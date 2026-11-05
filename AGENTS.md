@@ -63,7 +63,8 @@ rule, it is repeated in every `CLAUDE.md`, `AGENTS.md` and `GEMINI.md` of the op
   `gh run view <run> --log-failed`.
 - It spends the operator's Actions minutes: about 15 billed per run (four jobs, each rounded up: about 1 for the types
   and the build, 2 to 7 per test shard). A task whose pull request merges spends two, its own and the merge's; every
-  push to a pull request runs it all again.
+  push to a pull request runs it all again. A task on "merge on its own" does not wait for its run: to see it first,
+  `shepherdr checks <id>` waits (up to 10 minutes).
 - A branch with no pull request can still be checked by hand, `gh workflow run check.yml --ref <branch>` then
   `gh run watch`: it costs the same, so only for rare cases (a review asks for it, or the change is to the tests' own
   setup).

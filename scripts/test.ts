@@ -158,7 +158,7 @@ if (changed) {
     const none = touched.filter((f) => !reaches(covered, f) && /\.(tsx?|css|html)$/.test(f))
     if (none.length) console.log(`No test reaches: ${none.join(', ')}`)
     if (!files.length) {
-      console.log(touched.length ? 'No test reaches what changed.' : 'Nothing changed from main.')
+      console.log(touched.length ? 'No test reaches what changed.' : 'Nothing changed from the default branch.')
       process.exit(0)
     }
   }

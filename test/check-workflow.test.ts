@@ -7,7 +7,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hasPrWorkflows } from '../server/live/engine/git.ts'
 import { checkBranch } from './screen-map.ts'
-
 type Trigger = null | { branches?: string[]; 'paths-ignore'?: string[] }
 type Workflow = {
   on: Record<'push' | 'pull_request' | 'workflow_dispatch', Trigger>
@@ -15,7 +14,9 @@ type Workflow = {
   jobs: Record<string, { name?: string; 'runs-on': string; 'timeout-minutes': number; strategy?: { matrix: { shard: number[] } } }>
 }
 
-const file = join(import.meta.dir, '..', '.github', 'workflows', 'check.yml')
+const root = join(import.meta.dir, '..')
+// one literal path: bun run test changed follows it, so a change to the workflow runs this file (scripts/test.ts)
+const file = join(root, '.github/workflows/check.yml')
 const workflow = Bun.YAML.parse(await Bun.file(file).text()) as Workflow
 
 /** what a change of docs only leaves out, on a pull request and on a merge */
@@ -30,7 +31,7 @@ describe('when Check runs', () => {
   })
   test('which the merge logic reads as a pull request that gets checks, before any shows', async () => {
     // engine.ts holds a merge back while GitHub's checks on its pull request are still missing; the workflow's word
-    expect(await hasPrWorkflows(join(import.meta.dir, '..'))).toBe(true)
+    expect(await hasPrWorkflows(root)).toBe(true)
   })
   test('not on a change of docs only, since there is nothing to check in it', () => {
     expect(workflow.on.pull_request?.['paths-ignore']).toEqual(DOCS)
