@@ -23,9 +23,9 @@ export function paneWrong(kind: string, p: ProcessInfo, want: Record<string, str
 }
 
 /** what is wrong with an agent, from herdr's own view of it and what runs in its pane: nothing while herdr still
- *  launches it (a pending launch is finished by a client asking for the agent by name, which the launch nudge does;
- *  starting it again would launch it twice), nothing for stale files while herdr sees it at work or asking (a turn is
- *  never cut for that), and null when herdr can't say what runs there */
+ *  launches it (a client asking for the agent by name finishes that launch, which Shepherdr does on every look at
+ *  herdr; starting it again would launch it twice), nothing for stale files while herdr sees it at work or asking (a
+ *  turn is never cut for that), and null when herdr can't say what runs there */
 export function agentWrong(a: AgentInfo, p: ProcessInfo | null, kind: string, want: Record<string, string>): Wrong | undefined | null {
   if (a.launch_pending) return undefined
   if (!p) return null

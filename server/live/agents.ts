@@ -88,6 +88,9 @@ export interface AgentRecord {
   /** the CLI, model and effort Settings said for its role when it last started on them: a change since is offered as
    *  a restart in its chat (restart.ts) */
   set?: { kind: string; model?: string; effort?: string }
+  /** the pane its last run was started in: a launch closes one its agent no longer holds, so a relaunch never sits
+   *  beside an orphan (herdr closes the pane of a launch it dropped, but nothing guarantees that of every version) */
+  lastPane?: string
 }
 
 export interface OutItem {
@@ -202,6 +205,8 @@ export class Agents extends Emitter<Events> {
   private starting = new Map<string, Promise<AgentInfo | null>>()
   /** agents being stopped for a restart: what you send waits for the one it starts */
   private stopping = new Set<string>()
+  /** names a launch is being completed for right now, so a look at herdr never asks twice at once */
+  private asking = new Set<string>()
   private delivering = new Set<string>()
   /** what went in lately with a screen's id: the chat gives the id back once it reads the message from the log */
   private delivered: OutItem[] = []
@@ -420,6 +425,9 @@ export class Agents extends Emitter<Events> {
         this.readingBackground = true
         void this.readBackground().catch(() => undefined).finally(() => { this.readingBackground = false })
       }
+      // a launch herdr has not finished is completed only by a client asking for that agent by name (issue #491): ask
+      // again on every look, until it is ready, or herdr drops the name; nothing here starts or stops anything
+      for (const a of this.live.values()) if (a.launch_pending && a.name && this.byName.has(a.name)) void this.askLaunch(a.name)
       // learn log files herdr names (its agent integrations report them)
       for (const [name, key] of this.byName) this.learnSession(key, this.live.get(name))
       // and the session its hooks say it is in now, which herdr doesn't name: a /clear starts another
@@ -444,6 +452,37 @@ export class Agents extends Emitter<Events> {
     } finally {
       this.refreshing = false
     }
+  }
+
+  /**
+   * herdr starts an agent with `agent.start` and then leaves the launch pending: it finishes it only when a client asks
+   * for that agent by name, and drops it (closing the pane) about a minute later if nobody does (herdr 0.9.5, issue
+   * #491). Claude Code reports its own readiness through its hooks, but pi does not, so a pi agent sat at its start
+   * screen for ever and its brief stayed in outbox. Asking keeps the launch alive and finishes it; a name herdr has
+   * already dropped answers not found, and the next look at herdr sees the agent gone, which is what revive handles.
+   * One ask in flight per agent, and never awaited by the caller: the look at herdr never waits on a launch.
+   */
+  private async askLaunch(name: string) {
+    if (this.asking.has(name)) return
+    this.asking.add(name)
+    try {
+      await herdr.agent(name)
+    } catch {
+      /* dropped, or herdr out of reach: the next look says which */
+    } finally {
+      this.asking.delete(name)
+    }
+  }
+
+  /** a pane this chat's last run was started in that no agent holds now, closed while it sits at a prompt: a relaunch
+   *  never leaves an orphan beside the agent it starts. The pane it is starting in now is left alone, and so is one
+   *  another chat's agent runs in, or one where something else runs */
+  private async closeLeftPane(r: AgentRecord, startingIn: string) {
+    const pane = r.lastPane
+    r.lastPane = undefined
+    if (!pane || pane === startingIn || [...this.live.values()].some((a) => a.pane_id === pane)) return
+    if (!(await herdr.paneIdle(pane).catch(() => false))) return
+    await herdr.closePane(pane).catch(() => undefined)
   }
 
   /** Bind the actual CLI process, not HERDR_PANE_ID (old shells can inherit another pane's id). */
@@ -720,6 +759,8 @@ export class Agents extends Emitter<Events> {
       if (log) r.logs = [...r.logs.filter((f) => !f.endsWith(`/${id}.jsonl`)), log]
     }
     const pane = place ? await place() : await this.paneFor(r, was)
+    await this.closeLeftPane(r, pane)
+    r.lastPane = pane
     const args = this.args(r, !!resume)
     this.save()
     // a new pane needs a moment before its shell is at the prompt

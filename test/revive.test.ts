@@ -33,7 +33,7 @@ describe('what is wrong with a pane', () => {
 describe('what counts as wrong for a whole agent', () => {
   test('a launch herdr has not finished yet is never restarted (it would be launched twice)', () => {
     const shell = { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ argv: ['bash'], pid: 10 }] }
-    // herdr lists it as pending, with its shell still at the prompt: the launch nudge finishes this one
+    // herdr lists it as pending, with its shell still at the prompt: Shepherdr asks for it by name and finishes it
     expect(agentWrong(info({ launch_pending: true }), shell, 'pi', {})).toBeUndefined()
     expect(agentWrong(info({ launch_pending: true, agent_status: 'working' }), running(['pi', '--session-id', 'x']), 'pi', {})).toBeUndefined()
     // the same pane once herdr is done with it is judged as usual
