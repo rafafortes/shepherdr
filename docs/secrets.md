@@ -15,9 +15,10 @@ is stored on the main machine.
 `agentEnv` passes only an opaque `SHEPHERDR_SECRET_FILE` reference to the launch environment (including Codex's shell
 policy). The capability is written via stdin over the existing private SSH connection, never in launch arguments,
 agent records, prompt text or CLI output. `helper/route.pl --bind PID` reads JSON on stdin, creates owner-only files
-in owner-only `<shepherdr home>/helper/routes` and `credentials` directories (`~/.shepherdr`, or wherever
-`SHEPHERDR_HOME` moves it: a server with a home of its own writes neither into the real one), and binds them to the
-process start stamp.
+in owner-only `~/.shepherdr/helper/routes` and `<shepherdr home>/helper/credentials` directories (`SHEPHERDR_HOME`
+moves the credentials with the rest of the home; the routes stay in the login home, where the CLI's own helper looks for
+them), and binds them to the process start stamp. A server with a home of its own binds neither, since it starts no
+agent (launch-policy.ts).
 The CLI obtains proof from a live ancestor's binding or that explicit credential reference. Folder/chat routing may
 choose the command's destination, but cannot grant a credential. The helper carries Authorization unchanged through
 main.sock and the SSH forward; there is no `local=true` bypass. The transient bearer environment variable is removed

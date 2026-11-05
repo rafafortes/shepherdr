@@ -544,6 +544,12 @@ export class Agents extends Emitter<Events> {
 
   /** Bind the actual CLI process, not HERDR_PANE_ID (old shells can inherit another pane's id). */
   private async bindRoute(r: AgentRecord, pane: string) {
+    // a server that may start no agent binds no route for one either: no route file, no credential (launch-policy.ts)
+    if (!launchesAgents()) {
+      this.routes.delete(r.key)
+      this.secretAccess.revoke(r.key)
+      return
+    }
     const p = await herdr.processInfo(pane)
     const proc = p.foreground_processes?.find((x) => x.pid && isAgentProcess(r.kind, x.argv))
     if (!proc?.pid || r.finished || this.records[r.key]?.finished || this.stopping.has(r.key)) { this.routes.delete(r.key); this.secretAccess.revoke(r.key); return }
@@ -958,7 +964,8 @@ export class Agents extends Emitter<Events> {
   /** started again by `start` (that resumes its session), its pane closed first where it still holds it (its CLI
    *  exited, or runs on outdated files). Meanwhile what you send waits for the one it starts, as in a restart */
   async relaunch(key: string, close: boolean, start: () => Promise<unknown>) {
-    if (!this.allowed(key)) return
+    // nothing closed, nothing stopped, and the caller hears why (a recovery loop gives up instead of retrying for good)
+    if (!this.allowed(key)) throw new Error(skippedLaunch(key))
     this.secretAccess.revoke(key)
     this.routes.delete(key)
     this.stopping.add(key)

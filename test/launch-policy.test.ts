@@ -12,10 +12,11 @@ process.env.HERDR_SOCKET_PATH = join(proof, 'no-herdr.sock')
 
 const { REAL_HOME, launchesAgents, skippedLaunch } = await import('../server/live/launch-policy.ts')
 const { agentEnv } = await import('../server/live/box.ts')
-const { home } = await import('../server/store.ts')
+const { HOME, home } = await import('../server/store.ts')
 const { Agents } = await import('../server/live/agents.ts')
 const { herdr } = await import('../server/live/herdr.ts')
 const { ROOT } = await import('../server/root.ts')
+const { resolve } = await import('node:path')
 
 const withEnv = <T>(vars: Record<string, string | undefined>, f: () => T): T => {
   const kept = Object.entries(vars).map(([k]) => [k, process.env[k]] as const)
@@ -30,11 +31,15 @@ const withEnv = <T>(vars: Record<string, string | undefined>, f: () => T): T => 
 const spec = (key: string) => ({ key, name: `shep-proof-${key.replace(/\W/g, '')}`, kind: 'claude', cwd: proof, workspace: 'proof', first: 'Go.' })
 
 describe('a server with a home of its own', () => {
-  test('starts agents only when it is asked to, or when it is the real home', () => {
-    expect(withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: undefined }, launchesAgents)).toBe(false)
-    expect(withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: '1' }, launchesAgents)).toBe(true)
-    expect(withEnv({ SHEPHERDR_HOME: REAL_HOME, SHEPHERDR_LAUNCH_AGENTS: undefined }, launchesAgents)).toBe(true)
-    expect(withEnv({ SHEPHERDR_HOME: undefined, SHEPHERDR_LAUNCH_AGENTS: undefined }, launchesAgents)).toBe(true)
+  test('starts agents only when it is asked to, when it is a worker for another machine, or at the real home', () => {
+    expect(withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(false)
+    expect(withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: '1', SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(true)
+    expect(withEnv({ SHEPHERDR_HOME: REAL_HOME, SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(true)
+    // a worker drives its own machine's herdr, from a home of its own under the main one (machines.ts)
+    expect(withEnv({ SHEPHERDR_HOME: join(HOME, 'machines', 'laptop'), SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: '{}' }, launchesAgents)).toBe(true)
+    expect(withEnv({ SHEPHERDR_HOME: join(HOME, 'machines', 'laptop'), SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(false)
+    // with no SHEPHERDR_HOME the store's own home is what counts (a temp folder under bun test, so: not the real one)
+    expect(withEnv({ SHEPHERDR_HOME: undefined, SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(resolve(HOME) === resolve(REAL_HOME))
   })
 
   test('refuses a launch, says why in its log, and starts nothing', async () => {
@@ -44,14 +49,14 @@ describe('a server with a home of its own', () => {
     const timer = spyOn(globalThis, 'setTimeout').mockImplementation((() => 0) as never)
     const a = new Agents()
     try {
-      await withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: undefined }, async () => {
+      await withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, async () => {
         await expect(a.ensure(spec('LP-1/Agent'))).rejects.toThrow(/LP-1\/Agent not started/)
         expect(start).not.toHaveBeenCalled()
         const said = logged.mock.calls.map((c) => (c as string[]).join(' ')).join('\n')
         expect(said).toContain(skippedLaunch('LP-1/Agent'))
         expect(said).toContain('SHEPHERDR_LAUNCH_AGENTS=1')
       })
-      await withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: '1' }, async () => {
+      await withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: '1', SHEPHERDR_BOX: undefined }, async () => {
         // asked to: it goes on to herdr (a socket that isn't there), so the rule is what stood in the way before
         Object.assign(a, { refresh: async () => undefined, bindRoute: async () => undefined, queue: () => undefined, paneFor: async () => 'fake-pane' })
         await a.ensure(spec('LP-2/Agent')).catch(() => undefined)
