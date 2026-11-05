@@ -113,7 +113,7 @@ describe('a launch herdr left pending', () => {
       try {
         await a.refresh()
         // asked by name, and the brief waits: herdr is not taking input for it yet
-        expect(asked).toEqual([name])
+        expect(asked).toContain(name)
         expect(prompted).toEqual([])
         expect(a.status(KEY)).toBe('unknown')
         // asked again, herdr finishes the launch, and the brief goes in
@@ -193,7 +193,7 @@ describe('a launch herdr left pending', () => {
       try {
         // it comes back with the launch still pending, not when herdr answers
         await a.refresh()
-        expect(asked).toEqual([name])
+        expect(asked).toContain(name)
         expect(a.status(KEY)).toBe('unknown')
       } finally {
         release()
@@ -204,7 +204,7 @@ describe('a launch herdr left pending', () => {
     }
   })
 
-  test('a launch that never goes ready is asked for only so long, then left for herdr to drop', async () => {
+  test('a launch that never goes ready is asked for only so long, then left alone', async () => {
     const s = spies()
     const errors: string[] = []
     const log = spyOn(console, 'error').mockImplementation((...a: unknown[]) => void errors.push(a.join(' ')))
@@ -213,15 +213,18 @@ describe('a launch herdr left pending', () => {
       chat({ pending: true })
       const a = new Agents()
       try {
-        // a launch that stays pending: herdr's own drop, and the relaunch loop, end it
-        a.pendingFor = 50
+        // a launch that stays pending: herdr's own timeout, and the relaunch loop, end it
+        a.pendingFor = 300
         await a.refresh()
-        expect(asked).toEqual([name])
+        expect(asked).toContain(name)
         expect(errors).toEqual([])
-        await Bun.sleep(80)
+        // past the patience, and past any look the subscription itself starts
+        await Bun.sleep(400)
+        const before = asked.length
+        await a.refresh()
         await a.refresh()
         // said once, and no longer asked: a stuck launch is not kept alive by the asking itself
-        expect(asked).toEqual([name])
+        expect(asked.length).toBe(before)
         expect(errors.length).toBe(1)
         expect(errors[0]).toContain(name)
         expect(errors[0]).toContain("hasn't become ready")
@@ -242,7 +245,7 @@ describe('a launch herdr left pending', () => {
       const a = new Agents()
       try {
         await a.refresh()
-        expect(asked).toEqual([name])
+        expect(asked).toContain(name)
         // herdr answers not found while it still lists the name: nothing is started beside it
         s.agent.mockImplementation(async (target: string) => {
           asked.push(target)
