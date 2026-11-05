@@ -6,9 +6,9 @@ import { dirname, join } from 'node:path'
 
 export const HOME = process.env.SHEPHERDR_HOME || (process.env.NODE_ENV === 'test' ? testHome() : join(homedir(), '.shepherdr'))
 
-/** where Shepherdr's own files are now: read on every call, so a test can give each of its worlds a folder of its own
- *  (a test that times out goes on running, and must not reach into the one the next test reads and writes). Whoever
- *  keeps files of its own takes it once, when it is made, and keeps that folder: readJson and writeJson's `dir`. */
+/** where Shepherdr's own files are now. HOME is where it started and stays for what is set up once at start; whoever
+ *  keeps files while it runs takes this once, when it is made, and passes it as `dir`: a test gives each of its tests a
+ *  folder of its own that way, since a test that times out goes on running and must not reach into the next one's. */
 export const home = () => process.env.SHEPHERDR_HOME || HOME
 
 /** under bun test, never the real ~/.shepherdr (however the tests were started): an empty folder of their own */

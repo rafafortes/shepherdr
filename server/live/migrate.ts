@@ -7,7 +7,7 @@
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { slugify } from '../../shared/types.ts'
-import { home, readJson, writeJson } from '../store.ts'
+import { home as storeHome, readJson, writeJson } from '../store.ts'
 
 /** what a coordinator's id from before is now: All machines' and a machine's go to a home space */
 export function movedId(id: string, home: (machine?: string) => string): string {
@@ -76,7 +76,7 @@ export function migrateToSpaces(home: (machine?: string) => string, homeAgent: s
   if (Object.keys(retries).some(old)) writeJson('retries.json', Object.fromEntries(Object.entries(retries).filter(([k]) => !old(k))))
 
   // what Shepherdr posted in their chats, merged by time
-  const dir = join(home(), 'chatlog')
+  const dir = join(storeHome(), 'chatlog')
   const files = existsSync(dir) ? readdirSync(dir) : []
   for (const f of files) {
     const id = f === 'all.json' ? 'all' : f.startsWith('m_') ? `m:${f.slice(2, -5)}` : null
@@ -101,7 +101,7 @@ export function migrateToSpaces(home: (machine?: string) => string, homeAgent: s
   }
 
   // heartbeats: the checklists side by side where both had one
-  const beats = join(home(), 'heartbeat')
+  const beats = join(storeHome(), 'heartbeat')
   for (const f of existsSync(beats) ? readdirSync(beats) : []) {
     const id = f === 'all.md' ? 'all' : f.startsWith('m-') ? `m:${f.slice(2, -3)}` : null
     if (!id) continue
@@ -142,6 +142,6 @@ export function migrateToSpaces(home: (machine?: string) => string, homeAgent: s
   // the spaces, every project as it was, last: spaces.json says it ran, so a start cut short before this runs it again
   // (each step above finds nothing left to move the second time)
   writeJson('spaces.json', readJson('projects.json', []))
-  rmSync(join(home(), 'projects.json'), { force: true })
+  rmSync(join(storeHome(), 'projects.json'), { force: true })
   return { retire }
 }
