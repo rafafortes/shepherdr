@@ -98,6 +98,10 @@ async function open(opts: BrowserContextOptions, answer: Answer = { text: 'the r
 /** everything the composer shows above its box */
 const above = (page: Page) => page.$eval(box, (b) => b.previousElementSibling?.textContent ?? '')
 
+/** the recorder's first piece of audio comes a second in (its timeslice), as it does for someone speaking: a Done
+ *  pressed the instant the microphone opens has nothing to send, which is its own case below */
+const aMomentOfSpeech = (page: Page) => page.waitForTimeout(1500)
+
 describe.skipIf(!browser)('a voice call lives in the chat box', () => {
   test('the box turns into the call: no typing, the wave, what it is doing, a timer, Mute and End', async () => {
     const { ctx, page } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
@@ -195,6 +199,7 @@ describe.skipIf(!browser)('talk to type records in the chat box', () => {
     expect(await page.$(`${box} canvas[aria-label="Your voice"]`)).not.toBeNull()
     expect(await page.textContent(`${box} p`)).toMatch(/0:0\d$/)
     expect(await above(page)).toBe('')
+    await aMomentOfSpeech(page)
     await page.tap(`${box} button[aria-label^="Done"]`)
     // the words are written down on the machine that serves Shepherdr: the box says so while it happens
     await page.waitForFunction((sel) => document.querySelector(sel)?.textContent === 'Writing it down', `${box} p [role=status]`)
@@ -215,12 +220,28 @@ describe.skipIf(!browser)('talk to type records in the chat box', () => {
     await page.fill(`${box} textarea`, 'Before')
     await page.tap(`${box} button[aria-label="Talk to type"]`)
     await page.waitForSelector(`${box} button[aria-label^="Done"]`)
+    await aMomentOfSpeech(page)
     await page.tap(`${box} button[aria-label^="Done"]`)
     await page.waitForSelector('[data-topbar]')
     expect(await page.textContent('[data-topbar]')).toContain(why)
     expect(await page.inputValue(`${box} textarea`)).toBe('Before')
     await page.tap('[data-topbar] button[aria-label="Close"]')
     expect(await page.$('[data-topbar]')).toBeNull()
+    await ctx.close()
+  }, 30_000)
+
+  test('Done pressed the instant the microphone opens says nothing was heard, and the box comes back to type in', async () => {
+    const { ctx, page } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    await page.fill(`${box} textarea`, 'Before')
+    await page.tap(`${box} button[aria-label="Talk to type"]`)
+    await page.waitForSelector(`${box} button[aria-label^="Done"]`)
+    // no audio at all yet: there is nothing to write down, and nothing is sent
+    await page.tap(`${box} button[aria-label^="Done"]`)
+    await page.waitForSelector('[data-topbar]')
+    expect(await page.textContent('[data-topbar]')).toContain('Nothing was heard in that recording')
+    expect(await page.inputValue(`${box} textarea`)).toBe('Before')
+    // the cursor is back in the box, where it was
+    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA')
     await ctx.close()
   }, 30_000)
 
@@ -242,6 +263,7 @@ describe.skipIf(!browser)('talk to type records in the chat box', () => {
     for (const [start, stop, want] of steps) {
       await page.tap(`${box} ${start}`)
       await page.waitForSelector(`${box} ${stop}`)
+      await aMomentOfSpeech(page)
       await page.tap(`${box} ${stop}`)
       await page.waitForSelector(`${box} textarea`)
       await page.waitForTimeout(50)
@@ -255,6 +277,7 @@ describe.skipIf(!browser)('talk to type records in the chat box', () => {
     answer.text = 'Ship it'
     await page.keyboard.press('t')
     await page.waitForSelector(`${box} button[aria-label^="Done"]`)
+    await aMomentOfSpeech(page)
     await page.keyboard.press('Enter')
     await page.waitForSelector(`${box} textarea`)
     expect(await page.inputValue(`${box} textarea`)).toBe('Ship it')
@@ -277,6 +300,7 @@ describe.skipIf(!browser)('talk to type records in the chat box', () => {
         answer.text = said
         await page.click(`${box} button[aria-label="Talk to type"]`)
         await page.waitForSelector(`${box} button[aria-label^="Done"]`)
+        await aMomentOfSpeech(page)
         await page.click(`${box} button[aria-label^="Done"]`)
         await page.waitForSelector(`${box} textarea`)
         await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA')

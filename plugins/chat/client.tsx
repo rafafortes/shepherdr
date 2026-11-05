@@ -2018,8 +2018,6 @@ export function toggleDictation(chatKey: string) {
   dictation = dictate((said, failure) => {
     dictation = null
     if (getState().ui.dict !== chatKey) return
-    // it couldn't be written down: the box comes back as it was, and the chat says why
-    if (failure) return setUI({ dict: null, dictDone: false, dictError: failure })
     const now = getDraft(chatKey) ?? ''
     const [from, to] = at && at[1] <= now.length ? at : [now.length, now.length]
     const before = now.slice(0, from)
@@ -2030,7 +2028,8 @@ export function toggleDictation(chatKey: string) {
       setDraft(chatKey, before + words + (after && !/^\s/.test(after) ? ' ' : '') + after)
       caret = before.length + words.length
     }
-    setUI({ dict: null, dictDone: false })
+    // nothing to write down, or it couldn't be: the box comes back as it was, and the chat says why
+    setUI({ dict: null, dictDone: false, dictError: failure ?? null })
     // the box comes back as a new textarea: the cursor goes into it right after the words, its line in view
     let tries = 10
     const back = () => {
