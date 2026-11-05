@@ -60,8 +60,12 @@ export function ownCall(text: unknown, command: string, chat: string | undefined
     words.push(word[0])
     at = WORD.lastIndex
   }
-  // the launch prompt's form, and only this launch's identity in it
-  const first = chat && unquote(words[0] ?? '') === `SHEPHERDR_CHAT=${chat}` ? 1 : 0
+  // the launch prompt's form, and only this launch's identity in it: its name must be unquoted, so a word a shell would
+  // run as a command (`"SHEPHERDR_CHAT=…"` is one, quotes and all) never matches
+  const PREFIX = 'SHEPHERDR_CHAT='
+  const value = /^(?:[\w@%+=:,./~-]+|'[^']*'|"(?:[^"\\$`]|\\["\\])*")$/
+  const named = (word: string) => word.startsWith(PREFIX) && value.test(word.slice(PREFIX.length)) && unquote(word) === PREFIX + chat
+  const first = chat && named(words[0] ?? '') ? 1 : 0
   if (unquote(words[first] ?? '') !== command) return false
   const verb = words.slice(first + 1).map(unquote)
   return own.some((allowed) => {
@@ -83,7 +87,7 @@ export function ownDecision(command: string, chat: string | undefined, input: an
 }
 
 /** the hook Claude Code runs before a Bash call: reads it on stdin, allows this launch's own command, says nothing else.
- *  Its arguments are the command and the chat (empty when the chat can't be written in a rule) */
+ *  Its arguments are the command path and this launch's chat identity */
 export const deciderScript = () => `// Written by Shepherdr: lets a launch run its own Shepherdr command without a prompt (readers/own-commands.ts).
 const OWN = ${JSON.stringify(OWN_VERBS)}
 const ownCall = ${ownCall.toString()}

@@ -39,6 +39,17 @@ describe("an agent's own shepherdr command", () => {
     expect(own(`SHEPHERDR_CHAT="${chat}" '${spaced}' status`, spaced)).toBe(true)
   })
 
+  test('is allowed in the launch prompt’s form for a chat with a space in it, and not by any other quoting', () => {
+    const who = 'p:host:Letter garden'
+    expect(own(`SHEPHERDR_CHAT="${who}" ${command} status`, command, who)).toBe(true)
+    // a word the shell would run as a command (its name quoted, so no assignment) is not this launch's form
+    expect(own(`"SHEPHERDR_CHAT=${chat}" ${command} status`)).toBe(false)
+    expect(own(`SHEPHERDR_CHAT"=${chat}" ${command} status`)).toBe(false)
+    // an unquoted assignment is the same thing, and bash runs it as one
+    expect(own(`SHEPHERDR_CHAT=${chat} ${command} status`)).toBe(true)
+    expect(own(`SHEPHERDR_CHAT="${chat}"${command} status`)).toBe(false)
+  })
+
   test('keeps its card for the verbs that run or write anything, and for one not listed', () => {
     for (const text of [
       `${command} secret run A -- rm -rf /`,
@@ -109,10 +120,10 @@ describe('the settings file a launch gets', () => {
       expect(groups[1].matcher).toBe('Bash')
       expect(groups[1].hooks[0].command).toContain(command)
       expect(groups[1].hooks[0].command).toContain(chat)
-      // an agent started without one (an older record) keeps its prompt, and so does a chat a hook can't be given
+      // an agent started without one (an older record) keeps its prompt
       expect(JSON.parse(readFileSync(hookSettings(dir, 'bare').settings, 'utf8')).hooks.PreToolUse).toHaveLength(1)
-      const odd = JSON.parse(readFileSync(hookSettings(dir, 'odd', { command, chat: 'a b"c' }).settings, 'utf8'))
-      expect(odd.hooks.PreToolUse[1].hooks[0].command.endsWith("''")).toBe(true)
+      const spaced = JSON.parse(readFileSync(hookSettings(dir, 'spaced', { command, chat: 'p:host:Letter garden' }).settings, 'utf8'))
+      expect(spaced.hooks.PreToolUse[1].hooks[0].command.endsWith(`'p:host:Letter garden'`)).toBe(true)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

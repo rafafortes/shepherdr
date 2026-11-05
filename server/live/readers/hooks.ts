@@ -146,9 +146,6 @@ function writeScript(dir: string, name: string, text: string): string {
   return file
 }
 
-/** a chat identity a hook can be told as one plain word: no quote, shell character or space in it */
-const plainChat = (chat: string | undefined) => (chat && /^[\w@%+=:,./~-]+$/.test(chat) ? chat : '')
-
 /** the settings file that makes one Claude Code record its hooks to `events`, and run its own shepherdr command without
  *  a prompt (`command`, this launch's; see own-commands.ts); returns its path. Starting over: what an earlier run
  *  recorded is gone. */
@@ -175,7 +172,8 @@ export function hookSettings(
   // its own shepherdr command never asks: the same settings file allows exactly one plain call of this launch's own
   // path, verb by verb (own-commands.ts). Another machine's helper records events but decides nothing: there it asks.
   if (!BOX && o.command) {
-    const decider = `${q(runtime)} ${q(writeScript(dir, 'allow.cjs', deciderScript()))} ${q(o.command)} ${q(plainChat(o.chat))}`
+    // the chat goes in as one shell word, quoted whole: any identity a space is named with survives it
+    const decider = `${q(runtime)} ${q(writeScript(dir, 'allow.cjs', deciderScript()))} ${q(o.command)} ${q(o.chat ?? '')}`
     hooks.PreToolUse = [...one, { matcher: 'Bash', hooks: [{ type: 'command', command: decider, timeout: 10 }] }]
   }
   const settings = join(dir, `${name}.settings.json`)
