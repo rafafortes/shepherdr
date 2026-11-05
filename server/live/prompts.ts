@@ -15,7 +15,10 @@ const OWN = BOX ? helperDir(BOX.home) : ROOT
 export const SKILLS = join(OWN, 'skill')
 const skill = (name: string) => join(SKILLS, name, 'SKILL.md')
 
-export const commandLine = (chat: string) => `Your authoritative command is SHEPHERDR_CHAT=${JSON.stringify(chat)} ${join(OWN, 'bin', 'shepherdr')}.${BOX ? '' : ` Write it out in full each time, as this line does (quoted if the path has a space), rather than the bare name shepherdr or $SHEPHERDR_COMMAND: only that form runs without a permission prompt, and a line with anything after the command still asks.`} Use it if a shell finds another shepherdr. Never start a server to repair command routing. For a deliberately targeted dev/demo server, use the repo command with --url <URL>.`
+/** how a command is written where its path has a space: as a shell needs it, and as the hook allows it */
+const quoted = (path: string) => (path.includes(' ') ? `"${path}"` : path)
+
+export const commandLine = (chat: string) => `Your authoritative command is SHEPHERDR_CHAT=${JSON.stringify(chat)} ${quoted(join(OWN, 'bin', 'shepherdr'))}.${BOX ? '' : ` Write it out in full each time, as this line does, rather than the bare name shepherdr or $SHEPHERDR_COMMAND: only that form runs without a permission prompt, and a line with anything after the command still asks.`} Use it if a shell finds another shepherdr. Never start a server to repair command routing. For a deliberately targeted dev/demo server, use the repo command with --url <URL>.`
 
 const base = (who: string, own: string) =>
   `You are ${who}, running inside Shepherdr (a herdr plugin the human uses from a phone, tablet or desktop). Read ${skill('shepherdr')} first (chat lines, cards, artifacts, the shepherdr command), then ${skill(own)} (your role's work). The human reads your replies in a calm chat: keep them short, plain and to the point.`

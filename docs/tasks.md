@@ -68,16 +68,19 @@
   `show`, `models`, `help`, `secret list` and `secret ask`. The settings file Shepherdr passes at launch carries a
   `PreToolUse` hook (`server/live/readers/own-commands.ts`) that allows exactly one plain call of that launch's own
   command path — the one Shepherdr puts on the agent's `PATH` — with one of those verbs, either bare or in the launch
-  prompt's own `SHEPHERDR_CHAT="…"` form. A coordinator therefore runs its whole job without a tap; what those verbs
-  change (a setting, a space, a task, a checklist, an artifact) is what the human asked it for, and the command's own
-  checks refuse the rest. Everything else keeps its card: `secret run` (it runs any program) and `secret env` (it writes
-  a file), `secret elevenlabs`, a verb not on that list (`restart`, `mode`, `doctor`), the bare name `shepherdr`, and a
-  command line with anything after the command (`;`, `&&`, `|`, a redirect). The Merge setting is guidance the agent
-  follows, as before: it is not a check the command makes.
+  prompt's own `SHEPHERDR_CHAT="…"` form; the words after the verb pass as they are, as before. A coordinator therefore
+  runs its Shepherdr commands without a tap; what those verbs change (a setting, a space, a task, a checklist, an
+  artifact) is what the human asked it for, and a task's agent can only reach its own task's `todo`, `pr`, `checks`,
+  `merge` and `status` — not its `set`, `automation` or `space`, which the command refuses to a task's agent only where
+  it says so. Everything else keeps its card: `secret run` (it runs any program) and `secret env` (it writes a file),
+  `secret elevenlabs`, a verb not on that list (`restart`, `mode`, `doctor`, the `project` alias), the bare name
+  `shepherdr`, and a command line with anything after the command (`;`, `&&`, `|`, a redirect). The Merge setting is
+  guidance the agent follows, as before: it is not a check the command makes.
 - Claude Code's own Bash allow rules were the other way to do this, and upstream 2.1 does it that way: measured on
   2.1.318, a rule for `<path> status` also let `<path> status; echo hi` run, `secret run` included, which is why here it
-  is a hook. On another machine (a box) its helper records hooks but decides nothing, so its agents still ask. Codex
-  runs without approvals; pi never asks for one.
+  is a hook. An agent already running keeps the settings file it started with, so it asks until it is restarted. On
+  another machine (a box) its helper records hooks but decides nothing, so its agents still ask. Codex runs without
+  approvals; pi never asks for one.
 - On a repo with a GitHub remote that `gh` is logged in to, each task gets a pull request. The shepherdr-agent skill runs
   `shepherdr pr <id>`: it pushes the branch and opens a draft (its title the task's, its words the agent's summary, the
   brief's gist and a "Generated with" footer), and pushes to it again after new commits. `shepherdr checks <id>` waits
