@@ -7,7 +7,7 @@
 # Lean, as GitHub bills each job by the minute, rounded up: the types and the build share one job, and the tests run
 # split over three runners (bun test --shard, balanced by each file's time on the last run), which also note which
 # lines of the screen each browser test runs. Whatever doesn't change between runs comes from the cache. A whole run is
-# about 15 billed minutes; a change of docs only skips it.
+# about 7 to 15 billed minutes (the high end with cold caches); a change of docs only skips it.
 name: Check
 
 on:
