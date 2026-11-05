@@ -5,14 +5,20 @@ import { execSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { mergeHere, namedFiles } from '../server/live/engine/git.ts'
+import { catchUp, mergeHere, namedFiles } from '../server/live/engine/git.ts'
 
 const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8' }).trim()
 
-/** a repo on main with a task's branch off it */
-function setup() {
+/** a repo on main */
+function fresh() {
   const dir = mkdtempSync(join(tmpdir(), 'shep-merge-'))
   sh('git init -q -b main && git config user.email t@t && git config user.name T && printf "hi\\n" > README.md && printf "a\\n" > a.txt && git add -A && git commit -qm init', dir)
+  return dir
+}
+
+/** a repo on main, and a task's branch off it that changes README.md */
+function setup() {
+  const dir = fresh()
   sh('git checkout -q -b work/task && printf "theirs\\n" > README.md && git commit -qam task && git checkout -q main', dir)
   return dir
 }
@@ -43,8 +49,36 @@ describe('merging into main here', () => {
     expect(sh('git show --name-only --format= main', dir)).toBe('README.md')
   })
 
+  test('an ignored file of yours is not silently written over: the merge stops and names it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shep-merge-ignored-'))
+    sh('git init -q -b main && git config user.email t@t && git config user.name T && printf "secret.txt\\n" > .gitignore && git add -A && git commit -qm init', dir)
+    sh('git checkout -q -b work/task && printf "theirs\\n" > secret.txt && git add -f secret.txt && git commit -qm theirs && git checkout -q main', dir)
+    writeFileSync(join(dir, 'secret.txt'), 'mine\n')
+    const r = await mergeHere(dir, 'work/task', 'main', 'SHE-9: Test', true)
+    expect(r.ok).toBe(false)
+    expect(r.err).toBe('main here holds work of its own that would be overwritten: secret.txt. Nothing was changed there: commit, move or remove it first, then merge again.')
+    expect(readFileSync(join(dir, 'secret.txt'), 'utf8')).toBe('mine\n')
+  })
+
   test('a name git lists in its refusal is read off it, and a refusal about no file gives none', () => {
     expect(namedFiles('error: Your local changes to the following files would be overwritten by merge:\n\ta.txt\n\tb.txt\nPlease commit your changes or stash them before you merge.\nAborting')).toEqual(['a.txt', 'b.txt'])
     expect(namedFiles('fatal: Not possible to fast-forward, aborting.')).toEqual([])
+  })
+})
+
+describe('catching main up with its remote', () => {
+  test('a file of yours the remote also brings stops it, naming the file and what to do here', async () => {
+    const dir = fresh()
+    const bare = mkdtempSync(join(tmpdir(), 'shep-merge-origin-'))
+    sh('git init -q --bare -b main', bare)
+    sh(`git remote add origin ${bare} && git push -q origin main`, dir)
+    // someone else's work lands on the remote, bringing the very name the checkout has of its own
+    const clone = mkdtempSync(join(tmpdir(), 'shep-merge-clone-'))
+    sh(`git clone -q ${bare} . && git config user.email t@t && git config user.name T && printf "theirs\\n" > notes.txt && git add -A && git commit -qm theirs && git push -q origin main`, clone)
+    writeFileSync(join(dir, 'notes.txt'), 'mine\n')
+    const r = await catchUp(dir, 'main', 'then merge again')
+    expect(r.ok).toBe(false)
+    expect(r.err).toBe('main here holds work of its own that would be overwritten: notes.txt. Nothing was changed there: commit, move or remove it first, then merge again.')
+    expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe('mine\n')
   })
 })

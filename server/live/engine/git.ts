@@ -256,7 +256,7 @@ export async function catchUp(repo: string, base: string, then = 'then merge aga
     (await git(repo, 'branch', '--show-current')).out === base
       ? await git(repo, 'merge', '--ff-only', '--no-autostash', '--no-overwrite-ignore', '--quiet', remote)
       : await git(repo, 'update-ref', `refs/heads/${base}`, remote)
-  return r.ok ? r : { ...r, err: overwriteRefusal(base, `${r.out}\n${r.err}`, then) ?? `could not bring ${base} up to ${remote}: ${(r.err || r.out).split('\n')[0]}` }
+  return r.ok ? r : { ...r, err: overwriteRefusal(base, `${r.out}\n${r.err}`, then) ?? `could not bring ${base} up to ${remote}: ${gitReason(`${r.err}\n${r.out}`)}` }
 }
 
 /** replay the branch on top of the base; a conflict leaves it as it was */
@@ -286,6 +286,15 @@ function overwriteRefusal(base: string, said: string, then: string) {
   return `${base} here holds work of its own that would be overwritten: ${files.slice(0, 5).join(', ')}${more}. Nothing was changed there: commit, move or remove ${files.length === 1 ? 'it' : 'them'} first, ${then}.`
 }
 
+/** git's own words on why it refused: its error line, else its first (a git that speaks another language says "erro:") */
+function gitReason(said: string) {
+  const lines = said
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+  return (lines.find((l) => /^(?:error|fatal):/i.test(l)) ?? lines[0] ?? 'git gave no reason').replace(/^(?:error|fatal):\s*/i, '')
+}
+
 /**
  * Merge a branch into the base on this machine. Git builds the merge itself (merge-tree: no checkout, no index, no
  * stash), and a checkout of the base is only ever moved forward by git: work of the human's in that folder stays as
@@ -297,14 +306,17 @@ export async function mergeHere(repo: string, branch: string, base: string, mess
   if (!tree.ok) return { ...tree, err: `conflict: ${tree.out || tree.err}` }
   // the squash commit main gets, or the merge commit that keeps both sides
   const commit = await git(repo, 'commit-tree', tree.out.split('\n')[0], '-p', base, ...(squash ? [] : ['-p', branch]), '-m', message)
-  if (!commit.ok) return { ...commit, err: `could not make the merge commit: ${(commit.err || commit.out).split('\n')[0]}` }
+  if (!commit.ok) return { ...commit, err: `could not make the merge commit: ${gitReason(`${commit.err}\n${commit.out}`)}` }
   const head = commit.out
   // the base is not this checkout's branch: its branch moves, and no checkout of it is touched
-  if ((await git(repo, 'branch', '--show-current')).out !== base) return git(repo, 'update-ref', `refs/heads/${base}`, head)
+  if ((await git(repo, 'branch', '--show-current')).out !== base) {
+    const moved = await git(repo, 'update-ref', `refs/heads/${base}`, head)
+    return moved.ok ? moved : { ...moved, err: `could not move ${base} to the merge: ${gitReason(`${moved.err}\n${moved.out}`)}` }
+  }
   // it is: git moves it, and writes only the files the merge changed
   const ff = await git(repo, 'merge', '--ff-only', '--no-autostash', '--no-overwrite-ignore', '--quiet', head)
   const said = `${ff.out}\n${ff.err}`
-  return ff.ok ? ff : { ...ff, err: overwriteRefusal(base, said, 'then merge again') ?? `${base} here could not be brought up to the merge: ${said.split('\n').find((l) => /error|fatal/i.test(l))?.replace(/^(?:error|fatal):\s*/, '') ?? 'git gave no reason'}. Nothing was changed in that checkout.` }
+  return ff.ok ? ff : { ...ff, err: overwriteRefusal(base, said, 'then merge again') ?? `${base} here could not be brought up to the merge: ${gitReason(said)}. Nothing was changed in that checkout.` }
 }
 
 /* ---------- GitHub, through gh ---------- */

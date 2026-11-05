@@ -133,9 +133,7 @@ describe('shepherdr merge', () => {
     w.agentIs(key, 'idle')
     const r = await w.engine.merge(t.id)
     expect(r.ok).toBe(false)
-    expect(r.error).toContain('notes.txt')
-    expect(r.error).toContain('would be overwritten')
-    expect(r.error).toContain('commit, move or remove it')
+    expect(r.error).toBe('main here holds work of its own that would be overwritten: notes.txt. Nothing was changed there: commit, move or remove it first, then merge again.')
     expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe('mine, untracked\n')
   })
 
