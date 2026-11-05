@@ -45,8 +45,9 @@
   (Settings → the machine, as Queued) and for what it was queued `--after`, and its chat says its time came. Added with
   `--later` too, its agent then reads the brief and waits for a go. A time that passed while Shepherdr was off starts
   it as soon as Shepherdr is back, and says so in its chat. Change or cancel it before it starts with `shepherdr task
-  queue <id> --at "tomorrow 7:00"` (`--in 2h`) or `--at none`, which clears the time and starts it now; anything you
-  write to it is the go too, and starts it at once. Only a task that has not started can be scheduled.
+  queue <id> --at "tomorrow 7:00"` (`--in 2h`) or `--at none`, which clears the time and starts it now (ask your
+  coordinator: a task waiting for its time has no chat yet, so there is nowhere to write in it). A message to it, from
+  your coordinator, is the go too, and starts it at once. Only a task that has not started can be scheduled.
 - A task's dot comes from its agent alone: Working, Needs you (it asks, or waits for your reply), Scheduled (it waits
   for a time it starts by itself at, with no agent yet), Queued (it waits for other tasks), To do (it waits for a go, or
   is still starting up; a To do row is its title alone), Ready

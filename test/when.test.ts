@@ -70,6 +70,9 @@ describe('--at and --in together', () => {
     expect(() => whenFrom('tomorrow 9:00', '6h', ZONE, NOW)).toThrow('not both')
     expect(() => whenFrom('today 9:00', undefined, ZONE, NOW)).toThrow('has passed')
     expect(() => whenFrom(undefined, undefined, ZONE, NOW)).toThrow('Say when')
+    // a span or a date the calendar can't hold, or a typo with too many digits, is refused where it is read
+    expect(() => whenFrom(undefined, '99999999999 days', ZONE, NOW)).toThrow('too far ahead')
+    expect(() => whenFrom('9999-12-31 09:00', undefined, ZONE, NOW)).toThrow('too far ahead')
   })
 })
 

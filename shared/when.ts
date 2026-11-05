@@ -13,6 +13,8 @@ const UNITS: Record<string, number> = {
 }
 const DAY = 86_400_000
 const MINUTE = 60_000
+/** the furthest a task may be put off: further than this is a typo, and a date the calendar can't hold */
+const MAX_AHEAD = 10 * 366 * DAY
 const pad = (n: number) => String(n).padStart(2, '0')
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
 const WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -141,20 +143,25 @@ export function parseIn(text: string): number {
  *  time goes ("6h", "in 2 days") is read as from now. */
 export function whenFrom(at: string | undefined, within: string | undefined, zone: string, now = Date.now()): number {
   if (at !== undefined && within !== undefined) throw new Error('Give --at or --in, not both.')
-  if (within !== undefined) return now + parseIn(within)
+  const soon = (ms: number) => {
+    if (!Number.isFinite(ms) || ms > now + MAX_AHEAD) throw new Error('That is too far ahead: a task can wait at most ten years.')
+    if (ms <= now) throw new Error(`${(at ?? within ?? '').trim()} has passed. ${AT_HOW}`)
+    return ms
+  }
+  if (within !== undefined) return soon(now + parseIn(within))
   if (at === undefined) throw new Error(`Say when. ${AT_HOW}`)
   let ms: number
   try {
     ms = parseAt(at, zone, now)
   } catch (e) {
+    // a span typed where a time goes ("6h", "in 2 days"): from now
     try {
-      return now + parseIn(at)
+      return soon(now + parseIn(at))
     } catch {
       throw new Error(`${(e as Error).message} Or a span from now, like "6h" or "in 2 days".`)
     }
   }
-  if (ms <= now) throw new Error(`${at.trim()} has passed. ${AT_HOW}`)
-  return ms
+  return soon(ms)
 }
 
 /** a span as people read a countdown: "45m", "6h", "6h 30m", "2d" */

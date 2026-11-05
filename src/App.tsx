@@ -459,7 +459,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   ) : (
     <Empty>
       {task.status === 'scheduled'
-        ? `${task.id} waits for its time: ${task.sub}. Its chat opens here then.`
+        ? `${task.id} waits for its time: ${task.sub}. Its chat opens here then; to start it sooner, ask ${coordinator}.`
         : task.status === 'todo' || task.status === 'work' || task.status === 'queued'
           ? `${task.id} is starting: its chat opens here in a moment.`
           : `${task.id}'s agent didn't start: its chat opens here once it does. Ask ${coordinator} about it.`}

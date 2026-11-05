@@ -191,4 +191,22 @@ describe('a task that starts by itself at a time', () => {
     expect(t.scheduled).toBeTruthy()
     expect(w.engine.statusOf(t)).toBe('scheduled')
   })
+
+  test('what it waits for is done before its time: it starts on its brief alone, once, and is not held by itself', async () => {
+    const w = world()
+    const a = await started(w, repo(), 'sched-after-done', 'First', 'Add a.txt.')
+    w.brief(a.key)
+    await until(() => w.engine.statusOf(a.t) === 'work')
+    const t = w.engine.add({ project: a.p.name, title: 'After', desc: 'Add b.txt.', by: 'test', after: [a.t.id], at: Date.now() + 700 })
+    // that task is done with nothing to merge before its time comes
+    await w.engine.close(a.t.id)
+    await until(() => w.started.some((s) => s.key === `${t.id}/Agent`), 15_000)
+    const first = w.started.find((s) => s.key === `${t.id}/Agent`)!.first!
+    expect(first).toStartWith('After\n\nAdd b.txt.\n\nSettings:')
+    expect(first).not.toContain('Queued:')
+    // it waits for nothing, so it is not held for its own slot, and no late go starts it again
+    expect(t.after).toBeUndefined()
+    expect(t.held).toBeUndefined()
+    expect(w.started.filter((s) => s.key === `${t.id}/Agent`).length).toBe(1)
+  })
 })

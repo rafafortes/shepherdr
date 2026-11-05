@@ -976,10 +976,11 @@ export class Engine extends Emitter<Events> {
     const after = this.checkAfter(t.id, refs)
     // one still waiting for its time keeps it: only what it waits for changes, and at its time it starts once those are done
     if (t.scheduled) {
-      t.after = after.length ? after : undefined
+      const open = after.filter((ref) => this.depState(ref) !== 'done')
+      t.after = open.length ? open : undefined
       this.save()
       this.settleOne(t)
-      return { queued: this.open(t) }
+      return { queued: open }
     }
     const was = this.queued(t) ? t.after! : []
     const open = after.filter((ref) => this.depState(ref) !== 'done')
@@ -1270,8 +1271,11 @@ export class Engine extends Emitter<Events> {
       const why = note ?? 'while Shepherdr was off'
       this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: `its time (${when}) passed ${why}: starting now` } })
     }
-    // what it waits for still open: it is queued now, and Shepherdr starts it once those are done
-    if (this.queued(t) && this.open(t).length) {
+    // what it waits for still open: it is queued now, and Shepherdr starts it once those are done. One that is done
+    // already is no wait any more: kept, it would start the agent on the queued line all the same
+    const open = this.queued(t) ? this.open(t) : []
+    t.after = open.length ? open : undefined
+    if (open.length) {
       t.told = 'queued'
       this.save()
       this.settleOne(t)
@@ -1313,12 +1317,13 @@ export class Engine extends Emitter<Events> {
       this.settle(t)
       return { at }
     }
-    // cancelled: from now on it waits for nothing but room, and for what it waits for
+    // cancelled: from now on it waits for nothing but room, and for what it waits for (those done already are no wait)
     this.materialize(t)
     t.scheduled = undefined
     this.save()
     this.armDue()
     const open = this.queued(t) ? this.open(t) : []
+    t.after = open.length ? open : undefined
     if (open.length) {
       this.settle(t)
       return { queued: open }
@@ -2376,8 +2381,11 @@ export class Engine extends Emitter<Events> {
     // it waited for is gone
     const wasScheduled = !!t.scheduled
     if (t.scheduled) {
+      // the words start it now: it no longer waits for its time, nor for the tasks it was queued after (a hold would
+      // drop them too)
       this.materialize(t)
       t.scheduled = undefined
+      t.after = undefined
       this.armDue()
     }
     // a stopped task is no wait for room: its agent is closed, and the words start it again where it is
