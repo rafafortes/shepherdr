@@ -5,7 +5,7 @@
 // unless you have started using it.
 import { boxHome } from '../box.ts'
 import { existsSync, realpathSync } from '../mfs.ts'
-import { readJson, writeJson } from '../../store.ts'
+import { home, readJson, writeJson } from '../../store.ts'
 import { herdr, type WorkspaceInfo, type WorktreeFrom, type WorktreeSpace } from '../herdr.ts'
 import * as G from './git.ts'
 
@@ -49,7 +49,7 @@ const tilde = (p: string) => (p.startsWith(boxHome()) ? `~${p.slice(boxHome().le
 const SPACES = 'repo-spaces.json'
 
 export class Worktrees {
-  constructor(private h: HerdrSpaces = herdr) {}
+  constructor(private h: HerdrSpaces = herdr, private dir = home()) {}
 
   private repoSpaces(list: WorkspaceInfo[], repo: string) {
     return list.filter((w) => w.worktree && !w.worktree.is_linked_worktree && real(w.worktree.checkout_path) === real(repo))
@@ -75,7 +75,7 @@ export class Worktrees {
     if (!list) return r
     const before = new Set(this.repoSpaces(list, home.repo).map((w) => w.workspace_id))
     const made = this.repoSpaces(await this.h.workspaces().catch(() => []), home.repo).find((w) => !before.has(w.workspace_id))
-    if (made) writeJson(SPACES, { ...readJson<Record<string, string>>(SPACES, {}), [real(home.repo)]: made.workspace_id })
+    if (made) writeJson(SPACES, { ...readJson<Record<string, string>>(SPACES, {}, this.dir), [real(home.repo)]: made.workspace_id }, this.dir)
     return r
   }
 
@@ -232,13 +232,13 @@ export class Worktrees {
    * looking at it or have used it (another tab or pane, an agent, a command at work, another folder).
    */
   private async closeRepoSpace(repo: string) {
-    const all = readJson<Record<string, string>>(SPACES, {})
+    const all = readJson<Record<string, string>>(SPACES, {}, this.dir)
     const id = all[real(repo)]
     if (!id) return
     const forget = () => {
-      const now = readJson<Record<string, string>>(SPACES, {})
+      const now = readJson<Record<string, string>>(SPACES, {}, this.dir)
       delete now[real(repo)]
-      writeJson(SPACES, now)
+      writeJson(SPACES, now, this.dir)
     }
     const list = await this.h.workspaces().catch(() => null)
     if (!list) return
@@ -256,7 +256,7 @@ export class Worktrees {
 
   /** the sweep looks again at repo spaces that could not be closed when their last task ended */
   async closeRepoSpaces() {
-    for (const repo of Object.keys(readJson<Record<string, string>>(SPACES, {}))) await this.closeRepoSpace(repo)
+    for (const repo of Object.keys(readJson<Record<string, string>>(SPACES, {}, this.dir))) await this.closeRepoSpace(repo)
   }
 
   workspaces() {

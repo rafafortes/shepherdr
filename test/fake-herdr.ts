@@ -5,7 +5,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
-const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8' }).trim()
+// a git that stalls names itself: 30 s instead of the whole test's timeout, with nothing to say where it was
+const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8', timeout: 30_000 }).trim()
 
 type Space = { workspace_id: string; label: string; tab_count: number; focused?: boolean; worktree?: { checkout_path: string; is_linked_worktree: boolean; repo_root: string }; panes: string[] }
 
@@ -64,7 +65,7 @@ export function fakeHerdr() {
       up()
       const repo = source(from)
       const path = at ?? join(root, basename(repo), branch.replace(/\//g, '-'))
-      const has = execSync(`git branch --list ${branch}`, { cwd: repo, encoding: 'utf8' }).trim()
+      const has = execSync(`git branch --list ${branch}`, { cwd: repo, encoding: 'utf8', timeout: 30_000 }).trim()
       sh(has ? `git worktree add -q ${path} ${branch}` : `git worktree add -q -b ${branch} ${path} ${base}`, repo)
       return opened(repo, path, label)
     },

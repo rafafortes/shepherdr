@@ -388,7 +388,7 @@ export class Engine extends Emitter<Events> {
     super()
     this.taskIds = new TaskIds(this.places.spaces, this.data, (name) => placeId.space(name), this.dir)
     this.places.takenTaskKeys = () => this.taskIds.keys()
-    this.wt = new Worktrees(h)
+    this.wt = new Worktrees(h, this.dir)
     let snapped = false
     // tasks from before statuses came from the agent: a finished one is merged, and was cleaned up then
     for (const t of this.data.tasks as (Omit<TaskRec, 'after'> & { stage?: string; after?: string | string[] })[]) {

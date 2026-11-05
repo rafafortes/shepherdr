@@ -74,12 +74,27 @@ if (import.meta.main) {
         pid = Number(readFileSync(lock, 'utf8').trim() || 0)
       } catch {}
       if (pid && !running(pid)) {
-        // taken away atomically: one waiter renames it, the others fail here and find whatever the winner made next
-        const away = `${lock}.gone-${process.pid}`
+        // the dead one goes, one waiter at a time: a takeover lock of its own, made for a moment, so no waiter ever
+        // takes away a lock another one has just made
+        const hand = `${lock}.takeover`
+        let mine: number | undefined
         try {
-          renameSync(lock, away)
-          unlinkSync(away)
-        } catch {}
+          mine = openSync(hand, 'wx')
+        } catch {
+          if (tries > 3000) throw e
+          Bun.sleepSync(5)
+          continue
+        }
+        try {
+          let still = 0
+          try {
+            still = Number(readFileSync(lock, 'utf8').trim() || 0)
+          } catch {}
+          if (still === pid) rmSync(lock, { force: true })
+        } finally {
+          closeSync(mine)
+          rmSync(hand, { force: true })
+        }
         continue
       }
       if (tries > 3000) throw e
@@ -98,7 +113,8 @@ if (import.meta.main) {
     const i = args.indexOf(`--${name}`)
     return i >= 0 ? args[i + 1] : undefined
   }
-  const git = (...a: string[]) => execFileSync('git', a, { cwd: st.origin, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  // 30 s: a git that stalls says which command it was, instead of the test timing out with nothing to show for it
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: st.origin, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 }).trim()
   const headOf = (branch: string) => {
     try {
       return git('rev-parse', `refs/heads/${branch}`)
@@ -180,7 +196,7 @@ if (import.meta.main) {
       // GitHub squashes the branch onto its base
       const tmp = mkdtempSync(join(tmpdir(), 'fake-gh-merge-'))
       try {
-        const g = (...a: string[]) => execFileSync('git', a, { cwd: tmp, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+        const g = (...a: string[]) => execFileSync('git', a, { cwd: tmp, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 })
         g('clone', '-q', '-b', p.base, st.origin, '.')
         g('fetch', '-q', 'origin', p.head)
         try {

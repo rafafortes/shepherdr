@@ -17,7 +17,10 @@ export const { fakeHerdr } = await import('./fake-herdr.ts')
 export const G = await import('../server/live/engine/git.ts')
 export type Said = import('../server/live/readers/hooks.ts').Said
 
-export const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8' }).trim()
+// a git call that stalls may not be waited on until the test's own timeout takes the whole test away with no word on
+// which step it was: this one stops at 30 s and names its command (run 42020185856, shard 1, on a runner six times
+// slower than the same shard's rerun)
+export const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8', timeout: 30_000 }).trim()
 
 /**
  * A world reads and writes a data folder of its own, a copy of the one it is made from. Bun does not stop a test that
