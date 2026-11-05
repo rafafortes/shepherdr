@@ -102,7 +102,7 @@ jobs:
           restore-keys: test-timings-
       # Which lines of the screen each of this shard's browser tests runs, for the test runs on the agents' machine: a
       # change to the screen there runs only the browser tests that reach it (test/screen-map.ts puts the shards' maps
-      # of main's newest green run together)
+      # of the newest green run on the default branch together)
       - run: bun run test --shard=${{ matrix.shard }}/3 --map=screen-map.json
       - if: always()
         uses: actions/upload-artifact@v4

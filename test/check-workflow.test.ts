@@ -2,9 +2,10 @@
 // screen maps come from. Our line is `herdr-tui` (this fork's default branch): its pull requests and its merges are
 // what must be checked, and `main` only mirrors upstream (upstream 7c4cb02b, SHEP-36 #550).
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { hasPrWorkflows } from '../server/live/engine/git.ts'
 import { checkBranch } from './screen-map.ts'
 
 type Trigger = null | { branches?: string[]; 'paths-ignore'?: string[] }
@@ -26,6 +27,10 @@ describe('when Check runs', () => {
     expect(workflow.on.push?.branches).toEqual(['herdr-tui'])
     // main mirrors upstream's line: nothing of ours lands there, so nothing of ours is checked there
     for (const t of [workflow.on.pull_request, workflow.on.push]) expect(t?.branches).not.toContain('main')
+  })
+  test('which the merge logic reads as a pull request that gets checks, before any shows', async () => {
+    // engine.ts holds a merge back while GitHub's checks on its pull request are still missing; the workflow's word
+    expect(await hasPrWorkflows(join(import.meta.dir, '..'))).toBe(true)
   })
   test('not on a change of docs only, since there is nothing to check in it', () => {
     expect(workflow.on.pull_request?.['paths-ignore']).toEqual(DOCS)
@@ -58,15 +63,23 @@ describe('the branch its runs come from', () => {
   }
   test("the repo's default branch, which origin/HEAD names: herdr-tui here, main upstream", () => {
     const dir = mkdtempSync(join(tmpdir(), 'shep-check-'))
-    git(dir, 'init', '-q', '-b', 'herdr-tui')
-    git(dir, '-c', 'user.name=CI', '-c', 'user.email=ci@localhost', 'commit', '-q', '--allow-empty', '-m', 'first')
-    git(dir, 'update-ref', 'refs/remotes/origin/herdr-tui', 'HEAD')
-    git(dir, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/herdr-tui')
-    expect(checkBranch(dir)).toBe('herdr-tui')
+    try {
+      git(dir, 'init', '-q', '-b', 'herdr-tui')
+      git(dir, '-c', 'user.name=CI', '-c', 'user.email=ci@localhost', 'commit', '-q', '--allow-empty', '-m', 'first')
+      git(dir, 'update-ref', 'refs/remotes/origin/herdr-tui', 'HEAD')
+      git(dir, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/herdr-tui')
+      expect(checkBranch(dir)).toBe('herdr-tui')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
   test('main, where no origin/HEAD says otherwise', () => {
     const dir = mkdtempSync(join(tmpdir(), 'shep-check-'))
-    git(dir, 'init', '-q', '-b', 'main')
-    expect(checkBranch(dir)).toBe('main')
+    try {
+      git(dir, 'init', '-q', '-b', 'main')
+      expect(checkBranch(dir)).toBe('main')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

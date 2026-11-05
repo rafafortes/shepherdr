@@ -266,5 +266,5 @@ if (code === 0 && whole && commit && clean && git('rev-parse', 'HEAD') === commi
   writeFileSync(passed, JSON.stringify({ commit, at: Date.now(), summary: `${ran} in ${secs}s` }))
 }
 const shard = flags.find((f) => f.startsWith('--shard='))?.slice('--shard='.length)
-console.log(`${code === 0 ? 'Passed' : 'Failed'} in ${secs}s${whole ? '' : shard ? ` (shard ${shard} of the suite)` : ' (part of the suite: GitHub runs it all after each merge)'}`)
+console.log(`${code === 0 ? 'Passed' : 'Failed'} in ${secs}s${whole ? '' : shard ? ` (shard ${shard} of the suite)` : ' (part of the suite: GitHub runs it all on a pull request and after each merge)'}`)
 process.exit(code)
