@@ -116,8 +116,8 @@ fit us — a task that can start at a time, a space or task named in the chat wi
 as its own, Autopilot's Run now, and a model picker to search — and a sixth, a quiet agent on its own background work,
 was checked first and left out (its row below). Two rows are about a task that wrongly read Needs you while it worked;
 both were checked against our SHE-10 card (its own row above) and neither can raise a false one here; this pass checked
-both again. Upstream
-keeps its `SHEP-` numbers from 3.1.0 (a `SHEP-2`, `SHEP-10` and `SHEP-23` exist on both lines), so every row cites its
+both again.
+Upstream keeps its `SHEP-` numbers from 3.1.0 (a `SHEP-2`, `SHEP-10` and `SHEP-23` exist on both lines), so every row cites its
 commit as well. The release commits themselves (two per tag until 3.1.9: `7239bcfe`, `6894c0dd`, `1cc02a07`,
 `5ca5b07f`, `6a9eab34`, `21be48fa`, `140998d1`, `d64a187a`, `3e487bab`, `c44b602d`, `7a6c6d17`, `79eac088`, then
 `ea72e9f9`) bump versions and write changelogs: no row.
