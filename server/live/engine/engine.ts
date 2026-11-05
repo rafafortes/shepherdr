@@ -910,7 +910,7 @@ export class Engine extends Emitter<Events> {
     const id = `go:${t.id}:${Date.now()}`
     this.chats.post(key, { id, card: { id, task: t.id, status: 'work', text: `started: ${why}` } })
     this.save()
-    if (!t.worktree) {
+    if (!t.worktree && !this.starting.has(t.id)) {
       // it never started (its time came while it waited for another task): no agent waits to hear the go, so it goes in
       // the brief it starts on, and is not sent again after a restart (nothing is waiting to receive it)
       const [work, how] = splitBrief(t.desc)

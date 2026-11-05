@@ -29,8 +29,8 @@ describe('a task row', () => {
   test('scheduled, it says when it starts and counts down to it, rather than a line that ages', () => {
     const html = line(task('scheduled', { sub: 'Starts Tomorrow 9:00', scheduled: Date.now() + 6 * 3_600_000 }))
     expect(text(html)).toMatch(/^Starts Tomorrow 9:00 · in 6h$/)
-    // once its time has come, "now", until its first turn takes the row's line over
-    expect(text(line(task('scheduled', { sub: 'Starts now', scheduled: Date.now() - 1000 })))).toBe('Starts now · now')
+    // once its time has come, its own words alone, until its first turn takes the row's line over
+    expect(text(line(task('scheduled', { sub: 'Starts now', scheduled: Date.now() - 1000 })))).toBe('Starts now')
   })
   test('ready, done or to do, it says its summary', () => {
     for (const s of ['ready', 'done', 'todo'] as const) expect(text(line(task(s, { sub: 'It now checks the raw body' })))).toBe('It now checks the raw body')

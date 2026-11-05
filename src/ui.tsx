@@ -299,11 +299,13 @@ function ScheduledLine({ t }: { t: Task }) {
     return () => clearInterval(x)
   }, [])
   const left = (t.scheduled ?? 0) - Date.now()
+  // its time has come and its first turn has not taken the line over yet: "Starts now" alone says it
+  if (left <= 0) return <>{t.sub}</>
   return (
     <>
       {t.sub}
       <span className="text-fg3"> · </span>
-      <span className="whitespace-nowrap tabular-nums text-fg3">{left > 0 ? `in ${span(left)}` : 'now'}</span>
+      <span className="whitespace-nowrap tabular-nums text-fg3">in {span(left)}</span>
     </>
   )
 }
