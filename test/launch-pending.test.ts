@@ -249,6 +249,8 @@ describe('a launch herdr left pending', () => {
           throw new HerdrError('agent_not_found', `agent target ${target} not found`)
         })
         await a.refresh()
+        // still listed as pending: not to be started again, whatever herdr says about its pane
+        expect(await a.wrong(KEY)).toBeUndefined()
         expect(started).toEqual([])
         expect(a.status(KEY)).toBe('unknown')
         // herdr dropped the name, and the pane with it: gone, which the relaunch loop brings back
@@ -276,7 +278,7 @@ describe('a launch herdr left pending', () => {
       const a = new Agents()
       try {
         const spec = { key: KEY, name, kind: 'pi', cwd, workspace: 'w' }
-        // this herdr leaves the pane of a launch it dropped behind
+        // a herdr that leaves the pane of a launch it dropped behind: nothing guarantees every version closes it
         await a.ensure({ ...spec, pane: async () => 'p1' })
         expect(started).toEqual([{ name, pane: 'p1' }])
         expect(a.record(KEY)?.pendingLaunch).toBe(true)

@@ -468,8 +468,9 @@ export class Agents extends Emitter<Events> {
    * handles as it handles any agent that stopped; nothing here starts or stops one.
    *
    * One ask in flight per agent, never awaited by the caller (a look at herdr never waits on a launch), and only for so
-   * long: a launch that never goes ready must not be kept alive by our asking, so past pendingFor it is said once and
-   * left for herdr to drop.
+   * long: a launch that never goes ready must not be kept alive by our asking itself, so past pendingFor it is said
+   * once and no longer asked for. Nothing here starts one again either: a pending agent is never counted as wrong, so
+   * only herdr's own timeout on an unasked launch, which the relaunch loop then sees as gone, can end it.
    */
   private settleLaunches(now = Date.now()) {
     for (const [name, a] of this.live) {
@@ -498,7 +499,7 @@ export class Agents extends Emitter<Events> {
       }
       if (this.pendingSaid.has(name)) continue
       this.pendingSaid.add(name)
-      console.error(`shepherdr: ${name}'s launch hasn't become ready in ${Math.round((now - since) / 1000)} s; not asking for it any more, so herdr drops it and the relaunch loop can start it again`)
+      console.error(`shepherdr: ${name}'s launch hasn't become ready in ${Math.round((now - since) / 1000)} s; not asking for it any more`)
     }
     // forget the names herdr no longer lists, ready or dropped
     for (const name of this.pendingSince.keys()) if (!this.live.has(name)) this.pendingSince.delete(name)
