@@ -23,12 +23,13 @@ own `v2.0.<n>` tags (Releases, below).
 
 **Last reviewed** (update these three lines at the end of every pass):
 
-- upstream `main`: `dc1b6782` "SHEP-36: Release Shepherdr 3.1.3 (#628)", 2026-11-05 01:02 +0100
-- upstream tag `v3.1.3` (`dc018f2a`, 2026-11-04), the newest release
-- upstream branch `v2.0` tip: `ebb17d58` "SHE-295: Build coordinator Autopilot (#490)", 2026-10-29
+- upstream `main`: `ea72e9f9` "SHEP-55: Release Shepherdr 3.1.10 (#697)", 2026-11-05 16:06 +0000
+- upstream tag `v3.1.10` (`ea72e9f9`, 2026-11-05), the newest release
+- upstream branch `v2.0` tip: `ebb17d58` "SHE-295: Build coordinator Autopilot (#490)", 2026-10-29 (unchanged)
 
-Reviewed on 2026-11-04 by the operator's clock (the tip's commit date, 2026-11-05 01:02 +0100, is just past midnight
-UTC); every upstream commit after `v2.0.0` is weighed in [the ledger](upstream-ledger.md).
+Reviewed on 2026-11-05, the second pass: the 60 commits after `dc1b6782`, behind the seven tags since `v3.1.3`
+(3.1.4 to 3.1.10, all released that day, 09:39 to 16:06 UTC); every upstream commit after `v2.0.0` is weighed in
+[the ledger](upstream-ledger.md), the new ones in its 3.1.4 to 3.1.10 section.
 
 ## How we notice a new upstream release
 
