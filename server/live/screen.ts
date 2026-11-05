@@ -23,8 +23,9 @@ export interface ScreenMenu {
 }
 
 /** A card's identity is the screen it was drawn from: the words as they are, in the whole screen, but for what moves
- *  with no one touching them (the menu's cursor, a spinner's frame). A card whose words changed is a different card, and
- *  a tap on the old one presses nothing. It includes the full permission being granted. */
+ *  there with no one touching them (the menu's cursor, a spinner's frame, a timer, an activity bar, the helpers it
+ *  counts) and for what the card itself shows (a multiple choice's ticks). Any other change is another card, and a tap
+ *  on the old one presses nothing. It includes the full permission being granted. */
 export function menuId(key: string, m: ScreenMenu) {
   const shown = m.all ?? m.screen
   const screen = shown === undefined ? undefined : screenText(shown, m)
@@ -65,7 +66,7 @@ function startupMenu(lines: string[]): ScreenMenu | null {
     const rows = lines.slice(first).filter((l) => /^\s*[❯›>▶]?\s*\[[✔✓x ]\]\s+/.test(l))
     if (first >= 0 && rows.length) {
       const cursor = rows.findIndex((l) => /[❯›>▶]/.test(l))
-      return { title: lines.find((l) => /new MCP servers found in this project/i.test(l))!.trim(), choices: rows.map((l) => l.replace(/^\s*[❯›>▶]?\s*\[[✔✓x ]\]\s+/, '').trim()), cursor: cursor < 0 ? rows.length : cursor, multi: true, selected: rows.flatMap((l, i) => (/\[[✔✓x]\]/.test(l) ? [i] : [])), reject: 'Reject all', screen: promptScreen(lines, first), all: screen }
+      return { title: lines.find((l) => /new MCP servers found in this project/i.test(l))!.trim(), choices: rows.map((l) => l.replace(/^\s*[❯›>▶]?\s*\[[✔✓x ]\]\s+/, '').trim()), cursor: cursor < 0 ? rows.length : cursor, multi: true, selected: rows.flatMap((l, i) => (/\[[✔✓x]\]/.test(l) ? [i] : [])), reject: 'Reject all', screen: promptScreen(lines, first) }
     }
   }
   const cursor = lines.findLastIndex((l) => /^\s*[❯›>▶]\s+\S/.test(l))
@@ -79,11 +80,11 @@ function startupMenu(lines: string[]): ScreenMenu | null {
       const choices = lines.slice(first, last + 1).map((l) => l.replace(/^\s*[❯›>▶]?\s*/, '').trim())
       const context = lines.slice(0, first).map(clean).filter(Boolean)
       const title = context.findLast((l) => /\?|MCP servers? found|trust|accessing workspace/i.test(l)) ?? context.at(-1) ?? 'Choose an option'
-      return { title, choices, cursor: cursor - first, screen: promptScreen(lines, first), all: screen }
+      return { title, choices, cursor: cursor - first, screen: promptScreen(lines, first) }
     }
   }
   const yn = screen.match(/([^\n]*?)(?:\[y\/n\]|\(y\/n\)|\[yes\/no\]|\(yes\/no\))\s*[:?]?\s*$/i)
-  if (yn) return { title: yn[1].trim() || 'Continue?', choices: ['Yes', 'No'], cursor: 0, keys: [['y', 'enter'], ['n', 'enter']], screen, all: screen }
+  if (yn) return { title: yn[1].trim() || 'Continue?', choices: ['Yes', 'No'], cursor: 0, keys: [['y', 'enter'], ['n', 'enter']], screen }
   // a numbered picker the CLI ends on a footer ("Choose the text style:", "Select login method:") asks no question, so the
   // numbered reading above found nothing to go by; its footer is what says it is a menu and not a list in a transcript
   if (!menuFooter(screen)) return null
@@ -104,7 +105,7 @@ function startupMenu(lines: string[]): ScreenMenu | null {
   }
   if (choices.length < 2) return null
   const context = lines.slice(0, first).map(clean).filter(Boolean)
-  return { title: context.at(-1) ?? 'Choose an option', choices, cursor: Math.max(0, on), screen: promptScreen(lines, first), all: screen }
+  return { title: context.at(-1) ?? 'Choose an option', choices, cursor: Math.max(0, on), screen: promptScreen(lines, first) }
 }
 
 export function parseMenu(screen: string): ScreenMenu | null {
@@ -168,7 +169,7 @@ export function parseMenu(screen: string): ScreenMenu | null {
   const asksToRun = asks.test(question)
   const title = asksToRun && cmd ? `Allow: ${cmd.replace(/\?$/, '')}?` : question
   const descriptions = opts.some((o) => o.description) ? opts.map((o) => o.description) : undefined
-  return { title, screen: promptScreen(lines, first), choices: opts.map((o) => o.label), ...(descriptions ? { descriptions } : {}), cursor: Math.max(0, opts.findIndex((o) => o.on)), all: screen }
+  return { title, screen: promptScreen(lines, first), choices: opts.map((o) => o.label), ...(descriptions ? { descriptions } : {}), cursor: Math.max(0, opts.findIndex((o) => o.on)) }
 }
 
 /** A frame of the usual Braille spinner or Claude Code's, starting a line, in a box or not: any other symbol there may
@@ -202,23 +203,30 @@ export function restingScreen(text: string) {
 }
 
 /**
- * The screen as it is, all but what moves with no one touching its words: the mark on the menu's cursor line and a
- * spinner's frame at a line's start. Everything else counts, whatever it is — a path, a number, a symbol — so a card is
- * only closed (or a tap only lands) on the screen it was drawn from, not on one that merely looks like it.
+ * The screen as it is, all but what moves there with no one touching its words (see `menuId`), and the blanks and
+ * trailing spaces it drew. Everything else counts, whatever it is — a path, a number, a symbol — so a card is only
+ * closed (or a tap only lands) on the screen it was drawn from, not on one that merely looks like it.
  */
-export function screenText(text: string, m?: Pick<ScreenMenu, 'choices' | 'cursor'>) {
-  const lines = text.split('\n').map((l) => l.replace(SPINNER, '$1 ').trimEnd())
+export function screenText(text: string, m?: Pick<ScreenMenu, 'choices' | 'cursor' | 'multi'>) {
+  const lines = text.split('\n').map((l) => l.replace(SPINNER, '$1 '))
   // the choice the cursor is on: its mark is the cursor, not words, so moving it is no change
   const on = m?.choices[m.cursor]
   if (on !== undefined) {
-    const line = lines.findLastIndex((l) => plainChoice(l) === plainChoice(on) && /^\s*[❯›>▶*]/.test(l))
+    const line = lines.findLastIndex((l) => /^\s*[❯›>▶*]/.test(l) && plainChoice(l) === plainChoice(on))
     if (line >= 0) lines[line] = lines[line].replace(/^(\s*)[❯›>▶*](?=\s)/, '$1 ')
   }
-  return lines.join('\n')
+  // a multiple choice's ticks are drawn on the card itself: ticking one is no new screen
+  return restingScreen((m?.multi ? lines.map((l) => l.replace(/\[[✔✓x]\]/, '[ ]')) : lines).join('\n'))
 }
 
-/** a choice's words, as a line on the screen or as the card reads it: no cursor, no checkbox, no "(esc)" hint */
-const plainChoice = (line: string) => line.replace(/^\s*[❯›>▶*]\s*/, '').replace(/^\[[✔✓x ]\]\s*/, '').replace(/\s*\((?:esc|enter|tab|[a-z])\)$/i, '').trim()
+/** a choice's words, as a line on the screen or as the card reads it: no cursor, no number, no checkbox, no "(esc)" hint */
+const plainChoice = (line: string) =>
+  line
+    .replace(/^\s*[❯›>▶*]\s*/, '')
+    .replace(/^\d{1,2}[.)]\s+/, '')
+    .replace(/^\[[✔✓x ]\]\s*/, '')
+    .replace(/\s*\((?:esc|enter|tab|[a-z])\)$/i, '')
+    .trim()
 
 /** two reads of a screen that only moved: a spinner turned, a timer counted, the cursor blinked */
 export const sameScreen = (a: string, b: string) => restingScreen(a) === restingScreen(b)

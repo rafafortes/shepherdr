@@ -63,7 +63,7 @@ describe.skipIf(!browser)('attention count circles', () => {
               expect(await row.locator(badge).count()).toBe(1)
             } else expect(await row.locator(badge).count()).toBe(0)
             // Clicking the same space keeps the existing navigation and closes the phone drawer.
-            await row.getByRole('button', { name: /^gtm,/ }).click()
+            await row.getByRole('button', { name: /^gtm(,|$)/ }).click()
             await settled(page)
             expect(page.url()).toContain('gtm')
             expect(await page.locator('[data-attention]').count()).toBe(0)
