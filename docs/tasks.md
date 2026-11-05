@@ -107,7 +107,10 @@
   coordinator hears it once (news), with the failing run, the end of its log and the tasks merged since main was last
   green, and decides on a fix-forward task (Autopilot adds one by itself). It hears again only after main was green. GitHub's
   merge queue would test each one on top of the others, but it needs an organisation's repo. Elsewhere it is rebased
-  and squash-merged into main here (and main pushed when there is a remote). Then the task is marked merged. Once the
+  and squash-merged into main here (and main pushed when there is a remote). Work of your own left uncommitted in that
+  checkout stops this only when the merge would write over it, and the refusal names the file and says what to do; a
+  merge that leaves it alone goes in, and your edit stays uncommitted (nothing is stashed, and nothing is reset).
+  Then the task is marked merged. Once the
   agent's turn ends, the task is put away through herdr: the worktree removed (which closes its space and agent), then
   the branch deleted. Nothing is forced: a checkout with uncommitted changes, or a branch with work main lacks, is kept
   and said so (in the coordinator's news and in `shepherdr status`), and its space and agent close all the same.
