@@ -2246,6 +2246,6 @@ describe('review rounds from the command', () => {
     expect(more.code).toBe(0)
     expect(more.out).toContain(`may now use ${rounds + 1} review rounds`)
     expect((await src.cli(['task', 'show', t.id], {})).out).toContain(`Review rounds: ${rounds} of ${rounds + 1} used, one added by its coordinator`)
-    expect((await src.cli(['task', 'review-more', t.id], { chat: place })).out).toContain(`has used ${rounds} of ${rounds + 1} review rounds`)
+    expect((await src.cli(['task', 'review-more', t.id], { chat: place })).out).toContain('already added its one more review round')
   })
 })

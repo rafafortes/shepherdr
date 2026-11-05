@@ -35,13 +35,16 @@ describe('review rounds a coordinator may add', () => {
     expect(() => w.engine.reviewRound(t.id)).toThrow(`All 3 of ${t.id}'s review rounds are used`)
   })
 
-  test('refused a second time: one added round is the last', async () => {
+  test('refused a second time, before or after the round it added is used', async () => {
     const w = world()
     const t = await twoRounds(w, 'granted-once')
     w.engine.reviewRound(t.id)
     w.engine.reviewRound(t.id)
     await w.engine.reviewMore(t.id, t.project)
-    await expect(w.engine.reviewMore(t.id, t.project)).rejects.toThrow(`has used 2 of 3 review rounds`)
+    // one, ever: asked again while its added round is still unused, and after it is used and they are all gone again
+    await expect(w.engine.reviewMore(t.id, t.project)).rejects.toThrow('already added its one more review round')
+    expect(w.engine.reviewRound(t.id)).toEqual({ round: 3, rounds: 3 })
+    await expect(w.engine.reviewMore(t.id, t.project)).rejects.toThrow('already added its one more review round')
     expect(t.reviewsAdded).toBe(1)
     expect(w.engine.roundsOf(t)).toBe(3)
   })
@@ -49,7 +52,7 @@ describe('review rounds a coordinator may add', () => {
   test('refused before the rounds are used', async () => {
     const w = world()
     const t = await twoRounds(w, 'before-they-are-used')
-    await expect(w.engine.reviewMore(t.id, t.project)).rejects.toThrow(`has used 0 of 2 review rounds`)
+    await expect(w.engine.reviewMore(t.id, t.project)).rejects.toThrow(`has used 0 of 2 review rounds; it takes one more only once they are all used (its agent counts each round: shepherdr review ${t.id})`)
     w.engine.reviewRound(t.id)
     await expect(w.engine.reviewMore(t.id, t.project)).rejects.toThrow(`has used 1 of 2 review rounds`)
     expect(t.reviewsAdded).toBeUndefined()

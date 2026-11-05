@@ -1405,7 +1405,9 @@ export class Engine extends Emitter<Events> {
   /**
    * Its coordinator gives it exactly one more review round, once its own are used, and its agent hears it in its chat
    * and runs it. The limit is what stops an agent reviewing for ever, so a task's own agent can never raise it: `from`
-   * is the chat that ran the command, which must be that space's coordinator.
+   * is the chat that ran the command, which must be that space's coordinator. That chat is the caller's own session
+   * route (helper/route.pl, bound to the agent's process), so a task's agent cannot name itself a coordinator; a shell
+   * that scrubs its entire environment is the human's own terminal as far as any local command can tell.
    */
   async reviewMore(id: string, from?: string) {
     const t = this.req(id)
@@ -1413,7 +1415,10 @@ export class Engine extends Emitter<Events> {
     // a coordinator of another space (another machine's included) is not this task's
     if (from && from !== t.project) throw new Error(`Only ${this.spaceName(t)}'s coordinator adds ${t.id} a review round, not ${this.places.nameOf(from) ?? from}'s: ask it`)
     if (ended(t) || t.landing) throw new Error(`${t.id} is ${t.closed ? 'Done with nothing to merge' : t.merged ? 'merged' : 'on its way into main'}: it needs no more review`)
-    if (this.reviewsLeft(t) > 0) throw new Error(`${t.id} has used ${t.reviews ?? 0} of ${this.roundsOf(t)} review rounds; it takes one more only once they are all used`)
+    // one, ever: using the round it added is the last of them, not room for another
+    if (t.reviewsAdded) throw new Error(`${t.id}'s coordinator has already added its one more review round (${t.reviews ?? 0} of ${this.roundsOf(t)} used): there is no second`)
+    // a task from before rounds were counted has none: its agent counts the next one, and only then can one be added
+    if (this.reviewsLeft(t) > 0) throw new Error(`${t.id} has used ${t.reviews ?? 0} of ${this.roundsOf(t)} review rounds; it takes one more only once they are all used${t.reviews === undefined ? ` (its agent counts each round: shepherdr review ${t.id})` : ''}`)
     t.reviewsAdded = (t.reviewsAdded ?? 0) + 1
     const rounds = this.roundsOf(t)
     this.save()
