@@ -405,7 +405,7 @@ export function chats(): Record<string, Chat> {
         m({
           who: 'peer',
           peer: { name: 'gtm coordinator', pane: 'w74:p1', space: 'gtm' },
-          text: 'Relayed from the operator: keep the plan as it is, and print the docs link at the end of gtm init.',
+          text: 'Relayed from the operator: the docs link goes at the end of gtm init too — put it in the plan.',
         }),
         m({
           who: 'agent',
