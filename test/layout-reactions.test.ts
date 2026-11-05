@@ -53,10 +53,16 @@ describe.skipIf(!browser)('reactions on a phone', () => {
     await touch(box.left + 30, box.top + 16, 60)
     await page.waitForTimeout(400)
     expect(await page.$(dialog)).toBeNull()
-    // a finger landing on a chat that is still scrolling stops it, it doesn't open anything
+    // a finger landing on a chat that is still scrolling stops it, it doesn't open anything. The scroll comes from the
+    // page as the finger lands: the app counts a chat as scrolling for 250 ms after a scroll a finger left, and a trip
+    // from here to the browser and back takes longer than that on a machine as busy as a shared one
     await page.evaluate(() => {
-      document.dispatchEvent(new Event('touchend'))
-      document.dispatchEvent(new Event('scroll'))
+      const land = () => {
+        window.removeEventListener('pointerdown', land, true)
+        document.dispatchEvent(new Event('touchend'))
+        document.dispatchEvent(new Event('scroll'))
+      }
+      window.addEventListener('pointerdown', land, true)
     })
     await touch(box.left + 30, box.top + 16, 600)
     await page.waitForTimeout(300)

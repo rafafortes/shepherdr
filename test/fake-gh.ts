@@ -3,7 +3,7 @@
 // of gh is here: auth status, pr list/view/create/edit/ready/checks/merge, run list, and api (a pull request's reviews and
 // comments, Actions' runs and jobs, a job's log).
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -49,14 +49,35 @@ if (import.meta.main) {
   // slow before it holds the state file, so the other calls meanwhile go on
   if (process.argv[2] === 'pr' && process.argv[3] === 'merge') Bun.sleepSync((JSON.parse(readFileSync(file, 'utf8')) as FakeGitHub).mergeSlow ?? 0)
   // the engine runs several gh at once (a pull request's reviews and comments): each holds the state file to itself
-  // from reading it to writing it back, or one reads it half-written, or writes over what another wrote down
+  // from reading it to writing it back, or one reads it half-written, or writes over what another wrote down. One
+  // killed (a test that timed out takes its processes with it) leaves its lock behind with its pid in it: a lock whose
+  // owner is gone is taken over instead of waited on.
   const lock = `${file}.lock`
+  const running = (pid: number) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
   for (let tries = 0; ; tries++) {
     try {
-      openSync(lock, 'wx')
+      const fd = openSync(lock, 'wx')
+      writeFileSync(fd, String(process.pid))
+      closeSync(fd)
       break
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST' || tries > 3000) throw e
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+      let pid = 0
+      try {
+        pid = Number(readFileSync(lock, 'utf8').trim() || 0)
+      } catch {}
+      if (pid && !running(pid)) {
+        rmSync(lock, { force: true })
+        continue
+      }
+      if (tries > 3000) throw e
       Bun.sleepSync(5)
     }
   }

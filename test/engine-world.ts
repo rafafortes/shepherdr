@@ -1,7 +1,8 @@
 // The tasks engine's test world, shared by the engine*.test.ts files: a real git repo, the agents stubbed, herdr a
-// stand-in that makes and removes real git worktrees. Each file that imports it gets its own Shepherdr home.
+// stand-in that makes and removes real git worktrees. Each file that imports it gets its own Shepherdr home, and each
+// world one of its own inside it.
 import { execSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -17,6 +18,22 @@ export type Said = import('../server/live/readers/hooks.ts').Said
 
 export const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8' }).trim()
 
+/**
+ * A world reads and writes a data folder of its own, filled with what was there when it was made. Bun does not stop a
+ * test that timed out: it goes on running, and its leftovers (a prefix it reserved, a branch it put away, a task it
+ * wrote) must not reach into the folder the next test reads. Anything written before a world is made (a test that
+ * saves tasks of its own) comes along into it. The name is the preload's, which clears those older than an hour.
+ */
+function ownHome() {
+  const from = process.env.SHEPHERDR_HOME
+  const dir = mkdtempSync(join(tmpdir(), 'shep-test-home-world-'))
+  // the task numbers matter more than the database that hands them out: tasks.json's next carries them, and an open
+  // database is not a file to copy while its own connection is writing
+  const keep = (f: string) => !/^task-ids\.sqlite/.test(f)
+  if (from && existsSync(from)) for (const f of readdirSync(from).filter(keep)) cpSync(join(from, f), join(dir, f), { recursive: true })
+  process.env.SHEPHERDR_HOME = dir
+}
+
 export function repo() {
   const dir = mkdtempSync(join(tmpdir(), 'shep-repo-'))
   sh('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', dir)
@@ -25,6 +42,7 @@ export function repo() {
 
 /** boot: what herdr says once the agent is ready; any but working leaves its brief waiting to go in */
 export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
+  ownHome()
   const started: { key: string; first?: string; cwd: string; system?: string; pane?: string }[] = []
   const status: Record<string, string> = {}
   const sent: { key: string; text: string }[] = []
@@ -97,6 +115,9 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
   const places = new Places()
   const settings = new Settings()
   const engine = new Engine(agents as never, chats as never, places, settings, herdr.h as never)
+  // a merge that stalls on a slow machine answers in its own words, inside the time a test has, instead of hanging
+  // until bun takes the test away and the merge goes on into the tests after it (MERGE_DEADLINE is 90 s)
+  engine.mergeDeadline = 15_000
   const news: string[] = []
   /** the place each news is for: a project's place id, as its coordinator's chat has it */
   const newsTo: string[] = []
