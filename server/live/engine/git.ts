@@ -241,7 +241,7 @@ export async function aheadCount(wt: string, base: string) {
 }
 
 /** bring the local base up to the remote's when there is one; refused when the two have split */
-export async function catchUp(repo: string, base: string): Promise<Run> {
+export async function catchUp(repo: string, base: string, then = 'then merge again'): Promise<Run> {
   const ok: Run = { ok: true, code: 0, out: '', err: '' }
   if (!(await git(repo, 'remote', 'get-url', 'origin')).ok) return ok
   // offline: go on with what is here
@@ -256,7 +256,7 @@ export async function catchUp(repo: string, base: string): Promise<Run> {
     (await git(repo, 'branch', '--show-current')).out === base
       ? await git(repo, 'merge', '--ff-only', '--no-autostash', '--no-overwrite-ignore', '--quiet', remote)
       : await git(repo, 'update-ref', `refs/heads/${base}`, remote)
-  return r.ok ? r : { ...r, err: overwriteRefusal(base, `${r.out}\n${r.err}`) ?? `could not bring ${base} up to ${remote}: ${(r.err || r.out).split('\n')[0]}` }
+  return r.ok ? r : { ...r, err: overwriteRefusal(base, `${r.out}\n${r.err}`, then) ?? `could not bring ${base} up to ${remote}: ${(r.err || r.out).split('\n')[0]}` }
 }
 
 /** replay the branch on top of the base; a conflict leaves it as it was */
@@ -277,42 +277,34 @@ export function namedFiles(said: string) {
 
 /**
  * What to say when git will not move a checkout over work of its own: the files it names, and what to do. Null when
- * git's refusal names no file (a split branch, an unfinished merge): then it is not about local work.
+ * git's refusal names no file (a split branch, an unfinished merge): then it is not about that work.
  */
-function overwriteRefusal(base: string, said: string) {
+function overwriteRefusal(base: string, said: string, then: string) {
   const files = namedFiles(said)
   if (!files.length) return null
   const more = files.length > 5 ? ` and ${files.length - 5} more` : ''
-  return `${base} here holds work of its own that would be overwritten: ${files.slice(0, 5).join(', ')}${more}. Nothing was merged or changed there: commit, move or remove ${files.length === 1 ? 'it' : 'them'}, then merge again.`
+  return `${base} here holds work of its own that would be overwritten: ${files.slice(0, 5).join(', ')}${more}. Nothing was changed there: commit, move or remove ${files.length === 1 ? 'it' : 'them'} first, ${then}.`
 }
 
 /**
- * Merge a branch into the base on this machine. The merge is made in a scratch worktree, so a checkout of the base is
- * only ever moved forward by git itself: work of the human's in that folder stays as it is, uncommitted, unless the
- * merge would write over it — and then git refuses, naming the files, with nothing changed. Nothing is stashed and
- * nothing is reset --hard, so that work is never lost.
+ * Merge a branch into the base on this machine. Git builds the merge itself (merge-tree: no checkout, no index, no
+ * stash), and a checkout of the base is only ever moved forward by git: work of the human's in that folder stays as
+ * it is, uncommitted, unless the merge would write over it — and then git refuses, naming the files, with nothing
+ * changed. Nothing of theirs is stashed, reset or lost.
  */
 export async function mergeHere(repo: string, branch: string, base: string, message: string, squash: boolean): Promise<Run> {
-  const current = (await git(repo, 'branch', '--show-current')).out
-  const tmp = join(repo, '.git', `shepherdr-merge-${Date.now()}`)
-  const add = await git(repo, 'worktree', 'add', '--detach', tmp, base)
-  if (!add.ok) return { ...add, err: `could not prepare the merge in ${repo}: ${(add.err || add.out).split('\n')[0]}` }
-  try {
-    const m = squash ? await git(tmp, 'merge', '--squash', '--no-autostash', branch) : await git(tmp, 'merge', '--no-ff', '--no-autostash', '-m', message, branch)
-    if (!m.ok) return { ...m, err: `conflict: ${m.out || m.err}` }
-    if (squash) {
-      const c = await git(tmp, 'commit', '-q', '-m', message)
-      if (!c.ok) return { ...c, err: `could not commit the merge: ${(c.err || c.out).split('\n')[0]}` }
-    }
-    const head = (await git(tmp, 'rev-parse', 'HEAD')).out
-    // the base is not checked out here: its branch moves, and no checkout of it is touched
-    if (current !== base) return git(repo, 'update-ref', `refs/heads/${base}`, head)
-    // the base is this checkout's branch: git moves it, and writes only the files the merge changed
-    const ff = await git(repo, 'merge', '--ff-only', '--no-autostash', '--no-overwrite-ignore', '--quiet', head)
-    return ff.ok ? ff : { ...ff, err: overwriteRefusal(base, `${ff.out}\n${ff.err}`) ?? `could not bring ${base} here up to the merge: ${(ff.err || ff.out).split('\n')[0]}` }
-  } finally {
-    await removeWorktree(repo, tmp, true)
-  }
+  const tree = await git(repo, 'merge-tree', '--write-tree', base, branch)
+  if (!tree.ok) return { ...tree, err: `conflict: ${tree.out || tree.err}` }
+  // the squash commit main gets, or the merge commit that keeps both sides
+  const commit = await git(repo, 'commit-tree', tree.out.split('\n')[0], '-p', base, ...(squash ? [] : ['-p', branch]), '-m', message)
+  if (!commit.ok) return { ...commit, err: `could not make the merge commit: ${(commit.err || commit.out).split('\n')[0]}` }
+  const head = commit.out
+  // the base is not this checkout's branch: its branch moves, and no checkout of it is touched
+  if ((await git(repo, 'branch', '--show-current')).out !== base) return git(repo, 'update-ref', `refs/heads/${base}`, head)
+  // it is: git moves it, and writes only the files the merge changed
+  const ff = await git(repo, 'merge', '--ff-only', '--no-autostash', '--no-overwrite-ignore', '--quiet', head)
+  const said = `${ff.out}\n${ff.err}`
+  return ff.ok ? ff : { ...ff, err: overwriteRefusal(base, said, 'then merge again') ?? `${base} here could not be brought up to the merge: ${said.split('\n').find((l) => /error|fatal/i.test(l))?.replace(/^(?:error|fatal):\s*/, '') ?? 'git gave no reason'}. Nothing was changed in that checkout.` }
 }
 
 /* ---------- GitHub, through gh ---------- */

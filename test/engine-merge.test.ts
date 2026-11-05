@@ -114,7 +114,7 @@ describe('shepherdr merge', () => {
     w.agentIs(key, 'idle')
     const r = await w.engine.merge(t.id)
     expect(r.ok).toBe(false)
-    expect(r.error).toBe('main here holds work of its own that would be overwritten: README.md. Nothing was merged or changed there: commit, move or remove it, then merge again.')
+    expect(r.error).toBe('main here holds work of its own that would be overwritten: README.md. Nothing was changed there: commit, move or remove it first, then merge again.')
     // nothing there was lost or changed: their edit, and main, are as they were
     expect(readFileSync(join(dir, 'README.md'), 'utf8')).toBe('mine, not committed\n')
     expect(sh('git status --porcelain', dir)).toBe('M README.md')
@@ -137,6 +137,24 @@ describe('shepherdr merge', () => {
     expect(r.error).toContain('would be overwritten')
     expect(r.error).toContain('commit, move or remove it')
     expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe('mine, untracked\n')
+  })
+
+  test('a staged change of yours in the space’s checkout that the merge does not touch is neither lost nor taken in', async () => {
+    const w = world()
+    const dir = repo()
+    const { t } = await started(w, dir, 'staged')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', t.worktree!)
+    // staged in the operator's own checkout, never committed
+    writeFileSync(join(dir, 'README.md'), 'staged, not committed\n')
+    sh('git add README.md', dir)
+    w.agentIs(`${t.id}/Agent`, 'idle')
+    expect((await w.engine.merge(t.id)).ok).toBe(true)
+    // still staged, and out of the merge commit
+    expect(readFileSync(join(dir, 'README.md'), 'utf8')).toBe('staged, not committed\n')
+    expect(sh('git diff --cached --name-only', dir)).toBe('README.md')
+    expect(sh('git status --porcelain', dir)).toBe('M  README.md')
+    expect(sh('git show --name-only --format= HEAD', dir)).toBe('hello.txt')
   })
 
   test('a late message it has not read yet stops the merge until it has', async () => {
