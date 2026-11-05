@@ -117,14 +117,15 @@ export class Starts {
     // a start's words. Only a state — what was handed to it still cannot go in — is worth one.
     if (l.prior) {
       if (!l.waits) return l.card ? { do: 'clear' } : { do: 'wait' }
-      return { do: 'card', menu: { title: 'Waiting on its screen', choices: [], cursor: 0, screen: screen } }
+      return { do: 'card', menu: { title: 'Waiting on its screen', choices: [], cursor: 0, screen, all: l.screen } }
     }
-    // a menu it reads, with the CLI's own footer under it: a startup screen, not a wall of text
+    // a menu it reads, with the CLI's own footer under it: a startup screen, not a wall of text. Its card is the screen
+    // at rest: what only moves there (a timer) is no change of words, and the card of it stays the card
     const menu = menuFooter(l.screen) ? parseMenu(l.screen) : null
-    if (menu) return { do: 'card', menu }
+    if (menu) return { do: 'card', menu: { ...menu, all: l.screen } }
     // Nothing to choose: a card only when the screen says something is wrong, or when it still cannot take its brief.
     // A slow start says neither — a screen at rest while the model loads, its brief already in — and gets no card.
-    if (STOPPED.test(lastWords(l.screen, 4)) || l.waits) return { do: 'card', menu: { title: 'Waiting on its screen', choices: [], cursor: 0, screen: screen } }
+    if (STOPPED.test(lastWords(l.screen, 4)) || l.waits) return { do: 'card', menu: { title: 'Waiting on its screen', choices: [], cursor: 0, screen, all: l.screen } }
     // its brief went in after all: a card about waiting for it has nothing left to say
     return l.card ? { do: 'clear' } : { do: 'wait' }
   }

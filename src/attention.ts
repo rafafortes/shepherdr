@@ -1,16 +1,12 @@
 import type { Snapshot, Task } from '@shared/types.ts'
 
-/** Unanswered requests in original chats, independent of forwarded copies in chats. Ready is separate. */
+/** What waits on you at these places, each number what its own list shows: need is the Needs you view's rows here, each
+ *  card or waiting agent once; ready is the Ready tasks of the Tasks list. */
 export function attentionCounts(snap: Snapshot, places: string[]) {
   const ids = new Set(places)
-  const tasks = snap.tasks.filter((t) => ids.has(t.place) && !t.archived)
-  const requests = new Set<string>()
-  const add = (chat: string, fallback: string[]) => {
-    for (const id of snap.attentionRequests?.[chat] ?? fallback) requests.add(`${chat}\0${id}`)
-  }
-  for (const t of tasks.filter((t) => t.status === 'need')) add(t.agent?.chat ?? `${t.id}/Agent`, ['attention'])
-  for (const p of snap.places.filter((p) => ids.has(p.id))) add(p.chat, snap.asks[p.id] ? [snap.asks[p.id]] : [])
-  return { need: requests.size, ready: new Set(tasks.filter((t) => t.status === 'ready').map((t) => t.id)).size }
+  const needs = new Set((snap.needs ?? []).filter((n) => ids.has(n.place)).map((n) => `${n.chat}\0${n.id}`))
+  const ready = new Set(snap.tasks.filter((t) => ids.has(t.place) && !t.archived && t.status === 'ready').map((t) => t.id))
+  return { need: needs.size, ready: ready.size }
 }
 
 export const actionable = (t: Task) => t.status === 'need' || t.status === 'ready'

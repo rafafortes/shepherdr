@@ -11,7 +11,7 @@ import { hush } from './motion.ts'
 import { closed, loadPanes, MAX_PANES, normal, only, opened, PANE_MIN, replaced, samePane, savePanes, type Pane, type Panes } from './panes.ts'
 import { setupGuarded } from './guard.tsx'
 import { decide, screenOf, screenOfUrl, stepKey, stepsTo, systemSwipe, urlOf, type Entry } from './nav.ts'
-import { machineName, type Action, type Chat, type Message, type Place, type ReplyQuote, type ServerEvent, type Snapshot, type Task, type TermScreen, type UpdateStatus } from '@shared/types.ts'
+import { machineName, type Action, type Chat, type Message, type Need, type Place, type ReplyQuote, type ServerEvent, type Snapshot, type Task, type TermScreen, type UpdateStatus } from '@shared/types.ts'
 
 /* ---------- slots ---------- */
 
@@ -30,6 +30,10 @@ export interface Views {
   tasks: FC<{ placeId: string }>
   /** the lists' artifacts, newest first: what their chips hold (listView); placeId is the place picked (artifacts) */
   artifacts: FC<{ placeId: string }>
+  /** everything waiting on you, oldest first: what the chips hold (listView); placeId is the place picked (needs) */
+  needs: FC<{ placeId: string }>
+  /** a task's own actions, in its row's menu and in its chat's ⋯ (tasks): the same ones in both */
+  taskActions: FC<{ task: Task; close: () => void }>
   /** the Tasks header's ⋯: how its tasks are grouped, by listView's level; place is the place picked (tasks) */
   tasksMenu: FC<{ place: Place }>
   /** buttons in the sidebar's header beside the app's name: New section (places) */
@@ -182,10 +186,10 @@ export interface UI {
   place: string
   /** the open task: its agent's chat */
   task: string | null
-  /** phone: Chat, Tasks or Artifacts */
-  tab: 'chat' | 'tasks' | 'artifacts'
-  /** a wide screen's right-hand column: the place's Tasks or its Artifacts, remembered on this device */
-  side: 'tasks' | 'artifacts'
+  /** phone: Chat, Needs you, Tasks or Artifacts */
+  tab: 'chat' | 'needs' | 'tasks' | 'artifacts'
+  /** a wide screen's right-hand column: Needs you, the place's Tasks or its Artifacts, remembered on this device */
+  side: 'needs' | 'tasks' | 'artifacts'
   /** what the Tasks and Artifacts lists show (their chips) and whether it stays whatever place is picked, remembered
    *  on this device */
   lists: Lists
@@ -283,7 +287,7 @@ interface State {
 }
 
 function tabOf(t: string | null): UI['tab'] {
-  return t === 'tasks' || t === 'artifacts' ? t : 'chat'
+  return t === 'needs' || t === 'tasks' || t === 'artifacts' ? t : 'chat'
 }
 
 function deviceFor(w: number): Device {
@@ -332,7 +336,8 @@ const SIDE = 'shepherdr.side'
 
 function loadSide(): UI['side'] {
   try {
-    return localStorage.getItem(SIDE) === 'artifacts' ? 'artifacts' : 'tasks'
+    const side = localStorage.getItem(SIDE)
+    return side === 'artifacts' || side === 'needs' ? side : 'tasks'
   } catch {
     return 'tasks'
   }
@@ -1013,6 +1018,11 @@ export function pauseTask(t: Task) {
   return act({ type: 'pause', chat: t.agent?.chat ?? `${t.id}/Agent` })
 }
 
+/** stop a task: its agent and space close, it is To do and its work stays, until it is written to again */
+export function stopTask(t: Task) {
+  return act({ type: 'stop', chat: t.agent?.chat ?? `${t.id}/Agent` })
+}
+
 /** mark a task done with nothing merged: refused (held: what it holds) while it holds unmerged work, unless force */
 export function closeTask(t: Task, force = false): Promise<{ ok?: boolean; error?: string; held?: string[]; waiting?: boolean }> {
   return act({ type: 'close', chat: t.agent?.chat ?? `${t.id}/Agent`, force })
@@ -1045,10 +1055,6 @@ export { GROUPS, groupChoices, groupFor, namesFor, type GroupBy, type Groups, ty
 /** a list's tasks in their groups, in the order they show: more machines' under each machine's name */
 export function taskGroups(snap: Snapshot, list: ListView, by: GroupBy): TaskGroup[] {
   const tasks = tasksIn(snap, list)
-  if (list.attention) return snap.places.flatMap((p) => (['need', 'ready'] as const).flatMap((status) => {
-    const rows = tasks.filter((t) => t.place === p.id && t.status === status)
-    return rows.length ? [{ key: `${p.id}|${status}`, label: `${p.name} · ${status === 'need' ? 'Needs you' : 'Ready'}`, note: machineName(snap.machines, p.machine), tasks: rows, names: { machine: false, project: false } }] : []
-  }))
   return groupTasks(snap.places, snap.machines ?? [], tasks, by, list.level)
 }
 
@@ -1099,7 +1105,7 @@ export function setFilter(listKey: string, list: 'tasks' | 'artifacts', q: strin
 
 /** A list's tasks filtered: in their groups, every Done one, and then its archived ones; groups with none left out */
 export function filteredGroups(snap: Snapshot, list: ListView, q: string, ui: Pick<UI, 'groups'> = state.ui) {
-  const groups: TaskGroup[] = taskGroups(snap, { ...list, attention: false }, groupFor(ui.groups, list.level))
+  const groups: TaskGroup[] = taskGroups(snap, list, groupFor(ui.groups, list.level))
   const archived = archivedIn(snap, list)
   if (archived.length) groups.push({ key: 'archived', label: 'Archived', tasks: archived, names: namesFor(list.level) })
   return groups.map((g) => ({ ...g, tasks: g.tasks.filter((t) => taskMatches(t, q)) })).filter((g) => g.tasks.length)
@@ -1166,8 +1172,6 @@ export interface ListView {
   chips: string[]
   /** what its rows needn't say, as a place's level: 2 one space's, 1 one machine's, 0 more machines' */
   level: 0 | 1 | 2
-  /** Global Home’s default, before an explicit scope or search. */
-  attention?: boolean
 }
 
 const machineChip = (c: string) => c.startsWith('m:')
@@ -1207,7 +1211,7 @@ let lastList: { snap: Snapshot; lists: Lists; place: string; view: ListView } | 
 /** the lists as they show now: the same object while nothing they hang on changes, so a part can pick it */
 export function listView(ui: UI, snap: Snapshot): ListView {
   if (lastList && lastList.snap === snap && lastList.lists === ui.lists && lastList.place === ui.place) return lastList.view
-  const view = { ...listOf(snap, listChips(ui, snap)), search: listsPinned(ui, snap) ? '*pinned' : ui.place, attention: !!placeOf(snap, ui.place).home && placeOf(snap, ui.place).machine === snap.host && !listsPinned(ui, snap) && ui.lists.at !== ui.place }
+  const view = { ...listOf(snap, listChips(ui, snap)), search: listsPinned(ui, snap) ? '*pinned' : ui.place }
   lastList = { snap, lists: ui.lists, place: ui.place, view }
   return view
 }
@@ -1368,6 +1372,13 @@ export function openTask(id: string) {
 export function goChat(key: string) {
   if (key.includes('/')) openTask(key.split('/')[0])
   else setUI({ place: key, task: null, tab: 'chat', drawer: false })
+}
+
+/** what waits on you (needs): its chat, brought to the card it waits on, where it is answered */
+export function openNeed(n: Need) {
+  if (n.task) openTask(n.task)
+  else setUI({ place: n.place, task: null, tab: 'chat', drawer: false })
+  if (n.question) setUI({ jump: n.question.id })
 }
 
 export type Children = { children?: ReactNode }

@@ -2,7 +2,7 @@
 // the real thing would, so every screen and case can be walked through without touching real agents.
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { apart, asEmoji, artifactQuote, cardMessage, modeCard, nameProblem, slugify, type Action, type ActivityAsk, type AddSpace, type Artifact, type Chat, type FolderEntry, type Folders, type Machine, type Message, type Place, type Snapshot, type Task, type TaskStatus, type TermScreen, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
+import { apart, asEmoji, artifactQuote, cardMessage, modeCard, nameProblem, slugify, type Action, type ActivityAsk, type AddSpace, type Artifact, type Chat, type FolderEntry, type Folders, type Machine, type Message, type Need, type Place, type Snapshot, type Task, type TaskStatus, type TermScreen, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
 import { Emitter, type Source, type SourceEvents } from '../source.ts'
 import { DICTATE_CAP, DICTATE_TOO_LONG } from '../../shared/dictate.ts'
 import * as D from './data.ts'
@@ -207,6 +207,20 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
 
   /* ---------- reading ---------- */
 
+  /** Everything waiting on the human, as the Needs you view lists it: oldest first, each once. */
+  private needs(): Need[] {
+    const out: Need[] = []
+    const cards = (key: string) => [...new Set((this.chats[key]?.messages ?? []).flatMap((m) => (m.question && m.question.sent === undefined ? [m] : [])))]
+    for (const p of this.places) for (const m of cards(p.chat)) out.push({ id: m.question!.id, chat: p.chat, place: p.id, at: m.at ?? 0, question: m.question! })
+    for (const t of this.tasks.filter((t) => t.status === 'need' && !t.archived)) {
+      const key = t.agent?.chat ?? `${t.id}/Agent`
+      const open = cards(key)
+      if (open.length) for (const m of open) out.push({ id: m.question!.id, chat: key, place: t.place, task: t.id, at: m.at ?? 0, question: m.question! })
+      else out.push({ id: 'attention', chat: key, place: t.place, task: t.id, at: 0, text: t.sub || 'Waiting for you' })
+    }
+    return out.sort((a, b) => a.at - b.at)
+  }
+
   snapshot(): Snapshot {
     return {
       name: 'Shepherdr',
@@ -216,14 +230,8 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       automations: this.automations,
       artifacts: this.artifacts,
       asks: this.asks,
-      attentionRequests: Object.fromEntries([
-        ...this.places.map((p) => [p.chat, [...new Set((this.chats[p.chat]?.messages ?? []).flatMap((m) => m.question && m.question.sent === undefined ? [m.question.id] : []))]] as [string, string[]]),
-        ...this.tasks.filter((t) => t.status === 'need' && !t.archived).map((t) => {
-          const key = t.agent?.chat ?? `${t.id}/Agent`
-          const ids = (this.chats[key]?.messages ?? []).flatMap((m) => m.question && m.question.sent === undefined ? [m.question.id] : [])
-          return [key, ids.length ? [...new Set(ids)] : ['attention']] as const
-        }),
-      ]),
+      needs: this.needs(),
+      attentionRequests: this.needs().reduce<Record<string, string[]>>((out, n) => ({ ...out, [n.chat]: [...(out[n.chat] ?? []), n.id] }), {}),
       last: this.last(),
       read: this.read,
       settings: secretPages([...this.sections, ...Object.entries(this.bases).map(([id, base]) => repositorySection(id, id.split(':')[1], base))], this.vault.names()),
@@ -653,6 +661,14 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const t = this.task(a.chat.split('/')[0])
         if (!t || t.status !== 'work') return { ok: false, error: 'It isn’t working.' }
         Object.assign(t, { status: 'todo', sub: '', report: undefined, state: 'To do · paused just now' })
+        this.emit('snapshot')
+        return { ok: true }
+      }
+      case 'stop': {
+        const t = this.task(a.chat.split('/')[0])
+        if (!t) return { ok: false, error: 'No such task.' }
+        if (t.status === 'done') return { ok: false, error: 'It is done already.' }
+        Object.assign(t, { status: 'todo', sub: '', report: undefined, state: 'To do · stopped just now', agent: t.agent && { ...t.agent, status: 'todo', running: false } })
         this.emit('snapshot')
         return { ok: true }
       }

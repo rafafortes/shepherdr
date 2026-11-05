@@ -383,11 +383,11 @@ export class Chats {
     // Some herdr versions call startup checkbox menus idle. Require a live menu footer before parsing those.
     const waiting = /(?:enter.*(?:confirm|select|continue)|space to select.*esc to reject|\[y\/n\]|\(y\/n\))/i.test(text.trimEnd().split('\n').slice(-3).join('\n'))
     const parsed = st === 'blocked' || this.commandMenus.has(key) || starting || waiting ? parseMenu(text) : null
-    let m: ScreenMenu | null = parsed ? { ...parsed, screen: parsed.screen ?? text.trim() } : null
+    let m: ScreenMenu | null = parsed ? { ...parsed, screen: parsed.screen ?? text.trim(), all: text } : null
     // a startup screen it read no choices in is still the same card while it rests: its words, and Open terminal
     const was = this.menus.get(key)
     if (!m && starting && was?.screen && sameScreen(was.screen, text)) m = was
-    if (!m && st === 'blocked' && text.trim()) m = { title: 'The terminal is waiting for you', choices: [], cursor: 0, screen: text.trim() }
+    if (!m && st === 'blocked' && text.trim()) m = { title: 'The terminal is waiting for you', choices: [], cursor: 0, screen: text.trim(), all: text }
     const before = JSON.stringify(this.menus.get(key) ?? null)
     if (m) this.menus.set(key, m)
     else {

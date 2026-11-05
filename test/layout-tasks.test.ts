@@ -607,13 +607,14 @@ describe.skipIf(!browser)('archiving a task', () => {
     await page.close()
   }, 30_000)
 
-  test('a phone: holding a row opens its menu, with no ⋯ in the way', async () => {
+  test('a phone: its ⋯ shows, and holding the row opens the same menu', async () => {
     const ctx = await browser!.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     const page = await ctx.newPage()
     await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}&tab=tasks`)
     const row = page.locator('li', { hasText: 'GTM-17' })
     await row.waitFor()
-    expect(await row.getByRole('button', { name: 'More for this task' }).isVisible()).toBe(false)
+    // a finger has no hover to find it with, so it is there, past the row's age
+    expect(await row.getByRole('button', { name: 'More for this task' }).isVisible()).toBe(true)
     const box = (await row.boundingBox())!
     const cdp = await ctx.newCDPSession(page)
     const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 }

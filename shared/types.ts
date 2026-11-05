@@ -185,6 +185,8 @@ export interface TaskAgent {
   cli: string
   /** always the task's own status: the list and the chat show one and the same */
   status: Status
+  /** its process is up: a To do task may still have an agent left to stop */
+  running?: boolean
   age: string
   note: string
 }
@@ -542,6 +544,25 @@ export interface CardAsk {
   open?: boolean
 }
 
+/** One thing waiting on the human, from any agent: its own card, never a forwarded copy. The Needs you view lists these
+ *  and every count counts these, so a number and its list always agree. */
+export interface Need {
+  /** the request's id in its chat; 'attention' when the agent waits with no card */
+  id: string
+  /** the agent's chat, where the answer goes */
+  chat: string
+  place: string
+  /** the task it belongs to; none for a coordinator */
+  task?: string
+  /** when it began to wait (ms), for the list's oldest-first order */
+  at: number
+  /** the card it waits on (a choice, a plan, the CLI's own menu or a start's screen): drawn in its chat, where it is
+   *  answered */
+  question?: Question
+  /** no card: what it waits with (a plain question, a failed start), for its row to say */
+  text?: string
+}
+
 /** Done tasks newest first, at the end; the rest keep their order (a stable sort) */
 /** a machine's name as the human reads it ("Mac mini"), from its key, a place's machine ("Mac") */
 export const machineName = (machines: Machine[] | undefined, machine?: string) => machines?.find((m) => m.machine === machine)?.name ?? machine ?? ''
@@ -837,7 +858,10 @@ export interface Snapshot {
   artifacts: Artifact[]
   /** open coordinator questions, by place id (a choice card's id, or "blocked" on the CLI's own menu): counted as waiting on you */
   asks: Record<string, string>
-  /** Unanswered request IDs by original chat, never forwarded copies. Optional for older machines/plugins. */
+  /** everything waiting on the human, oldest first, each once: what the Needs you view lists and every count counts */
+  needs: Need[]
+  /** the same needs by chat, oldest first: kept filled for plugins written for it and for machines on an older
+   *  version (read `needs`: it is what the screen draws) */
   attentionRequests?: Record<string, string[]>
   settings: SettingSection[]
   /** a source like demo marks its data as fictional */
@@ -895,6 +919,8 @@ export type Action =
   | { type: 'pin'; chat: string; on: boolean }
   /** pause a working task: its agent is interrupted (it stays alive) and the task is To do until written to */
   | { type: 'pause'; chat: string }
+  /** stop a task: its agent and space close, it is To do and its work stays, until written to */
+  | { type: 'stop'; chat: string }
   /** what the restart sheet shows for a coordinator (chat: its place id) or a task's agent (ID/Agent): RestartInfo */
   | { type: 'restart-info'; chat: string }
   /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as

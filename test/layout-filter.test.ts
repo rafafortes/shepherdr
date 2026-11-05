@@ -83,27 +83,37 @@ describe.skipIf(!browser)('filtering the artifacts', () => {
   }, 30_000)
 })
 
-describe.skipIf(!browser)('Home attention defaults', () => {
-  test('fresh global Home separates actionable work by space, search overrides it, explicit scope and lock win', async () => {
+describe.skipIf(!browser)('Home: Needs you beside the unfiltered Tasks list', () => {
+  test('a fresh Home lists every task by status, and Needs you is its own list whose count is its rows; the lock still wins', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     // This file’s other cases explicitly select Everything. Here exercise a fresh device.
     await page.addInitScript(() => localStorage.removeItem('shepherdr.lists'))
     await page.goto(`http://127.0.0.1:${server!.port}/?place=vm-str/home`)
     const panel = page.locator('section[aria-label="Tasks"]')
-    await panel.getByText('Actionable · all machines', { exact: true }).waitFor()
-    await panel.getByRole('button', { name: 'gtm · Ready · vm-str 1', exact: true }).waitFor()
+    // no filter by default: an off-scope task is a row like any, found by its id where the search is not used
+    await panel.getByText('HP-202', { exact: true }).waitFor()
     expect(await ids(panel.locator('li'))).toContain('LV-3')
-    expect(await ids(panel.locator('li'))).not.toContain('HP-202')
     const search = panel.getByRole('searchbox', { name: 'Filter tasks' })
     await search.fill('HP-202')
     await panel.getByText('HP-202', { exact: true }).waitFor()
     await search.fill('')
-    await panel.getByRole('button', { name: 'Show all tasks', exact: true }).click()
-    await panel.getByText('HP-202', { exact: true }).waitFor()
+    // the lock keeps the list on its chips while a space is picked
     await page.getByRole('button', { name: 'Lock filters: keep them when switching spaces', exact: true }).click()
     await page.getByRole('button', { name: /^lilla-varlden,/ }).click()
     await panel.getByText('HP-202', { exact: true }).waitFor()
     expect(await panel.getByText('Everything', { exact: true }).count()).toBe(1)
+    // Needs you: one row per card that waits, and the count beside it is those rows, never more
+    await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: /^Needs you/ }).click()
+    const needs = page.locator('section[aria-label="Needs you"]')
+    await needs.getByText('Waiting on you', { exact: true }).waitFor()
+    const rows = await needs.locator('li[data-need]').count()
+    expect(rows).toBeGreaterThan(0)
+    expect(await needs.locator('[data-count]').textContent()).toBe(`${rows}`)
+    const badge = page.locator('[data-attention-badge][aria-label$="needs scope"]').filter({ visible: true }).first()
+    expect(await badge.getAttribute('aria-label')).toBe(`${rows} needs you, 0 ready · needs scope`)
+    // a row opens its chat, where the card is answered
+    await needs.locator('li[data-need]').first().click()
+    await page.locator('[data-messages]').waitFor()
     await page.close()
   })
 })
@@ -151,8 +161,9 @@ describe.skipIf(!browser)('no chat attention summary and quiet health', () => {
     await page.getByText('Rerun CI on main?', { exact: true }).waitFor()
     expect(await page.locator('[data-attention]').count()).toBe(0)
     expect(await page.getByText(/3 need you · 1 ready/).count()).toBe(0)
-    // Tasks still counts its own requests, excluding the coordinator question.
-    expect(await panel.getByLabel('2 needs you, 1 ready · panel scope', { exact: true }).count()).toBe(1)
+    // Needs you counts the coordinator's question too, in the one list it shows; Tasks counts only its Ready group.
+    expect(await panel.getByLabel('0 needs you, 1 ready · panel scope', { exact: true }).count()).toBe(1)
+    expect(await panel.getByLabel('3 needs you, 0 ready · needs scope', { exact: true }).count()).toBe(1)
     await page.close()
   })
 })
@@ -168,9 +179,9 @@ describe.skipIf(!browser)('Home on a single machine', () => {
       await page.addInitScript(() => localStorage.removeItem('shepherdr.lists'))
       await page.goto(`http://127.0.0.1:${server!.port}/?place=vm-str/home`)
       const panel = page.locator('section[aria-label="Tasks"]')
-      await panel.getByText('Actionable · all machines', { exact: true }).waitFor()
+      // the whole list, by status, with no filter of its own: this machine's tasks, every group
+      await panel.getByText('GTM-15', { exact: true }).waitFor()
       expect(await ids(panel.locator('li'))).toContain('GTM-15')
-      expect(await ids(panel.locator('li'))).not.toContain('HP-202')
     } finally {
       world.places = places
       world.machines = machines

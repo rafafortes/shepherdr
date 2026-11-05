@@ -69,14 +69,15 @@ describe.skipIf(!browser)('renaming spaces and machines', () => {
       // the header says where it is
       await page.getByText('Space on Work VM').waitFor()
 
-      // every task (the main machine's home space, its chip taken off), by status: each saying its machine's and space's
-      // new names
+      // every task (the main machine's home space, its chip taken off), by status: each row saying its machine's and
+      // space's new names
       await places.locator('li[data-project="p:vm-str:~"]').getByRole('button', { name: /^home/ }).click()
       const tasks = page.locator('section[aria-label="Tasks"]')
-      // the main home space lists every machine's, under its space's heading: both new names show there
-      const heading = tasks.locator('[data-heading="go-to-market · Needs you"]')
-      await heading.waitFor()
-      expect(await heading.textContent()).toContain('Work VM')
+      // the main home space lists every machine's: both new names show on its tasks' rows
+      const row = tasks.locator('li[data-flip]', { hasText: 'GTM-14' }).first()
+      await row.waitFor()
+      expect(await row.textContent()).toContain('Work VM')
+      expect(await row.textContent()).toContain('go-to-market')
 
       // a home space is renamed as any space, by the same rules
       expect(await world.act({ type: 'rename', id: 'p:vm-str:~', name: 'My base' })).toMatchObject({ ok: false })

@@ -490,6 +490,9 @@ export class Engine extends Emitter<Events> {
   statusOf(t: TaskRec): TaskStatus {
     if (ended(t)) return 'done'
     if (t.trouble) return 'need'
+    // stopped (task stop, or the way on from a delete that was refused): its agent is closed and it is To do, whatever
+    // card its chat still ends on, until something is written to it
+    if (t.stopped) return 'todo'
     const key = this.key(t)
     const st = this.agents.status(key)
     // a start that stopped on a screen of its own (start.ts) waits on you as a menu does
@@ -678,7 +681,7 @@ export class Engine extends Emitter<Events> {
       base: t.base,
       pr: t.pr,
       plan: t.plan,
-      agent: rec || t.worktree ? { chat: key, role: 'Agent', cli, status, age: age(rec?.started ?? t.updated), note: sub } : undefined,
+      agent: rec || t.worktree ? { chat: key, role: 'Agent', cli, status, age: age(rec?.started ?? t.updated), note: sub, running: !t.stopped && this.agents.status(key) !== 'gone' } : undefined,
       desc: t.desc || 'No brief yet.',
       said: t.said,
       facts: t.facts,
@@ -2117,7 +2120,8 @@ export class Engine extends Emitter<Events> {
    */
   async tell(id: string, text: string, { gate = false } = {}): Promise<{ held?: 'slots' | 'machine' }> {
     const t = this.req(id)
-    const waits = this.statusOf(t) === 'todo' || this.holding(t)
+    // a stopped task is no wait for room: its agent is closed, and the words start it again where it is
+    const waits = (this.statusOf(t) === 'todo' && !t.stopped) || this.holding(t)
     const r = gate && waits && !ended(t) ? this.room() : {}
     if (r.why) {
       if (!t.worktree) {
@@ -2161,6 +2165,12 @@ export class Engine extends Emitter<Events> {
   async stopTask(id: string): Promise<string[]> {
     const t = this.req(id)
     t.stopped = true
+    // To do, as task pause leaves it: its agent is closed, and writing to it is how it starts again. A start that failed
+    // is no longer what it waits on (writing tries it again, and says so if it fails again)
+    t.todo = true
+    t.paused = undefined
+    t.trouble = undefined
+    t.startTrouble = undefined
     this.briefing.delete(t.id)
     this.settle(t)
     const key = this.key(t)

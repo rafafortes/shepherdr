@@ -68,6 +68,7 @@ export {
   QuestionMarkCircleIcon as QuestionIcon,
   RocketLaunchIcon as AutopilotIcon,
   ServerStackIcon as MachineIcon,
+  StopIcon,
   SunIcon as AppearanceIcon,
   TrashIcon as DeleteIcon,
   ViewColumnsIcon as SplitIcon,
@@ -433,8 +434,8 @@ function reportEnd(w: Report, head: boolean, left: boolean) {
 
 /**
  * What the agent is doing right now; in a header, its minutes left quietly at the end, the words giving way first so
- * the minutes never get cut off. While it waits on you, all of it frozen and quiet (no pause mark: Pause is the menu's
- * own action). `head` is a chat header's wording; on
+ * the minutes never get cut off. While it waits on you, all of it frozen and quiet (no pause mark: stopping it is the
+ * menu's own action). `head` is a chat header's wording; on
  * a phone (`wrap`) the line flows centred, the minutes kept whole after the words: two lines at most for the
  * status line's 40 characters, and never more than three.
  */
