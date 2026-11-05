@@ -41,6 +41,7 @@ import { asMode, HOME_SPACE, HOST, NAME, placeId, Places } from './places.ts'
 import { privatePrompt, coordinatorPrompt, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
 import { fitHarness, harnessProblem, harnessWords, recentChat, restartHint, restartInfo, type Harness } from './restart.ts'
 import { Revivals, type Wrong } from './revive.ts'
+import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
 import { CATALOG, CLI_NAME, CLIS, kindOf, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
 import { startVoice } from './voice.ts'
@@ -51,6 +52,9 @@ import { Unread } from './unread.ts'
 import { Monitor, meters, procLines, summary, topProcs, type HealthEvent, type Kind } from './health.ts'
 import { has, PLUGIN_KEY, pluginSection, setPluginOn } from '../plugins.ts'
 import { TOOK_OVER, type TookOver } from '../../scripts/take-over.ts'
+
+/** a start that never became a turn, in one line for the chat and the task: which CLI, and the reason it stopped on */
+const startWords = (kind: string | undefined, why: string) => `${kind ? (CLI_NAME[kind] ?? kind) : 'Its agent'} couldn't start: ${why}`
 
 function userName(): string {
   const set = readJson<{ user?: string }>('config.json', {}).user
@@ -90,7 +94,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     nudge: (key, text) => {
       // a task stopped, paused or finished meanwhile is left as it is
       if (key.includes('/') && !this.engine.mayRetry(key)) return this.retries.clear(key)
-      this.agents.send(key, text, { ensure: key.includes('/') ? () => this.resumeTaskAgent(key) : () => this.coordinator(key) }).catch(() => undefined)
+      this.agents.send(key, text, { ensure: this.starter(key) }).catch(() => undefined)
     },
     over: (key, r) => this.cannotGoOn(key, r),
     changed: (key) => {
@@ -125,6 +129,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** agents that stopped or run on outdated files, started again by Shepherdr (revive.ts) */
   revivals = new Revivals()
   private reviving = new Set<string>()
+  /** what each start has shown, and what was said of it: a start that never becomes a turn (start.ts) */
+  starts = new Starts()
+  private watchingStarts = new Set<string>()
+  /** the launch each chat's agent began a turn in: a start it has since left is never looked at again */
+  private begunStarts = new Map<string, number>()
   /** when a busy machine last had its finished tasks' browsers closed */
   private sweptAt = 0
   devices: () => string[] = () => []
@@ -219,7 +228,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a turn cut short (Esc, a prompt turned down) runs no hook: its log says it is over
     this.agents.endedSince = (key, at) => this.chats.endedSince(key, at)
     this.agents.beforeInput = async (key) => { if (!['working', 'gone'].includes(this.agents.status(key)) && await this.chats.readMenu(key, true)) this.emit('chat', key) }
-    this.agents.menuUp = (key) => this.menuAnswers.has(key) || !!this.chats.menu(key)
+    // a card of a start's screen with nothing to choose holds nothing: typing cannot pick what is not there
+    this.agents.menuUp = (key) => this.menuAnswers.has(key) || !!this.chats.menu(key)?.choices.length
     this.engine.on('card', (t, status, sub) => this.onCard(t, status, sub))
     // a task's question shows on its needs-you card in its space's chat too: the card follows it
     this.on('chat', (key) => {
@@ -257,6 +267,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.timers.push(setInterval(() => this.emit('snapshot'), 30_000))
     if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.healthTick(), 5000))
     if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => void this.revive().catch(() => undefined), 15_000))
+    // a start that never becomes a turn: looked at twice a second past its first look, so a card or an error comes
+    // within seconds of it stopping, not at the stalled notice twenty minutes later
+    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => void this.watchStarts().catch(() => undefined), 2000))
   }
 
   /** once, after Shepherdr replaced herdr-projects here (scripts/take-over.ts): what it did, in the home space's chat */
@@ -433,6 +446,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     for (const p of [placeId.home(), ...this.places.spaces.map((x) => placeId.space(x.name))]) {
       const open = this.chats.log(p).posted.find((x) => x.question && x.question.id.startsWith('ask:') && x.question.sent === undefined && this.chats.log(p).answers[x.question.id] === undefined)
       if (open) out[p] = open.question!.id
+      // stopped on a start's screen of its own (start.ts): it waits on you as a menu does
+      else if (this.chats.startMenuUp(p)) out[p] = menuId(p, this.chats.menu(p)!)
       else if (this.agents.status(p) === 'blocked') out[p] = 'blocked'
     }
     return out
@@ -1037,6 +1052,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   private keepsRunning(key: string) {
     const r = this.agents.record(key)
     if (!r || r.finished || this.agents.busy(key) || this.reseating.has(key) || this.peers?.owner(key)) return false
+    // a start that failed is the human's to try again by writing to it: a relaunch would only say the same error twice
+    if (this.engine.startFailedAt(key) !== undefined) return false
     if (!key.includes('/')) return !!this.places.coordinator(key)
     return this.engine.mayRetry(key) && !!this.engine.task(key.split('/')[0])?.worktree
   }
@@ -1064,6 +1081,105 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
   }
 
+  /**
+   * A start that never becomes a turn: a CLI that exited before its first turn, a resume whose session is gone, or an
+   * agent stopped on a startup screen of its own (folder trust, the theme, signing in, a model that isn't there, pi's
+   * start screen). No hook and no log tells those, so its screen does (start.ts, and screen.ts for reading it). Read for
+   * every launch until it either reports a turn or is settled, and settled once: one card, one error.
+   *
+   * The screen is only read while it can still be a start: herdr is not finishing the launch, no turn has begun, and
+   * herdr does not see the agent at work. A moving screen is a slow start and is left alone, however long it takes.
+   */
+  async watchStarts(now = Date.now()) {
+    if (!this.agents.reachable || now - this.agents.lastReach > 10_000) return
+    for (const [key, r] of Object.entries(this.agents.records)) {
+      if (r.finished || this.watchingStarts.has(key) || this.agents.busy(key)) continue
+      this.watchingStarts.add(key)
+      try {
+        await this.lookStart(key, now)
+      } catch (e) {
+        if (BOX) console.error(`shepherdr: reading ${key}'s start: ${(e as Error).message}`)
+      } finally {
+        this.watchingStarts.delete(key)
+      }
+    }
+  }
+
+  private async lookStart(key: string, now: number) {
+    const r = this.agents.record(key)
+    if (!r) return
+    // it began its turn in this launch: no start any more, nothing left to read (a new launch is a new start)
+    if (this.begunStarts.get(key) === r.started) return
+    // back on a session from before, past its settle: no read of herdr or its log is worth anything there
+    if (r.resumed && now - r.started >= RESUME_SETTLE) return
+    const st = this.agents.status(key)
+    // at work, on a menu herdr sees, or done: no start any more
+    const begun = st === 'working' || st === 'blocked' || st === 'done' || this.chats.begunSince(key, r.started)
+    if (begun) this.begunStarts.set(key, r.started)
+    const info = this.agents.info(key)
+    const pending = !!info?.launch_pending
+    // herdr's word on what runs in its pane: exited, gone, unknown (null) or fine
+    const wrong = begun || pending ? undefined : await this.agents.wrong(key)
+    // its screen, from the pane it started in: herdr drops a name it was never asked for, and its pane is still the
+    // only witness of what it printed
+    const pane = info?.pane_id ?? r.lastPane
+    // a launch that never opened a pane and threw nothing of its own has nothing to say: no start ever happened
+    if (!pane && !r.startError && wrong === 'gone') return
+    const screen = !begun && !pending && wrong !== null && pane ? await herdr.visible(pane).catch(() => '') : ''
+    // a relaunch may have begun while herdr answered: that is a new launch, and the next look reads it
+    if (this.agents.record(key)?.started !== r.started) return
+    const card = this.chats.startMenuUp(key)
+    const step = this.starts.look(key, { started: r.started, wrong, pending, begun, prior: !!r.resumed, screen, resumed: !!r.resumed, waits: this.agents.waiting(key).length > 0, card, error: r.startError }, now)
+    await this.startStep(key, step)
+  }
+
+  /** what a look at a start means: nothing, a card of its screen, or an error in the chat */
+  private async startStep(key: string, step: StartStep) {
+    const r = this.agents.record(key)
+    if (step.do === 'wait' || !r) return
+    const cli = CLI_NAME[r.kind] ?? r.kind
+    if (step.do === 'card') {
+      // what the CLI asks is the card's title; nothing to choose, its own words are still the card (Open terminal is
+      // the way on). The same screen looked at again says nothing new
+      const menu = step.menu.choices.length ? step.menu : { ...step.menu, title: `${cli} is waiting on its screen` }
+      if (!this.chats.showStartMenu(key, menu)) return
+      this.emit('chat', key)
+      this.engine.screenCard(key)
+      return
+    }
+    // its screen moved on: the card of it goes, and the next screen is read as a card of its own
+    if (step.do === 'clear') {
+      if (this.chats.clearStartMenu(key)) this.emit('chat', key)
+      return
+    }
+    // its session is gone: a new one, with its brief, says so in the chat (and the start is not a failure)
+    if (step.fresh) return this.startFresh(key, cli)
+    // a task shows it as an error instead of working; a coordinator's chat says it, as its own failed start
+    this.engine.startFailed(key, startWords(r.kind, step.why), r.started)
+    this.emit('chat', key)
+  }
+
+  /** a resume found no session: the same start without one, its brief again, and the chat says why */
+  private async startFresh(key: string, cli: string) {
+    const r = this.agents.record(key)
+    if (!r) return
+    const started = r.started
+    delete r.sessionId
+    r.fresh = true
+    this.agents.save()
+    const id = `start-fresh:${key}:${started}`
+    this.chats.post(key, { id, card: { id, text: `Its earlier session was gone, so ${cli} started a new one.` } })
+    this.emit('chat', key)
+    try {
+      // the CLI is not in that pane any more: closed, and started again where its work is
+      await this.agents.relaunch(key, true, () => (key.includes('/') ? this.engine.resume(key.split('/')[0], true) : this.coordinator(key)))
+    } catch (e) {
+      this.engine.startFailed(key, startWords(r.kind, (e as Error).message), started)
+      this.emit('chat', key)
+    }
+    this.emit('snapshot')
+  }
+
   private async relaunch(key: string, why: Wrong) {
     this.reviving.add(key)
     // read before it starts: its status once started says it is idle
@@ -1072,7 +1188,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       console.error(`shepherdr: ${key}'s agent ${why === 'stale' ? 'runs on outdated settings' : 'stopped'}: starting it again`)
       // its pane still holds it, or its shell: herdr would count that as running
       await this.agents.relaunch(key, why !== 'gone', () => (key.includes('/') ? this.resumeTaskAgent(key) : this.coordinator(key)))
-      if (working) await this.agents.send(key, hidden(relaunchedLine(), 'restart'))
+      // it started again; one whose start failed says so instead, and nothing goes into an agent that isn't there
+      if (working && this.engine.startFailedAt(key) === undefined) await this.agents.send(key, hidden(relaunchedLine(), 'restart'))
     } catch (e) {
       console.error(`shepherdr: couldn't start ${key}'s agent again: ${(e as Error).message}`)
     } finally {
@@ -1145,7 +1262,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
             : mode === 'regular'
               ? ' Act on it if the human asked you to handle such things; otherwise tell the human what matters in a line or two. Nothing matters: reply with only <no-reply>reason</no-reply>.'
               : ' Act on it by your Autopilot rules. Nothing worth saying: reply with only <no-reply>reason</no-reply>.'
-      this.agents.send(id, hidden(`${prefix}${text}.${tail}`, 'news', about), { ensure: () => this.coordinator(id) }).catch(() => undefined)
+      this.agents.send(id, hidden(`${prefix}${text}.${tail}`, 'news', about), { ensure: this.starter(id) }).catch(() => undefined)
     }
     const requester = about?.task ? this.engine.task(about.task)?.requester : undefined
     // Owner and home already heard above. The main home already receives the overview over the worker link.
@@ -1175,7 +1292,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           const kind = ({ added: 'added', ready: 'ready', 'needs-you': 'need', merged: 'done', closed: 'done', stalled: 'stalled' } as const)[n.event as 'ready'] ?? 'need'
           if (!this.wakes(n.to, this.happened(kind, n.from, n.text, n.task), `${n.from}: ${n.text}`)) return
           const words = `${n.from}: ${n.text}. You requested this task. Its owning coordinator still handles it. Act only within the human's request; otherwise reply with only <no-reply>reason</no-reply>.`
-          await this.agents.send(n.to, hidden(words, 'news', { task: n.task, event: n.event }), { cid: `requested-news:${n.id}`, ensure: () => this.coordinator(n.to) })
+          await this.agents.send(n.to, hidden(words, 'news', { task: n.task, event: n.event }), { cid: `requested-news:${n.id}`, ensure: this.starter(n.to) })
         },
       )
     } catch { /* keep it on disk until herdr/the coordinator can receive it */ }
@@ -1190,7 +1307,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const line = clip(n.line.split('\n')[0].replace(/\.$/, ''), OVERVIEW_MAX)
     if (!this.wakes(home, n.kind === 'health' ? { event: 'health' } : this.happened(n.kind, n.place, n.line, (n.about as { task?: string } | undefined)?.task), `${from}: ${line}`)) return
     const tail = ' Its own coordinator has the whole of it. If it can’t wait, alert the human with shepherdr alert (--task <id> when it is about a task) and say why; otherwise reply with only <no-reply>reason</no-reply>.'
-    this.agents.send(home, hidden(`${from}: ${line}.${tail}`, n.kind === 'health' ? 'health' : 'news', n.about), { ensure: () => this.coordinator(home) }).catch(() => undefined)
+    this.agents.send(home, hidden(`${from}: ${line}.${tail}`, n.kind === 'health' ? 'health' : 'news', n.about), { ensure: this.starter(home) }).catch(() => undefined)
   }
 
   /** another machine's news, from its worker: its space by the name the human sees, or the machine for its health */
@@ -1234,7 +1351,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const h = this.settings.heartbeat(this.levelOf(p.id))
       if (!this.heartbeats.due(p.id, h.time, h.zone, now) || !this.idle(p.id)) continue
       const text = this.heartbeats.beat(p.id, this.roleOf(p.id), now)
-      if (text) this.agents.send(p.id, hidden(text, 'heartbeat'), { ensure: () => this.coordinator(p.id), idle: true }).catch(() => undefined)
+      if (text) this.agents.send(p.id, hidden(text, 'heartbeat'), { ensure: this.starter(p.id), idle: true }).catch(() => undefined)
     }
   }
 
@@ -1336,7 +1453,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (e.what === 'over') this.fireTaskAutomations({ event: 'health' }, machine)
     if (!this.wakes(machine, { event: 'health' }, `Machine ${NAME}: ${words}`)) return
     const tail = `${mode === 'regular' ? 'Act on it if the human asked you to handle such things.' : 'Act on it by your machine health rules.'} If it can’t wait, alert the human with shepherdr alert and say why. A card in this chat already shows the human the news: ${REPLY_AFTER_CARD}`
-    this.agents.send(machine, hidden(`${text}\n${tail}`, 'health', { kind: e.kind, what: e.what }), { ensure: () => this.coordinator(machine) }).catch(() => undefined)
+    this.agents.send(machine, hidden(`${text}\n${tail}`, 'health', { kind: e.kind, what: e.what }), { ensure: this.starter(machine) }).catch(() => undefined)
   }
 
   /** a task now waits on you, is done, or stalled: one small update card in its space's chat, one line of a few
@@ -1768,6 +1885,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   private resumeTaskAgent(key: string) {
     return this.engine.resume(key.split('/')[0])
+  }
+
+  /** the way a message behind the chat (news, a heartbeat, a health line, a provider's retry) starts its agent again:
+   *  never one whose last start failed, which is the human's to try again by writing (start.ts), and what waits for it
+   *  goes in at once when it does */
+  private starter(key: string) {
+    return () => (this.engine.startFailedAt(key) !== undefined ? Promise.resolve(null) : key.includes('/') ? this.resumeTaskAgent(key) : this.coordinator(key))
   }
 
   private async react(key: string, messageId: string, emoji: string) {

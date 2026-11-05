@@ -1,6 +1,5 @@
 // Chats: one chat per agent across all its sessions, read from the CLI's own log files, plus what Shepherdr itself
 // posts (update cards, choice cards, plans, artifacts, merge cards) kept in its own small log per chat.
-import { createHash } from 'node:crypto'
 import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { apart, cardMessage, type ActivityAnswer, type ActivityAsk, type Chat, type ChatControls, type ArtifactPost, type Job, type Message, type Question, type Reaction, type SecretAsk, type UpdateCard } from '../../shared/types.ts'
@@ -20,6 +19,9 @@ import { launchHarness } from './restart.ts'
 import { CLI_NAME } from './settings.ts'
 import { replyOnScreen } from './streaming.ts'
 import { activityOf, codexThreadLog, cutOutput, headlessJob, JobLogs, lastLine, lineOf, outputAt, shown as shownStep, tailOf, type JobRec } from './activity.ts'
+import { menuId, parseMenu, sameScreen, type ScreenMenu } from './screen.ts'
+
+export { menuId, menuKeys, parseMenu, type ScreenMenu } from './screen.ts'
 
 /** a chat line of yours that shows as words: an answer, a page's Send and words about an artifact under what they
  *  answer, a note with what it is on */
@@ -116,150 +118,6 @@ function withAnswer(q: Question, l: ChatLog, place: (key: string) => Question['e
 }
 
 const safe = (key: string) => key.replace(/[^a-zA-Z0-9_.-]+/g, '_')
-
-/** a menu the CLI shows in its terminal (permission prompts and the like), read from the screen */
-export interface ScreenMenu {
-  title: string
-  choices: string[]
-  /** what the CLI shows under each choice, in grey (Claude Code's own questions): none, or one per choice */
-  descriptions?: (string | undefined)[]
-  /** the choice the CLI's cursor is on */
-  cursor: number
-  /** Direct keys for y/n prompts; otherwise move the menu cursor and confirm. */
-  keys?: string[][]
-  multi?: boolean
-  selected?: number[]
-  reject?: string
-  /** The visible prompt, including security context that must not be lost. */
-  screen?: string
-}
-
-/** A card's identity excludes the cursor, but includes the full permission being granted. */
-export function menuId(key: string, m: ScreenMenu) {
-  const screen = m.multi
-    ? m.screen?.split('\n').map((l) => l.trim().replace(/^[❯›>▶]\s*/, '').replace(/^\[[✔✓x ]\]/, '[ ]')).join('\n')
-    : m.screen?.replace(/^(\s*)[❯›>▶](?=\s)/gm, '$1 ')
-  return `menu:${key}:${createHash('sha256').update(JSON.stringify([m.title, m.choices, screen])).digest('hex').slice(0, 16)}`
-}
-
-export function menuKeys(m: ScreenMenu, choice: number, choices?: number[]): string[] | undefined {
-  if (m.multi) {
-    if (!choices) return
-    if (!choices.length && choice === -1) return ['escape']
-    if (choices.some((i) => !Number.isInteger(i) || i < 0 || i >= m.choices.length)) return
-    const keys: string[] = []
-    let cursor = m.cursor
-    const move = (to: number) => { const d = to - cursor; keys.push(...Array(Math.abs(d)).fill(d > 0 ? 'down' : 'up')); cursor = to }
-    for (let i = 0; i < m.choices.length; i++) if (choices.includes(i) !== !!m.selected?.includes(i)) { move(i); keys.push('space') }
-    move(m.choices.length)
-    keys.push('enter')
-    return keys
-  }
-  if (!Number.isInteger(choice) || choice < 0 || choice >= m.choices.length) return
-  const d = choice - m.cursor
-  return m.keys?.[choice] ?? [...Array(Math.abs(d)).fill(d > 0 ? 'down' : 'up'), 'enter']
-}
-
-/** Drop shell startup and old output above the prompt's separator. Keep all of the consent text. */
-function promptScreen(lines: string[], first: number) {
-  for (let i = first - 1; i >= 0; i--) if (/^\s*[╭┌│|]?[─━─]{5,}/.test(lines[i])) return lines.slice(i + 1).join('\n').trim()
-  return lines.join('\n').trim()
-}
-
-/** Unnumbered arrow menus and single-line confirmations, as used at startup. */
-function startupMenu(lines: string[]): ScreenMenu | null {
-  const screen = lines.join('\n').trim()
-  const clean = (s: string) => s.replace(/^[\s─╭╰]+|[\s─╮╯]+$/g, '').trim()
-  // Claude's multi-server MCP consent is a checkbox list followed by a submit row.
-  if (/new MCP servers found in this project/i.test(screen) && /Space to select.*Esc to reject all/i.test(screen)) {
-    const first = lines.findIndex((l) => /^\s*[❯›>▶]?\s*\[[✔✓x ]\]\s+/.test(l))
-    const rows = lines.slice(first).filter((l) => /^\s*[❯›>▶]?\s*\[[✔✓x ]\]\s+/.test(l))
-    if (first >= 0 && rows.length) {
-      const cursor = rows.findIndex((l) => /[❯›>▶]/.test(l))
-      return { title: lines.find((l) => /new MCP servers found in this project/i.test(l))!.trim(), choices: rows.map((l) => l.replace(/^\s*[❯›>▶]?\s*\[[✔✓x ]\]\s+/, '').trim()), cursor: cursor < 0 ? rows.length : cursor, multi: true, selected: rows.flatMap((l, i) => /\[[✔✓x]\]/.test(l) ? [i] : []), reject: 'Reject all', screen: promptScreen(lines, first) }
-    }
-  }
-  const cursor = lines.findLastIndex((l) => /^\s*[❯›>▶]\s+\S/.test(l))
-  if (cursor >= 0 && /enter.*(?:confirm|select|continue)|[↑↓]|arrow keys/i.test(screen)) {
-    const col = lines[cursor].search(/[❯›>▶]/) + 2
-    const isOption = (i: number) => i === cursor || (!!lines[i]?.trim() && lines[i].search(/\S/) === col && !/^(?:enter|esc|press |[↑↓]|arrow keys).*?(?:confirm|select|continue|cancel|navigate|back)/i.test(lines[i].trim()))
-    let first = cursor, last = cursor
-    while (first > 0 && isOption(first - 1)) first--
-    while (last + 1 < lines.length && isOption(last + 1)) last++
-    if (last > first) {
-      const choices = lines.slice(first, last + 1).map((l) => l.replace(/^\s*[❯›>▶]?\s*/, '').trim())
-      const context = lines.slice(0, first).map(clean).filter(Boolean)
-      const title = context.findLast((l) => /\?|MCP servers? found|trust|accessing workspace/i.test(l)) ?? context.at(-1) ?? 'Choose an option'
-      return { title, choices, cursor: cursor - first, screen: promptScreen(lines, first) }
-    }
-  }
-  const yn = screen.match(/([^\n]*?)(?:\[y\/n\]|\(y\/n\)|\[yes\/no\]|\(yes\/no\))\s*[:?]?\s*$/i)
-  if (yn) return { title: yn[1].trim() || 'Continue?', choices: ['Yes', 'No'], cursor: 0, keys: [['y', 'enter'], ['n', 'enter']], screen }
-  return null
-}
-
-export function parseMenu(screen: string): ScreenMenu | null {
-  const lines = screen.split('\n').map((l) => l.replace(/\s+$/, '').replace(/^[\s│|]+|[│|]+$/g, (m) => m.replace(/[│|]/g, ' ')))
-  const OPT = /^(\s*)([❯›>▶*]\s*)?(\d{1,2})[.)]\s+(.+)$/
-  // the last numbered list on screen that starts at 1
-  let first = -1
-  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 40); i--) {
-    const m = lines[i].match(OPT)
-    if (m && m[3] === '1') {
-      first = i
-      break
-    }
-  }
-  if (first < 0) return startupMenu(lines)
-  const opts: { label: string; description?: string; on: boolean }[] = []
-  let indent = 0
-  // the terminal's width, by its longest line: a line wraps only once the next word would pass it
-  const width = Math.max(...lines.map((l) => l.trimEnd().length))
-  for (let i = first; i < lines.length; i++) {
-    const l = lines[i]
-    const m = l.match(OPT)
-    if (m && Number(m[3]) === opts.length + 1) {
-      opts.push({ label: m[4].trim(), on: !!m[2] })
-      indent = m[1].length + (m[2]?.length ?? 0)
-      continue
-    }
-    // an indented line under a choice: the choice wrapping on, or (under a line that had room for more) its description
-    if (opts.length && l.trim() && l.search(/\S/) > indent) {
-      const o = opts[opts.length - 1]
-      const wraps = lines[i - 1].trimEnd().length + 1 + l.trim().split(' ')[0].length > width
-      if (o.description !== undefined || !wraps) o.description = o.description === undefined ? l.trim() : `${o.description} ${l.trim()}`
-      else o.label += ` ${l.trim()}`
-      continue
-    }
-    if (!l.trim() && opts.length) continue
-    break
-  }
-  if (opts.length < 2) return null
-  for (const o of opts) o.label = o.label.replace(/\s*\((esc|enter|tab|[a-z])\)$/i, '').trim()
-  // the question: the nearest line above the list with a "?"
-  const clean = (x: string) => x.replace(/^[\s╭╰─]+|[\s╮╯─]+$/g, '').trim()
-  const asks = /would you like|do you want|allow|proceed|run the following|run this/i
-  const marked = [...Array(Math.min(14, first)).keys()].map((k) => first - 1 - k).filter((i) => lines[i].includes('?'))
-  const qi = marked.find((i) => asks.test(lines[i])) ?? marked[0] ?? -1
-  if (qi < 0) return null
-  // a question that wraps: its lines above, while each goes on from the one before (starts in lower case)
-  let top = qi
-  while (top > 0 && /^[a-z]/.test(clean(lines[top])) && clean(lines[top - 1])) top--
-  const qline = lines.slice(top, qi + 1).map(clean).join(' ')
-  const qmark = qline.indexOf('?')
-  const question = qline.slice(Math.max(qline.lastIndexOf('. ', qmark) + 1, 0), qmark + 1).trim()
-  // the command being asked about, when the CLI shows one between the question and the list
-  const shown = lines
-    .slice(qi + 1, first)
-    .map(clean)
-    .filter(Boolean)
-  const at = shown.findIndex((l) => l.startsWith('$ '))
-  const cmd = (at >= 0 ? shown.slice(at).filter((l, k) => k === 0 || !/[?:]$/.test(l)).join(' ').slice(2) : undefined) ?? lines.slice(Math.max(0, qi - 4), qi).map(clean).filter((l) => l && !/[.:]$/.test(l) && !/^(Bash|Edit|Write|Read)( command)?$/i.test(l)).at(-1)
-  const asksToRun = asks.test(question)
-  const title = asksToRun && cmd ? `Allow: ${cmd.replace(/\?$/, '')}?` : question
-  const descriptions = opts.some((o) => o.description) ? opts.map((o) => o.description) : undefined
-  return { title, screen: promptScreen(lines, first), choices: opts.map((o) => o.label), ...(descriptions ? { descriptions } : {}), cursor: Math.max(0, opts.findIndex((o) => o.on)) }
-}
 
 /** words as typed, whatever the spacing a CLI's log keeps */
 const words = (s: string) => s.replace(/\s+/g, ' ').trim()
@@ -506,12 +364,14 @@ export class Chats {
     return s.on
   }
 
-  /** a blocked agent's terminal menu, or one a slash command opened, read from its screen (refreshed at most every
-   *  2s) */
+  /** A blocked agent's terminal menu, one a slash command opened, or the startup screen a start stopped on, read from
+   *  its screen (refreshed at most every 2s). */
   async readMenu(key: string, force = false): Promise<boolean> {
     const st = this.agents.status(key)
+    const starting = this.startScreens.has(key)
     if (!force && (st === 'working' || st === 'gone') && !this.commandMenus.has(key)) {
       const had = this.menus.delete(key)
+      this.startScreens.delete(key)
       return had
     }
     const last = this.menuAt.get(key) ?? 0
@@ -522,19 +382,31 @@ export class Chats {
     const text = await herdr.visible(info.pane_id)
     // Some herdr versions call startup checkbox menus idle. Require a live menu footer before parsing those.
     const waiting = /(?:enter.*(?:confirm|select|continue)|space to select.*esc to reject|\[y\/n\]|\(y\/n\))/i.test(text.trimEnd().split('\n').slice(-3).join('\n'))
-    const parsed = st === 'blocked' || this.commandMenus.has(key) || waiting ? parseMenu(text) : null
-    const m = parsed ? { ...parsed, screen: parsed.screen ?? text.trim() } : st === 'blocked' && text.trim() ? { title: 'The terminal is waiting for you', choices: [], cursor: 0, screen: text.trim() } : null
+    const parsed = st === 'blocked' || this.commandMenus.has(key) || starting || waiting ? parseMenu(text) : null
+    let m: ScreenMenu | null = parsed ? { ...parsed, screen: parsed.screen ?? text.trim() } : null
+    // a startup screen it read no choices in is still the same card while it rests: its words, and Open terminal
+    const was = this.menus.get(key)
+    if (!m && starting && was?.screen && sameScreen(was.screen, text)) m = was
+    if (!m && st === 'blocked' && text.trim()) m = { title: 'The terminal is waiting for you', choices: [], cursor: 0, screen: text.trim() }
     const before = JSON.stringify(this.menus.get(key) ?? null)
     if (m) this.menus.set(key, m)
-    else this.menus.delete(key)
+    else {
+      this.menus.delete(key)
+      // the startup screen moved on (or went): the card with it, and the next screen is read as a card of its own
+      this.startScreens.delete(key)
+    }
     // the command's menu is answered: what you wrote meanwhile goes in
     if (!m && this.commandMenus.delete(key)) void this.agents.deliver(key)
-    return before !== JSON.stringify(m)
+    return before !== JSON.stringify(this.menus.get(key) ?? null)
   }
 
   /** menus a slash command opened that herdr doesn't see as blocking the agent: shown as a card all the same, and what
    *  you write waits for them like for any menu */
   private commandMenus = new Set<string>()
+
+  /** starts that stopped on a screen of their own (start.ts): their screen is a card like a menu's, and the task waits on
+   *  you until it moves on */
+  private startScreens = new Set<string>()
 
   /** a slash command opened a menu: read it as a card; true when there is one */
   async commandMenu(key: string) {
@@ -542,6 +414,29 @@ export class Chats {
     await this.readMenu(key, true).catch(() => false)
     if (!this.menus.has(key)) this.commandMenus.delete(key)
     return this.menus.has(key)
+  }
+
+  /** a start stopped on a screen of its own: what it shows is a card, from now on read as one whenever it is read
+   *  again (its words alone, with no choices, still a card: Open terminal is the way on); true when it changed */
+  showStartMenu(key: string, menu: ScreenMenu): boolean {
+    this.startScreens.add(key)
+    const had = this.menus.get(key)
+    // the same card, though a spinner or a timer on it moved: nothing changed for the human
+    if (had && menuId(key, had) === menuId(key, menu)) return false
+    this.menus.set(key, menu)
+    return true
+  }
+
+  /** its screen moved on and nothing there is a card any more (its brief went in after all); true when one was up */
+  clearStartMenu(key: string) {
+    const had = this.startScreens.delete(key)
+    if (had) this.menus.delete(key)
+    return had
+  }
+
+  /** a card of a start stopped on its screen is up: the task waits on you for it */
+  startMenuUp(key: string) {
+    return this.startScreens.has(key) && this.menus.has(key)
   }
 
   /** a menu a slash command opened is up */
@@ -602,6 +497,12 @@ export class Chats {
   endedSince(key: string, at: number): boolean {
     this.pull(key)
     return (this.events.get(key) ?? []).some((e) => e.kind === 'turn-end' && e.at > at)
+  }
+
+  /** its log shows a turn since this time: a start became an agent at work, whatever its screen says */
+  begunSince(key: string, at: number): boolean {
+    this.pull(key)
+    return (this.events.get(key) ?? []).some((e) => e.at >= at && (e.kind === 'turn-start' || e.kind === 'user' || e.kind === 'agent' || e.kind === 'turn-end'))
   }
 
   /**

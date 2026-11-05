@@ -151,6 +151,11 @@ export function taskFirst(t: { title: string; desc: string }) {
   return t.desc && t.desc !== t.title ? `${t.title}\n\n${t.desc}` : t.title
 }
 
+/** what a start is told when the session it was to resume is gone: a new one remembers none of it */
+export function freshLine() {
+  return 'Your earlier session is gone, so this is a new one that remembers none of it. What was done is on the branch and in this chat: look at what is here before you start, and keep the work that is already done.'
+}
+
 /** what a backup agent is told after the brief when it takes a task over: from whom and why, and what was done */
 export function handOverLine(o: { from: string; why: string; commits: string; changes: string; chat: string }) {
   return [
