@@ -231,6 +231,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       artifacts: this.artifacts,
       asks: this.asks,
       needs: this.needs(),
+      attentionRequests: this.needs().reduce<Record<string, string[]>>((out, n) => ({ ...out, [n.chat]: [...(out[n.chat] ?? []), n.id] }), {}),
       last: this.last(),
       read: this.read,
       settings: secretPages([...this.sections, ...Object.entries(this.bases).map(([id, base]) => repositorySection(id, id.split(':')[1], base))], this.vault.names()),

@@ -472,8 +472,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const message = cards.get(id) ?? log.posted.find((x) => x.question?.id === id)
         const question = message && 'question' in message ? message.question : undefined
         const text = 'The terminal is waiting for you'
-        // no card to name a time: when its agent last said anything (0: before this screen knew)
-        const at = message?.at ?? this.chats.chat(p).messages.findLast((m) => m.who === 'agent')?.at ?? 0
+        // its CLI's own menu is drawn anew on every look (its message says now), and a menu nobody reads names no time:
+        // when its agent last said anything (0: before this screen knew)
+        const last = this.chats.chat(p).messages.findLast((m) => m.who === 'agent')?.at ?? 0
+        const at = message && !question?.terminal ? (message.at ?? last) : last
         out.push({ id, chat: p, place: p, at, ...(question ? { question } : { text }) })
       }
     }
@@ -484,7 +486,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const cards = [...open(key).values()]
       const menu = this.chats.startMenuUp(key) && !cards.length ? this.chats.menu(key) : undefined
       if (menu) out.push({ id: menuId(key, menu), chat: key, place: t.project, task: t.id, at: t.updated, question: { id: menuId(key, menu), kind: 'Form', title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: t.id, asks: 'Its screen waits' } })
-      else if (cards.length) for (const m of cards) out.push({ id: m.question.id, chat: key, place: t.project, task: t.id, at: m.at ?? t.updated, question: m.question })
+      else if (cards.length) for (const m of cards) out.push({ id: m.question.id, chat: key, place: t.project, task: t.id, at: m.question.terminal || !m.at ? t.updated : m.at, question: m.question })
       // a plain question or a failed start has no card: its row says what it waits with
       else out.push({ id: 'attention', chat: key, place: t.project, task: t.id, at: t.updated, text: this.engine.subOf(t, 'need') })
     }
@@ -504,6 +506,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const automations: Snapshot['automations'] = Object.fromEntries(places.map((p) => [p.id, this.automations.view(p.id, this.settings.zone())]))
     const asks = this.asks()
     const needs = [...this.needs(), ...peers.flatMap((l) => l.snap?.needs ?? [])].sort((a, b) => a.at - b.at)
+    // the same needs by chat, for plugins and older machines that read the field it replaced
+    const attentionRequests: Record<string, string[]> = {}
+    for (const n of needs) (attentionRequests[n.chat] ??= []).push(n.id)
     for (const l of peers) {
       Object.assign(automations, l.snap?.automations ?? {})
       Object.assign(asks, l.snap?.asks ?? {})
@@ -523,6 +528,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       artifacts: [...Object.values(this.artifacts.list).map((a) => this.artifactView(a)), ...peers.flatMap((l) => l.snap?.artifacts ?? [])].sort((a, b) => b.at - a.at),
       asks,
       needs,
+      attentionRequests,
       last: Object.assign({}, ...peers.map((l) => l.snap?.last ?? {}), this.unread.last),
       read: this.unread.read,
       sections,

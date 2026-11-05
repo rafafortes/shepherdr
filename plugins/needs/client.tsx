@@ -32,7 +32,7 @@ function NeedRow({ n }: { n: Need }) {
       <span className="flex min-h-[inherit] min-w-0 flex-1 flex-col justify-center gap-0.5 py-1.5 pr-1 text-left">
         <RowText sub={whoAsks(snap, n)}>{waitsWith(n)}</RowText>
       </span>
-      <Meta className="self-start pt-2">{n.question?.terminal ? 'Terminal' : n.question?.kind === 'Plan' ? 'Plan' : ''}</Meta>
+      {n.question?.terminal ? <Meta className="self-start pt-2">Terminal</Meta> : n.question?.kind === 'Plan' ? <Meta className="self-start pt-2">Plan</Meta> : null}
     </Row>
   )
 }
@@ -47,7 +47,7 @@ function NeedsView(_: { placeId: string }) {
       <div className="flex flex-col gap-1">
         <Heading count={0} />
         <Empty className="flex items-center gap-2">
-          <BellIcon className={ic} aria-hidden /> Nothing needs you.
+          <BellIcon className={ic} aria-hidden /> Nothing needs you{view.chips.length ? ' here' : ''}.
         </Empty>
       </div>
     )

@@ -860,6 +860,9 @@ export interface Snapshot {
   asks: Record<string, string>
   /** everything waiting on the human, oldest first, each once: what the Needs you view lists and every count counts */
   needs: Need[]
+  /** the same needs by chat, oldest first: kept filled for plugins written for it and for machines on an older
+   *  version (read `needs`: it is what the screen draws) */
+  attentionRequests?: Record<string, string[]>
   settings: SettingSection[]
   /** a source like demo marks its data as fictional */
   demo?: boolean
