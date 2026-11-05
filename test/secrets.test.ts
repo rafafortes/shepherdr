@@ -150,7 +150,8 @@ describe('the shepherdr secret command', () => {
     const server = startApp({ source: src, dist: '/nonexistent', port: 0 })
     // main.sock is the same byte-preserving HTTP transport as the SSH remote forward.
     const socket = Bun.serve({ unix: join(helper, 'main.sock'), fetch: (req) => fetch(`http://127.0.0.1:${server.port}/api/cli`, { method: 'POST', headers: req.headers, body: req.body }) })
-    const env = { ...process.env, HOME: dir, SHEPHERDR_CHAT: home, SHEPHERDR_SECRET_FILE: credentialFile, SHEPHERDR_URL: `http://127.0.0.1:${server.port}` }
+    // a remote helper: the box's own HOME, with no SHEPHERDR_HOME of its own (route.pl's credentials live under it)
+    const env = { ...process.env, SHEPHERDR_HOME: '', HOME: dir, SHEPHERDR_CHAT: home, SHEPHERDR_SECRET_FILE: credentialFile, SHEPHERDR_URL: `http://127.0.0.1:${server.port}` }
     const bind = (capability: string, pid = process.pid) => {
       const r = Bun.spawnSync(['perl', join(root, 'helper', 'route.pl'), '--bind', String(pid)], { env, stdin: Buffer.from(JSON.stringify({ chat: home, cwd: dir, url: env.SHEPHERDR_URL, capability, credentialFile })) })
       expect(r.exitCode).toBe(0)

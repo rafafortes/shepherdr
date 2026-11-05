@@ -107,6 +107,28 @@ describe('a task is its brief and one agent', () => {
     expect(w.news.some((n) => n.includes('was added'))).toBe(true)
   })
 
+  test('a server with a home of its own makes no worktree, no branch and no space, and starts no agent', async () => {
+    const w = world()
+    const dir = repo()
+    const p = await w.places.add(dir, 'proofhome')
+    const branches = sh('git branch --list', dir)
+    const yes = process.env.SHEPHERDR_LAUNCH_AGENTS
+    delete process.env.SHEPHERDR_LAUNCH_AGENTS
+    try {
+      // the refused start is said on the task itself, with the way on
+      const t = w.engine.add({ project: p.name, title: 'Say hello', desc: 'Add hello.txt.', by: 'test' })
+      await until(() => !!t.trouble)
+      expect(t.trouble).toContain('SHEPHERDR_LAUNCH_AGENTS=1')
+      expect(t.worktree).toBeUndefined()
+      expect(w.started).toEqual([])
+      // refused before anything of its own was made in the human's repository
+      expect(sh('git branch --list', dir)).toBe(branches)
+      expect(sh('git worktree list', dir).split('\n').length).toBe(1)
+    } finally {
+      if (yes !== undefined) process.env.SHEPHERDR_LAUNCH_AGENTS = yes
+    }
+  })
+
   test('private rules reach launches, stay out of briefs/git, and refresh only on restart', async () => {
     const w = world()
     w.engine.installed = () => true

@@ -25,6 +25,7 @@ import { agentWrong, type Wrong } from './revive.ts'
 import { readCodexRuntime } from './codex-runtime.ts'
 import { SecretAccess } from './secret-access.ts'
 import { isAgentProcess } from './agent-process.ts'
+import { launchesAgents, skippedLaunch } from './launch-policy.ts'
 
 /** a log's name (its session id), wherever it lies: one named both by its mirrored path and by its own is one log */
 const logName = (f: string) => f.slice(f.lastIndexOf('/') + 1)
@@ -543,6 +544,12 @@ export class Agents extends Emitter<Events> {
 
   /** Bind the actual CLI process, not HERDR_PANE_ID (old shells can inherit another pane's id). */
   private async bindRoute(r: AgentRecord, pane: string) {
+    // a server that may start no agent binds no route for one either: no route file, no credential (launch-policy.ts)
+    if (!launchesAgents()) {
+      this.routes.delete(r.key)
+      this.secretAccess.revoke(r.key)
+      return
+    }
     const p = await herdr.processInfo(pane)
     const proc = p.foreground_processes?.find((x) => x.pid && isAgentProcess(r.kind, x.argv))
     if (!proc?.pid || r.finished || this.records[r.key]?.finished || this.stopping.has(r.key)) { this.routes.delete(r.key); this.secretAccess.revoke(r.key); return }
@@ -553,7 +560,9 @@ export class Agents extends Emitter<Events> {
     const signature = JSON.stringify([proc.pid, route])
     if (this.routes.get(r.key) === signature) { this.emit('routed', r.key); return }
     const router = BOX ? join(helperDir(BOX.home), 'route.pl') : join(ROOT, 'helper', 'route.pl')
-    const result = await run(['perl', router, '--bind', String(proc.pid)], { stdin: JSON.stringify(route), timeoutMs: 5000 })
+    // the box's own Shepherdr home, said rather than left to what its login shell exports: the credential file it writes
+    // is the box's, whether or not that shell sets SHEPHERDR_HOME as well
+    const result = await run(['perl', router, '--bind', String(proc.pid)], { stdin: JSON.stringify(route), timeoutMs: 5000, ...(BOX ? { env: { SHEPHERDR_HOME: join(BOX.home, '.shepherdr') } } : {}) })
     if (result.code) {
       this.routes.delete(r.key)
       this.secretAccess.revoke(r.key)
@@ -751,12 +760,23 @@ export class Agents extends Emitter<Events> {
   /* ---------- starting ---------- */
 
   /**
+   * A server with a home of its own starts and moves no agent unless it was asked to (launch-policy.ts): refused before
+   * anything it would do here (a turn stopped, a pane closed), and said in its log.
+   */
+  private allowed(key: string) {
+    if (launchesAgents()) return true
+    console.error(`shepherdr: ${skippedLaunch(key)}`)
+    return false
+  }
+
+  /**
    * Start this chat's agent again on what spec says: `before` first (its turn stopped; what it returns is the first
    * message then, read once the turn is over), then its run ends and it starts, resuming its session on the same CLI.
    * Meanwhile anything that would start it waits for this instead, and what you send waits and goes in after the first
    * message. `before` throwing leaves it as it was.
    */
   restart(spec: Spec, before?: () => Promise<string | void>): Promise<AgentInfo | null> {
+    if (!this.allowed(spec.key)) return Promise.reject(new Error(skippedLaunch(spec.key)))
     const problem = chatProblem(spec.kind)
     if (problem) return Promise.reject(new Error(problem))
     const p0 = this.starting.get(spec.key)
@@ -778,6 +798,7 @@ export class Agents extends Emitter<Events> {
 
   /** start (or resume) this chat's agent; resolves once herdr says it is ready for input */
   ensure(spec: Spec): Promise<AgentInfo | null> {
+    if (!this.allowed(spec.key)) return Promise.reject(new Error(skippedLaunch(spec.key)))
     const problem = chatProblem(spec.kind)
     if (problem) return Promise.reject(new Error(problem))
     const running = this.live.get(spec.name)
@@ -800,6 +821,8 @@ export class Agents extends Emitter<Events> {
   }
 
   private async launch({ first, pane: place, was, ...spec }: Spec) {
+    // the one place an agent is started: a server with a home of its own starts none unless it was asked to
+    if (!this.allowed(spec.key)) throw new Error(skippedLaunch(spec.key))
     this.secretAccess.revoke(spec.key)
     this.routes.delete(spec.key)
     const old = this.records[spec.key]
@@ -943,6 +966,8 @@ export class Agents extends Emitter<Events> {
   /** started again by `start` (that resumes its session), its pane closed first where it still holds it (its CLI
    *  exited, or runs on outdated files). Meanwhile what you send waits for the one it starts, as in a restart */
   async relaunch(key: string, close: boolean, start: () => Promise<unknown>) {
+    // nothing closed, nothing stopped, and the caller hears why (a recovery loop gives up instead of retrying for good)
+    if (!this.allowed(key)) throw new Error(skippedLaunch(key))
     this.secretAccess.revoke(key)
     this.routes.delete(key)
     this.stopping.add(key)

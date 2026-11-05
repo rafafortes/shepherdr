@@ -85,6 +85,26 @@ build, check and review the work is your own judgment.
 8. Tell the human in one line that it is merged. Anything about setting up or testing this repo the next agent would
    need and `AGENTS.md` lacks goes in one line, `For AGENTS.md: <the line>`, for the human to accept; never commit it.
 
+## A server for a proof
+
+Showing the screen, or a task coming due, needs a server of its own, never the one the human runs:
+
+- **The demo world first** (`SHEPHERDR_SOURCE=demo`): fictional data, no agents, nothing in herdr. Where the proof needs
+  a real launch, a herdr stand-in of your own (the tests' fake is an object, not a socket) stands in for it, and
+  `HERDR_SOCKET_PATH` names it; without one, point `HERDR_SOCKET_PATH` at a socket that isn't there, as the tests do,
+  and nothing reaches any herdr.
+- **Never the real `~/.shepherdr`**: give it `SHEPHERDR_HOME=/tmp/<something of its own>` and a port of its own that
+  nothing else uses — `SHEPHERDR_PORT=78<nn>`, never 7787, the human's, and never another task's. Its own files, its
+  agents' credentials included, stay there; the helper's per-process route files are the one thing it writes where a CLI
+  looks for them.
+- **No task that can come due**: no `--in`, `--at`, nothing queued behind another task, nothing to relaunch. A server
+  with a home of its own refuses to start any agent unless `SHEPHERDR_LAUNCH_AGENTS=1` says it may, and logs each skip;
+  never set that variable with the human's herdr in reach, only around a fake one.
+- **Stop it by its own pid**: run it as `bun server/main.ts` in the background (not through `bun run`) and keep `$!`,
+  or take the `pid` from `server.json` in its home (live only), and stop that: `kill $!`. Never `pkill -f
+  server/main.ts` or any pattern loose enough to match the human's live server, which runs from `.releases/`. Leave no
+  server, port, home or process of yours behind.
+
 ## Outputs
 
 The change committed on the branch, one proof artifact (or a line in your chat), the ready summary and facts, then

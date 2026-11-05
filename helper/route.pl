@@ -26,6 +26,21 @@ sub process_identity {
 
 sub route_dir { return "$ENV{HOME}/.shepherdr/helper/routes"; }
 
+# a path the way node's resolve/join writes it: absolute, no //, no trailing /, no . or .. segment
+sub norm_path {
+  my ($p) = @_;
+  $p = getcwd() . "/$p" unless $p =~ m{^/};
+  my @in = split m{/+}, $p;
+  my @out;
+  for my $seg (@in) {
+    next if $seg eq '' || $seg eq '.';
+    if ($seg eq '..') { pop @out; next }
+    push @out, $seg;
+  }
+  my $s = join('/', @out);
+  return $p =~ m{^/} ? "/$s" : ($s eq '' ? '.' : $s);
+}
+
 sub read_route {
   my ($file, $pid) = @_;
   open(my $f, '<', $file) or return;
@@ -167,7 +182,11 @@ sub bind_route {
   print $f JSON::PP->new->canonical->encode($r); close $f;
   rename($tmp, "$d/$pid.json") or die "route: $!";
   if (my $file = $r->{credentialFile}) {
-    my $base = "$ENV{HOME}/.shepherdr/helper/credentials";
+    # this machine's Shepherdr home, which SHEPHERDR_HOME moves (a server with a home of its own keeps its credentials
+    # there, never in the real ~/.shepherdr); the server builds the path with node's join, so both sides are compared
+    # the way it writes them
+    my $base = norm_path((($ENV{SHEPHERDR_HOME} // '') || "$ENV{HOME}/.shepherdr") . "/helper/credentials");
+    $file = norm_path($file);
     die "Invalid credential path\n" unless $file =~ m{^\Q$base\E/[a-f0-9-]{36}$};
     die "Unsafe credential directory\n" if -l $base;
     make_path($base, { mode => 0700 });

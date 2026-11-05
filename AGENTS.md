@@ -55,7 +55,13 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
 - No tests on this machine: it keeps the CPU for herdr, the server and the agents. While you work and before you
   merge, run only `bun run typecheck` (seconds). Don't run `bun run test`, `bun test`, `bun run test changed`,
   `bun run check` or any browser test here.
-- Check what you changed on the screen by hand in your shared browser, for the proof.
+- Check what you changed on the screen by hand in your shared browser, for the proof, against a proof server of your
+  own, never the one the human runs: the demo source (`SHEPHERDR_SOURCE=demo`) first, or `HERDR_SOCKET_PATH` at a
+  socket that isn't there (as the tests do), a `SHEPHERDR_HOME` under `/tmp`, a `SHEPHERDR_PORT` other than 7787 and
+  not another task's, no task that can come due, and stopped by its own pid (keep `$!`, or the pid `server.json` names).
+  Never `pkill -f server/main.ts`: that also matches the live server, which runs from `.releases/`.
+- A server with a home of its own starts no agent in herdr unless `SHEPHERDR_LAUNCH_AGENTS=1` says it may, and logs
+  each one it skips (agents are real CLIs in the herdr it inherits). `test/preload.ts` sets that yes for the tests.
 - GitHub runs the whole check (types, every test with the browser tests, the build) on every pull request into
   `herdr-tui` and again on every push to it (a merge): the Check workflow (`.github/workflows/check.yml`), which skips
   a pull request and a push that touch only `**/*.md` or `docs/**` (its `paths-ignore`, the skill files included). A

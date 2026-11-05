@@ -20,6 +20,7 @@ import { ROOT } from '../../root.ts'
 import { has } from '../../plugins.ts'
 import { browserEnv } from '../browser.ts'
 import { hidden, ROUTING_FAILURE, type Agents, type Spec } from '../agents.ts'
+import { launchesAgents, refusedLaunch } from '../launch-policy.ts'
 import { fromAgentLine } from '../chatlines.ts'
 import type { Chats } from '../chats.ts'
 import { HOST, placeId, type Places, type Space } from '../places.ts'
@@ -896,6 +897,12 @@ export class Engine extends Emitter<Events> {
 
   /** the go: its agent hears it (hidden from the chat, where a small card says why it started) and starts on the work */
   private go(t: TaskRec, text: string, why: string, plain = false) {
+    // a server that may start no agent spends none of its queue on one: the task says why instead
+    if (!launchesAgents()) {
+      t.trouble = troubleOf(refusedLaunch(this.key(t)))
+      this.settle(t)
+      return
+    }
     // archived while it waited: it starts work, so it shows again
     if (t.archived) this.unarchive(t.id)
     t.after = undefined
@@ -1359,6 +1366,8 @@ export class Engine extends Emitter<Events> {
     t.trouble = undefined
     this.emit('changed')
     try {
+      // a server that may start no agent makes nothing for one either: no worktree, no branch, nothing in herdr
+      if (!launchesAgents()) throw refusedLaunch(this.key(t))
       const p = this.proj(t)
       const branch = branchFor(t)
       // Old records without a snapshot keep the existing fallback; new tasks snapshot at add.
@@ -1395,6 +1404,8 @@ export class Engine extends Emitter<Events> {
    * the same folder, so its agent's session (kept by folder) is found again; never a finished task's.
    */
   private async launch(t: TaskRec, first?: string, made?: Made, as?: Harness, restart?: () => Promise<string | void>) {
+    // refused before the worktree it would make, the herdr space it would open and the CLI trust file it would write
+    if (!launchesAgents()) throw refusedLaunch(this.key(t))
     const key = this.key(t)
     const rec = this.agents.record(key)
     const p = this.proj(t)

@@ -6,9 +6,9 @@
 // needs only herdr, git, perl and the agent CLIs, plus the small helper Shepherdr puts there (helper/, install.ts).
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { secretFileId } from './secret-paths.ts'
-import { readJson } from '../store.ts'
+import { home, readJson } from '../store.ts'
 
 export interface BoxInfo {
   /** herdr's label for it: the machine's name in Shepherdr */
@@ -38,7 +38,7 @@ export const boxHome = () => BOX?.home ?? homedir()
 
 /** where the SSH connections keep their shared master: short, a socket path has a length limit */
 const control = () => {
-  const dir = join(process.env.SHEPHERDR_MAIN_HOME ?? join(homedir(), '.shepherdr'), 'ssh')
+  const dir = join(process.env.SHEPHERDR_MAIN_HOME ?? home(), 'ssh')
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   return join(dir, '%C')
 }
@@ -107,10 +107,16 @@ export function spawnOn(b: BoxInfo, argv: string[], o: { extra?: string[]; stdin
   return Bun.spawn(sshArgs(b.target, script(b, argv), { extra: o.extra }), { stdin: o.stdin ?? 'ignore', stdout: 'pipe', stderr: 'pipe' })
 }
 
+/** an agent's credential file: in the current Shepherdr home's helper (SHEPHERDR_HOME included, so a server given a
+ *  home of its own never writes into the real ~/.shepherdr), or in the box's helper when this worker runs another
+ *  machine, where helper/route.pl writes it */
+const credentialFile = (chat: string) =>
+  BOX ? join(helperDir(BOX.home), 'credentials', secretFileId(chat)) : join(resolve(home(), 'helper', 'credentials'), secretFileId(chat))
+
 /** who an agent is to the shepherdr command, and where that command is: here Shepherdr's own bin and server; on
  *  another machine the helper's bin first on its own PATH (its command finds the way back by itself) */
 export function agentEnv(chat: string, root: string): Record<string, string> {
-  const credential = { SHEPHERDR_SECRET_FILE: join(helperDir(BOX?.home ?? homedir()), 'credentials', secretFileId(chat)) }
+  const credential = { SHEPHERDR_SECRET_FILE: credentialFile(chat) }
   if (BOX) return { ...credential, SHEPHERDR_CHAT: chat, SHEPHERDR_URL: '', SHEPHERDR_COMMAND: join(helperDir(BOX.home), 'bin', 'shepherdr'), SHEPHERDR_MACHINE: BOX.label, PATH: BOX.path }
   // The listening live server owns these agents, never an inherited CLI target (which may be a demo).
   return { ...credential, SHEPHERDR_CHAT: chat, SHEPHERDR_COMMAND: join(root, 'bin', 'shepherdr'), SHEPHERDR_URL: `http://127.0.0.1:${readJson<{ port?: number }>('server.json', {}).port ?? process.env.SHEPHERDR_PORT ?? 7787}`, PATH: `${join(root, 'bin')}:${process.env.PATH ?? ''}` }

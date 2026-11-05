@@ -109,7 +109,7 @@ Only the ones it made. Every task works in its own worktree, on its own branch `
 
 ### Where do my tasks live?
 
-In `~/.shepherdr/` on the main machine (`SHEPHERDR_HOME` to move it): your spaces, tasks, chats, artifacts, settings, Autopilot checklists and your own plugins. Other machines get only a small helper folder. [Develop](docs/develop.md) and [Plugins](docs/plugins.md) cover the code and how to change Shepherdr's screen for yourself.
+In `~/.shepherdr/` on the main machine (`SHEPHERDR_HOME` to move it; a home moved elsewhere also needs `SHEPHERDR_LAUNCH_AGENTS=1`, since only the default home is trusted to open agents in your herdr): your spaces, tasks, chats, artifacts, settings, Autopilot checklists and your own plugins. Other machines get only a small helper folder. [Develop](docs/develop.md) and [Plugins](docs/plugins.md) cover the code and how to change Shepherdr's screen for yourself.
 
 ### Can I use several machines?
 
