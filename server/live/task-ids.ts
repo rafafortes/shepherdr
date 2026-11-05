@@ -4,7 +4,7 @@ import { Database } from 'bun:sqlite'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SettingSection } from '../../shared/types.ts'
-import { HOME } from '../store.ts'
+import { home } from '../store.ts'
 import type { Space } from './places.ts'
 
 export const MAX_TASK_NUMBER = Number.MAX_SAFE_INTEGER - 1
@@ -26,7 +26,7 @@ export function taskIdsSection(level: string, machine: string, prefix: string, n
 type Sequence = { space: string; prefix: string; last: number }
 export class TaskIds {
   private db: Database
-  constructor(spaces: Space[], legacy: { next: Record<string, number>; tasks: { id: string; n: number; project: string }[] }, idOf: (name: string) => string, dir = HOME) {
+  constructor(spaces: Space[], legacy: { next: Record<string, number>; tasks: { id: string; n: number; project: string }[] }, idOf: (name: string) => string, dir = home()) {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
     this.db = new Database(join(dir, 'task-ids.sqlite'), { create: true })
     this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;')

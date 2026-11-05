@@ -14,7 +14,7 @@ import { agentEnv } from '../box.ts'
 import { join } from 'node:path'
 import { STATUS_MAX, TITLE_MAX, type Question, type Report, type Task, type TaskStatus, type UpdateCard } from '../../../shared/types.ts'
 import { Emitter } from '../../source.ts'
-import { readJson, writeJson } from '../../store.ts'
+import { home, readJson, writeJson } from '../../store.ts'
 import { ROOT } from '../../root.ts'
 import { has } from '../../plugins.ts'
 import { browserEnv } from '../browser.ts'
@@ -333,8 +333,10 @@ const BRIEF_WAIT = 120_000
 const LATER = "Don't start yet: wait for a go."
 
 export class Engine extends Emitter<Events> {
+  /** the folder its files are in, taken when it is made: a test's world keeps its own, whatever comes after it */
+  private dir = home()
   /** main: by project path, the failing commit on GitHub's main its coordinator was told of, until main is green */
-  private data = readJson<{ next: Record<string, number>; tasks: TaskRec[]; red?: Record<string, string> }>('tasks.json', { next: {}, tasks: [] })
+  private data = readJson<{ next: Record<string, number>; tasks: TaskRec[]; red?: Record<string, string> }>('tasks.json', { next: {}, tasks: [] }, this.dir)
   readonly taskIds: TaskIds
   private starting = new Set<string>()
   /** started, its brief not yet taken up: To do until its agent works on it */
@@ -384,9 +386,9 @@ export class Engine extends Emitter<Events> {
     h?: HerdrSpaces,
   ) {
     super()
-    this.taskIds = new TaskIds(this.places.spaces, this.data, (name) => placeId.space(name))
+    this.taskIds = new TaskIds(this.places.spaces, this.data, (name) => placeId.space(name), this.dir)
     this.places.takenTaskKeys = () => this.taskIds.keys()
-    this.wt = new Worktrees(h)
+    this.wt = new Worktrees(h, this.dir)
     let snapped = false
     // tasks from before statuses came from the agent: a finished one is merged, and was cleaned up then
     for (const t of this.data.tasks as (Omit<TaskRec, 'after'> & { stage?: string; after?: string | string[] })[]) {
@@ -448,7 +450,7 @@ export class Engine extends Emitter<Events> {
   }
 
   private save() {
-    writeJson('tasks.json', this.data)
+    writeJson('tasks.json', this.data, this.dir)
     this.emit('changed')
   }
 

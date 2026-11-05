@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { setOrder, type PlaceOrder, type SectionDefs } from '../../shared/order.ts'
 import { nameProblem, slugify, type Mode } from '../../shared/types.ts'
-import { readJson, writeJson } from '../store.ts'
+import { home, readJson, writeJson } from '../store.ts'
 import { Agents } from './agents.ts'
 import { boxHome } from './box.ts'
 import { validateBase, defaultBranch, github, githubRemote, isRepo, topLevel, type GitHub } from './engine/git.ts'
@@ -84,18 +84,20 @@ export function keyFor(name: string, taken: string[]) {
 }
 
 export class Places {
+  /** the folder its files are in, taken when it is made: a test's world keeps its own, whatever comes after it */
+  private dir = home()
   /** Historical task prefixes, including deleted tasks; supplied by the owning engine. */
   takenTaskKeys?: () => string[]
   /** what was kept under the coordinators that are gone moves to the home spaces first, once */
   retired = migrateToSpaces((m) => placeId.home(m), HOME_AGENT).retire
-  spaces: Space[] = readJson('spaces.json', [])
+  spaces: Space[] = readJson('spaces.json', [], this.dir)
   // kept under their old names too (manual and ping, suggest, auto): read as today's, saved so on the next save
-  modes: Record<string, Mode> = Object.fromEntries(Object.entries(readJson<Record<string, unknown>>('modes.json', {})).flatMap(([id, m]) => (asMode(m) ? [[id, asMode(m)!]] : [])))
+  modes: Record<string, Mode> = Object.fromEntries(Object.entries(readJson<Record<string, unknown>>('modes.json', {}, this.dir)).flatMap(([id, m]) => (asMode(m) ? [[id, asMode(m)!]] : [])))
   /** the sidebar's order the human dragged, of every machine's places (see shared/order.ts) */
-  order: PlaceOrder = readJson('order.json', {})
+  order: PlaceOrder = readJson('order.json', {}, this.dir)
   /** the names the human gave machines and spaces in the sidebar, by id, every machine's: only what shows changes,
    *  never a folder, repo, herdr space or task id */
-  names: Record<string, string> = readJson('names.json', {})
+  names: Record<string, string> = readJson('names.json', {}, this.dir)
 
   /** the names given: on another machine's worker, the main machine's (it keeps them), read as they are now, so its
    *  commands take the names the sidebar shows */
@@ -110,39 +112,39 @@ export class Places {
   }
 
   /** the emoji the human gave machines, by id, kept by the main machine */
-  emojis: Record<string, string> = readJson('emojis.json', {})
+  emojis: Record<string, string> = readJson('emojis.json', {}, this.dir)
 
   /** a place's new name; '' gives it back its own */
   rename(id: string, name: string) {
     if (name) this.names[id] = name
     else delete this.names[id]
-    writeJson('names.json', this.names)
+    writeJson('names.json', this.names, this.dir)
   }
 
   /** a machine's emoji; '' takes it away */
   setEmoji(id: string, emoji: string) {
     if (emoji) this.emojis[id] = emoji
     else delete this.emojis[id]
-    writeJson('emojis.json', this.emojis)
+    writeJson('emojis.json', this.emojis, this.dir)
   }
 
   setOrder(under: string, ids: string[]) {
     setOrder(this.order, under, ids)
-    writeJson('order.json', this.order)
+    writeJson('order.json', this.order, this.dir)
   }
 
   /** the sections the human made in the sidebar, by id (shared/order.ts): what is in them is kept with the order */
-  sections: SectionDefs = readJson('sections.json', {})
+  sections: SectionDefs = readJson('sections.json', {}, this.dir)
 
   /** the sections and the order, after a section changed or a space moved */
   saveSections() {
-    writeJson('sections.json', this.sections)
-    writeJson('order.json', this.order)
+    writeJson('sections.json', this.sections, this.dir)
+    writeJson('order.json', this.order, this.dir)
   }
 
   save() {
-    writeJson('spaces.json', this.spaces)
-    writeJson('modes.json', this.modes)
+    writeJson('spaces.json', this.spaces, this.dir)
+    writeJson('modes.json', this.modes, this.dir)
   }
 
   /** the name each of this machine's spaces shows, the home space first: as given, by the space rules, each its own */

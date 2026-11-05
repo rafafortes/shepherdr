@@ -85,7 +85,10 @@ describe.skipIf(!browser)('unified search', () => {
       await page.keyboard.press('Control+k')
       await search.fill('Upload page draft')
       const artifacts = page.getByRole('group', { name: 'Artifacts', exact: true })
-      await artifacts.getByRole('option').first().waitFor()
+      // the box filters 120 ms after the last keystroke, and until it has it lists recent items: every artifact, newest
+      // first, so the first one taken there could be another place's (run 42036805223, attempt 2: a5, vm-str). Waiting
+      // for the draft to be listed is waiting for the list to be this query's
+      await artifacts.getByRole('option').filter({ hasText: 'Upload page draft' }).first().waitFor()
       await artifacts.getByRole('option').first().click()
       expect(page.url()).toContain('artifact=')
       expect(page.url()).toContain('mac%2Flilla-varlden')

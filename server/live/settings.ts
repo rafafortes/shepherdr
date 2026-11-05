@@ -10,7 +10,7 @@ import { CHAT_KINDS, chatProblem } from './readers/index.ts'
 import { cpus, totalmem } from 'node:os'
 import { NOTIFY, NOTIFY_DEFAULT, NOTIFY_KEY } from '../../shared/alerts.ts'
 import type { SettingSection, TriggerRow } from '../../shared/types.ts'
-import { readJson, writeJson } from '../store.ts'
+import { home, readJson, writeJson } from '../store.ts'
 import type { SetBy } from '../../shared/brief.ts'
 import { settingsBlock, settingsLines, SEVERITIES, type Said, type Ways } from './prompts.ts'
 import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf } from './models.ts'
@@ -319,11 +319,13 @@ export interface Stored {
 
 /** the defaults you set, at their levels */
 export class Settings {
+  /** the folder it reads and writes, taken when it is made: a test's world keeps its own, whatever comes after it */
+  private dir = home()
   private d: Stored
 
   /** seed: these values, kept only in memory (the demo's) */
   constructor(private seed?: Stored) {
-    const raw = (seed ?? readJson<Record<string, unknown>>('settings.json', {})) as Record<string, unknown>
+    const raw = (seed ?? readJson<Record<string, unknown>>('settings.json', {}, this.dir)) as Record<string, unknown>
     const keep = (v: unknown) => Object.fromEntries(Object.entries(upgrade((v ?? {}) as Values)).filter(([k, x]) => KEYS.includes(k) && typeof x === 'string' && !refuse(k, x))) as Values
     if (raw.everywhere) {
       // the space level was the project level before spaces came (read here too: Settings may start before migrate.ts)
@@ -353,7 +355,7 @@ export class Settings {
   }
 
   private save() {
-    if (!this.seed) writeJson('settings.json', this.d)
+    if (!this.seed) writeJson('settings.json', this.d, this.dir)
   }
 
   /** the values set at one level */

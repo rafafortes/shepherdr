@@ -756,7 +756,7 @@ describe('archiving', () => {
     // one whose agent you are talking to stays put
     tasks.push(done('BUSY-1', now - 30 * day))
     w.status['BUSY-1/Agent'] = 'working'
-    // tasks earlier tests left in tasks.json are left out: only these five are looked at
+    // only these five are looked at: whatever else this world holds stays out of the count
     tasks.splice(0, tasks.length - 5)
     expect(w.engine.autoArchive(now)).toBe(1)
     expect(w.engine.task('OLD-1')!.archived).toBe(now)

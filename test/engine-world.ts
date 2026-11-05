@@ -1,6 +1,8 @@
 // The tasks engine's test world, shared by the engine*.test.ts files: a real git repo, the agents stubbed, herdr a
-// stand-in that makes and removes real git worktrees. Each file that imports it gets its own Shepherdr home.
+// stand-in that makes and removes real git worktrees. Each file that imports it gets its own Shepherdr home, and each
+// test a folder of its own inside it.
 import { execSync } from 'node:child_process'
+import { beforeEach } from 'bun:test'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,12 +12,32 @@ export const { Engine } = await import('../server/live/engine/engine.ts')
 export const { Places, placeId } = await import('../server/live/places.ts')
 export const { Settings } = await import('../server/live/settings.ts')
 export const { settingsBlock } = await import('../server/live/prompts.ts')
-export const { writeJson } = await import('../server/store.ts')
+const store = await import('../server/store.ts')
 export const { fakeHerdr } = await import('./fake-herdr.ts')
 export const G = await import('../server/live/engine/git.ts')
 export type Said = import('../server/live/readers/hooks.ts').Said
 
-export const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8' }).trim()
+// a git call that stalls may not be waited on until the test's own timeout takes the whole test away with no word on
+// which step it was: this one stops at 30 s and names its command (run 42020185856, shard 1, on a runner six times
+// slower than the same shard's rerun)
+export const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8', timeout: 30_000 }).trim()
+
+/**
+ * Every test reads and writes a data folder of its own, and every world it makes keeps that same one: a test builds a
+ * world again to see what a restart reads, and that must be what the world before it wrote. Bun does not stop a test
+ * that timed out — it goes on running — and what it left must not reach into the folder the next test reads, which is
+ * what made one timeout fail the tests after it (run 42020185856, shard 1). Whoever keeps files of its own takes the
+ * folder when it is made (store.ts's `dir`), so even the leftovers of a test gone by write into its own folder. The
+ * name is the preload's, which clears those older than an hour.
+ */
+let base = mkdtempSync(join(tmpdir(), 'shep-test-home-base-'))
+beforeEach(() => {
+  base = mkdtempSync(join(tmpdir(), 'shep-test-home-base-'))
+  process.env.SHEPHERDR_HOME = base
+})
+
+/** what a test writes itself goes into its own test's folder, whatever a later test points the process at */
+export const writeJson = (name: string, value: unknown) => store.writeJson(name, value, base)
 
 export function repo() {
   const dir = mkdtempSync(join(tmpdir(), 'shep-repo-'))
@@ -25,6 +47,7 @@ export function repo() {
 
 /** boot: what herdr says once the agent is ready; any but working leaves its brief waiting to go in */
 export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
+  process.env.SHEPHERDR_HOME = base
   const started: { key: string; first?: string; cwd: string; system?: string; pane?: string }[] = []
   const status: Record<string, string> = {}
   const sent: { key: string; text: string }[] = []

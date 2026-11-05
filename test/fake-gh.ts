@@ -3,7 +3,7 @@
 // of gh is here: auth status, pr list/view/create/edit/ready/checks/merge, run list, and api (a pull request's reviews and
 // comments, Actions' runs and jobs, a job's log).
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -49,18 +49,63 @@ if (import.meta.main) {
   // slow before it holds the state file, so the other calls meanwhile go on
   if (process.argv[2] === 'pr' && process.argv[3] === 'merge') Bun.sleepSync((JSON.parse(readFileSync(file, 'utf8')) as FakeGitHub).mergeSlow ?? 0)
   // the engine runs several gh at once (a pull request's reviews and comments): each holds the state file to itself
-  // from reading it to writing it back, or one reads it half-written, or writes over what another wrote down
+  // from reading it to writing it back, or one reads it half-written, or writes over what another wrote down. One
+  // killed (a test that timed out takes its processes with it) leaves its lock behind with its pid in it: a lock whose
+  // owner is gone is taken over instead of waited on.
   const lock = `${file}.lock`
+  const running = (pid: number) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
   for (let tries = 0; ; tries++) {
     try {
-      openSync(lock, 'wx')
+      const fd = openSync(lock, 'wx')
+      writeFileSync(fd, String(process.pid))
+      closeSync(fd)
       break
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST' || tries > 3000) throw e
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+      let pid = 0
+      try {
+        pid = Number(readFileSync(lock, 'utf8').trim() || 0)
+      } catch {}
+      if (pid && !running(pid)) {
+        // the dead one goes, one waiter at a time: a takeover lock of its own, made for a moment, so no waiter ever
+        // takes away a lock another one has just made
+        const hand = `${lock}.takeover`
+        let mine: number | undefined
+        try {
+          mine = openSync(hand, 'wx')
+        } catch {
+          if (tries > 3000) throw e
+          Bun.sleepSync(5)
+          continue
+        }
+        try {
+          let still = 0
+          try {
+            still = Number(readFileSync(lock, 'utf8').trim() || 0)
+          } catch {}
+          if (still === pid) rmSync(lock, { force: true })
+        } finally {
+          closeSync(mine)
+          rmSync(hand, { force: true })
+        }
+        continue
+      }
+      if (tries > 3000) throw e
       Bun.sleepSync(5)
     }
   }
-  process.on('exit', () => unlinkSync(lock))
+  process.on('exit', () => {
+    try {
+      unlinkSync(lock)
+    } catch {}
+  })
   const st = JSON.parse(readFileSync(file, 'utf8')) as FakeGitHub
   const args = process.argv.slice(2)
   st.calls.push({ host: process.env.GH_HOST, args })
@@ -72,7 +117,8 @@ if (import.meta.main) {
     const i = args.indexOf(`--${name}`)
     return i >= 0 ? args[i + 1] : undefined
   }
-  const git = (...a: string[]) => execFileSync('git', a, { cwd: st.origin, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  // 30 s: a git that stalls says which command it was, instead of the test timing out with nothing to show for it
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: st.origin, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 }).trim()
   const headOf = (branch: string) => {
     try {
       return git('rev-parse', `refs/heads/${branch}`)
@@ -154,7 +200,7 @@ if (import.meta.main) {
       // GitHub squashes the branch onto its base
       const tmp = mkdtempSync(join(tmpdir(), 'fake-gh-merge-'))
       try {
-        const g = (...a: string[]) => execFileSync('git', a, { cwd: tmp, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+        const g = (...a: string[]) => execFileSync('git', a, { cwd: tmp, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 })
         g('clone', '-q', '-b', p.base, st.origin, '.')
         g('fetch', '-q', 'origin', p.head)
         try {
