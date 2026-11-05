@@ -478,8 +478,11 @@ describe('Queued from the command', () => {
     // can be sent later, into whatever test runs then (run 42096468692, shard 3, typed in as a CLI command's answer).
     // Waited for, then stopped at the source: nothing sends it once the task holds no go and no place in the queue.
     await until(() => src.agents.outbox.some((o) => o.text.includes('vm-x:ELA-3 is done')) || !!use.held, 8000, `${use.id}'s go`)
-    use.going = undefined
-    use.held = undefined
+    // and so that nothing of theirs keeps a go to send later: resumeQueue() would type it into whatever runs then
+    for (const t of ts) {
+      t.going = undefined
+      t.held = undefined
+    }
     src.agents.outbox = src.agents.outbox.filter((o) => !o.text.includes('vm-x:ELA-3 is done') && !ts.some((t) => o.key === `${t.id}/Agent`))
   })
 })
