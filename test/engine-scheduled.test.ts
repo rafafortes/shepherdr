@@ -66,10 +66,13 @@ describe('a task that starts by itself at a time', () => {
       tasks: [{ id, n: 1, project: placeId.space(p.name), title: 'Missed', desc: 'Add hi.txt.', by: 'test', created: at, updated: at, told: 'scheduled', scheduled: { at, desc: 'Add hi.txt.' } }],
     })
     const w = world()
-    await until(() => w.started.some((s) => s.key === `${id}/Agent`), 15_000)
+    // not at once: herdr has to say which agents are alive first, so the machine's room can be seen (the same first look
+    // queued tasks wait for), and then it starts
+    expect(w.started).toEqual([])
+    await until(() => w.started.some((s) => s.key === `${id}/Agent`), 25_000)
     expect(w.started.find((s) => s.key === `${id}/Agent`)!.first).toStartWith('Missed\n\nAdd hi.txt.\n\nSettings:')
     expect(w.posted.some((x) => x.key === `${id}/Agent` && (x.card?.text ?? '').includes('passed while Shepherdr was off'))).toBe(true)
-  })
+  }, 30_000)
 
   test('its time can be changed, and cancelled: it starts now; only a task not started yet can be scheduled', async () => {
     const w = world()
@@ -118,5 +121,74 @@ describe('a task that starts by itself at a time', () => {
     const t = w.engine.add({ project: p.name, title: 'Later', desc: 'Add hi.txt.', by: 'test', later: true, at: Date.now() + 500 })
     await until(() => w.started.some((s) => s.key === `${t.id}/Agent`), 15_000)
     expect(w.started.find((s) => s.key === `${t.id}/Agent`)!.first).toStartWith("Later\n\nAdd hi.txt.\n\nDon't start yet: wait for a go.\n\nSettings:")
+  })
+
+  test('stopped before its time: it does not start by itself, and a later word starts it on the Settings it would have taken', async () => {
+    const w = world()
+    const p = await w.places.add(repo(), 'sched-stop')
+    const t = w.engine.add({ project: p.name, title: 'Stop', desc: 'Add hi.txt.', by: 'test', at: Date.now() + 3_600_000 })
+    expect(t.desc).toBe('Add hi.txt.')
+    await w.engine.stopTask(t.id)
+    // no time left for it to start by itself, and its brief's Settings block is built now, so a word later starts it on them
+    expect(t.scheduled).toBeUndefined()
+    expect(t.desc).toContain('Settings:')
+    expect(w.engine.statusOf(t)).toBe('todo')
+    await w.engine.tell(t.id, 'Go on now.')
+    await until(() => w.started.some((s) => s.key === `${t.id}/Agent`), 15_000)
+    expect(w.started.find((s) => s.key === `${t.id}/Agent`)!.first).toContain('Settings:')
+  })
+
+  test('a task stopped before it ever started is not started by a restart', async () => {
+    const p = await world().places.add(repo(), 'sched-stopped-boot')
+    const id = `${p.key}-1`
+    writeJson('tasks.json', {
+      next: { [p.key]: 1 },
+      tasks: [{ id, n: 1, project: placeId.space(p.name), title: 'Stopped', desc: 'Add hi.txt.', by: 'test', created: Date.now(), updated: Date.now(), told: 'todo', stopped: true, todo: true }],
+    })
+    const w = world()
+    await Bun.sleep(1500)
+    expect(w.started).toEqual([])
+  })
+
+  test('archived while its time passes: it waits, and starts when it is brought back', async () => {
+    const w = world()
+    const p = await w.places.add(repo(), 'sched-away')
+    const t = w.engine.add({ project: p.name, title: 'Away', desc: 'Add hi.txt.', by: 'test', at: Date.now() + 300 })
+    await w.engine.archive(t.id)
+    await Bun.sleep(800)
+    expect(w.started.some((s) => s.key === `${t.id}/Agent`)).toBe(false)
+    w.engine.unarchive(t.id)
+    await until(() => w.started.some((s) => s.key === `${t.id}/Agent`), 15_000)
+  })
+
+  test('a task held for room can be given a time instead, and cancelling it starts it once', async () => {
+    const w = world()
+    expect(w.settings.set('machine.maxTasks', '1').ok).toBe(true)
+    const a = await started(w, repo(), 'sched-held', 'First', 'Add a.txt.')
+    w.brief(a.key)
+    await until(() => w.engine.statusOf(a.t) === 'work')
+    const b = w.engine.add({ project: a.p.name, title: 'Held', desc: 'Add b.txt.', by: 'test' })
+    await until(() => !!b.held)
+    // a time replaces the wait for room: it is Scheduled, with no agent
+    w.engine.schedule(b.id, Date.now() + 3_600_000)
+    expect(b.held).toBeUndefined()
+    expect(w.engine.statusOf(b)).toBe('scheduled')
+    expect(w.started.some((s) => s.key === `${b.id}/Agent`)).toBe(false)
+    // cancelled with a slot free: it starts now, once (release() must not start it again)
+    expect(w.settings.set('machine.maxTasks', '2').ok).toBe(true)
+    expect(w.engine.schedule(b.id, null)).toEqual({})
+    w.engine.release()
+    await until(() => w.started.some((s) => s.key === `${b.id}/Agent`), 15_000)
+    expect(w.started.filter((s) => s.key === `${b.id}/Agent`).length).toBe(1)
+  })
+
+  test('what it waits for can change while it waits for its time, without clearing the time', async () => {
+    const w = world()
+    const a = await started(w, repo(), 'sched-after-change', 'First', 'Add a.txt.')
+    w.brief(a.key)
+    const t = w.engine.add({ project: a.p.name, title: 'Later', desc: 'Add hi.txt.', by: 'test', at: Date.now() + 3_600_000 })
+    expect(w.engine.queue(t.id, [a.t.id]).queued).toEqual([a.t.id])
+    expect(t.scheduled).toBeTruthy()
+    expect(w.engine.statusOf(t)).toBe('scheduled')
   })
 })

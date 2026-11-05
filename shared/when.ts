@@ -129,7 +129,7 @@ export function parseIn(text: string): number {
   let pos = 0
   const re = /\s*(\d+(?:\.\d+)?)\s*([a-z]+)\s*/g
   for (let m = re.exec(t); m; m = re.exec(t)) {
-    if (m.index !== pos || !(m[2] in UNITS)) throw new Error(`Unknown span "${text.trim()}". ${IN_HOW}`)
+    if (m.index !== pos || !Object.hasOwn(UNITS, m[2])) throw new Error(`Unknown span "${text.trim()}". ${IN_HOW}`)
     total += Number(m[1]) * UNITS[m[2]]
     pos = m.index + m[0].length
   }

@@ -454,20 +454,20 @@ export class Engine extends Emitter<Events> {
     queueMicrotask(() => {
       // saved for later with no agent, before every task got one at once: its agent starts now and waits for a go
       let chain = Promise.resolve()
-      for (const t of this.tasks.filter((t) => t.told === 'todo' && !t.worktree && !ended(t) && !t.trouble)) {
+      for (const t of this.tasks.filter((t) => t.told === 'todo' && !t.worktree && !ended(t) && !t.stopped && !t.trouble)) {
         if (!t.desc.includes(LATER)) t.desc = `${t.desc || t.title}\n\n${LATER}`
         chain = chain.then(() => this.startTask(t)).catch((e) => this.troubled(t, e))
       }
     })
-    const recheck = setTimeout(() => this.resumeQueue(), RECHECK_FIRST)
-    recheck.unref?.()
-    this.sweeps.push(recheck)
-    // a task scheduled while Shepherdr was off, its time passed meanwhile, starts as soon as it is back (and its chat
-    // says so); then the next one is armed
-    queueMicrotask(() => {
+    // herdr has told which agents are alive: what waits for other tasks may go, and a task whose time passed while
+    // Shepherdr was off starts now — the machine's room can be seen, so it waits for a slot like any other
+    const recheck = setTimeout(() => {
       this.duePass()
       this.armDue()
-    })
+      this.resumeQueue()
+    }, RECHECK_FIRST)
+    recheck.unref?.()
+    this.sweeps.push(recheck)
     // a repo that gained its GitHub remote after it was added shows it from the start
     queueMicrotask(() => Promise.all(this.places.spaces.map((p) => this.places.recheckGithub(p))).then(() => this.emit('changed'), () => undefined))
     // once herdr has told which agents are at work: a restart (main updated by a merge) cuts a clean-up short
@@ -1241,10 +1241,10 @@ export class Engine extends Emitter<Events> {
     return this.dueTasks().filter((t) => t.scheduled!.at <= now).sort((a, b) => a.scheduled!.at - b.scheduled!.at)
   }
 
-  /** Start every task whose time has come (at once on boot, then on the timer): also one whose time passed while
-   *  Shepherdr was off, which starts as soon as it is back and says so in its chat. */
-  duePass(now = Date.now()) {
-    for (const t of this.dueNow(now)) this.beginScheduled(t, now)
+  /** Start every task whose time has come (on the timer, and on the first look after a start): also one whose time
+   *  passed while Shepherdr was off, which starts as soon as it is back and says so in its chat. */
+  duePass(now = Date.now(), note?: string) {
+    for (const t of this.dueNow(now)) this.beginScheduled(t, now, note)
   }
 
   /**
@@ -1252,7 +1252,7 @@ export class Engine extends Emitter<Events> {
    * added counts), then waits for room on this machine, and for the tasks it was queued after (--after) — an agent of
    * its own starts only once both hold, with no countdown left to show.
    */
-  private beginScheduled(t: TaskRec, now = Date.now()) {
+  private beginScheduled(t: TaskRec, now = Date.now(), note?: string) {
     const s = t.scheduled!
     const late = now - s.at > MISSED_BY
     try {
@@ -1266,7 +1266,9 @@ export class Engine extends Emitter<Events> {
     if (late) {
       const id = `due:${t.id}:${now}`
       const when = clockWords(s.at, now, this.zone())
-      this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: `its time (${when}) passed while Shepherdr was off: starting now` } })
+      // why it is late: Shepherdr was off at its time (the usual case), or it was put away and brought back
+      const why = note ?? 'while Shepherdr was off'
+      this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: `its time (${when}) passed ${why}: starting now` } })
     }
     // what it waits for still open: it is queued now, and Shepherdr starts it once those are done
     if (this.queued(t) && this.open(t).length) {
@@ -1326,6 +1328,8 @@ export class Engine extends Emitter<Events> {
       this.hold(t, r.why)
       return { held: r.why }
     }
+    // no longer held: it starts here, and release() must not start it a second time
+    t.held = undefined
     this.startTask(t).catch((e) => this.troubled(t, e))
     return {}
   }
@@ -2433,6 +2437,13 @@ export class Engine extends Emitter<Events> {
     // is no longer what it waits on (writing tries it again, and says so if it fails again); a time it waited for is
     // dropped too, so it does not start by itself while it is stopped
     if (t.scheduled) {
+      // the Settings it would have taken are built now, so writing to it later starts it on them; then no time is left
+      // for it to start by itself while it is stopped
+      try {
+        this.materialize(t)
+      } catch {
+        /* its project is gone: its start says so */
+      }
       t.scheduled = undefined
       this.armDue()
     }
@@ -2537,7 +2548,7 @@ export class Engine extends Emitter<Events> {
     // one that waited for a time meanwhile: its time may have come while it was away
     if (t.scheduled) {
       this.armDue()
-      this.duePass()
+      this.duePass(undefined, 'while it was archived')
     }
     return t
   }

@@ -2874,6 +2874,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           )
         const none = refs.length === 1 && /^(none|nothing|-)$/i.test(refs[0].trim())
         const r = this.engine.queue(t.id, none ? [] : refs, { self: ctx.chat === `${t.id}/Agent` })
+        // one waiting for a time has no agent to tell: what it waits for is looked at once its time comes
+        if (t.scheduled) {
+          const starts = startsWords(t.scheduled.at, Date.now(), this.settings.zone()).replace(/^Starts /, '')
+          if (!r.queued.length) return `${t.id} waits for no task now; it keeps its time (${starts}) and starts then.`
+          return `${t.id} waits for ${r.queued.join(', ')} once its time comes (${starts}).`
+        }
         if (r.queued.length) return `${t.id} is queued after ${r.queued.join(', ')}. ${ctx.chat === `${t.id}/Agent` ? 'Stop at a clean point, reply in one line and end your turn: Shepherdr tells you to go.' : 'Its agent is told to wait; Shepherdr tells it to go once they are done.'}`
         if (r.went) return t.held ? `${t.id} waits for no task now, but is held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : 'the machine is busy'} (${this.workingLine()}). Its agent gets the go when there's room.` : `${t.id} waits for nothing more: its agent is told to go.`
         return none ? `${t.id} was not queued.` : `${t.id} isn't queued: what it would wait for is done already.`
