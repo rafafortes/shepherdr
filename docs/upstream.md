@@ -27,8 +27,8 @@ own `v2.0.<n>` tags (Releases, below).
 - upstream tag `v3.1.10` (`ea72e9f9`, 2026-11-05), the newest release
 - upstream branch `v2.0` tip: `ebb17d58` "SHE-295: Build coordinator Autopilot (#490)", 2026-10-29 (unchanged)
 
-Reviewed on 2026-11-05, the second pass: 60 commits and seven tags since `v3.1.3` (3.1.4 to 3.1.10, all released the
-same day, 09:39 to 16:06 UTC); every upstream commit after `v2.0.0` is weighed in
+Reviewed on 2026-11-05, the second pass: the 60 commits after `dc1b6782`, behind the seven tags since `v3.1.3`
+(3.1.4 to 3.1.10, all released that day, 09:39 to 16:06 UTC); every upstream commit after `v2.0.0` is weighed in
 [the ledger](upstream-ledger.md), the new ones in its 3.1.4 to 3.1.10 section.
 
 ## How we notice a new upstream release
