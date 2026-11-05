@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { startApp } from '../server/app.ts'
 import { Emitter, type Source, type SourceEvents } from '../server/source.ts'
 import { clean, dictate, langOf, MODEL_DIR, MODEL_URL, transcribe, whisperBinary } from '../server/live/dictate.ts'
+import { refuse } from '../server/live/settings.ts'
 import { DICTATE_CAP, DICTATE_TOO_LONG } from '../shared/dictate.ts'
 
 /** a command of the test's own, standing where ffmpeg or whisper-cli would */
@@ -21,17 +22,14 @@ function command(dir: string, name: string, body: string) {
 const dir = mkdtempSync(join(tmpdir(), 'shepherdr-dictate-test-'))
 const model = join(dir, 'ggml-base.bin')
 writeFileSync(model, 'not really a model')
-const was = process.env.PATH ?? ''
-/** the fake ffmpeg first on PATH: what a recording is turned into is the test's own, and it says what it was given */
-command(dir, 'ffmpeg', 'printf "%s\\n" "$@" > "$(dirname "$0")/ffmpeg.args"\nif [ -n "$FFMPEG_FAILS" ]; then echo "Invalid data found when processing input" >&2; exit 1; fi\n: > "${@: -1}"')
-process.env.PATH = `${dir}:${was}`
+/** ffmpeg, played by the test: it says what it was given, and makes the wav it is told to make */
+const ffmpeg = command(dir, 'ffmpeg', 'printf "%s\\n" "$@" > "$(dirname "$0")/ffmpeg.args"\n: > "${@: -1}"')
+/** ffmpeg on a recording it cannot read */
+const brokenFfmpeg = command(dir, 'ffmpeg-broken', 'echo "Invalid data found when processing input" >&2\nexit 1')
 const said = command(dir, 'whisper-cli', `printf '\\n [BLANK_AUDIO] hello from a test (music)\\n a second line\\n'`)
 const broken = command(dir, 'whisper-broken', 'echo "error: failed to load model from file" >&2\nexit 1')
 
-afterAll(() => {
-  process.env.PATH = was
-  rmSync(dir, { recursive: true, force: true })
-})
+afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
 /** a recording of nothing in particular: what a phone's MediaRecorder sends is opus, but the fake ffmpeg takes any */
 const recording = () => new Blob([new Uint8Array(2048)], { type: 'audio/webm' })
@@ -55,12 +53,18 @@ describe('the words whisper writes down', () => {
     // a code Settings does not offer still goes through as it is
     expect(langOf('es')).toBe('es')
   })
+
+  test('Settings take a language code it does not offer, and refuse nonsense', () => {
+    expect(refuse('dictate.language', 'es')).toBeUndefined()
+    expect(refuse('dictate.language', 'Portuguese')).toBeUndefined()
+    expect(refuse('dictate.language', 'Klingon')).toContain('whisper code')
+  })
 })
 
 describe('a recording becomes words', () => {
   test('ffmpeg makes 16 kHz mono of it and whisper writes it down, and nothing is kept', async () => {
     const before = leftovers()
-    const text = await transcribe(recording(), { binary: said, model, lang: 'auto' })
+    const text = await transcribe(recording(), { binary: said, model, lang: 'auto', ffmpeg })
     expect(text).toBe('hello from a test a second line')
     const args = readFileSync(join(dir, 'ffmpeg.args'), 'utf8').trim().split('\n')
     // the rate and channels whisper.cpp needs, and the wav it reads next
@@ -72,23 +76,27 @@ describe('a recording becomes words', () => {
 
   test('a recording too long for the cap never reaches a command', async () => {
     const big = { size: DICTATE_CAP + 1 } as unknown as Blob
-    await expect(transcribe(big, { binary: said, model, lang: 'auto' })).rejects.toThrow(DICTATE_TOO_LONG)
+    await expect(transcribe(big, { binary: said, model, lang: 'auto', ffmpeg })).rejects.toThrow(DICTATE_TOO_LONG)
   })
 
   test('a recording ffmpeg cannot read says so, and keeps nothing', async () => {
     const before = leftovers()
-    process.env.FFMPEG_FAILS = '1'
-    try {
-      await expect(transcribe(recording(), { binary: said, model, lang: 'auto' })).rejects.toThrow(/couldn't be read \(Invalid data/)
-    } finally {
-      delete process.env.FFMPEG_FAILS
-    }
+    await expect(transcribe(recording(), { binary: said, model, lang: 'auto', ffmpeg: brokenFfmpeg })).rejects.toThrow(/couldn't be read \(Invalid data/)
     expect(leftovers()).toEqual(before)
   })
 
   test('whisper failing says so, in its own words', async () => {
-    await expect(transcribe(recording(), { binary: broken, model, lang: 'auto' })).rejects.toThrow(/couldn't write it down \(error: failed to load model/)
+    await expect(transcribe(recording(), { binary: broken, model, lang: 'auto', ffmpeg })).rejects.toThrow(/couldn't write it down \(error: failed to load model/)
   })
+
+  test('one recording is written down at a time, so a phone cannot put this host on its knees', async () => {
+    const slow = command(dir, 'whisper-slow', 'sleep 1\nprintf " slow words\\n"')
+    const ways = { binary: slow, model, lang: 'auto', ffmpeg }
+    const both = await Promise.allSettled([transcribe(recording(), ways), transcribe(recording(), ways)])
+    expect(both.filter((r) => r.status === 'fulfilled').length).toBe(1)
+    const failed = both.find((r) => r.status === 'rejected') as PromiseRejectedResult
+    expect(String(failed.reason)).toContain('Another recording is being written down')
+  }, 20_000)
 
   test('a machine without whisper.cpp, or without the model, says what to do about it', async () => {
     await expect(dictate(recording(), model, 'auto', null)).rejects.toThrow(/sudo apt install whisper\.cpp/)
@@ -100,11 +108,9 @@ describe('a recording becomes words', () => {
   })
 
   test('whisper.cpp is found by the name the Ubuntu archive gives it', () => {
-    expect(whisperBinary((n) => (n === 'whisper-cli' ? '/usr/bin/whisper-cli' : null))).toBe('/usr/bin/whisper-cli')
-    expect(whisperBinary(() => null)).toBeNull()
-    // wherever it is on this machine, it is a file that exists
-    const found = whisperBinary()
-    if (found) expect(existsSync(found)).toBe(true)
+    expect(whisperBinary((n) => (n === 'whisper-cli' ? '/usr/local/bin/whisper-cli' : null))).toBe('/usr/local/bin/whisper-cli')
+    // a PATH without it falls back to where it is usually installed, and whatever is found is a file
+    for (const found of [whisperBinary(() => null), whisperBinary()]) if (found) expect(existsSync(found)).toBe(true)
   })
 })
 

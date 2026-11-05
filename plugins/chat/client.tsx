@@ -2109,7 +2109,7 @@ function DictError() {
   if (!error) return null
   return (
     <div data-topbar role="status" className={dictBar}>
-      <span className="min-w-0 flex-1 text-pretty">Talk to type: {error}</span>
+      <span className="min-w-0 flex-1 text-pretty">{error}</span>
       <IconButton label="Close" className="rounded-full!" onClick={() => setUI({ dictError: null })}>
         <XIcon className={ic} />
       </IconButton>

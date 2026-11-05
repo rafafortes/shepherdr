@@ -62,15 +62,22 @@ export function dictate(end: (text: string | null, failure?: string) => void): D
   /** the recording, sent to the machine that serves Shepherdr: the words come back, or why there are none */
   const writeDown = async () => {
     const audio = new Blob(chunks, { type: type || 'audio/webm' })
-    let said: { text?: string; error?: string } | null = null
+    let r: Response
     try {
-      const r = await fetch('api/dictate', { method: 'POST', headers: { 'x-shepherdr': '1', 'content-type': audio.type }, body: audio })
-      said = (await r.json()) as { text?: string; error?: string }
+      r = await fetch('api/dictate', { method: 'POST', headers: { 'x-shepherdr': '1', 'content-type': audio.type }, body: audio })
     } catch {
       return close(null, "Couldn't reach Shepherdr to write it down.")
     }
-    if (said?.error) return close(null, said.error)
-    const text = (said?.text ?? '').trim()
+    // a proxy in front may answer instead of Shepherdr (a body too big for it, a refused sign-in)
+    let said: { text?: string; error?: string } = {}
+    try {
+      said = (await r.json()) as typeof said
+    } catch {
+      /* not words: what came back is the status below */
+    }
+    if (said.error) return close(null, said.error)
+    if (!r.ok) return close(null, `Shepherdr couldn't write that recording down (${r.status}${r.statusText ? ` ${r.statusText}` : ''}).`)
+    const text = (said.text ?? '').trim()
     if (!text) return close(null, 'Nothing was heard in that recording. Try again, closer to the microphone.')
     close(text)
   }
@@ -103,22 +110,31 @@ export function dictate(end: (text: string | null, failure?: string) => void): D
     .then((stream) => {
       if (state === 'over') return stream.getTracks().forEach((t) => t.stop())
       mic = stream
-      ctx = new AudioContext()
-      level = meter(ctx)
-      ctx.createMediaStreamSource(stream).connect(level)
-      type = recordType()
+      // the recorder, not only the microphone: a browser that won't record says so instead of failing silently
       try {
-        rec = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream)
+        ctx = new AudioContext()
+        level = meter(ctx)
+        ctx.createMediaStreamSource(stream).connect(level)
+        type = recordType()
+        rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined)
+        rec.ondataavailable = (e) => {
+          if (e.data.size) chunks.push(e.data)
+        }
+        rec.onerror = () => close(null, "This browser's recorder stopped before the end of the recording.")
+        rec.start(1000)
       } catch {
         return close(null, "This browser couldn't record your voice.")
       }
-      rec.ondataavailable = (e) => {
-        if (e.data.size) chunks.push(e.data)
-      }
-      rec.start(1000)
       // Done came while the microphone was opening: it records from here and stops at once
       if (state === 'finishing') send()
     })
-    .catch(() => close(null, 'The microphone is off for Shepherdr: allow it in the browser to talk to type.'))
+    .catch((e: Error) =>
+      close(
+        null,
+        e?.name === 'NotAllowedError'
+          ? 'The microphone is off for Shepherdr: allow it in the browser to talk to type.'
+          : "This browser couldn't open the microphone.",
+      ),
+    )
   return self
 }

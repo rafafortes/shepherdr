@@ -67,15 +67,34 @@ export function clean(text: string): string {
     .trim()
 }
 
-const run = (cmd: string[]) => {
+/** a command, killed when it takes longer than it should: a hung whisper or ffmpeg must not hold the machine */
+const run = async (cmd: string[], ms: number) => {
   const p = Bun.spawn(cmd, { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' })
-  return Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]).then(([out, err, code]) => ({ out, err, code }))
+  let late = false
+  const timer = setTimeout(() => {
+    late = true
+    p.kill()
+  }, ms)
+  try {
+    const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited])
+    return { out, err, code, late }
+  } finally {
+    clearTimeout(timer)
+  }
 }
+
+/** a recording is read as wav in seconds; a long one written down takes minutes, and not hours */
+const WAV_MS = 60_000
+const WORDS_MS = 10 * 60_000
+
+/** one recording at a time: whisper takes every core it is given, and this host runs agents too */
+let writing = false
 
 /** the recording as 16 kHz mono wav, as whisper.cpp wants it */
 export async function toWav(audio: Blob, into: string, ffmpeg: string): Promise<void> {
   await Bun.write(join(into, 'audio'), audio)
-  const r = await run([ffmpeg, '-loglevel', 'error', '-nostdin', '-y', '-i', join(into, 'audio'), '-ar', '16000', '-ac', '1', join(into, 'audio.wav')])
+  const r = await run([ffmpeg, '-loglevel', 'error', '-nostdin', '-y', '-i', join(into, 'audio'), '-ar', '16000', '-ac', '1', join(into, 'audio.wav')], WAV_MS)
+  if (r.late) throw new Error('That recording took too long to read.')
   if (r.code !== 0) throw new Error(`That recording couldn't be read${why(r.err)}.`)
 }
 
@@ -88,16 +107,20 @@ const why = (err: string) => {
 /** what a recording says, written down here; throws with words for the screen when it can't be */
 export async function transcribe(audio: Blob, ways: DictateWays): Promise<string> {
   if (audio.size > DICTATE_CAP) throw new Error(DICTATE_TOO_LONG)
-  const ffmpeg = Bun.which('ffmpeg')
+  const ffmpeg = ways.ffmpeg ?? Bun.which('ffmpeg')
   if (!ffmpeg) throw new Error('Talk to type needs ffmpeg on this machine: sudo apt install ffmpeg.')
+  if (writing) throw new Error('Another recording is being written down right now: try again in a moment.')
+  writing = true
   const dir = mkdtempSync(join(tmpdir(), 'shepherdr-dictate-'))
   try {
     await toWav(audio, dir, ffmpeg)
     const threads = Math.min(8, cpus().length)
-    const r = await run([ways.binary, '-m', ways.model, '-f', join(dir, 'audio.wav'), '-l', ways.lang, '-nt', '-np', '-t', String(threads)])
+    const r = await run([ways.binary, '-m', ways.model, '-f', join(dir, 'audio.wav'), '-l', ways.lang, '-nt', '-np', '-t', String(threads)], WORDS_MS)
+    if (r.late) throw new Error('That recording was too long to write down.')
     if (r.code !== 0) throw new Error(`whisper.cpp couldn't write it down${why(r.err)}.`)
     return clean(r.out)
   } finally {
+    writing = false
     rmSync(dir, { recursive: true, force: true })
   }
 }

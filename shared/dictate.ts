@@ -14,6 +14,8 @@ export interface DictateWays {
   model: string
   /** whisper's language code, or auto */
   lang: string
+  /** ffmpeg's command, when it is not the one on PATH (a test's, or a machine that keeps it elsewhere) */
+  ffmpeg?: string
 }
 
 export type DictateAnswer = { text: string } | { error: string }

@@ -255,7 +255,7 @@ export const CATALOG: Section[] = [
     name: 'Dictation',
     levels: ['all', 'machine'],
     about:
-      'Talk to type shows on its own; what it needs is here: whisper.cpp on the machine that serves Shepherdr (sudo apt install whisper.cpp) and a model file. The model is multilingual, so the same setting writes down more than one language; Language is what whisper is told, or Detect it to let it work the language out. The recording is written down and dropped: nothing of it is kept.',
+      'Talk to type shows on its own; what it needs is here: whisper.cpp on the machine that serves Shepherdr (sudo apt install whisper.cpp) and a model file. The model is multilingual, so the same setting writes down more than one language; Language is what whisper is told, or Detect it to let it work the language out (a whisper code like es also works). The recording is written down and dropped: nothing of it is kept. Only the machine that serves the web app writes down, so a value set for another machine is not used.',
     rows: [
       { label: 'Model', key: 'dictate.model', value: '~/.local/share/shepherdr-whisper/ggml-base.bin', text: true },
       { label: 'Language', key: 'dictate.language', value: 'Detect it', options: ['Detect it', 'English', 'Portuguese'] },
@@ -734,9 +734,12 @@ export function refuse(key: string, value: string): string | undefined {
     }
   }
   if (key === 'time.zone' && !validZone(value.trim())) return `${value} is no time zone: write one like Europe/Stockholm.`
-  if (num && numValue(num, value) === undefined) return `Write a number from ${num.min} to ${num.max}${num.step ? '' : ' (whole)'}${num.unit ? `, in ${num.unit}` : ''}${num.off ? ', or off' : num.zero ? ' (0 is off)' : ''}.`
   const options = ROWS.find((r) => r.key === key)?.options
-  if (options && !cli && key !== 'reviewer.agent' && key !== 'alerts' && key !== 'task.fallback' && !options.includes(value)) return `Pick one of: ${options.join(' · ')}.`
+  // a dictation language by name or by its whisper code (es, pt): whisper knows more of them than Settings lists
+  if (key === 'dictate.language' && !options?.includes(value) && !/^(auto|[a-z]{2,3})$/i.test(value.trim()))
+    return 'Pick a language, or write its whisper code (en, pt, es).'
+  if (num && numValue(num, value) === undefined) return `Write a number from ${num.min} to ${num.max}${num.step ? '' : ' (whole)'}${num.unit ? `, in ${num.unit}` : ''}${num.off ? ', or off' : num.zero ? ' (0 is off)' : ''}.`
+  if (options && !cli && key !== 'reviewer.agent' && key !== 'alerts' && key !== 'task.fallback' && key !== 'dictate.language' && !options.includes(value)) return `Pick one of: ${options.join(' · ')}.`
   return undefined
 }
 
