@@ -46,6 +46,9 @@ export interface Source extends Emitter<SourceEvents> {
   /** which chats and terminal are on someone's screen: read them while they are */
   watch(chats: string[], terms: string[]): void
   upload(chat: string, name: string, data: Uint8Array): Promise<string>
+  /** talk to type: a recording, written down on this machine (whisper.cpp), its words back; throws with words for the
+   *  screen when it can't (no whisper.cpp, no model, nothing said). It stops when the screen goes away (signal) */
+  dictate?(audio: Blob, signal?: AbortSignal): Promise<string>
   /** a file attached in a chat, by the path its chat line gives; only those, never anything else on the machine */
   attachment(chat: string, path: string): Promise<Blob | null>
   /** a machine's folders, for adding a project: only folders in the human's home on it */

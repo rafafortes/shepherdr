@@ -2014,8 +2014,8 @@ export function toggleDictation(chatKey: string) {
   const at = box && document.activeElement === box ? [box.selectionStart, box.selectionEnd] : null
   // the box records instead of taking typing, so the keyboard goes down
   ;(document.activeElement as HTMLElement | null)?.blur?.()
-  setUI({ dict: chatKey, dictStarted: Date.now(), dictDone: false, focus: null, plus: null })
-  dictation = dictate((said) => {
+  setUI({ dict: chatKey, dictStarted: Date.now(), dictDone: false, dictError: null, focus: null, plus: null })
+  dictation = dictate((said, failure) => {
     dictation = null
     if (getState().ui.dict !== chatKey) return
     const now = getDraft(chatKey) ?? ''
@@ -2028,7 +2028,8 @@ export function toggleDictation(chatKey: string) {
       setDraft(chatKey, before + words + (after && !/^\s/.test(after) ? ' ' : '') + after)
       caret = before.length + words.length
     }
-    setUI({ dict: null, dictDone: false })
+    // nothing to write down, or it couldn't be: the box comes back as it was, and the chat says why
+    setUI({ dict: null, dictDone: false, dictError: failure ?? null })
     // the box comes back as a new textarea: the cursor goes into it right after the words, its line in view
     let tries = 10
     const back = () => {
@@ -2079,9 +2080,9 @@ export function DictationBox() {
       <p className="flex shrink-0 items-center gap-2 pr-1 pl-2 text-[0.8125rem] text-fg2 tabular-nums phone:text-[0.9375rem]">
         <span aria-hidden="true" className="size-2 rounded-full bg-need motion-safe:animate-pulse" />
         <span role="status" className="sr-only">
-          {ui.dictDone ? 'Putting it in the box' : 'Recording'}
+          {ui.dictDone ? 'Writing it down' : 'Recording'}
         </span>
-        {t}
+        {ui.dictDone ? 'Writing it down' : t}
       </p>
       <LiveWave sample={dictSample} label="Your voice" className="mr-1.5 flex-1" />
       <button
@@ -2094,6 +2095,24 @@ export function DictationBox() {
         <CheckIcon className={ic} />
       </button>
     </>
+  )
+}
+
+/** Talk to type couldn't be written down (whisper.cpp or its model missing on the machine that serves Shepherdr, the
+ *  microphone off, nothing heard): the chat says why in words to act on, until it is closed. */
+const dictBar =
+  'mx-3 mt-2 flex shrink-0 items-center gap-2.5 rounded-full bg-bubble py-1.5 pr-1.5 pl-4 text-[0.8125rem] text-fg2 [[data-device=phone]>&:first-child]:mt-[calc(env(safe-area-inset-top)+8px)] phone:text-[0.9375rem]'
+
+function DictError() {
+  const error = useUI((u) => u.dictError)
+  if (!error) return null
+  return (
+    <div data-topbar role="status" className={dictBar}>
+      <span className="min-w-0 flex-1 text-pretty">{error}</span>
+      <IconButton label="Close" className="rounded-full!" onClick={() => setUI({ dictError: null })}>
+        <XIcon className={ic} />
+      </IconButton>
+    </div>
   )
 }
 
@@ -2424,6 +2443,7 @@ export default definePlugin({
     reg.messageParts.push({ order: 61, View: ({ msg, chat }) => (msg.secret ? <SecretCard ask={msg.secret} chat={chat} /> : null) })
     reg.composerPlus = PlusMenu
     reg.composerMic = Mic
+    reg.topBars.push(DictError)
     reg.composerLive.push({ when: (ui, chatKey) => ui.dict === chatKey, View: DictationBox })
     // while it records, Enter puts it in the box and Esc drops it
     reg.keys.push({

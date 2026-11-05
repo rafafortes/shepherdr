@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apart, asEmoji, artifactQuote, cardMessage, modeCard, nameProblem, slugify, type Action, type ActivityAsk, type AddSpace, type Artifact, type Chat, type FolderEntry, type Folders, type Machine, type Message, type Place, type Snapshot, type Task, type TaskStatus, type TermScreen, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
 import { Emitter, type Source, type SourceEvents } from '../source.ts'
+import { DICTATE_CAP, DICTATE_TOO_LONG } from '../../shared/dictate.ts'
 import * as D from './data.ts'
 import { ARTIFACT_DATA, ARTIFACT_HTML, thumb } from './artifacts.ts'
 import { DEMO_PRS, demoWorktree } from './code.ts'
@@ -297,6 +298,13 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     this.files[path] = () => blob
     this.uploaded.add(`${chat}\n${path}`)
     return path
+  }
+
+  /** Talk to type writes nothing down here: the demo has no whisper. It answers with words to look at, so the box and
+   *  the screen can be reviewed without a microphone or a model. */
+  async dictate(audio: Blob) {
+    if (audio.size > DICTATE_CAP) throw new Error(DICTATE_TOO_LONG)
+    return 'This is what talking to type wrote down.'
   }
 
   async attachment(chat: string, path: string) {

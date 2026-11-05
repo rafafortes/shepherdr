@@ -1,6 +1,6 @@
 // A voice call and talk to type, as a phone and a computer draw them: the chat box itself turns into the call or the
 // recorder, with no bar above it. Built, served and opened in a real browser with a pretend microphone, a pretend voice
-// agent and pretend speech recognition. Skipped where no browser is installed.
+// agent and a pretend machine that writes recordings down. Skipped where no browser is installed.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import type { Browser, BrowserContextOptions, Page } from 'playwright-core'
 import { startApp } from '../server/app.ts'
@@ -72,38 +72,35 @@ function pretend() {
     for (let i = 0; i < pcm.length; i++) pcm[i] = Math.sin(i / 8) * 12000
     ;(w.call as Call).onmessage?.({ data: pcm.buffer })
   }
-  class Rec {
-    onresult: ((e: unknown) => void) | null = null
-    onend: (() => void) | null = null
-    onerror: (() => void) | null = null
-    start() {
-      w.rec = this
-    }
-    stop() {
-      setTimeout(() => this.onend?.(), 20)
-    }
-    abort() {
-      setTimeout(() => this.onend?.(), 0)
-    }
-  }
-  w.SpeechRecognition = Rec
-  w.hear = (text: string) => (w.rec as Rec).onresult?.({ resultIndex: 0, results: [Object.assign([{ transcript: text }], { isFinal: true })] })
 }
 
 const url = () => `http://127.0.0.1:${server!.port}/?place=vm-str/home`
 const box = '[data-composer]'
 
-async function open(opts: BrowserContextOptions) {
+/** what the machine that serves Shepherdr answers when the recording goes up: its words, or why it has none */
+type Answer = { text?: string; error?: string }
+
+async function open(opts: BrowserContextOptions, answer: Answer = { text: 'the rest of it' }) {
   const ctx = await browser!.newContext({ permissions: ['microphone'], ...opts })
   await ctx.addInitScript(pretend)
+  // whisper takes a moment: the box says what it is doing meanwhile
+  await ctx.route('**/api/dictate', async (route) => {
+    await new Promise((r) => setTimeout(r, 150))
+    const body = JSON.stringify(answer.error ? { error: answer.error } : { text: answer.text ?? '' })
+    await route.fulfill({ status: answer.error ? 422 : 200, contentType: 'application/json', body })
+  })
   const page = await ctx.newPage()
   await page.goto(url())
   await page.waitForSelector(`${box} textarea`)
-  return { ctx, page }
+  return { ctx, page, answer }
 }
 
 /** everything the composer shows above its box */
 const above = (page: Page) => page.$eval(box, (b) => b.previousElementSibling?.textContent ?? '')
+
+/** the recorder's first piece of audio comes a second in (its timeslice), as it does for someone speaking: a Done
+ *  pressed the instant the microphone opens has nothing to send, which is its own case below */
+const aMomentOfSpeech = (page: Page) => page.waitForTimeout(1500)
 
 describe.skipIf(!browser)('a voice call lives in the chat box', () => {
   test('the box turns into the call: no typing, the wave, what it is doing, a timer, Mute and End', async () => {
@@ -202,46 +199,85 @@ describe.skipIf(!browser)('talk to type records in the chat box', () => {
     expect(await page.$(`${box} canvas[aria-label="Your voice"]`)).not.toBeNull()
     expect(await page.textContent(`${box} p`)).toMatch(/0:0\d$/)
     expect(await above(page)).toBe('')
-    await page.evaluate(() => (window as unknown as { hear(t: string): void }).hear('the rest of it'))
+    await aMomentOfSpeech(page)
     await page.tap(`${box} button[aria-label^="Done"]`)
+    // the words are written down on the machine that serves Shepherdr: the box says so while it happens
+    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent === 'Writing it down', `${box} p [role=status]`)
     await page.waitForSelector(`${box} textarea`)
     expect(await page.inputValue(`${box} textarea`)).toBe('Before the rest of it')
     // Cancel drops what it heard
     await page.tap(`${box} button[aria-label="Talk to type"]`)
     await page.waitForSelector(`${box} button[aria-label=Cancel]`)
-    await page.evaluate(() => (window as unknown as { hear(t: string): void }).hear('never mind'))
     await page.tap(`${box} button[aria-label=Cancel]`)
     await page.waitForSelector(`${box} textarea`)
     expect(await page.inputValue(`${box} textarea`)).toBe('Before the rest of it')
     await ctx.close()
   }, 30_000)
 
+  test('a machine that cannot write it down says why in the chat, and the box keeps what you had typed', async () => {
+    const why = 'Talk to type needs whisper.cpp on the machine that serves Shepherdr: run `sudo apt install whisper.cpp` there.'
+    const { ctx, page } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }, { error: why })
+    await page.fill(`${box} textarea`, 'Before')
+    await page.tap(`${box} button[aria-label="Talk to type"]`)
+    await page.waitForSelector(`${box} button[aria-label^="Done"]`)
+    await aMomentOfSpeech(page)
+    await page.tap(`${box} button[aria-label^="Done"]`)
+    await page.waitForSelector('[data-topbar]')
+    expect(await page.textContent('[data-topbar]')).toContain(why)
+    expect(await page.inputValue(`${box} textarea`)).toBe('Before')
+    await page.tap('[data-topbar] button[aria-label="Close"]')
+    expect(await page.$('[data-topbar]')).toBeNull()
+    await ctx.close()
+  }, 30_000)
+
+  test('Done pressed the instant the microphone opens says nothing was heard, and the box comes back to type in', async () => {
+    const { ctx, page } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    await page.fill(`${box} textarea`, 'Before')
+    await page.tap(`${box} button[aria-label="Talk to type"]`)
+    await page.waitForSelector(`${box} button[aria-label^="Done"]`)
+    // no audio at all yet: there is nothing to write down, and nothing is sent
+    await page.tap(`${box} button[aria-label^="Done"]`)
+    await page.waitForSelector('[data-topbar]')
+    expect(await page.textContent('[data-topbar]')).toContain('Nothing was heard in that recording')
+    expect(await page.inputValue(`${box} textarea`)).toBe('Before')
+    // the cursor is back in the box, where it was
+    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA')
+    await ctx.close()
+  }, 30_000)
+
   test('a long draft keeps its height when the box comes back from recording', async () => {
     const { ctx, page } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     const long = Array.from({ length: 60 }, (_, i) => `Sentence ${i + 1} of a long draft.`).join(' ')
+    const withWords = `${long} the rest of it`
     const height = () => page.$eval(`${box} textarea`, (t) => t.getBoundingClientRect().height)
+    // what it looks like once the words are in, before it is recorded: Cancel keeps it, Done comes back to it
+    await page.fill(`${box} textarea`, withWords)
+    const done = await height()
+    expect(done).toBeGreaterThan(150)
     await page.fill(`${box} textarea`, long)
     const tall = await height()
-    expect(tall).toBeGreaterThan(150)
-    for (const [start, stop] of [
-      ['button[aria-label="Talk to type"]', 'button[aria-label=Cancel]'],
-      ['button[aria-label="Talk to type"]', 'button[aria-label^="Done"]'],
-    ]) {
+    const steps: [string, string, number][] = [
+      ['button[aria-label="Talk to type"]', 'button[aria-label=Cancel]', tall],
+      ['button[aria-label="Talk to type"]', 'button[aria-label^="Done"]', done],
+    ]
+    for (const [start, stop, want] of steps) {
       await page.tap(`${box} ${start}`)
       await page.waitForSelector(`${box} ${stop}`)
+      await aMomentOfSpeech(page)
       await page.tap(`${box} ${stop}`)
       await page.waitForSelector(`${box} textarea`)
       await page.waitForTimeout(50)
-      expect(Math.abs((await height()) - tall)).toBeLessThan(1)
+      expect(Math.abs((await height()) - want)).toBeLessThan(1)
     }
     await ctx.close()
   }, 30_000)
 
   test('on a computer T records, Enter puts it in with the cursor after it, Esc drops it', async () => {
-    const { ctx, page } = await open({ viewport: { width: 1280, height: 800 } })
+    const { ctx, page, answer } = await open({ viewport: { width: 1280, height: 800 } })
+    answer.text = 'Ship it'
     await page.keyboard.press('t')
     await page.waitForSelector(`${box} button[aria-label^="Done"]`)
-    await page.evaluate(() => (window as unknown as { hear(t: string): void }).hear('Ship it'))
+    await aMomentOfSpeech(page)
     await page.keyboard.press('Enter')
     await page.waitForSelector(`${box} textarea`)
     expect(await page.inputValue(`${box} textarea`)).toBe('Ship it')
@@ -259,11 +295,12 @@ describe.skipIf(!browser)('talk to type records in the chat box', () => {
     const caret = (page: Page) =>
       page.$eval(`${box} textarea`, (t) => [document.activeElement === t, (t as HTMLTextAreaElement).selectionStart, (t as HTMLTextAreaElement).selectionEnd])
     for (const opts of [{ viewport: { width: 1280, height: 800 } }, { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }]) {
-      const { ctx, page } = await open(opts)
+      const { ctx, page, answer } = await open(opts)
       const talk = async (said: string) => {
+        answer.text = said
         await page.click(`${box} button[aria-label="Talk to type"]`)
         await page.waitForSelector(`${box} button[aria-label^="Done"]`)
-        await page.evaluate((t) => (window as unknown as { hear(t: string): void }).hear(t), said)
+        await aMomentOfSpeech(page)
         await page.click(`${box} button[aria-label^="Done"]`)
         await page.waitForSelector(`${box} textarea`)
         await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA')

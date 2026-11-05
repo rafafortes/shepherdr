@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, watch } from 'node:fs'
 import { basename, dirname, join, normalize } from 'node:path'
 import { notifies, waiting } from '../shared/alerts.ts'
 import { buildId } from '../shared/build.ts'
+import { DICTATE_CAP, DICTATE_TOO_LONG } from '../shared/dictate.ts'
 import { fileType } from '../shared/files.ts'
 import type { Action, AddSpace, ServerEvent, UpdateStatus, WorktreeAsk } from '../shared/types.ts'
 import { frameResponse, wrapPage } from './frame.ts'
@@ -194,6 +195,21 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
           const at = q.get('path') ?? ''
           const blob = await source.attachment(q.get('chat') ?? '', at)
           return blob ? attachment(blob, basename(at).replace(/^[a-z0-9]+-/, ''), q.has('download')) : new Response('no such file', { status: 404 })
+        }
+        // talk to type: the browser's recording, written down here (whisper.cpp); the words go back, never the audio
+        if (path === '/api/dictate' && req.method === 'POST') {
+          if (!source.dictate) return json({ error: 'This server does not write dictation down.' }, 404)
+          // a recording over the cap is refused before it is read into memory
+          if (Number(req.headers.get('content-length') ?? 0) > DICTATE_CAP) return json({ error: DICTATE_TOO_LONG }, 413)
+          const audio = new Blob([await req.arrayBuffer()], { type: req.headers.get('content-type') ?? '' })
+          if (audio.size > DICTATE_CAP) return json({ error: DICTATE_TOO_LONG }, 413)
+          // a long recording takes as long as whisper takes: no idle cut-off meanwhile. Its screen going away stops it
+          srv.timeout(req, 0)
+          try {
+            return json({ text: await source.dictate(audio, req.signal) })
+          } catch (e) {
+            return json({ error: (e as Error).message }, 422)
+          }
         }
         if (path === '/api/cli' && req.method === 'POST') {
           const cli = (source as Source & { cli?(a: string[], c: { chat?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string }): Promise<{ out: string; code: number }> }).cli
