@@ -99,10 +99,11 @@ describe('a task that starts by itself at a time', () => {
     await until(() => !t.scheduled, 15_000)
     expect(w.engine.statusOf(t)).toBe('queued')
     expect(w.started.some((s) => s.key === `${t.id}/Agent`)).toBe(false)
-    // that task is done with nothing to merge: its own agent starts, the go in its brief (no agent waited to hear it)
+    // that task is done with nothing to merge: its own agent is started for the go, and gets it as its first message
     await w.engine.close(a.t.id)
     await until(() => w.started.some((s) => s.key === `${t.id}/Agent`), 15_000)
-    expect(w.started.find((s) => s.key === `${t.id}/Agent`)!.first).toContain(`Go: ${a.t.id} is done, start now.`)
+    expect(w.started.find((s) => s.key === `${t.id}/Agent`)!.first).not.toContain('Queued:')
+    expect(w.sent.some((x) => x.key === `${t.id}/Agent` && x.text.includes(`Go: ${a.t.id} is done, start now.`))).toBe(true)
   }, 30_000)
 
   test('anything written to it is the go: it starts now, on its brief with the words in it', async () => {

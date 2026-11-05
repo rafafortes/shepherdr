@@ -910,14 +910,9 @@ export class Engine extends Emitter<Events> {
     const id = `go:${t.id}:${Date.now()}`
     this.chats.post(key, { id, card: { id, task: t.id, status: 'work', text: `started: ${why}` } })
     this.save()
-    if (!t.worktree && !this.starting.has(t.id)) {
-      // it never started (its time came while it waited for another task): no agent waits to hear the go, so it goes in
-      // the brief it starts on, and is not sent again after a restart (nothing is waiting to receive it)
-      const [work, how] = splitBrief(t.desc)
-      t.desc = [work, text, how].filter(Boolean).join('\n\n')
-      t.going = undefined
-      this.startTask(t).catch((e) => this.troubled(t, e))
-    } else this.agents.send(key, plain ? text : hidden(text, 'go'), { ensure: this.starter(t) }).catch(() => undefined)
+    // its agent hears it: one that never started (a scheduled task whose time came while it waited for another) is
+    // started first by `ensure`, and gets the go as its first message after the brief (starter)
+    this.agents.send(key, plain ? text : hidden(text, 'go'), { ensure: this.starter(t) }).catch(() => undefined)
     this.settleOne(t)
     this.settleSoon(t, ANSWER_GRACE + 500)
   }
