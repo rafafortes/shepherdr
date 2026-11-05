@@ -22,6 +22,7 @@ import { HELP, one, parseArgs, summaryOpts, type Parsed } from './args.ts'
 import { Automations, type Automation, type Template } from './automations.ts'
 import { Heartbeats, heartbeatFile } from './heartbeat.ts'
 import { eventRules, eventsText, eventWords, matches, nextWords, runWords, timeRule, timeWords, triggerWords, type Happened, type TriggerEvent } from './trigger.ts'
+import { startsWords, whenFrom } from '../../shared/when.ts'
 import { Browsers, type BrowserBridge, type BrowserClient } from './browser.ts'
 import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
@@ -2749,8 +2750,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (sub === 'add') {
       if (!rest[0]?.trim()) throw new Error('shepherdr task add "<title>" --desc "<the whole brief>"')
       if (p.flags.has('after')) throw new Error('--after needs the tasks it waits for: --after SHE-12,SHE-13')
-      const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => !['brief', 'desc', 'space', 'base', 'after', 'later', 'agent', 'model', 'effort', 'reviewer', 'reviewer-model', 'reviewer-effort', 'set'].includes(f))
-      if (odd.length) throw new Error(`Task add takes no --${odd[0]}: only --desc, --space, --base, --after, --later, --set, --agent, --model, --effort, --reviewer, --reviewer-model and --reviewer-effort`)
+      const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => !['brief', 'desc', 'space', 'base', 'after', 'at', 'in', 'later', 'agent', 'model', 'effort', 'reviewer', 'reviewer-model', 'reviewer-effort', 'set'].includes(f))
+      if (odd.length) throw new Error(`Task add takes no --${odd[0]}: only --desc, --space, --base, --after, --at, --in, --later, --set, --agent, --model, --effort, --reviewer, --reviewer-model and --reviewer-effort`)
       // --set key=value: a How tasks work setting for this task, or what --agent, --reviewer and the like set
       const set: Record<string, string> = {}
       for (const pair of p.opts.set ?? []) {
@@ -2791,10 +2792,20 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       }
       const pr = named && this.places.space(named) ? this.places.space(named)! : this.projectFor(p, ctx)
       await validateBase(pr.path, one(p, 'base') ?? pr.base)
+      // --at / --in: it starts by itself then, in the time zone Settings sets
+      const at = one(p, 'at')
+      const within = one(p, 'in')
+      const when = at !== undefined || within !== undefined ? whenFrom(at, within, this.settings.zone()) : undefined
       const after = p.opts.after ?? []
       const agent = harnessOf(p, this.settings)
       const reviewer = reviewerOf(p, this.settings)
-      const t = this.engine.add({ project: pr.name, base: one(p, 'base'), title, desc: one(p, 'brief') ?? one(p, 'desc'), by: this.byWho(ctx), requester: this.requestedNews.known(ctx.chat), after, later: p.flags.has('later'), agent, reviewer, set })
+      const t = this.engine.add({ project: pr.name, base: one(p, 'base'), title, desc: one(p, 'brief') ?? one(p, 'desc'), by: this.byWho(ctx), requester: this.requestedNews.known(ctx.chat), after, later: p.flags.has('later'), at: when, agent, reviewer, set })
+      // one added for a time has no agent yet: nothing of Settings is read until it starts
+      if (t.scheduled) {
+        const starts = startsWords(t.scheduled.at, Date.now(), this.settings.zone())
+        const waits = [t.after?.length ? `${t.after.join(', ')} ${t.after.length === 1 ? 'is' : 'are'} done` : '', 'the machine has room, as for any queued task'].filter(Boolean).join(' and ')
+        return `Added ${t.id}: ${t.title}, ${starts.toLowerCase()}. It has no agent yet: it starts by itself then, once ${waits}, on the Settings as they are then.${p.flags.has('later') ? ` Its agent then reads the brief and waits for a go (shepherdr task tell ${t.id} "go").` : ''}`
+      }
       const on = [CLI_NAME[t.agent!.kind] ?? t.agent!.kind, t.agent!.model, t.agent!.effort && `${t.agent!.effort} effort`].filter(Boolean).join(', ')
       if (t.after?.length) return `Added ${t.id}: ${t.title}, queued after ${t.after.join(', ')}. Its agent (${on}) reads the brief now and waits; Shepherdr tells it to go once ${t.after.length === 1 ? 'that task is' : 'they are all'} done.`
       if (p.flags.has('later')) return `Added ${t.id}: ${t.title}, for later. Its agent (${on}) reads the brief now and waits for a go (shepherdr task tell ${t.id} "go").`
@@ -2808,7 +2819,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const ts = this.engine.tasks.filter((t) => (!pr || t.project === placeId.space(pr.name)) && shown(t)).map((t) => this.engine.view(t))
       const others = pr ? [] : (this.peers?.list() ?? []).flatMap((l) => (l.snap?.tasks ?? []).filter(shown).map((t) => ({ ...t, machine: l.rec.machine })))
       const all = doneNewestFirst<(typeof ts)[number] | (typeof others)[number]>([...ts, ...others])
-      if (p.flags.has('json')) return JSON.stringify(all.map((t) => ({ id: t.id, title: t.name, status: t.status, sub: statusLine(t), machine: 'machine' in t ? t.machine : undefined, archived: t.archived, pinned: t.pinned })), null, 2)
+      if (p.flags.has('json')) return JSON.stringify(all.map((t) => ({ id: t.id, title: t.name, status: t.status, sub: statusLine(t), machine: 'machine' in t ? t.machine : undefined, archived: t.archived, pinned: t.pinned, ...(t.scheduled ? { scheduled: t.scheduled } : {}) })), null, 2)
       const rows = all.map((t) => `${t.id.padEnd(8)} ${t.status.padEnd(5)} ${t.name}${t.pinned ? '  (pinned)' : ''}${statusLine(t) ? `  · ${statusLine(t)}` : ''}${'machine' in t ? `  (on ${t.machine})` : ''}`)
       const archived = p.flags.has('archived') ? 0 : this.engine.tasks.filter((t) => t.archived && (!pr || t.project === placeId.space(pr.name))).length
       const tail = archived ? `\n(${archived} archived: shepherdr task list --archived)` : ''
@@ -2841,7 +2852,26 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       }
       case 'queue': {
         const refs = p.opts.after ?? []
-        if (!refs.length) throw new Error('shepherdr task queue <id> --after SHE-12[,SHE-13]  (--after none clears it)')
+        const at = one(p, 'at')
+        const within = one(p, 'in')
+        // --at … / --in …: it starts by itself then; --at none (or "") cancels a time it waits for and starts it now
+        if (at !== undefined || within !== undefined) {
+          if (refs.length) throw new Error('One at a time: --at … or --after …, not both. A task scheduled --at still waits for what it is already --after.')
+          if (within === undefined && /^(none|nothing|off|-|)$/i.test((at ?? '').trim())) {
+            const r = this.engine.schedule(t.id, null)
+            if (r.queued?.length) return `${t.id} no longer waits for a time: it starts once ${r.queued.join(', ')} ${r.queued.length === 1 ? 'is' : 'are'} done.`
+            if (r.held) return `${t.id} no longer waits for a time, but is held: ${r.held === 'slots' ? `all ${this.settings.machine().max} slots are taken` : 'the machine is busy'} (${this.workingLine()}). It starts as soon as there's room, oldest first.`
+            return `${t.id} no longer waits for a time: it starts now.`
+          }
+          const when = whenFrom(at, within, this.settings.zone())
+          this.engine.schedule(t.id, when)
+          const after = this.engine.view(t).after ?? []
+          return `${t.id} starts ${startsWords(when, Date.now(), this.settings.zone()).replace(/^Starts /, '')}. It waits for the machine's room like any queued task${after.length ? `, and for ${after.join(', ')}` : ''}; its Settings are read when it starts, not before.`
+        }
+        if (!refs.length)
+          throw new Error(
+            'shepherdr task queue <id> --after SHE-12[,SHE-13]  (--after none clears it), or --at "tomorrow 9:00" / --in 6h  (--at none clears a time and starts it now)',
+          )
         const none = refs.length === 1 && /^(none|nothing|-)$/i.test(refs[0].trim())
         const r = this.engine.queue(t.id, none ? [] : refs, { self: ctx.chat === `${t.id}/Agent` })
         if (r.queued.length) return `${t.id} is queued after ${r.queued.join(', ')}. ${ctx.chat === `${t.id}/Agent` ? 'Stop at a clean point, reply in one line and end your turn: Shepherdr tells you to go.' : 'Its agent is told to wait; Shepherdr tells it to go once they are done.'}`

@@ -16,9 +16,14 @@ const names = (g: { names: { machine: boolean; project: boolean } }) => `${g.nam
 const vmStr = ts.filter((t) => t.place.startsWith('p:vm-str:'))
 
 describe('grouping tasks', () => {
-  test('by status: Needs you, Ready, Merging, Working, Queued, To do, Done, empty groups left out but To do', () => {
+  test('by status: Needs you, Ready, Merging, Working, Scheduled, Queued, To do, Done, empty groups left out but To do', () => {
     const gs = groupTasks(ps, ts, 'status')
     expect(gs.map((g) => g.label)).toEqual(['Needs you', 'Ready', 'Merging', 'Working', 'Queued', 'To do', 'Done'])
+    // one waiting for its time has a group of its own, between Working and Queued
+    const sched: Task = { ...ts.find((t) => t.id === 'HP-204')!, id: 'HP-205', status: 'scheduled', sub: 'Starts Tomorrow 9:00', scheduled: Date.now() + 6 * 3_600_000 }
+    const withScheduled = groupTasks(ps, [...ts, sched], 'status')
+    expect(withScheduled.map((g) => g.label)).toEqual(['Needs you', 'Ready', 'Merging', 'Working', 'Scheduled', 'Queued', 'To do', 'Done'])
+    expect(withScheduled.find((g) => g.key === 'scheduled')!.tasks.map((t) => t.id)).toEqual(['HP-205'])
     for (const g of gs) expect(new Set(g.tasks.map((t) => t.status)).size).toBe(1)
     expect(groupTasks(ps, ts.filter((t) => t.status === 'need'), 'status').map((g) => [g.label, g.tasks.length])).toEqual([
       ['Needs you', ts.filter((t) => t.status === 'need' && !t.archived).length],

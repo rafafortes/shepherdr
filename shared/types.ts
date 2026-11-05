@@ -3,8 +3,8 @@
 import type { BrowserNote } from './browser.ts'
 
 /** Status marks: red needs you, green ready, green turning ring merging, amber working, grey ring idle or to do, grey
- * clock queued, grey check done, dashed ring unreachable. */
-export type Status = 'need' | 'ready' | 'merging' | 'work' | 'idle' | 'queued' | 'todo' | 'done' | 'off'
+ * clock queued or scheduled (its agent starts by itself at a time), grey check done, dashed ring unreachable. */
+export type Status = 'need' | 'ready' | 'merging' | 'work' | 'idle' | 'scheduled' | 'queued' | 'todo' | 'done' | 'off'
 
 /** regular, always the fallback: the coordinator does what the human asks; or Autopilot, a switch on top of it */
 export type Mode = 'regular' | 'autopilot'
@@ -172,10 +172,11 @@ export interface Report {
 }
 
 /** need: its agent asks or waits for you; ready: finished, waits for you to merge it; merging: finished and on its way
- * into main, nothing for you to do (GitHub's checks run, it is rebased or merged); work: its agent is at it; queued:
- * it waits for other tasks to be done, then Shepherdr tells its agent to go; todo: its agent waits for a go, or is
- * starting and not yet at work on its brief; done: merged */
-export type TaskStatus = 'need' | 'ready' | 'merging' | 'work' | 'queued' | 'todo' | 'done'
+ * into main, nothing for you to do (GitHub's checks run, it is rebased or merged); work: its agent is at it; scheduled:
+ * it starts by itself at a time, and has no agent yet (`task add --at`/`--in`); queued: it waits for other tasks to be
+ * done, then Shepherdr tells its agent to go; todo: its agent waits for a go, or is starting and not yet at work on its
+ * brief; done: merged */
+export type TaskStatus = 'need' | 'ready' | 'merging' | 'work' | 'scheduled' | 'queued' | 'todo' | 'done'
 
 /** A task's one agent: tapping the task opens its chat. */
 export interface TaskAgent {
@@ -223,6 +224,8 @@ export interface Task {
   pr?: { number: number; url: string }
   /** queued: the tasks it still waits for ("SHE-12", "vm-str:SHE-12" on another machine) */
   after?: string[]
+  /** scheduled: when it starts by itself (ms), in the time zone Settings sets */
+  scheduled?: number
   /** how it ended, for a task queued after it: done (merged, or closed with nothing to merge), stopped, failed */
   outcome?: 'done' | 'stopped' | 'failed'
   /** when it was archived (ms): out of every list and count, only search and its place's Archived view show it */

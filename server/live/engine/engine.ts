@@ -13,6 +13,7 @@ import { existsSync, statSync } from '../mfs.ts'
 import { agentEnv } from '../box.ts'
 import { join } from 'node:path'
 import { STATUS_MAX, TITLE_MAX, type Question, type Report, type Task, type TaskStatus, type UpdateCard } from '../../../shared/types.ts'
+import { clockWords, startsLine } from '../../../shared/when.ts'
 import { Emitter } from '../../source.ts'
 import { home, readJson, writeJson } from '../../store.ts'
 import { ROOT } from '../../root.ts'
@@ -80,6 +81,9 @@ export interface TaskRec {
   /** queued: the tasks it waits for ("SHE-12", or "vm-str:SHE-12" on another machine); cleared by the go Shepherdr
    *  sends once they are all done, or by anything written to it */
   after?: string[]
+  /** starts by itself at a time (`task add --at`/`--in`, or `task queue <id> --at`): when, in the time zone Settings
+   *  sets. A task added for a time has no agent yet, and takes its Settings when it starts, not when it was added */
+  scheduled?: Scheduled
   /** the go sent to its agent, until the agent is seen at work: a restart in between sends it again */
   going?: string
   /** held by Shepherdr until this machine has room for it (Settings → the machine's limits): why it waits (all its
@@ -125,6 +129,24 @@ export interface TaskRec {
   /** coordinators were told it stalled: its last sign of life then (`life`), and the report (by its time) it ran far
    *  past (`over`); each is told once, until it shows life again or reports anew */
   stalled?: { life?: number; over?: number }
+}
+
+/**
+ * A task that starts by itself at a time (`task add --at "tomorrow 9:00"`, `--in 6h`, or `task queue <id> --at`): when,
+ * and — for one added for a time — the brief as it was written, before Shepherdr's Settings block. Its agent, reviewer
+ * and the Settings the block says are read when it starts, so a setting changed meanwhile still counts.
+ */
+export interface Scheduled {
+  at: number
+  /** the brief's own words; none for a task scheduled after it was added, whose brief is already whole */
+  desc?: string
+  /** the coordinator's --set for this task, applied when it starts */
+  set?: Record<string, string>
+  /** it was added --later: once its time comes its agent reads the brief and waits for a go */
+  later?: boolean
+  /** the CLI, model and effort the coordinator chose for it when it was added */
+  agent?: Partial<Harness>
+  reviewer?: Partial<Harness>
 }
 
 /**
@@ -216,7 +238,7 @@ export function askOf(text = ''): string | undefined {
 /** finished: merged, or closed with nothing to merge */
 export const ended = (t: TaskRec) => !!(t.merged || t.closed)
 
-const STATE: Record<TaskStatus, string> = { need: 'Needs you', ready: 'Ready', merging: 'Merging', work: 'Working', queued: 'Queued', todo: 'To do', done: 'Done' }
+const STATE: Record<TaskStatus, string> = { need: 'Needs you', ready: 'Ready', merging: 'Merging', work: 'Working', scheduled: 'Scheduled', queued: 'Queued', todo: 'To do', done: 'Done' }
 
 /** one of the tasks a queued task waits for, as it stands: done, still open, ended without being done, gone, or on a
  *  machine that can't be reached right now */
@@ -242,6 +264,10 @@ export const HELD = { slots: 'Waiting for a free slot', machine: 'Waiting for th
 
 /** queued tasks are first looked at once herdr has told which agents are alive: a go sent before would start a second */
 const RECHECK_FIRST = 15_000
+
+/** a scheduled task whose time passed by more than this was missed: Shepherdr was off, or the machine asleep, and its
+ *  chat says so when it starts */
+const MISSED_BY = 60_000
 
 /** the branch every task's worktree gets */
 const branchFor = (t: TaskRec) => `work/${t.n}-${G.slug(t.title)}`
@@ -373,6 +399,8 @@ export class Engine extends Emitter<Events> {
   /** tasks whose place is being put away */
   private cleaning = new Set<string>()
   private sweeps: ReturnType<typeof setTimeout>[] = []
+  /** the timer that starts the next scheduled task at its time */
+  private dueTimer?: ReturnType<typeof setTimeout>
   private wt: Worktrees
   /** other machines' tasks, for a task queued after one (the main copy only: it is the one that sees them) */
   peerTask?: PeerTask
@@ -434,6 +462,12 @@ export class Engine extends Emitter<Events> {
     const recheck = setTimeout(() => this.resumeQueue(), RECHECK_FIRST)
     recheck.unref?.()
     this.sweeps.push(recheck)
+    // a task scheduled while Shepherdr was off, its time passed meanwhile, starts as soon as it is back (and its chat
+    // says so); then the next one is armed
+    queueMicrotask(() => {
+      this.duePass()
+      this.armDue()
+    })
     // a repo that gained its GitHub remote after it was added shows it from the start
     queueMicrotask(() => Promise.all(this.places.spaces.map((p) => this.places.recheckGithub(p))).then(() => this.emit('changed'), () => undefined))
     // once herdr has told which agents are at work: a restart (main updated by a merge) cuts a clean-up short
@@ -484,6 +518,7 @@ export class Engine extends Emitter<Events> {
 
   stop() {
     this.taskIds.close()
+    clearTimeout(this.dueTimer)
     for (const x of this.later.values()) clearTimeout(x)
     for (const x of this.sweeps) clearTimeout(x)
   }
@@ -497,6 +532,8 @@ export class Engine extends Emitter<Events> {
     // stopped (task stop, or the way on from a delete that was refused): its agent is closed and it is To do, whatever
     // card its chat still ends on, until something is written to it
     if (t.stopped) return 'todo'
+    // it waits for its time, with no agent yet (task add --at/--in): never Needs you while it counts down
+    if (t.scheduled) return 'scheduled'
     const key = this.key(t)
     const st = this.agents.status(key)
     // a start that stopped on a screen of its own (start.ts) waits on you as a menu does
@@ -546,6 +583,8 @@ export class Engine extends Emitter<Events> {
     const s = (() => {
       // a few words, never the summary: that is in its chat's card
       if (status === 'done') return t.closed ? 'Nothing to merge' : 'Merged'
+      // when it starts by itself: the countdown the screen keeps is its own
+      if (status === 'scheduled' && t.scheduled) return startsLine(t.scheduled.at, Date.now(), this.zone())
       if (status === 'need' && (this.agents.status(key) === 'blocked' || this.asks(key) || this.chats.startMenuUp(key))) return this.reasonOf(key) ?? NEED.question
       if (t.trouble) return fitStatus(`Went wrong: ${t.trouble}`)
       // a To do row is its title alone
@@ -679,7 +718,7 @@ export class Engine extends Emitter<Events> {
       status,
       place: t.project,
       sub,
-      age: age(t.archived ?? doneAt ?? (status === 'todo' ? t.created : t.updated)),
+      age: age(t.archived ?? doneAt ?? (status === 'todo' || status === 'scheduled' ? t.created : t.updated)),
       doneAt,
       branch: t.branch,
       base: t.base,
@@ -689,10 +728,21 @@ export class Engine extends Emitter<Events> {
       desc: t.desc || 'No brief yet.',
       said: t.said,
       facts: t.facts,
-      state: t.archived ? `Archived · ${ago(t.archived)}` : status === 'todo' ? `To do · added ${ago(t.created)}` : t.closed ? `Done · nothing to merge · ${ago(doneAt ?? t.updated)}` : status === 'done' ? `Done · merged ${ago(doneAt ?? t.updated)}` : `${STATE[status]} · ${ago(doneAt ?? t.updated)}`,
+      state: t.archived
+        ? `Archived · ${ago(t.archived)}`
+        : status === 'todo'
+          ? `To do · added ${ago(t.created)}`
+          : status === 'scheduled'
+            ? `Scheduled · added ${ago(t.created)}`
+            : t.closed
+              ? `Done · nothing to merge · ${ago(doneAt ?? t.updated)}`
+              : status === 'done'
+                ? `Done · merged ${ago(doneAt ?? t.updated)}`
+                : `${STATE[status]} · ${ago(doneAt ?? t.updated)}`,
       on: cli,
       created: `${clock(t.created)} by ${t.by}`,
       after: this.queued(t) ? this.open(t) : undefined,
+      scheduled: t.scheduled?.at,
       outcome: this.outcomeOf(t),
       archived: t.archived,
       pinned: t.pinned,
@@ -815,7 +865,8 @@ export class Engine extends Emitter<Events> {
     if (this.checking) return
     this.checking = true
     try {
-      for (const t of this.tasks.filter((t) => this.queued(t))) {
+      // a task still waiting for its time is no queued task yet: it starts when it is due, then waits for the machine
+      for (const t of this.tasks.filter((t) => this.queued(t) && !t.scheduled)) {
         if (!this.open(t).length) this.goWhenRoom(t, goLine(t.after!, this.notes(t.after!)), `${t.after!.join(', ')} ${t.after!.length === 1 ? 'is' : 'are'} done`)
         else if (this.statusOf(t) !== t.told) this.settleOne(t)
       }
@@ -859,7 +910,13 @@ export class Engine extends Emitter<Events> {
     const id = `go:${t.id}:${Date.now()}`
     this.chats.post(key, { id, card: { id, task: t.id, status: 'work', text: `started: ${why}` } })
     this.save()
-    this.agents.send(key, plain ? text : hidden(text, 'go'), { ensure: this.starter(t) }).catch(() => undefined)
+    if (!t.worktree) {
+      // it never started (its time came while it waited for another task): no agent waits to hear the go, so it goes in
+      // the brief it starts on
+      const [work, how] = splitBrief(t.desc)
+      t.desc = [work, text, how].filter(Boolean).join('\n\n')
+      this.startTask(t).catch((e) => this.troubled(t, e))
+    } else this.agents.send(key, plain ? text : hidden(text, 'go'), { ensure: this.starter(t) }).catch(() => undefined)
     this.settleOne(t)
     this.settleSoon(t, ANSWER_GRACE + 500)
   }
@@ -917,6 +974,13 @@ export class Engine extends Emitter<Events> {
     const t = this.req(id)
     if (ended(t)) throw new Error(`${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'})`)
     const after = this.checkAfter(t.id, refs)
+    // one still waiting for its time keeps it: only what it waits for changes, and at its time it starts once those are done
+    if (t.scheduled) {
+      t.after = after.length ? after : undefined
+      this.save()
+      this.settleOne(t)
+      return { queued: this.open(t) }
+    }
     const was = this.queued(t) ? t.after! : []
     const open = after.filter((ref) => this.depState(ref) !== 'done')
     if (!open.length) {
@@ -1029,10 +1093,11 @@ export class Engine extends Emitter<Events> {
   /* ---------- adding and starting ---------- */
 
   /**
-   * A new task: its agent starts on the brief at once. The brief ends with the default way of working from Settings;
-   * its CLI, model and effort are Settings' too, unless the coordinator chose others for it.
+   * A new task: its agent starts on the brief at once, unless it is added for a time (`at`): that one waits in Scheduled,
+   * with no agent yet, and takes its Settings when it starts. The brief ends with the default way of working from
+   * Settings; its CLI, model and effort are Settings' too, unless the coordinator chose others for it.
    */
-  add(o: { project: string; base?: string; title: string; desc?: string; by: string; requester?: string; after?: string[]; later?: boolean; agent?: Partial<Harness>; reviewer?: Partial<Harness>; set?: Record<string, string> }) {
+  add(o: { project: string; base?: string; title: string; desc?: string; by: string; requester?: string; after?: string[]; later?: boolean; at?: number; agent?: Partial<Harness>; reviewer?: Partial<Harness>; set?: Record<string, string> }) {
     const p = this.places.byName(o.project) ?? this.places.byKey(o.project) ?? this.places.space(o.project)
     if (!p) throw new Error(`No project called ${o.project}`)
     // a new task is in no circle; those already done are not waited for
@@ -1043,6 +1108,37 @@ export class Engine extends Emitter<Events> {
     const { id, n, prefix } = this.taskIds.allocate(space)
     p.key = prefix
     this.data.next[prefix] = n
+    const work = o.desc ?? (title !== o.title ? o.title : '')
+    if (o.at !== undefined) {
+      // for a time: no agent yet, and no Settings read yet (its brief, its agent and its ways are built when it starts)
+      const t: TaskRec = {
+        id,
+        n,
+        project: space,
+        base: o.base ?? p.base,
+        title,
+        desc: work,
+        by: o.by,
+        requester: o.requester,
+        created: Date.now(),
+        updated: Date.now(),
+        told: 'scheduled',
+        ...(after.length ? { after } : {}),
+        scheduled: {
+          at: o.at,
+          desc: work,
+          ...(o.set && Object.keys(o.set).length ? { set: o.set } : {}),
+          ...(o.later ? { later: true } : {}),
+          ...(Object.keys(o.agent ?? {}).length ? { agent: o.agent } : {}),
+          ...(Object.keys(o.reviewer ?? {}).length ? { reviewer: o.reviewer } : {}),
+        },
+      }
+      this.data.tasks.push(t)
+      this.save()
+      this.armDue()
+      this.emit('news', t.project, `${t.id} was added: ${t.title}`, 'added', { task: t.id, event: 'added' })
+      return t
+    }
     // its project's defaults: its own, else its machine's, else All machines'
     const reviewer = this.harness(o.reviewer, 'reviewer', p.name)
     const agent = this.harness(o.agent, 'task', p.name)
@@ -1051,7 +1147,7 @@ export class Engine extends Emitter<Events> {
     const by = { ...this.settings.setBy(p.name, set), ...(Object.keys(o.reviewer ?? {}).length ? { reviewer: 'task' as const } : {}), ...(Object.keys(o.agent ?? {}).length ? { agent: 'task' as const } : {}) }
     const ways = this.settings.ways(p.name, set)
     const how = settingsBlock(id, { ways, reviewer, agent, by })
-    const desc = [o.desc ?? (title !== o.title ? o.title : ''), o.later ? LATER : '', how].filter(Boolean).join('\n\n')
+    const desc = [work, o.later ? LATER : '', how].filter(Boolean).join('\n\n')
     const t: TaskRec = {
       id,
       n,
@@ -1088,6 +1184,150 @@ export class Engine extends Emitter<Events> {
   private harness(chosen: Partial<Harness> = {}, role: 'task' | 'reviewer' = 'task', project?: string): Harness {
     const h = this.settings.harness(role, project)
     return { ...h, ...(chosen.kind && chosen.kind !== h.kind ? { model: undefined } : {}), ...chosen }
+  }
+
+  /* ---------- scheduled: a task that starts by itself at a time (--at / --in) ---------- */
+
+  /** the time zone every time here is read in: Settings' (time.zone, Everywhere), as the heartbeat and automations' */
+  private zone() {
+    return this.settings.zone()
+  }
+
+  /**
+   * A task added for a time takes its Settings when it starts, not when it was added: its brief's Settings block, its
+   * agent and reviewer, and the ways it works are built here, from Settings as they are now. A task scheduled after it
+   * was added already has its brief; it is left as it is.
+   */
+  private materialize(t: TaskRec) {
+    const s = t.scheduled
+    if (!s || s.desc === undefined) return
+    const p = this.proj(t)
+    const reviewer = this.harness(s.reviewer, 'reviewer', p.name)
+    const agent = this.harness(s.agent, 'task', p.name)
+    const set = s.set && Object.keys(s.set).length ? s.set : undefined
+    const by = { ...this.settings.setBy(p.name, set), ...(Object.keys(s.reviewer ?? {}).length ? { reviewer: 'task' as const } : {}), ...(Object.keys(s.agent ?? {}).length ? { agent: 'task' as const } : {}) }
+    const ways = this.settings.ways(p.name, set)
+    t.desc = [s.desc, s.later ? LATER : '', settingsBlock(t.id, { ways, reviewer, agent, by })].filter(Boolean).join('\n\n')
+    t.agent = agent
+    t.reviewer = reviewer
+    t.waitChecks = ways.waitChecks
+    t.rounds = ways.rounds
+  }
+
+  /**
+   * The timer for the next task due: at its exact time, and never longer than a minute at a stretch, so a clock that
+   * moved or a machine that slept still starts it on the next look.
+   */
+  private armDue() {
+    clearTimeout(this.dueTimer)
+    const next = this.dueTasks().map((t) => t.scheduled!.at).sort((a, b) => a - b)[0]
+    if (next === undefined) return
+    const wait = Math.max(250, next - Date.now())
+    const x = setTimeout(() => {
+      this.duePass()
+      this.armDue()
+    }, Math.min(wait, 60_000))
+    x.unref?.()
+    this.dueTimer = x
+  }
+
+  /** tasks waiting for a time, whose agent starts then: not stopped, not archived, not done */
+  private dueTasks() {
+    return this.tasks.filter((t) => !!t.scheduled && !ended(t) && !t.stopped && !t.archived)
+  }
+
+  /** the tasks whose time has come now, oldest time first */
+  dueNow(now = Date.now()) {
+    return this.dueTasks().filter((t) => t.scheduled!.at <= now).sort((a, b) => a.scheduled!.at - b.scheduled!.at)
+  }
+
+  /** Start every task whose time has come (at once on boot, then on the timer): also one whose time passed while
+   *  Shepherdr was off, which starts as soon as it is back and says so in its chat. */
+  duePass(now = Date.now()) {
+    for (const t of this.dueNow(now)) this.beginScheduled(t, now)
+  }
+
+  /**
+   * Its time has come: it starts as a task added now would. It takes its Settings first (a setting changed since it was
+   * added counts), then waits for room on this machine, and for the tasks it was queued after (--after) — an agent of
+   * its own starts only once both hold, with no countdown left to show.
+   */
+  private beginScheduled(t: TaskRec, now = Date.now()) {
+    const s = t.scheduled!
+    const late = now - s.at > MISSED_BY
+    try {
+      this.materialize(t)
+    } catch (e) {
+      t.scheduled = undefined
+      this.troubled(t, e)
+      return
+    }
+    t.scheduled = undefined
+    if (late) {
+      const id = `due:${t.id}:${now}`
+      const when = clockWords(s.at, now, this.zone())
+      this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: `its time (${when}) passed while Shepherdr was off: starting now` } })
+    }
+    // what it waits for still open: it is queued now, and Shepherdr starts it once those are done
+    if (this.queued(t) && this.open(t).length) {
+      t.told = 'queued'
+      this.save()
+      this.settleOne(t)
+      return
+    }
+    const r = this.room()
+    if (r.why) {
+      this.hold(t, r.why)
+      return
+    }
+    if (!late) {
+      const id = `due:${t.id}:${now}`
+      this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'work', text: 'its time came: starting' } })
+    }
+    this.save()
+    this.startTask(t).catch((e) => this.troubled(t, e))
+  }
+
+  /**
+   * Start a task that has not started yet by itself at a time (`task queue <id> --at …`), or (null) cancel its time and
+   * start it now, waiting for room and for what it waits for like a task added now. A task already at work, or one
+   * whose agent ran before, keeps its own life: only one that has not started can be scheduled.
+   */
+  schedule(id: string, at: number | null): { at?: number; queued?: string[]; held?: 'slots' | 'machine' } {
+    const t = this.req(id)
+    if (ended(t)) throw new Error(`${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'})`)
+    if (t.worktree || this.starting.has(t.id) || this.agents.record(this.key(t))) throw new Error(`${t.id} has already started: only a task that has not started yet can wait for a time. Write to its chat, or stop it first (shepherdr task stop ${t.id}).`)
+    t.stopped = undefined
+    t.trouble = undefined
+    if (at !== null) {
+      // it keeps what it waits for (--after): at its time it waits for the machine, and for those, before its agent starts
+      t.held = undefined
+      t.todo = undefined
+      // a task added for a time keeps the brief it was added with, unread by Settings; one scheduled after it was added
+      // already has its own, whole
+      t.scheduled = { ...(t.scheduled ?? {}), at }
+      this.save()
+      this.armDue()
+      this.settle(t)
+      return { at }
+    }
+    // cancelled: from now on it waits for nothing but room, and for what it waits for
+    this.materialize(t)
+    t.scheduled = undefined
+    this.save()
+    this.armDue()
+    const open = this.queued(t) ? this.open(t) : []
+    if (open.length) {
+      this.settle(t)
+      return { queued: open }
+    }
+    const r = this.room()
+    if (r.why) {
+      this.hold(t, r.why)
+      return { held: r.why }
+    }
+    this.startTask(t).catch((e) => this.troubled(t, e))
+    return {}
   }
 
   /** its agent waits for a go: To do until something is written to it (the go, or a change to the brief) */
@@ -1469,7 +1709,7 @@ export class Engine extends Emitter<Events> {
   }
 
   private markClosed(t: TaskRec) {
-    Object.assign(t, { closed: true, doneAt: Date.now(), reported: true, landing: undefined, trouble: undefined, stopped: undefined, todo: undefined })
+    Object.assign(t, { closed: true, doneAt: Date.now(), reported: true, landing: undefined, trouble: undefined, stopped: undefined, todo: undefined, scheduled: undefined })
     clearTimeout(this.later.get(t.id))
     this.settle(t)
     this.emit('gone', t, true)
@@ -2128,8 +2368,16 @@ export class Engine extends Emitter<Events> {
     // what its agent reads, once it has an agent to read it: another agent's message says who sent it, in the envelope
     // herdr's messaging writes (chatlines.fromAgents). A brief is never wrapped: those words are the task's own
     const said = from ? fromAgentLine({ ...from, to: `${t.id} agent` }, text) : text
+    // a message to a task waiting for its time is the go: it starts now, on its brief with the words in it, and the time
+    // it waited for is gone
+    const wasScheduled = !!t.scheduled
+    if (t.scheduled) {
+      this.materialize(t)
+      t.scheduled = undefined
+      this.armDue()
+    }
     // a stopped task is no wait for room: its agent is closed, and the words start it again where it is
-    const waits = (this.statusOf(t) === 'todo' && !t.stopped) || this.holding(t)
+    const waits = wasScheduled || (this.statusOf(t) === 'todo' && !t.stopped) || this.holding(t)
     const r = gate && waits && !ended(t) ? this.room() : {}
     if (r.why) {
       if (!t.worktree) {
@@ -2159,7 +2407,13 @@ export class Engine extends Emitter<Events> {
   /** the way a message behind the chat starts its agent again: never one whose last start failed, which is the human's
    *  to try again by writing (start.ts); what waits for it goes in at once when it does */
   private starter(t: TaskRec) {
-    return () => (this.startFailedAt(this.key(t)) !== undefined ? Promise.resolve(null) : this.launch(t))
+    return () =>
+      this.startFailedAt(this.key(t)) !== undefined
+        ? Promise.resolve(null)
+        : // never started (a scheduled task whose time came, or one that was held): it gets its worktree and its brief
+          t.worktree && existsSync(t.worktree)
+          ? this.launch(t)
+          : this.startTask(t)
   }
 
   /** a task held before it ever started: it has no agent yet, so what you write starts it (tell) */
@@ -2176,7 +2430,12 @@ export class Engine extends Emitter<Events> {
     const t = this.req(id)
     t.stopped = true
     // To do, as task pause leaves it: its agent is closed, and writing to it is how it starts again. A start that failed
-    // is no longer what it waits on (writing tries it again, and says so if it fails again)
+    // is no longer what it waits on (writing tries it again, and says so if it fails again); a time it waited for is
+    // dropped too, so it does not start by itself while it is stopped
+    if (t.scheduled) {
+      t.scheduled = undefined
+      this.armDue()
+    }
     t.todo = true
     t.paused = undefined
     t.trouble = undefined
@@ -2275,6 +2534,11 @@ export class Engine extends Emitter<Events> {
     t.archived = undefined
     t.unarchived = Date.now()
     this.quiet(t)
+    // one that waited for a time meanwhile: its time may have come while it was away
+    if (t.scheduled) {
+      this.armDue()
+      this.duePass()
+    }
     return t
   }
 

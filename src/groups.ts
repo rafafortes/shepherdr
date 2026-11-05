@@ -1,6 +1,6 @@
 // How a list's tasks are grouped, pinned ones first in a Pinned group of their own (only when it holds some): by status
-// (Needs you, Ready, Merging, Working, Queued, To do, Done; To do shows even when empty, so the human sees where waiting
-// tasks go) across everything it lists, or one list per space. A list of one machine's tasks (its chip) can be by
+// (Needs you, Ready, Merging, Working, Scheduled, Queued, To do, Done; To do shows even when empty, so the human sees
+// where waiting tasks go) across everything it lists, or one list per space. A list of one machine's tasks (its chip) can be by
 // space; one of more machines' (everything, or chips on more), also one list per machine, or each machine's name over
 // its spaces' lists. One space's list is by status alone. More machines' and one machine's each keep their choice,
 // remembered on this device; by status until chosen.
@@ -14,6 +14,7 @@ export const GROUPS: [Task['status'], string][] = [
   ['ready', 'Ready'],
   ['merging', 'Merging'],
   ['work', 'Working'],
+  ['scheduled', 'Scheduled'],
   ['queued', 'Queued'],
   ['todo', 'To do'],
   ['done', 'Done'],

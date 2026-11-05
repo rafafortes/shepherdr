@@ -64,8 +64,9 @@ Spaces (a folder on a machine with a name and its own coordinator; each machine 
 
 Tasks (coordinators add them; only when the human asks, or on Autopilot)
   shepherdr task add "<title>" --brief "<the brief>" [--space NAME] [--base BRANCH] [--after SHE-12,SHE-13] [--later]
-                                                 [--set KEY=VALUE ...] [--agent CLI] [--model ID] [--effort LEVEL]
-                                                 [--reviewer CLI] [--reviewer-model ID] [--reviewer-effort LEVEL]
+                                                 [--at "tomorrow 9:00" | --in 6h] [--set KEY=VALUE ...] [--agent CLI]
+                                                 [--model ID] [--effort LEVEL] [--reviewer CLI] [--reviewer-model ID]
+                                                 [--reviewer-effort LEVEL]
                                                  the title at most ${TITLE_MAX} characters (it fits one line on a phone);
                                                  its agent starts at once, in its own worktree. Shepherdr ends the
                                                  brief with its Settings block (shepherdr show has the defaults); the
@@ -85,6 +86,15 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
                                                  --after queues it: its agent reads the brief and waits, and Shepherdr
                                                  tells it to go once those tasks are all done (merged, or nothing to
                                                  merge); vm-str:SHE-12 is another machine's.
+                                                 --at ("2026-11-06 09:00", "tomorrow 9:00", "fri 8:15", "today
+                                                 18:00", "18:00") or --in ("6h", "90m", "2 days", "1h 30m"), one or
+                                                 the other, in the time zone Settings sets (time.zone): the task starts
+                                                 by itself then, and until then it waits in Scheduled with no agent,
+                                                 its row saying when. At its time it waits for the machine's room as
+                                                 any queued task does, and for what it was --after; it takes
+                                                 Settings when it starts, not when it was added, and a time that
+                                                 passed while Shepherdr was off starts it as soon as it is back,
+                                                 saying so. With --later its agent then waits for a go.
                                                  While the machine has no room (its max tasks working, or its load
                                                  or memory over the start limit) a new task waits as Queued and
                                                  starts by itself once there's room, oldest first
@@ -92,15 +102,19 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
                                                  queue a task after others, or change what it waits for; --after none
                                                  clears it and it goes. A message to a queued task reaches its agent,
                                                  which clears its queue itself if the message is a go
+  shepherdr task queue <id> --at "tomorrow 9:00" | --in 6h | --at none
+                                                 change when a task that hasn't started starts by itself, or cancel
+                                                 it (--at none: it starts now, waiting for the machine's room). Only
+                                                 a task that has not started yet can be scheduled
   shepherdr task list [--space NAME] [--json] [--archived]
                                                  archived tasks are left out; --archived lists only them
   shepherdr task show <id> [--json]
-  shepherdr task tell <id> "<text>"            from a coordinator, a go to a task that waits (To do, Queued) waits
-                                                 too while the machine has no room (Settings → the machine), and it
-                                                 says so; Shepherdr hands it over once there's room. Run from an
-                                                 agent's own shell, the message says which agent sent it (its
-                                                 chat, pane and space or task), and the chat shows it as that
-                                                 agent's, never as the human's words
+  shepherdr task tell <id> "<text>"            from a coordinator, a go to a task that waits (To do, Queued,
+                                                 Scheduled) waits too while the machine has no room (Settings → the
+                                                 machine), and it says so; Shepherdr hands it over once there's room. Run
+                                                 from an agent's own shell, the message says which agent sent it (its
+                                                 chat, pane and space or task), and the chat shows it as that agent's,
+                                                 never as the human's words
   shepherdr task review-more <id>                only from the task's own coordinator, and only once it has used all
                                                  its Review rounds: exactly one more round, ever, and its agent is
                                                  told to run it. Only its coordinator adds one; a task's agent asks
