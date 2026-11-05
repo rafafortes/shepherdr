@@ -21,7 +21,7 @@ import { browserEnv } from '../browser.ts'
 import { hidden, ROUTING_FAILURE, type Agents, type Spec } from '../agents.ts'
 import type { Chats } from '../chats.ts'
 import { HOST, placeId, type Places, type Space } from '../places.ts'
-import { privatePrompt, freshLine, goLine, handOverLine, restartLine, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, startWords, taskFirst, taskPrompt } from '../prompts.ts'
+import { privatePrompt, freshLine, goLine, handOverLine, restartLine, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { CLI_NAME, kindOf, type Settings } from '../settings.ts'
@@ -1178,7 +1178,8 @@ export class Engine extends Emitter<Events> {
     const first = fresh ? `${taskFirst(t)}\n\n${freshLine()}` : undefined
     return this.launch(t, first).catch((e) => {
       // it never got going: the human hears why, in the chat and on the task, and nothing starts it again meanwhile
-      this.startFailed(this.key(t), startWords(this.agents.record(this.key(t))?.kind, troubleOf(e)))
+      const kind = this.agents.record(this.key(t))?.kind
+      this.startFailed(this.key(t), `${kind ? (CLI_NAME[kind] ?? kind) : 'Its agent'} couldn't start: ${troubleOf(e)}`)
       return null
     })
   }

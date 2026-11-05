@@ -38,7 +38,7 @@ import { claudeProjectDir, piSessionDir } from './readers/find.ts'
 import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places } from './places.ts'
-import { privatePrompt, coordinatorPrompt, relaunchedLine, restartLine, resumedLine, settingsBlock, startWords } from './prompts.ts'
+import { privatePrompt, coordinatorPrompt, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
 import { fitHarness, harnessProblem, harnessWords, recentChat, restartHint, restartInfo, type Harness } from './restart.ts'
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
@@ -52,6 +52,9 @@ import { Unread } from './unread.ts'
 import { Monitor, meters, procLines, summary, topProcs, type HealthEvent, type Kind } from './health.ts'
 import { has, PLUGIN_KEY, pluginSection, setPluginOn } from '../plugins.ts'
 import { TOOK_OVER, type TookOver } from '../../scripts/take-over.ts'
+
+/** a start that never became a turn, in one line for the chat and the task: which CLI, and the reason it stopped on */
+const startWords = (kind: string | undefined, why: string) => `${kind ? (CLI_NAME[kind] ?? kind) : 'Its agent'} couldn't start: ${why}`
 
 function userName(): string {
   const set = readJson<{ user?: string }>('config.json', {}).user
