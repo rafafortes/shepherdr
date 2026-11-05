@@ -18,6 +18,8 @@ for (const n of readdirSync(tmpdir()))
     } catch {}
 const home = mkdtempSync(join(tmpdir(), 'shep-test-home-'))
 process.env.SHEPHERDR_HOME = home
+// Tests are a server with a home of its own that does start agents: a fake herdr, or something spied on (launch-policy.ts)
+process.env.SHEPHERDR_LAUNCH_AGENTS = '1'
 process.on('exit', () => rmSync(home, { recursive: true, force: true }))
 for (const k of ['SHEPHERDR_URL', 'SHEPHERDR_CHAT']) delete process.env[k]
 

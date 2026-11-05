@@ -25,6 +25,12 @@ Agents working on Shepherdr: [AGENTS.md](../AGENTS.md) says what they check befo
 The demo source (`SHEPHERDR_SOURCE=demo`) holds a fictional world for reviewing every screen and case without real
 agents. Your data lives in `~/.shepherdr` (`SHEPHERDR_HOME` to move it).
 
+A server with a home of its own (`SHEPHERDR_HOME`) starts no agent in herdr unless `SHEPHERDR_LAUNCH_AGENTS=1` says it
+may, and logs each one it skips: its agents would be real CLIs in the herdr it inherits, so a task that came due there
+would open one in the human's own herdr. A proof uses the demo source or a fake herdr, a home under `/tmp`, a loopback
+port other than 7787, no task that can come due, and stops the server by its own pid (never `pkill -f server/main.ts`,
+which also matches the live one).
+
 ```text
 server/            the web server, the demo source and the live source
   live/            herdr link, chats from logs (readers/), tasks (engine/), settings, machines (box, mirror, install), voice, browser

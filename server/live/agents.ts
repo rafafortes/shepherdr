@@ -25,6 +25,7 @@ import { agentWrong, type Wrong } from './revive.ts'
 import { readCodexRuntime } from './codex-runtime.ts'
 import { SecretAccess } from './secret-access.ts'
 import { isAgentProcess } from './agent-process.ts'
+import { launchesAgents, skippedLaunch } from './launch-policy.ts'
 
 /** a log's name (its session id), wherever it lies: one named both by its mirrored path and by its own is one log */
 const logName = (f: string) => f.slice(f.lastIndexOf('/') + 1)
@@ -751,12 +752,23 @@ export class Agents extends Emitter<Events> {
   /* ---------- starting ---------- */
 
   /**
+   * A server with a home of its own starts and moves no agent unless it was asked to (launch-policy.ts): refused before
+   * anything it would do here (a turn stopped, a pane closed), and said in its log.
+   */
+  private allowed(key: string) {
+    if (launchesAgents()) return true
+    console.error(`shepherdr: ${skippedLaunch(key)}`)
+    return false
+  }
+
+  /**
    * Start this chat's agent again on what spec says: `before` first (its turn stopped; what it returns is the first
    * message then, read once the turn is over), then its run ends and it starts, resuming its session on the same CLI.
    * Meanwhile anything that would start it waits for this instead, and what you send waits and goes in after the first
    * message. `before` throwing leaves it as it was.
    */
   restart(spec: Spec, before?: () => Promise<string | void>): Promise<AgentInfo | null> {
+    if (!this.allowed(spec.key)) return Promise.reject(new Error(skippedLaunch(spec.key)))
     const problem = chatProblem(spec.kind)
     if (problem) return Promise.reject(new Error(problem))
     const p0 = this.starting.get(spec.key)
@@ -778,6 +790,7 @@ export class Agents extends Emitter<Events> {
 
   /** start (or resume) this chat's agent; resolves once herdr says it is ready for input */
   ensure(spec: Spec): Promise<AgentInfo | null> {
+    if (!this.allowed(spec.key)) return Promise.reject(new Error(skippedLaunch(spec.key)))
     const problem = chatProblem(spec.kind)
     if (problem) return Promise.reject(new Error(problem))
     const running = this.live.get(spec.name)
@@ -800,6 +813,8 @@ export class Agents extends Emitter<Events> {
   }
 
   private async launch({ first, pane: place, was, ...spec }: Spec) {
+    // the one place an agent is started: a server with a home of its own starts none unless it was asked to
+    if (!this.allowed(spec.key)) throw new Error(skippedLaunch(spec.key))
     this.secretAccess.revoke(spec.key)
     this.routes.delete(spec.key)
     const old = this.records[spec.key]
@@ -943,6 +958,7 @@ export class Agents extends Emitter<Events> {
   /** started again by `start` (that resumes its session), its pane closed first where it still holds it (its CLI
    *  exited, or runs on outdated files). Meanwhile what you send waits for the one it starts, as in a restart */
   async relaunch(key: string, close: boolean, start: () => Promise<unknown>) {
+    if (!this.allowed(key)) return
     this.secretAccess.revoke(key)
     this.routes.delete(key)
     this.stopping.add(key)

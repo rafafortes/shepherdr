@@ -167,7 +167,9 @@ sub bind_route {
   print $f JSON::PP->new->canonical->encode($r); close $f;
   rename($tmp, "$d/$pid.json") or die "route: $!";
   if (my $file = $r->{credentialFile}) {
-    my $base = "$ENV{HOME}/.shepherdr/helper/credentials";
+    # this machine's Shepherdr home, which SHEPHERDR_HOME moves (a server with a home of its own keeps its credentials
+    # there, never in the real ~/.shepherdr)
+    my $base = (($ENV{SHEPHERDR_HOME} // '') || "$ENV{HOME}/.shepherdr") . "/helper/credentials";
     die "Invalid credential path\n" unless $file =~ m{^\Q$base\E/[a-f0-9-]{36}$};
     die "Unsafe credential directory\n" if -l $base;
     make_path($base, { mode => 0700 });
