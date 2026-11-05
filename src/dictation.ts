@@ -48,6 +48,8 @@ export function dictate(end: (text: string | null, failure?: string) => void): D
   let mic: MediaStream | null = null
   let ctx: AudioContext | null = null
   let rec: MediaRecorder | null = null
+  /** the upload in flight: Cancel drops it, so the machine behind Shepherdr stops on the words it will not show */
+  let sending: AbortController | null = null
   let type = ''
   const chunks: Blob[] = []
   const close = (text: string | null, failure?: string) => {
@@ -62,11 +64,18 @@ export function dictate(end: (text: string | null, failure?: string) => void): D
   /** the recording, sent to the machine that serves Shepherdr: the words come back, or why there are none */
   const writeDown = async () => {
     const audio = new Blob(chunks, { type: type || 'audio/webm' })
+    // nothing was recorded (Done pressed the instant the microphone opened): no upload of nothing to pay for
+    if (!audio.size) return close(null, 'Nothing was heard in that recording. Try again, closer to the microphone.')
     let r: Response
+    sending = new AbortController()
     try {
-      r = await fetch('api/dictate', { method: 'POST', headers: { 'x-shepherdr': '1', 'content-type': audio.type }, body: audio })
-    } catch {
+      r = await fetch('api/dictate', { method: 'POST', headers: { 'x-shepherdr': '1', 'content-type': audio.type }, body: audio, signal: sending.signal })
+    } catch (e) {
+      // cancelled on purpose: the screen already went back to its box
+      if ((e as Error)?.name === 'AbortError') return close(null)
       return close(null, "Couldn't reach Shepherdr to write it down.")
+    } finally {
+      sending = null
     }
     // a proxy in front may answer instead of Shepherdr (a body too big for it, a refused sign-in)
     let said: { text?: string; error?: string } = {}
@@ -101,6 +110,8 @@ export function dictate(end: (text: string | null, failure?: string) => void): D
         rec.onstop = null
         rec.stop()
       }
+      // already on its way to be written down: drop it
+      sending?.abort()
       close(null)
     },
   }

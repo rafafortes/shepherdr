@@ -12,7 +12,6 @@ import { excerpt } from '../../shared/excerpt.ts'
 
 /** where the model lives unless Settings says elsewhere: the human's own share folder, outside the repository */
 export const MODEL_DIR = join(homedir(), '.local', 'share', 'shepherdr-whisper')
-export const MODEL = join(MODEL_DIR, 'ggml-base.bin')
 export const MODEL_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin'
 
 /** whisper.cpp's command, by the names it ships as on PATH, then where the Ubuntu archive and Homebrew put it */
@@ -110,8 +109,9 @@ export async function transcribe(audio: Blob, ways: DictateWays): Promise<string
   const ffmpeg = ways.ffmpeg ?? Bun.which('ffmpeg')
   if (!ffmpeg) throw new Error('Talk to type needs ffmpeg on this machine: sudo apt install ffmpeg.')
   if (writing) throw new Error('Another recording is being written down right now: try again in a moment.')
-  writing = true
+  // the folder first: whatever fails here must not leave the one-at-a-time slot taken
   const dir = mkdtempSync(join(tmpdir(), 'shepherdr-dictate-'))
+  writing = true
   try {
     await toWav(audio, dir, ffmpeg)
     const threads = Math.min(8, cpus().length)
