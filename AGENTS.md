@@ -61,11 +61,11 @@ rule, it is repeated in every `CLAUDE.md`, `AGENTS.md` and `GEMINI.md` of the op
   a pull request and a push that touch only `**/*.md` or `docs/**` (its `paths-ignore`, the skill files included). A
   red `herdr-tui` reaches the coordinator, who has it fixed forward. A failure's log is
   `gh run view <run> --log-failed`.
-- It spends the operator's Actions minutes: about 7 to 15 billed per run, rounding each job up to its minute (about 1
-  for the types and the build and 2 to 7 per test shard; 14 on the run of 2026-11-05, 7 once the caches were warm). A
-  task whose pull request merges spends two, its own and the merge's; every push to a pull request runs it all again. A
-  task on "merge on its own" does not wait for its run: to see it first, `shepherdr checks <id>` waits for it (up to
-  about 9 minutes).
+- It spends the operator's Actions minutes: about 7 to 15 billed per run, each job rounded up to its minute (about 1
+  for the types and the build and 2 to 7 per test shard; 14 when the caches were cold, 10 on this task's last pull
+  request run). A task whose pull request merges spends two, its own and the merge's; every push to a pull request runs
+  it all again. A task on "merge on its own" does not wait for its run: to see it first, `shepherdr checks <id>` waits
+  for it (up to about 9 minutes).
 - A branch with no pull request can still be checked by hand, `gh workflow run check.yml --ref <branch>` then
   `gh run watch`: it costs the same, so only for rare cases (a review asks for it, or the change is to the tests' own
   setup).
