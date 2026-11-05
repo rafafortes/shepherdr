@@ -1,7 +1,8 @@
 // A launch herdr leaves pending (issue #491, herdr 0.9.5): `agent.start` returns at once with launch_pending, and herdr
-// finishes the launch only when a client asks for that agent by name. Claude Code reports its own readiness through its
-// hooks, but pi does not, so a pi task agent sat at its start screen for ever and its brief stayed in the outbox until
-// an outside nudge asked for it. Shepherdr asks now, on every look at herdr, and finishes the launch itself.
+// finishes such a launch only when a client asks for that agent by name — a name nobody asks for is dropped about a
+// minute later, with its pane. Claude Code reports its own readiness through its hooks, pi does not, so a pi task agent
+// sat at its start screen for ever and its brief stayed in the outbox until an outside nudge asked for it. Shepherdr
+// asks now, on every look at herdr, and finishes the launch itself.
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
 import { mkdtempSync } from 'node:fs'
 import { createServer } from 'node:net'
@@ -15,14 +16,11 @@ const { herdr, HerdrError } = await import('../server/live/herdr.ts')
 const { writeJson } = await import('../server/store.ts')
 type AgentInfo = import('../server/live/herdr.ts').AgentInfo
 
-/** what herdr lists: the same array, changed in place by each test */
+/** what herdr lists, changed in place by each test: its answer to a look */
 const listing: AgentInfo[] = []
-/** how herdr answers `agent.get`, which is what finishes a launch */
-let answer = async (target: string): Promise<AgentInfo> => {
-  const a = listing.find((x) => x.name === target)
-  if (!a) throw new HerdrError('agent_not_found', `agent target ${target} not found`)
-  return { ...a }
-}
+/** how many asks for an agent herdr takes to finish its launch: the second, at most, on a real one */
+let finishesAfter = Number.POSITIVE_INFINITY
+const asks = new Map<string, number>()
 const asked: string[] = []
 const prompted: string[] = []
 const started: { name: string; pane: string }[] = []
@@ -39,13 +37,18 @@ const server = createServer((c) => {
 }).listen(process.env.HERDR_SOCKET_PATH)
 afterAll(() => server.close())
 
-/** every herdr call Shepherdr makes on a look, standing in for the machine's herdr */
+/** herdr, standing in: a pending launch is finished by asking for the agent by name, as the real one does */
 function spies() {
   return {
     agents: spyOn(herdr, 'agents').mockImplementation(async () => listing.map((a) => ({ ...a }))),
     agent: spyOn(herdr, 'agent').mockImplementation(async (target: string) => {
       asked.push(target)
-      return answer(target)
+      const a = listing.find((x) => x.name === target)
+      if (!a) throw new HerdrError('agent_not_found', `agent target ${target} not found`)
+      const n = (asks.get(target) ?? 0) + 1
+      asks.set(target, n)
+      if (a.launch_pending && n >= finishesAfter) Object.assign(a, { launch_pending: undefined, interactive_ready: true, agent_status: 'idle' })
+      return { ...a }
     }),
     // herdr refuses input to an agent it is still launching, as it does on the machine we run
     prompt: spyOn(herdr, 'prompt').mockImplementation(async (target: string, text: string) => {
@@ -74,12 +77,12 @@ const name = 'shep-t-1'
 const cwd = mkdtempSync(join(tmpdir(), 'shep-launch-cwd-'))
 
 /** a pi task agent Shepherdr started once, its brief waiting in the outbox for it */
-function chat(o: { pending?: boolean; ready?: boolean } = {}) {
+function chat(o: { pending?: boolean; ready?: boolean; pane?: string } = {}) {
   listing.splice(0, listing.length, {
     agent: 'pi',
     agent_status: o.ready ? 'idle' : 'unknown',
     name,
-    pane_id: 'p1',
+    pane_id: o.pane ?? 'p1',
     tab_id: 't1',
     workspace_id: 'w1',
     cwd,
@@ -90,13 +93,21 @@ function chat(o: { pending?: boolean; ready?: boolean } = {}) {
   writeJson('outbox.json', [{ id: 'o1', key: KEY, text: 'the brief', at: Date.now() }])
 }
 
-const reset = () => (asked.length = 0, prompted.length = 0, started.length = 0, closed.length = 0)
+function reset() {
+  asked.length = 0
+  prompted.length = 0
+  started.length = 0
+  closed.length = 0
+  asks.clear()
+  finishesAfter = Number.POSITIVE_INFINITY
+}
 
 describe('a launch herdr left pending', () => {
   test('asking for the agent by name finishes it, and its brief goes in as for any other agent', async () => {
     const s = spies()
     try {
       reset()
+      finishesAfter = 2
       chat({ pending: true })
       const a = new Agents()
       try {
@@ -104,15 +115,42 @@ describe('a launch herdr left pending', () => {
         // asked by name, and the brief waits: herdr is not taking input for it yet
         expect(asked).toEqual([name])
         expect(prompted).toEqual([])
-        // herdr finished the launch
-        listing.splice(0, listing.length, { ...listing[0], agent_status: 'idle', launch_pending: undefined, interactive_ready: true })
-        await a.refresh()
-        // nothing more to ask for, and the brief goes in
-        expect(asked).toEqual([name])
+        expect(a.status(KEY)).toBe('unknown')
+        // asked again, herdr finishes the launch, and the brief goes in
+        for (let i = 0; i < 3; i++) await a.refresh()
+        expect(asked.length).toBeGreaterThanOrEqual(2)
         await until(() => prompted.length === 1)
         expect(prompted).toEqual(['the brief'])
-        expect(a.waiting(KEY)).toEqual([])
+        await until(() => a.waiting(KEY).length === 0)
         expect(a.status(KEY)).toBe('idle')
+        // the launch is over: nothing is asked any more
+        const before = asked.length
+        await a.refresh()
+        expect(asked.length).toBe(before)
+      } finally {
+        a.stop()
+      }
+    } finally {
+      for (const spy of Object.values(s)) spy.mockRestore()
+    }
+  })
+
+  test('a pending agent Shepherdr did not start is never asked for, and only the asking finishes one', async () => {
+    const s = spies()
+    try {
+      reset()
+      finishesAfter = 2
+      chat({ pending: true })
+      // herdr's own manual agent, or one of another Shepherdr: no record of ours
+      listing.push({ agent: 'pi', agent_status: 'unknown', name: 'shep-other', pane_id: 'p9', tab_id: 't9', workspace_id: 'w9', cwd, launch_pending: true })
+      const a = new Agents()
+      try {
+        for (let i = 0; i < 3; i++) await a.refresh()
+        expect(asked).not.toContain('shep-other')
+        // ours is ready, and the one nobody asked for is still pending, as herdr leaves it
+        await until(() => prompted.length === 1)
+        expect(listing.find((x) => x.name === 'shep-other')?.launch_pending).toBe(true)
+        expect(listing.find((x) => x.name === name)?.launch_pending).toBeUndefined()
       } finally {
         a.stop()
       }
@@ -166,6 +204,36 @@ describe('a launch herdr left pending', () => {
     }
   })
 
+  test('a launch that never goes ready is asked for only so long, then left for herdr to drop', async () => {
+    const s = spies()
+    const errors: string[] = []
+    const log = spyOn(console, 'error').mockImplementation((...a: unknown[]) => void errors.push(a.join(' ')))
+    try {
+      reset()
+      chat({ pending: true })
+      const a = new Agents()
+      try {
+        // a launch that stays pending: herdr's own drop, and the relaunch loop, end it
+        a.pendingFor = 50
+        await a.refresh()
+        expect(asked).toEqual([name])
+        expect(errors).toEqual([])
+        await Bun.sleep(80)
+        await a.refresh()
+        // said once, and no longer asked: a stuck launch is not kept alive by the asking itself
+        expect(asked).toEqual([name])
+        expect(errors.length).toBe(1)
+        expect(errors[0]).toContain(name)
+        expect(errors[0]).toContain("hasn't become ready")
+      } finally {
+        a.stop()
+      }
+    } finally {
+      log.mockRestore()
+      for (const spy of Object.values(s)) spy.mockRestore()
+    }
+  })
+
   test('a launch that died while pending is not started again, and asking never breaks the look', async () => {
     const s = spies()
     try {
@@ -176,18 +244,14 @@ describe('a launch herdr left pending', () => {
         await a.refresh()
         expect(asked).toEqual([name])
         // herdr answers not found while it still lists the name: nothing is started beside it
-        answer = async () => {
-          throw new HerdrError('agent_not_found', `agent target ${name} not found`)
-        }
+        s.agent.mockImplementation(async (target: string) => {
+          asked.push(target)
+          throw new HerdrError('agent_not_found', `agent target ${target} not found`)
+        })
         await a.refresh()
         expect(started).toEqual([])
         expect(a.status(KEY)).toBe('unknown')
         // herdr dropped the name, and the pane with it: gone, which the relaunch loop brings back
-        answer = async (target: string) => {
-          const x = listing.find((y) => y.name === target)
-          if (!x) throw new HerdrError('agent_not_found', `agent target ${target} not found`)
-          return { ...x }
-        }
         listing.splice(0, listing.length)
         await a.refresh()
         expect(a.status(KEY)).toBe('gone')
@@ -212,9 +276,11 @@ describe('a launch herdr left pending', () => {
       const a = new Agents()
       try {
         const spec = { key: KEY, name, kind: 'pi', cwd, workspace: 'w' }
+        // this herdr leaves the pane of a launch it dropped behind
         await a.ensure({ ...spec, pane: async () => 'p1' })
         expect(started).toEqual([{ name, pane: 'p1' }])
-        // herdr dropped the pending name and closed the pane: the agent is gone
+        expect(a.record(KEY)?.pendingLaunch).toBe(true)
+        // herdr dropped the pending name: the agent is gone, its pane still at its prompt
         listing.splice(0, listing.length)
         await a.refresh()
         expect(a.status(KEY)).toBe('gone')
@@ -225,6 +291,29 @@ describe('a launch herdr left pending', () => {
           { name, pane: 'p1' },
           { name, pane: 'p2' },
         ])
+      } finally {
+        a.stop()
+      }
+    } finally {
+      for (const spy of Object.values(s)) spy.mockRestore()
+    }
+  })
+
+  test('an agent that stopped for any other reason leaves no pane of its own to close', async () => {
+    const s = spies()
+    try {
+      reset()
+      chat({ ready: true })
+      const a = new Agents()
+      try {
+        const spec = { key: KEY, name, kind: 'pi', cwd, workspace: 'w' }
+        await a.ensure({ ...spec, pane: async () => 'p1' })
+        expect(a.record(KEY)?.pendingLaunch).toBeFalsy()
+        // its CLI exited and herdr let the name go: nothing pending was dropped, so no pane is Shepherdr's to close
+        listing.splice(0, listing.length)
+        await a.refresh()
+        await a.ensure({ ...spec, pane: async () => 'p2' })
+        expect(closed).toEqual([])
       } finally {
         a.stop()
       }

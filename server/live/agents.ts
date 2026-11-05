@@ -88,9 +88,10 @@ export interface AgentRecord {
   /** the CLI, model and effort Settings said for its role when it last started on them: a change since is offered as
    *  a restart in its chat (restart.ts) */
   set?: { kind: string; model?: string; effort?: string }
-  /** the pane its last run was started in: a launch closes one its agent no longer holds, so a relaunch never sits
-   *  beside an orphan (herdr closes the pane of a launch it dropped, but nothing guarantees that of every version) */
+  /** the pane its last run was started in, and whether herdr still had that launch pending when it was last seen: a
+   *  launch herdr dropped can leave that pane behind, and a relaunch closes it rather than sit beside it */
   lastPane?: string
+  pendingLaunch?: boolean
 }
 
 export interface OutItem {
@@ -207,6 +208,12 @@ export class Agents extends Emitter<Events> {
   private stopping = new Set<string>()
   /** names a launch is being completed for right now, so a look at herdr never asks twice at once */
   private asking = new Set<string>()
+  /** since when each launch has been seen pending, and the ones already said to be stuck, so each is said once */
+  private pendingSince = new Map<string, number>()
+  private pendingSaid = new Set<string>()
+  /** how long a launch may stay pending while Shepherdr asks for it: past that it is left for herdr to drop, so a name
+   *  that never goes ready is not kept alive for ever by the asking itself (the relaunch loop brings it back after) */
+  pendingFor = 90_000
   private delivering = new Set<string>()
   /** what went in lately with a screen's id: the chat gives the id back once it reads the message from the log */
   private delivered: OutItem[] = []
@@ -425,9 +432,7 @@ export class Agents extends Emitter<Events> {
         this.readingBackground = true
         void this.readBackground().catch(() => undefined).finally(() => { this.readingBackground = false })
       }
-      // a launch herdr has not finished is completed only by a client asking for that agent by name (issue #491): ask
-      // again on every look, until it is ready, or herdr drops the name; nothing here starts or stops anything
-      for (const a of this.live.values()) if (a.launch_pending && a.name && this.byName.has(a.name)) void this.askLaunch(a.name)
+      this.settleLaunches()
       // learn log files herdr names (its agent integrations report them)
       for (const [name, key] of this.byName) this.learnSession(key, this.live.get(name))
       // and the session its hooks say it is in now, which herdr doesn't name: a /clear starts another
@@ -455,13 +460,49 @@ export class Agents extends Emitter<Events> {
   }
 
   /**
-   * herdr starts an agent with `agent.start` and then leaves the launch pending: it finishes it only when a client asks
-   * for that agent by name, and drops it (closing the pane) about a minute later if nobody does (herdr 0.9.5, issue
-   * #491). Claude Code reports its own readiness through its hooks, but pi does not, so a pi agent sat at its start
-   * screen for ever and its brief stayed in outbox. Asking keeps the launch alive and finishes it; a name herdr has
-   * already dropped answers not found, and the next look at herdr sees the agent gone, which is what revive handles.
-   * One ask in flight per agent, and never awaited by the caller: the look at herdr never waits on a launch.
+   * herdr starts an agent with `agent.start` and then leaves the launch pending: it finishes such a launch only when a
+   * client asks for that agent by name, and about a minute later, if nobody did, it drops the name and closes the pane
+   * (herdr 0.9.5, issue #491). Claude Code reports its own readiness through its hooks, pi does not, so a pi agent sat
+   * at its start screen for ever and its brief stayed in outbox. Asking finishes the launch, and readiness then arrives
+   * as it does for any agent. A name herdr dropped answers not found and is no longer listed, which the relaunch loop
+   * handles as it handles any agent that stopped; nothing here starts or stops one.
+   *
+   * One ask in flight per agent, never awaited by the caller (a look at herdr never waits on a launch), and only for so
+   * long: a launch that never goes ready must not be kept alive by our asking, so past pendingFor it is said once and
+   * left for herdr to drop.
    */
+  private settleLaunches(now = Date.now()) {
+    for (const [name, a] of this.live) {
+      const key = this.byName.get(name)
+      const r = key ? this.records[key] : undefined
+      if (!a.launch_pending) {
+        if (r?.pendingLaunch) {
+          r.pendingLaunch = false
+          this.save()
+        }
+        this.pendingSince.delete(name)
+        this.pendingSaid.delete(name)
+        continue
+      }
+      if (r && !r.pendingLaunch) {
+        r.pendingLaunch = true
+        this.save()
+      }
+      const since = this.pendingSince.get(name) ?? now
+      this.pendingSince.set(name, since)
+      if (now - since < this.pendingFor) {
+        void this.askLaunch(name)
+        continue
+      }
+      if (this.pendingSaid.has(name)) continue
+      this.pendingSaid.add(name)
+      console.error(`shepherdr: ${name}'s launch hasn't become ready in ${Math.round((now - since) / 1000)} s; herdr drops it, and the relaunch loop starts it again`)
+    }
+    // forget the names herdr no longer lists, ready or dropped
+    for (const name of this.pendingSince.keys()) if (!this.live.has(name)) this.pendingSince.delete(name)
+    for (const name of [...this.pendingSaid]) if (!this.live.has(name)) this.pendingSaid.delete(name)
+  }
+
   private async askLaunch(name: string) {
     if (this.asking.has(name)) return
     this.asking.add(name)
@@ -474,13 +515,18 @@ export class Agents extends Emitter<Events> {
     }
   }
 
-  /** a pane this chat's last run was started in that no agent holds now, closed while it sits at a prompt: a relaunch
-   *  never leaves an orphan beside the agent it starts. The pane it is starting in now is left alone, and so is one
-   *  another chat's agent runs in, or one where something else runs */
+  /**
+   * The pane a launch herdr dropped can leave behind, closed before its agent is started again, so a relaunch never
+   * sits beside an orphan (on herdr 0.9.5 the drop closes the pane itself; nothing guarantees that of every version).
+   * Only such a pane is closed: one another chat's agent runs in, one where something else runs, and the pane it is
+   * starting in now are all left alone.
+   */
   private async closeLeftPane(r: AgentRecord, startingIn: string) {
     const pane = r.lastPane
     r.lastPane = undefined
-    if (!pane || pane === startingIn || [...this.live.values()].some((a) => a.pane_id === pane)) return
+    const dropped = r.pendingLaunch
+    r.pendingLaunch = false
+    if (!dropped || !pane || pane === startingIn || [...this.live.values()].some((a) => a.pane_id === pane)) return
     if (!(await herdr.paneIdle(pane).catch(() => false))) return
     await herdr.closePane(pane).catch(() => undefined)
   }
