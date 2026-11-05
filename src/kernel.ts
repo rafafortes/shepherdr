@@ -257,8 +257,10 @@ export interface UI {
   /** chat key listening for talk-to-type */
   dict: string | null
   dictStarted: number
-  /** Done was pressed: the last words are still coming in */
+  /** Done was pressed: the words are still being written down on the machine that serves Shepherdr */
   dictDone: boolean
+  /** why the last recording couldn't be written down, until dismissed */
+  dictError: string | null
   files: Record<string, { name: string; path?: string }[]>
   /** search in a chat: its words, and the match shown (by message id; none: the newest) */
   find: { chat: string; q: string; id: string | null } | null
@@ -396,6 +398,7 @@ let state: State = {
     dict: null,
     dictStarted: 0,
     dictDone: false,
+    dictError: null,
     files: {},
     reply: {},
     find: null,

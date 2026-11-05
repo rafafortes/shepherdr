@@ -25,6 +25,7 @@ import { eventRules, eventsText, eventWords, matches, nextWords, runWords, timeR
 import { Browsers, type BrowserBridge, type BrowserClient } from './browser.ts'
 import { excerpt, line, tag } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
+import { dictate as dictation } from './dictate.ts'
 import { age, checkTitle, ended, Engine, fitStatus, type TaskRec } from './engine/engine.ts'
 import { listFolders, makeRepo, resolveInHome } from './folders.ts'
 import { sh, validateBase } from './engine/git.ts'
@@ -744,6 +745,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const f = join(dir, `${Date.now().toString(36)}${randomUUID().slice(0, 4)}-${safe}`)
     task.writeFileSync(f, data)
     return f
+  }
+
+  /** Talk to type: whisper.cpp on this machine writes the recording down, with the model and language Settings name.
+   *  The words come back; the audio and its wav go with the temporary folder, so nothing is kept. */
+  dictate(audio: Blob) {
+    return dictation(audio, this.settings.get('dictate.model'), this.settings.get('dictate.language'))
   }
 
   async attachment(chat: string, path: string) {

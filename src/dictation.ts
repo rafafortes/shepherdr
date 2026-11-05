@@ -1,32 +1,25 @@
-// Talk to type: the browser's own speech recognition hears you while a meter on the microphone draws the wave. What
-// it heard waits until you are done, then goes into the box to edit; cancel drops it.
+// Talk to type: the microphone is recorded where it is, and a meter on it draws the wave. On Done the recording goes to
+// the machine that serves Shepherdr, which writes it down with whisper.cpp and sends the words back into the box to
+// edit; Cancel drops it. Nothing is written down in the browser, so a phone writes down as well as a computer does.
+//
+// It is the browser's own recording (MediaRecorder), not the browser's speech recognition: that one types nothing at
+// all on Android Chrome, and nothing can be asked of it beforehand to know whether it works. A recording needs no such
+// guess, and a server that can't write it down says why in the screen, in words.
 import { levelOf, meter, TALKING, type Sample } from './meter.ts'
 
-type Rec = {
-  lang: string
-  continuous: boolean
-  interimResults: boolean
-  onresult: (e: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void
-  onend: () => void
-  onerror: (e: { error: string }) => void
-  start(): void
-  stop(): void
-  abort(): void
-}
-
 export interface Dictation {
-  /** stop listening; the words still on their way come in, then the end callback gets them all */
+  /** stop recording; the words still being written down come in, then the end callback gets them */
   finish(): void
-  /** stop listening and drop what was heard */
+  /** stop recording and drop what was said */
   cancel(): void
 }
 
 let current: Dictation | null = null
 let level: AnalyserNode | null = null
 
+/** whether this browser can record and send a voice at all: a microphone it may use, and MediaRecorder */
 export function canDictate() {
-  const w = window as unknown as Record<string, unknown>
-  return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition)
+  return typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
 }
 
 /** for the wave: how loud you are right now */
@@ -35,73 +28,76 @@ export function dictSample(): Sample {
   return { level: l, who: l > TALKING ? 'you' : null }
 }
 
-/** Starts listening. `end` gets what was heard when it finishes, or null when cancelled. */
-export function dictate(end: (text: string | null) => void): Dictation {
+/** what the recording is sent as, the best this browser makes (Android Chrome: webm with opus) */
+function recordType() {
+  for (const type of ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']) {
+    try {
+      if (MediaRecorder.isTypeSupported(type)) return type
+    } catch {
+      /* not every browser answers */
+    }
+  }
+  return ''
+}
+
+/** Starts recording. `end` gets what was said when it finishes, or null when cancelled or when nothing was heard, with
+ *  why in `failure` when it couldn't be written down. */
+export function dictate(end: (text: string | null, failure?: string) => void): Dictation {
   current?.cancel()
-  const w = window as unknown as Record<string, new () => Rec>
-  const R = w.SpeechRecognition || w.webkitSpeechRecognition
-  const heard: string[] = []
   let state: 'on' | 'finishing' | 'over' = 'on'
-  let blocked = false
-  let quick = 0
-  let startedAt = 0
   let mic: MediaStream | null = null
   let ctx: AudioContext | null = null
-  let rec: Rec | null = null
-  const close = (text: string | null) => {
+  let rec: MediaRecorder | null = null
+  let type = ''
+  const chunks: Blob[] = []
+  const close = (text: string | null, failure?: string) => {
     if (state === 'over') return
     state = 'over'
     mic?.getTracks().forEach((t) => t.stop())
     ctx?.close().catch(() => undefined)
     level = null
     if (current === self) current = null
-    end(text)
+    end(text, failure)
+  }
+  /** the recording, sent to the machine that serves Shepherdr: the words come back, or why there are none */
+  const writeDown = async () => {
+    const audio = new Blob(chunks, { type: type || 'audio/webm' })
+    let said: { text?: string; error?: string } | null = null
+    try {
+      const r = await fetch('api/dictate', { method: 'POST', headers: { 'x-shepherdr': '1', 'content-type': audio.type }, body: audio })
+      said = (await r.json()) as { text?: string; error?: string }
+    } catch {
+      return close(null, "Couldn't reach Shepherdr to write it down.")
+    }
+    if (said?.error) return close(null, said.error)
+    const text = (said?.text ?? '').trim()
+    if (!text) return close(null, 'Nothing was heard in that recording. Try again, closer to the microphone.')
+    close(text)
+  }
+  /** stop the recorder; what is left of it is written down once the recorder says it stopped */
+  const send = () => {
+    if (!rec || rec.state === 'inactive') return close('')
+    rec.onstop = () => void writeDown()
+    rec.stop()
   }
   const self: Dictation = {
     finish() {
       if (state !== 'on') return
       state = 'finishing'
-      rec?.stop()
-      // the last words normally come within a moment; don't wait on a browser that never says it stopped
-      setTimeout(() => close(heard.join(' ')), 2500)
+      // the microphone may still be opening: the recorder sends as soon as it is there, so a Done pressed at once is
+      // still written down instead of dropped
+      if (rec) send()
     },
     cancel() {
       if (state === 'over') return
-      rec?.abort()
+      if (rec && rec.state !== 'inactive') {
+        rec.onstop = null
+        rec.stop()
+      }
       close(null)
     },
   }
   current = self
-  if (!R) {
-    queueMicrotask(() => close(null))
-    return self
-  }
-  const listen = () => {
-    startedAt = Date.now()
-    try {
-      rec!.start()
-    } catch {
-      close(heard.join(' '))
-    }
-  }
-  rec = new R()
-  rec.lang = navigator.language || 'en-US'
-  rec.continuous = true
-  rec.interimResults = false
-  rec.onresult = (e) => {
-    for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) heard.push(e.results[i][0].transcript.trim())
-  }
-  rec.onerror = (e) => {
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture') blocked = true
-  }
-  rec.onend = () => {
-    // a browser stops by itself after a pause: keep listening until Done, unless it keeps stopping straight away
-    quick = Date.now() - startedAt < 1000 ? quick + 1 : 0
-    if (state === 'on' && !blocked && quick < 3) return listen()
-    close(heard.join(' '))
-  }
-  listen()
-  // the wave's own ear on the microphone
   navigator.mediaDevices
     ?.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
     .then((stream) => {
@@ -110,7 +106,19 @@ export function dictate(end: (text: string | null) => void): Dictation {
       ctx = new AudioContext()
       level = meter(ctx)
       ctx.createMediaStreamSource(stream).connect(level)
+      type = recordType()
+      try {
+        rec = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream)
+      } catch {
+        return close(null, "This browser couldn't record your voice.")
+      }
+      rec.ondataavailable = (e) => {
+        if (e.data.size) chunks.push(e.data)
+      }
+      rec.start(1000)
+      // Done came while the microphone was opening: it records from here and stops at once
+      if (state === 'finishing') send()
     })
-    .catch(() => undefined)
+    .catch(() => close(null, 'The microphone is off for Shepherdr: allow it in the browser to talk to type.'))
   return self
 }

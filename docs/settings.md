@@ -5,7 +5,8 @@
   merge), each row offering its exact line under Brief wording. How Shepherdr runs: the agent, model and effort tasks and
   coordinators start with (model:
   an id or alias, or default for the CLI's own; effort: default, lowest, low, medium, high, xhigh or max, each CLI
-  taking it its own way) and tasks' backup agent, when Done tasks archive themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, the idle browser, Notifications and Voice. Notifications gathers scoped delivery rules and device enrolment; device delivery is Everywhere. Space menus still offer Notify. Its
+  taking it its own way) and tasks' backup agent, when Done tasks archive themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, the idle browser, dictation, Notifications
+  and Voice. Notifications gathers scoped delivery rules and device enrolment; device delivery is Everywhere. Space menus still offer Notify. Its
   defaults are set Everywhere, for a machine or for a space (`shepherdr set <key> <value> [--machine | --space NAME]`, from any machine);
   the most specific one set wins. Editing above the content names the scope; its searchable hierarchy handles many machines and spaces. Values set here are highlighted, with their inherited value, source and Reset beside them. And, kept on each device, its Appearance: System (the device's own light
   or dark), Light or Dark, set before the first paint, with the browser's bar and artifacts following it. A phone
@@ -25,6 +26,29 @@
   Settings and Restart offer Claude Code, Codex and pi; other herdr CLIs are refused before a chat launch because
   their replies cannot be shown. Existing saved choices are kept, but an unsupported choice must be changed before
   launching again. Headless reviewer choices are separate; this does not add or prove support for other reviewers.
+
+## Dictation
+
+Talk to type (the microphone beside the message box) records in the browser with `MediaRecorder`, sends the
+recording to the machine that serves Shepherdr, and that machine writes it down with **whisper.cpp**: `ffmpeg` turns
+it into a 16 kHz mono wav, whisper transcribes it, and the recording and the wav are dropped with the temporary
+folder they lived in. The words come back into the message box to edit, at the cursor; Cancel drops them. It is the
+same in every browser, which is why the browser's own speech recognition is not used: Android Chrome's types nothing
+at all, silently.
+
+Settings → Dictation (Everywhere or one machine) has what it needs:
+
+- **Model**: the model file, `~/.local/share/shepherdr-whisper/ggml-base.bin` unless set elsewhere. It must be a
+  multilingual model (`ggml-base.bin`, not `ggml-base.en.bin`), so one machine writes down more than one language.
+  Download: `curl -L -o ~/.local/share/shepherdr-whisper/ggml-base.bin
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin`.
+- **Language**: Detect it (whisper works the language out itself), English or Portuguese. A whisper language code
+  (`es`) is also accepted.
+
+whisper.cpp itself installs from the Ubuntu archive (`sudo apt install whisper.cpp`), which provides
+`whisper-cli`; Shepherdr finds it on `PATH`, then at `/usr/bin`, `/usr/local/bin`, `~/.local/bin` and Homebrew's
+prefix. A recording goes up at most 20 MB. When whisper.cpp, `ffmpeg` or the model is missing, the chat says so in
+words — it never fails silently — and nothing of the recording is written anywhere.
 
 ## Private instructions
 

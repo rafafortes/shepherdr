@@ -249,6 +249,19 @@ export const CATALOG: Section[] = [
     rows: [{ label: 'Time zone', key: 'time.zone', value: OWN_ZONE, text: true }],
   },
   {
+    // talk to type (src/dictation.ts, server/live/dictate.ts): the phone records, the machine that serves Shepherdr
+    // writes it down with whisper.cpp. The model is a multilingual one, so one setting writes down Portuguese and
+    // English; nothing of the recording is kept
+    name: 'Dictation',
+    levels: ['all', 'machine'],
+    about:
+      'Talk to type shows on its own; what it needs is here: whisper.cpp on the machine that serves Shepherdr (sudo apt install whisper.cpp) and a model file. The model is multilingual, so the same setting writes down more than one language; Language is what whisper is told, or Detect it to let it work the language out. The recording is written down and dropped: nothing of it is kept.',
+    rows: [
+      { label: 'Model', key: 'dictate.model', value: '~/.local/share/shepherdr-whisper/ggml-base.bin', text: true },
+      { label: 'Language', key: 'dictate.language', value: 'Detect it', options: ['Detect it', 'English', 'Portuguese'] },
+    ],
+  },
+  {
     name: 'Alerts and voice',
     levels: ['all'],
     about: 'The same on every machine and space.',
@@ -710,7 +723,7 @@ export function refuse(key: string, value: string): string | undefined {
   const cli = key === 'task.agent' || key === 'coordinator.agent' || (key === 'task.fallback' && value.trim().toLowerCase() !== 'off')
   if (cli && !kindOf(value)) return `${value} is not an agent herdr can start.`
   if (key === 'reviewer.agent' && !REVIEWERS.includes(CLI_NAME[kindOf(value) ?? ''] ?? '')) return `Pick one of: ${REVIEWERS.join(' · ')}.`
-  if (key.endsWith('.model') && !/^[\w.:/@[\] -]+$/.test(value.trim())) return 'Write a model id like claude-opus-5-5, or default.'
+  if (/^(task|coordinator|reviewer|backup)\.model$/.test(key) && !/^[\w.:/@[\] -]+$/.test(value.trim())) return 'Write a model id like claude-opus-5-5, or default.'
   const num = numOf(key)
   if (key === 'heartbeat.when' || key === 'heartbeat.on') {
     try {
