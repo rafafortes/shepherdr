@@ -7,6 +7,9 @@
 // guess, and a server that can't write it down says why in the screen, in words.
 import { levelOf, meter, TALKING, type Sample } from './meter.ts'
 
+/** what the chat says when a recording holds no audio at all, so nothing is written down */
+const NOTHING_HEARD = 'Nothing was heard in that recording. Try again, closer to the microphone.'
+
 export interface Dictation {
   /** stop recording; the words still being written down come in, then the end callback gets them */
   finish(): void
@@ -65,7 +68,7 @@ export function dictate(end: (text: string | null, failure?: string) => void): D
   const writeDown = async () => {
     const audio = new Blob(chunks, { type: type || 'audio/webm' })
     // nothing was recorded (Done pressed the instant the microphone opened): no upload of nothing to pay for
-    if (!audio.size) return close(null, 'Nothing was heard in that recording. Try again, closer to the microphone.')
+    if (!audio.size) return close(null, NOTHING_HEARD)
     let r: Response
     sending = new AbortController()
     try {
@@ -87,12 +90,13 @@ export function dictate(end: (text: string | null, failure?: string) => void): D
     if (said.error) return close(null, said.error)
     if (!r.ok) return close(null, `Shepherdr couldn't write that recording down (${r.status}${r.statusText ? ` ${r.statusText}` : ''}).`)
     const text = (said.text ?? '').trim()
-    if (!text) return close(null, 'Nothing was heard in that recording. Try again, closer to the microphone.')
+    if (!text) return close(null, NOTHING_HEARD)
     close(text)
   }
   /** stop the recorder; what is left of it is written down once the recorder says it stopped */
   const send = () => {
-    if (!rec || rec.state === 'inactive') return close('')
+    // the recorder is gone already (it stopped itself): whatever it did catch is still worth writing down
+    if (!rec || rec.state === 'inactive') return chunks.length ? void writeDown() : close(null, NOTHING_HEARD)
     rec.onstop = () => void writeDown()
     rec.stop()
   }
@@ -100,8 +104,8 @@ export function dictate(end: (text: string | null, failure?: string) => void): D
     finish() {
       if (state !== 'on') return
       state = 'finishing'
-      // the microphone may still be opening: the recorder sends as soon as it is there, so a Done pressed at once is
-      // still written down instead of dropped
+      // the microphone may still be opening: it heard nothing by now, so the box says so as soon as it opens instead
+      // of writing a sliver of nothing down
       if (rec) send()
     },
     cancel() {
@@ -120,7 +124,12 @@ export function dictate(end: (text: string | null, failure?: string) => void): D
   navigator.mediaDevices
     ?.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
     .then((stream) => {
-      if (state === 'over') return stream.getTracks().forEach((t) => t.stop())
+      // Done or Cancel came while the microphone was still opening: it heard nothing, so no recorder starts and
+      // nothing is written down (Cancel's screen has already gone back to its box, where close does nothing)
+      if (state !== 'on') {
+        stream.getTracks().forEach((t) => t.stop())
+        return close(null, NOTHING_HEARD)
+      }
       mic = stream
       // the recorder, not only the microphone: a browser that won't record says so instead of failing silently
       try {
@@ -137,8 +146,6 @@ export function dictate(end: (text: string | null, failure?: string) => void): D
       } catch {
         return close(null, "This browser couldn't record your voice.")
       }
-      // Done came while the microphone was opening: it records from here and stops at once
-      if (state === 'finishing') send()
     })
     .catch((e: Error) =>
       close(
