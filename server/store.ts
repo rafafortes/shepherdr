@@ -7,7 +7,8 @@ import { dirname, join } from 'node:path'
 export const HOME = process.env.SHEPHERDR_HOME || (process.env.NODE_ENV === 'test' ? testHome() : join(homedir(), '.shepherdr'))
 
 /** where Shepherdr's own files are now: read on every call, so a test can give each of its worlds a folder of its own
- *  (a test that times out goes on running, and must not reach into the one the next test reads and writes) */
+ *  (a test that times out goes on running, and must not reach into the one the next test reads and writes). Whoever
+ *  keeps files of its own takes it once, when it is made, and keeps that folder: readJson and writeJson's `dir`. */
 export const home = () => process.env.SHEPHERDR_HOME || HOME
 
 /** under bun test, never the real ~/.shepherdr (however the tests were started): an empty folder of their own */
@@ -17,8 +18,8 @@ function testHome() {
   return dir
 }
 
-export function readJson<T>(name: string, fallback: T): T {
-  const f = join(home(), name)
+export function readJson<T>(name: string, fallback: T, dir = home()): T {
+  const f = join(dir, name)
   try {
     return existsSync(f) ? (JSON.parse(readFileSync(f, 'utf8')) as T) : fallback
   } catch {
@@ -29,8 +30,8 @@ export function readJson<T>(name: string, fallback: T): T {
 /** secrets (keys, push subscriptions) are readable by you only */
 const PRIVATE = new Set(['secrets.json', 'vapid.json', 'push.json'])
 
-export function writeJson(name: string, value: unknown) {
-  const f = join(home(), name)
+export function writeJson(name: string, value: unknown, dir = home()) {
+  const f = join(dir, name)
   mkdirSync(dirname(f), { recursive: true, mode: 0o700 })
   const tmp = `${f}.tmp`
   writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: PRIVATE.has(name) ? 0o600 : 0o644 })

@@ -2,6 +2,7 @@
 // stand-in that makes and removes real git worktrees. Each file that imports it gets its own Shepherdr home, and each
 // world one of its own inside it.
 import { execSync } from 'node:child_process'
+import { beforeEach } from 'bun:test'
 import { cpSync, existsSync, mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -19,10 +20,12 @@ export type Said = import('../server/live/readers/hooks.ts').Said
 export const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8' }).trim()
 
 /**
- * A world reads and writes a data folder of its own, filled with what was there when it was made. Bun does not stop a
- * test that timed out: it goes on running, and its leftovers (a prefix it reserved, a branch it put away, a task it
- * wrote) must not reach into the folder the next test reads. Anything written before a world is made (a test that
- * saves tasks of its own) comes along into it. The name is the preload's, which clears those older than an hour.
+ * A world reads and writes a data folder of its own, a copy of the one it is made from. Bun does not stop a test that
+ * timed out: it goes on running, and its leftovers (a prefix it reserved, a branch it put away, a task it wrote) must
+ * not reach into the folder the next test reads. Each test starts from an empty folder of its own (beforeEach), so
+ * nothing a test left comes into the next one, while a test's own writes before its first world (tasks saved from
+ * before) do, as does what a world wrote for the next world in the same test. The name is the preload's, which clears
+ * those older than an hour.
  */
 function ownHome() {
   const from = process.env.SHEPHERDR_HOME
@@ -33,6 +36,8 @@ function ownHome() {
   if (from && existsSync(from)) for (const f of readdirSync(from).filter(keep)) cpSync(join(from, f), join(dir, f), { recursive: true })
   process.env.SHEPHERDR_HOME = dir
 }
+
+beforeEach(() => void (process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-test-home-base-'))))
 
 export function repo() {
   const dir = mkdtempSync(join(tmpdir(), 'shep-repo-'))
@@ -115,9 +120,6 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
   const places = new Places()
   const settings = new Settings()
   const engine = new Engine(agents as never, chats as never, places, settings, herdr.h as never)
-  // a merge that stalls on a slow machine answers in its own words, inside the time a test has, instead of hanging
-  // until bun takes the test away and the merge goes on into the tests after it (MERGE_DEADLINE is 90 s)
-  engine.mergeDeadline = 15_000
   const news: string[] = []
   /** the place each news is for: a project's place id, as its coordinator's chat has it */
   const newsTo: string[] = []

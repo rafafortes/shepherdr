@@ -74,7 +74,12 @@ if (import.meta.main) {
         pid = Number(readFileSync(lock, 'utf8').trim() || 0)
       } catch {}
       if (pid && !running(pid)) {
-        rmSync(lock, { force: true })
+        // taken away atomically: one waiter renames it, the others fail here and find whatever the winner made next
+        const away = `${lock}.gone-${process.pid}`
+        try {
+          renameSync(lock, away)
+          unlinkSync(away)
+        } catch {}
         continue
       }
       if (tries > 3000) throw e
