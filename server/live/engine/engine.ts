@@ -1404,10 +1404,11 @@ export class Engine extends Emitter<Events> {
 
   /**
    * Its coordinator gives it exactly one more review round, once its own are used, and its agent hears it in its chat
-   * and runs it. The limit is what stops an agent reviewing for ever, so a task's own agent can never raise it: `from`
-   * is the chat that ran the command, which must be that space's coordinator. That chat is the caller's own session
-   * route (helper/route.pl, bound to the agent's process), so a task's agent cannot name itself a coordinator; a shell
-   * that scrubs its entire environment is the human's own terminal as far as any local command can tell.
+   * and runs it: the limit is what stops an agent reviewing for ever, so the verb is its coordinator's. `from` is the
+   * chat the command carries, and helper/route.pl takes it from the caller's live process, so a task's agent arrives as
+   * `<ID>/Agent` and is refused even when it names another chat. A caller that posts to the loopback API itself, or
+   * scrubs its whole environment, is the human's own shell as far as any local command can tell: the boundary every
+   * coordinator-only verb here shares (`task delete`, `archive`, `pause`).
    */
   async reviewMore(id: string, from?: string) {
     const t = this.req(id)

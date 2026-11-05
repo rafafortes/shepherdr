@@ -100,7 +100,7 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
                                                  says so; Shepherdr hands it over once there's room
   shepherdr task review-more <id>                only from the task's own coordinator, and only once it has used all
                                                  its Review rounds: exactly one more round, ever, and its agent is
-                                                 told to run it. A task's own agent never adds one itself
+                                                 told to run it. A task's own agent can't add one: it asks in its chat
   shepherdr task stop <id>                       close its agent and herdr space; its work stays (a worktree with
                                                  unsaved or unmerged work is kept); writing to it starts it again
   shepherdr task close <id> [--summary "..."]    a task with nothing to merge: stop its agent, close its herdr space,
