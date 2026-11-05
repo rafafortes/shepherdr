@@ -67,13 +67,21 @@ describe('one design across the screen', () => {
   test("the agent's messages sit in their own bubbles too: left, grey while yours are blue, mirrored corners", () => {
     const chat = source['plugins/chat/client.tsx']
     const bubble = chat.slice(chat.indexOf('function Bubble('), chat.indexOf('function SessionLine('))
-    expect(bubble).toContain("you ? 'rounded-bubble rounded-br-[6px] bg-reply' : 'rounded-bubble rounded-bl-[6px] bg-bubble'")
+    // one shade each: yours (blue), the agent's (grey), another agent's (its own, ringed)
+    expect(bubble).toMatch(
+      /you\s+\? 'rounded-bubble rounded-br-\[6px\] bg-reply'\s*:\s*peer\s+\? 'rounded-bubble rounded-bl-\[6px\] bg-peer shadow-\[inset_0_0_0_1px_var\(--line2\)\]'\s*:\s*'rounded-bubble rounded-bl-\[6px\] bg-bubble'/,
+    )
     expect(bubble).toMatch(/items-start self-start/)
     // long replies stay wide enough to read on a phone
     expect(bubble).toMatch(/phone:max-w-\[9\d%\]/)
     // your bubbles' reply shade has a dark twin
     const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
     expect(css.match(/--reply:/g)?.length).toBe(2)
+    // another agent's message: a bubble of its own on the same side, in a third shade with its dark twin, naming the
+    // sender it declared above it (it is never the human's, and never this agent's either)
+    expect(css.match(/--peer:/g)?.length).toBe(2)
+    expect(chat).toMatch(/peer \? <PeerFrom peer=\{peer\} \/> : null/)
+    expect(chat).toMatch(/function PeerFrom\(\{ peer \}: \{ peer: Peer \}\)/)
     // inline code shows on either bubble's shade
     expect(css).toMatch(/& code \{[^}]*background: var\(--sel\)/)
   })

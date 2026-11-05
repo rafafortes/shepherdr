@@ -36,7 +36,7 @@ try {
   const r = await fetch(`${url}/api/cli`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(capability ? { authorization: `Bearer ${capability}` } : {}) },
-    body: JSON.stringify({ args, chat: process.env.SHEPHERDR_CHAT, cwd: process.cwd(), stdin }),
+    body: JSON.stringify({ args, chat: process.env.SHEPHERDR_CHAT, pane: process.env.HERDR_PANE_ID, cwd: process.cwd(), stdin }),
     signal: wait ? AbortSignal.timeout(wait) : undefined,
   })
   j = (await r.json()) as typeof j

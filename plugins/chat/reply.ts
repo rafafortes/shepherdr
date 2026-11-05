@@ -10,12 +10,14 @@ import { artifactQuote, type Chat, type Message, type Question, type ReplyQuote 
 /** the start of a message as a quote shows it: one line of plain words (a file by its name, an artifact by its title
     and version) */
 export function quoteOf(msg: Message): ReplyQuote & { id: string } {
+  // another agent's message keeps the name it declared in its quote
+  const who = { who: msg.who, ...(msg.peer ? { from: msg.peer.name } : {}) }
   if (isArtifact(msg)) {
     const title = getState().snap?.artifacts?.find((a) => a.id === msg.artifact!.id)?.title ?? 'Artifact'
-    return { id: msg.id, who: msg.who, text: artifactQuote(title, msg.artifact!.v), artifact: true }
+    return { id: msg.id, ...who, text: artifactQuote(title, msg.artifact!.v), artifact: true }
   }
-  if (!msg.text) return { id: msg.id, who: msg.who, text: msg.file?.name ?? '', file: true }
-  return { id: msg.id, who: msg.who, text: excerpt(msg.text, 160) }
+  if (!msg.text) return { id: msg.id, ...who, text: msg.file?.name ?? '', file: true }
+  return { id: msg.id, ...who, text: excerpt(msg.text, 160) }
 }
 
 /** the message a card was answered with in the chat, as its quote: your first one after the card with those words

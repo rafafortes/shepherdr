@@ -412,6 +412,12 @@ export function chats(): Record<string, Chat> {
             to: 'GTM-16 agent',
           },
         }),
+        // another agent's message: a row of its own, naming the sender it declared and the pane it writes from
+        m({
+          who: 'peer',
+          peer: { name: 'gtm coordinator', pane: 'w74:p1', space: 'gtm' },
+          text: 'Relayed from the operator: keep the plan as it is, and print the docs link at the end of gtm init.',
+        }),
       ]),
       c('GTM-14/Agent', 'Claude Code', [
         m({ who: 'you', text: 'Bundle the skills folder into the starter template.' }),

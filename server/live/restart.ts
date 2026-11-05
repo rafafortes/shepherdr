@@ -82,13 +82,13 @@ export function restartInfo(o: { role: 'task' | 'coordinator'; space?: string; o
   return { role: o.role, space: o.space, onKnown: o.onKnown, on, onWords: harnessWords(on), want: fitHarness(o.want), clis, working: o.working }
 }
 
-/** a chat's last words, latest last, for an agent taking over: yours and its agent's (as `them`), each cut short;
- *  cards and the brief (`skip`) left out */
+/** a chat's last words, latest last, for an agent taking over: yours, another agent's (named as it declared itself) and
+ *  its agent's (as `them`), each cut short; cards and the brief (`skip`) left out */
 export function recentChat(messages: Message[], them: string, skip?: string) {
   return messages
     .filter((m) => m.text && !m.card && m.text.trim() !== skip)
     .slice(-12)
-    .map((m) => `${m.who === 'you' ? 'Human' : them}: ${m.text!.length > 400 ? `${m.text!.slice(0, 400)}…` : m.text}`)
+    .map((m) => `${m.who === 'you' ? 'Human' : m.peer ? `Another agent (${m.peer.name})` : them}: ${m.text!.length > 400 ? `${m.text!.slice(0, 400)}…` : m.text}`)
     .join('\n\n')
 }
 

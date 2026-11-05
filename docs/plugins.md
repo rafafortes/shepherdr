@@ -78,7 +78,9 @@ slots below are public: plugins outside the repo rely on them, so they change on
     `tasks`, `artifacts`, `artifact` (one in a split view's pane), `tasksMenu`, `taskActions` (a task's own menu items,
     in its row's ⋯ and its chat's), `settings`, `search` (one each; the last plugin to set one wins)
   - chats: `messageParts`, `messageEdge` (under and on a message's bubble), `chatTail` (after the messages),
-    `chatBody` (replaces a chat's body while its `when` holds)
+    `chatBody` (replaces a chat's body while its `when` holds). A `Message.who` is `'you'`, `'agent'` or `'peer'`
+    (another agent's message, with `peer`: the name it declared, its pane, its space or task); a plugin that only
+    knows the first two should treat `'peer'` as not the human's
   - headers and menus: `placeHeader`, `placeMark`, `placeMenu` (a coordinator's), `agentHeader`, `agentMenu` (a task's)
   - the composer: `composerAbove`, `composerLive`, `composerSettings`, `composerIdle`, `composerPlus`, `composerMic`
     (unchanged). The base chat shows launch controls inside its + popup; attachment menu contributions still

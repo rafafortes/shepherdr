@@ -71,6 +71,8 @@ export function activityOf(ev: LogEvent[]): { turns: Turn[]; open?: Turn; jobs: 
         if (cur) close(e.at)
         break
       case 'user':
+      // a message from another agent opens a turn the agent answers, as one of yours does
+      case 'peer':
         if (cur && !cur.asked && !cur.steps.length) cur.asked = e.id
         break
       case 'agent':

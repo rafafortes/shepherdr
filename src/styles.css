@@ -56,6 +56,8 @@
   --bubble: #f4f4f5;
   /* your bubbles: a calm cool shade, apart from the agent's grey ones */
   --reply: #edf2f8;
+  /* another agent's message: a warm wash from the accent's family, so it reads as neither yours nor this agent's */
+  --peer: #fdf3e8;
   /* the picked segment of a toggle: lighter than its track in both themes */
   --seg-on: #fff;
   /* a scrollbar's thumb, and while you hold it */
@@ -140,6 +142,7 @@
   --well: #111114;
   --bubble: #1c1c20;
   --reply: #161b23;
+  --peer: #241a12;
   --seg-on: #2c2c31;
   --thumb: rgb(255 255 255 / 0.18);
   --thumb-held: rgb(255 255 255 / 0.32);
@@ -192,6 +195,7 @@
   --color-well: var(--well);
   --color-bubble: var(--bubble);
   --color-reply: var(--reply);
+  --color-peer: var(--peer);
   --color-seg-on: var(--seg-on);
   --color-need: var(--need);
   --color-ready: var(--ready);
