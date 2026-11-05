@@ -1,6 +1,6 @@
 // The log readers, on made-up lines in each CLI's exact format (field names and nesting copied from real logs).
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { claudeLogPath, findClaudeLog, findCodexLog, findPiLog, piSessionDir } from '../server/live/readers/find.ts'
@@ -98,6 +98,41 @@ describe('claude reader', () => {
     expect(ev[0]).toMatchObject({ kind: 'session', sessionId: S })
     // what the CLI says it runs on is a runtime line, not the chat's words
     expect(ev.filter((e) => e.kind !== 'usage' && e.kind !== 'turn-start' && e.kind !== 'runtime' && !STEPS.has(e.kind))[5].id).toBe('msg_B')
+  })
+
+  test("the message Claude Code shows as an update mid-turn is the agent's, from a coordinator log's own lines", () => {
+    // fixtures/readers/claude-updates.jsonl: one message as a coordinator's Claude Code log writes it (the keys in its
+    // order, the empty thinking block, the update, the call, the result and the reply that ends the turn), with the
+    // words and everything about that machine replaced. Claude Code shows the update in place of what the agent wrote
+    // before the call and keeps only the update: the chat shows it too.
+    const lines = readFileSync(join(import.meta.dir, 'fixtures/readers/claude-updates.jsonl'), 'utf8').split('\n').filter(Boolean)
+    const ev = parse('claude', lines.map((l) => JSON.parse(l)))
+    expect(brief(ev)).toEqual([
+      // the fixture file's own session
+      'session:session-c0a1b2c3-0000-4000-8000-000000000011',
+      'user:The app shows a generic error after signing in. Find out why.',
+      'agent:The saved session is rejected on every call, but the screen shows a generic error instead of asking for a fresh sign-in. Checking what the app promises for that case before changing anything.',
+      'agent:The session rule is in `docs/sessions.md`, so the fix goes in the sign-in path.',
+      'turn-end:turn-msg_2',
+    ])
+  })
+
+  test('the signature alone tells an update from thinking: real thinking stays hidden, with the flag or without', () => {
+    // the signatures' real starts, which name the block's kind in base64: "narration" for an update, "thinking" for
+    // thinking. A log without thinkingDisplay still shows the update; real thinking stays hidden with the flag
+    // ("updates" on a model of another family writes its reasoning with no signature at all), summarized, or not.
+    const NARRATION = 'CAQS6QYKEQgTGAI4AUIJbmFycmF0aW9uEgyt18vBwn6rCMM/olQaDNnJxhBE'
+    const THINKING = 'CAQSmhMKEAgTGAI4AUIIdGhpbmtpbmcSDCGjs6X4aWQYTyCqPxoM9syo+jvz'
+    const flagged = (uuid: string, id: string, block: object, stop: string) => ({ ...cassistant(uuid, id, block, stop), thinkingDisplay: 'updates' })
+    const ev = parse('claude', [
+      cassistant('a1', 'msg_A', { type: 'thinking', thinking: '', signature: THINKING }, 'tool_use'),
+      cassistant('a2', 'msg_A', { type: 'thinking', thinking: 'Checked the log first.\n\n', signature: NARRATION }, 'tool_use'),
+      flagged('a3', 'msg_B', { type: 'thinking', thinking: 'The token is rejected, so the sign-in path needs a fix.', signature: THINKING }, 'tool_use'),
+      // Claude Code on a local model: its own reasoning, with the flag and no signature of any kind
+      flagged('a4', 'msg_C', { type: 'thinking', thinking: 'Let me read the document again and compare the two revisions.', signature: '' }, 'tool_use'),
+      cassistant('a5', 'msg_D', { type: 'thinking', thinking: 'Just a short greeting, so the reply stays short.', signature: THINKING }, 'end_turn'),
+    ])
+    expect(brief(ev).filter((x) => x.startsWith('agent:'))).toEqual(['agent:Checked the log first.'])
   })
 
   test('a command Claude Code runs itself reads as typed, with what it printed as its answer, and starts no turn', () => {
