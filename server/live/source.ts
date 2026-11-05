@@ -2221,8 +2221,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * pane (another Claude Code or pi session of the operator's, not one of ours): it goes by that agent's name. A plain
    * terminal — no chat, no agent in its pane — sends nothing, so its words stay the human's.
    *
-   * Declared, never verified: a shell could set SHEPHERDR_CHAT itself, which is why the chat shows the sender and grants
-   * it nothing. The pane is what herdr reports, not what the caller claims.
+   * Declared, never verified: a shell could set SHEPHERDR_CHAT and the pane itself. The one thing asked of herdr is
+   * whether an agent really runs in the pane a shell with no chat named, and which one; its name is only what herdr
+   * calls it. Either way the chat shows the sender and grants it nothing.
    */
   private async toldFrom(ctx: { chat?: string; pane?: string }): Promise<{ name: string; pane?: string; space?: string; task?: string } | undefined> {
     const pane = ctx.pane

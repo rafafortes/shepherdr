@@ -144,12 +144,12 @@ function peerLine(text: string): string | undefined {
 
 /**
  * A message from another agent not seen yet. Claude Code writes one either as a queued command (taken in mid-turn) or
- * as a user line, never both for the same message in the logs on this machine: the same words in the other place within
- * a minute are that same message, and one message is one row. The same words twice from one place are two messages.
+ * as a user line: the same words in the other place at the same moment are that one message written twice, and one
+ * message is one row. The same words twice from one place, or a turn apart, are two messages.
  */
 function firstPeer(s: FileState, text: string, at: number, shape: string): boolean {
   const seen = (s.peers ??= new Map())
-  for (const [t, was] of seen) if (Math.abs(at - was.at) > 60_000) seen.delete(t)
+  for (const [t, was] of seen) if (Math.abs(at - was.at) > 5_000) seen.delete(t)
   const was = seen.get(text)
   if (was && was.shape !== shape) return false
   seen.set(text, { at, shape })
