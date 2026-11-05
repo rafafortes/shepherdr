@@ -2,14 +2,13 @@
 // a CLI's own menus; what you send shows at once and goes in at once, even mid-turn; only while the CLI shows a menu
 // or is starting does it wait, and the bubble says why.
 import clsx from 'clsx'
-import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
+import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
 import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
 import { keyOf, partsOf, priorOf, reasonOf, SEND_TIMEOUT, type Outgoing } from '@client/outbox.ts'
-import { AlertIcon, BackIcon, CameraIcon, CheckIcon, Count, dimmed, Dot, DownIcon, DownloadIcon, EffortIcon, Empty, field, FileIcon, ic, IconButton, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModelIcon, ModeIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, roundBtn, SearchIcon, Sent, SmileIcon, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
+import { AlertIcon, BackIcon, CameraIcon, CheckIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
-import { readBrief } from '@shared/brief.ts'
 import { extOf, isImage } from '@shared/files.ts'
-import { modeName, type CardAsk, type Chat, type Message, type Place, type Question, type ReplyQuote, type UpdateCard } from '@shared/types.ts'
+import { modeName, type CardAsk, type Chat, type Message, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
 import { buzz, mine, openBar, openPicker, quick, react } from '@plugins/reactions/client.tsx'
 import { EDGE } from '@client/gestures.ts'
 import { still, useArrive } from '@client/motion.ts'
@@ -21,35 +20,13 @@ import { Markdown } from './markdown.tsx'
 import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } from './reply.ts'
 import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, LiveLine, TurnLine } from './activity.tsx'
+import { AgentControls, PlaceRestartItem, RestartSheet, TaskRestartItem } from '@client/restart.tsx'
 
 /* ---------- messages ---------- */
 
-/**
- * What you (or a coordinator for you) wrote, as written. A task's brief ends with its Settings block: that shows as a
- * list under a line, each setting's name first, and a line that differs from Shepherdr's default picked out with who
- * changed it, so you see at a glance what this task got that others don't.
- */
+/** Human messages, including full task briefs and generated settings, exactly as written. */
 function YourText({ text }: { text: string }) {
-  const b = readBrief(text)
-  if (!b?.lines.length) return <div className="whitespace-pre-wrap">{text}</div>
-  return (
-    <>
-      {b.before ? <div className="whitespace-pre-wrap">{b.before}</div> : null}
-      <div data-settings className={clsx('flex flex-col gap-1 border-line2 text-[0.8125rem]/5 phone:text-[0.9375rem]/[1.375rem]', b.before && 'mt-2.5 border-t pt-2.5')}>
-        <div className="font-medium text-fg">Settings</div>
-        <ul className="flex flex-col gap-1">
-          {b.lines.map((l, i) => (
-            <li key={i} data-changed={l.by ? '' : undefined} className={clsx('text-pretty', l.by ? '-mx-2 rounded-row bg-accent/10 px-2 py-0.5 text-fg' : 'text-fg2')}>
-              {l.label ? <span className="font-medium text-fg">{l.label}: </span> : null}
-              {l.text}
-              {l.by ? <span className="block text-[0.75rem]/4 font-medium text-accent phone:text-[0.8125rem]/[1.125rem]">Changed: {l.by}</span> : null}
-            </li>
-          ))}
-        </ul>
-      </div>
-      {b.after ? <div className="mt-2.5 whitespace-pre-wrap">{b.after}</div> : null}
-    </>
-  )
+  return <div className="whitespace-pre-wrap wrap-anywhere">{text}</div>
 }
 
 export { Markdown }
@@ -71,9 +48,12 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
   const picked = usePicked(msg.id, chat.key)
   const selecting = useUI((u) => u.selecting === msg.id)
   const text = useRef<HTMLDivElement>(null)
+  // one on its way isn't a message yet: a hold (or ⋯ with a mouse) offers only to take it out
+  const [menu, setMenu] = useState(false)
+  const pending = out && out.state !== 'failed' ? out : undefined
   // a finger holds a message to react (like iMessage) and slides it right to reply; Select text in the bar lets it
   // select instead, until a tap elsewhere
-  const hold = useHold(canReact && !selecting ? (at) => openBar(chat.key, msg.id, at) : null, replies && !selecting ? () => startReply(chat.key, msg) : null)
+  const hold = useHold(canReact && !selecting ? (at) => openBar(chat.key, msg.id, at) : pending ? () => setMenu(true) : null, replies && !selecting ? () => startReply(chat.key, msg) : null)
   useEffect(() => {
     if (!selecting) return
     if (text.current) getSelection()?.selectAllChildren(text.current)
@@ -89,7 +69,7 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
       }
     : {}
   // a file waiting to go in shows faded, without a line saying so
-  const body = !!(msg.text || msg.answered || (msg.waiting && !msg.file))
+  const body = !!(msg.text || msg.answered || msg.waiting)
   const reacted = !!msg.reactions?.length
   const edge = registry.messageEdge.map(({ View }, i) => <View key={i} msg={msg} chat={chat} />)
   // reactions sit on the bubble's bottom right corner, yours and the agent's alike (like iMessage and WhatsApp); a row
@@ -116,7 +96,8 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
       {quoted ? quote : null}
       {anchor}
       {pills}
-      <Beside msg={msg} chat={chat.key} you={you} picked={picked} react={canReact} reply={replies} />
+      <Beside msg={msg} chat={chat.key} you={you} picked={picked || menu} react={canReact} reply={replies} more={pending && (() => setMenu(true))} />
+      {pending && menu ? <PendingMenu out={pending} onClose={() => setMenu(false)} /> : null}
     </div>
   )
   return (
@@ -160,8 +141,8 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
                   'relative max-w-full min-w-0 text-[0.9375rem]/[1.375rem] text-pretty px-3.5 py-2 phone:px-4 phone:py-2.5 phone:text-base/6',
                   you ? 'rounded-bubble rounded-br-[6px] bg-reply' : 'rounded-bubble rounded-bl-[6px] bg-bubble',
                   you ? 'self-end' : 'self-start',
-                  // on a touch screen a hold reacts, so it doesn't start selecting text or a link's preview
-                  canReact && !selecting && clsx(pressable, 'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]'),
+                  // on a touch screen a hold reacts (or offers Remove), so it doesn't start selecting text or a link's preview
+                  ((canReact && !selecting) || pending) && clsx(pressable, 'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]'),
                   // after Select text it selects, though the app's chrome around it doesn't
                   selecting && 'select-text',
                   touchFor(replies && !selecting),
@@ -180,7 +161,13 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
                     ) : null}
                   </div>
                 ) : null}
-                {msg.waiting ? <div className="text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{waitLine(msg.waitsFor)}</div> : null}
+                {msg.waiting ? <div className="text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{msg.waitsFor === 'menu' ? <>
+                  Waiting for your answer above.{' '}
+                  {(() => {
+                    const blocker = chat.messages.findLast((m) => m.question?.sent === undefined && !!m.question && !m.waiting)
+                    return blocker ? <LinkButton onClick={() => jumpTo(chat.key, blocker.id, { card: true })}>Go to question</LinkButton> : null
+                  })()}
+                </> : waitLine(msg.waitsFor)}</div> : null}
                 {msg.text ? <div ref={text} data-text>{you ? <YourText text={msg.text} /> : <Fold id={msg.id}><Markdown text={msg.text} /></Fold>}</div> : null}
               </div>,
               true,
@@ -188,7 +175,7 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
           : null}
         {msg.file
           ? unit(
-              <div data-anchor {...hold} className={clsx('relative max-w-full select-none [-webkit-touch-callout:none]', canReact && pressable, touchFor(replies), you ? 'self-end' : 'self-start')}>
+              <div data-anchor {...hold} className={clsx('relative max-w-full select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies), you ? 'self-end' : 'self-start')}>
                 <FileTile name={msg.file.name} chat={chat.key} path={msg.file.path} tucked={!body && !!quote} />
               </div>,
               !body,
@@ -217,31 +204,57 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
 /** why one you sent waits: a busy agent takes it at once, so only a menu (typing could pick an option), an agent still
  *  starting, a CLI command mid-turn or a machine out of reach hold it */
 function waitLine(why: Message['waitsFor']) {
-  if (why === 'menu') return "Held until its question is answered, so it can't pick an option"
+  if (why === 'menu') return 'Waiting for your answer above.'
   if (why === 'start') return 'Goes in once the agent has started'
   if (why === 'turn') return 'Goes in once the agent finishes this step'
   return 'Goes in once it can be reached'
 }
 
-/** under what didn't go through: why, and Retry or Remove; the words stay in the bubble */
+/** under what didn't go through: why, and Retry or Remove; the words stay in the bubble. One that went in but never came
+ *  back from the agent's log says so calmly: it may well have reached the agent */
 function NotSent({ out, className }: { out: Outgoing; className?: string }) {
   const btn = 'relative font-medium text-fg after:absolute after:-inset-x-1.5 after:-inset-y-2.5 hover:underline'
   return (
-    <div role="alert" className={clsx('mt-1 flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 text-[0.75rem] text-need phone:text-[0.8125rem]', className)}>
-      <span className="flex items-center gap-1.5">
-        <AlertIcon className="size-3.5 shrink-0" />
-        Not sent. {out.error}
-      </span>
+    <div role="alert" className={clsx('mt-1 flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 text-[0.75rem] phone:text-[0.8125rem]', out.lost ? 'text-fg2' : 'text-need', className)}>
+      {out.lost ? (
+        <span>Not delivered</span>
+      ) : (
+        <span className="flex items-center gap-1.5">
+          <AlertIcon className="size-3.5 shrink-0" />
+          Not sent. {out.error}
+        </span>
+      )}
       <span className="flex items-center gap-1.5 whitespace-nowrap">
         <button type="button" className={btn} onClick={() => retry(out.cid)}>
           Retry
         </button>
         <span aria-hidden="true" className="text-fg3">·</span>
-        <button type="button" className={btn} onClick={() => setOutbox((all) => all.filter((o) => o.cid !== out.cid))}>
+        <button type="button" className={btn} onClick={() => removeOut(out.cid)}>
           Remove
         </button>
       </span>
     </div>
+  )
+}
+
+/** take one you sent out of the chat, its words and files with it */
+const removeOut = (cid: string) => setOutbox((all) => all.filter((o) => o.cid !== cid))
+
+/** a hold on one still on its way (or ⋯ beside it, with a mouse): Remove takes it out, should it never come back. It
+ *  opens above it: what is on its way is always at the end of the chat, over the box */
+function PendingMenu({ out, onClose }: { out: Outgoing; onClose: () => void }) {
+  return (
+    <Menu label="Message" onClose={onClose} className="absolute right-0 bottom-full z-21 mb-1.5 w-max min-w-0! origin-bottom-right">
+      <MenuItem
+        icon={<DeleteIcon className={ic} />}
+        onClick={() => {
+          onClose()
+          removeOut(out.cid)
+        }}
+      >
+        Remove
+      </MenuItem>
+    </Menu>
   )
 }
 
@@ -413,8 +426,8 @@ function SwipeHint() {
 }
 
 /** with a mouse, a smiley and a reply arrow beside the message (like Slack and WhatsApp on the web) */
-function Beside({ msg, chat, you, picked, react, reply, name, over }: { msg: Message; chat: string; you: boolean; picked: boolean; react: boolean; reply: boolean; name?: string; over?: boolean }) {
-  if (!react && !reply) return null
+function Beside({ msg, chat, you, picked, react, reply, more, name, over }: { msg: Message; chat: string; you: boolean; picked: boolean; react: boolean; reply: boolean; more?: () => void; name?: string; over?: boolean }) {
+  if (!react && !reply && !more) return null
   const btn = over
     ? 'grid size-7 place-items-center rounded-full bg-black/55 text-white backdrop-blur-sm hover:bg-black/70'
     : 'grid size-7 place-items-center rounded-full text-fg3 hover:bg-hover hover:text-fg2'
@@ -439,6 +452,11 @@ function Beside({ msg, chat, you, picked, react, reply, name, over }: { msg: Mes
       {reply ? (
         <button type="button" aria-label={name ? `Reply to ${name}` : 'Reply'} onClick={() => startReply(chat, msg)} className={btn}>
           <ReplyIcon className={ic} />
+        </button>
+      ) : null}
+      {more ? (
+        <button type="button" aria-label={name ? `More for ${name}` : 'More'} aria-haspopup="menu" onClick={more} className={clsx(btn, picked && !over && 'bg-hover text-fg2')}>
+          <MoreIcon className={ic} />
         </button>
       ) : null}
     </div>
@@ -573,7 +591,7 @@ function Album({ msgs, chat, from, out, last: lastPart }: { msgs: Message[]; cha
                 last && c === len - 1 ? (you ? '6px' : big) : small,
                 last && !c ? (you ? big : '6px') : small,
               ].join(' ')
-              return <Tile key={keyOf(m)} msg={m} chat={chat} you={you} radius={radius} single={msgs.length === 1} more={i === 6 ? more : 0} out={!!out} />
+              return <Tile key={keyOf(m)} msg={m} chat={chat} you={you} radius={radius} single={msgs.length === 1} more={i === 6 ? more : 0} out={out} />
             })}
           </div>
         ))}
@@ -585,7 +603,7 @@ function Album({ msgs, chat, from, out, last: lastPart }: { msgs: Message[]; cha
 
 /** one picture in an album, a message of its own: a tap opens it full screen; a hold (or the smiley on it, with a
  *  mouse) reacts, and its reactions sit in its bottom right corner */
-function Tile({ msg, chat, you, radius, single, more, out }: { msg: Message; chat: Chat; you: boolean; radius: string; single: boolean; more: number; out?: boolean }) {
+function Tile({ msg, chat, you, radius, single, more, out }: { msg: Message; chat: Chat; you: boolean; radius: string; single: boolean; more: number; out?: Outgoing }) {
   const f = msg.file!
   // a picture this browser can't show (HEIC on most desktops) is a file tile, or a small one in an album
   const [broken, setBroken] = useState(false)
@@ -593,14 +611,22 @@ function Tile({ msg, chat, you, radius, single, more, out }: { msg: Message; cha
   const canReact = has('reactions') && !msg.waiting && !out
   const replies = canReply(msg, out)
   const picked = usePicked(msg.id, chat.key)
-  const hold = useHold(canReact ? (at) => openBar(chat.key, msg.id, at) : null, replies ? () => startReply(chat.key, msg) : null)
+  // one on its way offers only Remove, as a bubble does
+  const [menu, setMenu] = useState(false)
+  const pending = out && out.state !== 'failed' ? out : undefined
+  const hold = useHold(canReact ? (at) => openBar(chat.key, msg.id, at) : pending ? () => setMenu(true) : null, replies ? () => startReply(chat.key, msg) : null)
   const edge = msg.reactions?.length ? registry.messageEdge.map(({ View }, i) => <View key={i} msg={msg} chat={chat} />) : null
-  const smiley = (beside: boolean) => <Beside msg={msg} chat={chat.key} you={you} picked={picked} react={canReact} reply={replies} name={f.name} over={!beside} />
+  const smiley = (beside: boolean) => (
+    <>
+      <Beside msg={msg} chat={chat.key} you={you} picked={picked || menu} react={canReact} reply={replies} more={pending && (() => setMenu(true))} name={f.name} over={!beside} />
+      {pending && menu ? <PendingMenu out={pending} onClose={() => setMenu(false)} /> : null}
+    </>
+  )
   // on its own it is a file tile like any other file, its reactions on its bottom right corner as on a bubble
   if (broken && single)
     return (
       <div data-msg={msg.id} data-chat={chat.key} data-you={you ? '' : undefined} className="group/msg relative flex max-w-full flex-col">
-        <div data-anchor {...hold} className={clsx('relative max-w-full select-none [-webkit-touch-callout:none]', canReact && pressable, touchFor(replies))}>
+        <div data-anchor {...hold} className={clsx('relative max-w-full select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies))}>
           <FileTile name={f.name} chat={chat.key} path={f.path} />
         </div>
         {edge ? <div className="relative -mt-2 flex max-w-full flex-wrap justify-end gap-1 self-end pr-2.5 pl-1 phone:-mt-2.5">{edge}</div> : null}
@@ -618,7 +644,7 @@ function Tile({ msg, chat, you, radius, single, more, out }: { msg: Message; cha
           aria-label={`Download ${f.name}`}
           {...hold}
           style={{ borderRadius: radius }}
-          className={clsx(frame, 'grid size-full place-items-center text-fg2 select-none [-webkit-touch-callout:none] hover:text-fg', canReact && pressable, touchFor(replies))}
+          className={clsx(frame, 'grid size-full place-items-center text-fg2 select-none [-webkit-touch-callout:none] hover:text-fg', (canReact || pending) && pressable, touchFor(replies))}
         >
           <span className="grid justify-items-center gap-0.5 text-[0.6875rem] phone:text-[0.75rem]">
             <FileIcon className={ic} />
@@ -634,7 +660,7 @@ function Tile({ msg, chat, you, radius, single, more, out }: { msg: Message; cha
           // one on its way isn't a message yet: it opens on its own, like a file in the message box
           onClick={() => setUI({ photo: out ? { chat: chat.key, file: f } : { chat: chat.key, msg: msg.id } })}
           style={{ borderRadius: radius }}
-          className={clsx(frame, 'select-none [-webkit-touch-callout:none]', canReact && pressable, touchFor(replies), !single && 'size-full', picked && 'outline-2 outline-offset-2 outline-(--line2)')}
+          className={clsx(frame, 'select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies), !single && 'size-full', picked && 'outline-2 outline-offset-2 outline-(--line2)')}
         >
           <img
             src={fileUrl(chat.key, f.path)}
@@ -1004,7 +1030,8 @@ const cardAside = 'shrink-0 text-[0.8125rem] text-fg2'
 
 /** Shepherdr's update card about a task: one line, a dot, its id and a few words; a tap opens the task, where its
     summary is; held (or the smiley beside it) it reacts, like a message. A mode card marks when the place's
-    coordinator went on a mode; a machine's health or a red main says what happened. Those open nothing */
+    coordinator went on a mode; a restart card what its agent started again on; a machine's health or a red main says
+    what happened. Those open nothing */
 function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard; chat: string; at?: number; press?: ReturnType<typeof useHold>; keys?: object; className?: string }) {
   const snap = useSnap()!
   // a machine's health: what crossed its limit (red) or came back under it
@@ -1028,6 +1055,16 @@ function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard;
           <span className="truncate">
             <b className="font-semibold">{c.red}</b> {c.text}
           </span>
+        </span>
+      </div>
+    )
+  // its agent started again: on what
+  if (c.restart)
+    return (
+      <div data-anchor data-restart-card {...press} {...keys} className={clsx(cardBox, className)}>
+        <RestartIcon className={clsx(ic, 'shrink-0 text-fg2')} />
+        <span className={cardLine}>
+          <span className="truncate">{c.text}</span>
         </span>
       </div>
     )
@@ -1065,22 +1102,23 @@ function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard;
   return (
     <>
       {line}
-      <AskOnCard ask={c.ask} task={task} space={chat} />
+      <AskOnCard ask={c.ask} task={task} taskTitle={t?.name} space={chat} />
     </>
   )
 }
 
 /** what a needs-you card's task asks, answered here as in the task's own chat: its question cards as they stand there,
     or the agent's plain question with a reply box */
-function AskOnCard({ ask, task, space }: { ask: CardAsk; task: string; space: string }) {
+function AskOnCard({ ask, task, taskTitle, space }: { ask: CardAsk; task: string; taskTitle?: string; space: string }) {
   // the cards answer into the task's chat; the words that answered one show on it
   const chat: Chat = { key: ask.chat, cli: '', messages: [] }
-  if (ask.questions) return ask.questions.map((q) => <QuestionCard key={q.id} q={q} chat={chat} msg={q.id} from={task} space={space} />)
-  return ask.reply ? <ReplyOnCard ask={ask} reply={ask.reply} task={task} space={space} /> : null
+  const source = { id: task, title: taskTitle }
+  if (ask.questions) return ask.questions.map((q) => <QuestionCard key={q.id} q={q} chat={chat} msg={q.id} from={task} space={space} source={source} />)
+  return ask.reply ? <ReplyOnCard ask={ask} reply={ask.reply} task={task} space={space} source={source} /> : null
 }
 
 /** a plain question, with no choices: its words, and a reply to it that goes to the task's agent */
-function ReplyOnCard({ ask, reply, task, space }: { ask: CardAsk; reply: NonNullable<CardAsk['reply']>; task: string; space: string }) {
+function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply: NonNullable<CardAsk['reply']>; task: string; space: string; source: CardSource }) {
   const [text, setText] = useDraft(`card-reply:${ask.chat}:${reply.id}`)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -1099,7 +1137,7 @@ function ReplyOnCard({ ask, reply, task, space }: { ask: CardAsk; reply: NonNull
   }
   const a = ask.answered
   return (
-    <CardShell title={`${task} asks`}>
+    <CardShell title={`${task} asks`} source={source}>
       <div data-ask-text className="line-clamp-6 break-words whitespace-pre-wrap">{reply.text}</div>
       {a ? (
         <Sent>
@@ -1112,7 +1150,7 @@ function ReplyOnCard({ ask, reply, task, space }: { ask: CardAsk; reply: NonNull
         <>
           <TextBox name="reply" data-kept label={`Reply to ${task}`} className={noteBox} placeholder="Type something…" value={text} onChange={setText} />
           <div className="flex items-center justify-end gap-2">
-            {err ? <span className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
+            {err ? <span role="alert" className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
             <Primary soft disabled={busy || !text.trim()} onClick={send}>
               Send
             </Primary>
@@ -1234,10 +1272,17 @@ function Typing({ chat, from }: { chat: Chat; from: string }) {
 
 /** a question's card: one width whatever its choices (the chat's width on a phone), its title in a header under a
  *  question mark, or a list for a plan. The title wraps onto as many lines as it needs, the mark on its first line */
-export function CardShell({ title, plan, action, children }: { title: string; plan?: boolean; action?: ReactNode; children: ReactNode }) {
-  const Icon = plan ? PlanIcon : QuestionIcon
+type CardSource = { id: string; title?: string }
+
+export function CardShell({ title, plan, icon, action, source, children }: { title: string; plan?: boolean; icon?: ComponentType<{ className?: string }>; action?: ReactNode; source?: CardSource; children: ReactNode }) {
+  const Icon = icon ?? (plan ? PlanIcon : QuestionIcon)
   return (
     <div data-card className="mt-2 w-[440px] max-w-full cursor-default overflow-hidden rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line2)]">
+      {source ? (
+        <div data-card-source className="px-3 pt-2 text-[0.8125rem] break-words text-fg2">
+          <span className="font-semibold">{source.id}</span>{source.title ? ` · ${source.title}` : ''}
+        </div>
+      ) : null}
       <div className="flex items-start gap-2 border-b border-line py-2 pr-2 pl-3 text-[0.9375rem]">
         <Icon className={clsx(ic, 'mt-[3px] text-fg2')} />
         <b data-card-title className="min-w-0 flex-1 font-semibold text-pretty break-words">{title}</b>
@@ -1258,13 +1303,15 @@ function answeredHow(q: Question) {
 const noteBox = clsx('min-h-10 w-full resize-none rounded-row bg-transparent px-3 py-[9px] placeholder:text-fg3 coarse:min-h-11 phone:min-h-11 phone:text-[1rem]', field)
 
 /** space: a copy of a task's question on its needs-you card in that space's chat, answered there */
-export function QuestionCard({ q, chat, msg, from, space }: { q: Question; chat: Chat; msg: string; from: string; space?: string }) {
-  // nothing picked to start with: Send waits for a pick, so a stray tap never answers (a permission's Yes least of all)
+export function QuestionCard({ q, chat, msg, from, space, source }: { q: Question; chat: Chat; msg: string; from: string; space?: string; source?: CardSource }) {
+  // Unmarked cards always require a deliberate pick and Send, including all approval prompts.
   const [sel, setSel] = useState<number[]>([])
   // half-typed notes survive a reload
   const [note, setNote] = useDraft(`card:${chat.key}:${q.id}`)
   const [other, setOther] = useDraft(`card-other:${chat.key}:${q.id}`)
   const [busy, setBusy] = useState(false)
+  const sending = useRef(false)
+  const [composing, setComposing] = useState(false)
   const [err, setErr] = useState('')
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const sent = q.sent !== undefined
@@ -1272,25 +1319,41 @@ export function QuestionCard({ q, chat, msg, from, space }: { q: Question; chat:
   // a plan sent back says what to change in the note
   const needNote = q.noteRequiredFor !== undefined && sel[0] === q.noteRequiredFor
   const picked = sel.length > 0 || !!other.trim()
+  // Positive opt-in, plus structural exclusions: unknown kinds and older/plugin cards remain confirmed.
+  const ordinary = q.ordinary === true && (q.kind === 'Form' || q.kind === 'Question') && !q.multi && !q.terminal && !q.screen && !q.steps && !q.reject && !q.noNote && q.noteRequiredFor === undefined && !q.id.startsWith('menu:')
+  const immediate = ordinary && !sent && !composing && !note && !other
   const choose = (j: number) => setSel(q.multi ? (sel.includes(j) ? sel.filter((x) => x !== j) : [...sel, j]) : [j])
-  const send = async (reject = false) => {
+  const send = async (reject = false, choice = sel[0] ?? -1) => {
+    if (sent || sending.current) return
     // sending a plan back needs a note: the box says so and takes the focus
     if (needNote && !note.trim()) return noteRef.current?.focus()
+    sending.current = true
     setBusy(true)
     setErr('')
+    let accepted = false
     try {
-      const r = await act({ type: 'answer', chat: chat.key, question: q.id, choice: reject ? -1 : sel[0] ?? -1, choices: q.multi ? (reject ? [] : sel) : undefined, note: note.trim() || undefined, other: other.trim() || undefined, space })
+      const r = await act({ type: 'answer', chat: chat.key, question: q.id, choice: reject ? -1 : choice, choices: q.multi ? (reject ? [] : sel) : undefined, note: note.trim() || undefined, other: other.trim() || undefined, space })
       if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
       else {
+        accepted = true
         setNote('')
         setOther('')
       }
+    } catch (e) {
+      setErr(reasonOf(e))
     } finally {
-      setBusy(false)
+      // Keep a successful answer locked until the server's answered snapshot arrives.
+      if (!accepted) {
+        sending.current = false
+        setBusy(false)
+      }
     }
   }
+  useEffect(() => {
+    if (composing) noteRef.current?.focus()
+  }, [composing])
   return (
-    <CardShell title={q.title} plan={q.kind === 'Plan'}>
+    <CardShell title={q.title} plan={q.kind === 'Plan'} source={source}>
       {q.screen ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-fg2">{q.screen}</pre> : null}
       {q.terminal && has('terminal') ? <button type="button" className="text-left text-accent" onClick={() => setUI({ term: chat.key, arts: null, kb: true })}>Open terminal</button> : null}
       {q.steps ? (
@@ -1300,30 +1363,37 @@ export function QuestionCard({ q, chat, msg, from, space }: { q: Question; chat:
           ))}
         </ol>
       ) : null}
+      {immediate && !sent ? <p className="text-[0.8125rem] text-fg2">Choose an answer to send it now.</p> : null}
       {q.choices.map((c, j) => {
         const on = sent ? q.sent === j : sel.includes(j)
         return (
           <button
             key={j}
             type="button"
-            aria-pressed={on}
-            disabled={sent}
-            onClick={() => choose(j)}
+            aria-pressed={immediate ? undefined : on}
+            disabled={sent || busy}
+            onClick={() => {
+              if (immediate) {
+                setSel([j])
+                void send(false, j)
+              } else choose(j)
+            }}
             className="group press relative flex min-h-10 w-full items-center gap-2.5 rounded-row px-3 py-2 text-left shadow-[inset_0_0_0_1px_var(--line2)] enabled:hover:bg-hover disabled:cursor-default disabled:opacity-40 aria-pressed:shadow-[inset_0_0_0_1.5px_var(--fg)] disabled:aria-pressed:opacity-100 coarse:min-h-11 phone:min-h-12"
           >
-            <span
+            {immediate ? null : <span
+              aria-hidden="true"
               className={clsx(
                 'size-4 shrink-0 shadow-[inset_0_0_0_1.5px_var(--fg3)] group-aria-pressed:shadow-[inset_0_0_0_5px_var(--fg)]',
                 q.multi ? 'rounded-[4px]' : 'rounded-full',
               )}
-            />
+            />}
             {c.description ? (
               <span>
-                <span className="block">{c.label}</span>
+                <span className="block">{immediate ? `Send: ${c.label}` : c.label}</span>
                 <span className="block text-[0.75rem]/[18px] text-fg2 phone:text-[0.8125rem]/5">{c.description}</span>
               </span>
             ) : (
-              c.label
+              (immediate ? `Send: ${c.label}` : c.label)
             )}
           </button>
         )
@@ -1331,6 +1401,7 @@ export function QuestionCard({ q, chat, msg, from, space }: { q: Question; chat:
       {q.other && !sent ? (
         <input
           name="other"
+          disabled={busy}
           data-kept
           aria-label="Other answer"
           className={noteBox}
@@ -1357,10 +1428,14 @@ export function QuestionCard({ q, chat, msg, from, space }: { q: Question; chat:
       {by ? <Quote q={by} chat={chat.key} from={from} you={false} loose label="Answered by" /> : null}
       {sent || (q.terminal && !q.choices.length) ? null : (
         <>
-          {!q.other && !q.noNote ? (
+          {immediate ? (
+            <button type="button" disabled={busy} className="min-h-11 text-left text-accent" onClick={() => setComposing(true)}>Add a note</button>
+          ) : null}
+          {(!q.other || ordinary) && !q.noNote && !immediate ? (
             <TextBox
               ref={noteRef}
               name="note"
+              disabled={busy}
               data-kept
               label="Note"
               className={noteBox}
@@ -1370,10 +1445,72 @@ export function QuestionCard({ q, chat, msg, from, space }: { q: Question; chat:
             />
           ) : null}
           <div className="flex items-center justify-end gap-2">
-            {err ? <span className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
+            {err ? <span role="alert" className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
             {q.reject ? <button type="button" disabled={busy} onClick={() => send(true)}>{q.reject}</button> : null}
-            <Primary soft disabled={busy || !picked} onClick={() => send()}>
+            {!immediate ? <Primary soft disabled={busy || !picked} onClick={() => send()}>
               Send
+            </Primary> : null}
+            {busy ? <span role="status" className="text-[0.8125rem] text-fg2">Sending…</span> : null}
+          </div>
+        </>
+      )}
+    </CardShell>
+  )
+}
+
+/* ---------- a secret an agent asked for ---------- */
+
+/** a masked box for a secret an agent asked for by name, and where it is kept (its space, its machine, Everywhere).
+ *  The value goes once to the main machine and is never kept here, as a draft or otherwise; the agent is told it is
+ *  there, by name only */
+function SecretCard({ ask, chat }: { ask: SecretAsk; chat: Chat }) {
+  const [value, setValue] = useState('')
+  const [level, setLevel] = useState(ask.levels[0]?.id ?? 'all')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const save = async () => {
+    if (!value || busy) return
+    setBusy(true)
+    setErr('')
+    try {
+      const r = (await act({ type: 'secret', level, name: ask.name, value, card: { chat: chat.key, id: ask.id } })) as { ok?: boolean; error?: string }
+      if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
+      else setValue('')
+    } catch {
+      setErr("That didn't go through: Shepherdr can't be reached.")
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <CardShell title={`Secret: ${ask.name}`} icon={KeyIcon}>
+      {ask.why ? <p className="text-pretty break-words">{ask.why}</p> : null}
+      {ask.saved ? (
+        <Sent>
+          <CheckIcon className={ic} />
+          <span className="min-w-0 truncate">Saved for {ask.saved}</span>
+        </Sent>
+      ) : (
+        <>
+          <SecretField label={ask.name} value={value} onChange={setValue} onEnter={save} />
+          {ask.levels.length > 1 ? (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <span className="text-[0.75rem] text-fg2 phone:text-[0.8125rem]">For</span>
+              <Tabs label="Where it is kept">
+                {ask.levels.map((l) => (
+                  <Tab key={l.id} on={l.id === level} onClick={() => setLevel(l.id)}>
+                    {l.label}
+                  </Tab>
+                ))}
+              </Tabs>
+            </div>
+          ) : null}
+          <div className="flex items-center justify-end gap-2">
+            <span role="status" className={clsx('mr-auto text-[0.75rem] text-pretty phone:text-[0.8125rem]', err ? 'text-need' : 'text-fg3')}>
+              {err || 'Agents use it by name, never seeing it.'}
+            </span>
+            <Primary soft disabled={busy || !value} onClick={save}>
+              Save
             </Primary>
           </div>
         </>
@@ -1812,16 +1949,10 @@ function PlusMenu({ chatKey }: { chatKey: string }) {
   )
 }
 
-/** an effort level as the menu says it: Low, Extra high */
-const effortLabel = (e: string) => (e === 'xhigh' ? 'Extra high' : e.charAt(0).toUpperCase() + e.slice(1))
-
-/** the + menu while it is open: it springs up out of the + and fades away. Picking File or Screenshot closes it; a
- *  setting (mode, model, effort) keeps it open, to change another */
+/** The + menu: attachments close it; plugin settings can stay open. Launch controls open the restart sheet. */
 function PlusOpen({ chatKey, file, photo }: { chatKey: string; file: RefObject<HTMLInputElement | null>; photo: RefObject<HTMLInputElement | null> }) {
   const phone = useUI((u) => u.device === 'phone')
   const snap = useSnap()
-  const chat = useChat(chatKey)
-  const c = chat?.controls
   const close = () => setUI({ plus: null })
   const screenshot = async () => {
     close()
@@ -1844,8 +1975,8 @@ function PlusOpen({ chatKey, file, photo }: { chatKey: string; file: RefObject<H
       /* cancelled */
     }
   }
+  const cli = useChat(chatKey)?.cli ?? 'Agent'
   const settings = snap ? registry.composerSettings.filter((x) => x.when(snap, chatKey)) : []
-  // the agent's own settings are only what its CLI supports; one that supports none adds files and nothing else
   return (
     <Menu label="Attach files and more" tabs onClose={close} className="mb-2 w-fit max-w-full origin-bottom-left">
       <MenuItem
@@ -1860,24 +1991,11 @@ function PlusOpen({ chatKey, file, photo }: { chatKey: string; file: RefObject<H
       <MenuItem icon={<CameraIcon className={ic} />} onClick={screenshot}>
         {phone ? 'Take a photo' : 'Screenshot'}
       </MenuItem>
-      {settings.length || c?.models.length || c?.efforts.length ? <MenuSeparator /> : null}
+      <MenuSeparator />
+      <AgentControls chatKey={chatKey} cli={cli} />
       {settings.map(({ View }, i) => (
         <View key={i} chatKey={chatKey} />
       ))}
-      {c?.models.length ? (
-        <MenuSetting
-          name="Model"
-          icon={<ModelIcon className={ic} />}
-          choices={c.models.map((x) => ({ label: x, on: c.models[c.model] === x, onClick: () => act({ type: 'model', chat: chatKey, model: x }) }))}
-        />
-      ) : null}
-      {c?.efforts.length ? (
-        <MenuSetting
-          name="Effort"
-          icon={<EffortIcon className={ic} />}
-          choices={c.efforts.map((x) => ({ label: effortLabel(x), on: c.efforts[c.effort] === x, onClick: () => act({ type: 'effort', chat: chatKey, effort: x }) }))}
-        />
-      ) : null}
     </Menu>
   )
 }
@@ -2232,9 +2350,14 @@ function ChatView({ chatKey, placeholder, unreachable }: { chatKey: string; plac
 /** Search in this chat, first in a chat's ⋯ menu (a coordinator's or a task's) */
 function FindItem({ chatKey }: { chatKey: string }) {
   return (
-    <MenuItem icon={<SearchIcon className={ic} />} onClick={() => openFind(chatKey)}>
-      Search in this chat
-    </MenuItem>
+    <>
+      <MenuItem icon={<SearchIcon className={ic} />} onClick={() => openFind(chatKey)}>
+        Search in this chat
+      </MenuItem>
+      {registry.views.search ? <MenuItem icon={<SearchIcon className={ic} />} onClick={() => setUI({ search: true, searchScope: { kind: 'chat', id: chatKey }, menu: false, taskMenu: false })}>
+        Search this chat and beyond
+      </MenuItem> : null}
+    </>
   )
 }
 
@@ -2298,6 +2421,7 @@ export default definePlugin({
     reg.composerAbove.push({ order: 10, View: JobsTag })
     reg.overlays.push(JobsSheet)
     reg.messageParts.push({ order: 60, View: ({ msg, chat, from }) => (msg.question ? <QuestionCard q={msg.question} chat={chat} msg={msg.id} from={from} /> : null) })
+    reg.messageParts.push({ order: 61, View: ({ msg, chat }) => (msg.secret ? <SecretCard ask={msg.secret} chat={chat} /> : null) })
     reg.composerPlus = PlusMenu
     reg.composerMic = Mic
     reg.composerLive.push({ when: (ui, chatKey) => ui.dict === chatKey, View: DictationBox })
@@ -2312,8 +2436,9 @@ export default definePlugin({
         return true
       },
     })
-    reg.placeMenu.push({ order: 50, View: ({ place }) => <FindItem chatKey={place.chat} /> })
-    reg.agentMenu.push({ order: 50, View: FindItem })
+    reg.placeMenu.push({ order: 50, View: ({ place }) => <FindItem chatKey={place.chat} /> }, { order: 55, joined: true, View: PlaceRestartItem })
+    reg.agentMenu.push({ order: 50, View: FindItem }, { order: 55, View: TaskRestartItem })
+    reg.overlays.push(RestartSheet)
     reg.composerAbove.push({ order: 20, View: Attachments }, { order: 30, View: PlusMenu })
     reg.overlays.push(Photo)
     addEventListener('pointerdown', keepBox, true)

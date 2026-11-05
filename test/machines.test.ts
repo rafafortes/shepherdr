@@ -331,7 +331,7 @@ describe('a machine run from the main one', () => {
 
 describe('a restart of the main server (an update)', () => {
   const saved = { id: 'far', label: 'far', target: 'far.invalid', session: 'default', enabled: true }
-  const snap = { name: 'S', host: 'far', places: [{ id: 'm:far', kind: 'machine', level: 1, name: 'far', machine: 'far', status: 'idle', mode: 'regular', chat: 'm:far' }, { id: 'p:far:web', kind: 'project', level: 2, name: 'web', machine: 'far', status: 'need', mode: 'regular', chat: 'p:far:web' }], tasks: [], automations: {}, asks: {}, settings: [], overrides: {}, user: 'u' }
+  const snap = { name: 'S', host: 'far', machines: [{ machine: 'far', status: 'idle' }], places: [{ id: 'm:far', kind: 'machine', level: 1, name: 'far', machine: 'far', status: 'idle', mode: 'regular', chat: 'm:far' }, { id: 'p:far:web', kind: 'project', level: 2, name: 'web', machine: 'far', status: 'need', mode: 'regular', chat: 'p:far:web' }], tasks: [], automations: {}, asks: {}, settings: [], overrides: {}, user: 'u' }
 
   /** a worker left running from before the restart: a process of its own, serving its snapshot */
   function oldWorker() {
@@ -349,13 +349,13 @@ describe('a restart of the main server (an update)', () => {
     const { Machines, codeVersion } = await import('../server/live/machines.ts')
     writeJson('machines/far/last.json', { saved, snap, chats: [{ key: 'p:far:web', cli: 'Claude Code', messages: [{ id: 'm1', who: 'agent', at: 1, text: 'Done.' }] }] })
     writeJson('machines/far/server.json', { port: w.port, pid: w.pid, code: code || codeVersion() })
-    return { HOME, Machines }
+    return { HOME, Machines, writeJson }
   }
 
   test('what each machine showed comes back at once, connecting, and its worker on the same code is taken back', async () => {
     const w = await oldWorker()
     const { HOME, Machines } = await before(w, '')
-    const m = new Machines(async () => [saved])
+    const m = new Machines(async () => [saved], async () => ({}))
     try {
       const l = m.list().find((x) => x.rec.machine === 'far')!
       // at once: its places and the chats on screen, as before the restart, connecting rather than out of reach
@@ -378,10 +378,57 @@ describe('a restart of the main server (an update)', () => {
     }
   })
 
+  test('a worker started again out of its hands (the doctor, by hand) is followed to its new address', async () => {
+    const w = await oldWorker()
+    const { Machines, writeJson } = await before(w, '')
+    const m = new Machines(async () => [saved], async () => ({}))
+    const next = await oldWorker()
+    try {
+      const l = m.list().find((x) => x.rec.machine === 'far')!
+      for (let i = 0; i < 250 && !l.reachable; i++) await Bun.sleep(20)
+      expect(l.reachable).toBe(true)
+      // the old worker stops, and a new one serves on another port, as the doctor leaves it
+      process.kill(w.pid)
+      writeJson('machines/far/server.json', { port: next.port, pid: next.pid })
+      for (let i = 0; i < 500 && !(l.reachable && l.rec.url.endsWith(`:${next.port}`)); i++) await Bun.sleep(20)
+      expect(l.rec.url).toBe(`http://127.0.0.1:${next.port}`)
+      expect(l.reachable).toBe(true)
+      expect(l.worker?.pid).toBe(next.pid)
+    } finally {
+      m.stop()
+      if (w.alive()) process.kill(w.pid)
+      process.kill(next.pid)
+    }
+  })
+
+  test('cached workers are not adopted while enabled membership is pending, and disabled workers stay off', async () => {
+    const w = await oldWorker()
+    const { HOME, Machines } = await before(w, '')
+    let resolve!: (value: typeof saved[]) => void
+    const pending = new Promise<typeof saved[]>((r) => { resolve = r })
+    const m = new Machines(() => pending, async () => ({}))
+    try {
+      const l = m.list().find((x) => x.rec.machine === 'far')!
+      await (m as unknown as { pollAll(): Promise<void> }).pollAll()
+      expect(l.worker).toBeUndefined()
+      expect(l.reachable).toBe(false)
+      expect(l.rec.url).toBe('')
+      resolve([{ ...saved, enabled: false }])
+      for (let i = 0; i < 250 && w.alive(); i++) await Bun.sleep(20)
+      expect(w.alive()).toBe(false)
+      expect(m.byName('far')).toBeUndefined()
+      expect(existsSync(join(HOME, 'machines', 'far', 'last.json'))).toBe(false)
+    } finally {
+      resolve([])
+      m.stop()
+      if (w.alive()) process.kill(w.pid)
+    }
+  })
+
   test('a worker on other code is stopped, not taken back', async () => {
     const w = await oldWorker()
     const { Machines } = await before(w, 'older')
-    const m = new Machines(async () => [saved])
+    const m = new Machines(async () => [saved], async () => ({}))
     try {
       for (let i = 0; i < 250 && w.alive(); i++) await Bun.sleep(20)
       expect(w.alive()).toBe(false)

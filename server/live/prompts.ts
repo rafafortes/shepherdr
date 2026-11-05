@@ -15,6 +15,8 @@ const OWN = BOX ? helperDir(BOX.home) : ROOT
 export const SKILLS = join(OWN, 'skill')
 const skill = (name: string) => join(SKILLS, name, 'SKILL.md')
 
+export const commandLine = (chat: string) => `Your authoritative command is SHEPHERDR_CHAT=${JSON.stringify(chat)} ${join(OWN, 'bin', 'shepherdr')}. Use it if a shell finds another shepherdr. Never start a server to repair command routing. For a deliberately targeted dev/demo server, use the repo command with --url <URL>.`
+
 const base = (who: string, own: string) =>
   `You are ${who}, running inside Shepherdr (a herdr plugin the human uses from a phone, tablet or desktop). Read ${skill('shepherdr')} first (chat lines, cards, artifacts, the shepherdr command), then ${skill(own)} (your role's work). The human reads your replies in a calm chat: keep them short, plain and to the point.`
 
@@ -111,7 +113,7 @@ export function settingsBlock(id: string, t: Told) {
 /** a space's coordinator: its space's work; a home space's also its machine's (health, load and disk news, its
  *  processes, adding spaces); the main machine's home space's also every machine's overview (what needs the human,
  *  which alerts reach the phone, machine-wide alerts), as it can see every machine */
-export function coordinatorPrompt(place: { role: 'space' | 'home' | 'main'; name: string; path?: string; machine: string }, mode: Mode) {
+export function coordinatorPrompt(place: { role: 'space' | 'home' | 'main'; name: string; path?: string; machine: string; chat?: string }, mode: Mode) {
   const who = `the coordinator of the space ${place.name} on ${place.machine} (${place.path})`
   const duties =
     place.role === 'space'
@@ -119,7 +121,7 @@ export function coordinatorPrompt(place: { role: 'space' | 'home' | 'main'; name
       : place.role === 'home'
         ? `\n\nThis is ${place.machine}'s home space: you also look after the machine (its health, load and disk news, its processes) and add spaces on it when asked (shepherdr space add).`
         : `\n\nThis is the home space of the main machine, ${place.machine}: you also look after this machine (its health, load and disk news, its processes, adding spaces with shepherdr space add), and you keep the overview of every machine: what needs the human across them all (shepherdr task list shows every machine's tasks), which alerts reach the phone, and machine-wide alerts.`
-  return `${base(who, 'shepherdr-coordinator')}${duties}
+  return `${base(who, 'shepherdr-coordinator')}\n\n${commandLine(place.chat ?? place.name)}${duties}
 
 Autopilot is ${mode === 'autopilot' ? 'on' : 'off'} now. On Autopilot you get a heartbeat while idle, on its trigger: shepherdr heartbeat shows your HEARTBEAT.md and when, shepherdr heartbeat set changes it.`
 }
@@ -127,6 +129,7 @@ Autopilot is ${mode === 'autopilot' ? 'on' : 'off'} now. On Autopilot you get a 
 export function taskPrompt(t: { id: string; branch: string; base: string }, times = '') {
   return [
     base(`the agent of task ${t.id}`, 'shepherdr-agent'),
+    commandLine(`${t.id}/Agent`),
     `You work in your own git worktree on branch ${t.branch} (from ${t.base}): commit there, and don't switch branches.`,
     times,
     has('browser') ? browserLine(t.id) : '',
@@ -155,6 +158,28 @@ export function handOverLine(o: { from: string; why: string; commits: string; ch
   ].join('\n\n')
 }
 
+/** what an agent started again on another CLI is told (a task's after its brief): who ran its role until now, and
+ *  what was said and done; a task's commits and changes, none for a coordinator */
+export function restartLine(o: { from: string; to: string; chat: string; commits?: string; changes?: string }) {
+  const task = o.commits !== undefined
+  return [
+    `Restarted: the human restarted this ${task ? 'task' : 'chat'} on ${o.to}. ${o.from} ran it until now; you carry on from here, in the same ${task ? 'worktree and branch' : 'folder'}. Look at what is there and go on from it, don't start over.`,
+    ...(task ? [`Commits on the branch so far:\n${o.commits || 'none'}`, `Uncommitted changes:\n${o.changes || 'none'}`] : []),
+    ...(o.chat ? [`The chat so far, latest last:\n\n${o.chat}`] : []),
+    `If you were in the middle of something, carry on; else reply in one short line that you are here and end your turn.`,
+  ].join('\n\n')
+}
+
+/** what an agent started again on its own CLI is told, its session resumed (a model or an effort changed) */
+/** what an agent Shepherdr started again by itself is told, when it was at work as it stopped */
+export function relaunchedLine() {
+  return `Your agent had stopped (herdr restarted, or it ran on outdated settings): Shepherdr started you again, with your session as it was. Carry on where you left off; if there is nothing left to do, reply with only <no-reply>relaunched</no-reply>.`
+}
+
+export function resumedLine(on: string) {
+  return `The human restarted you on ${on}, with your session as it was. If you were in the middle of something, carry on where you left off; else reply with only <no-reply>restarted</no-reply>.`
+}
+
 /** what a task queued after others is told: with its brief (start), when queued while it runs (later), or when what
  *  it waits for changed */
 export function queuedLine(ids: string[], when: 'start' | 'later' | 'changed', id = '<id>') {
@@ -174,4 +199,16 @@ export function goLine(ids: string[], notes: string[], cleared = false) {
 /** news from GitHub on a done task's pull request, as its agent hears it: what happened, never what to do about it */
 export function prNewsLine(id: string, pr: { number: number; url: string }, news: string[]) {
   return [`GitHub news on PR #${pr.number} (${pr.url}), since you reported ${id} ready:`, ...news, 'The shepherdr-agent skill says how to handle news like this.'].join('\n')
+}
+
+/** Personal settings are supplemental, never a replacement for repository rules or a human's explicit request. */
+export function privatePrompt(own: string, reviewer?: string): string {
+  return [
+    'Private instruction snapshot for this start. This replaces earlier private instruction snapshots, including when empty. Read and follow the repository/team AGENTS.md, CLAUDE.md and REVIEW.md alongside these supplemental rules. Never edit, replace or create repository instruction files to install these rules. Explicit human instructions and the task brief win over private rules; if private and team rules conflict, explain and ask rather than silently overriding either. Never copy private instructions into git, briefs, reports or GitHub. These fields are not a secret store.',
+    own,
+    ...(reviewer === undefined ? [] : [
+      'Reviewer handoff only: the next block applies to reviewers, not to you as the task agent. Include this reviewer block and the precedence/privacy rules above in every fresh reviewer prompt (headless or subagent), alongside the brief and repository rules. This is the snapshot from your latest start; restart this task agent to refresh it after Settings changes. Do not pass your task-only private rules to reviewers.',
+      reviewer,
+    ]),
+  ].join('\n\n')
 }

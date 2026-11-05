@@ -202,6 +202,8 @@ export interface Task {
   /** when a Done task finished (ms): the Done group shows newest first */
   doneAt?: number
   branch?: string
+  /** destination captured when this task was added */
+  base?: string
   /** the agent's plan, when it posted one */
   plan?: string[]
   /** none until the task's agent starts */
@@ -259,6 +261,8 @@ export interface Question {
   id: string
   title: string
   kind: 'Form' | 'Question' | 'Plan'
+  /** Explicitly an ordinary question, never permission or approval. Missing means confirm. */
+  ordinary?: boolean
   steps?: string[]
   /** CLI prompt context, read from its visible screen. */
   screen?: string
@@ -378,7 +382,22 @@ export interface Message {
   card?: UpdateCard
   /** a turn's tool steps, as a few rows in plain words, just before its last reply */
   activity?: TurnActivity
+  /** a secret the agent asked for (shepherdr secret ask): a masked box to give it in */
+  secret?: SecretAsk
   at?: number
+}
+
+/** a secret an agent asked for by name: the human types or pastes it in a masked box, for one of the levels offered;
+ *  only its name ever shows, never its value */
+export interface SecretAsk {
+  id: string
+  name: string
+  /** why the agent needs it, in its words */
+  why?: string
+  /** where it may be kept, the agent's space first: a level's id (p:<machine>:<space>, m:<machine>, all) and its name */
+  levels: { id: string; label: string }[]
+  /** saved: where, by its level's name */
+  saved?: string
 }
 
 /** what kind of step a tool call is, for its icon and its row */
@@ -503,6 +522,8 @@ export interface UpdateCard {
   health?: { level: HealthLevel; machine: string }
   /** the project's base branch went red on GitHub ("main"); text says which checks failed */
   red?: string
+  /** its agent started again (text: "Restarted on Codex (GPT-6-Sol, high)") */
+  restart?: boolean
   /** a task that needs you: a copy of what it asks, answered here as in its own chat */
   ask?: CardAsk
 }
@@ -566,6 +587,53 @@ export interface Chat {
   cli: string
   /** what this CLI lets the + menu change; only what it supports is listed */
   controls?: ChatControls
+  /** Recorded launch values, never inferred from Settings. Missing values are CLI defaults, not observed telemetry. */
+  agent?: { kind: string; model?: string; modelLabel?: string; effort?: string; runtime?: AgentRuntime }
+  /** Settings for its role now say something else than what its agent runs on: a calm hint offers a restart */
+  restart?: RestartHint
+}
+
+/** "Runs on {on} · Settings now say {want}", by the first that differs: the CLI, the model or the effort */
+export interface RestartHint {
+  on: string
+  want: string
+}
+
+/** a CLI the restart sheet offers; models and efforts where Shepherdr passes them (none: it runs on its own) */
+export interface RestartCli {
+  kind: string
+  name: string
+  models?: { id: string; label: string; efforts: string[]; defaultEffort?: string }[]
+  /** the levels its own default model takes */
+  efforts?: string[]
+  defaultModel?: string
+  defaultEffort?: string
+}
+
+/** what the restart sheet shows: what its agent runs on now and what Settings say for its role (what it restarts with
+ *  unless changed), each a CLI kind with a model id and level (none: the CLI's own) */
+/** CLI-reported state, kept separate from the selected next-launch policy. */
+export interface AgentRuntime {
+  model?: string
+  modelLabel?: string
+  effort?: string
+  effortUnsupported?: boolean
+  source: 'session' | 'hook'
+  at: number
+}
+
+export interface RestartInfo {
+  role: 'task' | 'coordinator'
+  /** its space, whose Settings a save changes */
+  space?: string
+  on: { kind: string; model?: string; effort?: string }
+  /** False if no launch record exists; on is then only a proposed starting configuration. */
+  onKnown?: boolean
+  onWords: string
+  want: { kind: string; model?: string; effort?: string }
+  clis: RestartCli[]
+  /** its agent is mid-turn: a restart interrupts it first */
+  working: boolean
 }
 
 export interface ChatControls {
@@ -583,6 +651,8 @@ export interface SettingRow {
   value: string
   /** free text instead of a pick list */
   text?: boolean
+  /** private instruction text, saved explicitly without a repository file */
+  multiline?: boolean
   /** a trigger's time rule or event rules (Autopilot's heartbeat): shown in words, never as written */
   trigger?: TriggerRow
   /** a whole file's words (a coordinator's HEARTBEAT.md), in a box as wide as the page */
@@ -633,6 +703,8 @@ export interface SettingSection {
   global?: boolean
   /** only words in agents' prompts (What agents are told), not how Shepherdr runs */
   told?: boolean
+  /** the secrets kept at its level, by name (Secrets): added, replaced and removed in masked boxes */
+  secrets?: { name: string; at: number }[]
 }
 
 export interface Alert {
@@ -765,6 +837,8 @@ export interface Snapshot {
   artifacts: Artifact[]
   /** open coordinator questions, by place id (a choice card's id, or "blocked" on the CLI's own menu): counted as waiting on you */
   asks: Record<string, string>
+  /** Unanswered request IDs by original chat, never forwarded copies. Optional for older machines/plugins. */
+  attentionRequests?: Record<string, string[]>
   settings: SettingSection[]
   /** a source like demo marks its data as fictional */
   demo?: boolean
@@ -786,6 +860,11 @@ export type Action =
   /** space: sent from a needs-you card in that space's chat (CardAsk) */
   | { type: 'send'; chat: string; text: string; attachments?: string[]; cid?: string; reply?: string; space?: string }
   | { type: 'react'; chat: string; message: string; emoji: string }
+  /** a secret kept at a level (all, m:<machine>, p:<machine>:<space>), or removed (null); kept on the main machine, so
+      it names no chat or place to be passed on by. card: the agent's ask it answers, told once it is kept */
+  | { type: 'secret'; level: string; name: string; value: string | null; card?: { chat: string; id: string } }
+  /** the main machine kept a secret an agent asked for: its card says so, and its agent is told (no value) */
+  | { type: 'secret-saved'; chat: string; card: string; name: string; level: string }
   /** fromAlert: a notification's button, which answers only the card the chat still waits on (an old alert's can't
       answer what came after, or a card already settled in words) */
   | { type: 'answer'; chat: string; question: string; choice: number; choices?: number[]; note?: string; other?: string; fromAlert?: boolean; space?: string }
@@ -816,6 +895,11 @@ export type Action =
   | { type: 'pin'; chat: string; on: boolean }
   /** pause a working task: its agent is interrupted (it stays alive) and the task is To do until written to */
   | { type: 'pause'; chat: string }
+  /** what the restart sheet shows for a coordinator (chat: its place id) or a task's agent (ID/Agent): RestartInfo */
+  | { type: 'restart-info'; chat: string }
+  /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as
+      Settings say for its role); save: as its space's Settings for its role too */
+  | { type: 'restart'; chat: string; kind?: string; model?: string; effort?: string; save?: boolean }
   /** mark a task done with nothing merged (shepherdr task close); refused (held) while it holds unmerged work, unless force */
   | { type: 'close'; chat: string; force?: boolean }
   /** delete a task: its agent, herdr space, worktree, branch, chat and record; refused while it holds work, unless force */

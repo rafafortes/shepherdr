@@ -16,7 +16,7 @@ const parse = (cli: string, objs: object[]) =>
 // token usage, turn starts and steps are checked on their own below; the other tests read the conversation
 const STEPS = new Set(['step', 'step-end', 'job', 'job-end'])
 const brief = (ev: LogEvent[]) =>
-  ev.filter((e) => e.kind !== 'usage' && e.kind !== 'turn-start' && !STEPS.has(e.kind)).map((e) =>
+  ev.filter((e) => e.kind !== 'runtime' && e.kind !== 'usage' && e.kind !== 'turn-start' && !STEPS.has(e.kind)).map((e) =>
     e.kind === 'user' || e.kind === 'agent' ? `${e.kind}:${e.text}` : e.kind === 'question' ? `question:${e.id}` : `${e.kind}:${e.id}`,
   )
 
@@ -430,6 +430,28 @@ describe('LogTail', () => {
     writeFileSync(g, piSession('s3') + piUser('e1', 'x') + piUser('e2', 'y'))
     renameSync(g, f)
     expect(brief(tail.read())).toEqual(['session:session-s3', 'user:x', 'user:y'])
+  })
+
+  test('a read with a limit stops after whole lines past it; the next goes on, and a partial last line is not more to read', () => {
+    const f = join(dir, 'limit.jsonl')
+    const lines = Array.from({ length: 400 }, (_, i) => piUser(`e${i}`, `prompt ${i} ${'x'.repeat(1000)}`))
+    const last = piUser('e400', 'not yet whole')
+    writeFileSync(f, piSession('s1') + lines.join('') + last.slice(0, 30))
+    const tail = new LogTail(f, readerFor('pi')!)
+    const got: string[] = []
+    let reads = 0
+    do {
+      const ev = brief(tail.read(64 << 10))
+      expect(ev.length).toBeLessThan(401)
+      got.push(...ev)
+      reads++
+    } while (tail.behind)
+    expect(reads).toBeGreaterThan(3)
+    expect(got).toEqual(brief(new LogTail(f, readerFor('pi')!).read()))
+    expect(got).toHaveLength(401)
+    expect(tail.read(64 << 10)).toEqual([])
+    appendFileSync(f, last.slice(30))
+    expect(brief(tail.read(64 << 10))).toEqual(['user:not yet whole'])
   })
 
   test('a missing file reads as nothing', () => {
