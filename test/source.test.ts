@@ -15,6 +15,7 @@ const { hidden } = await import('../server/live/agents.ts')
 const { isAgentProcess } = await import('../server/live/agent-process.ts')
 const { heartbeatFile } = await import('../server/live/heartbeat.ts')
 const { carryOn } = await import('../server/live/retry.ts')
+const { WorkerHealth } = await import('../server/live/recovery.ts')
 const { Worktrees } = await import('../server/live/engine/worktrees.ts')
 const { fakeHerdr } = await import('./fake-herdr.ts')
 
@@ -28,21 +29,62 @@ Object.assign(src.engine, { wt: new Worktrees(fake.h as never) })
 afterAll(() => src.stop())
 
 /** what a test waits for has come true, however slow the machine (a timer, another process) */
-const until = async (f: () => boolean, ms = 8000) => {
-  for (const t0 = Date.now(); !f(); await Bun.sleep(20)) if (Date.now() - t0 > ms) throw new Error('timed out')
+const until = async (f: () => boolean, ms = 8000, said = 'it') => {
+  for (const t0 = Date.now(); !f(); await Bun.sleep(20)) if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${said}`)
 }
+
+/**
+ * Something that only has to settle before the tests after this one (an agent herdr can't start): waited for at
+ * most 8 s — the 20 s these tests run in is the other bound — and the test goes on either way, however slow the
+ * machine. The fixed 5 s these had failed a slow runner; a longer wait would only spend a test's own time.
+ */
+const settle = (f: () => boolean, said: string) => until(f, 8000, said).catch(() => undefined)
+
+/** a repo a test made, with its first commit (never the folder the tests run from) */
+const REPO = 'git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init'
+
+/**
+ * The test's own git, bounded: 30 s, and a stalled one says which command it was, instead of bun taking the whole test
+ * away with no word on the step (SHE-9 bounded the engine worlds' and herdr's stand-in after run 42020185856, but a
+ * timeout there reads just "ETIMEDOUT", which names nothing either).
+ */
+const run = (cmd: string, cwd: string): string => {
+  try {
+    return execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8', timeout: 30_000 }).trim()
+  } catch (e) {
+    throw new Error(`\`${cmd}\` in ${cwd}: ${(e as Error).message.trim()}`, { cause: e })
+  }
+}
+
+/** how many tasks a place holds: what a refused add must leave exactly as it was, whatever else the home holds */
+const tasksIn = (place: string) => src.engine.tasks.filter((t) => t.project === place).length
 
 /** a project with a task whose agent has committed work on its branch (herdr isn't there: its agent can't start) */
 async function workedTask(name: string) {
   const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
-  execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', { cwd: dir, shell: '/bin/sh' })
+  run(REPO, dir)
   const p = await src.places.add(dir, name)
-  const t = src.engine.add({ project: p.name, title: 'Worked', by: 'test' })
-  for (let i = 0; !t.worktree && i < 200; i++) await Bun.sleep(20)
-  // never in the folder the tests run from
+  return { t: await worked(p), dir, place: placeId.space(p.name) }
+}
+
+/**
+ * The worktree herdr's stand-in makes for a task, waited for until it is there or the start has said why it can't be —
+ * so a start that never gets one fails with the app's own words, inside the 20 s a test has unless it says otherwise.
+ */
+async function worktree(t: { id: string; worktree?: string; trouble?: string }, ms = 15_000) {
+  await until(() => !!t.worktree || !!t.trouble, ms, `${t.id}'s worktree`)
   if (!t.worktree) throw new Error(`${t.id} got no worktree: ${t.trouble}`)
-  execSync('echo x > x.txt && git add -A && git commit -qm work', { cwd: t.worktree!, shell: '/bin/sh' })
-  return { t, dir, place: placeId.space(p.name) }
+}
+
+/**
+ * A task in a place already there, its agent's work committed on its branch (herdr isn't there: its agent can't
+ * start). It waits for the worktree herdr's stand-in makes, so the commit never lands in a folder not there yet.
+ */
+async function worked(p: { name: string }, file = 'x.txt') {
+  const t = src.engine.add({ project: p.name, title: 'Worked', by: 'test' })
+  await worktree(t)
+  run(`echo x > ${file} && git add -A && git commit -qm work`, t.worktree!)
+  return t
 }
 
 describe('private instruction CLI', () => {
@@ -140,19 +182,45 @@ describe('merging from the command', () => {
     expect((await src.cli(['merge', b.t.id], {})).out).toContain('Merged')
     expect(existsSync(join(b.dir, 'x.txt'))).toBe(true)
   })
-  test('task list shows Done tasks newest finished first, after the rest', async () => {
-    const a = await workedTask('first')
-    const b = await workedTask('second')
-    const open = await workedTask('open')
-    expect((await src.cli(['merge', a.t.id], {})).out).toContain('Merged')
-    await Bun.sleep(5)
-    expect((await src.cli(['merge', b.t.id], {})).out).toContain('Merged')
-    const ids = [a.t.id, b.t.id, open.t.id]
-    const listed = (JSON.parse((await src.cli(['task', 'list', '--json'], {})).out) as { id: string }[]).map((t) => t.id).filter((id) => ids.includes(id))
-    expect(listed).toEqual([open.t.id, b.t.id, a.t.id])
-    expect(src.engine.view(b.t).doneAt).toBe(b.t.doneAt!)
-    expect(src.engine.view(open.t).doneAt).toBeUndefined()
-  })
+  test(
+    'task list shows Done tasks newest finished first, after the rest',
+    async () => {
+      // Three tasks in one place: the list is the whole home's, and every place of its own is another real repo with
+      // its worktrees and its merge's git calls, on a runner that runs the browser tests beside this one (SHE-9 met a
+      // shard six times slower than its rerun). This test made three before.
+      const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
+      run(REPO, dir)
+      const p = await src.places.add(dir, 'listed')
+      const a = await worked(p, 'first.txt')
+      const b = await worked(p, 'second.txt')
+      const open = src.engine.add({ project: p.name, title: 'Open', by: 'test' })
+      // it is never merged, so it gets no work; its place is made all the same, and nothing here races that
+      await worktree(open)
+      /**
+       * Merged, and Done on record before the next one starts — what the list's order is made of. The merge answers
+       * only once it is Done (markMerged sets its finish time before it answers), so there is nothing left to wait for.
+       */
+      const merged = async (t: { id: string }) => {
+        expect((await src.cli(['merge', t.id], {})).out).toContain('Merged')
+        expect(typeof src.engine.view(src.engine.task(t.id)!).doneAt).toBe('number')
+      }
+      await merged(a)
+      await merged(b)
+      const ids = [a.id, b.id, open.id]
+      const listed = (JSON.parse((await src.cli(['task', 'list', '--json'], {})).out) as { id: string }[]).map((t) => t.id).filter((id) => ids.includes(id))
+      expect(listed).toEqual([open.id, b.id, a.id])
+      expect(b.doneAt!).toBeGreaterThan(a.doneAt!)
+      expect(src.engine.view(b).doneAt).toBe(b.doneAt!)
+      expect(src.engine.view(open).doneAt).toBeUndefined()
+    },
+    // Real git: three worktrees, two commits in them, a rebase and two merges into one repo. It takes under 2 s on a
+    // quiet runner, and it was its 20 s it ran out of in run 42083009810, shard 3, whose log says only "timed out": which
+    // step stalled is unknown (a sibling test in the same shard was then at its usual 330 ms, and the shard ran the
+    // browser tests' 3 to 10 s swipes beside it). What this test asks of git itself is bounded and named — 30 s, in
+    // run() and herdr's stand-in — and the engine's own merge steps are not: a stall in one of those still ends as
+    // bun's timeout here. 60 s leaves a slow runner the room the 20 s it had did not.
+    60_000,
+  )
   test('the old task settings and their flags are gone', async () => {
     expect((await src.cli(['set', 'merge.by', 'by itself'], {})).code).toBe(1)
     expect((await src.cli(['review', 'X-1', '--verdict', 'pass'], {})).code).toBe(1)
@@ -164,11 +232,10 @@ describe('closing from the command', () => {
   /** a project with a task whose agent made no changes */
   async function emptyTask(name: string) {
     const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
-    execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', { cwd: dir, shell: '/bin/sh' })
+    run(REPO, dir)
     const p = await src.places.add(dir, name)
     const t = src.engine.add({ project: p.name, title: 'Answer', by: 'test' })
-    for (let i = 0; !t.worktree && i < 200; i++) await Bun.sleep(20)
-    if (!t.worktree) throw new Error(`${t.id} got no worktree: ${t.trouble}`)
+    await worktree(t)
     return { t, dir, place: placeId.space(p.name) }
   }
 
@@ -237,7 +304,7 @@ describe('deleting a task from the command', () => {
     expect(r.out).toContain(`Deleted ${t.id}`)
     expect(src.engine.task(t.id)).toBeUndefined()
     expect(existsSync(t.worktree!)).toBe(false)
-    expect(execSync('git branch --list "work/*"', { cwd: dir, encoding: 'utf8' }).trim()).toBe('')
+    expect(run('git branch --list "work/*"', dir)).toBe('')
     expect(existsSync(join(process.env.SHEPHERDR_HOME!, 'chatlog', `${key.replace('/', '_')}.json`))).toBe(false)
     expect(existsSync(file)).toBe(false)
     expect(src.agents.record(key)).toBeUndefined()
@@ -257,7 +324,7 @@ describe('deleting a task from the command', () => {
 describe('base branch choices', () => {
   test('CLI and Settings keep task snapshots, validate before adding, and show the target', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'shep-base-cli-'))
-    execSync('git init -q -b main && git config user.email t@t && git config user.name T && touch README && git add . && git commit -qm init && git branch develop && git branch feature/topic', { cwd: dir })
+    run('git init -q -b main && git config user.email t@t && git config user.name T && touch README && git add . && git commit -qm init && git branch develop && git branch feature/topic', dir)
     const p = await src.places.add(dir, 'base-cli')
     const place = placeId.space(p.name)
     expect((await src.cli(['set', 'space.base', 'develop', '--space', p.name], {})).code).toBe(0)
@@ -267,9 +334,9 @@ describe('base branch choices', () => {
     const t = src.engine.tasks.at(-1)!
     expect(t.base).toBe('feature/topic')
     expect((await src.cli(['task', 'show', t.id], {})).out).toContain('Merges into: feature/topic')
-    const count = src.engine.tasks.length
+    const count = tasksIn(place)
     expect((await src.cli(['task', 'add', 'Bad base', '--base', 'missing', '--space', p.name], {})).code).toBe(1)
-    expect(src.engine.tasks.length).toBe(count)
+    expect(tasksIn(place)).toBe(count)
     expect((await src.cli(['space', 'set', 'base', 'main', '--space', p.name], {})).code).toBe(0)
     expect(t.base).toBe('feature/topic')
     expect(await src.act({ type: 'setting', place, key: 'space.base', value: 'develop' })).toMatchObject({ ok: true })
@@ -285,16 +352,16 @@ describe('base branch choices', () => {
 describe('To do from the command', () => {
   test('task add starts its agent; shepherdr todo shows it as To do, and a message to its agent is the go', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
-    execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', { cwd: dir, shell: '/bin/sh' })
+    run(REPO, dir)
     const p = await src.places.add(dir, 'later')
     const place = placeId.space(p.name)
     // a title too long for one line on a phone is refused, and nothing is added
-    const before = src.engine.tasks.length
+    const before = tasksIn(place)
     const long = await src.cli(['task', 'add', 'Reply to any message, plus what the best chats do', '--desc', 'x'], { chat: place })
     expect(long.code).toBe(1)
     expect(long.out).toContain('49 characters')
     expect(long.out).toContain('32 at most')
-    expect(src.engine.tasks.length).toBe(before)
+    expect(tasksIn(place)).toBe(before)
     expect((await src.cli(['automation', 'add', 'Nightly', '--task', 'x'.repeat(33), '--when', 'FREQ=DAILY'], { chat: place })).code).toBe(1)
     const add = await src.cli(['task', 'add', 'Noted', '--desc', 'For later.', '--later'], { chat: place })
     expect(add.out).toContain('Its agent (Claude Code) reads the brief now and waits for a go')
@@ -307,7 +374,7 @@ describe('To do from the command', () => {
     // herdr isn't here: its agents can't start. Let that settle before the tests after this one
     const t = src.engine.task(id)!
     const next = src.engine.task(other.out.match(/([A-Z]+-\d+)/)![1])!
-    for (let i = 0; !(t.trouble && next.trouble) && i < 250; i++) await Bun.sleep(20)
+    await settle(() => !!(t.trouble && next.trouble), 'their agents to fail to start')
     expect((await src.cli(['todo', id], { chat: `${next.id}/Agent` })).code).toBe(1)
     expect((await src.cli(['todo', id], { chat: `${id}/Agent` })).out).toContain('To do until it gets a go')
     expect(t.todo).toBe(true)
@@ -322,7 +389,7 @@ describe('To do from the command', () => {
 describe('Queued from the command', () => {
   test('task add --after queues it; task queue changes or clears it; what is not there, or a circle, is refused', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
-    execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', { cwd: dir, shell: '/bin/sh' })
+    run(REPO, dir)
     const p = await src.places.add(dir, 'queue')
     const place = placeId.space(p.name)
     const idOf = (out: string) => out.match(/([A-Z]+-\d+)/)![1]
@@ -344,7 +411,21 @@ describe('Queued from the command', () => {
     // another machine's task, as that machine last showed it: refused while it can't be reached
     const links = (src.peers as unknown as { links: Map<string, unknown> }).links
     const theirs = { id: 'ELA-3', name: 'Their API', status: 'work', place: 'p:vm-x:api', age: '1m', state: 'Working', on: 'Claude Code', created: '' }
-    links.set('vm-x', { rec: { machine: 'vm-x', url: 'http://127.0.0.1:9', lastSeen: 0 }, reachable: false, snap: { places: [], tasks: [theirs] }, chats: new Map(), watching: { chats: [], term: null }, waiting: [] })
+    // a whole link: the machine poller reads the one it finds every 5 s, and one missing saved/health threw inside it
+    // (a TypeError bun then hung on whichever test was running: run 42087512769, attempt 4)
+    links.set('vm-x', {
+      rec: { machine: 'vm-x', url: 'http://127.0.0.1:9', lastSeen: 0 },
+      saved: { id: 'vm-x', label: 'vm-x', target: 'vm-x', session: 's', enabled: true },
+      snap: { places: [], tasks: [theirs] },
+      chats: new Map(),
+      watching: { chats: [], term: null },
+      waiting: [],
+      reachable: false,
+      state: 'Ready',
+      lacks: [],
+      connecting: false,
+      health: new WorkerHealth(),
+    })
     expect((await src.cli(['task', 'add', 'Use it', '--desc', 'y', '--after', 'vm-x:ELA-3'], { chat: place })).out).toContain("can't reach vm-x")
     ;(links.get('vm-x') as { reachable: boolean }).reachable = true
     expect((await src.cli(['task', 'add', 'Use it', '--desc', 'y', '--after', 'vm-x:ELA-9'], { chat: place })).out).toContain('vm-x has no task ELA-9')
@@ -357,18 +438,24 @@ describe('Queued from the command', () => {
     links.delete('vm-x')
     // herdr isn't here: its agents can't start. Let that settle before the tests after this one
     const ts = [first, then, use.id].map((id) => src.engine.task(id)!)
-    for (let i = 0; !ts.every((t) => t.trouble) && i < 250; i++) await Bun.sleep(20)
-    src.agents.outbox = src.agents.outbox.filter((o) => !ts.some((t) => o.key === `${t.id}/Agent`))
+    await settle(() => ts.every((t) => t.trouble), 'their agents to fail to start')
+    // its go (the task it waited for is done) either goes to an agent that never starts or waits for room: either way it
+    // can be sent later, into whatever test runs then (run 42096468692, shard 3, typed in as a CLI command's answer).
+    // Waited for, then stopped at the source: nothing sends it once the task holds no go and no place in the queue.
+    await until(() => src.agents.outbox.some((o) => o.text.includes('vm-x:ELA-3 is done')) || !!use.held, 8000, `${use.id}'s go`)
+    use.going = undefined
+    use.held = undefined
+    src.agents.outbox = src.agents.outbox.filter((o) => !o.text.includes('vm-x:ELA-3 is done') && !ts.some((t) => o.key === `${t.id}/Agent`))
   })
 })
 
 describe("a task's CLI, model and effort", () => {
   test('task add takes --agent, --model and --effort for one task; what makes no sense is refused', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
-    execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', { cwd: dir, shell: '/bin/sh' })
+    run(REPO, dir)
     const p = await src.places.add(dir, 'harness-source')
     const place = placeId.space(p.name)
-    const before = src.engine.tasks.length
+    const before = tasksIn(place)
     for (const [args, says] of <[string[], string][]>[
       [['--agent', 'nope'], 'No CLI called nope'],
       [['--effort', 'extreme'], '--effort takes default, low, medium, high, xhigh, max on Claude Code'],
@@ -383,7 +470,7 @@ describe("a task's CLI, model and effort", () => {
       expect(r.code).toBe(1)
       expect(r.out).toContain(says)
     }
-    expect(src.engine.tasks.length).toBe(before)
+    expect(tasksIn(place)).toBe(before)
     const r = await src.cli(['task', 'add', 'On Codex', '--desc', 'x', '--agent', 'codex', '--model', 'GPT-6-Sol', '--effort', 'Ultra'], { chat: place })
     expect(r.out).toContain('Its agent (Codex, gpt-6-sol, ultra effort) starts on the brief now')
     const t = src.engine.task(r.out.match(/([A-Z]+-\d+)/)![1])!
@@ -393,11 +480,11 @@ describe("a task's CLI, model and effort", () => {
     const d = await src.cli(['task', 'add', 'Plain', '--desc', 'x', '--model', 'default'], { chat: place })
     expect(src.engine.task(d.out.match(/([A-Z]+-\d+)/)![1])!.agent).toEqual({ kind: 'claude', model: '', effort: undefined })
     src.settings.set('task.model', null)
-    for (let i = 0; !t.trouble && i < 250; i++) await Bun.sleep(20)
+    await settle(() => !!t.trouble, `${t.id}'s agent to fail to start`)
   })
   test("its brief's Reviewer line names the reviewer: Settings', or task add's --reviewer flags for one task", async () => {
     const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
-    execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', { cwd: dir, shell: '/bin/sh' })
+    run(REPO, dir)
     const place = placeId.space((await src.places.add(dir, 'reviewer-source')).name)
     for (const [args, says] of <[string[], string][]>[
       [['--reviewer', 'gemini'], '--reviewer gemini: Pick one of: Codex · Claude Code · pi.'],
@@ -423,7 +510,7 @@ describe("a task's CLI, model and effort", () => {
   })
   test('task add --set changes a line of its Settings block for that task alone, marked as set by its coordinator', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
-    execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', { cwd: dir, shell: '/bin/sh' })
+    run(REPO, dir)
     const place = placeId.space((await src.places.add(dir, 'set-source')).name)
     const bad = await src.cli(['task', 'add', 'Odd', '--desc', 'x', '--set', 'merge=whenever'], { chat: place })
     expect(bad.code).toBe(1)
@@ -470,7 +557,7 @@ describe("a task's CLI, model and effort", () => {
     src.agents.ensure = (async (spec: { kind: string; model?: string; effort?: string }) => (seen.push(spec), null)) as never
     try {
       const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
-      execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', { cwd: dir, shell: '/bin/sh' })
+      run(REPO, dir)
       const place = placeId.space((await src.places.add(dir, 'coord-settings')).name)
       expect(src.agents.record(place)).toBeUndefined()
       src.settings.set('coordinator.agent', 'Codex')
@@ -584,7 +671,7 @@ describe("an alert's button", () => {
 describe("a coordinator's alert about a task", () => {
   test('says what the task needs, then the why, in place of the task\'s own alert', async () => {
     const { t } = await workedTask('alerted')
-    for (let i = 0; src.engine.statusOf(t) !== 'need' && i < 100; i++) await Bun.sleep(20)
+    await until(() => src.engine.statusOf(t) === 'need', 8000, `${t.id} to need you`)
     expect(src.engine.statusOf(t)).toBe('need')
     const alerts: import('../shared/types.ts').Alert[] = []
     const off = src.on('alert', (a) => void alerts.push(a))
@@ -1199,7 +1286,7 @@ describe('news for coordinators', () => {
   test('requester news preserves owner/home routes, carries no extra card, and drops removed origins', async () => {
     const { t, place } = await workedTask('requestnews')
     const originDir = mkdtempSync(join(tmpdir(), 'request-origin-'))
-    execSync('git init -q -b main', { cwd: originDir })
+    run('git init -q -b main', originDir)
     const origin = await src.places.add(originDir, 'requestorigin')
     const requester = placeId.space(origin.name)
     const sent: { chat: string; text: string }[] = []
@@ -1398,7 +1485,7 @@ describe("Autopilot's heartbeat", () => {
   const min = 60_000
   test('on its time rule, only while its coordinator is idle; the news its event rules name wakes it at once, the rest waits for it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'shep-beat-'))
-    execSync('git init -q -b main', { cwd: dir })
+    run('git init -q -b main', dir)
     const p = await src.places.add(dir, 'beat')
     const place = placeId.space(p.name)
     const sent: { k: string; text: string }[] = []
@@ -1566,7 +1653,7 @@ describe('adding a space from the sidebar', () => {
     })
     try {
       src.peers!.adopt('far', `http://127.0.0.1:${far.port}`)
-      for (let i = 0; i < 50 && !src.peers!.list().find((l) => l.rec.machine === 'far')?.reachable; i++) await new Promise((r) => setTimeout(r, 20))
+      await until(() => !!src.peers!.list().find((l) => l.rec.machine === 'far')?.reachable, 8000, "the far peer to be reachable")
       // an older helper there still says Manual: read as regular
       expect(src.snapshot().places.find((p) => p.id === 'p:far:~')?.mode).toBe('regular')
       expect(src.snapshot().machines.find((m) => m.id === 'm:far')?.status).toBe('idle')
@@ -1622,7 +1709,7 @@ describe('removing a space', () => {
   test('shepherdr space add refuses a name another space has, or one that breaks the rules', async () => {
     const repo = () => {
       const dir = mkdtempSync(join(tmpdir(), 'shep-src-taken-'))
-      execSync('git init -q -b main', { cwd: dir })
+      run('git init -q -b main', dir)
       return dir
     }
     await src.places.add(repo(), 'taken')
@@ -1643,7 +1730,7 @@ describe('the order of places', () => {
   test('A to Z until dragged; the order is kept on disk, and a new space slots in A to Z', async () => {
     const add = async (name: string) => {
       const dir = mkdtempSync(join(tmpdir(), 'shep-src-order-'))
-      execSync('git init -q -b main', { cwd: dir })
+      run('git init -q -b main', dir)
       await src.places.add(dir, name)
     }
     await add('order-zed')
@@ -1669,7 +1756,7 @@ describe('the order of places', () => {
 describe('renaming places', () => {
   test("only the name that shows changes, kept on disk; its id, folder and task key stay; a space's name follows the rules", async () => {
     const dir = mkdtempSync(join(tmpdir(), 'shep-src-rename-'))
-    execSync('git init -q -b main', { cwd: dir })
+    run('git init -q -b main', dir)
     const p = await src.places.add(dir, 'rename-me')
     const id = placeId.space('rename-me')
     const home = placeId.home()
@@ -1832,7 +1919,7 @@ describe("another machine's artifacts", () => {
     })
     try {
       src.peers!.adopt('far2', `http://127.0.0.1:${far.port}`)
-      for (let i = 0; i < 50 && !src.peers!.list().find((l) => l.rec.machine === 'far2')?.snap; i++) await new Promise((r) => setTimeout(r, 20))
+      await until(() => !!src.peers!.list().find((l) => l.rec.machine === 'far2')?.snap, 8000, 'the far peer to have a snapshot')
       expect(src.snapshot().artifacts.find((a) => a.id === 'farx')).toMatchObject({ title: 'Far board', place: 'p:far2:proj' })
       expect(await src.artifact('farx', 2)).toEqual({ html: '<p>far v2</p>', data: { n: 1 } })
       expect(await (await src.artifactThumb('farx', true))!.text()).toBe('png')
@@ -2064,7 +2151,7 @@ describe('machine health', () => {
       expect(sent.slice(n).filter((s) => s.text.includes('<health '))).toEqual([])
       // new tasks wait for the machine, and the command says so
       const dir = mkdtempSync(join(tmpdir(), 'shep-src-held-'))
-      execSync('git init -q -b main && git -c user.email=t@t -c user.name=T commit -q --allow-empty -m init', { cwd: dir, shell: '/bin/sh' })
+      run('git init -q -b main && git -c user.email=t@t -c user.name=T commit -q --allow-empty -m init', dir)
       await src.places.add(dir, 'held')
       const r = await src.cli(['task', 'add', 'Wait for room', '--desc', 'Add y.txt.', '--project', 'held'], { chat: placeId.space('held') })
       expect(r.out).toContain('held: the machine is busy')
@@ -2167,7 +2254,7 @@ describe('startup menus before the first message', () => {
 describe('visible launch controls', () => {
   test('coordinator and task metadata comes from the launch record, never new Settings; old actions cannot claim an unapplied change', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'shep-controls-'))
-    execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', { cwd: dir, shell: '/bin/sh' })
+    run(REPO, dir)
     const p = await src.places.add(dir, 'launch-controls')
     const place = placeId.space(p.name)
     const t = src.engine.add({ project: p.name, title: 'Launch controls', by: 'test', later: true })
@@ -2211,7 +2298,7 @@ test('native and npm agent CLI process identities', () => {
 describe('Task IDs live only in repository space Settings', () => {
   test('edits apply to new tasks and survive a display rename; invalid scopes and collisions fail', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'shep-id-settings-'))
-    execSync('git init -q -b main', { cwd: dir })
+    run('git init -q -b main', dir)
     const p = await src.places.add(dir, 'id-settings')
     const place = placeId.space(p.name)
     const set = (key: string, value: string, at = place) => src.act({ type: 'setting', place: at, key, value })
@@ -2232,7 +2319,7 @@ describe('Task IDs live only in repository space Settings', () => {
     expect(pages.find((s) => s.level === place)?.rows[0].value).toBe('NEWKEY')
     expect(pages.every((s) => s.level?.startsWith('p:') && !s.level.endsWith(':~'))).toBe(true)
     const otherDir = mkdtempSync(join(tmpdir(), 'shep-id-other-'))
-    execSync('git init -q -b main', { cwd: otherDir })
+    run('git init -q -b main', otherDir)
     const other = await src.places.add(otherDir, 'id-other')
     expect(await set('taskIds.prefix', 'GAME', placeId.space(other.name))).toMatchObject({ ok: false })
   })

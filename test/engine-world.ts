@@ -19,8 +19,14 @@ export type Said = import('../server/live/readers/hooks.ts').Said
 
 // a git call that stalls may not be waited on until the test's own timeout takes the whole test away with no word on
 // which step it was: this one stops at 30 s and names its command (run 42020185856, shard 1, on a runner six times
-// slower than the same shard's rerun)
-export const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8', timeout: 30_000 }).trim()
+// slower than the same shard's rerun). A timeout on its own only says "ETIMEDOUT".
+export const sh = (cmd: string, cwd: string) => {
+  try {
+    return execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8', timeout: 30_000 }).trim()
+  } catch (e) {
+    throw new Error(`\`${cmd}\` in ${cwd}: ${(e as Error).message.trim()}`, { cause: e })
+  }
+}
 
 /**
  * Every test reads and writes a data folder of its own, and every world it makes keeps that same one: a test builds a
