@@ -96,7 +96,7 @@ describe('a server with a home of its own', () => {
   test('keeps its agents credentials in its own home, where the helper writes them', async () => {
     const credentialFile = await withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: undefined }, () => agentEnv('LP-3/Agent', ROOT).SHEPHERDR_SECRET_FILE)
     expect(home()).toBe(proof)
-    expect(credentialFile).toStartWith(join(proof, 'helper', 'credentials', ''))
+    expect(credentialFile).toStartWith(join(proof, 'helper', 'credentials') + '/')
     // the name helper/route.pl accepts: a uuid
     expect(credentialFile.split('/').pop()).toMatch(/^[a-f0-9-]{36}$/)
     expect(credentialFile).not.toStartWith(join(REAL_HOME, 'helper'))

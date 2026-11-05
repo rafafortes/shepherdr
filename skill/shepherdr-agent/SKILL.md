@@ -90,10 +90,13 @@ build, check and review the work is your own judgment.
 Showing the screen, or a task coming due, needs a server of its own, never the one the human runs:
 
 - **The demo world first** (`SHEPHERDR_SOURCE=demo`): fictional data, no agents, nothing in herdr. Where the proof needs
-  a real launch, a fake herdr (as the tests do) stands in for it: point `HERDR_SOCKET_PATH` at that fake.
-- **Never the real `~/.shepherdr`**: give it `SHEPHERDR_HOME=/tmp/<something of its own>` and a loopback port of its
-  own, `SHEPHERDR_PORT=7801` (never 7787, the human's). Its own files, its agents' credentials included, stay there;
-  the helper's per-process route files are the one thing it writes where a CLI looks for them.
+  a real launch, a herdr stand-in of your own (the tests' fake is an object, not a socket) stands in for it, and
+  `HERDR_SOCKET_PATH` names it; without one, point `HERDR_SOCKET_PATH` at a socket that isn't there, as the tests do,
+  and nothing reaches any herdr.
+- **Never the real `~/.shepherdr`**: give it `SHEPHERDR_HOME=/tmp/<something of its own>` and a port of its own that
+  nothing else uses — `SHEPHERDR_PORT=78<nn>`, never 7787, the human's, and never another task's. Its own files, its
+  agents' credentials included, stay there; the helper's per-process route files are the one thing it writes where a CLI
+  looks for them.
 - **No task that can come due**: no `--in`, `--at`, nothing queued behind another task, nothing to relaunch. A server
   with a home of its own refuses to start any agent unless `SHEPHERDR_LAUNCH_AGENTS=1` says it may, and logs each skip;
   never set that variable with the human's herdr in reach, only around a fake one.

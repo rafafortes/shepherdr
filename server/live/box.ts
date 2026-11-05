@@ -6,7 +6,7 @@
 // needs only herdr, git, perl and the agent CLIs, plus the small helper Shepherdr puts there (helper/, install.ts).
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { secretFileId } from './secret-paths.ts'
 import { home, readJson } from '../store.ts'
 
@@ -110,7 +110,8 @@ export function spawnOn(b: BoxInfo, argv: string[], o: { extra?: string[]; stdin
 /** an agent's credential file: in the current Shepherdr home's helper (SHEPHERDR_HOME included, so a server given a
  *  home of its own never writes into the real ~/.shepherdr), or in the box's helper when this worker runs another
  *  machine, where helper/route.pl writes it */
-const credentialFile = (chat: string) => join(BOX ? helperDir(BOX.home) : join(home(), 'helper'), 'credentials', secretFileId(chat))
+const credentialFile = (chat: string) =>
+  BOX ? join(helperDir(BOX.home), 'credentials', secretFileId(chat)) : join(resolve(home(), 'helper', 'credentials'), secretFileId(chat))
 
 /** who an agent is to the shepherdr command, and where that command is: here Shepherdr's own bin and server; on
  *  another machine the helper's bin first on its own PATH (its command finds the way back by itself) */

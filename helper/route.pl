@@ -26,9 +26,10 @@ sub process_identity {
 
 sub route_dir { return "$ENV{HOME}/.shepherdr/helper/routes"; }
 
-# a path the way node's join writes it: no //, no trailing /, no . or .. segment (the server builds its paths so)
+# a path the way node's resolve/join writes it: absolute, no //, no trailing /, no . or .. segment
 sub norm_path {
   my ($p) = @_;
+  $p = getcwd() . "/$p" unless $p =~ m{^/};
   my @in = split m{/+}, $p;
   my @out;
   for my $seg (@in) {

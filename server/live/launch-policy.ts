@@ -35,9 +35,10 @@ export const launchesAgents = () => {
   return atRealHome(home())
 }
 
-/** why one was not started, for the log and for the chat or task that asked for it */
+/** why one was not started, for the log and for the chat or task that asked for it: the way on comes first, since a
+ *  task's card keeps only the start of it (engine.ts, troubleOf) */
 export const skippedLaunch = (key: string) =>
-  `${key} not started: this Shepherdr has a home of its own (${home()}) and would open its agent in the herdr here. Set SHEPHERDR_LAUNCH_AGENTS=1 to let it start agents.`
+  `${key} not started: set SHEPHERDR_LAUNCH_AGENTS=1 to let this Shepherdr (home ${home()}) start agents; it has a home of its own and they would open in the herdr here.`
 
 /** the refusal, said in the log once, for a place that would start one before the agents do */
 export function refusedLaunch(key: string): Error {

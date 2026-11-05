@@ -846,6 +846,12 @@ export class Engine extends Emitter<Events> {
 
   /** the go: its agent hears it (hidden from the chat, where a small card says why it started) and starts on the work */
   private go(t: TaskRec, text: string, why: string, plain = false) {
+    // a server that may start no agent spends none of its queue on one: the task says why instead
+    if (!launchesAgents()) {
+      t.trouble = troubleOf(refusedLaunch(this.key(t)))
+      this.settle(t)
+      return
+    }
     // archived while it waited: it starts work, so it shows again
     if (t.archived) this.unarchive(t.id)
     t.after = undefined
