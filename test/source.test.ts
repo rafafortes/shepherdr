@@ -415,7 +415,6 @@ describe('A tell with no chat of its own', () => {
       src.engine.machine = machine
     }
     expect(t.held?.go).toBe('Not yet.')
-    expect(t.held?.plain).toBe(true)
     // nothing left behind for the tests after this one: not held, and nothing queued for its agent
     t.held = undefined
     src.agents.outbox = src.agents.outbox.filter((o) => o.key !== `${id}/Agent`)

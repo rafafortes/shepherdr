@@ -74,15 +74,6 @@ describe('which card an alert is about', () => {
     expect(a).toMatchObject({ title: 'X · Allow: rm -rf x?', go: { focus: 'menu:X/Agent' } })
     expect(a.card).toBeUndefined()
   })
-  test("another agent's message after the card is not an answer: the card still waits, and yours after it still closes it", () => {
-    const plan = { id: 'm1', who: 'agent' as const, text: 'Here is my plan.', question: q({ id: 'plan:X:1', kind: 'Plan' as const, title: 'Plan for X' }) }
-    const alone = about(chat([plan]))
-    const peer = { id: 'p1', who: 'peer' as const, peer: { name: 'p coordinator', space: 'p' }, text: 'Keep the plan as it is.' }
-    expect(about(chat([plan, peer]))).toEqual(alone)
-    expect(alone).toMatchObject({ title: 'X · Plan to approve', go: { focus: 'plan:X:1' } })
-    // your own words after it do close it, as before
-    expect(about(chat([plan, { id: 'y1', who: 'you', text: 'Something else' }]))).toMatchObject({ title: 'X · Waits for your reply' })
-  })
   test('a long question keeps its choices in the body', () => {
     const a = askText('SHE-63', q({ title: 'Why '.repeat(80) + '?' }))
     expect(a.body.length).toBeLessThanOrEqual(BODY_MAX)

@@ -399,6 +399,14 @@ export function chats(): Record<string, Chat> {
       ]),
       c('GTM-16/Agent', 'Claude Code', [
         m({ who: 'you', text: 'Write docs for the skills folder.' }),
+        // another agent's message: a row of its own, naming the sender it declared and the pane it writes from. Above the
+        // plan, never after it: the alert and the app find the card a task waits on by reading back from its chat's last
+        // row, so a row that is no card after an unanswered one would hide the plan from the phone (SHE-19)
+        m({
+          who: 'peer',
+          peer: { name: 'gtm coordinator', pane: 'w74:p1', space: 'gtm' },
+          text: 'Relayed from the operator: keep the plan as it is, and print the docs link at the end of gtm init.',
+        }),
         m({
           who: 'agent',
           text: 'Here is my plan. Nothing in the repo changes until you say yes.',
@@ -411,12 +419,6 @@ export function chats(): Record<string, Chat> {
             noteRequiredFor: 1,
             to: 'GTM-16 agent',
           },
-        }),
-        // another agent's message: a row of its own, naming the sender it declared and the pane it writes from
-        m({
-          who: 'peer',
-          peer: { name: 'gtm coordinator', pane: 'w74:p1', space: 'gtm' },
-          text: 'Relayed from the operator: keep the plan as it is, and print the docs link at the end of gtm init.',
         }),
       ]),
       c('GTM-14/Agent', 'Claude Code', [
