@@ -21,6 +21,7 @@ describe("an agent's own shepherdr command", () => {
       `SHEPHERDR_CHAT="${chat}" ${command} ask "Rerun CI?" --choice Yes --choice No`,
       `SHEPHERDR_CHAT='${chat}' ${command} ready EX-1 --summary 'It works; really' --facts "a \\"b\\" | c"`,
       `${command} todo EX-1`,
+      `${command} review EX-1`,
       `${command} merge EX-1`,
       `${command} task add One --brief 'line one\nline two'`,
       `${command} artifact update wk3n board.html --note "bars by week"`,

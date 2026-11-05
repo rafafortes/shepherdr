@@ -20,6 +20,7 @@ export const OWN_VERBS = [
   'space',
   'task',
   'status',
+  'review',
   'ask',
   'plan',
   'pr',

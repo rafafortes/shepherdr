@@ -2247,6 +2247,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return this.taskCommand(a1, rest, p, ctx)
       case 'restart':
         return this.restartCommand(a1, p, ctx)
+      // a task's own agent counts each review round it starts, so its brief's at most so many are kept by
+      case 'review': {
+        const t = this.engine.task(a1 ?? '')
+        if (!t) throw new Error(`No task ${a1 ?? ''}; shepherdr review <id>`)
+        if (ctx.chat !== `${t.id}/Agent`) throw new Error(`${t.id}'s own agent counts its review rounds, not ${ctx.chat ? 'this chat' : 'you at the command'}; a coordinator adds one with shepherdr task review-more ${t.id}`)
+        const { round, rounds } = this.engine.reviewRound(t.id)
+        return `Round ${round} of ${rounds} counted for ${t.id}: review its final commit before you report ready.`
+      }
       // done is ready's old name, still taken
       case 'ready':
       case 'done': {
@@ -2732,7 +2740,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'show': {
         const v = this.engine.view(t)
         if (p.flags.has('json')) return JSON.stringify(v, null, 2)
-        return [`${v.id} ${v.name}`, `State: ${v.state}${statusLine(v) ? ` · ${statusLine(v)}` : ''}${v.pinned ? ' · pinned' : ''}`, `Added: ${v.created}`, v.branch ? `Branch: ${v.branch}` : '', v.base ? `Merges into: ${v.base}` : '', v.desc ? `\n${v.desc}` : ''].filter(Boolean).join('\n')
+        // the rounds its agent counted, and the one its coordinator may have added
+        const rounds = t.reviews === undefined ? undefined : `Review rounds: ${t.reviews} of ${this.engine.roundsOf(t)} used${t.reviewsAdded ? ', one added by its coordinator' : ''}`
+        return [`${v.id} ${v.name}`, `State: ${v.state}${statusLine(v) ? ` · ${statusLine(v)}` : ''}${v.pinned ? ' · pinned' : ''}`, `Added: ${v.created}`, v.branch ? `Branch: ${v.branch}` : '', v.base ? `Merges into: ${v.base}` : '', rounds, v.desc ? `\n${v.desc}` : ''].filter(Boolean).join('\n')
       }
       case 'tell': {
         // a coordinator's go to a task that waits starts it only when this machine has room
@@ -2779,6 +2789,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         this.emit('snapshot')
         return `Paused ${t.id}: its agent was interrupted and it is To do. Its work, worktree and chat stay; any message to it (task tell) is the go to go on.`
       }
+      case 'review-more': {
+        const { rounds } = await this.engine.reviewMore(t.id, ctx.chat)
+        return `${t.id} may now use ${rounds} review rounds, one more than its brief said: its agent is told to run it (its chat shows why it woke).`
+      }
       case 'pin':
       case 'unpin': {
         if (ctx.chat?.includes('/')) throw new Error(`Only a coordinator ${sub}s tasks, when the human asks.`)
@@ -2789,7 +2803,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return on ? `Pinned ${t.id}: it shows in Pinned at the top of its tasks.` : `Unpinned ${t.id}: it is back in its group (${this.engine.view(t).state}).`
       }
     }
-    throw new Error('shepherdr task add|list|show|tell|queue|stop|close|archive|unarchive|pin|unpin|pause|merge|delete')
+    throw new Error('shepherdr task add|list|show|tell|queue|stop|close|archive|unarchive|pin|unpin|pause|review-more|merge|delete')
   }
 
   /** shepherdr restart <space|id> [--agent CLI] [--model ID] [--effort LEVEL] [--save]: a task's agent restarts only

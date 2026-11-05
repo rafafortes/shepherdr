@@ -172,7 +172,8 @@ export const CATALOG: Section[] = [
       // on: the brief's Review line asks the task's agent for a fresh-eyes review before it merges
       { label: 'Review', key: 'brief.review', value: 'on', options: ['on', 'off'] },
       // the reviewer tags each finding; the agent fixes those at or above this one and reviews again, at most so many
-      // rounds. Only words in the Review line: what counts as which is the skill's and the reviewer's judgment
+      // rounds, each counted by the agent (shepherdr review) and never more by its own word: its coordinator may add one
+      // (engine.reviewMore). What counts as which is the skill's and the reviewer's judgment
       { label: 'Must fix', key: 'review.mustFix', value: 'major', options: [...SEVERITIES] },
       { label: 'Review rounds', key: 'review.rounds', value: '3 rounds', num: { min: 1, max: 10, unit: 'rounds', one: 'round' } },
       // on its own: once its own quick checks pass; GitHub's run on (pull request, main), and main's going red is told

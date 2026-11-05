@@ -19,6 +19,11 @@
   `--agent`, `--model` or `--effort` to `task add`; for another reviewer, `--reviewer`, `--reviewer-model` or
   `--reviewer-effort`. Tap the task and you are in its agent's chat, where it asks, shows
   artifacts and tells you when it is done; the task's brief shows exactly what its agent got.
+- Review rounds are a limit, so no agent reviews for ever, and raising it is its coordinator's alone: its agent counts each round
+  (`shepherdr review <id>`) and stops at the brief's Review rounds. A task that has used them all with its final
+  commit still unreviewed says so in its chat; its coordinator gives it exactly one more with `shepherdr task
+  review-more <id>`, once, only once they are all used, and its agent is woken with the round to run. `task show`
+  records it.
 - Want something noted but not started? Ask for it "for later": the coordinator adds it with `--later`, and its agent
   starts all the same, with "don't start yet, wait for a go" in its brief. It says in one line that it has it and the task shows To do (`shepherdr todo`).
   Tap it and you are in its chat, like any other: say go when you are ready, or say what to change. The agent decides
@@ -122,9 +127,10 @@
   and agent close all the same.
   Something still running in its space puts it all off until later. You can also just ask its coordinator to merge it.
   Task agents learn the way from brief to merged from [shepherdr-agent](../skill/shepherdr-agent/SKILL.md): the review the
-  brief's Settings block asks for (Settings → How tasks work → Review, Reviewer, Must fix and Review rounds: only words
-  in the brief; the agent runs it however it sees fit, a subagent or a
-  headless CLI), what the change broke, left undone or added beyond the brief; only the choices no experiment can
+  brief's Settings block asks for (Settings → How tasks work → Review, Reviewer, Must fix and Review rounds; the agent runs
+  it however it sees fit, a subagent or a
+  headless CLI, and counts each round with `shepherdr review <id>`, at most Review rounds), what the change broke, left
+  undone or added beyond the brief; only the choices no experiment can
   settle as cards for you, and your yes before anything irreversible; the proof in one small artifact; ready with a facts line; then merge or ask. How to
   build and check the work is the agent's own judgment: Shepherdr only gives it the brief, your defaults and the house
   rules.
