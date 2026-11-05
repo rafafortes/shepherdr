@@ -20,11 +20,14 @@ export interface ScreenMenu {
   screen?: string
 }
 
-/** A card's identity excludes the cursor, but includes the full permission being granted. */
+/** A card's identity excludes the cursor and whatever on the screen only moves (a spinner, a timer): a card whose
+ *  screen does that is the same card, and the same answer, on the next look. It includes the full permission being
+ *  granted. */
 export function menuId(key: string, m: ScreenMenu) {
-  const screen = m.multi
+  const shown = m.multi
     ? m.screen?.split('\n').map((l) => l.trim().replace(/^[❯›>▶]\s*/, '').replace(/^\[[✔✓x ]\]/, '[ ]')).join('\n')
     : m.screen?.replace(/^(\s*)[❯›>▶](?=\s)/gm, '$1 ')
+  const screen = shown === undefined ? undefined : restingScreen(shown)
   return `menu:${key}:${createHash('sha256').update(JSON.stringify([m.title, m.choices, screen])).digest('hex').slice(0, 16)}`
 }
 
@@ -81,7 +84,27 @@ function startupMenu(lines: string[]): ScreenMenu | null {
   }
   const yn = screen.match(/([^\n]*?)(?:\[y\/n\]|\(y\/n\)|\[yes\/no\]|\(yes\/no\))\s*[:?]?\s*$/i)
   if (yn) return { title: yn[1].trim() || 'Continue?', choices: ['Yes', 'No'], cursor: 0, keys: [['y', 'enter'], ['n', 'enter']], screen }
-  return null
+  // a numbered picker the CLI ends on a footer ("Choose the text style:", "Select login method:") asks no question, so the
+  // numbered reading above found nothing to go by; its footer is what says it is a menu and not a list in a transcript
+  if (!menuFooter(screen)) return null
+  const OPT = /^\s*([❯›>▶*]\s*)?(\d{1,2})[.)]\s+(.+)$/
+  const first = lines.findIndex((l) => OPT.exec(l)?.[2] === '1')
+  if (first < 0) return null
+  const choices: string[] = []
+  let on = -1
+  for (let i = first; i < lines.length; i++) {
+    const m = OPT.exec(lines[i])
+    if (!m) {
+      if (!lines[i].trim()) continue
+      break
+    }
+    if (Number(m[2]) !== choices.length + 1) break
+    if (m[1]) on = choices.length
+    choices.push(m[3].trim())
+  }
+  if (choices.length < 2) return null
+  const context = lines.slice(0, first).map(clean).filter(Boolean)
+  return { title: context.at(-1) ?? 'Choose an option', choices, cursor: Math.max(0, on), screen: promptScreen(lines, first) }
 }
 
 export function parseMenu(screen: string): ScreenMenu | null {
@@ -127,7 +150,8 @@ export function parseMenu(screen: string): ScreenMenu | null {
   const asks = /would you like|do you want|allow|proceed|run the following|run this/i
   const marked = [...Array(Math.min(14, first)).keys()].map((k) => first - 1 - k).filter((i) => lines[i].includes('?'))
   const qi = marked.find((i) => asks.test(lines[i])) ?? marked[0] ?? -1
-  if (qi < 0) return null
+  // a numbered list no question asks about ("Choose the text style", "Select login method:"): the startup shapes read it
+  if (qi < 0) return startupMenu(lines)
   // a question that wraps: its lines above, while each goes on from the one before (starts in lower case)
   let top = qi
   while (top > 0 && /^[a-z]/.test(clean(lines[top])) && clean(lines[top - 1])) top--

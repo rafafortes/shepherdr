@@ -1,7 +1,7 @@
 // A start that never becomes a turn, on the real source with herdr standing in: an agent stopped on its startup
 // screen is a card in its chat and the task waits on you, a CLI gone from its pane is an error with its reason, a resume
 // whose session is gone starts a new one — once each, and never for an agent that is working.
-import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -24,6 +24,8 @@ const fake = fakeHerdr()
 Object.assign(src.engine, { wt: new Worktrees(fake.h as never) })
 const ensure = src.agents.ensure.bind(src.agents)
 const relaunch = src.agents.relaunch.bind(src.agents)
+// this file makes a task per case, each a start of its own: the machine's limit of ten working ones would hold them
+beforeAll(() => src.settings.set('machine.maxTasks', '200', 'machine'))
 afterAll(() => src.stop())
 
 const TRUST = readFileSync(join(import.meta.dir, 'fixtures/startup/claude-trust.txt'), 'utf8')
@@ -257,10 +259,17 @@ describe('no false card', () => {
   })
 
   test('an agent back on an older session is not carded, whatever its transcript looks like', async () => {
-    const { key, at } = await task({ title: 'Transcript', screen: 'Should I take the second approach?\n\n1. Yes, do that\n2. No, keep this one\n', resumed: true })
+    const { key, at } = await task({ title: 'Transcript', screen: 'Should I take the second approach?\n\n1. Yes, do that\n2. No, keep this one\n', resumed: true, waits: false })
     await look(at, 3)
     expect(src.chats.menu(key)).toBeUndefined()
     expect(src.chats.chat(key).messages.filter((m) => m.question)).toEqual([])
+  })
+
+  test('a resumed agent that cannot take what was handed to it is a card all the same', async () => {
+    const { t, key, at } = await task({ title: 'Resumed and stuck', screen: 'Press any key to continue.\n', resumed: true })
+    await look(at, 2)
+    expect(src.chats.menu(key)?.choices).toEqual([])
+    expect(src.engine.statusOf(t)).toBe('need')
   })
 
   test('a start herdr still finishes (a launch left pending) is neither failed nor carded', async () => {

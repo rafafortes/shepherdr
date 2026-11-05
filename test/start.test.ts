@@ -4,7 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { FIRST_LOOK, LOST_SESSION, RESUME_SETTLE, Starts, type StartLook } from '../server/live/start.ts'
-import { lastWords, menuFooter, parseMenu, restingScreen, sameScreen } from '../server/live/screen.ts'
+import { lastWords, menuFooter, menuId, parseMenu, restingScreen, sameScreen } from '../server/live/screen.ts'
 
 const fixture = (name: string) => readFileSync(join(import.meta.dir, 'fixtures/startup', name + '.txt'), 'utf8')
 const TRUST = fixture('claude-trust')
@@ -43,6 +43,17 @@ describe('reading what a screen says', () => {
     expect(menuFooter(THEME)).toBe(true)
     expect(menuFooter('Which do you want?\n1. This\n2. That\n')).toBe(false)
     expect(menuFooter(WORKING)).toBe(false)
+    // a numbered picker with no question mark on it, ended on a footer, is a menu all the same
+    expect(parseMenu('Choose the text style:\n\n 1. Dark\n 2. Light\n\n Enter to select · ↑/↓ to navigate\n')?.choices).toEqual(['Dark', 'Light'])
+    expect(parseMenu('Pick one:\n\n 1. A\n 2. B\n')).toBeNull()
+  })
+
+  test('a card whose screen only ticks is the same card, with the same answer', () => {
+    const m = parseMenu(THEME)!
+    const at = (secs: number) => ({ ...m, screen: `${m.screen}\n⣾ Signing in… (${secs}s)` })
+    expect(menuId('c', at(12))).toBe(menuId('c', at(19)))
+    // other words, or another set of choices, are another card
+    expect(menuId('c', m)).not.toBe(menuId('c', { ...m, choices: ['Dark theme', 'Light theme'] }))
   })
 
   test('the words it stopped on are its last lines, never the shell prompt that started it', () => {
@@ -151,11 +162,15 @@ describe('a start that never becomes a turn', () => {
     expect(s.look('EX-1/Agent', look({ screen: THEME }), SETTLED + 4000)).toMatchObject({ do: 'card', menu: { choices: ['Dark mode', 'Light mode'] } })
   })
 
-  test('an agent back on a session from before is never carded: its transcript reads like anything', () => {
+  test('an agent back on a session from before is never carded from its words: its transcript reads like anything', () => {
     const s = new Starts()
     for (const at of [SETTLED, SETTLED + 2000, SETTLED + 60_000]) expect(s.look('EX-1/Agent', look({ prior: true, screen: TRANSCRIPT, resumed: true }), at)).toEqual({ do: 'wait' })
     // even a trust screen, which a transcript could show: it has been through a start before
     expect(settle(look({ prior: true, screen: TRUST, resumed: true })).second).toEqual({ do: 'wait' })
+    // what was handed to it still cannot go in: that is a state, and a card
+    expect(settle(look({ prior: true, screen: TRANSCRIPT, resumed: true, waits: true })).second).toMatchObject({ do: 'card', menu: { choices: [] } })
+    // and once it goes in, the card has nothing left to say
+    expect(settle(look({ prior: true, screen: TRANSCRIPT, resumed: true, card: true })).second).toEqual({ do: 'clear' })
     // a failure is still worth saying while it settles, and nothing after that
     const gone = look({ prior: true, resumed: true, wrong: 'gone', screen: CLAUDE_LOST })
     expect(new Starts().look('EX-1/Agent', gone, STARTED + FIRST_LOOK + 2000)).toMatchObject({ do: 'failed', fresh: true })

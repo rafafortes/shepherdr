@@ -87,9 +87,9 @@ export interface TaskRec {
   held?: { why: 'slots' | 'machine'; since: number; go?: string; goWhy?: string; plain?: boolean }
   /** shepherdr task stop closed its agent and space; writing to it again clears it */
   stopped?: boolean
-  /** the trouble it shows is a start that never became a turn (start.ts): a turn, or a word, clears it, and it survives a
-   *  restart with the error it explains */
-  startTrouble?: boolean
+  /** the words of a start that never became a turn (start.ts), kept so a restart still knows which trouble a turn, or a
+   *  word, clears: another trouble that replaced it stays */
+  startTrouble?: string
   /** the status coordinators were last told, so each change is told once */
   told?: TaskStatus
   /** the state last posted as a card (waiting on you, or done), so each is posted once */
@@ -815,7 +815,7 @@ export class Engine extends Emitter<Events> {
    */
   resumeQueue() {
     for (const t of this.tasks.filter((t) => t.going && !ended(t) && !t.stopped && this.agents.status(this.key(t)) !== 'working'))
-      this.agents.send(this.key(t), hidden(t.going!, 'go'), { ensure: () => this.launch(t) }).catch(() => undefined)
+      this.agents.send(this.key(t), hidden(t.going!, 'go'), { ensure: this.starter(t) }).catch(() => undefined)
     this.recheck()
   }
 
@@ -845,7 +845,7 @@ export class Engine extends Emitter<Events> {
     const id = `go:${t.id}:${Date.now()}`
     this.chats.post(key, { id, card: { id, task: t.id, status: 'work', text: `started: ${why}` } })
     this.save()
-    this.agents.send(key, plain ? text : hidden(text, 'go'), { ensure: () => this.launch(t) }).catch(() => undefined)
+    this.agents.send(key, plain ? text : hidden(text, 'go'), { ensure: this.starter(t) }).catch(() => undefined)
     this.settleOne(t)
     this.settleSoon(t, ANSWER_GRACE + 500)
   }
@@ -918,7 +918,7 @@ export class Engine extends Emitter<Events> {
     const cid = `queued:${t.id}:${Date.now()}`
     this.chats.post(key, { id: cid, card: { id: cid, task: t.id, status: 'queued', text: `queued after ${open.join(', ')}` } })
     this.save()
-    if (!opts.self && this.agents.status(key) !== 'gone') this.agents.send(key, hidden(queuedLine(open, was.length ? 'changed' : 'later', t.id), 'queue'), { ensure: () => this.launch(t) }).catch(() => undefined)
+    if (!opts.self && this.agents.status(key) !== 'gone') this.agents.send(key, hidden(queuedLine(open, was.length ? 'changed' : 'later', t.id), 'queue'), { ensure: this.starter(t) }).catch(() => undefined)
     this.settleOne(t)
     return { queued: open }
   }
@@ -1197,7 +1197,7 @@ export class Engine extends Emitter<Events> {
     const t = this.task(key.split('/')[0])
     if (!t || key !== this.key(t) || ended(t) || t.archived) return
     t.trouble = why
-    t.startTrouble = true
+    t.startTrouble = why
     this.settle(t)
   }
 
@@ -1209,13 +1209,12 @@ export class Engine extends Emitter<Events> {
   /** it began its turn, or something was handed to it: its start is no longer a failed one, and the error it shows for
    *  it goes (one that was another trouble, or that a restart kept, stays) */
   private started(key: string) {
-    const failed = this.failedStarts.get(key)
-    if (failed) this.failedStarts.delete(key)
+    this.failedStarts.delete(key)
     const t = this.task(key.split('/')[0])
     if (!t || key !== this.key(t) || !t.startTrouble) return
+    // another trouble replaced the start's own: that one is not this
+    if (t.trouble === t.startTrouble) t.trouble = undefined
     t.startTrouble = undefined
-    // a trouble of its own that the start's error covered stays as it was
-    if (!failed || t.trouble === failed.why) t.trouble = undefined
     this.settle(t)
   }
 
@@ -1270,7 +1269,6 @@ export class Engine extends Emitter<Events> {
 
   /** something went in to an agent: its brief, maybe, which it may already be at work on */
   sent(key: string) {
-    this.started(key)
     const t = this.task(key.split('/')[0])
     if (!t || !this.briefing.has(t.id)) return
     this.begun(t)
@@ -1697,7 +1695,7 @@ export class Engine extends Emitter<Events> {
     t.landing.nudged = true
     this.save()
     const text = `GitHub's checks passed on PR #${n}: merge ${t.id} now (shepherdr merge ${t.id}), as your brief says.`
-    await this.agents.send(key, hidden(text, 'github', { task: t.id, pr: String(n) }), { ensure: () => this.launch(t) }).catch(() => undefined)
+    await this.agents.send(key, hidden(text, 'github', { task: t.id, pr: String(n) }), { ensure: this.starter(t) }).catch(() => undefined)
   }
 
   /**
@@ -2067,6 +2065,12 @@ export class Engine extends Emitter<Events> {
     await this.agents.send(this.key(t), text, { ensure: () => this.launch(t) })
     this.youWrote(this.key(t))
     return {}
+  }
+
+  /** the way a message behind the chat starts its agent again: never one whose last start failed, which is the human's
+   *  to try again by writing (start.ts); what waits for it goes in at once when it does */
+  private starter(t: TaskRec) {
+    return () => (this.startFailedAt(this.key(t)) !== undefined ? Promise.resolve(null) : this.launch(t))
   }
 
   /** a task held before it ever started: it has no agent yet, so what you write starts it (tell) */

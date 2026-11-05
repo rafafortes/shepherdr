@@ -420,7 +420,9 @@ export class Chats {
    *  again (its words alone, with no choices, still a card: Open terminal is the way on); true when it changed */
   showStartMenu(key: string, menu: ScreenMenu): boolean {
     this.startScreens.add(key)
-    if (JSON.stringify(this.menus.get(key) ?? null) === JSON.stringify(menu)) return false
+    const had = this.menus.get(key)
+    // the same card, though a spinner or a timer on it moved: nothing changed for the human
+    if (had && menuId(key, had) === menuId(key, menu)) return false
     this.menus.set(key, menu)
     return true
   }

@@ -41,7 +41,7 @@ import { asMode, HOME_SPACE, HOST, NAME, placeId, Places } from './places.ts'
 import { privatePrompt, coordinatorPrompt, relaunchedLine, restartLine, resumedLine, settingsBlock, startWords } from './prompts.ts'
 import { fitHarness, harnessProblem, harnessWords, recentChat, restartHint, restartInfo, type Harness } from './restart.ts'
 import { Revivals, type Wrong } from './revive.ts'
-import { Starts, type StartStep } from './start.ts'
+import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
 import { CATALOG, CLI_NAME, CLIS, kindOf, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
 import { startVoice } from './voice.ts'
@@ -91,7 +91,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     nudge: (key, text) => {
       // a task stopped, paused or finished meanwhile is left as it is
       if (key.includes('/') && !this.engine.mayRetry(key)) return this.retries.clear(key)
-      this.agents.send(key, text, { ensure: key.includes('/') ? () => this.resumeTaskAgent(key) : () => this.coordinator(key) }).catch(() => undefined)
+      this.agents.send(key, text, { ensure: this.starter(key) }).catch(() => undefined)
     },
     over: (key, r) => this.cannotGoOn(key, r),
     changed: (key) => {
@@ -1107,6 +1107,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (!r) return
     // it began its turn in this launch: no start any more, nothing left to read (a new launch is a new start)
     if (this.begunStarts.get(key) === r.started) return
+    // back on a session from before, past its settle: no read of herdr or its log is worth anything there
+    if (r.resumed && now - r.started >= RESUME_SETTLE) return
     const st = this.agents.status(key)
     // at work, on a menu herdr sees, or done: no start any more
     const begun = st === 'working' || st === 'blocked' || st === 'done' || this.chats.begunSince(key, r.started)
@@ -1121,6 +1123,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a launch that never opened a pane and threw nothing of its own has nothing to say: no start ever happened
     if (!pane && !r.startError && wrong === 'gone') return
     const screen = !begun && !pending && wrong !== null && pane ? await herdr.visible(pane).catch(() => '') : ''
+    // a relaunch may have begun while herdr answered: that is a new launch, and the next look reads it
+    if (this.agents.record(key)?.started !== r.started) return
     const card = this.chats.startMenuUp(key)
     const step = this.starts.look(key, { started: r.started, wrong, pending, begun, prior: !!r.resumed, screen, resumed: !!r.resumed, waits: this.agents.waiting(key).length > 0, card, error: r.startError }, now)
     await this.startStep(key, step)
@@ -1255,7 +1259,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
             : mode === 'regular'
               ? ' Act on it if the human asked you to handle such things; otherwise tell the human what matters in a line or two. Nothing matters: reply with only <no-reply>reason</no-reply>.'
               : ' Act on it by your Autopilot rules. Nothing worth saying: reply with only <no-reply>reason</no-reply>.'
-      this.agents.send(id, hidden(`${prefix}${text}.${tail}`, 'news', about), { ensure: () => this.coordinator(id) }).catch(() => undefined)
+      this.agents.send(id, hidden(`${prefix}${text}.${tail}`, 'news', about), { ensure: this.starter(id) }).catch(() => undefined)
     }
     const requester = about?.task ? this.engine.task(about.task)?.requester : undefined
     // Owner and home already heard above. The main home already receives the overview over the worker link.
@@ -1285,7 +1289,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           const kind = ({ added: 'added', ready: 'ready', 'needs-you': 'need', merged: 'done', closed: 'done', stalled: 'stalled' } as const)[n.event as 'ready'] ?? 'need'
           if (!this.wakes(n.to, this.happened(kind, n.from, n.text, n.task), `${n.from}: ${n.text}`)) return
           const words = `${n.from}: ${n.text}. You requested this task. Its owning coordinator still handles it. Act only within the human's request; otherwise reply with only <no-reply>reason</no-reply>.`
-          await this.agents.send(n.to, hidden(words, 'news', { task: n.task, event: n.event }), { cid: `requested-news:${n.id}`, ensure: () => this.coordinator(n.to) })
+          await this.agents.send(n.to, hidden(words, 'news', { task: n.task, event: n.event }), { cid: `requested-news:${n.id}`, ensure: this.starter(n.to) })
         },
       )
     } catch { /* keep it on disk until herdr/the coordinator can receive it */ }
@@ -1300,7 +1304,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const line = clip(n.line.split('\n')[0].replace(/\.$/, ''), OVERVIEW_MAX)
     if (!this.wakes(home, n.kind === 'health' ? { event: 'health' } : this.happened(n.kind, n.place, n.line, (n.about as { task?: string } | undefined)?.task), `${from}: ${line}`)) return
     const tail = ' Its own coordinator has the whole of it. If it can’t wait, alert the human with shepherdr alert (--task <id> when it is about a task) and say why; otherwise reply with only <no-reply>reason</no-reply>.'
-    this.agents.send(home, hidden(`${from}: ${line}.${tail}`, n.kind === 'health' ? 'health' : 'news', n.about), { ensure: () => this.coordinator(home) }).catch(() => undefined)
+    this.agents.send(home, hidden(`${from}: ${line}.${tail}`, n.kind === 'health' ? 'health' : 'news', n.about), { ensure: this.starter(home) }).catch(() => undefined)
   }
 
   /** another machine's news, from its worker: its space by the name the human sees, or the machine for its health */
@@ -1344,7 +1348,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const h = this.settings.heartbeat(this.levelOf(p.id))
       if (!this.heartbeats.due(p.id, h.time, h.zone, now) || !this.idle(p.id)) continue
       const text = this.heartbeats.beat(p.id, this.roleOf(p.id), now)
-      if (text) this.agents.send(p.id, hidden(text, 'heartbeat'), { ensure: () => this.coordinator(p.id), idle: true }).catch(() => undefined)
+      if (text) this.agents.send(p.id, hidden(text, 'heartbeat'), { ensure: this.starter(p.id), idle: true }).catch(() => undefined)
     }
   }
 
@@ -1446,7 +1450,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (e.what === 'over') this.fireTaskAutomations({ event: 'health' }, machine)
     if (!this.wakes(machine, { event: 'health' }, `Machine ${NAME}: ${words}`)) return
     const tail = `${mode === 'regular' ? 'Act on it if the human asked you to handle such things.' : 'Act on it by your machine health rules.'} If it can’t wait, alert the human with shepherdr alert and say why. A card in this chat already shows the human the news: ${REPLY_AFTER_CARD}`
-    this.agents.send(machine, hidden(`${text}\n${tail}`, 'health', { kind: e.kind, what: e.what }), { ensure: () => this.coordinator(machine) }).catch(() => undefined)
+    this.agents.send(machine, hidden(`${text}\n${tail}`, 'health', { kind: e.kind, what: e.what }), { ensure: this.starter(machine) }).catch(() => undefined)
   }
 
   /** a task now waits on you, is done, or stalled: one small update card in its space's chat, one line of a few
@@ -1878,6 +1882,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   private resumeTaskAgent(key: string) {
     return this.engine.resume(key.split('/')[0])
+  }
+
+  /** the way a message behind the chat (news, a heartbeat, a health line, a provider's retry) starts its agent again:
+   *  never one whose last start failed, which is the human's to try again by writing (start.ts), and what waits for it
+   *  goes in at once when it does */
+  private starter(key: string) {
+    return () => (this.engine.startFailedAt(key) !== undefined ? Promise.resolve(null) : key.includes('/') ? this.resumeTaskAgent(key) : this.coordinator(key))
   }
 
   private async react(key: string, messageId: string, emoji: string) {

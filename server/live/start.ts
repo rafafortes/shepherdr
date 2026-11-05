@@ -106,8 +106,6 @@ export class Starts {
       const why = lastWords(l.screen) || l.error || 'It stopped before its first turn'
       return { do: 'failed', why, fresh: l.resumed && LOST_SESSION.test(l.screen) }
     }
-    // back on its transcript: nothing there is a card, whatever it looks like
-    if (l.prior) return { do: 'wait' }
     // it runs: a screen that rests says something, one that keeps saying something new is a slow start
     const screen = restingScreen(l.screen)
     if (!screen) return { do: 'wait' }
@@ -115,12 +113,18 @@ export class Starts {
     const resting = was?.launch === l.started && was.screen === screen
     this.seen.set(key, { launch: l.started, screen })
     if (!resting || now - l.started < FIRST_LOOK) return { do: 'wait' }
-    // a menu it reads, with the CLI's own footer under it: a startup screen, not a transcript or a wall of text
+    // Back on a session from before: its screen is a transcript, so no menu there is a card and nothing it says reads as
+    // a start's words. Only a state — what was handed to it still cannot go in — is worth one.
+    if (l.prior) {
+      if (!l.waits) return l.card ? { do: 'clear' } : { do: 'wait' }
+      return { do: 'card', menu: { title: 'Waiting on its screen', choices: [], cursor: 0, screen: screen } }
+    }
+    // a menu it reads, with the CLI's own footer under it: a startup screen, not a wall of text
     const menu = menuFooter(l.screen) ? parseMenu(l.screen) : null
     if (menu) return { do: 'card', menu }
     // Nothing to choose: a card only when the screen says something is wrong, or when it still cannot take its brief.
     // A slow start says neither — a screen at rest while the model loads, its brief already in — and gets no card.
-    if (STOPPED.test(lastWords(l.screen, 4)) || l.waits) return { do: 'card', menu: { title: 'Waiting on its screen', choices: [], cursor: 0, screen: l.screen.trim() } }
+    if (STOPPED.test(lastWords(l.screen, 4)) || l.waits) return { do: 'card', menu: { title: 'Waiting on its screen', choices: [], cursor: 0, screen: screen } }
     // its brief went in after all: a card about waiting for it has nothing left to say
     return l.card ? { do: 'clear' } : { do: 'wait' }
   }

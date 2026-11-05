@@ -48,7 +48,8 @@
   session is gone. Its last words come to the chat as a card, the task shows `Went wrong: …` and needs you instead of
   Working, and Shepherdr leaves it to you rather than starting it again in a loop (`start.ts`). One that was resuming
   a session that is gone starts a new one, with its brief again, and the chat says so. An agent that has not begun its
-  turn about ten seconds after its brief was handed over shows its screen as a card ([Chats](chat.md)).
+  turn about ten seconds after its brief was handed over shows its screen as a card: what tells a stuck start from a
+  slow one is in [Chats](chat.md).
 - A turn cut off by the model's provider (overloaded, at capacity, a rate limit, a dropped connection) is no question
   for you: Shepherdr waits and tells the agent, task or coordinator, to carry on, after 1, 2, 4 and 8 minutes. Meanwhile
   a task stays Working, its line saying why and when (`Provider overloaded · retry in 2m`). Only when the fifth try is
