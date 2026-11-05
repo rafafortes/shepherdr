@@ -42,17 +42,25 @@ describe.skipIf(!browser)('a message from another agent', () => {
         expect(box.x).toBeLessThan(390 / 2)
         const mine = (await page.locator('[data-you] [data-anchor]').first().boundingBox())!
         expect(mine.x).toBeGreaterThan(390 / 2)
-        // its own shade: neither the human's reply shade nor the agent's bubble shade
-        const bg = (sel: string) => page.locator(sel).first().evaluate((b) => getComputedStyle(b).backgroundColor)
-        const shades = await page.evaluate(() => {
-          const css = getComputedStyle(document.documentElement)
-          return { reply: css.getPropertyValue('--reply').trim(), bubble: css.getPropertyValue('--bubble').trim(), peer: css.getPropertyValue('--peer').trim() }
-        })
-        expect(Object.values(shades).every(Boolean)).toBe(true)
-        expect(new Set(Object.values(shades)).size).toBe(3)
-        expect(await bubble.locator('[data-anchor]').evaluate((b) => getComputedStyle(b).backgroundColor)).toBe(await bg('.bg-peer'))
-        expect(await bg('.bg-bubble')).not.toBe(await bg('.bg-peer'))
-        expect(await bg('.bg-reply')).not.toBe(await bg('.bg-peer'))
+        // its own shade: the --peer colour itself, not the human's reply shade nor the agent's bubble shade
+        const token = (name: string) =>
+          page.evaluate((n) => {
+            const probe = document.createElement('i')
+            probe.style.color = `var(${n})`
+            document.body.append(probe)
+            const colour = getComputedStyle(probe).color
+            probe.remove()
+            return colour
+          }, name)
+        const shade = await bubble.locator('[data-anchor]').evaluate((b) => getComputedStyle(b).backgroundColor)
+        expect(shade).toBe(await token('--peer'))
+        expect(shade).not.toBe(await token('--reply'))
+        expect(shade).not.toBe(await token('--bubble'))
+        // this agent's own bubbles and the human's are drawn as they were
+        const own = page.locator('[data-whole]').filter({ has: page.locator('[data-you]') }).first().locator('[data-anchor]')
+        expect(await own.evaluate((b) => getComputedStyle(b).backgroundColor)).toBe(await token('--reply'))
+        const theirs = page.locator('[data-whole]').filter({ hasNot: page.locator('[data-you], [data-peer]') }).filter({ has: page.locator('[data-anchor]') }).last().locator('[data-anchor]')
+        expect(await theirs.evaluate((b) => getComputedStyle(b).backgroundColor)).toBe(await token('--bubble'))
         // and the words wrap inside the screen rather than pushing it wide
         expect(await bubble.locator('[data-text]').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
       } finally {

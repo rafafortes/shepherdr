@@ -37,7 +37,7 @@ describe('To do: its agent waits for a go', () => {
 
   test('a message another agent’s shell sends says who sent it; one from a plain terminal stays your words', async () => {
     const w = world()
-    const { t } = await started(w, repo(), 'told', 'Say hi', later)
+    const { t, p } = await started(w, repo(), 'told', 'Say hi', later)
     w.engine.todo(t.id)
     w.agentIs(`${t.id}/Agent`, 'idle')
     const from = { name: 'SHE-17 agent', pane: 'w7R:p2', space: 'shepherdr', task: 'SHE-17' }
@@ -49,6 +49,13 @@ describe('To do: its agent waits for a go', () => {
     // a terminal with no chat sends nothing: its words are the human's, exactly as typed, as before
     await w.engine.tell(t.id, 'Plain words from a terminal.')
     expect(w.sent.at(-1)).toEqual({ key: `${t.id}/Agent`, text: 'Plain words from a terminal.' })
+    // a task with no agent yet takes the words into its brief, which is always plain: no envelope inside a brief
+    w.engine.machine = () => ({ busy: 'cpu' as const, herdr: true })
+    const saved = w.engine.add({ project: p.name, title: 'Held one', desc: 'Add b.txt.', by: 'test' })
+    expect(saved.worktree).toBeUndefined()
+    await w.engine.tell(saved.id, 'Your coordinator says go.', { gate: true, from })
+    expect(saved.desc).toContain('Your coordinator says go.')
+    expect(saved.desc).not.toContain('<agent-message')
   })
 
   test('talking to it leaves To do; only the agent puts it back, and one that stops otherwise needs you', async () => {

@@ -35,6 +35,8 @@ interface FileState {
   seen: Set<string>
   /** the folder its background shells write their output to, learned from one */
   tasks?: string
+  /** messages from other agents already taken in, by their words: a message kept mid-turn as a queued command is one */
+  peers?: Map<string, number>
 }
 
 /** steps remembered as not over: one cut off (Esc) never gets its result */
@@ -140,6 +142,16 @@ function peerLine(text: string): string | undefined {
   return p && !/^\[Subagent hand-back\]/.test(p.text) ? text : undefined
 }
 
+/** a message from another agent not seen yet: one Claude Code kept as a queued command may also be written again as a
+ *  user line (never seen in a real log), and one message is one row */
+function firstPeer(s: FileState, text: string, at: number): boolean {
+  const seen = (s.peers ??= new Map())
+  for (const [t, when] of seen) if (Math.abs(at - when) > 60_000) seen.delete(t)
+  if (seen.has(text)) return false
+  seen.set(text, at)
+  return true
+}
+
 function questionItems(input: Json): CliQuestionItem[] {
   const qs: Json[] = Array.isArray(input?.questions) ? input.questions : []
   return qs.map((q) => ({
@@ -236,7 +248,7 @@ export class ClaudeReader implements Reader {
         // another agent's message: a row of its own, named by what it wrote (chatlines.fromAgent)
         if (!l.isSidechain && l.origin?.kind === 'peer') {
           const peer = peerLine(typeof c === 'string' ? c : '')
-          if (peer) {
+          if (peer && firstPeer(s, peer, t)) {
             turnStart(`start-${l.uuid ?? offset}`, t)
             out.push({ kind: 'peer', id: String(l.uuid ?? `u${offset}`), at: t, text: peer })
             continue
@@ -266,7 +278,7 @@ export class ClaudeReader implements Reader {
         // another agent's message, taken in mid-turn (Claude Code keeps it as a queued command)
         if (!l.isSidechain && a.origin?.kind === 'peer' && typeof a.prompt === 'string') {
           const peer = peerLine(a.prompt)
-          if (peer) {
+          if (peer && firstPeer(s, peer, Date.parse(a.timestamp ?? '') || t)) {
             turnStart(`start-${l.uuid ?? offset}`, t)
             out.push({ kind: 'peer', id: String(l.uuid ?? `u${offset}`), at: Date.parse(a.timestamp ?? '') || t, text: peer })
             continue

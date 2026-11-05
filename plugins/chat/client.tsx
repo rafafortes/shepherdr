@@ -142,9 +142,12 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
                 className={clsx(
                   // mirrored round corners: the small one points at whoever wrote it. Slack's 15/22 message text
                   'relative max-w-full min-w-0 text-[0.9375rem]/[1.375rem] text-pretty px-3.5 py-2 phone:px-4 phone:py-2.5 phone:text-base/6',
-                  you ? 'rounded-bubble rounded-br-[6px] bg-reply' : 'rounded-bubble rounded-bl-[6px] bg-bubble',
-                  // another agent's message: its own shade, ringed, so it never reads as this agent's or yours
-                  peer && 'bg-peer shadow-[inset_0_0_0_1px_var(--line2)]',
+                  // one shade each: yours, the agent's, and another agent's own (ringed, so it never reads as either)
+                  you
+                    ? 'rounded-bubble rounded-br-[6px] bg-reply'
+                    : peer
+                      ? 'rounded-bubble rounded-bl-[6px] bg-peer shadow-[inset_0_0_0_1px_var(--line2)]'
+                      : 'rounded-bubble rounded-bl-[6px] bg-bubble',
                   you ? 'self-end' : 'self-start',
                   // on a touch screen a hold reacts (or offers Remove), so it doesn't start selecting text or a link's preview
                   ((canReact && !selecting) || pending) && clsx(pressable, 'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]'),
@@ -1820,7 +1823,8 @@ function ReplyStrip({ chatKey }: { chatKey: string }) {
   const q = useUI((u) => u.reply[chatKey])
   const snap = useSnap()
   if (!q) return null
-  const name = q.who === 'you' ? 'You' : snap ? chatName(snap, chatKey) : 'Agent'
+  // another agent's message is answered under the name it declared, as its quote says
+  const name = q.who === 'you' ? 'You' : q.who === 'peer' && q.from ? q.from : snap ? chatName(snap, chatKey) : 'Agent'
   return (
     <div data-reply-strip className="flex h-7 items-center gap-2 pr-0.75 pl-2.25 text-[0.8125rem] phone:h-8 phone:pr-2 phone:pl-3.5 phone:text-[0.875rem]">
       <div {...jumps(chatKey, q, `Replying to ${name}`)} className="min-w-0 flex-1 cursor-pointer truncate text-fg2">

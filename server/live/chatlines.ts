@@ -23,16 +23,22 @@
 //   agent → <reply to="What needs me today?"/>      a line of its own, then its reply
 //   agent → <no-reply>SHE-72 merged, nothing to do</no-reply>   a reply that is only this shows nothing (news with nothing to say)
 //
-// Herdr's own messaging, which this reads: a message one agent sends another is wrapped in its envelope, and the chat
-// shows it as that agent's, naming it (never as the human's, whose words are plain text with no wrapper):
+// A message from another agent is wrapped in an envelope, and the chat shows it as that agent's, naming it (never as the
+// human's, whose words are plain text with no wrapper). Three things write that envelope:
 //
 //   <agent-message from="SHE-17 agent" to="SHE-18 agent" pane="w7R:p2" space="shepherdr" task="SHE-17">hello</agent-message>
-//   <agent-message from="herdr/explore">…</agent-message>       herdr's own wrapper: from, to and nothing more
-//   Another Claude session sent a message:                         Claude Code's own cross-session messaging
+//   <agent-message from="herdr/explore" to="orchestrator">…</agent-message>
+//   Another Claude session sent a message:
 //   <cross-session-message from="uds:/run/user/1000/cc-socks/1.sock" from-name="proton-vpn" from-mode="prompting">…</cross-session-message>
 //
-// `shepherdr task tell` writes the first one when an agent's shell runs it, so the task it reaches says who sent it.
-// The sender is only the name that side wrote: the chat shows it and grants it nothing.
+// `shepherdr task tell` writes the first, when an agent's own shell runs it, so the task it reaches says who sent it.
+// The second is what the pi herdr integration (the herdr_message_agent tool, pi's own 'herdr' package) types into a pi
+// pane: from and to, nothing more. The third is Claude Code's own cross-session messaging, which its log marks
+// (`origin.kind` "peer") and is the only one read from a log line rather than from a tag, so its text comes wrapped too.
+//
+// Nothing else marks a sender: plain text typed with `herdr agent prompt`, or an answer typed into a blocked pane, is a
+// `user` line in the CLI's log, exactly like the human's, and stays the human's in the chat. The sender is only the name
+// that side wrote: the chat shows it and grants it nothing.
 //
 // Shepherdr's own lines to agents are <shepherdr type="news">…</shepherdr> and the like (agents.ts hidden). The older
 // [square bracket] lines still read back, from agents started before the change and from old chat logs.
@@ -249,31 +255,52 @@ export interface FromAgent {
 /** the line before the wrapper, when a harness writes one */
 const CLAUDE_PEER = /^Another Claude session sent a message:\s*/
 
-/** the tags that wrap a message from another agent: herdr's own (and ours, which says more in it) and Claude Code's */
+/** the tags that wrap a message from another agent: the herdr integration's and ours, and Claude Code's */
 const PEER_TAGS = ['agent-message', 'cross-session-message']
 
+/** one envelope at the start of a text: its tag, its attributes and its words, up to its own closing tag */
+const ENVELOPE = /^<([a-z][\w-]*)((?:\s+[\w-]+="[^\n]*?")*)\s*>([\s\S]*?)<\/\1>\s*/
+
+/** the attributes of a tag, read the way tagOf reads them */
+function attrsOf(s: string): Record<string, string> {
+  const a: Record<string, string> = {}
+  for (const x of s.matchAll(/([\w-]+)="([^\n]*?)"(?=\s+[\w-]+="|\s*$)/gu)) a[x[1]] = x[2]
+  return a
+}
+
 /**
- * A message another agent sent, or null for anything else (the human's words are plain, and Shepherdr's own lines carry
- * their own tags). Only a whole message wrapped in one of those tags counts: an agent that quotes one in the middle of
- * its own words is not sending it.
+ * The messages another agent sent, in order: none for anything else (the human's words are plain, and Shepherdr's own
+ * lines carry their own tags). Only a whole message wrapped in one of those tags counts, so an agent that quotes one in
+ * the middle of its own words is not sending it; two envelopes in one text (a task told twice while it was held) are two
+ * messages, each with its own sender.
  *
  * The sender is declared, never verified: a pane id or a name is only what the other side wrote, which is why the chat
  * shows it beside the message and nothing treats it as the human's word.
  */
-export function fromAgent(text: string): FromAgent | null {
-  const s = String(text ?? '').trim().replace(CLAUDE_PEER, '')
-  if (!s.startsWith('<')) return null
-  const t = tagOf(s)
-  if (!t || !PEER_TAGS.includes(t.name)) return null
-  const a = t.a
-  const name = (t.name === 'cross-session-message' ? (a['from-name'] ?? a.from) : (a.from ?? a.name ?? a['from-name']))?.trim()
-  return {
-    name: name || 'Another agent',
-    ...(a.pane ? { pane: a.pane } : {}),
-    ...(a.space ? { space: a.space } : {}),
-    ...(a.task ? { task: a.task } : {}),
-    text: (t.body ?? '').trim(),
+export function fromAgents(text: string): FromAgent[] {
+  let s = String(text ?? '').trim().replace(CLAUDE_PEER, '')
+  const out: FromAgent[] = []
+  while (s.startsWith('<')) {
+    const m = ENVELOPE.exec(s)
+    if (!m || !PEER_TAGS.includes(m[1])) break
+    const a = attrsOf(m[2])
+    const name = (m[1] === 'cross-session-message' ? (a['from-name'] ?? a.from) : (a.from ?? a.name ?? a['from-name']))?.trim()
+    out.push({
+      name: name || 'Another agent',
+      ...(a.pane ? { pane: a.pane } : {}),
+      ...(a.space ? { space: a.space } : {}),
+      ...(a.task ? { task: a.task } : {}),
+      text: (m[3] ?? '').trim(),
+    })
+    s = s.slice(m[0].length)
   }
+  // anything left over is not an envelope, so the text as a whole is not one of these lines: no message from it
+  return out.length && !s.trim() ? out : []
+}
+
+/** one message another agent sent, or null: the first of a text (see fromAgents) */
+export function fromAgent(text: string): FromAgent | null {
+  return fromAgents(text)[0] ?? null
 }
 
 /** a message from another agent as it goes into the log the chat reads: who sent it, then its words */

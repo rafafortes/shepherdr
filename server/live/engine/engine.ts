@@ -2125,24 +2125,27 @@ export class Engine extends Emitter<Events> {
    */
   async tell(id: string, text: string, { gate = false, from }: { gate?: boolean; from?: TellFrom } = {}): Promise<{ held?: 'slots' | 'machine' }> {
     const t = this.req(id)
-    // what its agent reads: another agent's message says who sent it, in herdr's own envelope (chatlines.fromAgent)
+    // what its agent reads, once it has an agent to read it: another agent's message says who sent it, in the envelope
+    // herdr's messaging writes (chatlines.fromAgents). A brief is never wrapped: those words are the task's own
     const said = from ? fromAgentLine({ ...from, to: `${t.id} agent` }, text) : text
     // a stopped task is no wait for room: its agent is closed, and the words start it again where it is
     const waits = (this.statusOf(t) === 'todo' && !t.stopped) || this.holding(t)
     const r = gate && waits && !ended(t) ? this.room() : {}
     if (r.why) {
       if (!t.worktree) {
-        // its brief takes the words, as below; it starts on it once there's room
+        // its brief takes the words, as below, plain: a brief is its own words, never another agent's envelope; it
+        // starts on it once there's room
         const [work, how] = splitBrief(t.desc)
-        t.desc = [work, said, how].filter(Boolean).join('\n\n')
+        t.desc = [work, text, how].filter(Boolean).join('\n\n')
         this.hold(t, r.why)
       } else this.hold(t, r.why, { text: t.held?.go ? `${t.held.go}\n\n${said}` : said, why: 'its coordinator said go', plain: true })
       return { held: r.why }
     }
     if (!t.worktree && !this.starting.has(t.id)) {
-      // above the defaults Shepherdr ended the brief with, so it wins over them like the rest of the brief
+      // above the defaults Shepherdr ended the brief with, so it wins over them like the rest of the brief: plain, as
+      // a brief is
       const [work, how] = splitBrief(t.desc)
-      t.desc = [work, said, how].filter(Boolean).join('\n\n')
+      t.desc = [work, text, how].filter(Boolean).join('\n\n')
       // a message is the go, as for one at work
       t.held = undefined
       await this.startTask(t)

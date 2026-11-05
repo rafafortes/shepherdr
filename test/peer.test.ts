@@ -4,7 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fromAgent, fromAgentLine } from '../server/live/chatlines.ts'
+import { fromAgent, fromAgentLine, fromAgents } from '../server/live/chatlines.ts'
 
 process.env.SHEPHERDR_HOME ??= mkdtempSync(join(tmpdir(), 'shep-peer-'))
 const { Chats } = await import('../server/live/chats.ts')
@@ -26,6 +26,18 @@ describe('the envelope a message from another agent arrives in', () => {
     expect(fromAgent(cross)).toEqual({ name: 'proton-vpn', text: 'The proxy is up.' })
     // a wrapper with nothing said about itself still names something: never an empty sender
     expect(fromAgent('<agent-message from="">hello</agent-message>')?.name).toBe('Another agent')
+  })
+
+  test('two messages joined are two rows, each with its own sender: a task told twice while it was held', () => {
+    const a = fromAgentLine({ name: 'SHE-17 agent', pane: 'w7R:p2' }, 'First.')
+    const b = fromAgentLine({ name: 'polylog coordinator', pane: 'w74:p1' }, 'Second.')
+    const both = fromAgents(`${a}\n\n${b}`)
+    expect(both).toEqual([
+      { name: 'SHE-17 agent', pane: 'w7R:p2', text: 'First.' },
+      { name: 'polylog coordinator', pane: 'w74:p1', text: 'Second.' },
+    ])
+    // words after the envelopes are no envelope at all: that text is what it looks like, not a message from an agent
+    expect(fromAgents(`${a}\n\nand a note after it`)).toEqual([])
   })
 
   test('the human’s words, a quoted wrapper inside them, and an unfinished envelope are not one', () => {
@@ -106,6 +118,16 @@ describe('a message another agent sent, in the chat', () => {
     ])
     expect(chat.messages).toHaveLength(1)
     expect(chat.messages[0]).toMatchObject({ who: 'peer', text: 'The migration is done.', peer: { name: 'SHE-17 agent', pane: 'w7R:p2', task: 'SHE-17' } })
+  })
+
+  test('two envelopes in one turn are two rows, each with its own sender', () => {
+    const both = `${fromAgentLine({ name: 'SHE-17 agent', pane: 'w7R:p2' }, 'First.')}\n\n${fromAgentLine({ name: 'polylog coordinator' }, 'Second.')}`
+    const chat = chatWith('claude', [cuser('u1', both)])
+    expect(chat.messages.map((m) => [m.id, m.peer?.name, m.text])).toEqual([
+      ['u1:peer0', 'SHE-17 agent', 'First.'],
+      ['u1:peer1', 'polylog coordinator', 'Second.'],
+    ])
+    expect(chat.messages.every((m) => m.who === 'peer')).toBe(true)
   })
 
   test("Claude Code's own cross-session message is one; a subagent's hand-back stays out, as before", () => {

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { apart, cardMessage, type ActivityAnswer, type ActivityAsk, type Chat, type ChatControls, type ArtifactPost, type Job, type Message, type Peer, type Question, type Reaction, type SecretAsk, type UpdateCard } from '../../shared/types.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
 import { stripHidden, type Agents, type OutItem } from './agents.ts'
-import { agentLines, excerpt, findQuoted, fromAgent, markerSoFar, parseBrowserNotes, parseReply, parseUserLine, userLines, type FromAgent, type Parsed } from './chatlines.ts'
+import { agentLines, excerpt, findQuoted, fromAgents, markerSoFar, parseBrowserNotes, parseReply, parseUserLine, userLines, type FromAgent, type Parsed } from './chatlines.ts'
 import { shortUrl } from '../../shared/browser.ts'
 import { herdr } from './herdr.ts'
 import { logKind } from './readers/find.ts'
@@ -587,6 +587,15 @@ export class Chats {
 
   /* ---------- the chat as the screen draws it ---------- */
 
+  /** a message from another agent as the chat draws it (one per envelope: a task told twice while it was held heard two),
+   *  naming the sender it declared and nothing this machine vouches for */
+  private peerRows(msgs: Message[], id: string, at: number, froms: FromAgent[], newSession?: boolean, more: Partial<Message> = {}) {
+    froms.forEach((f, i) => {
+      const mid = froms.length === 1 ? id : `${id}:peer${i}`
+      msgs.push({ id: mid, who: 'peer', at, text: f.text, peer: this.whoOf(f), newSession: !i && newSession ? true : undefined, ...more })
+    })
+  }
+
   chat(key: string): Chat {
     this.pull(key)
     const r = this.agents.record(key)
@@ -652,8 +661,9 @@ export class Chats {
       }
       // another agent's message, as its CLI's log marks it: a row of its own naming the sender it declared
       if (e.kind === 'peer') {
-        const p = fromAgent(e.text) ?? { name: 'Another agent', text: e.text }
-        msgs.push({ id: e.id, who: 'peer', at: e.at, text: p.text, peer: this.whoOf(p), newSession: newSession || undefined })
+        const froms = fromAgents(e.text)
+        if (!froms.length) froms.push({ name: 'Another agent', text: e.text })
+        this.peerRows(msgs, e.id, e.at, froms, newSession || undefined)
         newSession = false
         continue
       }
@@ -661,9 +671,9 @@ export class Chats {
         const text = stripHidden(e.text)
         if (!text) continue
         // another agent's message: a row of its own naming the sender it declared (never the human's words)
-        const from = fromAgent(text)
-        if (from) {
-          msgs.push({ id: e.id, who: 'peer', at: e.at, text: from.text, peer: this.whoOf(from), newSession: newSession || undefined })
+        const froms = fromAgents(text)
+        if (froms.length) {
+          this.peerRows(msgs, e.id, e.at, froms, newSession || undefined)
           newSession = false
           continue
         }
@@ -809,9 +819,9 @@ export class Chats {
         addRx(m, o.reaction.emoji, 'me', parseUserLine(o.text)?.kind !== 'unreact', true)
       } else {
         // a message from another agent waiting to go in says who sent it here too, exactly as it will in the log
-        const from = fromAgent(stripHidden(o.text))
-        if (from) {
-          msgs.push({ id: o.id, who: 'peer', at: o.at, text: from.text, peer: this.whoOf(from), waiting: true, waitsFor })
+        const froms = fromAgents(stripHidden(o.text))
+        if (froms.length) {
+          this.peerRows(msgs, o.id, o.at, froms, undefined, { waiting: true, waitsFor })
           continue
         }
         const files: { name: string; path: string }[] = []

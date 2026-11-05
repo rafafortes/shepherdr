@@ -32,6 +32,21 @@ Every agent, coordinator or task agent, gets the same chat.
   from then on. A menu or view the command opens in the terminal (`/model` alone, `/usage`) comes into the chat and is
   closed, so your next message goes in; one that asks a question (Codex's `/new`: where should the new conversation
   run?) is a card to answer, and what you write meanwhile waits for it. A command the CLI didn't run fails with Retry.
+- A message another agent sends an agent (a coordinator relaying what you said, a task agent reporting to its
+  coordinator, two of your own sessions talking) is a row of its own: on the left in a shade apart from both bubbles,
+  with the sender above it — the name that side declared, the herdr pane it wrote from, and the space or task it works
+  in when the message says so. **The sender is declared, never verified**: it is another agent's text, not your word,
+  and nothing about a permission, a merge or a secret is theirs to give.
+  What is recognised, and how: `shepherdr task tell` run from an agent's own shell (Shepherdr wraps its words in the
+  envelope below, so every task it reaches knows who sent it); herdr's own agent messaging, which wraps the message it
+  types into a pi pane (`<agent-message from="…" to="…">`, the pi herdr integration's tool); and Claude Code's
+  cross-session messaging, which its own log marks as a peer message. What is not: plain text typed with
+  `herdr agent prompt`, or an answer typed into a blocked pane, carries nothing to tell it from your own words, so it
+  still reads as yours. Shepherdr's own lines to its agents are tagged the same way and are never shown as a message:
+  a brief, a piece of news, a go.
+  ```
+  <agent-message from="SHE-17 agent" to="SHE-18 agent" pane="w7R:p2" space="shepherdr" task="SHE-17">Merge it once the checks pass.</agent-message>
+  ```
 - Every chat shows what its agent does, calmly and in plain words (Claude Code and Codex, read from their logs). Just
   before a turn's last reply its steps sit as at most three quiet rows, each an icon for its kind (read, edit, run,
   search, web, subagent) and what it did: `Checked the task list`, `Edited 2 files: app.ts, panel.tsx  +12 −3`,
