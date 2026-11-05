@@ -74,6 +74,17 @@ describe('which card an alert is about', () => {
     expect(a).toMatchObject({ title: 'X · Allow: rm -rf x?', go: { focus: 'menu:X/Agent' } })
     expect(a.card).toBeUndefined()
   })
+  test("another agent's message after a card ends the walk: known, not decided (SHE-19)", () => {
+    // A row from another agent carries no card, and openCards stops at the first row that is not a question, so a card
+    // followed by such a row stops counting: a real task whose coordinator writes to it while a plan waits loses that
+    // plan from its alert, from the app icon's count and from answers taken from the alert. Deciding what such a row
+    // means for the card is the human's call, not a test's, so this pins today's behaviour: flip it, with openCards, when
+    // that decision is made.
+    const plan = { id: 'm1', who: 'agent' as const, text: 'Here is my plan.', question: q({ id: 'plan:X:1', kind: 'Plan' as const, title: 'Plan for X' }) }
+    const peer = { id: 'p1', who: 'peer' as const, peer: { name: 'p coordinator', space: 'p' }, text: 'Keep the plan as it is.' }
+    expect(about(chat([plan]))).toMatchObject({ title: 'X · Plan to approve', go: { focus: 'plan:X:1' } })
+    expect(about(chat([plan, peer]))).toMatchObject({ title: 'X · Waits for your reply', go: { focus: 'm1' } })
+  })
   test('a long question keeps its choices in the body', () => {
     const a = askText('SHE-63', q({ title: 'Why '.repeat(80) + '?' }))
     expect(a.body.length).toBeLessThanOrEqual(BODY_MAX)
