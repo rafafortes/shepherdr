@@ -57,9 +57,9 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   `bun run check` or any browser test here.
 - Check what you changed on the screen by hand in your shared browser, for the proof, against a proof server of your
   own, never the one the human runs: the demo source (`SHEPHERDR_SOURCE=demo`) or a fake herdr (`HERDR_SOCKET_PATH`
-  pointing at it) first, a `SHEPHERDR_HOME` under `/tmp`, a loopback port that isn't 7787, no task that can come due,
-  and stopped by its own pid. Never `pkill -f server/main.ts`: that also matches the live server, which runs from
-  `.releases/`.
+  pointing at it) first, a `SHEPHERDR_HOME` under `/tmp`, `SHEPHERDR_PORT` other than 7787, no task that can come due,
+  and stopped by its own pid (keep `$!`, or the pid `server.json` names). Never `pkill -f server/main.ts`: that also
+  matches the live server, which runs from `.releases/`.
 - A server with a home of its own starts no agent in herdr unless `SHEPHERDR_LAUNCH_AGENTS=1` says it may, and logs
   each one it skips (agents are real CLIs in the herdr it inherits). `test/preload.ts` sets that yes for the tests.
 - GitHub runs the whole check (types, every test with the browser tests, the build) on every pull request into

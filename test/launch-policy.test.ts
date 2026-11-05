@@ -16,7 +16,6 @@ const { HOME, home } = await import('../server/store.ts')
 const { Agents } = await import('../server/live/agents.ts')
 const { herdr } = await import('../server/live/herdr.ts')
 const { ROOT } = await import('../server/root.ts')
-const { resolve } = await import('node:path')
 
 const withEnv = <T>(vars: Record<string, string | undefined>, f: () => T): T => {
   const kept = Object.entries(vars).map(([k]) => [k, process.env[k]] as const)
@@ -35,11 +34,14 @@ describe('a server with a home of its own', () => {
     expect(withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(false)
     expect(withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: '1', SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(true)
     expect(withEnv({ SHEPHERDR_HOME: REAL_HOME, SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(true)
-    // a worker drives its own machine's herdr, from a home of its own under the main one (machines.ts)
-    expect(withEnv({ SHEPHERDR_HOME: join(HOME, 'machines', 'laptop'), SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: '{}' }, launchesAgents)).toBe(true)
-    expect(withEnv({ SHEPHERDR_HOME: join(HOME, 'machines', 'laptop'), SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(false)
-    // with no SHEPHERDR_HOME the store's own home is what counts (a temp folder under bun test, so: not the real one)
-    expect(withEnv({ SHEPHERDR_HOME: undefined, SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(resolve(HOME) === resolve(REAL_HOME))
+    // a worker for another machine starts agents there: its own home is under its main server's, not the real one
+    const worker = { SHEPHERDR_HOME: join(HOME, 'machines', 'laptop'), SHEPHERDR_LAUNCH_AGENTS: undefined }
+    expect(withEnv({ ...worker, SHEPHERDR_BOX: '{}', SHEPHERDR_MAIN_HOME: REAL_HOME }, launchesAgents)).toBe(true)
+    // a proof server's own worker is no way around the rule
+    expect(withEnv({ ...worker, SHEPHERDR_BOX: '{}', SHEPHERDR_MAIN_HOME: proof }, launchesAgents)).toBe(false)
+    // nor is a home moved elsewhere, whose server says the yes itself (its workers inherit it)
+    expect(withEnv({ ...worker, SHEPHERDR_BOX: undefined, SHEPHERDR_MAIN_HOME: undefined }, launchesAgents)).toBe(false)
+    expect(withEnv({ SHEPHERDR_HOME: join(HOME, 'machines', 'laptop'), SHEPHERDR_LAUNCH_AGENTS: '1', SHEPHERDR_BOX: '{}', SHEPHERDR_MAIN_HOME: '/srv/shepherdr' }, launchesAgents)).toBe(true)
   })
 
   test('refuses a launch, says why in its log, and starts nothing', async () => {
@@ -55,6 +57,23 @@ describe('a server with a home of its own', () => {
         const said = logged.mock.calls.map((c) => (c as string[]).join(' ')).join('\n')
         expect(said).toContain(skippedLaunch('LP-1/Agent'))
         expect(said).toContain('SHEPHERDR_LAUNCH_AGENTS=1')
+      })
+      await withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, async () => {
+        // a restart and a relaunch refuse too, before a turn is stopped or a pane closed, and they say why
+        const close = spyOn(herdr, 'closePane').mockResolvedValue(undefined as never)
+        const seen = spyOn(herdr, 'processInfo').mockRejectedValue(new Error('no herdr here') as never)
+        try {
+          await expect(a.restart(spec('LP-4/Agent'))).rejects.toThrow(/not started/)
+          await expect(a.relaunch('LP-4/Agent', true, async () => 'started')).rejects.toThrow(/not started/)
+          expect(close).not.toHaveBeenCalled()
+          // and no route is bound for one either: nothing written, nothing read back from herdr
+          const bind = (r: ReturnType<typeof spec>) => (a as unknown as { bindRoute(r: unknown, pane: string): Promise<void> }).bindRoute(r, 'fake-pane')
+          await bind(spec('LP-4/Agent'))
+          expect(seen).not.toHaveBeenCalled()
+        } finally {
+          close.mockRestore()
+          seen.mockRestore()
+        }
       })
       await withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: '1', SHEPHERDR_BOX: undefined }, async () => {
         // asked to: it goes on to herdr (a socket that isn't there), so the rule is what stood in the way before
@@ -78,10 +97,10 @@ describe('a server with a home of its own', () => {
     expect(credentialFile.split('/').pop()).toMatch(/^[a-f0-9-]{36}$/)
     expect(credentialFile).not.toStartWith(join(REAL_HOME, 'helper'))
 
-    const bind = (file: string) =>
+    const bind = (file: string, shepherdrHome = proof) =>
       Bun.spawnSync(['perl', join(ROOT, 'helper', 'route.pl'), '--bind', String(process.pid)], {
         // the helper is a machine's own: its HOME there, and the Shepherdr home SHEPHERDR_HOME moves
-        env: { ...process.env, HOME: proof, SHEPHERDR_HOME: proof },
+        env: { ...process.env, HOME: proof, SHEPHERDR_HOME: shepherdrHome },
         stdin: Buffer.from(JSON.stringify({ chat: 'LP-3/Agent', cwd: proof, url: 'http://127.0.0.1:1', capability: undefined, credentialFile: file })),
       })
     const written = bind(credentialFile)
@@ -89,7 +108,10 @@ describe('a server with a home of its own', () => {
     expect(written.exitCode).toBe(0)
     expect(existsSync(credentialFile)).toBe(true)
     expect(statSync(credentialFile).mode & 0o777).toBe(0o600)
-    // never the real home of a server it is not
+    // the same home written another way (node's join normalizes it, so the helper must agree), and never the real one
+    for (const written of [`${proof}/`, `${proof}//`, `${proof}/./`]) expect(bind(credentialFile, written).exitCode).toBe(0)
+    const outside = join(proof, 'elsewhere', credentialFile.split('/').pop()!)
+    expect(bind(outside).exitCode).not.toBe(0)
     expect(bind(join(REAL_HOME, 'helper', 'credentials', credentialFile.split('/').pop()!)).exitCode).not.toBe(0)
   })
 })

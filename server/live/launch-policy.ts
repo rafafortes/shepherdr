@@ -3,9 +3,10 @@
 // inherits, so the moment a task came due there (queued, scheduled, relaunched) it would open a real CLI in the
 // operator's own herdr, on the default agent of that home, and use up the operator's worktree and clock. So such a
 // server starts no agent unless it is asked to: SHEPHERDR_LAUNCH_AGENTS=1 says it was. What may start agents anyway:
-// the real home (~/.shepherdr, whose server is the human's), and a worker running another machine (SHEPHERDR_BOX),
-// whose launches go to that machine's herdr, not to the one here. The demo world has no agents at all. bun test sets the
-// yes for itself (test/preload.ts); docs/develop.md says how a proof server is run.
+// the real home (~/.shepherdr, whose server is the human's), and a worker running another machine (SHEPHERDR_BOX) for
+// such a server, whose launches go to that machine's herdr, not to the one here. A home moved elsewhere is not the real
+// one: its server says the yes too. The demo world has no agents at all. bun test sets the yes for itself
+// (test/preload.ts); docs/develop.md says how a proof server is run.
 import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
@@ -23,9 +24,16 @@ const real = (p: string) => {
   }
 }
 
-/** whether this Shepherdr may start agents in herdr: at the real home, as a worker for another machine, or when told to */
-export const launchesAgents = () =>
-  process.env.SHEPHERDR_LAUNCH_AGENTS === '1' || !!process.env.SHEPHERDR_BOX || real(home()) === real(REAL_HOME)
+const atRealHome = (p: string | undefined) => !!p && real(p) === real(REAL_HOME)
+
+/** whether this Shepherdr may start agents in herdr: at the real home, as a worker for another machine of a server that
+ *  may start them itself, or when told to (a home moved elsewhere, a moved one included, says so too) */
+export const launchesAgents = () => {
+  if (process.env.SHEPHERDR_LAUNCH_AGENTS === '1') return true
+  // a worker starts them on its machine, never here: only for a main server that is the human's own
+  if (process.env.SHEPHERDR_BOX) return atRealHome(process.env.SHEPHERDR_MAIN_HOME)
+  return atRealHome(home())
+}
 
 /** why one was not started, for the log and for the chat or task that asked for it */
 export const skippedLaunch = (key: string) =>
