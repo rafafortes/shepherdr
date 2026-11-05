@@ -107,6 +107,12 @@ describe('a recording becomes words', () => {
     await expect(p).rejects.toThrow(/dropped before it was written down/)
     // nothing holds the machine now
     await expect(transcribe(recording(), { binary: said, model, lang: 'auto', ffmpeg })).resolves.toBe('hello from a test a second line')
+    // gone before it started: not even ffmpeg is run for it
+    rmSync(join(dir, 'ffmpeg.args'), { force: true })
+    const early = new AbortController()
+    early.abort()
+    await expect(transcribe(recording(), { binary: said, model, lang: 'auto', ffmpeg }, early.signal)).rejects.toThrow(/dropped before it was written down/)
+    expect(existsSync(join(dir, 'ffmpeg.args'))).toBe(false)
   }, 20_000)
 
   test('a machine without whisper.cpp, or without the model, says what to do about it', async () => {

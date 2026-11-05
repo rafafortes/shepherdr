@@ -69,6 +69,8 @@ export function clean(text: string): string {
 /** a command, killed when it takes longer than it should or when the screen that asked for it goes away: a hung
  *  whisper or ffmpeg must not hold the machine */
 const run = async (cmd: string[], ms: number, signal?: AbortSignal) => {
+  // gone before it started: not even spawned
+  if (signal?.aborted) throw new Error(DROPPED)
   const p = Bun.spawn(cmd, { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' })
   let late = false
   const kill = () => p.kill()
@@ -112,6 +114,7 @@ const why = (err: string) => {
 
 /** what a recording says, written down here; throws with words for the screen when it can't be */
 export async function transcribe(audio: Blob, ways: DictateWays, signal?: AbortSignal): Promise<string> {
+  if (signal?.aborted) throw new Error(DROPPED)
   if (audio.size > DICTATE_CAP) throw new Error(DICTATE_TOO_LONG)
   const ffmpeg = ways.ffmpeg ?? Bun.which('ffmpeg')
   if (!ffmpeg) throw new Error('Talk to type needs ffmpeg on this machine: sudo apt install ffmpeg.')
