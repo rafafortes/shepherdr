@@ -286,13 +286,14 @@ function overwriteRefusal(base: string, said: string, then: string) {
   return `${base} here holds work of its own that would be overwritten: ${files.slice(0, 5).join(', ')}${more}. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes ${files.length === 1 ? 'it' : 'them'} first, ${then}.`
 }
 
-/** git's own words on why it refused: its error line, else its first (a git that speaks another language says "erro:") */
+/** git's own words on why it refused: its error line, else its first (a git that speaks another language says "erro:"),
+ *  with its full stop dropped, since a sentence of ours follows it */
 function gitReason(said: string) {
   const lines = said
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean)
-  return (lines.find((l) => /^(?:error|fatal):/i.test(l)) ?? lines[0] ?? 'git gave no reason').replace(/^(?:error|fatal):\s*/i, '')
+  return (lines.find((l) => /^(?:error|fatal):/i.test(l)) ?? lines[0] ?? 'git gave no reason').replace(/^(?:error|fatal):\s*/i, '').replace(/\.$/, '')
 }
 
 /**
@@ -323,7 +324,7 @@ export async function mergeHere(repo: string, branch: string, base: string, mess
   // it is: git moves it, and writes only the files the merge changed
   const ff = await git(repo, 'merge', '--ff-only', '--no-autostash', '--no-overwrite-ignore', '--quiet', head)
   const said = `${ff.out}\n${ff.err}`
-  return ff.ok ? ff : { ...ff, err: overwriteRefusal(base, said, 'then merge again') ?? `${base} here could not be brought up to the merge: ${gitReason(said)}. Nothing was changed in that checkout: settle that, then merge again.` }
+  return ff.ok ? ff : { ...ff, err: overwriteRefusal(base, said, 'then merge again') ?? `${base} here could not be brought up to the merge (${gitReason(said)}). Nothing was changed in that checkout: run the merge again.` }
 }
 
 /* ---------- GitHub, through gh ---------- */
