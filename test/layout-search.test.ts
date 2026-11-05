@@ -85,6 +85,10 @@ describe.skipIf(!browser)('unified search', () => {
       await page.keyboard.press('Control+k')
       await search.fill('Upload page draft')
       const artifacts = page.getByRole('group', { name: 'Artifacts', exact: true })
+      // the results fill in as each chat is read, and the first artifact only holds once they all are: clicked as soon as
+      // one was there, it could be another place's artifact, and the screen opened that one instead
+      const busy = () => page.getByRole('listbox', { name: 'Search results' }).getAttribute('aria-busy')
+      await until(busy, (v) => v === 'false', 45_000)
       await artifacts.getByRole('option').first().waitFor()
       await artifacts.getByRole('option').first().click()
       expect(page.url()).toContain('artifact=')
