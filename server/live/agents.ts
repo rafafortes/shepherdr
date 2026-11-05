@@ -809,11 +809,9 @@ export class Agents extends Emitter<Events> {
     if (!r) return undefined
     const a = this.info(key)
     if (!a) return 'gone'
-    // a launch herdr has not finished yet is neither gone nor exited, and starting it again would launch it twice
+    // a launch herdr has not finished yet is neither gone nor exited (agentWrong): starting it again would launch it twice
     if (a.launch_pending) return undefined
     const p = await herdr.processInfo(a.pane_id).catch(() => null)
-    // herdr didn't say: neither well nor wrong
-    if (!p) return null
     return agentWrong(a, p, r.kind, this.filesOf(r))
   }
 

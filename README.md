@@ -4,9 +4,9 @@
 
 <p align="center">Shepherdr is mission control for <a href="https://herdr.dev">herdr</a>: one private app on your tailnet with your spaces in a sidebar, each with its own coordinator. You tell a space's coordinator what needs doing and it turns it into tasks. Every task runs as an ordinary herdr agent in its own git worktree, gets reviewed by fresh eyes before it merges, and asks you on a card when it needs a decision. The tasks list shows which need you, which are ready and which are still working.</p>
 
-<p align="center"><a href="https://github.com/eliasstravik/shepherdr/blob/main/assets/shepherdr-launch.mp4"><img src="assets/shepherdr-launch.webp" width="88%" alt="Animation: Shepherdr on a desktop and a phone; you ask the gtm space's coordinator, it adds two tasks that run in parallel, each in its own worktree, reviewed and merged; then a voice call with the home space asks what needs you today" /></a></p>
+<p align="center"><a href="https://github.com/rafafortes/shepherdr/blob/herdr-tui/assets/shepherdr-launch.mp4"><img src="assets/shepherdr-launch.webp" width="88%" alt="Animation: Shepherdr on a desktop and a phone; you ask the gtm space's coordinator, it adds two tasks that run in parallel, each in its own worktree, reviewed and merged; then a voice call with the home space asks what needs you today" /></a></p>
 
-<p align="center"><a href="https://github.com/eliasstravik/shepherdr/blob/main/docs/get-started.md"><img src="assets/buttons/install-shepherdr.svg" alt="Install Shepherdr" /></a></p>
+<p align="center"><a href="https://github.com/rafafortes/shepherdr/blob/herdr-tui/docs/get-started.md"><img src="assets/buttons/install-shepherdr.svg" alt="Install Shepherdr" /></a></p>
 
 <p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;private&nbsp;on&nbsp;your&nbsp;tailnet &nbsp; ✓&nbsp;macOS&nbsp;and&nbsp;Linux,&nbsp;herdr&nbsp;0.9+</sub></p>
 
@@ -54,7 +54,7 @@ An agent that asks you something, wants a permission or a plan approved shows un
 
 <table>
 <tr>
-<td align="center" valign="top" width="33%"><h3>1️⃣</h3><b>Install the plugin</b><br /><sub>Run <code>herdr plugin install eliasstravik/shepherdr</code>. herdr builds it and starts it at every herdr start; it gets its own Bun if you have none.</sub></td>
+<td align="center" valign="top" width="33%"><h3>1️⃣</h3><b>Install the plugin</b><br /><sub>Run <code>herdr plugin install rafafortes/shepherdr</code>. herdr builds it and starts it at every herdr start; it gets its own Bun if you have none.</sub></td>
 <td align="center" valign="top" width="33%"><h3>2️⃣</h3><b>Share it on your tailnet</b><br /><sub>Run the plugin action "Share Shepherdr on my tailnet". It serves the app privately with <code>tailscale serve</code>, never public, and prints its link.</sub></td>
 <td align="center" valign="top" width="33%"><h3>3️⃣</h3><b>Write to a coordinator</b><br /><sub>Open the link on your phone and add it to the home screen, then turn alerts on in Settings. Pick a space and say what needs doing. <code>?</code> on a keyboard shows everything else.</sub></td>
 </tr>
@@ -67,7 +67,7 @@ An agent that asks you something, wants a permission or a plan approved shows un
 <td align="center" valign="top"><sub>For developers who run coding agents in herdr on macOS or Linux</sub><br /><h2>Free</h2><div align="left">&nbsp;&nbsp;&nbsp;✓&nbsp; A coordinator for every space that turns what you write into tasks<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Every task on its own worktree and branch, with its own agent<br />&nbsp;&nbsp;&nbsp;✓&nbsp; A review by fresh eyes before it merges, through a pull request on GitHub<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Cards, alerts and voice calls on your phone, tablet or desktop<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Every machine you saved in herdr, from one app<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Your own plugins and themes, kept through every update<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Autopilot, automations, artifacts, a shared browser and split view</div></td>
 </tr>
 <tr>
-<td align="center"><a href="https://github.com/eliasstravik/shepherdr/blob/main/docs/get-started.md"><img src="assets/buttons/install-shepherdr.svg" alt="Install Shepherdr" /></a></td>
+<td align="center"><a href="https://github.com/rafafortes/shepherdr/blob/herdr-tui/docs/get-started.md"><img src="assets/buttons/install-shepherdr.svg" alt="Install Shepherdr" /></a></td>
 </tr>
 </table>
 
@@ -131,6 +131,6 @@ Shepherdr is free and [MIT licensed](LICENSE). Your agent CLI's usual usage char
 
 <p align="center">Shepherdr starts with an install, one link, and one sentence to a coordinator about what needs doing. It starts the agents, follows their work and brings what needs you to your phone. You choose what to answer and what to merge.</p>
 
-<p align="center"><a href="https://github.com/eliasstravik/shepherdr/blob/main/docs/get-started.md"><img src="assets/buttons/install-shepherdr.svg" alt="Install Shepherdr" /></a></p>
+<p align="center"><a href="https://github.com/rafafortes/shepherdr/blob/herdr-tui/docs/get-started.md"><img src="assets/buttons/install-shepherdr.svg" alt="Install Shepherdr" /></a></p>
 
 <p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;private&nbsp;on&nbsp;your&nbsp;tailnet &nbsp; ✓&nbsp;macOS&nbsp;and&nbsp;Linux,&nbsp;herdr&nbsp;0.9+</sub></p>

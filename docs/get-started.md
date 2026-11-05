@@ -13,7 +13,7 @@ once on the main machine: `bin/agent-browser install` (on Linux, `install --with
 machines need nothing installed by hand ([Other machines](machines.md)).
 
 ```sh
-herdr plugin install eliasstravik/shepherdr     # or link a checkout: herdr plugin link /path/to/shepherdr
+herdr plugin install rafafortes/shepherdr     # or link a checkout: herdr plugin link /path/to/shepherdr
 ```
 
 Its plugin id is `herdr-projects`, the plugin it replaced ([Upgrading](upgrading.md)), so herdr lists it as `herdr-projects (Shepherdr)`

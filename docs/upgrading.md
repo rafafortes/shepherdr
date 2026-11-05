@@ -25,7 +25,7 @@ with your old tasks and settings as they were:
 
 ```sh
 herdr plugin action invoke herdr-projects.stop                     # stop Shepherdr
-herdr plugin install eliasstravik/shepherdr --ref v1.2.27 --yes    # herdr-projects 1.2.27 in its place
+herdr plugin install rafafortes/shepherdr --ref v1.2.27 --yes    # herdr-projects 1.2.27 in its place
 cp ~/.herdr-projects-backup-<date>/config.toml ~/.config/herdr/config.toml   # its sidebar rows back
 herdr server reload-config
 rm ~/.shepherdr/took-over-herdr-projects.json                      # a later upgrade tidies up again
@@ -34,7 +34,7 @@ rm ~/.shepherdr/took-over-herdr-projects.json                      # a later upg
 If you changed herdr's config since the upgrade, paste the `# >>> herdr-projects sidebar` block from the backup's
 `config.toml` back in instead of copying the whole file. Then press the herdr-projects key: the board opens, and its
 keeper and agent skill come back by themselves. Shepherdr's own data stays in `~/.shepherdr` for a later try; to
-return to Shepherdr, `herdr plugin install eliasstravik/shepherdr --yes`.
+return to Shepherdr, `herdr plugin install rafafortes/shepherdr --yes`.
 
 ## Updates
 
