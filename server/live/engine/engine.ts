@@ -87,6 +87,9 @@ export interface TaskRec {
   held?: { why: 'slots' | 'machine'; since: number; go?: string; goWhy?: string; plain?: boolean }
   /** shepherdr task stop closed its agent and space; writing to it again clears it */
   stopped?: boolean
+  /** the trouble it shows is a start that never became a turn (start.ts): a turn, or a word, clears it, and it survives a
+   *  restart with the error it explains */
+  startTrouble?: boolean
   /** the status coordinators were last told, so each change is told once */
   told?: TaskStatus
   /** the state last posted as a card (waiting on you, or done), so each is posted once */
@@ -366,8 +369,9 @@ export class Engine extends Emitter<Events> {
   retry?: (key: string) => Retry | undefined
   /** its backup agent is taking over */
   private handing = new Set<string>()
-  /** chats whose last start never became a turn (start.ts): the error it shows, and no relaunch until someone writes */
-  private failedStarts = new Map<string, number>()
+  /** chats whose last start never became a turn (start.ts): when it failed and the words it shows, so a relaunch loop
+   *  leaves it to the human until someone writes */
+  private failedStarts = new Map<string, { at: number; why: string }>()
   /** a CLI is installed here (a test says) */
   installed = (kind: string) => !!Bun.which(kind)
   /** how loaded this machine is now: over a start limit (health.ts busy), and whether herdr answers; none until first
@@ -1164,7 +1168,6 @@ export class Engine extends Emitter<Events> {
     return restart ? this.agents.restart(spec, restart) : this.agents.ensure(spec)
   }
 
-  /** writing to a task whose agent stopped starts it again, with its memory */
   /**
    * Writing to a task whose agent stopped starts it again, with its memory. `fresh`: its session is gone (start.ts), so
    * it starts on a new one and is told its brief again: all it remembers of the work is the branch and the chat.
@@ -1187,27 +1190,33 @@ export class Engine extends Emitter<Events> {
   startFailed(key: string, why: string, at = Date.now()) {
     const before = this.failedStarts.get(key)
     // one launch, one error: a look that comes again, or the relaunch loop, says nothing new
-    if (before !== undefined && at <= before) return
-    this.failedStarts.set(key, at)
+    if (before !== undefined && at <= before.at) return
+    this.failedStarts.set(key, { at, why })
     const card = `start-failed:${key}:${at}`
     this.chats.post(key, { id: card, card: { id: card, text: why } })
     const t = this.task(key.split('/')[0])
     if (!t || key !== this.key(t) || ended(t) || t.archived) return
-    if (!t.trouble) t.trouble = why
+    t.trouble = why
+    t.startTrouble = true
     this.settle(t)
   }
 
-  /** whether this chat's last start failed: the relaunch loop leaves a failed start to the human */
+  /** when this chat's last start failed, if it did: the relaunch loop leaves a failed start to the human */
   startFailedAt(key: string) {
     return this.failedStarts.get(key)
   }
 
-  /** it began its turn, or something was handed to it: its start is no longer a failed one, and its error goes */
+  /** it began its turn, or something was handed to it: its start is no longer a failed one, and the error it shows for
+   *  it goes (one that was another trouble, or that a restart kept, stays) */
   private started(key: string) {
-    if (!this.failedStarts.delete(key)) return
+    const failed = this.failedStarts.get(key)
+    if (failed) this.failedStarts.delete(key)
     const t = this.task(key.split('/')[0])
-    if (t && key === this.key(t)) t.trouble = undefined
-    if (t) this.settle(t)
+    if (!t || key !== this.key(t) || !t.startTrouble) return
+    t.startTrouble = undefined
+    // a trouble of its own that the start's error covered stays as it was
+    if (!failed || t.trouble === failed.why) t.trouble = undefined
+    this.settle(t)
   }
 
   /**

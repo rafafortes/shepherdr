@@ -3,20 +3,24 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { FIRST_LOOK, LOST_SESSION, Starts, type StartLook } from '../server/live/start.ts'
-import { lastWords, parseMenu, restingScreen, sameScreen } from '../server/live/screen.ts'
+import { FIRST_LOOK, LOST_SESSION, RESUME_SETTLE, Starts, type StartLook } from '../server/live/start.ts'
+import { lastWords, menuFooter, parseMenu, restingScreen, sameScreen } from '../server/live/screen.ts'
 
 const fixture = (name: string) => readFileSync(join(import.meta.dir, 'fixtures/startup', name + '.txt'), 'utf8')
 const TRUST = fixture('claude-trust')
 const THEME = 'Choose a style\n\n ❯ Dark mode\n   Light mode\n\n Enter to confirm\n'
+// a working agent's own screen: no footer a menu would have
 const WORKING = '⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt · ← 4 agents\n'
+// its transcript's end, which reads like a numbered menu with a question above it
+const TRANSCRIPT = 'Should I take the second approach?\n\n1. Yes, do that\n2. No, keep this one\n'
 const PI = " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash ·\n Press ctrl+o to show full startup help and loaded resources.\n /tmp/pitest\n 0.0%/1.0M (auto)  deepseek/deepseek-v4.1-flash • high\n"
 const CLAUDE_LOST = 'No conversation found with session ID: 11111111-2222-4333-8444-555555555555\n'
 const STARTED = 1_000_000
+const SETTLED = STARTED + FIRST_LOOK + 2000
 /** a look at a start that began at STARTED, changing only what the test is about */
-const look = (o: Partial<StartLook> = {}): StartLook => ({ started: STARTED, wrong: undefined, pending: false, begun: false, screen: '', resumed: false, waits: false, ...o })
+const look = (o: Partial<StartLook> = {}): StartLook => ({ started: STARTED, wrong: undefined, pending: false, begun: false, prior: false, screen: '', resumed: false, waits: false, card: false, ...o })
 /** two looks at the same start, a poll apart, past the first look: what a card takes */
-function settle(l: StartLook = look(), at = STARTED + FIRST_LOOK + 2000) {
+function settle(l: StartLook = look(), at = SETTLED) {
   const s = new Starts()
   const first = s.look('EX-1/Agent', l, at)
   const second = s.look('EX-1/Agent', l, at + 2000)
@@ -27,10 +31,18 @@ describe('reading what a screen says', () => {
   test('a spinner, a timer and an activity bar move; the words do not', () => {
     expect(sameScreen('Thinking… (3s)', 'Thinking… (7s)')).toBe(true)
     expect(sameScreen('⠋ Loading', '⠙ Loading')).toBe(true)
-    expect(sameScreen('▁▂▃▄ 40%', '▄▅▆▇ 70%')).toBe(true)
+    expect(sameScreen('⣾ 40%', '⣽ 70%')).toBe(false)
+    expect(sameScreen('▁▂▃▄ Loading', '▄▅▆▇ Loading')).toBe(true)
     expect(sameScreen('Step 1 of 3', 'Step 2 of 3')).toBe(false)
     expect(sameScreen(TRUST, THEME)).toBe(false)
     expect(restingScreen('\n   \n')).toBe('')
+  })
+
+  test('only a screen with the CLI’s own menu footer under it is a prompt to press keys in', () => {
+    expect(menuFooter(TRUST)).toBe(true)
+    expect(menuFooter(THEME)).toBe(true)
+    expect(menuFooter('Which do you want?\n1. This\n2. That\n')).toBe(false)
+    expect(menuFooter(WORKING)).toBe(false)
   })
 
   test('the words it stopped on are its last lines, never the shell prompt that started it', () => {
@@ -75,65 +87,78 @@ describe('a start that never becomes a turn', () => {
   test('a slow start is no card and no error, however long it takes', () => {
     // a screen that keeps saying something new: steps, percentages, an agent's own words
     const s = new Starts()
-    const at = STARTED + FIRST_LOOK
-    expect(s.look('EX-1/Agent', look({ screen: 'Loading model 1 of 4' }), at)).toEqual({ do: 'wait' })
-    expect(s.look('EX-1/Agent', look({ screen: 'Loading model 2 of 4' }), at + 2000)).toEqual({ do: 'wait' })
-    expect(s.look('EX-1/Agent', look({ screen: 'Loading model 3 of 4' }), at + 4000)).toEqual({ do: 'wait' })
-    // and one that only counts seconds moves too
-    expect(s.look('EX-1/Agent', look({ screen: 'Starting 13s' }), at + 6000)).toEqual({ do: 'wait' })
-    expect(s.look('EX-1/Agent', look({ screen: 'Starting 21s' }), at + 8000)).toEqual({ do: 'wait' })
+    expect(s.look('EX-1/Agent', look({ screen: 'Loading model 1 of 4' }), SETTLED)).toEqual({ do: 'wait' })
+    expect(s.look('EX-1/Agent', look({ screen: 'Loading model 2 of 4' }), SETTLED + 2000)).toEqual({ do: 'wait' })
+    expect(s.look('EX-1/Agent', look({ screen: 'Loading model 3 of 4' }), SETTLED + 4000)).toEqual({ do: 'wait' })
     // a screen that rests but says nothing wrong, its brief already in: the model is loading, and it may take a while
     expect(settle(look({ screen: PI })).second).toEqual({ do: 'wait' })
     expect(settle(look({ screen: WORKING })).second).toEqual({ do: 'wait' })
   })
 
   test('a screen with nothing to choose is still a card when it says something is wrong, or its brief is still waiting', () => {
-    const { second, first } = settle(look({ screen: 'Error: model nope/nope not found' }))
+    const { first, second } = settle(look({ screen: 'Error: model nope/nope not found' }))
     expect(first).toEqual({ do: 'wait' })
     expect(second).toMatchObject({ do: 'card', menu: { choices: [] } })
     expect(second.do === 'card' && second.menu.screen).toContain('nope/nope')
     // pi's start screen, its brief still waiting to go in: it is not a slow start, it never took it
-    const stuck = settle(look({ screen: PI, waits: true }))
-    expect(stuck.second).toMatchObject({ do: 'card', menu: { choices: [] } })
+    expect(settle(look({ screen: PI, waits: true })).second).toMatchObject({ do: 'card', menu: { choices: [] } })
+  })
+
+  test('a card of a screen whose brief went in after all has nothing left to say', () => {
+    expect(settle(look({ screen: PI, card: true })).second).toEqual({ do: 'clear' })
+    // a prompt it still waits at stays a card
+    expect(settle(look({ screen: TRUST, card: true })).second).toMatchObject({ do: 'card' })
   })
 
   test('a CLI gone from its pane failed, with its own words in the chat', () => {
     const { first, second } = settle(look({ screen: 'Error: Invalid API key\nPlease run /login\n', wrong: 'exited' }))
-    // a failure is settled on the first look, not after two
     expect(first).toEqual({ do: 'failed', why: 'Error: Invalid API key Please run /login', fresh: false })
+    // one launch, one error: the next look says nothing more
     expect(second).toEqual({ do: 'wait' })
   })
 
-  test('one launch, one error: the next look and the relaunch loop say nothing more', () => {
+  test('a CLI takes its pane first: a launch is not failed before its moment', () => {
+    const s = new Starts()
+    expect(s.look('EX-1/Agent', look({ screen: 'Error: broken', wrong: 'exited' }), STARTED + 2000)).toEqual({ do: 'wait' })
+    expect(s.look('EX-1/Agent', look({ screen: 'Error: broken', wrong: 'exited' }), SETTLED)).toMatchObject({ do: 'failed' })
+  })
+
+  test('a new launch has its own say, after one that failed', () => {
     const s = new Starts()
     const failed = look({ screen: 'Error: broken', wrong: 'exited' })
-    expect(s.look('EX-1/Agent', failed, STARTED + 5000).do).toBe('failed')
-    for (const t of [6000, 60_000, 600_000]) expect(s.look('EX-1/Agent', failed, STARTED + t)).toEqual({ do: 'wait' })
-    // a new launch has its own say: its own screen, its own error
-    const again = { ...failed, started: STARTED + 700_000 }
-    expect(s.look('EX-1/Agent', again, STARTED + 705_000).do).toBe('failed')
+    expect(s.look('EX-1/Agent', failed, SETTLED).do).toBe('failed')
+    for (const t of [60_000, 600_000]) expect(s.look('EX-1/Agent', failed, STARTED + t)).toEqual({ do: 'wait' })
+    expect(s.look('EX-1/Agent', { ...failed, started: STARTED + 700_000 }, STARTED + 705_000 + FIRST_LOOK).do).toBe('failed')
   })
 
   test('a resume whose session is gone is the one failure a start without it is the way on', () => {
-    const fresh = new Starts().look('EX-1/Agent', look({ screen: CLAUDE_LOST, wrong: 'exited', resumed: true }), STARTED + 5000)
+    const fresh = new Starts().look('EX-1/Agent', look({ screen: CLAUDE_LOST, wrong: 'exited', resumed: true }), SETTLED)
     expect(fresh).toEqual({ do: 'failed', why: CLAUDE_LOST.trim(), fresh: true })
     // the same words on a start that resumed nothing are only a start that failed
-    const one = new Starts().look('EX-1/Agent', look({ screen: CLAUDE_LOST, wrong: 'exited' }), STARTED + 5000)
+    const one = new Starts().look('EX-1/Agent', look({ screen: CLAUDE_LOST, wrong: 'exited' }), SETTLED)
     expect(one).toMatchObject({ do: 'failed', fresh: false })
   })
 
   test('herdr dropped the agent and left no screen to read: the reason is what the launch itself said', () => {
-    const step = new Starts().look('EX-1/Agent', look({ wrong: 'gone', error: 'herdr is not answering' }), STARTED + 5000)
-    expect(step).toEqual({ do: 'failed', why: 'herdr is not answering', fresh: false })
-    const empty = new Starts().look('EX-1/Agent', look({ wrong: 'gone' }), STARTED + 5000)
-    expect(empty).toEqual({ do: 'failed', why: 'It stopped before its first turn', fresh: false })
+    expect(new Starts().look('EX-1/Agent', look({ wrong: 'gone', error: 'herdr is not answering' }), SETTLED)).toEqual({ do: 'failed', why: 'herdr is not answering', fresh: false })
+    expect(new Starts().look('EX-1/Agent', look({ wrong: 'gone' }), SETTLED)).toEqual({ do: 'failed', why: 'It stopped before its first turn', fresh: false })
   })
 
   test('a screen that changed once is read again before it is a card', () => {
     const s = new Starts()
-    const at = STARTED + FIRST_LOOK
-    expect(s.look('EX-1/Agent', look({ screen: TRUST }), at)).toEqual({ do: 'wait' })
-    expect(s.look('EX-1/Agent', look({ screen: THEME }), at + 2000)).toEqual({ do: 'wait' })
-    expect(s.look('EX-1/Agent', look({ screen: THEME }), at + 4000)).toMatchObject({ do: 'card', menu: { choices: ['Dark mode', 'Light mode'] } })
+    expect(s.look('EX-1/Agent', look({ screen: TRUST }), SETTLED)).toEqual({ do: 'wait' })
+    expect(s.look('EX-1/Agent', look({ screen: THEME }), SETTLED + 2000)).toEqual({ do: 'wait' })
+    expect(s.look('EX-1/Agent', look({ screen: THEME }), SETTLED + 4000)).toMatchObject({ do: 'card', menu: { choices: ['Dark mode', 'Light mode'] } })
+  })
+
+  test('an agent back on a session from before is never carded: its transcript reads like anything', () => {
+    const s = new Starts()
+    for (const at of [SETTLED, SETTLED + 2000, SETTLED + 60_000]) expect(s.look('EX-1/Agent', look({ prior: true, screen: TRANSCRIPT, resumed: true }), at)).toEqual({ do: 'wait' })
+    // even a trust screen, which a transcript could show: it has been through a start before
+    expect(settle(look({ prior: true, screen: TRUST, resumed: true })).second).toEqual({ do: 'wait' })
+    // a failure is still worth saying while it settles, and nothing after that
+    const gone = look({ prior: true, resumed: true, wrong: 'gone', screen: CLAUDE_LOST })
+    expect(new Starts().look('EX-1/Agent', gone, STARTED + FIRST_LOOK + 2000)).toMatchObject({ do: 'failed', fresh: true })
+    expect(new Starts().look('EX-1/Agent', gone, STARTED + RESUME_SETTLE + 2000)).toEqual({ do: 'wait' })
   })
 })

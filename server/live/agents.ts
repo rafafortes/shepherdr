@@ -95,6 +95,8 @@ export interface AgentRecord {
   /** this run was told to resume the session it had (start.ts: a session that is gone is the one case a start without
    *  one is the way on) */
   resumed?: boolean
+  /** the next launch starts a new session, whatever it kept: the one it had is gone (start.ts) */
+  fresh?: boolean
   /** the last start that threw, where it did, before a pane could be read: the reason a start failed (start.ts) */
   startError?: string
 }
@@ -801,7 +803,8 @@ export class Agents extends Emitter<Events> {
     this.secretAccess.revoke(spec.key)
     this.routes.delete(spec.key)
     const old = this.records[spec.key]
-    const resume = old && old.kind === spec.kind && (old.sessionId || old.logs.length)
+    // its session is gone (start.ts): this launch starts a new one, whatever log files the chat keeps
+    const resume = old && !old.fresh && old.kind === spec.kind && (old.sessionId || old.logs.length)
     const r: AgentRecord = old ?? { ...spec, logs: [], started: Date.now() }
     const changedPrompt = old?.system !== spec.system
     const from = old?.cwd
@@ -810,6 +813,7 @@ export class Agents extends Emitter<Events> {
     r.started = Date.now()
     r.resumed = !!resume
     r.startError = undefined
+    delete r.fresh
     if (!resume) r.sessionId = r.kind === 'codex' ? undefined : randomUUID()
     // a run of its own: what its hooks record starts over
     if (r.hooks) this.hooks.forget(mirrored(r.hooks))

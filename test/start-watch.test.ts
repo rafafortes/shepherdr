@@ -14,7 +14,6 @@ const { LiveSource } = await import('../server/live/source.ts')
 const { herdr } = await import('../server/live/herdr.ts')
 const { Worktrees } = await import('../server/live/engine/worktrees.ts')
 const { menuId } = await import('../server/live/screen.ts')
-const { placeId } = await import('../server/live/places.ts')
 const { fakeHerdr } = await import('./fake-herdr.ts')
 type AgentInfo = import('../server/live/herdr.ts').AgentInfo
 type TaskRec = import('../server/live/engine/engine.ts').TaskRec
@@ -78,9 +77,9 @@ afterEach(() => {
   src.agents.outbox = []
 })
 
-/** a task whose agent Shepherdr started once, and its own herdr agent standing at `pane` */
+/** a task whose agent Shepherdr started once, and its own herdr agent standing at its pane */
 let repos = 0
-async function task(o: { title: string; kind?: string; screen: string; started?: number; resumed?: boolean; exit?: boolean; gone?: boolean; waits?: boolean }) {
+async function task(o: { title: string; kind?: string; screen: string; resumed?: boolean; exit?: boolean; gone?: boolean; waits?: boolean }) {
   const dir = mkdtempSync(join(tmpdir(), 'shep-starts-repo-'))
   execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', { cwd: dir, shell: '/bin/sh' })
   const place = await src.places.add(dir, `starts${++repos}`)
@@ -101,20 +100,26 @@ async function task(o: { title: string; kind?: string; screen: string; started?:
     cwd: t.worktree,
     workspace: 'w',
     logs: [],
-    started: o.started ?? at - 30_000,
+    started: at - 30_000,
     sessionId: 'session-1',
     lastPane: 'p1',
     resumed: !!o.resumed,
   }
   src.agents.outbox = o.waits === false ? [] : [{ id: `o-${key}`, key, text: 'the brief', at }]
   src.agents.reachable = true
-  src.agents.lastReach = Date.now()
+  src.agents.lastReach = at
   return { t, key, name, at }
 }
 
 /** what a start does over the next few looks: two a poll apart, past its first look */
 async function look(at: number, times = 2) {
-  for (let i = 0; i < times; i++) await src.watchStarts(at + i * 2000)
+  for (let i = 0; i < times; i++) {
+    const now = at + i * 2000
+    // herdr answered at the last look: it is reachable for this one
+    src.agents.reachable = true
+    src.agents.lastReach = now
+    await src.watchStarts(now)
+  }
 }
 
 const cards = (key: string) => src.chats.chat(key).messages.filter((m) => m.card).map((m) => m.card!.text)
@@ -136,6 +141,8 @@ describe('an agent stopped on its startup screen', () => {
     expect(src.engine.subOf(t)).toContain('Quick safety check')
     expect(spaceCards(t)).toEqual(['needs you: Quick safety check: Is this a project'])
     expect(t.trouble).toBeUndefined()
+    // what waits for it holds: typed text would pick an option there
+    expect(src.agents.menuUp!(key)).toBe(true)
     // one screen, one card, however often it is looked at
     await look(Date.now(), 2)
     expect(src.chats.chat(key).messages.filter((m) => m.question).length).toBe(1)
@@ -156,6 +163,15 @@ describe('an agent stopped on its startup screen', () => {
     expect(answer).toMatchObject({ ok: false })
     expect(pressed).toEqual([])
   })
+
+  test('a screen with nothing to read is a card too, and holds nothing: its brief goes in as soon as it can', async () => {
+    const { key } = await task({ title: 'Nothing to read', screen: 'Error: model nope/nope not found' })
+    await look(Date.now(), 2)
+    expect(src.chats.menu(key)?.choices).toEqual([])
+    expect(src.chats.menu(key)?.title).toBe('Claude Code is waiting on its screen')
+    // no options to press, so nothing waits on a card that has none
+    expect(src.agents.menuUp!(key)).toBe(false)
+  })
 })
 
 describe('a start that fails', () => {
@@ -167,7 +183,10 @@ describe('a start that fails', () => {
     expect(src.engine.subOf(t)).toBe("Went wrong: Claude Code couldn't start")
     expect(cards(key)).toEqual(["Claude Code couldn't start: Error: Invalid API key Please run /login"])
     // the relaunch loop leaves a failed start to the human: no second card, no start of its own
+    src.agents.reachable = true
+    src.agents.lastReach = at + 60_000
     await src.revive(at + 60_000)
+    src.agents.lastReach = at + 600_000
     await src.revive(at + 600_000)
     expect(cards(key)).toHaveLength(1)
     expect(started.map((s) => s.key)).not.toContain(key)
@@ -178,12 +197,13 @@ describe('a start that fails', () => {
     expect(src.engine.statusOf(t)).not.toBe('need')
   })
 
-  test('a resume whose session is gone starts a new one with its brief, and the chat says so', async () => {
+  test('a resume whose session is gone starts a new session with its brief, and the chat says so', async () => {
     const { t, key, at } = await task({ title: 'Resumed', screen: LOST, exit: true, gone: true, resumed: true })
     await look(at)
     expect(cards(key)).toEqual(['Its earlier session was gone, so Claude Code started a new one.'])
-    // a new session, and its brief again: it remembers none of the last one
+    // a new session, not another resume of the one that is gone, and its brief again: it remembers none of it
     expect(src.agents.records[key].sessionId).toBeUndefined()
+    expect(src.agents.records[key].fresh).toBe(true)
     const fresh = started.filter((s) => s.key === key)
     expect(fresh).toHaveLength(1)
     expect(fresh[0].first).toContain('Resumed')
@@ -198,7 +218,7 @@ describe('a start that fails', () => {
   test('the same words on a start that had no session to lose are only a failed start', async () => {
     const { t, key, at } = await task({ title: 'No session', screen: LOST, exit: true, gone: true })
     await look(at)
-    expect(t.trouble).toBe('Claude Code couldn\'t start: No conversation found with session ID: 11111111-2222-4333-8444-555555555555')
+    expect(t.trouble).toBe("Claude Code couldn't start: No conversation found with session ID: 11111111-2222-4333-8444-555555555555")
     expect(started.map((s) => s.key)).not.toContain(key)
   })
 })
@@ -234,6 +254,13 @@ describe('no false card', () => {
     expect(src.chats.menu(key)).toBeUndefined()
     expect(src.engine.statusOf(t)).not.toBe('need')
     expect(t.trouble).toBeUndefined()
+  })
+
+  test('an agent back on an older session is not carded, whatever its transcript looks like', async () => {
+    const { key, at } = await task({ title: 'Transcript', screen: 'Should I take the second approach?\n\n1. Yes, do that\n2. No, keep this one\n', resumed: true })
+    await look(at, 3)
+    expect(src.chats.menu(key)).toBeUndefined()
+    expect(src.chats.chat(key).messages.filter((m) => m.question)).toEqual([])
   })
 
   test('a start herdr still finishes (a launch left pending) is neither failed nor carded', async () => {

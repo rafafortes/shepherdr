@@ -417,11 +417,19 @@ export class Chats {
   }
 
   /** a start stopped on a screen of its own: what it shows is a card, from now on read as one whenever it is read
-   *  again (its words alone, with no choices, still a card: Open terminal is the way on) */
-  showStartMenu(key: string, menu: ScreenMenu) {
+   *  again (its words alone, with no choices, still a card: Open terminal is the way on); true when it changed */
+  showStartMenu(key: string, menu: ScreenMenu): boolean {
     this.startScreens.add(key)
-    if (JSON.stringify(this.menus.get(key) ?? null) === JSON.stringify(menu)) return
+    if (JSON.stringify(this.menus.get(key) ?? null) === JSON.stringify(menu)) return false
     this.menus.set(key, menu)
+    return true
+  }
+
+  /** its screen moved on and nothing there is a card any more (its brief went in after all); true when one was up */
+  clearStartMenu(key: string) {
+    const had = this.startScreens.delete(key)
+    if (had) this.menus.delete(key)
+    return had
   }
 
   /** a card of a start stopped on its screen is up: the task waits on you for it */

@@ -147,11 +147,21 @@ export function parseMenu(screen: string): ScreenMenu | null {
   return { title, screen: promptScreen(lines, first), choices: opts.map((o) => o.label), ...(descriptions ? { descriptions } : {}), cursor: Math.max(0, opts.findIndex((o) => o.on)) }
 }
 
-/** what only moves while a CLI sits still: its spinner's frames, its timers, an activity bar, the cursor */
-const MOVING = [/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷]/gu, /\b\d+(?:\.\d+)?\s*(?:ms|s|secs?|seconds?|mins?|minutes?)\b/gi, /\b\d+(?:\.\d+)?\s?%/g, /[▁▂▃▄▅▆▇█]+/gu, /[·•]\s*(?:←\s*)?\d+\s*(?:agents?|tasks?|shells?)\b/gi]
+/** what only moves while a CLI sits still: its spinner's frames, its timers, an activity bar, the count of helpers it
+ *  shows. A percentage it prints is content: a progress that goes from 40 to 70 says something new */
+const MOVING = [/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷]/gu, /\b\d+(?:\.\d+)?\s*(?:ms|s|secs?|seconds?|mins?|minutes?)\b/gi, /[▁▂▃▄▅▆▇█]+/gu, /[·•]\s*(?:←\s*)?\d+\s*(?:agents?|tasks?|shells?)\b/gi]
+
+/** the footer a CLI puts under a menu it wants answered: "Enter to confirm · Esc to cancel", "Space to select · Esc to
+ *  reject all", a y/n prompt. A screen without one is no prompt to press keys in, whatever it looks like. */
+export const MENU_FOOTER = /(?:enter|space|tab|↑|↓|arrow keys)[^\n]{0,40}(?:confirm|select|continue|cancel|submit|navigate)|\[y\/n\]|\(y\/n\)/i
+
+/** whether a screen ends on such a footer (looked at on its last lines, where a CLI draws it) */
+export function menuFooter(text: string) {
+  return MENU_FOOTER.test(text.trimEnd().split('\n').slice(-4).join('\n'))
+}
 
 /** a screen without what only moves: two reads of an agent that rested look the same, and a slow start that keeps
- *  saying something new (a step, a percentage, an agent's words) never does */
+ *  saying something new (a step, an agent's words) never does */
 export function restingScreen(text: string) {
   return MOVING.reduce((s, re) => s.replace(re, ' '), text)
     .split('\n')

@@ -4,27 +4,36 @@
 // pi's start screen — where it waits for a person who is not there.
 //
 // The screen is the only witness of those, so it is read through herdr (a pane read) and judged here:
-//   · the CLI is gone from its pane, or herdr dropped its name: it failed, and its last words say why;
-//   · it rests on a screen with choices in it: that is a prompt, and the chat shows it as a card, answered by pressing
-//     what the card reads (nothing is typed blind);
-//   · it rests on a screen that says something is wrong, or still cannot take what was handed to it (the brief waits
-//     in its outbox): that is a card too, with its words and Open terminal;
-//   · a screen that keeps moving (a spinner, a timer, a step, a percentage) is a slow start, and no card and no error
-//     come of it, however long it takes: pi on a cold local model may take a while to say anything.
-// Nothing here counts a screen as the agent's own status: the hooks and the log do, as before. This is upstream's
-// failed-starts.ts and screens.ts (eliasstravik/shepherdr 9a6a4bef, c9861ef0, 774c4966) against 2.0's code.
-import { lastWords, parseMenu, restingScreen, type ScreenMenu } from './screen.ts'
+//   · the CLI is gone from its pane, or herdr dropped its name, once the launch has had its moment: it failed, and its
+//     last words say why;
+//   · a first start (no session from before) that rests on a screen with a menu footer: that is a prompt, and the chat
+//     shows it as a card, answered by pressing what the card reads (nothing is typed blind);
+//   · it rests on a screen that says something is wrong, or still cannot take what was handed to it (the brief waits in
+//     its outbox): that is a card too, with its words and Open terminal;
+//   · anything else is left alone. A screen that keeps saying something new (a step, a word, a percentage, work going
+//     on) is a slow start, and so is one at rest whose brief already went in — pi on a cold local model takes a while —
+//     and neither a card nor an error comes of it, however long it takes.
+// An agent back on a session from before is never carded: what a CLI shows there is its transcript, which can look like
+// anything (upstream's 774c4966). Nothing here counts a screen as the agent's own status: the hooks and the log do, as
+// before. This is upstream's failed-starts.ts and screens.ts (eliasstravik/shepherdr 9a6a4bef, c9861ef0, 774c4966)
+// against 2.0's code.
+import { lastWords, menuFooter, parseMenu, restingScreen, type ScreenMenu } from './screen.ts'
 import type { Wrong } from './revive.ts'
 
-/** how long a start has before a screen it rests on is read at all: hook and log reads are given their moment first */
+/** how long a launch has before a screen it rests on is read, and before a pane without its CLI counts as a failure:
+ *  hook and log reads are given their moment, and a CLI takes its pane before herdr is done with it */
 export const FIRST_LOOK = 10_000
+
+/** how long a launch that resumed a session from before is watched for a failure, and no longer: its transcript is no
+ *  start, and nothing has to be waited on there */
+export const RESUME_SETTLE = 2 * 60_000
 
 /** what a CLI prints when the session it was told to resume is gone. Claude Code 2.1.318: "No conversation found with
  *  session ID: …"; Codex: "ERROR: No saved session found with ID …" */
 export const LOST_SESSION = /\bno (?:saved )?(?:conversation|session|rollout)\b[^\n]{0,40}\b(?:found|exists)\b|\b(?:conversation|session)\b[^\n]{0,40}\bnot found\b|\bcould(?: not|n't) find (?:the |your )?session\b/i
 
 /** words that say a CLI stopped on something, rather than still starting: a slow start says none of them */
-const STOPPED = /\b(?:error|failed|failure|cannot|can't|could not|couldn't|unable to|invalid|denied|refused|expired|unauthori[sz]ed|logged out|not signed in|sign in|sign-in|usage limit|out of allowance|exceeded|no such)\b/i
+const STOPPED = /\b(?:error|failed|failure|cannot|can't|could not|couldn't|unable to|invalid|denied|refused|expired|unauthori[sz]ed|logged out|not signed in|sign in|sign-in|\/login|usage limit|out of allowance|exceeded|no such)\b/i
 
 /** one look at a start */
 export interface StartLook {
@@ -37,12 +46,16 @@ export interface StartLook {
   pending: boolean
   /** its log shows a turn since it started, or its hooks said anything: it is an agent at work, no start any more */
   begun: boolean
+  /** it came back to a session from before this launch: its screen is a transcript, never a start to card */
+  prior: boolean
   /** what its pane shows now */
   screen: string
   /** it was resuming a session: the one case where a start without one is the way on */
   resumed: boolean
   /** what was handed to it (its brief, what you wrote) still waits to go in: it has not taken its first turn */
   waits: boolean
+  /** a card of a start's screen is up already */
+  card: boolean
   /** the launch itself threw, before a pane was there to read */
   error?: string
 }
@@ -51,6 +64,8 @@ export type StartStep =
   | { do: 'wait' }
   /** it rests on a screen of its own: a card for the chat, with what it shows and the choices it reads in it */
   | { do: 'card'; menu: ScreenMenu }
+  /** its screen moved on: the card of it goes, and the next screen is read as a card of its own */
+  | { do: 'clear' }
   /** it could not start: why, in words for the chat, and whether starting again without its session is the way on */
   | { do: 'failed'; why: string; fresh: boolean }
 
@@ -75,35 +90,38 @@ export class Starts {
       this.failed.delete(key)
       return { do: 'wait' }
     }
+    // back on an older session: only a failure is worth a look, and only while the launch settles
+    if (l.prior && now - l.started >= RESUME_SETTLE) return { do: 'wait' }
     if (l.pending || l.wrong === null) {
       this.seen.delete(key)
       return { do: 'wait' }
     }
     if (l.wrong === 'gone' || l.wrong === 'exited') {
       this.seen.delete(key)
+      // a CLI takes its pane when herdr starts it: only past the first look is one gone for good
+      if (now - l.started < FIRST_LOOK) return { do: 'wait' }
       // one card and one error per launch: the relaunch loop and the next look must not say it again
       if (this.settled(key, l.started)) return { do: 'wait' }
       this.failed.set(key, l.started)
       const why = lastWords(l.screen) || l.error || 'It stopped before its first turn'
       return { do: 'failed', why, fresh: l.resumed && LOST_SESSION.test(l.screen) }
     }
-    // it runs: a screen that rests says something, one that keeps moving is a slow start
+    // back on its transcript: nothing there is a card, whatever it looks like
+    if (l.prior) return { do: 'wait' }
+    // it runs: a screen that rests says something, one that keeps saying something new is a slow start
     const screen = restingScreen(l.screen)
-    if (!screen) {
-      this.seen.set(key, { launch: l.started, screen: '' })
-      return { do: 'wait' }
-    }
+    if (!screen) return { do: 'wait' }
     const was = this.seen.get(key)
+    const resting = was?.launch === l.started && was.screen === screen
     this.seen.set(key, { launch: l.started, screen })
-    if (was?.launch !== l.started) return { do: 'wait' }
-    if (was.screen !== screen) return { do: 'wait' }
-    if (now - l.started < FIRST_LOOK) return { do: 'wait' }
-    const menu = parseMenu(l.screen)
+    if (!resting || now - l.started < FIRST_LOOK) return { do: 'wait' }
+    // a menu it reads, with the CLI's own footer under it: a startup screen, not a transcript or a wall of text
+    const menu = menuFooter(l.screen) ? parseMenu(l.screen) : null
     if (menu) return { do: 'card', menu }
     // Nothing to choose: a card only when the screen says something is wrong, or when it still cannot take its brief.
-    // What a slow start shows is neither — a screen that rests while the model loads, its brief already in — and a
-    // screen that keeps saying something new never gets here at all.
-    if (!STOPPED.test(lastWords(l.screen, 4)) && !l.waits) return { do: 'wait' }
-    return { do: 'card', menu: { title: 'Waiting on its screen', choices: [], cursor: 0, screen: l.screen.trim() } }
+    // A slow start says neither — a screen at rest while the model loads, its brief already in — and gets no card.
+    if (STOPPED.test(lastWords(l.screen, 4)) || l.waits) return { do: 'card', menu: { title: 'Waiting on its screen', choices: [], cursor: 0, screen: l.screen.trim() } }
+    // its brief went in after all: a card about waiting for it has nothing left to say
+    return l.card ? { do: 'clear' } : { do: 'wait' }
   }
 }

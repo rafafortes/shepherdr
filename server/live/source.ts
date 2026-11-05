@@ -225,7 +225,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a turn cut short (Esc, a prompt turned down) runs no hook: its log says it is over
     this.agents.endedSince = (key, at) => this.chats.endedSince(key, at)
     this.agents.beforeInput = async (key) => { if (!['working', 'gone'].includes(this.agents.status(key)) && await this.chats.readMenu(key, true)) this.emit('chat', key) }
-    this.agents.menuUp = (key) => this.menuAnswers.has(key) || !!this.chats.menu(key)
+    // a card of a start's screen with nothing to choose holds nothing: typing cannot pick what is not there
+    this.agents.menuUp = (key) => this.menuAnswers.has(key) || !!this.chats.menu(key)?.choices.length
     this.engine.on('card', (t, status, sub) => this.onCard(t, status, sub))
     // a task's question shows on its needs-you card in its space's chat too: the card follows it
     this.on('chat', (key) => {
@@ -1120,7 +1121,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a launch that never opened a pane and threw nothing of its own has nothing to say: no start ever happened
     if (!pane && !r.startError && wrong === 'gone') return
     const screen = !begun && !pending && wrong !== null && pane ? await herdr.visible(pane).catch(() => '') : ''
-    const step = this.starts.look(key, { started: r.started, wrong, pending, begun, screen, resumed: !!r.resumed, waits: this.agents.waiting(key).length > 0, error: r.startError }, now)
+    const card = this.chats.startMenuUp(key)
+    const step = this.starts.look(key, { started: r.started, wrong, pending, begun, prior: !!r.resumed, screen, resumed: !!r.resumed, waits: this.agents.waiting(key).length > 0, card, error: r.startError }, now)
     await this.startStep(key, step)
   }
 
@@ -1131,11 +1133,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const cli = CLI_NAME[r.kind] ?? r.kind
     if (step.do === 'card') {
       // what the CLI asks is the card's title; nothing to choose, its own words are still the card (Open terminal is
-      // the way on)
+      // the way on). The same screen looked at again says nothing new
       const menu = step.menu.choices.length ? step.menu : { ...step.menu, title: `${cli} is waiting on its screen` }
-      this.chats.showStartMenu(key, menu)
+      if (!this.chats.showStartMenu(key, menu)) return
       this.emit('chat', key)
       this.engine.screenCard(key)
+      return
+    }
+    // its screen moved on: the card of it goes, and the next screen is read as a card of its own
+    if (step.do === 'clear') {
+      if (this.chats.clearStartMenu(key)) this.emit('chat', key)
       return
     }
     // its session is gone: a new one, with its brief, says so in the chat (and the start is not a failure)
@@ -1151,6 +1158,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (!r) return
     const started = r.started
     delete r.sessionId
+    r.fresh = true
     this.agents.save()
     const id = `start-fresh:${key}:${started}`
     this.chats.post(key, { id, card: { id, text: `Its earlier session was gone, so ${cli} started a new one.` } })
@@ -1173,7 +1181,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       console.error(`shepherdr: ${key}'s agent ${why === 'stale' ? 'runs on outdated settings' : 'stopped'}: starting it again`)
       // its pane still holds it, or its shell: herdr would count that as running
       await this.agents.relaunch(key, why !== 'gone', () => (key.includes('/') ? this.resumeTaskAgent(key) : this.coordinator(key)))
-      if (working) await this.agents.send(key, hidden(relaunchedLine(), 'restart'))
+      // it started again; one whose start failed says so instead, and nothing goes into an agent that isn't there
+      if (working && this.engine.startFailedAt(key) === undefined) await this.agents.send(key, hidden(relaunchedLine(), 'restart'))
     } catch (e) {
       console.error(`shepherdr: couldn't start ${key}'s agent again: ${(e as Error).message}`)
     } finally {

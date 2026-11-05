@@ -16,10 +16,11 @@ Every agent, coordinator or task agent, gets the same chat.
   session) shows what its screen shows as a card, and the task counts as Needs you. It reads the screen through
   herdr for every CLI the same way (`server/live/screen.ts`): the choices it can read are one-tap answers, pressed in
   the terminal exactly as the card shows them; a screen with nothing to read still comes with its words, and Open
-  terminal is the way on. What tells a stuck start from a slow one: a screen that keeps moving (a spinner, a timer, a
-  step, a percentage) is a slow start and never a card, however long it takes, and neither is a screen at rest whose
-  brief already went in (pi on a cold local model takes a while); a screen that rests and cannot take the brief, or says
-  something went wrong, is a card. An agent that is working never gets one.
+  terminal is the way on. What tells a stuck start from a slow one: a screen that keeps saying something new (a step, a
+  word, a percentage that grows) is a slow start and never a card, however long it takes, and neither is a screen at rest
+  whose brief already went in (pi on a cold local model takes a while); a screen that rests and cannot take the brief, or
+  says something went wrong, is a card. An agent that is working never gets one, and neither does one back on an older
+  session: its screen is a transcript, not a start.
 - A start or a resume that fails is no longer silence: its chat says what the CLI printed last (`Claude Code couldn't
   start: …`), and its task shows `Went wrong: …` and needs you, instead of Working for ever. One that was resuming a
   session that is gone starts a new one instead, told its brief again, and says so in the chat. Nothing starts it
