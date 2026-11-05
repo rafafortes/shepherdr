@@ -98,10 +98,21 @@ describe('a recording becomes words', () => {
     expect(String(failed.reason)).toContain('Another recording is being written down')
   }, 20_000)
 
+  test('a screen that goes away stops the writing down and frees the slot', async () => {
+    // a real whisper-cli has no children of its own: this one replaces its shell with the sleep, so a kill ends it
+    const slow = command(dir, 'whisper-slow2', 'exec sleep 10')
+    const gone = new AbortController()
+    const p = transcribe(recording(), { binary: slow, model, lang: 'auto', ffmpeg }, gone.signal)
+    setTimeout(() => gone.abort(), 150)
+    await expect(p).rejects.toThrow(/dropped before it was written down/)
+    // nothing holds the machine now
+    await expect(transcribe(recording(), { binary: said, model, lang: 'auto', ffmpeg })).resolves.toBe('hello from a test a second line')
+  }, 20_000)
+
   test('a machine without whisper.cpp, or without the model, says what to do about it', async () => {
-    await expect(dictate(recording(), model, 'auto', null)).rejects.toThrow(/sudo apt install whisper\.cpp/)
+    await expect(dictate(recording(), model, 'auto', { binary: null })).rejects.toThrow(/sudo apt install whisper\.cpp/)
     const missing = join(dir, 'no-such-model.bin')
-    const why = await dictate(recording(), missing, 'auto', said).catch((e: Error) => e.message)
+    const why = await dictate(recording(), missing, 'auto', { binary: said }).catch((e: Error) => e.message)
     expect(why).toContain(missing)
     expect(why).toContain(MODEL_URL)
     expect(why).toContain(MODEL_DIR)

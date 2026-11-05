@@ -66,21 +66,27 @@ export function clean(text: string): string {
     .trim()
 }
 
-/** a command, killed when it takes longer than it should: a hung whisper or ffmpeg must not hold the machine */
-const run = async (cmd: string[], ms: number) => {
+/** a command, killed when it takes longer than it should or when the screen that asked for it goes away: a hung
+ *  whisper or ffmpeg must not hold the machine */
+const run = async (cmd: string[], ms: number, signal?: AbortSignal) => {
   const p = Bun.spawn(cmd, { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' })
   let late = false
+  const kill = () => p.kill()
   const timer = setTimeout(() => {
     late = true
-    p.kill()
+    kill()
   }, ms)
+  signal?.addEventListener('abort', kill, { once: true })
   try {
     const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited])
     return { out, err, code, late }
   } finally {
     clearTimeout(timer)
+    signal?.removeEventListener('abort', kill)
   }
 }
+
+const DROPPED = 'The recording was dropped before it was written down.'
 
 /** a recording is read as wav in seconds; a long one written down takes minutes, and not hours */
 const WAV_MS = 60_000
@@ -90,9 +96,10 @@ const WORDS_MS = 10 * 60_000
 let writing = false
 
 /** the recording as 16 kHz mono wav, as whisper.cpp wants it */
-export async function toWav(audio: Blob, into: string, ffmpeg: string): Promise<void> {
+export async function toWav(audio: Blob, into: string, ffmpeg: string, signal?: AbortSignal): Promise<void> {
   await Bun.write(join(into, 'audio'), audio)
-  const r = await run([ffmpeg, '-loglevel', 'error', '-nostdin', '-y', '-i', join(into, 'audio'), '-ar', '16000', '-ac', '1', join(into, 'audio.wav')], WAV_MS)
+  const r = await run([ffmpeg, '-loglevel', 'error', '-nostdin', '-y', '-i', join(into, 'audio'), '-ar', '16000', '-ac', '1', join(into, 'audio.wav')], WAV_MS, signal)
+  if (signal?.aborted) throw new Error(DROPPED)
   if (r.late) throw new Error('That recording took too long to read.')
   if (r.code !== 0) throw new Error(`That recording couldn't be read${why(r.err)}.`)
 }
@@ -104,7 +111,7 @@ const why = (err: string) => {
 }
 
 /** what a recording says, written down here; throws with words for the screen when it can't be */
-export async function transcribe(audio: Blob, ways: DictateWays): Promise<string> {
+export async function transcribe(audio: Blob, ways: DictateWays, signal?: AbortSignal): Promise<string> {
   if (audio.size > DICTATE_CAP) throw new Error(DICTATE_TOO_LONG)
   const ffmpeg = ways.ffmpeg ?? Bun.which('ffmpeg')
   if (!ffmpeg) throw new Error('Talk to type needs ffmpeg on this machine: sudo apt install ffmpeg.')
@@ -113,9 +120,10 @@ export async function transcribe(audio: Blob, ways: DictateWays): Promise<string
   const dir = mkdtempSync(join(tmpdir(), 'shepherdr-dictate-'))
   writing = true
   try {
-    await toWav(audio, dir, ffmpeg)
+    await toWav(audio, dir, ffmpeg, signal)
     const threads = Math.min(8, cpus().length)
-    const r = await run([ways.binary, '-m', ways.model, '-f', join(dir, 'audio.wav'), '-l', ways.lang, '-nt', '-np', '-t', String(threads)], WORDS_MS)
+    const r = await run([ways.binary, '-m', ways.model, '-f', join(dir, 'audio.wav'), '-l', ways.lang, '-nt', '-np', '-t', String(threads)], WORDS_MS, signal)
+    if (signal?.aborted) throw new Error(DROPPED)
     if (r.late) throw new Error('That recording was too long to write down.')
     if (r.code !== 0) throw new Error(`whisper.cpp couldn't write it down${why(r.err)}.`)
     return clean(r.out)
@@ -127,11 +135,12 @@ export async function transcribe(audio: Blob, ways: DictateWays): Promise<string
 
 /** words from a recording, with whisper.cpp as this machine has it: the model Settings name, the language Settings
  *  say. Why it can't is said in words the screen can show as they are. */
-export async function dictate(audio: Blob, model: string, language: string, binary = whisperBinary()): Promise<string> {
+export async function dictate(audio: Blob, model: string, language: string, opts: { binary?: string | null; signal?: AbortSignal } = {}): Promise<string> {
+  const binary = opts.binary === undefined ? whisperBinary() : opts.binary
   if (!binary)
     throw new Error('Talk to type needs whisper.cpp on the machine that serves Shepherdr: run `sudo apt install whisper.cpp` there (its command is whisper-cli).')
   const file = homePath(model)
   if (!existsSync(file))
     throw new Error(`Talk to type needs its model file, and ${file} isn't there: download ${MODEL_URL} into ${MODEL_DIR} (Settings → Dictation → Model).`)
-  return transcribe(audio, { binary, model: file, lang: langOf(language) })
+  return transcribe(audio, { binary, model: file, lang: langOf(language) }, opts.signal)
 }

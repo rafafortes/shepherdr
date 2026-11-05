@@ -48,7 +48,7 @@ export function dictate(end: (text: string | null, failure?: string) => void): D
   let mic: MediaStream | null = null
   let ctx: AudioContext | null = null
   let rec: MediaRecorder | null = null
-  /** the upload in flight: Cancel drops it, so the machine behind Shepherdr stops on the words it will not show */
+  /** the upload in flight: Cancel abandons it, and Shepherdr stops writing that recording down when its screen goes */
   let sending: AbortController | null = null
   let type = ''
   const chunks: Blob[] = []
@@ -106,11 +106,12 @@ export function dictate(end: (text: string | null, failure?: string) => void): D
     },
     cancel() {
       if (state === 'over') return
-      if (rec && rec.state !== 'inactive') {
+      // whatever the recorder is doing, nothing of this recording is written down: a stop already asked for sends
+      // nothing either
+      if (rec) {
         rec.onstop = null
-        rec.stop()
+        if (rec.state !== 'inactive') rec.stop()
       }
-      // already on its way to be written down: drop it
       sending?.abort()
       close(null)
     },

@@ -203,10 +203,10 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
           if (Number(req.headers.get('content-length') ?? 0) > DICTATE_CAP) return json({ error: DICTATE_TOO_LONG }, 413)
           const audio = new Blob([await req.arrayBuffer()], { type: req.headers.get('content-type') ?? '' })
           if (audio.size > DICTATE_CAP) return json({ error: DICTATE_TOO_LONG }, 413)
-          // a long recording takes as long as whisper takes: no idle cut-off meanwhile
+          // a long recording takes as long as whisper takes: no idle cut-off meanwhile. Its screen going away stops it
           srv.timeout(req, 0)
           try {
-            return json({ text: await source.dictate(audio) })
+            return json({ text: await source.dictate(audio, req.signal) })
           } catch (e) {
             return json({ error: (e as Error).message }, 422)
           }

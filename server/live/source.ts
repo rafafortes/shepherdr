@@ -749,8 +749,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** Talk to type: whisper.cpp on this machine writes the recording down, with the model and language Settings name.
    *  The words come back; the audio and its wav go with the temporary folder, so nothing is kept. */
-  dictate(audio: Blob) {
-    return dictation(audio, this.settings.get('dictate.model'), this.settings.get('dictate.language'))
+  dictate(audio: Blob, signal?: AbortSignal) {
+    return dictation(audio, this.settings.get('dictate.model'), this.settings.get('dictate.language'), { signal })
   }
 
   async attachment(chat: string, path: string) {
