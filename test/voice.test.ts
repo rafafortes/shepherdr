@@ -45,7 +45,15 @@ function pretend() {
   w.order = []
   const md = navigator.mediaDevices
   const ask = md.getUserMedia.bind(md)
+  // the microphone stays closed until the test opens it: a Done pressed the instant it opens is its own case below
+  w.held = null
+  w.openMic = null
+  w.holdMic = () => {
+    w.held = new Promise<void>((open) => (w.openMic = open))
+  }
   md.getUserMedia = async (c) => {
+    const held = w.held as Promise<void> | null
+    if (held) await held
     const s = await ask(c)
     ;(w.order as string[]).push('mic')
     return s
@@ -83,8 +91,11 @@ type Answer = { text?: string; error?: string }
 async function open(opts: BrowserContextOptions, answer: Answer = { text: 'the rest of it' }) {
   const ctx = await browser!.newContext({ permissions: ['microphone'], ...opts })
   await ctx.addInitScript(pretend)
+  /** how many recordings went up to be written down: one with no audio at all must never be one of them */
+  let uploads = 0
   // whisper takes a moment: the box says what it is doing meanwhile
   await ctx.route('**/api/dictate', async (route) => {
+    uploads += 1
     await new Promise((r) => setTimeout(r, 150))
     const body = JSON.stringify(answer.error ? { error: answer.error } : { text: answer.text ?? '' })
     await route.fulfill({ status: answer.error ? 422 : 200, contentType: 'application/json', body })
@@ -92,7 +103,7 @@ async function open(opts: BrowserContextOptions, answer: Answer = { text: 'the r
   const page = await ctx.newPage()
   await page.goto(url())
   await page.waitForSelector(`${box} textarea`)
-  return { ctx, page, answer }
+  return { ctx, page, answer, uploads: () => uploads }
 }
 
 /** everything the composer shows above its box */
@@ -230,18 +241,25 @@ describe.skipIf(!browser)('talk to type records in the chat box', () => {
     await ctx.close()
   }, 30_000)
 
-  test('Done pressed the instant the microphone opens says nothing was heard, and the box comes back to type in', async () => {
-    const { ctx, page } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  test('Done pressed while the microphone is still opening says nothing was heard, and the box comes back to type in', async () => {
+    const { ctx, page, uploads } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     await page.fill(`${box} textarea`, 'Before')
+    // the microphone is held closed, so Done really does come while it is still opening: no audio exists to write down
+    await page.evaluate(() => (window as unknown as { holdMic(): void }).holdMic())
     await page.tap(`${box} button[aria-label="Talk to type"]`)
     await page.waitForSelector(`${box} button[aria-label^="Done"]`)
-    // no audio at all yet: there is nothing to write down, and nothing is sent
     await page.tap(`${box} button[aria-label^="Done"]`)
-    await page.waitForSelector('[data-topbar]')
+    // Done is handled (the button is spent) before the microphone opens: nothing of the recording can be heard
+    await page.waitForSelector(`${box} button[aria-label^="Done"][disabled]`)
+    await page.evaluate(() => (window as unknown as { openMic(): void }).openMic())
+    await page.waitForSelector('[data-topbar]', { timeout: 10_000 })
     expect(await page.textContent('[data-topbar]')).toContain('Nothing was heard in that recording')
+    // the box comes back to type in, with the draft it had, and nothing went up to be written down
+    await page.waitForSelector(`${box} textarea`, { timeout: 10_000 })
     expect(await page.inputValue(`${box} textarea`)).toBe('Before')
+    expect(uploads()).toBe(0)
     // the cursor is back in the box, where it was
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA')
+    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA', null, { timeout: 10_000 })
     await ctx.close()
   }, 30_000)
 
