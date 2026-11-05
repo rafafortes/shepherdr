@@ -474,7 +474,9 @@ export class Agents extends Emitter<Events> {
   private settleLaunches(now = Date.now()) {
     for (const [name, a] of this.live) {
       const key = this.byName.get(name)
-      const r = key ? this.records[key] : undefined
+      // another client's agent (the human's own `herdr agent start`, or another Shepherdr's): its launch is theirs
+      if (!key) continue
+      const r = this.records[key]
       if (!a.launch_pending) {
         if (r?.pendingLaunch) {
           r.pendingLaunch = false
@@ -496,7 +498,7 @@ export class Agents extends Emitter<Events> {
       }
       if (this.pendingSaid.has(name)) continue
       this.pendingSaid.add(name)
-      console.error(`shepherdr: ${name}'s launch hasn't become ready in ${Math.round((now - since) / 1000)} s; herdr drops it, and the relaunch loop starts it again`)
+      console.error(`shepherdr: ${name}'s launch hasn't become ready in ${Math.round((now - since) / 1000)} s; not asking for it any more, so herdr drops it and the relaunch loop can start it again`)
     }
     // forget the names herdr no longer lists, ready or dropped
     for (const name of this.pendingSince.keys()) if (!this.live.has(name)) this.pendingSince.delete(name)
