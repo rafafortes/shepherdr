@@ -48,7 +48,7 @@ gate snapshots, caches and temporary dirs: `git worktree remove <path>`, `git wo
 branch once its commits are on the target. Before removing, verify nothing unique and wanted remains. Never remove a
 worktree, branch or directory another agent or the operator created. This is the operator's standing approval for the
 agent's own worktrees and scratch; every other destructive command still needs explicit approval. Like the Language
-rule, it is repeated in every `CLAUDE.md`, `AGENTS.md` and `GEMINI.md` of the operator's projects.
+rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's projects.
 
 ## Tests
 
