@@ -378,11 +378,44 @@ describe('To do from the command', () => {
     expect((await src.cli(['todo', id], { chat: `${next.id}/Agent` })).code).toBe(1)
     expect((await src.cli(['todo', id], { chat: `${id}/Agent` })).out).toContain('To do until it gets a go')
     expect(t.todo).toBe(true)
-    // the go is a message to its agent: it waits for the agent, and the task is no longer To do
+    // the go is a message to its agent: it waits for the agent, and the task is no longer To do. Its own space's
+    // coordinator told it, so its agent reads who sent it, in the envelope every agent's message arrives in
     await src.cli(['task', 'tell', id, 'Go.'], { chat: place })
-    expect(src.agents.waiting(`${id}/Agent`).map((o) => o.text)).toEqual(['Go.'])
+    expect(src.agents.waiting(`${id}/Agent`).map((o) => o.text)).toEqual([`<agent-message from="${p.name} coordinator" to="${id} agent" space="${p.name}">Go.</agent-message>`])
     expect(t.todo).toBeUndefined()
     src.agents.outbox = src.agents.outbox.filter((o) => o.key !== `${id}/Agent`)
+  })
+})
+
+describe('A tell with no chat of its own', () => {
+  test('a plain terminal sends no envelope: its words are the human’s, as typed, and the command says Told or that it is held', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'plain')
+    const place = placeId.space(p.name)
+    const add = await src.cli(['task', 'add', 'Noted', '--desc', 'For later.', '--later'], { chat: place })
+    const id = add.out.match(/([A-Z]+-\d+)/)![1]
+    const t = src.engine.task(id)!
+    // herdr isn't here: its agent can't start. Let that settle before the tests after this one
+    await settle(() => !!t.trouble, 'its agent to fail to start')
+    // no chat and no pane: like the systemd timer that runs `shepherdr task tell <id> <text>`, and the words go in
+    // exactly as typed, because a plain terminal is no agent talking
+    expect((await src.cli(['task', 'tell', id, 'Go.'], {})).out).toBe(`Told ${id}.\n`)
+    expect(src.agents.waiting(`${id}/Agent`).map((o) => o.text)).toEqual(['Go.'])
+    src.agents.outbox = src.agents.outbox.filter((o) => o.key !== `${id}/Agent`)
+    // no room on the machine: it is held, says so, and the words wait with it, still plain. (herdr can't start an agent
+    // here, so its start failed and it would show as needing you: as if it had said it waits, it is To do)
+    t.trouble = undefined
+    src.engine.todo(id)
+    const machine = src.engine.machine
+    src.engine.machine = () => ({ busy: 'cpu' as const, herdr: true })
+    try {
+      expect((await src.cli(['task', 'tell', id, 'Not yet.'], {})).out).toContain(`${id} is held`)
+    } finally {
+      src.engine.machine = machine
+    }
+    expect(t.held?.go).toBe('Not yet.')
+    expect(t.held?.plain).toBe(true)
   })
 })
 

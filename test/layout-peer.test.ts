@@ -41,7 +41,11 @@ describe.skipIf(!browser)('a message from another agent', () => {
         expect(top.y + top.height).toBeLessThanOrEqual(box.y + 1)
         expect(box.x).toBeLessThan(390 / 2)
         const mine = (await page.locator('[data-you] [data-anchor]').first().boundingBox())!
-        expect(mine.x).toBeGreaterThan(390 / 2)
+        // the human's own stay right: their bubble ends at the screen's right edge and its middle sits past the screen's
+        // middle (a bubble is as wide as its words, so it may well start left of the middle: check the edge, not the
+        // start, or a sentence like 'Free up some disk space.' fails here at 150 of 390)
+        expect(mine.x + mine.width).toBeGreaterThan(390 * 0.9)
+        expect(mine.x + mine.width / 2).toBeGreaterThan(390 / 2)
         // its own shade: the --peer colour itself, not the human's reply shade nor the agent's bubble shade
         const token = (name: string) =>
           page.evaluate((n) => {
