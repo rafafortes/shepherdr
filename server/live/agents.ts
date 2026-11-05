@@ -847,8 +847,10 @@ export class Agents extends Emitter<Events> {
     if (r.kind === 'claude') {
       if (resume && r.sessionId) a.push('--resume', r.sessionId)
       else if (r.sessionId) a.push('--session-id', r.sessionId)
-      // its hooks tell Shepherdr what it does (readers/hooks.ts), from a settings file of its own: yours stay untouched
-      const h = hookSettings(HOOKS_DIR, r.name)
+      // its hooks tell Shepherdr what it does (readers/hooks.ts), from a settings file of its own: yours stay untouched.
+      // The same file lets it run its own shepherdr command without a prompt (readers/own-commands.ts), by the exact
+      // path Shepherdr puts on its PATH and its own chat identity
+      const h = hookSettings(HOOKS_DIR, r.name, { command: agentEnv(r.key, ROOT).SHEPHERDR_COMMAND, chat: r.key })
       r.hooks = h.events
       a.push('--settings', h.settings)
       if (r.system) a.push('--append-system-prompt-file', this.promptFile(r))

@@ -97,7 +97,7 @@ It checks every machine saved in herdr, puts Shepherdr's helper there again, sta
 
 ### What permissions do the agents get?
 
-**Codex starts with full access** (`--dangerously-bypass-approvals-and-sandbox`), so a task never waits on a prompt nobody sees. Claude Code and pi start with your own permission settings; Shepherdr adds only its hooks, from a settings file of its own, and yours are never touched. A permission prompt shows the task under `Needs you` (`Asks permission`), and startup trust and MCP prompts come as cards. The brief's rules and the review are guidance, not a sandbox. [Tasks](docs/tasks.md) has the details.
+**Codex starts with full access** (`--dangerously-bypass-approvals-and-sandbox`), so a task never waits on a prompt nobody sees. Claude Code and pi start with your own permission settings; Shepherdr adds only its hooks, from a settings file of its own, and yours are never touched — including the one hook that lets an agent run its own `shepherdr` command without asking. A permission prompt shows the task under `Needs you` (`Asks permission`), and startup trust and MCP prompts come as cards. The brief's rules and the review are guidance, not a sandbox. [Tasks](docs/tasks.md) has the details.
 
 ### Does the plugin send my work to a hosted service?
 

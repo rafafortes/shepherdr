@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path'
 import { BOX, helperDir } from '../box.ts'
 import * as task from '../mfs.ts'
 import type { Background } from './background.ts'
+import { deciderScript } from './own-commands.ts'
 
 /** one hook event, as the recorder writes it */
 export interface HookEvent {
@@ -135,9 +136,25 @@ process.stdin.on('end', () => {
 
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
 
-/** the settings file that makes one Claude Code record its hooks to `events`; returns its path. Starting over: what
- *  an earlier run recorded is gone. */
-export function hookSettings(dir: string, name: string, runtime = process.execPath): { settings: string; events: string } {
+/** a script the hooks run, replaced whole and only when it changed: other agents' hooks may be running it */
+function writeScript(dir: string, name: string, text: string): string {
+  const file = join(dir, name)
+  if (!task.existsSync(file) || task.readFileSync(file, 'utf8') !== text) {
+    task.writeFileSync(`${file}.${process.pid}`, text)
+    task.renameSync(`${file}.${process.pid}`, file)
+  }
+  return file
+}
+
+/** the settings file that makes one Claude Code record its hooks to `events`, and run its own shepherdr command without
+ *  a prompt (`command`, this launch's; see own-commands.ts); returns its path. Starting over: what an earlier run
+ *  recorded is gone. */
+export function hookSettings(
+  dir: string,
+  name: string,
+  o: { command?: string; chat?: string; runtime?: string } = {},
+): { settings: string; events: string } {
+  const runtime = o.runtime ?? process.execPath
   task.mkdirSync(dir, { recursive: true })
   const events = join(dir, `${name}.jsonl`)
   task.rmSync(events, { force: true })
@@ -148,18 +165,19 @@ export function hookSettings(dir: string, name: string, runtime = process.execPa
     // its time, and the main machine cuts it down as it reads the mirrored file (parseHookLines)
     command = `perl ${q(join(helperDir(BOX.home), 'hook.pl'))} ${q(events)}`
   } else {
-    // other agents' hooks may be running it: it is replaced whole, and only when it changed
-    const script = join(dir, 'record.cjs')
-    const text = recorderScript()
-    if (!task.existsSync(script) || task.readFileSync(script, 'utf8') !== text) {
-      task.writeFileSync(`${script}.${process.pid}`, text)
-      task.renameSync(`${script}.${process.pid}`, script)
-    }
-    command = `${q(runtime)} ${q(script)} ${q(events)}`
+    command = `${q(runtime)} ${q(writeScript(dir, 'record.cjs', recorderScript()))} ${q(events)}`
   }
   const one = [{ hooks: [{ type: 'command', command, timeout: 10 }] }]
+  const hooks: Record<string, unknown> = Object.fromEntries(HOOK_EVENTS.map((e) => [e, one]))
+  // its own shepherdr command never asks: the same settings file allows exactly one plain call of this launch's own
+  // path, verb by verb (own-commands.ts). Another machine's helper records events but decides nothing: there it asks.
+  if (!BOX && o.command) {
+    // the chat goes in as one shell word, quoted whole: any identity a space is named with survives it
+    const decider = `${q(runtime)} ${q(writeScript(dir, 'allow.cjs', deciderScript()))} ${q(o.command)} ${q(o.chat ?? '')}`
+    hooks.PreToolUse = [...one, { matcher: 'Bash', hooks: [{ type: 'command', command: decider, timeout: 10 }] }]
+  }
   const settings = join(dir, `${name}.settings.json`)
-  task.writeFileSync(settings, JSON.stringify({ hooks: Object.fromEntries(HOOK_EVENTS.map((e) => [e, one])) }, null, 2))
+  task.writeFileSync(settings, JSON.stringify({ hooks }, null, 2))
   return { settings, events }
 }
 
