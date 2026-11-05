@@ -1,9 +1,9 @@
 // The tasks engine's test world, shared by the engine*.test.ts files: a real git repo, the agents stubbed, herdr a
 // stand-in that makes and removes real git worktrees. Each file that imports it gets its own Shepherdr home, and each
-// world one of its own inside it.
+// test a folder of its own inside it.
 import { execSync } from 'node:child_process'
 import { beforeEach } from 'bun:test'
-import { cpSync, existsSync, mkdtempSync, readdirSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -12,7 +12,7 @@ export const { Engine } = await import('../server/live/engine/engine.ts')
 export const { Places, placeId } = await import('../server/live/places.ts')
 export const { Settings } = await import('../server/live/settings.ts')
 export const { settingsBlock } = await import('../server/live/prompts.ts')
-export const { writeJson } = await import('../server/store.ts')
+const store = await import('../server/store.ts')
 export const { fakeHerdr } = await import('./fake-herdr.ts')
 export const G = await import('../server/live/engine/git.ts')
 export type Said = import('../server/live/readers/hooks.ts').Said
@@ -23,24 +23,21 @@ export type Said = import('../server/live/readers/hooks.ts').Said
 export const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8', timeout: 30_000 }).trim()
 
 /**
- * A world reads and writes a data folder of its own, a copy of the one it is made from. Bun does not stop a test that
- * timed out: it goes on running, and its leftovers (a prefix it reserved, a branch it put away, a task it wrote) must
- * not reach into the folder the next test reads. Each test starts from an empty folder of its own (beforeEach), so
- * nothing a test left comes into the next one, while a test's own writes before its first world (tasks saved from
- * before) do, as does what a world wrote for the next world in the same test. The name is the preload's, which clears
- * those older than an hour.
+ * Every test reads and writes a data folder of its own, and every world it makes keeps that same one: a test builds a
+ * world again to see what a restart reads, and that must be what the world before it wrote. Bun does not stop a test
+ * that timed out — it goes on running — and what it left must not reach into the folder the next test reads, which is
+ * what made one timeout fail the tests after it (run 42020185856, shard 1). Whoever keeps files of its own takes the
+ * folder when it is made (store.ts's `dir`), so even the leftovers of a test gone by write into its own folder. The
+ * name is the preload's, which clears those older than an hour.
  */
-function ownHome() {
-  const from = process.env.SHEPHERDR_HOME
-  const dir = mkdtempSync(join(tmpdir(), 'shep-test-home-world-'))
-  // the task numbers matter more than the database that hands them out: tasks.json's next carries them, and an open
-  // database is not a file to copy while its own connection is writing
-  const keep = (f: string) => !/^task-ids\.sqlite/.test(f)
-  if (from && existsSync(from)) for (const f of readdirSync(from).filter(keep)) cpSync(join(from, f), join(dir, f), { recursive: true })
-  process.env.SHEPHERDR_HOME = dir
-}
+let base = mkdtempSync(join(tmpdir(), 'shep-test-home-base-'))
+beforeEach(() => {
+  base = mkdtempSync(join(tmpdir(), 'shep-test-home-base-'))
+  process.env.SHEPHERDR_HOME = base
+})
 
-beforeEach(() => void (process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-test-home-base-'))))
+/** what a test writes itself goes into its own test's folder, whatever a later test points the process at */
+export const writeJson = (name: string, value: unknown) => store.writeJson(name, value, base)
 
 export function repo() {
   const dir = mkdtempSync(join(tmpdir(), 'shep-repo-'))
@@ -50,7 +47,7 @@ export function repo() {
 
 /** boot: what herdr says once the agent is ready; any but working leaves its brief waiting to go in */
 export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
-  ownHome()
+  process.env.SHEPHERDR_HOME = base
   const started: { key: string; first?: string; cwd: string; system?: string; pane?: string }[] = []
   const status: Record<string, string> = {}
   const sent: { key: string; text: string }[] = []

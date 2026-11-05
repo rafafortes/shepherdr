@@ -101,7 +101,11 @@ if (import.meta.main) {
       Bun.sleepSync(5)
     }
   }
-  process.on('exit', () => unlinkSync(lock))
+  process.on('exit', () => {
+    try {
+      unlinkSync(lock)
+    } catch {}
+  })
   const st = JSON.parse(readFileSync(file, 'utf8')) as FakeGitHub
   const args = process.argv.slice(2)
   st.calls.push({ host: process.env.GH_HOST, args })
