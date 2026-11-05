@@ -63,6 +63,15 @@
   trusting in a dialog first, and it writes OSC 7501 itself, which herdr will pass on), pi (it tells only a turn's
   end), an agent started before this, or a menu up between turns that no hook tells of. One function (`statusFrom` in
   `server/live/agents.ts`) decides, so taking herdr's OSC 7501 program status once it passes that on is one change.
+- An agent's own Shepherdr commands never ask: not `ask`, `status`, `ready` or `merge`. The same settings file Shepherdr
+  passes at launch carries a `PreToolUse` hook (`server/live/readers/own-commands.ts`) that allows exactly one plain call
+  of that launch's own command path — the one Shepherdr puts on the agent's `PATH` — with one of a fixed list of verbs,
+  either bare or in the launch prompt's own `SHEPHERDR_CHAT="…"` form. Everything else keeps its card: `secret run` (it
+  runs any program) and `secret env` (it writes a file), a verb not on the list, the bare name `shepherdr`, and a command
+  line with anything after it (`;`, `&&`, `|`, a redirect). Claude Code's own Bash allow rules were the other way to do
+  it (upstream 2.1 does that); measured on 2.1.318 a rule for `<path> status` also let `<path> status; echo hi` run,
+  which is why this is a hook. On another machine (a box) its helper records hooks but decides nothing, so its agents
+  still ask. Codex runs without approvals; pi never asks for one. Your Merge setting and merge approvals still apply.
 - On a repo with a GitHub remote that `gh` is logged in to, each task gets a pull request. The shepherdr-agent skill runs
   `shepherdr pr <id>`: it pushes the branch and opens a draft (its title the task's, its words the agent's summary, the
   brief's gist and a "Generated with" footer), and pushes to it again after new commits. `shepherdr checks <id>` waits

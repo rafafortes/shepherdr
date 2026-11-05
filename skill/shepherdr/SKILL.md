@@ -17,6 +17,8 @@ and flag. Your role's own work is in its own skill (References).
 ## Command routing
 
 The launch prompt names your authoritative command and chat identity. `SHEPHERDR_COMMAND` also names that command.
+Write that command out in full each time, as the launch prompt shows it (quoted if its path has a space), rather than
+the bare name `shepherdr` or `$SHEPHERDR_COMMAND`: only that form runs without a permission prompt.
 On a remote machine it is `~/.shepherdr/helper/bin/shepherdr`, which uses `helper/main.sock`, not a local web port.
 Use the launch identity: a coordinator's space key, `<task-id>/Agent`, or `<task-id>/Reviewer` for a reviewer.
 Do not trust another inherited `SHEPHERDR_CHAT`, `SHEPHERDR_URL`, or a repo command ahead of the helper on PATH.
