@@ -36,8 +36,22 @@
   (`vm-str:SHE-12`), from the main machine's home space. If one it waits for is stopped or goes wrong, the queued task needs
   you, saying which; it goes back to waiting once that task is going again. Want it started early? Just write to it:
   its agent decides from your words, and clears its queue itself when they are a go (a note leaves it queued).
-- A task's dot comes from its agent alone: Working, Needs you (it asks, or waits for your reply), Queued (it waits
-  for other tasks), To do (it waits for a go, or is still starting up; a To do row is its title alone), Ready
+- "Do this tomorrow morning" schedules it: the coordinator adds it with `--at "tomorrow 9:00"` (`"fri 8:15"`,
+  `"today 18:00"`, `"2026-11-06 09:00"`, `"18:00"`) or `--in 6h` (`"90m"`, `"2 days"`, `"1h 30m"`), one or the
+  other, in the time zone Settings sets (time.zone). Until then it has no agent at all and shows under Scheduled, its
+  row saying when it starts (`Starts Tomorrow 9:00`, counting down as you read it); it never reads Needs you while it
+  counts down. At its time it starts as any new task does: it takes Settings as they are then (not as they were when it
+  was added: the brief's block, the agent and the reviewer are read at the start), waits for the machine's room
+  (Settings → the machine, as Queued) and for what it was queued `--after`, and its chat says its time came. Added with
+  `--later` too, its agent then reads the brief and waits for a go. A time that passed while Shepherdr was off starts
+  it as soon as Shepherdr is back, and says so in its chat. Change or cancel it before it starts with `shepherdr task
+  queue <id> --at "tomorrow 7:00"` (`--in 2h`) or `--at none`, which clears the time and starts it now (ask your
+  coordinator: a task waiting for its time has no chat yet, so there is nowhere to write in it). A message to it, from
+  your coordinator, is the go too: it starts at once, no longer waiting for its time or for the tasks it was queued
+  after. Only a task that has not started can be scheduled.
+- A task's dot comes from its agent alone: Working, Needs you (it asks, or waits for your reply), Scheduled (it waits
+  for a time it starts by itself at, with no agent yet), Queued (it waits for other tasks), To do (it waits for a go, or
+  is still starting up; a To do row is its title alone), Ready
   (`shepherdr ready`: finished, waits for you to merge it), Merging (`shepherdr merge` under way: GitHub's checks run,
   a rebase or the merge itself, nothing for you to do) and Done (`shepherdr merge`: Merged, or closed: Nothing to merge). The list and the task's chat always show
   the same. Once started, only the agent puts a task in To do; one that stops for any other reason needs you, except

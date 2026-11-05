@@ -61,9 +61,16 @@ How to do the work inside a task is its agent's judgment, not yours.
    `--set reviewer=claude`): the block then says the coordinator set it. Plain words in the brief win over the block
    too. A review is only words in the brief; its agent decides how to do it and counts each round (`shepherdr review
    <id>`), so a task that has used them all asks you for one more (step 3).
-2. **Hold or queue it**: `--later` has its agent wait for a go (`shepherdr task tell <id> "<go>"`). `--after SHE-12`
+2. **Hold, queue or schedule it**: `--later` has its agent wait for a go (`shepherdr task tell <id> "<go>"`). `--after SHE-12`
    queues it until those are all done; Shepherdr then sends the go. `shepherdr task queue <id> --after …|none` changes
    it; another machine's task is `vm-str:SHE-12`. One it waits for stopped or gone wrong: ask the human.
+   A time ("tomorrow 9:00", "in 6 hours", "after the weekend", a day they name) is `--at "tomorrow 9:00"` or `--in 6h`,
+   one or the other, in their words turned into a time in the zone `time.zone` sets: it has no agent until then, waits
+   under Scheduled with its start time showing, and then starts as a new task does (Settings as they are then, the
+   machine's room, what it was `--after`). Change it with `shepherdr task queue <id> --at …|--in …`, cancel it with
+   `--at none` (it starts now); a message to it from you is the go too: it starts at once, its time and what it waits for
+   dropped. It has no chat until it starts, so the human reaches it through you. A time that passed while Shepherdr was off
+   starts it when Shepherdr is back, its chat saying so. `--at` with `--later` means it starts then and waits for your go.
 3. **News**: act on it when the human asked you to handle such things, or on Autopilot. News the human sees as a card
    in your chat (ready, merged, needs you, went wrong, stalled, main red, machine health) always gets your reply after
    the card, so the card is never the chat's last word: at most two short lines of plain words on what it means here,
@@ -121,8 +128,9 @@ Tasks with full briefs, merges and closes, a short reply after each news card, o
 ## Exceptions
 
 A task status reads from what its agent's CLI reports: **Needs you** is a prompt, an open card or question, signed
-out, or a turn ended without `ready`; **Queued** is `--after` or no room on the machine (Shepherdr starts it once there
-is room); **To do** is waiting for a go; **Ready to merge** waits for the human; **Merging** runs until it is in.
+out, or a turn ended without `ready`; **Scheduled** is a time it starts by itself at, with no agent yet; **Queued** is
+`--after` or no room on the machine (Shepherdr starts it once there is room); **To do** is waiting for a go; **Ready to
+merge** waits for the human; **Merging** runs until it is in.
 
 ## QC
 

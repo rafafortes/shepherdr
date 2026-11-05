@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref, type RefObject, type TextareaHTMLAttributes } from 'react'
 import { ChevronUpDownIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/16/solid'
 import type { Status, Task, Report } from '@shared/types.ts'
+import { span } from '@shared/when.ts'
 import { TALKING, type Sample } from './meter.ts'
 import { useMotion } from './motion.ts'
 
@@ -287,6 +288,28 @@ export function useElapsed(since: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
+/**
+ * A scheduled task's line: when it starts, and how long until then, counted again as you read it ("Starts Tomorrow
+ * 9:00 · in 6h"); once its time has come, "Starts now", until its first turn takes that row's line over.
+ */
+function ScheduledLine({ t }: { t: Task }) {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const x = setInterval(() => tick((n) => n + 1), 20_000)
+    return () => clearInterval(x)
+  }, [])
+  const left = (t.scheduled ?? 0) - Date.now()
+  // its time has come and its first turn has not taken the line over yet: "Starts now" alone says it
+  if (left <= 0) return <>{t.sub}</>
+  return (
+    <>
+      {t.sub}
+      <span className="text-fg3"> · </span>
+      <span className="whitespace-nowrap tabular-nums text-fg3">in {span(left)}</span>
+    </>
+  )
+}
+
 const STEP = 5 // a 3px bar and a 2px gap, like the small wave
 const EVERY = 70 // ms per new bar
 
@@ -468,7 +491,8 @@ export const rowReport = (t: Task) => (t.status === 'work' ? t.report : undefine
  */
 export function taskLine(t: Task, where?: string[]): ReactNode {
   const w = rowReport(t)
-  const line = w ? <ReportLine w={w} /> : t.sub
+  // a task waiting for its time counts down as you read it, rather than a line that ages
+  const line = w ? <ReportLine w={w} /> : t.status === 'scheduled' && t.scheduled ? <ScheduledLine t={t} /> : t.sub
   // where it is leads, or else its pull request's number, small: the link itself is in its chat's header
   const parts = [...(where?.length ? where : t.pr ? [`PR #${t.pr.number}`] : []), ...(t.base ? [`→ ${t.base}`] : [])]
   const lead = parts.length ? (
@@ -505,6 +529,7 @@ const STATUS_WORD: Record<Status, string> = {
   merging: 'Merging',
   work: 'Working',
   idle: 'Stopped',
+  scheduled: 'Scheduled',
   queued: 'Queued',
   todo: 'To do',
   done: 'Done',

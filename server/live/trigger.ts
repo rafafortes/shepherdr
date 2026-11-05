@@ -4,6 +4,7 @@
 // sets it off (a task added, ready, gone wrong…), each with optional filters (space, branch, title). Humans never write
 // either: the coordinator writes them from plain words, and everywhere they are shown in words with the next runs.
 import { RRule, rrulestr, type Frequency, type Weekday } from 'rrule'
+import { instant, wall } from '../../shared/when.ts'
 
 export type TriggerEvent = 'added' | 'ready' | 'failed' | 'needs-you' | 'merged' | 'stalled' | 'main-red' | 'health'
 export const EVENTS: TriggerEvent[] = ['added', 'ready', 'failed', 'needs-you', 'merged', 'stalled', 'main-red', 'health']
@@ -105,22 +106,8 @@ function parse(kept: string) {
   return set as import('rrule').RRuleSet
 }
 
-/** an instant as the wall clock in a zone shows it, as a Date whose UTC fields are that wall clock */
-function wall(at: number, zone: string): Date {
-  const f = new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
-  const p = Object.fromEntries(f.formatToParts(new Date(at)).map((x) => [x.type, Number(x.value)]))
-  return new Date(Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second))
-}
-
-/** the instant a wall-clock time (UTC fields) is in a zone; a time the clocks skip is the one an hour later */
-function instant(w: Date, zone: string): number {
-  const guess = w.getTime()
-  const off = wall(guess, zone).getTime() - guess
-  let at = guess - off
-  const off2 = wall(at, zone).getTime() - at
-  if (off2 !== off) at = guess - off2
-  return at
-}
+// wall and instant (a wall clock time in a zone, and back) live in shared/when.ts, where a scheduled task's plain words
+// are read too: one way of reading a clock, for both.
 
 /** the next runs of a time rule after an instant, in a zone (at most n); none once it is over or off */
 export function nextRuns(kept: string | undefined, zone: string, after = Date.now(), n = 1): number[] {

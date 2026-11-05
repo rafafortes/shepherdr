@@ -79,8 +79,10 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
       if (o.boot) outbox.push(s.key)
       return null
     },
-    send: async (key: string, text: string) => {
+    send: async (key: string, text: string, o?: { ensure?: () => Promise<unknown> }) => {
       sent.push({ key, text })
+      // as the real ones: a task with no agent up starts it first, and the text goes in once it is there
+      if (!status[key] || status[key] === 'gone') await o?.ensure?.().catch(() => undefined)
       return { waiting: false, item: {} }
     },
     status: (key: string) => status[key] ?? 'gone',

@@ -79,7 +79,7 @@ const agent = (task: string, cli: string, status: TaskAgent['status'], age: stri
   note,
 })
 
-export const STATE_LABEL = { need: 'Needs you', ready: 'Ready', merging: 'Merging', work: 'Working', queued: 'Queued', todo: 'To do', done: 'Done' } as const
+export const STATE_LABEL = { need: 'Needs you', ready: 'Ready', merging: 'Merging', work: 'Working', scheduled: 'Scheduled', queued: 'Queued', todo: 'To do', done: 'Done' } as const
 
 export function tasks(): Task[] {
   const list: Omit<Task, 'state' | 'on' | 'created'>[] & Partial<Task>[] = [
