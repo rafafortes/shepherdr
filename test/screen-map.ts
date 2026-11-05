@@ -1,10 +1,10 @@
 // Which lines of the screen's code each browser test file runs, so a change to the screen runs only the browser tests
 // that reach the changed lines (scripts/test.ts), not all of them.
 //
-// Recorded on GitHub, on every push to main, by each test shard (bun run test --shard=1/3 --map): each page a browser
-// test opens notes which of the built screen's functions ran, and the build's source maps turn them into lines of src/
-// and plugins/. A test run here fetches the newest map from there, the shards' maps as one (and keeps it in the repo's
-// .git, for every worktree), then sets the lines that changed since the map's commit against it:
+// Recorded on GitHub, on every push to the default branch, by each test shard (bun run test --shard=1/3 --map): each
+// page a browser test opens notes which of the built screen's functions ran, and the build's source maps turn them into
+// lines of src/ and plugins/. A test run here fetches the newest map from there, the shards' maps as one (and keeps it
+// in the repo's .git, for every worktree), then sets the lines that changed since the map's commit against it:
 //   - a line in a function: the test files that ran that function
 //   - a whole new function: none by itself (whatever calls it changed too)
 //   - types, imports, comments: none (they don't run)
@@ -166,8 +166,16 @@ export const readMap = (file: string): ScreenMap | null => {
   }
 }
 
-/** the newest map: the one kept here, after asking GitHub (at most every 10 minutes) for the one its last check of main
- *  made. Null when there is none, or its commit can't be found here. */
+/** the branch the Check workflow runs on: the repo's default branch, which origin/HEAD names (`herdr-tui` in this
+ *  fork, `main` upstream); `main` here only mirrors upstream. */
+export function checkBranch(cwd = root) {
+  const r = Bun.spawnSync(['git', 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { cwd, stdout: 'pipe', stderr: 'pipe' })
+  const name = r.success ? r.stdout.toString().trim().replace(/^origin\//, '') : ''
+  return name && name !== 'HEAD' ? name : 'main'
+}
+
+/** the newest map: the one kept here, after asking GitHub (at most every 10 minutes) for the one its last check of the
+ *  default branch made. Null when there is none, or its commit can't be found here. */
 export function screenMap(): ScreenMap | null {
   if (process.env.SHEPHERDR_SCREEN_MAP) return readMap(process.env.SHEPHERDR_SCREEN_MAP)
   const file = mapFile()
@@ -185,7 +193,7 @@ export function screenMap(): ScreenMap | null {
       const r = Bun.spawnSync(['gh', ...args], { cwd: root, env, stdout: 'pipe', stderr: 'pipe', timeout: 20_000 })
       return r.success ? r.stdout : null
     }
-    const runs = JSON.parse(gh('run', 'list', '--workflow', 'check.yml', '--branch', 'main', '--event', 'push', '--status', 'success', '--limit', '1', '--json', 'databaseId,headSha')?.toString() || '[]') as { databaseId: number; headSha: string }[]
+    const runs = JSON.parse(gh('run', 'list', '--workflow', 'check.yml', '--branch', checkBranch(), '--event', 'push', '--status', 'success', '--limit', '1', '--json', 'databaseId,headSha')?.toString() || '[]') as { databaseId: number; headSha: string }[]
     if (runs[0] && runs[0].headSha !== map?.commit) {
       const tmp = `${file}.${process.pid}`
       const parts = join(tmp, 'parts')

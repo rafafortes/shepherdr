@@ -2,15 +2,15 @@
 //
 //   bun run test                  everything; skipped when it already passed on this very commit with nothing changed
 //   bun run test --force          everything, even then
-//   bun run test changed          only the tests that reach what changed from main (committed or not)
+//   bun run test changed          only the tests that reach what changed from the default branch (committed or not)
 //   bun run test engine layout    only the test files whose path has these words
 //   bun run test changed --since=HEAD   only what changed since that commit (here: not committed yet)
 //   bun run test changed --list   which test files would run, without running them
 //   bun run test --map            and note which lines of the screen each browser test runs (screen-map.ts)
 //
-// A change to the screen runs only the browser tests that run the lines it changed, by the map GitHub makes on main
-// (screen-map.ts); every one where there is no map yet, or for a change to the whole screen (styles.css). All the
-// browser tests of a run share one browser (test/chromium.ts).
+// A change to the screen runs only the browser tests that run the lines it changed, by the map GitHub makes on the
+// default branch (screen-map.ts); every one where there is no map yet, or for a change to the whole screen
+// (styles.css). All the browser tests of a run share one browser (test/chromium.ts).
 //
 // Any other flag goes to bun test as it is (-t <pattern>, --bail, --rerun-each=3, --shard=2/6 as GitHub runs it). SHEPHERDR_TEST_JOBS sets how many
 // processes run at once.
@@ -83,16 +83,17 @@ function reach(test: string, seen = new Set<string>(), screen = true): Set<strin
 /** a file reached is this one, or a folder holding it */
 const reaches = (set: Set<string>, file: string) => set.has(file) || [...set].some((p) => file.startsWith(`${p}/`))
 
-/** what changed from main: commits on this branch, and what is not committed yet */
+/** what changed from the default branch: commits on this branch, and what is not committed yet */
 function changedFiles(since?: string) {
   const fail = (why: string) => {
     console.error(why)
     process.exit(1)
   }
   if (since && !git('rev-parse', '--verify', '--quiet', `${since}^{commit}`)) fail(`No commit ${since} to compare with.`)
-  const main = ['main', 'origin/main'].find((b) => git('rev-parse', '--verify', '--quiet', `${b}^{commit}`))
-  const base = since ?? (main ? git('merge-base', 'HEAD', main) : '')
-  if (!base) fail("Can't find main (or origin/main) to compare with: name a commit with --since=<ref>.")
+  // origin/HEAD names the default branch: `herdr-tui` in this fork, `main` upstream, which main only mirrors here
+  const onto = ['origin/HEAD', 'origin/main', 'main'].find((b) => git('rev-parse', '--verify', '--quiet', `${b}^{commit}`))
+  const base = since ?? (onto ? git('merge-base', 'HEAD', onto) : '')
+  if (!base) fail("Can't find the default branch (origin/HEAD, or main) to compare with: name a commit with --since=<ref>.")
   return [...new Set([...lines(git('diff', '--name-only', base)), ...lines(git('ls-files', '--others', '--exclude-standard'))])]
 }
 
@@ -265,5 +266,5 @@ if (code === 0 && whole && commit && clean && git('rev-parse', 'HEAD') === commi
   writeFileSync(passed, JSON.stringify({ commit, at: Date.now(), summary: `${ran} in ${secs}s` }))
 }
 const shard = flags.find((f) => f.startsWith('--shard='))?.slice('--shard='.length)
-console.log(`${code === 0 ? 'Passed' : 'Failed'} in ${secs}s${whole ? '' : shard ? ` (shard ${shard} of the suite)` : ' (part of the suite: GitHub runs it all on main)'}`)
+console.log(`${code === 0 ? 'Passed' : 'Failed'} in ${secs}s${whole ? '' : shard ? ` (shard ${shard} of the suite)` : ' (part of the suite: GitHub runs it all after each merge)'}`)
 process.exit(code)

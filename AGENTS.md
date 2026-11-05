@@ -24,8 +24,9 @@ The operator's fork, used on their desktop since 2026-11-04 (herdr installs the 
   `herdr-plugin.toml` carry the same version. The desktop moves to it with
   `herdr plugin install rafafortes/shepherdr --ref <tag> --yes`, then the plugin's start action swaps the running
   server.
-- **Tests.** The Check workflow runs on pushes to `main` only, so nothing runs it for `herdr-tui` yet. Until that is
-  set up, run `bun run typecheck` and the tests of the files you changed (`nice -n 19 bun test <files>`).
+- **Tests.** The Check workflow runs on every pull request into `herdr-tui` and on every push to it (a merge), so a
+  task sees its own run on its pull request; a change of docs only skips it, and `main` gets no run. On this machine
+  run only `bun run typecheck` (Tests, below).
 - Nothing of the operator's host goes into this repository: settings, secrets, hosts and paths stay in
   `~/.shepherdr` and the operator's own tools.
 
@@ -55,12 +56,15 @@ rule, it is repeated in every `CLAUDE.md`, `AGENTS.md` and `GEMINI.md` of the op
   merge, run only `bun run typecheck` (seconds). Don't run `bun run test`, `bun test`, `bun run test changed`,
   `bun run check` or any browser test here.
 - Check what you changed on the screen by hand in your shared browser, for the proof.
-- GitHub runs the whole check (types, every test with the browser tests, the build) after each merge: the Check
-  workflow (`.github/workflows/check.yml`) on every push to main, not on pull requests. A red main reaches the
+- GitHub runs the whole check (types, every test with the browser tests, the build) on every pull request into
+  `herdr-tui` and again on every push to it (a merge): the Check workflow (`.github/workflows/check.yml`), which skips
+  the pull requests and the pushes that change only docs (its `paths-ignore`). A red `herdr-tui` reaches the
   coordinator, who has it fixed forward. A failure's log is `gh run view <run> --log-failed`.
-- Running the whole check on your branch before merging, `gh workflow run check.yml --ref <branch>` then
-  `gh run watch`, is for rare cases only (a review asks for it, or the change is to the tests' own setup): it costs
-  Actions minutes.
+- It spends the operator's Actions minutes: about 15 billed a run (four jobs, each rounded up: about 1 for the types
+  and the build, 2 to 7 per test shard). Every push to a pull request runs it all again.
+- A branch with no pull request can still be checked by hand, `gh workflow run check.yml --ref <branch>` then
+  `gh run watch`: it costs the same, so only for rare cases (a review asks for it, or the change is to the tests' own
+  setup).
 - Still write tests with your change: GitHub runs them. A new browser test goes in the `layout-*.test.ts` file of its
   topic (setup in `test/layout.ts`); split a file that grows past about 20 s.
 - If someone runs tests here by hand anyway, they run at the lowest priority and never touch `~/.shepherdr`.
