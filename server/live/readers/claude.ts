@@ -5,6 +5,7 @@
 // log, subagents/agent-<id>.jsonl beside the session's: read with `sub`).
 import { basename, dirname, join } from 'node:path'
 import { isCommand } from '../commands.ts'
+import { fromAgent } from '../chatlines.ts'
 import { testResult } from '../../../shared/activity.ts'
 import { claudeStep, toolName } from './steps.ts'
 import type { CliQuestionItem, LogEvent, Reader } from './types.ts'
@@ -129,6 +130,16 @@ function isHumanLine(l: Json): boolean {
   return !kind || kind === 'human'
 }
 
+/**
+ * A message another agent sent this one, as Claude Code logs it (origin.kind "peer"): its own cross-session messaging,
+ * or the envelope herdr's messaging writes. A subagent's hand-back is wrapped in one too, but it is a report to its own
+ * session, not a message between agents: it stays out of the chat, as it did before.
+ */
+function peerLine(text: string): string | undefined {
+  const p = fromAgent(text)
+  return p && !/^\[Subagent hand-back\]/.test(p.text) ? text : undefined
+}
+
 function questionItems(input: Json): CliQuestionItem[] {
   const qs: Json[] = Array.isArray(input?.questions) ? input.questions : []
   return qs.map((q) => ({
@@ -222,6 +233,15 @@ export class ClaudeReader implements Reader {
         if (!l.isSidechain && l.origin?.kind === 'task-notification') this.over(typeof c === 'string' ? c : '', s, out, t)
         // a background job (a subagent, a shell) that finished wakes the agent into a turn of its own
         if (!l.isSidechain && l.origin?.kind === 'task-notification') turnStart(`start-${l.uuid ?? offset}`, t)
+        // another agent's message: a row of its own, named by what it wrote (chatlines.fromAgent)
+        if (!l.isSidechain && l.origin?.kind === 'peer') {
+          const peer = peerLine(typeof c === 'string' ? c : '')
+          if (peer) {
+            turnStart(`start-${l.uuid ?? offset}`, t)
+            out.push({ kind: 'peer', id: String(l.uuid ?? `u${offset}`), at: t, text: peer })
+            continue
+          }
+        }
         if (!isHumanLine(l)) continue
         // the human pressed Esc: the turn is over
         if (interrupted(c)) turnEnd(`turn-${l.uuid ?? offset}`, t)
@@ -243,6 +263,15 @@ export class ClaudeReader implements Reader {
         // a prompt typed while the agent was busy and taken in mid-turn: it never shows up as a user line
         const a = l.attachment
         if (!l.isSidechain && a.commandMode === 'task-notification' && typeof a.prompt === 'string') this.over(a.prompt, s, out, Date.parse(a.timestamp ?? '') || t)
+        // another agent's message, taken in mid-turn (Claude Code keeps it as a queued command)
+        if (!l.isSidechain && a.origin?.kind === 'peer' && typeof a.prompt === 'string') {
+          const peer = peerLine(a.prompt)
+          if (peer) {
+            turnStart(`start-${l.uuid ?? offset}`, t)
+            out.push({ kind: 'peer', id: String(l.uuid ?? `u${offset}`), at: Date.parse(a.timestamp ?? '') || t, text: peer })
+            continue
+          }
+        }
         if (l.isSidechain || a.commandMode !== 'prompt' || (a.origin?.kind && a.origin.kind !== 'human')) continue
         const words = userContent(a.prompt)
         if (words) out.push({ kind: 'user', id: String(l.uuid), at: Date.parse(a.timestamp ?? '') || t, text: words })

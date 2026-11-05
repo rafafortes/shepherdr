@@ -2,10 +2,10 @@
 // posts (update cards, choice cards, plans, artifacts, merge cards) kept in its own small log per chat.
 import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { apart, cardMessage, type ActivityAnswer, type ActivityAsk, type Chat, type ChatControls, type ArtifactPost, type Job, type Message, type Question, type Reaction, type SecretAsk, type UpdateCard } from '../../shared/types.ts'
+import { apart, cardMessage, type ActivityAnswer, type ActivityAsk, type Chat, type ChatControls, type ArtifactPost, type Job, type Message, type Peer, type Question, type Reaction, type SecretAsk, type UpdateCard } from '../../shared/types.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
 import { stripHidden, type Agents, type OutItem } from './agents.ts'
-import { agentLines, excerpt, findQuoted, markerSoFar, parseBrowserNotes, parseReply, parseUserLine, userLines, type Parsed } from './chatlines.ts'
+import { agentLines, excerpt, findQuoted, fromAgent, markerSoFar, parseBrowserNotes, parseReply, parseUserLine, userLines, type FromAgent, type Parsed } from './chatlines.ts'
 import { shortUrl } from '../../shared/browser.ts'
 import { herdr } from './herdr.ts'
 import { logKind } from './readers/find.ts'
@@ -51,8 +51,9 @@ export function turnOf(ev: LogEvent[], sent: { at: number }[]): { kind: 'yours' 
   const now = ev.slice(end + 1)
   const start = now.find((e) => e.kind === 'turn-start')
   if (!start) return { kind: 'over' }
-  // yours once a message of yours is in it, even one taken in mid-turn
-  return now.some((e) => e.kind === 'user' && yours(e.text)) ? { kind: 'yours' } : { kind: 'own', id: start.id }
+  // yours once a message of yours is in it, even one taken in mid-turn; another agent's message is one the agent will
+  // answer just the same
+  return now.some((e) => (e.kind === 'user' && yours(e.text)) || e.kind === 'peer') ? { kind: 'yours' } : { kind: 'own', id: start.id }
 }
 
 /** a reply you will see that already landed in the agent's own turn (a hidden <no-reply> is none) */
@@ -135,7 +136,7 @@ export function rememberReply(line: string, id: string) {
 function hostFor(msgs: Message[], at: number, p: { question?: unknown; artifact?: unknown }, hosting: Set<Message>): Message | undefined {
   for (const m of msgs) {
     if ((m.at ?? 0) < at - 1000) continue
-    if (m.who === 'you') return undefined
+    if (m.who !== 'agent') return undefined
     if (m.text && !m.card && !(p.question && m.question) && !(p.artifact && hosting.has(m))) return m
   }
   return undefined
@@ -174,6 +175,8 @@ export class Chats {
     private agents: Agents,
     private nameOf: (key: string) => string,
     private user: () => string,
+    /** who a message from another agent says it is, as this machine can name it (live/source.ts: our own name for it) */
+    private whoOf: (p: FromAgent) => Peer = (p) => ({ name: p.name }),
   ) {}
 
   /* ---------- Shepherdr's own log per chat ---------- */
@@ -502,7 +505,7 @@ export class Chats {
   /** its log shows a turn since this time: a start became an agent at work, whatever its screen says */
   begunSince(key: string, at: number): boolean {
     this.pull(key)
-    return (this.events.get(key) ?? []).some((e) => e.at >= at && (e.kind === 'turn-start' || e.kind === 'user' || e.kind === 'agent' || e.kind === 'turn-end'))
+    return (this.events.get(key) ?? []).some((e) => e.at >= at && (e.kind === 'turn-start' || e.kind === 'user' || e.kind === 'peer' || e.kind === 'agent' || e.kind === 'turn-end'))
   }
 
   /**
@@ -617,7 +620,7 @@ export class Chats {
       const id = line && replied.get(words(line))
       const m = (id && msgs.find((x) => x.id === id)) || byText(quoted, path)
       if (!m) return { text: quoted.replace(/”/g, '"') }
-      return { id: m.id, who: m.who, text: m.text ? excerpt(m.text, 160) : (m.file?.name ?? ''), ...(m.text ? {} : { file: true }) }
+      return { id: m.id, who: m.who, ...(m.peer ? { from: m.peer.name } : {}), text: m.text ? excerpt(m.text, 160) : (m.file?.name ?? ''), ...(m.text ? {} : { file: true }) }
     }
     const addRx = (m: Message | undefined, emoji: string, who: 'me' | 'them', on: boolean, pending = false) => {
       if (!m) return
@@ -647,9 +650,23 @@ export class Chats {
         if (sessions++) newSession = true
         continue
       }
+      // another agent's message, as its CLI's log marks it: a row of its own naming the sender it declared
+      if (e.kind === 'peer') {
+        const p = fromAgent(e.text) ?? { name: 'Another agent', text: e.text }
+        msgs.push({ id: e.id, who: 'peer', at: e.at, text: p.text, peer: this.whoOf(p), newSession: newSession || undefined })
+        newSession = false
+        continue
+      }
       if (e.kind === 'user') {
         const text = stripHidden(e.text)
         if (!text) continue
+        // another agent's message: a row of its own naming the sender it declared (never the human's words)
+        const from = fromAgent(text)
+        if (from) {
+          msgs.push({ id: e.id, who: 'peer', at: e.at, text: from.text, peer: this.whoOf(from), newSession: newSession || undefined })
+          newSession = false
+          continue
+        }
         // a reply: its words, then its files; notes from the shared browser show short: each element and its note
         const bn = parseBrowserNotes(text)
         const r = bn ? null : parseReply(text)
@@ -791,6 +808,12 @@ export class Chats {
         const m = msgs.find((x) => x.id === o.reaction!.message)
         addRx(m, o.reaction.emoji, 'me', parseUserLine(o.text)?.kind !== 'unreact', true)
       } else {
+        // a message from another agent waiting to go in says who sent it here too, exactly as it will in the log
+        const from = fromAgent(stripHidden(o.text))
+        if (from) {
+          msgs.push({ id: o.id, who: 'peer', at: o.at, text: from.text, peer: this.whoOf(from), waiting: true, waitsFor })
+          continue
+        }
         const files: { name: string; path: string }[] = []
         const r = parseReply(o.text)
         const reply = r ? replyTo(r.to, undefined, r.line, r.artifact) : undefined

@@ -19,6 +19,7 @@ import { ROOT } from '../../root.ts'
 import { has } from '../../plugins.ts'
 import { browserEnv } from '../browser.ts'
 import { hidden, ROUTING_FAILURE, type Agents, type Spec } from '../agents.ts'
+import { fromAgentLine } from '../chatlines.ts'
 import type { Chats } from '../chats.ts'
 import { HOST, placeId, type Places, type Space } from '../places.ts'
 import { privatePrompt, freshLine, goLine, handOverLine, restartLine, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
@@ -342,6 +343,9 @@ const BRIEF_WAIT = 120_000
 
 /** what a task for later (task add --later) is told: its agent reads the brief and waits for a go */
 const LATER = "Don't start yet: wait for a go."
+
+/** who a `task tell` comes from, when an agent's own shell runs it: what it says about itself (chatlines.FromAgent) */
+export type TellFrom = { name: string; pane?: string; space?: string; task?: string }
 
 export class Engine extends Emitter<Events> {
   /** the folder its files are in, taken when it is made: a test's world keeps its own, whatever comes after it */
@@ -2116,10 +2120,13 @@ export class Engine extends Emitter<Events> {
   /**
    * A message to a task (task tell, or yours in its chat). `gate`: a coordinator's go to a task that waits (To do, or
    * held) waits for room on this machine; it says so. Yours always goes in at once. One queued after other tasks gets
-   * it at once and stays queued: its agent clears the queue itself if the words are a go.
+   * it at once and stays queued: its agent clears the queue itself if the words are a go. `from`: another agent sent it
+   * (its shell ran the command), so its agent reads who it came from, and the chat draws it as that agent's message.
    */
-  async tell(id: string, text: string, { gate = false } = {}): Promise<{ held?: 'slots' | 'machine' }> {
+  async tell(id: string, text: string, { gate = false, from }: { gate?: boolean; from?: TellFrom } = {}): Promise<{ held?: 'slots' | 'machine' }> {
     const t = this.req(id)
+    // what its agent reads: another agent's message says who sent it, in herdr's own envelope (chatlines.fromAgent)
+    const said = from ? fromAgentLine({ ...from, to: `${t.id} agent` }, text) : text
     // a stopped task is no wait for room: its agent is closed, and the words start it again where it is
     const waits = (this.statusOf(t) === 'todo' && !t.stopped) || this.holding(t)
     const r = gate && waits && !ended(t) ? this.room() : {}
@@ -2127,21 +2134,21 @@ export class Engine extends Emitter<Events> {
       if (!t.worktree) {
         // its brief takes the words, as below; it starts on it once there's room
         const [work, how] = splitBrief(t.desc)
-        t.desc = [work, text, how].filter(Boolean).join('\n\n')
+        t.desc = [work, said, how].filter(Boolean).join('\n\n')
         this.hold(t, r.why)
-      } else this.hold(t, r.why, { text: t.held?.go ? `${t.held.go}\n\n${text}` : text, why: 'its coordinator said go', plain: true })
+      } else this.hold(t, r.why, { text: t.held?.go ? `${t.held.go}\n\n${said}` : said, why: 'its coordinator said go', plain: true })
       return { held: r.why }
     }
     if (!t.worktree && !this.starting.has(t.id)) {
       // above the defaults Shepherdr ended the brief with, so it wins over them like the rest of the brief
       const [work, how] = splitBrief(t.desc)
-      t.desc = [work, text, how].filter(Boolean).join('\n\n')
+      t.desc = [work, said, how].filter(Boolean).join('\n\n')
       // a message is the go, as for one at work
       t.held = undefined
       await this.startTask(t)
       return {}
     }
-    await this.agents.send(this.key(t), text, { ensure: () => this.launch(t) })
+    await this.agents.send(this.key(t), said, { ensure: () => this.launch(t) })
     this.youWrote(this.key(t))
     return {}
   }

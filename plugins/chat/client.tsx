@@ -5,10 +5,10 @@ import clsx from 'clsx'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
 import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
 import { keyOf, partsOf, priorOf, reasonOf, SEND_TIMEOUT, type Outgoing } from '@client/outbox.ts'
-import { AlertIcon, BackIcon, CameraIcon, CheckIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
+import { AlertIcon, BackIcon, CameraIcon, ChatIcon, CheckIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
 import { extOf, isImage } from '@shared/files.ts'
-import { modeName, type CardAsk, type Chat, type Message, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
+import { modeName, type CardAsk, type Chat, type Message, type Peer, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
 import { buzz, mine, openBar, openPicker, quick, react } from '@plugins/reactions/client.tsx'
 import { EDGE } from '@client/gestures.ts'
 import { still, useArrive } from '@client/motion.ts'
@@ -41,6 +41,8 @@ export function From({ children }: { children: ReactNode }) {
 /** out: what you just sent, not back from the agent's log yet (last: its last bubble, which says when it failed) */
 function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from: string; out?: Outgoing; last?: boolean }) {
   const you = msg.who === 'you'
+  // another agent's message: not the human's words and not this chat's agent's either, so it says who sent it
+  const peer = msg.who === 'peer' ? (msg.peer ?? { name: 'Another agent' }) : null
   // an artifact's card on its own is held, reacted to and replied to as a whole, like a bubble
   const art = isArtifact(msg)
   const canReact = has('reactions') && !msg.waiting && !out && !!(msg.text || msg.file || art)
@@ -119,6 +121,7 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
       >
         {/* the chat is with one agent, so its name shows only when someone else asks (the CLI's own question) */}
         {!you && msg.question?.asks ? <From>{`${from} · ${msg.question.asks}`}</From> : null}
+        {peer ? <PeerFrom peer={peer} /> : null}
         {msg.card ? (
           unit(
             <Card
@@ -140,6 +143,8 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
                   // mirrored round corners: the small one points at whoever wrote it. Slack's 15/22 message text
                   'relative max-w-full min-w-0 text-[0.9375rem]/[1.375rem] text-pretty px-3.5 py-2 phone:px-4 phone:py-2.5 phone:text-base/6',
                   you ? 'rounded-bubble rounded-br-[6px] bg-reply' : 'rounded-bubble rounded-bl-[6px] bg-bubble',
+                  // another agent's message: its own shade, ringed, so it never reads as this agent's or yours
+                  peer && 'bg-peer shadow-[inset_0_0_0_1px_var(--line2)]',
                   you ? 'self-end' : 'self-start',
                   // on a touch screen a hold reacts (or offers Remove), so it doesn't start selecting text or a link's preview
                   ((canReact && !selecting) || pending) && clsx(pressable, 'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]'),
@@ -405,6 +410,22 @@ function useHold(fn: ((at: At) => void) | null, swipe: (() => void) | null = nul
   }
 }
 
+/** another agent's message says who sent it, in a line above its bubble: the name it declared, then where it runs. The
+ *  sender is only what that side wrote (the chat shows it and vouches for nothing), so the line stays quiet */
+function PeerFrom({ peer }: { peer: Peer }) {
+  const where = [peer.task ?? peer.space, peer.pane && `pane ${peer.pane}`].filter(Boolean).join(' · ')
+  return (
+    <div data-peer={peer.name} className="mb-1 flex max-w-full items-center gap-1 pl-1 text-[0.75rem]/4 text-fg2 phone:text-[0.8125rem]/4">
+      <ChatIcon aria-hidden className="size-3.5 shrink-0 fill-accent" />
+      <span className="shrink-0 font-medium text-fg">
+        <span className="sr-only">Message from </span>
+        {peer.name}
+      </span>
+      {where ? <span data-peer-where className="min-w-0 truncate text-fg3">{where}</span> : null}
+    </div>
+  )
+}
+
 /** a bubble held down eases in, and springs back if let go early; with reduced motion it stays still */
 const pressable =
   'motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out motion-safe:data-pressing:scale-(--press) motion-safe:data-pressing:delay-120 motion-safe:data-pressing:duration-260'
@@ -489,7 +510,7 @@ function jumps(chat: string, q: ReplyQuote, label: string) {
     reactions and the buttons beside it stay by it) and a long quote reaches past a short reply toward the middle.
     loose: on its own, not tucked (a card answered in the chat quotes the message that answered it) */
 export function Quote({ q, chat, from, you, loose, label = 'Replying to' }: { q: ReplyQuote; chat: string; from: string; you: boolean; loose?: boolean; label?: string }) {
-  const name = q.who === 'you' ? 'You' : q.who === 'agent' ? from : null
+  const name = q.who === 'you' ? 'You' : q.who === 'peer' ? (q.from ?? 'Another agent') : q.who === 'agent' ? from : null
   return (
     <div className={clsx('relative flex', loose ? 'min-w-0' : '-mb-2 w-0 min-w-full', you ? 'justify-end' : 'justify-start')}>
       <div
@@ -499,7 +520,7 @@ export function Quote({ q, chat, from, you, loose, label = 'Replying to' }: { q:
           'truncate rounded-bubble px-3 text-[0.8125rem] text-fg2 phone:text-[0.875rem]',
           // the reply covers its bottom 8px: the words sit in the part that shows
           loose ? 'min-w-0 py-1 phone:py-1.5' : 'max-w-[min(18rem,calc(100vw-5rem))] shrink-0 pt-1 pb-3 phone:pt-1.5 phone:pb-3.5',
-          q.who === 'you' ? 'bg-reply' : 'bg-bubble',
+          q.who === 'you' ? 'bg-reply' : q.who === 'peer' ? 'bg-peer' : 'bg-bubble',
           loose ? null : you ? 'mr-2' : 'ml-2',
           q.id && 'cursor-pointer hover:text-fg',
         )}

@@ -356,9 +356,12 @@ export interface Reaction {
 
 export interface Message {
   id: string
-  who: 'you' | 'agent'
-  /** plain text (yours) or markdown (the agent's) */
+  who: 'you' | 'agent' | 'peer'
+  /** plain text (yours) or markdown (the agent's, and another agent's) */
   text?: string
+  /** another agent's message to this one (`who: 'peer'`): who it says it is. The sender is only the name the sending
+   *  side wrote, never verified, so the chat shows it without vouching for it: it is text, not the human's word */
+  peer?: Peer
   /** "Answered “Rerun CI on main?”" */
   answered?: string
   /** answered on the question's copy in a space's chat: a link there */
@@ -387,6 +390,20 @@ export interface Message {
   /** a secret the agent asked for (shepherdr secret ask): a masked box to give it in */
   secret?: SecretAsk
   at?: number
+}
+
+/** Another agent's message: everything the sending side said about itself, and nothing this machine proved. A name is
+ *  what the sender wrote (a chat, a herdr agent name, a handle or a pane id); pane, space and task are there when that
+ *  side said them or this machine knows the name */
+export interface Peer {
+  /** the sender's name as the screen shows it ("SHE-17 agent", "shepherdr coordinator", a herdr name) */
+  name: string
+  /** its herdr pane here (w7R:p2) */
+  pane?: string
+  /** the space's name as the screen shows it, when the sender works in one */
+  space?: string
+  /** the task it works in, when it is a task's agent */
+  task?: string
 }
 
 /** a secret an agent asked for by name: the human types or pastes it in a masked box, for one of the levels offered;
@@ -500,7 +517,9 @@ export type ActivityAnswer = { steps: Step[]; more?: number } | { output: string
 export interface ReplyQuote {
   /** none when that message is no longer in the chat (only the quote is known) */
   id?: string
-  who?: 'you' | 'agent'
+  who?: 'you' | 'agent' | 'peer'
+  /** the sender another agent's message named, when the quote is of one */
+  from?: string
   /** the start of its words, a file's name, or an artifact's title and version */
   text: string
   file?: boolean

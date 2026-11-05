@@ -9,7 +9,7 @@ import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { BODY_MAX, clip, lastReply, openCards, taskAlert, TITLE_MAX } from '../../shared/alerts.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, sortPlaces } from '../../shared/order.ts'
-import { asEmoji, doneNewestFirst, modeCard, NAME_MAX, nameProblem, slugify, STATUS_MAX, type Action, type ActivityAnswer, type ActivityAsk, type AddSpace, type Alert, type Artifact, type CardAsk, type Chat, type RestartInfo, type Question, type Folders, type Machine, type Need, type Place, type Section, type Snapshot, type Task, type TaskStatus, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
+import { asEmoji, doneNewestFirst, modeCard, NAME_MAX, nameProblem, slugify, STATUS_MAX, type Action, type ActivityAnswer, type ActivityAsk, type AddSpace, type Alert, type Artifact, type CardAsk, type Chat, type RestartInfo, type Peer, type Question, type Folders, type Machine, type Need, type Place, type Section, type Snapshot, type Task, type TaskStatus, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
 import { Emitter, type Overview, type Source, type SourceEvents } from '../source.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
 import { ROOT } from '../root.ts'
@@ -23,7 +23,7 @@ import { Automations, type Automation, type Template } from './automations.ts'
 import { Heartbeats, heartbeatFile } from './heartbeat.ts'
 import { eventRules, eventsText, eventWords, matches, nextWords, runWords, timeRule, timeWords, triggerWords, type Happened, type TriggerEvent } from './trigger.ts'
 import { Browsers, type BrowserBridge, type BrowserClient } from './browser.ts'
-import { excerpt, line, tag } from './chatlines.ts'
+import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
 import { dictate as dictation } from './dictate.ts'
 import { age, checkTitle, ended, Engine, fitStatus, type TaskRec } from './engine/engine.ts'
@@ -76,7 +76,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   settings = new Settings()
   places = new Places()
   agents = new Agents()
-  chats = new Chats(this.agents, (k) => this.chatName(k), () => this.user)
+  chats = new Chats(
+    this.agents,
+    (k) => this.chatName(k),
+    () => this.user,
+    (p) => this.peerOf(p),
+  )
   engine = new Engine(this.agents, this.chats, this.places, this.settings)
   automations = new Automations()
   heartbeats = new Heartbeats()
@@ -2132,7 +2137,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       read: async (to) => {
         const t = resolve(to)
         const { chat: c, status: state } = await load(t)
-        return `${t.machine}:${t.name} is ${state === 'gone' ? 'not running' : state}.\n${c.messages.slice(-8).map((m) => `${m.who === 'you' ? this.user : t.name}: ${excerpt(m.text ?? m.question?.title ?? (m.artifact ? tag('artifact', { id: m.artifact.id, title: this.snapshot().artifacts.find((a) => a.id === m.artifact!.id)?.title ?? 'deleted' }) : ''), 300)}`).join('\n')}`
+        return `${t.machine}:${t.name} is ${state === 'gone' ? 'not running' : state}.\n${c.messages.slice(-8).map((m) => `${m.who === 'you' ? this.user : m.peer ? `${m.peer.name} (another agent)` : t.name}: ${excerpt(m.text ?? m.question?.title ?? (m.artifact ? tag('artifact', { id: m.artifact.id, title: this.snapshot().artifacts.find((a) => a.id === m.artifact!.id)?.title ?? 'deleted' }) : ''), 300)}`).join('\n')}`
       },
       overview: async () => {
         const s = this.snapshot()
@@ -2170,7 +2175,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /* ---------- the shepherdr command ---------- */
 
-  async cli(args: string[], ctx: { chat?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string }): Promise<{ out: string; code: number; secrets?: Record<string, string> }> {
+  async cli(args: string[], ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string }): Promise<{ out: string; code: number; secrets?: Record<string, string> }> {
     try {
       // the values themselves, for the shepherdr command to put in a command's environment or a file: never printed,
       // only with a worker-issued capability whose stored scope selects the secret chain
@@ -2210,6 +2215,39 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return `${name}${ctx.chat.includes('/') ? '' : ' (you asked in chat)'}`
   }
 
+  /**
+   * Who a `task tell` comes from, when an agent's own shell runs it: its chat (the launch's SHEPHERDR_CHAT), its herdr
+   * pane and the space or task it works in. A terminal without a chat sends nothing, so its words stay the human's.
+   * Declared, never verified: a shell can set both itself, which is why the chat shows the sender and grants it
+   * nothing.
+   */
+  private toldFrom(ctx: { chat?: string; pane?: string }): { name: string; pane?: string; space?: string; task?: string } | undefined {
+    if (!ctx.chat) return undefined
+    const [id, role] = ctx.chat.split('/')
+    const t = role ? this.engine.task(id) : undefined
+    const name = t ? `${t.id} ${role.toLowerCase()}` : ctx.chat.includes('/') ? this.chatName(ctx.chat) : `${this.chatName(ctx.chat)} coordinator`
+    return {
+      name,
+      ...(ctx.pane ? { pane: ctx.pane } : {}),
+      ...(t ? { task: t.id, space: this.chatName(t.project) } : { space: this.chatName(ctx.chat) }),
+    }
+  }
+
+  /**
+   * Who a message from another agent says it is: the name it declared, with our own name for it, its pane and the space
+   * or task it works in when the declared one is one of our agents' (a herdr agent name or pane id). Nothing more is
+   * looked up: it is still only what that side wrote.
+   */
+  private peerOf(p: FromAgent): Peer {
+    // our own line already says where it runs: the pane, the space and the task it wrote
+    if (p.pane || p.space || p.task) return { name: p.name, ...(p.pane ? { pane: p.pane } : {}), ...(p.space ? { space: p.space } : {}), ...(p.task ? { task: p.task } : {}) }
+    const key = Object.keys(this.agents.records).find((k) => this.agents.records[k].name === p.name || this.agents.info(k)?.pane_id === p.name)
+    if (!key) return { name: p.name }
+    const pane = this.agents.info(key)?.pane_id
+    const t = key.includes('/') ? this.engine.task(key.split('/')[0]) : undefined
+    return { name: this.chatName(key), ...(pane ? { pane } : {}), ...(t ? { task: t.id, space: this.chatName(t.project) } : { space: this.chatName(key) }) }
+  }
+
   /** a task's agent says how far along it is: shepherdr status <id> "<line>" --done <0-100> [--left 5m] */
   private reportCommand(id: string, words: string[], p: Parsed, ctx: { chat?: string }) {
     const t = this.engine.task(id)
@@ -2228,7 +2266,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return `Noted: ${t.id} shows "${r.msg}"${cut}, ${r.progress}% done${r.left !== undefined ? `, about ${r.left} min left` : ''}.`
   }
 
-  private async command(p: Parsed, ctx: { chat?: string; cwd?: string; stdin?: string }): Promise<string> {
+  private async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string }): Promise<string> {
     const [a0, a1, ...rest] = p.words
     if (!a0 || a0 === 'help' || p.flags.has('help')) return HELP
     switch (a0) {
@@ -2783,8 +2821,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return [`${v.id} ${v.name}`, `State: ${v.state}${statusLine(v) ? ` · ${statusLine(v)}` : ''}${v.pinned ? ' · pinned' : ''}`, `Added: ${v.created}`, v.branch ? `Branch: ${v.branch}` : '', v.base ? `Merges into: ${v.base}` : '', rounds, v.desc ? `\n${v.desc}` : ''].filter(Boolean).join('\n')
       }
       case 'tell': {
-        // a coordinator's go to a task that waits starts it only when this machine has room
-        const r = await this.engine.tell(t.id, rest.slice(1).join(' '), { gate: !ctx.chat?.includes('/') })
+        // a coordinator's go to a task that waits starts it only when this machine has room; a message an agent's own
+        // shell sends says who it came from, so the chat shows it as that agent's and never as the human's words
+        const r = await this.engine.tell(t.id, rest.slice(1).join(' '), { gate: !ctx.chat?.includes('/'), from: this.toldFrom(ctx) })
         if (r.held) return `${t.id} is held: ${r.held === 'slots' ? `all ${this.settings.machine().max} slots are taken` : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and gets your message when there's room, oldest first.`
         return `Told ${t.id}.`
       }

@@ -97,7 +97,10 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
   shepherdr task show <id> [--json]
   shepherdr task tell <id> "<text>"            from a coordinator, a go to a task that waits (To do, Queued) waits
                                                  too while the machine has no room (Settings → the machine), and it
-                                                 says so; Shepherdr hands it over once there's room
+                                                 says so; Shepherdr hands it over once there's room. Run from an
+                                                 agent's own shell, the message says which agent sent it (its
+                                                 chat, pane and space or task), and the chat shows it as that
+                                                 agent's, never as the human's words
   shepherdr task review-more <id>                only from the task's own coordinator, and only once it has used all
                                                  its Review rounds: exactly one more round, ever, and its agent is
                                                  told to run it. Only its coordinator adds one; a task's agent asks

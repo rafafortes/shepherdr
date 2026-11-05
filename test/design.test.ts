@@ -74,6 +74,12 @@ describe('one design across the screen', () => {
     // your bubbles' reply shade has a dark twin
     const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
     expect(css.match(/--reply:/g)?.length).toBe(2)
+    // another agent's message: a bubble of its own on the same side, in a third shade with its dark twin, naming the
+    // sender it declared above it (it is never the human's, and never this agent's either)
+    expect(css.match(/--peer:/g)?.length).toBe(2)
+    expect(bubble).toContain("peer && 'bg-peer shadow-[inset_0_0_0_1px_var(--line2)]'")
+    expect(chat).toMatch(/peer \? <PeerFrom peer=\{peer\} \/> : null/)
+    expect(chat).toMatch(/function PeerFrom\(\{ peer \}: \{ peer: Peer \}\)/)
     // inline code shows on either bubble's shade
     expect(css).toMatch(/& code \{[^}]*background: var\(--sel\)/)
   })

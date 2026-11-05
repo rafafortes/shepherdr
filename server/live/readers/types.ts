@@ -32,6 +32,10 @@ export type LogEvent =
   | { kind: 'session'; id: string; at: number; sessionId: string; file?: string }
   /** something the human (or Shepherdr on their behalf) typed */
   | { kind: 'user'; id: string; at: number; text: string }
+  /** a message another agent sent this one, as its CLI's log keeps it whole (the envelope the chat reads the sender
+   *  from: chatlines.fromAgent). Only a CLI whose log marks it as one sends this; a message with no mark is a `user`
+   *  line, and text, like the human's */
+  | { kind: 'peer'; id: string; at: number; text: string }
   /** a reply the agent wrote (markdown). Can come again with the same id and longer text when the CLI writes the rest
    * of that reply after a read: keep the latest per id. */
   | { kind: 'agent'; id: string; at: number; text: string }
