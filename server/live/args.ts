@@ -98,6 +98,9 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
   shepherdr task tell <id> "<text>"            from a coordinator, a go to a task that waits (To do, Queued) waits
                                                  too while the machine has no room (Settings → the machine), and it
                                                  says so; Shepherdr hands it over once there's room
+  shepherdr task review-more <id>                only from the task's own coordinator, and only once it has used all
+                                                 its Review rounds: exactly one more round, ever, and its agent is
+                                                 told to run it. A task's own agent never adds one itself
   shepherdr task stop <id>                       close its agent and herdr space; its work stays (a worktree with
                                                  unsaved or unmerged work is kept); writing to it starts it again
   shepherdr task close <id> [--summary "..."]    a task with nothing to merge: stop its agent, close its herdr space,
@@ -131,6 +134,9 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
 
 Task agents
   shepherdr todo <id>                            the brief says to wait for a go: show as To do until one comes
+  shepherdr review <id>                          count the review round you are starting: its brief's Review rounds
+                                                 at most, then say in your chat what is still unreviewed and end
+                                                 your turn (only your coordinator adds a round: task review-more)
   shepherdr ready <id> --summary "<what changed>" [--facts "<PR · commit · checks · review · not proven>"]
                                                  the summary at most ${SUMMARY_MAX} characters, in plain words for the
                                                  human (longer is refused); the facts go in the PR,

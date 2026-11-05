@@ -110,6 +110,13 @@ export interface TaskRec {
   /** shepherdr merge waits for GitHub's checks, as its brief's Settings block said when it was added (Settings, or
    *  task add --set); none: a task from before, which follows Settings as they are now */
   waitChecks?: boolean
+  /** the review rounds its brief's Settings block said when it was added (Settings, or task add --set); none: a task
+   *  from before, which follows its space's Settings as they are now */
+  rounds?: number
+  /** review rounds its agent has counted (shepherdr review): what the brief's at most so many are kept by */
+  reviews?: number
+  /** rounds its coordinator added past those (shepherdr task review-more): one at most, and never by its own agent */
+  reviewsAdded?: number
   /** what its agent last said of its own progress (shepherdr status): kept while it works or waits on you */
   report?: Reported
   /** its backup agent took over once its agent couldn't go on (retry.ts): from which CLI, to which, and why */
@@ -1053,6 +1060,7 @@ export class Engine extends Emitter<Events> {
       agent,
       reviewer,
       waitChecks: ways.waitChecks,
+      rounds: ways.rounds,
     }
     if (after.length) t.after = after
     // one that starts work now waits for room; one for later only reads its brief, so it starts at once
@@ -1355,6 +1363,65 @@ export class Engine extends Emitter<Events> {
     t.report = { msg: fitStatus(msg), progress, left, at, pausedAt: this.statusOf(t) === 'need' ? at : undefined }
     this.save()
     return t.report
+  }
+
+  /* ---------- review rounds ---------- */
+
+  /**
+   * The most review rounds its brief asks for: the rounds it said when the task was added, and any its coordinator
+   * added past them (one, and only once those were used).
+   */
+  roundsOf(t: TaskRec) {
+    return (t.rounds ?? this.settings.ways(this.places.space(t.project)?.name).rounds) + (t.reviewsAdded ?? 0)
+  }
+
+  /** the review rounds it has left, as its agent counted them (shepherdr review) */
+  reviewsLeft(t: TaskRec) {
+    return this.roundsOf(t) - (t.reviews ?? 0)
+  }
+
+  /**
+   * Its own agent counts the review round it starts (shepherdr review): no round goes by uncounted, so one that has
+   * used them all is refused and asks its coordinator instead of reviewing on its own for ever.
+   */
+  reviewRound(id: string) {
+    const t = this.req(id)
+    if (ended(t)) throw new Error(`${t.id} is Done already: it has no review to run`)
+    if (this.reviewsLeft(t) <= 0) throw new Error(this.roundsUsed(t))
+    t.reviews = (t.reviews ?? 0) + 1
+    this.save()
+    return { round: t.reviews, rounds: this.roundsOf(t) }
+  }
+
+  /** what a task out of review rounds is told: the rounds are a limit, so only its coordinator raises it */
+  private roundsUsed(t: TaskRec) {
+    return `All ${this.roundsOf(t)} of ${t.id}'s review rounds are used. If its last commit still needs a review, say why in your chat and end your turn: only ${this.spaceName(t)}'s coordinator adds one (shepherdr task review-more ${t.id})`
+  }
+
+  private spaceName(t: TaskRec) {
+    return this.places.nameOf(t.project) ?? t.project
+  }
+
+  /**
+   * Its coordinator gives it exactly one more review round, once its own are used, and its agent hears it in its chat
+   * and runs it. The limit is what stops an agent reviewing for ever, so a task's own agent can never raise it: `from`
+   * is the chat that ran the command, which must be that space's coordinator.
+   */
+  async reviewMore(id: string, from?: string) {
+    const t = this.req(id)
+    if (from?.includes('/')) throw new Error(`Only ${t.id}'s coordinator adds a review round, never its own agent: ask your coordinator`)
+    // a coordinator of another space (another machine's included) is not this task's
+    if (from && from !== t.project) throw new Error(`Only ${this.spaceName(t)}'s coordinator adds ${t.id} a review round, not ${this.places.nameOf(from) ?? from}'s: ask it`)
+    if (ended(t) || t.landing) throw new Error(`${t.id} is ${t.closed ? 'Done with nothing to merge' : t.merged ? 'merged' : 'on its way into main'}: it needs no more review`)
+    if (this.reviewsLeft(t) > 0) throw new Error(`${t.id} has used ${t.reviews ?? 0} of ${this.roundsOf(t)} review rounds; it takes one more only once they are all used`)
+    t.reviewsAdded = (t.reviewsAdded ?? 0) + 1
+    const rounds = this.roundsOf(t)
+    this.save()
+    const text = `Your coordinator added one review round: ${rounds} in all. Run shepherdr review ${t.id}, then review your final commit as your brief says.`
+    const cid = `review:${t.id}:${Date.now()}`
+    this.chats.post(this.key(t), { id: cid, card: { id: cid, task: t.id, status: 'work', text: `woken: your coordinator added one review round (${rounds} in all)` } })
+    await this.sendBack(t, hidden(text, 'review', { task: t.id }))
+    return { rounds }
   }
 
   /**

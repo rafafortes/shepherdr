@@ -2227,3 +2227,25 @@ describe('Task IDs live only in repository space Settings', () => {
     expect(await set('taskIds.prefix', 'GAME', placeId.space(other.name))).toMatchObject({ ok: false })
   })
 })
+
+describe('review rounds from the command', () => {
+  test("a task's own agent counts each round, and only its coordinator adds one", async () => {
+    const { t, place } = await workedTask('review-rounds')
+    const rounds = src.engine.roundsOf(t)
+    // each round its agent starts is counted; a reviewer's chat and the terminal count nothing
+    expect((await src.cli(['review', t.id], { chat: `${t.id}/Agent` })).out).toContain(`Round 1 of ${rounds} counted`)
+    expect((await src.cli(['review', t.id], { chat: `${t.id}/Reviewer` })).code).toBe(1)
+    expect((await src.cli(['review', t.id], {})).code).toBe(1)
+    // never its own agent, and not before its rounds are used
+    expect((await src.cli(['task', 'review-more', t.id], { chat: `${t.id}/Agent` })).out).toContain('never its own agent')
+    expect((await src.cli(['task', 'review-more', t.id], { chat: place })).out).toContain(`has used 1 of ${rounds} review rounds`)
+    // all of them used: its coordinator adds one, once, and task show records it
+    for (let i = 1; i < rounds; i++) expect((await src.cli(['review', t.id], { chat: `${t.id}/Agent` })).code).toBe(0)
+    expect((await src.cli(['review', t.id], { chat: `${t.id}/Agent` })).out).toContain('review rounds are used')
+    const more = await src.cli(['task', 'review-more', t.id], { chat: place })
+    expect(more.code).toBe(0)
+    expect(more.out).toContain(`may now use ${rounds + 1} review rounds`)
+    expect((await src.cli(['task', 'show', t.id], {})).out).toContain(`Review rounds: ${rounds} of ${rounds + 1} used, one added by its coordinator`)
+    expect((await src.cli(['task', 'review-more', t.id], { chat: place })).out).toContain(`has used ${rounds} of ${rounds + 1} review rounds`)
+  })
+})

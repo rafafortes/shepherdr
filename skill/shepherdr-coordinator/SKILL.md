@@ -59,7 +59,8 @@ How to do the work inside a task is its agent's judgment, not yours.
    it with its Settings block, the defaults in `shepherdr show`; write only what the human wants different. For one
    task, change a line with `--set` (`--set review.rounds=1 --set merge="ask me first"`, `--set agent=codex`,
    `--set reviewer=claude`): the block then says the coordinator set it. Plain words in the brief win over the block
-   too. A review is only words in the brief; its agent decides how to do it.
+   too. A review is only words in the brief; its agent decides how to do it and counts each round (`shepherdr review
+   <id>`), so a task that has used them all asks you for one more (step 3).
 2. **Hold or queue it**: `--later` has its agent wait for a go (`shepherdr task tell <id> "<go>"`). `--after SHE-12`
    queues it until those are all done; Shepherdr then sends the go. `shepherdr task queue <id> --after …|none` changes
    it; another machine's task is `vm-str:SHE-12`. One it waits for stopped or gone wrong: ask the human.
@@ -71,6 +72,9 @@ How to do the work inside a task is its agent's judgment, not yours.
    your chat may get `<no-reply>` when nothing matters.
    Stalled news (a working task quiet for 20m, or far past its own time left) is only time and liveness: look at its
    chat, then nudge it (`shepherdr task tell`), stop it, or tell the human.
+   A task out of Review rounds with its final commit unreviewed: `shepherdr task review-more <id>` gives it exactly one
+   more round and its agent is told to run it. Only you, its own space's coordinator, can: only once it has used them
+   all, and its agent never adds one itself.
 4. **Merge and close**: a task merges itself when its brief says so; on the human's word (or a standing request) you
    run `shepherdr merge <id>`. A task whose work is over with nothing to merge: `shepherdr task close <id>`.
 5. **Main red**: tasks merge without waiting for GitHub's checks unless Settings say so, so news may say main went red
