@@ -1793,8 +1793,11 @@ export class Engine extends Emitter<Events> {
       const message = `${t.id}: ${t.title}${t.said ? `\n\n${t.said}` : ''}${t.facts ? `\n\nFacts: ${t.facts}` : ''}`
       const m = await G.mergeHere(p.path, t.branch, t.base, message, true)
       if (!m.ok) {
-        if (/conflict/i.test(`${m.out}${m.err}`)) this.land(t, 'rebase')
-        return { ok: false, error: /conflict/i.test(`${m.out}${m.err}`) ? `Conflict with ${t.base}` : `Merge failed: ${(m.err || m.out).split('\n')[0]}` }
+        // mergeHere marks a conflict with its own prefix, so a file name (conflicts.md) is never taken for one
+        const conflict = m.err.startsWith('conflict:')
+        if (conflict) this.land(t, 'rebase')
+        // mergeHere already says what stopped it, in words that name the file when git refused to write over one
+        return { ok: false, error: conflict ? `Conflict with ${t.base}` : m.err || m.out || `${t.id}'s merge did not go through` }
       }
       t.squash = (await G.git(p.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out || undefined
     }
@@ -1894,7 +1897,7 @@ export class Engine extends Emitter<Events> {
 
   /** main here comes up to GitHub's, so the merge is here too (and Shepherdr's own update sees it), then it is marked */
   private async mergedOnGitHub(t: TaskRec, p: Space, note: string) {
-    const up = await G.catchUp(p.path, t.base!)
+    const up = await G.catchUp(p.path, t.base!, `then run git pull in ${t.base} here`)
     return this.markMerged(t, up.ok ? note : `${note}; ${t.base} here is not up to date: ${up.err}`)
   }
 

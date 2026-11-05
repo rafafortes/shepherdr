@@ -83,6 +83,78 @@ describe('shepherdr merge', () => {
     expect(t.merged).toBeFalsy()
   })
 
+  test('a change of yours in the space’s checkout that the merge does not touch: the merge goes in and that change stays', async () => {
+    const w = world()
+    const dir = repo()
+    const { t } = await started(w, dir, 'stray')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', t.worktree!)
+    // the space's folder is the operator's own working copy: an edit of theirs, never committed
+    writeFileSync(join(dir, 'README.md'), 'mine, not committed\n')
+    w.agentIs(`${t.id}/Agent`, 'idle')
+    expect((await w.engine.merge(t.id)).ok).toBe(true)
+    // the merge went in
+    expect(sh('git log --format=%s -n 2', dir).split('\n')).toEqual([`${t.id}: Say hello`, 'init'])
+    expect(existsSync(join(dir, 'hello.txt'))).toBe(true)
+    // and their edit is still there, uncommitted, and not part of the merge commit
+    expect(readFileSync(join(dir, 'README.md'), 'utf8')).toBe('mine, not committed\n')
+    expect(sh('git status --porcelain', dir)).toBe('M README.md')
+    expect(sh('git show --name-only --format= HEAD', dir)).toBe('hello.txt')
+  })
+
+  test('a change of yours in the space’s checkout that the merge would overwrite stops it, naming the file, and is kept', async () => {
+    const w = world()
+    const dir = repo()
+    const { t, key } = await started(w, dir, 'overwrites')
+    // the task changes README.md, and so did the operator, uncommitted, in the space's own checkout
+    writeFileSync(join(t.worktree!, 'README.md'), 'theirs\n')
+    sh('git commit -qam theirs', t.worktree!)
+    writeFileSync(join(dir, 'README.md'), 'mine, not committed\n')
+    const before = sh('git rev-parse main', dir)
+    w.agentIs(key, 'idle')
+    const r = await w.engine.merge(t.id)
+    expect(r.ok).toBe(false)
+    expect(r.error).toBe("main here holds work of its own that would be overwritten: README.md. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes it first, then merge again.")
+    // nothing there was lost or changed: their edit, and main, are as they were
+    expect(readFileSync(join(dir, 'README.md'), 'utf8')).toBe('mine, not committed\n')
+    expect(sh('git status --porcelain', dir)).toBe('M README.md')
+    expect(sh('git rev-parse main', dir)).toBe(before)
+    expect(t.merged).toBeFalsy()
+  })
+
+  test('a new file of yours in the space’s checkout that the task adds stops it too, naming it', async () => {
+    const w = world()
+    const dir = repo()
+    const { t, key } = await started(w, dir, 'minefirst')
+    writeFileSync(join(t.worktree!, 'notes.txt'), 'the task’s\n')
+    sh('git add -A && git commit -qm notes', t.worktree!)
+    // theirs, untracked, with the same name the merge would bring in
+    writeFileSync(join(dir, 'notes.txt'), 'mine, untracked\n')
+    w.agentIs(key, 'idle')
+    const r = await w.engine.merge(t.id)
+    expect(r.ok).toBe(false)
+    expect(r.error).toBe("main here holds work of its own that would be overwritten: notes.txt. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes it first, then merge again.")
+    expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe('mine, untracked\n')
+  })
+
+  test('a staged change of yours in the space’s checkout that the merge does not touch is neither lost nor taken in', async () => {
+    const w = world()
+    const dir = repo()
+    const { t } = await started(w, dir, 'staged')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', t.worktree!)
+    // staged in the operator's own checkout, never committed
+    writeFileSync(join(dir, 'README.md'), 'staged, not committed\n')
+    sh('git add README.md', dir)
+    w.agentIs(`${t.id}/Agent`, 'idle')
+    expect((await w.engine.merge(t.id)).ok).toBe(true)
+    // still staged, and out of the merge commit
+    expect(readFileSync(join(dir, 'README.md'), 'utf8')).toBe('staged, not committed\n')
+    expect(sh('git diff --cached --name-only', dir)).toBe('README.md')
+    expect(sh('git status --porcelain', dir)).toBe('M  README.md')
+    expect(sh('git show --name-only --format= HEAD', dir)).toBe('hello.txt')
+  })
+
   test('a late message it has not read yet stops the merge until it has', async () => {
     const w = world()
     const dir = repo()
