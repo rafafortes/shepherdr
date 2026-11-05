@@ -53,7 +53,8 @@ describe.skipIf(!browser)('attention count circles', () => {
             await one('needs scope', need, 0)
             await one('panel scope', 0, ready)
             const colour = theme === 'dark' ? 'rgb(0, 0, 0)' : 'rgb(255, 255, 255)'
-            if (need || ready) expect(await page.locator(`${badge}[aria-label$="panel scope"]`).filter({ visible: true }).first().evaluate((el) => getComputedStyle(el).color)).toBe(colour)
+            const shown = need ? 'needs scope' : 'panel scope'
+            if (need || ready) expect(await page.locator(`${badge}[aria-label$="${shown}"]`).filter({ visible: true }).first().evaluate((el) => getComputedStyle(el).color)).toBe(colour)
             const row = page.locator(`nav[aria-label="Places"] li[data-project="${place}"]`)
             if (!await row.isVisible()) await page.getByRole('button', { name: 'Places', exact: true }).click()
             if (need || ready) {

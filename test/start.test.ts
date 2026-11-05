@@ -53,7 +53,8 @@ describe('reading what a screen says', () => {
     // a braille mark in words is part of the words, so the screen rests and says something new when it changes
     expect(restingScreen('⠁ means allow access')).toBe('⠁ means allow access')
     expect(sameScreen('⠁ means allow access', '⠃ means allow access')).toBe(false)
-    expect(screenText('  ⠋ Signing in… (12s)')).toBe('Signing in… (12s)')
+    // a timer is what only moves: its numbers go, the words around it stay
+    expect(screenText('  ⠋ Signing in… (12s)')).toBe('Signing in… ( )')
     expect(screenText('Plan 1 ⣾')).toBe('Plan 1 ⣾')
   })
 

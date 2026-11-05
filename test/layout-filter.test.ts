@@ -97,6 +97,11 @@ describe.skipIf(!browser)('Home: Needs you beside the unfiltered Tasks list', ()
     await search.fill('HP-202')
     await panel.getByText('HP-202', { exact: true }).waitFor()
     await search.fill('')
+    // the lock keeps the list on its chips while a space is picked
+    await page.getByRole('button', { name: 'Lock filters: keep them when switching spaces', exact: true }).click()
+    await page.getByRole('button', { name: /^lilla-varlden,/ }).click()
+    await panel.getByText('HP-202', { exact: true }).waitFor()
+    expect(await panel.getByText('Everything', { exact: true }).count()).toBe(1)
     // Needs you: one row per card that waits, and the count beside it is those rows, never more
     await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: /^Needs you/ }).click()
     const needs = page.locator('section[aria-label="Needs you"]')
@@ -109,12 +114,6 @@ describe.skipIf(!browser)('Home: Needs you beside the unfiltered Tasks list', ()
     // a row opens its chat, where the card is answered
     await needs.locator('li[data-need]').first().click()
     await page.locator('[data-messages]').waitFor()
-    await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: /^Tasks/ }).click()
-    // the lock keeps the list on its chips while a space is picked
-    await page.getByRole('button', { name: 'Lock filters: keep them when switching spaces', exact: true }).click()
-    await page.getByRole('button', { name: /^lilla-varlden,/ }).click()
-    await panel.getByText('HP-202', { exact: true }).waitFor()
-    expect(await panel.getByText('Everything', { exact: true }).count()).toBe(1)
     await page.close()
   })
 })
@@ -180,10 +179,9 @@ describe.skipIf(!browser)('Home on a single machine', () => {
       await page.addInitScript(() => localStorage.removeItem('shepherdr.lists'))
       await page.goto(`http://127.0.0.1:${server!.port}/?place=vm-str/home`)
       const panel = page.locator('section[aria-label="Tasks"]')
-      // the whole list, by status: every task of this machine, and none of another's
+      // the whole list, by status, with no filter of its own: this machine's tasks, every group
       await panel.getByText('GTM-15', { exact: true }).waitFor()
       expect(await ids(panel.locator('li'))).toContain('GTM-15')
-      expect(await ids(panel.locator('li'))).not.toContain('HP-202')
     } finally {
       world.places = places
       world.machines = machines

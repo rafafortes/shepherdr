@@ -474,7 +474,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const text = 'The terminal is waiting for you'
         // its CLI's own menu is drawn anew on every look (its message says now), and a menu nobody reads names no time:
         // when its agent last said anything (0: before this screen knew)
-        const last = this.chats.chat(p).messages.findLast((m) => m.who === 'agent')?.at ?? 0
+        const last = this.chats.chat(p).messages.findLast((m) => m.who === 'agent' && (m.text || m.file))?.at ?? 0
         const at = message && !question?.terminal ? (message.at ?? last) : last
         out.push({ id, chat: p, place: p, at, ...(question ? { question } : { text }) })
       }
