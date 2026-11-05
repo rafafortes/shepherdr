@@ -1310,7 +1310,6 @@ export class Engine extends Emitter<Events> {
     if (at !== null) {
       // it keeps what it waits for (--after): at its time it waits for the machine, and for those, before its agent starts
       t.held = undefined
-      t.todo = undefined
       // a task added for a time keeps the brief it was added with, unread by Settings; one scheduled after it was added
       // already has its own, whole
       t.scheduled = { ...(t.scheduled ?? {}), at }

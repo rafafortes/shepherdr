@@ -128,8 +128,9 @@ Tasks with full briefs, merges and closes, a short reply after each news card, o
 ## Exceptions
 
 A task status reads from what its agent's CLI reports: **Needs you** is a prompt, an open card or question, signed
-out, or a turn ended without `ready`; **Queued** is `--after` or no room on the machine (Shepherdr starts it once there
-is room); **To do** is waiting for a go; **Ready to merge** waits for the human; **Merging** runs until it is in.
+out, or a turn ended without `ready`; **Scheduled** is a time it starts by itself at, with no agent yet; **Queued** is
+`--after` or no room on the machine (Shepherdr starts it once there is room); **To do** is waiting for a go; **Ready to
+merge** waits for the human; **Merging** runs until it is in.
 
 ## QC
 
