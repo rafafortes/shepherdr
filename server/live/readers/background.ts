@@ -4,8 +4,7 @@
 // agent runs, "shell" while only shells or monitors do, "idle" once nothing does. Its screen says so too, and is read
 // when there is no session file: "✻ Waiting for 1 background agent to finish", "✻ … · done 10:04 PM · 1 shell, 1 monitor
 // still running", the footer's "· 2 shells ·" and a row per subagent below it. Codex keeps background terminals but is
-// never woken by them, and a pi shell is the same: only a herdr child agent or a workflow wakes a pi session (pi-herdr's
-// delivery), never a process, so a turn that ends with a shell of its own still running waits on you.
+// never woken by them, and pi has none: their turn's end waits on you.
 // A shell that ends (a test run, a review) wakes it, however long it takes; one that serves or watches (a dev server it
 // left for you to look at) never does. Its hooks name each shell's command, which tells them apart (hooks.ts).
 // A shell that runs a headless reviewer of another CLI (codex exec, claude -p: a task agent's own reviewer) wakes it like a
