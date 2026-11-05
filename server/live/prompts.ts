@@ -5,6 +5,7 @@ import { OLD_HEADS, SET_BY, SETTINGS_HEAD, type SetBy } from '../../shared/brief
 import { type Mode } from '../../shared/types.ts'
 import { ROOT } from '../root.ts'
 import { has } from '../plugins.ts'
+import { CLI_NAME } from './settings.ts'
 import { BOX, helperDir } from './box.ts'
 
 /** where an agent finds Shepherdr's files: its checkout here; on another machine the helper's copy (install.ts) */
@@ -149,6 +150,16 @@ const browserLine = (id: string) => {
 
 export function taskFirst(t: { title: string; desc: string }) {
   return t.desc && t.desc !== t.title ? `${t.title}\n\n${t.desc}` : t.title
+}
+
+/** what a start is told when the session it was to resume is gone: a new one remembers none of it */
+export function freshLine() {
+  return 'Your earlier session is gone, so this is a new one that remembers none of it. What was done is on the branch and in this chat: look at what is here before you start, and keep the work that is already done.'
+}
+
+/** a start that never became a turn, in one line for the chat and the task: which CLI, and the reason it stopped on */
+export function startWords(kind: string | undefined, why: string) {
+  return `${kind ? (CLI_NAME[kind] ?? kind) : 'Its agent'} couldn't start: ${why}`
 }
 
 /** what a backup agent is told after the brief when it takes a task over: from whom and why, and what was done */

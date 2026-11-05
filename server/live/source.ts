@@ -38,9 +38,10 @@ import { claudeProjectDir, piSessionDir } from './readers/find.ts'
 import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places } from './places.ts'
-import { privatePrompt, coordinatorPrompt, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
+import { privatePrompt, coordinatorPrompt, relaunchedLine, restartLine, resumedLine, settingsBlock, startWords } from './prompts.ts'
 import { fitHarness, harnessProblem, harnessWords, recentChat, restartHint, restartInfo, type Harness } from './restart.ts'
 import { Revivals, type Wrong } from './revive.ts'
+import { Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
 import { CATALOG, CLI_NAME, CLIS, kindOf, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
 import { startVoice } from './voice.ts'
@@ -125,6 +126,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** agents that stopped or run on outdated files, started again by Shepherdr (revive.ts) */
   revivals = new Revivals()
   private reviving = new Set<string>()
+  /** what each start has shown, and what was said of it: a start that never becomes a turn (start.ts) */
+  starts = new Starts()
+  private watchingStarts = new Set<string>()
+  /** the launch each chat's agent began a turn in: a start it has since left is never looked at again */
+  private begunStarts = new Map<string, number>()
   /** when a busy machine last had its finished tasks' browsers closed */
   private sweptAt = 0
   devices: () => string[] = () => []
@@ -257,6 +263,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.timers.push(setInterval(() => this.emit('snapshot'), 30_000))
     if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.healthTick(), 5000))
     if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => void this.revive().catch(() => undefined), 15_000))
+    // a start that never becomes a turn: looked at twice a second past its first look, so a card or an error comes
+    // within seconds of it stopping, not at the stalled notice twenty minutes later
+    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => void this.watchStarts().catch(() => undefined), 2000))
   }
 
   /** once, after Shepherdr replaced herdr-projects here (scripts/take-over.ts): what it did, in the home space's chat */
@@ -433,6 +442,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     for (const p of [placeId.home(), ...this.places.spaces.map((x) => placeId.space(x.name))]) {
       const open = this.chats.log(p).posted.find((x) => x.question && x.question.id.startsWith('ask:') && x.question.sent === undefined && this.chats.log(p).answers[x.question.id] === undefined)
       if (open) out[p] = open.question!.id
+      // stopped on a start's screen of its own (start.ts): it waits on you as a menu does
+      else if (this.chats.startMenuUp(p)) out[p] = menuId(p, this.chats.menu(p)!)
       else if (this.agents.status(p) === 'blocked') out[p] = 'blocked'
     }
     return out
@@ -1037,6 +1048,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   private keepsRunning(key: string) {
     const r = this.agents.record(key)
     if (!r || r.finished || this.agents.busy(key) || this.reseating.has(key) || this.peers?.owner(key)) return false
+    // a start that failed is the human's to try again by writing to it: a relaunch would only say the same error twice
+    if (this.engine.startFailedAt(key) !== undefined) return false
     if (!key.includes('/')) return !!this.places.coordinator(key)
     return this.engine.mayRetry(key) && !!this.engine.task(key.split('/')[0])?.worktree
   }
@@ -1062,6 +1075,94 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         else if (go === 'give-up') this.gaveUp(key, why)
       }
     }
+  }
+
+  /**
+   * A start that never becomes a turn: a CLI that exited before its first turn, a resume whose session is gone, or an
+   * agent stopped on a startup screen of its own (folder trust, the theme, signing in, a model that isn't there, pi's
+   * start screen). No hook and no log tells those, so its screen does (start.ts, and screen.ts for reading it). Read for
+   * every launch until it either reports a turn or is settled, and settled once: one card, one error.
+   *
+   * The screen is only read while it can still be a start: herdr is not finishing the launch, no turn has begun, and
+   * herdr does not see the agent at work. A moving screen is a slow start and is left alone, however long it takes.
+   */
+  async watchStarts(now = Date.now()) {
+    if (!this.agents.reachable || now - this.agents.lastReach > 10_000) return
+    for (const [key, r] of Object.entries(this.agents.records)) {
+      if (r.finished || this.watchingStarts.has(key) || this.agents.busy(key)) continue
+      this.watchingStarts.add(key)
+      try {
+        await this.lookStart(key, now)
+      } catch (e) {
+        if (BOX) console.error(`shepherdr: reading ${key}'s start: ${(e as Error).message}`)
+      } finally {
+        this.watchingStarts.delete(key)
+      }
+    }
+  }
+
+  private async lookStart(key: string, now: number) {
+    const r = this.agents.record(key)
+    if (!r) return
+    // it began its turn in this launch: no start any more, nothing left to read (a new launch is a new start)
+    if (this.begunStarts.get(key) === r.started) return
+    const st = this.agents.status(key)
+    // at work, on a menu herdr sees, or done: no start any more
+    const begun = st === 'working' || st === 'blocked' || st === 'done' || this.chats.begunSince(key, r.started)
+    if (begun) this.begunStarts.set(key, r.started)
+    const info = this.agents.info(key)
+    const pending = !!info?.launch_pending
+    // herdr's word on what runs in its pane: exited, gone, unknown (null) or fine
+    const wrong = begun || pending ? undefined : await this.agents.wrong(key)
+    // its screen, from the pane it started in: herdr drops a name it was never asked for, and its pane is still the
+    // only witness of what it printed
+    const pane = info?.pane_id ?? r.lastPane
+    // a launch that never opened a pane and threw nothing of its own has nothing to say: no start ever happened
+    if (!pane && !r.startError && wrong === 'gone') return
+    const screen = !begun && !pending && wrong !== null && pane ? await herdr.visible(pane).catch(() => '') : ''
+    const step = this.starts.look(key, { started: r.started, wrong, pending, begun, screen, resumed: !!r.resumed, waits: this.agents.waiting(key).length > 0, error: r.startError }, now)
+    await this.startStep(key, step)
+  }
+
+  /** what a look at a start means: nothing, a card of its screen, or an error in the chat */
+  private async startStep(key: string, step: StartStep) {
+    const r = this.agents.record(key)
+    if (step.do === 'wait' || !r) return
+    const cli = CLI_NAME[r.kind] ?? r.kind
+    if (step.do === 'card') {
+      // what the CLI asks is the card's title; nothing to choose, its own words are still the card (Open terminal is
+      // the way on)
+      const menu = step.menu.choices.length ? step.menu : { ...step.menu, title: `${cli} is waiting on its screen` }
+      this.chats.showStartMenu(key, menu)
+      this.emit('chat', key)
+      this.engine.screenCard(key)
+      return
+    }
+    // its session is gone: a new one, with its brief, says so in the chat (and the start is not a failure)
+    if (step.fresh) return this.startFresh(key, cli)
+    // a task shows it as an error instead of working; a coordinator's chat says it, as its own failed start
+    this.engine.startFailed(key, startWords(r.kind, step.why), r.started)
+    this.emit('chat', key)
+  }
+
+  /** a resume found no session: the same start without one, its brief again, and the chat says why */
+  private async startFresh(key: string, cli: string) {
+    const r = this.agents.record(key)
+    if (!r) return
+    const started = r.started
+    delete r.sessionId
+    this.agents.save()
+    const id = `start-fresh:${key}:${started}`
+    this.chats.post(key, { id, card: { id, text: `Its earlier session was gone, so ${cli} started a new one.` } })
+    this.emit('chat', key)
+    try {
+      // the CLI is not in that pane any more: closed, and started again where its work is
+      await this.agents.relaunch(key, true, () => (key.includes('/') ? this.engine.resume(key.split('/')[0], true) : this.coordinator(key)))
+    } catch (e) {
+      this.engine.startFailed(key, startWords(r.kind, (e as Error).message), started)
+      this.emit('chat', key)
+    }
+    this.emit('snapshot')
   }
 
   private async relaunch(key: string, why: Wrong) {

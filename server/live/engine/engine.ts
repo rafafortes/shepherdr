@@ -21,7 +21,7 @@ import { browserEnv } from '../browser.ts'
 import { hidden, ROUTING_FAILURE, type Agents, type Spec } from '../agents.ts'
 import type { Chats } from '../chats.ts'
 import { HOST, placeId, type Places, type Space } from '../places.ts'
-import { privatePrompt, goLine, handOverLine, restartLine, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
+import { privatePrompt, freshLine, goLine, handOverLine, restartLine, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, startWords, taskFirst, taskPrompt } from '../prompts.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { CLI_NAME, kindOf, type Settings } from '../settings.ts'
@@ -158,6 +158,7 @@ export const NEED = {
   permission: 'Asks permission',
   login: 'Signed out',
   question: 'Question for you',
+  screen: 'Waiting on its screen',
   reply: 'Waits for your reply',
 } as const
 
@@ -365,6 +366,8 @@ export class Engine extends Emitter<Events> {
   retry?: (key: string) => Retry | undefined
   /** its backup agent is taking over */
   private handing = new Set<string>()
+  /** chats whose last start never became a turn (start.ts): the error it shows, and no relaunch until someone writes */
+  private failedStarts = new Map<string, number>()
   /** a CLI is installed here (a test says) */
   installed = (kind: string) => !!Bun.which(kind)
   /** how loaded this machine is now: over a start limit (health.ts busy), and whether herdr answers; none until first
@@ -478,7 +481,8 @@ export class Engine extends Emitter<Events> {
     if (t.trouble) return 'need'
     const key = this.key(t)
     const st = this.agents.status(key)
-    if (st === 'blocked' || this.asks(key)) return 'need'
+    // a start that stopped on a screen of its own (start.ts) waits on you as a menu does
+    if (st === 'blocked' || this.asks(key) || this.chats.startMenuUp(key)) return 'need'
     // queued: until they are all done, or one ends without being done (then it waits for you to decide)
     if (this.queued(t)) return this.halts(t).length ? 'need' : 'queued'
     // held until the machine has room
@@ -524,7 +528,7 @@ export class Engine extends Emitter<Events> {
     const s = (() => {
       // a few words, never the summary: that is in its chat's card
       if (status === 'done') return t.closed ? 'Nothing to merge' : 'Merged'
-      if (status === 'need' && (this.agents.status(key) === 'blocked' || this.asks(key))) return this.reasonOf(key) ?? NEED.question
+      if (status === 'need' && (this.agents.status(key) === 'blocked' || this.asks(key) || this.chats.startMenuUp(key))) return this.reasonOf(key) ?? NEED.question
       if (t.trouble) return fitStatus(`Went wrong: ${t.trouble}`)
       // a To do row is its title alone
       if (status === 'todo') return ''
@@ -548,6 +552,8 @@ export class Engine extends Emitter<Events> {
   private reasonOf(key: string): string | undefined {
     const cut = this.retry?.(key)
     if (cut?.over) return fitStatus(cut.reason)
+    // a start stopped on a screen of its own: what the CLI asks there, in its own words where it asks something
+    if (this.chats.startMenuUp(key)) return fitStatus(this.chats.menu(key)?.title ?? '') || NEED.screen
     const said = this.agents.said(key)
     if (this.agents.status(key) === 'blocked') {
       if (said?.state === 'blocked') return said.kind === 'plan' ? NEED.plan : said.kind === 'question' ? (said.ask && fitStatus(said.ask)) || NEED.question : NEED.permission
@@ -1159,10 +1165,49 @@ export class Engine extends Emitter<Events> {
   }
 
   /** writing to a task whose agent stopped starts it again, with its memory */
-  resume(id: string) {
+  /**
+   * Writing to a task whose agent stopped starts it again, with its memory. `fresh`: its session is gone (start.ts), so
+   * it starts on a new one and is told its brief again: all it remembers of the work is the branch and the chat.
+   */
+  resume(id: string, fresh = false) {
     const t = this.task(id)
     if (!t?.worktree) return Promise.resolve(null)
-    return this.launch(t)
+    const first = fresh ? `${taskFirst(t)}\n\n${freshLine()}` : undefined
+    return this.launch(t, first).catch((e) => {
+      // it never got going: the human hears why, in the chat and on the task, and nothing starts it again meanwhile
+      this.startFailed(this.key(t), startWords(this.agents.record(this.key(t))?.kind, troubleOf(e)))
+      return null
+    })
+  }
+
+  /**
+   * A start that never became a turn (start.ts): its chat says the error with the reason, a task shows it instead of
+   * working, and nothing starts it again until someone writes to it, or a fresh session was the way on.
+   */
+  startFailed(key: string, why: string, at = Date.now()) {
+    const before = this.failedStarts.get(key)
+    // one launch, one error: a look that comes again, or the relaunch loop, says nothing new
+    if (before !== undefined && at <= before) return
+    this.failedStarts.set(key, at)
+    const card = `start-failed:${key}:${at}`
+    this.chats.post(key, { id: card, card: { id: card, text: why } })
+    const t = this.task(key.split('/')[0])
+    if (!t || key !== this.key(t) || ended(t) || t.archived) return
+    if (!t.trouble) t.trouble = why
+    this.settle(t)
+  }
+
+  /** whether this chat's last start failed: the relaunch loop leaves a failed start to the human */
+  startFailedAt(key: string) {
+    return this.failedStarts.get(key)
+  }
+
+  /** it began its turn, or something was handed to it: its start is no longer a failed one, and its error goes */
+  private started(key: string) {
+    if (!this.failedStarts.delete(key)) return
+    const t = this.task(key.split('/')[0])
+    if (t && key === this.key(t)) t.trouble = undefined
+    if (t) this.settle(t)
   }
 
   /**
@@ -1216,6 +1261,7 @@ export class Engine extends Emitter<Events> {
 
   /** something went in to an agent: its brief, maybe, which it may already be at work on */
   sent(key: string) {
+    this.started(key)
     const t = this.task(key.split('/')[0])
     if (!t || !this.briefing.has(t.id)) return
     this.begun(t)
@@ -2165,6 +2211,8 @@ export class Engine extends Emitter<Events> {
     // writing to an archived task brings it back: you talk to it again
     if (t.archived) this.unarchive(t.id)
     if (ended(t)) return
+    // writing to it is how a start that failed is tried again
+    this.started(key)
     t.reported = false
     t.landing = undefined
     t.stopped = undefined
@@ -2209,8 +2257,11 @@ export class Engine extends Emitter<Events> {
       return
     }
     this.begun(t)
-    // at work: the go reached it
-    if (st === 'working' && t.going) t.going = undefined
+    // at work: the go reached it, and a start that failed is over
+    if (st === 'working') {
+      this.started(key)
+      if (t.going) t.going = undefined
+    }
     // paused, it stopped; at work again on its own after that, it isn't paused any more
     if (t.paused && st !== 'working') t.paused = 'idle'
     else if (t.paused === 'idle' && st === 'working') {
@@ -2227,6 +2278,12 @@ export class Engine extends Emitter<Events> {
   retried(key: string) {
     const t = this.task(key.split('/')[0])
     if (t && key === this.key(t)) this.settle(t)
+  }
+
+  /** a start stopped on a screen of its own (start.ts): the task waits on you for it now, not at the next look */
+  screenCard(key: string) {
+    const t = this.task(key.split('/')[0])
+    if (t && key === this.key(t) && !ended(t)) this.settle(t)
   }
 
   /** automations: tasks of a project, by status (archived ones left out) */

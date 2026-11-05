@@ -44,6 +44,11 @@
   Asks permission, Signed out, Question for you, Waits for your reply), or the agent's own question cut to fit
   (from its question tool, its choice card, or the last sentence of its last message that asks). The tasks list, the
   card in its space's chat, alerts and coordinator news all say the same; the full message stays in the task's chat.
+- A start that never becomes a turn is no silence either: a CLI that exited before its first turn, or a resume whose
+  session is gone. Its last words come to the chat as a card, the task shows `Went wrong: …` and needs you instead of
+  Working, and Shepherdr leaves it to you rather than starting it again in a loop (`start.ts`). One that was resuming
+  a session that is gone starts a new one, with its brief again, and the chat says so. An agent that has not begun its
+  turn about ten seconds after its brief was handed over shows its screen as a card ([Chats](chat.md)).
 - A turn cut off by the model's provider (overloaded, at capacity, a rate limit, a dropped connection) is no question
   for you: Shepherdr waits and tells the agent, task or coordinator, to carry on, after 1, 2, 4 and 8 minutes. Meanwhile
   a task stays Working, its line saying why and when (`Provider overloaded · retry in 2m`). Only when the fifth try is

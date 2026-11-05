@@ -12,6 +12,18 @@ Every agent, coordinator or task agent, gets the same chat.
 - Startup trust and MCP approval prompts appear as choice cards, even before the first message. The card keeps the
   CLI's screen text and offers Open terminal if it cannot read the choices. Answers are checked before messages go
   in. Only task worktrees Shepherdr creates are pre-trusted in Claude Code and Codex; a space you picked still asks.
+- An agent that has not begun its turn about ten seconds after its brief was handed over (nothing in its log, no
+  session) shows what its screen shows as a card, and the task counts as Needs you. It reads the screen through
+  herdr for every CLI the same way (`server/live/screen.ts`): the choices it can read are one-tap answers, pressed in
+  the terminal exactly as the card shows them; a screen with nothing to read still comes with its words, and Open
+  terminal is the way on. What tells a stuck start from a slow one: a screen that keeps moving (a spinner, a timer, a
+  step, a percentage) is a slow start and never a card, however long it takes, and neither is a screen at rest whose
+  brief already went in (pi on a cold local model takes a while); a screen that rests and cannot take the brief, or says
+  something went wrong, is a card. An agent that is working never gets one.
+- A start or a resume that fails is no longer silence: its chat says what the CLI printed last (`Claude Code couldn't
+  start: …`), and its task shows `Went wrong: …` and needs you, instead of Working for ever. One that was resuming a
+  session that is gone starts a new one instead, told its brief again, and says so in the chat. Nothing starts it
+  again by itself; your next message tries again. A launch herdr has not finished yet (issue #491) is left to herdr.
 - A slash command you type (`/clear`, `/new`, `/compact`, `/model sonnet`, a custom one) goes into the agent's CLI as
   you typed it, once its turn is over, and the CLI runs it. The chat shows it as you typed it, and what the CLI printed
   as its answer. After `/clear` or `/new` a quiet New session line starts the new session, whose log the chat reads

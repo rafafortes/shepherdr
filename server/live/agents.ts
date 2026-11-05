@@ -92,6 +92,11 @@ export interface AgentRecord {
    *  launch herdr dropped can leave that pane behind, and a relaunch closes it rather than sit beside it */
   lastPane?: string
   pendingLaunch?: boolean
+  /** this run was told to resume the session it had (start.ts: a session that is gone is the one case a start without
+   *  one is the way on) */
+  resumed?: boolean
+  /** the last start that threw, where it did, before a pane could be read: the reason a start failed (start.ts) */
+  startError?: string
 }
 
 export interface OutItem {
@@ -759,7 +764,7 @@ export class Agents extends Emitter<Events> {
       try {
         const first = await before?.()
         await this.finish(spec.key)
-        return await this.launch({ ...spec, ...(first ? { first } : {}) })
+        return await this.launch({ ...spec, ...(first ? { first } : {}) }).catch((e) => this.startedWrongly(spec.key, e))
       } finally {
         this.stopping.delete(spec.key)
         this.deliver(spec.key)
@@ -777,9 +782,19 @@ export class Agents extends Emitter<Events> {
     if (running) return this.bindRoute({ ...this.records[spec.key], ...spec } as AgentRecord, running.pane_id).then(() => running)
     const p0 = this.starting.get(spec.key)
     if (p0) return p0
-    const p = this.launch(spec).finally(() => this.starting.delete(spec.key))
+    const p = this.launch(spec).catch((e) => this.startedWrongly(spec.key, e)).finally(() => this.starting.delete(spec.key))
     this.starting.set(spec.key, p)
     return p
+  }
+
+  /** a start that threw where it could: its record keeps the reason, which start.ts shows the human */
+  private startedWrongly(key: string, e: unknown): never {
+    const r = this.records[key]
+    if (r) {
+      r.startError = (e as Error)?.message ?? String(e)
+      this.save()
+    }
+    throw e
   }
 
   private async launch({ first, pane: place, was, ...spec }: Spec) {
@@ -793,6 +808,8 @@ export class Agents extends Emitter<Events> {
     Object.assign(r, { name: spec.name, kind: spec.kind, cwd: spec.cwd, workspace: spec.workspace, tab: spec.tab ?? r.tab, env: spec.env ?? r.env, access: spec.access ?? r.access, model: spec.model ?? r.model, effort: spec.effort ?? r.effort, system: spec.system ?? r.system, set: spec.set ?? r.set, finished: false })
     this.codexState.delete(spec.key)
     r.started = Date.now()
+    r.resumed = !!resume
+    r.startError = undefined
     if (!resume) r.sessionId = r.kind === 'codex' ? undefined : randomUUID()
     // a run of its own: what its hooks record starts over
     if (r.hooks) this.hooks.forget(mirrored(r.hooks))
