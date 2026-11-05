@@ -209,10 +209,10 @@ describe.skipIf(!browser)('grouping a machine\'s tasks', () => {
     await page.waitForSelector('section[aria-label="Tasks"] li')
     expect(await labels(page)).toEqual(['Needs you', 'To do'])
     expect((await subs(page))['LV-3']).toStartWith('lilla-varlden · ')
-    // a space's rows say neither
+    // a space's rows say neither, only where the work goes
     await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
     await page.waitForSelector('section[aria-label="Tasks"] li')
-    expect((await subs(page))['GTM-14']).toBe('Asks permission')
+    expect((await subs(page))['GTM-14']).toBe('→ main · Asks permission')
     await ctx.close()
   }, 30_000)
 

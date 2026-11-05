@@ -217,7 +217,7 @@ describe('a machine run from the main one', () => {
     try {
       const w = Bun.spawn([process.execPath, '-e', code], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, ...mirrorHomes(home, box), PATH: `${bin}:${process.env.PATH}`, SHEPHERDR_BOX: JSON.stringify(box), SHEPHERDR_HOME: home, SHEPHERDR_MACHINE: 'vm-demo', SHEPHERDR_MAIN_HOME: main, SHEPHERDR_SHARED_HOME: main, HERDR_SOCKET_PATH: join(home, 'no-herdr.sock') } })
       const out = await new Response(w.stdout).text()
-      const [set, mine, unset, away] = JSON.parse(out) as [number, string, { value: string; from: string }][]
+      const [set, mine, unset, away] = JSON.parse(out.trim().split('\n').at(-1)!) as [number, string, { value: string; from: string }][]
       expect(set).toEqual([0, "brief.review = off (Everywhere's)", { value: 'off', from: 'all' }])
       expect(mine).toEqual([0, "machine.maxTasks = 3 (vm-demo's)", { value: '3', from: 'machine' }])
       expect(unset[0]).toBe(0)

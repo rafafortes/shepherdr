@@ -391,7 +391,7 @@ export class Agents extends Emitter<Events> {
     try {
       const list = await herdr.agents()
       if (this.stopped) return
-      if (!this.reachable && BOX) console.info('shepherdr: herdr link recovered')
+      if (!this.reachable && BOX) console.error('shepherdr: herdr link recovered')
       this.recovery.success()
       this.retryAt = 0
       this.reachable = true
@@ -436,7 +436,7 @@ export class Agents extends Emitter<Events> {
     } catch {
       if (BOX) this.retryAt = Date.now() + this.recovery.fail()
       if (this.reachable) {
-        if (BOX) console.info('shepherdr: herdr link lost; retrying (3–30s backoff)')
+        if (BOX) console.error('shepherdr: herdr link lost; retrying (3–30s backoff)')
         this.reachable = false
         this.emit('status', '*', 'gone')
       }

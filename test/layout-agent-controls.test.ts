@@ -57,12 +57,14 @@ describe.skipIf(!browser)('composer + agent controls', () => {
     world.chats[key].cli = 'Codex'
     const page = await browser!.newPage({ viewport: { width: 320, height: 844 } })
     await page.goto(`http://127.0.0.1:${server!.port}/?place=all&task=GTM-17`)
-    await page.locator('[data-composer]:visible button[aria-label="Attach files and more"]').last().click()
+    // the task's own box: the place's chat is drawn under it
+    const box = page.locator('[data-composer]:has(textarea[data-chat="GTM-17/Agent"])')
+    await box.locator('button[aria-label="Attach files and more"]').click()
     const controls = page.locator('[data-agent-controls]:visible')
     await controls.getByRole('menuitem', { name: 'Model: Not reported. Select and restart', exact: true }).waitFor()
     expect(await controls.getByRole('menuitem', { name: 'Effort: Not reported. Select and restart', exact: true }).count()).toBe(1)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
-    await page.locator('[data-composer]:visible button[aria-label="Attach files and more"]').last().click()
+    await box.locator('button[aria-label="Attach files and more"]').click()
     expect(await controls.count()).toBe(0)
     expect(world.chats[key].agent).toEqual({ kind: 'codex' })
     await page.close()

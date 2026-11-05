@@ -91,8 +91,10 @@ describe.skipIf(!browser)('restarting an agent', () => {
         }
       })
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent(p.id)}${task ? '&task=GTM-17' : ''}`)
+      // the chat's own box: a phone draws the place's under the task's
+      const box = page.locator(`[data-composer]:has(textarea[data-chat="${chat}"])`)
       for (const save of [false, true]) {
-        await page.locator('[data-composer]:visible button[aria-label="Attach files and more"]').last().click()
+        await box.locator('button[aria-label="Attach files and more"]').click()
         await page.locator('[data-agent-controls]:visible').last().getByRole('menuitem', { name: /^Model:/ }).click()
         const sheet = page.getByRole('alertdialog')
         await sheet.locator('[data-restart]').waitFor()
