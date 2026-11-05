@@ -4,7 +4,7 @@
 // or runs without the hooks that tell Shepherdr what it does. Tried a few times, further apart each time, then left to
 // the human: a start that keeps failing never loops.
 import { basename } from 'node:path'
-import type { ProcessInfo } from './herdr.ts'
+import type { AgentInfo, ProcessInfo } from './herdr.ts'
 
 /** gone from herdr; its CLI exited, the shell at its prompt; or it runs on other files than it would start with now */
 export type Wrong = 'gone' | 'exited' | 'stale'
@@ -20,6 +20,17 @@ export function paneWrong(kind: string, p: ProcessInfo, want: Record<string, str
     if (i < 0 || argv[i + 1] !== path) return 'stale'
   }
   return undefined
+}
+
+/** what is wrong with an agent, from herdr's own view of it and what runs in its pane: nothing while herdr still
+ *  launches it (a pending launch is finished by a client asking for the agent by name, which the launch nudge does;
+ *  starting it again would launch it twice), nothing for stale files while herdr sees it at work or asking (a turn is
+ *  never cut for that), and null when herdr can't say what runs there */
+export function agentWrong(a: AgentInfo, p: ProcessInfo | null, kind: string, want: Record<string, string>): Wrong | undefined | null {
+  if (a.launch_pending) return undefined
+  if (!p) return null
+  const w = paneWrong(kind, p, want)
+  return w === 'stale' && (a.agent_status === 'working' || a.agent_status === 'blocked') ? undefined : w
 }
 
 export interface RevivalTimes {

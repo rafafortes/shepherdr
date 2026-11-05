@@ -154,7 +154,8 @@ describe.skipIf(!browser)('sidebars', () => {
       expect(await page.locator('[data-messages]').first().evaluate((e) => e.getBoundingClientRect().width)).toBeGreaterThanOrEqual(480)
       if (!docked) {
         await page.getByRole('button', { name: 'Places', exact: true }).click()
-        await page.getByRole('navigation', { name: 'Places' }).waitFor()
+        // the drawer's own; the docked one stays on the screen behind a phone's
+        await page.locator('nav[aria-label="Places"]:visible').waitFor()
         await page.getByRole('button', { name: 'Close', exact: true }).click()
       }
     }
@@ -235,7 +236,7 @@ describe.skipIf(!browser)("a place's Autopilot", () => {
       const pop = page.getByRole('menu', { name: 'Menu' })
       const sw = pop.getByRole('menuitemcheckbox', { name: 'Autopilot' })
       await sw.waitFor()
-      expect(await pop.getByRole('menuitem').allTextContents()).toEqual([expect.stringContaining('Search in this chat'), 'Restart agent…', expect.stringContaining('Terminal'), 'Artifacts'])
+      expect(await pop.getByRole('menuitem').allTextContents()).toEqual([expect.stringContaining('Search in this chat'), 'Search this chat and beyond', 'Restart agent…', expect.stringContaining('Terminal'), 'Artifacts'])
       expect(await pop.locator('[role=group]').count()).toBe(0)
       expect(await sw.getAttribute('aria-checked')).toBe('false')
       expect(await pop.getByText('Off: does what you ask').count()).toBe(1)
@@ -432,6 +433,8 @@ describe.skipIf(!browser)('the ⋯ menu is one design', () => {
     await page.keyboard.press('ArrowDown')
     expect(await focused()).toBe('Search in this chat')
     await page.keyboard.press('ArrowDown')
+    expect(await focused()).toBe('Search this chat and beyond')
+    await page.keyboard.press('ArrowDown')
     expect(await focused()).toBe('Restart agent…')
     await page.keyboard.press('ArrowDown')
     expect(await focused()).toBe('Terminal')
@@ -453,19 +456,29 @@ describe.skipIf(!browser)('the ⋯ menu is one design', () => {
 })
 
 describe.skipIf(!browser)('places, calm like Slack', () => {
-  /** each place row: its name (in the button going there), the count on its right, whether its name is bold, and any status mark left in it */
+  /** each place row: its name (in the button going there), the counts on its right (needs you, ready), whether its
+   *  name is bold, any status mark left in it, and whether it says news came in */
   const rows = (page: import('playwright-core').Page, sel: string) =>
     page.$$eval(`${sel} li`, (ls) =>
       ls.map((l) => {
         const name = l.querySelector('button > span')!
-        const badge = l.querySelector('span[aria-label$="need you here"]')
-        return { name: name.textContent, count: badge ? Number(badge.textContent) : 0, bold: Number(getComputedStyle(name).fontWeight) >= 600, dots: l.querySelectorAll('.dot').length, text: l.textContent }
+        const badge = l.querySelector('[data-attention-badge]')
+        const said = l.querySelector('button')?.getAttribute('aria-label') ?? ''
+        return {
+          name: name.textContent,
+          count: Number(l.querySelector('.attention-badge-need')?.textContent ?? 0) + Number(l.querySelector('.attention-badge-ready')?.textContent ?? 0),
+          said: badge?.getAttribute('aria-label') ?? '',
+          unread: /, unread(?:,|$)/.test(said),
+          bold: Number(getComputedStyle(name).fontWeight) >= 600,
+          dots: l.querySelectorAll('.dot').length,
+          text: l.textContent,
+        }
       }),
     )
   const check = (rs: Awaited<ReturnType<typeof rows>>) => {
-    // no status marks; only rows with something waiting on you have a count, and their names are bold
+    // no status marks; only rows with something waiting on you (or news in their chat) have a count or a bold name
     expect(rs.every((r) => r.dots === 0)).toBe(true)
-    expect(rs.every((r) => r.bold === r.count > 0)).toBe(true)
+    expect(rs.every((r) => r.bold === (r.count > 0 || r.unread))).toBe(true)
     // each row counts its own coordinator's chat alone: nothing rolls up from the rows shown under it
     for (const m of ['vm-str', 'mac']) expect(rs.find((r) => r.name === m)!.count).toBe(0)
     expect(rs.some((r) => r.count > 0)).toBe(true)
@@ -690,7 +703,7 @@ describe.skipIf(!browser)('the places tree', () => {
     await page.waitForSelector('#places li')
     await row(page, 'vm-str').hover()
     const side = await box(page, '#places')
-    for (const sel of ['#places button[aria-label="New space on vm-str"]', '#places [aria-label$="need you here"]', '#places li:has-text("herdr-projects")']) {
+    for (const sel of ['#places button[aria-label="New space on vm-str"]', '#places [data-attention-badge]', '#places li:has-text("herdr-projects")']) {
       expect((await box(page, sel)).right).toBeLessThanOrEqual(side.right)
     }
     await page.close()

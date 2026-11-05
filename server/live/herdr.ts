@@ -138,6 +138,8 @@ export interface AgentInfo {
   title?: string | null
   terminal_title_stripped?: string | null
   interactive_ready?: boolean
+  /** herdr has not finished this launch yet: a client asking for it by name completes it (issue #491) */
+  launch_pending?: boolean
 }
 
 /** what runs in a pane (pane.process_info) */

@@ -11,6 +11,8 @@ describe.skipIf(!browser)('unified search', () => {
     const page = await browser!.newPage({ viewport: { width, height: 900 } })
     try {
       await page.goto(url())
+      // the screen takes its keys once mounted
+      await page.locator('#places li').first().waitFor()
       await page.keyboard.press('Control+k')
       const search = page.getByRole('combobox', { name: 'Search or jump to' })
       await search.waitFor()
@@ -19,7 +21,8 @@ describe.skipIf(!browser)('unified search', () => {
       const group = page.getByRole('group', { name: 'Messages', exact: true })
       await group.getByRole('option').first().waitFor()
       expect(await group.getByRole('option').count()).toBe(8)
-      await group.getByRole('button', { name: /Show more messages/ }).click()
+      // the list redraws as answers land: the button it is drawn in is replaced, so a click retries on the new one
+      await group.getByRole('button', { name: /Show more messages/ }).click({ timeout: 15_000 })
       expect(await group.getByRole('option').count()).toBe(28)
       const hit = group.getByRole('option', { name: /^Search paging needle 29 / })
       await hit.click()

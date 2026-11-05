@@ -15,6 +15,11 @@ const { writeJson } = await import('../server/store.ts')
 const { record } = await import('../server/live/readers/hooks.ts')
 
 const BOX = '─'.repeat(130)
+
+/** what a test waits for has come true, however slow the machine: the pane reads a look at herdr sets going land after it */
+const until = async (f: () => boolean, ms = 8000) => {
+  for (const t0 = Date.now(); !f(); await Bun.sleep(20)) if (Date.now() - t0 > ms) throw new Error('timed out')
+}
 const screen = (above: string[], footer: string, rows: string[] = [], prompt = '❯ ') => [...above, '', BOX, prompt, BOX, footer, '', ...rows].join('\n')
 
 /** SHE-59: it ended its turn while its fresh-eyes reviewer ran, and the reviewer's own probe (a shell and a monitor) */
@@ -145,6 +150,8 @@ describe('an agent whose turn ended', () => {
     const told: string[] = []
     a.on('status', (key) => told.push(key))
     await a.refresh()
+    // the pane reads (its screen) are made after the look at herdr, so health checks never wait on them
+    await until(() => a.background('T-2/Agent') === 'agents')
     expect(a.background('T-1/Agent')).toBe('agents')
     expect(a.background('T-2/Agent')).toBe('agents')
     // the reviewer finished, woke it, and it stopped again in between herdr's looks: told, though herdr saw nothing
@@ -153,6 +160,7 @@ describe('an agent whose turn ended', () => {
     a.sessions = new ClaudeSessions()
     screens.p2 = WOKE_AND_DONE
     await a.refresh()
+    await until(() => told.length === 2)
     expect(a.background('T-1/Agent')).toBeUndefined()
     expect(a.background('T-2/Agent')).toBeUndefined()
     expect(told.sort()).toEqual(['T-1/Agent', 'T-2/Agent'])
@@ -182,6 +190,7 @@ describe('an agent whose turn ended', () => {
     a.on('status', (key) => told.push(key))
     a.shellsFor = 0
     await a.refresh()
+    await until(() => told.length === 1)
     expect(a.background('T-1/Agent')).toBeUndefined()
     expect(told).toEqual(['T-1/Agent'])
     a.stop()

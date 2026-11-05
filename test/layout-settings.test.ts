@@ -92,7 +92,8 @@ describe.skipIf(!browser)('chat agent choices', () => {
       for (const group of ['Tasks', 'Coordinators', 'Backup']) {
         await settings.getByRole('heading', { name: group, exact: true }).locator('..').getByRole('button', { name: /^Agent:/ }).click()
         const choices = await page.getByRole('menuitemradio').allTextContents()
-        expect(choices.map((v) => v.trim())).toEqual(group === 'Backup' ? ['Off', 'Claude Code', 'Codex', 'Pi'] : ['Claude Code', 'Codex', 'Pi'])
+        // the one it is on leads the list
+        expect(choices.map((v) => v.trim())).toEqual(group === 'Backup' ? ['Codex', 'Off', 'Claude Code', 'Pi'] : ['Claude Code', 'Codex', 'Pi'])
         await page.keyboard.press('Escape')
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375)
@@ -206,7 +207,8 @@ describe.skipIf(!browser)('repository base', () => {
       await page.getByRole('button', { name: /Ready GTM-15 Fix webhook/ }).click()
       await page.getByText('Merges into main', { exact: true }).waitFor()
       await page.setViewportSize({ width: 390, height: 844 })
-      await page.getByText('Merges into main', { exact: true }).waitFor()
+      // a phone draws the task's page and the list's own: only one of them is on screen
+      await page.getByText('Merges into main', { exact: true }).filter({ visible: true }).first().waitFor()
     } finally {
       world.bases['p:vm-str:gtm'] = before
       world.emit('snapshot')

@@ -76,6 +76,7 @@ describe.skipIf(!browser)('attention count circles', () => {
         world.emit('snapshot')
         await page.close()
       }
-    }, 30_000)
+      // a wide window draws the docked lists too, and the counting with them: more to wait through
+    }, 60_000)
   }
 })

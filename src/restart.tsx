@@ -1,12 +1,11 @@
 // Restart picks for either chat role, used once or saved for its space. Opened from the + or ⋯ menu.
 import clsx from 'clsx'
-import { ChevronUpDownIcon } from '@heroicons/react/20/solid'
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { Place, RestartCli, RestartInfo } from '@shared/types.ts'
 import { act, setUI, taskOf, useSnap, useStore } from './kernel.ts'
 import { Dialog } from './rowmenu.tsx'
 import { Pick, shown, Switch, TextValue } from './Settings.tsx'
-import { EffortIcon, ic, MenuItem, ModelIcon, ModeIcon, Primary, RestartIcon } from './ui.tsx'
+import { EffortIcon, ic, MenuItem, ModelIcon, ModeIcon, Primary, RestartIcon, UpDownIcon } from './ui.tsx'
 
 /* ---------- the sheet ---------- */
 
@@ -191,10 +190,10 @@ export function AgentControls({ chatKey, cli }: { chatKey: string; cli: string }
   }
   return <div data-agent-controls>
     {([['Agent', agent ? cli : `${cli} · unknown`, ModeIcon], ['Model', model, ModelIcon], ['Effort', effort, EffortIcon]] as const).map(([label, value, Icon]) =>
-      <MenuItem key={label} icon={<Icon className={ic} />} aria-label={`${label}: ${value}. Select and restart`} title={`${label}: ${value}. Select and restart`} onClick={open}>
+      <MenuItem key={label} icon={<Icon className={ic} />} aria-label={`${label}: ${value}. Select and restart`} onClick={open}>
         <span className="flex min-w-0 items-center justify-between gap-4">
           <span>{label}</span>
-          <span className="flex min-w-0 items-center gap-1 text-fg2"><span className="truncate">{value}</span><ChevronUpDownIcon className={`${ic} shrink-0`} /></span>
+          <span className="flex min-w-0 items-center gap-1 text-fg2"><span className="truncate">{value}</span><UpDownIcon className={`${ic} shrink-0`} /></span>
         </span>
       </MenuItem>)}
   </div>

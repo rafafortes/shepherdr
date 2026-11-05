@@ -170,7 +170,7 @@ describe('a machine run from the main one', () => {
       console.log(JSON.stringify(outs))
       process.exit(0)`
     const r = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', env: { ...process.env, ...mirrorHomes(home, box), PATH: `${bin}:${process.env.PATH}`, SHEPHERDR_BOX: JSON.stringify(box), SHEPHERDR_HOME: home, SHEPHERDR_MACHINE: 'vm-demo', HERDR_SOCKET_PATH: join(home, 'no-herdr.sock') } })
-    const outs = JSON.parse(r.stdout) as string[]
+    const outs = JSON.parse(r.stdout.trim().split('\n').at(-1)!) as string[]
     for (const out of outs) expect(out).not.toContain(home)
     const checks = join(there, '.shepherdr', 'helper', 'checks')
     for (const out of outs.slice(0, 3)) expect(out).toContain(`Pictures at phone width: ${checks}/a.png (dark: ${checks}/a-dark.png)`)

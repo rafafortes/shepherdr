@@ -21,7 +21,7 @@ import { boxDir, mirrored } from './mfs.ts'
 import { agentEnv, BOX, helperDir, run, runSync } from './box.ts'
 import { ROOT } from '../root.ts'
 import { leftAtPrompt } from './commands.ts'
-import { paneWrong, type Wrong } from './revive.ts'
+import { agentWrong, type Wrong } from './revive.ts'
 import { readCodexRuntime } from './codex-runtime.ts'
 import { SecretAccess } from './secret-access.ts'
 import { isAgentProcess } from './agent-process.ts'
@@ -801,18 +801,20 @@ export class Agents extends Emitter<Events> {
   }
 
   /** what is wrong with this agent's run: gone from herdr, its CLI exited in its pane, or it runs on outdated files;
-   *  nothing while it is fine, null when herdr can't say. One on outdated files is left alone while herdr sees it at
-   *  work or asking (a turn is never cut for this); its hooks don't count, as what they last said may be from before */
+   *  nothing while it is fine (or while herdr still launches it), null when herdr can't say. One on outdated files is
+   *  left alone while herdr sees it at work or asking (a turn is never cut for this); its hooks don't count, as what
+   *  they last said may be from before */
   async wrong(key: string): Promise<Wrong | undefined | null> {
     const r = this.records[key]
-    const a = this.info(key)
     if (!r) return undefined
+    const a = this.info(key)
     if (!a) return 'gone'
+    // a launch herdr has not finished yet is neither gone nor exited, and starting it again would launch it twice
+    if (a.launch_pending) return undefined
     const p = await herdr.processInfo(a.pane_id).catch(() => null)
     // herdr didn't say: neither well nor wrong
     if (!p) return null
-    const w = paneWrong(r.kind, p, this.filesOf(r))
-    return w === 'stale' && (a.agent_status === 'working' || a.agent_status === 'blocked') ? undefined : w
+    return agentWrong(a, p, r.kind, this.filesOf(r))
   }
 
   /** whether its hooks last said it was at work, even while it is gone: a turn its log shows over is over */

@@ -23,9 +23,11 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     const page = await browser!.newPage({ viewport: { width: 1600, height: 900 } })
     await page.goto(at('place=vm-str/home'))
     const list = page.getByRole('region', { name: 'Tasks' })
-    // the main home space lists its own tasks, as any space: none in the demo
-    await list.getByText('No tasks yet. Ask home to add one.').waitFor()
-    expect(await chips(page)).toEqual(['p:vm-str:~'])
+    // the main home space lists everything, every machine's, with no chip to say so
+    expect(await chips(page)).toEqual([])
+    expect(await list.getByRole('group', { name: 'Showing' }).textContent()).toContain('Everything')
+    await list.getByRole('button', { name: /LV-3 Upload page/ }).waitFor()
+    // a space picked shows its own
     await page.getByRole('button', { name: /^gtm\b/ }).click()
     const gtm16 = list.getByRole('button', { name: /GTM-16 Docs/ })
     const lv3 = list.getByRole('button', { name: /LV-3 Upload page/ })
@@ -177,10 +179,14 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     await page.getByRole('group', { name: 'View' }).getByRole('button', { name: /^Tasks/ }).click()
     await page.getByRole('button', { name: /LV-3 Upload page/ }).waitFor()
     expect(await chips(page)).toEqual(['p:vm-str:gtm', 'm:mac', 'p:vm-str:herdr-projects', 'm:nas'])
-    // unpinned, the tab shows the space picked
+    // unpinned, the tab follows the place picked: at the main home space, everything; in a space, its own
     await page.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).click()
+    expect(await chips(page)).toEqual([])
+    await page.getByRole('button', { name: 'Places' }).click()
+    await page.locator('li[data-project="p:vm-str:herdr-projects"]').getByRole('button', { name: /^herdr-projects/ }).click()
+    await page.getByRole('group', { name: 'View' }).getByRole('button', { name: /^Tasks/ }).click()
     await page.getByRole('button', { name: /LV-3 Upload page/ }).waitFor({ state: 'detached' })
-    expect(await chips(page)).toEqual(['p:vm-str:~'])
+    expect(await chips(page)).toEqual(['p:vm-str:herdr-projects'])
     await page.close()
   }, 30_000)
 })

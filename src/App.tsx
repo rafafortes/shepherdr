@@ -359,7 +359,6 @@ function PinButton() {
       type="button"
       aria-label={label}
       aria-pressed={pinned}
-      title={label}
       onClick={togglePin}
       className={clsx('press-dim inline-flex h-7 max-w-40 min-w-7 shrink items-center justify-center gap-1.5 rounded-full px-2 text-[0.8125rem] text-fg coarse:h-9 @sm/side:pr-2.5', pinned && 'bg-sel')}
     >
@@ -435,7 +434,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const desktop = useUI((u) => u.device === 'desktop')
   const keyboard = useUI((u) => u.keyboard)
   const coordinator = placeOf(snap, task.place).name
-  const target = task.base ? <div className="shrink-0 truncate border-b border-line px-4 py-1 text-xs text-fg3" title={`Merges into ${task.base}`}>Merges into <span className="font-medium text-fg2">{task.base}</span></div> : null
+  const target = task.base ? <div className="shrink-0 truncate border-b border-line px-4 py-1 text-xs text-fg3">Merges into <span className="font-medium text-fg2">{task.base}</span></div> : null
   // in focus it sits at the window's edge: no line there
   const focus = useStore((s) => focusHere(s.ui, s.snap))
   // split, a click on the open task on the right gives it the focus (the keys work on its chat)

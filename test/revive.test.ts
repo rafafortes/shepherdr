@@ -1,10 +1,12 @@
 // An agent that stopped, or runs on files Shepherdr no longer starts it with, is started again: what counts as wrong,
 // and that tries are spaced out and end, so a start that keeps failing never loops.
 import { describe, expect, test } from 'bun:test'
-import { paneWrong, Revivals } from '../server/live/revive.ts'
+import { agentWrong, paneWrong, Revivals } from '../server/live/revive.ts'
+import type { AgentInfo } from '../server/live/herdr.ts'
 
 const want = { '--settings': '/h/.shepherdr/helper/hooks/shep-x.settings.json', '--append-system-prompt-file': '/h/.shepherdr/helper/prompts/shep-x.md' }
 const running = (argv: string[]) => ({ shell_pid: 10, foreground_process_group_id: 20, foreground_processes: [{ argv, pid: 20 }] })
+const info = (o: Partial<AgentInfo> = {}): AgentInfo => ({ agent: 'claude', agent_status: 'idle', pane_id: 'w1:p1', tab_id: 't1', workspace_id: 'w1', cwd: '/w', ...o })
 
 describe('what is wrong with a pane', () => {
   test('its CLI on the files it would start with now is fine', () => {
@@ -25,6 +27,28 @@ describe('what is wrong with a pane', () => {
   test('something else in the foreground, or a CLI with no files to check, is left alone', () => {
     expect(paneWrong('claude', running(['vim', 'x.ts']), want)).toBeUndefined()
     expect(paneWrong('codex', running(['node', '/usr/lib/bin/codex', 'resume', 'id']), {})).toBeUndefined()
+  })
+})
+
+describe('what counts as wrong for a whole agent', () => {
+  test('a launch herdr has not finished yet is never restarted (it would be launched twice)', () => {
+    const shell = { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ argv: ['bash'], pid: 10 }] }
+    // herdr lists it as pending, with its shell still at the prompt: the launch nudge finishes this one
+    expect(agentWrong(info({ launch_pending: true }), shell, 'pi', {})).toBeUndefined()
+    expect(agentWrong(info({ launch_pending: true, agent_status: 'working' }), running(['pi', '--session-id', 'x']), 'pi', {})).toBeUndefined()
+    // the same pane once herdr is done with it is judged as usual
+    expect(agentWrong(info(), shell, 'pi', {})).toBe('exited')
+  })
+
+  test('no word from herdr about its pane: neither well nor wrong', () => {
+    expect(agentWrong(info(), null, 'claude', want)).toBeNull()
+  })
+
+  test('an agent on outdated files is restarted, unless herdr sees it at work or asking', () => {
+    const old = running(['claude', '--resume', 'abc', '--settings', '/h/.shepherdr/hooks/shep-x.settings.json'])
+    expect(agentWrong(info(), old, 'claude', want)).toBe('stale')
+    expect(agentWrong(info({ agent_status: 'working' }), old, 'claude', want)).toBeUndefined()
+    expect(agentWrong(info({ agent_status: 'blocked' }), old, 'claude', want)).toBeUndefined()
   })
 })
 
