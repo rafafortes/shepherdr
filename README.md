@@ -105,7 +105,7 @@ No. Shepherdr runs on your own machine, keeps its files there, talks to your loc
 
 ### Will it touch my branches or worktrees on its own?
 
-Only the ones it made. Every task works in its own worktree, on its own branch `work/<n>-<slug>`, never in your checkout; a merge only moves your main forward (fast-forward, or a squash merge when there's no GitHub remote). Edits you left uncommitted in your own checkout are left alone: a merge stops only when it would write over one (and then says which file). By default a task merges on its own once its review is done and its quick checks pass; set Settings → How tasks work → Merge to "ask me first", or say so for one task. On GitHub it merges through the task's pull request. When a task is done its worktree and branch are removed; one with uncommitted or unmerged work stays, and Shepherdr says so.
+Only the ones it made. Every task works in its own worktree, on its own branch `work/<n>-<slug>`, never in your checkout; a merge only moves your main forward (fast-forward, or a squash merge when there's no GitHub remote). Edits you left uncommitted in your own checkout are left alone: a merge stops for one only when it would write over it (and then says which file). By default a task merges on its own once its review is done and its quick checks pass; set Settings → How tasks work → Merge to "ask me first", or say so for one task. On GitHub it merges through the task's pull request. When a task is done its worktree and branch are removed; one with uncommitted or unmerged work stays, and Shepherdr says so.
 
 ### Where do my tasks live?
 

@@ -60,6 +60,18 @@ describe('merging into main here', () => {
     expect(readFileSync(join(dir, 'secret.txt'), 'utf8')).toBe('mine\n')
   })
 
+  test('a repository set to autostash still refuses work of yours in main, and stashes nothing', async () => {
+    const dir = setup()
+    sh('git config merge.autoStash true', dir)
+    // the task changed README.md, and this is the operator's uncommitted version of it
+    writeFileSync(join(dir, 'README.md'), 'mine\n')
+    const r = await mergeHere(dir, 'work/task', 'main', 'SHE-5: Test', true)
+    expect(r.ok).toBe(false)
+    expect(r.err).toContain('README.md')
+    expect(readFileSync(join(dir, 'README.md'), 'utf8')).toBe('mine\n')
+    expect(sh('git stash list', dir)).toBe('')
+  })
+
   test('a branch main already has all of is refused, not an empty commit on main', async () => {
     const dir = fresh()
     sh('git checkout -q -b work/task && git checkout -q main', dir)

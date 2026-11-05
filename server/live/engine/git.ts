@@ -297,9 +297,10 @@ function gitReason(said: string) {
 
 /**
  * Merge a branch into the base on this machine. Git builds the merge itself (merge-tree: no checkout, no index, no
- * stash), and a checkout of the base is only ever moved forward by git: work of the human's in that folder stays as
- * it is, uncommitted, unless the merge would write over it — and then git refuses, naming the files, with nothing
- * changed. Nothing of theirs is stashed, reset or lost.
+ * stash) and writes the commit with commit-tree, then a checkout of the base is only ever moved forward by git: work
+ * of the human's in that folder stays as it is, uncommitted, unless the merge would write over it — and then git
+ * refuses, naming the files, with nothing changed. Nothing of theirs is stashed, reset or lost. A commit made this way
+ * runs no commit hook and takes no commit.gpgsign: there is no checkout whose hooks or signing could be trusted here.
  */
 export async function mergeHere(repo: string, branch: string, base: string, message: string, squash: boolean): Promise<Run> {
   const tree = await git(repo, 'merge-tree', '--write-tree', base, branch)
@@ -322,7 +323,7 @@ export async function mergeHere(repo: string, branch: string, base: string, mess
   // it is: git moves it, and writes only the files the merge changed
   const ff = await git(repo, 'merge', '--ff-only', '--no-autostash', '--no-overwrite-ignore', '--quiet', head)
   const said = `${ff.out}\n${ff.err}`
-  return ff.ok ? ff : { ...ff, err: overwriteRefusal(base, said, 'then merge again') ?? `${base} here could not be brought up to the merge: ${gitReason(said)}. Nothing was changed in that checkout.` }
+  return ff.ok ? ff : { ...ff, err: overwriteRefusal(base, said, 'then merge again') ?? `${base} here could not be brought up to the merge: ${gitReason(said)}. Nothing was changed in that checkout: settle that, then merge again.` }
 }
 
 /* ---------- GitHub, through gh ---------- */
