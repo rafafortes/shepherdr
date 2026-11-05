@@ -70,14 +70,13 @@ all four at once), or the idea is ported to 2.0's code instead of its herdr-core
      read as a task that is not there), and `said` and `facts` (an investigation's answer, sent back to the tester's
      thread after a gitleaks scan).
    - `shepherdr task tell <ID> <text>` — the output `Told <ID>.`, or `<ID> is held: …` when the machine is full
-     (`^Told (…-…\.|…-… is held)`).
+     (its pattern is `^(?:Told (ID)\.|(ID) is held)`, so "is held" has no `Told` in front).
    - `shepherdr task add <title> --brief <text> --space polylog [--set review=off --set merge=ask me first]` — the
      output `Added <ID>: …` (an investigation sets those two settings).
    - `shepherdr ready <ID> --summary "…" --facts "…"` — what an investigation task's brief tells the agent to run; its
      summary and facts are what comes back.
    - Task ids of the form `POL-12` (`^[A-Z]{2,5}-[0-9]{1,6}$`), the space named `polylog`, and `shepherdr` on `PATH`
-     as the single interface (the operator's wrapper finds the newest plugin checkout and talks to the loopback
-     server).
+     as the single interface (that command finds the newest plugin checkout and talks to the loopback server).
    - The data home `~/.shepherdr`: spaces, tasks, chats, settings, `outbox.json`. The bridge itself never reads those
      files, but the command's answers must keep meaning the same thing: a task's brief in `desc`, its state in
      `status`, a space's tasks under `polylog`, settings that a task can carry over.
@@ -95,8 +94,8 @@ Every improvement in the ledger gets one of three, always with the reason:
 - **skip** — it does not fit, or it costs more than it is worth; the reason says which of the four criteria fails or
   why the value is too low for us.
 
-A row may add `later` (worth doing, not now) or `verify first` (find out on 2.0's own code whether the failure even
-exists before writing anything).
+A row may add `later` (worth doing, not now), `for now` (a skip we may revisit) or `verify first` (find out on 2.0's own
+code whether the failure even exists before writing anything).
 
 ## One task and one pull request per adopted item
 
