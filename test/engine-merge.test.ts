@@ -114,7 +114,7 @@ describe('shepherdr merge', () => {
     w.agentIs(key, 'idle')
     const r = await w.engine.merge(t.id)
     expect(r.ok).toBe(false)
-    expect(r.error).toBe('main here holds work of its own that would be overwritten: README.md. Nothing was changed there: commit, move or remove it first, then merge again.')
+    expect(r.error).toBe("main here holds work of its own that would be overwritten: README.md. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes it first, then merge again.")
     // nothing there was lost or changed: their edit, and main, are as they were
     expect(readFileSync(join(dir, 'README.md'), 'utf8')).toBe('mine, not committed\n')
     expect(sh('git status --porcelain', dir)).toBe('M README.md')
@@ -133,7 +133,7 @@ describe('shepherdr merge', () => {
     w.agentIs(key, 'idle')
     const r = await w.engine.merge(t.id)
     expect(r.ok).toBe(false)
-    expect(r.error).toBe('main here holds work of its own that would be overwritten: notes.txt. Nothing was changed there: commit, move or remove it first, then merge again.')
+    expect(r.error).toBe("main here holds work of its own that would be overwritten: notes.txt. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes it first, then merge again.")
     expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe('mine, untracked\n')
   })
 

@@ -110,9 +110,8 @@
   and squash-merged into main here (and main pushed when there is a remote). Work of your own left uncommitted in that
   checkout stops this only when the merge would write over it, and the refusal names the file and says what to do; a
   merge that leaves it alone goes in, and your edit stays uncommitted (nothing is stashed, and nothing is reset). Then
-  the task is marked merged. Once the agent's turn ends, the task is put away through herdr: the worktree removed
-  (which closes its space and agent), then
-  the branch deleted. Nothing is forced: a checkout with uncommitted changes, or a branch with work main lacks, is kept
+  the task is marked merged. Once the agent's turn ends, the task is put away through herdr: the worktree removed (which
+  closes its space and agent), then the branch deleted. Nothing is forced: a checkout with uncommitted changes, or a branch with work main lacks, is kept
   and said so (in the coordinator's news and in `shepherdr status`), and its space and agent close all the same.
   Something still running in its space puts it all off until later. You can also just ask its coordinator to merge it.
   Task agents learn the way from brief to merged from [shepherdr-agent](../skill/shepherdr-agent/SKILL.md): the review the

@@ -56,8 +56,25 @@ describe('merging into main here', () => {
     writeFileSync(join(dir, 'secret.txt'), 'mine\n')
     const r = await mergeHere(dir, 'work/task', 'main', 'SHE-9: Test', true)
     expect(r.ok).toBe(false)
-    expect(r.err).toBe('main here holds work of its own that would be overwritten: secret.txt. Nothing was changed there: commit, move or remove it first, then merge again.')
+    expect(r.err).toBe("main here holds work of its own that would be overwritten: secret.txt. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes it first, then merge again.")
     expect(readFileSync(join(dir, 'secret.txt'), 'utf8')).toBe('mine\n')
+  })
+
+  test('a branch main already has all of is refused, not an empty commit on main', async () => {
+    const dir = fresh()
+    sh('git checkout -q -b work/task && git checkout -q main', dir)
+    const before = sh('git rev-parse main', dir)
+    const r = await mergeHere(dir, 'work/task', 'main', 'SHE-3: Test', true)
+    expect(r.ok).toBe(false)
+    expect(r.err).toBe('main already has this work: nothing was merged')
+    expect(sh('git rev-parse main', dir)).toBe(before)
+  })
+
+  test('a merge git cannot build at all is not called a conflict', async () => {
+    const dir = fresh()
+    const r = await mergeHere(dir, 'work/missing', 'main', 'SHE-4: Test', true)
+    expect(r.ok).toBe(false)
+    expect(r.err).toStartWith('could not build the merge: ')
   })
 
   test('a name git lists in its refusal is read off it, and a refusal about no file gives none', () => {
@@ -78,7 +95,7 @@ describe('catching main up with its remote', () => {
     writeFileSync(join(dir, 'notes.txt'), 'mine\n')
     const r = await catchUp(dir, 'main', 'then merge again')
     expect(r.ok).toBe(false)
-    expect(r.err).toBe('main here holds work of its own that would be overwritten: notes.txt. Nothing was changed there: commit, move or remove it first, then merge again.')
+    expect(r.err).toBe("main here holds work of its own that would be overwritten: notes.txt. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes it first, then merge again.")
     expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe('mine\n')
   })
 })

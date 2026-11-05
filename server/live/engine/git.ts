@@ -276,14 +276,14 @@ export function namedFiles(said: string) {
 }
 
 /**
- * What to say when git will not move a checkout over work of its own: the files it names, and what to do. Null when
- * git's refusal names no file (a split branch, an unfinished merge): then it is not about that work.
+ * What to say when git will not move a checkout over work of its own: the files it names, whose that work is, and what
+ * to do. Null when git's refusal names no file (a split branch, an unfinished merge): then it is not about that work.
  */
 function overwriteRefusal(base: string, said: string, then: string) {
   const files = namedFiles(said)
   if (!files.length) return null
   const more = files.length > 5 ? ` and ${files.length - 5} more` : ''
-  return `${base} here holds work of its own that would be overwritten: ${files.slice(0, 5).join(', ')}${more}. Nothing was changed there: commit, move or remove ${files.length === 1 ? 'it' : 'them'} first, ${then}.`
+  return `${base} here holds work of its own that would be overwritten: ${files.slice(0, 5).join(', ')}${more}. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes ${files.length === 1 ? 'it' : 'them'} first, ${then}.`
 }
 
 /** git's own words on why it refused: its error line, else its first (a git that speaks another language says "erro:") */
@@ -303,15 +303,21 @@ function gitReason(said: string) {
  */
 export async function mergeHere(repo: string, branch: string, base: string, message: string, squash: boolean): Promise<Run> {
   const tree = await git(repo, 'merge-tree', '--write-tree', base, branch)
-  if (!tree.ok) return { ...tree, err: `conflict: ${tree.out || tree.err}` }
+  const merged = tree.out.split('\n')[0] || ''
+  // a conflict writes the tree it could not finish (its id first, then the files); anything else made no merge at all
+  if (!tree.ok) return /^[0-9a-f]{40,64}$/.test(merged) ? { ...tree, err: `conflict: ${tree.out || tree.err}` } : { ...tree, err: `could not build the merge: ${gitReason(`${tree.err}\n${tree.out}`)}` }
+  // a squash merge that would change nothing is no commit at all, not an empty one on the base
+  const baseTree = await git(repo, 'rev-parse', '--verify', '--quiet', `${base}^{tree}`)
+  if (squash && baseTree.ok && merged === baseTree.out) return { ok: false, code: 0, out: '', err: `${base} already has this work: nothing was merged` }
   // the squash commit main gets, or the merge commit that keeps both sides
-  const commit = await git(repo, 'commit-tree', tree.out.split('\n')[0], '-p', base, ...(squash ? [] : ['-p', branch]), '-m', message)
+  const commit = await git(repo, 'commit-tree', merged, '-p', base, ...(squash ? [] : ['-p', branch]), '-m', message)
   if (!commit.ok) return { ...commit, err: `could not make the merge commit: ${gitReason(`${commit.err}\n${commit.out}`)}` }
   const head = commit.out
   // the base is not this checkout's branch: its branch moves, and no checkout of it is touched
   if ((await git(repo, 'branch', '--show-current')).out !== base) {
-    const moved = await git(repo, 'update-ref', `refs/heads/${base}`, head)
-    return moved.ok ? moved : { ...moved, err: `could not move ${base} to the merge: ${gitReason(`${moved.err}\n${moved.out}`)}` }
+    const was = await git(repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${base}`)
+    const moved = await git(repo, 'update-ref', `refs/heads/${base}`, head, ...(was.ok ? [was.out] : []))
+    return moved.ok ? moved : { ...moved, err: `could not move ${base} to the merge: ${gitReason(`${moved.err}\n${moved.out}`)}. Nothing was merged into ${base} here: run the merge again.` }
   }
   // it is: git moves it, and writes only the files the merge changed
   const ff = await git(repo, 'merge', '--ff-only', '--no-autostash', '--no-overwrite-ignore', '--quiet', head)

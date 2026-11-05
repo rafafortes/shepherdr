@@ -85,6 +85,10 @@ Done or the merge question.
 
 - `shepherdr merge` reports a conflict: rebase, check, push and merge again, without asking. It says **You have a new
   message in your chat**: handle that first, then merge again.
+- `shepherdr merge` says the base checkout **holds work of its own that would be overwritten**, naming a file: that
+  file is someone's uncommitted work in the space's own folder, not the task's. Do not commit, stash, move or remove
+  it; say so in one line and merge again once they have dealt with it. Same for **could not be brought up to the
+  merge** and **could not move**: nothing was merged, so say it and try again rather than editing the folder.
 - News from GitHub after ready (a failed check, a review, a comment) is only passed on. A failure your change caused:
   fix it. One outside it (the base is red too): say so in one line. A clear wish that fits the brief: do it. Anything
   else goes to the human in one short message. Then `shepherdr ready` again.

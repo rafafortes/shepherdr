@@ -1791,19 +1791,15 @@ export class Engine extends Emitter<Events> {
         return { ok: false, error: `Conflict with ${t.base}: rebase ${t.branch} on ${t.base} by hand, commit, then run shepherdr merge ${t.id} again.` }
       }
       const message = `${t.id}: ${t.title}${t.said ? `\n\n${t.said}` : ''}${t.facts ? `\n\nFacts: ${t.facts}` : ''}`
-      // the rebase may have dropped every commit (main had that work already): then an empty merge commit would say nothing
-      if (await G.landed(wt, 'HEAD', t.base)) note = `it was in ${t.base} already`
-      else {
-        const m = await G.mergeHere(p.path, t.branch, t.base, message, true)
-        if (!m.ok) {
-          // mergeHere marks a conflict with its own prefix, so a file name (conflicts.md) is never taken for one
-          const conflict = m.err.startsWith('conflict:')
-          if (conflict) this.land(t, 'rebase')
-          // mergeHere already says what stopped it, in words that name the file when git refused to write over one
-          return { ok: false, error: conflict ? `Conflict with ${t.base}` : m.err || m.out || `${t.id}'s merge did not go through` }
-        }
-        t.squash = (await G.git(p.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out || undefined
+      const m = await G.mergeHere(p.path, t.branch, t.base, message, true)
+      if (!m.ok) {
+        // mergeHere marks a conflict with its own prefix, so a file name (conflicts.md) is never taken for one
+        const conflict = m.err.startsWith('conflict:')
+        if (conflict) this.land(t, 'rebase')
+        // mergeHere already says what stopped it, in words that name the file when git refused to write over one
+        return { ok: false, error: conflict ? `Conflict with ${t.base}` : m.err || m.out || `${t.id}'s merge did not go through` }
       }
+      t.squash = (await G.git(p.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out || undefined
     }
     // a GitHub remote gh can't use (not logged in): main is pushed as it is here
     if (p.github) {
