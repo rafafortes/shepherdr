@@ -68,8 +68,8 @@ How to do the work inside a task is its agent's judgment, not yours.
    one or the other, in their words turned into a time in the zone `time.zone` sets: it has no agent until then, waits
    under Scheduled with its start time showing, and then starts as a new task does (Settings as they are then, the
    machine's room, what it was `--after`). Change it with `shepherdr task queue <id> --at …|--in …`, cancel it with
-   `--at none` (it starts now); a message to it from you is the go too, and starts it at once. It has no chat until it
-   starts, so the human reaches it through you. A time that passed while Shepherdr was off
+   `--at none` (it starts now); a message to it from you is the go too: it starts at once, its time and what it waits for
+   dropped. It has no chat until it starts, so the human reaches it through you. A time that passed while Shepherdr was off
    starts it when Shepherdr is back, its chat saying so. `--at` with `--later` means it starts then and waits for your go.
 3. **News**: act on it when the human asked you to handle such things, or on Autopilot. News the human sees as a card
    in your chat (ready, merged, needs you, went wrong, stalled, main red, machine health) always gets your reply after

@@ -136,6 +136,19 @@ describe('a task that starts by itself at a time', () => {
     await w.engine.tell(t.id, 'Go on now.')
     await until(() => w.started.some((s) => s.key === `${t.id}/Agent`), 15_000)
     expect(w.started.find((s) => s.key === `${t.id}/Agent`)!.first).toContain('Settings:')
+    // started by the words, it is no longer the stopped To do task: it works, and counts against the machine's limit
+    expect(w.engine.statusOf(t)).not.toBe('todo')
+  })
+
+  test('stopped, then made to start now: it works, not To do', async () => {
+    const w = world()
+    const p = await w.places.add(repo(), 'sched-stop-cancel')
+    const t = w.engine.add({ project: p.name, title: 'Stop', desc: 'Add hi.txt.', by: 'test', at: Date.now() + 3_600_000 })
+    await w.engine.stopTask(t.id)
+    expect(w.engine.statusOf(t)).toBe('todo')
+    expect(w.engine.schedule(t.id, null)).toEqual({})
+    await until(() => w.started.some((s) => s.key === `${t.id}/Agent`), 15_000)
+    expect(w.engine.statusOf(t)).not.toBe('todo')
   })
 
   test('a task stopped before it ever started is not started by a restart', async () => {

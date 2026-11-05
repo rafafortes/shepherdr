@@ -912,9 +912,10 @@ export class Engine extends Emitter<Events> {
     this.save()
     if (!t.worktree) {
       // it never started (its time came while it waited for another task): no agent waits to hear the go, so it goes in
-      // the brief it starts on
+      // the brief it starts on, and is not sent again after a restart (nothing is waiting to receive it)
       const [work, how] = splitBrief(t.desc)
       t.desc = [work, text, how].filter(Boolean).join('\n\n')
+      t.going = undefined
       this.startTask(t).catch((e) => this.troubled(t, e))
     } else this.agents.send(key, plain ? text : hidden(text, 'go'), { ensure: this.starter(t) }).catch(() => undefined)
     this.settleOne(t)
@@ -1304,6 +1305,7 @@ export class Engine extends Emitter<Events> {
     if (ended(t)) throw new Error(`${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'})`)
     if (t.worktree || this.starting.has(t.id) || this.agents.record(this.key(t))) throw new Error(`${t.id} has already started: only a task that has not started yet can wait for a time. Write to its chat, or stop it first (shepherdr task stop ${t.id}).`)
     t.stopped = undefined
+    t.todo = undefined
     t.trouble = undefined
     if (at !== null) {
       // it keeps what it waits for (--after): at its time it waits for the machine, and for those, before its agent starts
@@ -2406,8 +2408,14 @@ export class Engine extends Emitter<Events> {
       // a brief is
       const [work, how] = splitBrief(t.desc)
       t.desc = [work, text, how].filter(Boolean).join('\n\n')
-      // a message is the go, as for one at work
+      // a message is the go, as for one at work: what a stop left (stopped, To do, paused) goes with it, so the task it
+      // starts reads as it is (working) and counts against the machine's limit
       t.held = undefined
+      t.stopped = undefined
+      t.todo = undefined
+      t.paused = undefined
+      t.reported = false
+      this.wrote.set(t.id, Date.now())
       await this.startTask(t)
       return {}
     }

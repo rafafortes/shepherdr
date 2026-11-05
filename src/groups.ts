@@ -111,8 +111,8 @@ export interface TaskGroup {
 
 /**
  * Tasks in their groups, in the order they show (archived ones left out). Pinned tasks first, in a Pinned group in
- * status order, and in no other group. Then by status: Needs you, Ready, Working, Queued, To do, Done, the empty
- * ones left out but To do. By machine or by project: one group each, in the sidebar's order, its tasks in that same
+ * status order, and in no other group. Then by status: Needs you, Ready, Merging, Working, Scheduled, Queued, To do,
+ * Done, the empty ones left out but To do. By machine or by project: one group each, in the sidebar's order, its tasks in that same
  * status order (Needs you first). Machine › Project: each machine in the sidebar's order, its projects' groups under
  * it. Done tasks are newest finished first. level: the view's (0 All machines, 1 a machine, 2 a space), which says
  * what its rows needn't.
