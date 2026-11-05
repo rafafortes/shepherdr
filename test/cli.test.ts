@@ -272,3 +272,44 @@ describe.if(perl)('session-owned command routing', () => {
     } finally { server.stop(true) }
   })
 })
+
+describe('who a task tell comes from', () => {
+  test("the command says which chat and pane its shell runs in, so the message reaches the task as that agent's", async () => {
+    const bodies: { args?: string[]; chat?: string; pane?: string }[] = []
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async (req) => (bodies.push((await req.json()) as never), Response.json({ out: 'Told SHE-1.\n', code: 0 })) })
+    try {
+      const url = `http://127.0.0.1:${server.port}`
+      const r = await run([process.execPath, join(root, 'server', 'cli.ts'), 'task', 'tell', 'SHE-1', 'Merge it'], { SHEPHERDR_URL: url, SHEPHERDR_CHAT: 'SHE-17/Agent', HERDR_PANE_ID: 'w7R:p2' })
+      expect(r.code).toBe(0)
+      expect(r.out).toContain('Told SHE-1.')
+      expect(bodies.at(-1)).toMatchObject({ args: ['task', 'tell', 'SHE-1', 'Merge it'], chat: 'SHE-17/Agent', pane: 'w7R:p2' })
+      // a plain terminal sends neither, and its words stay the human's
+      await run([process.execPath, join(root, 'server', 'cli.ts'), 'task', 'tell', 'SHE-1', 'Plain words'], { SHEPHERDR_URL: url, SHEPHERDR_CHAT: '', HERDR_PANE_ID: '' })
+      expect(bodies.at(-1)).toMatchObject({ args: ['task', 'tell', 'SHE-1', 'Plain words'] })
+      expect(bodies.at(-1)!.chat).toBeFalsy()
+      expect(bodies.at(-1)!.pane).toBeFalsy()
+    } finally { server.stop(true) }
+  })
+
+  test('the server hands that pane to the command, with the chat and the folder', async () => {
+    const { startApp } = await import('../server/app.ts')
+    const { Emitter } = await import('../server/source.ts')
+    const seen: { chat?: string; pane?: string; cwd?: string }[] = []
+    const source = Object.assign(new Emitter(), {
+      kind: 'live',
+      cli: async (_args: string[], c: { chat?: string; pane?: string; cwd?: string }) => (seen.push(c), { out: 'Told SHE-1.\n', code: 0 }),
+      snapshot: () => ({ name: 'S', host: 'h', places: [], machines: [], tasks: [], automations: {}, asks: {}, settings: [], overrides: {}, user: 'u' }),
+      chat: () => undefined,
+    })
+    const app = startApp({ source: source as never, dist: '/nonexistent', port: 0 })
+    try {
+      const r = await fetch(`http://127.0.0.1:${app.port}/api/cli`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ args: ['task', 'tell', 'SHE-1', 'hi'], chat: 'SHE-17/Agent', pane: 'w7R:p2', cwd: '/work/x' }),
+      })
+      expect(await r.json()).toEqual({ out: 'Told SHE-1.\n', code: 0 })
+      expect(seen.at(-1)).toMatchObject({ chat: 'SHE-17/Agent', pane: 'w7R:p2', cwd: '/work/x' })
+    } finally { app.stop(true) }
+  })
+})

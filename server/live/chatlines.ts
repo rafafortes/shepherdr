@@ -261,6 +261,9 @@ const PEER_TAGS = ['agent-message', 'cross-session-message']
 /** one envelope at the start of a text: its tag, its attributes and its words, up to its own closing tag */
 const ENVELOPE = /^<([a-z][\w-]*)((?:\s+[\w-]+="[^\n]*?")*)\s*>([\s\S]*?)<\/\1>\s*/
 
+/** the same, holding everything up to the last closing tag: an agent's words may quote the tag they arrive in */
+const ENVELOPE_WHOLE = /^<([a-z][\w-]*)((?:\s+[\w-]+="[^\n]*?")*)\s*>([\s\S]*)<\/\1>$/
+
 /** the attributes of a tag, read the way tagOf reads them */
 function attrsOf(s: string): Record<string, string> {
   const a: Record<string, string> = {}
@@ -278,24 +281,35 @@ function attrsOf(s: string): Record<string, string> {
  * shows it beside the message and nothing treats it as the human's word.
  */
 export function fromAgents(text: string): FromAgent[] {
-  let s = String(text ?? '').trim().replace(CLAUDE_PEER, '')
+  const whole = String(text ?? '').trim().replace(CLAUDE_PEER, '')
   const out: FromAgent[] = []
+  let s = whole
   while (s.startsWith('<')) {
     const m = ENVELOPE.exec(s)
     if (!m || !PEER_TAGS.includes(m[1])) break
-    const a = attrsOf(m[2])
-    const name = (m[1] === 'cross-session-message' ? (a['from-name'] ?? a.from) : (a.from ?? a.name ?? a['from-name']))?.trim()
-    out.push({
-      name: name || 'Another agent',
-      ...(a.pane ? { pane: a.pane } : {}),
-      ...(a.space ? { space: a.space } : {}),
-      ...(a.task ? { task: a.task } : {}),
-      text: (m[3] ?? '').trim(),
-    })
+    out.push(peerOf(m))
     s = s.slice(m[0].length)
   }
-  // anything left over is not an envelope, so the text as a whole is not one of these lines: no message from it
-  return out.length && !s.trim() ? out : []
+  // anything left over is not an envelope, so the text as a whole is not one of these lines: unless the only envelope
+  // runs to the very end and its words quote a closing tag of their own ("… the </agent-message> line above …")
+  if (s.trim() || !out.length) {
+    const m = ENVELOPE_WHOLE.exec(whole)
+    return m && PEER_TAGS.includes(m[1]) ? [peerOf(m)] : []
+  }
+  return out
+}
+
+/** one envelope's match (the same shape from either pattern) as the message it holds */
+function peerOf(m: RegExpExecArray): FromAgent {
+  const a = attrsOf(m[2])
+  const name = (m[1] === 'cross-session-message' ? (a['from-name'] ?? a.from) : (a.from ?? a.name ?? a['from-name']))?.trim()
+  return {
+    name: name || 'Another agent',
+    ...(a.pane ? { pane: a.pane } : {}),
+    ...(a.space ? { space: a.space } : {}),
+    ...(a.task ? { task: a.task } : {}),
+    text: (m[3] ?? '').trim(),
+  }
 }
 
 /** one message another agent sent, or null: the first of a text (see fromAgents) */

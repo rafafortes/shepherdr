@@ -2216,21 +2216,32 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /**
-   * Who a `task tell` comes from, when an agent's own shell runs it: its chat (the launch's SHEPHERDR_CHAT), its herdr
-   * pane and the space or task it works in. A terminal without a chat sends nothing, so its words stay the human's.
-   * Declared, never verified: a shell can set both itself, which is why the chat shows the sender and grants it
-   * nothing.
+   * Who a `task tell` comes from, when an agent's shell runs it: its chat (the launch's SHEPHERDR_CHAT), its herdr pane
+   * and the space or task it works in. A shell with no chat is still an agent's when herdr says an agent runs in its
+   * pane (another Claude Code or pi session of the operator's, not one of ours): it goes by that agent's name. A plain
+   * terminal — no chat, no agent in its pane — sends nothing, so its words stay the human's.
+   *
+   * Declared, never verified: a shell could set SHEPHERDR_CHAT itself, which is why the chat shows the sender and grants
+   * it nothing. The pane is what herdr reports, not what the caller claims.
    */
-  private toldFrom(ctx: { chat?: string; pane?: string }): { name: string; pane?: string; space?: string; task?: string } | undefined {
-    if (!ctx.chat) return undefined
-    const [id, role] = ctx.chat.split('/')
-    const t = role ? this.engine.task(id) : undefined
-    const name = t ? `${t.id} ${role.toLowerCase()}` : ctx.chat.includes('/') ? this.chatName(ctx.chat) : `${this.chatName(ctx.chat)} coordinator`
-    return {
-      name,
-      ...(ctx.pane ? { pane: ctx.pane } : {}),
-      ...(t ? { task: t.id, space: this.chatName(t.project) } : { space: this.chatName(ctx.chat) }),
+  private async toldFrom(ctx: { chat?: string; pane?: string }): Promise<{ name: string; pane?: string; space?: string; task?: string } | undefined> {
+    const pane = ctx.pane
+    if (ctx.chat) {
+      const [id, role] = ctx.chat.split('/')
+      const t = role ? this.engine.task(id) : undefined
+      const name = t ? `${t.id} ${role.toLowerCase()}` : ctx.chat.includes('/') ? this.chatName(ctx.chat) : `${this.chatName(ctx.chat)} coordinator`
+      return {
+        name,
+        ...(pane ? { pane } : {}),
+        ...(t ? { task: t.id, space: this.chatName(t.project) } : { space: this.chatName(ctx.chat) }),
+      }
     }
+    if (!pane) return undefined
+    const a = await herdr.agent(pane).catch(() => undefined)
+    if (!a?.agent) return undefined
+    // an agent of ours is named as its chat is; anyone else by the herdr name it runs under, else its CLI
+    const who = this.peerOf({ name: a.name?.trim() || CLI_NAME[a.agent] || a.agent, text: '' })
+    return { name: who.name, pane, ...(who.space ? { space: who.space } : {}), ...(who.task ? { task: who.task } : {}) }
   }
 
   /**
@@ -2823,7 +2834,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'tell': {
         // a coordinator's go to a task that waits starts it only when this machine has room; a message an agent's own
         // shell sends says who it came from, so the chat shows it as that agent's and never as the human's words
-        const r = await this.engine.tell(t.id, rest.slice(1).join(' '), { gate: !ctx.chat?.includes('/'), from: this.toldFrom(ctx) })
+        const r = await this.engine.tell(t.id, rest.slice(1).join(' '), { gate: !ctx.chat?.includes('/'), from: await this.toldFrom(ctx) })
         if (r.held) return `${t.id} is held: ${r.held === 'slots' ? `all ${this.settings.machine().max} slots are taken` : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and gets your message when there's room, oldest first.`
         return `Told ${t.id}.`
       }

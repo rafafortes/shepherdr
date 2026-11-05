@@ -1,6 +1,6 @@
 // A message another agent sent: its own row in the chat, naming the sender it declared. Never the human's words, and
 // never vouched for: the sender is only what the other side wrote.
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -143,5 +143,46 @@ describe('a message another agent sent, in the chat', () => {
       ['you', undefined],
       ['you', undefined],
     ])
+  })
+})
+
+/* ---------- who a task tell comes from, on the live server ---------- */
+
+describe('shepherdr task tell says who sent it', () => {
+  test("an agent's shell names its chat, pane and space; a pane herdr says runs an agent is one too; a plain terminal is not", async () => {
+    const home = mkdtempSync(join(tmpdir(), 'shep-peer-tell-'))
+    process.env.SHEPHERDR_HOME = home
+    process.env.HERDR_SOCKET_PATH = join(home, 'no-herdr.sock')
+    const [{ LiveSource }, { herdr }, { placeId }] = await Promise.all([
+      import('../server/live/source.ts'),
+      import('../server/live/herdr.ts'),
+      import('../server/live/places.ts'),
+    ])
+    const src = new LiveSource()
+    type Told = { name: string; pane?: string; space?: string; task?: string } | undefined
+    const told = (ctx: { chat?: string; pane?: string }) => (src as unknown as { toldFrom(c: { chat?: string; pane?: string }): Promise<Told> }).toldFrom(ctx)
+    /** herdr says this is what runs in the pane */
+    const agentAt = (a: { agent: string | null; name?: string | null; pane_id: string }) => spyOn(herdr, 'agent').mockImplementation((async () => ({ ...a, tab_id: 't', workspace_id: 'w' })) as never)
+    try {
+      // one of ours: its chat says which agent it is, and where it works; herdr is not asked for it
+      const mine = await told({ chat: placeId.home(), pane: 'w9:p9' })
+      expect(mine).toMatchObject({ pane: 'w9:p9' })
+      expect(mine?.name).toEndWith('coordinator')
+      // a shell with no chat: the pane herdr says runs an agent makes it that agent's message
+      const ours = agentAt({ agent: 'pi', name: 'shep-she-17', pane_id: 'w9:p1' })
+      expect(await told({ pane: 'w9:p1' })).toEqual({ name: 'shep-she-17', pane: 'w9:p1' })
+      ours.mockRestore()
+      // an agent of the operator's that is not Shepherdr's: its CLI's name, with the pane it writes from
+      const stranger = agentAt({ agent: 'claude', name: null, pane_id: 'w2E:pC' })
+      expect(await told({ pane: 'w2E:pC' })).toEqual({ name: 'Claude Code', pane: 'w2E:pC' })
+      stranger.mockRestore()
+      // nothing runs in that pane (herdr says so), or a shell with neither chat nor pane: the words are the human's
+      const empty = agentAt({ agent: null, pane_id: 'w2E:pC' })
+      expect(await told({ pane: 'w2E:pC' })).toBeUndefined()
+      empty.mockRestore()
+      expect(await told({})).toBeUndefined()
+    } finally {
+      src.stop()
+    }
   })
 })

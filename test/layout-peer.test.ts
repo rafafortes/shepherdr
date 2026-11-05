@@ -28,7 +28,7 @@ describe.skipIf(!browser)('a message from another agent', () => {
         await whole.waitFor()
         // not the human's: nothing marks it yours
         expect(await bubble.getAttribute('data-you')).toBeNull()
-        expect(await page.locator('[data-you][data-whole="from-she-17"]').count()).toBe(0)
+        expect(await whole.locator('[data-you]').count()).toBe(0)
         // it says who sent it, and where that runs, before the words
         const head = whole.locator('[data-peer]')
         expect(await head.textContent()).toContain('SHE-17 agent')

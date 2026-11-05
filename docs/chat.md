@@ -37,12 +37,17 @@ Every agent, coordinator or task agent, gets the same chat.
   with the sender above it — the name that side declared, the herdr pane it wrote from, and the space or task it works
   in when the message says so. **The sender is declared, never verified**: it is another agent's text, not your word,
   and nothing about a permission, a merge or a secret is theirs to give.
-  What is recognised, and how: `shepherdr task tell` run from an agent's own shell (Shepherdr wraps its words in the
-  envelope below, so every task it reaches knows who sent it); herdr's own agent messaging, which wraps the message it
-  types into a pi pane (`<agent-message from="…" to="…">`, the pi herdr integration's tool); and Claude Code's
-  cross-session messaging, which its own log marks as a peer message. What is not: plain text typed with
-  `herdr agent prompt`, or an answer typed into a blocked pane, carries nothing to tell it from your own words, so it
-  still reads as yours. Shepherdr's own lines to its agents are tagged the same way and are never shown as a message:
+  What is recognised, and how: `shepherdr task tell` run from an agent's shell (Shepherdr wraps its words in the
+  envelope below, so every task it reaches knows who sent it), and from any pane herdr says an agent runs in, even one
+  that is not Shepherdr's (`shepherdr task tell` from a plain Claude Code or pi session's shell, which has no chat of its
+  own, goes by that pane's agent); herdr's own agent messaging, which wraps the message it types into a pi pane
+  (`<agent-message from="…" to="…">`, the pi herdr integration's tool); and Claude Code's cross-session messaging, which
+  its own log marks as a peer message. What is not: plain text typed with `herdr agent prompt`, or an answer typed into a
+  blocked pane, carries nothing to tell it from your own words, so it still reads as yours; and a `shepherdr task tell`
+  from a plain terminal with no agent in its pane is your own words, as always.
+  One thing to know about the name: when it is one of the agents on this machine (`shep-she-17`, a pane id), the row
+  shows that agent's own name, pane and space or task, which is what the machine knows about it — the message still
+  only claimed the name. Shepherdr's own lines to its agents are tagged the same way and are never shown as a message:
   a brief, a piece of news, a go.
   ```
   <agent-message from="SHE-17 agent" to="SHE-18 agent" pane="w7R:p2" space="shepherdr" task="SHE-17">Merge it once the checks pass.</agent-message>

@@ -590,8 +590,10 @@ export class Chats {
   /** a message from another agent as the chat draws it (one per envelope: a task told twice while it was held heard two),
    *  naming the sender it declared and nothing this machine vouches for */
   private peerRows(msgs: Message[], id: string, at: number, froms: FromAgent[], newSession?: boolean, more: Partial<Message> = {}) {
-    froms.forEach((f, i) => {
-      const mid = froms.length === 1 ? id : `${id}:peer${i}`
+    // an envelope with nothing in it is no message: a row with a sender and no words says nothing
+    const said = froms.filter((f) => f.text)
+    said.forEach((f, i) => {
+      const mid = said.length === 1 ? id : `${id}:peer${i}`
       msgs.push({ id: mid, who: 'peer', at, text: f.text, peer: this.whoOf(f), newSession: !i && newSession ? true : undefined, ...more })
     })
   }
