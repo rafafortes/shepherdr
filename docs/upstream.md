@@ -14,8 +14,8 @@ This file says how we watch upstream, what a change must keep to come in, how we
 The `upstream` remote is fetch-only (its push URL is `DISABLED`), so a mistake cannot reach eliasstravik/shepherdr:
 
 ```sh
-git fetch upstream --tags      # every release tag, read only
-git fetch upstream v2.0:v2.0   # upstream's own 2.0 line, the branch closest to our code
+git fetch upstream --tags   # every release tag, read only
+git fetch upstream v2.0     # upstream/v2.0, its own 2.0 line: the closest code to ours
 ```
 
 Never `git push --tags` from this repository: it would publish upstream's 3.x tags on our fork. We publish only our
@@ -35,10 +35,9 @@ Nothing is set up: the operator decides. The proposal is one weekly check, and n
 nearly every day, most of it on the herdr-core line we do not track, so the useful question is only whether anything
 new matters to us.
 
-- **Where:** one automation in the `shepherdr` space, so it runs as a task in this repository and reports in the
-  chat: `shepherdr automation add "Upstream check" --task "Upstream check" --brief "<the checks below>" --when
-  "FREQ=WEEKLY;BYDAY=MO;BYHOUR=9;BYMINUTE=0" --space shepherdr`. (Cheaper if the operator prefers: a line in the
-  space's coordinator heartbeat instead, `shepherdr heartbeat set`, which runs no task and does no work of its own.)
+- **Where:** one automation in the `shepherdr` space, on a Monday-morning time rule, its brief the three checks below.
+  It runs as a task in this repository and reports in the chat. (Cheaper, if the operator prefers: a line in the
+  space's coordinator heartbeat instead, which runs no task of its own and does less.)
 - **What it does:** `git fetch upstream --tags`, then compares `git tag --sort=-v:refname` and the tip of
   `upstream/main` with the "Last reviewed" lines above. Nothing new: it says so in one line and closes with no
   branch (`shepherdr task close`). Something new: it reads the new release notes and the commit subjects, and reports
@@ -54,23 +53,24 @@ all four at once), or the idea is ported to 2.0's code instead of its herdr-core
 
 1. **The herdr terminal plugin.** Shepherdr stays a plugin that herdr installs, builds, starts and stops, and whose
    agents are herdr agents: `herdr agent list/read/prompt`, panes, `herdr plugin install`, the plugin actions. No
-   herdr-core, no Herdr desktop app, and the plugin id stays `herdr-projects` (herdr refuses an update whose id
-   changed, which is why 2.1 needed a new one).
+   herdr-core, no Herdr desktop app, and the plugin id stays `herdr-projects`: herdr refuses an update whose id
+   changed, so a new id is how upstream keeps a 2.0 install from moving onto 2.1.
 2. **Our own login, in front.** The web app keeps listening on loopback and stays reachable from the phone through
    the operator's own path: the lab-ingress Caddy reverse proxy over the VPN, with basic auth (no Tailscale, no
    identity header, no `tailscale serve`). Nothing in the change may make a request's origin or identity decide who
    gets in. The plugin's `share` action (upstream's `tailscale serve`) stays unused for us.
 3. **pi task agents beside Claude Code.** pi is first-class: model and effort flags, the log reader (its chat shows
-   its replies), the folder-trust handling, and the brief reaching it. pi runs on OpenCode Go and on the local models
-   (the DGX Spark resident, the Radeon and the Avell ones). Claude Code stays the coordinator and the reviewer line.
+   its replies), the folder-trust handling, and the brief reaching it. pi runs on OpenCode Go and on the local models.
+   Claude Code stays the coordinator and the reviewer line.
 4. **What polylog-bridge relies on.** `~/www/hermes-assistant/host/polylog-bridge` (user timer, every minute) is the
    only outside consumer of our CLI, and it is what turns tester feedback into tasks. It uses exactly this, and any
    change that renames, reshapes or moves one of them breaks it:
    - `shepherdr task list --space polylog --json` — a JSON array; it reads each row's `id`, `title`, `status` and
      `sub` (those four, with the brief, are what it pushes to the VM and what its change digest is built from).
    - `shepherdr task show <ID> --json` — one object; it reads `desc` (the brief, shown to Manoj),
-     `status` (to tell a finished task from a running one), and `said` and `facts` (an investigation's answer, sent
-     back to the tester's thread after a gitleaks scan).
+     `status` (compared with the literal `done`, to tell a finished task from a running one; a failed `task show` is
+     read as a task that is not there), and `said` and `facts` (an investigation's answer, sent back to the tester's
+     thread after a gitleaks scan).
    - `shepherdr task tell <ID> <text>` — the output `Told <ID>.`, or `<ID> is held: …` when the machine is full
      (`^Told (…-…\.|…-… is held)`).
    - `shepherdr task add <title> --brief <text> --space polylog [--set review=off --set merge=ask me first]` — the
@@ -78,8 +78,8 @@ all four at once), or the idea is ported to 2.0's code instead of its herdr-core
    - `shepherdr ready <ID> --summary "…" --facts "…"` — what an investigation task's brief tells the agent to run; its
      summary and facts are what comes back.
    - Task ids of the form `POL-12` (`^[A-Z]{2,5}-[0-9]{1,6}$`), the space named `polylog`, and `shepherdr` on `PATH`
-     as the single interface (`~/www/misc/host-tools/bin/shepherdr` finds the newest plugin checkout and talks to the
-     loopback server).
+     as the single interface (the operator's wrapper finds the newest plugin checkout and talks to the loopback
+     server).
    - The data home `~/.shepherdr`: spaces, tasks, chats, settings, `outbox.json`. The bridge itself never reads those
      files, but the command's answers must keep meaning the same thing: a task's brief in `desc`, its state in
      `status`, a space's tasks under `polylog`, settings that a task can carry over.
@@ -94,6 +94,9 @@ Every improvement in the ledger gets one of three, always with the reason:
   client): it is rewritten against 2.0's code.
 - **skip** — it does not fit, or it costs more than it is worth; the reason says which of the four criteria fails or
   why the value is too low for us.
+
+A row may add `later` (worth doing, not now) or `verify first` (find out on 2.0's own code whether the failure even
+exists before writing anything).
 
 ## One task and one pull request per adopted item
 
@@ -113,7 +116,7 @@ Only with the operator's yes, and patch bumps (`v2.0.1`, `v2.0.2`, …) unless t
 1. On `herdr-tui`, with everything merged: `package.json` and `herdr-plugin.toml` carry the same version, and both are
    bumped in the release commit (they are the only two places with it).
 2. `git tag -a v2.0.<n> -m "Shepherdr 2.0.<n>"` and `git push origin v2.0.<n>` (the tag only — never `--tags`).
-3. A GitHub release on that tag, its notes written from the merged pull requests since the previous tag.
+3. Optionally a GitHub release on that tag, its notes written from the merged pull requests since the previous tag.
 4. On a machine: `herdr plugin install rafafortes/shepherdr --ref v2.0.<n> --yes`, then the plugin's **start** action,
    which swaps the running server. Each install gets its own checkout; the previous one stays for rollback
    (`herdr plugin install rafafortes/shepherdr --ref v2.0.<n-1> --yes`, then start again).
