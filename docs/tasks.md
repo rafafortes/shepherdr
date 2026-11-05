@@ -19,7 +19,7 @@
   `--agent`, `--model` or `--effort` to `task add`; for another reviewer, `--reviewer`, `--reviewer-model` or
   `--reviewer-effort`. Tap the task and you are in its agent's chat, where it asks, shows
   artifacts and tells you when it is done; the task's brief shows exactly what its agent got.
-- Review rounds are a limit, so no agent reviews for ever, and its own agent can't raise it: it counts each round
+- Review rounds are a limit, so no agent reviews for ever, and raising it is its coordinator's alone: its agent counts each round
   (`shepherdr review <id>`) and stops at the brief's Review rounds. A task that has used them all with its final
   commit still unreviewed says so in its chat; its coordinator gives it exactly one more with `shepherdr task
   review-more <id>`, once, only once they are all used, and its agent is woken with the round to run. `task show`
