@@ -9,7 +9,8 @@ The operator's fork, used on their desktop since 2026-11-04 (herdr installs the 
 
 - **Branches.** `herdr-tui` is our line, the default branch: Shepherdr 2.0, the plugin for the herdr terminal app
   (plugin id `herdr-projects`). `main` mirrors upstream (eliasstravik/shepherdr, now 3.x on herdr-core and the Herdr
-  desktop app): never commit to it. Upstream's own 2.0 line is its branch `v2.0` (42 unreleased commits after v2.0.0).
+  desktop app): never commit to it. Upstream's own 2.0 line is its branch `v2.0`, 42 unreleased commits after v2.0.0;
+  41 of them are merged here (#2, up to `bcaa2ca4`), only SHE-295 (the sandboxed coordinator Autopilot) stays out.
 - **What we keep.** The herdr terminal app, our own login in front of the web app (a reverse proxy over our VPN, not
   Tailscale), and pi task agents (OpenCode Go and local models) beside Claude Code. An improvement from upstream's 2.1
   or 3.x comes in only when it fits these; port the idea to 2.0's code rather than its herdr-core or Tailscale parts.

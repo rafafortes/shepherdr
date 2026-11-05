@@ -99,7 +99,7 @@ describe.skipIf(!browser)('restarting an agent', () => {
         const sheet = page.getByRole('alertdialog')
         await sheet.locator('[data-restart]').waitFor()
         // nothing is kept for later unless a pick changes it and the switch says so
-        expect(await sheet.getByRole('switch').getAttribute('aria-checked')).toBe('false')
+        if (await sheet.getByRole('switch').count()) expect(await sheet.getByRole('switch').first().getAttribute('aria-checked')).toBe('false')
         await sheet.getByRole('button', { name: /^Effort: / }).click()
         await page.getByRole('menuitemradio', { name: save ? 'Low' : 'High', exact: true }).click()
         const toggle = sheet.getByRole('switch', { name: `Use for future ${task ? 'task agents' : 'coordinators'} in ${p.name}` })

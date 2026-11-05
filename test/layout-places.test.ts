@@ -155,7 +155,6 @@ describe.skipIf(!browser)('sidebars', () => {
       if (!docked) {
         await page.getByRole('button', { name: 'Places', exact: true }).click()
         // the drawer, over the docked one the screen behind still holds
-        await page.locator('nav[aria-label="Places"] nav, [data-drawer]').first().waitFor().catch(() => undefined)
         await page.getByRole('button', { name: 'Close', exact: true }).waitFor()
         await page.getByRole('button', { name: 'Close', exact: true }).click()
       }

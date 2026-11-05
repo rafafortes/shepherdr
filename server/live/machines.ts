@@ -481,7 +481,7 @@ export class Machines extends Emitter<Events> {
     if (!this.active(l) || l.busy || !l.worker) return
     l.busy = true
     l.health.restarting()
-    console.error(`shepherdr: ${l.rec.machine}: link unhealthy for 3 minutes; replacing worker`)
+    console.info(`shepherdr: ${l.rec.machine}: link unhealthy for 3 minutes; replacing worker`)
     const w = l.worker
     l.ws?.close()
     l.ws = undefined

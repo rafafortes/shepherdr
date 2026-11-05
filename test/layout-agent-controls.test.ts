@@ -1,6 +1,6 @@
 // Composer + launch controls for both chat roles; only GitHub runs these browser tests.
 import { describe, expect, test } from 'bun:test'
-import { layout } from './layout.ts'
+import { layout, until } from './layout.ts'
 
 const { browser, world, server } = await layout({ everything: true })
 
@@ -65,7 +65,7 @@ describe.skipIf(!browser)('composer + agent controls', () => {
     expect(await controls.getByRole('menuitem', { name: 'Effort: Not reported. Select and restart', exact: true }).count()).toBe(1)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
     await box.locator('button[aria-label="Attach files and more"]').click()
-    expect(await controls.count()).toBe(0)
+    expect(await until(() => controls.count(), (n) => n === 0)).toBe(0)
     expect(world.chats[key].agent).toEqual({ kind: 'codex' })
     await page.close()
   }, 30_000)
