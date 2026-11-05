@@ -114,6 +114,8 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
     openCardTitle: () => (chat.card ? chat.cardTitle : undefined),
     unseen: () => chat.unseen ?? [],
     menu: (key: string) => (status[key] === 'blocked' ? { title: 'Allow: rm -rf build' } : undefined),
+    // no start of these agents ever stopped on a screen of its own (start.ts)
+    startMenuUp: () => false,
     forget: (key: string) => forgot.push(`chat ${key}`),
     chat: () => ({ messages: chat.messages ?? [] }),
   }
