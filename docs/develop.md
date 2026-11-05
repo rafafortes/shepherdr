@@ -12,10 +12,10 @@ bun run check         # by hand only: types, tests, build
 
 Agents run no tests on this machine, to keep its CPU for herdr and the agents: a task merges once `bun run typecheck`
 passes. GitHub runs the whole check on every pull request into `herdr-tui` and on every push to it
-(`.github/workflows/check.yml`), leaving out the ones that touch only Markdown, and a red `herdr-tui` reaches the
-coordinator, who has it fixed forward. It costs the operator Actions minutes (about 15 a run, two for a task whose
-pull request merges), so a branch with no pull request is checked by hand only when it matters. Tests run by hand run
-at the lowest priority (nice 19, idle disk, a systemd scope with the least CPU weight).
+(`.github/workflows/check.yml`), leaving out the ones that touch only `**/*.md` or `docs/**`, and a red `herdr-tui`
+reaches the coordinator, who has it fixed forward. It costs the operator Actions minutes (about 15 a run, two for a
+task whose pull request merges), so a branch with no pull request is checked by hand only when it matters. Tests run
+by hand run at the lowest priority (nice 19, idle disk, a systemd scope with the least CPU weight).
 On a machine where herdr runs as a systemd user service, give it (and the server and agents it holds) the CPU first:
 `systemctl --user set-property herdr.service CPUWeight=1000`.
 

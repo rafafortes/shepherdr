@@ -25,8 +25,8 @@ The operator's fork, used on their desktop since 2026-11-04 (herdr installs the 
   `herdr plugin install rafafortes/shepherdr --ref <tag> --yes`, then the plugin's start action swaps the running
   server.
 - **Tests.** The Check workflow runs on every pull request into `herdr-tui` and on every push to it (a merge), so a
-  task sees its own run on its pull request; a change that touches only Markdown skips it, and `main` gets no run. On
-  this machine run only `bun run typecheck` (Tests, below).
+  task sees its own run on its pull request; a change that touches only `**/*.md` or `docs/**` skips it, and `main`
+  gets no run. On this machine run only `bun run typecheck` (Tests, below).
 - Nothing of the operator's host goes into this repository: settings, secrets, hosts and paths stay in
   `~/.shepherdr` and the operator's own tools.
 
@@ -58,13 +58,13 @@ rule, it is repeated in every `CLAUDE.md`, `AGENTS.md` and `GEMINI.md` of the op
 - Check what you changed on the screen by hand in your shared browser, for the proof.
 - GitHub runs the whole check (types, every test with the browser tests, the build) on every pull request into
   `herdr-tui` and again on every push to it (a merge): the Check workflow (`.github/workflows/check.yml`), which skips
-  a pull request and a push that touch only Markdown (`**/*.md` and `docs/**`: its `paths-ignore`, the skill files
-  included). A red `herdr-tui` reaches the coordinator, who has it fixed forward. A failure's log is
+  a pull request and a push that touch only `**/*.md` or `docs/**` (its `paths-ignore`, the skill files included). A
+  red `herdr-tui` reaches the coordinator, who has it fixed forward. A failure's log is
   `gh run view <run> --log-failed`.
 - It spends the operator's Actions minutes: about 15 billed per run (four jobs, each rounded up: about 1 for the types
   and the build, 2 to 7 per test shard). A task whose pull request merges spends two, its own and the merge's; every
   push to a pull request runs it all again. A task on "merge on its own" does not wait for its run: to see it first,
-  `shepherdr checks <id>` waits (up to 10 minutes).
+  `shepherdr checks <id>` waits for it (up to about 9 minutes).
 - A branch with no pull request can still be checked by hand, `gh workflow run check.yml --ref <branch>` then
   `gh run watch`: it costs the same, so only for rare cases (a review asks for it, or the change is to the tests' own
   setup).
