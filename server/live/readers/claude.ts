@@ -1,7 +1,8 @@
 // Claude Code's log: ~/.claude/projects/<project>/<sessionId>.jsonl, one JSON object per line. Most lines are
 // bookkeeping (mode, attachment, api-request, file-history...); the chat needs the human's prompts, the visible text
-// of replies, AskUserQuestion and its answer, where a turn starts and ends, and its tool steps and background work (a
-// subagent's own steps are in its own log, subagents/agent-<id>.jsonl beside the session's: read with `sub`).
+// of replies (and the update Claude Code shows in place of a message it wrote mid-turn), AskUserQuestion and its
+// answer, where a turn starts and ends, and its tool steps and background work (a subagent's own steps are in its own
+// log, subagents/agent-<id>.jsonl beside the session's: read with `sub`).
 import { basename, dirname, join } from 'node:path'
 import { isCommand } from '../commands.ts'
 import { testResult } from '../../../shared/activity.ts'
@@ -94,6 +95,16 @@ function cleanText(t: string): string {
     .replace(/<\/?pasted_content\b[^>]*>\n?/g, '')
     .trim()
 }
+
+// Claude Code may show a message the agent writes mid-turn (before a tool call) as a short update in other words
+// (thinkingDisplay "updates"): what the agent wrote never reaches the log, only the update, kept as a thinking block.
+// Its signature names it narration ("narration" in base64, at each of its three alignments), which tells it from real
+// thinking in logs that carry no thinkingDisplay; real thinking (empty, or "summarized") stays hidden. The signature is
+// the only mark trusted: with that flag, a CLI run on a model of another family writes that model's own reasoning as a
+// thinking block with an empty signature, and nobody's reasoning belongs in the chat.
+const NARRATION = /bmFycmF0aW9u|5hcnJhdGlvb|uYXJyYXRpb2/
+const narration = (b: Json): boolean =>
+  b?.type === 'thinking' && typeof b.thinking === 'string' && !!b.thinking.trim() && NARRATION.test(String(b.signature ?? '').slice(0, 80))
 
 /** the text of user content (a string or blocks), or '' when it holds tool results or only injected text */
 function userContent(c: Json): string {
@@ -241,9 +252,10 @@ export class ClaudeReader implements Reader {
         const id = String(m.id ?? l.uuid)
         const blocks: Json[] = Array.isArray(m.content) ? m.content : []
         if (!s.replies.has(id)) turnStart(`start-${id}`, t)
+        // the reply's words, and an update shown in place of what it wrote before a call, which is its words too
         const texts = blocks
-          .filter((b) => b?.type === 'text' && typeof b.text === 'string' && b.text.trim())
-          .map((b) => b.text.trim())
+          .filter((b) => (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) || narration(b))
+          .map((b) => (b.type === 'text' ? b.text : b.thinking).trim())
         if (texts.length) {
           const all = [...(s.replies.get(id) ?? []), ...texts]
           s.replies.set(id, all)
