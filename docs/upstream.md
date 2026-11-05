@@ -36,15 +36,13 @@ nearly every day, most of it on the herdr-core line we do not track, so the usef
 new matters to us.
 
 - **Where:** one automation in the `shepherdr` space, on a Monday-morning time rule, its brief the three checks below.
-  It runs as a task in this repository and reports in the chat. (Cheaper, if the operator prefers: a line in the
-  space's coordinator heartbeat instead, which runs no task of its own and does less.)
+  It runs as a task in this repository and reports in the chat.
 - **What it does:** `git fetch upstream --tags`, then compares `git tag --sort=-v:refname` and the tip of
   `upstream/main` with the "Last reviewed" lines above. Nothing new: it says so in one line and closes with no
   branch (`shepherdr task close`). Something new: it reads the new release notes and the commit subjects, and reports
   in the chat what arrived, which rows of the ledger it would add and its first verdict per row — for the operator to
   pick, never to merge by itself. It never adopts anything on its own and never posts upstream.
-- **Cost:** one task a week, minutes of it. The alternative — only checking when the operator asks — is fine too and
-  needs no setup; the automation just keeps the ledger from drifting for months.
+- **Cost:** one task a week, minutes of it, and it keeps the ledger from drifting for months.
 
 ## What a change must meet
 
@@ -67,7 +65,7 @@ all four at once), or the idea is ported to 2.0's code instead of its herdr-core
    change that renames, reshapes or moves one of them breaks it:
    - `shepherdr task list --space polylog --json` — a JSON array; it reads each row's `id`, `title`, `status` and
      `sub` (those four, with the brief, are what it pushes to the VM and what its change digest is built from).
-   - `shepherdr task show <ID> --json` — one object; it reads `desc` (the brief, shown to Manoj),
+   - `shepherdr task show <ID> --json` — one object; it reads `desc` (the brief, shown to the testers' side),
      `status` (compared with the literal `done`, to tell a finished task from a running one; a failed `task show` is
      read as a task that is not there), and `said` and `facts` (an investigation's answer, sent back to the tester's
      thread after a gitleaks scan).
@@ -83,6 +81,8 @@ all four at once), or the idea is ported to 2.0's code instead of its herdr-core
    - The data home `~/.shepherdr`: spaces, tasks, chats, settings, `outbox.json`. The bridge itself never reads those
      files, but the command's answers must keep meaning the same thing: a task's brief in `desc`, its state in
      `status`, a space's tasks under `polylog`, settings that a task can carry over.
+   - What a call must keep: exit code 0 for "it worked" (anything else is read as a refusal or as Shepherdr not being
+     there) and the one-line answers above on stdout or stderr, which the bridge reads merged.
 
 ## Verdicts
 
