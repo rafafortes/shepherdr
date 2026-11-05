@@ -1,6 +1,7 @@
 {
   "plugins": [
     "places",
+    "needs",
     "coordinators",
     "tasks",
     "chat",

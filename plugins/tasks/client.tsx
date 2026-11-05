@@ -26,13 +26,12 @@ import {
   openSplit,
   panesHere,
   splitClick,
-  pauseTask,
   pinTask,
   placeOf,
   registry,
   setFilter,
-  setChips,
   setGroup,
+  stopTask,
   setUI,
   toggleAllDone,
   toggleShut,
@@ -68,7 +67,6 @@ import {
   Meta,
   MoreIcon,
   NextIcon,
-  PauseIcon,
   PinTaskIcon,
   Primary,
   RoundButton,
@@ -76,6 +74,7 @@ import {
   rowClass,
   RowText,
   SplitIcon,
+  StopIcon,
   taskLine,
   TaskDot,
   UnarchiveIcon,
@@ -111,7 +110,8 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
         // with ⌘ (Ctrl off a Mac), beside the focused pane in split view
         onClick={(e) => !menu.held() && (splitClick(e) ? openSplit({ kind: 'task', id: t.id }) : openTask(t.id))}
         className={clsx(
-          'flex min-h-[inherit] min-w-0 flex-1 cursor-pointer gap-2 rounded-[inherit] px-2 text-left outline-none focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] phone:px-3',
+          // where nothing hovers its ⋯ always shows, so the words keep clear of it, past the age
+          'flex min-h-[inherit] min-w-0 flex-1 cursor-pointer gap-2 rounded-[inherit] px-2 text-left outline-none focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] phone:px-3 [@media(hover:none)]:pr-9!',
           sub ? 'items-start py-1.5 [&>.dot]:mt-[3px] phone:[&>.dot]:mt-1' : 'items-center',
         )}
       >
@@ -121,7 +121,7 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
         </RowText>
         <Meta className={shy}>{t.age}</Meta>
       </button>
-      <RowMenuButton menu={menu} label="More for this task" className={clsx('absolute right-1 z-1 phone:right-1.5', sub ? 'top-1.5 phone:top-2.5' : 'top-1/2 -translate-y-1/2')} />
+      <RowMenuButton menu={menu} always label="More for this task" className={clsx('absolute right-1 z-1 phone:right-1.5', sub ? 'top-1.5 phone:top-2.5' : 'top-1/2 -translate-y-1/2')} />
       {menu.open ? <TaskMenu t={t} menu={menu} /> : null}
     </li>
   )
@@ -135,26 +135,18 @@ async function markDone(t: Task) {
 }
 
 /**
- * The row's menu: Pin or Unpin (not for an archived task), Pause (a working task), Restart agent (an open one), Mark done (one not done yet; it asks
- * first when work would stay unmerged), Archive (a working task asks first: its agent stops) or Unarchive, then
- * Delete, which always asks first.
+ * A task's own actions, the same ones in its row's ⋯ and in its chat's: Pin or Unpin (not an archived task), Restart
+ * agent (an open one), then the three ways to end it — Stop (an open one whose agent may still run: it closes the agent
+ * and puts the task in To do, its work kept), Done (one not done yet; it asks first when work would stay unmerged), and
+ * Delete (which always asks first) — with Archive or Unarchive beside them (an archived one is brought back here).
  */
-function TaskMenu({ t, menu }: { t: Task; menu: RowMenuState }) {
+export function TaskActions({ task: t, close }: { task: Task; close: () => void }) {
   const then = (f: () => unknown) => () => {
-    menu.close()
+    close()
     f()
   }
-  const desktop = useUI((u) => u.device === 'desktop')
   return (
-    <RowMenu menu={menu} label={t.id}>
-      {desktop ? (
-        <>
-          <MenuItem icon={<SplitIcon className={ic} />} onClick={then(() => openSplit({ kind: 'task', id: t.id }))}>
-            Open in split view
-          </MenuItem>
-          <MenuSeparator />
-        </>
-      ) : null}
+    <>
       {t.archived ? null : t.pinned ? (
         <MenuItem icon={<UnpinIcon className={ic} />} onClick={then(() => pinTask(t, false).catch(() => undefined))}>
           Unpin
@@ -164,15 +156,15 @@ function TaskMenu({ t, menu }: { t: Task; menu: RowMenuState }) {
           Pin
         </MenuItem>
       )}
-      {t.status === 'work' && !t.archived ? (
-        <MenuItem icon={<PauseIcon className={ic} />} onClick={then(() => pauseTask(t).catch(() => undefined))}>
-          Pause
+      {t.status !== 'done' && !t.archived ? <RestartItem chat={t.agent?.chat ?? `${t.id}/Agent`} name={t.id} onPick={close} /> : null}
+      {t.status !== 'done' && !t.archived && (t.status !== 'todo' || t.agent?.running) ? (
+        <MenuItem icon={<StopIcon className={ic} />} onClick={then(() => setConfirm({ t, kind: 'stop' }))}>
+          Stop…
         </MenuItem>
       ) : null}
-      {t.status !== 'done' && !t.archived ? <RestartItem chat={t.agent?.chat ?? `${t.id}/Agent`} name={t.id} onPick={menu.close} /> : null}
       {t.status !== 'done' ? (
         <MenuItem icon={<CheckCircleIcon className={ic} />} onClick={then(() => markDone(t))}>
-          Mark done
+          Done
         </MenuItem>
       ) : null}
       {t.archived ? (
@@ -188,13 +180,38 @@ function TaskMenu({ t, menu }: { t: Task; menu: RowMenuState }) {
       <MenuItem icon={<DeleteIcon className={ic} />} className="text-need-fg" onClick={then(() => setConfirm({ t, kind: 'delete' }))}>
         Delete…
       </MenuItem>
+    </>
+  )
+}
+
+/** The row's menu: beside a desktop's panes, Open in split view, then the task's own actions, which its chat's ⋯ has too */
+function TaskMenu({ t, menu }: { t: Task; menu: RowMenuState }) {
+  const desktop = useUI((u) => u.device === 'desktop')
+  const Actions = registry.views.taskActions ?? TaskActions
+  return (
+    <RowMenu menu={menu} label={t.id}>
+      {desktop ? (
+        <>
+          <MenuItem
+            icon={<SplitIcon className={ic} />}
+            onClick={() => {
+              menu.close()
+              openSplit({ kind: 'task', id: t.id })
+            }}
+          >
+            Open in split view
+          </MenuItem>
+          <MenuSeparator />
+        </>
+      ) : null}
+      <Actions task={t} close={menu.close} />
     </RowMenu>
   )
 }
 
-/* ---------- archiving a working task, and deleting any, ask first ---------- */
+/* ---------- stopping a task, archiving a working one and deleting any, ask first ---------- */
 
-type Confirming = { t: Task; kind: 'archive' | 'delete' } | { t: Task; kind: 'close'; held: string[]; error?: string }
+type Confirming = { t: Task; kind: 'stop' | 'archive' | 'delete' } | { t: Task; kind: 'close'; held: string[]; error?: string }
 let confirming: Confirming | null = null
 const confirmListeners = new Set<() => void>()
 function setConfirm(c: Confirming | null) {
@@ -202,8 +219,8 @@ function setConfirm(c: Confirming | null) {
   confirmListeners.forEach((f) => f())
 }
 
-/** "Archive SHE-12?" (its agent is at work, and archiving stops it first) or "Delete SHE-12?" */
-function ConfirmArchive() {
+/** "Stop SHE-12?", "Archive SHE-12?" (whose agent is at work) or "Delete SHE-12?" */
+function ConfirmTask() {
   const [, bump] = useState(0)
   useEffect(() => {
     const f = () => bump((n) => n + 1)
@@ -217,10 +234,39 @@ function ConfirmArchive() {
   if (!c || !t) return null
   // a new question each time, its own state fresh
   if (c.kind === 'close') return <ConfirmClose key={`c:${t.id}`} t={t} held={c.held} failed={c.error} />
+  if (c.kind === 'stop') return <ConfirmStop key={`s:${t.id}`} t={t} />
   return c.kind === 'delete' ? <ConfirmDelete key={`d:${t.id}`} t={t} /> : <ConfirmBox key={`a:${t.id}`} t={t} />
 }
 
 const cancel = () => setConfirm(null)
+
+/** "Stop SHE-12?": its agent closes and it goes to To do; its work stays. It says why when it can't be stopped */
+function ConfirmStop({ t }: { t: Task }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const go = async () => {
+    setBusy(true)
+    setError(null)
+    const r: { ok?: boolean; error?: string } = await stopTask(t).catch((e: Error) => ({ ok: false, error: e.message }))
+    setBusy(false)
+    if (r.ok === false) return setError(r.error || 'It could not be stopped.')
+    setConfirm(null)
+  }
+  return (
+    <Dialog
+      onCancel={cancel}
+      title={`Stop ${t.id}?`}
+      buttons={
+        <Primary autoFocus disabled={busy} onClick={go}>
+          {busy ? 'Stopping…' : 'Stop'}
+        </Primary>
+      }
+    >
+      <p>{t.status === 'work' ? 'Its agent is working; this ends that. ' : ''}It goes to To do. Its work stays, and writing to it starts it again.</p>
+      {error ? <p className="mt-1.5 text-need-fg">{error}</p> : null}
+    </Dialog>
+  )
+}
 
 /** "Archive SHE-12?" for a task at work */
 function ConfirmBox({ t }: { t: Task }) {
@@ -368,8 +414,7 @@ function TaskList(_: { placeId: string }) {
     return (
       <>
         <ListChips alone />
-        <Empty>{view.attention ? 'No tasks need you or are ready.' : noTasks(snap, view)}</Empty>
-        {view.attention ? <LinkButton onClick={() => setChips(view.chips)}>Show all tasks</LinkButton> : null}
+        <Empty>{noTasks(snap, view)}</Empty>
         {footer}
       </>
     )
@@ -378,10 +423,6 @@ function TaskList(_: { placeId: string }) {
   return (
     <>
       <TaskFilter listKey={view.search} order={order} />
-      {view.attention && !q ? <div className="flex items-center justify-between gap-2 px-3 pt-2 text-[0.8125rem] text-fg2 phone:px-4 phone:text-[0.9375rem]">
-        <span>Actionable · all machines</span>
-        <LinkButton onClick={() => setChips(view.chips)}>Show all tasks</LinkButton>
-      </div> : null}
       {/* one flat run of keyed parts: a group showing or going never makes the ones after it start over; only the
           rows and what sits between them glide (data-flip), never what holds them, so no move adds to another */}
       <div ref={list} className="relative">
@@ -599,7 +640,7 @@ function TasksMenu(_: { place: Place }) {
   const view = useStore((s) => listView(s.ui, snap))
   const level = view.level
   const chosen = useUI((u) => u.groups)
-  const by = view.attention ? 'project' : groupFor(chosen, level)
+  const by = groupFor(chosen, level)
   const phone = useUI((u) => u.device === 'phone')
   const [open, setOpen] = useState(false)
   const choices = groupChoices(level)
@@ -783,8 +824,9 @@ export default definePlugin({
   setup(reg) {
     reg.views.tasks = TaskList
     reg.views.tasksMenu = TasksMenu
+    reg.views.taskActions = TaskActions
     reg.tasksFooter.push(Automations, ArchivedLink)
-    reg.overlays.push(ConfirmArchive)
+    reg.overlays.push(ConfirmTask)
     reg.agentHeader.push({ order: 40, View: PrLink })
   },
 })

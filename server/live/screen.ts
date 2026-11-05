@@ -18,16 +18,16 @@ export interface ScreenMenu {
   reject?: string
   /** The visible prompt, including security context that must not be lost. */
   screen?: string
+  /** The whole screen it was read from, as it is: a card is that screen, so a tap needs every word on it to match */
+  all?: string
 }
 
-/** A card's identity excludes the cursor and whatever on the screen only moves (a spinner, a timer): a card whose
- *  screen does that is the same card, and the same answer, on the next look. It includes the full permission being
- *  granted. */
+/** A card's identity is the screen it was drawn from: the words as they are, in the whole screen, but for what moves
+ *  with no one touching them (the menu's cursor, a spinner's frame). A card whose words changed is a different card, and
+ *  a tap on the old one presses nothing. It includes the full permission being granted. */
 export function menuId(key: string, m: ScreenMenu) {
-  const shown = m.multi
-    ? m.screen?.split('\n').map((l) => l.trim().replace(/^[❯›>▶]\s*/, '').replace(/^\[[✔✓x ]\]/, '[ ]')).join('\n')
-    : m.screen?.replace(/^(\s*)[❯›>▶](?=\s)/gm, '$1 ')
-  const screen = shown === undefined ? undefined : restingScreen(shown)
+  const shown = m.all ?? m.screen
+  const screen = shown === undefined ? undefined : screenText(shown, m)
   return `menu:${key}:${createHash('sha256').update(JSON.stringify([m.title, m.choices, screen])).digest('hex').slice(0, 16)}`
 }
 
@@ -65,7 +65,7 @@ function startupMenu(lines: string[]): ScreenMenu | null {
     const rows = lines.slice(first).filter((l) => /^\s*[❯›>▶]?\s*\[[✔✓x ]\]\s+/.test(l))
     if (first >= 0 && rows.length) {
       const cursor = rows.findIndex((l) => /[❯›>▶]/.test(l))
-      return { title: lines.find((l) => /new MCP servers found in this project/i.test(l))!.trim(), choices: rows.map((l) => l.replace(/^\s*[❯›>▶]?\s*\[[✔✓x ]\]\s+/, '').trim()), cursor: cursor < 0 ? rows.length : cursor, multi: true, selected: rows.flatMap((l, i) => (/\[[✔✓x]\]/.test(l) ? [i] : [])), reject: 'Reject all', screen: promptScreen(lines, first) }
+      return { title: lines.find((l) => /new MCP servers found in this project/i.test(l))!.trim(), choices: rows.map((l) => l.replace(/^\s*[❯›>▶]?\s*\[[✔✓x ]\]\s+/, '').trim()), cursor: cursor < 0 ? rows.length : cursor, multi: true, selected: rows.flatMap((l, i) => (/\[[✔✓x]\]/.test(l) ? [i] : [])), reject: 'Reject all', screen: promptScreen(lines, first), all: screen }
     }
   }
   const cursor = lines.findLastIndex((l) => /^\s*[❯›>▶]\s+\S/.test(l))
@@ -79,11 +79,11 @@ function startupMenu(lines: string[]): ScreenMenu | null {
       const choices = lines.slice(first, last + 1).map((l) => l.replace(/^\s*[❯›>▶]?\s*/, '').trim())
       const context = lines.slice(0, first).map(clean).filter(Boolean)
       const title = context.findLast((l) => /\?|MCP servers? found|trust|accessing workspace/i.test(l)) ?? context.at(-1) ?? 'Choose an option'
-      return { title, choices, cursor: cursor - first, screen: promptScreen(lines, first) }
+      return { title, choices, cursor: cursor - first, screen: promptScreen(lines, first), all: screen }
     }
   }
   const yn = screen.match(/([^\n]*?)(?:\[y\/n\]|\(y\/n\)|\[yes\/no\]|\(yes\/no\))\s*[:?]?\s*$/i)
-  if (yn) return { title: yn[1].trim() || 'Continue?', choices: ['Yes', 'No'], cursor: 0, keys: [['y', 'enter'], ['n', 'enter']], screen }
+  if (yn) return { title: yn[1].trim() || 'Continue?', choices: ['Yes', 'No'], cursor: 0, keys: [['y', 'enter'], ['n', 'enter']], screen, all: screen }
   // a numbered picker the CLI ends on a footer ("Choose the text style:", "Select login method:") asks no question, so the
   // numbered reading above found nothing to go by; its footer is what says it is a menu and not a list in a transcript
   if (!menuFooter(screen)) return null
@@ -104,7 +104,7 @@ function startupMenu(lines: string[]): ScreenMenu | null {
   }
   if (choices.length < 2) return null
   const context = lines.slice(0, first).map(clean).filter(Boolean)
-  return { title: context.at(-1) ?? 'Choose an option', choices, cursor: Math.max(0, on), screen: promptScreen(lines, first) }
+  return { title: context.at(-1) ?? 'Choose an option', choices, cursor: Math.max(0, on), screen: promptScreen(lines, first), all: screen }
 }
 
 export function parseMenu(screen: string): ScreenMenu | null {
@@ -168,12 +168,16 @@ export function parseMenu(screen: string): ScreenMenu | null {
   const asksToRun = asks.test(question)
   const title = asksToRun && cmd ? `Allow: ${cmd.replace(/\?$/, '')}?` : question
   const descriptions = opts.some((o) => o.description) ? opts.map((o) => o.description) : undefined
-  return { title, screen: promptScreen(lines, first), choices: opts.map((o) => o.label), ...(descriptions ? { descriptions } : {}), cursor: Math.max(0, opts.findIndex((o) => o.on)) }
+  return { title, screen: promptScreen(lines, first), choices: opts.map((o) => o.label), ...(descriptions ? { descriptions } : {}), cursor: Math.max(0, opts.findIndex((o) => o.on)), all: screen }
 }
+
+/** A frame of the usual Braille spinner or Claude Code's, starting a line, in a box or not: any other symbol there may
+ *  mean something of its own (a mark in the text, a bullet), so only these are a spinner. */
+const SPINNER = /^([\s│┃]*)[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷✢✳✶✻✽](?=\s|$)/u
 
 /** what only moves while a CLI sits still: its spinner's frames, its timers, an activity bar, the count of helpers it
  *  shows. A percentage it prints is content: a progress that goes from 40 to 70 says something new */
-const MOVING = [/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷]/gu, /\b\d+(?:\.\d+)?\s*(?:ms|s|secs?|seconds?|mins?|minutes?)\b/gi, /[▁▂▃▄▅▆▇█]+/gu, /[·•]\s*(?:←\s*)?\d+\s*(?:agents?|tasks?|shells?)\b/gi]
+const MOVING = [/\b\d+(?:\.\d+)?\s*(?:ms|s|secs?|seconds?|mins?|minutes?)\b/gi, /[▁▂▃▄▅▆▇█]+/gu, /[·•]\s*(?:←\s*)?\d+\s*(?:agents?|tasks?|shells?)\b/gi]
 
 /** the footer a CLI puts under a menu it wants answered: "Enter to confirm · Esc to cancel", "Space to select · Esc to
  *  reject all", a y/n prompt. A screen without one is no prompt to press keys in, whatever it looks like. */
@@ -185,14 +189,36 @@ export function menuFooter(text: string) {
 }
 
 /** a screen without what only moves: two reads of an agent that rested look the same, and a slow start that keeps
- *  saying something new (a step, an agent's words) never does */
+ *  saying something new (a step, an agent's words) never does. Only a spinner's frame at a line's start is a spinner */
 export function restingScreen(text: string) {
-  return MOVING.reduce((s, re) => s.replace(re, ' '), text)
+  return text
     .split('\n')
-    .map((l) => l.trim())
+    .map((l) => l.replace(SPINNER, '$1 ').trim())
     .filter(Boolean)
     .join('\n')
+    .replace(MOVING[0], ' ')
+    .replace(MOVING[1], ' ')
+    .replace(MOVING[2], ' ')
 }
+
+/**
+ * The screen as it is, all but what moves with no one touching its words: the mark on the menu's cursor line and a
+ * spinner's frame at a line's start. Everything else counts, whatever it is — a path, a number, a symbol — so a card is
+ * only closed (or a tap only lands) on the screen it was drawn from, not on one that merely looks like it.
+ */
+export function screenText(text: string, m?: Pick<ScreenMenu, 'choices' | 'cursor'>) {
+  const lines = text.split('\n').map((l) => l.replace(SPINNER, '$1 ').trimEnd())
+  // the choice the cursor is on: its mark is the cursor, not words, so moving it is no change
+  const on = m?.choices[m.cursor]
+  if (on !== undefined) {
+    const line = lines.findLastIndex((l) => plainChoice(l) === plainChoice(on) && /^\s*[❯›>▶*]/.test(l))
+    if (line >= 0) lines[line] = lines[line].replace(/^(\s*)[❯›>▶*](?=\s)/, '$1 ')
+  }
+  return lines.join('\n')
+}
+
+/** a choice's words, as a line on the screen or as the card reads it: no cursor, no checkbox, no "(esc)" hint */
+const plainChoice = (line: string) => line.replace(/^\s*[❯›>▶*]\s*/, '').replace(/^\[[✔✓x ]\]\s*/, '').replace(/\s*\((?:esc|enter|tab|[a-z])\)$/i, '').trim()
 
 /** two reads of a screen that only moved: a spinner turned, a timer counted, the cursor blinked */
 export const sameScreen = (a: string, b: string) => restingScreen(a) === restingScreen(b)

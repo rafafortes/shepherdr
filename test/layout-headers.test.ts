@@ -168,16 +168,18 @@ describe.skipIf(!browser)('the Tasks header', () => {
         const st = getComputedStyle(b)
         return { pressed: b.getAttribute('aria-pressed'), bg: st.backgroundColor, shadow: st.boxShadow }
       }
-      const [tasks, artifacts] = [...tabs.querySelectorAll('button')]
-      const count = tasks.querySelector('[data-attention-badge]')
+      const [needs, tasks, artifacts] = [...tabs.querySelectorAll('button')]
+      // whichever tab has something waiting shows its own count: the Needs you rows or the Tasks tab's Ready group
+      const count = tabs.querySelector('[data-attention-badge]')
       return {
         text: bar.textContent,
         tabs: rect(tabs),
         bar: rect(bar),
         chatBar: rect(chatBar),
+        needs: shown(needs),
         tasks: shown(tasks),
         artifacts: shown(artifacts),
-        tab: rect(tasks),
+        tab: count ? rect(count.closest('button')!) : null,
         count: count ? rect(count) : null,
         chevron: rect(col.querySelector('[data-heading="Needs you"] svg')!),
       }
@@ -196,24 +198,25 @@ describe.skipIf(!browser)('the Tasks header', () => {
           await page.getByText('Needs you', { exact: true }).first().waitFor()
           const t = await head(page)
           // The tabs keep separate Needs you / Ready counts and the approved filter lock.
-          expect(t.text).toMatch(/^Tasks[\d+]*ArtifactsLock$/)
+          expect(t.text).toMatch(/^Needs you[\d+]*Tasks[\d+]*ArtifactsLock$/)
           expect(t.text).not.toContain('·')
           expect(await page.getByText('everything under it').count()).toBe(0)
-          // the shown tab is plainly picked: filled and edged; the other is bare
-          expect([t.tasks.pressed, t.artifacts.pressed]).toEqual(['true', 'false'])
+          // the shown tab is plainly picked: filled and edged; the others are bare
+          expect([t.needs.pressed, t.tasks.pressed, t.artifacts.pressed]).toEqual(['false', 'true', 'false'])
           expect(t.tasks.bg).not.toBe(t.artifacts.bg)
           expect(t.tasks.shadow).not.toBe('none')
           expect(t.artifacts.shadow).toBe('none')
+          expect(t.needs.shadow).toBe('none')
           // one line, centred in a header as tall as the chat's, so their bottom lines meet
           expect(t.tabs.bottom - t.tabs.top).toBeLessThan(40)
           expect(Math.abs(t.bar.bottom - t.chatBar.bottom)).toBeLessThan(0.5)
           expect(Math.abs((t.tabs.top + t.tabs.bottom) / 2 - (t.bar.top + t.bar.bottom) / 2)).toBeLessThan(1)
           // the tabs start where the list's group headings do: at their chevrons (the rows' dots), past the icon's own inset
           expect(Math.abs(t.tabs.left - t.chevron.left)).toBeLessThan(4)
-          // what waits on you is counted inside the Tasks tab, centred on its line and clear of its end
+          // what waits on you is counted inside its own tab, centred on its line and clear of its end
           expect(t.count).not.toBeNull()
-          expect(Math.abs((t.count!.top + t.count!.bottom) / 2 - (t.tab.top + t.tab.bottom) / 2)).toBeLessThan(0.5)
-          expect(t.tab.right - t.count!.right).toBeGreaterThanOrEqual(8)
+          expect(Math.abs((t.count!.top + t.count!.bottom) / 2 - (t.tab!.top + t.tab!.bottom) / 2)).toBeLessThan(0.5)
+          expect(t.tab!.right - t.count!.right).toBeGreaterThanOrEqual(8)
           // and it stays right there with Artifacts shown
           await page.getByRole('button', { name: 'Artifacts', exact: true }).click()
           const still = await page.evaluate(() => {

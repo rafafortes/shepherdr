@@ -10,8 +10,12 @@ machine (its ⋯, New section) only that machine's; a space moves into one from 
 it, and back where it was when taken out or its section is deleted. Pinned is one of them, built in. Headings are only
 headings: no chat, never selected; a tap anywhere on one folds it with its chevron, remembered on the device. Folded,
 it hides all its spaces, with a quiet dot where one is unread (grey) or waits on you (red); going to a space opens the
-heading it sits under. Spaces keep Slack's # icon. Each space's coordinator chat is in the middle and its
-tasks on the right. Under their filter box, chips say what Tasks and Artifacts show: a space (`# gtm · vm-str`) or a
+heading it sits under. Spaces keep Slack's # icon. Each space's coordinator chat is in the middle and three lists on the right: **Needs you**,
+its tasks and its artifacts. Needs you is everything waiting on an answer — a task's question, a plan, the CLI's own menu
+in its terminal, a coordinator's question — one row each, oldest first, a tap opening that chat at its card, where it is
+answered. Each count sits on the tab whose list it counts (needs on Needs you, Ready tasks on Tasks), so a number and its
+list always agree; a space's row in the sidebar counts both, and on a phone the same three are the bottom bar's tabs.
+Under the filter box, chips say what the lists show: a space (`# gtm · vm-str`) or a
 whole machine, any of them (none: everything), and the filter's words narrow within them. They follow the space you
 pick; × takes one off and **+ Filter** adds a space or a machine from the sidebar's tree. The pin in their header keeps
 the chips while the middle changes (a task from them opens in the middle); unpinned, they follow again. Chips and pin

@@ -9,7 +9,7 @@ import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { BODY_MAX, clip, lastReply, openCards, taskAlert, TITLE_MAX } from '../../shared/alerts.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, sortPlaces } from '../../shared/order.ts'
-import { asEmoji, doneNewestFirst, modeCard, NAME_MAX, nameProblem, slugify, STATUS_MAX, type Action, type ActivityAnswer, type ActivityAsk, type AddSpace, type Alert, type Artifact, type CardAsk, type Chat, type RestartInfo, type Question, type Folders, type Machine, type Place, type Section, type Snapshot, type Task, type TaskStatus, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
+import { asEmoji, doneNewestFirst, modeCard, NAME_MAX, nameProblem, slugify, STATUS_MAX, type Action, type ActivityAnswer, type ActivityAsk, type AddSpace, type Alert, type Artifact, type CardAsk, type Chat, type RestartInfo, type Question, type Folders, type Machine, type Need, type Place, type Section, type Snapshot, type Task, type TaskStatus, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
 import { Emitter, type Overview, type Source, type SourceEvents } from '../source.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
 import { ROOT } from '../root.ts'
@@ -453,20 +453,42 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return out
   }
 
-  /** Read original chats only: forwarded cards must never multiply requests. */
-  private attentionRequests(): Record<string, string[]> {
-    const out: Record<string, string[]> = {}
+  /**
+   * Everything waiting on the human, oldest first, each once: a coordinator's open card (a question it asked, a start
+   * stopped on a screen of its own) or the menu its CLI blocks on, and every task that needs you, with its cards or
+   * with what it waits with. Read from the original chats only: a card forwarded to a space must never count twice.
+   * The Needs you view lists these and every count counts these, so a number and its list always agree.
+   */
+  private needs(): Need[] {
+    const out: Need[] = []
+    const open = (chat: string) => new Map(openCards(this.chats.chat(chat)).map((m) => [m.question.id, m]))
+    // a coordinator: the cards it asked that still wait, then the CLI's own menu, then a menu nobody reads
     for (const p of [placeId.home(), ...this.places.spaces.map((x) => placeId.space(x.name))]) {
       const log = this.chats.log(p)
-      out[p] = coordinatorRequestIds(log.posted, log.answers, openCards(this.chats.chat(p)).map((m) => m.question.id), this.agents.status(p) === 'blocked')
+      const cards = open(p)
+      const blocked = this.agents.status(p) === 'blocked'
+      const ids = coordinatorRequestIds(log.posted, log.answers, [...cards.keys()], blocked)
+      for (const id of ids) {
+        const message = cards.get(id) ?? log.posted.find((x) => x.question?.id === id)
+        const question = message && 'question' in message ? message.question : undefined
+        const text = 'The terminal is waiting for you'
+        // no card to name a time: when its agent last said anything (0: before this screen knew)
+        const at = message?.at ?? this.chats.chat(p).messages.findLast((m) => m.who === 'agent')?.at ?? 0
+        out.push({ id, chat: p, place: p, at, ...(question ? { question } : { text }) })
+      }
     }
-    for (const t of this.engine.tasks.filter((t) => !t.archived && this.engine.statusOf(t) === 'need')) {
+    // a task that needs you: one need per card it waits on, else one for what it waits with
+    for (const t of this.engine.tasks) {
+      if (t.archived || this.engine.statusOf(t) !== 'need') continue
       const key = `${t.id}/Agent`
-      const ids = openCards(this.chats.chat(key)).map((m) => m.question.id)
-      // Plain questions and permission menus without a card still require one response.
-      out[key] = ids.length ? ids : ['attention']
+      const cards = [...open(key).values()]
+      const menu = this.chats.startMenuUp(key) && !cards.length ? this.chats.menu(key) : undefined
+      if (menu) out.push({ id: menuId(key, menu), chat: key, place: t.project, task: t.id, at: t.updated, question: { id: menuId(key, menu), kind: 'Form', title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: t.id, asks: 'Its screen waits' } })
+      else if (cards.length) for (const m of cards) out.push({ id: m.question.id, chat: key, place: t.project, task: t.id, at: m.at ?? t.updated, question: m.question })
+      // a plain question or a failed start has no card: its row says what it waits with
+      else out.push({ id: 'attention', chat: key, place: t.project, task: t.id, at: t.updated, text: this.engine.subOf(t, 'need') })
     }
-    return out
+    return out.sort((a, b) => a.at - b.at)
   }
 
   /** the Everywhere defaults, for the other machines (they keep a copy) */
@@ -481,11 +503,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const peers = this.peers?.list() ?? []
     const automations: Snapshot['automations'] = Object.fromEntries(places.map((p) => [p.id, this.automations.view(p.id, this.settings.zone())]))
     const asks = this.asks()
-    const attentionRequests = this.attentionRequests()
+    const needs = [...this.needs(), ...peers.flatMap((l) => l.snap?.needs ?? [])].sort((a, b) => a.at - b.at)
     for (const l of peers) {
       Object.assign(automations, l.snap?.automations ?? {})
       Object.assign(asks, l.snap?.asks ?? {})
-      Object.assign(attentionRequests, l.snap?.attentionRequests ?? {})
     }
     return this.withSecrets({
       name: 'Shepherdr',
@@ -501,7 +522,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       automations,
       artifacts: [...Object.values(this.artifacts.list).map((a) => this.artifactView(a)), ...peers.flatMap((l) => l.snap?.artifacts ?? [])].sort((a, b) => b.at - a.at),
       asks,
-      attentionRequests,
+      needs,
       last: Object.assign({}, ...peers.map((l) => l.snap?.last ?? {}), this.unread.last),
       read: this.unread.read,
       sections,
@@ -1697,6 +1718,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (!t) return { ok: false, error: 'No such task.' }
         try {
           await this.engine.pause(t.id)
+        } catch (e) {
+          return { ok: false, error: (e as Error).message }
+        }
+        this.emit('snapshot')
+        return { ok: true }
+      }
+      case 'stop': {
+        const t = this.engine.task(a.chat.split('/')[0])
+        if (!t) return { ok: false, error: 'No such task.' }
+        try {
+          await this.engine.stopTask(t.id)
         } catch (e) {
           return { ok: false, error: (e as Error).message }
         }

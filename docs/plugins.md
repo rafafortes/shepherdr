@@ -74,8 +74,9 @@ export default definePlugin({
 slots below are public: plugins outside the repo rely on them, so they change only with care.
 
 - `setup(reg)` gets the registry of slots (`Registry` in `src/kernel.ts`, each one documented there):
-  - views: `reg.views.places`, `placesMenu` (the sidebar header's buttons), `chat`, `tasks`, `artifacts`, `artifact` (one
-    in a split view's pane), `tasksMenu`, `settings`, `search` (one each; the last plugin to set one wins)
+  - views: `reg.views.places`, `placesMenu` (the sidebar header's buttons), `chat`, `needs` (everything waiting on you),
+    `tasks`, `artifacts`, `artifact` (one in a split view's pane), `tasksMenu`, `taskActions` (a task's own menu items,
+    in its row's ⋯ and its chat's), `settings`, `search` (one each; the last plugin to set one wins)
   - chats: `messageParts`, `messageEdge` (under and on a message's bubble), `chatTail` (after the messages),
     `chatBody` (replaces a chat's body while its `when` holds)
   - headers and menus: `placeHeader`, `placeMark`, `placeMenu` (a coordinator's), `agentHeader`, `agentMenu` (a task's)
@@ -85,9 +86,9 @@ slots below are public: plugins outside the repo rely on them, so they change on
     return a restart-required error rather than claim an unapplied change. `Chat.agent` is optional launch metadata,
     not telemetry of terminal changes.
   - the screen: `taskPanel` (side panel items), `overlays`, `topBars`, `tasksFooter`, `keys` (keyboard handlers)
-  - the lists show what their chips hold, `listView(ui, snap)`: `tasks`, `artifacts` and `tasksMenu` still get the
-    place picked (`placeId`, `place`), and `tasksFooter` also gets the `list` shown. `ListView.attention`
-    optionally marks global Home’s default actionable view; explicit chips, locks and searches keep normal lists.
+  - the lists show what their chips hold, `listView(ui, snap)`: `needs`, `tasks`, `artifacts` and `tasksMenu` still get
+    the place picked (`placeId`, `place`), and `tasksFooter` also gets the `list` shown. `snap.needs` is everything
+    waiting on the human, oldest first, each once: a count drawn from it always matches the Needs you list it sits on.
     `counts` keeps its legacy totals and adds `need`, `ready`, `ownNeed` and `ownReady` for separate categories. Optional `Snapshot.attentionRequests` lists original unanswered request IDs
     by chat; older machines fall back to one per waiting task/coordinator. Forwarded copies never add to counts
   - Settings: `settingsPages` (a page under This device), `settingActions`

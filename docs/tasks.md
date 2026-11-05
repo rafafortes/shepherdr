@@ -128,20 +128,25 @@
   settle as cards for you, and your yes before anything irreversible; the proof in one small artifact; ready with a facts line; then merge or ask. How to
   build and check the work is the agent's own judgment: Shepherdr only gives it the brief, your defaults and the house
   rules.
-- A task with nothing to merge (an answer, research, or work no longer wanted) is closed: `shepherdr task close <id>
-  [--summary "..."]`, or just ask its coordinator. Its agent stops, its space closes, its worktree and branch go when
+- One menu holds a task's controls: its row's ⋯ (a mouse finds it on hover; on a phone the ⋯ always shows, or hold the
+  row) and its chat's ⋯ have the same ones. It ends a task three ways: Stop, Done and Delete. Stop closes its agent and
+  its space and puts it in To do, its work kept (a worktree with unsaved or unmerged work stays, one with none goes with
+  its branch), and writing to it opens it again and resumes it; Stop asks first. Done asks first only when work would
+  stay unmerged. Delete always asks first. The menu also holds Pin and Restart agent, and Archive (a working task asks
+  first: its agent stops) or Unarchive.
+- A task with nothing to merge (an answer, research, or work no longer wanted) is Done: Done in its menu, or `shepherdr
+  task close <id> [--summary "..."]`, or just ask its coordinator. Its agent stops, its space closes, its worktree and branch go when
   they hold nothing unsaved or unmerged (else they are kept, and it says so) and it shows in Done with its summary
   (Nothing to merge by default); its card in the space's chat says so. An agent whose `shepherdr ready` finds no changes on
   its branch goes straight to Done the same way.
-- `shepherdr task stop <id>` closes a task's agent and space. Its work stays: a worktree with unsaved or unmerged work
-  is kept, one with none goes with its branch. Writing to the task opens its space again (or makes a fresh worktree)
-  and resumes its agent.
+- `shepherdr task stop <id>` is Stop from the menu: it closes a task's agent and space and puts it in To do. Its work
+  stays, as above. Writing to the task opens its space again (or makes a fresh worktree) and resumes its agent.
 - `shepherdr task delete <id>` removes a task for good, and only when you plainly ask its coordinator to: its agent
   stops, its space closes (with anything else running there), its worktree, branch, chat log and record go, so it
   leaves every list, and nothing is posted. A worktree with uncommitted changes, or a branch with work main lacks, is
   refused with what it holds, unless `--force`. A merged task can be deleted too: its commits stay on main. Its number
   is never given out again.
-- Archive a task from its row's ⋯ (a mouse finds it on hover; on a phone, hold the row), or ask its coordinator
+- Archive a task from its ⋯ (its row's or its chat's), or ask its coordinator
   (`shepherdr task archive <id>`, only when you ask). It leaves every list and count but keeps its record, chat and
   summary: ⌘K finds it, and **Archived · 12** at the bottom of the tasks list shows a space's archived tasks, the
   latest first, each with Unarchive in its ⋯ (`shepherdr task unarchive <id>`). Archiving a working task asks first:

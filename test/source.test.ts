@@ -1861,6 +1861,16 @@ describe("a task row's menu, and pin from the command", () => {
     expect(t.pinned).toBeNumber()
   })
 
+  test('Stop from the app closes its agent and puts the task in To do, its work kept: no false Needs you, and writing starts it again', async () => {
+    const { t } = await workedTask('stopfromapp')
+    expect(await src.act({ type: 'stop', chat: `${t.id}/Agent` })).toMatchObject({ ok: true })
+    expect(t.stopped).toBe(true)
+    // To do, though its chat ends on a card: the agent it would answer is closed, so it is no wait on you
+    expect(src.engine.view(t)).toMatchObject({ status: 'todo', agent: { running: false } })
+    expect(src.snapshot().needs.filter((n) => n.task === t.id)).toEqual([])
+    expect(src.snapshot().tasks.find((x) => x.id === t.id)).toMatchObject({ status: 'todo' })
+  })
+
   test('Mark done and Delete say what work stays unmerged, in words without paths, until forced', async () => {
     const { t } = await workedTask('rowmenu')
     expect(await src.act({ type: 'close', chat: `${t.id}/Agent` })).toEqual({ ok: false, held: [`work on ${t.branch} that main lacks`] })

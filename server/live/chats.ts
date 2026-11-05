@@ -387,7 +387,7 @@ export class Chats {
     // a startup screen it read no choices in is still the same card while it rests: its words, and Open terminal
     const was = this.menus.get(key)
     if (!m && starting && was?.screen && sameScreen(was.screen, text)) m = was
-    if (!m && st === 'blocked' && text.trim()) m = { title: 'The terminal is waiting for you', choices: [], cursor: 0, screen: text.trim() }
+    if (!m && st === 'blocked' && text.trim()) m = { title: 'The terminal is waiting for you', choices: [], cursor: 0, screen: text.trim(), all: text }
     const before = JSON.stringify(this.menus.get(key) ?? null)
     if (m) this.menus.set(key, m)
     else {

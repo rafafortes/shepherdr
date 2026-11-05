@@ -4,7 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { FIRST_LOOK, LOST_SESSION, RESUME_SETTLE, Starts, type StartLook } from '../server/live/start.ts'
-import { lastWords, menuFooter, menuId, parseMenu, restingScreen, sameScreen } from '../server/live/screen.ts'
+import { lastWords, menuFooter, menuId, parseMenu, restingScreen, sameScreen, screenText } from '../server/live/screen.ts'
 
 const fixture = (name: string) => readFileSync(join(import.meta.dir, 'fixtures/startup', name + '.txt'), 'utf8')
 const TRUST = fixture('claude-trust')
@@ -48,10 +48,25 @@ describe('reading what a screen says', () => {
     expect(parseMenu('Pick one:\n\n 1. A\n 2. B\n')).toBeNull()
   })
 
-  test('a card whose screen only ticks is the same card, with the same answer', () => {
+  test('a spinner frame is a frame only at a line\'s start: the rest of the screen counts, whatever it is', () => {
+    expect(restingScreen('⠋ Loading')).toBe('Loading')
+    // a braille mark in words is part of the words, so the screen rests and says something new when it changes
+    expect(restingScreen('⠁ means allow access')).toBe('⠁ means allow access')
+    expect(sameScreen('⠁ means allow access', '⠃ means allow access')).toBe(false)
+    expect(screenText('  ⠋ Signing in… (12s)')).toBe('   Signing in… (12s)')
+    expect(screenText('Plan 1 ⣾')).toBe('Plan 1 ⣾')
+  })
+
+  test('a card is the words on its screen: the cursor and a spinner frame may move, every other mark counts', () => {
     const m = parseMenu(THEME)!
-    const at = (secs: number) => ({ ...m, screen: `${m.screen}\n⣾ Signing in… (${secs}s)` })
-    expect(menuId('c', at(12))).toBe(menuId('c', at(19)))
+    const at = (o: Partial<typeof m>) => ({ ...m, ...o })
+    // the cursor moving from one choice to another is no change of words
+    expect(menuId('c', at({ cursor: 0 }))).toBe(menuId('c', at({ cursor: 1, all: 'Choose a style\n\n   Dark mode\n ❯ Light mode\n\n Enter to confirm\n' })))
+    // a spinner frame above the menu, and a timer running under it, are no change either
+    expect(menuId('c', at({ all: '⠋ Signing in… (12s)\n' + THEME }))).toBe(menuId('c', at({ all: '⠙ Signing in… (19s)\n' + THEME })))
+    // words above the card count: a path, a number, a symbol, a space the CLI drew
+    for (const above of ['Trust /repo/two', 'Trust 1', 'Trust /one', 'Trust /repo/🔒', 'Trust /repo/🚀'])
+      expect(menuId('c', at({ all: above + '\n\n' + THEME }))).not.toBe(menuId('c', at({ all: 'Trust /repo/one\n\n' + THEME })))
     // other words, or another set of choices, are another card
     expect(menuId('c', m)).not.toBe(menuId('c', { ...m, choices: ['Dark theme', 'Light theme'] }))
   })
