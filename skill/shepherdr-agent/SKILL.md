@@ -92,13 +92,15 @@ Showing the screen, or a task coming due, needs a server of its own, never the o
 - **The demo world first** (`SHEPHERDR_SOURCE=demo`): fictional data, no agents, nothing in herdr. Where the proof needs
   a real launch, a fake herdr (as the tests do) stands in for it: point `HERDR_SOCKET_PATH` at that fake.
 - **Never the real `~/.shepherdr`**: give it `SHEPHERDR_HOME=/tmp/<something of its own>` and a loopback port of its
-  own, `SHEPHERDR_PORT=7801` (never 7787, the human's). Its own files, its agents' credentials included, stay there.
+  own, `SHEPHERDR_PORT=7801` (never 7787, the human's). Its own files, its agents' credentials included, stay there;
+  the helper's per-process route files are the one thing it writes where a CLI looks for them.
 - **No task that can come due**: no `--in`, `--at`, nothing queued behind another task, nothing to relaunch. A server
   with a home of its own refuses to start any agent unless `SHEPHERDR_LAUNCH_AGENTS=1` says it may, and logs each skip;
   never set that variable with the human's herdr in reach, only around a fake one.
-- **Stop it by its own pid**: start it in the background and keep `$!`, or take the `pid` from `server.json` in its
-  home (live only), and stop that: `kill $!`. Never `pkill -f server/main.ts` or any pattern loose enough to match the
-  human's live server, which runs from `.releases/`. Leave no server, port, home or process of yours behind.
+- **Stop it by its own pid**: run it as `bun server/main.ts` in the background (not through `bun run`) and keep `$!`,
+  or take the `pid` from `server.json` in its home (live only), and stop that: `kill $!`. Never `pkill -f
+  server/main.ts` or any pattern loose enough to match the human's live server, which runs from `.releases/`. Leave no
+  server, port, home or process of yours behind.
 
 ## Outputs
 

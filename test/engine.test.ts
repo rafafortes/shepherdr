@@ -111,6 +111,7 @@ describe('a task is its brief and one agent', () => {
     const w = world()
     const dir = repo()
     const p = await w.places.add(dir, 'proofhome')
+    const branches = sh('git branch --list', dir)
     const yes = process.env.SHEPHERDR_LAUNCH_AGENTS
     delete process.env.SHEPHERDR_LAUNCH_AGENTS
     try {
@@ -121,7 +122,7 @@ describe('a task is its brief and one agent', () => {
       expect(t.worktree).toBeUndefined()
       expect(w.started).toEqual([])
       // refused before anything of its own was made in the human's repository
-      expect(sh('git branch --list', dir)).toBe('')
+      expect(sh('git branch --list', dir)).toBe(branches)
       expect(sh('git worktree list', dir).split('\n').length).toBe(1)
     } finally {
       if (yes !== undefined) process.env.SHEPHERDR_LAUNCH_AGENTS = yes

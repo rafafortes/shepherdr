@@ -560,7 +560,9 @@ export class Agents extends Emitter<Events> {
     const signature = JSON.stringify([proc.pid, route])
     if (this.routes.get(r.key) === signature) { this.emit('routed', r.key); return }
     const router = BOX ? join(helperDir(BOX.home), 'route.pl') : join(ROOT, 'helper', 'route.pl')
-    const result = await run(['perl', router, '--bind', String(proc.pid)], { stdin: JSON.stringify(route), timeoutMs: 5000 })
+    // the box's own Shepherdr home, said rather than left to what its login shell exports: the credential file it writes
+    // is the box's, whether or not that shell sets SHEPHERDR_HOME as well
+    const result = await run(['perl', router, '--bind', String(proc.pid)], { stdin: JSON.stringify(route), timeoutMs: 5000, ...(BOX ? { env: { SHEPHERDR_HOME: join(BOX.home, '.shepherdr') } } : {}) })
     if (result.code) {
       this.routes.delete(r.key)
       this.secretAccess.revoke(r.key)

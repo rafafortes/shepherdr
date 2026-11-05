@@ -1,11 +1,13 @@
 // A proof server keeps its own files and its own herdr: its home follows SHEPHERDR_HOME (credentials included), and it
 // starts no agent unless it is told to (docs/develop.md, skill/shepherdr-agent). These are its three rules.
 import { describe, expect, spyOn, test } from 'bun:test'
-import { existsSync, mkdtempSync, statSync } from 'node:fs'
+import { afterAll } from 'bun:test'
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const proof = mkdtempSync(join(tmpdir(), 'shep-proof-home-'))
+afterAll(() => rmSync(proof, { recursive: true, force: true }))
 process.env.SHEPHERDR_HOME = proof
 // nothing here reaches a real herdr, even where a launch gets past the rule
 process.env.HERDR_SOCKET_PATH = join(proof, 'no-herdr.sock')
@@ -17,11 +19,13 @@ const { Agents } = await import('../server/live/agents.ts')
 const { herdr } = await import('../server/live/herdr.ts')
 const { ROOT } = await import('../server/root.ts')
 
-const withEnv = <T>(vars: Record<string, string | undefined>, f: () => T): T => {
+// the variables are put back after the body has finished, an awaited one included: a finally alone would restore them
+// at its first await, and the rest of the body would run under the preload's answer
+const withEnv = async <T>(vars: Record<string, string | undefined>, f: () => T | Promise<T>): Promise<T> => {
   const kept = Object.entries(vars).map(([k]) => [k, process.env[k]] as const)
   for (const [k, v] of Object.entries(vars)) v === undefined ? delete process.env[k] : (process.env[k] = v)
   try {
-    return f()
+    return await f()
   } finally {
     for (const [k, v] of kept) v === undefined ? delete process.env[k] : (process.env[k] = v)
   }
@@ -30,18 +34,18 @@ const withEnv = <T>(vars: Record<string, string | undefined>, f: () => T): T => 
 const spec = (key: string) => ({ key, name: `shep-proof-${key.replace(/\W/g, '')}`, kind: 'claude', cwd: proof, workspace: 'proof', first: 'Go.' })
 
 describe('a server with a home of its own', () => {
-  test('starts agents only when it is asked to, when it is a worker for another machine, or at the real home', () => {
-    expect(withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(false)
-    expect(withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: '1', SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(true)
-    expect(withEnv({ SHEPHERDR_HOME: REAL_HOME, SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(true)
+  test('starts agents only when it is asked to, when it is a worker for another machine, or at the real home', async () => {
+    expect(await withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(false)
+    expect(await withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: '1', SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(true)
+    expect(await withEnv({ SHEPHERDR_HOME: REAL_HOME, SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(true)
     // a worker for another machine starts agents there: its own home is under its main server's, not the real one
     const worker = { SHEPHERDR_HOME: join(HOME, 'machines', 'laptop'), SHEPHERDR_LAUNCH_AGENTS: undefined }
-    expect(withEnv({ ...worker, SHEPHERDR_BOX: '{}', SHEPHERDR_MAIN_HOME: REAL_HOME }, launchesAgents)).toBe(true)
+    expect(await withEnv({ ...worker, SHEPHERDR_BOX: '{}', SHEPHERDR_MAIN_HOME: REAL_HOME }, launchesAgents)).toBe(true)
     // a proof server's own worker is no way around the rule
-    expect(withEnv({ ...worker, SHEPHERDR_BOX: '{}', SHEPHERDR_MAIN_HOME: proof }, launchesAgents)).toBe(false)
+    expect(await withEnv({ ...worker, SHEPHERDR_BOX: '{}', SHEPHERDR_MAIN_HOME: proof }, launchesAgents)).toBe(false)
     // nor is a home moved elsewhere, whose server says the yes itself (its workers inherit it)
-    expect(withEnv({ ...worker, SHEPHERDR_BOX: undefined, SHEPHERDR_MAIN_HOME: undefined }, launchesAgents)).toBe(false)
-    expect(withEnv({ SHEPHERDR_HOME: join(HOME, 'machines', 'laptop'), SHEPHERDR_LAUNCH_AGENTS: '1', SHEPHERDR_BOX: '{}', SHEPHERDR_MAIN_HOME: '/srv/shepherdr' }, launchesAgents)).toBe(true)
+    expect(await withEnv({ ...worker, SHEPHERDR_BOX: undefined, SHEPHERDR_MAIN_HOME: undefined }, launchesAgents)).toBe(false)
+    expect(await withEnv({ SHEPHERDR_HOME: join(HOME, 'machines', 'laptop'), SHEPHERDR_LAUNCH_AGENTS: '1', SHEPHERDR_BOX: '{}', SHEPHERDR_MAIN_HOME: '/srv/shepherdr' }, launchesAgents)).toBe(true)
   })
 
   test('refuses a launch, says why in its log, and starts nothing', async () => {
@@ -89,8 +93,8 @@ describe('a server with a home of its own', () => {
     }
   })
 
-  test('keeps its agents credentials in its own home, where the helper writes them', () => {
-    const credentialFile = withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: undefined }, () => agentEnv('LP-3/Agent', ROOT).SHEPHERDR_SECRET_FILE)
+  test('keeps its agents credentials in its own home, where the helper writes them', async () => {
+    const credentialFile = await withEnv({ SHEPHERDR_HOME: proof, SHEPHERDR_LAUNCH_AGENTS: undefined }, () => agentEnv('LP-3/Agent', ROOT).SHEPHERDR_SECRET_FILE)
     expect(home()).toBe(proof)
     expect(credentialFile).toStartWith(join(proof, 'helper', 'credentials', ''))
     // the name helper/route.pl accepts: a uuid
