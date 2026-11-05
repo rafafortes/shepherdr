@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { apart, cardMessage, type ActivityAnswer, type ActivityAsk, type Chat, type ChatControls, type ArtifactPost, type Job, type Message, type Question, type Reaction, type UpdateCard } from '../../shared/types.ts'
+import { apart, cardMessage, type ActivityAnswer, type ActivityAsk, type Chat, type ChatControls, type ArtifactPost, type Job, type Message, type Question, type Reaction, type SecretAsk, type UpdateCard } from '../../shared/types.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
 import { stripHidden, type Agents, type OutItem } from './agents.ts'
 import { agentLines, excerpt, findQuoted, markerSoFar, parseBrowserNotes, parseReply, parseUserLine, userLines, type Parsed } from './chatlines.ts'
@@ -15,6 +15,8 @@ import type { LogEvent } from './readers/types.ts'
 import type { Cut } from './retry.ts'
 import { findModel, modelsOf, nearest } from './models.ts'
 import { sameCommand } from './commands.ts'
+import { sessionRuntime } from './runtime.ts'
+import { launchHarness } from './restart.ts'
 import { CLI_NAME } from './settings.ts'
 import { replyOnScreen } from './streaming.ts'
 import { activityOf, codexThreadLog, cutOutput, headlessJob, JobLogs, lastLine, lineOf, outputAt, shown as shownStep, tailOf, type JobRec } from './activity.ts'
@@ -23,6 +25,7 @@ import { activityOf, codexThreadLog, cutOutput, headlessJob, JobLogs, lastLine, 
  *  answer, a note with what it is on */
 function shownAs(p: Parsed): { title?: string; text: string } | undefined {
   if (p.kind === 'answer') return { title: `Answered “${p.title}”`, text: p.answer }
+  if (p.kind === 'secret') return { title: 'Gave a secret', text: `${p.name}${p.where ? `, for ${p.where}` : ''}` }
   if (p.kind === 'artifact-send') return { title: `Sent from "${p.title}"`, text: p.text }
   if (p.kind === 'artifact-say') return { title: `About "${p.title}"`, text: p.text }
   if (p.kind === 'note') return { text: `[note on ${p.target}] ${p.note}` }
@@ -80,6 +83,8 @@ export interface Posted {
   card?: UpdateCard
   question?: Question
   artifact?: ArtifactPost
+  /** a secret the agent asked for: its masked box */
+  secret?: SecretAsk
   /** text shown with it, when it stands alone */
   text?: string
   /** a line of yours Shepherdr shows for you (an answer typed as keys, or a command, which the log doesn't keep) */
@@ -286,9 +291,19 @@ export function sawReply(s: Pick<Shown, 'last' | 'on'>, text: string | undefined
   return { on: s.on || (ok && s.last !== undefined && text !== s.last), last: ok ? text : undefined }
 }
 
+/** how much of a chat's logs one pull reads: the rest is read in the background a piece at a time, so a log of a
+ *  hundred MB (a long-lived coordinator's) never holds up the server, at a restart or as it grows */
+const PIECE = 2 << 20
+
 export class Chats {
   private tails = new Map<string, LogTail>()
   private events = new Map<string, LogEvent[]>()
+  /** where each reply and usage is in its chat's events, by kind and id: a reply read in two pieces replaces the first */
+  private where = new Map<string, Map<string, number>>()
+  /** chats whose logs are still being read in the background */
+  private reading = new Set<string>()
+  /** a chat's logs were read in the background to their end: what it shows changed */
+  onRead?: (key: string) => void
   private logs = new Map<string, ChatLog>()
   private menus = new Map<string, ScreenMenu>()
   private menuAt = new Map<string, number>()
@@ -320,7 +335,7 @@ export class Chats {
 
   /** a deleted task's chat: its log goes, and all that was read of it */
   forget(key: string) {
-    for (const m of [this.tails, this.events, this.logs, this.menus, this.menuAt, this.shown]) m.delete(key)
+    for (const m of [this.tails, this.events, this.where, this.reading, this.logs, this.menus, this.menuAt, this.shown]) m.delete(key)
     rmSync(join(HOME, 'chatlog', `${safe(key)}.json`), { force: true })
   }
 
@@ -380,12 +395,22 @@ export class Chats {
 
   /* ---------- reading the CLI's logs ---------- */
 
-  /** read new lines of this chat's log files; true when anything new came */
+  /** read new lines of this chat's log files, up to PIECE in all (the rest follows in the background); true when
+   *  anything new came */
   pull(key: string): boolean {
+    const { changed, behind } = this.read(key)
+    if (behind) this.readOn(key)
+    return changed
+  }
+
+  private read(key: string): { changed: boolean; behind: boolean } {
     const r = this.agents.record(key)
-    if (!r) return false
+    if (!r) return { changed: false, behind: false }
     let changed = false
+    let behind = false
+    let left = PIECE
     const all = this.events.get(key) ?? []
+    const where = this.where.get(key) ?? new Map<string, number>()
     for (const f of r.logs) {
       if (!existsSync(f)) continue
       let t = this.tails.get(f)
@@ -396,17 +421,38 @@ export class Chats {
         t = new LogTail(f, reader)
         this.tails.set(f, t)
       }
-      const ev = t.read()
+      const was = t.done
+      const ev = t.read(left)
+      left -= Math.max(0, t.done - was)
       for (const e of ev) {
         // a reply read in two pieces comes again with the same id and the full text: it replaces the first
-        const i = e.kind === 'agent' || e.kind === 'usage' ? all.findIndex((x) => x.kind === e.kind && x.id === e.id) : -1
-        if (i >= 0) all[i] = e
-        else all.push(e)
+        const id = e.kind === 'agent' || e.kind === 'usage' ? `${e.kind}:${e.id}` : undefined
+        const i = id === undefined ? undefined : where.get(id)
+        if (i !== undefined) all[i] = e
+        else {
+          if (id !== undefined) where.set(id, all.length)
+          all.push(e)
+        }
         changed = true
       }
+      // the next log once this one is read to its end: the chat keeps its order
+      if ((behind = t.behind || left <= 0)) break
     }
-    if (changed) this.events.set(key, all)
-    return changed
+    if (changed) (this.events.set(key, all), this.where.set(key, where))
+    return { changed, behind }
+  }
+
+  /** reads the rest of a chat's logs a piece at a time, letting the server answer between pieces; told once at the end */
+  private readOn(key: string) {
+    if (this.reading.has(key)) return
+    this.reading.add(key)
+    const step = () => {
+      if (!this.reading.has(key)) return
+      if (this.read(key).behind) return void setTimeout(step, 0)
+      this.reading.delete(key)
+      this.onRead?.(key)
+    }
+    setTimeout(step, 0)
   }
 
   /** tokens this chat's agent has used, across all its sessions */
@@ -803,6 +849,10 @@ export class Chats {
         msgs.push({ id: p.id, who: 'you', at: p.at, text: p.text, answered: p.answered, elsewhere: p.elsewhere, cid: p.cid })
         continue
       }
+      if (p.secret) {
+        msgs.push({ id: p.id, who: 'agent', at: p.at, secret: p.secret })
+        continue
+      }
       const q = p.question ? withAnswer(p.question, l, this.answeredIn) : undefined
       const host = hostFor(msgs, p.at, p, hosting)
       if (host && !p.text) {
@@ -881,10 +931,19 @@ export class Chats {
     }
     const st = this.agents.status(key)
     const failed = this.agents.failedLately(key)
+    const active = this.agents.info(key)?.agent_session
+    const file = active?.kind === 'path' ? r?.logs.find((f) => f.endsWith('/' + active.value.split('/').at(-1)))
+      : r?.sessionId ? r.logs.find((f) => f.endsWith(`${r.sessionId}.jsonl`)) : r?.logs.at(-1)
+    let runtime = sessionRuntime(ev, file, r?.started ?? 0)
+    if (st !== 'working' || !runtime) runtime = this.agents.runtime(key) ?? runtime
+    const hook = this.agents.runtimeHook(key)
+    if (hook) runtime = !runtime || hook.at >= runtime.at ? { ...(hook.model && runtime?.model && hook.model !== runtime.model ? {} : runtime), ...hook, source: 'hook' } : { ...(hook.model && runtime.model && hook.model !== runtime.model ? {} : hook), ...runtime }
+    if (runtime?.model) runtime.modelLabel = findModel(kind, runtime.model)?.label
     const jobs = this.jobs(key, act).map(({ log: _l, output: _o, ...j }): Job => j)
     return {
       key,
       cli: CLI_NAME[kind] ?? kind,
+      agent: r ? { runtime, ...launchHarness({ kind: r.kind, model: r.model, effort: r.effort }), ...(findModel(r.kind, r.model) ? { modelLabel: findModel(r.kind, r.model)!.label } : {}) } : undefined,
       messages: msgs,
       failed: failed.length ? failed : undefined,
       working: st === 'working' || undefined,

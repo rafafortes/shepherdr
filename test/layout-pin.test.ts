@@ -23,10 +23,12 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     const page = await browser!.newPage({ viewport: { width: 1600, height: 900 } })
     await page.goto(at('place=vm-str/home'))
     const list = page.getByRole('region', { name: 'Tasks' })
-    // the main home space lists its own tasks, as any space: none in the demo
-    await list.getByText('No tasks yet. Ask home to add one.').waitFor()
-    expect(await chips(page)).toEqual(['p:vm-str:~'])
-    await page.getByRole('button', { name: /^gtm\b/ }).click()
+    // the main home space lists everything, every machine's, with no chip to say so
+    expect(await chips(page)).toEqual([])
+    expect(await list.getByRole('group', { name: 'Showing' }).textContent()).toContain('Everything')
+    await list.getByRole('button', { name: /LV-3 Upload page/ }).waitFor()
+    // a space picked shows its own
+    await page.locator('#places li[data-project="p:vm-str:gtm"]').getByRole('button', { name: /^gtm,/ }).click()
     const gtm16 = list.getByRole('button', { name: /GTM-16 Docs/ })
     const lv3 = list.getByRole('button', { name: /LV-3 Upload page/ })
     await gtm16.waitFor()
@@ -84,8 +86,8 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     // what the filter says stays as they're pinned
     const box = list.getByRole('searchbox', { name: 'Filter tasks' })
     await box.fill('upload')
-    await list.getByRole('button', { name: 'Pin these filters' }).click()
-    const pin = list.getByRole('button', { name: 'Unpin: follow the space picked' })
+    await list.getByRole('button', { name: 'Lock filters: keep them when switching spaces' }).click()
+    const pin = list.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' })
     expect(await pin.getAttribute('aria-pressed')).toBe('true')
     expect(await box.inputValue()).toBe('upload')
     expect(await list.getByRole('button', { name: /GTM-16 Docs/ }).count()).toBe(0)
@@ -112,19 +114,21 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     const arts = page.getByRole('region', { name: 'Artifacts' })
     await arts.getByRole('button', { name: /Upload page draft/ }).waitFor()
     expect(await arts.getByRole('button', { name: /This week across machines/ }).count()).toBe(0)
-    expect(await arts.getByRole('button', { name: 'Unpin: follow the space picked' }).isVisible()).toBe(true)
+    expect(await arts.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).isVisible()).toBe(true)
     await arts.getByRole('button', { name: /^Tasks/ }).click()
 
     // kept on this device
     await page.reload()
-    await list.getByRole('button', { name: 'Unpin: follow the space picked' }).waitFor()
+    await list.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).waitFor()
     expect(await chips(page)).toEqual(['p:vm-str:gtm', 'p:mac:lilla-varlden'])
 
-    // unpinned, they follow the space picked again, and a task opens over the list as before
-    await list.getByRole('button', { name: 'Unpin: follow the space picked' }).click()
-    await list.getByRole('button', { name: 'Pin these filters' }).waitFor()
+    // unpinned, they follow the space picked again (the main home lists everything), and a task opens over the list
+    await list.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).click()
+    await list.getByRole('button', { name: 'Lock filters: keep them when switching spaces' }).waitFor()
+    expect(await chips(page)).toEqual([])
+    await page.locator('#places li[data-project="p:vm-str:gtm"]').getByRole('button', { name: /^gtm,/ }).click()
     await lv3.waitFor({ state: 'detached' })
-    await page.getByRole('button', { name: /^gtm\b/ }).click()
+    await page.locator('#places li[data-project="p:vm-str:gtm"]').getByRole('button', { name: /^gtm,/ }).click()
     expect(await chips(page)).toEqual(['p:vm-str:gtm'])
     await list.getByRole('button', { name: /GTM-16 Docs/ }).click()
     await page.getByRole('textbox', { name: 'Message GTM-16…' }).waitFor()
@@ -146,7 +150,7 @@ describe.skipIf(!browser)('the lists’ chips', () => {
         localStorage.setItem('shepherdr.pin', id)
       }, pin)
       await page.reload()
-      await list.getByRole('button', { name: 'Unpin: follow the space picked' }).waitFor()
+      await list.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).waitFor()
       expect(await chips(page)).toEqual([...want])
       expect(await page.evaluate(() => localStorage.getItem('shepherdr.pin'))).toBeNull()
     }
@@ -166,8 +170,8 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     const plus = (await page.getByRole('button', { name: 'Filter', exact: true }).boundingBox())!
     expect(plus.x + plus.width).toBeLessThanOrEqual(390)
 
-    await page.getByRole('button', { name: 'Pin these filters' }).click()
-    await page.getByRole('button', { name: 'Unpin: follow the space picked' }).waitFor()
+    await page.getByRole('button', { name: 'Lock filters: keep them when switching spaces' }).click()
+    await page.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).waitFor()
     // the top bar says so, naming the first chip and how many more
     expect(await page.getByText('gtm · vm-str +3', { exact: true }).isVisible()).toBe(true)
     // another space from the drawer, then its Tasks tab: the pinned chips still
@@ -177,10 +181,14 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     await page.getByRole('group', { name: 'View' }).getByRole('button', { name: /^Tasks/ }).click()
     await page.getByRole('button', { name: /LV-3 Upload page/ }).waitFor()
     expect(await chips(page)).toEqual(['p:vm-str:gtm', 'm:mac', 'p:vm-str:herdr-projects', 'm:nas'])
-    // unpinned, the tab shows the space picked
-    await page.getByRole('button', { name: 'Unpin: follow the space picked' }).click()
+    // unpinned, the tab follows the place picked: at the main home space, everything; in a space, its own
+    await page.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).click()
+    expect(await chips(page)).toEqual([])
+    await page.getByRole('button', { name: 'Places' }).click()
+    await page.locator('li[data-project="p:vm-str:herdr-projects"]').getByRole('button', { name: /^herdr-projects/ }).click()
+    await page.getByRole('group', { name: 'View' }).getByRole('button', { name: /^Tasks/ }).click()
     await page.getByRole('button', { name: /LV-3 Upload page/ }).waitFor({ state: 'detached' })
-    expect(await chips(page)).toEqual(['p:vm-str:~'])
+    expect(await chips(page)).toEqual(['p:vm-str:herdr-projects'])
     await page.close()
   }, 30_000)
 })

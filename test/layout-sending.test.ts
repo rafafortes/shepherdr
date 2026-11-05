@@ -2,6 +2,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
 import { layout, type Box } from './layout.ts'
+import { SETTINGS_HEAD, OLD_HEADS } from '../shared/brief.ts'
 
 const { browser, sending, world, server, url } = await layout()
 
@@ -13,6 +14,35 @@ describe.skipIf(!browser)('what you send shows at once', () => {
       const els = [...document.querySelectorAll('[data-you] [data-anchor]')].filter((e) => e.textContent === t)
       return els.length === 1 && !els[0].closest('[data-msg]')!.getAttribute('data-msg')!.startsWith('out:')
     }, text)
+  test('full briefs remain one selectable plain-text block, including settings and provenance', async () => {
+    const task = world.tasks.find((t) => t.id === 'HP-204')!
+    const original = `# Literal **brief** with \`commands\` and <tags>\n\n${task.desc}\n\nKeep instructions after settings.\n${'long-unbroken-text'.repeat(30)}`
+    const variants = [original, ...OLD_HEADS.map((head) => original.replace(SETTINGS_HEAD, head)), '# Brief without settings\n\n**Keep this literal too.**']
+    for (const [i, text] of variants.entries()) world.chats['p:vm-str:~'].messages.push({ id: `full-brief-${i}`, who: 'you', text, at: Date.now() + i })
+    for (const width of [390, 1440]) {
+      const page = await browser!.newPage({ viewport: { width, height: 900 } })
+      await page.goto(url())
+      for (const [i, text] of variants.entries()) {
+        const body = page.locator(`[data-msg="full-brief-${i}"] [data-text]`)
+        await body.waitFor()
+        expect(await body.textContent()).toBe(text)
+        expect(await body.locator('strong, b, pre, code, ul, table, hr, [data-settings], [data-changed]').count()).toBe(0)
+        expect(await body.locator(':scope > div').count()).toBe(1)
+        const selected = await body.evaluate((el) => {
+          const selection = window.getSelection()!
+          selection.selectAllChildren(el)
+          const value = selection.toString()
+          selection.removeAllRanges()
+          return value
+        })
+        expect(selected).toBe(text)
+        expect(await body.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+      }
+      // Ordinary agent replies still render Markdown.
+      expect(await page.locator('[data-msg="code-agent"] code').count()).toBeGreaterThan(0)
+      await page.close()
+    }
+  })
   test('it shows the moment you tap Send, faded, then the real one takes its place without being drawn again', async () => {
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
     await page.goto(url())
@@ -85,6 +115,37 @@ describe.skipIf(!browser)('what you send shows at once', () => {
     await alerts.first().waitFor({ state: 'detached' })
     await settled(page, 'First try')
     expect(await page.evaluate(() => localStorage.getItem('shepherdr.outbox'))).toBeNull()
+    await page.close()
+  }, 30_000)
+  test('one still on its way can be taken out from ⋯ beside it; a reload drops day-old ones', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1280, height: 800 } })
+    await page.goto(url())
+    const box = page.getByRole('textbox', { name: /Message/ })
+    await box.waitFor()
+    let release!: () => void
+    sending.hold = new Promise((r) => (release = r))
+    await box.fill('Stuck one')
+    await page.getByRole('button', { name: 'Send' }).click()
+    await bubbles(page, 'Stuck one').waitFor()
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('shepherdr.outbox')!)[0])
+    // ⋯ beside it, on hover, offers Remove (before a reload: that cuts the send off, and it fails)
+    await bubbles(page, 'Stuck one').hover()
+    await page.locator('[data-msg^="out:"]').getByRole('button', { name: 'More' }).click()
+    await page.getByRole('menu', { name: 'Message' }).getByRole('menuitem', { name: 'Remove' }).click()
+    await bubbles(page, 'Stuck one').waitFor({ state: 'detached' })
+    expect(await page.evaluate(() => localStorage.getItem('shepherdr.outbox'))).toBeNull()
+    // a day-old one, saved by an earlier visit, is gone after a reload (one for a chat that is gone too, but only with
+    // every machine in reach, and this world has one out of reach: outbox.test.ts). Put in as the page loads: the send
+    // the reload cuts off saves the outbox as it goes
+    await page.addInitScript((o) => {
+      const out = [{ ...o, cid: 'new', text: 'Just now', state: 'failed', error: 'Not sent.', at: Date.now() }, { ...o, cid: 'old', text: 'From yesterday', state: 'sent', at: Date.now() - 25 * 3_600_000 }]
+      localStorage.setItem('shepherdr.outbox', JSON.stringify(out))
+    }, saved)
+    await page.reload()
+    await bubbles(page, 'Just now').waitFor()
+    expect(await bubbles(page, 'From yesterday').count()).toBe(0)
+    release()
+    sending.hold = null
     await page.close()
   }, 30_000)
 })
@@ -383,4 +444,24 @@ describe.skipIf(!browser)('what the best chats do', () => {
       await page.getByRole('search').waitFor({ state: 'detached' })
       await page.close()
     }, 30_000)
+})
+
+
+describe.skipIf(!browser)('held messages', () => {
+  test('links to the blocking question without answering or offering Send now', async () => {
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
+    try {
+      await page.goto(`${url()}&task=GTM-14`)
+      const held = page.locator('[data-msg]').filter({ hasText: 'Also update the README.' })
+      await held.getByText('Waiting for your answer above.', { exact: false }).waitFor()
+      const link = held.getByRole('button', { name: 'Go to question' })
+      await link.click()
+      expect(await page.locator('[data-flash]').textContent()).toContain('Allow: rm -rf template/skills/old?')
+      expect(await page.getByRole('button', { name: 'Send now', exact: true }).count()).toBe(0)
+      expect(world.chat('GTM-14/Agent').messages.find((m) => m.question?.id === 'f4')?.question?.sent).toBeUndefined()
+      expect(await held.isVisible()).toBe(true)
+    } finally {
+      await page.close()
+    }
+  })
 })
