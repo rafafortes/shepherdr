@@ -16,6 +16,9 @@ The operator's fork, used on their desktop since 2026-11-04 (herdr installs the 
 - **Upstream is read only.** The `upstream` remote has no push URL. Never open an issue, pull request or comment on
   eliasstravik/shepherdr without the operator's explicit OK; our pull requests go to rafafortes/shepherdr, base
   `herdr-tui`.
+- **Upstream intake.** How we watch upstream and what a change must keep (the terminal plugin, our login, pi task
+  agents, polylog-bridge's commands) before it comes in: [docs/upstream.md](docs/upstream.md), each improvement since
+  v2.0.0 weighed in [docs/upstream-ledger.md](docs/upstream-ledger.md).
 - **Releases.** A tag `v2.0.<n>` on `herdr-tui`, only with the operator's yes (as below); `package.json` and
   `herdr-plugin.toml` carry the same version. The desktop moves to it with
   `herdr plugin install rafafortes/shepherdr --ref <tag> --yes`, then the plugin's start action swaps the running
