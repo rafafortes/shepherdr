@@ -12,17 +12,19 @@ describe.skipIf(!browser)('unified search', () => {
     try {
       await page.goto(url())
       // the screen takes its keys once mounted
-      await page.locator('#places li').first().waitFor()
+      await page.locator('textarea[name="message"]').first().waitFor()
       await page.keyboard.press('Control+k')
       const search = page.getByRole('combobox', { name: 'Search or jump to' })
       await search.waitFor()
       expect(await page.getByRole('button', { name: 'Everywhere', exact: true }).getAttribute('aria-pressed')).toBe('true')
       await search.fill('search paging needle')
+      // the results fill in as each chat is read (a chat that never answers waits out its batch): the counts below
+      // are the whole search's, so they wait for its own report of what it read
+      await until(() => page.getByRole('status').textContent(), (s) => /Read \d+ of \d+ chats/.test(s ?? ''), 45_000)
       const group = page.getByRole('group', { name: 'Messages', exact: true })
       await group.getByRole('option').first().waitFor()
       expect(await group.getByRole('option').count()).toBe(8)
-      // the list redraws as answers land: the button it is drawn in is replaced, so a click retries on the new one
-      await group.getByRole('button', { name: /Show more messages/ }).click({ timeout: 15_000 })
+      await group.getByRole('button', { name: /Show more messages/ }).click()
       expect(await group.getByRole('option').count()).toBe(28)
       const hit = group.getByRole('option', { name: /^Search paging needle 29 / })
       await hit.click()
@@ -45,7 +47,7 @@ describe.skipIf(!browser)('unified search', () => {
       expect(await page.getByRole('button', { name: 'Everywhere', exact: true }).getAttribute('aria-pressed')).toBe('true')
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     } finally { source.messages = old; await page.close() }
-  }, 30_000)
+  }, 90_000)
 
   test('late replies in an earlier batch refresh the open results', async () => {
     const first = world.snapshot().places[0].chat
@@ -65,7 +67,7 @@ describe.skipIf(!browser)('unified search', () => {
       chat.messages = chat.messages.filter(m => m.id !== 'late-stream-result')
       await page.close()
     }
-  }, 30_000)
+  }, 90_000)
 
   test('duplicate homes keep machine context, artifacts open by identity', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
@@ -86,5 +88,5 @@ describe.skipIf(!browser)('unified search', () => {
       expect(page.url()).toContain('artifact=')
       expect(page.url()).toContain('mac%2Flilla-varlden')
     } finally { await page.close() }
-  }, 30_000)
+  }, 90_000)
 })

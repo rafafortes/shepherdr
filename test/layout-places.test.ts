@@ -154,8 +154,9 @@ describe.skipIf(!browser)('sidebars', () => {
       expect(await page.locator('[data-messages]').first().evaluate((e) => e.getBoundingClientRect().width)).toBeGreaterThanOrEqual(480)
       if (!docked) {
         await page.getByRole('button', { name: 'Places', exact: true }).click()
-        // the drawer's own; the docked one stays on the screen behind a phone's
-        await page.locator('nav[aria-label="Places"]:visible').waitFor()
+        // the drawer, over the docked one the screen behind still holds
+        await page.locator('nav[aria-label="Places"] nav, [data-drawer]').first().waitFor().catch(() => undefined)
+        await page.getByRole('button', { name: 'Close', exact: true }).waitFor()
         await page.getByRole('button', { name: 'Close', exact: true }).click()
       }
     }

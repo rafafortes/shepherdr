@@ -73,8 +73,10 @@ describe.skipIf(!browser)('renaming spaces and machines', () => {
       // new names
       await places.locator('li[data-project="p:vm-str:~"]').getByRole('button', { name: /^home/ }).click()
       const tasks = page.locator('section[aria-label="Tasks"]')
-      // the main home space lists every machine's, its own chips aside
-      await tasks.locator('li', { hasText: 'Work VM · go-to-market' }).first().waitFor()
+      // the main home space lists every machine's, under its space's heading: both new names show there
+      const heading = tasks.locator('[data-heading="go-to-market · Needs you"]')
+      await heading.waitFor()
+      expect(await heading.textContent()).toContain('Work VM')
 
       // a home space is renamed as any space, by the same rules
       expect(await world.act({ type: 'rename', id: 'p:vm-str:~', name: 'My base' })).toMatchObject({ ok: false })

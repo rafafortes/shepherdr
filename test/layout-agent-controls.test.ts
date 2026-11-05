@@ -30,7 +30,8 @@ describe.skipIf(!browser)('composer + agent controls', () => {
         await sheet.locator('[data-restart]').waitFor()
         expect(await sheet.textContent()).not.toMatch(/Recorded launch|Settings for|unknown|CLI|resumes|meanwhile/)
         expect(await sheet.getByRole('button', { name: 'Model: GPT-6-Sol', exact: true }).count()).toBe(1)
-        expect(await sheet.getByRole('switch').count()).toBe(0)
+        // what the Settings would start differs from the launch, so keeping the pick is offered; nothing is kept
+        expect(await sheet.getByRole('switch').getAttribute('aria-checked')).toBe('false')
         const box = (await sheet.boundingBox())!
         expect(box.x).toBeGreaterThanOrEqual(0)
         expect(box.x + box.width).toBeLessThanOrEqual(width)
@@ -61,7 +62,7 @@ describe.skipIf(!browser)('composer + agent controls', () => {
     await controls.getByRole('menuitem', { name: 'Model: Not reported. Select and restart', exact: true }).waitFor()
     expect(await controls.getByRole('menuitem', { name: 'Effort: Not reported. Select and restart', exact: true }).count()).toBe(1)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
-    await page.getByRole('button', { name: 'Attach files and more', exact: true }).last().click()
+    await page.locator('[data-composer]:visible button[aria-label="Attach files and more"]').last().click()
     expect(await controls.count()).toBe(0)
     expect(world.chats[key].agent).toEqual({ kind: 'codex' })
     await page.close()

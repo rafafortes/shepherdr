@@ -28,7 +28,7 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     expect(await list.getByRole('group', { name: 'Showing' }).textContent()).toContain('Everything')
     await list.getByRole('button', { name: /LV-3 Upload page/ }).waitFor()
     // a space picked shows its own
-    await page.getByRole('button', { name: /^gtm\b/ }).click()
+    await page.locator('#places li[data-project="p:vm-str:gtm"]').getByRole('button', { name: /^gtm,/ }).click()
     const gtm16 = list.getByRole('button', { name: /GTM-16 Docs/ })
     const lv3 = list.getByRole('button', { name: /LV-3 Upload page/ })
     await gtm16.waitFor()
@@ -122,11 +122,13 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     await list.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).waitFor()
     expect(await chips(page)).toEqual(['p:vm-str:gtm', 'p:mac:lilla-varlden'])
 
-    // unpinned, they follow the space picked again, and a task opens over the list as before
+    // unpinned, they follow the space picked again (the main home lists everything), and a task opens over the list
     await list.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).click()
     await list.getByRole('button', { name: 'Lock filters: keep them when switching spaces' }).waitFor()
+    expect(await chips(page)).toEqual([])
+    await page.locator('#places li[data-project="p:vm-str:gtm"]').getByRole('button', { name: /^gtm,/ }).click()
     await lv3.waitFor({ state: 'detached' })
-    await page.getByRole('button', { name: /^gtm\b/ }).click()
+    await page.locator('#places li[data-project="p:vm-str:gtm"]').getByRole('button', { name: /^gtm,/ }).click()
     expect(await chips(page)).toEqual(['p:vm-str:gtm'])
     await list.getByRole('button', { name: /GTM-16 Docs/ }).click()
     await page.getByRole('textbox', { name: 'Message GTM-16…' }).waitFor()

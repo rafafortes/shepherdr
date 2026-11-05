@@ -49,7 +49,7 @@ describe.skipIf(!browser)('attention count circles', () => {
             expect(geometry.colour).toBe(theme === 'dark' ? 'rgb(0, 0, 0)' : 'rgb(255, 255, 255)')
             const row = page.locator(`nav[aria-label="Places"] li[data-project="${place}"]`)
             if (!await row.isVisible()) await page.getByRole('button', { name: 'Places', exact: true }).click()
-            await row.locator(badge).waitFor()
+            await row.locator(badge).first().waitFor({ state: 'attached' })
             expect(await row.locator(badge).getAttribute('aria-label')).toBe(`${need} needs you, ${ready} ready · here`)
             expect(await row.locator(badge).count()).toBe(1)
             // Clicking the same space keeps the existing navigation and closes the phone drawer.
