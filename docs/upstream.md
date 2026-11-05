@@ -27,7 +27,8 @@ own `v2.0.<n>` tags (Releases, below).
 - upstream tag `v3.1.3` (`dc018f2a`, 2026-11-04), the newest release
 - upstream branch `v2.0` tip: `ebb17d58` "SHE-295: Build coordinator Autopilot (#490)", 2026-10-29
 
-Reviewed on 2026-11-04; every upstream commit after `v2.0.0` is weighed in [the ledger](upstream-ledger.md).
+Reviewed on 2026-11-04 by the operator's clock (the tip's commit date, 2026-11-05 01:02 +0100, is just past midnight
+UTC); every upstream commit after `v2.0.0` is weighed in [the ledger](upstream-ledger.md).
 
 ## How we notice a new upstream release
 
@@ -60,8 +61,8 @@ all four at once), or the idea is ported to 2.0's code instead of its herdr-core
 3. **pi task agents beside Claude Code.** pi is first-class: model and effort flags, the log reader (its chat shows
    its replies), the folder-trust handling, and the brief reaching it. pi runs on OpenCode Go and on the local models.
    Claude Code stays the coordinator and the reviewer line.
-4. **What polylog-bridge relies on.** `~/www/hermes-assistant/host/polylog-bridge` (user timer, every minute) is the
-   only outside consumer of our CLI, and it is what turns tester feedback into tasks. It uses exactly this, and any
+4. **What polylog-bridge relies on.** `~/www/hermes-assistant/host/polylog-bridge`, a timer on the operator's
+   host, is the only outside consumer of our CLI, and it is what turns tester feedback into tasks. It uses exactly this, and any
    change that renames, reshapes or moves one of them breaks it:
    - `shepherdr task list --space polylog --json` — a JSON array; it reads each row's `id`, `title`, `status` and
      `sub` (those four, with the brief, are what it pushes to the VM and what its change digest is built from).
