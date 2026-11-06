@@ -384,6 +384,22 @@ function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['ch
 const waitForChecks = (w: ReturnType<typeof world>) => w.settings.set('brief.merge', 'after GitHub checks')
 afterEach(() => void new Settings().set('brief.merge', null))
 
+/**
+ * The person merging a task's pull request by hand on GitHub, with the squash button: main there gets the squash and
+ * the pull request says it merged at the commit it was at, while the branch keeps its own commits (a squash merge
+ * leaves them out of the base). Returns that commit.
+ */
+function mergedByHand(g: ReturnType<typeof onGitHub>, branch: string, subject = 'Say hello (#1)') {
+  const tip = sh(`git rev-parse refs/heads/${branch}`, g.bare)
+  const dir = mkdtempSync(join(tmpdir(), 'shep-gh-byhand-'))
+  sh(`git clone -q ${g.bare} . && git config user.email t@t && git config user.name T && git fetch -q origin ${branch} && git merge -q --squash FETCH_HEAD && git commit -qm "${subject}" && git push -q origin main`, dir)
+  g.set({ prs: g.gh().prs.map((p) => (p.head === branch ? { ...p, state: 'MERGED' as const, at: tip } : p)) })
+  return tip
+}
+
+/** how many pull requests the engine asked GitHub to open (a second one for the same branch is the bug) */
+const opened = (g: ReturnType<typeof onGitHub>) => g.gh().calls.filter((c) => c.args[0] === 'pr' && c.args[1] === 'create').length
+
 describe('on GitHub: a pull request per task', () => {
   test("its origin is read as written and as git rewrites it: github.com mapped to github.localhost talks to github.localhost", async () => {
     const dir = repo()
@@ -487,6 +503,103 @@ describe('on GitHub: a pull request per task', () => {
     await until(() => !!t.cleaned)
     expect(existsSync(t.worktree!)).toBe(false)
     expect(sh('git branch --list "work/*"', g.dir)).toBe('')
+  })
+
+  test('ready after its pull request was squash-merged on GitHub by hand: Done (merged), and no second pull request', async () => {
+    const w = world()
+    const g = onGitHub({ checks: [{ name: 'test', bucket: 'pass' }] })
+    const { t, key } = await started(w, g.dir, 'ghbyhand')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', t.worktree!)
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    expect(opened(g)).toBe(1)
+    mergedByHand(g, t.branch!)
+    // its work is in main there, though not as its commit: Done, merged, at once
+    expect(await w.engine.done(t.id, 'Added hello.txt.')).toBe('merged')
+    expect(t.merged).toBe(true)
+    expect(w.engine.statusOf(t)).toBe('done')
+    expect(w.engine.subOf(t)).toBe('Merged')
+    expect(t.facts).toBeUndefined()
+    // never a second pull request, and main here is GitHub's
+    expect(opened(g)).toBe(1)
+    expect(sh('git rev-parse main', g.dir)).toBe(sh('git rev-parse main', g.bare))
+    // its worktree and its branch go once its turn ends: nothing of its is lost with them
+    w.agentIs(key, 'idle')
+    await until(() => !!t.cleaned)
+    expect(existsSync(t.worktree!)).toBe(false)
+    expect(sh('git branch --list "work/*"', g.dir)).toBe('')
+  })
+
+  test('ready with its work squashed into main by hand, no pull request ever: Done (merged), nothing opened', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'ghinmain')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', t.worktree!)
+    sh(`git merge -q --squash ${t.branch} && git commit -qm "hello, by hand"`, g.dir)
+    expect(await w.engine.done(t.id, 'Added hello.txt.')).toBe('merged')
+    expect(t.merged).toBe(true)
+    expect(w.engine.statusOf(t)).toBe('done')
+    expect(g.gh().prs).toEqual([])
+    expect(opened(g)).toBe(0)
+  })
+
+  test('a branch with a commit after its merged pull request is not taken for merged: Ready, and left alone', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t, key } = await started(w, g.dir, 'ghafter')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', t.worktree!)
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    mergedByHand(g, t.branch!)
+    writeFileSync(join(t.worktree!, 'later.txt'), 'later\n')
+    sh('git add -A && git commit -qm later', t.worktree!)
+    expect(await w.engine.done(t.id, 'More to come.')).toBe('ready')
+    expect(t.merged).toBeFalsy()
+    // what it has after the merge is not in main: no watch marks it, and no second pull request is opened
+    w.agentIs(key, 'idle')
+    await w.engine.watchPrs()
+    expect(t.merged).toBeFalsy()
+    expect(w.engine.statusOf(t)).toBe('ready')
+    expect(opened(g)).toBe(1)
+  })
+
+  test("the watch sees a pull request merged on GitHub by hand: Done (merged), never Ready for ever", async () => {
+    const w = world()
+    const g = onGitHub({ checks: [{ name: 'test', bucket: 'pass' }] })
+    const { t, key } = await started(w, g.dir, 'ghwatch')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', t.worktree!)
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    expect(await w.engine.done(t.id, 'Added hello.txt.')).toBe('ready')
+    w.agentIs(key, 'idle')
+    // still open: Ready, its checks read as any watch does
+    await w.engine.watchPrs()
+    expect(t.merged).toBeFalsy()
+    expect(w.engine.statusOf(t)).toBe('ready')
+    mergedByHand(g, t.branch!)
+    await w.engine.watchPrs()
+    expect(t.merged).toBe(true)
+    expect(w.engine.statusOf(t)).toBe('done')
+    expect(w.engine.subOf(t)).toBe('Merged')
+    expect(opened(g)).toBe(1)
+  })
+
+  test('shepherdr pr never opens a second pull request for a branch whose pull request merged already', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'ghsecond')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', t.worktree!)
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    mergedByHand(g, t.branch!)
+    writeFileSync(join(t.worktree!, 'later.txt'), 'later\n')
+    sh('git add -A && git commit -qm later', t.worktree!)
+    const r = await w.engine.openPr(t.id)
+    expect(r.ok).toBe(false)
+    expect(r.text).toContain('PR #1 is merged on GitHub already')
+    expect(g.gh().prs.length).toBe(1)
+    expect(opened(g)).toBe(1)
   })
 
   test('merge opens the pull request itself when the agent never did, and merges it at the commit here', async () => {

@@ -257,6 +257,16 @@ describe('closing from the command', () => {
     expect((await src.cli(['merge', t.id], { chat: place })).out).toContain('nothing to merge')
   })
 
+  test('a task whose work is in main already reports ready as Done (merged): no pull request, nothing to merge', async () => {
+    const { t, dir } = await workedTask('inmain')
+    // the person squashed its branch into main by hand, no pull request at all
+    run(`git merge -q --squash ${t.branch} && git commit -qm "the work, by hand"`, dir)
+    const r = await src.cli(['ready', t.id, '--summary', 'Added x.txt.'], { chat: `${t.id}/Agent` })
+    expect(r.out).toContain(`its work is in main already, so ${t.id} is Done (merged)`)
+    expect(r.out).toContain('do nothing more in them')
+    expect(src.engine.statusOf(t)).toBe('done')
+  })
+
   test("a task agent's ready on a branch with no changes is Done at once; done, its old name, still works", async () => {
     const { t, place } = await emptyTask('research')
     const r = await src.cli(['ready', t.id, '--summary', 'The answer is 42.'], { chat: `${t.id}/Agent` })

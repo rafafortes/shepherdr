@@ -172,6 +172,16 @@ export async function landed(repo: string, ref: string, base: string, squashes: 
   return mergesTo(repo, base, ref, base)
 }
 
+/**
+ * All of `ref`'s work is in `base` already, though not as its commits: merging it into `base` would change nothing.
+ * That is what a squash merge of the branch leaves (its commits never in the base, its changes all there) and what a
+ * cherry-pick of them leaves, however `base` moved on since. Stricter than `landed`, which also takes a tree `base`
+ * had once: a branch bringing back an older state of the code is no merge, since what it would add is what counts.
+ */
+export async function inBase(repo: string, ref: string, base: string) {
+  return mergesTo(repo, base, ref, base)
+}
+
 /** git's own pattern match is not needed here: `*` matches anything, and a pattern matches a path or its last part */
 function globMatch(pattern: string, s: string) {
   const p = pattern.replace(/^\/+|\/+$/g, '')

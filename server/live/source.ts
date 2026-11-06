@@ -2415,6 +2415,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const { said, facts } = summaryOpts(p, rest)
         const r = await this.engine.done(t.id, said ?? '', facts)
         if (r === 'ended') return `Noted. ${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'}).`
+        if (r === 'merged') return `Noted: ${t.pr ? `PR #${t.pr.number} is merged` : `its work is in ${t.base} already`}, so ${t.id} is Done (merged): there is nothing to merge, and no pull request to open.${ctx.chat === `${t.id}/Agent` ? ' Your worktree, branch and herdr space close once this turn ends: do nothing more in them.' : ''}`
         if (r === 'closed') return `Noted: ${t.branch} has no changes, so there is nothing to merge: ${t.id} is Done.${ctx.chat === `${t.id}/Agent` ? ' Your worktree, branch and herdr space close once this turn ends: do nothing more in them.' : ''}`
         return `Noted: ${t.id} shows as Ready to merge (not merged yet). Merge only when your brief or the human says so (shepherdr merge ${t.id}).`
       }
