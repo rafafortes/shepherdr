@@ -2592,6 +2592,9 @@ describe("a card dismissed on the CLI's own screen", () => {
       keysSent.push(keys)
       screen = ''
     }
+    const told: string[] = []
+    const send = src.agents.send
+    src.agents.send = (async (k: string, text: string) => (k === key && told.push(text), { waiting: false })) as never
     try {
       await src.chats.readMenu(key, true)
       const q = src.chats.chat(key).messages.find((m) => m.question)?.question
@@ -2605,6 +2608,9 @@ describe("a card dismissed on the CLI's own screen", () => {
       expect(src.chats.chat(key).messages.some((m) => m.answered === 'Dismissed “Do you want to proceed?”')).toBe(true)
       // no bubble of your words behind it: the menu's title is in the line, not posted as something you said
       expect(src.chats.chat(key).messages.find((m) => m.answered?.startsWith('Dismissed'))?.text).toBeUndefined()
+      // its own Esc declines it, and the person's words reach the agent too: it carries on rather than stops
+      expect(told.join('\n')).toContain('<dismissed')
+      expect(told.join('\n')).toContain('carry on with your best judgment')
       // a start stopped on its own screen: Esc there would end the launch, so it has no Dismiss
       screen = 'Choose a login method:\n❯ 1. Log in\n  2. Skip'
       await src.chats.readMenu(key, true)
@@ -2625,6 +2631,7 @@ describe("a card dismissed on the CLI's own screen", () => {
       expect(await src.act({ type: 'answer', chat: key, question: blind!.id, choice: -1, dismiss: true })).toMatchObject({ ok: false, error: expect.stringContaining('no choices to decline') })
       expect(keysSent).toHaveLength(1)
     } finally {
+      src.agents.send = send
       Object.assign(src.agents, { info: originals.info, status: originals.status, refresh: originals.refresh, keys: originals.keys })
       herdr.visible = originals.visible
       src.agents.outbox = src.agents.outbox.filter((o) => o.key !== key)

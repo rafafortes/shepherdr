@@ -2163,8 +2163,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       try {
         const failed = await this.pressMenu(key, ['escape'], qid)
         if (failed) return { ok: false, error: failed }
-        this.chats.post(key, { id: `menu-dismiss:${Date.now()}`, who: 'you', answered: `Dismissed “${menu.title}”`, elsewhere: space ? this.chats.answeredIn(space) : undefined })
+        this.chats.post(key, { id: `menu-dismiss:${Date.now()}`, who: 'you', answered: `Dismissed “${menu.title}”`, elsewhere: space ? this.chats.dismissedIn(space) : undefined })
         if (space) this.answeredHere(space, key, menu.title, DISMISSED, true)
+        // the CLI's own Esc declines it, and the person's words reach the agent too, so it carries on rather than stops
+        const words = dismissWords(this.agents.said(key)?.kind === 'plan' ? 'plan' : 'questions')
+        await this.send(key, line.dismiss(this.user, menu.title, words), [], true, undefined, { keepAsks: true })
       } finally {
         this.menuAnswers.delete(key)
         void this.agents.deliver(key)
@@ -2192,29 +2195,38 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (open && (qid === open.id || qid.startsWith(`${open.id}:`))) {
       if (this.chats.log(key).answers[qid] !== undefined) return { ok: false, error: 'This card is answered already.' }
       const item = open.items[Number(qid === open.id ? 0 : qid.slice(open.id.length + 1)) ?? 0]
+      // only while the CLI waits on it: a question answered in the terminal (its log lagging) must not take Esc, and the
+      // card must not say Dismissed for a form that is up
+      if (this.agents.status(key) !== 'blocked') return { ok: false, error: 'The CLI no longer waits on this question: read the chat again.' }
       // Esc declines the CLI's whole form, so every question of it is closed, not only the one on the card
       for (let i = 0; i < open.items.length; i++) this.chats.answer(key, open.items.length > 1 ? `${open.id}:${i}` : open.id, -1, undefined, space, true)
-      // only while the CLI waits on it: a prompt already answered in the terminal (its log lagging) must not take Esc
-      if (this.agents.status(key) === 'blocked') await this.agents.keys(key, ['escape'])
-      this.chats.post(key, { id: `cli-dismiss:${qid}`, who: 'you', answered: `Dismissed “${item?.question ?? ''}”`, elsewhere: space ? this.chats.answeredIn(space) : undefined })
+      await this.agents.keys(key, ['escape'])
+      this.chats.post(key, { id: `cli-dismiss:${qid}`, who: 'you', answered: `Dismissed “${item?.question ?? ''}”`, elsewhere: space ? this.chats.dismissedIn(space) : undefined })
       if (space) this.answeredHere(space, key, item?.question ?? '', DISMISSED, true)
+      // its own Esc declines the question, and the person's words reach the agent too
+      await this.send(key, line.dismiss(this.user, item?.question ?? '', dismissWords('questions')), [], true, undefined, { keepAsks: true })
       this.engine.youWrote(key, { go: false })
       this.emit('chat', key)
       return { ok: true }
     }
     // the agent's plain question on its needs-you card in a space's chat: no card of its own in the task's chat, so the
-    // decline goes in as its dismissal, quoting the question
+    // decline goes in as its dismissal, quoting the question. Once, like a reply, and only while its card still waits
     const asked = this.chats.chat(key).messages.find((m) => m.id === qid && m.who === 'agent' && m.text && !m.question)
-    if (asked && !this.answeredSince(key, qid)) {
-      await this.send(key, line.dismiss(this.user, excerpt(asked.text!), dismissWords('questions')), [], true)
+    if (!asked) return { ok: false, error: 'This card is answered already.' }
+    if (this.answeredSince(key, qid) || (space && !this.askOpen(space, key, qid))) return { ok: false, error: 'This card is answered already.' }
+    if (this.replies.has(key)) return { ok: false, error: 'Your answer is still being checked.' }
+    this.replies.add(key)
+    try {
+      await this.send(key, line.dismiss(this.user, excerpt(asked.text!), dismissWords('questions')), [], true, undefined, { keepAsks: true })
       if (space) {
         this.chats.repliedFrom(key, qid, space)
         this.answeredHere(space, key, asked.text ?? '', DISMISSED, true)
       }
-      this.emit('chat', key)
-      return { ok: true }
+    } finally {
+      this.replies.delete(key)
     }
-    return { ok: false }
+    this.emit('chat', key)
+    return { ok: true }
   }
 
   /* ---------- voice ---------- */

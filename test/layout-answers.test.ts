@@ -142,6 +142,7 @@ describe.skipIf(!browser)('answer cards', () => {
       { id: 'ask-done', who: 'agent', at: now - 2, card: { id: 'ask-done', task: 'LV-3', status: 'need', text: 'needs you: Question for you', ask: { chat: 'LV-3/Agent', answered: { where: 'space' }, questions: [{ ...q, id: 'ask:old', sent: 0, elsewhere: { label: 'Answered here ·', chat: 'LV-3/Agent', name: 'LV-3 chat' } }] } } },
       { id: 'ask-reply', who: 'agent', at: now - 1, card: { id: 'ask-reply', task: 'LV-3', status: 'need', text: 'needs you: Waits for your reply', ask: { chat: 'LV-3/Agent', open: true, reply: { id: 'lv3-q', text: 'Keep the old API around?' } } } },
       { id: 'ask-open', who: 'agent', at: now, card: { id: 'ask-open', task: 'LV-3', status: 'need', text: 'needs you: Question for you', ask: { chat: 'LV-3/Agent', open: true, questions: [q] } } },
+      { id: 'ask-dismissed', who: 'agent', at: now + 1, card: { id: 'ask-dismissed', task: 'LV-3', status: 'need', text: 'needs you: Question for you', ask: { chat: 'LV-3/Agent', answered: { where: 'space', dismissed: true }, questions: [{ ...q, id: 'ask:gone', sent: -1, dismissed: true, elsewhere: { label: 'Dismissed ·', chat: 'LV-3/Agent', name: 'LV-3 chat' } }] } } },
     )
     const sent: Action[] = []
     const act = world.act
@@ -168,6 +169,11 @@ describe.skipIf(!browser)('answer cards', () => {
       const done = page.locator('[data-whole="ask-done"] [data-card]')
       expect(await done.textContent()).toContain('Answered here ·LV-3 chat')
       expect(await done.getByRole('button', { name: 'Send', exact: true }).count()).toBe(0)
+      // dismissed on its copy here: it says so, and offers nothing to send
+      const gone = page.locator('[data-whole="ask-dismissed"] [data-card]')
+      expect(await gone.textContent()).toContain('Dismissed ·LV-3 chat')
+      expect(await gone.getByRole('button', { name: 'Dismiss', exact: true }).count()).toBe(0)
+      expect(await gone.getByRole('button', { name: 'Send', exact: true }).count()).toBe(0)
       // Every copy keeps its source inside the card, including plain replies and answered cards.
       for (const c of [card, reply, done]) {
         expect(await c.locator('[data-card-source]').textContent()).toBe('LV-3 · Upload page for files')

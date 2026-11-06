@@ -281,6 +281,9 @@ export class Chats {
   /** where a question answered on its copy in a space's chat says it was answered, with a link there */
   answeredIn = (space: string): Question['elsewhere'] => ({ label: 'Answered in', chat: space, name: `${this.nameOf(space)} chat` })
 
+  /** a card closed without an answer, on its copy in that space's chat */
+  dismissedIn = (space: string): Question['elsewhere'] => ({ label: 'Dismissed in', chat: space, name: `${this.nameOf(space)} chat` })
+
   /** a message you send answers the choice cards still open in that chat: they close as answered in words (-1), and
    *  keep those words to quote */
   closeAsks(key: string, text?: string) {
