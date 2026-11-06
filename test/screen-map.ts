@@ -1,8 +1,9 @@
 // Which lines of the screen's code each browser test file runs, so a change to the screen runs only the browser tests
 // that reach the changed lines (scripts/test.ts), not all of them.
 //
-// Recorded here, by the whole check (`bun run check:local`, which runs `scripts/test.ts --map`): GitHub Actions is off
-// on this repo (SHE-21), so nothing records a map there any more; a Check workflow run asked for by hand still does.
+// Recorded here (`scripts/test.ts --map`), by the whole check on the default branch (`bun run check:local`): GitHub
+// Actions is off on this repo (SHE-21), so nothing records a map there any more; a Check workflow run asked for by hand
+// still does.
 // Each page a browser test opens notes which of the built screen's functions ran, and the build's source maps turn them
 // into lines of src/ and plugins/. The map is kept in the repo's .git, for every worktree, and a test run sets the
 // lines that changed since the map's commit against it:

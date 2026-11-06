@@ -8,9 +8,9 @@
 //   bun run test changed --list   which test files would run, without running them
 //   bun run test --map            and note which lines of the screen each browser test runs (screen-map.ts)
 //
-// A change to the screen runs only the browser tests that run the lines it changed, by the map the local check keeps
-// (screen-map.ts, `bun run check:local`); every one where there is no map yet, or for a change to the whole screen
-// (styles.css). All the browser tests of a run share one browser (test/chromium.ts).
+// A change to the screen runs only the browser tests that run the lines it changed, by the map the check keeps on the
+// default branch (screen-map.ts, `bun run check:local`); every one where there is no map yet, or for a change to the
+// whole screen (styles.css). All the browser tests of a run share one browser (test/chromium.ts).
 //
 // Any other flag goes to bun test as it is (-t <pattern>, --bail, --rerun-each=3, --shard=2/6 as a Check workflow run
 // asked for by hand does). SHEPHERDR_TEST_JOBS sets how many processes run at once.

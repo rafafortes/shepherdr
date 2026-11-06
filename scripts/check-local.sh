@@ -11,8 +11,9 @@
 # whatever is missing is named with the command that fixes it (a WebKit without its system libraries needs root).
 #
 # The tests are scripts/test.ts (the same as `bun run test`), which isolates them from ~/.shepherdr and from the herdr
-# on this machine (test/preload.ts) and keeps the screen map `bun run test changed` picks from. It prints one line per
-# step, the failing tests' names, the verdict, and where the full logs are. Exit code 0 only when everything passed.
+# on this machine (test/preload.ts) and, on the default branch, keeps the screen map `bun run test changed` picks from.
+# It prints one line per step, the failing tests' names, the verdict, and where the full logs are. Exit code 0 only when
+# everything passed.
 set -uo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -42,6 +43,11 @@ else
 fi
 started=$SECONDS
 
+# the tests that make commits need someone to make them, whatever HOME they commit with (the Check workflow set these
+# before it was turned off; a test's own repo has no user identity of its own)
+export GIT_AUTHOR_NAME=${GIT_AUTHOR_NAME:-CI} GIT_AUTHOR_EMAIL=${GIT_AUTHOR_EMAIL:-ci@localhost}
+export GIT_COMMITTER_NAME=${GIT_COMMITTER_NAME:-CI} GIT_COMMITTER_EMAIL=${GIT_COMMITTER_EMAIL:-ci@localhost}
+
 # one test file per worker: a quarter of the cores, unless told
 cores=$(nproc 2>/dev/null || echo 4)
 jobs=${SHEPHERDR_TEST_JOBS:-$((cores / 4))}
@@ -69,14 +75,15 @@ step_note() {
 step() { # <name> <command...>
   local name=$1
   shift
-  local t0=$SECONDS code secs
+  local t0=$SECONDS code secs note
   what+=("$name")
   printf '%d/%d %s … ' "${#what[@]}" "$total" "$name"
   (cd "$root" && "${prio[@]}" timeout "$step_timeout" "$@") >"$logs/$name.log" 2>&1
   code=$?
   secs=$((SECONDS - t0))
   if [ "$code" -eq 0 ]; then
-    printf 'ok (%s) %s\n' "$(dur "$secs")" "$(step_note "$name")"
+    note=$(step_note "$name")
+    printf 'ok (%s)%s\n' "$(dur "$secs")" "${note:+ $note}"
   elif [ "$code" -eq 124 ]; then
     printf 'TIMED OUT (%s)\n' "$(dur "$secs")"
     failed+=("$name")
@@ -88,9 +95,12 @@ step() { # <name> <command...>
 
 # what a failing step shows: the failing tests by file, the types' errors, or the end of the log when it named nothing
 failing_tests() {
+  # each test file's section names the file and then its own tests; the closing summary names the failures again, with
+  # no file around them, so it is left out (and a test that failed shows once)
   awk '
+    /^[[:space:]]*[0-9]+ tests? failed:[[:space:]]*$/ { summary = 1 }
     /^[[:space:]]*[^[:space:]]+\.test\.tsx?:[[:space:]]*$/ { file = $1; sub(/:$/, "", file); next }
-    /\(fail\) / {
+    !summary && /\(fail\) / {
       name = $0; sub(/^.*\(fail\) /, "", name); sub(/ \[[0-9.]+ms\]$/, "", name)
       print (file == "" ? name : file " > " name)
     }
@@ -133,8 +143,16 @@ for engine in chromium webkit; do
   esac
 done
 
+# the screen map `bun run test changed` picks browser tests from is recorded on the default branch alone: a task's
+# branch would record it at its own commit, and a diff from there would pick no browser test at all
+base=$(git -C "$root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+base=${base#origin/}
+[ -n "$base" ] || base=main
+map=()
+[ "$(git -C "$root" branch --show-current)" = "$base" ] && map=(--map)
+
 step types bun run typecheck
-step tests bun "$root/scripts/test.ts" --map
+step tests bun "$root/scripts/test.ts" "${map[@]}"
 step build bun run build
 
 echo
