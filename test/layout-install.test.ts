@@ -38,7 +38,7 @@ const gate = Bun.serve({
     seen.push({ path: url.pathname, auth })
     if (!auth) return new Response('sign in', { status: 401, headers: { 'www-authenticate': 'Basic realm="lab", charset="UTF-8"' } })
     const file = join(dist, url.pathname === '/' ? 'index.html' : url.pathname.slice(1))
-    if (!file.startsWith(dist) || !existsSync(file)) return new Response('not here', { status: 404 })
+    if (!file.startsWith(`${dist}/`) || !existsSync(file)) return new Response('not here', { status: 404 })
     return new Response(readFileSync(file), { headers: { 'content-type': TYPES[file.slice(file.lastIndexOf('.'))] ?? 'application/octet-stream' } })
   },
 })
@@ -66,7 +66,7 @@ test("the manifest link asks for the page's credentials, in index.html and in th
 })
 
 describe.skipIf(!browser)('a home-screen install behind the login', () => {
-  test('the gate lets the browser read the manifest, and everything else the app asks for at start carries the login', async () => {
+  test('behind the gate the browser reads the manifest, and a start\'s other requests carry the login too', async () => {
     const context = await browser!.newContext({ httpCredentials: { username: USER, password: PASS } })
     const page = await context.newPage()
     await page.goto(`http://127.0.0.1:${gate.port}/`)

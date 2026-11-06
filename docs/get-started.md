@@ -27,8 +27,7 @@ home screen: alerts need that.
 
 Install the link as an app on each device, open it, and turn alerts on in Settings → Alerts on → **Turn on for this
 device**. A login gate in front of the app (our own is a reverse proxy's basic auth) does not stop this: the page asks
-for its manifest with its own credentials, and everything else the app loads at start — the service worker alerts need,
-the icons, the push key and the subscription — carries the same login.
+for its manifest with its own credentials, so the browser reads it and offers to install the app.
 
 - **iPhone or iPad**: in Safari, Share → **Add to Home Screen**, then open it from the home screen (alerts only work
   there).
