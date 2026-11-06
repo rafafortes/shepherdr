@@ -4,21 +4,29 @@
 bun install
 bun run demo          # the server with fictional data (the prototype's world), on :7787
 bun run dev           # the screen with hot reload, on :5173, talking to the server above
-bun run typecheck     # types, in seconds: all a task runs here before it merges
-bun run test changed  # by hand only: the tests that reach what you changed from the default branch
-bun run test          # by hand only: every test, in parallel (about 30 s)
-bun run check         # by hand only: types, tests, build
+bun run typecheck     # types, in seconds: what to run while you work
+bun run test changed  # the tests that reach what you changed from the default branch
+bun run test          # every test, in parallel, a quarter of the cores as the check does (but no lock)
+bun run check:local   # the whole check: types, every test with the browser ones, the build (about 2 minutes)
 ```
 
-Agents run no tests on this machine, to keep its CPU for herdr and the agents: a task merges once `bun run typecheck`
-passes. GitHub runs the whole check on every pull request into `herdr-tui` and on every push to it
-(`.github/workflows/check.yml`), leaving out the ones that touch only `**/*.md` or `docs/**`, and a red `herdr-tui`
-reaches the coordinator, who has it fixed forward. It costs the operator Actions minutes (8 to 15 a run once the
-caches are warm, more when they are cold, and two for a task whose pull request merges), so a branch with no pull
-request is checked by hand only when it matters. Tests run by hand run at the lowest priority (nice 19, idle disk, a
-systemd scope with the least CPU weight).
+The whole check runs on this machine: GitHub Actions is off on this repo (2026-11-06), so `.github/workflows/check.yml`
+keeps only `workflow_dispatch` and starts nothing by itself. A task runs `bun run check:local` before `shepherdr ready`
+and says the result in its facts, and the coordinator runs it on `herdr-tui` before a release. It runs at the lowest
+priority (nice 19, idle disk), one run at a time across every worktree of the repo (a lock file under
+`$XDG_RUNTIME_DIR`, else `~/.cache`), and the test files are capped at `SHEPHERDR_TEST_JOBS` workers (a quarter of the
+cores by default) so herdr, the server and the agents keep the CPU: the tests' own `systemd-run` scope, where systemd
+runs this user's services, gives them the least CPU and IO weight too. It takes about two minutes warm, and waits
+(up to an hour) while another worktree's check runs, so run it with a long timeout or in the background, where its
+verdict waits in `~/.cache/shepherdr/check-local/<worktree>/verdict.txt` (with each step's log beside it).
 On a machine where herdr runs as a systemd user service, give it (and the server and agents it holds) the CPU first:
 `systemctl --user set-property herdr.service CPUWeight=1000`.
+
+The tests never touch the Shepherdr on this machine or its herdr: `test/preload.ts` gives each file a home of its own
+under `/tmp`, a socket that isn't there and no inherited pane, tab or workspace id. A browser test skips where its
+browser can't start, and `bun run check:local` opens both browsers first and names what to install: Chromium's headless
+shell for every browser test, and WebKit for the iPhone ones, whose system libraries need root
+(`sudo bun x playwright-core install-deps webkit`).
 
 Agents working on Shepherdr: [AGENTS.md](../AGENTS.md) says what they check before merging.
 

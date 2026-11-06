@@ -13,7 +13,8 @@
     "demo": "SHEPHERDR_SOURCE=demo bun server/main.ts",
     "typecheck": "bun scripts/build-plugins.ts && tsc --noEmit",
     "test": "bun scripts/test.ts",
-    "check": "bun run typecheck && bun scripts/test.ts && vite build"
+    "check": "bun run check:local",
+    "check:local": "bash scripts/check-local.sh"
   },
   "dependencies": {
     "@heroicons/react": "2.2.0",

@@ -1,4 +1,4 @@
-// The tests, fast: test files run in parallel (one bun process per core), slowest first.
+// The tests, fast: test files run in parallel (a quarter of the cores by default, SHEPHERDR_TEST_JOBS says more), slowest first.
 //
 //   bun run test                  everything; skipped when it already passed on this very commit with nothing changed
 //   bun run test --force          everything, even then
@@ -8,16 +8,19 @@
 //   bun run test changed --list   which test files would run, without running them
 //   bun run test --map            and note which lines of the screen each browser test runs (screen-map.ts)
 //
-// A change to the screen runs only the browser tests that run the lines it changed, by the map GitHub makes on the
-// default branch (screen-map.ts); every one where there is no map yet, or for a change to the whole screen
-// (styles.css). All the browser tests of a run share one browser (test/chromium.ts).
+// A change to the screen runs only the browser tests that run the lines it changed, by the map the check keeps on the
+// default branch (screen-map.ts, `bun run check:local`); every one where there is no map yet, or for a change to the
+// whole screen (styles.css). All the browser tests of a run share one browser (test/chromium.ts).
 //
-// Any other flag goes to bun test as it is (-t <pattern>, --bail, --rerun-each=3, --shard=2/6 as GitHub runs it). SHEPHERDR_TEST_JOBS sets how many
-// processes run at once.
+// Any other flag goes to bun test as it is (-t <pattern>, --bail, --rerun-each=3, --shard=2/6 as a Check workflow run
+// asked for by hand does; --parallel every core). SHEPHERDR_TEST_JOBS sets how many test files run at once: a quarter
+// of the cores by default, so herdr, the live server and the agents keep the CPU while several tasks test at once.
 //
-// The tests run below everything else on this machine, on every core: they take only the CPU and disk no one else
-// wants, so herdr, Shepherdr's server and the agents stay quick while several tasks test at once.
+// The tests run below everything else on this machine, on a quarter of the cores unless SHEPHERDR_TEST_JOBS or a flag
+// says more: they take only the CPU and disk no one else wants, so herdr, Shepherdr's server and the agents stay quick
+// while several tasks test at once.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpus } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { gather, mapFile, pick, readMap, screenMap } from '../test/screen-map.ts'
 import { INPUTS } from '../test/web.ts'
@@ -205,7 +208,7 @@ function lowPriority(): string[] {
 }
 
 mkdirSync(cache, { recursive: true })
-const jobs = process.env.SHEPHERDR_TEST_JOBS ? `--parallel=${process.env.SHEPHERDR_TEST_JOBS}` : '--parallel'
+const jobs = `--parallel=${process.env.SHEPHERDR_TEST_JOBS ?? Math.max(1, Math.floor(cpus().length / 4))}`
 // a test may take longer while every core is busy (several tasks test at once): 5 s, bun's default, is too tight
 const decoder = new TextDecoder()
 const timeout = flags.some((f) => f.startsWith('--timeout')) ? [] : ['--timeout=20000']
@@ -239,6 +242,18 @@ if (mapOut) {
   env.SHEPHERDR_TEST_MAP = mapParts
 }
 const p = Bun.spawn(cmd, { cwd: root, stdout: 'inherit', stderr: 'pipe', stdin: 'inherit', env })
+// a run that is stopped takes its own children with it (the test files' processes, the one browser): a check killed by
+// its tool's timeout, or its step's, leaves no suite running on the machine (scripts/check-local.sh)
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const)
+  process.on(signal, () => {
+    try {
+      p.kill()
+    } catch {}
+    try {
+      browser?.kill()
+    } catch {}
+    process.exit(1)
+  })
 // bun test reports on stderr: pass it on, and keep its closing lines
 let tail = ''
 const reader = p.stderr.getReader()
@@ -254,17 +269,23 @@ if (browser) {
   browser.kill()
 }
 if (mapOut) {
-  mkdirSync(dirname(mapOut), { recursive: true })
-  const map = gather(mapParts, commit, readMap(mapOut))
-  writeFileSync(mapOut, JSON.stringify(map))
+  // only a clean tree: the map is a commit's, and what is not committed is not part of it (a run that picked browser
+  // tests from it would read a file the map's commit never had)
+  if (clean) {
+    mkdirSync(dirname(mapOut), { recursive: true })
+    const map = gather(mapParts, commit, readMap(mapOut))
+    writeFileSync(mapOut, JSON.stringify(map))
+    console.log(`Screen map of ${commit.slice(0, 7)}: ${Object.keys(map.tests).length} browser test files, in ${mapOut}`)
+  } else console.log(`No screen map: ${commit.slice(0, 7)} does not hold what is not committed, and a map is a commit's.`)
   rmSync(mapParts, { recursive: true, force: true })
-  console.log(`Screen map of ${commit.slice(0, 7)}${clean ? '' : ' (and what is not committed)'}: ${Object.keys(map.tests).length} browser test files, in ${mapOut}`)
 }
 const secs = ((Date.now() - t0) / 1000).toFixed(1)
-if (code === 0 && whole && commit && clean && git('rev-parse', 'HEAD') === commit && git('status', '--porcelain') === '') {
+// a pass to keep: but not one where tests were skipped (a browser that would not start skips its browser tests, and
+// taken as passed it would hide behind this until the commit changes)
+if (code === 0 && whole && commit && clean && !/^\s*\d+ skip$/m.test(tail) && git('rev-parse', 'HEAD') === commit && git('status', '--porcelain') === '') {
   const ran = tail.match(/Ran \d+ tests across \d+ files?/)?.[0] ?? 'passed'
   writeFileSync(passed, JSON.stringify({ commit, at: Date.now(), summary: `${ran} in ${secs}s` }))
 }
 const shard = flags.find((f) => f.startsWith('--shard='))?.slice('--shard='.length)
-console.log(`${code === 0 ? 'Passed' : 'Failed'} in ${secs}s${whole ? '' : shard ? ` (shard ${shard} of the suite)` : ' (part of the suite: GitHub runs it all on a pull request and after each merge)'}`)
+console.log(`${code === 0 ? 'Passed' : 'Failed'} in ${secs}s${whole ? '' : shard ? ` (shard ${shard} of the suite)` : ' (part of the suite: bun run check:local runs it all)'}`)
 process.exit(code)

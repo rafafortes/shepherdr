@@ -1,35 +1,19 @@
-# The whole check (types, every test with the browser ones, the build) on GitHub's runners, on every pull request to
-# herdr-tui and every push to it (a merge): the full suite runs here, not on the machine the agents work on (AGENTS.md).
-# A task's own run shows on its pull request before it merges, and Shepherdr tells the coordinator when herdr-tui goes
-# red. main mirrors upstream's line and gets no run. A branch with no pull request can still be checked by hand:
-# gh workflow run check.yml --ref <branch>.
+# GitHub Actions is OFF on this repo (2026-11-06): its runs were stuck and GitHub refused new ones, so the whole check
+# (the types, every test with the browser ones, the build) runs on the machine the agents work on instead:
 #
-# Lean, as GitHub bills each job by the minute, rounded up: the types and the build share one job, and the tests run
-# split over three runners (bun test --shard, balanced by each file's time on the last run), which also note which
-# lines of the screen each browser test runs. Whatever doesn't change between runs comes from the cache. A whole run is
-# 8 to 15 billed minutes once the caches are warm, more with cold ones (a shard installs its system libraries then); a
-# change of docs only skips it.
+#   bun run check:local        # scripts/check-local.sh; AGENTS.md, "Tests"
+#
+# This file stays for a run asked for by hand (`gh workflow run check.yml --ref <branch>`, then `gh run watch`), which
+# is what workflow_dispatch is; it starts nothing by itself. Keep it free of anything that runs without being asked:
+# Shepherdr reads a workflow on a pull request as one whose checks will show up on the pull request, and holds a merge
+# until they do (server/live/engine/git.ts, hasPrWorkflows). No run hangs on this: a check is local, or it is asked for.
 name: Check
 
 on:
-  # the pull request's own head, so its changes are checked before they merge; docs only, nothing to check
-  pull_request:
-    branches: [herdr-tui]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-  # a merge to our line, again on what it landed
-  push:
-    branches: [herdr-tui]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
   workflow_dispatch:
 
 concurrency:
-  # refs/pull/<n>/merge on a pull request, refs/heads/herdr-tui on a merge: each only ever cancels its own older run
   group: check-${{ github.ref }}
-  # a newer push makes an older run moot: its verdict covers the older commits too
   cancel-in-progress: true
 
 env:
@@ -40,6 +24,8 @@ env:
   GIT_COMMITTER_EMAIL: ci@localhost
   # each file's time on the last run, which balances the shards (scripts/test.ts keeps it there)
   TIMINGS: node_modules/.cache/shepherdr-test/timings.json
+  # scripts/test.ts keeps to a quarter of the cores by default, which is one worker on a four-core runner
+  SHEPHERDR_TEST_JOBS: 4
 
 jobs:
   types:
@@ -80,8 +66,8 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
-      # Chromium's headless shell for playwright-core, at the version it wants (the runner has the libraries it needs),
-      # and WebKit, Safari's engine, for an iPhone's tests (layout-iphone.test.ts), with the libraries it needs
+      # Chromium's headless shell for playwright-core, at the version it wants, and WebKit, Safari's engine, for an
+      # iPhone's tests (layout-iphone.test.ts), with the libraries it needs
       - id: playwright
         uses: actions/cache@v4
         with:
@@ -101,17 +87,7 @@ jobs:
           path: ${{ env.TIMINGS }}
           key: test-timings-${{ github.run_id }}
           restore-keys: test-timings-
-      # Which lines of the screen each of this shard's browser tests runs, for the test runs on the agents' machine: a
-      # change to the screen there runs only the browser tests that reach it (test/screen-map.ts puts the shards' maps
-      # of the newest green run on the default branch together)
-      - run: bun run test --shard=${{ matrix.shard }}/3 --map=screen-map.json
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: screen-map-${{ matrix.shard }}
-          path: screen-map.json
-          if-no-files-found: ignore
-          retention-days: 30
+      - run: bun run test --shard=${{ matrix.shard }}/3
       # only a help: it never fails the check
       - if: always()
         uses: actions/cache/save@v4
