@@ -15,13 +15,14 @@
 #   bash scripts/check-local.sh > /dev/null 2>&1 &
 #
 # SHEPHERDR_TEST_JOBS caps its test workers, SHEPHERDR_CHECK_WAIT how long it waits for another worktree's check (an
-# hour), SHEPHERDR_CHECK_STEP_TIMEOUT how long one step may take (half an hour). Exit code: 0 passed, 1 failed, 2 gave
-# up waiting for another check.
+# hour), SHEPHERDR_CHECK_STEP_TIMEOUT how long one step may take (half an hour, where `timeout` exists).
 #
 # The tests are scripts/test.ts (the same as `bun run test`), which isolates them from ~/.shepherdr and from the herdr
 # on this machine (test/preload.ts) and, on the default branch, keeps the screen map `bun run test changed` picks from.
-# It prints one line per step, the failing tests' names, the verdict, and where the full logs are. Exit code 0 only when
-# every step passed; a browser that could not start is said in the verdict, never quietly passed.
+# It prints one line per step, the failing tests' names and the verdict, and says its log folder (and writes all of
+# that to verdict.txt in it, for a run left in the background). Exit code 0: every step passed (a browser that could not
+# start is named in the verdict and its tests skipped, so read it, never just the code); 1: a step failed; 2: it gave
+# up waiting for another check.
 set -uo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -30,6 +31,9 @@ branch=$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)
 # a log folder of this worktree's own: several worktrees' checks never overwrite each other's
 logs="$HOME/.cache/shepherdr/check-local/$(basename "$root")"
 mkdir -p "$logs"
+V="$logs/verdict.txt"
+# a run gone by must not answer for this one, while this one waits for the lock
+printf 'check:local is running: no verdict yet\n' >"$V"
 # the lock's folder: this session's runtime dir, else the cache (never the repo, never ~/.shepherdr)
 run=${XDG_RUNTIME_DIR:-$HOME/.cache}
 [ -d "$run" ] || run="$HOME/.cache"
@@ -68,6 +72,8 @@ if command -v flock >/dev/null 2>&1; then
 else
   echo "flock is missing: running without the one-at-a-time lock."
 fi
+# this run's own verdict, from its header on (what stood there while it waited was the note above)
+: >"$V"
 started=$SECONDS
 
 # the tests that make commits need someone to make them, whatever HOME they commit with (the Check workflow set these
@@ -78,6 +84,7 @@ export GIT_COMMITTER_NAME=${GIT_COMMITTER_NAME:-CI} GIT_COMMITTER_EMAIL=${GIT_CO
 # one test file per worker: a quarter of the cores, unless told (scripts/test.ts has the same default for every run)
 cores=$(nproc 2>/dev/null || echo 4)
 jobs=${SHEPHERDR_TEST_JOBS:-$((cores / 4))}
+case $jobs in '' | *[!0-9]*) jobs=$((cores / 4)) ;; esac
 [ "$jobs" -ge 1 ] || jobs=1
 export SHEPHERDR_TEST_JOBS="$jobs"
 
@@ -89,10 +96,7 @@ declare -a what=()
 step_note() {
   local log="$logs/$1.log" ran
   case $1 in
-    tests)
-      ran=$(grep -oE 'Ran [0-9]+ tests across [0-9]+ files?' "$log" | tail -1)
-      if [ -n "$ran" ]; then printf '%s' "$ran"; elif grep -q 'Not running them again' "$log"; then printf 'already passed at this commit, nothing changed since'; fi
-      ;;
+    tests) grep -oE 'Ran [0-9]+ tests across [0-9]+ files?' "$log" | tail -1 ;;
     build) grep -oE 'built in [0-9.]+m?s' "$log" | tail -1 ;;
     *) true ;;
   esac
@@ -107,19 +111,25 @@ step() { # <name> <command...>
   [ "$have_timeout" = 1 ] && cmd+=(timeout --foreground -k 60 "$step_timeout")
   cmd+=("$@")
   what+=("$name")
-  printf '%d/%d %s … ' "${#what[@]}" "$total" "$name"
   # fd 9 is the lock: the step's own processes must not keep it open after this check is gone
   (cd "$root" && exec 9>&- && "${cmd[@]}") >"$logs/$name.log" 2>&1
   code=$?
   secs=$((SECONDS - t0))
+  local line="${#what[@]}/$total $name"
   if [ "$code" -eq 0 ]; then
     note=$(step_note "$name")
-    printf 'ok (%s)%s\n' "$(dur "$secs")" "${note:+ $note}"
-  elif [ "$have_timeout" = 1 ] && { [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; }; then
-    printf 'TIMED OUT (%s)\n' "$(dur "$secs")"
+    say "$line ok ($(dur "$secs"))${note:+ $note}"
+  elif [ "$have_timeout" = 1 ] && [ "$code" -eq 124 ] && [ "$secs" -ge $((step_timeout - 5)) ]; then
+    say "$line TIMED OUT ($(dur "$secs"))"
+    failed+=("$name")
+  elif [ "$have_timeout" = 1 ] && [ "$code" -eq 137 ] && [ "$secs" -ge $((step_timeout - 5)) ]; then
+    say "$line TIMED OUT, killed ($(dur "$secs"))"
+    failed+=("$name")
+  elif [ "$code" -eq 137 ]; then
+    say "$line KILLED ($(dur "$secs")): out of memory, or something else stopped it"
     failed+=("$name")
   else
-    printf 'FAILED (%s)\n' "$(dur "$secs")"
+    say "$line FAILED ($(dur "$secs"))"
     failed+=("$name")
   fi
 }
@@ -159,13 +169,17 @@ show_failure() { # the reasons a step failed
 # the dependencies first: a fresh worktree has none, neither the types nor a browser can be read without them, and a
 # lockfile that moved since the last install (bun install itself is a no-op when they are all there)
 total=4
-V="$logs/verdict.txt"
-: >"$V"
 say() { printf '%s\n' "$1" | tee -a "$V"; }
 dirty=''
 [ -n "$(git -C "$root" status --porcelain 2>/dev/null)" ] && dirty=' and what is not committed'
 say "check:local · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty · $jobs test workers · $priority"
 step dependencies bun install --frozen-lockfile
+if [ ${#failed[@]} -gt 0 ]; then
+  say "The dependencies could not be installed: nothing else runs."
+  say "$(show_failure dependencies)"
+  say "FAILED in $(dur $((SECONDS - started))) · logs: $logs (verdict.txt)"
+  exit 1
+fi
 
 # the browsers the tests open, named before the run instead of skipping quietly inside it
 probe=("${prio[@]}")
@@ -192,13 +206,6 @@ base=${base#origin/}
 map=()
 [ "$branch" = "$base" ] && map=(--map)
 
-if [ ${#failed[@]} -gt 0 ]; then
-  say "The dependencies could not be installed: nothing else runs."
-  say "$(show_failure dependencies)"
-  say "FAILED in $(dur $((SECONDS - started))) · logs: $logs"
-  exit 1
-fi
-
 step types bun run typecheck
 # --force: a check never takes an earlier pass at this commit for its own (a browser that skipped then would hide here)
 step tests bun "$root/scripts/test.ts" --force ${map[@]+"${map[@]}"}
@@ -207,16 +214,17 @@ step build bun run build
 # a browser that died during the run skips its tests instead of failing them (test/chromium.ts): say so, as for the ones
 # that could not start at all
 skipped=$(grep -c '^(skip) ' "$logs/tests.log" 2>/dev/null || true)
-[ -n "$skipped" ] && [ "$skipped" -gt 0 ] && notes+=("the tests: $skipped skipped (a browser that would not start skips its browser tests; see $logs/tests.log)")
+[ -n "$skipped" ] && [ "$skipped" -gt 0 ] && notes+=("the tests: $skipped skipped (a browser that could not start, or a tool this host lacks; see tests.log)")
 
 echo
 if [ ${#failed[@]} -eq 0 ] && [ ${#notes[@]} -eq 0 ]; then
-  say "PASSED in $(dur $((SECONDS - started)))"
+  say "PASSED in $(dur $((SECONDS - started))) · logs: $logs"
   exit 0
 fi
 if [ ${#failed[@]} -eq 0 ]; then
   say "PASSED in $(dur $((SECONDS - started))), with parts of it not run:"
   for n in "${notes[@]}"; do say "  ! $n"; done
+  say "· logs: $logs"
   exit 0
 fi
 if [ ${#notes[@]} -gt 0 ]; then
@@ -226,5 +234,5 @@ if [ ${#notes[@]} -gt 0 ]; then
 fi
 for name in "${failed[@]}"; do say "$(show_failure "$name")"; done
 say "FAILED in $(dur $((SECONDS - started))): ${failed[*]}"
-say "Full logs: $logs"
+say "Full logs: $logs (verdict.txt)"
 exit 1

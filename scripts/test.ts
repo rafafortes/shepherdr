@@ -242,6 +242,18 @@ if (mapOut) {
   env.SHEPHERDR_TEST_MAP = mapParts
 }
 const p = Bun.spawn(cmd, { cwd: root, stdout: 'inherit', stderr: 'pipe', stdin: 'inherit', env })
+// a run that is stopped takes its own children with it (the test files' processes, the one browser): a check killed by
+// its tool's timeout, or its step's, leaves no suite running on the machine (scripts/check-local.sh)
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const)
+  process.on(signal, () => {
+    try {
+      p.kill()
+    } catch {}
+    try {
+      browser?.kill()
+    } catch {}
+    process.exit(1)
+  })
 // bun test reports on stderr: pass it on, and keep its closing lines
 let tail = ''
 const reader = p.stderr.getReader()

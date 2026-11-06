@@ -68,9 +68,14 @@ describe('the check itself', () => {
       .filter((l) => l.trim() && !l.trim().startsWith('#'))
       .join('\n')
     for (const step of ['bun run typecheck', 'scripts/test.ts', 'bun run build']) expect(lines).toContain(step)
-    expect(lines).toContain('nice -n 19')
-    expect(lines).toContain('ionice -c 3')
-    expect(lines).toContain('flock')
+    // the wrapper and the lock that is used, not the words near them
+    expect(lines).toContain('prio+=(nice -n 19)')
+    expect(lines).toContain('prio+=(ionice -c 3)')
+    expect(lines).toContain('exec 9>>"$lock"')
+    expect(lines).toContain('flock -w "$wait_timeout" 9')
+    // the step's own processes never keep the lock, and never take a pass at this commit for this one
+    expect(lines).toContain('exec 9>&-')
+    expect(lines).toContain('--force')
   })
 })
 
