@@ -2605,12 +2605,12 @@ describe("a card dismissed on the CLI's own screen", () => {
       expect(await src.act({ type: 'answer', chat: key, question: q!.id, choice: -1, dismiss: true })).toMatchObject({ ok: true })
       expect(keysSent).toEqual([['escape']])
       expect(src.chats.menu(key)).toBeUndefined()
-      expect(src.chats.chat(key).messages.some((m) => m.answered === 'Dismissed “Do you want to proceed?”')).toBe(true)
-      // no bubble of your words behind it: the menu's title is in the line, not posted as something you said
-      expect(src.chats.chat(key).messages.find((m) => m.answered?.startsWith('Dismissed'))?.text).toBeUndefined()
       // its own Esc declines it, and the person's words reach the agent too: it carries on rather than stops
       expect(told.join('\n')).toContain('<dismissed')
+      expect(told.join('\n')).toContain('Do you want to proceed?')
       expect(told.join('\n')).toContain('carry on with your best judgment')
+      // one line, not two: the line it hears is the one the chat shows, so none is posted beside it
+      expect(src.chats.chat(key).messages.some((m) => m.answered?.startsWith('Dismissed'))).toBe(false)
       // a start stopped on its own screen: Esc there would end the launch, so it has no Dismiss
       screen = 'Choose a login method:\n❯ 1. Log in\n  2. Skip'
       await src.chats.readMenu(key, true)
@@ -2630,6 +2630,17 @@ describe("a card dismissed on the CLI's own screen", () => {
       expect(blind?.noDismiss).toBe(true)
       expect(await src.act({ type: 'answer', chat: key, question: blind!.id, choice: -1, dismiss: true })).toMatchObject({ ok: false, error: expect.stringContaining('no choices to decline') })
       expect(keysSent).toHaveLength(1)
+      // a menu a slash command opened asks the agent nothing: Esc closes it, and nothing is sent to the agent
+      screen = 'Choose a model:\n❯ 1. Sonnet\n  2. Opus\nEnter to select · Esc to cancel'
+      await src.chats.readMenu(key, true)
+      expect(await src.chats.commandMenu(key)).toBe(true)
+      const picker = src.chats.chat(key).messages.findLast((m) => m.question)?.question
+      const before = told.length
+      expect(await src.act({ type: 'answer', chat: key, question: picker!.id, choice: -1, dismiss: true })).toMatchObject({ ok: true })
+      expect(keysSent.at(-1)).toEqual(['escape'])
+      expect(told).toHaveLength(before)
+      // and the chat keeps the dismissal itself: a key press is not in the CLI's log
+      expect(src.chats.chat(key).messages.some((m) => m.answered === 'Dismissed “Choose a model:”')).toBe(true)
     } finally {
       src.agents.send = send
       Object.assign(src.agents, { info: originals.info, status: originals.status, refresh: originals.refresh, keys: originals.keys })

@@ -842,7 +842,8 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     const c = this.chats[a.chat]
     const msg = c?.messages.find((m) => m.question?.id === a.question)
     const q = msg?.question
-    if (!c || !q || q.sent !== undefined) return { ok: false }
+    if (!c || !q) return { ok: false }
+    if (q.sent !== undefined) return { ok: false, error: 'This card is answered already.' }
     if (q.noteRequiredFor !== undefined && a.choice === q.noteRequiredFor && !a.note) return { ok: false, error: 'A note is needed to send it back.' }
     q.sent = a.choice
     // its Dismiss: closed without an answer, and its agent hears the person declined it and carries on

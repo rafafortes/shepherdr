@@ -2159,15 +2159,19 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // a prompt whose choices could not be read: its keys are a guess, so Esc is not pressed into it
       if (!menu.choices.length) return { ok: false, error: 'Its prompt shows no choices to decline: open the terminal.' }
       if (this.menuAnswers.has(key)) return { ok: false, error: 'Your answer is still being checked.' }
+      // a prompt it asked something at (read before Esc: its own answer clears what it said), never a menu a slash
+      // command opened: that one asks the agent nothing, and Esc alone closes it
+      const asked = !this.chats.commandMenuUp(key) && this.agents.status(key) === 'blocked'
+      const words = asked ? dismissWords(this.agents.said(key)?.kind === 'plan' ? 'plan' : 'questions') : undefined
       this.menuAnswers.add(key)
       try {
         const failed = await this.pressMenu(key, ['escape'], qid)
         if (failed) return { ok: false, error: failed }
-        this.chats.post(key, { id: `menu-dismiss:${Date.now()}`, who: 'you', answered: `Dismissed “${menu.title}”`, elsewhere: space ? this.chats.dismissedIn(space) : undefined })
-        if (space) this.answeredHere(space, key, menu.title, DISMISSED, true)
         // the CLI's own Esc declines it, and the person's words reach the agent too, so it carries on rather than stops
-        const words = dismissWords(this.agents.said(key)?.kind === 'plan' ? 'plan' : 'questions')
-        await this.send(key, line.dismiss(this.user, menu.title, words), [], true, undefined, { keepAsks: true })
+        if (words) await this.send(key, line.dismiss(this.user, menu.title, words), [], true, undefined, { keepAsks: true })
+        // its keys are not in the CLI's log: the chat shows the dismissal itself (the line above shows on its own)
+        else this.chats.post(key, { id: `menu-dismiss:${Date.now()}`, who: 'you', answered: `Dismissed “${menu.title}”`, elsewhere: space ? this.chats.dismissedIn(space) : undefined })
+        if (space) this.answeredHere(space, key, menu.title, DISMISSED, true)
       } finally {
         this.menuAnswers.delete(key)
         void this.agents.deliver(key)
@@ -2201,10 +2205,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // Esc declines the CLI's whole form, so every question of it is closed, not only the one on the card
       for (let i = 0; i < open.items.length; i++) this.chats.answer(key, open.items.length > 1 ? `${open.id}:${i}` : open.id, -1, undefined, space, true)
       await this.agents.keys(key, ['escape'])
-      this.chats.post(key, { id: `cli-dismiss:${qid}`, who: 'you', answered: `Dismissed “${item?.question ?? ''}”`, elsewhere: space ? this.chats.dismissedIn(space) : undefined })
       if (space) this.answeredHere(space, key, item?.question ?? '', DISMISSED, true)
-      // its own Esc declines the question, and the person's words reach the agent too
-      await this.send(key, line.dismiss(this.user, item?.question ?? '', dismissWords('questions')), [], true, undefined, { keepAsks: true })
+      // its own Esc declines the question, and the person's words reach the agent too (its line shows in the chat)
+      await this.send(key, line.dismiss(this.user, excerpt(item?.question ?? ''), dismissWords('questions')), [], true, undefined, { keepAsks: true })
       this.engine.youWrote(key, { go: false })
       this.emit('chat', key)
       return { ok: true }
