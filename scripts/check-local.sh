@@ -34,13 +34,13 @@ mkdir -p "$logs"
 V="$logs/verdict.txt"
 # a run gone by must not answer for this one, while this one waits for the lock
 printf 'check:local is running: no verdict yet\n' >"$V"
-# the lock's folder: this session's runtime dir, else the cache (never the repo, never ~/.shepherdr)
-run=${XDG_RUNTIME_DIR:-$HOME/.cache}
-[ -d "$run" ] || run="$HOME/.cache"
-mkdir -p "$run/shepherdr"
-lock="$run/shepherdr/check-local.lock"
+# one lock for every session (never in the repo, never in ~/.shepherdr): a shell without XDG_RUNTIME_DIR takes it too
+mkdir -p "$HOME/.cache/shepherdr"
+lock="$HOME/.cache/shepherdr/check-local.lock"
 step_timeout=${SHEPHERDR_CHECK_STEP_TIMEOUT:-1800}
 wait_timeout=${SHEPHERDR_CHECK_WAIT:-3600}
+case $step_timeout in '' | *[!0-9]*) step_timeout=1800 ;; esac
+case $wait_timeout in '' | *[!0-9]*) wait_timeout=3600 ;; esac
 
 dur() {
   local s=$1
@@ -56,6 +56,15 @@ have_timeout=0
 command -v timeout >/dev/null 2>&1 && have_timeout=1
 priority=${priority:-normal priority}
 
+# what runs right now, so a stop can take it with it
+STEP_PID=''
+stopped=''
+stop() {
+  stopped=1
+  [ -n "$STEP_PID" ] && kill -TERM "$STEP_PID" 2>/dev/null
+}
+trap stop INT TERM
+
 # one run at a time, whichever worktree it was started from
 if command -v flock >/dev/null 2>&1; then
   exec 9>>"$lock"
@@ -63,6 +72,7 @@ if command -v flock >/dev/null 2>&1; then
     holder=$(cat "$lock.pid" 2>/dev/null)
     echo "Another check${holder:+ (pid $holder)} is running: waiting for it, up to $(dur "$wait_timeout")."
     if ! flock -w "$wait_timeout" 9; then
+      printf 'GAVE UP: another check%s still ran after %s; nothing ran here.\n' "${holder:+ (pid $holder)}" "$(dur "$wait_timeout")" >>"$V"
       echo "Gave up waiting for it after $(dur "$wait_timeout"): nothing ran. Try again when it is done."
       exit 2
     fi
@@ -111,10 +121,22 @@ step() { # <name> <command...>
   [ "$have_timeout" = 1 ] && cmd+=(timeout --foreground -k 60 "$step_timeout")
   cmd+=("$@")
   what+=("$name")
-  # fd 9 is the lock: the step's own processes must not keep it open after this check is gone
-  (cd "$root" && exec 9>&- && "${cmd[@]}") >"$logs/$name.log" 2>&1
-  code=$?
+  # fd 9 is the lock: the step's own processes must not keep it open after this check is gone; and the subshell becomes
+  # the step itself, so a stop reaches the step and it reaches its own children (scripts/test.ts)
+  (
+    cd "$root" || exit 1
+    exec 9>&-
+    exec "${cmd[@]}"
+  ) >"$logs/$name.log" 2>&1 &
+  STEP_PID=$!
+  code=0
+  wait "$STEP_PID" || code=$?
+  STEP_PID=''
   secs=$((SECONDS - t0))
+  if [ -n "$stopped" ]; then
+    say "${#what[@]}/$total $name STOPPED ($(dur "$secs")): this check was stopped before it finished"
+    exit 130
+  fi
   local line="${#what[@]}/$total $name"
   if [ "$code" -eq 0 ]; then
     note=$(step_note "$name")
@@ -183,7 +205,7 @@ fi
 
 # the browsers the tests open, named before the run instead of skipping quietly inside it
 probe=("${prio[@]}")
-[ "$have_timeout" = 1 ] && probe+=(timeout -k 60 180)
+[ "$have_timeout" = 1 ] && probe+=(timeout --foreground -k 60 180)
 probe+=(bun "$root/scripts/check-browsers.ts")
 browsers=$(cd "$root" && exec 9>&- && "${probe[@]}" 2>&1)
 printf '%s\n' "$browsers" >"$logs/browsers.log"

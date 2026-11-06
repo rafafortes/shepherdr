@@ -25,5 +25,5 @@ async function probe(name: string, browser: BrowserType, install: string, deps?:
 }
 
 // the headless shell alone: what a headless browser test uses (the full Chromium is for a screen with a window)
-await probe('chromium', chromium, 'bun x playwright-core install --only-shell chromium')
+await probe('chromium', chromium, 'bun x playwright-core install --only-shell chromium', 'sudo bun x playwright-core install-deps chromium')
 await probe('webkit', webkit, 'bun x playwright-core install webkit', 'sudo bun x playwright-core install-deps webkit')

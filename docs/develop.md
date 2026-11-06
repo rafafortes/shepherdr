@@ -17,7 +17,8 @@ priority (nice 19, idle disk), one run at a time across every worktree of the re
 `$XDG_RUNTIME_DIR`, else `~/.cache`), and the test files are capped at `SHEPHERDR_TEST_JOBS` workers (a quarter of the
 cores by default) so herdr, the server and the agents keep the CPU: the tests' own `systemd-run` scope, where systemd
 runs this user's services, gives them the least CPU and IO weight too. It takes about two minutes warm, and waits
-(up to an hour) while another worktree's check runs, so run it with a long timeout or in the background.
+(up to an hour) while another worktree's check runs, so run it with a long timeout or in the background, where its
+verdict waits in `~/.cache/shepherdr/check-local/<worktree>/verdict.txt` (with each step's log beside it).
 On a machine where herdr runs as a systemd user service, give it (and the server and agents it holds) the CPU first:
 `systemctl --user set-property herdr.service CPUWeight=1000`.
 

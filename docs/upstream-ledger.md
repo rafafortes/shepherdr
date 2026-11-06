@@ -197,8 +197,9 @@ is still worth a task.
 6. **[merged in #7] Dictation through whisper on the server** (3.1.0's `service/dictate.ts`, ported; M) — the phone
    types by voice on Android Chrome, where the browser's speech API types nothing.
 7. **[merged in #2] Read transcripts incrementally** (`06c613c2`; M) — long pi logs stop freezing the app for the phone too.
-8. **[done, PR #4] Check runs on every pull request** (`7c4cb02b` ported to `herdr-tui`; S) — no more merging a
-   branch whose tests were never run; costs Actions minutes.
+8. **[done, PR #4, since 2026-11-06 local] Check runs on every pull request** (`7c4cb02b` ported to `herdr-tui`; S) —
+   no more merging a branch whose tests were never run. Actions is off since 2026-11-06: the same check runs on the
+   agents' machine (`bun run check:local`, SHE-21), and `check.yml` keeps only `workflow_dispatch`.
 9. **[merged in #2] Fix first-start installation** (`a477b5c4`; S) — a failed build says why and keeps the old server running.
 10. **[done, PR #10] Never stuck in silence after a failed start** (`9a6a4bef`, `c9861ef0`, `774c4966`; M) — a task
     that did not start shows a card or an error instead of Working.

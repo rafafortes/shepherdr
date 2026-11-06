@@ -79,6 +79,50 @@ describe('the check itself', () => {
   })
 })
 
+describe('what a failing run says', () => {
+  // the awk that reads a failing run's log (scripts/check-local.sh): the failing tests by file, the closing summary
+  // left out, and a file whose error names no test left to the log's end
+  const script = readFileSync(join(root, 'scripts', 'check-local.sh'), 'utf8')
+  const from = script.indexOf("awk '") + "awk '".length
+  const program = script.slice(from, script.indexOf("' \"$1\"", from))
+  const run = (log: string) => {
+    const dir = mkdtempSync(join(tmpdir(), 'shep-check-log-'))
+    try {
+      const file = join(dir, 'tests.log')
+      writeFileSync(file, log)
+      const r = Bun.spawnSync(['awk', program, file], { stdout: 'pipe', stderr: 'pipe' })
+      expect(r.exitCode, r.stderr.toString()).toBe(0)
+      return r.stdout.toString().trim().split('\n').filter(Boolean)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+  test('names each failing test against its own file, once, and never the closing summary', () => {
+    expect(
+      run(
+        [
+          'test/one.test.ts:',
+          '(pass) works [1.00ms]',
+          '(fail) breaks [2.00ms]',
+          '',
+          'test/two.test.ts:',
+          '(fail) another breaks [3.00ms]',
+          '',
+          ' 1 tests failed:',
+          '(fail) breaks [2.00ms]',
+          ' 1192 pass',
+          ' 1 fail',
+          'Ran 1193 tests across 105 files. [100.00s]',
+          '',
+        ].join('\n'),
+      ),
+    ).toEqual(['test/one.test.ts > breaks', 'test/two.test.ts > another breaks'])
+  })
+  test("says nothing when the log names no test: the check shows the log's end instead", () => {
+    expect(run(['test/one.test.ts:', '# Unhandled error between tests', 'ReferenceError: describe is not defined'].join('\n'))).toEqual([])
+  })
+})
+
 describe('a run asked for by hand', () => {
   test('still runs the whole check: the types and the build together, and the tests over three shards', () => {
     expect(Object.keys(workflow.jobs)).toEqual(['types', 'test'])

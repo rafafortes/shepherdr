@@ -60,10 +60,11 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   by file, the verdict and where the logs are. It takes about two minutes warm, longer while other work keeps the
   machine busy or behind another worktree's check (it waits for it, up to an hour): run it with a long timeout, or in
   the background and read the verdict it prints.
-- A task runs it before `shepherdr ready` and says the result in `--facts`: passed, about how long, or what failed. The
-  coordinator runs it on `herdr-tui` before a release (and that run, there, also refreshes the screen map
-  `bun run test changed` picks from). While you work, `bun run typecheck` (seconds) and `bun run test changed` (a
-  quarter of the cores, like the check, but no lock) are enough to keep moving.
+- A task runs it before `shepherdr ready` and says the result in `--facts`: passed, about how long, or what failed —
+  and, when the verdict names a part that did not run (a browser that could not start), that it did not. The coordinator
+  runs it on `herdr-tui` before a release, and that run also records the screen map `bun run test changed` picks from
+  (until it has, a change of the screen's files runs every browser test). While you work, `bun run typecheck` (seconds)
+  and `bun run test changed` (a quarter of the cores, like the check, but no lock) are enough to keep moving.
 - Check what you changed on the screen by hand in your shared browser, for the proof, against a proof server of your
   own, never the one the human runs: the demo source (`SHEPHERDR_SOURCE=demo`) first, or `HERDR_SOCKET_PATH` at a
   socket that isn't there (as the tests do), a `SHEPHERDR_HOME` under `/tmp`, a `SHEPHERDR_PORT` other than 7787 and

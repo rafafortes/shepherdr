@@ -1,4 +1,4 @@
-// The tests, fast: test files run in parallel (one bun process per core), slowest first.
+// The tests, fast: test files run in parallel (a quarter of the cores by default, SHEPHERDR_TEST_JOBS says more), slowest first.
 //
 //   bun run test                  everything; skipped when it already passed on this very commit with nothing changed
 //   bun run test --force          everything, even then
