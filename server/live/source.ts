@@ -656,7 +656,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     const task = key.split('/')[0]
     const words = dismissed
-      ? `The human dismissed ${task}'s card “${excerpt(title, 120)}” in this chat without answering it: ${task}'s agent heard the decline and carries on with its own judgment. Nothing else to say: reply with only <no-reply>dismissed by the human</no-reply>.`
+      ? `The human dismissed ${task}'s card “${excerpt(title, 120)}” in this chat without answering it: ${task}'s agent heard the decline and acts on it. Nothing else to say: reply with only <no-reply>dismissed by the human</no-reply>.`
       : `The human answered ${task}'s question from its card in this chat (“${excerpt(title, 120)}”: ${excerpt(text, 200)}). It went to ${task}'s agent as their answer: don't answer it too. Nothing else to say: reply with only <no-reply>answered by the human</no-reply>.`
     this.agents.send(space, hidden(words, 'news', { task, event: dismissed ? 'dismissed' : 'answered' })).catch(() => undefined)
     this.emit('chat', space)
@@ -2113,11 +2113,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return { ok: false }
   }
 
-  /** something of yours came after that message: the question it asked is answered in words already */
+  /** something of yours came after that message: the question it asked is answered already (in words, or by a dismissal
+   *  of its own, which shows as answered with no words) */
   private answeredSince(key: string, id: string) {
     const msgs = this.chats.chat(key).messages
     const at = msgs.findIndex((m) => m.id === id)
-    return at >= 0 && msgs.slice(at + 1).some((m) => m.who === 'you' && (m.text || m.file))
+    return at >= 0 && msgs.slice(at + 1).some((m) => m.who === 'you' && (m.text || m.file || m.answered))
   }
 
   /** keys go into the menu the card shows: this waits until its prompt has moved on, or says it has not (the card stands
@@ -2153,6 +2154,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (!menu || menuId(key, menu) !== qid) return { ok: false, error: 'The terminal prompt changed. Read the new card before deciding.' }
       // a start stopped on its own screen: Esc there ends the launch, and it asks nothing yet
       if (this.chats.startMenuUp(key)) return { ok: false, error: 'This start waits on its own screen, not on a question: open the terminal to answer it.' }
+      // a prompt whose choices could not be read: its keys are a guess, so Esc is not pressed into it
+      if (!menu.choices.length) return { ok: false, error: 'Its prompt shows no choices to decline: open the terminal.' }
       if (this.menuAnswers.has(key)) return { ok: false, error: 'Your answer is still being checked.' }
       this.menuAnswers.add(key)
       try {

@@ -123,7 +123,8 @@ when unsure; unmarked cards keep pick-then-Send. `--multi` always keeps Send.
 the human's yes is `shepherdr plan <id> --step "…" --step "…"`, then end your turn.
 
 Every question, permission and plan card has **Dismiss**, and Esc on a card the human pressed: it closes without an
-answer, and a dismissed card is never a yes. On Shepherdr's own card you hear a `<dismissed>` line saying the person
+answer, and a dismissed card is never a yes. A start stopped on its own screen has none (Esc there would end the
+launch), and neither has a terminal prompt whose choices could not be read. On Shepherdr's own card you hear a `<dismissed>` line saying the person
 declined it: carry on with your best judgment and say what you assumed, don't ask it again, and don't do what it asked
 if it asked to do something. On a CLI's own prompt Dismiss presses that prompt's own Esc, so what reaches you is the
 CLI's own words for a declined prompt, and a dismissed plan is not approved.

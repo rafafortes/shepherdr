@@ -144,7 +144,9 @@ interface ChatLog {
 function withAnswer(q: Question, l: ChatLog, place: (key: string) => Question['elsewhere']): Question {
   const sent = q.sent ?? l.answers[q.id]
   const s = l.said?.[q.id]
-  const elsewhere = s?.space ? place(s.space) : undefined
+  const at = s?.space ? place(s.space) : undefined
+  // dismissed on its copy in a space's chat: it says so there too, never "answered"
+  const elsewhere = at && s?.dismissed ? { ...at, label: 'Dismissed in' } : at
   if (sent !== -1) return { ...q, sent, elsewhere }
   return {
     ...q,
@@ -917,7 +919,7 @@ export class Chats {
         id: menuId(key, menu),
         who: 'agent',
         at: Date.now(),
-        question: { id: menuId(key, menu), title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, kind: 'Form', choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: from, asks: `${CLI_NAME[kind] ?? kind} asks`, noDismiss: this.startScreens.has(key) || undefined },
+        question: { id: menuId(key, menu), title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, kind: 'Form', choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: from, asks: `${CLI_NAME[kind] ?? kind} asks`, noDismiss: this.startScreens.has(key) || !menu.choices.length || undefined },
       }
       if (waitingAt >= 0) msgs.splice(waitingAt, 0, card)
       else msgs.push(card)

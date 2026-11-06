@@ -1238,6 +1238,7 @@ function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply:
   }
   // Dismiss: no reply, and the agent hears the person declined to answer it
   const dismiss = async () => {
+    if (busy) return
     setBusy(true)
     setErr('')
     try {
@@ -1405,7 +1406,7 @@ export function CardShell({ title, plan, icon, action, source, dismiss, children
       ref={box}
       data-card
       tabIndex={dismiss ? -1 : undefined}
-      onPointerDown={dismiss ? () => box.current?.focus({ preventScroll: true }) : undefined}
+      onPointerDown={dismiss ? (e) => { if (!(e.target as HTMLElement).closest('button, a, input, textarea, select, [role=button]')) box.current?.focus({ preventScroll: true }) } : undefined}
       onKeyDown={key}
       className="mt-2 w-[440px] max-w-full cursor-default overflow-hidden rounded-box bg-bg outline-none shadow-[inset_0_0_0_1px_var(--line2)] focus:shadow-[inset_0_0_0_1.5px_var(--color-focus)]"
     >

@@ -839,7 +839,7 @@ describe("a task's question on its needs-you card in its space's chat", () => {
       off()
     }
     expect(card().ask).toMatchObject({ open: false, answered: { where: 'space', dismissed: true }, questions: [{ sent: -1, dismissed: true, elsewhere: { label: 'Dismissed ·', chat: key, name: `${t.id} chat` } }] })
-    expect(src.chats.chat(key).messages.find((m) => m.question?.id === qid)?.question).toMatchObject({ sent: -1, dismissed: true })
+    expect(src.chats.chat(key).messages.find((m) => m.question?.id === qid)?.question).toMatchObject({ sent: -1, dismissed: true, elsewhere: { label: 'Dismissed in' } })
     // the space's coordinator hears the person declined it, never that they answered
     expect(said.join('\n')).toContain('dismissed')
     expect(said.join('\n')).not.toContain("don't answer it too")
@@ -900,8 +900,8 @@ describe("a task's question on its needs-you card in its space's chat", () => {
     expect(heard.join('\n')).toContain('<dismissed')
     expect(heard.join('\n')).toContain('Keep the old API around?')
     expect(card().ask).toMatchObject({ open: false, answered: { where: 'space', dismissed: true } })
-    // a reply came after it already: the stale card can't dismiss what was answered
-    src.chats.post(key, { id: 'a-reply', who: 'you', text: 'Yes, one more release' })
+    // its own dismissal line is there now (as the agent's log would show it): a second one goes nowhere
+    src.chats.post(key, { id: 'a-dismissal', who: 'you', answered: 'Dismissed “Keep the old API around?”' })
     expect(await src.act({ type: 'answer', chat: key, question: 'plain-dismiss', choice: -1, dismiss: true, space: place })).toMatchObject({ ok: false })
   })
 })
@@ -2590,6 +2590,17 @@ describe("a card dismissed on the CLI's own screen", () => {
       const start = src.chats.chat(key).messages.find((m) => m.question)?.question
       expect(start?.noDismiss).toBe(true)
       expect(await src.act({ type: 'answer', chat: key, question: start!.id, choice: -1, dismiss: true })).toMatchObject({ ok: false, error: expect.stringContaining('start waits on its own screen') })
+      expect(keysSent).toHaveLength(1)
+      // a prompt whose choices could not be read: its keys are a guess, so it has no Dismiss and refuses one
+      src.chats.clearStartMenu(key)
+      screen = 'A new CLI asks for a secret\nType your answer to continue'
+      await src.chats.readMenu(key, true)
+      screen = 'A new CLI asks for a secret\nType your answer to continue'
+      await src.chats.readMenu(key, true)
+      const blind = src.chats.chat(key).messages.find((m) => m.question)?.question
+      expect(blind?.choices).toEqual([])
+      expect(blind?.noDismiss).toBe(true)
+      expect(await src.act({ type: 'answer', chat: key, question: blind!.id, choice: -1, dismiss: true })).toMatchObject({ ok: false, error: expect.stringContaining('no choices to decline') })
       expect(keysSent).toHaveLength(1)
     } finally {
       Object.assign(src.agents, { info: originals.info, status: originals.status, refresh: originals.refresh, keys: originals.keys })

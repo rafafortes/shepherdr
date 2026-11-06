@@ -849,11 +849,12 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     if (a.dismiss) {
       q.dismissed = true
       if (q.asks) c.messages = c.messages.filter((m) => m !== msg)
-      this.push(a.chat, { who: 'you', answered: `Dismissed “${q.title}”` }, { who: 'agent', text: 'Understood. I’ll use my own judgment and say what I assumed.' })
+      const plan = q.kind === 'Plan'
+      this.push(a.chat, { who: 'you', answered: `Dismissed “${q.title}”` }, { who: 'agent', text: plan ? 'Understood: the plan isn’t approved, so I’ll say what I’ll do instead.' : 'Understood. I’ll use my own judgment and say what I assumed.' })
       for (const [pl, qid] of Object.entries(this.asks)) if (qid === q.id) delete this.asks[pl]
-      // the task carried on without an answer, as it does when you answer the card
+      // the task carried on without an answer, as it does when you answer the card (a plan: not carried out)
       if (q.id === 'f5') this.setTask('LV-3', 'work', 'Carrying on with my own judgment')
-      if (q.id === 'f6') this.setTask('GTM-16', 'work', 'Carrying on with my own judgment')
+      if (q.id === 'f6') this.setTask('GTM-16', 'work', 'Saying what to do instead')
       if (q.id === 'f7') this.setTask('LV-4', 'work', 'Carrying on with my own judgment')
       this.emit('snapshot')
       return { ok: true }

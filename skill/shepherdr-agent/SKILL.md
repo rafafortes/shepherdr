@@ -48,7 +48,8 @@ build, check and review the work is your own judgment.
    `ready`, and Shepherdr shows nothing you didn't report. Ask the human only what no experiment can settle: once, a
    card with your recommended choice first, then end your turn (a turn ended without `ready` and nothing running in
    the background shows Needs you). A card they dismiss is their answer too: they declined to give one, so decide it
-   with your best judgment and say what you assumed. Decide the rest yourself and list those decisions in the facts.
+   with your best judgment and say what you assumed — a dismissed plan is not approved, so don't carry it out. Decide
+   the rest yourself and list those decisions in the facts.
 3. **Review**, unless Review is off or the brief says none: fresh eyes that didn't write the change (a subagent, or
    a headless `codex exec`, `claude -p` or `pi -p` as the Reviewer setting suggests). Run a headless one in the
    foreground, its stdin closed (or it waits on stdin forever) and under a timeout, with your shell's timeout at its
