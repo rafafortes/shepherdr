@@ -340,6 +340,26 @@ export const markerSoFar = (words: string) => {
   return w.startsWith('[') || AGENT_TAGS.some((t) => w.startsWith(t) || t.startsWith(w))
 }
 
+/** which lines of a reply a code fence holds, the fence's own lines included (``` or ~~~, closed by the same mark at
+ *  least as long, or the reply's end): markdown draws them as code, so a tag line there is a sample the agent quoted,
+ *  never a line it sends */
+function fencedLines(lines: string[]): boolean[] {
+  const code = lines.map(() => false)
+  let open: { mark: string; len: number } | null = null
+  lines.forEach((l, i) => {
+    const m = l.trim().match(/^(`{3,}|~{3,})(.*)$/u)
+    if (!open && m) {
+      code[i] = true
+      open = { mark: m[1][0], len: m[1].length }
+    } else if (open) {
+      code[i] = true
+      // a closing fence carries nothing after its marks
+      if (m && m[1][0] === open.mark && m[1].length >= open.len && !m[2].trim()) open = null
+    }
+  })
+  return code
+}
+
 /** an agent's <react …/> or <reply …/> line; a reply's tag may also open its words (<reply to="…">words</reply>) */
 const AGENT_TAG = /^<(react|reply)((?:\s+[\w-]+="[^\n]*?")+)\s*(\/?)>(.*)$/u
 
@@ -348,9 +368,12 @@ export function agentLines(text: string): { text: string; reactions: (Quote & { 
   const reactions: (Quote & { emoji: string })[] = []
   let reply: Quote | undefined
   let opened = false
-  let kept = text
-    .split('\n')
-    .flatMap((l) => {
+  const lines = text.split('\n')
+  const code = fencedLines(lines)
+  let kept = lines
+    .flatMap((l, i) => {
+      // a fenced tag line is a sample: it stays in the words, where markdown draws it as code
+      if (code[i]) return [l]
       const s = l.trim()
       let m: RegExpMatchArray | null
       if ((m = s.match(AGENT_TAG))) {

@@ -132,6 +132,34 @@ describe('chat lines', () => {
     expect(agentLines('[reply to shot.png: /inbox/b-shot.png]\nSeen it.').reply).toEqual({ to: 'shot.png', path: '/inbox/b-shot.png' })
     expect(agentLines('Write [reply to "x"] on a line of its own.').text).toBe('Write [reply to "x"] on a line of its own.')
   })
+  // SHE-30: an agent quoting the skill's example in a code fence posts nothing: the words stay, and markdown draws them
+  // as code. A real line after the fence is still a real one.
+  test('a tag line inside a code fence stays words, and a real one after it still counts', () => {
+    const react = '<react emoji="👀" to="What needs me today?"/>'
+    const reply = '<reply to="What needs me today?"/>'
+    const fenced = `Write it like this:\n\`\`\`\n${reply}\n${react}\n\`\`\`\nNothing happens.`
+    expect(agentLines(fenced)).toEqual({ text: fenced, reactions: [] })
+    // the same tag inline, in backticks, was never one (and stays that way)
+    expect(agentLines(`Type \`${react}\` on a line of its own.`).reactions).toEqual([])
+    // a real line after the closing fence counts, and the example above it stays
+    const after = agentLines(`${fenced}\n${react}\nLooking now.`)
+    expect(after.reactions).toEqual([{ emoji: '👀', to: 'What needs me today?' }])
+    expect(after.reply).toBeUndefined()
+    expect(after.text).toBe(`${fenced}\nLooking now.`)
+    // the older [square bracket] lines in a fence are words too
+    expect(agentLines('```\n[react 👀 to "Hi"]\n[reply to "Hi"]\n```\nDone.')).toEqual({ text: '```\n[react 👀 to "Hi"]\n[reply to "Hi"]\n```\nDone.', reactions: [] })
+    // tilde fences, indented ones, and a fence that never closes (markdown holds the rest as code)
+    expect(agentLines(`~~~\n${react}\n~~~\nLooking now.`)).toEqual({ text: `~~~\n${react}\n~~~\nLooking now.`, reactions: [] })
+    expect(agentLines(`  \`\`\`\n  ${react}\n  \`\`\`\nLooking now.`).reactions).toEqual([])
+    expect(agentLines(`\`\`\`\n${react}`).reactions).toEqual([])
+    // a fence inside the words of a real reply line is no tag either, and the reply itself still counts
+    const inReply = agentLines(`<reply to="Hi">\nHere:\n\`\`\`\n${react}\n\`\`\`\n</reply>`)
+    expect(inReply.reactions).toEqual([])
+    expect(inReply.reply).toEqual({ to: 'Hi' })
+    expect(inReply.text).toBe(`Here:\n\`\`\`\n${react}\n\`\`\``)
+    // a fenced example of the no-reply marker does not make the reply quiet
+    expect(agentLines('```\n<no-reply>nothing to say</no-reply>\n```').text).toBe('```\n<no-reply>nothing to say</no-reply>\n```')
+  })
   test('a reply that is only <no-reply>why</no-reply> says nothing; anything more stays words', () => {
     expect(agentLines('<no-reply>SHE-72 merged, nothing to do</no-reply>').text).toBe('')
     expect(agentLines('\n  <no-reply>\n  SHE-72 merged\n</no-reply>\n').text).toBe('')
