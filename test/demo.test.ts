@@ -102,9 +102,12 @@ describe('Autopilot Run now', () => {
     await w.act({ type: 'mode', place: p.id, mode: 'autopilot' })
     const at = () => w.snapshot().places.find((x) => x.id === p.id)!.runNow
     expect(at()).toBe('ready')
+    // a wake's quiet line says nothing to read: it wakes nothing unread in the sidebar, and buzzes nothing
+    const last = w.snapshot().last?.[p.chat]
     // a tap wakes it once, and shows Waking until its turn is over
     expect(await w.act({ type: 'heartbeat', place: p.id, op: 'run' })).toEqual({ ok: true, queued: false })
     expect(line().map((m) => m.pilot)).toEqual(['Autopilot woke · Run now · nothing to report'])
+    expect(w.snapshot().last?.[p.chat]).toBe(last)
     expect(at()).toBe('waking')
     // one at a time: a second tap while its wake runs is refused
     expect(await w.act({ type: 'heartbeat', place: p.id, op: 'run' })).toEqual({ ok: false, error: `${p.name}'s coordinator is already waking: one wake at a time.` })

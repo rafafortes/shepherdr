@@ -393,8 +393,8 @@ export interface Message {
   card?: UpdateCard
   /** a turn's tool steps, as a few rows in plain words, just before its last reply */
   activity?: TurnActivity
-  /** an Autopilot wake's one quiet line: why it woke, and how it went once it answered with nothing ("Autopilot woke ·
-   *  Run now · nothing to do"): the chat draws it as a quiet row, never a card and never an alert */
+  /** an Autopilot wake's one quiet line: why it woke, and that it answered with nothing ("Autopilot woke · Run now ·
+   *  nothing to report"): the chat draws it as a quiet row, never a card and never an alert */
   pilot?: string
   /** a secret the agent asked for (shepherdr secret ask): a masked box to give it in */
   secret?: SecretAsk

@@ -1,7 +1,7 @@
 // Autopilot's heartbeat, as OpenClaw's: on its trigger's time rule (Settings → Autopilot: every 30 minutes, all day), a
 // coordinator on Autopilot gets one fixed prompt in its own session: go through its HEARTBEAT.md, its standing
 // checklist in plain words, and act on what needs it, or else reply with only <no-reply> (the chat shows none of it, and
-// a quiet line says it woke and had nothing to do, so a quiet night is not mistaken for a broken heartbeat). Only
+// a quiet line says it woke and had nothing to report, so a quiet night is not taken for a broken heartbeat). Only
 // while it is idle: a busy one gets it once its turn is over. None while its HEARTBEAT.md is empty and no news waits.
 // News its trigger's event rules name (all news by default) wakes the coordinator at once; other news waits here and
 // comes with the next heartbeat. Run now (Settings → Autopilot, the chat's pill, shepherdr heartbeat run) asks for one

@@ -248,12 +248,13 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     }
   }
 
-  /** when each coordinator's chat last had something from it or Shepherdr (tasks' chats count for nothing here) */
+  /** when each coordinator's chat last had something from it or Shepherdr (tasks' chats count for nothing here; a
+   *  wake's quiet line says nothing to read, so it marks nothing unread, as live's newest does not) */
   private last() {
     const out: Record<string, number> = {}
     for (const c of Object.values(this.chats)) {
       if (c.key.includes('/')) continue
-      const at = c.messages.findLast((m) => m.who === 'agent')?.at
+      const at = c.messages.findLast((m) => m.who === 'agent' && !m.pilot)?.at
       if (at) out[c.key] = at
     }
     return out

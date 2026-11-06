@@ -96,7 +96,7 @@ How to do the work inside a task is its agent's judgment, not yours.
    heartbeat. Act on what needs it by the rules above; don't redo or repeat earlier work. Nothing needs you: reply with
    only
    `<no-reply>heartbeat: nothing to do</no-reply>`, and the chat then shows one quiet line for that wake ("Autopilot
-   woke · on schedule · nothing to do"), so the human can tell a quiet night from a broken heartbeat. Never announce a
+   woke · on schedule · nothing to report"), so the human can tell a quiet night from a broken heartbeat. Never announce a
    wake yourself: the line is the whole of it, and an answer that says something follows it as your words. A wake the
    human asked for (`shepherdr heartbeat run`, Run now at the chat's Autopilot pill or in Settings → Autopilot) is the
    same heartbeat, at once and one at a time: go through the checklist, then answer as above. Keep the checklist current

@@ -1428,12 +1428,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** the one wake: its heartbeat prompt, as Run now brought it, which the chat shows as one quiet line */
   private sendWake(place: string, now = Date.now()) {
-    this.wakeQueue.take(place, now)
     const text = this.heartbeats.beat(place, this.roleOf(place), now)
-    if (!text) {
-      this.wakeQueue.forget(place)
-      return
-    }
+    // its checklist may have emptied while the tap waited: the tap keeps waiting, instead of going in silence
+    if (!text || !this.wakeQueue.take(place, now)) return
     this.agents.send(place, hidden(text, 'heartbeat', { reason: 'run now' }), { ensure: this.starter(place), idle: true }).catch(() => this.wakeQueue.forget(place))
     this.emit('snapshot')
   }
