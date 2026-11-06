@@ -26,7 +26,9 @@ home screen: alerts need that.
 ## Install it as an app, with alerts
 
 Install the link as an app on each device, open it, and turn alerts on in Settings → Alerts on → **Turn on for this
-device**.
+device**. A login gate in front of the app (a proxy's basic auth, Cloudflare Access, Authelia) does not stop this: the
+page asks for its manifest with its own credentials, and the service worker, the icons and the push key follow the same
+login.
 
 - **iPhone or iPad**: in Safari, Share → **Add to Home Screen**, then open it from the home screen (alerts only work
   there).
