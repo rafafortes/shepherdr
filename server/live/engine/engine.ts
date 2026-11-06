@@ -1700,9 +1700,9 @@ export class Engine extends Emitter<Events> {
    * work is in its base already, its pull request merged on GitHub by hand among them: Done (merged), never a pull
    * request opened for what is in.
    */
-  async done(id: string, summary: string, facts?: string): Promise<'ready' | 'closed' | 'merged' | 'ended'> {
+  async done(id: string, summary: string, facts?: string): Promise<{ state: 'ready' | 'closed' | 'merged' | 'ended'; note?: string }> {
     const t = this.req(id)
-    if (ended(t)) return 'ended'
+    if (ended(t)) return { state: 'ended' }
     if (summary) t.said = summary
     if (facts) t.facts = facts
     t.reported = true
@@ -1718,14 +1718,14 @@ export class Engine extends Emitter<Events> {
       if (!(await G.dirty(t.worktree)) && ahead === 0) {
         this.markClosed(t)
         if (this.agents.status(this.key(t)) !== 'working') await this.cleanup(t)
-        return 'closed'
+        return { state: 'closed' }
       }
       // its own work is in its base already, though not as its commits: its pull request was merged there (a squash
       // merge leaves the branch's commits out), or the work got in by hand. Done at once, merged.
       const why = ahead > 0 ? await this.mergedAlready(t).catch(() => null) : null
       if (why) {
         await this.mergedOnGitHub(t, this.proj(t), why)
-        return 'merged'
+        return { state: 'merged', note: why }
       }
     }
     this.save()
@@ -1733,7 +1733,7 @@ export class Engine extends Emitter<Events> {
     this.settleSoon(t)
     // its pull request gets the summary and is ready for review; GitHub away changes nothing here
     if (t.pr && !t.merged) this.readyForReview(t).catch(() => undefined)
-    return 'ready'
+    return { state: 'ready' }
   }
 
   /**
@@ -1747,8 +1747,9 @@ export class Engine extends Emitter<Events> {
     const wt = t.worktree!
     const base = t.base!
     const p = this.proj(t)
-    // the remote's base counts too: a pull request merged on GitHub is in it, and not in the local branch yet
-    await G.git(p.path, 'fetch', '--quiet', 'origin', base).catch(() => undefined)
+    // the remote's base counts too: a pull request merged on GitHub is in it, and not in the local branch yet. Bounded:
+    // a remote that does not answer leaves the local base to decide, never holds its agent's own ready for ever
+    await G.sh(['git', 'fetch', '--quiet', 'origin', base], p.path, { timeoutMs: 20_000 }).catch(() => undefined)
     let there = false
     for (const at of [base, `origin/${base}`]) if (await G.inBase(wt, 'HEAD', at)) there = true
     if (!there) return null

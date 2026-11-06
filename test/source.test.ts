@@ -262,7 +262,7 @@ describe('closing from the command', () => {
     // the person squashed its branch into main by hand, no pull request at all
     run(`git merge -q --squash ${t.branch} && git commit -qm "the work, by hand"`, dir)
     const r = await src.cli(['ready', t.id, '--summary', 'Added x.txt.'], { chat: `${t.id}/Agent` })
-    expect(r.out).toContain(`its work is in main already, so ${t.id} is Done (merged)`)
+    expect(r.out).toContain(`its work was in main already, so ${t.id} is Done (merged)`)
     expect(r.out).toContain('do nothing more in them')
     expect(src.engine.statusOf(t)).toBe('done')
   })
