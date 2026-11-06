@@ -622,6 +622,9 @@ export interface Chat {
   messages: Message[]
   /** herdr says the agent works: the CLI takes what you send at its next step */
   working?: boolean
+  /** the ids the screen gave what it sent that the CLI still holds in its own queue (it takes one at its next step, or
+   *  now with Send now): Claude Code's offer, so another CLI gives none */
+  queued?: string[]
   /** it works, but no message you will see is on its way: its turn is over and only background work runs (a subagent,
    *  a shell), or in a turn it started itself (news, background work waking it) no reply has shown yet; no dots then */
   background?: boolean
@@ -952,6 +955,9 @@ export type Action =
   | { type: 'pause'; chat: string }
   /** stop a task: its agent and space close, it is To do and its work stays, until written to */
   | { type: 'stop'; chat: string }
+  /** Send now on a message its CLI holds in its own queue: Claude Code's Ctrl+Enter, pressed only while its screen
+   *  offers it */
+  | { type: 'steer'; chat: string }
   /** what the restart sheet shows for a coordinator (chat: its place id) or a task's agent (ID/Agent): RestartInfo */
   | { type: 'restart-info'; chat: string }
   /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as

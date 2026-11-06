@@ -286,7 +286,11 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   chat(key: string) {
     // an agent nobody has written to yet still has a chat: an empty one
     if (!this.chats[key] && key.includes('/')) this.chats[key] = { key, cli: this.cliOf(key), messages: [], controls: this.cliOf(key) === 'Claude Code' ? CLAUDE_CONTROLS() : OTHER_CONTROLS() }
-    return this.chats[key]
+    const c = this.chats[key]
+    // what its CLI holds in its own queue, as the live one says: a chat at work takes a message at its next step
+    const queued = c?.working ? (this.queue.get(key) ?? []).map((x) => x.cid) : []
+    if (c) c.queued = queued.length ? queued : undefined
+    return c
   }
 
   private cliOf(key: string) {
@@ -383,6 +387,34 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     return g?.status === 'need' && !!this.chats[key]?.messages.some((m) => m.question?.asks && m.question.sent === undefined)
   }
 
+  /** what a chat's CLI holds in its own queue: taken at its next step (a moment here) unless Send now takes it first */
+  private queue = new Map<string, { cid: string; go: () => void; timer: ReturnType<typeof setTimeout> }[]>()
+
+  /** how long a CLI's next step takes to reach what it queued (a test keeps it longer than its own waiting) */
+  queueMs = 2500
+
+  /** an agent at work holds what you send in its own queue, as a CLI does */
+  private queued(key: string, cid: string, go: () => void) {
+    const item = { cid, go, timer: setTimeout(() => this.take(key, cid), this.queueMs) }
+    this.queue.set(key, [...(this.queue.get(key) ?? []), item])
+    this.emit('chat', key)
+  }
+
+  /** taken out of its CLI's queue: by its next step, or by Send now (the oldest when it names none); false when nothing
+   *  of that id waits there */
+  private take(key: string, cid?: string) {
+    const list = this.queue.get(key) ?? []
+    const i = cid ? list.findIndex((x) => x.cid === cid) : 0
+    if (i < 0 || !list.length) return false
+    const [item] = list.splice(i, 1)
+    clearTimeout(item.timer)
+    if (list.length) this.queue.set(key, list)
+    else this.queue.delete(key)
+    item.go()
+    this.emit('chat', key)
+    return true
+  }
+
   /** a Claude Code pane 100 cells wide, as herdr reads it: full-width rulers, lines that never pass the edge */
   private screen(key: string): TermScreen {
     const cols = 100
@@ -464,7 +496,12 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
           Object.assign(q, { sent: -1, said: a.text.trim() || undefined, via: 'chat' })
           for (const [pl, qid] of Object.entries(this.asks)) if (qid === q.id) delete this.asks[pl]
         }
-        this.push(a.chat, ...(a.text ? [{ who: 'you' as const, text: a.text, waiting, waitsFor, cid, reply }] : []), ...files)
+        const said = [...(a.text ? [{ who: 'you' as const, text: a.text, waiting, waitsFor, cid, reply }] : []), ...files]
+        // an agent at work holds what you send in its own queue, as its CLI does: Send now takes it at once, else its next
+        // step does (a moment here). One that waits for a menu goes in by itself once the menu is answered
+        const go = () => this.push(a.chat, ...said)
+        if (waiting || !cid || !this.chats[a.chat]?.working) go()
+        else this.queued(a.chat, cid, go)
         // a To do task's agent decides from your words: a go sets it to work, a change to its brief leaves it waiting
         const todo = this.task(a.chat.split('/')[0])
         // a queued task: any message is the go, it waits for nothing more
@@ -704,6 +741,12 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         Object.assign(t, { status: 'todo', sub: '', report: undefined, state: 'To do · stopped just now', agent: t.agent && { ...t.agent, status: 'todo', running: false } })
         this.emit('snapshot')
         return { ok: true }
+      }
+      case 'steer': {
+        // as the live one: Claude Code takes the first message in its own queue now (its Ctrl+Enter), and only then
+        const c = this.chat(a.chat)
+        if (c?.working && c.agent?.kind === 'claude' && this.take(a.chat)) return { ok: true }
+        return { ok: false, error: "It couldn't take it now." }
       }
       case 'close': {
         const t = this.task(a.chat.split('/')[0])
