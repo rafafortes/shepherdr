@@ -152,8 +152,19 @@ describe('chat lines', () => {
     // a list item's sample is indented four spaces, and a markdown code sample inside a reply is often indented whole
     expect(agentLines(`- the line:\n    \`\`\`\n    ${react}\n    \`\`\`\n- done`).reactions).toEqual([])
     expect(agentLines(`    \`\`\`\n${react}\n    \`\`\``).reactions).toEqual([])
-    // a longer run closes it, a shorter run does not
-    expect(agentLines(`\`\`\`\`\n${react}\n\`\`\``).reactions).toEqual([])
+  })
+  test('only the same mark, at least as long, with nothing after it, closes a fence', () => {
+    const react = '<react emoji="👀" to="Hi"/>'
+    // a longer run closes it: the fence still holds the sample, and the real line after it counts
+    expect(agentLines(`\`\`\`\`\n${react}\n\`\`\`\`\nLooking now.`)).toEqual({ text: `\`\`\`\`\n${react}\n\`\`\`\`\nLooking now.`, reactions: [] })
+    expect(agentLines(`\`\`\`\`\ncode\n\`\`\`\`\n${react}\nLooking now.`).reactions).toEqual([{ emoji: '👀', to: 'Hi' }])
+    // a shorter run, or one with words after its marks, closes nothing: what follows is still the sample
+    expect(agentLines(`\`\`\`\`\n${react}\n\`\`\`\n${react}`).reactions).toEqual([])
+    expect(agentLines(`\`\`\`\n${react}\n\`\`\`js\n${react}`).reactions).toEqual([])
+    // the other mark closes nothing either, and the closing line may be indented as the fence is
+    expect(agentLines(`\`\`\`\n${react}\n~~~\n${react}`).reactions).toEqual([])
+    expect(agentLines(`\`\`\`\n${react}\n\`\`\`\n${react}`).reactions).toEqual([{ emoji: '👀', to: 'Hi' }])
+    expect(agentLines(`  \`\`\`\n  ${react}\n    \`\`\`\n${react}`).reactions).toEqual([{ emoji: '👀', to: 'Hi' }])
   })
   test('what is not a fence leaves a real line real, and a tag inline in backticks stays words', () => {
     const react = '<react emoji="👀" to="What needs me today?"/>'

@@ -345,16 +345,16 @@ export const markerSoFar = (words: string) => {
  *  sample an agent meant). A backtick line with another backtick after its marks is inline code, not a fence */
 const FENCE = /^(`{3,}|~{3,})(.*)$/u
 
-/** the fence that line opens, or null */
+/** the fence that line opens, or null (on a trimmed line) */
 function fenceOpen(l: string): { mark: string; len: number } | null {
-  const m = l.trim().match(FENCE)
+  const m = l.match(FENCE)
   if (!m || (m[1][0] === '`' && m[2].includes('`'))) return null
   return { mark: m[1][0], len: m[1].length }
 }
 
-/** the line closes that fence: the same mark, at least as long, and nothing after it */
+/** the line closes that fence: the same mark, at least as long, and nothing after it (a trimmed line) */
 function fenceClose(l: string, open: { mark: string; len: number }) {
-  const m = l.trim().match(FENCE)
+  const m = l.match(FENCE)
   return !!m && m[1][0] === open.mark && m[1].length >= open.len && !m[2].trim()
 }
 
@@ -372,12 +372,12 @@ export function agentLines(text: string): { text: string; reactions: (Quote & { 
   let kept = text
     .split('\n')
     .flatMap((l) => {
+      const s = l.trim()
       if (fence) {
-        if (fenceClose(l, fence)) fence = null
+        if (fenceClose(s, fence)) fence = null
         return [l]
       }
-      if ((fence = fenceOpen(l))) return [l]
-      const s = l.trim()
+      if ((fence = fenceOpen(s))) return [l]
       let m: RegExpMatchArray | null
       if ((m = s.match(AGENT_TAG))) {
         const t = tagOf(`<${m[1]}${m[2]}/>`)!
@@ -390,7 +390,7 @@ export function agentLines(text: string): { text: string; reactions: (Quote & { 
           reply = quoteOf(t.a)
           opened = !m[3] && !m[4].endsWith('</reply>')
           // its words may open a fence on that same line (<reply to="Hi">```js)
-          fence = fenceOpen(words)
+          fence = fenceOpen(words.trim())
           return words ? [words] : []
         }
         return [l]
