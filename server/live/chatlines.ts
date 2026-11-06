@@ -340,24 +340,21 @@ export const markerSoFar = (words: string) => {
   return w.startsWith('[') || AGENT_TAGS.some((t) => w.startsWith(t) || t.startsWith(w))
 }
 
-/** which lines of a reply a code fence holds, the fence's own lines included (``` or ~~~, closed by the same mark at
- *  least as long, or the reply's end): markdown draws them as code, so a tag line there is a sample the agent quoted,
- *  never a line it sends */
-function fencedLines(lines: string[]): boolean[] {
-  const code = lines.map(() => false)
-  let open: { mark: string; len: number } | null = null
-  lines.forEach((l, i) => {
-    const m = l.trim().match(/^(`{3,}|~{3,})(.*)$/u)
-    if (!open && m) {
-      code[i] = true
-      open = { mark: m[1][0], len: m[1].length }
-    } else if (open) {
-      code[i] = true
-      // a closing fence carries nothing after its marks
-      if (m && m[1][0] === open.mark && m[1].length >= open.len && !m[2].trim()) open = null
-    }
-  })
-  return code
+/** a code fence as markdown opens it: up to three spaces of indent, three or more backticks (nothing holding one in
+ *  what follows) or tildes */
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/u
+
+/** the fence that line opens, or null: a ``` line with a backtick after its marks is inline code, not a fence */
+function fenceOpen(l: string): { mark: string; len: number } | null {
+  const m = l.match(FENCE)
+  if (!m || (m[1][0] === '`' && m[2].includes('`'))) return null
+  return { mark: m[1][0], len: m[1].length }
+}
+
+/** the line closes that fence: the same mark, at least as long, and nothing after it */
+const fenceClose = (l: string, open: { mark: string; len: number }) => {
+  const m = l.match(FENCE)
+  return !!m && m[1][0] === open.mark && m[1].length >= open.len && !m[2].trim()
 }
 
 /** an agent's <react …/> or <reply …/> line; a reply's tag may also open its words (<reply to="…">words</reply>) */
@@ -368,12 +365,17 @@ export function agentLines(text: string): { text: string; reactions: (Quote & { 
   const reactions: (Quote & { emoji: string })[] = []
   let reply: Quote | undefined
   let opened = false
-  const lines = text.split('\n')
-  const code = fencedLines(lines)
-  let kept = lines
-    .flatMap((l, i) => {
-      // a fenced tag line is a sample: it stays in the words, where markdown draws it as code
-      if (code[i]) return [l]
+  // markdown draws the lines a fence holds as code, so a tag line there is a sample the agent quoted, never a line it
+  // sends: those stay words. Opened or closed where markdown opens or closes it, to the reply's end when it never closes
+  let fence: { mark: string; len: number } | null = null
+  let kept = text
+    .split('\n')
+    .flatMap((l) => {
+      if (fence) {
+        if (fenceClose(l, fence)) fence = null
+        return [l]
+      }
+      if ((fence = fenceOpen(l))) return [l]
       const s = l.trim()
       let m: RegExpMatchArray | null
       if ((m = s.match(AGENT_TAG))) {
@@ -386,6 +388,8 @@ export function agentLines(text: string): { text: string; reactions: (Quote & { 
         if (m[1] === 'reply' && (t.a.to ?? t.a.file) !== undefined && !reply) {
           reply = quoteOf(t.a)
           opened = !m[3] && !m[4].endsWith('</reply>')
+          // its words may open a fence on that same line (<reply to="Hi">```js)
+          fence = fenceOpen(words)
           return words ? [words] : []
         }
         return [l]

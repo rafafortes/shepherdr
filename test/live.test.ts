@@ -148,17 +148,26 @@ describe('chat lines', () => {
     expect(after.text).toBe(`${fenced}\nLooking now.`)
     // the older [square bracket] lines in a fence are words too
     expect(agentLines('```\n[react 👀 to "Hi"]\n[reply to "Hi"]\n```\nDone.')).toEqual({ text: '```\n[react 👀 to "Hi"]\n[reply to "Hi"]\n```\nDone.', reactions: [] })
-    // tilde fences, indented ones, and a fence that never closes (markdown holds the rest as code)
+    // tilde fences, fences indented up to three spaces, and one that never closes (markdown holds the rest as code)
     expect(agentLines(`~~~\n${react}\n~~~\nLooking now.`)).toEqual({ text: `~~~\n${react}\n~~~\nLooking now.`, reactions: [] })
     expect(agentLines(`  \`\`\`\n  ${react}\n  \`\`\`\nLooking now.`).reactions).toEqual([])
     expect(agentLines(`\`\`\`\n${react}`).reactions).toEqual([])
+    // what markdown does not read as a fence stays a real line: four spaces is an indented code block, and a backtick
+    // among a backtick fence's marks is inline code
+    expect(agentLines(`    \`\`\`\n${react}\nLooking now.`).reactions).toEqual([{ emoji: '👀', to: 'What needs me today?' }])
+    expect(agentLines(`\`\`\`x\`\`\` y\n${react}\nLooking now.`).reactions).toEqual([{ emoji: '👀', to: 'What needs me today?' }])
     // a fence inside the words of a real reply line is no tag either, and the reply itself still counts
     const inReply = agentLines(`<reply to="Hi">\nHere:\n\`\`\`\n${react}\n\`\`\`\n</reply>`)
     expect(inReply.reactions).toEqual([])
     expect(inReply.reply).toEqual({ to: 'Hi' })
     expect(inReply.text).toBe(`Here:\n\`\`\`\n${react}\n\`\`\``)
-    // a fenced example of the no-reply marker does not make the reply quiet
-    expect(agentLines('```\n<no-reply>nothing to say</no-reply>\n```').text).toBe('```\n<no-reply>nothing to say</no-reply>\n```')
+    // a fence its tag opens on that same line holds the rest too (<reply to="Hi">```js)
+    expect(agentLines(`<reply to="Hi">\`\`\`js\n${react}\n\`\`\`\n</reply>`)).toEqual({ text: `\`\`\`js\n${react}\n\`\`\``, reactions: [], reply: { to: 'Hi' } })
+    expect(agentLines(`<reply to="Hi">~~~\n${react}\n~~~\n</reply>`).reactions).toEqual([])
+    // guards for what this never touched: a line of inline code, or a tag inside one, was words before the fix too
+    expect(agentLines(`\`${react}\``)).toEqual({ text: `\`${react}\``, reactions: [] })
+    expect(agentLines(`Type \`${react}\` on a line of its own.`).reactions).toEqual([])
+    expect(agentLines('`<no-reply>nothing to say</no-reply>`').text).toBe('')
   })
   test('a reply that is only <no-reply>why</no-reply> says nothing; anything more stays words', () => {
     expect(agentLines('<no-reply>SHE-72 merged, nothing to do</no-reply>').text).toBe('')
