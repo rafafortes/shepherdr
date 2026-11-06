@@ -1,7 +1,7 @@
 // The words of a mention in a chat (plugins/chat/mentions.ts): what is typed, what a pick becomes at Send, and what a
 // message draws. The round trip matters: what Send writes is what the CLI's log hands back, as text.
 import { describe, expect, test } from 'bun:test'
-import { expand, forMarkdown, fromFragment, hasMention, matchSpaces, matchTasks, mentionTyping, put, split, taskToken } from '../plugins/chat/mentions.ts'
+import { expand, forMarkdown, fromFragment, hasMention, matchSpaces, matchTasks, mentionTyping, plain, put, split, taskToken } from '../plugins/chat/mentions.ts'
 import type { Place, Task } from '../shared/types.ts'
 
 const space = { id: 'p:vm-str:gtm', name: 'gtm', machine: 'vm-str', level: 2, status: 'idle', mode: 'regular', chat: 'p:vm-str:gtm' } as Place
@@ -44,6 +44,11 @@ describe('what is typed in the box', () => {
     expect(expand('x#gtm', [...picked])).toBe('x#gtm')
   })
 
+  test('a sentence typed after a pick keeps its punctuation', () => {
+    expect(expand('look at #gtm.', [...picked])).toBe(`look at [#gtm](space:${space.id}).`)
+    expect(expand('ask @SHE-12.', [...picked])).toBe('ask [@SHE-12](task:SHE-12).')
+  })
+
   test('what Send wrote is what the log hands back: expanding it again changes nothing', () => {
     const once = expand('ask @SHE-12 about #gtm', [...picked])
     expect(expand(once, [...picked])).toBe(once)
@@ -73,6 +78,15 @@ describe('a message with a mention', () => {
     // code is code: a mention in it stays as it was written
     expect(forMarkdown(`run \`echo ${token}\``)).toBe(`run \`echo ${token}\``)
     expect(forMarkdown(`\`\`\`\n${token}\n\`\`\``)).toBe(`\`\`\`\n${token}\n\`\`\``)
+    // an indented block is code too
+    expect(forMarkdown(`    ${token}`)).toBe(`    ${token}`)
+  })
+
+  test('a quote names the mention as the space is called now, or as its words were', () => {
+    const snap = { places: [{ ...space, name: 'renamed' }], tasks: [] } as unknown as Parameters<typeof plain>[1]
+    expect(plain(`see [#gtm](space:${space.id}) and [@SHE-12](task:SHE-12)`)).toBe('see #gtm and @SHE-12')
+    expect(plain(`see [#gtm](space:${space.id})`, snap)).toBe('see #renamed')
+    expect(plain('no mentions here', snap)).toBe('no mentions here')
   })
 
   test('a fragment link is the mention it was made from', () => {

@@ -55,15 +55,19 @@ export function put(text: string, t: Typing, words: string): { text: string; car
     word typed by hand, never picked, is only words */
 export function expand(text: string, picks: Picked[]): string {
   if (!picks.length) return text
-  const spaces = new Map(picks.flatMap((p) => (p.kind === 'space' ? [[p.name, p] as const] : [])))
-  const tasks = new Map(picks.flatMap((p) => (p.kind === 'task' ? [[p.ref.toLowerCase(), p] as const] : [])))
-  const withSpaces = text.replace(/(^|[\s(])#([\w.-]+)(?![\w.-]|\]\()/g, (all, before: string, word: string) => {
-    const p = spaces.get(word)
-    return p ? `${before}${spaceToken(p)}` : all
+  const spaces = new Map<string, Picked & { kind: 'space' }>(picks.flatMap((p) => (p.kind === 'space' ? [[p.name, p] as const] : [])))
+  const tasks = new Map<string, Picked & { kind: 'task' }>(picks.flatMap((p) => (p.kind === 'task' ? [[p.ref.toLowerCase(), p] as const] : [])))
+  // "a sentence ends at #gtm.": the pick is the word less the punctuation the sentence added, and that stays after it
+  const word = (w: string) => [w, w.replace(/[.-]+$/, '')]
+  const withSpaces = text.replace(/(^|[\s(])#([\w.-]+)(?![\w.-]|\]\()/g, (all, before: string, w: string) => {
+    const p = word(w).map((x) => spaces.get(x)).find(Boolean)
+    return p ? `${before}${spaceToken(p)}${w.slice(p.name.length)}` : all
   })
-  return withSpaces.replace(/(^|[\s(])@([\w.-]+)(?![\w.-]|\]\()/g, (all, before: string, word: string) => {
-    const p = tasks.get(word.toLowerCase())
-    return p ? `${before}${taskToken(p)}` : all
+  return withSpaces.replace(/(^|[\s(])@([\w.-]+)(?![\w.-]|\]\()/g, (all, before: string, w: string) => {
+    const p = word(w.toLowerCase())
+      .map((x) => tasks.get(x))
+      .find(Boolean)
+    return p ? `${before}${taskToken(p)}${w.slice(p.ref.length)}` : all
   })
 }
 
@@ -88,11 +92,16 @@ export function split(text: string): Part[] {
 }
 
 /** a message's words without its mentions' tokens, for a line that only quotes them (a reply's quote): "#gtm",
-    "@SHE-12" */
-export const plain = (text: string) =>
+    "@SHE-12", named as the space or task is called now when `snap` knows it (a quote's words are cut and thinned, so
+    its token may be old) */
+export const plain = (text: string, snap?: Snapshot | null) =>
   hasMention(text)
     ? split(text)
-        .map((p) => ('text' in p ? p.text : p.mention.kind === 'space' ? `#${p.mention.name}` : `@${p.mention.ref}`))
+        .map((p) => {
+          if ('text' in p) return p.text
+          const named = p.mention.kind === 'space' ? placeOf(snap, p.mention.id)?.name : taskOf(snap, p.mention.id)?.id
+          return p.mention.kind === 'space' ? `#${named ?? p.mention.name}` : `@${named ?? p.mention.ref}`
+        })
         .join('')
     : text
 
@@ -106,11 +115,20 @@ export function forMarkdown(text: string): string {
     .map((part, i) =>
       i % 2
         ? part
-        : part.replace(/\[([#@])([^\]\n]{1,80})\]\((space|task):([^)\s]+)\)/g, (all, mark: string, name: string, kind: string, id: string) =>
-            (mark === '#') === (kind === 'space') ? `[${mark}${name}](#${kind}=${encodeURIComponent(id)})` : all,
-          ),
+        : part.replace(/\[([#@])([^\]\n]{1,80})\]\((space|task):([^)\s]+)\)/g, (all, mark: string, name: string, kind: string, id: string, offset: number) => {
+            // a line indented as code is code too: its words stay as the agent wrote them
+            if (/^( {4}|\t)/.test(lineOf(part, offset))) return all
+            return (mark === '#') === (kind === 'space') ? `[${mark}${name}](#${kind}=${encodeURIComponent(id)})` : all
+          }),
     )
     .join('')
+}
+
+/** the line `at` sits on */
+const lineOf = (text: string, at: number) => {
+  const start = text.lastIndexOf('\n', at - 1) + 1
+  const end = text.indexOf('\n', at)
+  return text.slice(start, end < 0 ? text.length : end)
 }
 
 /** what a token's fragment link names, or null when it is not one */

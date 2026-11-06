@@ -7,6 +7,9 @@ import { Dot, HashIcon, ic, STATUS_WORD } from '@client/ui.tsx'
 import { hasMention, matchSpaces, matchTasks, placeOf, short, split, taskOf, mentionTyping, type Kind, type Mention, type Typing } from './mentions.ts'
 import type { Place, Snapshot, Status, Task } from '@shared/types.ts'
 
+/** the id of the # or @ list over the box, which the box names as the one it opens */
+export const MENTION_LIST = 'mention-list'
+
 /** a row of the "#" list (a space) or of the "@" list (a task) */
 export type Item = { kind: 'space'; key: string; place: Place; on: string } | { kind: 'task'; key: string; task: Task }
 
@@ -42,14 +45,17 @@ export function MentionList({ kind, items, sel, pick }: { kind: Kind; items: Ite
   return (
     <div
       role="listbox"
+      id={MENTION_LIST}
       aria-label={kind === 'space' ? 'Mention a space' : 'Mention a task'}
       data-mentions
-      className="popover mb-2 max-h-[min(22rem,40dvh)] overflow-y-auto overscroll-contain"
+      // a phone's room is the app's own height (--app-h, its keyboard taken out), not the screen's
+      className="popover mb-2 max-h-[min(22rem,calc(var(--app-h,100dvh)*0.4))] overflow-y-auto overscroll-contain"
     >
       <div className="flex h-7 items-center px-2.5 text-[0.75rem] text-fg3 phone:h-9 phone:px-3 phone:text-[0.8125rem]">{kind === 'space' ? 'Spaces' : 'Tasks'}</div>
       {items.map((i, n) => (
         <button
           key={i.key}
+          id={`${MENTION_LIST}-${n}`}
           ref={(el) => {
             rows.current[n] = el
           }}
@@ -59,7 +65,8 @@ export function MentionList({ kind, items, sel, pick }: { kind: Kind; items: Ite
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => pick(i)}
           className={clsx(
-            'press flex w-full min-w-0 items-center gap-2.5 rounded-row px-2.5 py-1 text-left phone:py-2',
+            // a finger's row on a phone: 44px tall, whatever its words
+            'press flex w-full min-w-0 items-center gap-2.5 rounded-row px-2.5 py-1 text-left phone:min-h-11 phone:py-2',
             n === sel ? 'bg-hover' : 'hover:bg-hover',
           )}
         >

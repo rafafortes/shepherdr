@@ -17,7 +17,7 @@ import { dayLabel } from './days.ts'
 import { FindBar, openFind } from './find.tsx'
 import { Fold } from './fold.tsx'
 import { Markdown } from './markdown.tsx'
-import { Mentions, MentionList, inBox, mentionItems, pickOf, type Item } from './mentions.tsx'
+import { Mentions, MentionList, MENTION_LIST, inBox, mentionItems, pickOf, type Item } from './mentions.tsx'
 import { expand, plain, put, type Picked } from './mentions.ts'
 import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } from './reply.ts'
 import { typing, working } from './typing.ts'
@@ -520,6 +520,7 @@ function jumps(chat: string, q: ReplyQuote, label: string) {
     reactions and the buttons beside it stay by it) and a long quote reaches past a short reply toward the middle.
     loose: on its own, not tucked (a card answered in the chat quotes the message that answered it) */
 export function Quote({ q, chat, from, you, loose, label = 'Replying to' }: { q: ReplyQuote; chat: string; from: string; you: boolean; loose?: boolean; label?: string }) {
+  const snap = useSnap()
   const name = q.who === 'you' ? 'You' : q.who === 'peer' ? (q.from ?? 'Another agent') : q.who === 'agent' ? from : null
   return (
     <div className={clsx('relative flex', loose ? 'min-w-0' : '-mb-2 w-0 min-w-full', you ? 'justify-end' : 'justify-start')}>
@@ -538,7 +539,7 @@ export function Quote({ q, chat, from, you, loose, label = 'Replying to' }: { q:
         {name ? <span className="mr-0.5 font-medium">{name} </span> : null}
         {q.file ? <FileIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
         {q.artifact ? <PageIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
-        {plain(q.text ?? '')}
+        {plain(q.text ?? '', snap)}
       </div>
     </div>
   )
@@ -1627,10 +1628,16 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
   const [sel, setSel] = useState(0)
   const [closed, setClosed] = useState<string | null>(null)
   const typed = mentionItems(snap, text, caret)
-  const list = typed && typed.items.length && closed !== text ? typed : null
+  // only while you type in it: a draft opened again (a reload, another chat it was left in) says nothing of a list
+  const list = typed && typed.items.length && closed !== text && focused ? typed : null
   const at = list ? Math.min(sel, list.items.length - 1) : 0
   const word = list ? `${list.kind}:${list.word}` : ''
   useEffect(() => setSel(0), [word])
+  // another chat's box: what was typed, chosen or closed there means nothing here
+  useEffect(() => {
+    setClosed(null)
+    setCaret(ref.current?.value.length ?? 0)
+  }, [chatKey])
   /** a pick goes in as words ("#gtm ", "@SHE-12 "); its mention is what Send turns it into */
   const take = (i: Item) => {
     if (!typed) return
@@ -1759,12 +1766,17 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                   data-kept
                   data-quiet
                   aria-label={placeholder}
+                  aria-controls={list ? MENTION_LIST : undefined}
+                  aria-expanded={list ? true : undefined}
+                  aria-activedescendant={list ? `${MENTION_LIST}-${at}` : undefined}
                   rows={1}
                   value={text}
                   placeholder=""
                   onChange={(e) => {
                     setText(e.target.value)
                     setCaret(e.target.selectionStart)
+                    // the box emptied: its picks go too, so a "#gtm" typed later by hand is only words
+                    if (!e.target.value) pickedIn.delete(chatKey)
                   }}
                   onPaste={(e) => {
                     // a screenshot or a copied file attaches, as + does; text pastes as text
@@ -1791,7 +1803,8 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                   }}
                   onKeyDown={(e) => {
                     // the # and @ lists first: the arrows choose, Enter or Tab takes, Escape closes for what is typed
-                    if (list) {
+                    // (never for an input method composing a word: those keys are its own)
+                    if (list && !e.nativeEvent.isComposing) {
                       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                         e.preventDefault()
                         setSel((n) => (n + (e.key === 'ArrowDown' ? 1 : list.items.length - 1)) % list.items.length)
@@ -1912,7 +1925,7 @@ function ReplyStrip({ chatKey }: { chatKey: string }) {
         Replying to <span className="inline-block max-w-[45%] truncate align-top font-medium text-fg">{name}</span>{' '}
         {q.file ? <FileIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
         {q.artifact ? <PageIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
-        {plain(q.text ?? '')}
+        {plain(q.text ?? '', snap)}
       </div>
       {/* taking the reply away keeps the keyboard up */}
       <button

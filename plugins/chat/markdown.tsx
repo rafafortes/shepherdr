@@ -7,7 +7,7 @@ import { marked } from 'marked'
 import { useMemo, type MouseEvent } from 'react'
 import { goPlace, openTask, useSnap } from '@client/kernel.ts'
 import type { Snapshot } from '@shared/types.ts'
-import { forMarkdown, fromFragment } from './mentions.ts'
+import { forMarkdown, fromFragment, hasMention } from './mentions.ts'
 import { chipFor, mentionKey } from './mentions.tsx'
 
 marked.setOptions({ gfm: true, breaks: false })
@@ -145,11 +145,27 @@ function onCopy(e: MouseEvent) {
   copied(el)
 }
 
-export function Markdown({ text }: { text: string }) {
+/** a reply, drawn from its HTML: a code block's copy button and a mention's chip are marked in it, and both are its
+    own (markdown.tsx's toHtml) */
+function Reply({ html }: { html: string }) {
+  return <div className="prose-reply" onClick={onCopy} dangerouslySetInnerHTML={{ __html: html }} />
+}
+
+/** a reply with a mention in it: drawn again when its words change, or when the space or task it names does (the
+    snapshot itself changes on every news, and re-parsing every reply then would be work for nothing) */
+function WithMentions({ text }: { text: string }) {
   const snap = useSnap()
-  // drawn again when its words change, or when a mention in it does (its space or task moved on): the snapshot itself
-  // changes on every news, and re-parsing every reply then would be work for nothing
   const key = mentionKey(snap, text)
   const html = useMemo(() => toHtml(forMarkdown(text), snap), [text, key])
-  return <div className="prose-reply" onClick={onCopy} dangerouslySetInnerHTML={{ __html: html }} />
+  return <Reply html={html} />
+}
+
+/** a reply without one, which no snapshot redraws */
+function WithoutMentions({ text }: { text: string }) {
+  const html = useMemo(() => toHtml(forMarkdown(text)), [text])
+  return <Reply html={html} />
+}
+
+export function Markdown({ text }: { text: string }) {
+  return hasMention(text) ? <WithMentions text={text} /> : <WithoutMentions text={text} />
 }

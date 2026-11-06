@@ -22,7 +22,8 @@ describe.skipIf(!browser)('mentions in the chat', () => {
       await spaces(page).waitFor()
       // every space, the sidebar's order, each with its machine
       const rows = spaces(page).getByRole('option')
-      expect(await rows.count()).toBe(world.snapshot().places.length)
+      // every space (the list shows six at most)
+      expect(await rows.count()).toBe(Math.min(6, world.snapshot().places.length))
       expect(await rows.first().textContent()).toContain('home')
       await text.pressSequentially('gt')
       expect(await rows.count()).toBe(1)
@@ -134,7 +135,7 @@ describe.skipIf(!browser)('mentions in the chat', () => {
       id: 'mention-reply',
       who: 'agent',
       at: Date.now() + 5,
-      text: 'Ask [#gtm](space:p:vm-str:gtm) about it; [@HP-202](task:HP-202) holds the call fix.\n\n```sh\n[@HP-202](task:HP-202)\n```',
+      text: 'Ask [#gtm](space:p:vm-str:gtm) about it; [@HP-202](task:HP-202) holds the call fix, and [#gone](space:p:vm-str:gone) is a space that left.\n\n```sh\n[@HP-202](task:HP-202)\n```',
     })
     const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } })
     try {
@@ -146,6 +147,9 @@ describe.skipIf(!browser)('mentions in the chat', () => {
       expect(await reply.getByRole('button', { name: 'Open task HP-202' }).count()).toBe(1)
       // the code block is code: the tokens in it are words
       expect((await reply.locator('pre code').first().textContent())?.trim()).toBe('[@HP-202](task:HP-202)')
+      // a space that isn't here any more is its words alone, and no button: nothing to open
+      expect(await reply.locator('[data-mention="gone"]').count()).toBe(1)
+      expect(await reply.getByRole('button', { name: 'Open space gone' }).count()).toBe(0)
       await reply.getByRole('button', { name: 'Open space gtm' }).click()
       await page.waitForFunction(() => new URL(location.href).searchParams.get('place') === 'vm-str/gtm')
       // mail keeps its @, and nothing opens a list for it
