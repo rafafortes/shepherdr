@@ -26,7 +26,8 @@ home screen: alerts need that.
 ## Install it as an app, with alerts
 
 Install the link as an app on each device, open it, and turn alerts on in Settings → Alerts on → **Turn on for this
-device**.
+device**. A login gate in front of the app (our own is a reverse proxy's basic auth) does not stop this: the page asks
+for its manifest with its own credentials, so the browser reads it and offers to install the app.
 
 - **iPhone or iPad**: in Safari, Share → **Add to Home Screen**, then open it from the home screen (alerts only work
   there).

@@ -20,7 +20,10 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Shepherdr" />
-    <link rel="manifest" href="manifest.webmanifest" />
+    <!-- crossorigin: a browser fetches a manifest without the page's credentials unless told, and a login gate in front
+         (our lab-ingress basic auth) then answers with its sign-in page: no manifest, no home-screen install, and on an
+         iPhone no push alerts either (docs/get-started.md) -->
+    <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials" />
     <link rel="icon" href="icon.svg?v=2" type="image/svg+xml" />
     <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png?v=2" />
     <!-- the launch screen on a home-screen iPhone, in its light or dark (scripts/splash.ts makes them) -->
