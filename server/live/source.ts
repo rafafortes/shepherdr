@@ -1070,8 +1070,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         }
     }
     const words = x.t ? await this.engine.restart(x.t.id, h) : await this.restartCoordinator(key, h)
-    // the model it now runs on is one of the human's picks: first among the recent ones
-    if (h.model) rememberModel(h.kind, h.model)
+    // the model it now runs on is one of the human's picks: first among the recent ones (only one a CLI lists, never
+    // a word typed before its list was read)
+    const picked = h.model ? findModel(h.kind, h.model) : undefined
+    if (picked) rememberModel(h.kind, picked.id)
     this.emit('snapshot')
     this.emit('chat', key)
     return words

@@ -15,7 +15,7 @@ import type { SetBy } from '../../shared/brief.ts'
 import { settingsBlock, settingsLines, SEVERITIES, type Said, type Ways } from './prompts.ts'
 import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf } from './models.ts'
 import { picksOf, rememberModel } from './model-picks.ts'
-import { orderByPicks } from '../../shared/picks.ts'
+import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
 import { eventRules, eventsText, eventWords, nextWords, OWN_ZONE, timeRule, timeWords, validZone, type EventRule } from './trigger.ts'
 
 /** every agent kind herdr can start (interactive chat requires runtime log discovery and a reader) */
@@ -282,7 +282,7 @@ const roleKind = (role: Role, get: (key: string) => string) => kindOf(get(role =
  *  models and of the levels its model takes, each showing what it starts with (a level the model lacks shows as the
  *  nearest it has); a CLI that can't list its models takes any id; one Shepherdr passes neither to picks its own. The
  *  models are this machine's picks first (pinned, then recent), then the CLI's own order */
-export function agentRow(r: Row, get: (key: string) => string): Row {
+export function agentRow(r: Row, get: (key: string) => string, picksOfKind: (kind: string) => { pinned: string[]; recent: string[] } = picksOf): Row {
   const [role, what] = r.key.split('.') as [Role, string]
   if (!ROLES.includes(role) || (what !== 'model' && what !== 'effort')) return r
   const kind = roleKind(role, get)
@@ -292,7 +292,7 @@ export function agentRow(r: Row, get: (key: string) => string): Row {
   const model = findModel(kind, stored)
   if (what === 'model') {
     if (!c.models.length) return { ...r, value: stored }
-    const picks = picksOf(kind)
+    const picks = picksOfKind(kind)
     // an older model it still takes by id stays on offer while it is pinned or was picked, as in the restart sheet
     const saved = (c.others ?? []).filter((m) => picks.pinned.includes(m.id) || picks.recent.includes(m.id))
     const ordered = orderByPicks([...c.models, ...saved], picks)
@@ -416,13 +416,19 @@ export class Settings {
     else at[key] = value
     if (typeof l === 'object' && !Object.keys(at).length) delete this.d.spaces[l.space]
     this.save()
-    // a model chosen here is one of the human's picks: first among the recent ones in every model list
-    if (value !== null && /^(task|coordinator|reviewer|backup)\.model$/.test(key)) {
+    // a model chosen here is one of the human's picks: first among the recent ones in every model list (a world of its
+    // own, the demo's, keeps its picks to itself)
+    if (!this.seed && value !== null && /^(task|coordinator|reviewer|backup)\.model$/.test(key)) {
       const kind = this.kindOf(key.split('.')[0] as Role, l)
       const picked = kind ? findModel(kind, value) : undefined
       if (kind && picked) rememberModel(kind, picked.id)
     }
     return { ok: true }
+  }
+
+  /** the picks a role's model rows lead with: this machine's, or none for a world of its own (the demo's) */
+  private picksAt(kind: string) {
+    return this.seed ? NO_PICKS : picksOf(kind)
   }
 
   /** the Everywhere level, as the main machine hands it to the others */
@@ -622,7 +628,7 @@ export class Settings {
         // set here: what a reset goes back to; not set here: where its value comes from
         const back = up ? this.pick(r.key, up) : { value: defaultOf(r.key) ?? '', from: 'default' as const }
         return {
-          ...agentRow({ ...r, value: p.value }, (k) => this.pick(k, l).value),
+          ...agentRow({ ...r, value: p.value }, (k) => this.pick(k, l).value, (kind) => this.picksAt(kind)),
           ...(lines[r.key] ? { line: lines[r.key] } : {}),
           ...this.triggerRow(r.key, p.value),
           ...(here ? { inherits: { value: back.value, from: back.from === 'default' && l === 'all' ? 'Default' : fromName(back.from) } } : l === 'all' ? {} : { from: fromName(p.from) }),

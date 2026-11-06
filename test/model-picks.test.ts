@@ -121,6 +121,39 @@ describe('what a model list offers', () => {
     clear()
   })
 
+  test('a model a CLI stops reporting keeps its pin in the file, out of the list until it is reported again', () => {
+    clear()
+    setModels('pi', PI)
+    try {
+      pinModel('pi', 'zeta/eight', true)
+      const fewer = { ...PI, models: PI.models.filter((m) => m.id !== 'zeta/eight') }
+      setModels('pi', fewer)
+      const pi = restartClis(['pi']).find((c) => c.kind === 'pi')!
+      expect(pi.models!.some((m) => m.id === 'zeta/eight')).toBe(false)
+      expect(pi.pinned).toEqual([])
+      expect(picksOf('pi').pinned).toEqual(['zeta/eight'])
+      // its provider reports it again: the pin is back
+      setModels('pi', PI)
+      expect(restartClis(['pi']).find((c) => c.kind === 'pi')!.pinned).toEqual(['zeta/eight'])
+    } finally {
+      setModels('pi', undefined)
+      clear()
+    }
+  })
+
+  test('a seeded world (the demo’s) neither reads this machine’s picks nor writes them', () => {
+    clear()
+    const machine = new Settings()
+    machine.set('task.model', 'Opus 5.5')
+    expect(picksOf('claude').recent).toEqual(['claude-opus-5-5'])
+    // a demo's Settings is its own world: its picks stay in memory, so this machine's file is untouched
+    const demo = new Settings({ everywhere: {}, machine: {}, spaces: {} })
+    demo.set('task.model', 'Sonnet 5.5')
+    expect(picksOf('claude').recent).toEqual(['claude-opus-5-5'])
+    machine.set('task.model', null)
+    clear()
+  })
+
   test('Settings’ model rows hold Default first, then the pinned models, then the recent ones', () => {
     clear()
     setModels('pi', PI)
