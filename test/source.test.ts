@@ -1291,6 +1291,8 @@ describe('Send now on a message its CLI queued', () => {
       events.set(chat, [...(events.get(chat) ?? []), { kind: 'user', id, at: Date.now(), text }])
     }
     try {
+      // what earlier tests left waiting for this chat
+      agents.outbox = agents.outbox.filter((o) => o.key !== chat)
       // typed mid-turn, and its log hasn't taken it yet: in its own queue
       expect(await src.act({ type: 'send', chat, text: 'Also the README', cid: 'q1' })).toMatchObject({ waiting: false })
       expect(src.chats.chat(chat).queued).toContain('q1')
@@ -1328,7 +1330,7 @@ describe('Send now on a message its CLI queued', () => {
       screen = '● Working…\n❯ \n  ctrl+enter to send now · esc to interrupt'
       expect(await src.act({ type: 'steer', chat })).toMatchObject({ ok: true })
       expect(pressed).toEqual([['ctrl+enter']])
-      // offered again later: a second tap presses again, and never twice for one
+      // another tap, another press: one key each, and nothing else
       expect(await src.act({ type: 'steer', chat })).toMatchObject({ ok: true })
       expect(pressed).toEqual([['ctrl+enter'], ['ctrl+enter']])
       // no offer: nothing is pressed (on an empty prompt Ctrl+Enter would type something else), and it says so
