@@ -43,10 +43,12 @@ export function mentionTyping(text: string, caret = text.length): Typing | null 
   return { kind: m[2] === '#' ? 'space' : 'task', word: m[3], from: m.index + m[1].length, to: caret }
 }
 
-/** the box after a pick: its "#word" (or "@word") becomes "#gtm " (a task's its id), the caret after it */
+/** the box after a pick: its "#word" (or "@word") becomes "#gtm " (a task's its id), the caret after it; a space
+    already there keeps the line from having two */
 export function put(text: string, t: Typing, words: string): { text: string; caret: number } {
-  const out = text.slice(0, t.from) + words + text.slice(t.to)
-  return { text: out, caret: t.from + words.length }
+  const same = words.endsWith(' ') && text[t.to] === ' '
+  const out = text.slice(0, t.from) + (same ? words.slice(0, -1) : words) + text.slice(t.to)
+  return { text: out, caret: t.from + words.length - (same ? 1 : 0) }
 }
 
 /* ---------- at Send ---------- */
@@ -106,31 +108,61 @@ export const plain = (text: string, snap?: Snapshot | null) =>
     : text
 
 /** an agent's markdown before it is drawn: each mention as a link to a fragment, which toHtml turns into a chip (a
-    fragment survives the sanitizer, "space:" does not); what is in code, inline or a block, keeps its words */
+    fragment survives the sanitizer, "space:" does not); what is in code, inline or a block, keeps its words, and so
+    does one the reply escaped with a backslash */
 export function forMarkdown(text: string): string {
   if (!hasMention(text)) return text
-  const parts = text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g)
-  return parts
-    .map((part, i) => {
-      if (i % 2) return part
-      // what comes after a fence or a code span, with a newline before it, starts a line; else it is mid-line
-      const startsLine = i === 0 || parts[i - 1].endsWith('\n')
-      return part.replace(/\[([#@])([^\]\n]{1,80})\]\((space|task):([^)\s]+)\)/g, (all, mark: string, name: string, kind: string, id: string, offset: number) => {
-        if (indentedCode(part, offset, startsLine)) return all
-        return (mark === '#') === (kind === 'space') ? `[${mark}${name}](#${kind}=${encodeURIComponent(id)})` : all
-      })
-    })
-    .join('')
+  const code = codeRanges(text)
+  const inCode = (at: number) => code.some(([from, to]) => at >= from && at < to) || indentedCode(text, at)
+  return text.replace(TOKEN, (all, mark: string, name: string, kind: string, id: string, offset: number) => {
+    if ((mark === '#') !== (kind === 'space')) return all
+    if (text[offset - 1] === '\\' || inCode(offset)) return all
+    return `[${mark}${name}](#${kind}=${encodeURIComponent(id)})`
+  })
+}
+
+/** where a reply's code is: a fenced block (``` or ~~~, closed or running to the end) and an inline span, its run of
+    backticks closed by the same run */
+function codeRanges(text: string): [number, number][] {
+  const out: [number, number][] = []
+  let fence: { mark: string; from: number } | null = null
+  let at = 0
+  for (const line of text.split('\n')) {
+    const start = at
+    at += line.length + 1
+    if (fence) {
+      // its own mark closes it: as many of them, alone on the line
+      if (new RegExp(`^ {0,3}${fence.mark[0]}{${fence.mark.length},}\\s*$`).test(line)) {
+        out.push([fence.from, Math.min(at, text.length)])
+        fence = null
+      }
+      continue
+    }
+    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line)
+    if (open) {
+      fence = { mark: open[1], from: start }
+      continue
+    }
+    const runs = [...line.matchAll(/`+/g)].map((m) => ({ at: start + m.index!, n: m[0].length }))
+    for (let i = 0; i < runs.length; i++) {
+      const close = runs.findIndex((r, j) => j > i && r.n === runs[i].n)
+      if (close < 0) continue
+      out.push([runs[i].at, runs[close].at + runs[close].n])
+      i = close
+    }
+  }
+  if (fence) out.push([fence.from, text.length])
+  return out
 }
 
 /** does `at` sit in a block markdown reads as indented code: four spaces or a tab at a line's start, after a blank line
-    (a nested list's item is indented without one, and is a paragraph's words, not code) */
-function indentedCode(part: string, at: number, startsLine: boolean) {
-  const start = part.lastIndexOf('\n', at - 1) + 1
-  if (!/^( {4}|\t)/.test(part.slice(start, at))) return false
-  if (start === 0) return startsLine
-  const before = part.lastIndexOf('\n', start - 2) + 1
-  return !part.slice(before, start - 1).trim()
+    (a nested list's item is indented without one, and is the item's words, not code) */
+function indentedCode(text: string, at: number) {
+  const start = text.lastIndexOf('\n', at - 1) + 1
+  if (!/^( {4}|\t)/.test(text.slice(start, at))) return false
+  if (start === 0) return true
+  const before = text.lastIndexOf('\n', start - 2) + 1
+  return !text.slice(before, start - 1).trim()
 }
 
 /** what a token's fragment link names, or null when it is not one */
@@ -156,6 +188,10 @@ const pickable = (t: Task) => !t.archived && /^[\w.-]+$/.test(t.id)
 
 /** a space by its id, the way a message's mention names it */
 export const placeOf = (snap: Snapshot | null | undefined, id: string) => snap?.places.find((p) => p.id === id)
+
+/** is the space or task a mention names still here (one removed since it was picked is only its words) */
+export const known = (snap: Snapshot | null | undefined, p: Picked) =>
+  !snap || (p.kind === 'space' ? !!placeOf(snap, p.id) : !!taskOf(snap, p.id))
 
 /** a task by its id, the way a mention names it */
 export const taskOf = (snap: Snapshot | null | undefined, id: string) =>

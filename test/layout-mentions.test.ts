@@ -44,7 +44,6 @@ describe.skipIf(!browser)('mentions in the chat', () => {
       // a heading typed in the box is no list either: only "#word" is
       await text.fill('# Release notes')
       expect(await spaces(page).count()).toBe(0)
-      await page.close()
     } finally {
       await page.close()
     }
@@ -65,7 +64,6 @@ describe.skipIf(!browser)('mentions in the chat', () => {
       expect(await text.inputValue()).toBe('@')
       await text.pressSequentially('HP')
       await tasks(page).waitFor()
-      await page.close()
     } finally {
       await page.close()
     }
@@ -107,6 +105,29 @@ describe.skipIf(!browser)('mentions in the chat', () => {
     }
   }, 45_000)
 
+  test('a pick comes back with the draft it belongs to when the screen reloads', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } })
+    try {
+      await page.goto(url())
+      const text = box(page)
+      await text.click()
+      await text.fill('see #')
+      await spaces(page).waitFor()
+      await spaces(page).getByRole('option', { name: /gtm/ }).click()
+      expect(await text.inputValue()).toBe('see #gtm ')
+      // the screen reloads itself on a new build, keeping the half-typed words (kernel.ts): the pick goes with them,
+      // so the mention is not sent as plain words
+      await page.evaluate(() => sessionStorage.setItem('shepherdr.kept', JSON.stringify({ text: { 'p:vm-str:~': 'see #gtm ' } })))
+      await page.goto(url())
+      await box(page).waitFor()
+      expect(await box(page).inputValue()).toBe('see #gtm ')
+      await box(page).press('Enter')
+      await page.getByRole('button', { name: 'Open space gtm' }).last().waitFor()
+    } finally {
+      await page.close()
+    }
+  }, 45_000)
+
   test('a phone: a tap picks, the Send button sends, and the chip opens the space', async () => {
     const ctx = await browser!.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     const page = await ctx.newPage()
@@ -134,7 +155,6 @@ describe.skipIf(!browser)('mentions in the chat', () => {
       await chip.waitFor()
       await chip.tap()
       await page.waitForFunction(() => new URL(location.href).searchParams.get('place') === 'vm-str/gtm')
-      await page.close()
     } finally {
       await ctx.close()
     }
@@ -166,7 +186,6 @@ describe.skipIf(!browser)('mentions in the chat', () => {
       await box(page).click()
       await box(page).fill('mail me at a@b.com')
       expect(await tasks(page).count()).toBe(0)
-      await page.close()
     } finally {
       await page.close()
     }

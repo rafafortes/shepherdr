@@ -182,7 +182,8 @@ export function chipFor(snap: Snapshot | null | undefined, mention: Mention): HT
     dot.className = `dot ${s.status} size-3 self-center`
     if (s.status === 'work' && s.progress !== undefined) dot.style.setProperty('--p', `${Math.max(4, s.progress)}%`)
     dot.setAttribute('role', 'img')
-    dot.setAttribute('aria-label', STATUS_WORD[s.status])
+    // as the screen's own Dot says it: working, the % its agent reported
+    dot.setAttribute('aria-label', s.status === 'work' && s.progress !== undefined ? `${STATUS_WORD[s.status]}, ${s.progress}% done` : STATUS_WORD[s.status])
     el.append(dot)
   }
   const words = document.createElement('span')

@@ -2,6 +2,7 @@
 // message draws. The round trip matters: what Send writes is what the CLI's log hands back, as text.
 import { describe, expect, test } from 'bun:test'
 import { expand, forMarkdown, fromFragment, hasMention, matchSpaces, matchTasks, mentionTyping, plain, put, split, taskToken } from '../plugins/chat/mentions.ts'
+import { excerpt } from '../shared/excerpt.ts'
 import type { Place, Task } from '../shared/types.ts'
 
 const space = { id: 'p:vm-str:gtm', name: 'gtm', machine: 'vm-str', level: 2, status: 'idle', mode: 'regular', chat: 'p:vm-str:gtm' } as Place
@@ -84,6 +85,11 @@ describe('a message with a mention', () => {
     expect(forMarkdown(`- a\n    - b ${token}`)).toBe(`- a\n    - b [#gtm](#space=${encodeURIComponent(space.id)})`)
     // and the words after a code span are on that span's line
     expect(forMarkdown(`\`x\`    ${token}`)).toBe(`\`x\`    [#gtm](#space=${encodeURIComponent(space.id)})`)
+    // a fence left open, and a span of two backticks
+    expect(forMarkdown(`\`\`\`sh\n${token}`)).toBe(`\`\`\`sh\n${token}`)
+    expect(forMarkdown(`\`\`x ${token}\`\``)).toBe(`\`\`x ${token}\`\``)
+    // escaped: the person wanted the words as they are
+    expect(forMarkdown(`\\${token}`)).toBe(`\\${token}`)
   })
 
   test('a quote names the mention as the space is called now, or as its words were', () => {
@@ -99,6 +105,19 @@ describe('a message with a mention', () => {
     expect(fromFragment(href)).toEqual({ kind: 'task', id: 'p:vm-str:task', ref: '' })
     expect(fromFragment('#space=p%3Avm-str%3Agtm')).toEqual({ kind: 'space', id: 'p:vm-str:gtm', name: '' })
     expect(fromFragment('https://example.com')).toBeNull()
+  })
+})
+
+describe('a quote of a message with a mention', () => {
+  test('names the mention, and never carries half of one', () => {
+    const token = `[#my_proj](space:p:vm-str:my_proj)`
+    // its id would only be noise in a line of words, and its underscores are the name's own
+    expect(excerpt(`ask ${token} about it`)).toBe('ask #my_proj about it')
+    // a quote cut at its length never leaves half a link behind
+    const long = `${'word '.repeat(28)}${token}`
+    const cut = excerpt(long, 140)
+    expect(cut).not.toContain('](')
+    expect(cut.endsWith('…')).toBe(true)
   })
 })
 

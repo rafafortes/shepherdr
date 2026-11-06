@@ -9,9 +9,9 @@ Every agent, coordinator or task agent, gets the same chat.
   `[#gtm](space:p:vm-str:gtm)` or `[@SHE-12](task:SHE-12)`, so the agent reads which space or task you meant and the
   message draws it as a chip that opens it (in an agent's reply too). Arrows choose and Enter or Tab takes a row, a tap
   on a phone, and Escape closes the list for the words typed; a `#` or `@` inside a word (an email, a link's `#anchor`)
-  and anything in code is only words. One typed by hand, never picked, goes as the words it is (`#gtm` stays `#gtm`),
-  and a pick belongs to the box it was made in: a draft a new build reloaded keeps its words, not its pick. How an agent
-  acts on a mention is in the shepherdr skill.
+  and anything in code is only words. One typed by hand, never picked, goes as the words it is (`#gtm` stays `#gtm`); a
+  pick is kept with the draft it was made in, so the reload of a new build brings both back. How an agent acts on a
+  mention is in the shepherdr skill.
 - What you send shows in the chat the moment you tap Send, faded until it is in. If it can't go through, it says so
   under the message, with Retry and Remove; it is still there after a reload.
 - Write to a busy agent any time: it goes in at once and steers the agent mid-turn (Claude Code, Codex and pi take it

@@ -18,7 +18,7 @@ import { FindBar, openFind } from './find.tsx'
 import { Fold } from './fold.tsx'
 import { Markdown } from './markdown.tsx'
 import { Mentions, MentionList, MENTION_LIST, inBox, mentionItems, pickOf, type Item } from './mentions.tsx'
-import { expand, plain, put, type Picked } from './mentions.ts'
+import { expand, known, plain, put, type Picked } from './mentions.ts'
 import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } from './reply.ts'
 import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, LiveLine, TurnLine } from './activity.tsx'
@@ -1592,17 +1592,45 @@ function retry(cid: string) {
 /* ---------- mentions: what the box's # and @ picks become at Send ---------- */
 
 /** what the person picked in each chat's box, by chat: Send turns each "#name" or "@REF" into its mention, and a pick
-    replaces an earlier one of the same name or id */
-const pickedIn = new Map<string, Picked[]>()
+    replaces an earlier one of the same name or id. The screen reloads itself on a new build and the box's words come
+    back (kernel.ts keeps them), so the picks come back with them: a draft's mention must not go out as words */
+const PICKS = 'shepherdr.picks'
+const pickedIn = new Map<string, Picked[]>(
+  (() => {
+    try {
+      return Object.entries(JSON.parse(sessionStorage.getItem(PICKS) ?? '{}') as Record<string, Picked[]>)
+    } catch {
+      return []
+    }
+  })(),
+)
+
+function keepPicks() {
+  try {
+    sessionStorage.setItem(PICKS, JSON.stringify(Object.fromEntries([...pickedIn].filter(([, p]) => p.length))))
+  } catch {
+    /* a private window: the picks stay in memory */
+  }
+}
 
 const same = (a: Picked, b: Picked) =>
   a.kind === 'space' && b.kind === 'space' ? a.name === b.name : a.kind === 'task' && b.kind === 'task' ? a.ref.toLowerCase() === b.ref.toLowerCase() : false
 
-const rememberPick = (chatKey: string, p: Picked) => pickedIn.set(chatKey, [...(pickedIn.get(chatKey) ?? []).filter((x) => !same(x, p)), p])
+/** the pick replaces an earlier one of the same name (its id is what Send writes) */
+const rememberPick = (chatKey: string, p: Picked) => {
+  pickedIn.set(chatKey, [...(pickedIn.get(chatKey) ?? []).filter((x) => !same(x, p)), p])
+  keepPicks()
+}
+
+const forgetPicks = (chatKey: string) => {
+  if (!pickedIn.delete(chatKey)) return
+  keepPicks()
+}
 
 const takePicks = (chatKey: string) => {
   const p = pickedIn.get(chatKey) ?? []
   pickedIn.delete(chatKey)
+  keepPicks()
   return p
 }
 
@@ -1718,8 +1746,12 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
     // and again when the box comes back after talking to type or a call: it is a new textarea then
   }, [text, width, room, !!live])
   const send = () => {
-    // the # and @ picks the person made become their mentions, the way the CLI's log hands them back (mentions.ts)
-    const t = expand(text, takePicks(chatKey)).trim()
+    // the # and @ picks the person made become their mentions, the way the CLI's log hands them back (mentions.ts);
+    // one whose space or task is gone is only its words
+    const t = expand(
+      text,
+      takePicks(chatKey).filter((p) => known(snap, p)),
+    ).trim()
     if (!t && !files.length) return
     const reply = getState().ui.reply[chatKey]
     setText('')
@@ -1787,7 +1819,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                     setText(e.target.value)
                     setCaret(e.target.selectionStart)
                     // the box emptied: its picks go too, so a "#gtm" typed later by hand is only words
-                    if (!e.target.value) pickedIn.delete(chatKey)
+                    if (!e.target.value) forgetPicks(chatKey)
                   }}
                   onPaste={(e) => {
                     // a screenshot or a copied file attaches, as + does; text pastes as text

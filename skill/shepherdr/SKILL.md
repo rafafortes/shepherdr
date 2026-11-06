@@ -103,9 +103,9 @@ The words in the brackets are how it shows in their chat; the parentheses say wh
 name you looked up yourself. A task: `shepherdr task show SHE-12` (`shepherdr task list` finds it by title), and when
 the human asks you to pass something on, `shepherdr task tell SHE-12 "…"` reaches its agent. A space:
 `shepherdr space list` names it and `shepherdr show --space <name>` says how it is set up; its chat is the human's,
-not a line you write to for them. You can write a task mention the same way, `[@SHE-12](task:SHE-12)`, and it reads as
-a chip in their chat; a space's id is not something a command prints, so leave a space as plain words (`#gtm`, which is
-how it reads unless they picked it).
+not a line you write to for them. You can write a task mention the same way, `[@SHE-12](task:SHE-12)`, and in a
+message of theirs it reads as a chip; a space's id is not something a command prints, so leave a space as plain words
+(`#gtm`). A quote of their message, an alert or a card shows a mention by its name, never its id.
 
 ### Asking
 
