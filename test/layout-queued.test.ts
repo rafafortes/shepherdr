@@ -10,53 +10,68 @@ const { browser, world, url } = await layout()
 const KEY = 'p:vm-str:~'
 const emit = (key: string) => (world as unknown as { emit(e: string, k: string): void }).emit('chat', key)
 
-/** one of yours still in its CLI's queue: the screen keeps it until the agent's log has it (src/outbox.ts) */
-const stillQueued = (text: string) => ({ cid: 'queued-1', chat: KEY, text, files: [], at: Date.now(), state: 'sent', serverAt: Date.now() })
-
-/** it at work, and one of your messages the log doesn't have yet: the browser opens on both */
-async function opened(text: string) {
+/** its agent at work, so what you send waits in its CLI's own queue (world.ts), and long enough that its next step
+ *  does not take it before the test got to Send now */
+function atWork() {
   const chat = world.chats[KEY]
   chat.working = true
-  const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
-  await page.addInitScript((o) => localStorage.setItem('shepherdr.outbox', JSON.stringify([o])), stillQueued(text))
-  await page.goto(url())
-  const bubble = page.locator('[data-msg^="out:"]').filter({ hasText: text })
-  await bubble.waitFor()
-  return { page, chat, bubble, now: bubble.getByRole('button', { name: 'Send now', exact: true }) }
+  const was = world.queueMs
+  world.queueMs = 60_000
+  return () => {
+    chat.working = undefined
+    chat.agent = chat.agent && { ...chat.agent, kind: 'claude' }
+    world.queueMs = was
+    emit(KEY)
+  }
 }
 
 describe.skipIf(!browser)("Send now on a message in Claude Code's queue", () => {
-  test('it shows on one still in its queue while the agent works, and on Claude Code alone', async () => {
+  test('a message its CLI holds says Queued · Send now, and a tap has the CLI take it now', async () => {
+    const done = atWork()
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
     const text = 'Also rerun the flaky test'
-    const { page, chat, bubble, now } = await opened(text)
-    const agent = chat.agent!
     try {
+      await page.goto(url())
+      const box = page.getByRole('textbox', { name: /Message/ })
+      await box.waitFor()
+      await box.fill(text)
+      await page.getByRole('button', { name: 'Send' }).click()
+      // in its CLI's queue, not in the chat yet: the bubble says so, and Send now is right there
+      const bubble = page.locator('[data-msg^="out:"]').filter({ hasText: text })
+      await bubble.waitFor()
+      const now = bubble.getByRole('button', { name: 'Send now', exact: true })
       await now.waitFor()
       expect(await bubble.textContent()).toContain('Queued · Send now')
       // another CLI keeps its own queue and has no such key: nothing to press, and nothing said
-      chat.agent = { ...agent, kind: 'pi' }
+      const agent = world.chats[KEY].agent!
+      world.chats[KEY].agent = { ...agent, kind: 'pi' }
       emit(KEY)
       await now.waitFor({ state: 'detached' })
       expect(await bubble.textContent()).toBe(text)
       // Claude Code again, but its turn is over: what it queued goes in on its own
-      chat.agent = agent
-      chat.working = false
+      world.chats[KEY].agent = agent
+      world.chats[KEY].working = false
       emit(KEY)
-      await page.waitForFunction((t) => document.querySelector(`[data-msg^="out:"]`)?.textContent === t, text)
+      await page.waitForFunction((t) => document.querySelector('[data-msg^="out:"]')?.textContent === t, text)
       expect(await now.count()).toBe(0)
       // at work again: the same message is still in its queue, and can be taken now
-      chat.working = true
+      world.chats[KEY].working = true
       emit(KEY)
       await now.waitFor()
+      // a tap: its CLI takes it, and the real message takes the bubble's place without the line
+      await now.click()
+      await page.waitForFunction(() => !document.querySelector('[data-msg^="out:"]'))
+      const real = page.locator('[data-you]').filter({ hasText: text })
+      await real.waitFor()
+      expect(await real.textContent()).toBe(text)
+      expect(await page.getByRole('button', { name: 'Send now', exact: true }).count()).toBe(0)
     } finally {
-      chat.agent = agent
-      chat.working = undefined
-      emit(KEY)
+      done()
       await page.close()
     }
   }, 30_000)
-  test('a tap asks its pane for it once, stays for the next one, and says why when it could not', async () => {
-    const text = 'And update the changelog'
+  test('a tap asks its pane for it once, and a screen that offers nothing says so, then lets it be tried again', async () => {
+    const done = atWork()
     const acted: Action[] = []
     let answer: unknown = { ok: true }
     const act = world.act.bind(world)
@@ -65,20 +80,29 @@ describe.skipIf(!browser)("Send now on a message in Claude Code's queue", () => 
       acted.push(a)
       return answer
     }
-    const { page, chat, bubble, now } = await opened(text)
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
+    const text = 'And update the changelog'
     /** what the server was told, once the tap's answer has landed */
     const told = async (n: number) => {
       for (let i = 0; i < 100 && acted.length < n; i++) await Bun.sleep(50)
       return acted
     }
     try {
+      await page.goto(url())
+      const box = page.getByRole('textbox', { name: /Message/ })
+      await box.waitFor()
+      await box.fill(text)
+      await page.getByRole('button', { name: 'Send' }).click()
+      const bubble = page.locator('[data-msg^="out:"]').filter({ hasText: text })
+      const now = bubble.getByRole('button', { name: 'Send now', exact: true })
+      await now.waitFor()
       await now.click()
       expect(await told(1)).toEqual([{ type: 'steer', chat: KEY }])
       // still in its queue: Send now is there for the next tap, and that one asks again, once
       await now.waitFor()
       await now.click()
       expect(await told(2)).toHaveLength(2)
-      // its screen offered nothing: the reason it couldn't, in place of Send now, and the words stay
+      // the screen offered nothing: why, in place of Send now, and the words stay; a moment later it can be tried again
       answer = { ok: false, error: "It couldn't take it now." }
       await now.waitFor()
       await now.click()
@@ -86,12 +110,11 @@ describe.skipIf(!browser)("Send now on a message in Claude Code's queue", () => 
       expect(await bubble.textContent()).toContain("Queued · It couldn't take it now.")
       expect(await bubble.locator('[data-text]').textContent()).toBe(text)
       expect(await told(3)).toHaveLength(3)
-      expect(await now.count()).toBe(0)
+      await now.waitFor({ timeout: 10_000 })
     } finally {
       world.act = act
-      chat.working = undefined
-      emit(KEY)
+      done()
       await page.close()
     }
-  }, 30_000)
+  }, 40_000)
 })

@@ -1278,6 +1278,38 @@ describe('what you send shows at once', () => {
 
 describe('Send now on a message its CLI queued', () => {
   const chat = placeId.home()
+  test('the chat names what its CLI still holds in its own queue, and drops it once its log has it', async () => {
+    const agents = src.agents
+    const originals = { status: agents.status, record: agents.records[chat], prompt: herdr.prompt }
+    let st = 'working'
+    agents.records[chat] = { ...(originals.record ?? { logs: [] }), key: chat, name: 'queued-now', kind: 'claude' } as (typeof agents.records)[string]
+    agents.status = (() => st) as typeof agents.status
+    herdr.prompt = (async () => {}) as typeof herdr.prompt
+    /** a line its CLI's log took: the readers keep them so */
+    const logged = (id: string, text: string) => {
+      const events = (src.chats as unknown as { events: Map<string, { kind: string; id: string; at: number; text: string }[]> }).events
+      events.set(chat, [...(events.get(chat) ?? []), { kind: 'user', id, at: Date.now(), text }])
+    }
+    try {
+      // typed mid-turn, and its log hasn't taken it yet: in its own queue
+      expect(await src.act({ type: 'send', chat, text: 'Also the README', cid: 'q1' })).toMatchObject({ waiting: false })
+      expect(src.chats.chat(chat).queued).toContain('q1')
+      // its log has it: taken, and no longer in its queue
+      logged('q1-log', 'Also the README')
+      expect(src.chats.chat(chat).queued ?? []).not.toContain('q1')
+      // a turn over means what it queued goes in on its own: nothing named then
+      expect(await src.act({ type: 'send', chat, text: 'And the changelog', cid: 'q2' })).toMatchObject({ waiting: false })
+      expect(src.chats.chat(chat).queued).toContain('q2')
+      st = 'idle'
+      expect(src.chats.chat(chat).queued).toBeUndefined()
+    } finally {
+      Object.assign(agents, { status: originals.status })
+      herdr.prompt = originals.prompt
+      if (originals.record) agents.records[chat] = originals.record
+      else delete agents.records[chat]
+      agents.outbox = agents.outbox.filter((o) => o.key !== chat)
+    }
+  })
   test("Claude Code's Ctrl+Enter, pressed only while its screen offers it, once per tap", async () => {
     const agents = src.agents
     const originals = { info: agents.info, status: agents.status, record: agents.records[chat], visible: herdr.visible, paneKeys: herdr.paneKeys }

@@ -562,6 +562,9 @@ export class Machines extends Emitter<Events> {
 
   async act(l: Link, a: Action): Promise<unknown> {
     if (!l.reachable) {
+      // Send now is a tap on a screen, answered now or not at all: kept for later it would press at a screen that has
+      // long moved on
+      if (a.type === 'steer') return { ok: false, error: 'Its machine is out of reach.' }
       l.waiting.push(a)
       return { waiting: true }
     }

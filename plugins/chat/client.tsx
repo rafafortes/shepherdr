@@ -231,18 +231,25 @@ function QueueLine({ chatKey }: { chatKey: string }) {
   )
 }
 
-/** whether this is one of yours still sitting in its CLI's own queue: Claude Code holds those while it works, and takes
- *  one now when its screen offers Ctrl+Enter. Another CLI has no such offer, and a waiting one is shown as waiting */
+/** whether this is one of yours still sitting in its CLI's own queue: the server says so by the screen's id for it
+ *  (what went in mid-turn that its log hasn't taken), and only Claude Code can take one now when its screen offers
+ *  Ctrl+Enter. Another CLI takes it at its next step, and a waiting one is shown as waiting */
 function inQueue(chat: Chat, out?: Outgoing) {
-  return !!out && out.state === 'sent' && !out.waiting && !out.queued && !!chat.working && chat.agent?.kind === 'claude'
+  return !!out?.cid && out.state === 'sent' && !out.waiting && !!chat.queued?.includes(out.cid) && chat.agent?.kind === 'claude'
 }
 
 function InQueue({ chatKey }: { chatKey: string }) {
   const [state, setState] = useState<'idle' | 'sending' | string>('idle')
+  // a reason shows for a moment, then Send now comes back: the message is still in its queue, to try again
+  useEffect(() => {
+    if (state === 'idle' || state === 'sending') return
+    const t = setTimeout(() => setState('idle'), 4000)
+    return () => clearTimeout(t)
+  }, [state])
   const now = () => {
     setState('sending')
     act({ type: 'steer', chat: chatKey }).then(
-      (r: { ok?: boolean; error?: string }) => setState(r?.ok === false ? (r.error ?? "It couldn't take it now.") : 'idle'),
+      (r: { ok?: boolean; error?: string }) => setState(r?.ok === false || r?.error ? (r.error ?? "It couldn't take it now.") : 'idle'),
       (e) => setState(reasonOf(e)),
     )
   }

@@ -525,6 +525,17 @@ export class Chats {
     return [...this.agents.waiting(key).filter(mine), ...this.agents.typedSince(key, start).filter((o) => mine(o) && !read(o))]
   }
 
+  /**
+   * What its CLI still holds in its own queue, by the id the screen gave each: what you sent since its turn began and
+   * its log hasn't taken yet (Claude Code reads those at its next step, or now with its own Ctrl+Enter). Only while it
+   * works: a turn over means what it queued goes in on its own.
+   */
+  inQueue(key: string): string[] {
+    if (this.agents.status(key) !== 'working') return []
+    const holding = new Set(this.agents.waiting(key).map((o) => o.cid))
+    return this.unseen(key).flatMap((o) => (o.cid && !holding.has(o.cid) ? [o.cid] : []))
+  }
+
   /* ---------- what it does: its steps, and its work in the background ---------- */
 
   /**
@@ -866,6 +877,7 @@ export class Chats {
       else msgs.push(card)
     }
     const st = this.agents.status(key)
+    const queued = this.inQueue(key)
     const failed = this.agents.failedLately(key)
     const active = this.agents.info(key)?.agent_session
     const file = active?.kind === 'path' ? r?.logs.find((f) => f.endsWith('/' + active.value.split('/').at(-1)))
@@ -883,6 +895,7 @@ export class Chats {
       messages: msgs,
       failed: failed.length ? failed : undefined,
       working: st === 'working' || undefined,
+      queued: queued.length ? queued : undefined,
       // its turn is over, or ended while work it started still runs: a subagent, a shell
       background: (st === 'working' && !this.replying(key, ev)) || !!this.agents.background(key) || undefined,
       finished: (r?.finished && st === 'gone') || undefined,
