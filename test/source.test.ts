@@ -1607,6 +1607,80 @@ describe("Autopilot's heartbeat", () => {
     const { agentLines } = await import('../server/live/chatlines.ts')
     expect(agentLines('<no-reply>heartbeat: nothing to do</no-reply>').text).toBe('')
   })
+
+  test("Run now: one wake on the human's word, refused while one waits or runs, and the command wakes it too", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shep-now-'))
+    run('git init -q -b main', dir)
+    const p = await src.places.add(dir, 'now')
+    const place = placeId.space(p.name)
+    const sent: { k: string; text: string }[] = []
+    const send = src.agents.send
+    const status = src.agents.status
+    const reachable = src.agents.reachable
+    let st = 'idle'
+    src.agents.send = (async (k: string, text: string) => (sent.push({ k, text }), { waiting: false })) as typeof send
+    src.agents.status = ((k: string) => (k === place ? st : 'gone')) as typeof status
+    src.agents.reachable = true
+    const wakes = () => sent.filter((x) => x.k === place && x.text.includes('<heartbeat'))
+    const runNow = () => src.snapshot().places.find((x) => x.id === place)?.runNow
+    // the turn runs, and is over: what the 30 s tick sees, at the clock this test keeps
+    const turn = (t: number) => {
+      st = 'working'
+      src.heartbeat(t)
+      st = 'idle'
+      src.heartbeat(t + 60_000)
+    }
+    try {
+      // off Autopilot: the screens offer nothing, and one that asks is refused
+      src.places.setMode(place, 'regular')
+      expect(runNow()).toBeUndefined()
+      expect(await src.act({ type: 'heartbeat', place, op: 'run' })).toEqual({ ok: false, error: `${p.name} is not on Autopilot: switch it on first.` })
+      src.places.setMode(place, 'autopilot')
+      expect(runNow()).toBe('ready')
+      // nothing to go through: refused, and no turn is spent
+      await src.act({ type: 'setting', key: 'heartbeat.md', value: '', place })
+      expect(await src.act({ type: 'heartbeat', place, op: 'run' })).toEqual({ ok: false, error: `Nothing to run: ${p.name}'s HEARTBEAT.md is empty and no news waits for it.` })
+      expect(wakes()).toEqual([])
+      // with its checklist: one wake, now, carrying the checklist itself (never a path)
+      expect(await src.act({ type: 'setting', key: 'heartbeat.md', value: '- Check the tasks', place })).toEqual({ ok: true })
+      expect(await src.act({ type: 'heartbeat', place, op: 'run' })).toEqual({ ok: true, queued: false })
+      expect(wakes()).toHaveLength(1)
+      expect(wakes()[0].text).toContain('<heartbeat reason="run now">')
+      expect(wakes()[0].text).toContain('- Check the tasks')
+      expect(wakes()[0].text).not.toContain(heartbeatFile(place))
+      // the screens say Waking, and a second tap is refused: one wake at a time
+      expect(runNow()).toBe('waking')
+      expect(await src.act({ type: 'heartbeat', place, op: 'run' })).toEqual({ ok: false, error: `${p.name}'s coordinator is already waking: one wake at a time.` })
+      expect(wakes()).toHaveLength(1)
+      turn(Date.now())
+      expect(runNow()).toBe('ready')
+      // a tap while its coordinator is busy is kept for its turn: one wake when that is over, never two at once
+      st = 'working'
+      expect(await src.act({ type: 'heartbeat', place, op: 'run' })).toEqual({ ok: true, queued: true })
+      expect(runNow()).toBe('queued')
+      expect(wakes()).toHaveLength(1)
+      st = 'idle'
+      src.heartbeat(Date.now() + 120_000)
+      expect(wakes()).toHaveLength(2)
+      // its turn over again: the command wakes it once, as a human's own terminal would
+      turn(Date.now() + 180_000)
+      const r = await src.cli(['heartbeat', 'run', p.name], {})
+      expect(r.code).toBe(0)
+      expect(r.out).toContain(`Woke ${p.name}'s coordinator: one heartbeat now`)
+      expect(wakes()).toHaveLength(3)
+      expect(wakes()[2].text).toContain('reason="run now"')
+      // and the command refuses what the screens hide: a place off Autopilot
+      src.places.setMode(place, 'regular')
+      const off = await src.cli(['heartbeat', 'run', p.name], {})
+      expect(off.code).toBe(1)
+      expect(off.out).toContain('is not on Autopilot: switch it on first.')
+    } finally {
+      src.places.setMode(place, 'regular')
+      src.agents.send = send
+      src.agents.status = status
+      src.agents.reachable = reachable
+    }
+  })
 })
 
 describe('automations add tasks with fresh agents', () => {

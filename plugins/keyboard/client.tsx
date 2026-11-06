@@ -186,7 +186,8 @@ export default definePlugin({
         }
         if (k === 'e') {
           const msgs = getState().chats[chatKey]?.messages ?? []
-          const m = [...msgs].reverse().find((x) => x.who === 'agent')
+          // never a wake's quiet line, which has no words to open
+          const m = [...msgs].reverse().find((x) => x.who === 'agent' && !x.pilot)
           return m ? go({ pick: ui.pick === m.id ? null : m.id }) : false
         }
         return false

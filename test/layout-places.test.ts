@@ -1040,3 +1040,76 @@ describe.skipIf(!browser)('the order of places', () => {
     }
   }, 30_000)
 })
+
+describe.skipIf(!browser)('Autopilot Run now', () => {
+  const place = () => world.places.find((x) => x.id === 'p:vm-str:herdr-projects')!
+  const at = (id: string) => `http://127.0.0.1:${server!.port}/?place=${encodeURIComponent(id)}`
+  const line = 'Autopilot woke · Run now · nothing to report'
+  for (const [name, opts] of [
+    ['phone, light', { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, colorScheme: 'light' }],
+    ['desktop, dark', { viewport: { width: 1440, height: 800 }, colorScheme: 'dark' }],
+  ] as const)
+    test(`one tap beside the pill wakes its coordinator once, leaves one quiet line in that chat, and says Waking while it runs (${name})`, async () => {
+      const p = place()
+      const was = p.mode
+      await world.act({ type: 'mode', place: p.id, mode: 'autopilot' })
+      const ctx = await browser!.newContext(opts)
+      const page = await ctx.newPage()
+      await page.goto(at(p.id))
+      const chat = page.locator('[data-messages]')
+      await chat.waitFor()
+      // a wake another test made may already sit here: its own line, at the end of the chat
+      const before = await chat.locator('[data-pilot]').count()
+      const run = page.locator('[data-chrome] [data-run-now]')
+      await run.waitFor()
+      await run.click()
+      // the wake's one quiet line, in the place's own chat: a line, never a card, and no words of its own
+      const quiet = chat.locator('[data-pilot]')
+      await page.waitForFunction((n) => document.querySelectorAll('[data-messages] [data-pilot]').length === n, before + 1)
+      expect((await quiet.allInnerTexts()).slice(before)).toEqual([line])
+      const last = quiet.last()
+      expect(await last.evaluate((e) => !!e.closest('[data-card]'))).toBe(false)
+      expect(await last.evaluate((e) => !!e.querySelector('[data-text]'))).toBe(false)
+      expect(await last.evaluate((e) => parseFloat(getComputedStyle(e).fontSize))).toBeLessThan(15)
+      // while its wake runs the button is off, saying so: a second tap can't stack another wake on it
+      await page.waitForFunction(() => document.querySelector('[data-chrome] [data-run-now]')?.hasAttribute('disabled'))
+      expect(await run.innerText()).toBe('Waking')
+      // its turn over: ready again, one wake per tap
+      await page.waitForFunction(() => !document.querySelector('[data-chrome] [data-run-now]')?.hasAttribute('disabled'))
+      await run.click()
+      await page.waitForFunction((n) => document.querySelectorAll('[data-messages] [data-pilot]').length === n, before + 2)
+      expect((await quiet.allInnerTexts()).slice(before)).toEqual([line, line])
+      await page.close()
+      // another place's chat has none of it: the line belongs to the chat it woke
+      const other = await browser!.newPage(opts)
+      await other.goto(at('p:vm-str:gtm'))
+      await other.locator('[data-messages]').waitFor()
+      expect(await other.locator('[data-messages] [data-pilot]').count()).toBe(0)
+      await other.close()
+      await world.act({ type: 'mode', place: p.id, mode: was })
+      await ctx.close()
+    }, 40_000)
+
+  test('Settings → Autopilot offers it too, at the top of the space level (phone)', async () => {
+    const p = place()
+    const was = p.mode
+    await world.act({ type: 'mode', place: p.id, mode: 'autopilot' })
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    const before = world.chat(p.chat).messages.length
+    await page.goto(at(p.id))
+    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: 'Settings' }).click()
+    await page.getByRole('button', { name: 'Autopilot', exact: true }).click()
+    const run = page.getByRole('button', { name: /Run now: wake/ })
+    await run.waitFor()
+    expect(await run.innerText()).toBe('Run now')
+    expect(await page.getByText('Wakes its coordinator once, now', { exact: false }).count()).toBe(1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await run.click()
+    // its coordinator wakes: one quiet line in the chat behind the page
+    await page.waitForFunction(() => !document.querySelector('[aria-label*="Run now: wake"]')?.hasAttribute('disabled'))
+    expect(world.chat(p.chat).messages.slice(before).filter((m) => m.pilot).map((m) => m.pilot)).toEqual([line])
+    await world.act({ type: 'mode', place: p.id, mode: was })
+    await page.close()
+  }, 40_000)
+})

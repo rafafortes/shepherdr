@@ -13,6 +13,7 @@ import { settingsBlock } from '../live/prompts.ts'
 import { CLI_NAME, repositorySection, defaultOf, kindOf } from '../live/settings.ts'
 import { harnessProblem, harnessWords, restartClis } from '../live/restart.ts'
 import { nextWords } from '../live/trigger.ts'
+import { pilotLine } from '../live/heartbeat.ts'
 import { secretPages, Vault } from '../live/secrets.ts'
 
 const DEFAULT_WAYS = { review: defaultOf('brief.review') !== 'off', mustFix: defaultOf('review.mustFix')!, rounds: Number.parseInt(defaultOf('review.rounds')!, 10), merge: defaultOf('brief.merge')!, waitChecks: defaultOf('brief.merge') === 'after GitHub checks' }
@@ -67,6 +68,8 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   stores = D.settingStores()
   /** each place's HEARTBEAT.md as edited here */
   checklists: Record<string, string> = {}
+  /** the places whose Run now woke its coordinator a moment ago */
+  waking: Record<string, boolean> = {}
   pluginsOff: string[] = []
   bases: Record<string, string> = Object.fromEntries(this.places.filter((p) => p.level === 2 && !p.id.endsWith(':~')).map((p) => [p.id, 'main']))
   sections = D.settings(this.stores)
@@ -225,7 +228,12 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     return {
       name: 'Shepherdr',
       host: D.DEMO_HOST,
-      ...sortPlaces(this.places, this.machines, this.order, this.groups),
+      ...sortPlaces(
+        this.places.map((p) => ({ ...p, ...(this.runNow(p) ? { runNow: this.runNow(p) } : {}) })),
+        this.machines,
+        this.order,
+        this.groups,
+      ),
       tasks: this.tasks.map((t) => (t.status === 'done' ? t : { ...t, browser: this.browsers?.status() ?? { ready: false, hint: 'The demo has no browser: start it with SHEPHERDR_DEMO_BROWSER=1.' } })),
       automations: this.automations,
       artifacts: this.artifacts,
@@ -240,12 +248,13 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     }
   }
 
-  /** when each coordinator's chat last had something from it or Shepherdr (tasks' chats count for nothing here) */
+  /** when each coordinator's chat last had something from it or Shepherdr (tasks' chats count for nothing here; a
+   *  wake's quiet line says nothing to read, so it marks nothing unread, as live's newest does not) */
   private last() {
     const out: Record<string, number> = {}
     for (const c of Object.values(this.chats)) {
       if (c.key.includes('/')) continue
-      const at = c.messages.findLast((m) => m.who === 'agent')?.at
+      const at = c.messages.findLast((m) => m.who === 'agent' && !m.pilot)?.at
       if (at) out[c.key] = at
     }
     return out
@@ -255,6 +264,13 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   private subtree(id: string) {
     const p = this.places.find((x) => x.id === id)
     return this.places.filter((x) => x.id === id || p?.level === 0 || (p?.level === 1 && x.machine === p.machine)).map((x) => x.id)
+  }
+
+  /** Autopilot's Run now, as the place shows it: one of this machine's on Autopilot, ready or already waking (another
+   *  machine's wakes its own, as live's does) */
+  private runNow(p: Place): Place['runNow'] {
+    if (p.mode !== 'autopilot' || p.machine !== D.DEMO_HOST || p.unreachableSince || this.pluginsOff.includes('autopilot')) return undefined
+    return this.waking[p.id] ? 'waking' : 'ready'
   }
 
   private placeStatus(p: Place): Place['status'] {
@@ -546,6 +562,23 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         }
         this.emit('snapshot')
         return {}
+      }
+      case 'heartbeat': {
+        // Autopilot's Run now: one wake at a time, and only while it is on. The demo's coordinator goes through its
+        // checklist, finds nothing and says so in one quiet line, as a quiet night's wake does
+        const p = this.places.find((x) => x.id === a.place)
+        if (!p) return { ok: false, error: 'No such space.' }
+        if (p.machine !== D.DEMO_HOST) return { ok: false, error: `${p.name} is on another machine: wake it there.` }
+        if (p.mode !== 'autopilot') return { ok: false, error: `${p.name} is not on Autopilot: switch it on first.` }
+        if (this.waking[p.id]) return { ok: false, error: `${p.name}'s coordinator is already waking: one wake at a time.` }
+        this.waking[p.id] = true
+        this.push(p.chat, { who: 'agent', pilot: pilotLine({ reason: 'run now', quiet: true, said: false }) })
+        setTimeout(() => {
+          delete this.waking[p.id]
+          this.emit('snapshot')
+        }, 1500)
+        this.emit('snapshot')
+        return { ok: true, queued: false }
       }
       case 'model':
       case 'effort':

@@ -12,7 +12,7 @@ const { Automations } = await import('../server/live/automations.ts')
 const T = await import('../server/live/trigger.ts')
 const { CATALOG, Settings, effortFor, setForTask } = await import('../server/live/settings.ts')
 const { readBrief } = await import('../shared/brief.ts')
-const { Heartbeats, heartbeatFile } = await import('../server/live/heartbeat.ts')
+const { Heartbeats, heartbeatFile, Wakes, pilotLine, wakeOf, wakeProblem } = await import('../server/live/heartbeat.ts')
 const { coordinatorPrompt, settingsBlock, splitBrief, taskPrompt } = await import('../server/live/prompts.ts')
 const { pastTimes, span } = await import('../server/live/estimates.ts')
 const { readJson, writeJson } = await import('../server/store.ts')
@@ -467,6 +467,74 @@ describe('heartbeat', () => {
     h.write('p:x:held', '')
     h.hold('p:x:held', 'SHE-2 needs you')
     expect(h.beat('p:x:held', 'space')).toContain('- SHE-2 needs you')
+  })
+  test('Run now: one wake per tap, refused while one waits or runs, and free again once its turn is over', () => {
+    const w = new Wakes()
+    const t0 = 1_000_000
+    // one tap: it waits for its coordinator
+    expect(w.ask('p:x:run', t0)).toBe(true)
+    expect(w.state('p:x:run')).toBe('queued')
+    // a second tap while one waits is refused: one wake per tap, one at a time
+    expect(w.ask('p:x:run', t0 + 1000)).toBe(false)
+    // its coordinator was idle: the wake goes, and its turn holds the place
+    expect(w.take('p:x:run', t0 + 2000)).toBe(true)
+    expect(w.state('p:x:run')).toBe('waking')
+    expect(w.ask('p:x:run', t0 + 3000)).toBe(false)
+    // a wake sent straight away marks itself; its turn ends once it was seen working and then free
+    w.mark('p:x:now', t0)
+    w.observe('p:x:now', false, t0 + 1000)
+    expect(w.state('p:x:now')).toBe('waking')
+    w.observe('p:x:now', true, t0 + 2000)
+    expect(w.state('p:x:now')).toBe('waking')
+    w.observe('p:x:now', false, t0 + 3000)
+    expect(w.state('p:x:now')).toBeUndefined()
+    expect(w.ask('p:x:now', t0 + 4000)).toBe(true)
+    // a wake that never got its turn (herdr was down) stops holding the place after 10 minutes
+    w.observe('p:x:run', true, t0 + 10_000)
+    w.prune(t0 + 11 * min)
+    expect(w.state('p:x:run')).toBeUndefined()
+    // a wake that opened and closed between two looks is over after its grace: the screens say Run now again
+    w.ask('p:x:fast', t0)
+    w.take('p:x:fast', t0)
+    w.observe('p:x:fast', false, t0 + 10_000)
+    expect(w.state('p:x:fast')).toBe('waking')
+    w.observe('p:x:fast', false, t0 + 21_000)
+    expect(w.state('p:x:fast')).toBeUndefined()
+    // a tap that waits keeps waiting, however long: it was promised the wake once its turn is over
+    w.ask('p:x:tap', t0)
+    w.prune(t0 + 11 * min)
+    expect(w.state('p:x:tap')).toBe('queued')
+    // Autopilot off forgets both the tap that waited and the wake that ran
+    w.ask('p:x:off', t0)
+    w.forget('p:x:off')
+    expect(w.state('p:x:off')).toBeUndefined()
+  })
+  test('Run now is refused with the reason: another machine, not on Autopilot, herdr down, one already waking, nothing to go through', () => {
+    const ok = { name: 'shop', autopilot: true, reachable: true, checklist: '- check', held: 0 }
+    expect(wakeProblem(ok)).toBeUndefined()
+    // news that waited is something to go through too, with an empty checklist
+    expect(wakeProblem({ ...ok, checklist: '', held: 2 })).toBeUndefined()
+    expect(wakeProblem({ ...ok, elsewhere: true })).toBe('shop is on another machine: wake it there.')
+    expect(wakeProblem({ ...ok, autopilot: false })).toBe('shop is not on Autopilot: switch it on first.')
+    expect(wakeProblem({ ...ok, reachable: false })).toBe("herdr does not answer: nothing can wake shop's coordinator.")
+    expect(wakeProblem({ ...ok, state: 'waking' })).toBe("shop's coordinator is already waking: one wake at a time.")
+    expect(wakeProblem({ ...ok, state: 'queued' })).toBe("shop's coordinator is already waking: one wake at a time.")
+    expect(wakeProblem({ ...ok, checklist: '', held: 0 })).toBe("Nothing to run: shop's HEARTBEAT.md is empty and no news waits for it.")
+  })
+  test('a wake`s line: why it woke, and that it answered with nothing; its words end it', () => {
+    // what the log holds: the time rule's wake, or a tap's; chatlines' hidden() writes them
+    expect(wakeOf(hidden('Heartbeat. Go through your HEARTBEAT.md.', 'heartbeat'))).toEqual({})
+    expect(wakeOf(hidden('Heartbeat.', 'heartbeat', { reason: 'run now' }))).toEqual({ reason: 'run now' })
+    expect(wakeOf(hidden('SHE-4 is ready to merge', 'news'))).toBeUndefined()
+    expect(wakeOf('a message of the human')).toBeUndefined()
+    // a heartbeat's words pasted into the chat are the human's, never a wake: the line must be Shepherdr's own
+    expect(wakeOf(`look at this: ${hidden('Heartbeat.', 'heartbeat', { reason: 'run now' })}`)).toBeUndefined()
+    expect(pilotLine({ quiet: true, said: false })).toBe('Autopilot woke · on schedule · nothing to report')
+    expect(pilotLine({ reason: 'run now', quiet: true, said: false })).toBe('Autopilot woke · Run now · nothing to report')
+    // it said something: its words follow, so the line says only why it woke
+    expect(pilotLine({ reason: 'run now', quiet: false, said: true })).toBe('Autopilot woke · Run now')
+    // still working: no verdict yet
+    expect(pilotLine({ quiet: false, said: false })).toBe('Autopilot woke · on schedule')
   })
   test('Settings: every 30 minutes, all news; a rule or events it can not read are refused', () => {
     const s = new Settings()

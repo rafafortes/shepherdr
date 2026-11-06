@@ -327,6 +327,9 @@ export const fromAgentLine = (from: { name: string; pane?: string; space?: strin
 const NO_REPLY = /^(`?)(<no-reply>(?:(?!<\/no-reply>)[\s\S])*<\/no-reply>|<no-reply\s*\/>)\1$/i
 const OLD_MARKER = /^(\[\[[^[\]\n]+\]\]|\[noted\])$/
 
+/** a reply that says nothing (its words never show): only <no-reply>…</no-reply>, or an older marker */
+export const quietReply = (text: string) => NO_REPLY.test(text.trim()) || OLD_MARKER.test(text.trim())
+
 /** the tags an agent's reply may start with, none of them for the chat as words */
 const AGENT_TAGS = ['<no-reply', '<react', '<reply']
 

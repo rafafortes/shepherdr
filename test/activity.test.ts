@@ -305,6 +305,41 @@ describe('a chat from its log', () => {
     expect(w.chats.activity({ chat: 'T-1/Agent', what: 'output', id: 'toolu_2' })).toEqual({ output: '@@ -3,1 +3,1 @@\n-x\n+y' })
   })
 
+  test("an Autopilot wake is one quiet line: why it woke, and 'nothing to do' when it answered with nothing", () => {
+    const w = world('claude', () => 'idle')
+    // the time rule's own wake: no reason, a step taken, then <no-reply>: it looked and found nothing
+    w.add(
+      user('u1', '<shepherdr><heartbeat>Heartbeat. Go through your HEARTBEAT.md.</heartbeat></shepherdr>', { origin: { kind: 'human' } }),
+      use('a1', 'toolu_1', 'Bash', { command: 'shepherdr task list' }),
+      result('u2', 'toolu_1', 'none'),
+      said('a2', 'msg_r1', { type: 'text', text: '<no-reply>heartbeat: nothing to do</no-reply>' }, 'end_turn'),
+      turnEnd('s1'),
+    )
+    let c = w.chats.chat('p:x')
+    expect(c.messages.filter((m) => m.pilot).map((m) => m.pilot)).toEqual(['Autopilot woke · on schedule · nothing to report'])
+    // a quiet line, not a card: no bubble, no words of its own, and the turn's steps stay folded away
+    const line = c.messages.find((m) => m.pilot)!
+    expect(line.who).toBe('agent')
+    expect(line.text).toBeUndefined()
+    expect(line.card).toBeUndefined()
+    expect(c.messages.filter((m) => m.activity)).toEqual([])
+    // nothing to read: no unread mark on the sidebar, no buzz on the phone (newest reads the log, not the quiet line)
+    expect(w.chats.newest('p:x')).toBeUndefined()
+    // Run now's wake, with nothing looked at: the same one line, saying who woke it
+    w.add(
+      user('u3', '<shepherdr><heartbeat reason="run now">Heartbeat. Go through your HEARTBEAT.md.</heartbeat></shepherdr>', { origin: { kind: 'human' } }),
+      said('a3', 'msg_r2', { type: 'text', text: '<no-reply>heartbeat: nothing to do</no-reply>' }, 'end_turn'),
+      turnEnd('s2'),
+    )
+    c = w.chats.chat('p:x')
+    expect(c.messages.filter((m) => m.pilot).map((m) => m.pilot)).toEqual(['Autopilot woke · on schedule · nothing to report', 'Autopilot woke · Run now · nothing to report'])
+    // a wake that says something keeps its why, and its words follow: the line never hides a reply
+    w.add(user('u4', '<shepherdr><heartbeat reason="run now">Heartbeat.</heartbeat></shepherdr>', { origin: { kind: 'human' } }), said('a4', 'msg_r3', { type: 'text', text: 'One task is ready: SHE-4.' }, 'end_turn'), turnEnd('s3'))
+    c = w.chats.chat('p:x')
+    expect(c.messages.filter((m) => m.pilot).map((m) => m.pilot).at(-1)).toBe('Autopilot woke · Run now')
+    expect(c.messages.at(-1)?.text).toBe('One task is ready: SHE-4.')
+  })
+
   test('news it answered with nothing shows no line', () => {
     const w = world('claude', () => 'idle')
     w.add(

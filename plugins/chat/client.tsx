@@ -5,7 +5,7 @@ import clsx from 'clsx'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
 import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
 import { keyOf, partsOf, priorOf, reasonOf, SEND_TIMEOUT, type Outgoing } from '@client/outbox.ts'
-import { AlertIcon, BackIcon, CameraIcon, ChatIcon, CheckIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
+import { AlertIcon, AutopilotIcon, BackIcon, CameraIcon, ChatIcon, CheckIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
 import { extOf, isImage } from '@shared/files.ts'
 import { modeName, type CardAsk, type Chat, type Message, type Peer, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
@@ -1021,6 +1021,17 @@ function SessionLine() {
       <span className="h-px flex-1 bg-line" />
       New session
       <span className="h-px flex-1 bg-line" />
+    </div>
+  )
+}
+
+/** an Autopilot wake in one quiet line: why it woke, and that it had nothing to report ("Autopilot woke · Run now ·
+ *  nothing to report"). Never a card and never an alert: a quiet night shows one line, a broken heartbeat none */
+function PilotLine({ text }: { text: string }) {
+  return (
+    <div data-pilot className="flex max-w-full min-w-0 items-center gap-1.5 text-[0.8125rem]/5 text-fg3 phone:text-[0.875rem]/5">
+      <AutopilotIcon aria-hidden className="size-3.5 shrink-0" />
+      <span className="min-w-0 text-pretty">{text}</span>
     </div>
   )
 }
@@ -2341,7 +2352,8 @@ function StickToBottom({ chatKey, children }: { chatKey: string; children: React
   const [away, setAway] = useState(false)
   const [newAt, setNewAt] = useState<string | null>(null)
   // the agent's messages, and how many of them you had seen at the bottom
-  const replies = useStore((s) => (s.chats[chatKey]?.messages ?? []).filter((m) => m.who === 'agent' && !m.waiting).map((m) => m.id).join('\n'))
+  // a wake's quiet line is no reply: it says nothing to read, so it never raises the New marker
+  const replies = useStore((s) => (s.chats[chatKey]?.messages ?? []).filter((m) => m.who === 'agent' && !m.waiting && !m.pilot).map((m) => m.id).join('\n'))
   const ids = replies ? replies.split('\n') : []
   /** the replies you had in view at the bottom: the others came in while you read further up */
   const read = useRef<Set<string> | null>(null)
@@ -2606,6 +2618,7 @@ export default definePlugin({
     reg.views.chat = ChatView
     reg.chatTail.push({ order: 90, View: Typing })
     reg.messageParts.push({ order: 10, View: ({ msg, chat }) => (msg.activity ? <TurnLine a={msg.activity} chat={chat.key} /> : null) })
+    reg.messageParts.push({ order: 11, View: ({ msg }) => (msg.pilot ? <PilotLine text={msg.pilot} /> : null) })
     reg.composerAbove.push({ order: 10, View: JobsTag })
     reg.overlays.push(JobsSheet)
     reg.messageParts.push({ order: 60, View: ({ msg, chat, from }) => (msg.question ? <QuestionCard q={msg.question} chat={chat} msg={msg.id} from={from} /> : null) })

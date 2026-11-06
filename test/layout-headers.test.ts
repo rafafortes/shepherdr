@@ -260,6 +260,9 @@ describe.skipIf(!browser)("a place's mode pill", () => {
       const pill = head.locator('button[data-mode]')
       await pill.waitFor()
       const more = head.getByRole('button', { name: 'Menu', exact: true })
+      // Run now, beside the pill: one wake of its coordinator on the human's word
+      const run = head.locator('[data-run-now]')
+      await run.waitFor()
       const title = head.getByText(p.name, { exact: true }).first()
       const token = (name: string) =>
         page.evaluate((n) => {
@@ -274,10 +277,17 @@ describe.skipIf(!browser)("a place's mode pill", () => {
         const [label, colour] = ['Autopilot', '--need']
         expect(await pill.getAttribute('aria-label')).toBe('Autopilot is on. Change it')
         // the title's line holds only the name
-        const [t, b, m] = [(await title.boundingBox())!, (await pill.boundingBox())!, (await more.boundingBox())!]
+        const [t, b, r, m] = [(await title.boundingBox())!, (await pill.boundingBox())!, (await run.boundingBox())!, (await more.boundingBox())!]
         expect(await title.evaluate((e) => !!e.parentElement!.querySelector('[data-mode]'))).toBe(false)
+        // the pill's word whole, and Run now right after it: one wake of its coordinator, named for a screen reader
+        expect(await run.innerText()).toBe('Run now')
+        expect(await run.getAttribute('aria-label')).toBe(`Run now: wake ${p.name}'s coordinator for one heartbeat`)
+        expect(await run.getAttribute('disabled')).toBeNull()
+        expect(r.x - (b.x + b.width)).toBeWithin(0, 12)
+        expect(r.x + r.width).toBeLessThan(m.x)
         if (phone) {
-          // a phone's header has no room beside the ⋯ for its word: it ends the subtitle line, under the name
+          // a phone's header has no room beside the ⋯ for its word: it ends the subtitle line, under the name, and
+          // Run now keeps the arrow alone beside it, its words for a screen reader
           const k = await pill.evaluate((e) => {
             const r = e.previousElementSibling!.getBoundingClientRect()
             return { x: r.x, y: r.y, width: r.width, height: r.height, text: e.previousElementSibling!.textContent }
@@ -287,10 +297,12 @@ describe.skipIf(!browser)("a place's mode pill", () => {
           expect(b.x - (k.x + k.width)).toBeWithin(0, 10)
           expect(b.y).toBeGreaterThanOrEqual(t.y + t.height - 1)
           expect(b.x + b.width).toBeLessThan(m.x)
+          expect(r.width).toBeLessThan(32)
         } else {
-          // right beside the ⋯, on its line, at the header's right
+          // the pill, Run now, then the ⋯ menu: on its line, at the header's right
           expect(Math.abs(m.y + m.height / 2 - (b.y + b.height / 2))).toBeLessThan(2)
-          expect(m.x - (b.x + b.width)).toBeWithin(0, 12)
+          expect(Math.abs(m.y + m.height / 2 - (r.y + r.height / 2))).toBeLessThan(2)
+          expect(m.x - (r.x + r.width)).toBeWithin(0, 12)
           expect(b.x).toBeGreaterThan(t.x + t.width)
         }
         // fully round, the dot and the word, whole: never a bare dot, which reads as recording
