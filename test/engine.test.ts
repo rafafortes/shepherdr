@@ -81,7 +81,7 @@ describe('recovered private routing failures', () => {
     w.engine.routeRecovered(key)
     w.engine.report(t.id, 'Writing evidence', 80)
     expect(t.trouble).toBeUndefined()
-    expect(await w.engine.done(t.id, 'Investigation complete')).toBe('closed')
+    expect((await w.engine.done(t.id, 'Investigation complete')).state).toBe('closed')
     expect(w.engine.view(t)).toMatchObject({ status: 'done', outcome: 'done', sub: 'Nothing to merge' })
   })
 })

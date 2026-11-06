@@ -114,6 +114,8 @@
   While it waits, Shepherdr looks at it every two minutes and passes news on to the resting agent once, in
   `<shepherdr>` tags: a check that failed (its link and the end of its log) and new reviews and comments with words (a
   bare approval is not news). The agent decides what to do (shepherdr-agent says how); Shepherdr only passes it on.
+  A pull request merged there by hand (squashed too) ends the task: it reads Done, merged, and no second pull request is
+  opened for work that is in.
   Its number shows on the task's row, links from its chat's header and from the Done card. The remote is read live, as
   written and as git rewrites it (`url.insteadOf`), and `gh` is told the host (`GH_HOST`, such as `github.localhost`).
   No remote, or no `gh` login: tasks merge here, as below. Logged in but GitHub not answering: nothing merges until it
@@ -159,7 +161,9 @@
   task close <id> [--summary "..."]`, or just ask its coordinator. Its agent stops, its space closes, its worktree and branch go when
   they hold nothing unsaved or unmerged (else they are kept, and it says so) and it shows in Done with its summary
   (Nothing to merge by default); its card in the space's chat says so. An agent whose `shepherdr ready` finds no changes on
-  its branch goes straight to Done the same way.
+  its branch goes straight to Done the same way. One whose branch's work is in its base already, though not as its
+  commits (its pull request merged there by hand, a squash merge, or the work itself), is Done (merged) instead: ready
+  says so, and no pull request is opened for what is in.
 - `shepherdr task stop <id>` is Stop from the menu: it closes a task's agent and space and puts it in To do. Its work
   stays, as above. Writing to the task opens its space again (or makes a fresh worktree) and resumes its agent.
 - `shepherdr task delete <id>` removes a task for good, and only when you plainly ask its coordinator to: its agent

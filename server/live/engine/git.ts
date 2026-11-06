@@ -172,6 +172,16 @@ export async function landed(repo: string, ref: string, base: string, squashes: 
   return mergesTo(repo, base, ref, base)
 }
 
+/**
+ * All of `ref`'s work is in `base` already, though not as its commits: merging it into `base` would change nothing.
+ * That is what a squash merge of the branch leaves (its commits never in the base, its changes all there) and what a
+ * cherry-pick of them leaves, however `base` moved on since. Stricter than `landed`, which also takes a tree `base`
+ * had once: a branch bringing back an older state of the code is no merge, since what it would add is what counts.
+ */
+export async function inBase(repo: string, ref: string, base: string) {
+  return mergesTo(repo, base, ref, base)
+}
+
 /** git's own pattern match is not needed here: `*` matches anything, and a pattern matches a path or its last part */
 function globMatch(pattern: string, s: string) {
   const p = pattern.replace(/^\/+|\/+$/g, '')
@@ -240,12 +250,18 @@ export async function aheadCount(wt: string, base: string) {
   return Number(r.out || 0)
 }
 
-/** bring the local base up to the remote's when there is one; refused when the two have split */
-export async function catchUp(repo: string, base: string, then = 'then merge again'): Promise<Run> {
+/**
+ * Bring the local base up to the remote's when there is one; refused when the two have split. `fetchMs` bounds the
+ * fetch, for a path with nothing racing a deadline: a remote that does not answer is then offline, as below.
+ */
+export async function catchUp(repo: string, base: string, then = 'then merge again', fetchMs?: number): Promise<Run> {
   const ok: Run = { ok: true, code: 0, out: '', err: '' }
   if (!(await git(repo, 'remote', 'get-url', 'origin')).ok) return ok
   // offline: go on with what is here
-  if (!(await git(repo, 'fetch', '--quiet', 'origin', base)).ok) return ok
+  const fetched = fetchMs ? await sh(['git', 'fetch', '--quiet', 'origin', base], repo, { timeoutMs: fetchMs }) : await git(repo, 'fetch', '--quiet', 'origin', base)
+  // offline: go on with what is here, saying that the base was not brought up (a bounded fetch that did not answer
+  // in time is that too, and its code says so)
+  if (!fetched.ok) return { ...ok, code: fetched.code, err: fetched.code === 124 ? `origin did not answer in ${Math.round(fetchMs! / 1000)} s` : fetched.err.split('\n')[0] || 'origin could not be reached' }
   const remote = `origin/${base}`
   if (!(await git(repo, 'rev-parse', '--verify', '--quiet', remote)).ok) return ok
   if (!(await branchExists(repo, base))) return git(repo, 'branch', '--', base, remote)

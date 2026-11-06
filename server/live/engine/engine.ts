@@ -1696,11 +1696,13 @@ export class Engine extends Emitter<Events> {
 
   /**
    * The agent reports done: Ready, waiting for review or merge. A branch with no changes at all (a research task, an
-   * answer) has nothing to merge: it is closed, Done at once, and put away once the agent's turn ends.
+   * answer) has nothing to merge: it is closed, Done at once, and put away once the agent's turn ends. So is one whose
+   * work is in its base already, its pull request merged on GitHub by hand among them: Done (merged), never a pull
+   * request opened for what is in.
    */
-  async done(id: string, summary: string, facts?: string): Promise<'ready' | 'closed' | 'ended'> {
+  async done(id: string, summary: string, facts?: string): Promise<{ state: 'ready' | 'closed' | 'merged' | 'ended'; note?: string }> {
     const t = this.req(id)
-    if (ended(t)) return 'ended'
+    if (ended(t)) return { state: 'ended' }
     if (summary) t.said = summary
     if (facts) t.facts = facts
     t.reported = true
@@ -1711,17 +1713,52 @@ export class Engine extends Emitter<Events> {
     t.watch ??= { since: ghNow() }
     // its job is over: so is what it said of its progress
     t.report = undefined
-    if (t.worktree && t.base && existsSync(t.worktree) && !(await G.dirty(t.worktree)) && (await G.aheadCount(t.worktree, t.base)) === 0) {
-      this.markClosed(t)
-      if (this.agents.status(this.key(t)) !== 'working') await this.cleanup(t)
-      return 'closed'
+    if (t.worktree && t.base && existsSync(t.worktree)) {
+      const ahead = await G.aheadCount(t.worktree, t.base)
+      if (!(await G.dirty(t.worktree)) && ahead === 0) {
+        this.markClosed(t)
+        if (this.agents.status(this.key(t)) !== 'working') await this.cleanup(t)
+        return { state: 'closed' }
+      }
+      // its own work is in its base already, though not as its commits: its pull request was merged there (a squash
+      // merge leaves the branch's commits out), or the work got in by hand. Done at once, merged.
+      const why = ahead > 0 ? await this.mergedAlready(t).catch(() => null) : null
+      if (why) {
+        // its words are the note the merge left, with main here being behind GitHub's said in it when it is
+        const r = await this.mergedOnGitHub(t, this.proj(t), why, 20_000)
+        return { state: 'merged', note: r.note ?? why }
+      }
     }
     this.save()
     // told once its turn ends: an agent that merges right after never shows as waiting
     this.settleSoon(t)
     // its pull request gets the summary and is ready for review; GitHub away changes nothing here
     if (t.pr && !t.merged) this.readyForReview(t).catch(() => undefined)
-    return 'ready'
+    return { state: 'ready' }
+  }
+
+  /**
+   * Its own work is in its base already, though not as its commits: its pull request was merged on GitHub (by hand
+   * too, and a squash merge leaves the branch's commits out of the base), or the work got there some other way. What
+   * it would add to the base is what decides, so a branch that only caught up with its base is never this (it has
+   * nothing to merge), and neither is one with a commit after the merge. GitHub is asked for the pull request's number
+   * alone, never to decide; null when this branch still has work of its own to merge.
+   */
+  private async mergedAlready(t: TaskRec): Promise<string | null> {
+    const wt = t.worktree!
+    const base = t.base!
+    const p = this.proj(t)
+    // the remote's base counts too: a pull request merged on GitHub is in it, and not in the local branch yet. Bounded:
+    // a remote that does not answer leaves the local base to decide, never holds its agent's own ready for ever
+    await G.sh(['git', 'fetch', '--quiet', 'origin', base], p.path, { timeoutMs: 20_000 }).catch(() => undefined)
+    let there = false
+    for (const at of [base, `origin/${base}`]) if (await G.inBase(wt, 'HEAD', at)) there = true
+    if (!there) return null
+    // which pull request it was: only its number, and only when GitHub answers
+    const g = t.pr ? await this.hub(p).catch(() => null) : null
+    const pr = g ? await this.prOf(t, g, wt).catch(() => null) : null
+    const tip = (await G.git(wt, 'rev-parse', 'HEAD')).out
+    return pr?.state === 'MERGED' && pr.headRefOid === tip ? `PR #${pr.number} was merged on GitHub` : `its work was in ${base} already`
   }
 
   private markClosed(t: TaskRec) {
@@ -1971,6 +2008,7 @@ export class Engine extends Emitter<Events> {
    * News on done tasks' pull requests: checks that failed, and what someone wrote on it (a review, a comment) since its
    * agent reported done. Its agent hears each once, in <shepherdr> tags, which wakes it; what to do about it is its own
    * call (the shepherdr-agent skill). Only an agent at rest is told: one at work, or at a prompt, hears it next time.
+   * A pull request merged on GitHub by hand ends the task here (Done, merged), whatever its checks say.
    */
   async watchPrs() {
     if (this.watching) return
@@ -1992,6 +2030,14 @@ export class Engine extends Emitter<Events> {
 
   private async watchPr(t: TaskRec, g: G.GitHub) {
     const pr = await this.prOf(t, g, t.worktree!)
+    // merged on GitHub by hand (a squash merge leaves its commits out of the base): Done as ready would, and no turn of
+    // its own to be cut: a task on its way in (Merging) is its merge's own to mark
+    if (pr?.state === 'MERGED') {
+      if (t.landing) return
+      const why = await this.mergedAlready(t).catch(() => null)
+      if (why) await this.mergedOnGitHub(t, this.proj(t), why, 20_000).catch(() => undefined)
+      return
+    }
     if (pr?.state !== 'OPEN') return
     const w = (t.watch ??= { since: ghNow() })
     const news: string[] = []
@@ -2288,10 +2334,16 @@ export class Engine extends Emitter<Events> {
     return this.mergedOnGitHub(t, p, `merged PR #${n} on GitHub${wait ? '' : ', not waiting for its checks'}`)
   }
 
-  /** main here comes up to GitHub's, so the merge is here too (and Shepherdr's own update sees it), then it is marked */
-  private async mergedOnGitHub(t: TaskRec, p: Space, note: string) {
-    const up = await G.catchUp(p.path, t.base!, `then run git pull in ${t.base} here`)
-    return this.markMerged(t, up.ok ? note : `${note}; ${t.base} here is not up to date: ${up.err}`)
+  /**
+   * main here comes up to GitHub's, so the merge is here too (and Shepherdr's own update sees it), then it is marked.
+   * `fetchMs` bounds the catch-up's fetch: `ready` and the watch call this with no deadline of their own around it, so
+   * a remote that does not answer leaves main here as it is, said in the note, rather than holding them. The merge
+   * path passes none: its own caller races a deadline of its own.
+   */
+  private async mergedOnGitHub(t: TaskRec, p: Space, note: string, fetchMs?: number) {
+    const up = await G.catchUp(p.path, t.base!, `then run git pull in ${t.base} here`, fetchMs)
+    const stale = !up.ok ? up.err : up.err ? `${t.base} here was not brought up to GitHub's: ${up.err}` : undefined
+    return this.markMerged(t, stale ? `${note}; ${stale}` : note)
   }
 
   private async markMerged(t: TaskRec, note?: string) {
