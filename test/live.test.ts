@@ -493,6 +493,17 @@ describe('heartbeat', () => {
     w.observe('p:x:run', true, t0 + 10_000)
     w.prune(t0 + 11 * min)
     expect(w.state('p:x:run')).toBeUndefined()
+    // a wake that opened and closed between two looks is over after its grace: the screens say Run now again
+    w.ask('p:x:fast', t0)
+    w.take('p:x:fast', t0)
+    w.observe('p:x:fast', false, t0 + 10_000)
+    expect(w.state('p:x:fast')).toBe('waking')
+    w.observe('p:x:fast', false, t0 + 21_000)
+    expect(w.state('p:x:fast')).toBeUndefined()
+    // a tap that waits keeps waiting, however long: it was promised the wake once its turn is over
+    w.ask('p:x:tap', t0)
+    w.prune(t0 + 11 * min)
+    expect(w.state('p:x:tap')).toBe('queued')
     // Autopilot off forgets both the tap that waited and the wake that ran
     w.ask('p:x:off', t0)
     w.forget('p:x:off')
@@ -510,18 +521,18 @@ describe('heartbeat', () => {
     expect(wakeProblem({ ...ok, state: 'queued' })).toBe("shop's coordinator is already waking: one wake at a time.")
     expect(wakeProblem({ ...ok, checklist: '', held: 0 })).toBe("Nothing to run: shop's HEARTBEAT.md is empty and no news waits for it.")
   })
-  test('a wake`s line: why it woke, and how it went once it answered with nothing; its words end it', () => {
+  test('a wake`s line: why it woke, and that it answered with nothing; its words end it', () => {
     // what the log holds: the time rule's wake, or a tap's; chatlines' hidden() writes them
     expect(wakeOf(hidden('Heartbeat. Go through your HEARTBEAT.md.', 'heartbeat'))).toEqual({})
     expect(wakeOf(hidden('Heartbeat.', 'heartbeat', { reason: 'run now' }))).toEqual({ reason: 'run now' })
     expect(wakeOf(hidden('SHE-4 is ready to merge', 'news'))).toBeUndefined()
     expect(wakeOf('a message of the human')).toBeUndefined()
-    expect(pilotLine({ steps: 0, quiet: true, said: false })).toBe('Autopilot woke · on schedule · nothing to do')
-    expect(pilotLine({ reason: 'run now', steps: 3, quiet: true, said: false })).toBe('Autopilot woke · Run now · checked, nothing new')
+    expect(pilotLine({ quiet: true, said: false })).toBe('Autopilot woke · on schedule · nothing to report')
+    expect(pilotLine({ reason: 'run now', quiet: true, said: false })).toBe('Autopilot woke · Run now · nothing to report')
     // it said something: its words follow, so the line says only why it woke
-    expect(pilotLine({ reason: 'run now', steps: 1, quiet: false, said: true })).toBe('Autopilot woke · Run now')
+    expect(pilotLine({ reason: 'run now', quiet: false, said: true })).toBe('Autopilot woke · Run now')
     // still working: no verdict yet
-    expect(pilotLine({ steps: 1, quiet: false, said: false })).toBe('Autopilot woke · on schedule')
+    expect(pilotLine({ quiet: false, said: false })).toBe('Autopilot woke · on schedule')
   })
   test('Settings: every 30 minutes, all news; a rule or events it can not read are refused', () => {
     const s = new Settings()

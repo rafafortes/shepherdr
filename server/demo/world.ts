@@ -265,9 +265,10 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     return this.places.filter((x) => x.id === id || p?.level === 0 || (p?.level === 1 && x.machine === p.machine)).map((x) => x.id)
   }
 
-  /** Autopilot's Run now, as the place shows it: one of this machine's on Autopilot, ready or already waking */
+  /** Autopilot's Run now, as the place shows it: one of this machine's on Autopilot, ready or already waking (another
+   *  machine's wakes its own, as live's does) */
   private runNow(p: Place): Place['runNow'] {
-    if (p.mode !== 'autopilot' || this.pluginsOff.includes('autopilot')) return undefined
+    if (p.mode !== 'autopilot' || p.machine !== D.DEMO_HOST || p.unreachableSince || this.pluginsOff.includes('autopilot')) return undefined
     return this.waking[p.id] ? 'waking' : 'ready'
   }
 
@@ -566,10 +567,11 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         // checklist, finds nothing and says so in one quiet line, as a quiet night's wake does
         const p = this.places.find((x) => x.id === a.place)
         if (!p) return { ok: false, error: 'No such space.' }
+        if (p.machine !== D.DEMO_HOST) return { ok: false, error: `${p.name} is on another machine: wake it there.` }
         if (p.mode !== 'autopilot') return { ok: false, error: `${p.name} is not on Autopilot: switch it on first.` }
         if (this.waking[p.id]) return { ok: false, error: `${p.name}'s coordinator is already waking: one wake at a time.` }
         this.waking[p.id] = true
-        this.push(p.chat, { who: 'agent', pilot: pilotLine({ reason: 'run now', steps: 1, quiet: true, said: false }) })
+        this.push(p.chat, { who: 'agent', pilot: pilotLine({ reason: 'run now', quiet: true, said: false }) })
         setTimeout(() => {
           delete this.waking[p.id]
           this.emit('snapshot')

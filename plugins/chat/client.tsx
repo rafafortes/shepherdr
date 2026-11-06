@@ -1008,8 +1008,8 @@ function SessionLine() {
   )
 }
 
-/** an Autopilot wake in one quiet line: why it woke, and how it went ("Autopilot woke · Run now · nothing to do"). Never
- *  a card and never an alert: a quiet night shows one line, so a broken heartbeat shows none */
+/** an Autopilot wake in one quiet line: why it woke, and that it had nothing to report ("Autopilot woke · Run now ·
+ *  nothing to report"). Never a card and never an alert: a quiet night shows one line, a broken heartbeat none */
 function PilotLine({ text }: { text: string }) {
   return (
     <div data-pilot className="flex max-w-full min-w-0 items-center gap-1.5 text-[0.8125rem]/5 text-fg3 phone:text-[0.875rem]/5">
@@ -2208,7 +2208,8 @@ function StickToBottom({ chatKey, children }: { chatKey: string; children: React
   const [away, setAway] = useState(false)
   const [newAt, setNewAt] = useState<string | null>(null)
   // the agent's messages, and how many of them you had seen at the bottom
-  const replies = useStore((s) => (s.chats[chatKey]?.messages ?? []).filter((m) => m.who === 'agent' && !m.waiting).map((m) => m.id).join('\n'))
+  // a wake's quiet line is no reply: it says nothing to read, so it never raises the New marker
+  const replies = useStore((s) => (s.chats[chatKey]?.messages ?? []).filter((m) => m.who === 'agent' && !m.waiting && !m.pilot).map((m) => m.id).join('\n'))
   const ids = replies ? replies.split('\n') : []
   /** the replies you had in view at the bottom: the others came in while you read further up */
   const read = useRef<Set<string> | null>(null)

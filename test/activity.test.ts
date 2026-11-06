@@ -316,21 +316,23 @@ describe('a chat from its log', () => {
       turnEnd('s1'),
     )
     let c = w.chats.chat('p:x')
-    expect(c.messages.filter((m) => m.pilot).map((m) => m.pilot)).toEqual(['Autopilot woke · on schedule · checked, nothing new'])
+    expect(c.messages.filter((m) => m.pilot).map((m) => m.pilot)).toEqual(['Autopilot woke · on schedule · nothing to report'])
     // a quiet line, not a card: no bubble, no words of its own, and the turn's steps stay folded away
     const line = c.messages.find((m) => m.pilot)!
     expect(line.who).toBe('agent')
     expect(line.text).toBeUndefined()
     expect(line.card).toBeUndefined()
     expect(c.messages.filter((m) => m.activity)).toEqual([])
-    // Run now's wake, with nothing looked at: 'nothing to do'. A phone's chat shows it in the same one line
+    // nothing to read: no unread mark on the sidebar, no buzz on the phone (newest reads the log, not the quiet line)
+    expect(w.chats.newest('p:x')).toBeUndefined()
+    // Run now's wake, with nothing looked at: the same one line, saying who woke it
     w.add(
       user('u3', '<shepherdr><heartbeat reason="run now">Heartbeat. Go through your HEARTBEAT.md.</heartbeat></shepherdr>', { origin: { kind: 'human' } }),
       said('a3', 'msg_r2', { type: 'text', text: '<no-reply>heartbeat: nothing to do</no-reply>' }, 'end_turn'),
       turnEnd('s2'),
     )
     c = w.chats.chat('p:x')
-    expect(c.messages.filter((m) => m.pilot).map((m) => m.pilot)).toEqual(['Autopilot woke · on schedule · checked, nothing new', 'Autopilot woke · Run now · nothing to do'])
+    expect(c.messages.filter((m) => m.pilot).map((m) => m.pilot)).toEqual(['Autopilot woke · on schedule · nothing to report', 'Autopilot woke · Run now · nothing to report'])
     // a wake that says something keeps its why, and its words follow: the line never hides a reply
     w.add(user('u4', '<shepherdr><heartbeat reason="run now">Heartbeat.</heartbeat></shepherdr>', { origin: { kind: 'human' } }), said('a4', 'msg_r3', { type: 'text', text: 'One task is ready: SHE-4.' }, 'end_turn'), turnEnd('s3'))
     c = w.chats.chat('p:x')

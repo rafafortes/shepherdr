@@ -1044,7 +1044,7 @@ describe.skipIf(!browser)('the order of places', () => {
 describe.skipIf(!browser)('Autopilot Run now', () => {
   const place = () => world.places.find((x) => x.id === 'p:vm-str:herdr-projects')!
   const at = (id: string) => `http://127.0.0.1:${server!.port}/?place=${encodeURIComponent(id)}`
-  const line = 'Autopilot woke · Run now · checked, nothing new'
+  const line = 'Autopilot woke · Run now · nothing to report'
   for (const [name, opts] of [
     ['phone, light', { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, colorScheme: 'light' }],
     ['desktop, dark', { viewport: { width: 1440, height: 800 }, colorScheme: 'dark' }],

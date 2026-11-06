@@ -36,8 +36,8 @@
   words, in the prompt itself, so a coordinator on another machine has it too; edited in Settings → Autopilot or by
   the agent with `shepherdr heartbeat set`; kept in `~/.shepherdr/heartbeat` on the main machine) and act on what needs
   it, or reply only `<no-reply>`. The chat shows none of the prompt and none of those words: each wake leaves one quiet
-  line instead, why it came and how it went ("Autopilot woke · on schedule · nothing to do", "Autopilot woke · Run now ·
-  checked, nothing new"), so a quiet night is never mistaken for a broken heartbeat. Never a card and never an alert: it
+  line instead, why it came and, when it answered with nothing, that there was nothing to report ("Autopilot woke · on
+  schedule · nothing to report"), so a quiet night is never mistaken for a broken heartbeat. Never a card and never an alert: it
   stays in that chat. A wake that did something shows its own reply after that line. A busy coordinator gets it once its
   turn is over; none while its HEARTBEAT.md is empty and no news waits. News its event rules name wakes the coordinator
   at once, so a news card gets its reply right after it; other news waits and comes with the next heartbeat (quiet

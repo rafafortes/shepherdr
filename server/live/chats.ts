@@ -63,9 +63,9 @@ export const landed = (ev: LogEvent[]) => {
   return start >= 0 && ev.slice(start).some((e) => e.kind === 'agent' && agentLines(stripHidden(e.text)).text)
 }
 
-/** Autopilot's wakes in a chat, by the log line that brought each one: why it woke, and how it went once it answered
- *  with nothing (heartbeat.ts pilotLine). A wake is Shepherdr's hidden heartbeat in the log; what the agent then does
- *  fills its one quiet line in, and another message to it ends that wake's watch */
+/** Autopilot's wakes in a chat, by the log line that brought each one: why it woke, and whether it answered with
+ *  nothing (heartbeat.ts pilotLine). A wake is Shepherdr's hidden heartbeat in the log; its own reply fills the line in,
+ *  and another message to it ends that wake's watch */
 function wakeLines(ev: LogEvent[]) {
   const out = new Map<string, { at: number; line: string }>()
   let w: (Woke & { id: string; at: number }) | undefined
@@ -79,10 +79,9 @@ function wakeLines(ev: LogEvent[]) {
     else if (e.kind === 'user' || e.kind === 'peer') {
       close()
       const wake = e.kind === 'user' ? wakeOf(e.text) : undefined
-      if (wake) w = { ...wake, id: e.id, at: e.at, steps: 0, quiet: false, said: false }
-    } else if (!w) continue
-    else if (e.kind === 'step') w.steps++
-    else if (e.kind === 'agent') {
+      if (wake) w = { ...wake, id: e.id, at: e.at, quiet: false, said: false }
+    } else if (!w || e.kind !== 'agent') continue
+    else {
       const text = stripHidden(e.text)
       if (agentLines(text).text) w.said = true
       else if (quietReply(text)) w.quiet = true

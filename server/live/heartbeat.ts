@@ -145,21 +145,21 @@ export function wakeOf(text: string): { reason?: string } | undefined {
   return m ? (m[1] ? { reason: m[1] } : {}) : undefined
 }
 
-/** an Autopilot wake as it went: why it came, the steps it took, and whether it answered with nothing */
+/** an Autopilot wake as it went: why it came, and whether it answered with nothing */
 export interface Woke {
   reason?: string
-  steps: number
   /** its reply said nothing (`<no-reply>`): a quiet wake */
   quiet: boolean
   /** its reply had words of its own: they follow in the chat, and this line says no more */
   said: boolean
 }
 
-/** a wake's one quiet line in the chat: why it woke, then how it went once it answered with nothing. Says nothing more
- *  while it works, or once it said something itself: its words follow */
+/** a wake's one quiet line in the chat: why it woke, then that it answered with nothing. "Nothing to report" is true
+ *  whether it only looked or also acted in silence: what it did is in its news and its tasks, never guessed from here.
+ *  Says no more while it works, or once it said something itself: its words follow */
 export function pilotLine(w: Woke): string {
   const head = `Autopilot woke · ${w.reason === 'run now' ? 'Run now' : 'on schedule'}`
-  return w.quiet && !w.said ? `${head} · ${w.steps ? 'checked, nothing new' : 'nothing to do'}` : head
+  return w.quiet && !w.said ? `${head} · nothing to report` : head
 }
 
 /** what a place is, for Run now: enough of it to refuse honestly, from anywhere */
@@ -190,9 +190,13 @@ export function wakeProblem(w: Wakeable): string | undefined {
   return undefined
 }
 
-/** how long a wake or a tap holds its place at most: then it is taken for lost (herdr went down, its turn never ended),
- *  so one lost wake never blocks the next */
+/** how long a wake holds its place at most: then it is taken for lost (herdr went down, its turn never ended), so one
+ *  lost wake never blocks the next */
 const WAKE_LOST = 10 * 60_000
+
+/** how long a wake may take to show as working: one that opens and ends between two looks (a quick <no-reply>) is over
+ *  by then, so the screens say Run now again instead of Waking */
+const WAKE_GRACE = 20_000
 
 /** Autopilot's Run now, as the state machine the live source drives: a tap waits for its coordinator to be idle and
  *  then goes once; while one waits or runs, another is refused. A wake ends once its turn was seen working and is over
@@ -228,13 +232,13 @@ export class Wakes {
     this.worked.delete(place)
   }
 
-  /** its coordinator works now, or is free again: a wake ends once it was seen working and then free, so the same tick
-   *  that sends one never ends it */
+  /** its coordinator works now, or is free again: a wake ends once it was seen working and then free, or once its turn
+   *  may have opened and closed between two looks, so the same tick that sends one never ends it */
   observe(place: string, working: boolean, now = Date.now()) {
     const at = this.running.get(place)
     if (at === undefined) return
     if (working) this.worked.add(place)
-    else if (this.worked.has(place) || now - at > WAKE_LOST) this.forget(place)
+    else if (this.worked.has(place) || now - at > WAKE_GRACE) this.forget(place)
   }
 
   /** Autopilot off, or its wake lost: nothing waits or runs here */
@@ -244,9 +248,9 @@ export class Wakes {
     this.worked.delete(place)
   }
 
-  /** a tap or a wake older than WAKE_LOST stops holding the place: herdr went down, or its turn never ended */
+  /** a wake older than WAKE_LOST stops holding the place: herdr went down, or its turn never ended. A tap that waits
+   *  keeps waiting: it was promised the wake once its turn is over */
   prune(now = Date.now()) {
-    for (const [place, at] of this.waiting) if (now - at > WAKE_LOST) this.waiting.delete(place)
     for (const [place, at] of this.running) if (now - at > WAKE_LOST) this.forget(place)
   }
 }

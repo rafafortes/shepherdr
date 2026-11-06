@@ -6,7 +6,7 @@
 // coordinator at once, one per tap, refused (and shown as Queued or Waking) while a wake already waits or runs.
 import { act, definePlugin, has, setUI, useUI } from '@client/kernel.ts'
 import { ic, MenuSwitch, ModeIcon, PlayIcon } from '@client/ui.tsx'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Place } from '@shared/types.ts'
 
 /** Autopilot on, as a red pill with a dot: at the header's right, or after the subtitle on a phone; a tap opens the ⋯
@@ -30,11 +30,18 @@ function AutopilotPill({ place }: { place: Place }) {
 
 /** Autopilot's Run now, beside the pill: one heartbeat to this coordinator now (or once its turn is over), for the
  *  human to poke a quiet night and see it is alive. One wake per tap: while one waits or runs it is off, saying
- *  Queued or Waking, and what a refusal says stands beside it. A phone keeps only the arrow, which its label names */
+ *  Queued or Waking, and what a refusal says stands beside it for a few seconds, on a phone too. A phone keeps only the
+ *  arrow, which its label names */
 function AutopilotRunNow({ place }: { place: Place }) {
   const phone = useUI((u) => u.device === 'phone')
   const [busy, setBusy] = useState(false)
   const [refused, setRefused] = useState('')
+  // why it did not wake is read once and goes: no room in a header for a sentence that stays
+  useEffect(() => {
+    if (!refused) return
+    const t = setTimeout(() => setRefused(''), 8000)
+    return () => clearTimeout(t)
+  }, [refused])
   const state = place.runNow
   if (!state) return null
   const waiting = busy || state !== 'ready'
@@ -66,8 +73,8 @@ function AutopilotRunNow({ place }: { place: Place }) {
         <PlayIcon aria-hidden className="size-3 shrink-0" />
         {phone ? <span className="sr-only">{words}</span> : <span>{words}</span>}
       </button>
-      {refused && !phone ? (
-        <span role="status" title={refused} className="max-w-[10rem] shrink truncate text-[0.75rem] text-need">
+      {refused ? (
+        <span role="status" title={refused} className="max-w-[9rem] shrink truncate text-[0.75rem] text-need phone:max-w-[6.5rem]">
           {refused}
         </span>
       ) : null}
