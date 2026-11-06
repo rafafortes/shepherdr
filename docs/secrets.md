@@ -45,6 +45,7 @@ Older shared tool executors cannot be authenticated by chat/cwd alone. They must
 it. Do not copy another session's credential, print its contents, or restart a working agent without approval. A
 custom `--url` target deliberately drops inherited credentials; it must provision its own authenticated session.
 
-Only `bun run typecheck` runs on agent machines. Regression suites use temporary fake vaults, homes, credentials,
-loopback servers and Unix sockets; GitHub runs them after merge. They cover no/invalid/revoked proof, raw TCP
-forwarding, spoofed headers, scope forgery, rotation, worker isolation and repo/helper secret-run transport.
+The whole check runs on the agents' machines (`bun run check:local`, AGENTS.md), and its regression suites use
+temporary fake vaults, homes, credentials, loopback servers and Unix sockets: they never read a real vault. They cover
+no/invalid/revoked proof, raw TCP forwarding, spoofed headers, scope forgery, rotation, worker isolation and
+repo/helper secret-run transport.

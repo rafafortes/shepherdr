@@ -6,7 +6,7 @@ bun run demo          # the server with fictional data (the prototype's world), 
 bun run dev           # the screen with hot reload, on :5173, talking to the server above
 bun run typecheck     # types, in seconds: what to run while you work
 bun run test changed  # the tests that reach what you changed from the default branch
-bun run test          # every test, in parallel, the test files capped as the check caps them
+bun run test          # every test, in parallel, a quarter of the cores as the check does (but no lock)
 bun run check:local   # the whole check: types, every test with the browser ones, the build (about 2 minutes)
 ```
 

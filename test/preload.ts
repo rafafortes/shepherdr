@@ -11,9 +11,6 @@ import { once } from './once.ts'
 // that wants a home of its own sets one before it imports the store; until then, and in every file that doesn't,
 // it is a fresh empty folder (bun test without --parallel shares the store between files).
 // (and the folders of runs gone an hour ago go, since a test process doesn't always get to clear its own)
-// Nor do they reach the herdr of the machine they run on, or say they are panes of it: the socket is a path that isn't
-// there (a test that wants a herdr sets its own, as test/fake-herdr.ts and test/launch-pending.test.ts do), and no
-// inherited pane, tab or workspace id says otherwise.
 for (const n of readdirSync(tmpdir()))
   if (n.startsWith('shep-test-home-'))
     try {
@@ -24,6 +21,9 @@ process.env.SHEPHERDR_HOME = home
 // Tests are a server with a home of its own that does start agents: a fake herdr, or something spied on (launch-policy.ts)
 process.env.SHEPHERDR_LAUNCH_AGENTS = '1'
 process.on('exit', () => rmSync(home, { recursive: true, force: true }))
+// Nor do they reach the herdr of the machine they run on, or say they are panes of it: the socket is a path that isn't
+// there (a test that wants a herdr listens on one of its own, as test/launch-pending.test.ts does), and no inherited
+// pane, tab or workspace id says otherwise.
 process.env.HERDR_SOCKET_PATH = join(home, 'no-herdr.sock')
 for (const k of ['SHEPHERDR_URL', 'SHEPHERDR_CHAT', 'HERDR_SOCKET', 'HERDR_PANE_ID', 'HERDR_WORKSPACE_ID', 'HERDR_TAB_ID']) delete process.env[k]
 

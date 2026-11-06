@@ -709,7 +709,7 @@ export function machineNote(l: MachineLimits, cores = cpus().length, memGb = Mat
     note: [
       `This machine has ${cores} cores and ${memGb} GB of memory. ${now.join(' ')}`,
       '',
-      '- 10 tasks at once: agents run no tests on this machine (GitHub does), so each mostly waits on its model; past about 10 they start to slow each other down.',
+      '- 10 tasks at once: each task spends most of its time waiting on its model, and the check it runs before it is done keeps to a quarter of the cores at the lowest priority; past about 10 they start to slow each other down.',
       '- Load 1× cores to start: every core is busy then, so one more task only slows the rest.',
       "- Memory 80% to start: room for a test run's peak before the machine starts killing processes.",
       "- Load 1.5× cores for 2 minutes to alert: half again more work than cores, for longer than one test run's spike.",

@@ -171,10 +171,14 @@ export const readMap = (file: string): ScreenMap | null => {
 
 /** the map a test run picks from: the one the check recorded here (`bun run check:local` on the default branch, which
  *  runs `scripts/test.ts --map`), or the one a run is given by name (SHEPHERDR_SCREEN_MAP, for a test of this file).
- *  GitHub Actions is off on this repo (SHE-21), so no map comes from there any more. Null when there is none. */
+ *  GitHub Actions is off on this repo (SHE-21), so no map comes from there any more. Null when there is none, or its
+ *  commit isn't in this checkout. */
 export function screenMap(): ScreenMap | null {
   const named = process.env.SHEPHERDR_SCREEN_MAP
-  return named ? readMap(named) : readMap(mapFile())
+  const map = readMap(named ?? mapFile())
+  // a commit this checkout doesn't have says nothing about what changed since: every browser test runs then
+  if (!map || !Bun.spawnSync(['git', 'cat-file', '-e', `${map.commit}^{commit}`], { cwd: root, stdout: 'ignore', stderr: 'ignore' }).success) return null
+  return map
 }
 
 type Kind = 'fn' | 'quiet' | 'code'

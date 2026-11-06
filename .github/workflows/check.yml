@@ -24,6 +24,8 @@ env:
   GIT_COMMITTER_EMAIL: ci@localhost
   # each file's time on the last run, which balances the shards (scripts/test.ts keeps it there)
   TIMINGS: node_modules/.cache/shepherdr-test/timings.json
+  # scripts/test.ts keeps to a quarter of the cores by default, which is one worker on a four-core runner
+  SHEPHERDR_TEST_JOBS: 4
 
 jobs:
   types:
@@ -85,16 +87,7 @@ jobs:
           path: ${{ env.TIMINGS }}
           key: test-timings-${{ github.run_id }}
           restore-keys: test-timings-
-      # which lines of the screen each browser test runs: a run asked for by hand still leaves a map behind, and a
-      # local run keeps one of its own too (bun run check:local)
-      - run: bun run test --shard=${{ matrix.shard }}/3 --map=screen-map.json
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: screen-map-${{ matrix.shard }}
-          path: screen-map.json
-          if-no-files-found: ignore
-          retention-days: 30
+      - run: bun run test --shard=${{ matrix.shard }}/3
       # only a help: it never fails the check
       - if: always()
         uses: actions/cache/save@v4

@@ -16,8 +16,9 @@
 // asked for by hand does; --parallel every core). SHEPHERDR_TEST_JOBS sets how many test files run at once: a quarter
 // of the cores by default, so herdr, the live server and the agents keep the CPU while several tasks test at once.
 //
-// The tests run below everything else on this machine, on every core: they take only the CPU and disk no one else
-// wants, so herdr, Shepherdr's server and the agents stay quick while several tasks test at once.
+// The tests run below everything else on this machine, on a quarter of the cores unless SHEPHERDR_TEST_JOBS or a flag
+// says more: they take only the CPU and disk no one else wants, so herdr, Shepherdr's server and the agents stay quick
+// while several tasks test at once.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { cpus } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
@@ -256,14 +257,20 @@ if (browser) {
   browser.kill()
 }
 if (mapOut) {
-  mkdirSync(dirname(mapOut), { recursive: true })
-  const map = gather(mapParts, commit, readMap(mapOut))
-  writeFileSync(mapOut, JSON.stringify(map))
+  // only a clean tree: the map is a commit's, and what is not committed is not part of it (a run that picked browser
+  // tests from it would read a file the map's commit never had)
+  if (clean) {
+    mkdirSync(dirname(mapOut), { recursive: true })
+    const map = gather(mapParts, commit, readMap(mapOut))
+    writeFileSync(mapOut, JSON.stringify(map))
+    console.log(`Screen map of ${commit.slice(0, 7)}: ${Object.keys(map.tests).length} browser test files, in ${mapOut}`)
+  } else console.log(`No screen map: ${commit.slice(0, 7)} does not hold what is not committed, and a map is a commit's.`)
   rmSync(mapParts, { recursive: true, force: true })
-  console.log(`Screen map of ${commit.slice(0, 7)}${clean ? '' : ' (and what is not committed)'}: ${Object.keys(map.tests).length} browser test files, in ${mapOut}`)
 }
 const secs = ((Date.now() - t0) / 1000).toFixed(1)
-if (code === 0 && whole && commit && clean && git('rev-parse', 'HEAD') === commit && git('status', '--porcelain') === '') {
+// a pass to keep: but not one where tests were skipped (a browser that would not start skips its browser tests, and
+// taken as passed it would hide behind this until the commit changes)
+if (code === 0 && whole && commit && clean && !/^\s*\d+ skip$/m.test(tail) && git('rev-parse', 'HEAD') === commit && git('status', '--porcelain') === '') {
   const ran = tail.match(/Ran \d+ tests across \d+ files?/)?.[0] ?? 'passed'
   writeFileSync(passed, JSON.stringify({ commit, at: Date.now(), summary: `${ran} in ${secs}s` }))
 }

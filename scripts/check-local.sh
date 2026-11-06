@@ -10,9 +10,13 @@
 # and the agents keep the CPU. A browser test skips where its browser can't start: the browsers are opened first, and
 # whatever is missing is named with the command that fixes it (a WebKit without its system libraries needs root).
 #
-# It takes about two minutes warm, longer on the first run of a worktree (the dependencies come first) and while other
-# work keeps the machine busy: run it with a long timeout, or in the background and read the verdict it prints, e.g.
-#   bash scripts/check-local.sh > /tmp/shepherdr-check.log 2>&1 &
+# It takes about two minutes warm, longer while other work keeps the machine busy: run it with a long timeout, or in the
+# background and read the verdict it left in its own log folder (it prints that folder; the file is verdict.txt):
+#   bash scripts/check-local.sh > /dev/null 2>&1 &
+#
+# SHEPHERDR_TEST_JOBS caps its test workers, SHEPHERDR_CHECK_WAIT how long it waits for another worktree's check (an
+# hour), SHEPHERDR_CHECK_STEP_TIMEOUT how long one step may take (half an hour). Exit code: 0 passed, 1 failed, 2 gave
+# up waiting for another check.
 #
 # The tests are scripts/test.ts (the same as `bun run test`), which isolates them from ~/.shepherdr and from the herdr
 # on this machine (test/preload.ts) and, on the default branch, keeps the screen map `bun run test changed` picks from.
@@ -100,7 +104,7 @@ step() { # <name> <command...>
   local t0=$SECONDS code secs note
   local -a cmd
   cmd=("${prio[@]}")
-  [ "$have_timeout" = 1 ] && cmd+=(timeout -k 60 "$step_timeout")
+  [ "$have_timeout" = 1 ] && cmd+=(timeout --foreground -k 60 "$step_timeout")
   cmd+=("$@")
   what+=("$name")
   printf '%d/%d %s … ' "${#what[@]}" "$total" "$name"
@@ -111,7 +115,7 @@ step() { # <name> <command...>
   if [ "$code" -eq 0 ]; then
     note=$(step_note "$name")
     printf 'ok (%s)%s\n' "$(dur "$secs")" "${note:+ $note}"
-  elif [ "$have_timeout" = 1 ] && [ "$code" -eq 124 ]; then
+  elif [ "$have_timeout" = 1 ] && { [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; }; then
     printf 'TIMED OUT (%s)\n' "$(dur "$secs")"
     failed+=("$name")
   else
@@ -152,22 +156,20 @@ show_failure() { # the reasons a step failed
   fi
 }
 
-# the dependencies first: a fresh worktree has none, and neither the types nor a browser can be read without them
-deps_stale() {
-  local stamp="$root/node_modules/.shepherdr-deps"
-  [ -d "$root/node_modules/typescript" ] || return 0
-  [ -f "$stamp" ] || return 0
-  [ "$root/bun.lock" -nt "$stamp" ] || [ "$root/package.json" -nt "$stamp" ]
-}
-
-total=3
-deps_stale && total=4
-echo "check:local · $branch at $(git -C "$root" rev-parse --short HEAD) · $jobs test workers · $priority"
-[ "$total" -eq 4 ] && step dependencies bun install --frozen-lockfile
+# the dependencies first: a fresh worktree has none, neither the types nor a browser can be read without them, and a
+# lockfile that moved since the last install (bun install itself is a no-op when they are all there)
+total=4
+V="$logs/verdict.txt"
+: >"$V"
+say() { printf '%s\n' "$1" | tee -a "$V"; }
+dirty=''
+[ -n "$(git -C "$root" status --porcelain 2>/dev/null)" ] && dirty=' and what is not committed'
+say "check:local · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty · $jobs test workers · $priority"
+step dependencies bun install --frozen-lockfile
 
 # the browsers the tests open, named before the run instead of skipping quietly inside it
 probe=("${prio[@]}")
-[ "$have_timeout" = 1 ] && probe+=(timeout 180)
+[ "$have_timeout" = 1 ] && probe+=(timeout -k 60 180)
 probe+=(bun "$root/scripts/check-browsers.ts")
 browsers=$(cd "$root" && exec 9>&- && "${probe[@]}" 2>&1)
 printf '%s\n' "$browsers" >"$logs/browsers.log"
@@ -190,34 +192,39 @@ base=${base#origin/}
 map=()
 [ "$branch" = "$base" ] && map=(--map)
 
-if [ "$total" -eq 4 ] && [ ${#failed[@]} -gt 0 ]; then
-  echo "The dependencies could not be installed: nothing else runs."
-  show_failure dependencies
-  echo "FAILED in $(dur $((SECONDS - started)))"
-  echo "Full logs: $logs"
+if [ ${#failed[@]} -gt 0 ]; then
+  say "The dependencies could not be installed: nothing else runs."
+  say "$(show_failure dependencies)"
+  say "FAILED in $(dur $((SECONDS - started))) · logs: $logs"
   exit 1
 fi
 
 step types bun run typecheck
-step tests bun "$root/scripts/test.ts" ${map[@]+"${map[@]}"}
+# --force: a check never takes an earlier pass at this commit for its own (a browser that skipped then would hide here)
+step tests bun "$root/scripts/test.ts" --force ${map[@]+"${map[@]}"}
 step build bun run build
+
+# a browser that died during the run skips its tests instead of failing them (test/chromium.ts): say so, as for the ones
+# that could not start at all
+skipped=$(grep -c '^(skip) ' "$logs/tests.log" 2>/dev/null || true)
+[ -n "$skipped" ] && [ "$skipped" -gt 0 ] && notes+=("the tests: $skipped skipped (a browser that would not start skips its browser tests; see $logs/tests.log)")
 
 echo
 if [ ${#failed[@]} -eq 0 ] && [ ${#notes[@]} -eq 0 ]; then
-  echo "PASSED in $(dur $((SECONDS - started)))"
+  say "PASSED in $(dur $((SECONDS - started)))"
   exit 0
 fi
 if [ ${#failed[@]} -eq 0 ]; then
-  echo "PASSED in $(dur $((SECONDS - started))), with parts of it not run:"
-  for n in "${notes[@]}"; do echo "  ! $n"; done
+  say "PASSED in $(dur $((SECONDS - started))), with parts of it not run:"
+  for n in "${notes[@]}"; do say "  ! $n"; done
   exit 0
 fi
 if [ ${#notes[@]} -gt 0 ]; then
-  echo "Not usable here, so it skipped:"
-  for n in "${notes[@]}"; do echo "  ! $n"; done
-  echo
+  say "Not usable here, so it skipped:"
+  for n in "${notes[@]}"; do say "  ! $n"; done
+  say ""
 fi
-for name in "${failed[@]}"; do show_failure "$name"; done
-echo "FAILED in $(dur $((SECONDS - started))): ${failed[*]}"
-echo "Full logs: $logs"
+for name in "${failed[@]}"; do say "$(show_failure "$name")"; done
+say "FAILED in $(dur $((SECONDS - started))): ${failed[*]}"
+say "Full logs: $logs"
 exit 1

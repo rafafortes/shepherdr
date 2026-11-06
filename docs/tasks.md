@@ -120,7 +120,7 @@
   does.
 - The agent merges when its brief or you say so: `shepherdr merge <id>` squash-merges the branch into main.
   On GitHub that goes through its pull request (opened then if the agent never did), as soon as the agent's own quick
-  checks pass (in Shepherdr: `bun run check:local`, AGENTS.md), without waiting for GitHub's checks: they still run on
+  checks pass (in Shepherdr: the whole check, `bun run check:local`, AGENTS.md), without waiting for GitHub's checks: they still run on
   every push to main (and on the pull request where a repo's checks do), and only a failure GitHub already shows at that commit stops the merge.
   With Settings → How tasks work → Merge on "after GitHub checks", it merges only once GitHub's checks pass. Either way only
   at the commit this machine has (`gh pr merge --squash --match-head-commit`), then its branch on GitHub is deleted
