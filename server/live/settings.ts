@@ -14,6 +14,8 @@ import { home, readJson, writeJson } from '../store.ts'
 import type { SetBy } from '../../shared/brief.ts'
 import { settingsBlock, settingsLines, SEVERITIES, type Said, type Ways } from './prompts.ts'
 import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf } from './models.ts'
+import { picksOf, rememberModel } from './model-picks.ts'
+import { orderByPicks } from '../../shared/picks.ts'
 import { eventRules, eventsText, eventWords, nextWords, OWN_ZONE, timeRule, timeWords, validZone, type EventRule } from './trigger.ts'
 
 /** every agent kind herdr can start (interactive chat requires runtime log discovery and a reader) */
@@ -100,7 +102,7 @@ export interface Num {
   zero?: boolean
 }
 
-type Row = { label: string; key: string; value: string; options?: string[]; text?: boolean; multiline?: boolean; fixed?: boolean; group?: string; num?: Num }
+type Row = { label: string; key: string; value: string; options?: string[]; ordered?: boolean; ids?: Record<string, string>; text?: boolean; multiline?: boolean; fixed?: boolean; group?: string; num?: Num }
 /** the levels a section's defaults may be set at (all three when none): a machine's capacity has no space level;
  *  alerts and voice are one for all */
 type Section = { name: string; about?: string; rows: Row[]; levels?: LevelKind[]; told?: boolean; prompt?: boolean }
@@ -278,7 +280,8 @@ const roleKind = (role: Role, get: (key: string) => string) => kindOf(get(role =
 
 /** a role's Model and Effort rows as its CLI has them, by these settings (r.value is the row's own): a pick of its
  *  models and of the levels its model takes, each showing what it starts with (a level the model lacks shows as the
- *  nearest it has); a CLI that can't list its models takes any id; one Shepherdr passes neither to picks its own */
+ *  nearest it has); a CLI that can't list its models takes any id; one Shepherdr passes neither to picks its own. The
+ *  models are this machine's picks first (pinned, then recent), then the CLI's own order */
 export function agentRow(r: Row, get: (key: string) => string): Row {
   const [role, what] = r.key.split('.') as [Role, string]
   if (!ROLES.includes(role) || (what !== 'model' && what !== 'effort')) return r
@@ -289,8 +292,15 @@ export function agentRow(r: Row, get: (key: string) => string): Row {
   const model = findModel(kind, stored)
   if (what === 'model') {
     if (!c.models.length) return { ...r, value: stored }
-    const labels = c.models.map((m) => m.label)
-    return { ...r, text: false, value: model?.label ?? 'default', options: ['default', ...labels, ...(model && !labels.includes(model.label) ? [model.label] : [])] }
+    const ordered = orderByPicks(c.models, picksOf(kind))
+    const labels = ordered.map((m) => m.label)
+    const ids = Object.fromEntries(ordered.map((m) => [m.label, m.id]))
+    // what it starts on, when that is a model the CLI no longer lists: still offered, to be replaced
+    if (model && !labels.includes(model.label)) {
+      labels.push(model.label)
+      ids[model.label] = model.id
+    }
+    return { ...r, text: false, value: model?.label ?? 'default', options: ['default', ...labels], ordered: true, ids }
   }
   const levels = effortsOf(kind, stored)
   if (!levels.length) return { ...r, value: 'none', fixed: true }
@@ -403,6 +413,12 @@ export class Settings {
     else at[key] = value
     if (typeof l === 'object' && !Object.keys(at).length) delete this.d.spaces[l.space]
     this.save()
+    // a model chosen here is one of the human's picks: first among the recent ones in every model list
+    if (value !== null && /^(task|coordinator|reviewer|backup)\.model$/.test(key)) {
+      const kind = this.kindOf(key.split('.')[0] as Role, l)
+      const picked = kind ? findModel(kind, value) : undefined
+      if (kind && picked) rememberModel(kind, picked.id)
+    }
     return { ok: true }
   }
 

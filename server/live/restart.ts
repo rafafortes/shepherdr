@@ -4,6 +4,8 @@
 // what its agent runs on (restartHint) come from here.
 import type { Message, RestartCli, RestartHint, RestartInfo } from '../../shared/types.ts'
 import { effortFor, effortsOf, findModel, modelArg, modelsOf } from './models.ts'
+import { picksOf } from './model-picks.ts'
+import { orderByPicks } from '../../shared/picks.ts'
 import { chatProblem } from './readers/index.ts'
 import { CLI_NAME } from './settings.ts'
 import type { Harness } from './engine/engine.ts'
@@ -54,14 +56,27 @@ export function restartHint(on: Harness, set: Harness | undefined, want: Harness
   return { on: `${effortOf(on) || 'default'} effort`, want: `${effortOf(want) || 'default'} effort` }
 }
 
-/** each CLI the sheet offers: its models (with the levels each takes) where Shepherdr passes them */
-export function restartClis(kinds: string[]): RestartCli[] {
+/** each CLI the sheet offers: its models (with the levels each takes) where Shepherdr passes them, the human's pinned
+ *  ones first and the ones picked last next, then the CLI's own order. An older model it still takes by id stays on
+ *  offer while it is pinned or was picked: a pin never drops out of the list it belongs to. picksOfKind: this machine's
+ *  picks (model-picks.ts), or the ones of a world of its own (the demo's) */
+export function restartClis(kinds: string[], picksOfKind: (kind: string) => { pinned: string[]; recent: string[] } = picksOf): RestartCli[] {
   return kinds.filter((kind) => !chatProblem(kind)).map((kind) => {
     const c = modelsOf(kind)
+    if (!c) return { kind, name: name(kind) }
+    const picks = picksOfKind(kind)
+    const saved = (c.others ?? []).filter((m) => picks.pinned.includes(m.id) || picks.recent.includes(m.id))
+    const models = orderByPicks([...c.models, ...saved], picks)
+    const listed = new Set(models.map((m) => m.id))
     return {
       kind,
       name: name(kind),
-      ...(c ? { models: c.models.map((m) => ({ id: m.id, label: m.label, efforts: m.efforts, defaultEffort: m.effort })), efforts: effortsOf(kind), defaultModel: c.default, defaultEffort: findModel(kind, c.default)?.effort } : {}),
+      models: models.map((m) => ({ id: m.id, label: m.label, efforts: m.efforts, defaultEffort: m.effort })),
+      efforts: effortsOf(kind),
+      defaultModel: c.default,
+      defaultEffort: findModel(kind, c.default)?.effort,
+      pinned: picks.pinned.filter((id) => listed.has(id)),
+      recent: picks.recent.filter((id) => listed.has(id)),
     }
   })
 }

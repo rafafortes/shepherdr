@@ -18,6 +18,8 @@ const { pastTimes, span } = await import('../server/live/estimates.ts')
 const { readJson, writeJson } = await import('../server/store.ts')
 const { HOST, keyFor, machineName, placeId } = await import('../server/live/places.ts')
 const { stripHidden, hidden } = await import('../server/live/agents.ts')
+const { setPicks } = await import('../server/live/model-picks.ts')
+const { NO_PICKS } = await import('../shared/picks.ts')
 const { ROOT } = await import('../server/root.ts')
 
 describe('chat lines', () => {
@@ -709,6 +711,8 @@ describe('settings', () => {
     expect(effortFor('gemini', 'high')).toBeUndefined()
   })
   test('Settings offer each role the models and levels of its own CLI, showing a stored one that no longer fits as what it starts with', () => {
+    // nothing pinned or picked by another test: each CLI's own order
+    setPicks(NO_PICKS)
     const s = new Settings()
     // the Reviewer's rows sit in How tasks work (its Settings block), the rest in Agents
     const rows = () => s.sections([], [], null).filter((x) => x.name === 'Agents' || x.name === 'How tasks work').flatMap((x) => x.rows)

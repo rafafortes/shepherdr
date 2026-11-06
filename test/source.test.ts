@@ -19,6 +19,8 @@ const { parseUserLine } = await import('../server/live/chatlines.ts')
 const { WorkerHealth } = await import('../server/live/recovery.ts')
 const { Worktrees } = await import('../server/live/engine/worktrees.ts')
 const { fakeHerdr } = await import('./fake-herdr.ts')
+const { setPicks } = await import('../server/live/model-picks.ts')
+const { NO_PICKS } = await import('../shared/picks.ts')
 
 const src = new LiveSource()
 // herdr makes task worktrees: a stand-in on real git; no terminal opens for their agents (no herdr is there)
@@ -2744,5 +2746,21 @@ describe('review rounds from the command', () => {
     expect(more.out).toContain(`may now use ${rounds + 1} review rounds`)
     expect((await src.cli(['task', 'show', t.id], {})).out).toContain(`Review rounds: ${rounds} of ${rounds + 1} used, one added by its coordinator`)
     expect((await src.cli(['task', 'review-more', t.id], { chat: place })).out).toContain('already added its one more review round')
+  })
+})
+
+describe('pinned models, from the screen', () => {
+  test('a pin is kept for this machine, and an id no CLI lists is refused', async () => {
+    setPicks(NO_PICKS)
+    try {
+      expect(await src.act({ type: 'model-pin', chat: 'p:x:~', kind: 'claude', model: 'claude-haiku-5-5' })).toEqual({ ok: true, pinned: ['claude-haiku-5-5'], recent: [] })
+      // never a model invented: only what the CLI itself reported
+      expect(await src.act({ type: 'model-pin', chat: 'p:x:~', kind: 'claude', model: 'claude-nope-9-9' })).toMatchObject({ ok: false, error: expect.stringContaining('has no model') })
+      expect(await src.act({ type: 'model-pin', chat: 'p:x:~', kind: 'nope', model: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('No CLI called') })
+      // the same row again unpins it
+      expect(await src.act({ type: 'model-pin', chat: 'p:x:~', kind: 'claude', model: 'claude-haiku-5-5' })).toEqual({ ok: true, pinned: [], recent: [] })
+    } finally {
+      setPicks(NO_PICKS)
+    }
   })
 })

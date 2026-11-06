@@ -2,6 +2,7 @@
 import clsx from 'clsx'
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { Place, RestartCli, RestartInfo } from '@shared/types.ts'
+import { NO_PICKS, orderByPicks, type Picks } from '@shared/picks.ts'
 import { act, setUI, taskOf, useSnap, useStore } from './kernel.ts'
 import { Dialog } from './rowmenu.tsx'
 import { Pick, shown, Switch, TextValue } from './Settings.tsx'
@@ -60,6 +61,8 @@ function Sheet({ chat, name, current }: Opening) {
   const [model, setModel] = useState('')
   const [effort, setEffort] = useState('')
   const [save, setSave] = useState(false)
+  // each CLI's pinned and recent models as the server has them, updated as one is pinned here
+  const [picks, setPicks] = useState<Record<string, Picks>>({})
   useEffect(() => {
     act({ type: 'restart-info', chat })
       .then((r: { ok?: boolean; error?: string; info?: RestartInfo; waiting?: boolean }) => {
@@ -69,6 +72,7 @@ function Sheet({ chat, name, current }: Opening) {
         setKind(pick.kind)
         setModel(pick.model ?? '')
         setEffort(pick.effort ?? '')
+        setPicks(Object.fromEntries(r.info.clis.map((c) => [c.kind, { pinned: c.pinned ?? [], recent: c.recent ?? [] }])))
       })
       .catch((e: Error) => setError(e.message))
   }, [chat, current])
@@ -98,6 +102,24 @@ function Sheet({ chat, name, current }: Opening) {
   const other = !!info && kind !== info.on.kind
   const changed = !!info && (kind !== info.want.kind || model !== (info.want.model ?? '') || effort !== (info.want.effort ?? ''))
   const label = (id: string) => (id ? (modelsOf(cli).find((m) => m.id === id)?.label ?? id) : DEFAULT)
+  // the model list: pinned first, then the recent ones, then the CLI's own order, each under its heading
+  const pickedHere = picks[kind] ?? NO_PICKS
+  const ordered = orderByPicks(modelsOf(cli), pickedHere)
+  const heading = (l: string) => {
+    if (!cli || l === DEFAULT) return undefined
+    const id = cli.models?.find((m) => m.label === l)?.id
+    if (!id) return undefined
+    if (pickedHere.pinned.includes(id)) return 'Pinned'
+    if (pickedHere.recent.includes(id)) return 'Recent'
+    return pickedHere.pinned.length || pickedHere.recent.length ? 'All models' : undefined
+  }
+  const pin = async (l: string) => {
+    const id = cli?.models?.find((m) => m.label === l)?.id
+    if (!cli || !id) return
+    // the chat names whose machine keeps the picks: another machine's agent pins on its own
+    const r = await act({ type: 'model-pin', chat, kind: cli.kind, model: id }).catch(() => null)
+    if (r?.ok) setPicks((p) => ({ ...p, [cli.kind]: { pinned: r.pinned ?? [], recent: r.recent ?? [] } }))
+  }
   return (
     <Dialog
       title={task ? `Restart ${name} agent?` : 'Restart coordinator?'}
@@ -117,7 +139,18 @@ function Sheet({ chat, name, current }: Opening) {
             <Line label="Model">
               {cli?.models ? (
                 cli.models.length ? (
-                  <Pick label="Model" value={label(model)} options={[DEFAULT, ...cli.models.map((m) => m.label)]} onPick={(l) => pickModel(cli.models!.find((m) => m.label === l)?.id ?? '')} />
+                  <Pick
+                    label="Model"
+                    value={label(model)}
+                    options={[DEFAULT, ...ordered.map((m) => m.label)]}
+                    ordered
+                    // found by its name or its id: a provider's prefix is not in the name
+                    match={(l) => `${l} ${cli.models?.find((m) => m.label === l)?.id ?? ''}`}
+                    section={heading}
+                    // only a model takes a pin: Default is the CLI's own choice
+                    pin={{ pinned: ordered.filter((m) => pickedHere.pinned.includes(m.id)).map((m) => m.label), toggle: pin, skip: (l) => !cli.models?.some((m) => m.label === l) }}
+                    onPick={(l) => pickModel(cli.models!.find((m) => m.label === l)?.id ?? '')}
+                  />
                 ) : (
                   <TextValue label="Model" value={model || DEFAULT} onEdit={() => undefined} onSave={(v) => pickModel(v.trim() === DEFAULT ? '' : v.trim())} />
                 )

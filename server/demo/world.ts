@@ -12,6 +12,7 @@ import { demoActivity } from './activity.ts'
 import { settingsBlock } from '../live/prompts.ts'
 import { CLI_NAME, repositorySection, defaultOf, kindOf } from '../live/settings.ts'
 import { harnessProblem, harnessWords, restartClis } from '../live/restart.ts'
+import { picksIn, pickKey, withPin, withRecent, type Picks } from '../../shared/picks.ts'
 import { nextWords } from '../live/trigger.ts'
 import { pilotLine } from '../live/heartbeat.ts'
 import { secretPages, Vault } from '../live/secrets.ts'
@@ -19,7 +20,7 @@ import { secretPages, Vault } from '../live/secrets.ts'
 const DEFAULT_WAYS = { review: defaultOf('brief.review') !== 'off', mustFix: defaultOf('review.mustFix')!, rounds: Number.parseInt(defaultOf('review.rounds')!, 10), merge: defaultOf('brief.merge')!, waitChecks: defaultOf('brief.merge') === 'after GitHub checks' }
 const DEFAULT_REVIEWER = { kind: kindOf(defaultOf('reviewer.agent')!)! }
 import { excerpt } from '../live/chatlines.ts'
-import { TABLE } from '../live/models.ts'
+import { findModel, TABLE } from '../live/models.ts'
 import { Browsers } from '../live/browser.ts'
 import { shortUrl } from '../../shared/browser.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, setOrder, sortPlaces, type PlaceOrder, type SectionDefs } from '../../shared/order.ts'
@@ -76,6 +77,8 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   /** agents' secrets, in memory only */
   vault = new Vault('', D.secrets())
   automations = structuredClone(D.AUTOMATIONS)
+  /** the human's pinned and recent models here, in memory: one world's picks never reach another's */
+  picks: Picks = { pinned: [], recent: [] }
   artifacts: Artifact[] = D.artifacts()
   /** what each artifact's page sent, by the HTML version it was sent from */
   artifactSent: Record<string, { html: number; text: string }> = {}
@@ -711,7 +714,15 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const t = this.task(a.chat.split('/')[0])
         const on = kindOf(c?.cli ?? '') ?? 'claude'
         const want = c?.restart ? (kindOf(c.restart.want) ?? on) : on
-        return { ok: true, info: { role: a.chat.includes('/') ? 'task' : 'coordinator', space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name, on: c?.agent ?? { kind: on }, onWords: harnessWords(c?.agent ?? { kind: on }), want: { kind: want }, clis: restartClis(['claude', 'codex', 'pi']), working: t?.status === 'work' } }
+        return { ok: true, info: { role: a.chat.includes('/') ? 'task' : 'coordinator', space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name, on: c?.agent ?? { kind: on }, onWords: harnessWords(c?.agent ?? { kind: on }), want: { kind: want }, clis: restartClis(['claude', 'codex', 'pi'], (kind) => picksIn(this.picks, kind)), working: t?.status === 'work' } }
+      }
+      case 'model-pin': {
+        const kind = kindOf(a.kind)
+        if (!kind) return { ok: false, error: `No CLI called ${a.kind}.` }
+        const m = findModel(kind, a.model)
+        if (!m) return { ok: false, error: `${CLI_NAME[kind] ?? kind} has no model ${a.model}.` }
+        this.picks = withPin(this.picks, pickKey(kind, m.id))
+        return { ok: true, ...picksIn(this.picks, kind) }
       }
       case 'restart': {
         const c = this.chat(a.chat)
@@ -720,6 +731,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const problem = harnessProblem({ kind, model: a.model, effort: a.effort })
         if (problem) return { ok: false, error: problem }
         const words = harnessWords({ kind, model: a.model, effort: a.effort })
+        if (a.model) this.picks = withRecent(this.picks, pickKey(kind, a.model))
         c.agent = { kind, model: a.model, effort: a.effort }
         c.cli = CLI_NAME[kind] ?? kind
         c.restart = undefined
