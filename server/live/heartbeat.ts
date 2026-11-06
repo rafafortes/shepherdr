@@ -141,7 +141,8 @@ export function heartbeatPrompt(list: string, held: string[] = []) {
 /** the wake a chat line brought, when it is one: Shepherdr's hidden heartbeat in the agent's log, with why it came
  *  (`reason="run now"` for a tap; the time rule's own has none) */
 export function wakeOf(text: string): { reason?: string } | undefined {
-  const m = /<shepherdr[^>]*>\s*<heartbeat(?:\s+reason="([^"]*)")?\s*>/.exec(text)
+  // the whole line is the wake (Shepherdr's own hidden message), so words pasted into a chat never read as one
+  const m = /^<shepherdr[^>]*>\s*<heartbeat(?:\s+reason="([^"]*)")?\s*>/.exec(text.trim())
   return m ? (m[1] ? { reason: m[1] } : {}) : undefined
 }
 

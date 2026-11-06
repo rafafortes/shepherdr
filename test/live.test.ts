@@ -527,6 +527,8 @@ describe('heartbeat', () => {
     expect(wakeOf(hidden('Heartbeat.', 'heartbeat', { reason: 'run now' }))).toEqual({ reason: 'run now' })
     expect(wakeOf(hidden('SHE-4 is ready to merge', 'news'))).toBeUndefined()
     expect(wakeOf('a message of the human')).toBeUndefined()
+    // a heartbeat's words pasted into the chat are the human's, never a wake: the line must be Shepherdr's own
+    expect(wakeOf(`look at this: ${hidden('Heartbeat.', 'heartbeat', { reason: 'run now' })}`)).toBeUndefined()
     expect(pilotLine({ quiet: true, said: false })).toBe('Autopilot woke · on schedule · nothing to report')
     expect(pilotLine({ reason: 'run now', quiet: true, said: false })).toBe('Autopilot woke · Run now · nothing to report')
     // it said something: its words follow, so the line says only why it woke

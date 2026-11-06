@@ -35,18 +35,21 @@
   Shepherdr sends it one fixed prompt in its own session: go through its HEARTBEAT.md (its standing checklist in plain
   words, in the prompt itself, so a coordinator on another machine has it too; edited in Settings → Autopilot or by
   the agent with `shepherdr heartbeat set`; kept in `~/.shepherdr/heartbeat` on the main machine) and act on what needs
-  it, or reply only `<no-reply>`. The chat shows none of the prompt and none of those words: each wake leaves one quiet
-  line instead, why it came and, when it answered with nothing, that there was nothing to report ("Autopilot woke · on
-  schedule · nothing to report"), so a quiet night is never mistaken for a broken heartbeat. Never a card and never an alert: it
-  stays in that chat. A wake that did something shows its own reply after that line. A busy coordinator gets it once its
+  it, or reply only `<no-reply>`. The chat shows none of the prompt and none of those words: each heartbeat and each Run
+  now leaves one quiet line instead, why it came and, when it answered with nothing, that there was nothing to report
+  ("Autopilot woke · on schedule · nothing to report"), so a quiet night is never mistaken for a broken heartbeat. Never
+  a card and never an alert: it stays in that chat. A wake that did something shows its own reply after that line, and
+  news that wakes the coordinator at once has its card as ever. A busy coordinator gets it once its
   turn is over; none while its HEARTBEAT.md is empty and no news waits. News its event rules name wakes the coordinator
   at once, so a news card gets its reply right after it; other news waits and comes with the next heartbeat (quiet
   nights: a time rule within the day's hours, and only what can't wait as its events).
 - **Run now** is that heartbeat on your word: beside the Autopilot pill at the top of the space's chat, at the top of
   Settings → Autopilot, and `shepherdr heartbeat run [<space>]`. One wake per tap, refused while a wake already waits or
   runs (the button says Queued or Waking then); a tap while its coordinator is busy waits for its turn, so two taps never
-  run two wakes at once. The next scheduled heartbeat counts from it, and it is never offered for another machine's
-  space: that machine wakes its own.
+  run two wakes at once. It is offered only while that space is on Autopilot and its herdr answers, and it is refused when
+  there would be nothing to go through (an empty HEARTBEAT.md and no news waiting), so a tap never spends a turn on
+  nothing. A wake takes the checklist and the news that waited, as a scheduled heartbeat does. The next scheduled
+  heartbeat counts from it, and it is never offered for another machine's space: that machine wakes its own.
 - Automations are cron jobs for tasks: a space's task template (title, brief, agent) and its trigger: a time rule,
   events of its own space (or the space a rule names), or both. Each run adds a new task with a fresh agent; none runs
   in the coordinator's chat. Only agents add or change them (`shepherdr automation`), when you ask a coordinator in the
