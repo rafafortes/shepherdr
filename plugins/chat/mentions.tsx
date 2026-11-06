@@ -108,7 +108,8 @@ function shown(snap: Snapshot | null | undefined, m: Mention): Shown {
   return { text: t.id, sub: t.name, status: t.status, progress: t.report?.progress, open: { kind: 'task', id: t.id } }
 }
 
-const CHIP = 'inline-flex max-w-full items-baseline gap-1 rounded-md py-px pr-1.5 pl-1 align-baseline whitespace-nowrap'
+// a chip in a message is a pill, like every one-line control (the corner rule, test/design.test.ts)
+const CHIP = 'inline-flex max-w-full items-baseline gap-1 rounded-full py-px pr-1.5 pl-1 align-baseline whitespace-nowrap'
 const OPEN = 'cursor-pointer bg-accent/12 text-accent hover:bg-accent/20'
 const GONE = 'bg-sel text-fg3'
 
