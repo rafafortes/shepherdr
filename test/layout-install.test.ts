@@ -63,7 +63,7 @@ async function until<T>(read: () => Promise<T>, ok: (v: T) => boolean, ms = 5000
 describe.skipIf(!browser)('a home-screen install behind the login', () => {
   test("the manifest link asks for the page's credentials, in index.html and in the screen built from it", () => {
     for (const file of [join(root, 'index.html'), join(dist, 'index.html')])
-      expect(readFileSync(file, 'utf8')).toMatch(/<link rel="manifest" href="manifest\.webmanifest" crossorigin="use-credentials" \/>/)
+      expect(readFileSync(file, 'utf8')).toMatch(/<link rel="manifest"[^>]*\scrossorigin="use-credentials"/)
   })
 
   test('the gate lets the browser read the manifest, and everything else the app asks for at start carries the login', async () => {
@@ -77,15 +77,25 @@ describe.skipIf(!browser)('a home-screen install behind the login', () => {
     expect(read.data ?? '').toContain('"name": "Shepherdr"')
     // and whole enough to install: the browser finds nothing missing in it (its name, start_url, display, icons)
     expect((await cdp.send('Page.getInstallabilityErrors')) as { installabilityErrors: unknown[] }).toEqual({ installabilityErrors: [] })
-    // the rest of a start: the service worker (which alerts need), an icon, and the push key it subscribes with (404
-    // here: this gate serves the screen only, and what it answers does not matter, only that the request got in)
+    // the rest of a start, asked for here as the app asks for it (the same origin's requests carry the login by
+    // themselves): the service worker alerts need, an icon, the push key, and the subscription it posts. What this gate
+    // answers does not matter, only that each request got in; the app's own requests are covered by the log below.
     expect(
       await page.evaluate(async () => ({
         worker: await navigator.serviceWorker.register('sw.js').then(() => true, () => false),
         icon: await fetch('icon-180.png?v=2').then((r) => r.status, () => 0),
         pushKey: await fetch('api/push/key').then(() => true, () => false),
+        subscribe: await fetch('api/push/subscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-shepherdr': '1' },
+          body: JSON.stringify({ sub: { endpoint: 'https://push.example/1' }, device: 'a test' }),
+        }).then(() => true, () => false),
       })),
-    ).toEqual({ worker: true, icon: 200, pushKey: true })
+    ).toEqual({ worker: true, icon: 200, pushKey: true, subscribe: true })
+    // every request that reached the gate carried the login, except the one challenge the person answers once
+    expect(seen.filter((s) => !s.auth).map((s) => s.path)).toEqual(['/'])
+    for (const path of ['/manifest.webmanifest', '/sw.js', '/icon-180.png', '/api/push/key', '/api/push/subscribe'])
+      expect(seen).toContainEqual({ path, auth: true })
     // every request that reached the gate carried the login, except the one challenge the person answers once
     expect(seen.filter((s) => !s.auth).map((s) => s.path)).toEqual(['/'])
     for (const path of ['/manifest.webmanifest', '/sw.js', '/icon-180.png', '/api/push/key']) expect(seen).toContainEqual({ path, auth: true })
