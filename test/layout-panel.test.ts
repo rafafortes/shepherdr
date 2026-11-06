@@ -521,8 +521,10 @@ describe.skipIf(!browser)("a task's side panel", () => {
       const frame = () => fake.toPanels({ type: 'frame', seq: 1, data: white, metadata: { deviceWidth: 1280, deviceHeight: 720, scrollOffsetX: 0, scrollOffsetY: 0 } })
       const page = await browser!.newPage({ viewport: { width: 1600, height: 900 }, colorScheme: 'dark' })
       await page.goto(task('GTM-15'))
-      const toggle = page.getByRole('button', { name: 'Show task panel' })
-      if (await toggle.count()) await toggle.click()
+      // the task view is drawn with the screen's first snapshot, and the panel is shut here: clicking the button that
+      // appears with it waits for it (reading count() once, as this did, can read the screen before that and skip it,
+      // leaving the panel shut and every tab below unreachable)
+      await page.getByRole('button', { name: 'Show task panel' }).click()
       await page.getByRole('tab', { name: 'Browser' }).click()
       await until(() => fake.streamSocks.size > 0)
       frame()
