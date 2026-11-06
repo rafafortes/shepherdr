@@ -1391,10 +1391,11 @@ type CardSource = { id: string; title?: string }
 export function CardShell({ title, plan, icon, action, source, dismiss, children }: { title: string; plan?: boolean; icon?: ComponentType<{ className?: string }>; action?: ReactNode; source?: CardSource; dismiss?: () => void; children: ReactNode }) {
   const Icon = icon ?? (plan ? PlanIcon : QuestionIcon)
   const box = useRef<HTMLDivElement>(null)
-  // Esc closes the card without an answer, as Esc on the CLI's own prompt does: only once the card was pressed, so the
-  // app's own Esc (back, a menu) is never taken from it, and not while typing in it
+  // Esc closes the card without an answer, as Esc on the CLI's own prompt does: only while the card itself holds the
+  // focus (a press on it that landed on no button or box of its own), so the app's own Esc (back, a menu) keeps working
+  // from a choice, a box or anywhere else
   const key = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (!dismiss || e.key !== 'Escape' || (e.target as HTMLElement).closest('input, textarea')) return
+    if (!dismiss || e.key !== 'Escape' || e.target !== box.current) return
     e.preventDefault()
     e.stopPropagation()
     dismiss()

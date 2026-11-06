@@ -377,6 +377,11 @@ describe.skipIf(!browser)('answer cards', () => {
       await page.waitForTimeout(200)
       expect(await page.locator('[data-whole="dis-in-task"]').count()).toBe(1)
       expect(await page.evaluate(() => location.search)).toContain('task=LV-3')
+      // a choice holds the focus: Esc there is the app's own (back to the list), never a second dismissal
+      await page.locator('[data-card]').filter({ hasText: 'Which upload limit?' }).getByRole('button', { name: /^50 MB per file/ }).click()
+      await page.keyboard.press('Escape')
+      await page.locator('[data-whole="dis-in-task"]').waitFor({ state: 'detached' })
+      expect(sent).toHaveLength(1)
     } finally {
       world.act = act
       chat.messages = chat.messages.filter((m) => m.id !== 'dis-in-task')
