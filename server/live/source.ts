@@ -1747,6 +1747,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         this.emit('snapshot')
         return { ok: true }
       }
+      case 'steer': {
+        // Send now on a message Claude Code queued while it works: its Ctrl+Enter, only while its screen offers it
+        if (await this.agents.steerNow(a.chat)) return { ok: true }
+        return { ok: false, error: "It couldn't take it now." }
+      }
       case 'restart-info': {
         try {
           const x = this.restartable(a.chat)

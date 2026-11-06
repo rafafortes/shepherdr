@@ -943,6 +943,9 @@ export type Action =
   | { type: 'pause'; chat: string }
   /** stop a task: its agent and space close, it is To do and its work stays, until written to */
   | { type: 'stop'; chat: string }
+  /** Send now on a message its CLI holds in its own queue: Claude Code's Ctrl+Enter, pressed only while its screen
+   *  offers it */
+  | { type: 'steer'; chat: string }
   /** what the restart sheet shows for a coordinator (chat: its place id) or a task's agent (ID/Agent): RestartInfo */
   | { type: 'restart-info'; chat: string }
   /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as

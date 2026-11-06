@@ -672,6 +672,10 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         this.emit('snapshot')
         return { ok: true }
       }
+      case 'steer':
+        // as the live one: only a message its CLI holds in its own queue is taken now, and the demo's chats show what
+        // you send at once, so none ever sits there
+        return { ok: false, error: "It couldn't take it now." }
       case 'close': {
         const t = this.task(a.chat.split('/')[0])
         if (!t || t.status === 'done') return { ok: false, error: 'It is done already.' }

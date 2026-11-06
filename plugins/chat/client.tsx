@@ -79,6 +79,9 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
     : {}
   // a file waiting to go in shows faded, without a line saying so
   const body = !!(msg.text || msg.answered || msg.waiting)
+  // one you sent that Claude Code may be holding in its own queue: it takes it now with Ctrl+Enter, and the server
+  // presses that only while its screen offers it. Another CLI has no such offer, so nothing shows there
+  const queued = !!you && inQueue(chat, pending)
   const reacted = !!msg.reactions?.length
   const edge = registry.messageEdge.map(({ View }, i) => <View key={i} msg={msg} chat={chat} />)
   // reactions sit on the bubble's bottom right corner, yours and the agent's alike (like iMessage and WhatsApp); a row
@@ -183,6 +186,7 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
                     return blocker ? <LinkButton onClick={() => jumpTo(chat.key, blocker.id, { card: true })}>Go to question</LinkButton> : null
                   })()}
                 </> : waitLine(msg.waitsFor)}</div> : null}
+                {queued && body ? <QueueLine chatKey={chat.key} /> : null}
                 {msg.text ? <div ref={text} data-text>{you ? <YourText text={msg.text} /> : <Fold id={msg.id}><Markdown text={msg.text} /></Fold>}</div> : null}
               </div>,
               true,
@@ -191,6 +195,7 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
         {msg.file
           ? unit(
               <div data-anchor {...hold} className={clsx('relative max-w-full select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies), you ? 'self-end' : 'self-start')}>
+                {queued && !pending?.text ? <QueueLine chatKey={chat.key} /> : null}
                 <FileTile name={msg.file.name} chat={chat.key} path={msg.file.path} tucked={!body && !!quote} />
               </div>,
               !body,
@@ -213,6 +218,40 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
         {out?.state === 'failed' && last ? <NotSent out={out} /> : null}
       </div>
     </>
+  )
+}
+
+/** one you sent that Claude Code holds in its own queue: Send now presses its Ctrl+Enter, which the server does only
+ *  while its screen offers it, so a tap at any other moment presses nothing. Why it couldn't, in place of Send now */
+function QueueLine({ chatKey }: { chatKey: string }) {
+  return (
+    <div className="text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
+      <InQueue chatKey={chatKey} />
+    </div>
+  )
+}
+
+/** whether this is one of yours still sitting in its CLI's own queue: Claude Code holds those while it works, and takes
+ *  one now when its screen offers Ctrl+Enter. Another CLI has no such offer, and a waiting one is shown as waiting */
+function inQueue(chat: Chat, out?: Outgoing) {
+  return !!out && out.state === 'sent' && !out.waiting && !out.queued && !!chat.working && chat.agent?.kind === 'claude'
+}
+
+function InQueue({ chatKey }: { chatKey: string }) {
+  const [state, setState] = useState<'idle' | 'sending' | string>('idle')
+  const now = () => {
+    setState('sending')
+    act({ type: 'steer', chat: chatKey }).then(
+      (r: { ok?: boolean; error?: string }) => setState(r?.ok === false ? (r.error ?? "It couldn't take it now.") : 'idle'),
+      (e) => setState(reasonOf(e)),
+    )
+  }
+  return state === 'idle' ? (
+    <>
+      Queued · <LinkButton onClick={now}>Send now</LinkButton>
+    </>
+  ) : (
+    `Queued · ${state === 'sending' ? 'Sending…' : state}`
   )
 }
 
@@ -595,6 +634,8 @@ export function albumRows(n: number) {
  *  corners rounded like a bubble's (the small one points at whoever sent them) */
 function Album({ msgs, chat, from, out, last: lastPart }: { msgs: Message[]; chat: Chat; from: string; out?: Outgoing; last?: boolean }) {
   const you = msgs[0].who === 'you'
+  // pictures alone carry the queue line: a picture sent with words has it under them
+  const queued = you && !out?.text && inQueue(chat, out)
   const rows = albumRows(msgs.length)
   const cols = Math.max(...rows)
   // the sixth tile is covered too: +N counts every picture not seen
@@ -620,6 +661,7 @@ function Album({ msgs, chat, from, out, last: lastPart }: { msgs: Message[]; cha
       >
         {canReply(msgs[0], out) ? <SwipeHint /> : null}
         {msgs[0].reply ? <Quote q={msgs[0].reply} chat={chat.key} from={from} you={you} /> : null}
+        {queued ? <QueueLine chatKey={chat.key} /> : null}
         {rows.map((len, r) => (
           <div key={r} className={clsx('flex gap-[3px]', you && 'justify-end')}>
             {Array.from({ length: len }, (_, c) => {

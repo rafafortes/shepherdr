@@ -1197,6 +1197,25 @@ export class Agents extends Emitter<Events> {
     if (a) await herdr.paneKeys(a.pane_id, keys)
   }
 
+  /**
+   * "Send now" on a message its CLI holds in its own queue: Claude Code's Ctrl+Enter, pressed only while its screen
+   * offers it (on any other screen it would type something else). A CLI with no such offer never gets a key. Whether it
+   * was pressed: false once its turn is over, since what it queued goes in on its own then.
+   */
+  async steerNow(key: string): Promise<boolean> {
+    if (this.record(key)?.kind !== 'claude') return false
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setTimeout(r, i ? 300 : 150))
+      const a = this.status(key) === 'working' ? this.info(key) : undefined
+      if (!a) return false
+      // what the pane shows now, never a deeper read: that would scroll a working agent's view
+      if (!/ctrl\+enter to send now/i.test(await herdr.visible(a.pane_id).catch(() => ''))) continue
+      await herdr.paneKeys(a.pane_id, ['ctrl+enter'])
+      return true
+    }
+    return false
+  }
+
   async text(key: string, text: string) {
     const a = this.info(key)
     if (a) await herdr.paneText(a.pane_id, text)

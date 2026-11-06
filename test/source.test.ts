@@ -1276,6 +1276,57 @@ describe('what you send shows at once', () => {
   })
 })
 
+describe('Send now on a message its CLI queued', () => {
+  const chat = placeId.home()
+  test("Claude Code's Ctrl+Enter, pressed only while its screen offers it, once per tap", async () => {
+    const agents = src.agents
+    const originals = { info: agents.info, status: agents.status, record: agents.records[chat], visible: herdr.visible, paneKeys: herdr.paneKeys }
+    let screen = ''
+    let st = 'working'
+    const pressed: string[][] = []
+    agents.records[chat] = { ...(originals.record ?? {}), key: chat, name: 'steer-now', kind: 'claude' } as (typeof agents.records)[string]
+    agents.info = (() => ({ agent: 'claude', agent_status: 'working', pane_id: 'steer-pane', cwd: '/tmp', tab_id: 'steer-tab', workspace_id: 'steer-space' })) as typeof agents.info
+    agents.status = (() => st) as typeof agents.status
+    herdr.visible = async () => screen
+    herdr.paneKeys = (async (_pane: string, keys: string[]) => {
+      pressed.push(keys)
+    }) as typeof herdr.paneKeys
+    try {
+      // its screen offers it: pressed, once
+      screen = '● Working…\n❯ \n  ctrl+enter to send now · esc to interrupt'
+      expect(await src.act({ type: 'steer', chat })).toMatchObject({ ok: true })
+      expect(pressed).toEqual([['ctrl+enter']])
+      // offered again later: a second tap presses again, and never twice for one
+      expect(await src.act({ type: 'steer', chat })).toMatchObject({ ok: true })
+      expect(pressed).toEqual([['ctrl+enter'], ['ctrl+enter']])
+      // no offer: nothing is pressed (on an empty prompt Ctrl+Enter would type something else), and it says so
+      screen = '● Working…\n❯ \n  esc to interrupt'
+      expect(await src.act({ type: 'steer', chat })).toMatchObject({ ok: false, error: "It couldn't take it now." })
+      expect(pressed).toHaveLength(2)
+      // another CLI has no such queue to take, though its screen says those words
+      agents.records[chat] = { ...agents.records[chat], kind: 'pi' }
+      screen = '  ctrl+enter to send now'
+      expect(await src.act({ type: 'steer', chat })).toMatchObject({ ok: false })
+      expect(pressed).toHaveLength(2)
+      // its turn is over: what it queued goes in on its own, so there is nothing to press
+      agents.records[chat] = { ...agents.records[chat], kind: 'claude' }
+      st = 'idle'
+      expect(await src.act({ type: 'steer', chat })).toMatchObject({ ok: false })
+      expect(pressed).toHaveLength(2)
+      // and an agent that isn't there has no pane to read
+      st = 'gone'
+      expect(await src.act({ type: 'steer', chat })).toMatchObject({ ok: false })
+      expect(pressed).toHaveLength(2)
+    } finally {
+      Object.assign(agents, { info: originals.info, status: originals.status })
+      if (originals.record) agents.records[chat] = originals.record
+      else delete agents.records[chat]
+      herdr.visible = originals.visible
+      herdr.paneKeys = originals.paneKeys
+    }
+  })
+})
+
 describe('modes: regular and Autopilot', () => {
   test('a saved mode that is neither loads as regular and is dropped', () => {
     writeFileSync(join(process.env.SHEPHERDR_HOME!, 'modes.json'), JSON.stringify({ 'p:h:old': 'manual', 'p:h:co': 'copilot', 'p:h:auto': 'autopilot', 'p:h:reg': 'Regular' }))
