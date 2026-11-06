@@ -292,7 +292,10 @@ export function agentRow(r: Row, get: (key: string) => string): Row {
   const model = findModel(kind, stored)
   if (what === 'model') {
     if (!c.models.length) return { ...r, value: stored }
-    const ordered = orderByPicks(c.models, picksOf(kind))
+    const picks = picksOf(kind)
+    // an older model it still takes by id stays on offer while it is pinned or was picked, as in the restart sheet
+    const saved = (c.others ?? []).filter((m) => picks.pinned.includes(m.id) || picks.recent.includes(m.id))
+    const ordered = orderByPicks([...c.models, ...saved], picks)
     const labels = ordered.map((m) => m.label)
     const ids = Object.fromEntries(ordered.map((m) => [m.label, m.id]))
     // what it starts on, when that is a model the CLI no longer lists: still offered, to be replaced

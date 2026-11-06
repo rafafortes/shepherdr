@@ -244,8 +244,9 @@ function Choices({
       value={query}
       onChange={(e) => setQuery(e.target.value)}
       onKeyDown={(e) => {
-        // Enter takes the first one left, never the one already set (that pick would change nothing)
-        const first = rows.find((r) => r !== value) ?? rows[0]
+        // Enter takes the first one left, never the one already set (that pick would change nothing); in an empty box it
+        // takes nothing at all, so a keyboard opening the menu and pressing Enter again cannot change what is set
+        const first = words ? (rows.find((r) => r !== value) ?? rows[0]) : undefined
         if (e.key === 'Enter' && first !== undefined) {
           e.preventDefault()
           onPick(first)

@@ -157,6 +157,14 @@ describe.skipIf(!browser)('Settings’ per-role model row', () => {
       await page.keyboard.type('provider/model-7')
       await settled(page)
       expect(await menu.getByRole('menuitemradio').allTextContents()).toEqual(['Model 7'])
+      // Enter in an empty box takes nothing: a keyboard opening the menu and pressing Enter again cannot change a
+      // setting it never meant to touch
+      await search.fill('')
+      await search.click()
+      await page.keyboard.press('Enter')
+      await settled(page)
+      expect(await menu.getByRole('menuitemradio').count()).toBe(options.length)
+      expect(world.sections.flatMap((s) => s.rows).find((r) => r.key === 'task.model')?.value).toBe('default')
     } finally {
       world.sections = before
       world.emit('snapshot')

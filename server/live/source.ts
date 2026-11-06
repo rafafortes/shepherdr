@@ -1846,7 +1846,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (!kind) return { ok: false, error: `No CLI called ${a.kind}.` }
         const m = findModel(kind, a.model)
         if (!m) return { ok: false, error: `${CLI_NAME[kind] ?? kind} has no model ${a.model}.` }
-        pinModel(kind, m.id)
+        pinModel(kind, m.id, !!a.on)
         // Settings' model rows lead with the pins too
         this.emit('snapshot')
         return { ok: true, ...picksOf(kind) }

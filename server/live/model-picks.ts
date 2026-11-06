@@ -20,9 +20,9 @@ export function picksOf(kind: string) {
   return picksIn(picks(), kind)
 }
 
-/** a model pinned to the top of its CLI's list, or not any more: the picks after it */
-export function pinModel(kind: string, id: string): Picks {
-  return save(withPin(picks(), pickKey(kind, id)))
+/** a model pinned to the top of its CLI's list (on), or not any more: the picks after it */
+export function pinModel(kind: string, id: string, on: boolean): Picks {
+  return save(withPin(picks(), pickKey(kind, id), on))
 }
 
 /** a model picked now (a restart on it, a default saved): first among the recent ones; none for the CLI's own */

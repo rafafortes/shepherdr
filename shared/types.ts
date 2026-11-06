@@ -976,9 +976,9 @@ export type Action =
   /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as
       Settings say for its role); save: as its space's Settings for its role too */
   | { type: 'restart'; chat: string; kind?: string; model?: string; effort?: string; save?: boolean }
-  /** pin a model to the top of its CLI's lists, or unpin it, on the machine that owns this chat (its picks are the
-      machine's own): the answer is that CLI's pins and recents there */
-  | { type: 'model-pin'; chat: string; kind: string; model: string }
+  /** pin a model to the top of its CLI's lists (on: false unpins it), on the machine that owns this chat (its picks are
+      the machine's own): the answer is that CLI's pins and recents there */
+  | { type: 'model-pin'; chat: string; kind: string; model: string; on: boolean }
   /** mark a task done with nothing merged (shepherdr task close); refused (held) while it holds unmerged work, unless force */
   | { type: 'close'; chat: string; force?: boolean }
   /** delete a task: its agent, herdr space, worktree, branch, chat and record; refused while it holds work, unless force */

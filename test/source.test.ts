@@ -2753,12 +2753,14 @@ describe('pinned models, from the screen', () => {
   test('a pin is kept for this machine, and an id no CLI lists is refused', async () => {
     setPicks(NO_PICKS)
     try {
-      expect(await src.act({ type: 'model-pin', chat: 'p:x:~', kind: 'claude', model: 'claude-haiku-5-5' })).toEqual({ ok: true, pinned: ['claude-haiku-5-5'], recent: [] })
+      expect(await src.act({ type: 'model-pin', chat: 'p:x:~', kind: 'claude', model: 'claude-haiku-5-5', on: true })).toEqual({ ok: true, pinned: ['claude-haiku-5-5'], recent: [] })
+      // the state asked for, twice: a tap replayed cannot undo itself
+      expect(await src.act({ type: 'model-pin', chat: 'p:x:~', kind: 'claude', model: 'claude-haiku-5-5', on: true })).toEqual({ ok: true, pinned: ['claude-haiku-5-5'], recent: [] })
       // never a model invented: only what the CLI itself reported
-      expect(await src.act({ type: 'model-pin', chat: 'p:x:~', kind: 'claude', model: 'claude-nope-9-9' })).toMatchObject({ ok: false, error: expect.stringContaining('has no model') })
-      expect(await src.act({ type: 'model-pin', chat: 'p:x:~', kind: 'nope', model: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('No CLI called') })
-      // the same row again unpins it
-      expect(await src.act({ type: 'model-pin', chat: 'p:x:~', kind: 'claude', model: 'claude-haiku-5-5' })).toEqual({ ok: true, pinned: [], recent: [] })
+      expect(await src.act({ type: 'model-pin', chat: 'p:x:~', kind: 'claude', model: 'claude-nope-9-9', on: true })).toMatchObject({ ok: false, error: expect.stringContaining('has no model') })
+      expect(await src.act({ type: 'model-pin', chat: 'p:x:~', kind: 'nope', model: 'x', on: true })).toMatchObject({ ok: false, error: expect.stringContaining('No CLI called') })
+      // and unpinning says so
+      expect(await src.act({ type: 'model-pin', chat: 'p:x:~', kind: 'claude', model: 'claude-haiku-5-5', on: false })).toEqual({ ok: true, pinned: [], recent: [] })
     } finally {
       setPicks(NO_PICKS)
     }

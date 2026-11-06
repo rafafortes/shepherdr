@@ -25,10 +25,12 @@ describe('the picks in a model list', () => {
     expect(parsePicks({ recent: many }).recent).toHaveLength(RECENT)
   })
 
-  test('a pin toggles, a pick goes first among the recent ones and stays once', () => {
-    const pin = withPin(NO_PICKS, 'pi:alpha/one')
+  test('a pin says the state it wants, a pick goes first among the recent ones and stays once', () => {
+    const pin = withPin(NO_PICKS, 'pi:alpha/one', true)
     expect(pin.pinned).toEqual(['pi:alpha/one'])
-    expect(withPin(pin, 'pi:alpha/one').pinned).toEqual([])
+    // the same again changes nothing, however often it is replayed
+    expect(withPin(pin, 'pi:alpha/one', true).pinned).toEqual(['pi:alpha/one'])
+    expect(withPin(pin, 'pi:alpha/one', false).pinned).toEqual([])
     let p = withRecent(NO_PICKS, 'pi:alpha/one')
     p = withRecent(p, 'pi:beta/three')
     p = withRecent(p, 'pi:alpha/one')
@@ -56,13 +58,13 @@ describe('where the picks are kept', () => {
   test('a file of their own in Shepherdr’s folder, read back after a pin and a pick', () => {
     clear()
     expect(picksOf('pi')).toEqual({ pinned: [], recent: [] })
-    pinModel('pi', 'alpha/one')
+    pinModel('pi', 'alpha/one', true)
     rememberModel('pi', 'beta/four')
     rememberModel('pi', 'default')
     expect(existsSync(join(home(), PICKS_FILE))).toBe(true)
     expect(readJson(PICKS_FILE, {}, home())).toEqual({ pinned: [pickKey('pi', 'alpha/one')], recent: [pickKey('pi', 'beta/four')] })
     expect(picksOf('pi')).toEqual({ pinned: ['alpha/one'], recent: ['beta/four'] })
-    pinModel('pi', 'alpha/one')
+    pinModel('pi', 'alpha/one', false)
     expect(picksOf('pi').pinned).toEqual([])
     clear()
   })
@@ -73,7 +75,7 @@ describe('what a model list offers', () => {
     clear()
     setModels('pi', PI)
     try {
-      pinModel('pi', 'beta/three')
+      pinModel('pi', 'beta/three', true)
       rememberModel('pi', 'gamma/five')
       const pi = restartClis(['pi']).find((c) => c.kind === 'pi')!
       expect(pi.models!.map((m) => m.id)).toEqual(['beta/three', 'gamma/five', 'alpha/one', 'alpha/two', 'beta/four', 'delta/six', 'epsilon/seven', 'zeta/eight', 'eta/nine', 'theta/ten'])
@@ -91,10 +93,13 @@ describe('what a model list offers', () => {
     const older = { id: 'claude-haiku-4-5', label: 'Haiku 4.5', efforts: ['low', 'high'] }
     setModels('claude', { models: [{ id: 'claude-opus-5-5', label: 'Opus 5.5', efforts: ['low', 'high'], effort: 'medium' }], others: [older], efforts: ['low', 'high'], default: 'claude-opus-5-5' })
     try {
-      pinModel('claude', older.id)
+      pinModel('claude', older.id, true)
       const claude = restartClis(['claude']).find((c) => c.kind === 'claude')!
       expect(claude.models!.at(0)).toMatchObject({ id: older.id, label: 'Haiku 4.5' })
       expect(claude.pinned).toEqual([older.id])
+      // Settings' rows offer it too, so a pinned model is never missing from one list and present in the other
+      const get = (key: string) => (key === 'task.agent' ? 'claude' : 'default')
+      expect(agentRow({ label: 'Model', key: 'task.model', value: 'default' }, get).options).toContain('Haiku 4.5')
       setPicks(NO_PICKS)
       const plain = restartClis(['claude']).find((c) => c.kind === 'claude')!
       expect(plain.models!.some((m) => m.id === older.id)).toBe(false)
@@ -120,7 +125,7 @@ describe('what a model list offers', () => {
     clear()
     setModels('pi', PI)
     try {
-      pinModel('pi', 'beta/three')
+      pinModel('pi', 'beta/three', true)
       rememberModel('pi', 'gamma/five')
       const get = (key: string) => (key === 'task.agent' ? 'pi' : 'default')
       const row = agentRow({ label: 'Model', key: 'task.model', value: 'default' }, get)

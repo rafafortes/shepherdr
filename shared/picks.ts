@@ -38,9 +38,11 @@ export function parsePicks(raw: unknown): Picks {
   return { pinned: [...new Set(keys(d.pinned))], recent: recentOnly(keys(d.recent)) }
 }
 
-/** pinned, or not any more */
-export function withPin(p: Picks, key: string): Picks {
-  return { ...p, pinned: p.pinned.includes(key) ? p.pinned.filter((k) => k !== key) : [...p.pinned, key] }
+/** pinned (on) or not any more: what the screen asked for, never "the other one", so a stale screen or a tap replayed
+ *  when its machine comes back cannot pin what was already pinned */
+export function withPin(p: Picks, key: string, on: boolean): Picks {
+  const pinned = on ? (p.pinned.includes(key) ? p.pinned : [...p.pinned, key]) : p.pinned.filter((k) => k !== key)
+  return { ...p, pinned }
 }
 
 /** picked now: first among the recent ones of its own CLI (each keeps RECENT), kept once */

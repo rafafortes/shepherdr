@@ -721,7 +721,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         if (!kind) return { ok: false, error: `No CLI called ${a.kind}.` }
         const m = findModel(kind, a.model)
         if (!m) return { ok: false, error: `${CLI_NAME[kind] ?? kind} has no model ${a.model}.` }
-        this.picks = withPin(this.picks, pickKey(kind, m.id))
+        this.picks = withPin(this.picks, pickKey(kind, m.id), !!a.on)
         return { ok: true, ...picksIn(this.picks, kind) }
       }
       case 'restart': {

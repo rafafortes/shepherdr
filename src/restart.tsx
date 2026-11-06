@@ -116,8 +116,10 @@ function Sheet({ chat, name, current }: Opening) {
   const pin = async (l: string) => {
     const id = cli?.models?.find((m) => m.label === l)?.id
     if (!cli || !id) return
-    // the chat names whose machine keeps the picks: another machine's agent pins on its own
-    const r = await act({ type: 'model-pin', chat, kind: cli.kind, model: id }).catch(() => null)
+    // the chat names whose machine keeps the picks: another machine's agent pins on its own; the state asked for is
+    // sent, so a tap on a stale list or a retry cannot unpin what it meant to pin
+    const on = !pickedHere.pinned.includes(id)
+    const r = await act({ type: 'model-pin', chat, kind: cli.kind, model: id, on }).catch(() => null)
     if (r?.ok) setPicks((p) => ({ ...p, [cli.kind]: { pinned: r.pinned ?? [], recent: r.recent ?? [] } }))
   }
   return (
