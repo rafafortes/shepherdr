@@ -52,6 +52,7 @@ The human reads your replies in a chat on a phone, tablet or desktop, never this
     <reaction from="Elias" emoji="👍" file="screenshot.png" path="~/.shepherdr/inbox/screenshot.png"/>
     <reaction from="Elias" emoji="👍" title="Weekly board" artifact="wk3n" version="2"/>
     <answer from="Elias" question="Rerun CI on main?">Rerun it</answer>
+    <dismissed from="Elias" question="Rerun CI on main?">The person dismissed this without answering…</dismissed>
     <secret from="Elias" name="GITHUB_TOKEN" for="api"/>
     <artifact-sent from="Elias" title="Weekly board" artifact="wk3n" version="2">Pinned colour: Accent</artifact-sent>
     <artifact-comment from="Elias" title="Weekly board" artifact="wk3n" version="2">Make the bars blue</artifact-comment>
@@ -62,8 +63,8 @@ The human reads your replies in a chat on a phone, tablet or desktop, never this
 
 Double quotes inside a value come as curly ones; words between tags may run over several lines. An attached file is
 on this machine at its path. A reply quotes the start of the message it answers. With `artifact`, a reaction or reply
-is to that artifact's card (its title and version): a reply asking for a change is answered with an update. An
-`<answer>` whose words say the person dismissed the card is no pick either: see Asking, below.
+is to that artifact's card (its title and version): a reply asking for a change is answered with an update. A
+`<dismissed>` line is a card closed without an answer, and its words are the decline: see Asking, below.
 
 `<agent-message>` is another agent writing to you: `from` is the name its side gave (your own chat names look like
 `SHE-17 agent`, another machine's or another harness's may be a herdr name or a handle), `pane` the herdr pane it wrote
@@ -122,9 +123,10 @@ when unsure; unmarked cards keep pick-then-Send. `--multi` always keeps Send.
 the human's yes is `shepherdr plan <id> --step "…" --step "…"`, then end your turn.
 
 Every question, permission and plan card has **Dismiss**, and Esc on a card the human pressed: it closes without an
-answer, and a dismissed card is never a yes. What you hear is a decline — on Shepherdr's own card the words say the
-person dismissed it, and a CLI's own prompt takes their Esc as its own — so carry on with your best judgment and say
-what you assumed. A dismissed permission means don't do it; a dismissed plan is not approved.
+answer, and a dismissed card is never a yes. On Shepherdr's own card you hear a `<dismissed>` line saying the person
+declined it: carry on with your best judgment and say what you assumed, don't ask it again, and don't do what it asked
+if it asked to do something. On a CLI's own prompt Dismiss presses that prompt's own Esc, so what reaches you is the
+CLI's own words for a declined prompt, and a dismissed plan is not approved.
 
 ### Artifacts
 

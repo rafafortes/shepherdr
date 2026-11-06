@@ -632,7 +632,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     const live = new Map(tc.messages.flatMap((m) => (m.question ? [[m.question.id, m.question] as const] : [])))
     const open = new Set(openCards(tc).map((m) => m.question.id))
-    const qs = (ask.questions ?? []).map((q) => live.get(q.id) ?? { ...q, sent: -1, said: ask.answered?.text })
+    const qs = (ask.questions ?? []).map((q) => live.get(q.id) ?? { ...q, sent: -1, said: ask.answered?.text, dismissed: ask.answered?.dismissed })
     const settled = qs.every((q) => q.sent !== undefined)
     const dismissed = !!ask.answered?.dismissed || qs.some((q) => q.dismissed)
     const where = ask.answered?.where ?? (qs.some((q) => q.via === 'terminal') ? 'terminal' : 'task')
@@ -2113,6 +2113,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return { ok: false }
   }
 
+  /** something of yours came after that message: the question it asked is answered in words already */
+  private answeredSince(key: string, id: string) {
+    const msgs = this.chats.chat(key).messages
+    const at = msgs.findIndex((m) => m.id === id)
+    return at >= 0 && msgs.slice(at + 1).some((m) => m.who === 'you' && (m.text || m.file))
+  }
+
   /** keys go into the menu the card shows: this waits until its prompt has moved on, or says it has not (the card stands
    *  as it was, so nothing was pressed) */
   private async pressMenu(key: string, keys: string[], qid: string): Promise<string | undefined> {
@@ -2143,7 +2150,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (qid.startsWith('menu:')) {
       await this.chats.readMenu(key, true)
       const menu = this.chats.menu(key)
-      if (!menu || menuId(key, menu) !== qid) return { ok: false, error: 'The terminal prompt changed. Read the new card before answering.' }
+      if (!menu || menuId(key, menu) !== qid) return { ok: false, error: 'The terminal prompt changed. Read the new card before deciding.' }
       // a start stopped on its own screen: Esc there ends the launch, and it asks nothing yet
       if (this.chats.startMenuUp(key)) return { ok: false, error: 'This start waits on its own screen, not on a question: open the terminal to answer it.' }
       if (this.menuAnswers.has(key)) return { ok: false, error: 'Your answer is still being checked.' }
@@ -2171,13 +2178,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       q.sent = -1
       this.chats.answer(key, qid, -1, words, space, true)
       if (space) this.answeredHere(space, key, q.title, words, true)
-      await this.send(key, line.answer(this.user, q.title, words), [], true)
+      await this.send(key, line.dismiss(this.user, q.title, words), [], true)
       this.emit('snapshot')
       return { ok: true }
     }
     // the CLI's own question tool (AskUserQuestion, request_user_input): its Esc, which declines the question
     const open = this.chats.openQuestion(key)
-    if (open && (qid === open.id || qid.startsWith(`${open.id}:`)) && this.chats.log(key).answers[qid] === undefined) {
+    if (open && (qid === open.id || qid.startsWith(`${open.id}:`))) {
+      if (this.chats.log(key).answers[qid] !== undefined) return { ok: false, error: 'This card is answered already.' }
       const item = open.items[Number(qid === open.id ? 0 : qid.slice(open.id.length + 1)) ?? 0]
       // Esc declines the CLI's whole form, so every question of it is closed, not only the one on the card
       for (let i = 0; i < open.items.length; i++) this.chats.answer(key, open.items.length > 1 ? `${open.id}:${i}` : open.id, -1, undefined, space, true)
@@ -2189,10 +2197,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       return { ok: true }
     }
     // the agent's plain question on its needs-you card in a space's chat: no card of its own in the task's chat, so the
-    // decline goes in as the person's reply to it
+    // decline goes in as its dismissal, quoting the question
     const asked = this.chats.chat(key).messages.find((m) => m.id === qid && m.who === 'agent' && m.text && !m.question)
-    if (asked) {
-      await this.send(key, this.replying(key, dismissWords('questions'), qid), [], true)
+    if (asked && !this.answeredSince(key, qid)) {
+      await this.send(key, line.dismiss(this.user, excerpt(asked.text!), dismissWords('questions')), [], true)
       if (space) {
         this.chats.repliedFrom(key, qid, space)
         this.answeredHere(space, key, asked.text ?? '', DISMISSED, true)

@@ -24,10 +24,12 @@ import { menuId, parseMenu, sameScreen, type ScreenMenu } from './screen.ts'
 
 export { menuId, menuKeys, parseMenu, type ScreenMenu } from './screen.ts'
 
-/** a chat line of yours that shows as words: an answer, a page's Send and words about an artifact under what they
- *  answer, a note with what it is on */
+/** a chat line of yours that shows as words: an answer, a dismissal (no answer: a line of its own, never the agent's
+ *  instructions as your words), a page's Send and words about an artifact under what they answer, a note with what it
+ *  is on */
 function shownAs(p: Parsed): { title?: string; text: string } | undefined {
   if (p.kind === 'answer') return { title: `Answered “${p.title}”`, text: p.answer }
+  if (p.kind === 'dismiss') return { title: `Dismissed “${p.title}”`, text: '' }
   if (p.kind === 'secret') return { title: 'Gave a secret', text: `${p.name}${p.where ? `, for ${p.where}` : ''}` }
   if (p.kind === 'artifact-send') return { title: `Sent from "${p.title}"`, text: p.text }
   if (p.kind === 'artifact-say') return { title: `About "${p.title}"`, text: p.text }

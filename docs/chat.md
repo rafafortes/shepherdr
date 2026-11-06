@@ -24,6 +24,13 @@ Every agent, coordinator or task agent, gets the same chat.
 - Startup trust and MCP approval prompts appear as choice cards, even before the first message. The card keeps the
   CLI's screen text and offers Open terminal if it cannot read the choices. Answers are checked before messages go
   in. Only task worktrees Shepherdr creates are pre-trusted in Claude Code and Codex; a space you picked still asks.
+- Every question, permission and plan card has Dismiss in its header, and Esc once you pressed the card (a press on
+  one of its choices or its box keeps the keys there). It closes without an answer and the agent hears the person
+  declined it, so it carries on with its own judgment and says what it assumed; a dismissed permission is never a yes,
+  and a dismissed plan is not approved. A dismissed card says Dismissed, its copy in the space's chat too, and the
+  space's coordinator hears a decline rather than an answer. A start stopped on its own screen has no Dismiss: Esc
+  there would end the launch, and Open terminal is the way on. A CLI's own prompt takes the person's own Esc, so what
+  reaches its agent is the CLI's words for a declined prompt.
 - An agent that has not begun its turn about ten seconds after its brief was handed over (nothing in its log, no
   session) shows what its screen shows as a card, and the task counts as Needs you. It reads the screen through
   herdr for every CLI the same way (`server/live/screen.ts`): the choices it can read are one-tap answers, pressed in

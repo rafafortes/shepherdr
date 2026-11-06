@@ -47,6 +47,11 @@ describe('chat lines', () => {
     const answer = line.answer('Elias', 'Rerun CI on main?', 'Rerun it')
     expect(answer).toBe('<answer from="Elias" question="Rerun CI on main?">Rerun it</answer>')
     expect(parseUserLine(answer)).toEqual({ kind: 'answer', title: 'Rerun CI on main?', answer: 'Rerun it' })
+    // a card closed without an answer: its own line, quoting what it was about, never an answer
+    const dismissed = line.dismiss('Elias', 'Rerun CI on main?', 'The person dismissed this without answering. Carry on.')
+    expect(dismissed).toBe('<dismissed from="Elias" question="Rerun CI on main?">The person dismissed this without answering. Carry on.</dismissed>')
+    expect(parseUserLine(dismissed)).toEqual({ kind: 'dismiss', title: 'Rerun CI on main?', words: 'The person dismissed this without answering. Carry on.' })
+    expect(userLines(dismissed)).toEqual([dismissed])
     const attach = line.attach('Elias', 'screenshot.png', '~/inbox/screenshot.png')
     expect(attach).toBe('<attachment from="Elias" name="screenshot.png" path="~/inbox/screenshot.png"/>')
     expect(parseUserLine(attach)).toEqual({ kind: 'attach', name: 'screenshot.png', path: '~/inbox/screenshot.png' })

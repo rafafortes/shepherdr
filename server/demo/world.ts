@@ -845,12 +845,16 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     if (!c || !q || q.sent !== undefined) return { ok: false }
     if (q.noteRequiredFor !== undefined && a.choice === q.noteRequiredFor && !a.note) return { ok: false, error: 'A note is needed to send it back.' }
     q.sent = a.choice
-    // its Dismiss: closed without an answer, and its agent hears the person declined it
+    // its Dismiss: closed without an answer, and its agent hears the person declined it and carries on
     if (a.dismiss) {
       q.dismissed = true
       if (q.asks) c.messages = c.messages.filter((m) => m !== msg)
-      this.push(a.chat, { who: 'you', answered: 'Dismissed', text: q.title }, { who: 'agent', text: 'Understood. I’ll use my own judgment and say what I assumed.' })
+      this.push(a.chat, { who: 'you', answered: `Dismissed “${q.title}”` }, { who: 'agent', text: 'Understood. I’ll use my own judgment and say what I assumed.' })
       for (const [pl, qid] of Object.entries(this.asks)) if (qid === q.id) delete this.asks[pl]
+      // the task carried on without an answer, as it does when you answer the card
+      if (q.id === 'f5') this.setTask('LV-3', 'work', 'Carrying on with my own judgment')
+      if (q.id === 'f6') this.setTask('GTM-16', 'work', 'Carrying on with my own judgment')
+      if (q.id === 'f7') this.setTask('LV-4', 'work', 'Carrying on with my own judgment')
       this.emit('snapshot')
       return { ok: true }
     }

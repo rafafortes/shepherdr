@@ -15,6 +15,7 @@ const { hidden } = await import('../server/live/agents.ts')
 const { isAgentProcess } = await import('../server/live/agent-process.ts')
 const { heartbeatFile } = await import('../server/live/heartbeat.ts')
 const { carryOn } = await import('../server/live/retry.ts')
+const { parseUserLine } = await import('../server/live/chatlines.ts')
 const { WorkerHealth } = await import('../server/live/recovery.ts')
 const { Worktrees } = await import('../server/live/engine/worktrees.ts')
 const { fakeHerdr } = await import('./fake-herdr.ts')
@@ -701,10 +702,13 @@ describe('choice cards', () => {
     // it waits on you no longer, and the agent hears a decline it may decide past
     expect(src.asks()[chat]).toBeUndefined()
     const heard = told.join('\n')
-    expect(heard).toContain('<answer')
+    expect(heard).toContain('<dismissed')
     expect(heard).toContain('Rerun CI on main?')
     expect(heard).toContain('dismissed this without answering')
     expect(heard).toContain('carry on with your best judgment')
+    // it is a dismissal of its own, never an answer carrying the agent's instructions as the person's words
+    const line = told.find((t) => t.includes('<dismissed'))!
+    expect(parseUserLine(line)).toMatchObject({ kind: 'dismiss', title: 'Rerun CI on main?' })
     // closed once: a second dismissal is refused
     expect(await src.act({ type: 'answer', chat, question: qid, choice: -1, dismiss: true })).toMatchObject({ ok: false })
   })
@@ -875,6 +879,30 @@ describe("a task's question on its needs-you card in its space's chat", () => {
     expect(said.join('\n')).toContain("don't answer it too")
     // another screen still showing the card can't send it twice
     expect(await src.act({ type: 'send', chat: key, text: 'Yes', reply: 'plain-q', space: place })).toMatchObject({ ok: false })
+  })
+
+  test('a plain question dismissed: the agent hears the decline, and its card says so', async () => {
+    const { t, place } = await workedTask('askplainno')
+    await until(() => src.engine.statusOf(t) === 'need')
+    const key = `${t.id}/Agent`
+    src.chats.post(key, { id: 'plain-dismiss', text: 'Keep the old API around?' })
+    engine().emit('card', t, 'need', 'Keep the old API around?')
+    const card = () => src.chat(place)!.messages.findLast((m) => m.card?.task === t.id)!.card!
+    expect(card().ask).toMatchObject({ chat: key, open: true, reply: { id: 'plain-dismiss' } })
+    const heard: string[] = []
+    const send = src.agents.send
+    src.agents.send = (async (k: string, text: string) => (k === key && heard.push(text), { waiting: false })) as never
+    try {
+      expect(await src.act({ type: 'answer', chat: key, question: 'plain-dismiss', choice: -1, dismiss: true, space: place })).toMatchObject({ ok: true })
+    } finally {
+      src.agents.send = send
+    }
+    expect(heard.join('\n')).toContain('<dismissed')
+    expect(heard.join('\n')).toContain('Keep the old API around?')
+    expect(card().ask).toMatchObject({ open: false, answered: { where: 'space', dismissed: true } })
+    // a reply came after it already: the stale card can't dismiss what was answered
+    src.chats.post(key, { id: 'a-reply', who: 'you', text: 'Yes, one more release' })
+    expect(await src.act({ type: 'answer', chat: key, question: 'plain-dismiss', choice: -1, dismiss: true, space: place })).toMatchObject({ ok: false })
   })
 })
 
