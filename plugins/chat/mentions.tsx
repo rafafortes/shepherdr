@@ -7,7 +7,7 @@ import { Dot, HashIcon, ic, STATUS_WORD } from '@client/ui.tsx'
 import { hasMention, matchSpaces, matchTasks, placeOf, short, split, taskOf, mentionTyping, type Kind, type Mention, type Typing } from './mentions.ts'
 import type { Place, Snapshot, Status, Task } from '@shared/types.ts'
 
-/** the id of the # or @ list over the box, which the box names as the one it opens */
+/** the start of the id the # or @ list over a chat's box has, which that box names as the one it opens */
 export const MENTION_LIST = 'mention-list'
 
 /** a row of the "#" list (a space) or of the "@" list (a task) */
@@ -35,61 +35,58 @@ export const inBox = (i: Item) => (i.kind === 'space' ? `#${i.place.name} ` : `@
 export const pickOf = (i: Item) =>
   i.kind === 'space' ? ({ kind: 'space', id: i.place.id, name: i.place.name } as const) : ({ kind: 'task', id: i.task.id, ref: i.task.id } as const)
 
-/** The # or @ list over the message box: a tap takes one; the arrows, Enter and Escape are the box's own (client.tsx) */
-export function MentionList({ kind, items, sel, pick }: { kind: Kind; items: Item[]; sel: number; pick: (i: Item) => void }) {
+/** The # or @ list over the message box: a tap takes one; the arrows, Enter and Escape are the box's own (client.tsx).
+    `id` is its chat's own, so two boxes open at once (a split) never name each other's list */
+export function MentionList({ id, kind, items, sel, pick }: { id: string; kind: Kind; items: Item[]; sel: number; pick: (i: Item) => void }) {
   const rows = useRef<(HTMLButtonElement | null)[]>([])
   useEffect(() => {
     rows.current[sel]?.scrollIntoView({ block: 'nearest' })
   }, [sel])
   if (!items.length) return null
+  // its room is the app's own height (--app-h, a phone's keyboard taken out), less than half of it
   return (
-    <div
-      role="listbox"
-      id={MENTION_LIST}
-      aria-label={kind === 'space' ? 'Mention a space' : 'Mention a task'}
-      data-mentions
-      // a phone's room is the app's own height (--app-h, its keyboard taken out), not the screen's
-      className="popover mb-2 max-h-[min(22rem,calc(var(--app-h,100dvh)*0.4))] overflow-y-auto overscroll-contain"
-    >
+    <div className="popover mb-2 max-h-[min(22rem,calc(var(--app-h,100dvh)*0.4))] overflow-y-auto overscroll-contain" data-mentions>
       <div className="flex h-7 items-center px-2.5 text-[0.75rem] text-fg3 phone:h-9 phone:px-3 phone:text-[0.8125rem]">{kind === 'space' ? 'Spaces' : 'Tasks'}</div>
-      {items.map((i, n) => (
-        <button
-          key={i.key}
-          id={`${MENTION_LIST}-${n}`}
-          ref={(el) => {
-            rows.current[n] = el
-          }}
-          type="button"
-          role="option"
-          aria-selected={n === sel}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => pick(i)}
-          className={clsx(
-            // a finger's row on a phone: 44px tall, whatever its words
-            'press flex w-full min-w-0 items-center gap-2.5 rounded-row px-2.5 py-1 text-left phone:min-h-11 phone:py-2',
-            n === sel ? 'bg-hover' : 'hover:bg-hover',
-          )}
-        >
-          {i.kind === 'space' ? (
-            <>
-              <span aria-hidden className="grid w-4 shrink-0 place-items-center text-fg3 phone:w-5">
-                <HashIcon className={ic} />
-              </span>
-              <span className="min-w-0 flex-1 truncate font-medium">{i.place.name}</span>
-              {i.on ? <span className="shrink-0 text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{i.on}</span> : null}
-            </>
-          ) : (
-            <>
-              <span className="grid w-4 shrink-0 place-items-center phone:w-5">
-                <Dot s={i.task.status} p={i.task.report?.progress} />
-              </span>
-              <span className="shrink-0 font-medium tabular-nums">{i.task.id}</span>
-              <span className="min-w-0 flex-1 truncate text-fg2">{i.task.name}</span>
-              <span className="shrink-0 text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{STATUS_WORD[i.task.status]}</span>
-            </>
-          )}
-        </button>
-      ))}
+      <div role="listbox" id={id} aria-label={kind === 'space' ? 'Mention a space' : 'Mention a task'}>
+        {items.map((i, n) => (
+          <button
+            key={i.key}
+            id={`${id}-${n}`}
+            ref={(el) => {
+              rows.current[n] = el
+            }}
+            type="button"
+            role="option"
+            aria-selected={n === sel}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => pick(i)}
+            className={clsx(
+              // a finger's row on a phone: 44px tall, whatever its words
+              'press flex w-full min-w-0 items-center gap-2.5 rounded-row px-2.5 py-1 text-left phone:min-h-11 phone:py-2',
+              n === sel ? 'bg-hover' : 'hover:bg-hover',
+            )}
+          >
+            {i.kind === 'space' ? (
+              <>
+                <span aria-hidden className="grid w-4 shrink-0 place-items-center text-fg3 phone:w-5">
+                  <HashIcon className={ic} />
+                </span>
+                <span className="min-w-0 flex-1 truncate font-medium">{i.place.name}</span>
+                {i.on ? <span className="shrink-0 text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{i.on}</span> : null}
+              </>
+            ) : (
+              <>
+                <span className="grid w-4 shrink-0 place-items-center phone:w-5">
+                  <Dot s={i.task.status} p={i.task.report?.progress} />
+                </span>
+                <span className="shrink-0 font-medium tabular-nums">{i.task.id}</span>
+                <span className="min-w-0 flex-1 truncate text-fg2">{i.task.name}</span>
+                <span className="shrink-0 text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{STATUS_WORD[i.task.status]}</span>
+              </>
+            )}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

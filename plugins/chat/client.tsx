@@ -1626,13 +1626,25 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
   const snap = useSnap()
   const [caret, setCaret] = useState(text.length)
   const [sel, setSel] = useState(0)
+  // the row the keys are on, by its own key: a snapshot that reorders the list (a task's state changed) keeps them on
+  // the same task, not on whatever took its place
+  const chosen = useRef<string | null>(null)
   const [closed, setClosed] = useState<string | null>(null)
   const typed = mentionItems(snap, text, caret)
   // only while you type in it: a draft opened again (a reload, another chat it was left in) says nothing of a list
   const list = typed && typed.items.length && closed !== text && focused ? typed : null
-  const at = list ? Math.min(sel, list.items.length - 1) : 0
+  const at = !list ? 0 : Math.max(0, chosen.current ? list.items.findIndex((i) => i.key === chosen.current) : Math.min(sel, list.items.length - 1))
   const word = list ? `${list.kind}:${list.word}` : ''
-  useEffect(() => setSel(0), [word])
+  const listId = `${MENTION_LIST}-${chatKey}`
+  useEffect(() => {
+    setSel(0)
+    chosen.current = null
+  }, [word])
+  const choose = (n: number) => {
+    if (!list) return
+    setSel(n)
+    chosen.current = list.items[n]?.key ?? null
+  }
   // another chat's box: what was typed, chosen or closed there means nothing here
   useEffect(() => {
     setClosed(null)
@@ -1737,7 +1749,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
       {registry.composerAbove.map(({ View }, i) => (
         <View key={i} chatKey={chatKey} cli={cli} />
       ))}
-      {list ? <MentionList kind={list.kind} items={list.items} sel={at} pick={take} /> : null}
+      {list ? <MentionList id={listId} kind={list.kind} items={list.items} sel={at} pick={take} /> : null}
       {/* a pill: the corners are half its one-line height, so one line has round ends; taller, the buttons keep their
           size and spot in the bottom corners, with the same curve around them (like iMessage) */}
       <div data-composer className="round-box bg-bg p-1.5 shadow-box has-[textarea:focus]:shadow-box-focus">
@@ -1766,9 +1778,8 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                   data-kept
                   data-quiet
                   aria-label={placeholder}
-                  aria-controls={list ? MENTION_LIST : undefined}
-                  aria-expanded={list ? true : undefined}
-                  aria-activedescendant={list ? `${MENTION_LIST}-${at}` : undefined}
+                  aria-controls={list ? listId : undefined}
+                  aria-activedescendant={list ? `${listId}-${at}` : undefined}
                   rows={1}
                   value={text}
                   placeholder=""
@@ -1807,10 +1818,9 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                     if (list && !e.nativeEvent.isComposing) {
                       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                         e.preventDefault()
-                        setSel((n) => (n + (e.key === 'ArrowDown' ? 1 : list.items.length - 1)) % list.items.length)
-                        return
+                        return choose((at + (e.key === 'ArrowDown' ? 1 : list.items.length - 1)) % list.items.length)
                       }
-                      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && device === 'desktop' && !e.nativeEvent.isComposing)) {
+                      if ((e.key === 'Tab' && !e.shiftKey) || (e.key === 'Enter' && !e.shiftKey && device === 'desktop' && !e.nativeEvent.isComposing)) {
                         e.preventDefault()
                         return take(list.items[at])
                       }

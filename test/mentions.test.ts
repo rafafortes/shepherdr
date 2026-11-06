@@ -78,8 +78,12 @@ describe('a message with a mention', () => {
     // code is code: a mention in it stays as it was written
     expect(forMarkdown(`run \`echo ${token}\``)).toBe(`run \`echo ${token}\``)
     expect(forMarkdown(`\`\`\`\n${token}\n\`\`\``)).toBe(`\`\`\`\n${token}\n\`\`\``)
-    // an indented block is code too
-    expect(forMarkdown(`    ${token}`)).toBe(`    ${token}`)
+    // an indented code block is code too (four spaces after a blank line)
+    expect(forMarkdown(`text\n\n    ${token}`)).toBe(`text\n\n    ${token}`)
+    // a nested list's item is indented without one: its words are the item's, so its mention is a chip
+    expect(forMarkdown(`- a\n    - b ${token}`)).toBe(`- a\n    - b [#gtm](#space=${encodeURIComponent(space.id)})`)
+    // and the words after a code span are on that span's line
+    expect(forMarkdown(`\`x\`    ${token}`)).toBe(`\`x\`    [#gtm](#space=${encodeURIComponent(space.id)})`)
   })
 
   test('a quote names the mention as the space is called now, or as its words were', () => {

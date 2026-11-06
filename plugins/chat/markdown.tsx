@@ -33,7 +33,11 @@ const DONE = svg(['M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.15
     go onto the sanitized elements themselves, never into the HTML as text, so nothing in the reply can turn into them.
     A link's or picture's title goes: nothing pops up on hover. A mention is drawn as its chip, from `snap` */
 export function toHtml(text: string, snap?: Snapshot | null) {
-  const root = DOMPurify.sanitize(marked.parse(text, { async: false }) as string, { RETURN_DOM: true, FORBID_ATTR: ['title'] }) as HTMLElement
+  // a reply's own copy buttons and mention chips are put on after this, so the words can never bring their own
+  const root = DOMPurify.sanitize(marked.parse(text, { async: false }) as string, {
+    RETURN_DOM: true,
+    FORBID_ATTR: ['title', 'data-copy', 'data-mention', 'data-open-space', 'data-open-task'],
+  }) as HTMLElement
   for (const a of root.querySelectorAll<HTMLAnchorElement>('a[href^="#space="], a[href^="#task="]')) {
     const pick = fromFragment(a.getAttribute('href')!)
     if (!pick) continue

@@ -33,6 +33,14 @@ describe.skipIf(!browser)('mentions in the chat', () => {
       await text.press('Enter')
       await spaces(page).waitFor({ state: 'detached' })
       expect(await text.inputValue()).toBe('look at #gtm ')
+      // Tab takes it too, and the arrows wrap round the list
+      await text.fill('see @')
+      await tasks(page).waitFor()
+      await text.press('ArrowUp')
+      expect(await tasks(page).getByRole('option').last().getAttribute('aria-selected')).toBe('true')
+      await text.press('Tab')
+      await tasks(page).waitFor({ state: 'detached' })
+      expect(await text.inputValue()).toMatch(/^see @\S+ $/)
       // a heading typed in the box is no list either: only "#word" is
       await text.fill('# Release notes')
       expect(await spaces(page).count()).toBe(0)
@@ -110,7 +118,9 @@ describe.skipIf(!browser)('mentions in the chat', () => {
       const list = spaces(page)
       await list.waitFor()
       // the list fits the phone: never wider than the screen, and no taller than a phone's list may be
-      const size = await list.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth, height: el.getBoundingClientRect().height, room: innerHeight }))
+      const size = await page
+        .locator('[data-mentions]')
+        .evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth, height: el.getBoundingClientRect().height, room: innerHeight }))
       expect(size.scroll).toBeLessThanOrEqual(size.client + 1)
       expect(size.height).toBeLessThanOrEqual(size.room * 0.45)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)

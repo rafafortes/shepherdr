@@ -109,26 +109,28 @@ export const plain = (text: string, snap?: Snapshot | null) =>
     fragment survives the sanitizer, "space:" does not); what is in code, inline or a block, keeps its words */
 export function forMarkdown(text: string): string {
   if (!hasMention(text)) return text
-  const rest = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g
-  return text
-    .split(rest)
-    .map((part, i) =>
-      i % 2
-        ? part
-        : part.replace(/\[([#@])([^\]\n]{1,80})\]\((space|task):([^)\s]+)\)/g, (all, mark: string, name: string, kind: string, id: string, offset: number) => {
-            // a line indented as code is code too: its words stay as the agent wrote them
-            if (/^( {4}|\t)/.test(lineOf(part, offset))) return all
-            return (mark === '#') === (kind === 'space') ? `[${mark}${name}](#${kind}=${encodeURIComponent(id)})` : all
-          }),
-    )
+  const parts = text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g)
+  return parts
+    .map((part, i) => {
+      if (i % 2) return part
+      // what comes after a fence or a code span, with a newline before it, starts a line; else it is mid-line
+      const startsLine = i === 0 || parts[i - 1].endsWith('\n')
+      return part.replace(/\[([#@])([^\]\n]{1,80})\]\((space|task):([^)\s]+)\)/g, (all, mark: string, name: string, kind: string, id: string, offset: number) => {
+        if (indentedCode(part, offset, startsLine)) return all
+        return (mark === '#') === (kind === 'space') ? `[${mark}${name}](#${kind}=${encodeURIComponent(id)})` : all
+      })
+    })
     .join('')
 }
 
-/** the line `at` sits on */
-const lineOf = (text: string, at: number) => {
-  const start = text.lastIndexOf('\n', at - 1) + 1
-  const end = text.indexOf('\n', at)
-  return text.slice(start, end < 0 ? text.length : end)
+/** does `at` sit in a block markdown reads as indented code: four spaces or a tab at a line's start, after a blank line
+    (a nested list's item is indented without one, and is a paragraph's words, not code) */
+function indentedCode(part: string, at: number, startsLine: boolean) {
+  const start = part.lastIndexOf('\n', at - 1) + 1
+  if (!/^( {4}|\t)/.test(part.slice(start, at))) return false
+  if (start === 0) return startsLine
+  const before = part.lastIndexOf('\n', start - 2) + 1
+  return !part.slice(before, start - 1).trim()
 }
 
 /** what a token's fragment link names, or null when it is not one */
