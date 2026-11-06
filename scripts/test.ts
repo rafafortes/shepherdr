@@ -8,12 +8,12 @@
 //   bun run test changed --list   which test files would run, without running them
 //   bun run test --map            and note which lines of the screen each browser test runs (screen-map.ts)
 //
-// A change to the screen runs only the browser tests that run the lines it changed, by the map GitHub makes on the
-// default branch (screen-map.ts); every one where there is no map yet, or for a change to the whole screen
+// A change to the screen runs only the browser tests that run the lines it changed, by the map the local check keeps
+// (screen-map.ts, `bun run check:local`); every one where there is no map yet, or for a change to the whole screen
 // (styles.css). All the browser tests of a run share one browser (test/chromium.ts).
 //
-// Any other flag goes to bun test as it is (-t <pattern>, --bail, --rerun-each=3, --shard=2/6 as GitHub runs it). SHEPHERDR_TEST_JOBS sets how many
-// processes run at once.
+// Any other flag goes to bun test as it is (-t <pattern>, --bail, --rerun-each=3, --shard=2/6 as a Check workflow run
+// asked for by hand does). SHEPHERDR_TEST_JOBS sets how many processes run at once.
 //
 // The tests run below everything else on this machine, on every core: they take only the CPU and disk no one else
 // wants, so herdr, Shepherdr's server and the agents stay quick while several tasks test at once.
@@ -266,5 +266,5 @@ if (code === 0 && whole && commit && clean && git('rev-parse', 'HEAD') === commi
   writeFileSync(passed, JSON.stringify({ commit, at: Date.now(), summary: `${ran} in ${secs}s` }))
 }
 const shard = flags.find((f) => f.startsWith('--shard='))?.slice('--shard='.length)
-console.log(`${code === 0 ? 'Passed' : 'Failed'} in ${secs}s${whole ? '' : shard ? ` (shard ${shard} of the suite)` : ' (part of the suite: GitHub runs it all on a pull request and after each merge)'}`)
+console.log(`${code === 0 ? 'Passed' : 'Failed'} in ${secs}s${whole ? '' : shard ? ` (shard ${shard} of the suite)` : ' (part of the suite: bun run check:local runs it all)'}`)
 process.exit(code)

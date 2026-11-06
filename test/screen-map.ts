@@ -1,10 +1,11 @@
 // Which lines of the screen's code each browser test file runs, so a change to the screen runs only the browser tests
 // that reach the changed lines (scripts/test.ts), not all of them.
 //
-// Recorded on GitHub, on every push to the default branch, by each test shard (bun run test --shard=1/3 --map): each
-// page a browser test opens notes which of the built screen's functions ran, and the build's source maps turn them into
-// lines of src/ and plugins/. A test run here fetches the newest map from there, the shards' maps as one (and keeps it
-// in the repo's .git, for every worktree), then sets the lines that changed since the map's commit against it:
+// Recorded here, by the whole check (`bun run check:local`, which runs `scripts/test.ts --map`): GitHub Actions is off
+// on this repo (SHE-21), so nothing records a map there any more; a Check workflow run asked for by hand still does.
+// Each page a browser test opens notes which of the built screen's functions ran, and the build's source maps turn them
+// into lines of src/ and plugins/. The map is kept in the repo's .git, for every worktree, and a test run sets the
+// lines that changed since the map's commit against it:
 //   - a line in a function: the test files that ran that function
 //   - a whole new function: none by itself (whatever calls it changed too)
 //   - types, imports, comments: none (they don't run)
@@ -174,8 +175,9 @@ export function checkBranch(cwd = root) {
   return name && name !== 'HEAD' ? name : 'main'
 }
 
-/** the newest map: the one kept here, after asking GitHub (at most every 10 minutes) for the one its last check of the
- *  default branch made. Null when there is none, or its commit can't be found here. */
+/** the newest map: the one kept here, after asking GitHub (at most every 10 minutes) for the one its last run of the
+ *  default branch made. With Actions off there is none to fetch, and the map the local check keeps is the one used.
+ *  Null when there is none, or its commit can't be found here. */
 export function screenMap(): ScreenMap | null {
   if (process.env.SHEPHERDR_SCREEN_MAP) return readMap(process.env.SHEPHERDR_SCREEN_MAP)
   const file = mapFile()

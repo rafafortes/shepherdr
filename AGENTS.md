@@ -24,9 +24,9 @@ The operator's fork, used on their desktop since 2026-11-04 (herdr installs the 
   `herdr-plugin.toml` carry the same version. The desktop moves to it with
   `herdr plugin install rafafortes/shepherdr --ref <tag> --yes`, then the plugin's start action swaps the running
   server.
-- **Tests.** The Check workflow runs on every pull request into `herdr-tui` and on every push to it (a merge), so a
-  task sees its own run on its pull request; a change that touches only `**/*.md` or `docs/**` skips it, and `main`
-  gets no run. On this machine run only `bun run typecheck` (Tests, below).
+- **Tests.** The whole check (the types, every test with the browser ones, the build) runs on this machine: GitHub
+  Actions is off on this repository since 2026-11-06. `bun run check:local` is what a task runs before `shepherdr
+  ready`, and the coordinator runs it on `herdr-tui` before a release (Tests, below).
 - Nothing of the operator's host goes into this repository: settings, secrets, hosts and paths stay in
   `~/.shepherdr` and the operator's own tools.
 
@@ -52,9 +52,15 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
 
 ## Tests
 
-- No tests on this machine: it keeps the CPU for herdr, the server and the agents. While you work and before you
-  merge, run only `bun run typecheck` (seconds). Don't run `bun run test`, `bun test`, `bun run test changed`,
-  `bun run check` or any browser test here.
+- The whole check runs here: `bun run check:local` (`scripts/check-local.sh`) — `bun run typecheck`, every test with
+  the browser tests (`scripts/test.ts`), and the build. It runs last in line for the CPU (nice 19, idle disk), one run
+  at a time across every worktree of the repo (a lock file under `$XDG_RUNTIME_DIR` or `~/.cache`, never in the repo and
+  never in `~/.shepherdr`), and the test files are capped at `SHEPHERDR_TEST_JOBS` workers (a quarter of the cores by
+  default, 8 here) so herdr, the live server and the agents keep the CPU. It prints one line per step, the failing
+  tests' names by file, the verdict and where the logs are.
+- A task runs it before `shepherdr ready` and says the result in `--facts`: passed, about how long, or what failed. The
+  coordinator runs it on `herdr-tui` before a release. While you work, `bun run typecheck` (seconds) and
+  `bun run test changed` are enough to keep moving.
 - Check what you changed on the screen by hand in your shared browser, for the proof, against a proof server of your
   own, never the one the human runs: the demo source (`SHEPHERDR_SOURCE=demo`) first, or `HERDR_SOCKET_PATH` at a
   socket that isn't there (as the tests do), a `SHEPHERDR_HOME` under `/tmp`, a `SHEPHERDR_PORT` other than 7787 and
@@ -62,22 +68,18 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   Never `pkill -f server/main.ts`: that also matches the live server, which runs from `.releases/`.
 - A server with a home of its own starts no agent in herdr unless `SHEPHERDR_LAUNCH_AGENTS=1` says it may, and logs
   each one it skips (agents are real CLIs in the herdr it inherits). `test/preload.ts` sets that yes for the tests.
-- GitHub runs the whole check (types, every test with the browser tests, the build) on every pull request into
-  `herdr-tui` and again on every push to it (a merge): the Check workflow (`.github/workflows/check.yml`), which skips
-  a pull request and a push that touch only `**/*.md` or `docs/**` (its `paths-ignore`, the skill files included). A
-  red `herdr-tui` reaches the coordinator, who has it fixed forward. A failure's log is
-  `gh run view <run> --log-failed`.
-- It spends the operator's Actions minutes: 8 to 15 billed per run once the caches are warm, each job rounded up to
-  its minute (1 for the types and the build, 2 to 7 per test shard); a run with cold caches costs more, as a shard then
-  installs the browser's system libraries from apt (7 to 15 minutes in one of 2026-11-05's runs). A task whose pull
-  request merges spends two, its own and the merge's; every push to a pull request runs it all again. A task on "merge
-  on its own" does not wait for its run: to see it first, `shepherdr checks <id>` waits for it (up to about 9 minutes).
-- A branch with no pull request can still be checked by hand, `gh workflow run check.yml --ref <branch>` then
-  `gh run watch`: it costs the same, so only for rare cases (a review asks for it, or the change is to the tests' own
-  setup).
-- Still write tests with your change: GitHub runs them. A new browser test goes in the `layout-*.test.ts` file of its
-  topic (setup in `test/layout.ts`); split a file that grows past about 20 s.
-- If someone runs tests here by hand anyway, they run at the lowest priority and never touch `~/.shepherdr`.
+- The tests touch neither `~/.shepherdr` nor the herdr of this machine: `test/preload.ts` gives each file a home of its
+  own under `/tmp`, a socket that isn't there and no inherited pane, tab or workspace id. A test that wants a herdr
+  brings its own (test/fake-herdr.ts). Run by hand they are the same, and at the lowest priority.
+- A browser test skips where its browser can't start, so the run opens both first and names what is missing instead of
+  passing quietly: Chromium's headless shell (`bun x playwright-core install --only-shell chromium`, no root) for every
+  browser test, and WebKit, Safari's engine, for the iPhone tests (`bun x playwright-core install webkit`; its system
+  libraries come from `sudo bun x playwright-core install-deps webkit`, which only the operator runs).
+- Still write tests with your change: the check runs them here. A new browser test goes in the `layout-*.test.ts` file
+  of its topic (setup in `test/layout.ts`); split a file that grows past about 20 s.
+- GitHub Actions is off: `.github/workflows/check.yml` keeps only `workflow_dispatch`, so nothing waits for GitHub and
+  `shepherdr checks` finds nothing to wait for. A branch can still be checked there by hand (`gh workflow run check.yml
+  --ref <branch>`, then `gh run watch`), only for a rare case such as a review asking for it.
 
 ## Plugins
 
