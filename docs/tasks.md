@@ -163,7 +163,7 @@
   (Nothing to merge by default); its card in the space's chat says so. An agent whose `shepherdr ready` finds no changes on
   its branch goes straight to Done the same way. One whose branch's work is in its base already, though not as its
   commits (its pull request merged there by hand, a squash merge, or the work itself), is Done (merged) instead: ready
-  says so, and neither it nor the two-minute watch opens a pull request for what is in.
+  says so, and no pull request is opened for what is in.
 - `shepherdr task stop <id>` is Stop from the menu: it closes a task's agent and space and puts it in To do. Its work
   stays, as above. Writing to the task opens its space again (or makes a fresh worktree) and resumes its agent.
 - `shepherdr task delete <id>` removes a task for good, and only when you plainly ask its coordinator to: its agent

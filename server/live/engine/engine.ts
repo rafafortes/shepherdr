@@ -1725,7 +1725,7 @@ export class Engine extends Emitter<Events> {
       const why = ahead > 0 ? await this.mergedAlready(t).catch(() => null) : null
       if (why) {
         // its words are the note the merge left, with main here being behind GitHub's said in it when it is
-        const r = await this.mergedOnGitHub(t, this.proj(t), why)
+        const r = await this.mergedOnGitHub(t, this.proj(t), why, 20_000)
         return { state: 'merged', note: r.note ?? why }
       }
     }
@@ -2035,7 +2035,7 @@ export class Engine extends Emitter<Events> {
     if (pr?.state === 'MERGED') {
       if (t.landing) return
       const why = await this.mergedAlready(t).catch(() => null)
-      if (why) await this.mergedOnGitHub(t, this.proj(t), why).catch(() => undefined)
+      if (why) await this.mergedOnGitHub(t, this.proj(t), why, 20_000).catch(() => undefined)
       return
     }
     if (pr?.state !== 'OPEN') return
@@ -2336,12 +2336,14 @@ export class Engine extends Emitter<Events> {
 
   /**
    * main here comes up to GitHub's, so the merge is here too (and Shepherdr's own update sees it), then it is marked.
-   * The catch-up's fetch is bounded: `ready` and the watch call this with no deadline of their own around it, and a
-   * remote that does not answer leaves main here as it is (said in the note) instead of holding them.
+   * `fetchMs` bounds the catch-up's fetch: `ready` and the watch call this with no deadline of their own around it, so
+   * a remote that does not answer leaves main here as it is, said in the note, rather than holding them. The merge
+   * path passes none: its own caller races a deadline of its own.
    */
-  private async mergedOnGitHub(t: TaskRec, p: Space, note: string) {
-    const up = await G.catchUp(p.path, t.base!, `then run git pull in ${t.base} here`, 20_000)
-    return this.markMerged(t, up.ok ? note : `${note}; ${t.base} here is not up to date: ${up.err}`)
+  private async mergedOnGitHub(t: TaskRec, p: Space, note: string, fetchMs?: number) {
+    const up = await G.catchUp(p.path, t.base!, `then run git pull in ${t.base} here`, fetchMs)
+    const stale = !up.ok ? up.err : up.err ? `${t.base} here was not brought up to GitHub's: ${up.err}` : undefined
+    return this.markMerged(t, stale ? `${note}; ${stale}` : note)
   }
 
   private async markMerged(t: TaskRec, note?: string) {

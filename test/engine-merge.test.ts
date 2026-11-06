@@ -557,6 +557,32 @@ describe('on GitHub: a pull request per task', () => {
     expect(g.gh().prs[0].state).toBe('OPEN')
   })
 
+  test('ready with its work in main already on a repo with no remote: Done (merged), nothing fetched', async () => {
+    const w = world()
+    const dir = repo()
+    const { t } = await started(w, dir, 'ghnoremote')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', t.worktree!)
+    sh(`git merge -q --squash ${t.branch} && git commit -qm "hello, by hand"`, dir)
+    expect(await w.engine.done(t.id, 'Added hello.txt.')).toEqual({ state: 'merged', note: 'its work was in main already' })
+    expect(w.engine.statusOf(t)).toBe('done')
+  })
+
+  test('ready with its work in main here and a remote that does not answer: Done (merged), its words saying main stayed behind', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'ghoffline')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', t.worktree!)
+    sh(`git merge -q --squash ${t.branch} && git commit -qm "hello, by hand"`, g.dir)
+    // GitHub is out of reach from this checkout: the fetch that would bring main up cannot run
+    sh(`git remote set-url origin ${join(tmpdir(), 'no-such-origin-here')}`, g.dir)
+    const r = await w.engine.done(t.id, 'Added hello.txt.')
+    expect(r.state).toBe('merged')
+    expect(r.note).toStartWith("its work was in main already; main here was not brought up to GitHub's:")
+    expect(w.engine.statusOf(t)).toBe('done')
+  })
+
   test('a branch with a commit after its merged pull request is not taken for merged: Ready, and left alone', async () => {
     const w = world()
     const g = onGitHub()

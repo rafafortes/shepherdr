@@ -259,7 +259,9 @@ export async function catchUp(repo: string, base: string, then = 'then merge aga
   if (!(await git(repo, 'remote', 'get-url', 'origin')).ok) return ok
   // offline: go on with what is here
   const fetched = fetchMs ? await sh(['git', 'fetch', '--quiet', 'origin', base], repo, { timeoutMs: fetchMs }) : await git(repo, 'fetch', '--quiet', 'origin', base)
-  if (!fetched.ok) return ok
+  // offline: go on with what is here, saying that the base was not brought up (a bounded fetch that did not answer
+  // in time is that too, and its code says so)
+  if (!fetched.ok) return { ...ok, code: fetched.code, err: fetched.code === 124 ? `origin did not answer in ${Math.round(fetchMs! / 1000)} s` : fetched.err.split('\n')[0] || 'origin could not be reached' }
   const remote = `origin/${base}`
   if (!(await git(repo, 'rev-parse', '--verify', '--quiet', remote)).ok) return ok
   if (!(await branchExists(repo, base))) return git(repo, 'branch', '--', base, remote)
