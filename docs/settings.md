@@ -4,8 +4,9 @@
   work, only words in each new brief's Settings block (review, the Reviewer a brief suggests, Must fix, Review rounds,
   merge), each row offering its exact line under Brief wording. How Shepherdr runs: the agent, model and effort tasks and
   coordinators start with (model:
-  an id or alias, or default for the CLI's own; effort: default, lowest, low, medium, high, xhigh or max, each CLI
-  taking it its own way) and tasks' backup agent, when Done tasks archive themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, the idle browser, dictation, Notifications
+  every model the CLI reports, searched once the list is long, the ones you pinned or picked last first; an id or alias,
+  or default for the CLI's own; effort: default, lowest, low, medium, high, xhigh or max, each CLI taking it its own
+  way, and in words on screen — Extra high for xhigh) and tasks' backup agent, when Done tasks archive themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, the idle browser, dictation, Notifications
   and Voice. Notifications gathers scoped delivery rules and device enrolment; device delivery is Everywhere. Space menus still offer Notify. Its
   defaults are set Everywhere, for a machine or for a space (`shepherdr set <key> <value> [--machine | --space NAME]`, from any machine);
   the most specific one set wins. Editing above the content names the scope; its searchable hierarchy handles many machines and spaces. Values set here are highlighted, with their inherited value, source and Reset beside them. And, kept on each device, its Appearance: System (the device's own light

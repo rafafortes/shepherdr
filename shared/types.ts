@@ -664,6 +664,10 @@ export interface RestartCli {
   efforts?: string[]
   defaultModel?: string
   defaultEffort?: string
+  /** the human's pinned models here, by id, in the order they were pinned: they lead the list */
+  pinned?: string[]
+  /** the ones picked last here, by id, newest first: they come next */
+  recent?: string[]
 }
 
 /** what the restart sheet shows: what its agent runs on now and what Settings say for its role (what it restarts with
@@ -721,6 +725,10 @@ export interface SettingRow {
   warn?: string
   /** pick list values */
   options?: string[]
+  /** the values in their own order (a model list: Default, then the ones pinned or picked first), not what is set first */
+  ordered?: boolean
+  /** each value's id, which a search finds it by where the value is its model's name (a model list) */
+  ids?: Record<string, string>
   /** a number from min to max (step: what it goes up by, 1 when none), with its unit (plural, and one: singular);
    *  off: it may be left empty for off, zero: 0 is off */
   num?: { min: number; max: number; step?: number; unit?: string; one?: string; off?: boolean; zero?: boolean }
@@ -968,6 +976,9 @@ export type Action =
   /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as
       Settings say for its role); save: as its space's Settings for its role too */
   | { type: 'restart'; chat: string; kind?: string; model?: string; effort?: string; save?: boolean }
+  /** pin a model to the top of its CLI's lists (on: false unpins it), on the machine that owns this chat (its picks are
+      the machine's own): the answer is that CLI's pins and recents there */
+  | { type: 'model-pin'; chat: string; kind: string; model: string; on: boolean }
   /** mark a task done with nothing merged (shepherdr task close); refused (held) while it holds unmerged work, unless force */
   | { type: 'close'; chat: string; force?: boolean }
   /** delete a task: its agent, herdr space, worktree, branch, chat and record; refused while it holds work, unless force */

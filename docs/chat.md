@@ -45,6 +45,13 @@ Every agent, coordinator or task agent, gets the same chat.
   start: …`), and its task shows `Went wrong: …` and needs you, instead of Working for ever. One that was resuming a
   session that is gone starts a new one instead, told its brief again, and says so in the chat. Nothing starts it
   again by itself; your next message tries again. A launch herdr has not finished yet (issue #491) is left to herdr.
+- The + menu's agent controls (Agent, Model, Effort) say what its CLI reports it runs on; a tap opens Restart agent on
+  any of them. The model list holds every model the CLI reports — pi's whole lineup across providers — with a search box
+  once it is long (by a model's name or its id), the models you pinned first and the ones you picked last next, and the
+  effort levels in words (`xhigh` reads Extra high). A tap on a row's pin keeps that model at the top of its CLI's list
+  from then on (the arrow keys reach it too, and Enter pins). Pins and recent picks belong to this machine, kept in
+  `~/.shepherdr/model-picks.json`, never in a browser, so every device sees the same ones; Settings' model rows show
+  them first too.
 - A slash command you type (`/clear`, `/new`, `/compact`, `/model sonnet`, a custom one) goes into the agent's CLI as
   you typed it, once its turn is over, and the CLI runs it. The chat shows it as you typed it, and what the CLI printed
   as its answer. After `/clear` or `/new` a quiet New session line starts the new session, whose log the chat reads

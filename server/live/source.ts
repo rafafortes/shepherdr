@@ -18,6 +18,7 @@ import { Agents, hidden, type Spec } from './agents.ts'
 import { herdr } from './herdr.ts'
 import { followCommand, isCommand } from './commands.ts'
 import { effortsOf, findModel, knowsModels, modelsOf, nearest } from './models.ts'
+import { picksOf, pinModel, rememberModel } from './model-picks.ts'
 import { HELP, one, parseArgs, summaryOpts, type Parsed } from './args.ts'
 import { Automations, type Automation, type Template } from './automations.ts'
 import { Heartbeats, heartbeatFile, Wakes, wakeProblem } from './heartbeat.ts'
@@ -1069,6 +1070,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         }
     }
     const words = x.t ? await this.engine.restart(x.t.id, h) : await this.restartCoordinator(key, h)
+    // the model it now runs on is one of the human's picks: first among the recent ones (only one a CLI lists, never
+    // a word typed before its list was read)
+    const picked = h.model ? findModel(h.kind, h.model) : undefined
+    if (picked) rememberModel(h.kind, picked.id)
     this.emit('snapshot')
     this.emit('chat', key)
     return words
@@ -1837,6 +1842,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         } catch (e) {
           return { ok: false, error: (e as Error).message }
         }
+      }
+      case 'model-pin': {
+        const kind = kindOf(a.kind)
+        if (!kind) return { ok: false, error: `No CLI called ${a.kind}.` }
+        const m = findModel(kind, a.model)
+        if (!m) return { ok: false, error: `${CLI_NAME[kind] ?? kind} has no model ${a.model}.` }
+        pinModel(kind, m.id, !!a.on)
+        // Settings' model rows lead with the pins too
+        this.emit('snapshot')
+        return { ok: true, ...picksOf(kind) }
       }
       case 'close': {
         const t = this.engine.task(a.chat.split('/')[0])

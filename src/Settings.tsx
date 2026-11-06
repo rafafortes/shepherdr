@@ -35,6 +35,7 @@ import {
   MinusIcon,
   ModelIcon,
   NextIcon,
+  PinIcon,
   PhoneTop,
   PlaceIcon,
   PlanIcon,
@@ -64,9 +65,12 @@ export function Pick({
   label,
   plain,
   show = shown,
+  match,
   depth,
   icon,
   ordered,
+  section,
+  pin,
   left,
   className,
 }: {
@@ -77,12 +81,19 @@ export function Pick({
   plain?: boolean
   /** its words for a value */
   show?: (v: string) => string
+  /** what it can be found by, where that is more than its words (a model's id as well as its name) */
+  match?: (v: string) => string
   /** a mark before a value's words, in the picker and its menu (a place's icon) */
   icon?: (v: string) => ReactNode
   /** a tree: how deep each choice sits, and its own short name there (a project's, under its machine) */
   depth?: (v: string) => { depth: number; name: string }
   /** the choices in their own order (else the one picked first) */
   ordered?: boolean
+  /** the group a choice belongs to: its heading is drawn above the first of each in turn (Pinned, Recent) */
+  section?: (v: string) => string | undefined
+  /** pin a choice to the top of the list, or unpin it: a mark on its row (a model's); skip: a choice with none (the
+   *  CLI's own default, which is no model) */
+  pin?: { pinned: string[]; toggle: (v: string) => void; skip?: (v: string) => boolean }
   /** its menu opens from its left edge */
   left?: boolean
   className?: string
@@ -92,12 +103,15 @@ export function Pick({
   // every place) shows ten rows and scrolls, fewer where the screen has less room (a phone on its side)
   const [up, setUp] = useState(false)
   const [tall, setTall] = useState(0)
+  // any list too long to take in at a glance can be searched, as well as scrolled
+  const searchable = options.length > 8
   const toggle = () => {
     const r = ref.current?.getBoundingClientRect()
+    const room = roomFor(ref.current)
     const row = innerWidth < 640 || matchMedia('(pointer: coarse)').matches ? 44 : 32
-    const need = (Math.min(options.length, 10) + 1) * row + 16
-    const below = r ? innerHeight - r.bottom - 12 : need
-    const above = r ? r.top - 12 : 0
+    const need = (Math.min(options.length, 10) + 1) * row + 16 + (searchable ? SEARCH_H : 0)
+    const below = r ? room.bottom - r.bottom - 12 : need
+    const above = r ? r.top - room.top - 12 : 0
     const upward = below < need && above > below
     setUp(upward)
     setTall(Math.max(3 * row, Math.min(need, upward ? above : below)))
@@ -132,9 +146,13 @@ export function Pick({
           value={value}
           options={options}
           show={show}
+          match={match}
           depth={depth}
           icon={icon}
           ordered={ordered}
+          section={section}
+          pin={pin}
+          searchable={searchable}
           left={left}
           up={up}
           tall={tall}
@@ -149,8 +167,24 @@ export function Pick({
   )
 }
 
+/** the room the search box takes at the top of a long menu */
+const SEARCH_H = 44
+
+/** where a menu may open: inside the pane it lives in (the page's content scrolls, and a list longer than that pane
+ *  would otherwise draw its top under the page's header, out of reach), and inside the window */
+function roomFor(from: HTMLElement | null) {
+  for (let el = from?.parentElement; el; el = el.parentElement) {
+    const s = getComputedStyle(el)
+    if (/(auto|scroll|hidden)/.test(`${s.overflow}${s.overflowY}`)) {
+      const r = el.getBoundingClientRect()
+      return { top: Math.max(0, r.top), bottom: Math.min(innerHeight, r.bottom) }
+    }
+  }
+  return { top: 0, bottom: innerHeight }
+}
+
 /** a setting's choices: the shared menu, springing out of it (up, near the bottom of the screen); one too long to show
- *  whole scrolls, the one picked in view */
+ *  whole scrolls, the one picked in view, and can be searched (a letter typed narrows it, Enter takes the first) */
 function Choices({
   value,
   options,
@@ -159,9 +193,13 @@ function Choices({
   onPick,
   onClose,
   show,
+  match,
   depth,
   icon,
   ordered,
+  section,
+  pin,
+  searchable,
   left,
 }: {
   value: string
@@ -171,17 +209,53 @@ function Choices({
   onPick: (v: string) => void
   onClose: () => void
   show: (v: string) => string
+  match?: (v: string) => string
   depth?: (v: string) => { depth: number; name: string }
   icon?: (v: string) => ReactNode
   ordered?: boolean
+  section?: (v: string) => string | undefined
+  pin?: { pinned: string[]; toggle: (v: string) => void; skip?: (v: string) => boolean }
+  searchable: boolean
   left?: boolean
 }) {
   const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
+  const box = useRef<HTMLInputElement>(null)
   useLayoutEffect(() => {
     const el = ref.current
     if (el && el.scrollHeight > el.clientHeight) el.querySelector('[aria-checked=true]')?.scrollIntoView({ block: 'center' })
   }, [])
+  // with a mouse, a long list takes what you type at once; a phone's keyboard waits for a tap on the box
+  useEffect(() => {
+    if (searchable && matchMedia('(pointer: fine)').matches) box.current?.focus({ preventScroll: true })
+  }, [searchable])
+  const all = ordered ? options : [value, ...options.filter((o) => o !== value)]
+  const words = query.trim().toLowerCase()
+  const rows = all.filter((o) => (match?.(o) ?? show(o)).toLowerCase().includes(words))
+  const search = searchable ? (
+    <input
+      ref={box}
+      aria-label={depth ? 'Find scope or value' : 'Search'}
+      placeholder={depth ? 'Find…' : 'Search…'}
+      type="search"
+      autoComplete="off"
+      spellCheck={false}
+      enterKeyHint="go"
+      value={query}
+      onChange={(e) => setQuery(e.target.value)}
+      onKeyDown={(e) => {
+        // Enter takes the first one left, never the one already set (that pick would change nothing); in an empty box it
+        // takes nothing at all, so a keyboard opening the menu and pressing Enter again cannot change what is set
+        const first = words ? (rows.find((r) => r !== value) ?? rows[0]) : undefined
+        if (e.key === 'Enter' && first !== undefined) {
+          e.preventDefault()
+          onPick(first)
+        }
+      }}
+      className="mx-2 mb-1 w-[calc(100%-1rem)] min-w-0 rounded-row bg-well px-2 py-2 outline-none phone:text-[1rem]"
+    />
+  ) : null
+  let group: string | undefined
   return (
     <Menu
       label="Choices"
@@ -193,25 +267,49 @@ function Choices({
         up ? (left ? 'origin-bottom-left' : 'origin-bottom-right') : left ? 'origin-top-left' : 'origin-top-right',
       )}
     >
-      {depth && options.length > 10 ? <input aria-label="Find scope or value" placeholder="Find…" value={query} onChange={(e) => setQuery(e.target.value)} className="mx-2 mb-1 w-[calc(100%-1rem)] min-w-0 rounded-row bg-well px-2 py-2 outline-none" /> : null}
-      <div ref={ref} style={{ maxHeight: tall - (depth && options.length > 10 ? 56 : 12) }} className="overflow-y-auto overscroll-contain">
-        {(ordered ? options : [value, ...options.filter((o) => o !== value)]).filter((o) => show(o).toLowerCase().includes(query.toLowerCase())).map((o) => {
+      {search}
+      <div ref={ref} style={{ maxHeight: Math.max(0, tall - (searchable ? SEARCH_H + 8 : 12)) }} className="overflow-y-auto overscroll-contain">
+        {rows.length ? null : <p className="px-2 py-2 text-fg3">No match.</p>}
+        {rows.map((o) => {
           const at = depth?.(o)
+          const head = section?.(o)
+          const starts = !!head && head !== group
+          group = head ?? group
           return (
-            <MenuItem
-              key={o}
-              role="menuitemradio"
-              aria-checked={o === value}
-              aria-label={at && at.name !== show(o) ? show(o) : undefined}
-              icon={o === value ? <CheckIcon className={ic} /> : null}
-              onClick={() => onPick(o)}
-            >
-              {/* a tree's rows step in under the one they belong to, as the sidebar's */}
-              <span style={at ? { paddingLeft: `${at.depth}rem` } : undefined} className={clsx(icon && 'flex min-w-0 items-center gap-2')}>
-                {icon?.(o)}
-                <span className="truncate">{at ? at.name : show(o)}</span>
-              </span>
-            </MenuItem>
+            <div key={o}>
+              {starts ? <div className="px-2 pt-2 pb-0.5 text-[0.75rem] text-fg3 coarse:text-[0.8125rem] phone:text-[0.8125rem]">{head}</div> : null}
+              <div className="relative flex items-center">
+                <MenuItem
+                  role="menuitemradio"
+                  aria-checked={o === value}
+                  aria-label={at && at.name !== show(o) ? show(o) : undefined}
+                  icon={o === value ? <CheckIcon className={ic} /> : null}
+                  onClick={() => onPick(o)}
+                  className={pin ? 'pr-10' : undefined}
+                >
+                  {/* a tree's rows step in under the one they belong to, as the sidebar's */}
+                  <span style={at ? { paddingLeft: `${at.depth}rem` } : undefined} className={clsx(icon && 'flex min-w-0 items-center gap-2')}>
+                    {icon?.(o)}
+                    <span className="truncate">{at ? at.name : show(o)}</span>
+                  </span>
+                </MenuItem>
+                {pin && !pin.skip?.(o) ? (
+                  // in the rows' own cycle (role menuitemcheckbox), so the arrow keys reach it and Enter or Space
+                  // pins: a menu keeps its keys on its menuitem rows
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    role="menuitemcheckbox"
+                    aria-checked={pin.pinned.includes(o)}
+                    aria-label={`${pin.pinned.includes(o) ? 'Unpin' : 'Pin'} ${show(o)}`}
+                    onClick={() => pin.toggle(o)}
+                    className={clsx('absolute right-0.5 grid size-7 shrink-0 place-items-center rounded-full text-fg3 hover:text-fg coarse:size-10 phone:size-10', pin.pinned.includes(o) ? 'text-fg' : 'opacity-60')}
+                  >
+                    <PinIcon className={ic} />
+                  </button>
+                ) : null}
+              </div>
+            </div>
           )
         })}
       </div>
@@ -583,7 +681,7 @@ function Control({ row, phone, set, edit }: { row: SettingRow; phone: boolean; s
   if (action) return <Ghost onClick={() => set(options[0])}>{options[0]}</Ghost>
   if (options.length === 2 && options.includes('on') && options.includes('off')) return <Switch label={row.label} on={row.value === 'on'} onChange={(on) => set(on ? 'on' : 'off')} />
   if (SEGMENTS.has(row.key)) return <Segments label={row.label} value={row.value} options={options} onPick={set} fill={phone} />
-  return <Pick label={row.label} plain={phone} value={row.value} options={options} onPick={set} />
+  return <Pick label={row.label} plain={phone} value={row.value} options={options} ordered={row.ordered} match={row.ids ? (v) => `${v} ${row.ids?.[v] ?? ''}` : undefined} onPick={set} />
 }
 
 /** Settings → Autopilot for a space: Run now, the same control as the chat's, one heartbeat at once (or once its turn

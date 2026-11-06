@@ -60,7 +60,7 @@ describe.skipIf(!browser)('notification settings', () => {
       await page.getByRole('button', { name: 'Places', exact: true }).click()
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
       await page.getByRole('button', { name: 'Editing: home · vm-str', exact: true }).click()
-      await page.getByRole('textbox', { name: 'Find scope or value' }).fill('home · machine-20')
+      await page.getByRole('searchbox', { name: 'Find scope or value' }).fill('home · machine-20')
       const menu = page.getByRole('menu', { name: 'Choices' })
       expect(await menu.getByRole('menuitemradio').count()).toBe(1)
       await menu.getByRole('menuitemradio', { name: 'home · machine-20', exact: true }).click()
