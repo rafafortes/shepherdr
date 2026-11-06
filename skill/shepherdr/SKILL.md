@@ -94,6 +94,19 @@ Each on a line of its own:
 words and the human sees no card of it (a heartbeat with nothing to do too), your whole reply is only
 `<no-reply>short reason</no-reply>`: the chat shows nothing.
 
+### A space or a task mentioned
+
+    [#gtm](space:p:vm-str:gtm)        a space the human picked in the message box
+    [@SHE-12](task:SHE-12)            a task the human picked there
+
+The words in the brackets are how it shows in their chat; the parentheses say what it is, so act on that, never on a
+name you looked up yourself. A task: `shepherdr task show SHE-12` (`shepherdr task list` finds it by title), and when
+the human asks you to pass something on, `shepherdr task tell SHE-12 "…"` reaches its agent. A space:
+`shepherdr space list` names it and `shepherdr show --space <name>` says how it is set up; its chat is the human's,
+not a line you write to for them. You can write a task mention the same way, `[@SHE-12](task:SHE-12)`, and in a
+message of theirs it reads as a chip; a space's id is not something a command prints, so leave a space as plain words
+(`#gtm`). A quote of their message, an alert or a card shows a mention by its name, never its id.
+
 ### Asking
 
 A question with a few answers is a choice card, then end your turn:

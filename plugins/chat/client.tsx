@@ -17,6 +17,8 @@ import { dayLabel } from './days.ts'
 import { FindBar, openFind } from './find.tsx'
 import { Fold } from './fold.tsx'
 import { Markdown } from './markdown.tsx'
+import { Mentions, MentionList, MENTION_LIST, inBox, mentionItems, pickOf, type Item } from './mentions.tsx'
+import { expand, hasMention, known, plain, put, type Picked } from './mentions.ts'
 import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } from './reply.ts'
 import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, LiveLine, TurnLine } from './activity.tsx'
@@ -24,9 +26,14 @@ import { AgentControls, PlaceRestartItem, RestartSheet } from '@client/restart.t
 
 /* ---------- messages ---------- */
 
-/** Human messages, including full task briefs and generated settings, exactly as written. */
+/** Human messages, including full task briefs and generated settings, exactly as written. A space or a task the person
+    picked among the words is a chip (mentions.tsx): the words are the same, the mention opens what it names */
 function YourText({ text }: { text: string }) {
-  return <div className="whitespace-pre-wrap wrap-anywhere">{text}</div>
+  return (
+    <div className="whitespace-pre-wrap wrap-anywhere">
+      <Mentions text={text} />
+    </div>
+  )
 }
 
 export { Markdown }
@@ -531,10 +538,20 @@ export function Quote({ q, chat, from, you, loose, label = 'Replying to' }: { q:
         {name ? <span className="mr-0.5 font-medium">{name} </span> : null}
         {q.file ? <FileIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
         {q.artifact ? <PageIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
-        {q.text}
+        <Quoted text={q.text ?? ''} />
       </div>
     </div>
   )
+}
+
+/** a quote's words, its mentions named as their space or task is called now (only a quote that has one is drawn again
+    when the snapshot changes) */
+function Quoted({ text }: { text: string }) {
+  return hasMention(text) ? <QuotedMention text={text} /> : <>{text}</>
+}
+
+function QuotedMention({ text }: { text: string }) {
+  return <>{plain(text, useSnap())}</>
 }
 
 /** what sits on a quote's bottom edge: a ring in the page colour, so a reply in the same shade still shows its edge */
@@ -1581,6 +1598,51 @@ function retry(cid: string) {
 
 /* ---------- composer ---------- */
 
+/* ---------- mentions: what the box's # and @ picks become at Send ---------- */
+
+/** what the person picked in each chat's box, by chat: Send turns each "#name" or "@REF" into its mention, and a pick
+    replaces an earlier one of the same name or id. The screen reloads itself on a new build and the box's words come
+    back (kernel.ts keeps them), so the picks come back with them: a draft's mention must not go out as words */
+const PICKS = 'shepherdr.picks'
+const pickedIn = new Map<string, Picked[]>(
+  (() => {
+    try {
+      return Object.entries(JSON.parse(sessionStorage.getItem(PICKS) ?? '{}') as Record<string, Picked[]>)
+    } catch {
+      return []
+    }
+  })(),
+)
+
+function keepPicks() {
+  try {
+    sessionStorage.setItem(PICKS, JSON.stringify(Object.fromEntries([...pickedIn].filter(([, p]) => p.length))))
+  } catch {
+    /* a private window: the picks stay in memory */
+  }
+}
+
+const same = (a: Picked, b: Picked) =>
+  a.kind === 'space' && b.kind === 'space' ? a.name === b.name : a.kind === 'task' && b.kind === 'task' ? a.ref.toLowerCase() === b.ref.toLowerCase() : false
+
+/** the pick replaces an earlier one of the same name (its id is what Send writes) */
+const rememberPick = (chatKey: string, p: Picked) => {
+  pickedIn.set(chatKey, [...(pickedIn.get(chatKey) ?? []).filter((x) => !same(x, p)), p])
+  keepPicks()
+}
+
+const forgetPicks = (chatKey: string) => {
+  if (!pickedIn.delete(chatKey)) return
+  keepPicks()
+}
+
+const takePicks = (chatKey: string) => {
+  const p = pickedIn.get(chatKey) ?? []
+  pickedIn.delete(chatKey)
+  keepPicks()
+  return p
+}
+
 export function useChat(key: string) {
   return useStore((s) => s.chats[key])
 }
@@ -1596,6 +1658,50 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
   const live = useUI((u) => registry.composerLive.find((l) => l.when(u, chatKey)))
   const Idle = registry.composerIdle
   const Mic = registry.composerMic
+  // the # and @ lists (mentions.tsx): where the caret is, what is being typed there, the row chosen, and the text an
+  // Escape closed it for (typing on, it opens again)
+  const snap = useSnap()
+  const [caret, setCaret] = useState(text.length)
+  const [sel, setSel] = useState(0)
+  // the row the keys are on, by its own key: a snapshot that reorders the list (a task's state changed) keeps them on
+  // the same task, not on whatever took its place
+  const chosen = useRef<string | null>(null)
+  const [closed, setClosed] = useState<string | null>(null)
+  const typed = mentionItems(snap, text, caret)
+  // only while you type in it: a draft opened again (a reload, another chat it was left in) says nothing of a list
+  const list = typed && typed.items.length && closed !== `${text}:${caret}` && focused ? typed : null
+  const at = !list ? 0 : Math.max(0, chosen.current ? list.items.findIndex((i) => i.key === chosen.current) : Math.min(sel, list.items.length - 1))
+  const word = list ? `${list.kind}:${list.word}` : ''
+  const listId = `${MENTION_LIST}-${chatKey}`
+  useEffect(() => {
+    setSel(0)
+    chosen.current = null
+  }, [word])
+  const choose = (n: number) => {
+    if (!list) return
+    setSel(n)
+    chosen.current = list.items[n]?.key ?? null
+  }
+  // another chat's box: what was typed, chosen or closed there means nothing here
+  useEffect(() => {
+    setClosed(null)
+    setCaret(ref.current?.value.length ?? 0)
+  }, [chatKey])
+  /** a pick goes in as words ("#gtm ", "@SHE-12 "); its mention is what Send turns it into */
+  const take = (i: Item) => {
+    if (!typed) return
+    const next = put(text, typed, inBox(i))
+    rememberPick(chatKey, pickOf(i))
+    setText(next.text)
+    setCaret(next.caret)
+    // the box keeps a phone's keyboard up (it never lost the focus) and the caret goes after the pick
+    requestAnimationFrame(() => {
+      const el = ref.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(next.caret, next.caret)
+    })
+  }
   useEffect(() => {
     if (focused && device === 'desktop') ref.current?.focus()
   }, [focused, device])
@@ -1649,10 +1755,17 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
     // and again when the box comes back after talking to type or a call: it is a new textarea then
   }, [text, width, room, !!live])
   const send = () => {
-    const t = text.trim()
+    // the # and @ picks the person made become their mentions, the way the CLI's log hands them back (mentions.ts);
+    // one whose space or task is gone is only its words
+    const t = expand(
+      text,
+      takePicks(chatKey).filter((p) => known(snap, p)),
+    ).trim()
     if (!t && !files.length) return
     const reply = getState().ui.reply[chatKey]
     setText('')
+    setCaret(0)
+    setClosed(null)
     setUI((u) => {
       const { [chatKey]: _, ...replies } = u.reply
       // the + menu goes too (on a desktop Enter can send with it open)
@@ -1677,6 +1790,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
       {registry.composerAbove.map(({ View }, i) => (
         <View key={i} chatKey={chatKey} cli={cli} />
       ))}
+      {list ? <MentionList id={listId} kind={list.kind} items={list.items} sel={at} pick={take} /> : null}
       {/* a pill: the corners are half its one-line height, so one line has round ends; taller, the buttons keep their
           size and spot in the bottom corners, with the same curve around them (like iMessage) */}
       <div data-composer className="round-box bg-bg p-1.5 shadow-box has-[textarea:focus]:shadow-box-focus">
@@ -1705,10 +1819,17 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                   data-kept
                   data-quiet
                   aria-label={placeholder}
+                  aria-controls={list ? listId : undefined}
+                  aria-activedescendant={list ? `${listId}-${at}` : undefined}
                   rows={1}
                   value={text}
                   placeholder=""
-                  onChange={(e) => setText(e.target.value)}
+                  onChange={(e) => {
+                    setText(e.target.value)
+                    setCaret(e.target.selectionStart)
+                    // the box emptied: its picks go too, so a "#gtm" typed later by hand is only words
+                    if (!e.target.value) forgetPicks(chatKey)
+                  }}
                   onPaste={(e) => {
                     // a screenshot or a copied file attaches, as + does; text pastes as text
                     const list = pasted(e.clipboardData)
@@ -1720,12 +1841,35 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                   // the caret moved (an arrow key, a tap, a letter typed, after which a phone scrolls to the caret
                   // itself, short of the padding): its line comes into full view
                   onSelect={(e) => {
+                    setCaret(e.currentTarget.selectionStart)
                     reveal(e.currentTarget)
                     fades(e.currentTarget)
                   }}
-                  onFocus={() => setUI({ focus: chatKey })}
-                  onBlur={() => getState().ui.focus === chatKey && setUI({ focus: null })}
+                  onFocus={() => {
+                    setClosed(null)
+                    setUI({ focus: chatKey })
+                  }}
+                  onBlur={() => {
+                    setClosed(`${text}:${caret}`)
+                    getState().ui.focus === chatKey && setUI({ focus: null })
+                  }}
                   onKeyDown={(e) => {
+                    // the # and @ lists first: the arrows choose, Enter or Tab takes, Escape closes for what is typed
+                    // (never for an input method composing a word: those keys are its own)
+                    if (list && !e.nativeEvent.isComposing) {
+                      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                        e.preventDefault()
+                        return choose((at + (e.key === 'ArrowDown' ? 1 : list.items.length - 1)) % list.items.length)
+                      }
+                      if ((e.key === 'Tab' && !e.shiftKey) || (e.key === 'Enter' && !e.shiftKey && device === 'desktop' && !e.nativeEvent.isComposing)) {
+                        e.preventDefault()
+                        return take(list.items[at])
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault()
+                        return setClosed(`${text}:${caret}`)
+                      }
+                    }
                     if (e.key === 'Enter' && !e.shiftKey && device === 'desktop' && !e.nativeEvent.isComposing) {
                       e.preventDefault()
                       send()
@@ -1832,7 +1976,7 @@ function ReplyStrip({ chatKey }: { chatKey: string }) {
         Replying to <span className="inline-block max-w-[45%] truncate align-top font-medium text-fg">{name}</span>{' '}
         {q.file ? <FileIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
         {q.artifact ? <PageIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
-        {q.text}
+        <Quoted text={q.text ?? ''} />
       </div>
       {/* taking the reply away keeps the keyboard up */}
       <button

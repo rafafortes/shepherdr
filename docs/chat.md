@@ -3,6 +3,16 @@
 Every agent, coordinator or task agent, gets the same chat.
 
 - Pick a space; write to its coordinator. Ask it for a task; tasks are created only through a coordinator.
+- Name a space or a task in what you write: type `#` in the box for its spaces (each with its machine, when there are
+  several) and `@` for its tasks, the ones waiting on you and at work first and Done last, each with its state, its id
+  and its title. A pick stays as plain words while you type (`#gtm`, `@SHE-12`) and goes in as
+  `[#gtm](space:p:vm-str:gtm)` or `[@SHE-12](task:SHE-12)`, so the agent reads which space or task you meant and the
+  message draws it as a chip that opens it. Arrows choose and Enter or Tab takes a row, a tap on a phone, and Escape
+  closes the list for the words typed. One typed by hand, never picked, goes as the words it is (`#gtm` stays `#gtm`,
+  and two spaces with the same name, a `home` on each machine, share the last one picked); a pick is kept with the draft
+  it was made in, so the reload of a new build brings both back. A `#` or `@` inside a word (an email, a link's
+  `#anchor`) is only words, and so is one in an agent's reply inside code, or one it escaped. How an agent acts on a
+  mention is in the shepherdr skill.
 - What you send shows in the chat the moment you tap Send, faded until it is in. If it can't go through, it says so
   under the message, with Retry and Remove; it is still there after a reload.
 - Write to a busy agent any time: it goes in at once and steers the agent mid-turn (Claude Code, Codex and pi take it

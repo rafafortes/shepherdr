@@ -523,7 +523,7 @@ export function taskLine(t: Task, where?: string[]): ReactNode {
   ) : null
 }
 
-const STATUS_WORD: Record<Status, string> = {
+export const STATUS_WORD: Record<Status, string> = {
   need: 'Needs you',
   ready: 'Ready',
   merging: 'Merging',
