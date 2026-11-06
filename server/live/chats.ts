@@ -133,8 +133,8 @@ interface ChatLog {
   /** the choice you sent for each question, by question id */
   answers: Record<string, number>
   /** the words a question was answered with instead of a pick, by question id; chat: a message in the chat; space: on
-   *  its copy in that space's chat */
-  said?: Record<string, { text?: string; chat?: true; space?: string }>
+   *  its copy in that space's chat; dismissed: closed without an answer (a Dismiss or Esc), those words the decline */
+  said?: Record<string, { text?: string; chat?: true; space?: string; dismissed?: true }>
 }
 
 /** a card Shepherdr posted, with its answer: a choice card answered without a pick and no words typed on it was
@@ -144,7 +144,14 @@ function withAnswer(q: Question, l: ChatLog, place: (key: string) => Question['e
   const s = l.said?.[q.id]
   const elsewhere = s?.space ? place(s.space) : undefined
   if (sent !== -1) return { ...q, sent, elsewhere }
-  return { ...q, sent, said: s?.text, via: s?.chat || (!s && q.id.startsWith('ask:')) ? 'chat' : undefined, elsewhere }
+  return {
+    ...q,
+    sent,
+    said: s?.text,
+    via: s?.dismissed ? undefined : s?.chat || (!s && q.id.startsWith('ask:')) ? 'chat' : undefined,
+    dismissed: s?.dismissed,
+    elsewhere,
+  }
 }
 
 const safe = (key: string) => key.replace(/[^a-zA-Z0-9_.-]+/g, '_')
@@ -252,11 +259,12 @@ export class Chats {
     this.saveLog(key)
   }
 
-  /** other: the words typed on the card in place of a pick; space: answered on its copy in that space's chat */
-  answer(key: string, qid: string, choice: number, other?: string, space?: string) {
+  /** other: the words typed on the card in place of a pick; space: answered on its copy in that space's chat; dismissed:
+   *  closed without an answer, the words saying the person declined it */
+  answer(key: string, qid: string, choice: number, other?: string, space?: string, dismissed?: true) {
     const l = this.log(key)
     l.answers[qid] = choice
-    if (other || space) (l.said ??= {})[qid] = { text: other, space }
+    if (other || space || dismissed) (l.said ??= {})[qid] = { text: other, space, dismissed }
     this.saveLog(key)
   }
 
@@ -781,6 +789,7 @@ export class Chats {
           const sent = l.answers[qid] ?? (answered.has(e.id) ? -1 : undefined)
           // not picked here and no words typed on the card: answered in the terminal
           const said = sent === -1 ? l.said?.[qid]?.text : undefined
+          const dismissed = sent === -1 ? l.said?.[qid]?.dismissed : undefined
           const space = l.said?.[qid]?.space
           msgs.push({
             id: `${e.id}#${i}`,
@@ -796,7 +805,8 @@ export class Chats {
               to: from,
               sent: sent === undefined ? undefined : sent,
               said,
-              via: sent === -1 && !said ? 'terminal' : undefined,
+              via: sent === -1 && !said && !dismissed ? 'terminal' : undefined,
+              dismissed,
               elsewhere: space ? this.answeredIn(space) : undefined,
             },
           })
@@ -905,7 +915,7 @@ export class Chats {
         id: menuId(key, menu),
         who: 'agent',
         at: Date.now(),
-        question: { id: menuId(key, menu), title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, kind: 'Form', choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: from, asks: `${CLI_NAME[kind] ?? kind} asks` },
+        question: { id: menuId(key, menu), title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, kind: 'Form', choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: from, asks: `${CLI_NAME[kind] ?? kind} asks`, noDismiss: this.startScreens.has(key) || undefined },
       }
       if (waitingAt >= 0) msgs.splice(waitingAt, 0, card)
       else msgs.push(card)

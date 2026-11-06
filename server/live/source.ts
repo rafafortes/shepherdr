@@ -26,6 +26,7 @@ import { startsWords, whenFrom } from '../../shared/when.ts'
 import { Browsers, type BrowserBridge, type BrowserClient } from './browser.ts'
 import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
+import { DISMISSED, dismissKind, dismissWords } from './dismiss.ts'
 import { dictate as dictation } from './dictate.ts'
 import { age, checkTitle, ended, Engine, fitStatus, type TaskRec } from './engine/engine.ts'
 import { listFolders, makeRepo, resolveInHome } from './folders.ts'
@@ -495,7 +496,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const key = `${t.id}/Agent`
       const cards = [...open(key).values()]
       const menu = this.chats.startMenuUp(key) && !cards.length ? this.chats.menu(key) : undefined
-      if (menu) out.push({ id: menuId(key, menu), chat: key, place: t.project, task: t.id, at: t.updated, question: { id: menuId(key, menu), kind: 'Form', title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: t.id, asks: 'Its screen waits' } })
+      if (menu) out.push({ id: menuId(key, menu), chat: key, place: t.project, task: t.id, at: t.updated, question: { id: menuId(key, menu), kind: 'Form', title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: t.id, asks: 'Its screen waits', noDismiss: true } })
       else if (cards.length) for (const m of cards) out.push({ id: m.question.id, chat: key, place: t.project, task: t.id, at: m.question.terminal || !m.at ? t.updated : m.at, question: m.question })
       // a plain question or a failed start has no card: its row says what it waits with
       else out.push({ id: 'attention', chat: key, place: t.project, task: t.id, at: t.updated, text: this.engine.subOf(t, 'need') })
@@ -633,28 +634,31 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const open = new Set(openCards(tc).map((m) => m.question.id))
     const qs = (ask.questions ?? []).map((q) => live.get(q.id) ?? { ...q, sent: -1, said: ask.answered?.text })
     const settled = qs.every((q) => q.sent !== undefined)
+    const dismissed = !!ask.answered?.dismissed || qs.some((q) => q.dismissed)
     const where = ask.answered?.where ?? (qs.some((q) => q.via === 'terminal') ? 'terminal' : 'task')
-    const label = where === 'space' ? 'Answered here ·' : where === 'terminal' ? 'Answered in the terminal ·' : 'Answered in'
+    const label = dismissed ? 'Dismissed ·' : where === 'space' ? 'Answered here ·' : where === 'terminal' ? 'Answered in the terminal ·' : 'Answered in'
     const questions = qs.map((q): Question => {
       if (q.sent === undefined && !open.has(q.id)) return { ...q, sent: -1, elsewhere: link('No longer waits ·') }
       // the words it was answered with show on the card; the message that said them is in the task's chat
       return q.sent === undefined ? q : { ...q, via: undefined, elsewhere: link(label) }
     })
-    return { ...ask, questions, answered: settled ? { where, text: ask.answered?.text } : undefined, open: !settled && questions.some((q) => q.sent === undefined) }
+    return { ...ask, questions, answered: settled ? { where, text: ask.answered?.text, dismissed: dismissed || undefined } : undefined, open: !settled && questions.some((q) => q.sent === undefined) }
   }
 
   /** answered on a needs-you card in its space's chat: the card says so, and the space's coordinator hears the human
-   *  answered it, so it doesn't answer it too */
-  private answeredHere(space: string, key: string, title: string, text: string) {
+   *  answered it, so it doesn't answer it too; dismissed: closed without an answer, and the coordinator hears that */
+  private answeredHere(space: string, key: string, title: string, text: string, dismissed = false) {
     const l = this.chats.log(space)
     const p = l.posted.findLast((x) => x.card?.ask?.chat === key)
     if (p?.card?.ask) {
-      p.card.ask.answered = { where: 'space', text }
+      p.card.ask.answered = { where: 'space', text, dismissed: dismissed || undefined }
       this.chats.saveLog(space)
     }
     const task = key.split('/')[0]
-    const words = `The human answered ${task}'s question from its card in this chat (“${excerpt(title, 120)}”: ${excerpt(text, 200)}). It went to ${task}'s agent as their answer: don't answer it too. Nothing else to say: reply with only <no-reply>answered by the human</no-reply>.`
-    this.agents.send(space, hidden(words, 'news', { task, event: 'answered' })).catch(() => undefined)
+    const words = dismissed
+      ? `The human dismissed ${task}'s card “${excerpt(title, 120)}” in this chat without answering it: ${task}'s agent heard the decline and carries on with its own judgment. Nothing else to say: reply with only <no-reply>dismissed by the human</no-reply>.`
+      : `The human answered ${task}'s question from its card in this chat (“${excerpt(title, 120)}”: ${excerpt(text, 200)}). It went to ${task}'s agent as their answer: don't answer it too. Nothing else to say: reply with only <no-reply>answered by the human</no-reply>.`
+    this.agents.send(space, hidden(words, 'news', { task, event: dismissed ? 'dismissed' : 'answered' })).catch(() => undefined)
     this.emit('chat', space)
   }
 
@@ -2035,6 +2039,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const space = this.spaceOf(key, a.space)
     // a notification's button: only the card the chat still ends on, unanswered
     if (a.fromAlert && !openCards(this.chats.chat(key)).some((m) => m.question.id === qid)) return { ok: false, error: 'This card no longer waits on you.' }
+    // its Dismiss, or Esc on it: closed without an answer, never a yes
+    if (a.dismiss) return this.dismissCard(a, space)
     // a menu in the terminal: the keys that pick the choice
     if (qid.startsWith('menu:')) {
       await this.chats.readMenu(key, true)
@@ -2046,21 +2052,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (this.menuAnswers.has(key)) return { ok: false, error: 'Your answer is still being checked.' }
       this.menuAnswers.add(key)
       try {
-        await this.agents.keys(key, keys)
-        let changed = false
-        for (let i = 0; i < 8; i++) {
-          await new Promise((r) => setTimeout(r, 350))
-          await this.agents.refresh()
-          await this.chats.readMenu(key, true)
-          const next = this.chats.menu(key)
-          if (!next || menuId(key, next) !== qid) { changed = true; break }
-        }
-        if (!changed) {
-          const error = 'The terminal still shows this prompt. Try again or open the terminal.'
-          this.chats.post(key, { id: `menu-failed:${Date.now()}`, card: { id: `menu-failed:${Date.now()}`, text: error } })
-          this.emit('chat', key)
-          return { ok: false, error }
-        }
+        const failed = await this.pressMenu(key, keys, qid)
+        if (failed) return { ok: false, error: failed }
         const said = menu.multi ? (a.choices?.length ? a.choices.map((i) => menu.choices[i]).join(', ') : menu.reject) : menu.choices[a.choice]
         this.chats.post(key, { id: `menu-answer:${Date.now()}`, who: 'you', answered: `Answered “${menu.title}”`, elsewhere: space ? this.chats.answeredIn(space) : undefined, text: said })
         if (space) this.answeredHere(space, key, menu.title, said ?? '')
@@ -2114,6 +2107,96 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       this.chats.post(key, { id: `cli-answer:${qid}`, who: 'you', answered: `Answered “${item?.question ?? ''}”`, elsewhere: space ? this.chats.answeredIn(space) : undefined, text: label })
       if (space) this.answeredHere(space, key, item?.question ?? '', label)
       this.engine.youWrote(key, { go: false })
+      this.emit('chat', key)
+      return { ok: true }
+    }
+    return { ok: false }
+  }
+
+  /** keys go into the menu the card shows: this waits until its prompt has moved on, or says it has not (the card stands
+   *  as it was, so nothing was pressed) */
+  private async pressMenu(key: string, keys: string[], qid: string): Promise<string | undefined> {
+    await this.agents.keys(key, keys)
+    for (let i = 0; i < 8; i++) {
+      await new Promise((r) => setTimeout(r, 350))
+      await this.agents.refresh()
+      await this.chats.readMenu(key, true)
+      const next = this.chats.menu(key)
+      if (!next || menuId(key, next) !== qid) return
+    }
+    const error = 'The terminal still shows this prompt. Try again or open the terminal.'
+    this.chats.post(key, { id: `menu-failed:${Date.now()}`, card: { id: `menu-failed:${Date.now()}`, text: error } })
+    this.emit('chat', key)
+    return error
+  }
+
+  /**
+   * A card closed without an answer: its Dismiss, or Esc on it. A CLI's own prompt takes Esc, exactly as the person's Esc
+   * in the terminal would, and the CLI's own words reach the agent; Shepherdr's own card says what the person declined,
+   * so its agent carries on with its own judgment. Never an answer: a dismissed permission is no, a dismissed plan is no
+   * approval.
+   */
+  private async dismissCard(a: Extract<Action, { type: 'answer' }>, space?: string): Promise<{ ok: boolean; error?: string }> {
+    const key = a.chat
+    const qid = a.question
+    // a prompt on the CLI's own screen (a permission, a form, its question tool): Esc there, as the person would press it
+    if (qid.startsWith('menu:')) {
+      await this.chats.readMenu(key, true)
+      const menu = this.chats.menu(key)
+      if (!menu || menuId(key, menu) !== qid) return { ok: false, error: 'The terminal prompt changed. Read the new card before answering.' }
+      // a start stopped on its own screen: Esc there ends the launch, and it asks nothing yet
+      if (this.chats.startMenuUp(key)) return { ok: false, error: 'This start waits on its own screen, not on a question: open the terminal to answer it.' }
+      if (this.menuAnswers.has(key)) return { ok: false, error: 'Your answer is still being checked.' }
+      this.menuAnswers.add(key)
+      try {
+        const failed = await this.pressMenu(key, ['escape'], qid)
+        if (failed) return { ok: false, error: failed }
+        this.chats.post(key, { id: `menu-dismiss:${Date.now()}`, who: 'you', answered: 'Dismissed', elsewhere: space ? this.chats.answeredIn(space) : undefined, text: menu.title })
+        if (space) this.answeredHere(space, key, menu.title, DISMISSED, true)
+      } finally {
+        this.menuAnswers.delete(key)
+        void this.agents.deliver(key)
+      }
+      // a dismissal in the CLI's own menu is no go for a queued task either
+      this.engine.youWrote(key, { go: false })
+      this.emit('chat', key)
+      return { ok: true }
+    }
+    // Shepherdr's own choice card or plan: the decline goes in as one chat line, so its agent hears it and decides
+    const posted = this.chats.log(key).posted.find((p) => p.question?.id === qid)
+    if (posted?.question) {
+      const q = posted.question
+      if (q.sent !== undefined || this.chats.log(key).answers[qid] !== undefined) return { ok: false, error: 'This card is answered already.' }
+      const words = dismissWords(dismissKind(qid))
+      q.sent = -1
+      this.chats.answer(key, qid, -1, words, space, true)
+      if (space) this.answeredHere(space, key, q.title, words, true)
+      await this.send(key, line.answer(this.user, q.title, words), [], true)
+      this.emit('snapshot')
+      return { ok: true }
+    }
+    // the CLI's own question tool (AskUserQuestion, request_user_input): its Esc, which declines the question
+    const open = this.chats.openQuestion(key)
+    if (open && (qid === open.id || qid.startsWith(`${open.id}:`)) && this.chats.log(key).answers[qid] === undefined) {
+      const item = open.items[Number(qid === open.id ? 0 : qid.slice(open.id.length + 1)) ?? 0]
+      // Esc declines the CLI's whole form, so every question of it is closed, not only the one on the card
+      for (let i = 0; i < open.items.length; i++) this.chats.answer(key, open.items.length > 1 ? `${open.id}:${i}` : open.id, -1, undefined, space, true)
+      await this.agents.keys(key, ['escape'])
+      this.chats.post(key, { id: `cli-dismiss:${qid}`, who: 'you', answered: `Dismissed “${item?.question ?? ''}”`, elsewhere: space ? this.chats.answeredIn(space) : undefined })
+      if (space) this.answeredHere(space, key, item?.question ?? '', DISMISSED, true)
+      this.engine.youWrote(key, { go: false })
+      this.emit('chat', key)
+      return { ok: true }
+    }
+    // the agent's plain question on its needs-you card in a space's chat: no card of its own in the task's chat, so the
+    // decline goes in as the person's reply to it
+    const asked = this.chats.chat(key).messages.find((m) => m.id === qid && m.who === 'agent' && m.text && !m.question)
+    if (asked) {
+      await this.send(key, this.replying(key, dismissWords('questions'), qid), [], true)
+      if (space) {
+        this.chats.repliedFrom(key, qid, space)
+        this.answeredHere(space, key, asked.text ?? '', DISMISSED, true)
+      }
       this.emit('chat', key)
       return { ok: true }
     }

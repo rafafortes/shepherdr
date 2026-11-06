@@ -845,6 +845,15 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     if (!c || !q || q.sent !== undefined) return { ok: false }
     if (q.noteRequiredFor !== undefined && a.choice === q.noteRequiredFor && !a.note) return { ok: false, error: 'A note is needed to send it back.' }
     q.sent = a.choice
+    // its Dismiss: closed without an answer, and its agent hears the person declined it
+    if (a.dismiss) {
+      q.dismissed = true
+      if (q.asks) c.messages = c.messages.filter((m) => m !== msg)
+      this.push(a.chat, { who: 'you', answered: 'Dismissed', text: q.title }, { who: 'agent', text: 'Understood. I’ll use my own judgment and say what I assumed.' })
+      for (const [pl, qid] of Object.entries(this.asks)) if (qid === q.id) delete this.asks[pl]
+      this.emit('snapshot')
+      return { ok: true }
+    }
     const label = a.other || q.choices[a.choice]?.label || ''
     if (q.asks) {
       // a CLI's own question: the card goes once answered, and what waited goes in after the answer

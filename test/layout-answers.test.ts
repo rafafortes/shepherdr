@@ -281,4 +281,106 @@ describe.skipIf(!browser)('answer cards', () => {
       await page.close()
     }, 30_000)
 
+  // SHEP-71: a card closed without an answer. Every question, permission and plan card has Dismiss (Esc on a card you
+  // pressed), and what it sends is a dismissal, never a pick; the card says Dismissed afterwards.
+  for (const [name, viewport] of [
+    ['desktop', { width: 1440, height: 900 }],
+    ['phone', { width: 390, height: 844 }],
+  ] as const)
+    test(`a question, a permission and a plan card each have Dismiss, and Esc on a pressed card does the same (${name})`, async () => {
+      const chat = world.chats['p:vm-str:~']
+      const now = Date.now()
+      chat.messages.push(
+        { id: 'dis-ask', who: 'agent', at: now, question: { id: 'ask:dis', title: 'Which colour?', kind: 'Form', choices: [{ label: 'Blue' }, { label: 'Green' }], to: 'LV-3 agent' } },
+        { id: 'dis-plan', who: 'agent', at: now + 1, question: { id: 'plan:dis', title: 'Plan for LV-3', kind: 'Plan', steps: ['Build it'], choices: [{ label: 'Approve the plan' }, { label: 'Send it back with a note' }], noteRequiredFor: 1, to: 'LV-3 agent' } },
+        { id: 'dis-perm', who: 'agent', at: now + 2, question: { id: 'menu:dis-perm', title: 'Allow writing files?', kind: 'Form', terminal: true, noNote: true, choices: [{ label: 'Yes' }, { label: 'No' }], to: 'LV-3 agent', asks: 'Claude Code asks' } },
+        { id: 'dis-note', who: 'agent', at: now + 3, question: { id: 'ask:dis-note', title: 'Which branch?', kind: 'Question', choices: [{ label: 'main' }, { label: 'next' }], to: 'LV-3 agent' } },
+        { id: 'dis-start', who: 'agent', at: now + 4, question: { id: 'menu:dis-start', title: 'Choose a login method:', kind: 'Form', terminal: true, noNote: true, choices: [{ label: 'Log in' }, { label: 'Skip' }], to: 'LV-3 agent', asks: 'Its screen waits', noDismiss: true } },
+      )
+      const sent: Action[] = []
+      const act = world.act
+      world.act = async (a: Action) => (a.type === 'answer' ? (sent.push(a), { ok: true }) : act(a))
+      const page = await browser!.newPage({ viewport, hasTouch: name === 'phone' })
+      try {
+        await page.goto(url())
+        for (const id of ['dis-ask', 'dis-plan', 'dis-perm']) {
+          const card = page.locator(`[data-whole="${id}"] [data-card]`)
+          await card.waitFor()
+          const dismiss = card.getByRole('button', { name: 'Dismiss', exact: true })
+          expect(await dismiss.count()).toBe(1)
+          // a finger's reach on a phone
+          expect((await dismiss.boundingBox())!.height).toBeGreaterThanOrEqual(name === 'phone' ? 44 : 20)
+        }
+        // a start stopped on its own screen: Esc there would end the launch, so it has none
+        expect(await page.locator('[data-whole="dis-start"] [data-card]').getByRole('button', { name: 'Dismiss', exact: true }).count()).toBe(0)
+        // Dismiss: closed without a pick, and nothing else goes with it
+        const ask = page.locator('[data-whole="dis-ask"] [data-card]')
+        await ask.getByRole('button', { name: 'Dismiss', exact: true }).click()
+        await until(() => sent.length === 1)
+        expect(sent[0]).toMatchObject({ type: 'answer', chat: chat.key, question: 'ask:dis', choice: -1, dismiss: true })
+        expect((sent[0] as { choices?: unknown }).choices).toBeUndefined()
+        expect((sent[0] as { other?: unknown }).other).toBeUndefined()
+        // Esc on a card you pressed: the same, and the page stays where it was
+        const plan = page.locator('[data-whole="dis-plan"] [data-card]')
+        await plan.locator('[data-card-title]').click()
+        expect(await plan.evaluate((el) => el === document.activeElement)).toBe(true)
+        await page.keyboard.press('Escape')
+        await until(() => sent.length === 2)
+        expect(sent[1]).toMatchObject({ type: 'answer', chat: chat.key, question: 'plan:dis', choice: -1, dismiss: true })
+        expect(await page.locator('[data-whole="dis-ask"]').count()).toBe(1)
+        // Esc typed in the card's own box is the box's, not the card's
+        const noted = page.locator('[data-whole="dis-note"] [data-card]')
+        await noted.getByRole('textbox', { name: 'Note' }).click()
+        await noted.getByRole('textbox', { name: 'Note' }).fill('half a thought')
+        await page.keyboard.press('Escape')
+        await page.waitForTimeout(150)
+        expect(sent.length).toBe(2)
+        // dismissed: the card says so, and asks nothing more
+        for (const m of chat.messages)
+          if (m.question && ['ask:dis', 'plan:dis', 'menu:dis-perm'].includes(m.question.id)) m.question = { ...m.question, sent: -1, dismissed: true, said: 'The person dismissed this without answering.' }
+        await page.reload()
+        const done = page.locator('[data-whole="dis-ask"] [data-card]')
+        await done.waitFor()
+        expect(await done.textContent()).toContain('Dismissed')
+        // the words heard are the agent's, not a quote of an answer on the card
+        expect(await done.textContent()).not.toContain('without answering')
+        expect(await done.getByRole('button', { name: 'Dismiss', exact: true }).count()).toBe(0)
+        expect(await done.getByRole('button', { name: 'Send', exact: true }).count()).toBe(0)
+        const planDone = page.locator('[data-whole="dis-plan"] [data-card]')
+        expect(await planDone.textContent()).toContain('Dismissed')
+        expect(await planDone.getByRole('button', { name: 'Approve the plan', exact: true }).isDisabled()).toBe(true)
+      } finally {
+        world.act = act
+        chat.messages = chat.messages.filter((m) => !m.id.startsWith('dis-'))
+        await page.close()
+      }
+    }, 40_000)
+
+  // Esc belongs to the card the person pressed: the app's own Esc (back to the task list) must not run behind it.
+  test('Esc on a pressed card is the card’s, not the app’s own back', async () => {
+    const key = 'LV-3/Agent'
+    const chat = world.chats[key]
+    chat.messages.push({ id: 'dis-in-task', who: 'agent', at: Date.now(), question: { id: 'menu:dis-in-task', title: 'Allow writing the upload route?', kind: 'Form', terminal: true, noNote: true, choices: [{ label: 'Yes' }, { label: 'No' }], to: 'LV-3 agent', asks: 'Claude Code asks' } })
+    const sent: Action[] = []
+    const act = world.act
+    world.act = async (a: Action) => (a.type === 'answer' ? (sent.push(a), { ok: true }) : act(a))
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await page.goto(at('place=p:mac:lilla-varlden&task=LV-3'))
+      const card = page.locator('[data-whole="dis-in-task"] [data-card]')
+      await card.waitFor()
+      await card.locator('[data-card-title]').click()
+      await page.keyboard.press('Escape')
+      await until(() => sent.length === 1)
+      expect(sent[0]).toMatchObject({ type: 'answer', chat: key, question: 'menu:dis-in-task', choice: -1, dismiss: true })
+      // still in the task: Esc did not close it behind the card
+      await page.waitForTimeout(200)
+      expect(await page.locator('[data-whole="dis-in-task"]').count()).toBe(1)
+      expect(await page.evaluate(() => location.search)).toContain('task=LV-3')
+    } finally {
+      world.act = act
+      chat.messages = chat.messages.filter((m) => m.id !== 'dis-in-task')
+      await page.close()
+    }
+  }, 30_000)
 })
