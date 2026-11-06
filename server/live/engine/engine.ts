@@ -1724,8 +1724,9 @@ export class Engine extends Emitter<Events> {
       // merge leaves the branch's commits out), or the work got in by hand. Done at once, merged.
       const why = ahead > 0 ? await this.mergedAlready(t).catch(() => null) : null
       if (why) {
-        await this.mergedOnGitHub(t, this.proj(t), why)
-        return { state: 'merged', note: why }
+        // its words are the note the merge left, with main here being behind GitHub's said in it when it is
+        const r = await this.mergedOnGitHub(t, this.proj(t), why)
+        return { state: 'merged', note: r.note ?? why }
       }
     }
     this.save()
@@ -2333,9 +2334,13 @@ export class Engine extends Emitter<Events> {
     return this.mergedOnGitHub(t, p, `merged PR #${n} on GitHub${wait ? '' : ', not waiting for its checks'}`)
   }
 
-  /** main here comes up to GitHub's, so the merge is here too (and Shepherdr's own update sees it), then it is marked */
+  /**
+   * main here comes up to GitHub's, so the merge is here too (and Shepherdr's own update sees it), then it is marked.
+   * The catch-up's fetch is bounded: `ready` and the watch call this with no deadline of their own around it, and a
+   * remote that does not answer leaves main here as it is (said in the note) instead of holding them.
+   */
   private async mergedOnGitHub(t: TaskRec, p: Space, note: string) {
-    const up = await G.catchUp(p.path, t.base!, `then run git pull in ${t.base} here`)
+    const up = await G.catchUp(p.path, t.base!, `then run git pull in ${t.base} here`, 20_000)
     return this.markMerged(t, up.ok ? note : `${note}; ${t.base} here is not up to date: ${up.err}`)
   }
 

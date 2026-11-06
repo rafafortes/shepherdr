@@ -250,12 +250,16 @@ export async function aheadCount(wt: string, base: string) {
   return Number(r.out || 0)
 }
 
-/** bring the local base up to the remote's when there is one; refused when the two have split */
-export async function catchUp(repo: string, base: string, then = 'then merge again'): Promise<Run> {
+/**
+ * Bring the local base up to the remote's when there is one; refused when the two have split. `fetchMs` bounds the
+ * fetch, for a path with nothing racing a deadline: a remote that does not answer is then offline, as below.
+ */
+export async function catchUp(repo: string, base: string, then = 'then merge again', fetchMs?: number): Promise<Run> {
   const ok: Run = { ok: true, code: 0, out: '', err: '' }
   if (!(await git(repo, 'remote', 'get-url', 'origin')).ok) return ok
   // offline: go on with what is here
-  if (!(await git(repo, 'fetch', '--quiet', 'origin', base)).ok) return ok
+  const fetched = fetchMs ? await sh(['git', 'fetch', '--quiet', 'origin', base], repo, { timeoutMs: fetchMs }) : await git(repo, 'fetch', '--quiet', 'origin', base)
+  if (!fetched.ok) return ok
   const remote = `origin/${base}`
   if (!(await git(repo, 'rev-parse', '--verify', '--quiet', remote)).ok) return ok
   if (!(await branchExists(repo, base))) return git(repo, 'branch', '--', base, remote)
