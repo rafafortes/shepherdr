@@ -161,7 +161,7 @@ describe('chat lines', () => {
     // a shorter run, or one with words after its marks, closes nothing: what follows is still the sample
     expect(agentLines(`\`\`\`\`\n${react}\n\`\`\`\n${react}`).reactions).toEqual([])
     expect(agentLines(`\`\`\`\n${react}\n\`\`\`js\n${react}`).reactions).toEqual([])
-    // the other mark closes nothing either, and the closing line may be indented as the fence is
+    // the other mark closes nothing either, and the indent is ignored at both ends: a 2-space fence closes on 4
     expect(agentLines(`\`\`\`\n${react}\n~~~\n${react}`).reactions).toEqual([])
     expect(agentLines(`\`\`\`\n${react}\n\`\`\`\n${react}`).reactions).toEqual([{ emoji: '👀', to: 'Hi' }])
     expect(agentLines(`  \`\`\`\n  ${react}\n    \`\`\`\n${react}`).reactions).toEqual([{ emoji: '👀', to: 'Hi' }])
@@ -184,6 +184,8 @@ describe('chat lines', () => {
     // even one its tag opens on that same line (<reply to="Hi">```js)
     expect(agentLines(`<reply to="Hi">\`\`\`js\n${react}\n\`\`\`\n</reply>`)).toEqual({ text: `\`\`\`js\n${react}\n\`\`\``, reactions: [], reply: { to: 'Hi' } })
     expect(agentLines(`<reply to="Hi">~~~\n${react}\n~~~\n</reply>`).reactions).toEqual([])
+    // a react's own words open one too, as a reply's do
+    expect(agentLines(`<react emoji="👀" to="Hi"/>~~~\n${react}\n~~~`)).toEqual({ text: `~~~\n${react}\n~~~`, reactions: [{ emoji: '👀', to: 'Hi' }] })
   })
   test('a reply that is only <no-reply>why</no-reply> says nothing; anything more stays words', () => {
     expect(agentLines('<no-reply>SHE-72 merged, nothing to do</no-reply>').text).toBe('')

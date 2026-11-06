@@ -343,7 +343,7 @@ export const markerSoFar = (words: string) => {
 /** a code fence as an agent writes one: backticks or tildes, three or more, wherever it indents it (markdown's own is
  *  up to three spaces, a list item's deeper; a reply's indentation is not tracked here, and a deeper fence is still the
  *  sample an agent meant). A backtick line with another backtick after its marks is inline code, not a fence */
-const FENCE = /^(`{3,}|~{3,})(.*)$/u
+const FENCE = /^(`{3,}|~{3,})([\s\S]*)$/u
 
 /** the fence that line opens, or null (on a trimmed line) */
 function fenceOpen(l: string): { mark: string; len: number } | null {
@@ -384,6 +384,8 @@ export function agentLines(text: string): { text: string; reactions: (Quote & { 
         const words = m[4].replace(/<\/reply>$/, '').trim()
         if (m[1] === 'react' && t.a.emoji && (t.a.to ?? t.a.file) !== undefined) {
           reactions.push({ emoji: t.a.emoji, ...quoteOf(t.a) })
+          // the words it leaves may open a fence on that same line, as a reply's may
+          fence = fenceOpen(words)
           return words ? [words] : []
         }
         if (m[1] === 'reply' && (t.a.to ?? t.a.file) !== undefined && !reply) {
