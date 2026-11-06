@@ -102,6 +102,8 @@ describe.skipIf(!browser)('picking a model', () => {
       await page.keyboard.press('ArrowDown')
       expect(await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('Pin Ten')
       await page.keyboard.press('Enter')
+      // the pin is the server's to keep: the row says so once it has it (a keyboard's Enter is a round trip, not a click)
+      await menu.getByRole('menuitemcheckbox', { name: 'Unpin Ten' }).waitFor()
       expect(world.picks.pinned).toContain('pi:theta/ten')
       // and Enter in the box takes the first one left
       await menu.getByRole('searchbox').click()
