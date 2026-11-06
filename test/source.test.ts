@@ -713,6 +713,26 @@ describe('choice cards', () => {
     expect(await src.act({ type: 'answer', chat, question: qid, choice: -1, dismiss: true })).toMatchObject({ ok: false })
   })
 
+  test("its Dismiss closes that card alone: the chat's other cards still wait on you", async () => {
+    const chat = placeId.home()
+    await src.cli(['ask', 'First?', '--choice', 'A', '--choice', 'B'], { chat })
+    await src.cli(['ask', 'Second?', '--choice', 'C', '--choice', 'D'], { chat })
+    const open = src.chats.log(chat).posted.filter((p) => p.question?.id.startsWith('ask:') && p.question.sent === undefined).slice(-2)
+    const [first, second] = open.map((p) => p.question!.id)
+    const send = src.agents.send
+    src.agents.send = (async () => ({ waiting: false })) as never
+    try {
+      expect(await src.act({ type: 'answer', chat, question: first, choice: -1, dismiss: true })).toMatchObject({ ok: true })
+    } finally {
+      src.agents.send = send
+    }
+    expect(src.chats.log(chat).answers[first]).toBe(-1)
+    // the other card was not answered by the dismissal, and still waits
+    expect(src.chats.log(chat).answers[second]).toBeUndefined()
+    expect(src.asks()[chat]).toBe(second)
+    src.chats.answer(chat, second, 0)
+  })
+
   test("a plan's Dismiss is no approval, and the agent hears the plan isn't approved", async () => {
     const { t } = await workedTask('plandismiss')
     const key = `${t.id}/Agent`
@@ -2582,7 +2602,9 @@ describe("a card dismissed on the CLI's own screen", () => {
       expect(await src.act({ type: 'answer', chat: key, question: q!.id, choice: -1, dismiss: true })).toMatchObject({ ok: true })
       expect(keysSent).toEqual([['escape']])
       expect(src.chats.menu(key)).toBeUndefined()
-      expect(src.chats.chat(key).messages.some((m) => m.answered === 'Dismissed')).toBe(true)
+      expect(src.chats.chat(key).messages.some((m) => m.answered === 'Dismissed “Do you want to proceed?”')).toBe(true)
+      // no bubble of your words behind it: the menu's title is in the line, not posted as something you said
+      expect(src.chats.chat(key).messages.find((m) => m.answered?.startsWith('Dismissed'))?.text).toBeUndefined()
       // a start stopped on its own screen: Esc there would end the launch, so it has no Dismiss
       screen = 'Choose a login method:\n❯ 1. Log in\n  2. Skip'
       await src.chats.readMenu(key, true)

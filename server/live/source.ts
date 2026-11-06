@@ -636,11 +636,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const settled = qs.every((q) => q.sent !== undefined)
     const dismissed = !!ask.answered?.dismissed || qs.some((q) => q.dismissed)
     const where = ask.answered?.where ?? (qs.some((q) => q.via === 'terminal') ? 'terminal' : 'task')
-    const label = dismissed ? 'Dismissed ·' : where === 'space' ? 'Answered here ·' : where === 'terminal' ? 'Answered in the terminal ·' : 'Answered in'
+    const answeredLabel = where === 'space' ? 'Answered here ·' : where === 'terminal' ? 'Answered in the terminal ·' : 'Answered in'
     const questions = qs.map((q): Question => {
       if (q.sent === undefined && !open.has(q.id)) return { ...q, sent: -1, elsewhere: link('No longer waits ·') }
       // the words it was answered with show on the card; the message that said them is in the task's chat
-      return q.sent === undefined ? q : { ...q, via: undefined, elsewhere: link(label) }
+      // each question says how it was settled: a dismissed one among answered ones says so for itself
+      return q.sent === undefined ? q : { ...q, via: undefined, elsewhere: link(q.dismissed ? 'Dismissed ·' : answeredLabel) }
     })
     return { ...ask, questions, answered: settled ? { where, text: ask.answered?.text, dismissed: dismissed || undefined } : undefined, open: !settled && questions.some((q) => q.sent === undefined) }
   }
@@ -1947,14 +1948,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
   }
 
-  /** what you write: a coordinator wakes for it (resumed with its memory); a task agent is resumed if it finished */
-  private async send(key: string, text: string, files: string[], fromScreen = false, cid?: string) {
+  /** what you write: a coordinator wakes for it (resumed with its memory); a task agent is resumed if it finished.
+   *  keepAsks: a close without an answer, which leaves the chat's other cards as they were (a message answers them all) */
+  private async send(key: string, text: string, files: string[], fromScreen = false, cid?: string, opts: { keepAsks?: boolean } = {}) {
     const at = Date.now()
     const lines = files.map((p) => line.attach(this.user, p.split('/').pop()!.replace(/^[a-z0-9]+-/, ''), p))
     const full = [text, ...lines].filter(Boolean).join('\n')
     if (!full) return {}
     // whatever you send answers the choice cards still open there: the place's dot no longer waits on them
-    if (this.chats.closeAsks(key)) this.emit('snapshot')
+    if (!opts.keepAsks && this.chats.closeAsks(key)) this.emit('snapshot')
     // a task held before it ever started has no agent: what you write starts it now, on its brief and your words
     if (key.includes('/') && this.engine.unstarted(key.split('/')[0])) {
       await this.engine.tell(key.split('/')[0], full)
@@ -2161,7 +2163,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       try {
         const failed = await this.pressMenu(key, ['escape'], qid)
         if (failed) return { ok: false, error: failed }
-        this.chats.post(key, { id: `menu-dismiss:${Date.now()}`, who: 'you', answered: 'Dismissed', elsewhere: space ? this.chats.answeredIn(space) : undefined, text: menu.title })
+        this.chats.post(key, { id: `menu-dismiss:${Date.now()}`, who: 'you', answered: `Dismissed “${menu.title}”`, elsewhere: space ? this.chats.answeredIn(space) : undefined })
         if (space) this.answeredHere(space, key, menu.title, DISMISSED, true)
       } finally {
         this.menuAnswers.delete(key)
@@ -2181,7 +2183,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       q.sent = -1
       this.chats.answer(key, qid, -1, words, space, true)
       if (space) this.answeredHere(space, key, q.title, words, true)
-      await this.send(key, line.dismiss(this.user, q.title, words), [], true)
+      await this.send(key, line.dismiss(this.user, q.title, words), [], true, undefined, { keepAsks: true })
       this.emit('snapshot')
       return { ok: true }
     }
@@ -2192,7 +2194,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const item = open.items[Number(qid === open.id ? 0 : qid.slice(open.id.length + 1)) ?? 0]
       // Esc declines the CLI's whole form, so every question of it is closed, not only the one on the card
       for (let i = 0; i < open.items.length; i++) this.chats.answer(key, open.items.length > 1 ? `${open.id}:${i}` : open.id, -1, undefined, space, true)
-      await this.agents.keys(key, ['escape'])
+      // only while the CLI waits on it: a prompt already answered in the terminal (its log lagging) must not take Esc
+      if (this.agents.status(key) === 'blocked') await this.agents.keys(key, ['escape'])
       this.chats.post(key, { id: `cli-dismiss:${qid}`, who: 'you', answered: `Dismissed “${item?.question ?? ''}”`, elsewhere: space ? this.chats.answeredIn(space) : undefined })
       if (space) this.answeredHere(space, key, item?.question ?? '', DISMISSED, true)
       this.engine.youWrote(key, { go: false })

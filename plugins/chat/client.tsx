@@ -1585,8 +1585,6 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
       ) : null}
       {/* the message that answered it, as a reply's quote: a tap jumps to it */}
       {by ? <Quote q={by} chat={chat.key} from={from} you={false} loose label="Answered by" /> : null}
-      {/* a card with no box of its own (a terminal prompt it can only answer in place): its Dismiss's error says why */}
-      {err && (q.terminal && !q.choices.length) ? <span role="alert" className="text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
       {sent || (q.terminal && !q.choices.length) ? null : (
         <>
           {immediate ? (
