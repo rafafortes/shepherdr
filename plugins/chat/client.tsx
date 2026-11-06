@@ -1236,16 +1236,30 @@ function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply:
       setBusy(false)
     }
   }
+  // Dismiss: no reply, and the agent hears the person declined to answer it
+  const dismiss = async () => {
+    if (busy) return
+    setBusy(true)
+    setErr('')
+    try {
+      const r = await act({ type: 'answer', chat: ask.chat, question: reply.id, choice: -1, dismiss: true, space })
+      if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
+    } catch {
+      setErr("That didn't go through.")
+    } finally {
+      setBusy(false)
+    }
+  }
   const a = ask.answered
   return (
-    <CardShell title={`${task} asks`} source={source}>
+    <CardShell title={`${task} asks`} source={source} dismiss={a ? undefined : () => void dismiss()}>
       <div data-ask-text className="line-clamp-6 break-words whitespace-pre-wrap">{reply.text}</div>
       {a ? (
         <Sent>
           <CheckIcon className={ic} />
-          <span className="shrink-0">{a.where === 'space' ? 'Answered here ·' : 'Answered in'}</span>
-          <LinkButton onClick={() => goChat(ask.chat)}>{`${task} chat`}</LinkButton>
-          {a.text ? <span className="min-w-0 truncate text-fg2">“{a.text.replace(/\s+/g, ' ')}”</span> : null}
+          <span className="shrink-0">{a.dismissed ? 'Dismissed' : a.where === 'space' ? 'Answered here ·' : 'Answered in'}</span>
+          {a.dismissed ? null : <LinkButton onClick={() => goChat(ask.chat)}>{`${task} chat`}</LinkButton>}
+          {a.text && !a.dismissed ? <span className="min-w-0 truncate text-fg2">“{a.text.replace(/\s+/g, ' ')}”</span> : null}
         </Sent>
       ) : ask.open ? (
         <>
@@ -1375,10 +1389,27 @@ function Typing({ chat, from }: { chat: Chat; from: string }) {
  *  question mark, or a list for a plan. The title wraps onto as many lines as it needs, the mark on its first line */
 type CardSource = { id: string; title?: string }
 
-export function CardShell({ title, plan, icon, action, source, children }: { title: string; plan?: boolean; icon?: ComponentType<{ className?: string }>; action?: ReactNode; source?: CardSource; children: ReactNode }) {
+export function CardShell({ title, plan, icon, action, source, dismiss, children }: { title: string; plan?: boolean; icon?: ComponentType<{ className?: string }>; action?: ReactNode; source?: CardSource; dismiss?: () => void; children: ReactNode }) {
   const Icon = icon ?? (plan ? PlanIcon : QuestionIcon)
+  const box = useRef<HTMLDivElement>(null)
+  // Esc closes the card without an answer, as Esc on the CLI's own prompt does: only while the card itself holds the
+  // focus (a press on it that landed on no button or box of its own), so the app's own Esc (back, a menu) keeps working
+  // from a choice, a box or anywhere else
+  const key = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!dismiss || e.key !== 'Escape' || e.target !== box.current) return
+    e.preventDefault()
+    e.stopPropagation()
+    dismiss()
+  }
   return (
-    <div data-card className="mt-2 w-[440px] max-w-full cursor-default overflow-hidden rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line2)]">
+    <div
+      ref={box}
+      data-card
+      tabIndex={dismiss ? -1 : undefined}
+      onPointerDown={dismiss ? (e) => { if (!(e.target as HTMLElement).closest('button, a, input, textarea, select, [role=button]')) box.current?.focus({ preventScroll: true }) } : undefined}
+      onKeyDown={key}
+      className="mt-2 w-[440px] max-w-full cursor-default overflow-hidden rounded-box bg-bg outline-none shadow-[inset_0_0_0_1px_var(--line2)] focus:shadow-[inset_0_0_0_1.5px_var(--color-focus)]"
+    >
       {source ? (
         <div data-card-source className="px-3 pt-2 text-[0.8125rem] break-words text-fg2">
           <span className="font-semibold">{source.id}</span>{source.title ? ` · ${source.title}` : ''}
@@ -1388,6 +1419,8 @@ export function CardShell({ title, plan, icon, action, source, children }: { tit
         <Icon className={clsx(ic, 'mt-[3px] text-fg2')} />
         <b data-card-title className="min-w-0 flex-1 font-semibold text-pretty break-words">{title}</b>
         {action}
+        {/* a finger's reach on a phone: the quiet link keeps the height of a tap */}
+        {dismiss ? <button type="button" className="relative shrink-0 self-start text-[0.8125rem] text-fg3 hover:text-fg hover:underline phone:min-h-11 phone:text-[0.9375rem]" onClick={dismiss}>Dismiss</button> : null}
       </div>
       <div className="flex flex-col gap-2 p-3">{children}</div>
     </div>
@@ -1396,6 +1429,7 @@ export function CardShell({ title, plan, icon, action, source, children }: { tit
 
 /** how a card was answered: a pick (or an Other answer) on it, a message in the chat, or the CLI's own terminal */
 function answeredHow(q: Question) {
+  if (q.dismissed) return 'Dismissed'
   if (q.via === 'chat') return 'Answered in chat'
   if (q.via === 'terminal') return 'Answered in the terminal'
   return q.sent === -1 && !q.said ? 'Answered' : `Sent to ${q.to}`
@@ -1450,11 +1484,35 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
       }
     }
   }
+  // Dismiss: closed without an answer, and the agent hears the person declined it (never a yes)
+  const dismiss = async () => {
+    if (sent || sending.current) return
+    sending.current = true
+    setBusy(true)
+    setErr('')
+    let accepted = false
+    try {
+      const r = await act({ type: 'answer', chat: chat.key, question: q.id, choice: -1, dismiss: true, space })
+      if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
+      else {
+        accepted = true
+        setNote('')
+        setOther('')
+      }
+    } catch (e) {
+      setErr(reasonOf(e))
+    } finally {
+      if (!accepted) {
+        sending.current = false
+        setBusy(false)
+      }
+    }
+  }
   useEffect(() => {
     if (composing) noteRef.current?.focus()
   }, [composing])
   return (
-    <CardShell title={q.title} plan={q.kind === 'Plan'} source={source}>
+    <CardShell title={q.title} plan={q.kind === 'Plan'} source={source} dismiss={sent || q.noDismiss ? undefined : () => void dismiss()}>
       {q.screen ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-fg2">{q.screen}</pre> : null}
       {q.terminal && has('terminal') ? <button type="button" className="text-left text-accent" onClick={() => setUI({ term: chat.key, arts: null, kb: true })}>Open terminal</button> : null}
       {q.steps ? (
@@ -1522,7 +1580,7 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
           {/* answered on its other copy: a link to that chat */}
           {q.elsewhere ? <LinkButton onClick={() => goChat(q.elsewhere!.chat)}>{q.elsewhere.name}</LinkButton> : null}
           {/* the words it was answered with, on one line (a message in the chat shows as its quote, below) */}
-          {q.said && q.via !== 'chat' ? <span className="min-w-0 truncate text-fg2">“{q.said.replace(/\s+/g, ' ')}”</span> : null}
+          {q.said && !q.dismissed && q.via !== 'chat' ? <span className="min-w-0 truncate text-fg2">“{q.said.replace(/\s+/g, ' ')}”</span> : null}
         </Sent>
       ) : null}
       {/* the message that answered it, as a reply's quote: a tap jumps to it */}

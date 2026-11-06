@@ -292,6 +292,10 @@ export interface Question {
   said?: string
   /** answered without a pick, and not on the card: by a message in the chat, or in the CLI's own terminal */
   via?: 'chat' | 'terminal'
+  /** closed without an answer, by its Dismiss (or Esc on it): the agent heard the person declined, never an answer */
+  dismissed?: true
+  /** no Dismiss on this card: a start's own screen, whose Esc would end the launch */
+  noDismiss?: true
   /** who asks, when it is not the agent's own message ("Claude Code asks") */
   asks?: string
   /** answered on its other copy (a task's question and its copy in its space's chat): where, and a link to that chat */
@@ -567,7 +571,7 @@ export interface CardAsk {
   /** a plain question with no choices: the agent's words, answered with a reply */
   reply?: { id: string; text: string }
   /** once answered: where (in this card, in the task's chat or its terminal) and the words, if known */
-  answered?: { where: 'space' | 'task' | 'terminal'; text?: string }
+  answered?: { where: 'space' | 'task' | 'terminal'; text?: string; dismissed?: true }
   /** on screen: it still waits, so it takes an answer here */
   open?: boolean
 }
@@ -922,7 +926,8 @@ export type Action =
   | { type: 'secret-saved'; chat: string; card: string; name: string; level: string }
   /** fromAlert: a notification's button, which answers only the card the chat still waits on (an old alert's can't
       answer what came after, or a card already settled in words) */
-  | { type: 'answer'; chat: string; question: string; choice: number; choices?: number[]; note?: string; other?: string; fromAlert?: boolean; space?: string }
+  /** dismiss: the card closed without an answer (its Dismiss, or Esc on it) instead of a pick */
+  | { type: 'answer'; chat: string; question: string; choice: number; choices?: number[]; note?: string; other?: string; fromAlert?: boolean; space?: string; dismiss?: boolean }
   | { type: 'page-send'; chat: string; page: string; text: string }
   | { type: 'page-note'; chat: string; page: string; note: string; target?: string }
   /** an artifact's page sent something, you noted on it, or wrote about it in its viewer: to its keeper. By its place,

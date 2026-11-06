@@ -8,6 +8,7 @@
 //   <reaction from="Elias" emoji="👍" title="Weekly board" artifact="wk3n" version="2"/>   (an artifact card)
 //   <attachment from="Elias" name="screenshot.png" path="~/inbox/screenshot.png"/>
 //   <answer from="Elias" question="Rerun CI on main?">Rerun it</answer>
+//   <dismissed from="Elias" question="Rerun CI on main?">The person dismissed this without answering…</dismissed>
 //   <artifact-sent from="Elias" title="Weekly board" artifact="wk3n" version="2">Pinned colour: Accent</artifact-sent>
 //   <artifact-comment from="Elias" title="Weekly board" artifact="wk3n" version="2">Make the bars blue</artifact-comment>
 //   <artifact-note from="Elias" title="Weekly board" artifact="wk3n" version="2" on="“Send” (button.primary in Board)">Make it say “Send event”.</artifact-note>
@@ -74,6 +75,8 @@ export const line = {
   unreactArtifact: (user: string, emoji: string, art: Art) => tag('reaction-removed', { from: user, emoji, ...art }),
   attach: (user: string, name: string, path: string) => tag('attachment', { from: user, name, path }),
   answer: (user: string, title: string, answer: string) => tag('answer', { from: user, question: title }, answer),
+  /** a card closed without an answer (its Dismiss, or Esc on it): the agent hears the decline in the words */
+  dismiss: (user: string, quote: string, words: string) => tag('dismissed', { from: user, question: quote }, words),
   /** a secret you gave, by its name and where it is kept: never its value */
   secret: (user: string, name: string, where: string) => tag('secret', { from: user, name, for: where }),
   artifact: (title: string, id: string, v: number): Art => ({ title, artifact: id, version: v }),
@@ -117,6 +120,7 @@ export type Parsed =
   | { kind: 'unreact'; emoji: string; to: string; path?: string; artifact?: ArtifactPost }
   | { kind: 'attach'; name: string; path: string }
   | { kind: 'answer'; title: string; answer: string }
+  | { kind: 'dismiss'; title: string; words: string }
   | { kind: 'secret'; name: string; where: string }
   | { kind: 'artifact-send'; title: string; text: string }
   | { kind: 'artifact-say'; title: string; text: string }
@@ -164,6 +168,7 @@ export function parseUserLine(l: string): Parsed | null {
     if ((t.name === 'reaction' || t.name === 'reaction-removed') && a.emoji) return { kind: t.name === 'reaction' ? 'react' : 'unreact', emoji: a.emoji, ...quoteOf(a) }
     if (t.name === 'attachment' && a.path) return { kind: 'attach', name: a.name ?? a.path.split('/').pop()!, path: a.path }
     if (t.name === 'answer') return { kind: 'answer', title: a.question ?? '', answer: body }
+    if (t.name === 'dismissed') return { kind: 'dismiss', title: a.question ?? '', words: body }
     if (t.name === 'secret' && a.name) return { kind: 'secret', name: a.name, where: a.for ?? '' }
     if (t.name === 'artifact-sent') return { kind: 'artifact-send', title: a.title ?? '', text: body }
     if (t.name === 'artifact-comment') return { kind: 'artifact-say', title: a.title ?? '', text: body }
@@ -184,7 +189,7 @@ export function parseUserLine(l: string): Parsed | null {
 }
 
 /** the tags whose words may run over several lines */
-const LONG = /^<(answer|artifact-sent|artifact-comment|artifact-note|reply|browser-notes)[\s>]/
+const LONG = /^<(answer|dismissed|artifact-sent|artifact-comment|artifact-note|reply|browser-notes)[\s>]/
 
 /** what you sent, line by line, a tag whose words run over several lines kept whole */
 export function userLines(text: string): string[] {

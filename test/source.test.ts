@@ -15,6 +15,7 @@ const { hidden } = await import('../server/live/agents.ts')
 const { isAgentProcess } = await import('../server/live/agent-process.ts')
 const { heartbeatFile } = await import('../server/live/heartbeat.ts')
 const { carryOn } = await import('../server/live/retry.ts')
+const { parseUserLine } = await import('../server/live/chatlines.ts')
 const { WorkerHealth } = await import('../server/live/recovery.ts')
 const { Worktrees } = await import('../server/live/engine/worktrees.ts')
 const { fakeHerdr } = await import('./fake-herdr.ts')
@@ -680,6 +681,79 @@ describe('choice cards', () => {
     expect(card?.question).toMatchObject({ sent: -1, said: 'release-2' })
     expect(card?.question?.via).toBeUndefined()
   })
+
+  test('its Dismiss closes the card without an answer: the agent hears the person declined it, and it decides', async () => {
+    const chat = placeId.home()
+    await src.cli(['ask', 'Rerun CI on main?', '--choice', 'Rerun it', '--choice', 'Leave it'], { chat })
+    const qid = src.asks()[chat]
+    const told: string[] = []
+    const send = src.agents.send
+    src.agents.send = (async (k: string, text: string) => (k === chat && told.push(text), { waiting: false })) as never
+    try {
+      expect(await src.act({ type: 'answer', chat, question: qid, choice: -1, dismiss: true })).toMatchObject({ ok: true })
+    } finally {
+      src.agents.send = send
+    }
+    // no pick, and the card says dismissed rather than answered
+    expect(src.chats.log(chat).answers[qid]).toBe(-1)
+    const card = src.chats.chat(chat).messages.find((m) => m.question?.id === qid)?.question
+    expect(card).toMatchObject({ sent: -1, dismissed: true })
+    expect(card?.via).toBeUndefined()
+    // it waits on you no longer, and the agent hears a decline it may decide past
+    expect(src.asks()[chat]).toBeUndefined()
+    const heard = told.join('\n')
+    expect(heard).toContain('<dismissed')
+    expect(heard).toContain('Rerun CI on main?')
+    expect(heard).toContain('dismissed this without answering')
+    expect(heard).toContain('carry on with your best judgment')
+    // it is a dismissal of its own, never an answer carrying the agent's instructions as the person's words
+    const line = told.find((t) => t.includes('<dismissed'))!
+    expect(parseUserLine(line)).toMatchObject({ kind: 'dismiss', title: 'Rerun CI on main?' })
+    // closed once: a second dismissal is refused
+    expect(await src.act({ type: 'answer', chat, question: qid, choice: -1, dismiss: true })).toMatchObject({ ok: false })
+  })
+
+  test("its Dismiss closes that card alone: the chat's other cards still wait on you", async () => {
+    const chat = placeId.home()
+    await src.cli(['ask', 'First?', '--choice', 'A', '--choice', 'B'], { chat })
+    await src.cli(['ask', 'Second?', '--choice', 'C', '--choice', 'D'], { chat })
+    const open = src.chats.log(chat).posted.filter((p) => p.question?.id.startsWith('ask:') && p.question.sent === undefined).slice(-2)
+    const [first, second] = open.map((p) => p.question!.id)
+    const send = src.agents.send
+    src.agents.send = (async () => ({ waiting: false })) as never
+    try {
+      expect(await src.act({ type: 'answer', chat, question: first, choice: -1, dismiss: true })).toMatchObject({ ok: true })
+    } finally {
+      src.agents.send = send
+    }
+    expect(src.chats.log(chat).answers[first]).toBe(-1)
+    // the other card was not answered by the dismissal, and still waits
+    expect(src.chats.log(chat).answers[second]).toBeUndefined()
+    expect(src.asks()[chat]).toBe(second)
+    src.chats.answer(chat, second, 0)
+  })
+
+  test("a plan's Dismiss is no approval, and the agent hears the plan isn't approved", async () => {
+    const { t } = await workedTask('plandismiss')
+    const key = `${t.id}/Agent`
+    await src.engine.plan(t.id, ['Build it'])
+    const qid = src.chats.log(key).posted.findLast((p) => p.question)!.question!.id
+    expect(qid).toStartWith('plan:')
+    const told: string[] = []
+    const send = src.agents.send
+    src.agents.send = (async (k: string, text: string) => (k === key && told.push(text), { waiting: false })) as never
+    try {
+      expect(await src.act({ type: 'answer', chat: key, question: qid, choice: -1, dismiss: true })).toMatchObject({ ok: true })
+    } finally {
+      src.agents.send = send
+    }
+    expect(src.chats.log(key).answers[qid]).toBe(-1)
+    const card = src.chats.chat(key).messages.find((m) => m.question?.id === qid)?.question
+    expect(card).toMatchObject({ sent: -1, dismissed: true })
+    // never an approved plan: the card's own first choice is not what went in
+    expect(card?.sent).not.toBe(0)
+    expect(told.join('\n')).toContain("the plan isn't approved")
+  })
 })
 
 describe("a coordinator's question", () => {
@@ -769,6 +843,28 @@ describe("a task's question on its needs-you card in its space's chat", () => {
     expect(await src.act({ type: 'answer', chat: key, question: qid, choice: 0 })).toMatchObject({ ok: false })
   })
 
+  test('dismissed on the card: both copies say Dismissed, and the coordinator hears a decline, not an answer', async () => {
+    const { t, place } = await workedTask('askdismiss')
+    await until(() => src.engine.statusOf(t) === 'need')
+    const key = `${t.id}/Agent`
+    await src.cli(['ask', 'Which colour?', '--choice', 'Blue', '--choice', 'Green'], { chat: key })
+    const qid = src.chats.log(key).posted.findLast((p) => p.question)!.question!.id
+    engine().emit('card', t, 'need', 'Question for you')
+    const card = () => src.chat(place)!.messages.findLast((m) => m.card?.task === t.id)!.card!
+    expect(card().ask).toMatchObject({ chat: key, open: true })
+    const { said, off } = told(place)
+    try {
+      await src.act({ type: 'answer', chat: key, question: qid, choice: -1, dismiss: true, space: place }).catch(() => undefined)
+    } finally {
+      off()
+    }
+    expect(card().ask).toMatchObject({ open: false, answered: { where: 'space', dismissed: true }, questions: [{ sent: -1, dismissed: true, elsewhere: { label: 'Dismissed ·', chat: key, name: `${t.id} chat` } }] })
+    expect(src.chats.chat(key).messages.find((m) => m.question?.id === qid)?.question).toMatchObject({ sent: -1, dismissed: true, elsewhere: { label: 'Dismissed in' } })
+    // the space's coordinator hears the person declined it, never that they answered
+    expect(said.join('\n')).toContain('dismissed')
+    expect(said.join('\n')).not.toContain("don't answer it too")
+  })
+
   test('answered in the task chat instead: the card follows, and says where', async () => {
     const { t, place } = await workedTask('askthere')
     await until(() => src.engine.statusOf(t) === 'need')
@@ -803,6 +899,30 @@ describe("a task's question on its needs-you card in its space's chat", () => {
     expect(said.join('\n')).toContain("don't answer it too")
     // another screen still showing the card can't send it twice
     expect(await src.act({ type: 'send', chat: key, text: 'Yes', reply: 'plain-q', space: place })).toMatchObject({ ok: false })
+  })
+
+  test('a plain question dismissed: the agent hears the decline, and its card says so', async () => {
+    const { t, place } = await workedTask('askplainno')
+    await until(() => src.engine.statusOf(t) === 'need')
+    const key = `${t.id}/Agent`
+    src.chats.post(key, { id: 'plain-dismiss', text: 'Keep the old API around?' })
+    engine().emit('card', t, 'need', 'Keep the old API around?')
+    const card = () => src.chat(place)!.messages.findLast((m) => m.card?.task === t.id)!.card!
+    expect(card().ask).toMatchObject({ chat: key, open: true, reply: { id: 'plain-dismiss' } })
+    const heard: string[] = []
+    const send = src.agents.send
+    src.agents.send = (async (k: string, text: string) => (k === key && heard.push(text), { waiting: false })) as never
+    try {
+      expect(await src.act({ type: 'answer', chat: key, question: 'plain-dismiss', choice: -1, dismiss: true, space: place })).toMatchObject({ ok: true })
+    } finally {
+      src.agents.send = send
+    }
+    expect(heard.join('\n')).toContain('<dismissed')
+    expect(heard.join('\n')).toContain('Keep the old API around?')
+    expect(card().ask).toMatchObject({ open: false, answered: { where: 'space', dismissed: true } })
+    // its own dismissal line is there now (as the agent's log would show it): a second one goes nowhere
+    src.chats.post(key, { id: 'a-dismissal', who: 'you', answered: 'Dismissed “Keep the old API around?”' })
+    expect(await src.act({ type: 'answer', chat: key, question: 'plain-dismiss', choice: -1, dismiss: true, space: place })).toMatchObject({ ok: false })
   })
 })
 
@@ -2450,6 +2570,79 @@ describe('startup menus before the first message', () => {
       expect(await src.act({ type: 'answer', chat: key, question: checkboxes!.id, choice: 1, choices: [1] })).toMatchObject({ ok: false, error: expect.stringContaining('still shows this prompt') })
       expect(src.chats.log(key).posted.some((m) => m.answered)).toBe(false)
     } finally {
+      Object.assign(src.agents, { info: originals.info, status: originals.status, refresh: originals.refresh, keys: originals.keys })
+      herdr.visible = originals.visible
+      src.agents.outbox = src.agents.outbox.filter((o) => o.key !== key)
+      src.chats.forget(key)
+    }
+  })
+})
+
+describe("a card dismissed on the CLI's own screen", () => {
+  test('takes Esc, as the person’s own Esc would; a start’s screen has none', async () => {
+    const key = 'dismiss-menu'
+    const originals = { info: src.agents.info, status: src.agents.status, visible: herdr.visible, refresh: src.agents.refresh, keys: src.agents.keys }
+    let screen = 'Do you want to proceed?\n❯ 1. Yes\n  2. Yes, and don’t ask again\n  3. No\nEsc to cancel'
+    const keysSent: string[][] = []
+    src.agents.info = (() => ({ pane_id: 'dismiss-pane', agent: 'claude', agent_status: 'blocked', cwd: '/tmp', tab_id: 'dismiss-tab', workspace_id: 'dismiss-space' })) as typeof src.agents.info
+    src.agents.status = (() => 'blocked') as typeof src.agents.status
+    herdr.visible = async () => screen
+    src.agents.refresh = async () => {}
+    src.agents.keys = async (_k: string, keys: string[]) => {
+      keysSent.push(keys)
+      screen = ''
+    }
+    const told: string[] = []
+    const send = src.agents.send
+    src.agents.send = (async (k: string, text: string) => (k === key && told.push(text), { waiting: false })) as never
+    try {
+      await src.chats.readMenu(key, true)
+      const q = src.chats.chat(key).messages.find((m) => m.question)?.question
+      expect(q?.terminal).toBe(true)
+      expect(q?.choices).toHaveLength(3)
+      expect(q?.noDismiss).toBeUndefined()
+      // a permission card: Esc, never the card's first choice (a yes)
+      expect(await src.act({ type: 'answer', chat: key, question: q!.id, choice: -1, dismiss: true })).toMatchObject({ ok: true })
+      expect(keysSent).toEqual([['escape']])
+      expect(src.chats.menu(key)).toBeUndefined()
+      // its own Esc declines it, and the person's words reach the agent too: it carries on rather than stops
+      expect(told.join('\n')).toContain('<dismissed')
+      expect(told.join('\n')).toContain('Do you want to proceed?')
+      expect(told.join('\n')).toContain('carry on with your best judgment')
+      // one line, not two: the line it hears is the one the chat shows, so none is posted beside it
+      expect(src.chats.chat(key).messages.some((m) => m.answered?.startsWith('Dismissed'))).toBe(false)
+      // a start stopped on its own screen: Esc there would end the launch, so it has no Dismiss
+      screen = 'Choose a login method:\n❯ 1. Log in\n  2. Skip'
+      await src.chats.readMenu(key, true)
+      src.chats.showStartMenu(key, src.chats.menu(key)!)
+      const start = src.chats.chat(key).messages.find((m) => m.question)?.question
+      expect(start?.noDismiss).toBe(true)
+      expect(await src.act({ type: 'answer', chat: key, question: start!.id, choice: -1, dismiss: true })).toMatchObject({ ok: false, error: expect.stringContaining('start waits on its own screen') })
+      expect(keysSent).toHaveLength(1)
+      // a prompt whose choices could not be read: its keys are a guess, so it has no Dismiss and refuses one
+      src.chats.clearStartMenu(key)
+      screen = 'A new CLI asks for a secret\nType your answer to continue'
+      await src.chats.readMenu(key, true)
+      screen = 'A new CLI asks for a secret\nType your answer to continue'
+      await src.chats.readMenu(key, true)
+      const blind = src.chats.chat(key).messages.find((m) => m.question)?.question
+      expect(blind?.choices).toEqual([])
+      expect(blind?.noDismiss).toBe(true)
+      expect(await src.act({ type: 'answer', chat: key, question: blind!.id, choice: -1, dismiss: true })).toMatchObject({ ok: false, error: expect.stringContaining('no choices to decline') })
+      expect(keysSent).toHaveLength(1)
+      // a menu a slash command opened asks the agent nothing: Esc closes it, and nothing is sent to the agent
+      screen = 'Choose a model:\n❯ 1. Sonnet\n  2. Opus\nEnter to select · Esc to cancel'
+      await src.chats.readMenu(key, true)
+      expect(await src.chats.commandMenu(key)).toBe(true)
+      const picker = src.chats.chat(key).messages.findLast((m) => m.question)?.question
+      const before = told.length
+      expect(await src.act({ type: 'answer', chat: key, question: picker!.id, choice: -1, dismiss: true })).toMatchObject({ ok: true })
+      expect(keysSent.at(-1)).toEqual(['escape'])
+      expect(told).toHaveLength(before)
+      // and the chat keeps the dismissal itself: a key press is not in the CLI's log
+      expect(src.chats.chat(key).messages.some((m) => m.answered === 'Dismissed “Choose a model:”')).toBe(true)
+    } finally {
+      src.agents.send = send
       Object.assign(src.agents, { info: originals.info, status: originals.status, refresh: originals.refresh, keys: originals.keys })
       herdr.visible = originals.visible
       src.agents.outbox = src.agents.outbox.filter((o) => o.key !== key)
