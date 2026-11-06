@@ -132,6 +132,61 @@ describe('chat lines', () => {
     expect(agentLines('[reply to shot.png: /inbox/b-shot.png]\nSeen it.').reply).toEqual({ to: 'shot.png', path: '/inbox/b-shot.png' })
     expect(agentLines('Write [reply to "x"] on a line of its own.').text).toBe('Write [reply to "x"] on a line of its own.')
   })
+  // SHE-30: an agent quoting the skill's example in a code fence posts nothing: the words stay, and markdown draws them
+  // as code. A real line after the fence is still a real one.
+  test('a tag line inside a code fence stays words, and a real one after it still counts', () => {
+    const react = '<react emoji="👀" to="What needs me today?"/>'
+    const reply = '<reply to="What needs me today?"/>'
+    const fenced = `Write it like this:\n\`\`\`\n${reply}\n${react}\n\`\`\`\nNothing happens.`
+    expect(agentLines(fenced)).toEqual({ text: fenced, reactions: [] })
+    const after = agentLines(`${fenced}\n${react}\nLooking now.`)
+    expect(after).toEqual({ text: `${fenced}\nLooking now.`, reactions: [{ emoji: '👀', to: 'What needs me today?' }] })
+    // the older [square bracket] lines in a fence are words too
+    expect(agentLines('```\n[react 👀 to "Hi"]\n[reply to "Hi"]\n```\nDone.')).toEqual({ text: '```\n[react 👀 to "Hi"]\n[reply to "Hi"]\n```\nDone.', reactions: [] })
+    // a fence that never closes holds the rest, as markdown draws it
+    expect(agentLines(`Here:\n\`\`\`\n${react}`)).toEqual({ text: `Here:\n\`\`\`\n${react}`, reactions: [] })
+  })
+  test('a fence is a fence wherever the agent indents it: tildes, list items, whole blocks', () => {
+    const react = '<react emoji="👀" to="Hi"/>'
+    expect(agentLines(`~~~\n${react}\n~~~\nLooking now.`)).toEqual({ text: `~~~\n${react}\n~~~\nLooking now.`, reactions: [] })
+    // a list item's sample is indented four spaces, and a markdown code sample inside a reply is often indented whole
+    expect(agentLines(`- the line:\n    \`\`\`\n    ${react}\n    \`\`\`\n- done`).reactions).toEqual([])
+    expect(agentLines(`    \`\`\`\n${react}\n    \`\`\``).reactions).toEqual([])
+  })
+  test('only the same mark, at least as long, with nothing after it, closes a fence', () => {
+    const react = '<react emoji="👀" to="Hi"/>'
+    // a longer run closes it: the fence still holds the sample, and the real line after it counts
+    expect(agentLines(`\`\`\`\`\n${react}\n\`\`\`\`\nLooking now.`)).toEqual({ text: `\`\`\`\`\n${react}\n\`\`\`\`\nLooking now.`, reactions: [] })
+    expect(agentLines(`\`\`\`\`\ncode\n\`\`\`\`\n${react}\nLooking now.`).reactions).toEqual([{ emoji: '👀', to: 'Hi' }])
+    // a shorter run, or one with words after its marks, closes nothing: what follows is still the sample
+    expect(agentLines(`\`\`\`\`\n${react}\n\`\`\`\n${react}`).reactions).toEqual([])
+    expect(agentLines(`\`\`\`\n${react}\n\`\`\`js\n${react}`).reactions).toEqual([])
+    // the other mark closes nothing either, and the indent is ignored at both ends: a 2-space fence closes on 4
+    expect(agentLines(`\`\`\`\n${react}\n~~~\n${react}`).reactions).toEqual([])
+    expect(agentLines(`\`\`\`\n${react}\n\`\`\`\n${react}`).reactions).toEqual([{ emoji: '👀', to: 'Hi' }])
+    expect(agentLines(`  \`\`\`\n  ${react}\n    \`\`\`\n${react}`).reactions).toEqual([{ emoji: '👀', to: 'Hi' }])
+  })
+  test('what is not a fence leaves a real line real, and a tag inline in backticks stays words', () => {
+    const react = '<react emoji="👀" to="What needs me today?"/>'
+    // a backtick among a backtick fence's marks is inline code, so the line after it is a real tag line
+    expect(agentLines(`\`\`\`x\`\`\` y\n${react}\nLooking now.`).reactions).toEqual([{ emoji: '👀', to: 'What needs me today?' }])
+    // the inline cases, which this never touched: a line of inline code was words before the fix too
+    expect(agentLines(`\`${react}\``)).toEqual({ text: `\`${react}\``, reactions: [] })
+    expect(agentLines(`Type \`${react}\` on a line of its own.`).reactions).toEqual([])
+    expect(agentLines('`<no-reply>nothing to say</no-reply>`').text).toBe('')
+    // lines from a window that ends them CRLF
+    expect(agentLines(`\`\`\`\r\n${react}\r\n\`\`\`\r\nDone.`)).toEqual({ text: `\`\`\`\r\n${react}\r\n\`\`\`\r\nDone.`, reactions: [] })
+  })
+  test('a fence inside the words of a real reply line is no tag line either', () => {
+    const react = '<react emoji="👀" to="Hi"/>'
+    const inReply = agentLines(`<reply to="Hi">\nHere:\n\`\`\`\n${react}\n\`\`\`\n</reply>`)
+    expect(inReply).toEqual({ text: `Here:\n\`\`\`\n${react}\n\`\`\``, reactions: [], reply: { to: 'Hi' } })
+    // even one its tag opens on that same line (<reply to="Hi">```js)
+    expect(agentLines(`<reply to="Hi">\`\`\`js\n${react}\n\`\`\`\n</reply>`)).toEqual({ text: `\`\`\`js\n${react}\n\`\`\``, reactions: [], reply: { to: 'Hi' } })
+    expect(agentLines(`<reply to="Hi">~~~\n${react}\n~~~\n</reply>`).reactions).toEqual([])
+    // a react's own words open one too, as a reply's do
+    expect(agentLines(`<react emoji="👀" to="Hi"/>~~~\n${react}\n~~~`)).toEqual({ text: `~~~\n${react}\n~~~`, reactions: [{ emoji: '👀', to: 'Hi' }] })
+  })
   test('a reply that is only <no-reply>why</no-reply> says nothing; anything more stays words', () => {
     expect(agentLines('<no-reply>SHE-72 merged, nothing to do</no-reply>').text).toBe('')
     expect(agentLines('\n  <no-reply>\n  SHE-72 merged\n</no-reply>\n').text).toBe('')

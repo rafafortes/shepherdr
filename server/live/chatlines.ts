@@ -340,6 +340,24 @@ export const markerSoFar = (words: string) => {
   return w.startsWith('[') || AGENT_TAGS.some((t) => w.startsWith(t) || t.startsWith(w))
 }
 
+/** a code fence as an agent writes one: backticks or tildes, three or more, wherever it indents it (markdown's own is
+ *  up to three spaces, a list item's deeper; a reply's indentation is not tracked here, and a deeper fence is still the
+ *  sample an agent meant). A backtick line with another backtick after its marks is inline code, not a fence */
+const FENCE = /^(`{3,}|~{3,})([\s\S]*)$/u
+
+/** the fence that line opens, or null (on a trimmed line) */
+function fenceOpen(l: string): { mark: string; len: number } | null {
+  const m = l.match(FENCE)
+  if (!m || (m[1][0] === '`' && m[2].includes('`'))) return null
+  return { mark: m[1][0], len: m[1].length }
+}
+
+/** the line closes that fence: the same mark, at least as long, and nothing after it (a trimmed line) */
+function fenceClose(l: string, open: { mark: string; len: number }) {
+  const m = l.match(FENCE)
+  return !!m && m[1][0] === open.mark && m[1].length >= open.len && !m[2].trim()
+}
+
 /** an agent's <react …/> or <reply …/> line; a reply's tag may also open its words (<reply to="…">words</reply>) */
 const AGENT_TAG = /^<(react|reply)((?:\s+[\w-]+="[^\n]*?")+)\s*(\/?)>(.*)$/u
 
@@ -348,21 +366,33 @@ export function agentLines(text: string): { text: string; reactions: (Quote & { 
   const reactions: (Quote & { emoji: string })[] = []
   let reply: Quote | undefined
   let opened = false
+  // markdown draws the lines a fence holds as code, so a tag line there is a sample the agent quoted, never a line it
+  // sends: those stay words. Opened or closed where markdown opens or closes it, to the reply's end when it never closes
+  let fence: { mark: string; len: number } | null = null
   let kept = text
     .split('\n')
     .flatMap((l) => {
       const s = l.trim()
+      if (fence) {
+        if (fenceClose(s, fence)) fence = null
+        return [l]
+      }
+      if ((fence = fenceOpen(s))) return [l]
       let m: RegExpMatchArray | null
       if ((m = s.match(AGENT_TAG))) {
         const t = tagOf(`<${m[1]}${m[2]}/>`)!
         const words = m[4].replace(/<\/reply>$/, '').trim()
         if (m[1] === 'react' && t.a.emoji && (t.a.to ?? t.a.file) !== undefined) {
           reactions.push({ emoji: t.a.emoji, ...quoteOf(t.a) })
+          // the words it leaves may open a fence on that same line, as a reply's may
+          fence = fenceOpen(words)
           return words ? [words] : []
         }
         if (m[1] === 'reply' && (t.a.to ?? t.a.file) !== undefined && !reply) {
           reply = quoteOf(t.a)
           opened = !m[3] && !m[4].endsWith('</reply>')
+          // its words may open a fence on that same line (<reply to="Hi">```js)
+          fence = fenceOpen(words.trim())
           return words ? [words] : []
         }
         return [l]
