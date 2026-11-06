@@ -340,20 +340,21 @@ export const markerSoFar = (words: string) => {
   return w.startsWith('[') || AGENT_TAGS.some((t) => w.startsWith(t) || t.startsWith(w))
 }
 
-/** a code fence as markdown opens it: up to three spaces of indent, three or more backticks (nothing holding one in
- *  what follows) or tildes */
-const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/u
+/** a code fence as an agent writes one: backticks or tildes, three or more, wherever it indents it (markdown's own is
+ *  up to three spaces, a list item's deeper; a reply's indentation is not tracked here, and a deeper fence is still the
+ *  sample an agent meant). A backtick line with another backtick after its marks is inline code, not a fence */
+const FENCE = /^(`{3,}|~{3,})(.*)$/u
 
-/** the fence that line opens, or null: a ``` line with a backtick after its marks is inline code, not a fence */
+/** the fence that line opens, or null */
 function fenceOpen(l: string): { mark: string; len: number } | null {
-  const m = l.match(FENCE)
+  const m = l.trim().match(FENCE)
   if (!m || (m[1][0] === '`' && m[2].includes('`'))) return null
   return { mark: m[1][0], len: m[1].length }
 }
 
 /** the line closes that fence: the same mark, at least as long, and nothing after it */
-const fenceClose = (l: string, open: { mark: string; len: number }) => {
-  const m = l.match(FENCE)
+function fenceClose(l: string, open: { mark: string; len: number }) {
+  const m = l.trim().match(FENCE)
   return !!m && m[1][0] === open.mark && m[1].length >= open.len && !m[2].trim()
 }
 
