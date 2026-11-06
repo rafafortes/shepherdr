@@ -131,14 +131,14 @@ function codeRanges(text: string): [number, number][] {
     const start = at
     at += line.length + 1
     if (fence) {
-      // its own mark closes it: as many of them, alone on the line
-      if (new RegExp(`^ {0,3}${fence.mark[0]}{${fence.mark.length},}\\s*$`).test(line)) {
+      // its own mark closes it: as many of them, alone on the line (a quoted block's own "> " before them)
+      if (new RegExp(`^(?: {0,3}> ?)* {0,3}${fence.mark[0]}{${fence.mark.length},}\\s*$`).test(line)) {
         out.push([fence.from, Math.min(at, text.length)])
         fence = null
       }
       continue
     }
-    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line)
+    const open = /^(?: {0,3}> ?)* {0,3}(`{3,}|~{3,})/.exec(line)
     if (open) {
       fence = { mark: open[1], from: start }
       continue

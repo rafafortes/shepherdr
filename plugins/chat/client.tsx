@@ -18,7 +18,7 @@ import { FindBar, openFind } from './find.tsx'
 import { Fold } from './fold.tsx'
 import { Markdown } from './markdown.tsx'
 import { Mentions, MentionList, MENTION_LIST, inBox, mentionItems, pickOf, type Item } from './mentions.tsx'
-import { expand, known, plain, put, type Picked } from './mentions.ts'
+import { expand, hasMention, known, plain, put, type Picked } from './mentions.ts'
 import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } from './reply.ts'
 import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, LiveLine, TurnLine } from './activity.tsx'
@@ -520,7 +520,6 @@ function jumps(chat: string, q: ReplyQuote, label: string) {
     reactions and the buttons beside it stay by it) and a long quote reaches past a short reply toward the middle.
     loose: on its own, not tucked (a card answered in the chat quotes the message that answered it) */
 export function Quote({ q, chat, from, you, loose, label = 'Replying to' }: { q: ReplyQuote; chat: string; from: string; you: boolean; loose?: boolean; label?: string }) {
-  const snap = useSnap()
   const name = q.who === 'you' ? 'You' : q.who === 'peer' ? (q.from ?? 'Another agent') : q.who === 'agent' ? from : null
   return (
     <div className={clsx('relative flex', loose ? 'min-w-0' : '-mb-2 w-0 min-w-full', you ? 'justify-end' : 'justify-start')}>
@@ -539,10 +538,20 @@ export function Quote({ q, chat, from, you, loose, label = 'Replying to' }: { q:
         {name ? <span className="mr-0.5 font-medium">{name} </span> : null}
         {q.file ? <FileIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
         {q.artifact ? <PageIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
-        {plain(q.text ?? '', snap)}
+        <Quoted text={q.text ?? ''} />
       </div>
     </div>
   )
+}
+
+/** a quote's words, its mentions named as their space or task is called now (only a quote that has one is drawn again
+    when the snapshot changes) */
+function Quoted({ text }: { text: string }) {
+  return hasMention(text) ? <QuotedMention text={text} /> : <>{text}</>
+}
+
+function QuotedMention({ text }: { text: string }) {
+  return <>{plain(text, useSnap())}</>
 }
 
 /** what sits on a quote's bottom edge: a ring in the page colour, so a reply in the same shade still shows its edge */
@@ -1660,7 +1669,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
   const [closed, setClosed] = useState<string | null>(null)
   const typed = mentionItems(snap, text, caret)
   // only while you type in it: a draft opened again (a reload, another chat it was left in) says nothing of a list
-  const list = typed && typed.items.length && closed !== text && focused ? typed : null
+  const list = typed && typed.items.length && closed !== `${text}:${caret}` && focused ? typed : null
   const at = !list ? 0 : Math.max(0, chosen.current ? list.items.findIndex((i) => i.key === chosen.current) : Math.min(sel, list.items.length - 1))
   const word = list ? `${list.kind}:${list.word}` : ''
   const listId = `${MENTION_LIST}-${chatKey}`
@@ -1841,7 +1850,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                     setUI({ focus: chatKey })
                   }}
                   onBlur={() => {
-                    setClosed(text)
+                    setClosed(`${text}:${caret}`)
                     getState().ui.focus === chatKey && setUI({ focus: null })
                   }}
                   onKeyDown={(e) => {
@@ -1858,7 +1867,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                       }
                       if (e.key === 'Escape') {
                         e.preventDefault()
-                        return setClosed(text)
+                        return setClosed(`${text}:${caret}`)
                       }
                     }
                     if (e.key === 'Enter' && !e.shiftKey && device === 'desktop' && !e.nativeEvent.isComposing) {
@@ -1967,7 +1976,7 @@ function ReplyStrip({ chatKey }: { chatKey: string }) {
         Replying to <span className="inline-block max-w-[45%] truncate align-top font-medium text-fg">{name}</span>{' '}
         {q.file ? <FileIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
         {q.artifact ? <PageIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
-        {plain(q.text ?? '', snap)}
+        <Quoted text={q.text ?? ''} />
       </div>
       {/* taking the reply away keeps the keyboard up */}
       <button
