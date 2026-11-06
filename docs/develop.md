@@ -6,8 +6,8 @@ bun run demo          # the server with fictional data (the prototype's world), 
 bun run dev           # the screen with hot reload, on :5173, talking to the server above
 bun run typecheck     # types, in seconds: what to run while you work
 bun run test changed  # the tests that reach what you changed from the default branch
-bun run test          # every test, in parallel, the way the check runs them
-bun run check:local   # the whole check: types, every test with the browser ones, the build
+bun run test          # every test, in parallel, the test files capped as the check caps them
+bun run check:local   # the whole check: types, every test with the browser ones, the build (about 2 minutes)
 ```
 
 The whole check runs on this machine: GitHub Actions is off on this repo (2026-11-06), so `.github/workflows/check.yml`
@@ -16,7 +16,8 @@ and says the result in its facts, and the coordinator runs it on `herdr-tui` bef
 priority (nice 19, idle disk), one run at a time across every worktree of the repo (a lock file under
 `$XDG_RUNTIME_DIR`, else `~/.cache`), and the test files are capped at `SHEPHERDR_TEST_JOBS` workers (a quarter of the
 cores by default) so herdr, the server and the agents keep the CPU: the tests' own `systemd-run` scope, where systemd
-runs this user's services, gives them the least CPU and IO weight too.
+runs this user's services, gives them the least CPU and IO weight too. It takes about two minutes warm, and waits
+(up to an hour) while another worktree's check runs, so run it with a long timeout or in the background.
 On a machine where herdr runs as a systemd user service, give it (and the server and agents it holds) the CPU first:
 `systemctl --user set-property herdr.service CPUWeight=1000`.
 

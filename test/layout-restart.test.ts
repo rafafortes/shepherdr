@@ -1,4 +1,4 @@
-// Minimal restart dialogs for both chat roles; only GitHub runs these browser tests.
+// Minimal restart dialogs for both chat roles; the whole check runs these browser tests (`bun run check:local`).
 import { describe, expect, test } from 'bun:test'
 import { layout } from './layout.ts'
 

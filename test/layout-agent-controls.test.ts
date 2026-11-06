@@ -1,4 +1,4 @@
-// Composer + launch controls for both chat roles; only GitHub runs these browser tests.
+// Composer + launch controls for both chat roles; the whole check runs these browser tests (`bun run check:local`).
 import { describe, expect, test } from 'bun:test'
 import { layout, until } from './layout.ts'
 

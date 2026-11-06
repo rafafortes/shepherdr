@@ -56,11 +56,14 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   the browser tests (`scripts/test.ts`), and the build. It runs last in line for the CPU (nice 19, idle disk), one run
   at a time across every worktree of the repo (a lock file under `$XDG_RUNTIME_DIR` or `~/.cache`, never in the repo and
   never in `~/.shepherdr`), and the test files are capped at `SHEPHERDR_TEST_JOBS` workers (a quarter of the cores by
-  default, 8 here) so herdr, the live server and the agents keep the CPU. It prints one line per step, the failing
-  tests' names by file, the verdict and where the logs are.
+  default) so herdr, the live server and the agents keep the CPU. It prints one line per step, the failing tests' names
+  by file, the verdict and where the logs are. It takes about two minutes warm, longer while other work keeps the
+  machine busy or behind another worktree's check (it waits for it, up to an hour): run it with a long timeout, or in
+  the background and read the verdict it prints.
 - A task runs it before `shepherdr ready` and says the result in `--facts`: passed, about how long, or what failed. The
-  coordinator runs it on `herdr-tui` before a release. While you work, `bun run typecheck` (seconds) and
-  `bun run test changed` are enough to keep moving.
+  coordinator runs it on `herdr-tui` before a release (and that run, there, also refreshes the screen map
+  `bun run test changed` picks from). While you work, `bun run typecheck` (seconds) and `bun run test changed` are
+  enough to keep moving.
 - Check what you changed on the screen by hand in your shared browser, for the proof, against a proof server of your
   own, never the one the human runs: the demo source (`SHEPHERDR_SOURCE=demo`) first, or `HERDR_SOCKET_PATH` at a
   socket that isn't there (as the tests do), a `SHEPHERDR_HOME` under `/tmp`, a `SHEPHERDR_PORT` other than 7787 and
@@ -71,10 +74,11 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
 - The tests touch neither `~/.shepherdr` nor the herdr of this machine: `test/preload.ts` gives each file a home of its
   own under `/tmp`, a socket that isn't there and no inherited pane, tab or workspace id. A test that wants a herdr
   brings its own (test/fake-herdr.ts). Run by hand they are the same, and at the lowest priority.
-- A browser test skips where its browser can't start, so the run opens both first and names what is missing instead of
-  passing quietly: Chromium's headless shell (`bun x playwright-core install --only-shell chromium`, no root) for every
-  browser test, and WebKit, Safari's engine, for the iPhone tests (`bun x playwright-core install webkit`; its system
-  libraries come from `sudo bun x playwright-core install-deps webkit`, which only the operator runs).
+- A browser test skips where its browser can't start, so the run opens both first and names what is missing, and its
+  verdict says which parts did not run; a task whose browser was missing says so in `--facts` instead of passing it as a
+  whole check. Chromium's headless shell (`bun x playwright-core install --only-shell chromium`, no root) runs every
+  browser test, and WebKit, Safari's engine, the iPhone tests (`bun x playwright-core install webkit`); WebKit's system
+  libraries come from `sudo bun x playwright-core install-deps webkit`, which only the operator runs.
 - Still write tests with your change: the check runs them here. A new browser test goes in the `layout-*.test.ts` file
   of its topic (setup in `test/layout.ts`); split a file that grows past about 20 s.
 - GitHub Actions is off: `.github/workflows/check.yml` keeps only `workflow_dispatch`, so nothing waits for GitHub and

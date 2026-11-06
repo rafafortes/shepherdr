@@ -4,6 +4,7 @@
 // Recorded here (`scripts/test.ts --map`), by the whole check on the default branch (`bun run check:local`): GitHub
 // Actions is off on this repo (SHE-21), so nothing records a map there any more; a Check workflow run asked for by hand
 // still does.
+//
 // Each page a browser test opens notes which of the built screen's functions ran, and the build's source maps turn them
 // into lines of src/ and plugins/. The map is kept in the repo's .git, for every worktree, and a test run sets the
 // lines that changed since the map's commit against it:
@@ -12,7 +13,7 @@
 //   - types, imports, comments: none (they don't run)
 //   - any other top-level code (a constant, a call): every test file that ran any of that file's code
 //   - a file the screen is built from that isn't code (styles.css, index.html), or no map: every browser test
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join, relative } from 'node:path'
 import { decodedMappings, TraceMap } from '@jridgewell/trace-mapping'
 import type { Browser, BrowserContext, Page } from 'playwright-core'
@@ -168,61 +169,12 @@ export const readMap = (file: string): ScreenMap | null => {
   }
 }
 
-/** the branch the Check workflow runs on: the repo's default branch, which origin/HEAD names (`herdr-tui` in this
- *  fork, `main` upstream); `main` here only mirrors upstream. */
-export function checkBranch(cwd = root) {
-  const r = Bun.spawnSync(['git', 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { cwd, stdout: 'pipe', stderr: 'pipe' })
-  const name = r.success ? r.stdout.toString().trim().replace(/^origin\//, '') : ''
-  return name && name !== 'HEAD' ? name : 'main'
-}
-
-/** the newest map: the one kept here, after asking GitHub (at most every 10 minutes) for the one its last run of the
- *  default branch made. With Actions off there is none to fetch, and the map the local check keeps is the one used.
- *  Null when there is none, or its commit can't be found here. */
+/** the map a test run picks from: the one the check recorded here (`bun run check:local` on the default branch, which
+ *  runs `scripts/test.ts --map`), or the one a run is given by name (SHEPHERDR_SCREEN_MAP, for a test of this file).
+ *  GitHub Actions is off on this repo (SHE-21), so no map comes from there any more. Null when there is none. */
 export function screenMap(): ScreenMap | null {
-  if (process.env.SHEPHERDR_SCREEN_MAP) return readMap(process.env.SHEPHERDR_SCREEN_MAP)
-  const file = mapFile()
-  const stamp = `${file}.checked`
-  const fresh = existsSync(stamp) && Date.now() - statSync(stamp).mtimeMs < 10 * 60_000
-  let map = readMap(file)
-  if (!fresh && Bun.which('gh')) {
-    mkdirSync(join(file, '..'), { recursive: true })
-    writeFileSync(stamp, '')
-    utimesSync(stamp, new Date(), new Date())
-    // gh asks the host the repo is on (github.localhost here)
-    const host = git('remote', 'get-url', 'origin')?.trim().match(/^(?:https?:\/\/|git@)([^/:]+)/)?.[1]
-    const env = { ...process.env, ...(host && host !== 'github.com' && !process.env.GH_HOST ? { GH_HOST: host } : {}) }
-    const gh = (...args: string[]) => {
-      const r = Bun.spawnSync(['gh', ...args], { cwd: root, env, stdout: 'pipe', stderr: 'pipe', timeout: 20_000 })
-      return r.success ? r.stdout : null
-    }
-    const runs = JSON.parse(gh('run', 'list', '--workflow', 'check.yml', '--branch', checkBranch(), '--event', 'push', '--status', 'success', '--limit', '1', '--json', 'databaseId,headSha')?.toString() || '[]') as { databaseId: number; headSha: string }[]
-    if (runs[0] && runs[0].headSha !== map?.commit) {
-      const tmp = `${file}.${process.pid}`
-      const parts = join(tmp, 'parts')
-      rmSync(tmp, { recursive: true, force: true })
-      mkdirSync(parts, { recursive: true })
-      // each test shard's map (screen-map-1, -2…), or one of every browser test (screen-map, as runs once made); read
-      // through the API, as gh run download skips a GitHub proxy (GH_HOST) for the files
-      const ids = gh('api', '--jq', '.artifacts[] | select(.name | startswith("screen-map")) | .id', `repos/{owner}/{repo}/actions/runs/${runs[0].databaseId}/artifacts?per_page=100`)
-      for (const id of ids?.toString().split('\n').filter(Boolean) ?? []) {
-        const zip = gh('api', `repos/{owner}/{repo}/actions/artifacts/${id}/zip`)
-        if (!zip) continue
-        writeFileSync(join(tmp, `${id}.zip`), zip)
-        const r = Bun.spawnSync(['unzip', '-p', join(tmp, `${id}.zip`), 'screen-map.json'], { stdout: 'pipe', stderr: 'ignore' })
-        if (r.success && r.stdout.length) writeFileSync(join(parts, `${id}.json`), r.stdout)
-      }
-      const got = readdirSync(parts).length ? gather(parts, runs[0].headSha) : null
-      if (got) {
-        writeFileSync(`${tmp}.json`, JSON.stringify(got))
-        renameSync(`${tmp}.json`, file)
-        map = got
-      }
-      rmSync(tmp, { recursive: true, force: true })
-    }
-  }
-  if (map && git('cat-file', '-e', `${map.commit}^{commit}`) === null) git('fetch', '--quiet', 'origin', map.commit)
-  return map && git('cat-file', '-e', `${map.commit}^{commit}`) !== null ? map : null
+  const named = process.env.SHEPHERDR_SCREEN_MAP
+  return named ? readMap(named) : readMap(mapFile())
 }
 
 type Kind = 'fn' | 'quiet' | 'code'

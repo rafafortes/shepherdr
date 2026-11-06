@@ -13,11 +13,13 @@
 // whole screen (styles.css). All the browser tests of a run share one browser (test/chromium.ts).
 //
 // Any other flag goes to bun test as it is (-t <pattern>, --bail, --rerun-each=3, --shard=2/6 as a Check workflow run
-// asked for by hand does). SHEPHERDR_TEST_JOBS sets how many processes run at once.
+// asked for by hand does; --parallel every core). SHEPHERDR_TEST_JOBS sets how many test files run at once: a quarter
+// of the cores by default, so herdr, the live server and the agents keep the CPU while several tasks test at once.
 //
 // The tests run below everything else on this machine, on every core: they take only the CPU and disk no one else
 // wants, so herdr, Shepherdr's server and the agents stay quick while several tasks test at once.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpus } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { gather, mapFile, pick, readMap, screenMap } from '../test/screen-map.ts'
 import { INPUTS } from '../test/web.ts'
@@ -205,7 +207,7 @@ function lowPriority(): string[] {
 }
 
 mkdirSync(cache, { recursive: true })
-const jobs = process.env.SHEPHERDR_TEST_JOBS ? `--parallel=${process.env.SHEPHERDR_TEST_JOBS}` : '--parallel'
+const jobs = `--parallel=${process.env.SHEPHERDR_TEST_JOBS ?? Math.max(1, Math.floor(cpus().length / 4))}`
 // a test may take longer while every core is busy (several tasks test at once): 5 s, bun's default, is too tight
 const decoder = new TextDecoder()
 const timeout = flags.some((f) => f.startsWith('--timeout')) ? [] : ['--timeout=20000']

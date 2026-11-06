@@ -1,5 +1,6 @@
-// A real browser for the tests that open one: skipped where none is installed, except on CI (GitHub's runners), where
-// a browser that won't start fails the run instead of quietly skipping every browser test.
+// A real browser for the tests that open one: skipped where none is installed, except on CI, where a browser that
+// won't start fails the run instead of quietly skipping every browser test. The local check opens both first and names
+// what to install, so nothing skips quietly here (scripts/check-local.sh, scripts/check-browsers.ts).
 //
 // One browser for the whole run: scripts/test.ts starts it (this file, run on its own) and every test file connects to
 // it, each with contexts of its own, so a run holds one browser's processes instead of one browser per file. Run any

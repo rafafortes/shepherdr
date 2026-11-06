@@ -8,7 +8,6 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hasPrWorkflows } from '../server/live/engine/git.ts'
-import { checkBranch } from './screen-map.ts'
 type Workflow = {
   on: Record<string, unknown>
   concurrency: { group: string; 'cancel-in-progress': boolean }
@@ -63,11 +62,15 @@ describe('the check itself', () => {
     expect(scripts.check).toBe('bun run check:local')
   })
   test('whose script runs the types, the tests and the build, one run at a time, last in line for the CPU', () => {
-    const script = readFileSync(join(root, 'scripts', 'check-local.sh'), 'utf8')
-    for (const step of ['bun run typecheck', 'scripts/test.ts', 'bun run build']) expect(script).toContain(step)
-    expect(script).toContain('nice -n 19')
-    expect(script).toContain('ionice -c 3')
-    expect(script).toContain('flock')
+    // its comments name these too: what runs is what a line that isn't a comment says
+    const lines = readFileSync(join(root, 'scripts', 'check-local.sh'), 'utf8')
+      .split('\n')
+      .filter((l) => l.trim() && !l.trim().startsWith('#'))
+      .join('\n')
+    for (const step of ['bun run typecheck', 'scripts/test.ts', 'bun run build']) expect(lines).toContain(step)
+    expect(lines).toContain('nice -n 19')
+    expect(lines).toContain('ionice -c 3')
+    expect(lines).toContain('flock')
   })
 })
 
@@ -79,38 +82,3 @@ describe('a run asked for by hand', () => {
     expect(workflow.jobs.test!.strategy?.matrix.shard).toEqual([1, 2, 3])
   })
 })
-
-describe('the branch its runs come from', () => {
-  test("the repo's default branch, which origin/HEAD names: herdr-tui here, main upstream", () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-check-'))
-    try {
-      const git = gitIn(dir, 'herdr-tui')
-      git('-c', 'user.name=CI', '-c', 'user.email=ci@localhost', 'commit', '-q', '--allow-empty', '-m', 'first')
-      git('update-ref', 'refs/remotes/origin/herdr-tui', 'HEAD')
-      git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/herdr-tui')
-      expect(checkBranch(dir)).toBe('herdr-tui')
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-  test('main, where no origin/HEAD says otherwise', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-check-'))
-    try {
-      gitIn(dir, 'main')
-      expect(checkBranch(dir)).toBe('main')
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-})
-
-/** a fresh repo at `branch`, and a git to run in it that fails this test when it fails */
-function gitIn(dir: string, branch: string) {
-  const git = (...args: string[]) => {
-    const r = Bun.spawnSync(['git', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
-    expect(r.exitCode, r.stderr.toString()).toBe(0)
-    return r.stdout.toString().trim()
-  }
-  git('init', '-q', '-b', branch)
-  return git
-}
