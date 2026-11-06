@@ -1407,7 +1407,7 @@ export function CardShell({ title, plan, icon, action, source, dismiss, children
       tabIndex={dismiss ? -1 : undefined}
       onPointerDown={dismiss ? () => box.current?.focus({ preventScroll: true }) : undefined}
       onKeyDown={key}
-      className="mt-2 w-[440px] max-w-full cursor-default overflow-hidden rounded-box bg-bg outline-none shadow-[inset_0_0_0_1px_var(--line2)]"
+      className="mt-2 w-[440px] max-w-full cursor-default overflow-hidden rounded-box bg-bg outline-none shadow-[inset_0_0_0_1px_var(--line2)] focus:shadow-[inset_0_0_0_1.5px_var(--color-focus)]"
     >
       {source ? (
         <div data-card-source className="px-3 pt-2 text-[0.8125rem] break-words text-fg2">
