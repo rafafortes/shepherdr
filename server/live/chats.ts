@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { apart, cardMessage, type ActivityAnswer, type ActivityAsk, type Chat, type ChatControls, type ArtifactPost, type Job, type Message, type Peer, type Question, type Reaction, type SecretAsk, type UpdateCard } from '../../shared/types.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
 import { stripHidden, type Agents, type OutItem } from './agents.ts'
-import { agentLines, excerpt, findQuoted, fromAgents, markerSoFar, parseBrowserNotes, parseReply, parseUserLine, userLines, type FromAgent, type Parsed } from './chatlines.ts'
+import { agentLines, excerpt, findQuoted, fromAgents, markerSoFar, parseBrowserNotes, parseReply, parseUserLine, quietReply, userLines, type FromAgent, type Parsed } from './chatlines.ts'
+import { pilotLine, wakeOf, type Woke } from './heartbeat.ts'
 import { shortUrl } from '../../shared/browser.ts'
 import { herdr } from './herdr.ts'
 import { logKind } from './readers/find.ts'
@@ -60,6 +61,35 @@ export function turnOf(ev: LogEvent[], sent: { at: number }[]): { kind: 'yours' 
 export const landed = (ev: LogEvent[]) => {
   const start = ev.findLastIndex((e) => e.kind === 'turn-start')
   return start >= 0 && ev.slice(start).some((e) => e.kind === 'agent' && agentLines(stripHidden(e.text)).text)
+}
+
+/** Autopilot's wakes in a chat, by the log line that brought each one: why it woke, and how it went once it answered
+ *  with nothing (heartbeat.ts pilotLine). A wake is Shepherdr's hidden heartbeat in the log; what the agent then does
+ *  fills its one quiet line in, and another message to it ends that wake's watch */
+function wakeLines(ev: LogEvent[]) {
+  const out = new Map<string, { at: number; line: string }>()
+  let w: (Woke & { id: string; at: number }) | undefined
+  const close = () => {
+    if (!w) return
+    out.set(w.id, { at: w.at, line: pilotLine(w) })
+    w = undefined
+  }
+  for (const e of ev) {
+    if (e.kind === 'session') close()
+    else if (e.kind === 'user' || e.kind === 'peer') {
+      close()
+      const wake = e.kind === 'user' ? wakeOf(e.text) : undefined
+      if (wake) w = { ...wake, id: e.id, at: e.at, steps: 0, quiet: false, said: false }
+    } else if (!w) continue
+    else if (e.kind === 'step') w.steps++
+    else if (e.kind === 'agent') {
+      const text = stripHidden(e.text)
+      if (agentLines(text).text) w.said = true
+      else if (quietReply(text)) w.quiet = true
+    }
+  }
+  close()
+  return out
 }
 
 /** Do the typing dots show: is a message you will see on its way? In a turn you started, at once (an agent never
@@ -653,6 +683,8 @@ export class Chats {
     }
     // Shepherdr's update cards are messages too, among the rest by time, so a reaction can quote one
     const cards = l.posted.filter((p) => p.card).map((p) => cardMessage(p.card!, p.at))
+    // Autopilot's wakes: one quiet line each, at the moment it woke
+    const wakes = wakeLines(ev)
     let sessions = 0
     let newSession = false
     for (const e of ev) {
@@ -671,6 +703,9 @@ export class Chats {
       }
       if (e.kind === 'user') {
         const text = stripHidden(e.text)
+        // an Autopilot wake's own quiet line, before anything the agent said after it
+        const woke = wakes.get(e.id)
+        if (woke) msgs.push({ id: `${e.id}:pilot`, who: 'agent', at: woke.at, pilot: woke.line })
         if (!text) continue
         // another agent's message: a row of its own naming the sender it declared (never the human's words)
         const froms = fromAgents(text)

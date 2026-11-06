@@ -1,9 +1,11 @@
 // Autopilot's heartbeat, as OpenClaw's: on its trigger's time rule (Settings → Autopilot: every 30 minutes, all day), a
 // coordinator on Autopilot gets one fixed prompt in its own session: go through its HEARTBEAT.md, its standing
-// checklist in plain words, and act on what needs it, or else reply with only <no-reply> (the chat shows nothing). Only
+// checklist in plain words, and act on what needs it, or else reply with only <no-reply> (the chat shows none of it, and
+// a quiet line says it woke and had nothing to do, so a quiet night is not mistaken for a broken heartbeat). Only
 // while it is idle: a busy one gets it once its turn is over. None while its HEARTBEAT.md is empty and no news waits.
 // News its trigger's event rules name (all news by default) wakes the coordinator at once; other news waits here and
-// comes with the next heartbeat.
+// comes with the next heartbeat. Run now (Settings → Autopilot, the chat's pill, shepherdr heartbeat run) asks for one
+// wake at once, one per tap.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { HOME, readJson, writeJson } from '../store.ts'
@@ -132,4 +134,119 @@ export function heartbeatPrompt(list: string, held: string[] = []) {
     ...(held.length ? [`News since the last heartbeat, which your trigger let wait (act on it by your Autopilot rules):\n${held.map((x) => `- ${x}`).join('\n')}`] : []),
     'If nothing needs you, reply with only <no-reply>heartbeat: nothing to do</no-reply>.',
   ].join('\n\n')
+}
+
+/* ---------- Run now: one wake on the human's word ---------- */
+
+/** the wake a chat line brought, when it is one: Shepherdr's hidden heartbeat in the agent's log, with why it came
+ *  (`reason="run now"` for a tap; the time rule's own has none) */
+export function wakeOf(text: string): { reason?: string } | undefined {
+  const m = /<shepherdr[^>]*>\s*<heartbeat(?:\s+reason="([^"]*)")?\s*>/.exec(text)
+  return m ? (m[1] ? { reason: m[1] } : {}) : undefined
+}
+
+/** an Autopilot wake as it went: why it came, the steps it took, and whether it answered with nothing */
+export interface Woke {
+  reason?: string
+  steps: number
+  /** its reply said nothing (`<no-reply>`): a quiet wake */
+  quiet: boolean
+  /** its reply had words of its own: they follow in the chat, and this line says no more */
+  said: boolean
+}
+
+/** a wake's one quiet line in the chat: why it woke, then how it went once it answered with nothing. Says nothing more
+ *  while it works, or once it said something itself: its words follow */
+export function pilotLine(w: Woke): string {
+  const head = `Autopilot woke · ${w.reason === 'run now' ? 'Run now' : 'on schedule'}`
+  return w.quiet && !w.said ? `${head} · ${w.steps ? 'checked, nothing new' : 'nothing to do'}` : head
+}
+
+/** what a place is, for Run now: enough of it to refuse honestly, from anywhere */
+export interface Wakeable {
+  name: string
+  /** its coordinator is on Autopilot */
+  autopilot: boolean
+  /** it belongs to another machine: only that machine wakes it */
+  elsewhere?: boolean
+  /** herdr answers on this machine */
+  reachable: boolean
+  /** a wake already waits or runs */
+  state?: 'queued' | 'waking'
+  /** its HEARTBEAT.md, as it stands */
+  checklist: string
+  /** news its event rules let wait, for the next heartbeat */
+  held: number
+}
+
+/** why Run now is refused for this place, or undefined when it may go: one wake at a time, only on Autopilot, only on
+ *  its own machine, and only with something to go through */
+export function wakeProblem(w: Wakeable): string | undefined {
+  if (w.elsewhere) return `${w.name} is on another machine: wake it there.`
+  if (!w.autopilot) return `${w.name} is not on Autopilot: switch it on first.`
+  if (!w.reachable) return `herdr does not answer: nothing can wake ${w.name}'s coordinator.`
+  if (w.state) return `${w.name}'s coordinator is already waking: one wake at a time.`
+  if (!w.checklist.trim() && !w.held) return `Nothing to run: ${w.name}'s HEARTBEAT.md is empty and no news waits for it.`
+  return undefined
+}
+
+/** how long a wake or a tap holds its place at most: then it is taken for lost (herdr went down, its turn never ended),
+ *  so one lost wake never blocks the next */
+const WAKE_LOST = 10 * 60_000
+
+/** Autopilot's Run now, as the state machine the live source drives: a tap waits for its coordinator to be idle and
+ *  then goes once; while one waits or runs, another is refused. A wake ends once its turn was seen working and is over
+ *  (or after WAKE_LOST), so the next tap is free again. */
+export class Wakes {
+  private waiting = new Map<string, number>()
+  private running = new Map<string, number>()
+  private worked = new Set<string>()
+
+  /** what a place's Run now is doing now */
+  state(place: string): 'queued' | 'waking' | undefined {
+    return this.running.has(place) ? 'waking' : this.waiting.has(place) ? 'queued' : undefined
+  }
+
+  /** takes a tap: false while one already waits or runs (it is refused) */
+  ask(place: string, now = Date.now()): boolean {
+    if (this.state(place)) return false
+    this.waiting.set(place, now)
+    return true
+  }
+
+  /** the tap that goes now, as its coordinator is idle: the caller sends it */
+  take(place: string, now = Date.now()): boolean {
+    if (!this.waiting.has(place)) return false
+    this.waiting.delete(place)
+    this.mark(place, now)
+    return true
+  }
+
+  /** a wake sent straight away (its coordinator was idle when the tap came) */
+  mark(place: string, now = Date.now()) {
+    this.running.set(place, now)
+    this.worked.delete(place)
+  }
+
+  /** its coordinator works now, or is free again: a wake ends once it was seen working and then free, so the same tick
+   *  that sends one never ends it */
+  observe(place: string, working: boolean, now = Date.now()) {
+    const at = this.running.get(place)
+    if (at === undefined) return
+    if (working) this.worked.add(place)
+    else if (this.worked.has(place) || now - at > WAKE_LOST) this.forget(place)
+  }
+
+  /** Autopilot off, or its wake lost: nothing waits or runs here */
+  forget(place: string) {
+    this.waiting.delete(place)
+    this.running.delete(place)
+    this.worked.delete(place)
+  }
+
+  /** a tap or a wake older than WAKE_LOST stops holding the place: herdr went down, or its turn never ended */
+  prune(now = Date.now()) {
+    for (const [place, at] of this.waiting) if (now - at > WAKE_LOST) this.waiting.delete(place)
+    for (const [place, at] of this.running) if (now - at > WAKE_LOST) this.forget(place)
+  }
 }

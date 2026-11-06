@@ -20,7 +20,7 @@ import { followCommand, isCommand } from './commands.ts'
 import { effortsOf, findModel, knowsModels, modelsOf, nearest } from './models.ts'
 import { HELP, one, parseArgs, summaryOpts, type Parsed } from './args.ts'
 import { Automations, type Automation, type Template } from './automations.ts'
-import { Heartbeats, heartbeatFile } from './heartbeat.ts'
+import { Heartbeats, heartbeatFile, Wakes, wakeProblem } from './heartbeat.ts'
 import { eventRules, eventsText, eventWords, matches, nextWords, runWords, timeRule, timeWords, triggerWords, type Happened, type TriggerEvent } from './trigger.ts'
 import { startsWords, whenFrom } from '../../shared/when.ts'
 import { Browsers, type BrowserBridge, type BrowserClient } from './browser.ts'
@@ -86,6 +86,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   engine = new Engine(this.agents, this.chats, this.places, this.settings)
   automations = new Automations()
   heartbeats = new Heartbeats()
+  /** Autopilot's Run now: the wake a tap waits for, and the one its turn runs */
+  wakeQueue = new Wakes()
   artifacts = new Artifacts()
   /** agents' secrets: one file on the main machine, which a worker for another machine reads there */
   vault = new Vault(process.env.SHEPHERDR_MAIN_HOME || HOME)
@@ -414,6 +416,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       mode: this.places.mode(id),
       chat: id,
       ...(space ? { githubRemote: !!space.github } : {}),
+      // Autopilot's Run now: this machine's own places only (another machine's wakes its own)
+      ...(this.runNow(id) ? { runNow: this.runNow(id) } : {}),
       // herdr gone: this machine's chats say so plainly
       ...(up ? {} : { herdrDown: clock(this.agents.lastReach) }),
     }))
@@ -423,7 +427,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       machines.push({ ...m, ...away })
       // a machine never reached yet still has its home space, to come back to
       const theirs = l.snap?.places ?? [{ id: placeId.home(l.rec.machine), name: 'home', machine: l.rec.machine, home: true, level: 1 as const, status: 'off' as const, mode: 'regular' as const, chat: placeId.home(l.rec.machine) }]
-      for (const p of theirs) places.push({ ...p, mode: asMode(p.mode) ?? 'regular', ...(p.home ? { level: 1 as const } : {}), ...away })
+      for (const p of theirs) places.push({ ...p, mode: asMode(p.mode) ?? 'regular', ...(p.home ? { level: 1 as const } : {}), ...away, runNow: undefined })
     }
     // the names the human gave them: a space's by the space rules (another on its machine with it keeps its own)
     for (const m of machines) {
@@ -1376,16 +1380,68 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return (st === 'idle' || st === 'done' || st === 'gone') && !this.agents.background(id) && !this.agents.waiting(id).length
   }
 
-  /** each coordinator on Autopilot that runs here gets its heartbeat once one is due and it is idle (heartbeat.ts) */
+  /** each coordinator on Autopilot that runs here gets its heartbeat once one is due and it is idle (heartbeat.ts), and
+   *  the wake a Run now tap waits for goes as soon as it is idle too */
   heartbeat(now = Date.now()) {
     if (!has('autopilot') || !this.agents.reachable) return
+    this.wakeQueue.prune(now)
     for (const p of this.placeList()) {
-      if (p.mode !== 'autopilot' || this.peers?.owner(p.id)) continue
+      if (this.peers?.owner(p.id)) continue
+      const free = this.idle(p.id)
+      // its turn was over: a wake that waited for it is sent, and one that ran is done holding the place
+      this.wakeQueue.observe(p.id, !free, now)
+      if (p.mode !== 'autopilot') continue
+      if (this.wakeQueue.state(p.id) === 'queued') {
+        if (free) this.sendWake(p.id, now)
+        continue
+      }
       const h = this.settings.heartbeat(this.levelOf(p.id))
-      if (!this.heartbeats.due(p.id, h.time, h.zone, now) || !this.idle(p.id)) continue
+      if (!free || !this.heartbeats.due(p.id, h.time, h.zone, now)) continue
       const text = this.heartbeats.beat(p.id, this.roleOf(p.id), now)
       if (text) this.agents.send(p.id, hidden(text, 'heartbeat'), { ensure: this.starter(p.id), idle: true }).catch(() => undefined)
     }
+  }
+
+  /** Autopilot's Run now (Settings → Autopilot, the chat's pill, shepherdr heartbeat run): one heartbeat to a place's
+   *  coordinator now, or as soon as its turn is over. One at a time: a second ask while one waits or runs is refused,
+   *  and never one for another machine's place */
+  wake(place: string): { name: string; queued: boolean } {
+    const p = this.placeList().find((x) => x.id === place || x.name === place)
+    if (!p) throw new Error('No such space: name one of its places.')
+    if (!has('autopilot')) throw new Error('Autopilot is not in the plugin list.')
+    const problem = wakeProblem({
+      name: p.name,
+      autopilot: p.mode === 'autopilot',
+      elsewhere: !!this.peers?.owner(p.id),
+      reachable: this.agents.reachable,
+      state: this.wakeQueue.state(p.id),
+      checklist: this.heartbeats.read(p.id, this.roleOf(p.id)),
+      held: this.heartbeats.held(p.id).length,
+    })
+    if (problem) throw new Error(problem)
+    if (!this.wakeQueue.ask(p.id)) throw new Error(`${p.name}'s coordinator is already waking: one wake at a time.`)
+    const queued = !this.idle(p.id)
+    if (!queued) this.sendWake(p.id)
+    this.emit('snapshot')
+    return { name: p.name, queued }
+  }
+
+  /** the one wake: its heartbeat prompt, as Run now brought it, which the chat shows as one quiet line */
+  private sendWake(place: string, now = Date.now()) {
+    this.wakeQueue.take(place, now)
+    const text = this.heartbeats.beat(place, this.roleOf(place), now)
+    if (!text) {
+      this.wakeQueue.forget(place)
+      return
+    }
+    this.agents.send(place, hidden(text, 'heartbeat', { reason: 'run now' }), { ensure: this.starter(place), idle: true }).catch(() => this.wakeQueue.forget(place))
+    this.emit('snapshot')
+  }
+
+  /** what Run now is doing for a place, for the screens: nothing where it isn't one of this machine's on Autopilot */
+  private runNow(id: string): Place['runNow'] {
+    if (!has('autopilot') || !this.agents.reachable || this.peers?.owner(id) || this.places.mode(id) !== 'autopilot') return undefined
+    return this.wakeQueue.state(id) ?? 'ready'
   }
 
   /** does news wake this coordinator at once: always off Autopilot; on it, when its heartbeat's event rules name it.
@@ -1649,6 +1705,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (this.places.mode(a.place) === mode) return {}
         this.places.setMode(a.place, mode)
         this.heartbeats.switched(a.place, mode === 'autopilot')
+        // off: a Run now that waited has nothing to go through any more
+        if (mode !== 'autopilot') this.wakeQueue.forget(a.place)
         // a small card in the place's chat marks when the mode began; the coordinator is told quietly
         const id = `mode:${mode}:${Date.now()}`
         this.chats.post(a.place, { id, card: modeCard(id, mode) })
@@ -1657,6 +1715,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         this.emit('snapshot')
         return {}
       }
+      case 'heartbeat':
+        try {
+          if (a.op !== 'run') throw new Error('Only Run now: shepherdr heartbeat run [<space>] wakes it from a terminal.')
+          const { queued } = this.wake(a.place)
+          return { ok: true, queued }
+        } catch (e) {
+          return { ok: false, error: (e as Error).message }
+        }
       case 'model':
       case 'effort':
         return { ok: false, error: 'Use the + menu agent controls and Restart to apply model or effort changes. Chat and work are preserved.' }
@@ -2519,11 +2585,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // a space by its name, else the coordinator asking, else the space of its folder, else the home space. Its
         // checklist is printed and changed here, never named by path: the file is on the machine Shepherdr runs from
         const set = a1 === 'set'
-        const name = set ? rest[0] : a1
+        const run = a1 === 'run'
+        const name = set || run ? rest[0] : a1
         const named = name ? this.placeList().find((x) => x.name === name || x.id === name) : undefined
         if (name && !named) throw new Error(`No place ${name}`)
         const at = named ?? this.placeList().find((x) => x.id === ctx.chat) ?? this.placeList().find((x) => this.placeOfCommand(p, ctx) && x.id === placeId.space(this.placeOfCommand(p, ctx)!.name)) ?? this.placeList().find((x) => x.id === placeId.home())!
         if (this.peers?.owner(at.id)) throw new Error(`${at.name} is on another machine: ask there`)
+        // Run now: one heartbeat at once, the same as the pill's Run now and Settings' (refused while one wakes)
+        if (run) {
+          const r = this.wake(at.id)
+          return r.queued ? `${r.name}'s coordinator is busy: it wakes once its turn is over, and says in the chat whether it found anything.` : `Woke ${r.name}'s coordinator: one heartbeat now. It says in the chat whether it found anything.`
+        }
         if (set) {
           if (ctx.stdin === undefined) throw new Error("Give the whole new HEARTBEAT.md on stdin: shepherdr heartbeat set [<place>] < file, or with a heredoc. Empty stops the heartbeat.")
           this.heartbeats.write(at.id, ctx.stdin.trim() ? ctx.stdin : '')
@@ -2542,6 +2614,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           `${at.name}: Autopilot ${at.mode === 'autopilot' ? 'on' : 'off'}; heartbeat: ${when}. Wakes at once on: ${eventWords(h.on).toLowerCase()}${held.length ? ` (${held.length} news waiting for the heartbeat)` : ''}. (Settings: heartbeat.when, heartbeat.on, time.zone.)`,
           list ? `HEARTBEAT.md${existsSync(heartbeatFile(at.id)) ? '' : ' (the starting checklist: none saved yet)'}:\n${list}` : 'HEARTBEAT.md is empty: no heartbeat until it has a checklist.',
           `Change it: shepherdr heartbeat set${named ? ` ${at.name}` : ''} < file (the whole new text on stdin; empty stops the heartbeat), or the human in Settings → Autopilot.`,
+          `Wake it once now: shepherdr heartbeat run${named ? ` ${at.name}` : ''} (one wake at a time, only on Autopilot).`,
         ].join('\n\n')
       }
       case 'doctor': {

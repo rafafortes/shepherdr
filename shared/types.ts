@@ -78,6 +78,9 @@ export interface Place {
   githubRemote?: boolean
   /** herdr on its machine isn't answering, since then ("14:02"): its agents can't hear anything */
   herdrDown?: string
+  /** Autopilot's Run now from this screen, on this machine's own places on Autopilot (never another machine's): 'ready'
+   *  to wake its coordinator once, or the tap that waits ('queued') or whose wake runs ('waking'), where it is refused */
+  runNow?: 'ready' | 'queued' | 'waking'
 }
 
 /** A machine, as a heading over its spaces in the sidebar: no chat, nothing to open. How it is doing shows on it and in
@@ -390,6 +393,9 @@ export interface Message {
   card?: UpdateCard
   /** a turn's tool steps, as a few rows in plain words, just before its last reply */
   activity?: TurnActivity
+  /** an Autopilot wake's one quiet line: why it woke, and how it went once it answered with nothing ("Autopilot woke ·
+   *  Run now · nothing to do"): the chat draws it as a quiet row, never a card and never an alert */
+  pilot?: string
   /** a secret the agent asked for (shepherdr secret ask): a masked box to give it in */
   secret?: SecretAsk
   at?: number
@@ -925,6 +931,9 @@ export type Action =
   /** Mark up's notes from the shared browser, sent together into the task's chat */
   | { type: 'browser-notes'; chat: string; url: string; title?: string; viewport?: { w: number; h: number }; notes: BrowserNote[] }
   | { type: 'mode'; place: string; mode: Mode }
+  /** Autopilot's Run now: wake that place's coordinator once, now (or as soon as its turn is over); refused while a
+      wake waits or runs, and never for another machine's place */
+  | { type: 'heartbeat'; place: string; op: 'run' }
   /** a project's automation: pause or go on, run now, remove. Only agents add or change one, through the command. By
       its place, so another machine's goes there */
   | { type: 'automation'; place: string; op: 'pause' | 'resume' | 'run' | 'remove'; name: string }

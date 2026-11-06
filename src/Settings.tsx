@@ -7,7 +7,7 @@
 // the list; a wider screen keeps the list down its side.
 import clsx from 'clsx'
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type FC, type ReactNode } from 'react'
-import { machineName, type SettingRow, type SettingSection, type Snapshot } from '@shared/types.ts'
+import { machineName, type Place, type SettingRow, type SettingSection, type Snapshot } from '@shared/types.ts'
 import { act, registry, setUI, useSnap, useUI, type UI } from './kernel.ts'
 import { usePluginErrors } from './guard.tsx'
 import { PlacesToggle } from './Frame.tsx'
@@ -586,6 +586,46 @@ function Control({ row, phone, set, edit }: { row: SettingRow; phone: boolean; s
   return <Pick label={row.label} plain={phone} value={row.value} options={options} onPick={set} />
 }
 
+/** Settings → Autopilot for a space: Run now, the same control as the chat's, one heartbeat at once (or once its turn
+ *  is over); while one waits or runs it says Queued or Waking, and a refusal says why */
+function AutopilotRunNow({ place }: { place: Place }) {
+  const [busy, setBusy] = useState(false)
+  const [refused, setRefused] = useState('')
+  const state = place.runNow
+  if (!state) return null
+  const waiting = busy || state !== 'ready'
+  const run = async () => {
+    if (waiting) return
+    setBusy(true)
+    setRefused('')
+    try {
+      const r = (await act({ type: 'heartbeat', place: place.id, op: 'run' })) as { ok?: boolean; error?: string } | undefined
+      if (r?.ok === false) setRefused(r.error ?? 'It did not wake.')
+    } catch (e) {
+      setRefused((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <div className="flex items-center gap-3">
+        <Ghost onClick={() => void run()} disabled={waiting} aria-label={`Run now: wake ${place.name}'s coordinator for one heartbeat`}>
+          {state === 'queued' ? 'Queued' : state === 'waking' ? 'Waking' : 'Run now'}
+        </Ghost>
+        <Small className="text-pretty">
+          {state === 'queued' ? 'It wakes once its turn is over' : state === 'waking' ? 'Its wake runs now' : 'Wakes its coordinator once, now: one heartbeat, no waiting for the next'}
+        </Small>
+      </div>
+      {refused ? (
+        <Small role="status" className="text-pretty text-need-fg!">
+          {refused}
+        </Small>
+      ) : null}
+    </div>
+  )
+}
+
 /** a value set here that is what the row would follow anyway unsets it: it follows again */
 const follows = (row: SettingRow, value: string) => (row.inherits && value === row.inherits.value ? null : value)
 
@@ -594,6 +634,9 @@ const SEGMENTS = new Set(['notify', 'review.mustFix'])
 
 /** a page's settings: its rows under their group's heading (Tasks, Coordinators, Reviewer), and what it notes under them */
 function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phone: boolean; set: (key: string, value: string | null) => void; refused: (key: string) => string | undefined; clear: (key: string) => void; hint?: string }) {
+  // Autopilot's Run now on a space's page: what its chat's pill offers, where the heartbeat is set
+  const snap = useSnap()
+  const woken = page.name === 'Autopilot' && page.level?.startsWith('p:') ? snap?.places.find((p) => p.id === page.level) : undefined
   const groups: { name?: string; rows: Page['rows'] }[] = []
   for (const row of page.rows) {
     if (groups.length && groups.at(-1)!.name === row.group) groups.at(-1)!.rows.push(row)
@@ -638,6 +681,7 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
         {page.about ? <p className={clsx('text-pretty text-fg2', phone ? 'text-[0.9375rem]' : 'text-[0.8125rem]')}>{page.about}</p> : null}
         {hint ? <p className={clsx('text-pretty text-fg3', phone ? 'text-[0.9375rem]' : 'text-[0.8125rem]')}>{hint}</p> : null}
       </div>
+      {woken?.runNow ? <AutopilotRunNow place={woken} /> : null}
       {page === APPEARANCE ? <AppearancePick phone={phone} /> : null}
       {page.secrets && page.level ? <SecretsList level={page.level} secrets={page.secrets} phone={phone} /> : null}
       {page.View ? <page.View phone={phone} /> : null}

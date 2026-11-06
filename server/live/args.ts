@@ -61,6 +61,9 @@ Spaces (a folder on a machine with a name and its own coordinator; each machine 
                                                  heartbeat brings)
   shepherdr heartbeat set [<space>] < file       change its HEARTBEAT.md: the whole new text on stdin (empty stops
                                                  the heartbeat); the human edits it in Settings → Autopilot too
+  shepherdr heartbeat run [<space>]              wake it once now, with its heartbeat (what Run now does in Settings →
+                                                 Autopilot and at the chat's Autopilot pill): one wake per call,
+                                                 refused while one is already waking, and only on its own machine
 
 Tasks (coordinators add them; only when the human asks, or on Autopilot)
   shepherdr task add "<title>" --brief "<the brief>" [--space NAME] [--base BRANCH] [--after SHE-12,SHE-13] [--later]

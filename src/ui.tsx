@@ -64,6 +64,7 @@ export {
   PauseIcon,
   PencilIcon as RenameIcon,
   PhoneXMarkIcon as EndCallIcon,
+  PlayIcon,
   PlusIcon,
   PuzzlePieceIcon as PluginIcon,
   QuestionMarkCircleIcon as QuestionIcon,

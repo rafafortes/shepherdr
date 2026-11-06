@@ -87,6 +87,33 @@ describe("a place's mode", () => {
   })
 })
 
+describe('Autopilot Run now', () => {
+  test('one wake per tap, refused while one wakes and off Autopilot, and it leaves one quiet line in that chat only', async () => {
+    const w = new DemoWorld()
+    const p = w.snapshot().places[0]
+    const line = () => w.chat(p.chat).messages.filter((m) => m.pilot)
+    // off Autopilot: no Run now to offer, and one that asks anyway is refused
+    expect(p.runNow).toBeUndefined()
+    expect(await w.act({ type: 'heartbeat', place: p.id, op: 'run' })).toEqual({ ok: false, error: `${p.name} is not on Autopilot: switch it on first.` })
+    await w.act({ type: 'mode', place: p.id, mode: 'autopilot' })
+    expect(w.snapshot().places[0].runNow).toBe('ready')
+    // a tap wakes it once, and shows Waking until its turn is over
+    expect(await w.act({ type: 'heartbeat', place: p.id, op: 'run' })).toEqual({ ok: true, queued: false })
+    expect(line().map((m) => m.pilot)).toEqual(['Autopilot woke · Run now · checked, nothing new'])
+    expect(w.snapshot().places[0].runNow).toBe('waking')
+    // one at a time: a second tap while its wake runs is refused
+    expect(await w.act({ type: 'heartbeat', place: p.id, op: 'run' })).toEqual({ ok: false, error: `${p.name}'s coordinator is already waking: one wake at a time.` })
+    expect(line()).toHaveLength(1)
+    await until(() => w.snapshot().places[0].runNow === 'ready')
+    // another tap goes again: one wake per tap, never a card and never another chat's line
+    expect(await w.act({ type: 'heartbeat', place: p.id, op: 'run' })).toEqual({ ok: true, queued: false })
+    expect(line()).toHaveLength(2)
+    expect(line()[1].card).toBeUndefined()
+    expect(Object.entries(w.chats).filter(([k, c]) => k !== p.chat && c.messages.some((m) => m.pilot))).toEqual([])
+    await w.act({ type: 'mode', place: p.id, mode: 'regular' })
+  })
+})
+
 describe('attachments', () => {
   test('each file sent is a message of its own after the text, served only from where it was attached', async () => {
     const w = new DemoWorld()
