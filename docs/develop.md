@@ -23,7 +23,11 @@ On a machine where herdr runs as a systemd user service, give it (and the server
 `systemctl --user set-property herdr.service CPUWeight=1000`.
 
 The tests never touch the Shepherdr on this machine or its herdr: `test/preload.ts` gives each file a home of its own
-under `/tmp`, a socket that isn't there and no inherited pane, tab or workspace id. A browser test skips where its
+under `/tmp`, a socket that isn't there and no inherited pane, tab or workspace id. Every temporary folder a test makes
+comes from `test/tmp.ts` (`tmp('name')`, never a plain `mkdtempSync`): it is named after the run and the process that
+made it and removed when that file's tests end, failing or not, and a whole run fails if one of its own is left behind.
+What a killed run leaves (two hours old, its process gone: `/tmp` sits on the root disk and keeps it for a month) is
+swept at the start of the next one. A browser test skips where its
 browser can't start, and `bun run check:local` opens both browsers first and names what to install: Chromium's headless
 shell for every browser test, and WebKit for the iPhone ones, whose system libraries need root
 (`sudo bun x playwright-core install-deps webkit`).

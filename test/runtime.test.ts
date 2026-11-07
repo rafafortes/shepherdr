@@ -3,9 +3,9 @@ import { CodexReader, ClaudeReader, PiReader, LogTail } from '../server/live/rea
 import { sessionRuntime } from '../server/live/runtime.ts'
 import { codexRuntime } from '../server/live/codex-runtime.ts'
 import { HookLogs, pickHook } from '../server/live/readers/hooks.ts'
-import { mkdtempSync, writeFileSync, appendFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { writeFileSync, appendFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
 const at = 1_700_000_000_000
 const lines = (...rows: unknown[]) => rows.map((row, offset) => ({ text: JSON.stringify(row), offset }))
@@ -59,7 +59,7 @@ describe('CLI runtime observations, independent of launch policy', () => {
   })
 
   test('hooks whitelist runtime fields without secrets, ignore subagent effort and reset at session start', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'runtime-hook-'))
+    const dir = tmp('runtime-hook')
     try {
       const file = join(dir, 'hooks')
       const logs = new HookLogs()
@@ -75,7 +75,7 @@ describe('CLI runtime observations, independent of launch policy', () => {
   })
 
   test('replayed session metadata survives server restart; truncated logs replace old runtime', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'runtime-log-'))
+    const dir = tmp('runtime-log')
     try {
       const file = join(dir, 'log')
       writeFileSync(file, JSON.stringify(context('long-old-model-name', 'xhigh')) + '\n')

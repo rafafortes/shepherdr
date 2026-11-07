@@ -3,11 +3,11 @@
 // whose session is gone starts a new one — once each, and never for an agent that is working.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { execSync } from 'node:child_process'
-import { mkdtempSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-starts-'))
+process.env.SHEPHERDR_HOME = tmp('starts')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock')
 delete process.env.SHEPHERDR_MAIN
 const { LiveSource } = await import('../server/live/source.ts')
@@ -82,7 +82,7 @@ afterEach(() => {
 /** a task whose agent Shepherdr started once, and its own herdr agent standing at its pane */
 let repos = 0
 async function task(o: { title: string; kind?: string; screen: string; resumed?: boolean; exit?: boolean; gone?: boolean; waits?: boolean }) {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-starts-repo-'))
+  const dir = tmp('starts-repo')
   execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', { cwd: dir, shell: '/bin/sh' })
   const place = await src.places.add(dir, `starts${++repos}`)
   const t: TaskRec = src.engine.add({ project: place.name, title: o.title, by: 'test' })

@@ -3,9 +3,9 @@
 // of gh is here: auth status, pr list/view/create/edit/ready/checks/merge, run list, and api (a pull request's reviews and
 // comments, Actions' runs and jobs, a job's log).
 import { execFileSync } from 'node:child_process'
-import { closeSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { closeSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
 export interface FakePr {
   number: number
@@ -200,9 +200,9 @@ if (import.meta.main) {
       const at = headOf(p.head)
       if (opt('match-head-commit') && opt('match-head-commit') !== at) fail('Head branch was modified. Review and try the merge again.')
       // GitHub squashes the branch onto its base
-      const tmp = mkdtempSync(join(tmpdir(), 'fake-gh-merge-'))
+      const scratch = tmp('fake-gh-merge')
       try {
-        const g = (...a: string[]) => execFileSync('git', a, { cwd: tmp, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 })
+        const g = (...a: string[]) => execFileSync('git', a, { cwd: scratch, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 })
         g('clone', '-q', '-b', p.base, st.origin, '.')
         g('fetch', '-q', 'origin', p.head)
         try {
@@ -213,7 +213,7 @@ if (import.meta.main) {
         g('-c', 'user.email=gh@t', '-c', 'user.name=GitHub', 'commit', '-q', '-m', `${opt('subject') ?? p.title}\n\n${opt('body') ?? ''}`.trim())
         g('push', '-q', 'origin', `HEAD:refs/heads/${p.base}`)
       } finally {
-        rmSync(tmp, { recursive: true, force: true })
+        rmSync(scratch, { recursive: true, force: true })
       }
       Object.assign(p, { state: 'MERGED', at })
       out(`✓ Squashed and merged pull request #${p.number}`)

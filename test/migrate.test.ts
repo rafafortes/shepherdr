@@ -3,9 +3,9 @@
 // of records from before (SHEPHERDR_HOME), by Places as the live source makes it.
 import { describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
 const root = join(import.meta.dir, '..')
 const HOME_ID = 'p:main:~'
@@ -20,14 +20,14 @@ function start(home: string): { retire: string[] } {
 
 describe('moving to spaces, once', () => {
   test("All machines' and the machine's coordinators: their chats, modes, marks, heartbeat, pins and artifacts move to the home space", () => {
-    const home = mkdtempSync(join(tmpdir(), 'shep-migrate-'))
+    const home = tmp('migrate')
     const put = (name: string, v: unknown) => {
       mkdirSync(join(home, name, '..'), { recursive: true })
       writeFileSync(join(home, name), typeof v === 'string' ? v : JSON.stringify(v))
     }
     const read = (name: string) => JSON.parse(readFileSync(join(home, name), 'utf8'))
     // the coordinators' session logs: the machine's older than All machines'
-    const logs = mkdtempSync(join(tmpdir(), 'shep-migrate-logs-'))
+    const logs = tmp('migrate-logs')
     const log = (name: string, at: number) => {
       const f = join(logs, name)
       writeFileSync(f, '{}\n')
@@ -115,7 +115,7 @@ describe('moving to spaces, once', () => {
   })
 
   test('a fresh install has nothing to move: no spaces yet, nothing to close', () => {
-    const home = mkdtempSync(join(tmpdir(), 'shep-migrate-new-'))
+    const home = tmp('migrate-new')
     expect(start(home)).toEqual({ retire: [] })
     expect(JSON.parse(readFileSync(join(home, 'spaces.json'), 'utf8'))).toEqual([])
     expect(start(home)).toEqual({ retire: [] })

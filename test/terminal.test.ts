@@ -1,12 +1,12 @@
 // The terminal is drawn at the pane's own size: herdr's lines go in as one write, never wrapped, and the font scales to
 // the pane's columns.
 import { afterAll, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { rmSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { colsOf, fitFont, frame, MAX, MIN, PAD } from '../plugins/terminal/screen.ts'
 import { herdr } from '../server/live/herdr.ts'
+import { tmp } from './tmp.ts'
 
 describe('the screen', () => {
   test("its width is the pane's; from an older machine (no size), the widest line without its colours", () => {
@@ -36,7 +36,7 @@ describe('the screen', () => {
 })
 
 describe("herdr's pane size", () => {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-sock-'))
+  const dir = tmp('sock')
   const path = join(dir, 'herdr.sock')
   const asked: { method: string; params: Record<string, unknown> }[] = []
   const server = createServer((sock) => {

@@ -1,11 +1,11 @@
 // Isolated voice tools: no agents, servers, user files, microphone or provider requests.
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Action, Chat, Place, Snapshot, Task } from '../shared/types.ts'
 import { Emitter } from '../server/source.ts'
-process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'voice-routing-'))
+import { tmp } from './tmp.ts'
+process.env.SHEPHERDR_HOME = tmp('voice-routing')
 const { LiveSource } = await import('../server/live/source.ts')
 const { Machines } = await import('../server/live/machines.ts')
 const { HOST } = await import('../server/live/places.ts')
@@ -135,7 +135,6 @@ describe('voice routes', () => {
     expect(f.peer.watching.chats).toEqual([])
   })
 })
-
 
 test('provider close and explicit call end both release the reply subscription once', async () => {
   const { startVoice } = await import('../server/live/voice.ts')

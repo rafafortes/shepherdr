@@ -1,26 +1,26 @@
 // Run before the tests in every checkout (bunfig.toml): a fresh worktree, or one whose lockfile moved since its last
 // install, gets its dependencies and plugin registries first, and plain bun test goes the fast way (scripts/test.ts).
+import { afterAll } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeRegistries } from '../scripts/build-plugins.ts'
 import { once } from './once.ts'
+import { cleanup, sweep, tmp } from './tmp.ts'
 
 // Tests never touch the Shepherdr that runs on this machine: its data folder, its server and its chats. A test file
 // that wants a home of its own sets one before it imports the store; until then, and in every file that doesn't,
-// it is a fresh empty folder (bun test without --parallel shares the store between files).
-// (and the folders of runs gone an hour ago go, since a test process doesn't always get to clear its own)
-for (const n of readdirSync(tmpdir()))
-  if (n.startsWith('shep-test-home-'))
-    try {
-      if (Date.now() - statSync(join(tmpdir(), n)).mtimeMs > 3_600_000) rmSync(join(tmpdir(), n), { recursive: true, force: true })
-    } catch {}
-const home = mkdtempSync(join(tmpdir(), 'shep-test-home-'))
+// it is a fresh empty folder (bun test without --parallel shares the store between files). test/tmp.ts removes it with
+// the rest when the file's tests end; a run killed before that leaves its sweep to the next one, which scripts/test.ts
+// does once for a whole run and a file run by hand does here.
+if (!process.env.SHEPHERDR_TEST_RUN) sweep()
+const home = tmp('test-home')
 process.env.SHEPHERDR_HOME = home
+// bun starts every test file in a worker of its own and ends it without running what is registered on the process: the
+// folders go when its last test does, failing or not (a run that ends any other way keeps the sweep as its net)
+afterAll(cleanup)
 // Tests are a server with a home of its own that does start agents: a fake herdr, or something spied on (launch-policy.ts)
 process.env.SHEPHERDR_LAUNCH_AGENTS = '1'
-process.on('exit', () => rmSync(home, { recursive: true, force: true }))
 // Nor do they reach the herdr of the machine they run on, or say they are panes of it: the socket is a path that isn't
 // there (a test that wants a herdr listens on one of its own, as test/launch-pending.test.ts does), and no inherited
 // pane, tab or workspace id says otherwise.
@@ -63,3 +63,11 @@ if (!process.env.SHEPHERDR_TEST_RUNNER && at > 0 && !cmd.some((a) => /^--(parall
   const r = Bun.spawnSync([process.execPath, join(root, 'scripts', 'test.ts'), ...cmd.slice(at + 1)], { cwd: process.cwd(), stdio: ['inherit', 'inherit', 'inherit'] })
   process.exit(r.exitCode ?? 1)
 }
+
+// a test file's process stopped by hand, by a check's timeout or by the harness goes with its folders; scripts/test.ts
+// never loads this file, so its own handlers, which kill the tests and the browser, are the ones that run there
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const)
+  process.on(signal, () => {
+    cleanup()
+    process.exit(1)
+  })

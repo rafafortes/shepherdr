@@ -1,9 +1,8 @@
 // herdr's worktree API, standing in for herdr on real git: a linked worktree's workspace nests under its repo's own,
 // which it opens when none is open; removing one is git worktree remove, never forced.
 import { execSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
+import { tmp } from './tmp.ts'
 
 // a git that stalls names itself: 30 s instead of the whole test's timeout, with nothing to say where it was (a
 // timeout on its own only says "ETIMEDOUT")
@@ -24,7 +23,7 @@ export function fakeHerdr() {
   const agentPanes = new Set<string>()
   const busy = new Set<string>()
   let down = false
-  const root = mkdtempSync(join(tmpdir(), 'shep-herdr-'))
+  const root = tmp('herdr')
   const find = (id: string) => spaces.find((w) => w.workspace_id === id)
   const drop = (id: string) => {
     const i = spaces.findIndex((w) => w.workspace_id === id)

@@ -2,10 +2,10 @@
 // agent-browser, standing in for the real one. Run as a command: the commands Shepherdr runs, answered from a state
 // file the test keeps (FAKE_AGENT_BROWSER: a folder with state.json; every call is logged to calls.log with the
 // session it was for). Imported: fakeAgentBrowser() starts its stream and DevTools servers and keeps that folder.
-import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { appendFileSync, chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ServerWebSocket } from 'bun'
+import { tmp } from './tmp.ts'
 
 /** what the page says about any element tapped */
 export const PICKED = { element: 'button "Save"', selector: 'form > button.primary', text: '', box: { x: 10, y: 20, w: 100, h: 30 }, at: { x: 50, y: 435 }, fixed: false, frame: false }
@@ -14,7 +14,7 @@ export const PICKED = { element: 'button "Save"', selector: 'form > button.prima
 export function fakeAgentBrowser() {
   const bin = join(import.meta.dir, 'fake-agent-browser.ts')
   chmodSync(bin, 0o755)
-  const dir = mkdtempSync(join(tmpdir(), 'shep-ab-'))
+  const dir = tmp('ab')
   const streamSocks = new Set<ServerWebSocket<unknown>>()
   const fromPanel: Record<string, unknown>[] = []
   const stream = Bun.serve({

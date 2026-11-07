@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, existsSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { LinkBackoff, WorkerHealth } from '../server/live/recovery.ts'
 import { EventEmitter } from 'node:events'
@@ -8,6 +7,7 @@ import { Subscription } from '../server/live/herdr.ts'
 import { Tunnel } from '../server/live/tunnel.ts'
 import { Machines } from '../server/live/machines.ts'
 import type { Snapshot } from '../shared/types.ts'
+import { tmp } from './tmp.ts'
 
 const until = async (f: () => boolean) => {
   for (let i = 0; i < 400 && !f(); i++) await Bun.sleep(10)
@@ -44,7 +44,7 @@ describe('machine link recovery', () => {
   })
 
   test('failed SSH/name lookup recovers inside the same worker with fresh bridge connections', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-dns-recovery-'))
+    const dir = tmp('dns-recovery')
     const root = join(import.meta.dir, '..')
     // Executed in an isolated child: never real SSH, DNS, sockets or the live store.
     writeFileSync(join(dir, 'ssh'), `#!/usr/bin/env bun

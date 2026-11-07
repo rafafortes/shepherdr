@@ -1,13 +1,13 @@
 // The human's own plugins (~/.shepherdr/plugins): added, replacing a base one of the same name, turned off, and one that
 // fails skipped without taking the rest down.
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pluginCatalog, readStaged, stageUserPlugins, writeRegistries } from '../scripts/build-plugins.ts'
 import { pluginsPage, setPluginOn } from '../server/plugins.ts'
 import { HOME } from '../server/store.ts'
 import { guardFn, setupGuarded } from '../src/guard.tsx'
+import { tmp } from './tmp.ts'
 
 function file(path: string, text = '') {
   mkdirSync(join(path, '..'), { recursive: true })
@@ -16,8 +16,8 @@ function file(path: string, text = '') {
 
 /** a build with base plugins a and b, and a home with the human's own: b (in b's place) and c */
 function fixture() {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-plugins-'))
-  const home = mkdtempSync(join(tmpdir(), 'shep-plugins-home-'))
+  const dir = tmp('plugins')
+  const home = tmp('plugins-home')
   file(join(dir, 'plugins.json'), JSON.stringify({ plugins: ['a', 'b'] }))
   file(join(dir, 'plugins', 'a', 'client.tsx'))
   file(join(dir, 'plugins', 'b', 'client.tsx'))

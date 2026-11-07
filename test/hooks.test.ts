@@ -3,11 +3,11 @@
 // a permission granted and a plain question, a plan, the end of the session.
 import { describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, mkdtempSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { copyFileSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME ??= mkdtempSync(join(tmpdir(), 'shep-hooks-'))
+process.env.SHEPHERDR_HOME ??= tmp('hooks')
 const { foldHook, hookSettings, HookLogs, HOOK_EVENTS, pickHook, record } = await import('../server/live/readers/hooks.ts')
 const { Agents, statusFrom } = await import('../server/live/agents.ts')
 const { Chats } = await import('../server/live/chats.ts')
@@ -206,7 +206,7 @@ describe('the one mapping: what it reports over what herdr reads off its screen'
 
 describe('recording', () => {
   test('a settings file of its own runs the recorder on every event; each launch starts over', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-rec-'))
+    const dir = tmp('rec')
     const { settings, events } = hookSettings(dir, "it's-1")
     const s = JSON.parse(readFileSync(settings, 'utf8'))
     expect(Object.keys(s.hooks)).toEqual([...HOOK_EVENTS])
@@ -233,7 +233,7 @@ describe('recording', () => {
   })
 
   test('a file grown too big turns over: what it said stays, and the new file is read from its start', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-rec-'))
+    const dir = tmp('rec')
     const f = join(dir, 'a.jsonl')
     const logs = new HookLogs()
     record(f, INPUTS[1], 1)
@@ -247,7 +247,7 @@ describe('recording', () => {
   })
 
   test('the file is read on from where it was, a half-written line waits for its end', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-rec-'))
+    const dir = tmp('rec')
     const f = join(dir, 'a.jsonl')
     const logs = new HookLogs()
     record(f, INPUTS[1], 1)
@@ -273,7 +273,7 @@ function oneAgent(events: string, log: string, herdrSays = 'idle') {
 
 describe('a turn cut short runs no hook: its transcript says it is over', () => {
   test('a permission prompt turned down', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-cut-'))
+    const dir = tmp('cut')
     const events = join(dir, 'e.jsonl')
     const log = join(dir, 'log.jsonl')
     const lines = readFileSync(join(SAMPLES, 'claude-denied.jsonl'), 'utf8').trim().split('\n')
@@ -296,14 +296,14 @@ describe('a turn cut short runs no hook: its transcript says it is over', () => 
   })
 
   test('an agent whose hooks said nothing yet is read off its screen', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-cut-'))
+    const dir = tmp('cut')
     const { a, key } = oneAgent(join(dir, 'none.jsonl'), join(dir, 'none-log.jsonl'), 'working')
     expect(a.said(key)).toBeUndefined()
     expect(a.status(key)).toBe('working')
   })
 
   test('its turn ended with helpers running: idle, with background work, though herdr reads work off its screen', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-bg-'))
+    const dir = tmp('bg')
     const events = join(dir, 'e.jsonl')
     INPUTS.slice(0, 8).forEach((input, i) => record(events, input, 1000 + i))
     const { a, key } = oneAgent(events, join(dir, 'log.jsonl'), 'working')
@@ -315,7 +315,7 @@ describe('a turn cut short runs no hook: its transcript says it is over', () => 
 describe('what it has not read yet', () => {
   const words = (o: { text: string }[]) => o.map((x) => x.text)
   test('what waits to go in, and what was typed in during its turn until its log has it', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-unseen-'))
+    const dir = tmp('unseen')
     const log = join(dir, 'log.jsonl')
     const lines = readFileSync(join(SAMPLES, 'claude-denied.jsonl'), 'utf8').trim().split('\n')
     copyFileSync(join(SAMPLES, 'claude-denied.jsonl'), log)

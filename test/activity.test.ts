@@ -2,8 +2,7 @@
 // on, its background work, and their output read only when opened. Words, rows, folding, and a chat built from logs in
 // each CLI's exact format.
 import { describe, expect, test } from 'bun:test'
-import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { glance, jobsWords, rowsOf, say, testResult, took } from '../shared/activity.ts'
 import { activityOf, cutOutput, lineOf } from '../server/live/activity.ts'
@@ -12,8 +11,9 @@ import { notices } from '../server/live/readers/claude.ts'
 import { claudeStep, codexItem, commandSay, commandWords } from '../server/live/readers/steps.ts'
 import type { Step } from '../shared/types.ts'
 import type { LogEvent } from '../server/live/readers/types.ts'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME ??= mkdtempSync(join(tmpdir(), 'shep-act-'))
+process.env.SHEPHERDR_HOME ??= tmp('act')
 const { Chats } = await import('../server/live/chats.ts')
 
 describe('words', () => {
@@ -245,7 +245,7 @@ describe('codex reader: steps and background work', () => {
 /* ---------- a chat built from a log ---------- */
 
 function world(kind: 'claude' | 'codex', status: () => string, runs: () => string | undefined = () => undefined) {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-act-log-'))
+  const dir = tmp('act-log')
   const log = join(dir, `${S}.jsonl`)
   writeFileSync(log, '')
   const agents = {

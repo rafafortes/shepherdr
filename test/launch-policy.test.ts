@@ -2,11 +2,11 @@
 // starts no agent unless it is told to (docs/develop.md, skill/shepherdr-agent). These are its three rules.
 import { describe, expect, spyOn, test } from 'bun:test'
 import { afterAll } from 'bun:test'
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-const proof = mkdtempSync(join(tmpdir(), 'shep-proof-home-'))
+const proof = tmp('proof-home')
 afterAll(() => rmSync(proof, { recursive: true, force: true }))
 process.env.SHEPHERDR_HOME = proof
 // nothing here reaches a real herdr, even where a launch gets past the rule

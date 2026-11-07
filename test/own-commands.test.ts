@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { OWN_VERBS, ownCall, ownDecision } from '../server/live/readers/own-commands.ts'
 import { hookSettings } from '../server/live/readers/hooks.ts'
+import { tmp } from './tmp.ts'
 
 const command = '/opt/shepherdr/bin/shepherdr'
 const chat = 'EX-1/Agent'
@@ -110,7 +110,7 @@ describe("an agent's own shepherdr command", () => {
 
 describe('the settings file a launch gets', () => {
   test('carries the hook that allows its own command, and only for a launch that names one', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-own-'))
+    const dir = tmp('own')
     try {
       const { settings } = hookSettings(dir, 'shep-ex-1', { command, chat })
       const s = JSON.parse(readFileSync(settings, 'utf8'))
@@ -131,7 +131,7 @@ describe('the settings file a launch gets', () => {
   })
 
   test('runs the hook it wrote: it allows that call and leaves every other to the prompt', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-own-'))
+    const dir = tmp('own')
     try {
       const { settings } = hookSettings(dir, 'shep-ex-1', { command, chat })
       const s = JSON.parse(readFileSync(settings, 'utf8'))

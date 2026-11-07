@@ -1,10 +1,10 @@
 // The live source's own rules: chat lines, terminal menus, triggers, settings, project keys.
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-test-'))
+process.env.SHEPHERDR_HOME = tmp('test')
 
 const { agentLines, excerpt, findQuoted, line, matches, parseReply, parseUserLine, userLines } = await import('../server/live/chatlines.ts')
 const { parseMenu } = await import('../server/live/chats.ts')

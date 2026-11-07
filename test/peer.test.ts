@@ -1,12 +1,12 @@
 // A message another agent sent: its own row in the chat, naming the sender it declared. Never the human's words, and
 // never vouched for: the sender is only what the other side wrote.
 import { describe, expect, spyOn, test } from 'bun:test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fromAgent, fromAgentLine, fromAgents } from '../server/live/chatlines.ts'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME ??= mkdtempSync(join(tmpdir(), 'shep-peer-'))
+process.env.SHEPHERDR_HOME ??= tmp('peer')
 const { Chats } = await import('../server/live/chats.ts')
 
 const sender = { name: 'SHE-17 agent', pane: 'w7R:p2', space: 'shepherdr', task: 'SHE-17' }
@@ -66,7 +66,7 @@ const cuser = (uuid: string, content: unknown, extra: object = {}) => ({
 
 /** a chat read from one log file, in that CLI's own format, with this machine's names for the senders */
 function chatWith(kind: 'claude' | 'pi', lines: object[]) {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-peer-log-'))
+  const dir = tmp('peer-log')
   const log = join(dir, `${S}.jsonl`)
   writeFileSync(log, lines.map((o) => `${JSON.stringify(o)}\n`).join(''))
   const agents = {
@@ -150,7 +150,7 @@ describe('a message another agent sent, in the chat', () => {
 
 describe('shepherdr task tell says who sent it', () => {
   test("an agent's shell names its chat, pane and space; a pane herdr says runs an agent is one too; a plain terminal is not", async () => {
-    const home = mkdtempSync(join(tmpdir(), 'shep-peer-tell-'))
+    const home = tmp('peer-tell')
     process.env.SHEPHERDR_HOME = home
     process.env.HERDR_SOCKET_PATH = join(home, 'no-herdr.sock')
     const [{ LiveSource }, { herdr }, { placeId }] = await Promise.all([

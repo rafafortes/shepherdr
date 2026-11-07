@@ -141,11 +141,15 @@ async function renew() {
 
 /** the supervisor's new code and everything it imports load (as a release's server is checked, update.ts) */
 async function loads() {
+  // the scratch folder goes whatever the build says, and whether it answers or throws
   const scratch = mkdtempSync(join(tmpdir(), 'shepherdr-check-'))
-  const r = await runCmd([process.execPath, 'build', import.meta.path, '--target', 'bun', '--outdir', scratch], ROOT)
-  rmSync(scratch, { recursive: true, force: true })
-  if (!r.ok) console.log(`the supervisor's new code doesn't load; it goes on as it is\n${r.out}`)
-  return r.ok
+  try {
+    const r = await runCmd([process.execPath, 'build', import.meta.path, '--target', 'bun', '--outdir', scratch], ROOT)
+    if (!r.ok) console.log(`the supervisor's new code doesn't load; it goes on as it is\n${r.out}`)
+    return r.ok
+  } finally {
+    rmSync(scratch, { recursive: true, force: true })
+  }
 }
 
 watch(join(ROOT, 'plugins.json'), () => soon(true))

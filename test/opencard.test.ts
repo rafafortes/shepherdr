@@ -1,11 +1,10 @@
 // A card Shepherdr posted for an agent (its plan, a choice card) is why it waits on you only while it is unanswered
 // and nothing was written to it since.
 import { expect, test } from 'bun:test'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME ??= mkdtempSync(join(tmpdir(), 'shep-card-'))
+process.env.SHEPHERDR_HOME ??= tmp('card')
 const { Chats } = await import('../server/live/chats.ts')
 
 test('an open plan or choice card, until it is answered or you write', async () => {

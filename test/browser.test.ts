@@ -1,11 +1,11 @@
 // The shared browser: the server's relay between a task's agent-browser session and the Browser panel (on a stand-in
 // for agent-browser, its stream and its DevTools), the notes Annotate mode sends, and the panel's arithmetic.
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { cpSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-const home = mkdtempSync(join(tmpdir(), 'shep-browser-'))
+const home = tmp('browser')
 process.env.SHEPHERDR_HOME = home
 const { Browsers, browserEnv, profileOf, usedMark, chromesIn, elapsed } = await import('../server/live/browser.ts')
 const { describe: describeEl } = await import('../server/live/pick.ts')
@@ -286,13 +286,13 @@ describe('a task’s browser', () => {
   })
 
   test('each agent command marks when its browser was used; Shepherdr’s own commands and other sessions don’t', async () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'shep-mark-'))
+    const folder = tmp('mark')
     // the helper's wrapper on another machine, with a stand-in for the binary next to it
-    mkdirSync(join(tmp, 'bin'))
-    cpSync(join(import.meta.dir, '..', 'helper', 'agent-browser'), join(tmp, 'bin', 'agent-browser'))
-    writeFileSync(join(tmp, 'bin', 'agent-browser-bin'), '#!/bin/sh\necho "ran $* with $AGENT_BROWSER_ARGS"\n', { mode: 0o755 })
-    for (const bin of [join(tmp, 'bin', 'agent-browser'), join(import.meta.dir, '..', 'bin', 'agent-browser')]) {
-      const profile = join(tmp, String(Math.random()), 'browser', 'SHE-5')
+    mkdirSync(join(folder, 'bin'))
+    cpSync(join(import.meta.dir, '..', 'helper', 'agent-browser'), join(folder, 'bin', 'agent-browser'))
+    writeFileSync(join(folder, 'bin', 'agent-browser-bin'), '#!/bin/sh\necho "ran $* with $AGENT_BROWSER_ARGS"\n', { mode: 0o755 })
+    for (const bin of [join(folder, 'bin', 'agent-browser'), join(import.meta.dir, '..', 'bin', 'agent-browser')]) {
+      const profile = join(folder, String(Math.random()), 'browser', 'SHE-5')
       const run = (env: Record<string, string>) => Bun.spawnSync(['sh', bin, '--version'], { env: { ...process.env, ...env }, stdout: 'pipe' })
       run({})
       run({ AGENT_BROWSER_PROFILE: profile, SHEPHERDR_OWN: '1' })

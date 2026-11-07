@@ -126,10 +126,14 @@ export async function buildAndCheck(dir: string, bun: string): Promise<{ error: 
 
 /** The server runs from source: check it and everything it imports still loads. */
 export async function checkServer(dir: string, bun: string): Promise<{ error: string; out: string } | null> {
+  // the scratch folder goes whatever the build says, and whether it answers or throws
   const scratch = mkdtempSync(join(tmpdir(), 'shepherdr-check-'))
-  const s = await run([bun, 'build', join(dir, 'server', 'main.ts'), '--target', 'bun', '--outdir', scratch], dir)
-  rmSync(scratch, { recursive: true, force: true })
-  return s.ok ? null : { error: `the server code doesn't load:\n${tail(s.out)}`, out: s.out }
+  try {
+    const s = await run([bun, 'build', join(dir, 'server', 'main.ts'), '--target', 'bun', '--outdir', scratch], dir)
+    return s.ok ? null : { error: `the server code doesn't load:\n${tail(s.out)}`, out: s.out }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true })
+  }
 }
 
 /** what a failed build said about one of the human's own plugins: from the line that names it, its paths as the human
