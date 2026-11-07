@@ -1,14 +1,14 @@
 // Adding a project from the sidebar: only folders in home are listed or made, however the path is spelled.
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { listFolders, makeRepo, resolveInHome } from '../server/live/folders.ts'
 import { nameProblem, slugify } from '../shared/types.ts'
 import { git } from '../server/live/engine/git.ts'
+import { tmp } from './tmp.ts'
 
-const outside = realpathSync(mkdtempSync(join(tmpdir(), 'shep-out-')))
-const h = realpathSync(mkdtempSync(join(tmpdir(), 'shep-home-')))
+const outside = realpathSync(tmp('out'))
+const h = realpathSync(tmp('home'))
 mkdirSync(join(h, 'dev', 'old', '.git'), { recursive: true })
 mkdirSync(join(h, 'dev', 'new', '.git'), { recursive: true })
 mkdirSync(join(h, 'dev', 'added', '.git'), { recursive: true })

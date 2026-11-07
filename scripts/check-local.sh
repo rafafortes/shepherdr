@@ -176,6 +176,9 @@ show_failure() { # the reasons a step failed
     tests)
       shown=$(failing_tests "$log")
       [ -n "$shown" ] && { echo "Failing tests:"; echo "$shown" | sed 's/^/  /'; }
+      # a run that leaves temporary folders in /tmp fails with no failing test to name: say what it left (test/tmp.ts)
+      left=$(sed -n '/^This run left [0-9]* temporary folder/,/^$/p' "$log" | head -22)
+      [ -n "$left" ] && { echo "Left behind:"; echo "$left" | sed 's/^/  /'; shown=$left; }
       ;;
     types)
       shown=$(grep -E 'error TS[0-9]+' "$log" | sort -u | head -8)

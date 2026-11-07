@@ -1,15 +1,15 @@
 import { afterEach, expect, test } from 'bun:test'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { dependenciesPresent, prepare } from '../scripts/prepare.ts'
+import { tmp } from './tmp.ts'
 
 const dirs: string[] = []
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
 
 // All installation/build effects stay in a scratch checkout. No live install, server or state is involved.
 function fixture(mode = '') {
-  const root = mkdtempSync(join(tmpdir(), 'shep-prepare-'))
+  const root = tmp('prepare')
   dirs.push(root)
   writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: { example: '1.0.0' } }))
   writeFileSync(join(root, 'mode'), mode)
@@ -122,7 +122,6 @@ test('failed preparation leaves an existing server answering and reports failure
     await old.exited
   }
 })
-
 
 test('an exports-only package with missing files is incomplete', async () => {
   const f = fixture()

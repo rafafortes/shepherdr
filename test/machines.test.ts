@@ -2,21 +2,21 @@
 // The SSH link itself (box.ts, machines.ts) was checked by hand against a machine saved in herdr.
 import { describe, expect, test } from 'bun:test'
 import { spawn, spawnSync } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseHookLines } from '../server/live/readers/hooks.ts'
 import { helperFiles, helperVersion } from '../server/live/install.ts'
 import { Mirror, mirrorHomes } from '../server/live/mirror.ts'
 import { carryClaudeSession } from '../server/live/agents.ts'
 import type { BoxInfo } from '../server/live/box.ts'
+import { tmp } from './tmp.ts'
 
 const root = join(import.meta.dir, '..')
 const perl = spawnSync('perl', ['-MJSON::PP', '-e1']).status === 0
 
 describe('the helper', () => {
   test.if(perl)('hook.pl records the hook as it came, with when; the main machine cuts it down as it reads', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-hook-'))
+    const dir = tmp('hook')
     const f = join(dir, 'a.jsonl')
     const input = { hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Ship it?' }] }, tool_response: { big: 'x'.repeat(1000) } }
     expect(spawnSync('perl', [join(root, 'helper', 'hook.pl'), f], { input: JSON.stringify(input) }).status).toBe(0)
@@ -27,7 +27,7 @@ describe('the helper', () => {
   })
 
   test.if(perl)('mirror.pl sends what a followed file gains, and a file that starts over from its start', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-mirror-'))
+    const dir = tmp('mirror')
     const f = join(dir, 'log.jsonl')
     writeFileSync(f, 'one\n')
     const p = spawn('perl', [join(root, 'helper', 'mirror.pl')])
@@ -47,7 +47,7 @@ describe('the helper', () => {
   })
 
   test.if(perl)('mirror.pl sends what an agent writes now before the rest of a backlog', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-mirror-'))
+    const dir = tmp('mirror')
     const big = join(dir, 'old.jsonl')
     const live = join(dir, 'live.jsonl')
     writeFileSync(big, 'x'.repeat(16 << 20))
@@ -68,8 +68,8 @@ describe('the helper', () => {
   })
 
   test.if(perl)('a mirror started again sends only what its copy lacks', async () => {
-    const there = mkdtempSync(join(tmpdir(), 'shep-mirror-'))
-    const here = mkdtempSync(join(tmpdir(), 'shep-copy-'))
+    const there = tmp('mirror')
+    const here = tmp('copy')
     const log = join(there, 'log.jsonl')
     writeFileSync(log, 'one\n')
     const copy = (f: string) => join(here, f)
@@ -109,7 +109,7 @@ describe('the helper', () => {
   })
 
   test.if(perl)('the shepherdr command there says plainly when the way back is down', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-shim-'))
+    const dir = tmp('shim')
     mkdirSync(join(dir, 'bin'))
     writeFileSync(join(dir, 'bin', 'shepherdr'), readFileSync(join(root, 'helper', 'shepherdr')), { mode: 0o755 })
     const r = spawnSync('perl', [join(dir, 'bin', 'shepherdr'), 'status'], { encoding: 'utf8' })
@@ -120,7 +120,7 @@ describe('the helper', () => {
 
 describe('a machine run from the main one', () => {
   test("its home space's coordinator runs in its home folder there, and its log is read from the mirror of that machine's", () => {
-    const home = mkdtempSync(join(tmpdir(), 'shep-worker-'))
+    const home = tmp('worker')
     const box: BoxInfo = { label: 'vm-demo', target: 'vm-demo', session: 'default', herdr: 'herdr', home: '/home/exedev', path: '/usr/bin:/bin', os: 'Linux' }
     const code = `const { Places } = await import(${JSON.stringify(join(root, 'server/live/places.ts'))}); const { claudeLogPath } = await import(${JSON.stringify(join(root, 'server/live/readers/find.ts'))}); const c = new Places().coordinator('p:vm-demo:~'); console.log(JSON.stringify({ cwd: c?.cwd, log: claudeLogPath(c?.cwd ?? '', 'abc') }))`
     const r = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', env: { ...process.env, ...mirrorHomes(home, box), SHEPHERDR_BOX: JSON.stringify(box), SHEPHERDR_HOME: home, SHEPHERDR_MACHINE: 'vm-demo' } })
@@ -128,7 +128,7 @@ describe('a machine run from the main one', () => {
   })
 
   test("its coordinator's heartbeat holds no path of the main machine: the checklist comes in it", () => {
-    const home = mkdtempSync(join(tmpdir(), 'shep-worker-'))
+    const home = tmp('worker')
     const box: BoxInfo = { label: 'vm-demo', target: 'vm-demo', session: 'default', herdr: 'herdr', home: '/home/other', path: '/usr/bin:/bin', os: 'Linux' }
     const code = `const { Heartbeats } = await import(${JSON.stringify(join(root, 'server/live/heartbeat.ts'))}); const h = new Heartbeats(); const first = h.beat('p:vm-demo:tor', 'space'); h.write('p:vm-demo:tor', '- Check the ROM builds'); console.log(JSON.stringify([first, h.beat('p:vm-demo:tor', 'space'), h.beat('p:vm-demo:~', 'home')]))`
     const r = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', env: { ...process.env, ...mirrorHomes(home, box), SHEPHERDR_BOX: JSON.stringify(box), SHEPHERDR_HOME: home, SHEPHERDR_MACHINE: 'vm-demo' } })
@@ -145,12 +145,12 @@ describe('a machine run from the main one', () => {
   })
 
   test("an agent's artifact commands there name no path of the main machine: the pictures and pages are copied over", () => {
-    const home = mkdtempSync(join(tmpdir(), 'shep-worker-'))
-    const there = mkdtempSync(join(tmpdir(), 'shep-there-'))
-    const files = mkdtempSync(join(tmpdir(), 'shep-there-files-'))
+    const home = tmp('worker')
+    const there = tmp('there')
+    const files = tmp('there-files')
     writeFileSync(join(files, 'board.html'), '<h1>Board</h1>')
     // ssh to the machine runs its command here, so its files are these folders
-    const bin = mkdtempSync(join(tmpdir(), 'shep-ssh-'))
+    const bin = tmp('ssh')
     writeFileSync(join(bin, 'ssh'), '#!/bin/sh\nfor a; do last=$a; done\nexec /bin/sh -c "$last"\n', { mode: 0o755 })
     const box: BoxInfo = { label: 'vm-demo', target: 'vm-demo', session: 'default', herdr: '/nonexistent/herdr', home: there, path: `${bin}:/usr/bin:/bin`, os: 'Linux' }
     const code = `
@@ -182,10 +182,10 @@ describe('a machine run from the main one', () => {
   })
 
   test("its shepherdr set and unset for Everywhere run on the main machine; its machine's own stays here", async () => {
-    const home = mkdtempSync(join(tmpdir(), 'shep-worker-'))
-    const main = mkdtempSync(join(tmpdir(), 'shep-main-'))
-    const there = mkdtempSync(join(tmpdir(), 'shep-there-'))
-    const bin = mkdtempSync(join(tmpdir(), 'shep-ssh-'))
+    const home = tmp('worker')
+    const main = tmp('main')
+    const there = tmp('there')
+    const bin = tmp('ssh')
     writeFileSync(join(bin, 'ssh'), '#!/bin/sh\nfor a; do last=$a; done\nexec /bin/sh -c "$last"\n', { mode: 0o755 })
     // the main machine's Shepherdr: it keeps Everywhere in its settings file
     const asked: string[][] = []
@@ -233,7 +233,7 @@ describe('a machine run from the main one', () => {
   })
 
   test.if(perl)('the shepherdr command there sends a new HEARTBEAT.md on stdin', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-shim-'))
+    const dir = tmp('shim')
     mkdirSync(join(dir, 'bin'))
     writeFileSync(join(dir, 'bin', 'shepherdr'), readFileSync(join(root, 'helper', 'shepherdr')), { mode: 0o755 })
     let got: { args: string[]; stdin?: string } | undefined
@@ -265,7 +265,7 @@ describe('a machine run from the main one', () => {
   })
 
   test.if(perl)("a /clear there starts another session: the chat follows it, from what the agent's hooks say", () => {
-    const home = mkdtempSync(join(tmpdir(), 'shep-worker-'))
+    const home = tmp('worker')
     const box: BoxInfo = { label: 'vm-demo', target: 'vm-demo', session: 'default', herdr: 'herdr', home: '/home/exedev', path: '/usr/bin:/bin', os: 'Linux' }
     const hooks = '/home/exedev/.shepherdr/hooks/shep-machine.jsonl'
     const project = '/home/exedev/.claude/projects/-home-exedev--shepherdr-coordinators-machine'
@@ -307,7 +307,7 @@ describe('a machine run from the main one', () => {
   })
 
   test('a session resumed in another folder takes its transcript along, wherever Claude Code wrote it', () => {
-    const claude = mkdtempSync(join(tmpdir(), 'shep-carry-'))
+    const claude = tmp('carry')
     const was = process.env.CLAUDE_CONFIG_DIR
     process.env.CLAUDE_CONFIG_DIR = claude
     try {
@@ -335,7 +335,7 @@ describe('a restart of the main server (an update)', () => {
 
   /** a worker left running from before the restart: a process of its own, serving its snapshot */
   function oldWorker() {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-old-worker-'))
+    const dir = tmp('old-worker')
     mkdirSync(join(dir, 'server'))
     writeFileSync(join(dir, 'server', 'main.ts'), `const s = Bun.serve({ port: 0, fetch: () => Response.json(${JSON.stringify(snap)}) }); console.log(s.port)`)
     const p = spawn(process.execPath, [join(dir, 'server', 'main.ts')])

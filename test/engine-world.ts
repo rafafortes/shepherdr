@@ -3,11 +3,10 @@
 // test a folder of its own inside it.
 import { execSync } from 'node:child_process'
 import { beforeEach } from 'bun:test'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-engine-'))
+process.env.SHEPHERDR_HOME = tmp('engine')
 export const { Engine } = await import('../server/live/engine/engine.ts')
 export const { Places, placeId } = await import('../server/live/places.ts')
 export const { Settings } = await import('../server/live/settings.ts')
@@ -33,12 +32,12 @@ export const sh = (cmd: string, cwd: string) => {
  * world again to see what a restart reads, and that must be what the world before it wrote. Bun does not stop a test
  * that timed out — it goes on running — and what it left must not reach into the folder the next test reads, which is
  * what made one timeout fail the tests after it (run 42020185856, shard 1). Whoever keeps files of its own takes the
- * folder when it is made (store.ts's `dir`), so even the leftovers of a test gone by write into its own folder. The
- * name is the preload's, which clears those older than an hour.
+ * folder when it is made (store.ts's `dir`), so even the leftovers of a test gone by write into its own folder. Each
+ * one goes when this process ends, and test/tmp.ts sweeps any a killed run left (SHE-32).
  */
-let base = mkdtempSync(join(tmpdir(), 'shep-test-home-base-'))
+let base = tmp('test-home-base')
 beforeEach(() => {
-  base = mkdtempSync(join(tmpdir(), 'shep-test-home-base-'))
+  base = tmp('test-home-base')
   process.env.SHEPHERDR_HOME = base
 })
 
@@ -46,7 +45,7 @@ beforeEach(() => {
 export const writeJson = (name: string, value: unknown) => store.writeJson(name, value, base)
 
 export function repo() {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-repo-'))
+  const dir = tmp('repo')
   sh('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', dir)
   return dir
 }

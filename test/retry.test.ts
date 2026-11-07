@@ -2,11 +2,11 @@
 // herdr-projects' tests: the "-made" ones are written by hand in a recorded one's shape), which errors pass by
 // themselves, and the waits and tries before the human hears.
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-retry-'))
+process.env.SHEPHERDR_HOME = tmp('retry')
 const { readerFor } = await import('../server/live/readers/index.ts')
 const { carryOn, providerError, Retries } = await import('../server/live/retry.ts')
 

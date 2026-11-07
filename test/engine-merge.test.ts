@@ -1,11 +1,12 @@
 // shepherdr merge on a real git repo (engine-world.ts): it squash-merges into main and cleans up, here (rebased) or
 // through a pull request on GitHub (a stand-in; rebased only on a conflict).
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { sh, repo, world, until, started, G, Settings } from './engine-world.ts'
 import type { FakeGitHub } from './fake-gh.ts'
+import { tmp } from './tmp.ts'
 
 // each test runs git dozens of times and gh (a bun process of its own) up to fifty: a few seconds alone, past 20 on a
 // machine as busy as a CI runner can get
@@ -205,7 +206,7 @@ describe('shepherdr merge', () => {
   test('with a remote, main here first catches up with it, so the merge sits on top of what is there', async () => {
     const w = world()
     const origin = repo()
-    const dir = mkdtempSync(join(tmpdir(), 'shep-clone-'))
+    const dir = tmp('clone')
     sh(`git clone -q ${origin} . && git config user.email t@t && git config user.name T`, dir)
     const { t } = await started(w, dir, 'remote')
     // someone else's work lands on the remote; main here never pulled it
@@ -361,18 +362,18 @@ describe('closed with nothing to merge', () => {
 })
 
 /** a GitHub stand-in: a bare repo is GitHub, gh is test/fake-gh.ts; the clone's origin reads as GitHub's */
-const ghBin = mkdtempSync(join(tmpdir(), 'shep-ghbin-'))
+const ghBin = tmp('ghbin')
 writeFileSync(join(ghBin, 'gh'), `#!/bin/sh\nexec "${process.execPath}" "${join(import.meta.dir, 'fake-gh.ts')}" "$@"\n`, { mode: 0o755 })
 
 function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['checks']; remote?: string } = {}) {
   process.env.PATH = `${ghBin}:${process.env.PATH}`
-  const bare = mkdtempSync(join(tmpdir(), 'shep-gh-origin-'))
+  const bare = tmp('gh-origin')
   sh('git init -q --bare -b main', bare)
   sh(`git push -q ${bare} main`, repo())
-  const dir = mkdtempSync(join(tmpdir(), 'shep-gh-clone-'))
+  const dir = tmp('gh-clone')
   const remote = o.remote ?? 'https://github.com/acme/app.git'
   sh(`git clone -q ${bare} . && git config user.email t@t && git config user.name T && git remote set-url origin ${remote} && git config url.${bare}.insteadOf ${remote}`, dir)
-  const file = join(mkdtempSync(join(tmpdir(), 'shep-gh-state-')), 'github.json')
+  const file = join(tmp('gh-state'), 'github.json')
   writeFileSync(file, JSON.stringify({ origin: bare, repo: 'acme/app', prs: [], calls: [], authed: o.authed, down: o.down, checks: o.checks }))
   process.env.FAKE_GH_STATE = file
   const gh = () => JSON.parse(readFileSync(file, 'utf8')) as FakeGitHub
@@ -391,7 +392,7 @@ afterEach(() => void new Settings().set('brief.merge', null))
  */
 function mergedByHand(g: ReturnType<typeof onGitHub>, branch: string, subject = 'Say hello (#1)') {
   const tip = sh(`git rev-parse refs/heads/${branch}`, g.bare)
-  const dir = mkdtempSync(join(tmpdir(), 'shep-gh-byhand-'))
+  const dir = tmp('gh-byhand')
   sh(`git clone -q ${g.bare} . && git config user.email t@t && git config user.name T && git fetch -q origin ${branch} && git merge -q --squash FETCH_HEAD && git commit -qm "${subject}" && git push -q origin main`, dir)
   g.set({ prs: g.gh().prs.map((p) => (p.head === branch ? { ...p, state: 'MERGED' as const, at: tip } : p)) })
   return tip
@@ -646,7 +647,7 @@ describe('on GitHub: a pull request per task', () => {
     const g = onGitHub({ checks: [{ name: 'test', bucket: 'pass' }] })
     const { t } = await started(w, g.dir, 'ghmerge')
     // main moved on GitHub since the task started
-    const other = mkdtempSync(join(tmpdir(), 'shep-gh-other-'))
+    const other = tmp('gh-other')
     sh(`git clone -q ${g.bare} . && git config user.email t@t && git config user.name T && echo o > other.txt && git add -A && git commit -qm other && git push -q origin main`, other)
     writeFileSync(join(t.worktree!, 'mine.txt'), 'mine\n')
     w.agentIs(`${t.id}/Agent`, 'idle')
@@ -670,7 +671,7 @@ describe('on GitHub: a pull request per task', () => {
     sh('git add -A && git commit -qm mine', t.worktree!)
     await w.engine.openPr(t.id)
     const head = sh('git rev-parse HEAD', t.worktree!)
-    const other = mkdtempSync(join(tmpdir(), 'shep-gh-other-'))
+    const other = tmp('gh-other')
     sh(`git clone -q ${g.bare} . && git config user.email t@t && git config user.name T && echo o > other.txt && git add -A && git commit -qm other && git push -q origin main`, other)
     const pushes = g.gh().calls.length
     const m = await w.engine.merge(t.id, { self: true })
@@ -693,7 +694,7 @@ describe('on GitHub: a pull request per task', () => {
     await w.engine.openPr(t.id)
     const head = sh('git rev-parse HEAD', t.worktree!)
     // main took this very change, then changed the line again: merging conflicts, but a rebase drops the change it has
-    const other = mkdtempSync(join(tmpdir(), 'shep-gh-other-'))
+    const other = tmp('gh-other')
     sh(`git clone -q ${g.bare} . && git config user.email t@t && git config user.name T && git fetch -q origin ${t.branch} && git cherry-pick -x FETCH_HEAD >/dev/null && echo again > README.md && git commit -qam again && git push -q origin main`, other)
     writeFileSync(join(t.worktree!, 'new.txt'), 'new\n')
     sh('git add -A && git commit -qm new', t.worktree!)
@@ -1105,7 +1106,7 @@ describe('on GitHub: a pull request per task', () => {
     writeFileSync(join(t.worktree!, 'y.txt'), 'y\n')
     sh('git add -A && git commit -qm y', t.worktree!)
     await w.engine.openPr(t.id)
-    const ready = mkdtempSync(join(tmpdir(), 'shep-gh-hand-'))
+    const ready = tmp('gh-hand')
     g.set({ prs: g.gh().prs.map((p) => ({ ...p, isDraft: false })) })
     sh(`"${join(ghBin, 'gh')}" pr merge 1 --squash`, ready)
     const m = await w.engine.merge(t.id, { self: true })

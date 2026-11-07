@@ -1,13 +1,13 @@
 // Background work that outlives an agent's turn (readers/background.ts): Claude Code's session file and its screen, on
 // samples captured from real panes and session files (Claude Code 2.1.310).
 import { afterAll, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-bg-'))
-process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'shep-bg-claude-'))
+process.env.SHEPHERDR_HOME = tmp('bg')
+process.env.CLAUDE_CONFIG_DIR = tmp('bg-claude')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'herdr.sock')
 const { ClaudeSessions, Reviewers, headless, screenBackground, sessionBackground } = await import('../server/live/readers/background.ts')
 const { Agents } = await import('../server/live/agents.ts')
@@ -89,7 +89,7 @@ describe("Claude Code's session file", () => {
   })
 
   test('found by its session id, else by its folder; one whose process is gone is none', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-sessions-'))
+    const dir = tmp('sessions')
     try {
       const file = (pid: number, o: object) =>
         writeFileSync(join(dir, `${pid}.json`), JSON.stringify({ pid, version: '2.1.310', peerProtocol: 1, kind: 'interactive', entrypoint: 'cli', name: 'work-59', ...o }))
@@ -200,7 +200,7 @@ describe('an agent whose turn ended', () => {
     // its subagent stopped to wait on a shell of its own; it ended its turn with only <no-reply>. Stop lists only the
     // subagent's shell, and the session file says "shell" (a live re-run of SHE-90's case)
     const inputs: any[] = readFileSync(join(import.meta.dir, 'samples', 'claude-paused.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
-    const events = join(mkdtempSync(join(tmpdir(), 'shep-bg-hooks-')), 'e.jsonl')
+    const events = join(tmp('bg-hooks'), 'e.jsonl')
     inputs.slice(0, 4).forEach((input, i) => record(events, input, Date.now() - 1000 + i))
     session('shell')
     const a = new Agents()
@@ -213,7 +213,7 @@ describe('an agent whose turn ended', () => {
     await a.refresh()
     expect(a.background('T-1/Agent')).toBe('agents')
     // hooks that say only shells, while the session file says a subagent runs: it runs
-    const shells = join(mkdtempSync(join(tmpdir(), 'shep-bg-hooks-')), 'e.jsonl')
+    const shells = join(tmp('bg-hooks'), 'e.jsonl')
     record(shells, { hook_event_name: 'Stop', last_assistant_message: 'The preview is up.', background_tasks: [{ id: 'b1', type: 'shell', status: 'running' }] }, Date.now())
     session('busy')
     const b = new Agents()
@@ -233,7 +233,7 @@ describe('an agent whose turn ended', () => {
   test('SHE-171: shells that end (a test run, a review) keep it at work long past a server; once they are done it needs you', async () => {
     // REV-4: it ended its turn "only waiting on the final test run and Codex's last review pass", 17 minutes into them
     const stop = (tasks: object[]) => {
-      const events = join(mkdtempSync(join(tmpdir(), 'shep-bg-hooks-')), 'e.jsonl')
+      const events = join(tmp('bg-hooks'), 'e.jsonl')
       record(events, { hook_event_name: 'UserPromptSubmit', prompt: 'what do you need?', session_id: 's1' }, Date.now() - 3000)
       record(events, { hook_event_name: 'Stop', last_assistant_message: "Nothing from you right now. I'm only waiting on the final test run and Codex's last review pass.", background_tasks: tasks }, Date.now() - 1000)
       return events
@@ -270,7 +270,7 @@ describe('an agent whose turn ended', () => {
   })
 
   test('SHE-171: the count starts again at each turn that ends, even one herdr never saw at work', async () => {
-    const events = join(mkdtempSync(join(tmpdir(), 'shep-bg-hooks-')), 'e.jsonl')
+    const events = join(tmp('bg-hooks'), 'e.jsonl')
     const turn = (at: number) => {
       record(events, { hook_event_name: 'UserPromptSubmit', prompt: 'status?', session_id: 's1' }, at)
       record(events, { hook_event_name: 'Stop', last_assistant_message: 'Still waiting on the tests.', background_tasks: [{ id: 'b1', type: 'shell', status: 'running', command: 'bun test' }] }, at + 1)
@@ -306,7 +306,7 @@ describe('headless reviewers', () => {
     expect(headless(['grep', 'codex', 'exec'])).toBe(false)
   })
   test("they are found in /proc by their command, and are the chat's their environment names", () => {
-    const proc = mkdtempSync(join(tmpdir(), 'shep-proc-'))
+    const proc = tmp('proc')
     const put = (pid: number, argv: string[], env: string[]) => {
       mkdirSync(join(proc, String(pid)))
       writeFileSync(join(proc, String(pid), 'cmdline'), `${argv.join('\0')}\0`)

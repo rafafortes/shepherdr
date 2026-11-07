@@ -1,10 +1,10 @@
 // Captured CLI screens: startup trust, MCP consent and approvals must work before a session log exists.
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { menuId, menuKeys, parseMenu } from '../server/live/chats.ts'
 import { codexTrust, trustWorktree } from '../server/live/trust.ts'
+import { tmp } from './tmp.ts'
 const screen = (name: string) => readFileSync(join(import.meta.dir, 'fixtures/startup', name + '.txt'), 'utf8')
 
 describe('recorded startup prompts', () => {
@@ -67,7 +67,7 @@ describe('trust only the task folder, preserving settings', () => {
     expect(() => codexTrust('projects = { "/other" = { trust_level = "untrusted" } }', '/task')).toThrow()
   })
   test('Claude retains project permissions and never approves MCP servers', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-startup-'))
+    const dir = tmp('startup')
     writeFileSync(join(dir, '.claude.json'), JSON.stringify({ preference: true, projects: { [dir]: { allowedTools: ['Read'], hasTrustDialogAccepted: false }, '/other': { hasTrustDialogAccepted: false } } }))
     trustWorktree(dir, 'claude', { CLAUDE_CONFIG_DIR: dir })
     const config = JSON.parse(readFileSync(join(dir, '.claude.json'), 'utf8'))

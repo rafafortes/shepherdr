@@ -1,16 +1,16 @@
 // Shepherdr updates itself when its checkout moves: each commit becomes a frozen release, built and checked; the server
 // restarts on it only when no voice call is on; a failed release leaves the running one.
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { UpdateStatus } from '../shared/types.ts'
 import { codeOf, Supervisor } from '../scripts/supervisor.ts'
 import { head, refDirs, releasesOf, update } from '../scripts/update.ts'
+import { tmp } from './tmp.ts'
 
 /** a stand-in Shepherdr checkout: its build writes the screen saying which version it is */
 function fixture() {
-  const repo = mkdtempSync(join(tmpdir(), 'shep-update-'))
+  const repo = tmp('update')
   const git = (...a: string[]) => Bun.spawnSync(['git', '-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stderr: 'pipe' })
   git('init', '-q', '-b', 'main')
   const commit = (version: string, o: { build?: string; server?: string; deps?: string } = {}) => {
@@ -104,7 +104,7 @@ describe('a release', () => {
 
 describe('the supervisor', () => {
   test('knows when its own code changed: its file or one it imports, not types only or files it never runs', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-code-'))
+    const dir = tmp('code')
     const w = (f: string, text: string) => writeFileSync(join(dir, f), text)
     w('main.ts', "import { a } from './a.ts'\nimport type { T } from './types.ts'\nconst b = await import('./b.ts')\n")
     w('a.ts', "export { c } from './c.ts'\nexport const a = 1\n")
@@ -232,7 +232,7 @@ describe("the human's own plugins", () => {
   // the fixture's build fails on any plugin of the human's own that says BROKEN, naming its file, as vite does
   const build = 'if grep -rl BROKEN user-plugins; then echo "error: can\'t build that"; exit 1; fi; mkdir -p dist && cp VERSION dist/index.html && ls user-plugins > dist/plugins.txt'
   const { repo, commit } = fixture()
-  const home = mkdtempSync(join(tmpdir(), 'shep-update-home-'))
+  const home = tmp('update-home')
   const plugin = (name: string, text: string) => {
     mkdirSync(join(home, 'plugins', name), { recursive: true })
     writeFileSync(join(home, 'plugins', name, 'client.tsx'), text)

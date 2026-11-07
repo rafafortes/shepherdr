@@ -4,12 +4,11 @@
 // sat at its start screen for ever and its brief stayed in the outbox until an outside nudge asked for it. Shepherdr
 // asks now, on every look at herdr, and finishes the launch itself.
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
-import { mkdtempSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-launch-pending-'))
+process.env.SHEPHERDR_HOME = tmp('launch-pending')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'herdr.sock')
 const { Agents } = await import('../server/live/agents.ts')
 const { herdr, HerdrError } = await import('../server/live/herdr.ts')
@@ -74,7 +73,7 @@ const until = async (f: () => boolean, ms = 5000) => {
 
 const KEY = 'T-1/Agent'
 const name = 'shep-t-1'
-const cwd = mkdtempSync(join(tmpdir(), 'shep-launch-cwd-'))
+const cwd = tmp('launch-cwd')
 
 /** a pi task agent Shepherdr started once, its brief waiting in the outbox for it */
 function chat(o: { pending?: boolean; ready?: boolean; pane?: string } = {}) {

@@ -3,9 +3,9 @@
 // halfway or the tunnel dropped and left its end open (SHE-212's agent sat on one for 40 minutes).
 import { describe, expect, test } from 'bun:test'
 import { spawn, spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
 const root = join(import.meta.dir, '..')
 const perl = spawnSync('perl', ['-MJSON::PP', '-e1']).status === 0
@@ -43,7 +43,7 @@ describe('shepherdr merge with no answer coming', () => {
   })
 
   test.if(perl)('on another machine: the open end of a dropped tunnel ends it too', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-cli-'))
+    const dir = tmp('cli')
     // main.sock as a dropped tunnel left it: it takes the call and never answers, nor closes
     const server = Bun.listen({ unix: join(dir, 'main.sock'), socket: { data() {} } })
     try {
@@ -71,7 +71,7 @@ describe('shepherdr secret run and env', () => {
   /** each shepherdr, here and on another machine, against the answer above */
   async function each(check: (cmd: string[], cwd: string) => Promise<void>) {
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: answer })
-    const dir = mkdtempSync(join(tmpdir(), 'shep-sec-'))
+    const dir = tmp('sec')
     mkdirSync(join(dir, 'bin'))
     copyFileSync(join(root, 'helper', 'shepherdr'), join(dir, 'bin', 'shepherdr'))
     const sock = perl ? Bun.serve({ unix: join(dir, 'main.sock'), fetch: answer }) : undefined
@@ -141,7 +141,7 @@ describe('shepherdr secret run and env', () => {
 describe.if(perl)('session-owned command routing', () => {
   // A real child process owns each binding. Neither cwd nor an inherited pane id identifies a session.
   async function session(route: Record<string, string>, commands: string[][], extra: Record<string, string> = {}) {
-    const home = mkdtempSync(join(tmpdir(), 'shep-routing-'))
+    const home = tmp('routing')
     const helperDir = join(home, '.shepherdr', 'helper')
     mkdirSync(join(helperDir, 'bin'), { recursive: true })
     copyFileSync(join(root, 'helper', 'route.pl'), join(helperDir, 'route.pl'))
@@ -216,7 +216,7 @@ describe.if(perl)('session-owned command routing', () => {
   })
 
   test('shared executor tools use the live owning folder, ignoring another session’s env and pane id', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'shep-shared-executor-'))
+    const home = tmp('shared-executor')
     const folder = join(home, 'worktree')
     mkdirSync(folder)
     const other = join(home, 'coordinator')
@@ -257,7 +257,7 @@ describe.if(perl)('session-owned command routing', () => {
 
   test('a reused pid with another start time does not inherit a route', async () => {
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json({ out: 'explicit local\n', code: 0 }) })
-    const home = mkdtempSync(join(tmpdir(), 'shep-reused-pid-'))
+    const home = tmp('reused-pid')
     const dir = join(home, '.shepherdr', 'helper', 'routes')
     mkdirSync(dir, { recursive: true })
     const code = `

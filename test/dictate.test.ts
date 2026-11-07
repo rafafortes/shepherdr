@@ -2,7 +2,7 @@
 // kept, and a machine without whisper (or its model) says so in words. The audio and whisper are played by the test,
 // as a real model is not installed everywhere; the route is the app's own.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startApp } from '../server/app.ts'
@@ -10,6 +10,7 @@ import { Emitter, type Source, type SourceEvents } from '../server/source.ts'
 import { clean, dictate, langOf, MODEL_DIR, MODEL_URL, transcribe, whisperBinary } from '../server/live/dictate.ts'
 import { refuse } from '../server/live/settings.ts'
 import { DICTATE_CAP, DICTATE_TOO_LONG } from '../shared/dictate.ts'
+import { tmp } from './tmp.ts'
 
 /** a command of the test's own, standing where ffmpeg or whisper-cli would */
 function command(dir: string, name: string, body: string) {
@@ -19,7 +20,7 @@ function command(dir: string, name: string, body: string) {
   return f
 }
 
-const dir = mkdtempSync(join(tmpdir(), 'shepherdr-dictate-test-'))
+const dir = tmp('shepherdr-dictate-test')
 const model = join(dir, 'ggml-base.bin')
 writeFileSync(model, 'not really a model')
 /** ffmpeg, played by the test: it says what it was given, and makes the wav it is told to make */

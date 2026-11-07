@@ -3,16 +3,16 @@
 // files too), and its pull request comes from gh (a stand-in here).
 import { describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { checksOf, diffFiles, diffPatch, ghRepo, listFiles, pullRequest, readFile, safeRel } from '../server/live/worktree.ts'
+import { tmp } from './tmp.ts'
 
 const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8' }).trim()
 
 /** a repo on main, and a task's worktree off it with every kind of change */
 function setup() {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-wt-'))
+  const dir = tmp('wt')
   const repo = join(dir, 'repo')
   mkdirSync(repo)
   sh('git init -q -b main && git config user.email t@t && git config user.name T', repo)

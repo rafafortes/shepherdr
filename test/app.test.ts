@@ -1,12 +1,12 @@
 // The web server lets only this app's own pages (and local programs) act: another website can't.
 import { afterAll, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { startApp } from '../server/app.ts'
 import type { Push } from '../server/push.ts'
 import type { Alert, UpdateStatus } from '../shared/types.ts'
 import { Emitter, type Source, type SourceEvents } from '../server/source.ts'
+import { tmp } from './tmp.ts'
 
 const acted: unknown[] = []
 class Stub extends Emitter<SourceEvents> {
@@ -139,7 +139,7 @@ describe('alerts', () => {
 })
 
 describe('updates', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-app-'))
+  const dir = tmp('app')
   mkdirSync(join(dir, 'dist'))
   writeFileSync(join(dir, 'dist', 'index.html'), '<script type="module" src="./assets/index-AbC123.js"></script>')
   const updates = join(dir, 'home', 'update.json')

@@ -1,9 +1,9 @@
 import { describe, expect, test, spyOn } from 'bun:test'
-import { mkdtempSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-private-launch-'))
+process.env.SHEPHERDR_HOME = tmp('private-launch')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock')
 const { Agents, hidden } = await import('../server/live/agents.ts')
 const { herdr } = await import('../server/live/herdr.ts')
@@ -12,7 +12,7 @@ const { writeJson } = await import('../server/store.ts')
 describe('private launch prompt delivery', () => {
   test('resumed Codex receives changed or cleared snapshots before the restart message, but no unchanged duplicate', async () => {
     const key = 'PRIVATE-1/Agent'
-    const cwd = mkdtempSync(join(tmpdir(), 'shep-private-cwd-'))
+    const cwd = tmp('private-cwd')
     const old = { key, name: 'shep-private-test', kind: 'codex', cwd, workspace: 'test', logs: [], sessionId: 'prior-session', started: 0, system: 'old private snapshot' }
     const start = spyOn(herdr, 'start').mockResolvedValue(undefined as never)
     const timer = spyOn(globalThis, 'setTimeout').mockImplementation((() => 0) as never)

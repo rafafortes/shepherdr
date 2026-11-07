@@ -4,10 +4,10 @@
 // up on it, and holds a merge until they do (server/live/engine/git.ts, hasPrWorkflows, read by checksOf in
 // server/live/engine/engine.ts): no merge here may wait for checks that never start.
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { hasPrWorkflows } from '../server/live/engine/git.ts'
+import { tmp } from './tmp.ts'
 type Workflow = {
   on: Record<string, unknown>
   concurrency: { group: string; 'cancel-in-progress': boolean }
@@ -23,7 +23,7 @@ const workflow = Bun.YAML.parse(text) as Workflow
 /** a git repo holding this repo's Check workflow at HEAD: what hasPrWorkflows reads, whatever this worktree hasn't
  *  committed yet */
 function repoWithWorkflow() {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-check-'))
+  const dir = tmp('check')
   const git = (...args: string[]) => {
     const r = Bun.spawnSync(['git', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
     expect(r.exitCode, r.stderr.toString()).toBe(0)
@@ -86,7 +86,7 @@ describe('what a failing run says', () => {
   const from = script.indexOf("awk '") + "awk '".length
   const program = script.slice(from, script.indexOf("' \"$1\"", from))
   const run = (log: string) => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-check-log-'))
+    const dir = tmp('check-log')
     try {
       const file = join(dir, 'tests.log')
       writeFileSync(file, log)

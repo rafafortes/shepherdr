@@ -1,13 +1,13 @@
 // Agents' secrets: kept at a level (Everywhere, a machine, a space) in a file only you can read, picked most specific
 // first, asked for with a masked card, and never in a snapshot, a chat or the command's printed answer.
 import { afterAll, describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, statSync, symlinkSync, mkdirSync, copyFileSync, unlinkSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, statSync, symlinkSync, mkdirSync, copyFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-secrets-'))
+process.env.SHEPHERDR_HOME = tmp('secrets')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock')
 delete process.env.SHEPHERDR_MAIN
 const { Vault, secretPages } = await import('../server/live/secrets.ts')
@@ -16,7 +16,7 @@ const { placeId } = await import('../server/live/places.ts')
 
 describe('the vault', () => {
   test('the most specific level wins, and its file is readable by you only', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-vault-'))
+    const dir = tmp('vault')
     const v = new Vault(dir)
     expect(v.set('all', 'TOKEN', 'everywhere').ok).toBe(true)
     expect(v.set('p:box:api', 'TOKEN', 'for api').ok).toBe(true)
@@ -141,7 +141,7 @@ describe('the shepherdr secret command', () => {
     const { startApp } = await import('../server/app.ts')
     const { SecretAccess } = await import('../server/live/secret-access.ts')
     const root = join(import.meta.dir, '..')
-    const dir = mkdtempSync(join(tmpdir(), 'shep-auth-cli-'))
+    const dir = tmp('auth-cli')
     const helper = join(dir, '.shepherdr', 'helper')
     mkdirSync(join(helper, 'bin'), { recursive: true })
     copyFileSync(join(root, 'helper', 'route.pl'), join(helper, 'route.pl'))
@@ -204,7 +204,7 @@ describe('the shepherdr secret command', () => {
 
   test('artifact imports cannot publish vaults or credentials, even through links', async () => {
     const { Artifacts } = await import('../server/live/artifacts.ts')
-    const dir = mkdtempSync(join(tmpdir(), 'shep-import-'))
+    const dir = tmp('import')
     const vault = join(process.env.SHEPHERDR_HOME!, 'vault.json')
     symlinkSync(vault, join(dir, 'innocent.json'))
     expect(() => Artifacts.read(undefined, vault, dir)).toThrow('Private Shepherdr')

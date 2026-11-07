@@ -1,10 +1,11 @@
 // To do, Queued, a task's place in herdr and archiving, on a real git repo (engine-world.ts).
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Task } from '../shared/types.ts'
 import { sh, repo, world, until, started, placeId, writeJson, fakeHerdr } from './engine-world.ts'
+import { tmp } from './tmp.ts'
 
 describe('To do: its agent waits for a go', () => {
   const later = 'Add hi.txt. Don\'t start yet, wait for a go.'
@@ -506,7 +507,7 @@ describe("a task's place in herdr", () => {
   test("the sweep puts away merged tasks' leftovers only: never a running task's, nor yours, nor while herdr is away", async () => {
     const dir = repo()
     const p = await world().places.add(dir, 'sweep')
-    const old = mkdtempSync(join(tmpdir(), 'shep-old-'))
+    const old = tmp('old')
     // left by an older Shepherdr: squash-merged, marked cleaned, and main moved on over the same lines since
     const make = (n: number, file: string) => {
       const wt = join(old, `work-${n}`)
@@ -543,7 +544,7 @@ describe("a task's place in herdr", () => {
   test("a squash merge main never had the tree of, with main moved on over the same lines since: it goes, unless work came after", async () => {
     const dir = repo()
     const p = await world().places.add(dir, 'squashed')
-    const old = mkdtempSync(join(tmpdir(), 'shep-squashed-'))
+    const old = tmp('squashed')
     // each branch is squash-merged as it was, without a rebase on main (so no commit of main has its tree), and main
     // then changes the lines it added (so merging it into main now would conflict)
     const squashed = (n: number, subject: string, also?: string) => {
@@ -640,7 +641,7 @@ describe("a task's place in herdr", () => {
     const herdr = fakeHerdr()
     const dir = repo()
     const p = await world(herdr).places.add(dir, 'plain')
-    const wt = join(mkdtempSync(join(tmpdir(), 'shep-plain-')), 'work-1')
+    const wt = join(tmp('plain'), 'work-1')
     sh(`git worktree add -q -b work/1-x ${wt} main`, dir)
     writeFileSync(join(wt, 'x.txt'), 'x\n')
     sh('git add -A && git commit -qm x', wt)

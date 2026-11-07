@@ -1,11 +1,11 @@
 // The log readers, on made-up lines in each CLI's exact format (field names and nesting copied from real logs).
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { claudeLogPath, findClaudeLog, findCodexLog, findPiLog, piSessionDir } from '../server/live/readers/find.ts'
 import { LogTail, readerFor } from '../server/live/readers/index.ts'
 import type { LogEvent } from '../server/live/readers/types.ts'
+import { tmp } from './tmp.ts'
 
 const parse = (cli: string, objs: object[]) =>
   readerFor(cli)!.parse(
@@ -430,7 +430,7 @@ describe('pi reader', () => {
 
 let dir = ''
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'shepherdr-readers-'))
+  dir = tmp('shepherdr-readers')
 })
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true })

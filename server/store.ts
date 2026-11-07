@@ -11,9 +11,12 @@ export const HOME = process.env.SHEPHERDR_HOME || (process.env.NODE_ENV === 'tes
  *  folder of its own that way, since a test that times out goes on running and must not reach into the next one's. */
 export const home = () => process.env.SHEPHERDR_HOME || HOME
 
-/** under bun test, never the real ~/.shepherdr (however the tests were started): an empty folder of their own */
+/** under bun test, never the real ~/.shepherdr (however the tests were started): an empty folder of their own, named
+ *  after the run and the process that made it as every test folder is (test/tmp.ts), so a run that was killed leaves
+ *  one the next one can tell is stale and take */
 function testHome() {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-test-home-'))
+  const run = process.env.SHEPHERDR_TEST_RUN || String(process.pid)
+  const dir = mkdtempSync(join(tmpdir(), `shep-test-home-${run}-${process.pid}-`))
   process.on('exit', () => rmSync(dir, { recursive: true, force: true }))
   return dir
 }

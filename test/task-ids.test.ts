@@ -1,12 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TaskIds, MAX_TASK_NUMBER, prefixProblem, taskIdsSection } from '../server/live/task-ids.ts'
 import type { Space } from '../server/live/places.ts'
+import { tmp } from './tmp.ts'
 
 const space = (name: string, key: string): Space => ({ name, key, path: `/repos/${name}`, github: null, base: 'main', added: 1 })
-const dir = () => mkdtempSync(join(tmpdir(), 'shep-task-ids-'))
+const dir = () => tmp('task-ids')
 const id = (name: string) => `p:machine:${name}`
 const empty = () => ({ next: {}, tasks: [] })
 

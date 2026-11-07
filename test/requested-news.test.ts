@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { RequestedNewsMailbox } from '../server/live/requested-news.ts'
+import { tmp } from './tmp.ts'
 
 describe('requesting coordinator mailbox', () => {
   test('only real coordinator identities in this installation are accepted, including helper worker records', () => {
-    const root = mkdtempSync(join(tmpdir(), 'requester-'))
-    const other = mkdtempSync(join(tmpdir(), 'other-user-'))
+    const root = tmp('requester')
+    const other = tmp('other-user')
     try {
       const home = join(root, 'machines', 'desktop')
       mkdirSync(home, { recursive: true })
@@ -23,7 +23,7 @@ describe('requesting coordinator mailbox', () => {
     } finally { rmSync(root, { recursive: true, force: true }); rmSync(other, { recursive: true, force: true }) }
   })
   test('restart and offline replay preserve events; successful delivery is consumed once without recursive publishing', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'requester-'))
+    const root = tmp('requester')
     try {
       const writer = new RequestedNewsMailbox(root)
       writer.post({ to: 'p:small:repo', from: 'p:desktop:repo', text: 'SHE-1 is ready', task: 'SHE-1', event: 'ready' })

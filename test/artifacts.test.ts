@@ -1,10 +1,10 @@
 // Artifacts: one HTML file and its data, kept per place, a new version on every update, checked before anyone sees it.
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME ??= mkdtempSync(join(tmpdir(), 'shep-art-'))
+process.env.SHEPHERDR_HOME ??= tmp('art')
 // one process runs every test file: the home is whichever file set it first
 const { HOME } = await import('../server/store.ts')
 
@@ -12,7 +12,7 @@ const { Artifacts, browserChecker, inlineImages, KEEP_VERSIONS, MAX_HTML, titleC
 const { wrapPage } = await import('../server/frame.ts')
 const { Automations } = await import('../server/live/automations.ts')
 
-const dir = mkdtempSync(join(tmpdir(), 'shep-art-files-'))
+const dir = tmp('art-files')
 const file = (name: string, body: string | Buffer) => {
   const f = join(dir, name)
   writeFileSync(f, body)

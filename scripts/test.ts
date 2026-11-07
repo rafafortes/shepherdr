@@ -16,13 +16,18 @@
 // asked for by hand does; --parallel every core). SHEPHERDR_TEST_JOBS sets how many test files run at once: a quarter
 // of the cores by default, so herdr, the live server and the agents keep the CPU while several tasks test at once.
 //
+// The folders the tests make in /tmp come from test/tmp.ts's tmp(), which removes them when their file's tests end; a
+// run that leaves one of its own behind fails, and what a killed run left (two hours old, its process gone) is swept
+// first, since /tmp is on the root disk and systemd-tmpfiles keeps it for 30 days (SHE-32).
+//
 // The tests run below everything else on this machine, on a quarter of the cores unless SHEPHERDR_TEST_JOBS or a flag
 // says more: they take only the CPU and disk no one else wants, so herdr, Shepherdr's server and the agents stay quick
 // while several tasks test at once.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { cpus } from 'node:os'
+import { cpus, tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { gather, mapFile, pick, readMap, screenMap } from '../test/screen-map.ts'
+import { leftBy, sweep } from '../test/tmp.ts'
 import { INPUTS } from '../test/web.ts'
 import { writeRegistries } from './build-plugins.ts'
 
@@ -208,6 +213,9 @@ function lowPriority(): string[] {
 }
 
 mkdirSync(cache, { recursive: true })
+// the folders of a run killed before it could remove what it made go now, two hours old or more (test/tmp.ts): /tmp is
+// on the root disk, and systemd-tmpfiles keeps what it finds there for 30 days
+sweep()
 const jobs = `--parallel=${process.env.SHEPHERDR_TEST_JOBS ?? Math.max(1, Math.floor(cpus().length / 4))}`
 // a test may take longer while every core is busy (several tasks test at once): 5 s, bun's default, is too tight
 const decoder = new TextDecoder()
@@ -215,7 +223,10 @@ const timeout = flags.some((f) => f.startsWith('--timeout')) ? [] : ['--timeout=
 const cmd = [...lowPriority(), process.execPath, 'test', jobs, ...timeout, `--timings=${timings}`, '--update-timings', ...flags, ...(files ?? []).map((f) => `./${f}`)]
 if (files) console.log(`${files.length} test file${files.length === 1 ? '' : 's'}: ${files.map((f) => f.replace(/^test\//, '')).join(' ')}`)
 const t0 = Date.now()
-const env: Record<string, string | undefined> = { ...process.env, SHEPHERDR_TEST_RUNNER: '1' }
+// this run's own name, in every folder the tests make (test/tmp.ts), so what it leaves can be found: never one taken
+// from the environment, where a run started by another would answer to the outer run's name
+const testRun = String(process.pid)
+const env: Record<string, string | undefined> = { ...process.env, SHEPHERDR_TEST_RUNNER: '1', SHEPHERDR_TEST_RUN: testRun }
 
 // one browser for every browser test of the run, as low in line as the tests; it closes when this process is gone
 let browser: ReturnType<typeof Bun.spawn> | null = null
@@ -268,6 +279,20 @@ if (browser) {
   await Promise.race([browser.exited, Bun.sleep(5000)])
   browser.kill()
 }
+// what this run left in /tmp: a folder the tests make through test/tmp.ts's tmp() goes when its process ends, so one
+// still there, made by a process gone by, is one a test (or a process it started) leaked; the run fails, since /tmp is
+// on the root disk and keeps it for a month. Only this run's own folders count: another worktree's suite runs alongside.
+let left = leftBy(testRun)
+for (const until = Date.now() + 3000; left.length && Date.now() < until; ) {
+  Bun.sleepSync(100)
+  left = leftBy(testRun)
+}
+if (left.length) {
+  console.error(`\nThis run left ${left.length} temporary folder${left.length === 1 ? '' : 's'} in /tmp. A test makes one through test/tmp.ts's tmp(), which removes it when its process ends: these outlived theirs.`)
+  for (const name of left.slice(0, 20)) console.error(`  ${join(tmpdir(), name)}`)
+  if (left.length > 20) console.error(`  … and ${left.length - 20} more`)
+}
+const exitCode = left.length ? 1 : code
 if (mapOut) {
   // only a clean tree: the map is a commit's, and what is not committed is not part of it (a run that picked browser
   // tests from it would read a file the map's commit never had)
@@ -282,10 +307,10 @@ if (mapOut) {
 const secs = ((Date.now() - t0) / 1000).toFixed(1)
 // a pass to keep: but not one where tests were skipped (a browser that would not start skips its browser tests, and
 // taken as passed it would hide behind this until the commit changes)
-if (code === 0 && whole && commit && clean && !/^\s*\d+ skip$/m.test(tail) && git('rev-parse', 'HEAD') === commit && git('status', '--porcelain') === '') {
+if (exitCode === 0 && whole && commit && clean && !/^\s*\d+ skip$/m.test(tail) && git('rev-parse', 'HEAD') === commit && git('status', '--porcelain') === '') {
   const ran = tail.match(/Ran \d+ tests across \d+ files?/)?.[0] ?? 'passed'
   writeFileSync(passed, JSON.stringify({ commit, at: Date.now(), summary: `${ran} in ${secs}s` }))
 }
 const shard = flags.find((f) => f.startsWith('--shard='))?.slice('--shard='.length)
-console.log(`${code === 0 ? 'Passed' : 'Failed'} in ${secs}s${whole ? '' : shard ? ` (shard ${shard} of the suite)` : ' (part of the suite: bun run check:local runs it all)'}`)
-process.exit(code)
+console.log(`${exitCode === 0 ? 'Passed' : 'Failed'} in ${secs}s${whole ? '' : shard ? ` (shard ${shard} of the suite)` : ' (part of the suite: bun run check:local runs it all)'}`)
+process.exit(exitCode)

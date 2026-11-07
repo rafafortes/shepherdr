@@ -1,11 +1,11 @@
 // The shepherdr command: who may merge, choice cards, files, modes, adding projects.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-source-'))
+process.env.SHEPHERDR_HOME = tmp('source')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock')
 delete process.env.SHEPHERDR_MAIN
 const { LiveSource } = await import('../server/live/source.ts')
@@ -64,7 +64,7 @@ const tasksIn = (place: string) => src.engine.tasks.filter((t) => t.project === 
 
 /** a project with a task whose agent has committed work on its branch (herdr isn't there: its agent can't start) */
 async function workedTask(name: string) {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
+  const dir = tmp('src-repo')
   run(REPO, dir)
   const p = await src.places.add(dir, name)
   return { t: await worked(p), dir, place: placeId.space(p.name) }
@@ -191,7 +191,7 @@ describe('merging from the command', () => {
       // Three tasks in one place: the list is the whole home's, and every place of its own is another real repo with
       // its worktrees and its merge's git calls, on a runner that runs the browser tests beside this one (SHE-9 met a
       // shard six times slower than its rerun). This test made three before.
-      const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
+      const dir = tmp('src-repo')
       run(REPO, dir)
       const p = await src.places.add(dir, 'listed')
       const a = await worked(p, 'first.txt')
@@ -234,7 +234,7 @@ describe('merging from the command', () => {
 describe('closing from the command', () => {
   /** a project with a task whose agent made no changes */
   async function emptyTask(name: string) {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
+    const dir = tmp('src-repo')
     run(REPO, dir)
     const p = await src.places.add(dir, name)
     const t = src.engine.add({ project: p.name, title: 'Answer', by: 'test' })
@@ -336,7 +336,7 @@ describe('deleting a task from the command', () => {
 
 describe('base branch choices', () => {
   test('CLI and Settings keep task snapshots, validate before adding, and show the target', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-base-cli-'))
+    const dir = tmp('base-cli')
     run('git init -q -b main && git config user.email t@t && git config user.name T && touch README && git add . && git commit -qm init && git branch develop && git branch feature/topic', dir)
     const p = await src.places.add(dir, 'base-cli')
     const place = placeId.space(p.name)
@@ -364,7 +364,7 @@ describe('base branch choices', () => {
 
 describe('To do from the command', () => {
   test('task add starts its agent; shepherdr todo shows it as To do, and a message to its agent is the go', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
+    const dir = tmp('src-repo')
     run(REPO, dir)
     const p = await src.places.add(dir, 'later')
     const place = placeId.space(p.name)
@@ -402,7 +402,7 @@ describe('To do from the command', () => {
 
 describe('A tell with no chat of its own', () => {
   test('a plain terminal sends no envelope: its words are the human’s, as typed, and the command says Told or that it is held', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
+    const dir = tmp('src-repo')
     run(REPO, dir)
     const p = await src.places.add(dir, 'plain')
     const place = placeId.space(p.name)
@@ -436,7 +436,7 @@ describe('A tell with no chat of its own', () => {
 
 describe('Queued from the command', () => {
   test('task add --after queues it; task queue changes or clears it; what is not there, or a circle, is refused', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
+    const dir = tmp('src-repo')
     run(REPO, dir)
     const p = await src.places.add(dir, 'queue')
     const place = placeId.space(p.name)
@@ -502,7 +502,7 @@ describe('Queued from the command', () => {
 
 describe("a task's CLI, model and effort", () => {
   test('task add takes --agent, --model and --effort for one task; what makes no sense is refused', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
+    const dir = tmp('src-repo')
     run(REPO, dir)
     const p = await src.places.add(dir, 'harness-source')
     const place = placeId.space(p.name)
@@ -534,7 +534,7 @@ describe("a task's CLI, model and effort", () => {
     await settle(() => !!t.trouble, `${t.id}'s agent to fail to start`)
   })
   test("its brief's Reviewer line names the reviewer: Settings', or task add's --reviewer flags for one task", async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
+    const dir = tmp('src-repo')
     run(REPO, dir)
     const place = placeId.space((await src.places.add(dir, 'reviewer-source')).name)
     for (const [args, says] of <[string[], string][]>[
@@ -560,7 +560,7 @@ describe("a task's CLI, model and effort", () => {
     src.settings.set('reviewer.model', null)
   })
   test('task add --set changes a line of its Settings block for that task alone, marked as set by its coordinator', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
+    const dir = tmp('src-repo')
     run(REPO, dir)
     const place = placeId.space((await src.places.add(dir, 'set-source')).name)
     const bad = await src.cli(['task', 'add', 'Odd', '--desc', 'x', '--set', 'merge=whenever'], { chat: place })
@@ -607,7 +607,7 @@ describe("a task's CLI, model and effort", () => {
     const ensure = src.agents.ensure
     src.agents.ensure = (async (spec: { kind: string; model?: string; effort?: string }) => (seen.push(spec), null)) as never
     try {
-      const dir = mkdtempSync(join(tmpdir(), 'shep-src-repo-'))
+      const dir = tmp('src-repo')
       run(REPO, dir)
       const place = placeId.space((await src.places.add(dir, 'coord-settings')).name)
       expect(src.agents.record(place)).toBeUndefined()
@@ -1540,7 +1540,7 @@ describe('news for coordinators', () => {
   })
   test('requester news preserves owner/home routes, carries no extra card, and drops removed origins', async () => {
     const { t, place } = await workedTask('requestnews')
-    const originDir = mkdtempSync(join(tmpdir(), 'request-origin-'))
+    const originDir = tmp('request-origin')
     run('git init -q -b main', originDir)
     const origin = await src.places.add(originDir, 'requestorigin')
     const requester = placeId.space(origin.name)
@@ -1739,7 +1739,7 @@ describe('Autopilot switched on or off', () => {
 describe("Autopilot's heartbeat", () => {
   const min = 60_000
   test('on its time rule, only while its coordinator is idle; the news its event rules name wakes it at once, the rest waits for it', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-beat-'))
+    const dir = tmp('beat')
     run('git init -q -b main', dir)
     const p = await src.places.add(dir, 'beat')
     const place = placeId.space(p.name)
@@ -1826,7 +1826,7 @@ describe("Autopilot's heartbeat", () => {
   })
 
   test("Run now: one wake on the human's word, refused while one waits or runs, and the command wakes it too", async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-now-'))
+    const dir = tmp('now')
     run('git init -q -b main', dir)
     const p = await src.places.add(dir, 'now')
     const place = placeId.space(p.name)
@@ -1943,7 +1943,7 @@ describe('automations add tasks with fresh agents', () => {
 })
 
 describe('adding a space from the sidebar', () => {
-  const home = mkdtempSync(join(tmpdir(), 'shep-home-'))
+  const home = tmp('home')
   const realHome = process.env.HOME
   beforeAll(() => {
     process.env.HOME = home
@@ -2037,7 +2037,7 @@ describe('removing a space', () => {
   })
   test('shepherdr space add refuses a name another space has, or one that breaks the rules', async () => {
     const repo = () => {
-      const dir = mkdtempSync(join(tmpdir(), 'shep-src-taken-'))
+      const dir = tmp('src-taken')
       run('git init -q -b main', dir)
       return dir
     }
@@ -2058,7 +2058,7 @@ describe('removing a space', () => {
 describe('the order of places', () => {
   test('A to Z until dragged; the order is kept on disk, and a new space slots in A to Z', async () => {
     const add = async (name: string) => {
-      const dir = mkdtempSync(join(tmpdir(), 'shep-src-order-'))
+      const dir = tmp('src-order')
       run('git init -q -b main', dir)
       await src.places.add(dir, name)
     }
@@ -2084,7 +2084,7 @@ describe('the order of places', () => {
 
 describe('renaming places', () => {
   test("only the name that shows changes, kept on disk; its id, folder and task key stay; a space's name follows the rules", async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-src-rename-'))
+    const dir = tmp('src-rename')
     run('git init -q -b main', dir)
     const p = await src.places.add(dir, 'rename-me')
     const id = placeId.space('rename-me')
@@ -2136,7 +2136,7 @@ describe('renaming places', () => {
 })
 
 describe('artifacts from the command', () => {
-  const files = mkdtempSync(join(tmpdir(), 'shep-src-art-'))
+  const files = tmp('src-art')
   writeFileSync(join(files, 'board.html'), '<h1>Board</h1>')
   writeFileSync(join(files, 'data.json'), '{"n":2}')
   const ok = async () => ({ errors: [], warnings: [], skipped: 'no browser in the test' })
@@ -2339,7 +2339,7 @@ describe('a turn the provider cut off, end to end', () => {
 
   test("a coordinator's cut-off turn is tried again after each wait, then it says so in its chat, with an alert", async () => {
     const key = placeId.space('cutco')
-    const dir = mkdtempSync(join(tmpdir(), 'shep-cut-'))
+    const dir = tmp('cut')
     const log = cutLog(dir)
     src.agents.records[key] = { key, name: 'shep-cutco-test', kind: 'claude', cwd: dir, workspace: 'cutco', logs: [log.f], started: 0 }
     Object.assign(src.retries, { waits: [30, 30, 30, 30] })
@@ -2380,7 +2380,7 @@ describe('a turn the provider cut off, end to end', () => {
   test('a stopped task is never told to carry on, nor started again for it', async () => {
     const { t } = await workedTask('cutstop')
     const key = `${t.id}/Agent`
-    const log = cutLog(mkdtempSync(join(tmpdir(), 'shep-cut-')))
+    const log = cutLog(tmp('cut'))
     src.agents.records[key] = { key, name: 'shep-cutstop-test', kind: 'claude', cwd: t.worktree!, workspace: 'cutstop', logs: [log.f], started: 0 }
     Object.assign(src.retries, { waits: [30, 30, 30, 30] })
     const sent: string[] = []
@@ -2479,7 +2479,7 @@ describe('machine health', () => {
       await Bun.sleep(1200)
       expect(sent.slice(n).filter((s) => s.text.includes('<health '))).toEqual([])
       // new tasks wait for the machine, and the command says so
-      const dir = mkdtempSync(join(tmpdir(), 'shep-src-held-'))
+      const dir = tmp('src-held')
       run('git init -q -b main && git -c user.email=t@t -c user.name=T commit -q --allow-empty -m init', dir)
       await src.places.add(dir, 'held')
       const r = await src.cli(['task', 'add', 'Wait for room', '--desc', 'Add y.txt.', '--project', 'held'], { chat: placeId.space('held') })
@@ -2655,7 +2655,7 @@ describe("a card dismissed on the CLI's own screen", () => {
 
 describe('visible launch controls', () => {
   test('coordinator and task metadata comes from the launch record, never new Settings; old actions cannot claim an unapplied change', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-controls-'))
+    const dir = tmp('controls')
     run(REPO, dir)
     const p = await src.places.add(dir, 'launch-controls')
     const place = placeId.space(p.name)
@@ -2699,7 +2699,7 @@ test('native and npm agent CLI process identities', () => {
 
 describe('Task IDs live only in repository space Settings', () => {
   test('edits apply to new tasks and survive a display rename; invalid scopes and collisions fail', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-id-settings-'))
+    const dir = tmp('id-settings')
     run('git init -q -b main', dir)
     const p = await src.places.add(dir, 'id-settings')
     const place = placeId.space(p.name)
@@ -2720,7 +2720,7 @@ describe('Task IDs live only in repository space Settings', () => {
     const pages = snap.settings.filter((s) => s.name === 'Task IDs')
     expect(pages.find((s) => s.level === place)?.rows[0].value).toBe('NEWKEY')
     expect(pages.every((s) => s.level?.startsWith('p:') && !s.level.endsWith(':~'))).toBe(true)
-    const otherDir = mkdtempSync(join(tmpdir(), 'shep-id-other-'))
+    const otherDir = tmp('id-other')
     run('git init -q -b main', otherDir)
     const other = await src.places.add(otherDir, 'id-other')
     expect(await set('taskIds.prefix', 'GAME', placeId.space(other.name))).toMatchObject({ ok: false })

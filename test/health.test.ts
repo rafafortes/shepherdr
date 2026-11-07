@@ -1,11 +1,10 @@
 // Machine health: reading /proc and nvidia-smi, when a limit is told (once, and again once it is back under), what
 // holds new tasks, and the numbers each machine's Settings note gives (server/live/health.ts).
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { tmp } from './tmp.ts'
 
-process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-health-'))
+process.env.SHEPHERDR_HOME = tmp('health')
 const H = await import('../server/live/health.ts')
 const { Settings, machineNote } = await import('../server/live/settings.ts')
 

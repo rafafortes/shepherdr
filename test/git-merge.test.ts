@@ -2,16 +2,16 @@
 // main is never rewritten over work of the human's, and a refusal names the file.
 import { describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { catchUp, mergeHere, namedFiles } from '../server/live/engine/git.ts'
+import { tmp } from './tmp.ts'
 
 const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8' }).trim()
 
 /** a repo on main */
 function fresh() {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-merge-'))
+  const dir = tmp('merge')
   sh('git init -q -b main && git config user.email t@t && git config user.name T && printf "hi\\n" > README.md && printf "a\\n" > a.txt && git add -A && git commit -qm init', dir)
   return dir
 }
@@ -50,7 +50,7 @@ describe('merging into main here', () => {
   })
 
   test('an ignored file of yours is not silently written over: the merge stops and names it', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shep-merge-ignored-'))
+    const dir = tmp('merge-ignored')
     sh('git init -q -b main && git config user.email t@t && git config user.name T && printf "secret.txt\\n" > .gitignore && git add -A && git commit -qm init', dir)
     sh('git checkout -q -b work/task && printf "theirs\\n" > secret.txt && git add -f secret.txt && git commit -qm theirs && git checkout -q main', dir)
     writeFileSync(join(dir, 'secret.txt'), 'mine\n')
@@ -98,11 +98,11 @@ describe('merging into main here', () => {
 describe('catching main up with its remote', () => {
   test('a file of yours the remote also brings stops it, naming the file and what to do here', async () => {
     const dir = fresh()
-    const bare = mkdtempSync(join(tmpdir(), 'shep-merge-origin-'))
+    const bare = tmp('merge-origin')
     sh('git init -q --bare -b main', bare)
     sh(`git remote add origin ${bare} && git push -q origin main`, dir)
     // someone else's work lands on the remote, bringing the very name the checkout has of its own
-    const clone = mkdtempSync(join(tmpdir(), 'shep-merge-clone-'))
+    const clone = tmp('merge-clone')
     sh(`git clone -q ${bare} . && git config user.email t@t && git config user.name T && printf "theirs\\n" > notes.txt && git add -A && git commit -qm theirs && git push -q origin main`, clone)
     writeFileSync(join(dir, 'notes.txt'), 'mine\n')
     const r = await catchUp(dir, 'main', 'then merge again')

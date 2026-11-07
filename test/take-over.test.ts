@@ -2,10 +2,10 @@
 // skill and sidebar rows out, its programs stopped; ~/.herdr-projects is never changed, and a linked checkout never
 // takes over.
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { takeOver, withoutSidebar, type Sys } from '../scripts/take-over.ts'
+import { tmp } from './tmp.ts'
 
 const KEY = `# >>> herdr-projects key (added by the herdr-projects plugin; \`herdr-projects remove-extras\` removes it)
 [[keys.command]]
@@ -23,7 +23,7 @@ rows = [["state_icon", "workspace"], [{ token = "$summary", dim = true }, "$prog
 const OWN = '# mine\n[ui]\ntoast = false\n'
 
 function world() {
-  const home = mkdtempSync(join(tmpdir(), 'shep-take-over-'))
+  const home = tmp('take-over')
   const cfg = join(home, '.config')
   const plugins = join(cfg, 'herdr', 'plugins')
   const root = join(plugins, 'github-installations', 'herdr-projects-1', '1-0', 'checkout')
@@ -107,7 +107,7 @@ describe('taking over herdr-projects', () => {
 
   test('no herdr-projects here: nothing to do', () => {
     const w = world()
-    const home = mkdtempSync(join(tmpdir(), 'shep-take-over-empty-'))
+    const home = tmp('take-over-empty')
     expect(takeOver(w.root, { env: w.env, home, now: NOW, sys: w.sys })).toBeNull()
   })
 
