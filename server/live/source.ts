@@ -44,7 +44,7 @@ import { asMode, HOME_SPACE, HOST, NAME, placeId, Places } from './places.ts'
 import { privatePrompt, coordinatorPrompt, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
 import { fitHarness, harnessProblem, harnessWords, loginHint, recentChat, restartHint, restartInfo, type Harness } from './restart.ts'
 import { Revivals, type Wrong } from './revive.ts'
-import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
+import { LOST_SESSION, RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
 import { CATALOG, CLI_NAME, CLIS, kindOf, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
 import { startVoice } from './voice.ts'
@@ -241,6 +241,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       this.emit('chat', item.key)
     })
     this.agents.on('failed', (key) => this.emit('chat', key))
+    // a headless Claude Code's turn that failed (headless.ts): its session gone starts a fresh one, as a resume that
+    // found none does; anything else is said in its chat in claude's words, and the next message is the next turn
+    this.agents.on('turnFailed', (key, why) => {
+      if (LOST_SESSION.test(why)) return void this.startFresh(key, 'Claude Code')
+      const id = `turn-failed:${key}:${Date.now()}`
+      this.chats.post(key, { id, card: { id, text: `Claude Code's turn failed: ${why.slice(0, 300)}` } })
+      this.emit('chat', key)
+    })
     this.agents.on('output', (key) => {
       if (this.terms.includes(key)) this.agents.screen(key).then((s) => this.emit('terminal', key, s))
     })
@@ -1193,7 +1201,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const pane = info?.pane_id ?? r.lastPane
     // a launch that never opened a pane and threw nothing of its own has nothing to say: no start ever happened
     if (!pane && !r.startError && wrong === 'gone') return
-    const screen = !begun && !pending && wrong !== null && pane ? await herdr.visible(pane).catch(() => '') : ''
+    // a headless one's pane shows its runner and its turns, never a CLI's start screen
+    const screen = !begun && !pending && wrong !== null && pane && !r.headless ? await herdr.visible(pane).catch(() => '') : ''
     // a relaunch may have begun while herdr answered: that is a new launch, and the next look reads it
     if (this.agents.record(key)?.started !== r.started) return
     const card = this.chats.startMenuUp(key)

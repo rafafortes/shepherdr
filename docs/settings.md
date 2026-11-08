@@ -44,6 +44,19 @@ API key). Set it Everywhere, for a machine or for a space, like the other rows, 
   `ANTHROPIC_API_KEY` from the vault. The key is in no launch argument, no environment an agent's tools inherit, no
   brief, chat, card or log. Your own Claude Code sessions are never touched: nothing changes in `~/.claude/settings.json`,
   `~/.claude.json` or the global environment.
+- With `api`, a coordinator or a Claude Code task agent runs **headless**, never the interactive CLI: API credits pay for
+  `claude -p` runs and the Agent SDK, while interactive Claude Code on a key is billed to purchased credits
+  ([Anthropic's note](https://support.claude.com/en/articles/17154008)). Its herdr pane runs a small runner
+  (`scripts/claude-headless.ts`, `server/live/headless.ts`) that takes each message as one turn,
+  `claude -p --resume <its session>` with the same settings file, model, effort and instructions, and shows the turn
+  in the pane (what was asked, what it said, the tools it ran, the turn's time and cost). The chat works as with the
+  interactive one: it reads the same session log, shows the agent at work while a turn runs or a message waits, and
+  what you write goes in as the next turn, in order; Stop (or Ctrl+C in the pane) ends the turn under way, not the
+  agent. Switching the login and restarting resumes the same session the other way, so no history is lost.
+- Headless, no prompt can be answered: its turns run in Claude Code's auto permission mode (`--permission-mode auto`),
+  so what the classifier lets through runs and what it blocks comes back to the agent as refused; it then asks you
+  (`shepherdr ask`) or works around it. Its secrets route binds the runner, the parent of every turn. Headless runs on
+  the main machine only: another machine refuses the `api` login for a Claude Code rather than run it interactively.
 - Coordinators, Claude Code task agents and headless reviews (`claude -p`) all follow it. With `api`, a new brief's
   Settings block has a Login line with the exact review command:
   `claude -p --settings <the space's review settings file> "<prompt>"`; that file names the helper, which fails when the
