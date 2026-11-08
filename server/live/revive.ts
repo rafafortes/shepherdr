@@ -15,6 +15,8 @@ export function paneWrong(kind: string, p: ProcessInfo, want: Record<string, str
   if (p.shell_pid && p.foreground_process_group_id === p.shell_pid) return 'exited'
   const argv = p.foreground_processes?.find((x) => x.argv?.some((a) => basename(a) === kind))?.argv
   if (!argv) return undefined
+  // pi sets its process title, so its argv reads just "pi" plus padding: its flags can't be read, never judged stale
+  if (kind === 'pi' && argv.slice(1).every((a) => !a.trim())) return undefined
   for (const [flag, path] of Object.entries(want)) {
     const i = argv.indexOf(flag)
     if (i < 0 || argv[i + 1] !== path) return 'stale'

@@ -20,6 +20,17 @@ describe('what is wrong with a pane', () => {
     expect(paneWrong('claude', running(['claude', '--resume', 'abc']), want)).toBe('stale')
   })
 
+  test('pi rewrites its process title, so an argv of just "pi" (plus padding) is not stale', () => {
+    const piWant = { '--append-system-prompt': '/h/.shepherdr/helper/prompts/shep-x.md' }
+    expect(paneWrong('pi', running(['pi']), piWant)).toBeUndefined()
+    expect(paneWrong('pi', running(['pi', '', '', '']), piWant)).toBeUndefined()
+    // an argv that does show flags is still judged
+    expect(paneWrong('pi', running(['pi', '--session-id', 'x']), piWant)).toBe('stale')
+    expect(paneWrong('pi', running(['pi', '--append-system-prompt', piWant['--append-system-prompt']]), piWant)).toBeUndefined()
+    // other CLIs with no flags still count as stale
+    expect(paneWrong('claude', running(['claude']), want)).toBe('stale')
+  })
+
   test('the shell at its prompt: the CLI exited', () => {
     expect(paneWrong('claude', { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ argv: ['bash'], pid: 10 }] }, want)).toBe('exited')
   })
