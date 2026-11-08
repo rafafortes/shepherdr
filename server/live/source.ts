@@ -180,9 +180,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // the login every Claude Code Shepherdr starts signs in with (claude-login.ts): its key comes from the vault when
     // Claude Code asks for it, and picking that login needs the key there first
     this.agents.apiKeyHelper = (chain) => (this.vault.pick([API_KEY_NAME], chain).missing.length ? undefined : keyHelper(this.vaultHome, chain))
-    this.settings.apiKeyAt = (l) => !this.vault.pick([API_KEY_NAME], this.levelChain(l)).missing.length
+    this.settings.apiKeyAt = (l) => {
+      try {
+        return !this.vault.pick([API_KEY_NAME], this.levelChain(l)).missing.length
+      } catch {
+        return false
+      }
+    }
     // a headless review runs with a settings file of its own, so it signs in as its space does
-    this.engine.reviewerLogin = (space) => ({ login: this.settings.login(space), settings: this.reviewFile(space) })
+    this.engine.reviewerLogin = (space) => ({ login: 'api', settings: this.reviewFile(space, 'api') })
     mkdirSync(HOME, { recursive: true })
     // what the Watcher kept, from before agents reported their own progress
     for (const f of ['watcher.json', 'watcher-call.json']) rmSync(join(HOME, f), { force: true })
@@ -973,7 +979,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // an agent's CLI, model or effort, or the login it signs in with: the restart hint of the chats open now
     if (/^(task|coordinator)\.(agent|model|effort)$/.test(key) || key === LOGIN_KEY) for (const k of this.watched) this.emit('chat', k)
     // a review runs with its space's settings file, which carries the login: every space's follows the setting at once
-    if (key === LOGIN_KEY) for (const id of [placeId.home(), ...this.places.spaces.map((p) => placeId.space(p.name))]) this.reviewFile(this.spaceKey(id))
+    if (key === LOGIN_KEY) for (const id of [placeId.home(), ...this.places.spaces.map((p) => placeId.space(p.name))]) this.reviewFile(this.spaceKey(id), this.settings.login(this.spaceKey(id)))
     this.emit('snapshot')
   }
 
@@ -1057,7 +1063,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     try {
       const x = this.restartable(key)
       if (!this.agents.record(key) || (x.t && (ended(x.t) || x.t.archived))) return undefined
-      return restartHint(x.on, x.set, x.want) ?? loginHint(x.login.on, x.login.want)
+      return restartHint(x.on, x.set, x.want) ?? (x.on.kind === 'claude' && x.want.kind === 'claude' ? loginHint(x.login.on, x.login.want) : undefined)
     } catch {
       return undefined
     }
@@ -2789,11 +2795,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** the settings file a headless Claude Code review in a space runs with, written now and returned by its path (claude-
-   *  login.ts): it carries the login Settings give that space, so a review started by an older brief takes it too */
-  private reviewFile(space?: string): string {
-    const chain = [placeId.space(space ?? '~'), placeId.machine(), 'all']
-    const helper = this.vault.pick([API_KEY_NAME], chain).missing.length ? undefined : keyHelper(this.vaultHome, chain)
-    return reviewSettingsFile(placeId.space(space ?? '~'), helper)
+   *  login.ts). For the API key it always names the helper, which fails when the key is gone rather than let the
+   *  review sign in with the subscription; for the subscription it adds nothing. The helper reads the vault when Claude
+   *  Code asks, so adding or replacing the key needs no rewrite */
+  private reviewFile(space: string | undefined, login: Login): string {
+    const place = placeId.space(space ?? '~')
+    return reviewSettingsFile(place, login === 'api' ? keyHelper(this.vaultHome, [place, placeId.machine(), 'all']) : undefined)
   }
 
   /* ---------- secrets ---------- */

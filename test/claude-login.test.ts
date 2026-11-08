@@ -113,6 +113,8 @@ describe('the login setting', () => {
     expect(reviewSettings('p:one:work')).toBe(file)
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({})
     rmSync(file, { force: true })
+    // two places whose names read alike never share a file (each would carry the other's chain)
+    expect(reviewSettingsPath('p:one:my app')).not.toBe(reviewSettingsPath('p:one:my-app'))
   })
 })
 

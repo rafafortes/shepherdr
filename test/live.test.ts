@@ -852,7 +852,7 @@ describe('settings', () => {
     s.set('brief.review', 'off')
     expect(note()).toContain("- Review: off. No review; the lines on reviewing below don't apply. (your setting for every machine)")
     s.set('brief.review', null)
-    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual(['Tasks', 'Tasks', 'Tasks', 'Coordinators', 'Coordinators', 'Coordinators', 'Backup', 'Backup', 'Backup'])
+    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual(['Tasks', 'Tasks', 'Tasks', 'Coordinators', 'Coordinators', 'Coordinators', 'Claude Code', 'Backup', 'Backup', 'Backup'])
   })
 })
 

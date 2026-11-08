@@ -1194,10 +1194,12 @@ export class Engine extends Emitter<Events> {
     return { ...h, ...(chosen.kind && chosen.kind !== h.kind ? { model: undefined } : {}), ...chosen }
   }
 
-  /** what a new brief's Settings block says about the login: Settings' for that space, and the settings file a headless
-   *  review there runs with (nothing where the world has no vault of its own, a test's) */
+  /** what a new brief's Settings block says about the login: nothing for the subscription (the brief is exactly what it
+   *  was before the setting), and for the API key the settings file a headless review there runs with (none where the
+   *  world has no vault of its own, a test's) */
   private loginTold(space?: string) {
-    return this.reviewerLogin?.(space) ?? { login: this.settings.login(space) }
+    if (this.settings.login(space) !== 'api') return undefined
+    return this.reviewerLogin?.(space) ?? { login: 'api' as const }
   }
 
   /* ---------- scheduled: a task that starts by itself at a time (--at / --in) ---------- */

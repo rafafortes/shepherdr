@@ -6,6 +6,7 @@
 // The helper is one small script of Shepherdr's that prints ANTHROPIC_API_KEY from the first level of the secret's
 // chain that has it, and nothing else. An agent running as this machine's user can still run that command, or read
 // the vault file itself: owner-only files are what protect it, and that is also Shepherdr's limit (docs/secrets.md).
+import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { boxDir, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from './mfs.ts'
 
@@ -69,7 +70,8 @@ export function keyHelper(home: string, chain: string[], runtime = process.execP
 }
 
 /** the settings file a headless Claude Code review in a place runs with (an empty object: nothing added) */
-export const reviewSettingsPath = (place: string) => join(hooksDir, `review-${place.replace(/[^A-Za-z0-9_.-]+/g, '-')}.settings.json`)
+export const reviewSettingsPath = (place: string) =>
+  join(hooksDir, `review-${place.replace(/[^A-Za-z0-9_.-]+/g, '-')}-${createHash('sha256').update(place).digest('hex').slice(0, 8)}.settings.json`)
 
 /** that file, written and returned by its path: the same apiKeyHelper a coordinator gets, so a headless review signs in
  *  exactly as its space does, or nothing added at all for the subscription login. It follows Settings, not the brief:
