@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { effortFor, findModel, helpLevels, nearest, parseClaude, parseCodex, parsePi, piEnabled, scopePi, setModels } from '../server/live/models.ts'
+import { effortFor, findModel, helpLevels, modelsOf, nearest, parseClaude, parseCodex, parsePi, piEnabled, scopePi, setModels } from '../server/live/models.ts'
 import { tmp } from './tmp.ts'
 
 describe('reading what each CLI takes', () => {
@@ -50,14 +50,14 @@ describe('reading what each CLI takes', () => {
     expect(c.efforts).toEqual(['low', 'high', 'ultra'])
     expect(parseCodex('not json')).toBeUndefined()
   })
-  test("pi's list: provider/model ids, levels only where it thinks", () => {
+  test("pi's list: provider/model ids and names, levels only where it thinks", () => {
     const list = ['provider  model            context  thinking  images', 'openai    gpt-6@x          1M       yes       yes', 'anthro    claude@x         1M       no        yes', 'other     gpt-6@x          1M       yes       no'].join('\n')
     const help = '  --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh, max\n'
     expect(helpLevels(help, '--thinking')).toEqual(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
     const c = parsePi(list, help)!
     expect(c.models.map((m) => [m.id, m.label, m.efforts.length])).toEqual([
       ['openai/gpt-6@x', 'openai/gpt-6@x', 7],
-      ['anthro/claude@x', 'claude@x', 0],
+      ['anthro/claude@x', 'anthro/claude@x', 0],
       ['other/gpt-6@x', 'other/gpt-6@x', 7],
     ])
     setModels('pi', c)
@@ -88,6 +88,9 @@ describe('reading what each CLI takes', () => {
       expect(piEnabled()).toEqual(['spark/qwen'])
       setModels('pi', c)
       expect(findModel('pi', 'claude-haiku-4-5')?.id).toBe('anthropic/claude-haiku-4-5')
+      // a list read before names had their provider gets it too
+      setModels('pi', { models: [{ id: 'spark/qwen', label: 'qwen', efforts: [] }], efforts: [] })
+      expect(modelsOf('pi')!.models.map((x) => x.label)).toEqual(['spark/qwen'])
     } finally {
       setModels('pi', undefined)
       if (was === undefined) delete process.env.PI_CODING_AGENT_DIR

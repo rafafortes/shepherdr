@@ -74,8 +74,14 @@ export function modelsOf(kind: string): CliModels | undefined {
   if (!TEST) ask(kind)
   const c = cache[kind]
   const got = c?.models.length || (c && !TABLE[kind].models.length) ? c : TABLE[kind]
-  return kind === 'pi' ? scopePi(got, piEnabled()) : got
+  return kind === 'pi' ? scopePi(withProvider(got), piEnabled()) : got
 }
+
+/** pi's models named with their provider, as parsePi names them now: a list read before it did named most without */
+const bare = (m: Model) => m.label === m.id.slice(m.id.indexOf('/') + 1)
+const named = (m: Model) => (bare(m) ? { ...m, label: m.id } : m)
+const withProvider = (c: CliModels): CliModels =>
+  [...c.models, ...(c.others ?? [])].some(bare) ? { ...c, models: c.models.map(named), others: c.others?.map(named) } : c
 
 /** pi's enabledModels (its global settings), read again only when the file changes; nothing when it names none */
 let enabled: { at: string; patterns?: string[] } = { at: '' }
@@ -279,11 +285,10 @@ export function parsePi(list: string, help: string): CliModels | undefined {
   if (head < 0) return undefined
   const think = rows[head].indexOf('thinking')
   const found = rows.slice(head + 1).filter((r) => r.length >= 2 && r[0])
-  const names = found.map((r) => r[1])
   const models = found.map((r) => ({
     id: `${r[0]}/${r[1]}`,
-    // a model's own name, unless another provider has one so named too
-    label: names.indexOf(r[1]) === names.lastIndexOf(r[1]) ? r[1] : `${r[0]}/${r[1]}`,
+    // with its provider always: the same model comes from several (a plan, an API, a machine of the operator's own)
+    label: `${r[0]}/${r[1]}`,
     efforts: think < 0 || r[think] === 'yes' ? efforts : [],
   }))
   return models.length ? { models, efforts } : undefined
