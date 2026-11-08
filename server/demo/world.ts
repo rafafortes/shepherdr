@@ -13,12 +13,15 @@ import { settingsBlock } from '../live/prompts.ts'
 import { CLI_NAME, repositorySection, defaultOf, kindOf } from '../live/settings.ts'
 import { harnessProblem, harnessWords, restartClis } from '../live/restart.ts'
 import { picksIn, pickKey, withPin, withRecent, type Picks } from '../../shared/picks.ts'
+import { LOGIN_KEY, loginOf } from '../live/claude-login.ts'
 import { nextWords } from '../live/trigger.ts'
 import { pilotLine } from '../live/heartbeat.ts'
 import { secretPages, Vault } from '../live/secrets.ts'
 
 const DEFAULT_WAYS = { review: defaultOf('brief.review') !== 'off', mustFix: defaultOf('review.mustFix')!, rounds: Number.parseInt(defaultOf('review.rounds')!, 10), merge: defaultOf('brief.merge')!, waitChecks: defaultOf('brief.merge') === 'after GitHub checks' }
 const DEFAULT_REVIEWER = { kind: kindOf(defaultOf('reviewer.agent')!)! }
+// the demo has no vault: briefs show the default login, without a review settings file
+const DEMO_LOGIN = { login: loginOf(defaultOf(LOGIN_KEY)!) }
 import { excerpt } from '../live/chatlines.ts'
 import { findModel, TABLE } from '../live/models.ts'
 import { Browsers } from '../live/browser.ts'
@@ -62,7 +65,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   read: Record<string, number> = { '*': Date.now() + 1000 }
   // every brief ends with its Settings block, as a live one does: HP-204's with two lines changed, one by its
   // coordinator and one by its space
-  tasks: Task[] = D.tasks().map((t) => ({ base: 'main', ...(DEMO_PRS[t.id] ? { ...t, pr: DEMO_PRS[t.id] } : t), desc: `${t.desc}\n\n${settingsBlock(t.id, t.id === 'HP-204' ? { ways: { ...DEFAULT_WAYS, rounds: 1, merge: 'ask me first' }, reviewer: DEFAULT_REVIEWER, by: { rounds: 'task', merge: 'space' } } : { ways: DEFAULT_WAYS, reviewer: DEFAULT_REVIEWER })}` }))
+  tasks: Task[] = D.tasks().map((t) => ({ base: 'main', ...(DEMO_PRS[t.id] ? { ...t, pr: DEMO_PRS[t.id] } : t), desc: `${t.desc}\n\n${settingsBlock(t.id, t.id === 'HP-204' ? { ways: { ...DEFAULT_WAYS, rounds: 1, merge: 'ask me first' }, reviewer: DEFAULT_REVIEWER, login: DEMO_LOGIN, by: { rounds: 'task', merge: 'space' } } : { ways: DEFAULT_WAYS, reviewer: DEFAULT_REVIEWER, login: DEMO_LOGIN })}` }))
   chats: Record<string, Chat> = D.chats()
   asks: Record<string, string> = { ...D.ASKS }
   /** each machine's defaults at their levels, as live */
@@ -125,7 +128,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     if (quiet) cards[quiet.place].push(cardMessage({ id: 'card-main-red', red: 'main', text: 'went red: Check failed' }, at++))
     for (const c of Object.values(this.chats)) {
       c.controls = c.cli === 'Claude Code' ? CLAUDE_CONTROLS() : OTHER_CONTROLS()
-      c.agent = c.cli === 'Claude Code' ? { kind: 'claude', model: 'claude-opus-5-5', modelLabel: 'Opus 5.5', effort: 'high' } : { kind: kindOf(c.cli) ?? 'codex' }
+      c.agent = c.cli === 'Claude Code' ? { kind: 'claude', model: 'claude-opus-5-5', modelLabel: 'Opus 5.5', effort: 'high', login: 'subscription' } : { kind: kindOf(c.cli) ?? 'codex' }
       for (const m of c.messages) m.at = at++
       if (cards[c.key]) c.messages.unshift(...cards[c.key])
     }

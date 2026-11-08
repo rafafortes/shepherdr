@@ -26,6 +26,7 @@ import { readCodexRuntime } from './codex-runtime.ts'
 import { SecretAccess } from './secret-access.ts'
 import { isAgentProcess } from './agent-process.ts'
 import { launchesAgents, skippedLaunch } from './launch-policy.ts'
+import { hooksDir, loginOf, NEEDS_KEY, type Login } from './claude-login.ts'
 
 /** a log's name (its session id), wherever it lies: one named both by its mirrored path and by its own is one log */
 const logName = (f: string) => f.slice(f.lastIndexOf('/') + 1)
@@ -71,6 +72,9 @@ export interface AgentRecord {
   tab?: string
   model?: string
   effort?: string
+  /** which login this Claude Code signs in with (claude-login.ts): Settings' at its start, and what its settings file
+   *  carries until it starts again */
+  login?: Login
   /** instructions appended to the CLI's system prompt (or sent first, hidden, where it has no such option) */
   system?: string
   /** log files, oldest first: one per session */
@@ -157,8 +161,9 @@ type Events = {
   output: [key: string]
 }
 
-/** where the hooks of the agents Shepherdr starts record their events */
-export const HOOKS_DIR = join(boxDir(), 'hooks')
+/** where the hooks of the agents Shepherdr starts record their events (claude-login.ts keeps its Claude Code files
+ *  beside them) */
+export const HOOKS_DIR = hooksDir
 
 /** where an agent's instructions are kept for its CLI to read */
 const promptPath = (name: string) => join(boxDir(), 'prompts', `${name}.md`)
@@ -203,6 +208,9 @@ export class Agents extends Emitter<Events> {
   private sub: Subscription
   readonly secretAccess = new SecretAccess()
   secretScope: (chat: string) => string[] | undefined = () => undefined
+  /** the command Claude Code runs for its Anthropic API key at these levels of the secret (claude-login.ts), or nothing
+   *  where none is kept: source.ts answers from the vault */
+  apiKeyHelper: (chain: string[]) => string | undefined = () => undefined
   private readingBackground = false
   private refreshing = false
   private stopped = false
@@ -823,6 +831,8 @@ export class Agents extends Emitter<Events> {
   private async launch({ first, pane: place, was, ...spec }: Spec) {
     // the one place an agent is started: a server with a home of its own starts none unless it was asked to
     if (!this.allowed(spec.key)) throw new Error(skippedLaunch(spec.key))
+    // an API key login with no key stops here, before its pane: it never signs in another way instead
+    this.claudeHelper(spec, true)
     this.secretAccess.revoke(spec.key)
     this.routes.delete(spec.key)
     const old = this.records[spec.key]
@@ -831,7 +841,7 @@ export class Agents extends Emitter<Events> {
     const r: AgentRecord = old ?? { ...spec, logs: [], started: Date.now() }
     const changedPrompt = old?.system !== spec.system
     const from = old?.cwd
-    Object.assign(r, { name: spec.name, kind: spec.kind, cwd: spec.cwd, workspace: spec.workspace, tab: spec.tab ?? r.tab, env: spec.env ?? r.env, access: spec.access ?? r.access, model: spec.model ?? r.model, effort: spec.effort ?? r.effort, system: spec.system ?? r.system, set: spec.set ?? r.set, finished: false })
+    Object.assign(r, { name: spec.name, kind: spec.kind, cwd: spec.cwd, workspace: spec.workspace, tab: spec.tab ?? r.tab, env: spec.env ?? r.env, access: spec.access ?? r.access, model: spec.model ?? r.model, effort: spec.effort ?? r.effort, login: spec.login ?? r.login, system: spec.system ?? r.system, set: spec.set ?? r.set, finished: false })
     this.codexState.delete(spec.key)
     r.started = Date.now()
     r.resumed = !!resume
@@ -882,6 +892,16 @@ export class Agents extends Emitter<Events> {
     return this.live.get(r.name) ?? null
   }
 
+  /** the command this Claude Code runs for its key, when it signs in with an API key (claude-login.ts): thrown for a
+   *  launch that would otherwise start on a login it has no key for, nothing for the subscription or another CLI */
+  private claudeHelper(a: Pick<AgentRecord, 'key' | 'kind' | 'login'>, refuse = false): string | undefined {
+    if (a.kind !== 'claude' || loginOf(a.login ?? 'subscription') !== 'api') return undefined
+    const chain = this.secretScope(a.key) ?? []
+    const helper = chain.length ? this.apiKeyHelper(chain) : undefined
+    if (!helper && refuse) throw new Error(`${NEEDS_KEY} This agent was not started.`)
+    return helper
+  }
+
   args(r: AgentRecord, resume: boolean): string[] {
     const a: string[] = []
     // a model is kept by its id, or by its name when picked in the chat's menu (Opus 5.5); an effort its model lacks
@@ -894,7 +914,8 @@ export class Agents extends Emitter<Events> {
       // its hooks tell Shepherdr what it does (readers/hooks.ts), from a settings file of its own: yours stay untouched.
       // The same file lets it run its own shepherdr command without a prompt (readers/own-commands.ts), by the exact
       // path Shepherdr puts on its PATH and its own chat identity
-      const h = hookSettings(HOOKS_DIR, r.name, { command: agentEnv(r.key, ROOT).SHEPHERDR_COMMAND, chat: r.key })
+      const helper = this.claudeHelper(r, true)
+      const h = hookSettings(HOOKS_DIR, r.name, { command: agentEnv(r.key, ROOT).SHEPHERDR_COMMAND, chat: r.key, ...(helper ? { apiKeyHelper: helper } : {}) })
       r.hooks = h.events
       a.push('--settings', h.settings)
       if (r.system) a.push('--append-system-prompt-file', this.promptFile(r))
