@@ -6,7 +6,6 @@ import { type Mode } from '../../shared/types.ts'
 import { ROOT } from '../root.ts'
 import { has } from '../plugins.ts'
 import { BOX, helperDir } from './box.ts'
-import { API_KEY_NAME, type Login } from './claude-login.ts'
 
 /** where an agent finds Shepherdr's files: its checkout here; on another machine the helper's copy (install.ts) */
 const OWN = BOX ? helperDir(BOX.home) : ROOT
@@ -57,16 +56,13 @@ export function reviewerWords(r: Reviewer) {
 export const SEVERITIES = ['critical', 'major', 'minor', 'trivial']
 
 /** the Settings block's lines, by the settings each comes from (Settings → How tasks work shows each under its row) */
-export type Said = 'review' | 'reviewer' | 'login' | 'mustFix' | 'rounds' | 'merge' | 'agent'
+export type Said = 'review' | 'reviewer' | 'mustFix' | 'rounds' | 'merge' | 'agent'
 
 /** what a brief's Settings block says: How tasks work, who reviews, the agent it runs on (only so it knows), and who
  *  set the lines that differ from Shepherdr's own */
 export interface Told {
   ways: Ways
   reviewer?: Reviewer
-  /** which login every Claude Code Shepherdr starts uses, and the settings file a headless review there runs with
-   *  (claude-login.ts): the reviewer's, since that is the Claude Code a brief starts */
-  login?: { login: Login; settings?: string }
   agent?: Reviewer
   by?: Partial<Record<Said, SetBy>>
 }
@@ -78,18 +74,6 @@ function onWords(r: Reviewer) {
   const name = REVIEWER_NAME[r.kind] ?? r.kind
   if (!r.model && !r.effort) return `${name} (its default model and effort)`
   return `${name} (${[r.model ? `model ${r.model}` : 'its default model', r.effort ? `${r.effort} effort` : 'its default effort'].join(', ')})`
-}
-
-/** the Login line of a brief's Settings block: the sign-in every Claude Code Shepherdr starts uses, and the command a
- *  headless review runs with so it takes the same one (claude-login.ts writes that settings file; its path is named
- *  here, and the file, not this line, is what a review reads when it runs) */
-export function loginLine(l: { login: Login; settings?: string }) {
-  const what =
-    l.login === 'api'
-      ? `an Anthropic API key from Shepherdr's secrets (${API_KEY_NAME}), never the subscription.`
-      : 'the Claude subscription, the claude.ai login you use.'
-  const how = l.settings ? ` A Claude Code reviewer runs with the space's own settings file, which carries that login: claude -p --settings ${l.settings} "<prompt>" < /dev/null.` : ''
-  return `Login: ${what}${how}`
 }
 
 /** the Settings block's lines, each with what it comes from: plain words, each with its value first */
@@ -106,7 +90,6 @@ export function settingsLines(id: string, t: Told): { said: Said; text: string }
   const lines: { said: Said; text: string }[] = [
     { said: 'review', text: w.review ? 'Review: on. Have your change reviewed by fresh eyes before it merges.' : "Review: off. No review; the lines on reviewing below don't apply." },
     ...(t.reviewer ? [{ said: 'reviewer' as const, text: `Reviewer: ${reviewerWords(t.reviewer)}.` }] : []),
-    ...(t.login ? [{ said: 'login' as const, text: loginLine(t.login) }] : []),
     { said: 'mustFix', text: `Must fix: ${w.mustFix}. Findings are tagged ${SEVERITIES.join('/')}; fix ${fix.length === SEVERITIES.length ? 'all of them' : plural(fix)}${w.rounds > 1 ? ', then review again' : ''}.` },
     { said: 'rounds', text: w.rounds > 1 ? `Review rounds: ${w.rounds}. Stop when a round finds none to fix, at most ${w.rounds} rounds.` : 'Review rounds: 1. One round, no review again.' },
   ]

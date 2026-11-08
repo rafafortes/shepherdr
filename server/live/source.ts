@@ -42,14 +42,13 @@ import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places } from './places.ts'
 import { privatePrompt, coordinatorPrompt, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
-import { fitHarness, harnessProblem, harnessWords, loginHint, recentChat, restartHint, restartInfo, type Harness } from './restart.ts'
+import { fitHarness, harnessProblem, harnessWords, recentChat, restartHint, restartInfo, type Harness } from './restart.ts'
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
 import { CATALOG, CLI_NAME, CLIS, kindOf, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
 import { startVoice } from './voice.ts'
 import { SECRET_NAME, secretPages, Vault } from './secrets.ts'
-import { API_KEY_NAME, keyHelper, LOGIN_KEY, reviewSettings as reviewSettingsFile, type Login } from './claude-login.ts'
 import { diffFiles, diffPatch, listFiles, pullRequest, readFile } from './worktree.ts'
 import { RequestedNewsMailbox } from './requested-news.ts'
 import { Unread } from './unread.ts'
@@ -92,10 +91,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** Autopilot's Run now: the wake a tap waits for, and the one its turn runs */
   wakeQueue = new Wakes()
   artifacts = new Artifacts()
-  /** where the vault file is: the main machine's Shepherdr home, read by a worker for another machine on the same disk */
-  vaultHome = process.env.SHEPHERDR_MAIN_HOME || HOME
   /** agents' secrets: one file on the main machine, which a worker for another machine reads there */
-  vault = new Vault(this.vaultHome)
+  vault = new Vault(process.env.SHEPHERDR_MAIN_HOME || HOME)
   /** opens an artifact at phone width before anyone sees it (a test puts its own here) */
   checker: Checker = browserChecker(
     // on this machine, whichever machine the artifact came from
@@ -177,18 +174,6 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const space = /^[^/]+\/(Agent|Reviewer)$/.test(chat) ? this.engine.task(chat.split('/')[0])?.project : this.places.find(chat)?.id === chat ? chat : undefined
       return space ? [space, placeId.machine(), 'all'] : undefined
     }
-    // the login every Claude Code Shepherdr starts signs in with (claude-login.ts): its key comes from the vault when
-    // Claude Code asks for it, and picking that login needs the key there first
-    this.agents.apiKeyHelper = (chain) => (this.vault.pick([API_KEY_NAME], chain).missing.length ? undefined : keyHelper(this.vaultHome, chain))
-    this.settings.apiKeyAt = (l) => {
-      try {
-        return !this.vault.pick([API_KEY_NAME], this.levelChain(l)).missing.length
-      } catch {
-        return false
-      }
-    }
-    // a headless review runs with a settings file of its own, so it signs in as its space does
-    this.engine.reviewerLogin = (space) => ({ login: 'api', settings: this.reviewFile(space, 'api') })
     mkdirSync(HOME, { recursive: true })
     // what the Watcher kept, from before agents reported their own progress
     for (const f of ['watcher.json', 'watcher-call.json']) rmSync(join(HOME, f), { force: true })
@@ -976,10 +961,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   private settingChanged(key: string) {
     if (key === 'tasks.archiveAfter') this.engine.autoArchive()
     if (key.startsWith('machine.')) this.engine.release()
-    // an agent's CLI, model or effort, or the login it signs in with: the restart hint of the chats open now
-    if (/^(task|coordinator)\.(agent|model|effort)$/.test(key) || key === LOGIN_KEY) for (const k of this.watched) this.emit('chat', k)
-    // a review runs with its space's settings file, which carries the login: every space's follows the setting at once
-    if (key === LOGIN_KEY) for (const id of [placeId.home(), ...this.places.spaces.map((p) => placeId.space(p.name))]) this.reviewFile(this.spaceKey(id), this.settings.login(this.spaceKey(id)))
+    // an agent's CLI, model or effort: the restart hint of the chats open now
+    if (/^(task|coordinator)\.(agent|model|effort)$/.test(key)) for (const k of this.watched) this.emit('chat', k)
     this.emit('snapshot')
   }
 
@@ -1008,7 +991,6 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       kind: h?.kind ?? rec!.kind,
       // '' is the CLI's own default
       ...(h ? { model: h.model ?? '', effort: h.effort ?? '', set } : {}),
-      login: this.settings.login(this.spaceKey(id)),
       cwd: c.cwd,
       workspace: c.workspace,
       was: (c as { was?: string }).was,
@@ -1052,10 +1034,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const want = this.settings.harness(role, space)
     const r = this.agents.record(key)
     const on: Harness = r ? { kind: r.kind, model: r.model, effort: r.effort } : (t?.agent ?? want)
-    // the login it started on (an agent from before the setting signed in with the subscription) and Settings' now
-    const wantLogin = this.settings.login(space)
-    const onLogin: Login = r ? (r.login ?? 'subscription') : wantLogin
-    return { t, role, space, want, on, set: r?.set, login: { on: onLogin, want: wantLogin } }
+    return { t, role, space, want, on, set: r?.set }
   }
 
   /** the calm hint a chat shows once Settings for its role say other than what its agent runs on */
@@ -1063,7 +1042,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     try {
       const x = this.restartable(key)
       if (!this.agents.record(key) || (x.t && (ended(x.t) || x.t.archived))) return undefined
-      return restartHint(x.on, x.set, x.want) ?? (x.on.kind === 'claude' && x.want.kind === 'claude' ? loginHint(x.login.on, x.login.want) : undefined)
+      return restartHint(x.on, x.set, x.want)
     } catch {
       return undefined
     }
@@ -1849,7 +1828,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'restart-info': {
         try {
           const x = this.restartable(a.chat)
-          return { ok: true, info: restartInfo({ role: x.role, space: x.space, on: x.on, onKnown: !!this.agents.record(a.chat), want: x.want, login: x.login, kinds: Object.keys(CLI_NAME).filter(this.engine.installed), working: this.agents.status(a.chat) === 'working' }) }
+          return { ok: true, info: restartInfo({ role: x.role, space: x.space, on: x.on, onKnown: !!this.agents.record(a.chat), want: x.want, kinds: Object.keys(CLI_NAME).filter(this.engine.installed), working: this.agents.status(a.chat) === 'working' }) }
         } catch (e) {
           return { ok: false, error: (e as Error).message }
         }
@@ -2687,7 +2666,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const where = pr ? `${named}'s` : level === 'machine' ? `${NAME}'s` : "Everywhere's"
         const now = this.settings.get(a1, pr)
         // a trigger in words too, to tell the human
-        return `${a0 === 'unset' ? `${a1}: ${where} own is unset; it is ${now} now.` : `${a1} = ${now} (${where})`}${this.settings.words(a1, now).replace(/^\n\s*/, '\nIn words: ')}${a1.endsWith('.instructions') ? '\nUsed at the next start or restart; running agents are unchanged. Reviewer changes need a new or restarted task agent.' : ''}${a1 === LOGIN_KEY ? '\nCoordinators, task agents and reviews starting from now sign in that way; a running coordinator picks it up when it is restarted (its + menu shows the login it runs on), and a running task agent at its next start.' : ''}`
+        return `${a0 === 'unset' ? `${a1}: ${where} own is unset; it is ${now} now.` : `${a1} = ${now} (${where})`}${this.settings.words(a1, now).replace(/^\n\s*/, '\nIn words: ')}${a1.endsWith('.instructions') ? '\nUsed at the next start or restart; running agents are unchanged. Reviewer changes need a new or restarted task agent.' : ''}`
       }
       case 'automation': {
         const op = a1 ?? 'list'
@@ -2783,24 +2762,6 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       }
     }
     throw new Error(`No command ${a0}; shepherdr help lists them`)
-  }
-
-  /* ---------- the Claude Code login ---------- */
-
-  /** the levels a secret kept at a settings level comes from, most specific first: its own, then the ones above it */
-  private levelChain(l: Level): string[] {
-    if (l === 'all') return ['all']
-    if (l === 'machine') return [placeId.machine(), 'all']
-    return [placeId.space(l.space), placeId.machine(), 'all']
-  }
-
-  /** the settings file a headless Claude Code review in a space runs with, written now and returned by its path (claude-
-   *  login.ts). For the API key it always names the helper, which fails when the key is gone rather than let the
-   *  review sign in with the subscription; for the subscription it adds nothing. The helper reads the vault when Claude
-   *  Code asks, so adding or replacing the key needs no rewrite */
-  private reviewFile(space: string | undefined, login: Login): string {
-    const place = placeId.space(space ?? '~')
-    return reviewSettingsFile(place, login === 'api' ? keyHelper(this.vaultHome, [place, placeId.machine(), 'all']) : undefined)
   }
 
   /* ---------- secrets ---------- */

@@ -148,12 +148,11 @@ function writeScript(dir: string, name: string, text: string): string {
 
 /** the settings file that makes one Claude Code record its hooks to `events`, and run its own shepherdr command without
  *  a prompt (`command`, this launch's; see own-commands.ts); returns its path. Starting over: what an earlier run
- *  recorded is gone. `apiKeyHelper` (claude-login.ts) is the command Claude Code runs for its Anthropic API key when the
- *  human picked that login; absent, the file is exactly what it was: the subscription's. */
+ *  recorded is gone. */
 export function hookSettings(
   dir: string,
   name: string,
-  o: { command?: string; chat?: string; runtime?: string; apiKeyHelper?: string } = {},
+  o: { command?: string; chat?: string; runtime?: string } = {},
 ): { settings: string; events: string } {
   const runtime = o.runtime ?? process.execPath
   task.mkdirSync(dir, { recursive: true })
@@ -178,7 +177,7 @@ export function hookSettings(
     hooks.PreToolUse = [...one, { matcher: 'Bash', hooks: [{ type: 'command', command: decider, timeout: 10 }] }]
   }
   const settings = join(dir, `${name}.settings.json`)
-  task.writeFileSync(settings, JSON.stringify(o.apiKeyHelper ? { hooks, apiKeyHelper: o.apiKeyHelper } : { hooks }, null, 2))
+  task.writeFileSync(settings, JSON.stringify({ hooks }, null, 2))
   return { settings, events }
 }
 

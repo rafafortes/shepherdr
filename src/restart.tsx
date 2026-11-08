@@ -6,7 +6,7 @@ import { NO_PICKS, orderByPicks, type Picks } from '@shared/picks.ts'
 import { act, setUI, taskOf, useSnap, useStore } from './kernel.ts'
 import { Dialog } from './rowmenu.tsx'
 import { Pick, shown, Switch, TextValue } from './Settings.tsx'
-import { EffortIcon, ic, LockIcon, MenuItem, ModelIcon, ModeIcon, Primary, RestartIcon, UpDownIcon } from './ui.tsx'
+import { EffortIcon, ic, MenuItem, ModelIcon, ModeIcon, Primary, RestartIcon, UpDownIcon } from './ui.tsx'
 
 /* ---------- the sheet ---------- */
 
@@ -48,9 +48,6 @@ export function RestartItem({ chat, name, onPick }: { chat: string; name: string
 }
 
 const DEFAULT = 'default'
-
-/** a Claude Code login in words: Settings → Agents → Claude Code login (claude-login.ts) */
-const loginWords = (login?: string) => (login === 'api' ? 'API key' : 'Subscription')
 
 /** a CLI's model choices by name, and the levels the one picked takes */
 const modelsOf = (c?: RestartCli) => c?.models ?? []
@@ -167,14 +164,6 @@ function Sheet({ chat, name, current }: Opening) {
               </Line>
             ) : <Line label="Effort"><span className="text-fg3">Default</span></Line>}
             {unavailable ? <p className="text-need-fg">{model} is unavailable. Choose Default or an available model before restarting.</p> : null}
-            {info.login && cli?.kind === 'claude' ? (
-              <Line label="Login">
-                <span data-login className="text-fg2">
-                  {kind === info.on.kind ? loginWords(info.login.on) : loginWords(info.login.want)}
-                  {kind === info.on.kind && info.login.on !== info.login.want ? <span className="text-fg3"> · Settings now say {loginWords(info.login.want)}: Restart applies it</span> : null}
-                </span>
-              </Line>
-            ) : null}
             {changed || save ? (
               <Line label={saveWords(info)}>
                 <Switch label={saveWords(info)} on={save} onChange={setSave} />
@@ -225,15 +214,8 @@ export function AgentControls({ chatKey, cli }: { chatKey: string; cli: string }
     setUI({ plus: null })
     openRestart(chatKey, chatKey.includes('/') ? chatKey.split('/')[0] : 'this space', true)
   }
-  // a Claude Code's login is a launch value like its model: Settings → Agents → Claude Code login, applied by a restart
-  const rows = [
-    ['Agent', agent ? cli : `${cli} · unknown`, ModeIcon],
-    ['Model', model, ModelIcon],
-    ['Effort', effort, EffortIcon],
-    ...(agent?.kind === 'claude' ? [['Login', loginWords(agent.login), LockIcon] as const] : []),
-  ] as const
   return <div data-agent-controls>
-    {rows.map(([label, value, Icon]) =>
+    {([['Agent', agent ? cli : `${cli} · unknown`, ModeIcon], ['Model', model, ModelIcon], ['Effort', effort, EffortIcon]] as const).map(([label, value, Icon]) =>
       <MenuItem key={label} icon={<Icon className={ic} />} aria-label={`${label}: ${value}. Select and restart`} onClick={open}>
         <span className="flex min-w-0 items-center justify-between gap-4">
           <span>{label}</span>

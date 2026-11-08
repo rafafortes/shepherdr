@@ -643,10 +643,8 @@ export interface Chat {
   cli: string
   /** what this CLI lets the + menu change; only what it supports is listed */
   controls?: ChatControls
-  /** Recorded launch values, never inferred from Settings. Missing values are CLI defaults, not observed telemetry.
-   *  login: which sign-in its Claude Code started with (claude-login.ts); a run from before that setting is the
-   *  subscription's */
-  agent?: { kind: string; model?: string; modelLabel?: string; effort?: string; login?: string; runtime?: AgentRuntime }
+  /** Recorded launch values, never inferred from Settings. Missing values are CLI defaults, not observed telemetry. */
+  agent?: { kind: string; model?: string; modelLabel?: string; effort?: string; runtime?: AgentRuntime }
   /** Settings for its role now say something else than what its agent runs on: a calm hint offers a restart */
   restart?: RestartHint
 }
@@ -693,8 +691,6 @@ export interface RestartInfo {
   onKnown?: boolean
   onWords: string
   want: { kind: string; model?: string; effort?: string }
-  /** the Claude Code login it runs on and the one Settings give its role now: a restart starts it on that one */
-  login?: { on: string; want: string }
   clis: RestartCli[]
   /** its agent is mid-turn: a restart interrupts it first */
   working: boolean

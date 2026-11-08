@@ -17,7 +17,6 @@ import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf } from '
 import { picksOf, rememberModel } from './model-picks.ts'
 import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
 import { eventRules, eventsText, eventWords, nextWords, OWN_ZONE, timeRule, timeWords, validZone, type EventRule } from './trigger.ts'
-import { API_KEY_NAME, LOGIN_KEY, LOGINS, loginOf, NEEDS_KEY, type Login } from './claude-login.ts'
 
 /** every agent kind herdr can start (interactive chat requires runtime log discovery and a reader) */
 const FALLBACK_KINDS = ['pi', 'claude', 'codex', 'gemini', 'cursor', 'devin', 'agy', 'cline', 'omp', 'mastracode', 'opencode', 'copilot', 'kimi', 'kiro', 'droid', 'amp', 'grok', 'hermes', 'kilo', 'qodercli', 'qwen', 'letta', 'maki', 'muse']
@@ -189,13 +188,10 @@ export const CATALOG: Section[] = [
   {
     // which agent (CLI), model and effort each kind of agent starts with
     name: 'Agents',
-    about: "What each kind of agent starts with. Default is the agent's own model or effort. Backup takes a task over when its agent can't go on. Chat choices need a chat log reader; other installed CLIs cannot show replies here. Headless review is separate. Claude Code's login is the claude.ai sign-in you already use, or an Anthropic API key kept in Secrets; a change reaches coordinators, task agents and reviews that start after it, and a running coordinator picks it up when it is restarted.",
+    about: "What each kind of agent starts with. Default is the agent's own model or effort. Backup takes a task over when its agent can't go on. Chat choices need a chat log reader; other installed CLIs cannot show replies here. Headless review is separate.",
     rows: [
       ...agentRows('Tasks', 'task', [...CHAT_CLIS], 'default', 'default'),
       ...agentRows('Coordinators', 'coordinator', [...CHAT_CLIS], 'default', 'default'),
-      // which sign-in every Claude Code Shepherdr starts uses (claude-login.ts): the subscription as you are signed in,
-      // or an Anthropic API key from Secrets. Picking the key needs one there first
-      { group: 'Claude Code', label: 'Login', key: LOGIN_KEY, value: 'subscription', options: [...LOGINS] },
       // a backup agent takes a task over where its agent can't go on (engine.ts cantGoOn)
       { group: 'Backup', label: 'Agent', key: 'task.fallback', value: 'Codex', options: ['off', ...CHAT_CLIS] },
       { group: 'Backup', label: 'Model', key: 'backup.model', value: 'default', text: true },
@@ -401,14 +397,10 @@ export class Settings {
   set(key: string, value: string | null, l: Level = 'all'): { ok: boolean; error?: string } {
     if (!KEYS.includes(key)) return { ok: false, error: `No setting ${key}` }
     if (!levelsOf(key).includes(kindOfLevel(l))) return { ok: false, error: levelsOf(key).includes('machine') ? `${key} is set Everywhere or for one machine, not a space.` : `${key} is set Everywhere only.` }
-    // a login is kept by its own word, any case
-    if (value !== null && key === LOGIN_KEY) value = value.trim().toLowerCase()
     if (value !== null) {
       const chat = key === 'task.agent' || key === 'coordinator.agent' || (key === 'task.fallback' && value.trim().toLowerCase() !== 'off')
       const err = refuse(key, value) ?? (chat ? chatProblem(kindOf(value) ?? value) : undefined) ?? this.unfit(key, value, l)
       if (err) return { ok: false, error: err }
-      // an API key login with no key to use would start nothing or, worse, quietly sign in another way
-      if (key === LOGIN_KEY && value === 'api' && this.apiKeyAt && !this.apiKeyAt(l)) return { ok: false, error: NEEDS_KEY }
       const num = numOf(key)
       // a number is kept with its unit, however it was written ("13", "1.5x", "80 %")
       if (num) value = numValue(num, value)!
@@ -508,7 +500,6 @@ export class Settings {
       mustFix: by('review.mustFix'),
       rounds: by('review.rounds'),
       merge: by('brief.merge'),
-      login: by(LOGIN_KEY),
       agent: by('task.agent', 'task.model', 'task.effort'),
     }
     return Object.fromEntries(Object.entries(all).filter(([, v]) => v)) as Partial<Record<Said, SetBy>>
@@ -554,15 +545,6 @@ export class Settings {
       alertHerdr: get('machine.alertHerdr') !== 'off',
     }
   }
-
-  /** the login every Claude Code Shepherdr starts uses for a space (none: this machine) */
-  login(space?: string): Login {
-    return loginOf(this.pick(LOGIN_KEY, space ? { space } : 'machine').value)
-  }
-
-  /** whether the Anthropic API key is kept for a level and the ones above it: source.ts sets it from the vault, and
-   *  where it is not set (a world of its own) picking the key is not checked */
-  apiKeyAt?: (l: Level) => boolean
 
   /** the CLI, model and effort tasks or coordinators start with, or tasks are reviewed by, for a space (none: this
    *  machine); nothing for a CLI's own default */
@@ -610,7 +592,6 @@ export class Settings {
       const next = nextWords(value, this.zone())
       return `\n${''.padEnd(23)}${timeWords(value, this.zone())}${next.length ? `; next ${next.join(', ')}` : ''}`
     }
-    if (key === LOGIN_KEY) return `\n${''.padEnd(23)}${loginOf(value) === 'api' ? `an Anthropic API key from Shepherdr's secrets (${API_KEY_NAME})` : 'the Claude subscription you are signed in with'}`
     return key === 'heartbeat.on' ? `\n${''.padEnd(23)}${eventWords(eventRules(value))}` : ''
   }
 
