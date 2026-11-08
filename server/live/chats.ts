@@ -414,6 +414,11 @@ export class Chats {
   /** A blocked agent's terminal menu, one a slash command opened, or the startup screen a start stopped on, read from
    *  its screen (refreshed at most every 2s). */
   async readMenu(key: string, force = false): Promise<boolean> {
+    // a headless Claude Code (headless.ts) has no menu: its pane prints its replies, which no menu may be read from
+    if (this.agents.record(key)?.headless) {
+      this.startScreens.delete(key)
+      return this.menus.delete(key)
+    }
     const st = this.agents.status(key)
     const starting = this.startScreens.has(key)
     if (!force && (st === 'working' || st === 'gone') && !this.commandMenus.has(key)) {

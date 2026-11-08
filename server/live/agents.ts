@@ -162,6 +162,8 @@ type Events = {
   /** what a screen sent couldn't go in */
   failed: [key: string]
   output: [key: string]
+  /** a headless Claude Code's turn failed (headless.ts): claude's own words */
+  turnFailed: [key: string, why: string]
 }
 
 /** where the hooks of the agents Shepherdr starts record their events (claude-login.ts keeps its Claude Code files
@@ -343,6 +345,12 @@ export class Agents extends Emitter<Events> {
   }
 
   status(key: string): AgentStatus | 'gone' {
+    // a headless one is working while its runner runs a turn or has one waiting: each claude -p run starts and ends a
+    // session of its own, so its hooks' idle and working say nothing of the agent; only a question it put counts
+    if (this.records[key]?.headless) {
+      const seen = this.info(key)?.agent_status ?? 'gone'
+      return seen !== 'gone' && this.said(key)?.helper ? 'blocked' : seen
+    }
     return statusFrom(this.said(key), this.info(key)?.agent_status ?? 'gone')
   }
 
@@ -479,6 +487,25 @@ export class Agents extends Emitter<Events> {
     }
   }
 
+  private turnsSeen = new Map<string, number>()
+
+  private listHeadless() {
+    for (const r of Object.values(this.records)) {
+      if (!r.headless || r.finished || !r.lastPane || this.live.has(r.name)) continue
+      const st = readState(r.name)
+      if (!st) continue
+      const busy = st.working || inboxCount(r.name) > 0
+      // a turn that failed since the last look: its chat says so in claude's own words
+      const seen = this.turnsSeen.get(r.key)
+      if (seen === undefined || st.turns < seen) this.turnsSeen.set(r.key, st.turns)
+      else if (st.turns > seen) {
+        this.turnsSeen.set(r.key, st.turns)
+        if (st.error) this.emit('turnFailed', r.key, st.error)
+      }
+      this.live.set(r.name, { name: r.name, agent: 'claude', agent_status: busy ? 'working' : 'idle', agent_session: r.sessionId ? { kind: 'id', value: r.sessionId } : null, cwd: r.cwd, pane_id: r.lastPane, tab_id: '', workspace_id: '' } as AgentInfo)
+    }
+  }
+
   /**
    * herdr starts an agent with `agent.start` and then leaves the launch pending: it finishes such a launch only when a
    * client asks for that agent by name, and about a minute later, if nobody did, it drops the name and closes the pane
@@ -494,16 +521,6 @@ export class Agents extends Emitter<Events> {
    */
   /** a headless Claude Code (headless.ts) is no agent of herdr's: while its runner lives in its pane it is listed as one,
    *  working while a turn runs or a message waits for it, its session the one the runner resumes */
-  private listHeadless() {
-    for (const r of Object.values(this.records)) {
-      if (!r.headless || r.finished || !r.lastPane || this.live.has(r.name)) continue
-      const st = readState(r.name)
-      if (!st) continue
-      const busy = st.working || inboxCount(r.name) > 0 || this.outbox.some((o) => o.key === r.key)
-      this.live.set(r.name, { name: r.name, agent: 'claude', agent_status: busy ? 'working' : 'idle', agent_session: r.sessionId ? { kind: 'id', value: r.sessionId } : null, cwd: r.cwd, pane_id: r.lastPane, tab_id: '', workspace_id: '' } as AgentInfo)
-    }
-  }
-
   private settleLaunches(now = Date.now()) {
     for (const [name, a] of this.live) {
       const key = this.byName.get(name)
@@ -614,6 +631,8 @@ export class Agents extends Emitter<Events> {
    * (Claude Code; see readers/background.ts). Nothing while it works, asks in a menu, or is gone.
    */
   background(key: string, now = Date.now()): Background | undefined {
+    // a claude -p run ends what it ran in the background with it: nothing still runs once its turn is over
+    if (this.records[key]?.headless) return undefined
     const what = this.stillRuns(key)
     if (what !== 'shells' && what !== 'servers') return what
     const s = this.seen.get(key)
@@ -850,6 +869,10 @@ export class Agents extends Emitter<Events> {
     if (!this.allowed(spec.key)) throw new Error(skippedLaunch(spec.key))
     // an API key login with no key stops here, before its pane: it never signs in another way instead
     this.claudeHelper(spec, true)
+    // on the API key login a Claude Code runs headless (headless.ts); a box has no runner for it, and so refuses that
+    // login rather than run it interactively on the key
+    const headless = spec.kind === 'claude' && loginOf(spec.login ?? this.records[spec.key]?.login ?? 'subscription') === 'api'
+    if (headless && BOX) throw new Error('A headless Claude Code (the API key login) runs only on the main machine for now. This agent was not started.')
     this.secretAccess.revoke(spec.key)
     this.routes.delete(spec.key)
     const old = this.records[spec.key]
@@ -859,10 +882,7 @@ export class Agents extends Emitter<Events> {
     const changedPrompt = old?.system !== spec.system
     const from = old?.cwd
     Object.assign(r, { name: spec.name, kind: spec.kind, cwd: spec.cwd, workspace: spec.workspace, tab: spec.tab ?? r.tab, env: spec.env ?? r.env, access: spec.access ?? r.access, model: spec.model ?? r.model, effort: spec.effort ?? r.effort, login: spec.login ?? r.login, system: spec.system ?? r.system, set: spec.set ?? r.set, finished: false })
-    // on the API key login a Claude Code runs headless (headless.ts); a box keeps the interactive one, which it has no
-    // runner for, and so refuses that login rather than run it interactively on the key
-    r.headless = r.kind === 'claude' && loginOf(r.login ?? 'subscription') === 'api'
-    if (r.headless && BOX) throw new Error('A headless Claude Code (the API key login) runs only on the main machine for now. This agent was not started.')
+    r.headless = headless
     this.codexState.delete(spec.key)
     r.started = Date.now()
     r.resumed = !!resume
@@ -1156,6 +1176,7 @@ export class Agents extends Emitter<Events> {
     const r = this.records[key]
     // a headless one takes it as its next turn: queued in its inbox, after the turn under way
     if (r.headless) {
+      if (item.command) throw new Error(`${item.text.trim().split(/\s/)[0]} is a command of the interactive Claude Code; a headless one (the API key login) takes messages only.`)
       if (!readState(r.name)) throw Object.assign(new Error(`agent ${r.name} is not running`), { code: 'agent_not_running' })
       writeInbox(r.name, item.text)
       return

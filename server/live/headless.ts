@@ -73,9 +73,19 @@ export function inboxCount(name: string) {
 export function readState(name: string, alive = isAlive): HeadlessState | undefined {
   try {
     const s = JSON.parse(readFileSync(join(headlessDir(name), 'state.json'), 'utf8')) as HeadlessState
-    return s?.pid && alive(s.pid) ? s : undefined
+    return s?.pid && alive(s.pid) && isRunner(s.pid) ? s : undefined
   } catch {
     return undefined
+  }
+}
+
+/** that pid is a runner still, not another process that took its number after a reboot */
+export function isRunner(pid: number) {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('claude-headless')
+  } catch {
+    // no /proc (macOS): its liveness is all there is to go on
+    return process.platform !== 'linux'
   }
 }
 

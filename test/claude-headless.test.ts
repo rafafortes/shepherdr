@@ -25,7 +25,7 @@ function fakeClaude(dir: string) {
 prompt=$(cat)
 printf '%s\\n' "$*" >> "$FAKE_CALLS"
 printf '%s\\n' "$prompt" >> "$FAKE_PROMPTS"
-case "$prompt" in *sleep*) sleep 30 ;; esac
+case "$prompt" in *sleep*) sleep 30 ;; *fail*) echo "Credit balance is too low" >&2; exit 1 ;; esac
 touch "$FAKE_LOG"
 printf '%s\\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"done: '"$prompt"'"}]}}'
 printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"duration_ms":10,"total_cost_usd":0.001}'
@@ -120,6 +120,50 @@ describe('an agent on the API key login', () => {
       ;(rec as any).finished = true
       ;(a as any).listHeadless()
       expect(a.info(rec.key)).toBeUndefined()
+    } finally {
+      a.stop()
+    }
+  })
+
+  test("reads its state from the runner, not its hooks, and says a failed turn in claude's words", async () => {
+    startRunner('shep-headless-f')
+    await until(() => !!H.readState('shep-headless-f'))
+    const a = new Agents()
+    const failed: string[] = []
+    a.on('turnFailed', (_k, why) => failed.push(why))
+    try {
+      const rec = { key: 'p:one:f', name: 'shep-headless-f', kind: 'claude', cwd: '/unused', workspace: 'w', logs: [], started: 0, headless: true, lastPane: 'w1:p2', sessionId: '11111111-2222-3333-4444-555555555555' }
+      ;(a as any).records[rec.key] = rec
+      ;(a as any).listHeadless()
+      // a claude -p run's own session start and end say nothing of the agent: idle while the runner waits
+      ;(a as any).said = () => ({ state: 'working', at: Date.now() })
+      expect(a.status(rec.key)).toBe('idle')
+      ;(a as any).said = () => ({ state: 'idle', at: Date.now(), helper: true })
+      expect(a.status(rec.key)).toBe('blocked')
+      ;(a as any).said = () => undefined
+      H.writeInbox('shep-headless-f', 'please fail')
+      await until(() => H.readState('shep-headless-f')?.turns === 1 && !H.readState('shep-headless-f')?.working)
+      ;(a as any).live = new Map()
+      ;(a as any).listHeadless()
+      expect(failed).toEqual(['Credit balance is too low'])
+      // said once: the next look has nothing new
+      ;(a as any).live = new Map()
+      ;(a as any).listHeadless()
+      expect(failed.length).toBe(1)
+    } finally {
+      a.stop()
+    }
+  })
+
+  test('a slash command is refused, not sent as a message', async () => {
+    startRunner('shep-headless-g')
+    await until(() => !!H.readState('shep-headless-g'))
+    const a = new Agents()
+    try {
+      const rec = { key: 'p:one:g', name: 'shep-headless-g', kind: 'claude', cwd: '/unused', workspace: 'w', logs: [], started: 0, headless: true }
+      ;(a as any).records[rec.key] = rec
+      await expect((a as any).put(rec.key, { id: 'z', key: rec.key, text: '/clear', command: true, at: Date.now() })).rejects.toThrow(/headless/)
+      expect(H.inboxCount('shep-headless-g')).toBe(0)
     } finally {
       a.stop()
     }

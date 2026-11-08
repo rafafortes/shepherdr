@@ -61,12 +61,18 @@ const stopTurn = () => {
 // Ctrl+C in the pane, or Shepherdr's interrupt: the turn stops, the runner goes on (a turn runs in a group of its own)
 process.on('SIGINT', stopTurn)
 process.on('SIGUSR2', stopTurn)
+/** gone: no state says it lives, so a pid reused later is never taken for it */
+const forget = () => rmSync(join(dir, 'state.json'), { force: true })
 for (const sig of ['SIGHUP', 'SIGTERM'] as const)
   process.on(sig, () => {
     ending = true
     toTurn('SIGTERM')
+    forget()
     setTimeout(() => process.exit(0), 300)
   })
+process.on('exit', forget)
+// a turn's failure never ends the runner: it says so and takes the next message
+process.on('uncaughtException', (e) => process.stdout.write(`${RED}${e.message}${RESET}\n`))
 
 /** the oldest message waiting, taken out of the inbox */
 function next(): string | undefined {
@@ -122,6 +128,7 @@ function turn(text: string): Promise<void> {
     child = c
     state.child = c.pid
     save()
+    c.stdin!.on('error', () => undefined)
     c.stdin!.end(text)
     let buf = ''
     c.stdout!.on('data', (d: Buffer) => {
@@ -133,7 +140,10 @@ function turn(text: string): Promise<void> {
     })
     let err = ''
     c.stderr!.on('data', (d: Buffer) => (err = (err + d.toString('utf8')).slice(-2000)))
+    let finished = false
     const done = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (finished) return
+      finished = true
       if (buf.trim()) show(buf)
       if (code && code !== 130 && !signal && !state.error) {
         state.error = (err.trim().split('\n').filter((l) => !/^Warning:/.test(l)).pop() ?? `claude exited ${code}`).slice(0, 500)
