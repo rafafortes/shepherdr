@@ -3,8 +3,12 @@
 // and which take xhigh and max) and its --help, `codex debug models`, `pi --list-models` and pi's --help. What they
 // said is kept in cli-models.json and asked again by version (claude) or every few hours; until then, or where a CLI
 // can't tell, the table below holds. A level a model lacks becomes the nearest it has (nearest), never an error at start.
-import { realpathSync, statSync } from 'node:fs'
+// pi lists every model of every provider it has a login for: where its settings name the models it cycles through
+// (enabledModels), the menus offer only those, and the rest stay usable by id (others).
+import { readFileSync, realpathSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { readJson, writeJson } from '../store.ts'
+import { piHome } from './readers/find.ts'
 
 export interface Model {
   /** what the CLI takes: claude-opus-5-5, gpt-6-sol, exe-dev-openai/gpt-4.1@llm */
@@ -69,7 +73,46 @@ export function modelsOf(kind: string): CliModels | undefined {
   if (!TABLE[kind]) return undefined
   if (!TEST) ask(kind)
   const c = cache[kind]
-  return c?.models.length || (c && !TABLE[kind].models.length) ? c : TABLE[kind]
+  const got = c?.models.length || (c && !TABLE[kind].models.length) ? c : TABLE[kind]
+  return kind === 'pi' ? scopePi(got, piEnabled()) : got
+}
+
+/** pi's enabledModels (its global settings), read again only when the file changes; nothing when it names none */
+let enabled: { at: string; patterns?: string[] } = { at: '' }
+export function piEnabled(): string[] | undefined {
+  const file = join(piHome(), 'settings.json')
+  let at = ''
+  try {
+    at = `${file}@${statSync(file).mtimeMs}`
+  } catch {}
+  if (at !== enabled.at) {
+    let patterns: string[] | undefined
+    try {
+      const list = at ? JSON.parse(readFileSync(file, 'utf8'))?.enabledModels : undefined
+      if (Array.isArray(list)) patterns = list.filter((p): p is string => typeof p === 'string' && !!p.trim())
+    } catch {}
+    enabled = { at, patterns: patterns?.length ? patterns : undefined }
+  }
+  return enabled.patterns
+}
+
+/** pi's models as its enabledModels scope them, in that order: a pattern is a glob on provider/model or on the model
+ *  alone, any case, with an optional :level after it (pi's own --models format). The others stay findable by id;
+ *  none matching leaves the list as it was. */
+export function scopePi(c: CliModels, patterns?: string[]): CliModels {
+  if (!patterns?.length || !c.models.length) return c
+  const picked: Model[] = []
+  for (const p of patterns) {
+    const colon = p.lastIndexOf(':')
+    const bare = (colon > 0 && p.slice(colon + 1).trim().toLowerCase() in RANK ? p.slice(0, colon) : p).trim().toLowerCase()
+    const glob = new Bun.Glob(bare)
+    for (const m of c.models) {
+      const id = m.id.toLowerCase()
+      if (!picked.includes(m) && (glob.match(id) || glob.match(id.slice(id.indexOf('/') + 1)))) picked.push(m)
+    }
+  }
+  if (!picked.length) return c
+  return { ...c, models: picked, others: [...c.models.filter((m) => !picked.includes(m)), ...(c.others ?? [])] }
 }
 
 /** a model by its id, its name on screen or an alias (opus, sonnet:high's sonnet), any case; nothing when this CLI

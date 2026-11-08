@@ -1,6 +1,9 @@
 // Each CLI's models and effort levels, as read from the CLI itself (models.ts): what its output looks like here
 import { describe, expect, test } from 'bun:test'
-import { effortFor, findModel, helpLevels, nearest, parseClaude, parseCodex, parsePi, setModels } from '../server/live/models.ts'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { effortFor, findModel, helpLevels, nearest, parseClaude, parseCodex, parsePi, piEnabled, scopePi, setModels } from '../server/live/models.ts'
+import { tmp } from './tmp.ts'
 
 describe('reading what each CLI takes', () => {
   test("Claude Code's catalog: the newest of each family, its levels by capability, older ones by id", () => {
@@ -65,6 +68,30 @@ describe('reading what each CLI takes', () => {
       expect(effortFor('pi', 'ultra', 'openai/gpt-6@x')).toBe('max')
     } finally {
       setModels('pi', undefined)
+    }
+  })
+  test("pi's enabledModels scope its list, in their order, the rest kept by id", () => {
+    const m = (id: string) => ({ id, label: id, efforts: [] })
+    const c = { models: ['anthropic/claude-opus-5-5', 'anthropic/claude-haiku-4-5', 'commandcode/deepseek/v4', 'openrouter/deepseek/v4', 'spark/qwen'].map(m), efforts: [] }
+    const s = scopePi(c, ['spark/qwen', 'ANTHROPIC/claude-opus-*:high', 'deepseek/v4', 'nothing/here'])
+    expect(s.models.map((x) => x.id)).toEqual(['spark/qwen', 'anthropic/claude-opus-5-5', 'commandcode/deepseek/v4', 'openrouter/deepseek/v4'])
+    expect(s.others!.map((x) => x.id)).toEqual(['anthropic/claude-haiku-4-5'])
+    // no settings, or none of them matching: the whole list
+    expect(scopePi(c, undefined)).toBe(c)
+    expect(scopePi(c, ['nothing/here'])).toBe(c)
+    const dir = tmp('pi-settings')
+    const was = process.env.PI_CODING_AGENT_DIR
+    process.env.PI_CODING_AGENT_DIR = dir
+    try {
+      expect(piEnabled()).toBeUndefined()
+      writeFileSync(join(dir, 'settings.json'), JSON.stringify({ enabledModels: ['spark/qwen', 3, ''] }))
+      expect(piEnabled()).toEqual(['spark/qwen'])
+      setModels('pi', c)
+      expect(findModel('pi', 'claude-haiku-4-5')?.id).toBe('anthropic/claude-haiku-4-5')
+    } finally {
+      setModels('pi', undefined)
+      if (was === undefined) delete process.env.PI_CODING_AGENT_DIR
+      else process.env.PI_CODING_AGENT_DIR = was
     }
   })
   test('a level a model lacks becomes the nearest it has, a tie going lower', () => {
