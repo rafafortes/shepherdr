@@ -25,6 +25,7 @@ import { fromAgentLine } from '../chatlines.ts'
 import type { Chats } from '../chats.ts'
 import { HOST, placeId, type Places, type Space } from '../places.ts'
 import { privatePrompt, freshLine, goLine, handOverLine, restartLine, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
+import type { Login } from '../claude-login.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { CLI_NAME, kindOf, type Settings } from '../settings.ts'
@@ -405,6 +406,9 @@ export class Engine extends Emitter<Events> {
   private wt: Worktrees
   /** other machines' tasks, for a task queued after one (the main copy only: it is the one that sees them) */
   peerTask?: PeerTask
+  /** the Claude Code login a space uses and the settings file a headless review there runs with (claude-login.ts);
+   *  source.ts answers from the vault */
+  reviewerLogin?: (space?: string) => { login: Login; settings?: string }
   /** its agent's turn the provider cut off (retry.ts): waited out, or given up */
   retry?: (key: string) => Retry | undefined
   /** its backup agent is taking over */
@@ -1150,7 +1154,7 @@ export class Engine extends Emitter<Events> {
     // each line that differs from Shepherdr's own says who set it: the coordinator's flags, or a level of Settings
     const by = { ...this.settings.setBy(p.name, set), ...(Object.keys(o.reviewer ?? {}).length ? { reviewer: 'task' as const } : {}), ...(Object.keys(o.agent ?? {}).length ? { agent: 'task' as const } : {}) }
     const ways = this.settings.ways(p.name, set)
-    const how = settingsBlock(id, { ways, reviewer, agent, by })
+    const how = settingsBlock(id, { ways, reviewer, agent, by, login: this.loginTold(p.name) })
     const desc = [work, o.later ? LATER : '', how].filter(Boolean).join('\n\n')
     const t: TaskRec = {
       id,
@@ -1190,6 +1194,14 @@ export class Engine extends Emitter<Events> {
     return { ...h, ...(chosen.kind && chosen.kind !== h.kind ? { model: undefined } : {}), ...chosen }
   }
 
+  /** what a new brief's Settings block says about the login: nothing for the subscription (the brief is exactly what it
+   *  was before the setting), and for the API key the settings file a headless review there runs with (none where the
+   *  world has no vault of its own, a test's) */
+  private loginTold(space?: string) {
+    if (this.settings.login(space) !== 'api') return undefined
+    return this.reviewerLogin?.(space) ?? { login: 'api' as const }
+  }
+
   /* ---------- scheduled: a task that starts by itself at a time (--at / --in) ---------- */
 
   /** the time zone every time here is read in: Settings' (time.zone, Everywhere), as the heartbeat and automations' */
@@ -1211,7 +1223,7 @@ export class Engine extends Emitter<Events> {
     const set = s.set && Object.keys(s.set).length ? s.set : undefined
     const by = { ...this.settings.setBy(p.name, set), ...(Object.keys(s.reviewer ?? {}).length ? { reviewer: 'task' as const } : {}), ...(Object.keys(s.agent ?? {}).length ? { agent: 'task' as const } : {}) }
     const ways = this.settings.ways(p.name, set)
-    t.desc = [s.desc, s.later ? LATER : '', settingsBlock(t.id, { ways, reviewer, agent, by })].filter(Boolean).join('\n\n')
+    t.desc = [s.desc, s.later ? LATER : '', settingsBlock(t.id, { ways, reviewer, agent, by, login: this.loginTold(p.name) })].filter(Boolean).join('\n\n')
     t.agent = agent
     t.reviewer = reviewer
     t.waitChecks = ways.waitChecks
@@ -1428,6 +1440,8 @@ export class Engine extends Emitter<Events> {
       ...(as ? { model: as.model ?? 'default', effort: as.effort } : rec ? {} : { model: h.model, effort: h.effort }),
       // what Settings said when it started on them: a change since is offered as a restart (restart.ts)
       ...(as || !rec ? { set: this.settings.harness('task', this.nameOf(t)) } : {}),
+      // a Claude Code task agent signs in as its space does (claude-login.ts)
+      login: this.settings.login(this.nameOf(t)),
       cwd: t.worktree!,
       workspace: labelOf(t),
       tab: 'Agent',

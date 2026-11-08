@@ -942,7 +942,8 @@ export class Chats {
     return {
       key,
       cli: CLI_NAME[kind] ?? kind,
-      agent: r ? { runtime, ...launchHarness({ kind: r.kind, model: r.model, effort: r.effort }), ...(findModel(r.kind, r.model) ? { modelLabel: findModel(r.kind, r.model)!.label } : {}) } : undefined,
+      // the login it started with: a Claude Code from before this setting signed in with the subscription
+      agent: r ? { runtime, ...launchHarness({ kind: r.kind, model: r.model, effort: r.effort }), ...(r.kind === 'claude' ? { login: r.login ?? 'subscription' } : {}), ...(findModel(r.kind, r.model) ? { modelLabel: findModel(r.kind, r.model)!.label } : {}) } : undefined,
       messages: msgs,
       failed: failed.length ? failed : undefined,
       working: st === 'working' || undefined,

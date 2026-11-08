@@ -28,6 +28,38 @@
   their replies cannot be shown. Existing saved choices are kept, but an unsupported choice must be changed before
   launching again. Headless reviewer choices are separate; this does not add or prove support for other reviewers.
 
+## Claude Code login
+
+Settings → Agents → Claude Code → Login (`claude.login`) picks how every Claude Code Shepherdr starts signs in:
+`subscription` (the default: the claude.ai login you already use, exactly as before this setting) or `api` (an Anthropic
+API key). Set it Everywhere, for a machine or for a space, like the other rows, or with
+`shepherdr set claude.login api [--machine | --space NAME]`; `shepherdr show` says which one each level uses.
+
+- The key is the secret `ANTHROPIC_API_KEY` in Secrets, kept by you: Settings → Secrets, or in your own terminal
+  `shepherdr secret set ANTHROPIC_API_KEY [--machine | --space NAME] < file`. Never paste it into a chat. Picking `api`
+  for a level with no key there (or above it) is refused, and a Claude Code whose key is gone is not started at all, so
+  it never quietly falls back to the subscription.
+- With `api`, Shepherdr gives each Claude Code a settings file of its own (`--settings`, beside its hooks) whose
+  `apiKeyHelper` is a small script of Shepherdr's: Claude Code runs it when it needs the key, and it prints
+  `ANTHROPIC_API_KEY` from the vault. The key is in no launch argument, no environment an agent's tools inherit, no
+  brief, chat, card or log. Your own Claude Code sessions are never touched: nothing changes in `~/.claude/settings.json`,
+  `~/.claude.json` or the global environment.
+- Coordinators, Claude Code task agents and headless reviews (`claude -p`) all follow it. With `api`, a new brief's
+  Settings block has a Login line with the exact review command:
+  `claude -p --settings <the space's review settings file> "<prompt>"`; that file names the helper, which fails when the
+  key is gone instead of letting the review use the subscription. With `subscription` a brief is exactly what it was, so
+  a review from a brief written before a switch to `api` still runs on the subscription.
+- When it takes effect: coordinators, task agents and reviews that start after the change. A running coordinator keeps
+  its login until it starts again (a restart, or a relaunch after it stopped); its chat offers the restart the way a
+  model change does, and its + menu and the restart sheet show the login it runs on.
+- A wrong or revoked key makes Claude Code retry for a few minutes before it gives up (401, its own retries), so a
+  review can sit quiet that long: replace the key in Secrets and restart.
+- `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` in the environment herdr hands its panes would win over the helper
+  (Claude Code's own order): Shepherdr sets neither, so leave them out of herdr's environment when you pick `api`.
+- Owner-only files are the limit, as for every secret ([agent secret access](secrets.md)): any agent running as your
+  user (a pi task agent included) can run the helper command named in those settings files, or read the vault, and get
+  the key. Use a key with a spending limit, or separate OS accounts, if that matters.
+
 ## Dictation
 
 Talk to type (the microphone beside the message box) records in the browser with `MediaRecorder`, sends the

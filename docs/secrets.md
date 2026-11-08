@@ -32,6 +32,12 @@ reprovisions running agents without restarting them. Credentials deliberately ar
 records. Owner-only files protect against other OS users, not hostile code already running as the same OS user:
 that code can read the vault itself. Use separate OS accounts/machines when agents must be mutually untrusted.
 
+
+Claude Code's API key login (`claude.login = api`, [Settings](settings.md#claude-code-login)) reads
+`ANTHROPIC_API_KEY` from the vault through an `apiKeyHelper` script named in Shepherdr's own per-agent Claude Code
+settings files, not through a capability: Claude Code runs it itself. That command is readable by any agent running as
+the same OS user, like the vault, so it adds no boundary beyond the owner-only files above.
+
 ## Upgrade and compatibility
 
 Deploy the updated server and helper together. Until provisioning succeeds, secret retrieval fails closed. No

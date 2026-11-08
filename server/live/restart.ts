@@ -3,6 +3,7 @@
 // What the restart sheet offers (restartInfo) and the calm hint a chat shows once Settings say something else than
 // what its agent runs on (restartHint) come from here.
 import type { Message, RestartCli, RestartHint, RestartInfo } from '../../shared/types.ts'
+import { loginOf, loginWords, type Login } from './claude-login.ts'
 import { effortFor, effortsOf, findModel, modelArg, modelsOf } from './models.ts'
 import { picksOf } from './model-picks.ts'
 import { orderByPicks } from '../../shared/picks.ts'
@@ -56,6 +57,14 @@ export function restartHint(on: Harness, set: Harness | undefined, want: Harness
   return { on: `${effortOf(on) || 'default'} effort`, want: `${effortOf(want) || 'default'} effort` }
 }
 
+/** a login that differs from what its agent runs on, offered like a CLI, model or effort: the agent runs on one and
+ *  Settings give its role the other now (claude-login.ts). Nothing while they agree */
+export function loginHint(on: string, want: string): RestartHint | undefined {
+  const a = loginOf(on)
+  const b = loginOf(want)
+  return a === b ? undefined : { on: loginWords(a), want: loginWords(b) }
+}
+
 /** each CLI the sheet offers: its models (with the levels each takes) where Shepherdr passes them, the human's pinned
  *  ones first and the ones picked last next, then the CLI's own order. An older model it still takes by id stays on
  *  offer while it is pinned or was picked: a pin never drops out of the list it belongs to. picksOfKind: this machine's
@@ -83,7 +92,7 @@ export function restartClis(kinds: string[], picksOfKind: (kind: string) => { pi
 
 /** what the restart sheet shows: what it runs on now, what Settings say (what it restarts with unless changed), the
  *  CLIs it may restart on */
-export function restartInfo(o: { role: 'task' | 'coordinator'; space?: string; on: Harness; want: Harness; kinds: string[]; working: boolean; onKnown?: boolean }): RestartInfo {
+export function restartInfo(o: { role: 'task' | 'coordinator'; space?: string; on: Harness; want: Harness; kinds: string[]; working: boolean; onKnown?: boolean; login?: { on: Login; want: Login } }): RestartInfo {
   const kinds = o.kinds.includes(o.on.kind) ? o.kinds : [o.on.kind, ...o.kinds]
   const clis = restartClis(kinds)
   // Discovery keeps older, still-supported models outside the short picker list. Keep a recognized launch or
@@ -94,7 +103,7 @@ export function restartInfo(o: { role: 'task' | 'coordinator'; space?: string; o
     if (m && cli?.models && !cli.models.some((x) => x.id === m.id)) cli.models.push({ id: m.id, label: m.label, efforts: m.efforts, defaultEffort: m.effort })
   }
   const on = launchHarness(o.on)
-  return { role: o.role, space: o.space, onKnown: o.onKnown, on, onWords: harnessWords(on), want: fitHarness(o.want), clis, working: o.working }
+  return { role: o.role, space: o.space, onKnown: o.onKnown, on, onWords: harnessWords(on), want: fitHarness(o.want), clis, working: o.working, ...(o.login ? { login: o.login } : {}) }
 }
 
 /** a chat's last words, latest last, for an agent taking over: yours, another agent's (named as it declared itself) and
