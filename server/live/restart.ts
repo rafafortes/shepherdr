@@ -77,7 +77,7 @@ export function restartAllWords(rows: RestartAllRow[], otherMachines: string[] =
   const others = otherMachines.length ? `Another machine's spaces are not touched here: ${otherMachines.join(', ')}.` : ''
   const tail = [tasks, others].filter(Boolean)
   if (!restarted.length && !failed.length)
-    return [`Every coordinator on this machine is on its Settings already (${same.length}): nothing was restarted.`, ...tail].join('\n')
+    return [`Nothing new in the Settings of this machine's coordinators (${same.length}): nothing was restarted.`, ...tail].join('\n')
   return [
     ...restarted.map((r) => `${r.name}: restarted on ${r.on}${r.interrupted ? ', its working turn interrupted first' : ''}`),
     ...same.map((r) => `${r.name}: already on ${r.on}, left alone`),

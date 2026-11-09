@@ -29,8 +29,8 @@ also has a side panel: its live herdr terminal, its files, its diff against main
   across them all, which alerts reach your phone, and alerts about a whole machine. A space's tasks list holds its
   own tasks, a home space's too; a machine's chip lists its spaces', grouped by status or by space, and chips on more
   machines (or none: everything) also by machine, or machine › space. A machine's heading has a + (New space) and a ⋯ (New space…, New section…,
-  Rename machine…: its emoji and name; this machine's own also Restart n coordinators, for the ones whose Settings moved),
-  and says when it is in trouble: `Can't reach`, `herdr down`, or a limit it is over.
+  Rename machine…: its emoji and name; this machine's own also Restart n coordinators, for as long as some coordinator's
+  Settings moved), and says when it is in trouble: `Can't reach`, `herdr down`, or a limit it is over.
 - Add a space with the + on a machine's heading (it shows on hover with a mouse), its ⋯ (New space…), `N` on a desktop
   (on the machine you are in), or by asking a coordinator (`add ~/dev/x as a space`, or `shepherdr space add <path>
   [--name NAME]`). Pick the machine when there is more than one, then a folder in your home there: the picker starts at

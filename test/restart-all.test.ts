@@ -84,11 +84,15 @@ describe('restarting every coordinator on new Settings', () => {
       const same = await w.space('same', { kind: 'codex' })
       // the two whose Settings now say Codex for their coordinators; the third's already do
       for (const { name } of [moved, also, same]) expect(w.src.settings.set('coordinator.agent', 'Codex', { space: name }).ok).toBe(true)
+      // before the run, the snapshot names exactly the two whose chat says Settings moved
+      expect(w.src.snapshot().places.filter((p) => p.restart).map((p) => p.name).sort()).toEqual(['also', 'moved'])
       const r = await w.src.cli(['restart', '--all'], {})
       expect(r.code).toBe(0)
       expect(w.started.map((x) => x.key).sort()).toEqual([moved.key, also.key].sort())
       // another CLI takes the chat over: the single restart's own line and card
       expect(w.started[0].first).toContain('the human restarted this chat on Codex')
+      // (the stub never records a new start, so the snapshot keeps saying they differ: the pre-run one above is what
+      // tells the places list's item what it will touch)
       expect(w.cards(moved.key)).toEqual(['Restarted on Codex'])
       expect(w.cards(also.key)).toEqual(['Restarted on Codex'])
       expect(w.cards(same.key)).toEqual([])
@@ -155,7 +159,7 @@ describe('restarting every coordinator on new Settings', () => {
       expect(w.started).toEqual([])
       expect(w.cards(key)).toEqual([])
       // the home space and the space itself, nothing else: the task's agent is no place's coordinator
-      expect(r.out).toContain('Every coordinator on this machine is on its Settings already (2): nothing was restarted.')
+      expect(r.out).toContain("Nothing new in the Settings of this machine's coordinators (2): nothing was restarted.")
     })
   })
 
@@ -216,10 +220,21 @@ describe('restarting every coordinator on new Settings', () => {
       const picked = await w.space('picked', { kind: 'claude', model: 'claude-sonnet-5-5' })
       w.src.agents.records[picked.key].set = { kind: 'claude', model: 'claude-opus-5-5' }
       expect(w.src.settings.set('coordinator.model', 'Opus 5.5', { space: picked.name }).ok).toBe(true)
+      // nothing moved at all: one sentence, no line per space
+      const nothing = await w.src.cli(['restart', '--all'], {})
+      expect(nothing.code).toBe(0)
+      expect(w.started).toEqual([])
+      expect(nothing.out).toContain("Nothing new in the Settings of this machine's coordinators (3): nothing was restarted.")
+      // one that does move: the line for the picked one still says what it really runs on, left alone
+      const moved = await w.space('moved', { kind: 'claude' })
+      expect(w.src.settings.set('coordinator.agent', 'Codex', { space: moved.name }).ok).toBe(true)
       const r = await w.src.cli(['restart', '--all'], {})
       expect(r.code).toBe(0)
-      expect(w.started).toEqual([])
-      expect(r.out).toContain('Every coordinator on this machine is on its Settings already (3): nothing was restarted.')
+      expect(w.started.map((x) => x.key)).toEqual([moved.key])
+      const lines = r.out.trim().split('\n')
+      expect(lines).toContain('picked: already on Claude Code (Sonnet 5.5), left alone')
+      expect(lines).toContain('agreeing: already on Codex, left alone')
+      expect(lines).toContain('1 restarted, 3 already on it, 0 failed.')
     })
   })
 })
@@ -249,7 +264,7 @@ describe('the words of restart --all', () => {
   test('nothing differed: one sentence, and still what it does not touch', () => {
     const out = restartAllWords([{ name: 'gtm', state: 'same', on: 'Codex' }])
     expect(out.split('\n')).toEqual([
-      'Every coordinator on this machine is on its Settings already (1): nothing was restarted.',
+      "Nothing new in the Settings of this machine's coordinators (1): nothing was restarted.",
       "Tasks are not restarted: a running task's brief was written when it started, and restarting its agent is its own choice (shepherdr restart <id>).",
     ])
   })

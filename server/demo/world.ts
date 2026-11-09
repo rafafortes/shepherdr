@@ -767,13 +767,9 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         }
         this.emit('snapshot')
         const others = [...new Set(this.places.filter((x) => x.machine !== D.DEMO_HOST).map((x) => x.machine))]
-        return {
-          ok: true,
-          out: restartAllWords(rows, others),
-          restarted: rows.filter((r) => r.state === 'restarted').length,
-          same: rows.filter((r) => r.state === 'same').length,
-          failed: rows.filter((r) => r.state === 'failed').length,
-        }
+        const count = (state: RestartAllRow['state']) => rows.filter((r) => r.state === state).length
+        const failures = rows.filter((r): r is Extract<RestartAllRow, { state: 'failed' }> => r.state === 'failed').map((r) => r.name)
+        return { ok: true, out: restartAllWords(rows, others), restarted: count('restarted'), same: count('same'), failed: failures.length, failures }
       }
       case 'pause': {
         const t = this.task(a.chat.split('/')[0])

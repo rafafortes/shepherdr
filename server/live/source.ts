@@ -1127,8 +1127,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         rows.push({ name: p.name, state: 'failed', error: (e as Error).message })
       }
     }
-    const counts = { restarted: rows.filter((r) => r.state === 'restarted').length, same: rows.filter((r) => r.state === 'same').length, failed: rows.filter((r) => r.state === 'failed').length }
-    return { out: restartAllWords(rows, this.otherMachines()), ...counts }
+    const count = (state: RestartAllRow['state']) => rows.filter((r) => r.state === state).length
+    // the ones that could not, by name: the row in the app says which beside the count (the full lines go to the CLI)
+    const failures = rows.filter((r): r is Extract<RestartAllRow, { state: 'failed' }> => r.state === 'failed').map((r) => r.name)
+    return { out: restartAllWords(rows, this.otherMachines()), restarted: count('restarted'), same: count('same'), failed: failures.length, failures }
   }
 
   /** the other machines' places, named for `restart --all`: theirs are not restarted from here */

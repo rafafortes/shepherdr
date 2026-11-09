@@ -791,7 +791,7 @@ function MachineHeading({ m, snap, shut, spaces, sort, className }: { m: Machine
             Rename machine…
           </MenuItem>
           {/* its coordinators are this machine's to restart; another machine's place belongs to that machine */}
-          {m.machine === snap.host ? <RestartAllItem machine={m.machine} /> : null}
+          {m.machine === snap.host ? <RestartAllItem /> : null}
         </RowMenu>
       ) : null}
     </Heading>
