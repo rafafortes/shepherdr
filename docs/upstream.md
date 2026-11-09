@@ -23,29 +23,32 @@ own `v2.0.<n>` tags (Releases, below).
 
 **Last reviewed** (update these three lines at the end of every pass):
 
-- upstream `main`: `45521918` "SHEP-84: Release Shepherdr 3.1.14 (#734)", 2026-11-06 12:21 +0000
-- upstream tag `v3.1.14` (`45521918`, 2026-11-06), the newest release
+- upstream `main`: `fc17865a` "SHEP-152 Copy buttons always copy, on every device", 2026-11-09 13:21 +0100
+- upstream tag `v3.1.28` (`9cc43dca`, 2026-11-09), the newest release
 - upstream branch `v2.0` tip: `ebb17d58` "SHE-295: Build coordinator Autopilot (#490)", 2026-10-29 (unchanged)
 
-Reviewed on 2026-11-06, the third pass: the 26 commits between `v3.1.10` and `v3.1.14`, behind the four tags of
-3.1.11 to 3.1.14 (2026-11-05 20:11 to 2026-11-06 12:21 UTC); every upstream commit after `v2.0.0` is weighed in
-[the ledger](upstream-ledger.md), the new ones in its 3.1.11 to 3.1.14 section. The pass before it read 3.1.4 to 3.1.10
-(2026-11-05), and the one before that the 60 commits after `dc1b6782`.
+Reviewed on 2026-11-09, the fourth pass: the 56 commits between `v3.1.14` and `main`'s tip, behind the fourteen tags of
+3.1.15 to 3.1.28 (2026-11-07 13:58 to 2026-11-09 12:09 UTC), the last of them published while the pass ran and read
+with it; every upstream commit after `v2.0.0` is weighed in [the ledger](upstream-ledger.md), the new ones in its 3.1.15
+to 3.1.28 section. The pass before it read 3.1.11 to 3.1.14 (2026-11-06), the one before that 3.1.4 to 3.1.10, and the
+first the 60 commits after `dc1b6782`.
 
 ## How we notice a new upstream release
 
-Nothing is set up: the operator decides. The proposal is one weekly check, and no more than that: upstream ships
-nearly every day, most of it on the herdr-core line we do not track, so the useful question is only whether anything
-new matters to us.
+One weekly check, no more than that: upstream ships nearly every day, most of it on the herdr-core line we do not track,
+so the useful question is only whether anything new matters to us. It runs as the automation **Weekly upstream check**,
+every Monday at 9:00 (America/Sao_Paulo), in the `shepherdr` space: one task in this repository, its brief these checks.
+It reports in the chat (a card with only the new adopt and port rows, ranked) and in the ledger.
 
-- **Where:** one automation in the `shepherdr` space, on a Monday-morning time rule, its brief the three checks below.
-  It runs as a task in this repository and reports in the chat.
 - **What it does:** `git fetch upstream --tags`, then compares `git tag --sort=-v:refname` and the tip of
-  `upstream/main` with the "Last reviewed" lines above. Nothing new: it says so in one line and closes with no
-  branch (`shepherdr task close`). Something new: it reads the new release notes and the commit subjects, and reports
-  in the chat what arrived, which rows of the ledger it would add and its first verdict per row — for the operator to
-  pick, never to merge by itself. It never adopts anything on its own and never posts upstream.
-- **Cost:** one task a week, minutes of it, and it keeps the ledger from drifting for months.
+  `upstream/main` with the "Last reviewed" lines above. Nothing new: it says so in one line and closes with no branch
+  (`shepherdr task close`). Something new: it reads the new release notes and the commit subjects, weighs each
+  improvement against 2.0's own code, writes the ledger's new rows and extends its ranked list, updates these
+  "Last reviewed" lines, and merges that docs-only change itself. It then posts one artifact with only the new adopt
+  and port rows, ranked, for the operator to pick from. It never adopts or ports anything on its own and never posts
+  upstream.
+- **Cost:** one task a week, minutes of it, and it keeps the ledger from drifting for months. The ledger's own rows are
+  the record: nothing else is kept.
 
 ## What a change must meet
 
