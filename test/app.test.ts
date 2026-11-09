@@ -225,6 +225,34 @@ describe('attached files', () => {
     expect((await get('/etc/passwd')).status).toBe(404)
     expect((await get('/inbox/c/x-shot.png', { 'sec-fetch-site': 'cross-site' })).status).toBe(403)
   })
+  test('a video is played part at a time, so a phone starts it and seeks without downloading it again', async () => {
+    const body = '<svg onload="alert(1)"/>'
+    const all = await get('/inbox/c/x-clip.mp4')
+    expect(all.status).toBe(200)
+    expect(all.headers.get('content-type')).toBe('video/mp4')
+    expect(all.headers.get('accept-ranges')).toBe('bytes')
+    expect(await all.text()).toBe(body)
+    const part = await get('/inbox/c/x-clip.mp4', { range: 'bytes=5-7' })
+    expect(part.status).toBe(206)
+    expect(part.headers.get('content-range')).toBe(`bytes 5-7/${body.length}`)
+    expect(await part.text()).toBe(body.slice(5, 8))
+    // the end of it, a part a player asks for last
+    expect(await (await get('/inbox/c/x-clip.mp4', { range: 'bytes=-3' })).text()).toBe(body.slice(-3))
+    // a span past the end of it can't be met
+    const bad = await get('/inbox/c/x-clip.mp4', { range: 'bytes=99-' })
+    expect(bad.status).toBe(416)
+    expect(bad.headers.get('content-range')).toBe(`bytes */${body.length}`)
+  })
+  test('a tile asks for a small copy: without one, a picture is its own thumbnail and a video has no still', async () => {
+    // the stub source makes none: a picture comes back whole (a phone still shows it), a video's still says it has none
+    const thumb = await get('/inbox/c/x-shot.png', {}, '&thumb=1')
+    expect(thumb.status).toBe(200)
+    expect(thumb.headers.get('content-type')).toBe('image/png')
+    expect(await thumb.text()).toBe('<svg onload="alert(1)"/>')
+    expect((await get('/inbox/c/x-clip.mp4', {}, '&poster=1')).status).toBe(404)
+    // and a path the source refuses is refused the same way, never read from disk
+    expect((await get('/etc/passwd', {}, '&thumb=1')).status).toBe(404)
+  })
 })
 
 describe('adding a space', () => {

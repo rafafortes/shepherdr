@@ -78,6 +78,15 @@ Every agent, coordinator or task agent, gets the same chat.
   ```
   <agent-message from="SHE-17 agent" to="SHE-18 agent" pane="w7R:p2" space="shepherdr" task="SHE-17">Merge it once the checks pass.</agent-message>
   ```
+- An agent's own pictures and videos reach its chat, sent with `shepherdr attach <file> --caption "…"` (the shepherdr
+  skill's "A picture or a video in your chat"): the file is copied into that chat's own inbox, as one you send is, and
+  posted as a message of the agent's — the caption, then each file a message of its own, pictures sent together lying
+  side by side (a video keeps a tile of its own). A picture draws as a tile and opens full screen, a video as a tile
+  with its still that plays in place, and each carries a way to keep it. On a machine with ffmpeg a big picture is a
+  thumbnail there (`server/live/media.ts`: made once, kept beside it in that inbox), a video's still likewise, and a
+  GIF that moves or a drawing is shown as it is; a video on that machine is served a part at a time, so a phone starts
+  it and seeks without downloading it again. A path a reply merely names, in markdown, is not drawn: the server serves only a file a
+  chat really has, never whatever path a reply names (`attachment` in `server/live/source.ts`).
 - Every chat shows what its agent does, calmly and in plain words (Claude Code and Codex, read from their logs). Just
   before a turn's last reply its steps sit as at most three quiet rows, each an icon for its kind (read, edit, run,
   search, web, subagent) and what it did: `Checked the task list`, `Edited 2 files: app.ts, panel.tsx  +12 −3`,

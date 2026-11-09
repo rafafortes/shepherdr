@@ -130,6 +130,24 @@ if it asked to do something. On a CLI's own prompt Dismiss presses that prompt's
 `<dismissed>` line too (a menu a slash command opened gets only the Esc: it asks you nothing), and a dismissed plan is
 not approved.
 
+### A picture or a video in your chat
+
+A shot of the screen you fixed, a short clip of it, read on a phone: send the file into your chat, never a path.
+
+    shepherdr attach /tmp/shot.png --caption "The keyboard up, and the button above it"
+    shepherdr attach /tmp/before.png /tmp/after.png --caption "Before and after"
+    shepherdr attach recording.mp4                        # mp4, webm, mov: it plays in place
+
+- **A copy is taken.** The file lands in the chat's own inbox, as the person's own attachments do, and is posted as a
+  message of yours, each file a message of its own right after your caption. Nothing else on the machine is ever
+  served: a picture a reply merely names, in markdown, is a broken tile.
+- **What shows.** A picture as a tile, and a big one is a thumbnail there (a machine with ffmpeg makes it), so a phone
+  downloads little for it; a video as a tile with a still, which plays in place. At most 100 MB each. Pictures sent at
+  once lie side by side; a video keeps a tile of its own. A GIF that moves and a drawing are shown as they are, so
+  keep those small.
+- **Only what the person reads.** It is for proof they need: the screen you changed, the bug you reproduced. Not every
+  screenshot you take; an artifact is still the lasting record of a longer thing.
+
 ### Artifacts
 
 Anything richer than text (a report, a dashboard, a deck, a draft screen, a small app) is an artifact: one
@@ -224,7 +242,8 @@ checkout.
 
 ## Outputs
 
-Short, plain replies in the chat; cards, plans, artifacts and alerts through the `shepherdr` command.
+Short, plain replies in the chat; cards, plans, artifacts, pictures and videos, and alerts through the `shepherdr`
+command.
 
 ## Exceptions
 

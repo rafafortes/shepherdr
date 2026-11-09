@@ -344,6 +344,14 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     return this.files[path]?.() ?? null
   }
 
+  /** a tile's small copy of a picture, or a video's still: the demo has no ffmpeg, so a picture is its own thumbnail and
+   *  a video's still is kept beside it (a file named for it, as the machine would keep one) */
+  async media(chat: string, path: string, want: 'thumb' | 'poster') {
+    if (!(await this.attachment(chat, path))) return null
+    if (want === 'poster') return this.files[`${path}.poster.jpg`]?.() ?? null
+    return this.files[path]?.() ?? null
+  }
+
   /* ---------- helpers ---------- */
 
   private task(tid: string) {

@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmp } from './tmp.ts'
 
 process.env.SHEPHERDR_HOME = tmp('source')
@@ -1129,6 +1129,38 @@ describe('attachments', () => {
     const link = join(waiting, '..', 'mf2-link.txt')
     symlinkSync(secret, link)
     expect(await src.attachment(chat, link)).toBeNull()
+  })
+
+  test("an agent's own picture is taken into the chat's inbox and shows as a message of its own", async () => {
+    const shot = join(tmp('attach'), 'shot.png')
+    writeFileSync(shot, new Uint8Array([7, 7, 7, 7]))
+    const r = await src.cli(['attach', shot, '--caption', 'The keyboard up, and the button above it'], { chat })
+    expect(r.code).toBe(0)
+    expect(r.out).toContain('Posted a picture in your chat')
+    const msgs = src.chats.chat(chat).messages.filter((m) => m.id.startsWith('media:'))
+    expect(msgs.map((m) => m.text ?? m.file?.name)).toEqual(['The keyboard up, and the button above it', 'shot.png'])
+    // a copy of its own in the chat's folder, not the file it was (that one is in a worktree or /tmp)
+    const media = msgs[1].file!
+    expect(media.path).not.toBe(shot)
+    expect(dirname(media.path)).toBe(join(process.env.SHEPHERDR_HOME!, 'inbox', chat.replace(/[^a-zA-Z0-9_.-]+/g, '_')))
+    expect(new Uint8Array(await Bun.file(media.path).arrayBuffer())).toEqual(new Uint8Array([7, 7, 7, 7]))
+    // it is served as the chat's own file, copied before it was named, so deleting the chat takes both away
+    expect(await (await src.attachment(chat, media.path))?.bytes()).toEqual(new Uint8Array([7, 7, 7, 7]))
+    // and only in that chat
+    expect(await src.attachment(placeId.space('elsewhere'), media.path)).toBeNull()
+    // nothing else the machine holds is served, whatever a reply names: the file it came from is outside the inbox
+    expect(await src.attachment(chat, shot)).toBeNull()
+  })
+  test('attach refuses what the chat cannot draw, and asks for an agent of Shepherdr', async () => {
+    const dir = tmp('attach')
+    writeFileSync(join(dir, 'notes.txt'), 'words')
+    expect((await src.cli(['attach', join(dir, 'notes.txt')], { chat })).out).toContain('is neither a picture nor a video')
+    expect((await src.cli(['attach', join(dir, 'gone.png')], { chat })).out).toContain('No file ')
+    // no path: the pictures and the videos of the folder it runs in
+    writeFileSync(join(dir, 'shot.png'), new Uint8Array([1]))
+    expect((await src.cli(['attach'], { chat, cwd: dir })).out).toContain('Here: shot.png')
+    // the human's own terminal is not a chat to post into
+    expect((await src.cli(['attach', join(dir, 'shot.png')], {})).out).toContain('works from an agent Shepherdr started')
   })
 })
 
@@ -2796,5 +2828,66 @@ describe('a space whose repo moved', () => {
     renameSync(to, to + '-2')
     const moved = await src.cli(['space', 'add', to + '-2', '--name', 'other'], {})
     expect(moved.out).toContain('It keeps its name shop.')
+  })
+})
+
+describe("a tile's small copy of a chat's picture or video", () => {
+  const chat = placeId.home()
+  const shot = () => join(tmp('media-shot'), 'shot.png')
+
+  test('only a file of that chat, never a path a reply names', async () => {
+    const at = shot()
+    writeFileSync(at, new Uint8Array([1, 2, 3]))
+    expect(await src.media(chat, at, 'thumb')).toBeNull()
+    expect(await src.media(chat, '/etc/passwd', 'thumb')).toBeNull()
+    // one the chat has, but another chat's: refused
+    const sent = await src.cli(['attach', at, '--caption', 'A shot'], { chat })
+    expect(sent.code).toBe(0)
+    const file = src.chats.chat(chat).messages.find((m) => m.id.startsWith('media:') && m.file)!.file!
+    expect(await src.media(placeId.space('elsewhere'), file.path, 'thumb')).toBeNull()
+    // a small picture is its own thumbnail: nothing to make
+    expect(await src.media(chat, file.path, 'thumb')).toBeNull()
+    // a still is asked of a video only
+    expect(await src.media(chat, file.path, 'poster')).toBeNull()
+  })
+
+  test.skipIf(!Bun.which('ffmpeg'))('a big picture of that chat gets one, made beside it', async () => {
+    const dir = tmp('media-big')
+    const at = join(dir, 'big.png')
+    const made = Bun.spawnSync(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0x2f6f4f:s=900x700:d=1', '-vf', 'noise=alls=90:allf=t', '-frames:v', '1', at])
+    expect(made.exitCode).toBe(0)
+    await src.cli(['attach', at], { chat })
+    const file = src.chats.chat(chat).messages.findLast((m) => m.id.startsWith('media:') && m.file)!.file!
+    const thumb = await src.media(chat, file.path, 'thumb')
+    expect(thumb?.type).toBe('image/jpeg')
+    // the whole picture is bigger than what a tile draws from
+    expect(Bun.file(file.path).size).toBeGreaterThan((await thumb!.bytes()).length)
+  })
+
+  test("another machine's chat asks that machine for its tile, and nothing when it cannot answer", async () => {
+    const asked: string[] = []
+    const peers = src.peers as unknown as { owner: (k: string) => unknown; fetch: (l: unknown, p: string) => Promise<Response> }
+    const owner = peers.owner
+    const fetch_ = peers.fetch
+    peers.owner = () => ({ rec: { machine: 'laptop' }, reachable: true })
+    try {
+      peers.fetch = async (_l, p) => (asked.push(p), new Response(new Uint8Array([9, 9]), { headers: { 'content-type': 'image/jpeg' } }))
+      const thumb = await src.media('p:laptop:~', '/home/u/.shepherdr/inbox/x/shot.png', 'thumb')
+      expect(thumb?.type).toBe('image/jpeg')
+      expect(asked[0]).toContain('/api/file?')
+      expect(asked[0]).toContain('thumb=1')
+      expect(decodeURIComponent(asked[0])).toContain('chat=p:laptop:~')
+      // a still the other machine cannot make: none here either
+      peers.fetch = async () => new Response('no still', { status: 404 })
+      expect(await src.media('p:laptop:~', '/home/u/.shepherdr/inbox/x/clip.mp4', 'poster')).toBeNull()
+      // and one unreachable answers nothing rather than throwing
+      peers.fetch = async () => {
+        throw new Error('no route')
+      }
+      expect(await src.media('p:laptop:~', '/home/u/.shepherdr/inbox/x/shot.png', 'thumb')).toBeNull()
+    } finally {
+      peers.owner = owner
+      peers.fetch = fetch_
+    }
   })
 })

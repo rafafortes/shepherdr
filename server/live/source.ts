@@ -35,7 +35,8 @@ import { sh, validateBase } from './engine/git.ts'
 import { Artifacts, browserChecker, type ArtifactRec, type Checker } from './artifacts.ts'
 import { Machines } from './machines.ts'
 import { agentEnv, BOX, boxHome } from './box.ts'
-import { fileType } from '../../shared/files.ts'
+import { ATTACH_MAX, fileType, isMedia, isVideo } from '../../shared/files.ts'
+import { smaller, type Small } from './media.ts'
 import { Mirror } from './mirror.ts'
 import { claudeProjectDir, piSessionDir } from './readers/find.ts'
 import { boxDir } from './mfs.ts'
@@ -814,14 +815,22 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   async attachment(chat: string, path: string) {
     // only a file attached in this chat, or uploaded for it and still waiting in the message box, and only from the
     // inbox: a path that leads anywhere else is refused
-    const c = this.chat(chat)
-    if (!c) return null
-    const sent = c.messages.some((m) => m.file?.path === path)
+    if (!this.chat(chat)) return null
     const peer = this.peers?.owner(chat)
     if (peer) {
       const r = await this.peers!.fetch(peer, `/api/file?chat=${encodeURIComponent(chat)}&path=${encodeURIComponent(path)}`).catch(() => null)
       return r?.ok ? r.blob() : null
     }
+    const real = this.inboxFile(chat, path)
+    if (!real) return null
+    return BOX ? new Blob([new Uint8Array(task.readFileSync(real))], { type: fileType(real).type }) : Bun.file(real)
+  }
+
+  /** a file of this chat's own inbox, as it really is on disk, or null: what a chat line names, and nothing else */
+  private inboxFile(chat: string, path: string): string | null {
+    const c = this.chat(chat)
+    if (!c) return null
+    const sent = c.messages.some((m) => m.file?.path === path)
     try {
       const inbox = task.realpathSync(join(boxDir(), 'inbox'))
       const real = task.realpathSync(path.replace(/^~(?=\/)/, boxHome()))
@@ -835,10 +844,28 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       }
       const ok = sent ? real.startsWith(inbox + sep) || old() : dirname(real) === join(inbox, chatDir(chat))
       if (!ok || !task.statSync(real).isFile()) return null
-      return BOX ? new Blob([new Uint8Array(task.readFileSync(real))], { type: fileType(real).type }) : Bun.file(real)
+      return real
     } catch {
       return null
     }
+  }
+
+  /** a tile's small copy of a picture (thumb) or a still of a video (poster), made once from this chat's own file and
+   *  kept beside it; null when it isn't worth one, and the screen shows the file itself (server/live/media.ts) */
+  async media(chat: string, path: string, want: Small): Promise<Blob | null> {
+    // a chat on another machine: its tile asks that machine, which holds the file and makes the small copy there (the
+    // same route: it serves only a file that chat really has)
+    const peer = this.peers?.owner(chat)
+    if (peer) {
+      const q = new URLSearchParams({ chat, path, [want]: '1' })
+      const r = await this.peers!.fetch(peer, `/api/file?${q}`).catch(() => null)
+      return r?.ok ? r.blob() : null
+    }
+    const real = this.inboxFile(chat, path)
+    if (!real) return null
+    const small = await smaller(real, want).catch(() => null)
+    if (!small) return null
+    return BOX ? new Blob([new Uint8Array(task.readFileSync(small))], { type: 'image/jpeg' }) : Bun.file(small)
   }
 
   /* ---------- a chat's activity: a turn's steps, a step's output, a background job ---------- */
@@ -2606,6 +2633,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         this.emit('snapshot')
         return 'Asked. End your turn now; the answer arrives as an [… answered …] line.'
       }
+      case 'attach':
+        return this.attachCommand([a1, ...rest].filter(Boolean), p, ctx)
       case 'artifact':
         return this.artifactCommand(a1, rest, p, ctx)
       case 'render':
@@ -2884,6 +2913,70 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const warn = c.warnings.length ? `\nIt logged: ${c.warnings.join(' · ')}` : ''
     const media = c.media?.length ? `\nDoesn't fit at phone width (cut off, or it scrolls): ${c.media.join(' · ')}. Drop its fixed width or height: the frame fits media by itself.` : ''
     return { ok: !errors.length, c, report: errors.length ? `Problems:\n- ${errors.join('\n- ')}\n${pics}${warn}${media}` : `No errors. ${pics}${warn}${media}` }
+  }
+
+  /**
+   * shepherdr attach <file> [<file> …] [--caption "…"]: a picture or a video the agent shows in its chat. The file is
+   * copied into the chat's own inbox (the same folder the person's own attachments land in) and posted as a message of
+   * the agent's, each file a message of its own right after the caption, so the screen draws it in place exactly as it
+   * draws one the person sent: a tile, a video with its still (server/live/media.ts), the caption above.
+   *
+   * The copy is what makes it reachable: what it was in its worktree or /tmp never is, so no route serves a path a reply
+   * names, and the file goes away with the chat's inbox.
+   */
+  private attachCommand(paths: string[], p: Parsed, ctx: { chat?: string; cwd?: string }): string {
+    if (!ctx.chat) throw new Error('shepherdr attach works from an agent Shepherdr started: it sends into that agent\'s own chat.')
+    const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => f !== 'caption' && f !== 'text')
+    if (odd.length) throw new Error(`shepherdr attach takes no --${odd[0]}: shepherdr attach <file> [<file> …] [--caption "…"]`)
+    const caption = (one(p, 'caption') ?? one(p, 'text'))?.trim().replace(/\s*\n\s*/g, ' ') || undefined
+    if (!paths.length) {
+      // no path: what this folder has that it could send, so an agent that forgot the name finds it
+      const here = (ctx.cwd ?? HOME).replace(/^~(?=\/)/, boxHome())
+      let found: string[] = []
+      try {
+        found = task.readdirSync(here).filter((n) => isMedia(n)).sort().slice(0, 20)
+      } catch {
+        found = []
+      }
+      throw new Error(
+        `shepherdr attach <file> [<file> …] [--caption "…"]: a picture or a video, shown in your chat where the person reads.${found.length ? `\nHere: ${found.join(' · ')}` : ''}`,
+      )
+    }
+    const dir = join(boxDir(), 'inbox', chatDir(ctx.chat))
+    // every file is checked before one is copied, so a refusal leaves nothing behind in the inbox
+    const checked = paths.map((path) => {
+      const real = path.replace(/^~(?=\/)/, boxHome())
+      let st: ReturnType<typeof task.statSync>
+      try {
+        st = task.statSync(real)
+      } catch {
+        throw new Error(`No file ${path}: shepherdr attach takes a picture or a video on this machine, by its path`)
+      }
+      if (!st.isFile()) throw new Error(`${path} is not a file`)
+      const name = real.split('/').pop()!
+      if (!isMedia(name))
+        throw new Error(`${name} is neither a picture nor a video: shepherdr attach shows one of those in your chat (any picture the chat draws, and mp4, m4v, webm, mov or ogv). Anything else is words and a path.`)
+      if (st.size > ATTACH_MAX) throw new Error(`${name} is ${Math.round(st.size / 1024 / 1024)} MB: the chat takes a picture or a video up to ${ATTACH_MAX / 1024 / 1024} MB (crop it, or make it shorter first).`)
+      // the bytes, never a link: a copy that is a link leads out of the inbox, and the chat would refuse to serve it
+      return { real: task.realpathSync(real), name }
+    })
+    task.mkdirSync(dir, { recursive: true })
+    const files = checked.map(({ real, name }) => {
+      // its own path even next to a file of the same name, as an upload gets one: the message names the file by it
+      const to = join(dir, `${Date.now().toString(36)}${randomUUID().slice(0, 4)}-${name.replace(/[^a-zA-Z0-9_. -]+/g, '_').slice(0, 120) || 'file'}`)
+      task.cpSync(real, to)
+      return { name, path: to }
+    })
+    // one post: the caption, then each file a message of its own, all at one time (pictures sent together lie side by side)
+    const at = Date.now()
+    this.chats.post(ctx.chat, { id: `media:${randomUUID().slice(0, 8)}`, at, ...(caption ? { text: caption } : {}), files })
+    this.emit('chat', ctx.chat)
+    this.emit('snapshot')
+    const videos = files.filter((f) => isVideo(f.name)).length
+    const pics = files.length - videos
+    const what =
+      files.length === 1 ? (videos ? 'a video' : 'a picture') : !videos ? `${files.length} pictures` : !pics ? `${files.length} videos` : `${files.length} files (${pics} ${pics === 1 ? 'picture' : 'pictures'}, ${videos} ${videos === 1 ? 'video' : 'videos'})`
+    return `Posted ${what} in your chat${caption ? ', under your words' : ''}: the person sees ${files.length > 1 ? 'them' : 'it'} there in place.`
   }
 
   private async artifactCommand(sub: string | undefined, rest: string[], p: Parsed, ctx: { chat?: string; cwd?: string }): Promise<string> {

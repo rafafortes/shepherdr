@@ -10,6 +10,7 @@ import { fileType } from '../shared/files.ts'
 import type { Action, AddSpace, ServerEvent, UpdateStatus, WorktreeAsk } from '../shared/types.ts'
 import { frameResponse, wrapPage } from './frame.ts'
 import type { Source } from './source.ts'
+import { span } from './live/media.ts'
 import type { Push } from './push.ts'
 
 type Sock =
@@ -193,8 +194,19 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
         }
         if (path === '/api/file') {
           const at = q.get('path') ?? ''
-          const blob = await source.attachment(q.get('chat') ?? '', at)
-          return blob ? attachment(blob, basename(at).replace(/^[a-z0-9]+-/, ''), q.has('download')) : new Response('no such file', { status: 404 })
+          const chat = q.get('chat') ?? ''
+          // a tile asks for a small copy of a picture, a video's still: made from the chat's own file, never from a path a
+          // reply names. A machine with no ffmpeg makes none, and a picture falls back to itself (a still does not: a
+          // phone would download the whole video for a tile)
+          const want = q.has('thumb') ? ('thumb' as const) : q.has('poster') ? ('poster' as const) : null
+          if (want) {
+            const small = await source.media?.(chat, at, want)
+            // sealed exactly as the file itself is: a small copy is served by whoever made it, and nothing in it runs
+            if (small) return sealed(small, small.type || 'application/octet-stream')
+            if (want === 'poster') return new Response('no still', { status: 404 })
+          }
+          const blob = await source.attachment(chat, at)
+          return blob ? attachment(blob, basename(at).replace(/^[a-z0-9]+-/, ''), q.has('download'), req.headers.get('range')) : new Response('no such file', { status: 404 })
         }
         // talk to type: the browser's recording, written down here (whisper.cpp); the words go back, never the audio
         if (path === '/api/dictate' && req.method === 'POST') {
@@ -367,22 +379,40 @@ function serveStatic(dist: string, path: string) {
   return file(join(dist, 'index.html'))
 }
 
-/** an attached file: a picture, PDF or text opens in the browser (as text, never as a page that runs); the rest
- *  downloads. Nothing in it runs with this app's origin. */
-function attachment(blob: Blob, name: string, download: boolean) {
-  const { type, inline } = fileType(name)
+/** a file served as it is, sealed off: nothing in it runs with this app's origin, and a browser never guesses its type */
+function sealed(blob: Blob, type: string) {
   return new Response(blob, {
     headers: {
       'content-type': type,
-      'content-disposition': `${inline && !download ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`,
-      // a PDF needs the browser's own viewer, which a sandbox blocks; it runs nothing of ours either way
-      ...(type === 'application/pdf' ? {} : { 'content-security-policy': "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'" }),
+      'content-security-policy': "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'",
       'cache-control': 'private, max-age=86400',
       'cross-origin-resource-policy': 'same-origin',
       'x-content-type-options': 'nosniff',
       'referrer-policy': 'no-referrer',
     },
   })
+}
+
+/** an attached file: a picture, PDF or text opens in the browser (as text, never as a page that runs); the rest
+ *  downloads. A video is played part at a time (Range), so a phone starts it before it has all of it and seeks without
+ *  downloading it again. Nothing in it runs with this app's origin. */
+function attachment(blob: Blob, name: string, download: boolean, range?: string | null) {
+  const { type, inline } = fileType(name)
+  const head = {
+    'content-type': type,
+    'content-disposition': `${inline && !download ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`,
+    // a PDF needs the browser's own viewer, which a sandbox blocks; it runs nothing of ours either way
+    ...(type === 'application/pdf' ? {} : { 'content-security-policy': "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'" }),
+    'cache-control': 'private, max-age=86400',
+    'cross-origin-resource-policy': 'same-origin',
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'accept-ranges': 'bytes',
+  }
+  const s = span(range, blob.size)
+  if (s === 'bad') return new Response(null, { status: 416, headers: { ...head, 'content-range': `bytes */${blob.size}` } })
+  if (!s) return new Response(blob, { headers: { ...head, 'content-length': String(blob.size) } })
+  return new Response(blob.slice(s[0], s[1] + 1), { status: 206, headers: { ...head, 'content-range': `bytes ${s[0]}-${s[1]}/${blob.size}`, 'content-length': String(s[1] - s[0] + 1) } })
 }
 
 function file(f: string) {

@@ -1,5 +1,6 @@
 // Reads a shepherdr command line: positional words and --options (repeatable ones collect into lists).
 import { splitFacts, STATUS_MAX, SUMMARY_MAX, TITLE_MAX } from '../../shared/types.ts'
+import { ATTACH_MAX } from '../../shared/files.ts'
 
 export interface Parsed {
   words: string[]
@@ -184,6 +185,16 @@ Task agents
 Chat
   shepherdr ask "<question>" --choice "<label>" ... [--desc "<label>=<one line>"] [--other] [--multi] [--ordinary]
       --ordinary: ordinary questions only; never permissions, startup approvals or plans
+  shepherdr attach <file> [<file> …] [--caption "<one line>"]
+                                                 a picture (any kind the chat draws: png, jpg, gif, webp, avif,
+                                                 heic, svg …) or a video (mp4, m4v, webm, mov, ogv) the person sees
+                                                 in your chat, in place: the file is copied into the chat's own inbox,
+                                                 as their own attachments are, and posted as a message of yours (the
+                                                 caption above it). Up to ${ATTACH_MAX / 1024 / 1024} MB each; on a machine with
+                                                 ffmpeg a big picture becomes a thumbnail and a video gets a still,
+                                                 so a phone downloads little.
+                                                 With no path it lists the pictures and videos in the folder you
+                                                 run it from
   shepherdr alert "<title>" --body "<why now>" [--task <id>]
                                                  with --task: it says what that task needs and opens on its card
 

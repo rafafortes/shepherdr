@@ -7,7 +7,7 @@ import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReloa
 import { keyOf, partsOf, priorOf, reasonOf, SEND_TIMEOUT, type Outgoing } from '@client/outbox.ts'
 import { AlertIcon, AutopilotIcon, BackIcon, CameraIcon, ChatIcon, CheckIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
-import { extOf, isImage } from '@shared/files.ts'
+import { extOf, isImage, isVideo } from '@shared/files.ts'
 import { modeName, type CardAsk, type Chat, type Message, type Peer, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
 import { buzz, mine, openBar, openPicker, quick, react } from '@plugins/reactions/client.tsx'
 import { EDGE } from '@client/gestures.ts'
@@ -196,7 +196,11 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
           ? unit(
               <div data-anchor {...hold} className={clsx('relative max-w-full select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies), you ? 'self-end' : 'self-start')}>
                 {queued && !pending?.text ? <QueueLine chatKey={chat.key} /> : null}
-                <FileTile name={msg.file.name} chat={chat.key} path={msg.file.path} tucked={!body && !!quote} />
+                {isVideo(msg.file.name) ? (
+                  <VideoTile name={msg.file.name} chat={chat.key} path={msg.file.path} tucked={!body && !!quote} />
+                ) : (
+                  <FileTile name={msg.file.name} chat={chat.key} path={msg.file.path} tucked={!body && !!quote} />
+                )}
               </div>,
               !body,
             )
@@ -608,8 +612,40 @@ const tucks = 'shadow-[0_0_0_2px_var(--bg)]'
 export const fileUrl = (chat: string, path: string, download = false) =>
   `api/file?chat=${encodeURIComponent(chat)}&path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`
 
+/** a tile's small copy of a big picture (`thumb`), made once on the machine that holds the file: a phone would
+ *  otherwise download the whole picture for each tile. The same file's own path, so nothing else is served */
+export const thumbUrl = (chat: string, path: string) => `${fileUrl(chat, path)}&thumb=1`
+
+/** a video's still, for its tile: a `poster` of the same file, made once */
+export const posterUrl = (chat: string, path: string) => `${fileUrl(chat, path)}&poster=1`
+
 /** a picture on its own, with no words: it shows as a tile, and the viewer pages through every one in the chat */
 export const isPicture = (m: Message) => !!m.file && !m.text && !m.answered && isImage(m.file.name)
+
+/** a video (an agent's screen recording of what it fixed): it plays in place, a still first, so a phone shows it
+ *  without downloading it whole; the file itself is served a part at a time, so a seek costs nothing */
+function VideoTile({ name, chat, path, tucked }: { name: string; chat: string; path: string; tucked?: boolean }) {
+  return (
+    <div className={clsx('w-[280px] max-w-full overflow-hidden rounded-box bg-bubble p-1.5', tucked && tucks)}>
+      <video
+        controls
+        playsInline
+        preload="metadata"
+        poster={posterUrl(chat, path)}
+        aria-label={name}
+        className="block w-full rounded-[calc(var(--bubble-radius)-var(--spacing))] bg-black"
+      >
+        <source src={fileUrl(chat, path)} type={extOf(name) === 'webm' ? 'video/webm' : extOf(name) === 'mov' ? 'video/quicktime' : extOf(name) === 'ogv' ? 'video/ogg' : 'video/mp4'} />
+      </video>
+      <div className="mt-0.5 flex items-center gap-2 px-1 pt-0.5 text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
+        <span className="min-w-0 flex-1 truncate">{name}</span>
+        <a href={fileUrl(chat, path, true)} download={name} aria-label={`Download ${name}`} className="hit grid size-8 shrink-0 place-items-center rounded-full text-fg2 hover:bg-hover phone:size-9">
+          <DownloadIcon className={ic} />
+        </a>
+      </div>
+    </div>
+  )
+}
 
 function FileTile({ name, chat, path, tucked }: { name: string; chat: string; path: string; tucked?: boolean }) {
   const ext = extOf(name)
@@ -753,7 +789,7 @@ function Tile({ msg, chat, you, radius, single, more, out }: { msg: Message; cha
           className={clsx(frame, 'select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies), !single && 'size-full', picked && 'outline-2 outline-offset-2 outline-(--line2)')}
         >
           <img
-            src={fileUrl(chat.key, f.path)}
+            src={thumbUrl(chat.key, f.path)}
             alt={f.name}
             draggable={false}
             onError={() => setBroken(true)}
@@ -2169,7 +2205,7 @@ function Pending({ f, chatKey, onRemove }: { f: { name: string; path?: string };
           }}
           className="relative block size-16 overflow-hidden rounded-box bg-bubble after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_1px_var(--line)] phone:size-[72px]"
         >
-          <img src={fileUrl(chatKey, path)} alt={f.name} draggable={false} onError={() => setBroken(true)} className="size-full object-cover" />
+          <img src={thumbUrl(chatKey, path)} alt={f.name} draggable={false} onError={() => setBroken(true)} className="size-full object-cover" />
         </button>
       ) : (
         <div title={f.name} className="flex h-full w-[184px] items-center gap-2.5 rounded-box bg-bubble pr-8 pl-2.5 phone:w-[200px]">
