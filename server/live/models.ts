@@ -74,8 +74,16 @@ export function modelsOf(kind: string): CliModels | undefined {
   if (!TEST) ask(kind)
   const c = cache[kind]
   const got = c?.models.length || (c && !TABLE[kind].models.length) ? c : TABLE[kind]
-  return kind === 'pi' ? scopePi(withProvider(got), piEnabled()) : got
+  if (kind !== 'pi') return got
+  // scoping runs a glob per pattern over every model, and one snapshot asks for pi's models thousands of times (each
+  // place's restart hint): kept while neither the list nor pi's enabledModels change
+  const patterns = piEnabled()
+  if (piScoped.from !== got || piScoped.patterns !== patterns) piScoped = { from: got, patterns, out: scopePi(withProvider(got), patterns) }
+  return piScoped.out
 }
+
+/** pi's list as its enabledModels last scoped it, and what it was scoped from */
+let piScoped: { from?: CliModels; patterns?: string[]; out?: CliModels } = {}
 
 /** pi's models named with their provider, as parsePi names them now: a list read before it did named most without */
 const bare = (m: Model) => m.label === m.id.slice(m.id.indexOf('/') + 1)
