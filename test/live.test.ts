@@ -993,6 +993,8 @@ describe('the brief\'s default way of working', () => {
     expect(block).toContain('- Must fix: major.')
     // no backup reviewer (the default): the line reads exactly as it always has
     expect(settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: 'high' } })).not.toContain('cannot run at all')
+    // with Review off there is nothing to review with: the line still says who, and asks for nothing
+    expect(settingsBlock('X-1', { ways: { ...ways, review: false }, reviewer: { kind: 'codex' }, fallback: { kind: 'pi' } })).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).\n')
   })
   test('a line that differs from the default says who changed it, and the screen reads it back', () => {
     const block = settingsBlock('X-1', { ways: { ...ways, rounds: 1, merge: 'ask me first' }, by: { rounds: 'task', merge: 'space' } })
@@ -1015,6 +1017,14 @@ describe('the brief\'s default way of working', () => {
     expect(s.setBy('web', { 'review.mustFix': 'critical' })).toEqual({ rounds: 'machine', merge: 'space', mustFix: 'task' })
     expect(s.ways('web', { 'brief.merge': 'after GitHub checks' })).toMatchObject({ merge: 'on its own', waitChecks: true, rounds: 2 })
     for (const [k, l] of [['review.rounds', 'machine'], ['brief.merge', { space: 'web' }], ['review.mustFix', 'all']] as const) s.set(k, null, l)
+    // a backup reviewer marks the Reviewer line only where one is set: its model or effort alone changes no line
+    expect(s.set('reviewer.fallbackModel', 'opus').ok).toBe(true)
+    expect(s.setBy()).toEqual({})
+    s.set('reviewer.fallback', 'pi')
+    expect(s.setBy()).toEqual({ reviewer: 'all' })
+    s.set('reviewer.fallback', 'off')
+    expect(s.setBy()).toEqual({})
+    for (const k of ['reviewer.fallback', 'reviewer.fallbackModel']) s.set(k, null)
   })
   test('task add --set takes a How tasks work key or its short name, or stands for a flag; a bad one says why', () => {
     expect(setForTask('review.rounds=1')).toEqual({ key: 'review.rounds', value: '1 round' })

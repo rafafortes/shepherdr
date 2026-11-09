@@ -603,6 +603,8 @@ describe("a task's CLI, model and effort", () => {
     expect(out).toContain('What agents are told (')
     expect(out).toContain('How Shepherdr runs:')
     expect(out).toContain('--set review.rounds=1')
+    // a coordinator hears how to set the backup reviewer for one task too
+    expect(out).toContain('reviewer.fallback, reviewer.fallbackModel, reviewer.fallbackEffort')
     expect(out).toContain('coordinator.agent        Claude Code')
     expect(out).toContain("Every new task's brief ends with:\nSettings:")
   })

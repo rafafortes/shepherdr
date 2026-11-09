@@ -593,7 +593,8 @@ export class Settings {
     }
     const all: Record<Said, SetBy | undefined> = {
       review: by('brief.review'),
-      reviewer: by('reviewer.agent', 'reviewer.model', 'reviewer.effort', 'reviewer.fallback', 'reviewer.fallbackModel', 'reviewer.fallbackEffort'),
+      // the three keys of a backup reviewer only count where it is set: with it off the line is the plain one
+      reviewer: by('reviewer.agent', 'reviewer.model', 'reviewer.effort', ...(this.reviewerBackupAt(l, set) ? ['reviewer.fallback', 'reviewer.fallbackModel', 'reviewer.fallbackEffort'] : [])),
       mustFix: by('review.mustFix'),
       rounds: by('review.rounds'),
       merge: by('brief.merge'),

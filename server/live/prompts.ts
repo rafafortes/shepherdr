@@ -98,7 +98,7 @@ export function settingsLines(id: string, t: Told): { said: Said; text: string }
   // every line shows, review off too: nothing hidden, an override included
   const lines: { said: Said; text: string }[] = [
     { said: 'review', text: w.review ? 'Review: on. Have your change reviewed by fresh eyes before it merges.' : "Review: off. No review; the lines on reviewing below don't apply." },
-    ...(t.reviewer ? [{ said: 'reviewer' as const, text: reviewerLine(t.reviewer, t.fallback) }] : []),
+    ...(t.reviewer ? [{ said: 'reviewer' as const, text: reviewerLine(t.reviewer, w.review ? t.fallback : undefined) }] : []),
     { said: 'mustFix', text: `Must fix: ${w.mustFix}. Findings are tagged ${SEVERITIES.join('/')}; fix ${fix.length === SEVERITIES.length ? 'all of them' : plural(fix)}${w.rounds > 1 ? ', then review again' : ''}.` },
     { said: 'rounds', text: w.rounds > 1 ? `Review rounds: ${w.rounds}. Stop when a round finds none to fix, at most ${w.rounds} rounds.` : 'Review rounds: 1. One round, no review again.' },
   ]
