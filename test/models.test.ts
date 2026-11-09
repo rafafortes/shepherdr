@@ -1,6 +1,6 @@
 // Each CLI's models and effort levels, as read from the CLI itself (models.ts): what its output looks like here
 import { describe, expect, test } from 'bun:test'
-import { writeFileSync } from 'node:fs'
+import { utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { effortFor, findModel, helpLevels, modelsOf, nearest, parseClaude, parseCodex, parsePi, piEnabled, scopePi, setModels } from '../server/live/models.ts'
 import { tmp } from './tmp.ts'
@@ -91,6 +91,35 @@ describe('reading what each CLI takes', () => {
       // a list read before names had their provider gets it too
       setModels('pi', { models: [{ id: 'spark/qwen', label: 'qwen', efforts: [] }], efforts: [] })
       expect(modelsOf('pi')!.models.map((x) => x.label)).toEqual(['spark/qwen'])
+    } finally {
+      setModels('pi', undefined)
+      if (was === undefined) delete process.env.PI_CODING_AGENT_DIR
+      else process.env.PI_CODING_AGENT_DIR = was
+    }
+  })
+  test("pi's scoped list is kept while neither its list nor its enabledModels change", () => {
+    // a snapshot asks for pi's models thousands of times (each place's restart hint): scoping them every time made it
+    // take seconds, and the screen never loaded
+    const m = (id: string) => ({ id, label: id, efforts: [] })
+    const c = { models: ['spark/qwen', 'openrouter/deepseek/v4'].map(m), efforts: [] }
+    const dir = tmp('pi-scope-kept')
+    const file = join(dir, 'settings.json')
+    const was = process.env.PI_CODING_AGENT_DIR
+    process.env.PI_CODING_AGENT_DIR = dir
+    try {
+      writeFileSync(file, JSON.stringify({ enabledModels: ['deepseek/*'] }))
+      setModels('pi', c)
+      const first = modelsOf('pi')!
+      expect(first.models.map((x) => x.id)).toEqual(['openrouter/deepseek/v4'])
+      // asked again with nothing changed: the very same list, not scoped again
+      expect(modelsOf('pi')).toBe(first)
+      // its enabledModels changed: scoped again
+      writeFileSync(file, JSON.stringify({ enabledModels: ['spark/*'] }))
+      utimesSync(file, new Date(), new Date(Date.now() + 5000))
+      expect(modelsOf('pi')!.models.map((x) => x.id)).toEqual(['spark/qwen'])
+      // a new list from the CLI: scoped again
+      setModels('pi', { ...c, models: [...c.models, m('spark/other')] })
+      expect(modelsOf('pi')!.models.map((x) => x.id)).toEqual(['spark/qwen', 'spark/other'])
     } finally {
       setModels('pi', undefined)
       if (was === undefined) delete process.env.PI_CODING_AGENT_DIR
