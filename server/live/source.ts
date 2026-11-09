@@ -43,7 +43,8 @@ import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
 import { privatePrompt, coordinatorPrompt, backupCardWords, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
-import { fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, type Harness, type RestartAllRow } from './restart.ts'
+import { fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
+import { backCard, canProbe, Returns, type Outage, type Probe } from './return.ts'
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
@@ -113,6 +114,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       this.emit('snapshot')
     },
   })
+  /** the primary models of the roles whose agents a backup took over: asked now and then whether they answer again
+   *  (Settings → Agents → Backup → Tell me when it is back; return.ts) */
+  returns = new Returns()
+  /** one probe runs at a time, and none beside real work */
+  private probing = false
   /** this machine's load, memory, disks and herdr, sampled every 30 seconds; its coordinator hears when one is past
    *  its limit (Settings → the machine). Tests never measure the machine they run on: they tick it themselves */
   health = new Monitor(
@@ -232,6 +238,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     })
     this.engine.on('changed', () => this.emit('snapshot'))
     this.engine.retry = (key) => this.retries.get(key)
+    // a task's backup went in for a reason waiting can't fix: what the primary may answer again to (return.ts)
+    this.engine.noteTookOver = (t, to, why) => {
+      const space = this.places.space(t.project)?.name
+      if (space) this.returns.note({ role: 'task', space, primary: this.settings.harness('task', space), to, why, at: Date.now() })
+    }
     this.artifacts.migratePages(
       (chat) => (chat.includes('/') ? (this.engine.task(chat.split('/')[0])?.project ?? placeId.home()) : chat),
       (chat, id) => this.chats.repostPage(chat, id),
@@ -273,6 +284,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a reply in a turn that goes on (or one only background work follows) changes no status: looked for here
     this.timers.push(setInterval(() => Object.keys(this.agents.records).forEach((k) => this.agents.status(k) !== 'gone' && this.fresh(k)), 5000))
     this.timers.push(setInterval(() => this.runSchedules(), 60_000))
+    // whether a primary that ran out answers again: asked a while after this machine started, never at boot, and never
+    // beside real work (watchReturns)
+    if (process.env.NODE_ENV !== 'test')
+      this.timers.push(
+        setTimeout(() => void this.watchReturns().catch(() => undefined), 10 * 60_000) as unknown as ReturnType<typeof setInterval>,
+        setInterval(() => void this.watchReturns().catch(() => undefined), 60_000),
+      )
     // heartbeats: looked for twice a minute, so a busy coordinator gets its own soon after its turn ends
     this.timers.push(setInterval(() => this.heartbeat(), 30_000))
     this.timers.push(setInterval(() => this.emit('snapshot'), 30_000))
@@ -1359,7 +1377,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** an agent can't go on by itself: its backup agent takes over once (a task's engine.ts cantGoOn, a coordinator's
    *  below), or it waits for you in its chat, with an alert */
   private cannotGoOn(key: string, r: Retry) {
-    if (key.includes('/')) return void this.engine.cantGoOn(key.split('/')[0], r.reason).catch(() => undefined)
+    if (key.includes('/')) return void this.engine.cantGoOn(key.split('/')[0], r.reason, r.lasting).catch(() => undefined)
     void this.coordinatorCantGoOn(key, r).catch(() => undefined)
   }
 
@@ -1387,6 +1405,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now() })
       try {
         await this.restartCoordinator(key, on, why)
+        // a lasting one: the primary it ran out of is what the watch asks about later (return.ts)
+        if (r.lasting) this.returns.note({ role: 'coordinator', space: this.spaceKey(key) ?? '', primary: this.settings.harness('coordinator', this.spaceKey(key) || undefined), to: on, why, at: Date.now() })
         return
       } catch (e) {
         // it didn't start: the human hears why, and a later hand-over may try again
@@ -1405,6 +1425,117 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.chats.post(key, { id, card: { id, text: words } })
     if (this.watched.includes(key)) this.emit('chat', key)
     this.alert({ id: randomUUID(), from: 'Shepherdr', title: `${this.chatName(key)} stopped`, body: `${r.reason}. ${r.words}`.slice(0, 200), go: { place: key, focus: id }, tag: `cut:${key}` })
+  }
+
+  /* ---------- when the primary model is back ---------- */
+
+  /**
+   * Settings → Agents → Backup → Tell me when it is back: the model a backup took over from is asked now and then
+   * whether it answers again, and one card in each chat still on the backup says so, with the way back named — never a switch
+   * (return.ts). A probe runs only while nothing on this machine works, one at a time, and its failures only lengthen
+   * the wait: no card, no alert, nothing of its words anywhere.
+   */
+  async watchReturns(now = Date.now()) {
+    if (this.probing || this.working()) return
+    this.noteReviewer()
+    for (const o of this.returns.list()) {
+      if (o.back || (o.due ?? 0) > now) continue
+      if (this.settings.get('backup.watchReturn', o.space || undefined) !== 'on') continue
+      const to = this.backTo(o)
+      // nothing of this machine's is on that backup any more: there is nothing to come back to
+      if (!to) {
+        this.returns.forget(o.role, o.space)
+        continue
+      }
+      // a CLI this machine doesn't have, or one Shepherdr has no silent one-shot for, is never asked
+      if (!canProbe(to.primary.kind) || !this.engine.installed(to.primary.kind)) continue
+      let probe: Probe
+      this.probing = true
+      try {
+        probe = await this.returns.probe(to.primary)
+      } catch (e) {
+        probe = { ok: false, said: (e as Error).message }
+      } finally {
+        this.probing = false
+      }
+      if (!probe.ok) {
+        this.returns.failed(o.role, o.space, now)
+        continue
+      }
+      this.returns.answered(o.role, o.space, now)
+      this.sayBack(o, to)
+    }
+  }
+
+  /** somebody on this machine works now: a probe waits for its turn, it never runs beside real work */
+  private working() {
+    return Object.keys(this.agents.records).some((k) => this.agents.status(k) === 'working')
+  }
+
+  /**
+   * A backup reviewer set to another harness is the one thing Shepherdr knows of a reviewer whose primary can't run (it
+   * never starts a reviewer itself, so it never sees one fail): while one is set, the primary reviewer is asked whether
+   * it answers again, so the human can go back. Nothing once it is dropped or set to the same harness.
+   */
+  private noteReviewer(now = Date.now()) {
+    for (const p of this.places.spaces) {
+      const primary = this.settings.harness('reviewer', p.name)
+      const backup = this.settings.reviewerBackup(p.name)
+      // nothing while the human set the watch off, or when there is nothing to come back to
+      const worth =
+        this.settings.get('backup.watchReturn', p.name) === 'on' && !!backup && this.settings.ways(p.name).review && !sameHarness(primary, backup) && canProbe(primary.kind)
+      const had = this.returns.get('reviewer', p.name)
+      if (!worth) {
+        if (had) this.returns.forget('reviewer', p.name)
+        continue
+      }
+      if (!had) this.returns.note({ role: 'reviewer', space: p.name, primary, to: backup, why: 'a backup reviewer is set', at: now })
+    }
+  }
+
+  /**
+   * What a role's outage comes back to now: the primary Settings name, and the chats still on the backup (a task's per
+   * task, a coordinator's own, a space's for a reviewer, which has no chat of its own). Nothing while Settings name the
+   * harness in use, and nothing once no agent here runs on the backup any more.
+   */
+  private backTo(o: Outage): { primary: Harness; chats: { key: string; task?: string }[] } | undefined {
+    const primary = this.settings.harness(o.role, o.space || undefined)
+    if (sameHarness(primary, o.to)) return undefined
+    const on = (key: string) => {
+      const r = this.agents.record(key)
+      return r ? ({ kind: r.kind, model: r.model, effort: r.effort } as Harness) : undefined
+    }
+    const chats: { key: string; task?: string }[] = []
+    if (o.role === 'task') {
+      for (const t of this.engine.tasks) {
+        if ((this.places.space(t.project)?.name ?? '') !== o.space || ended(t) || t.stopped || t.archived) continue
+        const h = on(`${t.id}/Agent`)
+        // still on what took over: one that went back (or was restarted on the primary) asks nothing
+        if (h && sameHarness(h, o.to)) chats.push({ key: `${t.id}/Agent`, task: t.id })
+      }
+    } else {
+      const id = o.space === '~' ? placeId.home() : placeId.space(o.space)
+      if (o.role === 'coordinator') {
+        const h = on(id)
+        if (h && sameHarness(h, o.to)) chats.push({ key: id })
+      } else if (this.places.coordinator(id)) chats.push({ key: id })
+    }
+    return chats.length ? { primary, chats } : undefined
+  }
+
+  /** its primary answered: one card in each chat still on the backup, and an alert; the card names the way back */
+  private sayBack(o: Outage, to: { primary: Harness; chats: { key: string; task?: string }[] }) {
+    const id = `back:${o.role}:${o.space}:${o.at}`
+    // the name the space shows ('~' is a home space), which is what the restart command takes too
+    const shown = this.places.nameOf(o.space === '~' ? placeId.home() : placeId.space(o.space)) ?? o.space
+    const words = (c: { task?: string }) => backCard({ role: o.role, primary: to.primary, to: o.to, task: c.task, space: shown })
+    for (const c of to.chats) {
+      const text = words(c)
+      this.chats.post(c.key, { id, card: { id, text } })
+      if (this.watched.includes(c.key)) this.emit('chat', c.key)
+    }
+    const first = to.chats[0]
+    this.alert({ id: randomUUID(), from: 'Shepherdr', title: 'The primary model answers again', body: words(first).slice(0, 200), go: { place: first.key, focus: id }, tag: `back:${o.role}:${o.space}:${o.at}`, ...(first.task ? { task: true as const } : {}) })
   }
 
   /** news for coordinators: they act on it when the human asked them to, and on Autopilot on their own. News the human

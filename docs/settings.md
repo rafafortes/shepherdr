@@ -7,7 +7,8 @@
   every model the CLI reports, searched once the list is long, the ones you pinned or picked last first; an id or alias,
   or default for the CLI's own; effort: default, lowest, low, medium, high, xhigh or max, each CLI taking it its own
   way, and in words on screen — Extra high for xhigh) and the backup agents that take over when a task's or a
-  coordinator's agent can't go on, when Done tasks archive themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, the idle browser, dictation, Notifications
+  coordinator's agent can't go on, whether one of those is told when its primary answers again, when Done tasks archive
+  themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, the idle browser, dictation, Notifications
   and Voice. Notifications gathers scoped delivery rules and device enrolment; device delivery is Everywhere. Space menus still offer Notify. Its
   defaults are set Everywhere, for a machine or for a space (`shepherdr set <key> <value> [--machine | --space NAME]`, from any machine);
   the most specific one set wins. Editing above the content names the scope; its searchable hierarchy handles many machines and spaces. Values set here are highlighted, with their inherited value, source and Reset beside them. And, kept on each device, its Appearance: System (the device's own light
@@ -70,6 +71,40 @@ session, so nothing is lost; another CLI takes the work over — a task's with i
 coordinator's chat with its open tasks and its chat so far, which changes who you talk to — and the card in that chat says
 who went in and why. A backup that isn't installed, or set to a model its CLI doesn't have, doesn't go in: the chat says
 why. Each value shows where it comes from, with Reset to the inherited one, like every other setting.
+
+## Tell me when it is back
+
+A backup stays in place until you go back to the primary yourself — a restart for a task or a coordinator, a Settings
+key for a reviewer — so a model that comes back to life went unnoticed. Settings → Agents → Backup → **Tell me when it
+is back** (`backup.watchReturn`, on unless you set it off; Everywhere, for a machine or for a space, the most specific
+one set wins) asks the primary now and then whether it answers again, and tells you in the chats that are still on a
+backup.
+
+- **When it asks.** After a takeover for a reason waiting can't fix (out of allowance, signed out, a model that is not
+there, a provider's refusal — never an error that passes by itself), the primary is first asked half an hour or so
+later, then every half hour, and the wait doubles each time it still fails, up to four hours. A probe is one tiny
+request through that CLI — a single line in, one word out, no tools, no session kept, a hard timeout — and it runs
+only while nobody on this machine is working, one at a time, and never at boot. It is nobody's turn: no chat line, no
+herdr pane, no agent's secret, and its own failure is silent (no card, no alert, nothing of its words anywhere).
+- **What it tells you.** One card in each chat still on the backup — each task's, the coordinator's own, the space's
+  for a reviewer, which has none of its own — saying that the primary answers again and how to go back: `shepherdr
+  restart <task or space>` (or ⋯ → Restart agent) for a task or a coordinator, `shepherdr set reviewer.model <id>` for a
+  reviewer. And an alert, where your Notifications let one through. One card per recovery: a primary that keeps
+  answering posts nothing more, and a chat that already went back gets nothing. The chats it names are the ones still
+  running on what took over; nothing is said to a role whose Settings name the harness it runs on.
+- **Which roles.** The roles whose primary can be in use somewhere else: the tasks' agents, the coordinators and the
+  reviewer, each probed as Settings name its primary — the tasks' pair, the coordinators', the reviewer's
+  (`reviewer.agent`, `reviewer.model`, `reviewer.effort`). For a reviewer the card names `reviewer.model`, where the
+  backup reviewer's own model is `reviewer.fallbackModel`. Shepherdr never starts a reviewer, so it never sees one fail:
+  a backup reviewer being set is what it knows of a reviewer whose primary can't run, and while one is set (with Review
+  on, on a CLI of its own) the primary reviewer is what it asks, so you can go back to it. A role whose primary is the
+  harness in use is never asked: a backup set to the same harness as the primary, or the backup reviewer itself, which
+  has no backup of its own, leaves nothing to come back to.
+- **What it never does.** It never switches anything: no setting is written, no agent restarted, no model chosen — the
+  card is the whole action. It never asks another machine's models (the record lives in this machine's
+  `returns.json`), never asks a CLI that isn't installed here, never asks one Shepherdr has no silent one-shot for
+  (only Claude Code, Codex and pi have one), and it is never part of the takeover's decision: the probe reads, and
+  nothing else.
 
 ## Dictation
 

@@ -110,7 +110,13 @@
   `error` event, and `checkCut` needs the agent's record), and a reviewer is no such agent — headless, it is a shell
   the task's agent runs, whose log `activity.ts` reads for steps and turns only, and a subagent is background work of
   it. A nudge would rest on a guess, and a wrong one would send an agent to its backup reviewer over a normal finding.
-  The brief's words are the trigger.
+  The brief's words are the trigger. For the same reason, what tells you a backup reviewer is no longer needed is a
+  probe rather than a log line: while one is set, Shepherdr asks the primary reviewer itself whether it answers again
+  (Settings → Agents → Backup → Tell me when it is back, [settings](settings.md#tell-me-when-it-is-back)).
+- **Going back is yours.** A backup stays where it is until you restart the agent on what Settings name again (⋯ →
+  Restart agent, or `shepherdr restart <id>`) or, for a reviewer, until you set `reviewer.model` back: nothing switches
+  on its own. What Shepherdr does do is tell you when the primary answers again — one card in each chat still on a
+  backup, and no more — which is the setting above, `backup.watchReturn`, never a decision of the takeover itself.
 - Status, coordinators' too, is what the agent reports of itself. Every Claude Code Shepherdr starts gets a settings
   file of its own (`--settings`, in `~/.shepherdr/hooks/`; your own settings are never touched) whose hooks record
   each event: a turn starts or ends, what still runs in the background as it ends, a permission prompt (a subagent's
