@@ -121,6 +121,9 @@ export interface Posted {
   secret?: SecretAsk
   /** text shown with it, when it stands alone */
   text?: string
+  /** pictures or a video an agent sends into its chat (shepherdr attach): the words above them, then each file a
+   *  message of its own, exactly as the person's own attachments go */
+  files?: { name: string; path: string }[]
   /** a line of yours Shepherdr shows for you (an answer typed as keys, or a command, which the log doesn't keep) */
   who?: 'you'
   answered?: string
@@ -828,6 +831,13 @@ export class Chats {
     const hosting = new Set<Message>()
     for (const p of l.posted) {
       if (p.card) continue
+      // a picture or a video the agent sent (shepherdr attach): its words, then each file a message of its own, at one
+      // time so pictures sent together lie side by side, as the person's do
+      if (p.files?.length) {
+        if (p.text) msgs.push({ id: p.id, who: 'agent', at: p.at, text: p.text })
+        p.files.forEach((file, i) => msgs.push({ id: `${p.id}:${i}`, who: 'agent', at: p.at, file }))
+        continue
+      }
       if (p.who === 'you') {
         // a command as you typed it: once the log has it (by its id, or by its name: /new is /clear to Claude Code), the
         // log's line shows, in your words

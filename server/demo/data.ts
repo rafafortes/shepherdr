@@ -319,7 +319,23 @@ export const FILES: Record<string, () => Blob> = {
       { type: 'image/svg+xml' },
     ),
   '~/inbox/lv/mf1a2c-devices.csv': () => new Blob(['name,model,last seen\nhall,Pixel 9,today\noffice,iPhone 17,yesterday\n'], { type: 'text/csv' }),
+  // what an agent sends into its chat (shepherdr attach): a shot of the screen it fixed, and a short clip of it, each
+  // taken into the chat's own inbox as the person's own attachments are
+  '~/inbox/lv/mf1a2d-upload-page.png': () =>
+    new Blob([bytes('iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAnUlEQVR4nO3QMQ3AIAAAQUjQUydYwf9YBc2PdLhT8Pn5nD34tm4H/J1BwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCi/mOgHnyr1VqQAAAABJRU5ErkJggg==')], { type: 'image/png' }),
+  '~/inbox/lv/mf1a2e-upload-page.mp4': () => new Blob([bytes(DEMO_CLIP)], { type: 'video/mp4' }),
+  // the still a video's tile shows, which the machine's own ffmpeg would make once
+  '~/inbox/lv/mf1a2e-upload-page.mp4.poster.jpg': () =>
+    new Blob([bytes('/9j/4AAQSkZJRgABAgAAAQABAAD//gAQTGF2YzYyLjExLjEwMAD/2wBDAAgODhAOEBMTExMTExYVFhcXFxYWFhYXFxcZGRkdHR0ZGRkXFxkZHBwdHSAhIB4eHR4hISMjIyoqKCgxMTI8PEj/xABNAAEBAAAAAAAAAAAAAAAAAAAABgEBAQEAAAAAAAAAAAAAAAAAAAMFEAEAAAAAAAAAAAAAAAAAAAAAEQEAAAAAAAAAAAAAAAAAAAAA/8AAEQgAQABgAwEiAAIRAAMRAP/aAAwDAQACEQMRAD8AlwEWCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//9k=')], { type: 'image/jpeg' }),
 }
+
+/** bytes of a small file written down as base64, so the demo needs no picture or video of its own */
+const bytes = (b64: string) => new Uint8Array(Buffer.from(b64, 'base64'))
+
+/** a second of a flat green frame, 96×64: the demo's clip */
+const DEMO_CLIP =
+  'AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAzxtZGF0AAACoAYF//+c3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE2NSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjUgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDM6MHgxMTMgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTEgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0yIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MyBiX3B5cmFtaWQ9MiBiX2FkYXB0PTEgYl9iaWFzPTAgZGlyZWN0PTEgd2VpZ2h0Yj0xIG9wZW5fZ29wPTAgd2VpZ2h0cD0yIGtleWludD0yNTAga2V5aW50X21pbj0xMCBzY2VuZWN1dD00MCBpbnRyYV9yZWZyZXNoPTAgcmNfbG9va2FoZWFkPTQwIHJjPWNyZiBtYnRyZWU9MSBjcmY9MjMuMCBxY29tcD0wLjYwIHFwbWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0xOjEuMDAAgAAAACpliIQAEP/+5sD5llAtXeXPOjvW0i5SXikwyt23GKfyKU7Q+8+C0DrjXOsAAAALQZokbEP//qmWWkAAAAAIQZ5CeId/AjcAAAAIAZ5hdEN/Au4AAAAIAZ5jakN/Au8AAAARQZpnSahBaJlMCG///qeEqYEAAAAKQZ6FRREsN/8C7wAAAAgBnqZqQ38C7wAAA5Ftb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAADIAABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACvHRyYWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAADIAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAYAAAAEAAAAAAACRlZHRzAAAAHGVsc3QAAAAAAAAAAQAAAyAAAAgAAAEAAAAAAjRtZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAACgAAAAgAFXEAAAAAAAtaGRscgAAAAAAAAAAdmlkZQAAAAAAAAAAAAAAAFZpZGVvSGFuZGxlcgAAAAHfbWluZgAAABR2bWhkAAAAAQAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAABn3N0YmwAAAC/c3RzZAAAAAAAAAABAAAAr2F2YzEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAYABAAEgAAABIAAAAAAAAAAEVTGF2YzYyLjExLjEwMCBsaWJ4MjY0AAAAAAAAAAAAAAAY//8AAAA1YXZjQwFkAAr/4QAYZ2QACqzZRibARAAAAwAEAAADAFA8SJZYAQAGaOvjyyLA/fj4AAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAACAIAAAAAAAAABhzdHRzAAAAAAAAAAEAAAAIAAAEAAAAABRzdHNzAAAAAAAAAAEAAAABAAAASGN0dHMAAAAAAAAABwAAAAEAAAgAAAAAAQAAFAAAAAABAAAIAAAAAAEAAAAAAAAAAQAABAAAAAABAAAQAAAAAAIAAAQAAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAAIAAAAAQAAADRzdHN6AAAAAAAAAAAAAAAIAAAC0gAAAA8AAAAMAAAADAAAAAwAAAAVAAAADgAAAAwAAAAUc3RjbwAAAAAAAAABAAAAMAAAAGF1ZHRhAAAAWW1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALGlsc3QAAAAkqXRvbwAAABxkYXRhAAAAAQAAAABMYXZmNjIuMy4xMDA='
+
 
 let mid = 0
 const m = (msg: Omit<Message, 'id'>): Message => ({ id: `m${++mid}`, ...msg })
@@ -382,6 +398,12 @@ export function chats(): Record<string, Chat> {
         m({ who: 'agent', text: 'LV-3 is building the upload page; LV-4 waits.' }),
         // a reply, quoting the message it answers
         m({ who: 'agent', text: 'The button now sits above the keyboard on phones. Try it on yours.', reply: { id: hides.id, who: 'you', text: hides.text! } }),
+        // an agent sending its own proof into the chat (shepherdr attach): its words, then the picture and the clip it
+        // took, each in the chat's own inbox as the person's own attachments are
+        m({ who: 'agent', text: 'The keyboard up, and the button above it:' }),
+        m({ who: 'agent', file: { name: 'upload-page.png', path: '~/inbox/lv/mf1a2d-upload-page.png' } }),
+        m({ who: 'agent', text: 'And the same on a short clip:' }),
+        m({ who: 'agent', file: { name: 'upload-page.mp4', path: '~/inbox/lv/mf1a2e-upload-page.mp4' } }),
       ]),
       c('GTM-12/Agent', 'Claude Code', [m({ who: 'you', text: 'Set up the Slack agent.' }), m({ who: 'agent', text: 'Done and merged two days ago. The bot answers in #gtm.' })], { finished: true }),
       c('GTM-15/Agent', 'Claude Code', [

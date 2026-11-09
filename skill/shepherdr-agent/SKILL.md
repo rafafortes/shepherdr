@@ -67,8 +67,9 @@ build, check and review the work is your own judgment.
 4. **Proof.** One artifact, `shepherdr artifact new <file> --title "<id>: Proof"`: what changed in one to three plain
    lines, each proof with a one-line caption, and a "Not proven" list. Every proof is real and from this branch now;
    never staged, and a mocked test is no proof of what users see. A bug fix first reproduces the bug: the same repro
-   failing before and passing after. A change too small to show gets a line in your chat instead. Its files stay out
-   of the commit.
+   failing before and passing after. A change too small to show gets a line in your chat instead. A screen is also
+   shown in your chat as the person sees it: `shepherdr attach <shot.png> --caption "…"` (a picture, or a clip that
+   plays in place), which is the quick proof beside the artifact, never instead of it. Its files stay out of the commit.
 5. **Rebase** on the base. On GitHub, `shepherdr pr <id>` pushes and opens a draft pull request; run it again after
    each new commit. Once GitHub's checks passed on it, rebase again only for a conflict: each push runs them again.
 6. **Ready.** `shepherdr ready <id> --summary "<what changed>" --facts "<facts>"`. The summary is at most 160

@@ -51,6 +51,9 @@ export interface Source extends Emitter<SourceEvents> {
   dictate?(audio: Blob, signal?: AbortSignal): Promise<string>
   /** a file attached in a chat, by the path its chat line gives; only those, never anything else on the machine */
   attachment(chat: string, path: string): Promise<Blob | null>
+  /** a tile's small copy of a picture (thumb) or a still of a video (poster), from the same file and only that file;
+   *  null when it isn't worth one or the machine can't make it, and the screen shows the file itself */
+  media?(chat: string, path: string, want: 'thumb' | 'poster'): Promise<Blob | null>
   /** a machine's folders, for adding a project: only folders in the human's home on it */
   folders?(machine: string, path: string): Promise<Folders>
   /** add a project from the sidebar, as `shepherdr project add` does (made a new repo first with create); its place */
