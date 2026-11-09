@@ -81,11 +81,14 @@ one set wins) asks the primary now and then whether it answers again, and tells 
 backup.
 
 - **When it asks.** After a takeover for a reason waiting can't fix (out of allowance, signed out, a model that is not
-there, a provider's refusal — never an error that passes by itself), the primary is first asked half an hour or so
-later, then every half hour, and the wait doubles each time it still fails, up to four hours. A probe is one tiny
-request through that CLI — a single line in, one word out, no tools, no session kept, a hard timeout — and it runs
-only while nobody on this machine is working, one at a time, and never at boot. It is nobody's turn: no chat line, no
-herdr pane, no agent's secret, and its own failure is silent (no card, no alert, nothing of its words anywhere).
+there, a provider's refusal — never an error that passes by itself), the primary is first asked about half an hour
+later, and while it still doesn't answer each wait doubles — an hour, then two, then four, the longest — with a fifth
+of the wait either way at random, so two roles never ask at the same moment. A probe is one tiny request through that
+CLI: its coding assistant's own prompt and the person's MCP servers and settings left out, one line in, one word out,
+no tools, no session kept, a hard timeout. It runs only while nobody on this machine is working, one at a time, and
+never at boot. It is nobody's turn: no chat line, no herdr pane, no agent's secret, and its own failure is silent for
+you — no card, no alert, nothing to answer, nothing of its words in a chat (the server's log says why, for the day it
+needs explaining).
 - **What it tells you.** One card in each chat still on the backup — each task's, the coordinator's own, the space's
   for a reviewer, which has none of its own — saying that the primary answers again and how to go back: `shepherdr
   restart <task or space>` (or ⋯ → Restart agent) for a task or a coordinator, `shepherdr set reviewer.model <id>` for a
@@ -96,9 +99,10 @@ herdr pane, no agent's secret, and its own failure is silent (no card, no alert,
   reviewer, each probed as Settings name its primary — the tasks' pair, the coordinators', the reviewer's
   (`reviewer.agent`, `reviewer.model`, `reviewer.effort`). For a reviewer the card names `reviewer.model`, where the
   backup reviewer's own model is `reviewer.fallbackModel`. Shepherdr never starts a reviewer, so it never sees one fail:
-  a backup reviewer being set is what it knows of a reviewer whose primary can't run, and while one is set (with Review
-  on, on a CLI of its own) the primary reviewer is what it asks, so you can go back to it. A role whose primary is the
-  harness in use is never asked: a backup set to the same harness as the primary, or the backup reviewer itself, which
+  a backup reviewer being set is what it knows of a reviewer whose primary can't run, and while one is set at a level of
+  Settings (with Review on, on a CLI of its own) the primary reviewer is what it asks, so you can go back to it; one a
+  coordinator set for a single task (`task add --set reviewer.fallback=…`) is that task's, and is not watched. A role
+  whose primary is the harness in use is never asked: a backup set to the same harness as the primary, or the backup reviewer itself, which
   has no backup of its own, leaves nothing to come back to.
 - **What it never does.** It never switches anything: no setting is written, no agent restarted, no model chosen — the
   card is the whole action. It never asks another machine's models (the record lives in this machine's

@@ -284,12 +284,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a reply in a turn that goes on (or one only background work follows) changes no status: looked for here
     this.timers.push(setInterval(() => Object.keys(this.agents.records).forEach((k) => this.agents.status(k) !== 'gone' && this.fresh(k)), 5000))
     this.timers.push(setInterval(() => this.runSchedules(), 60_000))
-    // whether a primary that ran out answers again: asked a while after this machine started, never at boot, and never
-    // beside real work (watchReturns)
+    // whether a primary that ran out answers again: never at boot, the first look ten minutes after this machine
+    // started, and every minute after that; never beside real work (watchReturns)
     if (process.env.NODE_ENV !== 'test')
       this.timers.push(
-        setTimeout(() => void this.watchReturns().catch(() => undefined), 10 * 60_000) as unknown as ReturnType<typeof setInterval>,
-        setInterval(() => void this.watchReturns().catch(() => undefined), 60_000),
+        setTimeout(() => {
+          void this.watchReturns().catch(() => undefined)
+          this.timers.push(setInterval(() => void this.watchReturns().catch(() => undefined), 60_000))
+        }, 10 * 60_000) as unknown as ReturnType<typeof setInterval>,
       )
     // heartbeats: looked for twice a minute, so a busy coordinator gets its own soon after its turn ends
     this.timers.push(setInterval(() => this.heartbeat(), 30_000))
@@ -1405,8 +1407,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now() })
       try {
         await this.restartCoordinator(key, on, why)
-        // a lasting one: the primary it ran out of is what the watch asks about later (return.ts)
-        if (r.lasting) this.returns.note({ role: 'coordinator', space: this.spaceKey(key) ?? '', primary: this.settings.harness('coordinator', this.spaceKey(key) || undefined), to: on, why, at: Date.now() })
+        // a lasting one: the primary it ran out of is what the watch asks about later (return.ts). A note that can't be
+        // written must never undo the takeover that just went in
+        if (r.lasting)
+          try {
+            this.returns.note({ role: 'coordinator', space: this.spaceKey(key) ?? '', primary: this.settings.harness('coordinator', this.spaceKey(key) || undefined), to: on, why, at: Date.now() })
+          } catch (e) {
+            console.error(`shepherdr: couldn't keep that ${key} runs on a backup: ${(e as Error).message}`)
+          }
         return
       } catch (e) {
         // it didn't start: the human hears why, and a later hand-over may try again
@@ -1437,7 +1445,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    */
   async watchReturns(now = Date.now()) {
     if (this.probing || this.working()) return
-    this.noteReviewer()
+    this.noteReviewer(now)
     for (const o of this.returns.list()) {
       if (o.back || (o.due ?? 0) > now) continue
       if (this.settings.get('backup.watchReturn', o.space || undefined) !== 'on') continue
@@ -1449,6 +1457,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       }
       // a CLI this machine doesn't have, or one Shepherdr has no silent one-shot for, is never asked
       if (!canProbe(to.primary.kind) || !this.engine.installed(to.primary.kind)) continue
+      // somebody may have begun working while the role before this one was asked
+      if (this.working()) return
       let probe: Probe
       this.probing = true
       try {
@@ -1458,7 +1468,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       } finally {
         this.probing = false
       }
+      // its failure is silent for the human — no card, no alert, nothing to answer — and leaves only the log and a
+      // longer wait
       if (!probe.ok) {
+        console.error(`shepherdr: ${to.primary.kind} doesn't answer yet: ${probe.said.slice(0, 160)}`)
         this.returns.failed(o.role, o.space, now)
         continue
       }
@@ -1489,7 +1502,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (had) this.returns.forget('reviewer', p.name)
         continue
       }
-      if (!had) this.returns.note({ role: 'reviewer', space: p.name, primary, to: backup, why: 'a backup reviewer is set', at: now })
+      // one whose backup reviewer or primary was set differently since: a new record, so a later recovery is a card of
+      // its own (one already told about, set the same way, stays quiet)
+      if (had && (!sameHarness(had.to, backup!) || !sameHarness(had.primary, primary))) this.returns.forget('reviewer', p.name)
+      if (!this.returns.get('reviewer', p.name)) this.returns.note({ role: 'reviewer', space: p.name, primary, to: backup, why: 'a backup reviewer is set', at: now })
     }
   }
 

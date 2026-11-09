@@ -1603,8 +1603,14 @@ export class Engine extends Emitter<Events> {
       const card = `takeover:${t.id}:${t.tookOver.at}`
       const text = backupCardWords({ from: name(from), to: name(to), words, same, why: t.tookOver.why })
       this.chats.post(key, { id: card, card: { id: card, text } })
-      // a lasting one: the primary it ran out of is what the watch asks about later (return.ts)
-      if (lasting) this.noteTookOver?.(t, h, t.tookOver.why)
+      // a lasting one: the primary it ran out of is what the watch asks about later (return.ts). A note that can't be
+      // written must never undo the takeover that just went in
+      if (lasting)
+        try {
+          this.noteTookOver?.(t, h, t.tookOver.why)
+        } catch (e) {
+          console.error(`shepherdr: couldn't keep that ${t.id} runs on a backup: ${(e as Error).message}`)
+        }
     } catch (e) {
       // the backup didn't start: it went wrong, and a later hand-over may try again
       t.trouble = troubleOf(e)

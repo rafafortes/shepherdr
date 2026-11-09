@@ -175,16 +175,43 @@ describe('when the primary answers again', () => {
       expect(s.src.settings.set('reviewer.model', 'GPT-6-Sol', { space: s.p.name }).ok).toBe(true)
       expect(s.src.settings.set('reviewer.fallback', 'pi', { space: s.p.name }).ok).toBe(true)
       coordinator(s.key, 'claude')
+      // the backup reviewer is what it knows of one; the primary is asked about half an hour later, like any other
       await s.src.watchReturns(later())
+      expect(asked).toEqual([])
+      await s.src.watchReturns(later() + FIRST_WAIT * 2)
       expect(asked).toEqual(['codex gpt-6-sol'])
       const [text] = cards(s.key)
       expect(text).toContain('The primary model answers again: Codex (GPT-6-Sol).')
-      expect(text).toContain('Reviews still fall back to pi (the backup reviewer, reviewer.fallbackModel)')
+      expect(text).toContain('Reviews still fall back to pi (the backup reviewer: reviewer.fallback on reviewer.fallbackModel)')
       expect(text).toContain('shepherdr set reviewer.model gpt-6-sol')
       // nothing was started, and no setting was written: a reviewer is never Shepherdr's to start
       expect(s.src.settings.get('reviewer.fallback', s.p.name)).toBe('pi')
       await s.src.watchReturns(later() + 3_600_000)
       expect(cards(s.key)).toHaveLength(1)
+    } finally {
+      for (const k of ['reviewer.fallback', 'reviewer.model']) s.src.settings.set(k, null, { space: s.p.name })
+      s.done()
+    }
+  })
+
+  test('a reviewer whose backup was set differently since gets a card of its own', async () => {
+    const s = await space('back-again')
+    try {
+      expect(s.src.settings.set('reviewer.model', 'GPT-6-Sol', { space: s.p.name }).ok).toBe(true)
+      expect(s.src.settings.set('reviewer.fallback', 'pi', { space: s.p.name }).ok).toBe(true)
+      coordinator(s.key, 'claude')
+      await s.src.watchReturns(later())
+      expect(asked).toEqual([])
+      await s.src.watchReturns(later() + FIRST_WAIT * 2)
+      expect(cards(s.key)).toHaveLength(1)
+      // the human went to another backup reviewer: the primary is asked again, and its recovery is a card of its own
+      expect(s.src.settings.set('reviewer.fallback', 'claude', { space: s.p.name }).ok).toBe(true)
+      await s.src.watchReturns(later() + 3_600_000)
+      expect(asked).toEqual(['codex gpt-6-sol'])
+      await s.src.watchReturns(later() + 3_600_000 + FIRST_WAIT * 2)
+      expect(asked).toEqual(['codex gpt-6-sol', 'codex gpt-6-sol'])
+      expect(cards(s.key)).toHaveLength(2)
+      expect(cards(s.key)[1]).toContain('Reviews still fall back to Claude Code')
     } finally {
       for (const k of ['reviewer.fallback', 'reviewer.model']) s.src.settings.set(k, null, { space: s.p.name })
       s.done()
@@ -302,9 +329,33 @@ describe('what is never asked', () => {
   })
 
   test('a CLI Shepherdr has no silent one-shot for is never asked', () => {
-    expect(oneShot({ kind: 'claude' })).toContain('-p')
-    expect(oneShot({ kind: 'pi' })).toContain('--no-tools')
+    // the shortest call each CLI has that proves its provider answers: no tools, no MCP servers, nothing written
+    expect(oneShot({ kind: 'claude' })).toEqual(expect.arrayContaining(['-p', '--strict-mcp-config', '--restricted', '--no-session-persistence']))
+    expect(oneShot({ kind: 'pi' })).toEqual(expect.arrayContaining(['-p', '--no-tools', '--no-mcp', '--no-session']))
     expect(oneShot({ kind: 'opencode' })).toBeUndefined()
+  })
+
+  test('a probe waits for real work to be over, and one runs at a time', async () => {
+    const s = await space('back-busy')
+    try {
+      const a = task(s.p.name, 'codex', { from: 'claude' })
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: Date.now() - FIRST_WAIT * 2 })
+      // somebody on this machine works: nothing is asked, and nothing is posted
+      const status = s.src.agents.status
+      s.src.agents.status = (() => 'working') as never
+      try {
+        await s.src.watchReturns(later())
+        expect(asked).toEqual([])
+        expect(cards(a.key)).toEqual([])
+      } finally {
+        s.src.agents.status = status
+      }
+      // nobody works now, and one probe runs even where two roles are due
+      await s.src.watchReturns(later())
+      expect(asked).toEqual(['claude'])
+    } finally {
+      s.done()
+    }
   })
 
   test('the demo world never runs a real probe against a real provider', async () => {
