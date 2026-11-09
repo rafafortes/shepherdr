@@ -711,6 +711,31 @@ describe('a turn the provider cut off', () => {
     for (const k of ['task.fallback', 'backup.model']) w.settings.set(k, null)
   })
 
+  test("the coordinators' own pair leaves the tasks' backup on its own model and effort", async () => {
+    const w = world()
+    const retries = cutOff(w)
+    w.engine.installed = () => true
+    w.settings.set('task.fallback', 'claude')
+    w.settings.set('backup.model', 'Sonnet 5.5')
+    w.settings.set('backup.effort', 'low')
+    // the coordinators' backup on another model and effort of its own: the tasks' backup keeps its own
+    w.settings.set('coordinator.fallback', 'claude')
+    w.settings.set('coordinator.fallbackModel', 'Opus 5.5')
+    w.settings.set('coordinator.fallbackEffort', 'high')
+    const { t, key } = await started(w, repo(), 'retry-backup-pairs')
+    w.agentIs(key, 'idle')
+    await w.engine.cantGoOn(t.id, 'Out of allowance until 5pm')
+    const s = w.started.filter((x) => x.key === key)
+    expect(s).toHaveLength(2)
+    expect(s[1]).toMatchObject({ kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })
+    const cards = w.posted.filter((p) => p.key === key && p.card?.text.includes('started again'))
+    expect(cards.map((p) => p.card!.text)).toEqual(['Claude Code (Sonnet 5.5, low) started again, with its session: out of allowance until 5pm'])
+    // what each backup starts on, apart from the other's
+    expect(w.engine.backupFor('task')).toEqual({ to: { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' } })
+    expect(w.engine.backupFor('coordinator')).toEqual({ to: { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' } })
+    for (const k of ['task.fallback', 'backup.model', 'backup.effort', 'coordinator.fallback', 'coordinator.fallbackModel', 'coordinator.fallbackEffort']) w.settings.set(k, null)
+  })
+
   test("a task's backup comes from its own space first: its CLI and the shared model, over Everywhere's", async () => {
     const w = world()
     cutOff(w)

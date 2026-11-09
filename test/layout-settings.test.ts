@@ -111,6 +111,67 @@ describe.skipIf(!browser)('chat agent choices', () => {
   })
 })
 
+describe.skipIf(!browser)('two backups, each with its own model and effort', () => {
+  test("the coordinators' Model reads the tasks' one until it is set, and Reset follows it again", async () => {
+    const store = world.stores['vm-str']
+    const before = world.sections
+    store.set('task.fallback', 'Codex')
+    store.set('coordinator.fallback', 'Claude Code')
+    store.set('backup.model', 'GPT-6-Sol')
+    store.set('backup.effort', 'low')
+    world.sections = (await import('../server/demo/data.ts')).settings(world.stores)
+    world.emit('snapshot')
+    const page = await browser!.newPage({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })
+    try {
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.getByRole('button', { name: 'Agents', exact: true }).click()
+      const backup = settings.getByRole('heading', { name: 'Backup', exact: true }).locator('..')
+      // each backup has a Model and an Effort row of its own
+      const models = backup.getByRole('button', { name: /^Model:/ })
+      const efforts = backup.getByRole('button', { name: /^Effort:/ })
+      expect(await models.count()).toBe(2)
+      expect(await efforts.count()).toBe(2)
+      // the tasks' own pair; the coordinators' is at default, so its rows read the tasks' pair's and say where from
+      expect(await models.nth(0).getAttribute('aria-label')).toBe('Model: GPT-6-Sol')
+      expect(await models.nth(1).getAttribute('aria-label')).toBe('Model: Default')
+      expect(await efforts.nth(1).getAttribute('aria-label')).toBe('Effort: Low')
+      expect(await backup.textContent()).toContain("From the tasks' backup (Everywhere)")
+      expect(await backup.textContent()).toContain("While default: the tasks' backup's.")
+      // its own model, from the models its own CLI has
+      await models.nth(1).click()
+      await page.getByRole('menuitemradio', { name: 'Opus 5.5', exact: true }).click()
+      await settled(page)
+      expect(store.get('coordinator.fallbackModel', '~')).toBe('Opus 5.5')
+      // the tasks' pair is its own still
+      expect(store.get('backup.model')).toBe('GPT-6-Sol')
+      expect(await models.nth(0).getAttribute('aria-label')).toBe('Model: GPT-6-Sol')
+      expect(await models.nth(1).getAttribute('aria-label')).toBe('Model: Opus 5.5')
+      // set here: what a reset goes back to is the tasks' backup's model
+      await backup.getByRole('button', { name: 'Reset to GPT-6-Sol', exact: true }).waitFor()
+      expect(await backup.textContent()).toContain('Inherits GPT-6-Sol · Everywhere')
+      await efforts.nth(1).click()
+      await page.getByRole('menuitemradio', { name: 'High', exact: true }).click()
+      await settled(page)
+      expect(store.get('coordinator.fallbackEffort', '~')).toBe('high')
+      // Reset: the coordinators' pair follows the tasks' again
+      await backup.getByRole('button', { name: 'Reset to GPT-6-Sol', exact: true }).click()
+      await backup.getByRole('button', { name: 'Reset to GPT-6-Sol', exact: true }).waitFor({ state: 'detached' })
+      expect(store.get('coordinator.fallbackModel', '~')).toBe('default')
+      expect(await models.nth(1).getAttribute('aria-label')).toBe('Model: Default')
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375)
+    } finally {
+      for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model', 'backup.effort', 'coordinator.fallbackModel', 'coordinator.fallbackEffort'])
+        for (const l of ['all', { space: '~' }] as const) store.set(k, null, l)
+      world.sections = (await import('../server/demo/data.ts')).settings(world.stores)
+      world.emit('snapshot')
+      await page.close()
+    }
+  })
+})
+
 describe.skipIf(!browser)('Task IDs space settings', () => {
   test('shows only for its space, with two fields and a useful refusal', async () => {
     const { taskIdsSection } = await import('../server/live/task-ids.ts')

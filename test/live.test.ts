@@ -10,7 +10,7 @@ const { agentLines, excerpt, findQuoted, line, matches, parseReply, parseUserLin
 const { parseMenu } = await import('../server/live/chats.ts')
 const { Automations } = await import('../server/live/automations.ts')
 const T = await import('../server/live/trigger.ts')
-const { CATALOG, Settings, agentRow, effortFor, setForTask } = await import('../server/live/settings.ts')
+const { CATALOG, Settings, agentRow, backupModelOf, effortFor, setForTask } = await import('../server/live/settings.ts')
 const { readBrief } = await import('../shared/brief.ts')
 const { Heartbeats, heartbeatFile, Wakes, pilotLine, wakeOf, wakeProblem } = await import('../server/live/heartbeat.ts')
 const { coordinatorPrompt, settingsBlock, splitBrief, taskPrompt } = await import('../server/live/prompts.ts')
@@ -856,6 +856,21 @@ describe('settings', () => {
     expect(s.everywhere()).toEqual({ 'brief.review': 'on' })
     writeJson('settings.json', {})
   })
+  test("a coordinators' backup model the tasks' pair holds and its CLI has not is said where it is read", () => {
+    // a world of its own: this test writes no settings file
+    const s = new Settings({ everywhere: {}, machine: {}, spaces: {} })
+    s.set('task.fallback', 'Codex')
+    s.set('coordinator.fallback', 'Claude Code')
+    expect(s.set('backup.model', 'GPT-6-Sol').ok).toBe(true)
+    const model = () => s.sections([], [], null, 'host').find((x) => x.level === 'm:host' && x.name === 'Agents')!.rows.find((r) => r.key === 'coordinator.fallbackModel')!
+    // it follows the tasks' pair, whose model Claude Code has not: the row says why its backup won't go in
+    expect(model().value).toBe('default')
+    expect(model().warn).toBe("GPT-6-Sol is no model Claude Code has: this backup doesn't go in until you set one here.")
+    // its own, one its own CLI has: nothing to say
+    expect(s.set('coordinator.fallbackModel', 'Opus 5.5').ok).toBe(true)
+    expect(model().value).toBe('Opus 5.5')
+    expect(model().warn).toBeUndefined()
+  })
   test("a task's backup agent is Codex unless set: any CLI herdr starts, or off", () => {
     const s = new Settings()
     expect(s.get('task.fallback')).toBe('Codex')
@@ -866,28 +881,71 @@ describe('settings', () => {
     expect(s.set('task.fallback', 'Nonsense').ok).toBe(false)
     s.set('task.fallback', null)
   })
-  test("a coordinator's backup agent is off unless set, and the model and effort are one pair for both roles", () => {
+  test("a coordinator's backup agent is off unless set, and each backup has its own model and effort", () => {
     const s = new Settings()
     expect(s.get('coordinator.fallback')).toBe('off')
     expect(s.set('coordinator.fallback', 'pi').ok).toBe(true)
     expect(s.get('coordinator.fallback')).toBe('pi')
     expect(s.set('coordinator.fallback', 'Off').ok).toBe(true)
     expect(s.set('coordinator.fallback', 'Nonsense').ok).toBe(false)
-    // both roles back up: a model either CLI has is one the pair may hold, none of them is not
+    // both roles back up, on different CLIs; while the coordinators' own pair is at default, the tasks' one serves both,
+    // so a model either CLI has is one it may hold, and one neither has is not
     s.set('task.fallback', 'Codex')
     s.set('coordinator.fallback', 'Claude Code')
     expect(s.set('backup.model', 'gpt-6-sol').ok).toBe(true)
     expect(s.set('backup.model', 'Sonnet 5.5').ok).toBe(true)
     expect(s.set('backup.model', 'nope-9')).toMatchObject({ ok: false, error: expect.stringContaining('Neither Codex nor Claude Code has a model nope-9') })
-    const row = CATALOG.flatMap((x) => x.rows).find((r) => r.key === 'backup.model')!
-    const shown = agentRow(row, (k: string) => s.get(k), () => NO_PICKS)
-    expect(shown.options).toContain('GPT-6-Sol')
-    expect(shown.options).toContain('Sonnet 5.5')
+    const rowOf = (key: string) => CATALOG.flatMap((x) => x.rows).find((r) => r.key === key)!
+    // each row offers the models of its own CLI: the tasks' a Codex's, the coordinators' a Claude Code's, and the
+    // coordinators' row shows the model it reads from the tasks' pair while its own is at default
+    const tasksRow = agentRow(rowOf('backup.model'), (k: string) => s.get(k), () => NO_PICKS)
+    expect(tasksRow.options).toContain('GPT-6-Sol')
+    expect(tasksRow.options).not.toContain('Sonnet 5.5')
+    const coordRow = agentRow(rowOf('coordinator.fallbackModel'), (k: string) => s.get(k), () => NO_PICKS)
+    expect(coordRow.options).toContain('Sonnet 5.5')
+    expect(coordRow.options).not.toContain('GPT-6-Sol')
+    expect(coordRow.value).toBe('Sonnet 5.5')
+    // a model the chosen CLI does not have is refused where it is set: the coordinators' own pair by Claude Code
+    expect(s.set('coordinator.fallbackModel', 'gpt-6-sol')).toMatchObject({ ok: false, error: expect.stringContaining('Claude Code has no model gpt-6-sol') })
+    expect(s.set('coordinator.fallbackModel', 'Opus 5.5').ok).toBe(true)
+    // its own pair now: the tasks' backup keeps its own model, and the coordinators' starts on its own
+    expect(s.set('backup.model', 'gpt-6-sol').ok).toBe(true)
+    expect(s.get('backup.model')).toBe('gpt-6-sol')
+    expect(s.modelOf('backup', 'codex')).toEqual({ model: 'gpt-6-sol', effort: undefined })
+    expect(s.modelOf('coordinatorBackup', 'claude')).toEqual({ model: 'claude-opus-5-5', effort: undefined })
     // a space's own wins over Everywhere, as for every setting
-    expect(s.set('backup.model', 'Opus 5.5', { space: 'web' }).ok).toBe(true)
-    expect(s.pick('backup.model', { space: 'web' })).toEqual({ value: 'Opus 5.5', from: 'space' })
+    expect(s.set('backup.model', 'gpt-6-luna', { space: 'web' }).ok).toBe(true)
+    expect(s.pick('backup.model', { space: 'web' })).toEqual({ value: 'gpt-6-luna', from: 'space' })
     expect(s.pick('backup.model', 'machine').from).toBe('all')
-    for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model']) s.set(k, null)
+    expect(s.set('coordinator.fallbackModel', 'Haiku 5.5', { space: 'web' }).ok).toBe(true)
+    expect(s.readAt('coordinator.fallbackModel', { space: 'web' })).toEqual({ value: 'Haiku 5.5', from: 'space' })
+    expect(s.readAt('coordinator.fallbackModel', 'machine')).toEqual({ value: 'Opus 5.5', from: 'all' })
+    for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model', 'coordinator.fallbackModel']) for (const l of ['all', { space: 'web' }] as const) s.set(k, null, l)
+    writeJson('settings.json', {})
+  })
+  test("the coordinators' backup pair reads the tasks' one while it is at default, at every level", () => {
+    const s = new Settings()
+    s.set('task.fallback', 'Codex')
+    s.set('coordinator.fallback', 'Claude Code')
+    s.set('backup.model', 'Sonnet 5.5')
+    s.set('backup.effort', 'low')
+    // its own keys unset: what it starts on is the tasks' pair's, and the row says where it comes from
+    expect(s.readAt('coordinator.fallbackModel', 'machine')).toEqual({ value: 'Sonnet 5.5', from: 'all', follows: 'backup.model' })
+    expect(s.modelOf('coordinatorBackup', 'claude')).toEqual({ model: 'claude-sonnet-5-5', effort: 'low' })
+    // a space's own model wins over Everywhere, while its effort keeps following the tasks' pair
+    expect(s.set('coordinator.fallbackModel', 'Opus 5.5', { space: 'web' }).ok).toBe(true)
+    expect(s.modelOf('coordinatorBackup', 'claude', 'web')).toEqual({ model: 'claude-opus-5-5', effort: 'low' })
+    expect(s.modelOf('coordinatorBackup', 'claude')).toEqual({ model: 'claude-sonnet-5-5', effort: 'low' })
+    // backupModelOf names the row the model is set in: the tasks' while it follows, the coordinators' once it is its own
+    expect(backupModelOf('coordinator', (k) => s.get(k))).toEqual({ model: 'Sonnet 5.5', row: 'Backup → Model' })
+    expect(backupModelOf('coordinator', (k) => s.get(k, 'web'))).toEqual({ model: 'Opus 5.5', row: "Backup → Coordinators' backup → Model" })
+    expect(backupModelOf('task', (k) => s.get(k))).toEqual({ model: 'Sonnet 5.5', row: 'Backup → Model' })
+    // shepherdr show says it too: each key on its own line, with its level
+    const line = (space?: string) => s.lines(space, 'host').split('\n').filter((x) => x.startsWith('coordinator.fallback'))
+    expect(line()).toContain('coordinator.fallbackModel Sonnet 5.5  (Everywhere, the tasks\' backup\'s model)')
+    expect(line()).toContain('coordinator.fallbackEffort low  (Everywhere, the tasks\' backup\'s effort)')
+    expect(line('web')).toContain('coordinator.fallbackModel Opus 5.5  (this space)')
+    for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model', 'backup.effort', 'coordinator.fallbackModel']) for (const l of ['all', { space: 'web' }] as const) s.set(k, null, l)
     writeJson('settings.json', {})
   })
   test("a model chosen for the backups is remembered whichever of the two roles' backups is set", () => {
@@ -922,7 +980,7 @@ describe('settings', () => {
     s.set('brief.review', 'off')
     expect(note()).toContain("- Review: off. No review; the lines on reviewing below don't apply. (your setting for every machine)")
     s.set('brief.review', null)
-    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual(['Tasks', 'Tasks', 'Tasks', 'Coordinators', 'Coordinators', 'Coordinators', 'Backup', 'Backup', 'Backup', 'Backup'])
+    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual(['Tasks', 'Tasks', 'Tasks', 'Coordinators', 'Coordinators', 'Coordinators', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup'])
   })
 })
 

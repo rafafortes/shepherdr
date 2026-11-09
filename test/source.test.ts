@@ -598,6 +598,12 @@ describe("a task's CLI, model and effort", () => {
     expect(out).toContain('reviewer.fallback        off')
     expect(out).toContain('reviewer.fallbackModel   default')
     expect(out).toContain('reviewer.fallbackEffort  default')
+    // each backup has its own pair, on its own line with its level; the coordinators' says where it reads it while default
+    expect(out).toMatch(/^backup\.model\s+default\s+\(default\)$/m)
+    expect(out).toMatch(/^backup\.effort\s+default\s+\(default\)$/m)
+    expect(out).toMatch(/^coordinator\.fallback\s+off\s+\(default\)$/m)
+    expect(out).toMatch(/^coordinator\.fallbackModel\s+default\s+\(default\)$/m)
+    expect(out).toMatch(/^coordinator\.fallbackEffort\s+default\s+\(default\)$/m)
     expect(out).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).')
     expect(out).not.toContain('cannot run at all')
     expect(out).toContain('What agents are told (')

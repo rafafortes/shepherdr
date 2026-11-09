@@ -1317,10 +1317,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /**
-   * A coordinator that can't go on (retry.ts): Settings' coordinator.fallback takes the chat over once, on backup.model and
-   * backup.effort — the same CLI again, resuming its session, or another CLI, which is a takeover of the conversation and
-   * says so. Its tasks go on as they are. Else, or when its backup can't go either, it waits for you: a card in the space
-   * and an alert.
+   * A coordinator that can't go on (retry.ts): Settings' coordinator.fallback takes the chat over once, on the
+   * coordinators' backup model and effort (coordinator.fallbackModel and coordinator.fallbackEffort, or the tasks'
+   * backup.model and backup.effort while those are at default) — the same CLI again, resuming its session, or another CLI,
+   * which is a takeover of the conversation and says so. Its tasks go on as they are. Else, or when its backup can't go
+   * either, it waits for you: a card in the space and an alert.
    */
   private async coordinatorCantGoOn(key: string, r: Retry) {
     const rec = this.agents.record(key)
@@ -1330,7 +1331,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // once per agent, until you restart it yourself: a backup that keeps failing waits for the human, never a loop
     if (plan.to && from && !took) {
       const why = r.reason.charAt(0).toLowerCase() + r.reason.slice(1)
-      // Backup → Model and Effort, or else the model and effort it ran on: a model the backup's CLI lacks is dropped
+      // the coordinators' Model and Effort, or else the model and effort it ran on: a model the backup's CLI lacks is dropped
       const on: Harness = {
         kind: plan.to.kind,
         model: plan.to.model ?? (rec.model ? findModel(plan.to.kind, rec.model)?.id : undefined),

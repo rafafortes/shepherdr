@@ -1,6 +1,7 @@
-// A coordinator's backup agent (Settings' coordinator.fallback, on backup.model and backup.effort): the same CLI again
-// with its session, or another CLI taking the chat over once; off, it waits for the human as before. A real LiveSource,
-// its agents stubbed at the one place they start (no herdr is here), and a herdr socket that isn't there.
+// A coordinator's backup agent (Settings' coordinator.fallback, on its own coordinator.fallbackModel and
+// coordinator.fallbackEffort, or the tasks' backup.model and backup.effort while those are at default): the same CLI
+// again with its session, or another CLI taking the chat over once; off, it waits for the human as before. A real
+// LiveSource, its agents stubbed at the one place they start (no herdr is here), and a herdr socket that isn't there.
 import { afterAll, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import { join } from 'node:path'
@@ -150,6 +151,94 @@ describe("a coordinator's backup agent", () => {
       await s.cut('Out of allowance')
       expect(s.started).toHaveLength(3)
     } finally {
+      s.done()
+    }
+  })
+
+  test("the coordinators' backup on its own pair takes over on its own model, apart from the tasks' backup's", async () => {
+    const s = await place('ownpair')
+    try {
+      expect(s.src.settings.set('task.fallback', 'codex', { space: s.p.name }).ok).toBe(true)
+      expect(s.src.settings.set('coordinator.fallback', 'claude', { space: s.p.name }).ok).toBe(true)
+      // the tasks' backup's own pair, which the coordinators' backup followed until now
+      expect(s.src.settings.set('backup.model', 'gpt-6-sol', { space: s.p.name }).ok).toBe(true)
+      expect(s.src.settings.set('backup.effort', 'low', { space: s.p.name }).ok).toBe(true)
+      // the coordinators' own: a model and an effort Claude Code has, where a Codex model would be none for it
+      expect(s.src.settings.set('coordinator.fallbackModel', 'Sonnet 5.5', { space: s.p.name }).ok).toBe(true)
+      expect(s.src.settings.set('coordinator.fallbackEffort', 'medium', { space: s.p.name }).ok).toBe(true)
+      await s.cut('Out of allowance until 5pm')
+      expect(s.started).toHaveLength(1)
+      expect(s.started[0]).toMatchObject({ kind: 'claude', model: 'claude-sonnet-5-5', effort: 'medium' })
+      const card = s.cards().find((m) => m.card!.text.includes('started again'))!
+      expect(card.card!.text).toBe('Claude Code (Sonnet 5.5, medium) started again, with its session: out of allowance until 5pm')
+      // each backup on its own: what they start on, side by side
+      expect(s.src.engine.backupFor('coordinator', s.p.name)).toEqual({ to: { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'medium' } })
+      expect(s.src.engine.backupFor('task', s.p.name)).toEqual({ to: { kind: 'codex', model: 'gpt-6-sol', effort: 'low' } })
+    } finally {
+      for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model', 'backup.effort', 'coordinator.fallbackModel', 'coordinator.fallbackEffort']) s.src.settings.set(k, null, { space: s.p.name })
+      s.done()
+    }
+  })
+
+  test("a space's own coordinator backup model wins over Everywhere's, and another space follows Everywhere", async () => {
+    const a = await place('pair-a')
+    expect(a.src.settings.set('coordinator.fallback', 'claude', 'all').ok).toBe(true)
+    expect(a.src.settings.set('coordinator.fallbackModel', 'Opus 5.5', 'all').ok).toBe(true)
+    try {
+      expect(a.src.settings.set('coordinator.fallbackModel', 'Sonnet 5.5', { space: a.p.name }).ok).toBe(true)
+      await a.cut('Signed out')
+      expect(a.started[0]).toMatchObject({ kind: 'claude', model: 'claude-sonnet-5-5' })
+    } finally {
+      a.done()
+    }
+    const b = await place('pair-b')
+    try {
+      await b.cut('Signed out')
+      // a space that sets none reads Everywhere's, as the tasks' pair always did
+      expect(b.started[0]).toMatchObject({ kind: 'claude', model: 'claude-opus-5-5' })
+    } finally {
+      for (const k of ['coordinator.fallback', 'coordinator.fallbackModel']) for (const l of ['all', { space: a.p.name }] as const) b.src.settings.set(k, null, l)
+      b.done()
+    }
+  })
+
+  test("a coordinator backup model its CLI does not have is no takeover, and the card names the row it is set in", async () => {
+    const s = await place('ownbadmodel')
+    try {
+      // the model was picked for a Codex backup; its coordinator's backup moved to Claude Code, which has no such model
+      expect(s.src.settings.set('coordinator.fallback', 'codex', { space: s.p.name }).ok).toBe(true)
+      expect(s.src.settings.set('coordinator.fallbackModel', 'gpt-6-sol', { space: s.p.name }).ok).toBe(true)
+      expect(s.src.settings.set('coordinator.fallback', 'claude', { space: s.p.name }).ok).toBe(true)
+      await s.cut('Signed out')
+      expect(s.started).toHaveLength(0)
+      expect(s.src.agents.tookOver(s.key)).toBeUndefined()
+      expect(s.cards().map((m) => m.card!.text)).toEqual([
+        "Cut off by its provider: signed out. No backup agent took over: Claude Code has no model gpt-6-sol: Backup → Coordinators' backup → Model is set to one it doesn't have. Write to carry on.",
+      ])
+      expect(s.alerts).toHaveLength(1)
+    } finally {
+      for (const k of ['coordinator.fallback', 'coordinator.fallbackModel']) s.src.settings.set(k, null, { space: s.p.name })
+      s.done()
+    }
+  })
+
+  test("shepherdr set takes the coordinators' pair for a space, and shepherdr show reads it back", async () => {
+    const s = await place('cli-set')
+    try {
+      expect((await s.src.cli(['set', 'coordinator.fallback', 'Claude Code', '--space', s.p.name], {})).code).toBe(0)
+      expect((await s.src.cli(['set', 'coordinator.fallbackModel', 'Opus 5.5', '--space', s.p.name], {})).code).toBe(0)
+      expect((await s.src.cli(['set', 'coordinator.fallbackEffort', 'high', '--space', s.p.name], {})).code).toBe(0)
+      expect(s.src.engine.backupFor('coordinator', s.p.name)).toEqual({ to: { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' } })
+      const out = (await s.src.cli(['show', '--space', s.p.name], {})).out
+      expect(out).toMatch(/^coordinator\.fallback\s+Claude Code\s+\(this space\)$/m)
+      expect(out).toMatch(/^coordinator\.fallbackModel\s+Opus 5\.5\s+\(this space\)$/m)
+      expect(out).toMatch(/^coordinator\.fallbackEffort\s+high\s+\(this space\)$/m)
+      // a model its CLI does not have is refused where it is set
+      const bad = await s.src.cli(['set', 'coordinator.fallbackModel', 'gpt-6-sol', '--space', s.p.name], {})
+      expect(bad.code).toBe(1)
+      expect(bad.out).toContain('Claude Code has no model gpt-6-sol')
+    } finally {
+      for (const k of ['coordinator.fallback', 'coordinator.fallbackModel', 'coordinator.fallbackEffort']) s.src.settings.set(k, null, { space: s.p.name })
       s.done()
     }
   })
