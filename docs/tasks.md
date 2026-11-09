@@ -79,7 +79,7 @@
 - When a task's agent can't go on (out of allowance, signed out, its provider still down after the tries), its
   **backup agent** goes in, once (a start that fails leaves a later one to try again): Settings → Agents → Backup →
   Tasks' backup (`task.fallback`, Codex unless set, or
-  off), on `backup.model` and `backup.effort`. The same CLI as the agent that can't go on starts again on that model
+  off), on its own `backup.model` and `backup.effort`. The same CLI as the agent that can't go on starts again on that model
   and effort and resumes its own session, so nothing is lost, its worktree and branch unchanged; another CLI takes
   over in the same worktree and branch, with the brief and a short handover: who it takes over from and why, the
   branch's commits, what lies uncommitted and the chat so far. Either way a card in the task's chat says who went in
@@ -87,12 +87,14 @@
   needs you: its chat says why where a backup setting is the reason, and one that couldn't start at all shows as
   `Went wrong`.
 - A coordinator that can't go on is backed up the same way, when Settings → Agents → Backup → Coordinators' backup
-  (`coordinator.fallback`, off unless set) is on: the same CLI starts again on `backup.model` and `backup.effort` with
-  its session, or another CLI takes the chat over — a different conversation partner, which the card in the space
-  says — with the chat so far and its open tasks, its tasks going on as they are, and on Backup → Model and Effort
-  where they are set, else on the model and effort it ran on. Once, until you start it again yourself (⋯ → Restart
-  agent, or `shepherdr restart`); off, a backup already gone in, or one unable to go in, the space's chat says so and
-  you are alerted.
+  (`coordinator.fallback`, off unless set) is on: the two backups have their own model and effort, and the coordinators'
+  own pair (`coordinator.fallbackModel`, `coordinator.fallbackEffort`) reads `backup.model` and `backup.effort` while it
+  is at default, so one backup can be on Claude Code and the other on pi, each on a model its CLI has. The same CLI starts
+  again on that pair with its session, or another CLI takes the chat over — a different conversation partner, which the
+  card in the space says — with the chat so far and its open tasks, its tasks going on as they are, and on the
+  coordinators' Model and Effort where they are set, else on the model and effort it ran on. Once, until you start it
+  again yourself (⋯ → Restart agent, or `shepherdr restart`); off, a backup already gone in, or one unable to go in, the
+  space's chat says so and you are alerted.
 - A reviewer has a backup of its own, and it is words in the brief rather than an agent Shepherdr runs: a reviewer is
   the task's own agent reviewing, so a reviewer that is out of allowance would leave that agent stuck at the review.
   Settings → How tasks work → Reviewer → Backup reviewer (`reviewer.fallback`, off until set, with

@@ -27,7 +27,7 @@ import { HOST, placeId, type Places, type Space } from '../places.ts'
 import { privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, restartLine, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
-import { CLI_NAME, FALLBACK_OF, kindOf, type Settings } from '../settings.ts'
+import { backupModelOf, CLI_NAME, FALLBACK_OF, kindOf, type Settings } from '../settings.ts'
 import { findModel, knowsModels } from '../models.ts'
 import { fitHarness, harnessWords, recentChat } from '../restart.ts'
 import * as G from './git.ts'
@@ -1612,9 +1612,11 @@ export class Engine extends Emitter<Events> {
 
   /**
    * The backup agent a role's agent gets when it can't go on, by Settings at this level: its CLI, and the model and effort
-   * it starts on. `own` is what one task keeps for itself (task add --set), read before the space's. Nothing when the
-   * backup is off, not installed, or set to a model that CLI doesn't have; `why` says why a backup the human set can't go
-   * in (its words in that chat), nothing when there is no backup at all.
+   * it starts on (each backup's own pair: the tasks' on backup.model and backup.effort, the coordinators' on
+   * coordinator.fallbackModel and coordinator.fallbackEffort, read from the tasks' pair while that one is at default).
+   * `own` is what one task keeps for itself (task add --set), read before the space's. Nothing when the backup is off,
+   * not installed, or set to a model that CLI doesn't have; `why` says why a backup the human set can't go in (its
+   * words in that chat), nothing when there is no backup at all.
    */
   backupFor(role: 'task' | 'coordinator', space?: string, own?: Record<string, string>): { to?: { kind: string; model?: string; effort?: string }; why?: string } {
     const get = (key: string) => own?.[key] ?? this.settings.get(key, space)
@@ -1622,9 +1624,9 @@ export class Engine extends Emitter<Events> {
     if (!to) return {}
     const them = CLI_NAME[to] ?? to
     if (!this.installed(to)) return { why: `${them} isn't installed on this machine` }
-    const model = get('backup.model').trim()
-    if (model.toLowerCase() !== 'default' && knowsModels(to) && !findModel(to, model)) return { why: `${them} has no model ${model}: Backup → Model is set to one it doesn't have` }
-    return { to: { kind: to, ...this.settings.modelOf('backup', to, space, get) } }
+    const { model, row } = backupModelOf(role, get)
+    if (model.toLowerCase() !== 'default' && knowsModels(to) && !findModel(to, model)) return { why: `${them} has no model ${model}: ${row} is set to one it doesn't have` }
+    return { to: { kind: to, ...this.settings.modelOf(role === 'task' ? 'backup' : 'coordinatorBackup', to, space, get) } }
   }
 
   /** no backup went in, and the human set one: its chat says why, so a backup that can't go leaves no silence */

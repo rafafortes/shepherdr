@@ -40,25 +40,30 @@
 
 ## Backup agents
 
-Settings → Agents → Backup holds both backups in one group: two CLIs, and one model and effort they share. They go in
-when an agent can't go on (signed out, out of allowance, its provider still down after the retries): a task's agent
-keeps its worktree and branch, a coordinator's tasks go on as they are, and either way it happens once, so a backup that
-keeps failing waits for you.
+Settings → Agents → Backup holds both backups in one group: two CLIs, each with its own Model and Effort — the
+coordinators' pair reads the tasks' pair until you set its own. They go in when an agent can't go on (signed out, out of
+allowance, its provider still down after the retries): a task's agent keeps its worktree and branch, a coordinator's
+tasks go on as they are, and either way it happens once, so a backup that keeps failing waits for you.
 
 - **Tasks' backup** (`task.fallback`, Codex unless set, or off): the CLI a task's backup goes in on — the task's own
   `task add --set task.fallback=…` first, then its space's, this machine's and Everywhere's.
 - **Coordinators' backup** (`coordinator.fallback`, off unless set): the CLI a coordinator's backup goes in on — its
   space's own, then this machine's, then Everywhere's. Another machine's coordinator follows its own machine's settings.
-- **Model** and **Effort** (`backup.model`, `backup.effort`, default): one pair for both backups, read at the most
+- **Model** and **Effort** (`backup.model`, `backup.effort`, default): the tasks' backup's own pair, read at the most
   specific level that sets it — a task's own `--set backup.model=…` (or `backup.effort=…`), else its space's, else this
-  machine's, else Everywhere's. Where Backup → Model is default, a backup starts on the model and effort the agent it
-  backs up ran on, when the backup's CLI has them.
+  machine's, else Everywhere's. Where it is default, a backup starts on the model and effort the agent it backs up ran
+  on, when the backup's CLI has them.
+- **Coordinators' Model** and **Effort** (`coordinator.fallbackModel`, `coordinator.fallbackEffort`, default): the
+  coordinators' backup's own pair, set at the same levels, so that it can be on a CLI other than the tasks' one and on a
+  model that CLI has. While it is at default it reads `backup.model` and `backup.effort`, so every configuration in use
+  keeps its meaning and its row shows the value it reads, saying it comes from the tasks' backup.
 
-A model neither backup CLI has — at that level or any level below it — is refused when you set it in Settings; one only
-the other CLI has, or one set for a single task with `--set`, is not used for the backup that lacks it, which then
-doesn't go in and its chat says why. Effort it lacks becomes the nearest it takes. Only a backup that changed the CLI is
-a takeover; the same CLI again keeps the session it had. A task's backup goes in once (a start that fails leaves a later
-one to try again); a coordinator's once, until you start it again yourself.
+A model no backup that reads it can take — at the level it is set and every level below that reads it — is refused when
+you set it in Settings; one a backup's CLI lacks where it goes in, such as one set for a single task with `--set`, or one
+the other role's backup can take while the coordinators' pair follows it, is not used there, so that backup doesn't go in
+and its chat says why (and its Model row says so too). Effort it lacks becomes the nearest it takes. Only a backup that
+changed the CLI is a takeover; the same CLI again keeps the session it had. A task's backup goes in once (a start that
+fails leaves a later one to try again); a coordinator's once, until you start it again yourself.
 
 A backup on the CLI the agent already runs starts that CLI again on the Backup model and effort and resumes its own
 session, so nothing is lost; another CLI takes the work over — a task's with its brief, its branch and the chat so far, a
