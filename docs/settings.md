@@ -6,7 +6,8 @@
   coordinators start with (model:
   every model the CLI reports, searched once the list is long, the ones you pinned or picked last first; an id or alias,
   or default for the CLI's own; effort: default, lowest, low, medium, high, xhigh or max, each CLI taking it its own
-  way, and in words on screen — Extra high for xhigh) and tasks' backup agent, when Done tasks archive themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, the idle browser, dictation, Notifications
+  way, and in words on screen — Extra high for xhigh) and the backup agents that take over when a task's or a
+  coordinator's agent can't go on, when Done tasks archive themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, the idle browser, dictation, Notifications
   and Voice. Notifications gathers scoped delivery rules and device enrolment; device delivery is Everywhere. Space menus still offer Notify. Its
   defaults are set Everywhere, for a machine or for a space (`shepherdr set <key> <value> [--machine | --space NAME]`, from any machine);
   the most specific one set wins. Editing above the content names the scope; its searchable hierarchy handles many machines and spaces. Values set here are highlighted, with their inherited value, source and Reset beside them. And, kept on each device, its Appearance: System (the device's own light
@@ -27,6 +28,29 @@
   Settings and Restart offer Claude Code, Codex and pi; other herdr CLIs are refused before a chat launch because
   their replies cannot be shown. Existing saved choices are kept, but an unsupported choice must be changed before
   launching again. Headless reviewer choices are separate; this does not add or prove support for other reviewers.
+
+## Backup agents
+
+Settings → Agents → Backup holds both backups in one group: two CLIs, and one model and effort they share. They go in
+when an agent can't go on (signed out, out of allowance, its provider still down after the retries): a task's agent
+keeps its worktree and branch, a coordinator's tasks go on as they are, and either way it happens once, so a backup that
+keeps failing waits for you.
+
+- **Tasks' backup** (`task.fallback`, Codex unless set, or off): the CLI a task's backup goes in on, read at the
+  task's own space first, then this machine, then Everywhere. A task's own effort (`task add --effort`, or its chat's
+  pickers) is what its backup starts on where Backup → Effort is default.
+- **Coordinators' backup** (`coordinator.fallback`, off unless set): the CLI a coordinator's backup goes in on, read at
+  its space first, then this machine, then Everywhere. Another machine's coordinator follows its own machine's settings.
+- **Model** and **Effort** (`backup.model`, `backup.effort`, default): one pair for both backups, read at the most
+  specific level that sets it — a space's own, else this machine's, else Everywhere's. A model neither backup CLI has is
+  refused when you set it; one only the other CLI has is not used for that one, which then doesn't go in and says why
+  in its chat. Effort it lacks becomes the nearest it takes.
+
+A backup on the CLI the agent already runs starts that CLI again on the Backup model and effort and resumes its own
+session, so nothing is lost; another CLI takes the work over — a task's with its brief, its branch and the chat so far, a
+coordinator's chat with its open tasks and its chat so far, which changes who you talk to — and the card in that chat says
+who went in and why. A backup that isn't installed, or set to a model its CLI doesn't have, doesn't go in: the chat says
+why. Each value shows where it comes from, with Reset to the inherited one, like every other setting.
 
 ## Dictation
 

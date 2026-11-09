@@ -41,7 +41,7 @@ import { claudeProjectDir, piSessionDir } from './readers/find.ts'
 import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
-import { privatePrompt, coordinatorPrompt, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
+import { privatePrompt, coordinatorPrompt, backupCardWords, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
 import { fitHarness, harnessProblem, harnessWords, recentChat, restartHint, restartInfo, type Harness } from './restart.ts'
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
@@ -1009,8 +1009,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** a coordinator started again on this CLI, model and effort: the same CLI resumes its session, another takes over
-   *  with its role's prompt and the chat's last words. Its tasks go on as they are; a card in its chat marks it */
-  private async restartCoordinator(id: string, to: Harness) {
+   *  with its role's prompt and the chat's last words. Its tasks go on as they are; a card in its chat marks it. A
+   *  backup's own start (`backup`: the reason its agent can't go on) says so in the card and in what it is told */
+  private async restartCoordinator(id: string, to: Harness, backup?: string) {
     if (!this.places.coordinator(id)) throw new Error(`No place ${id}`)
     if (!this.engine.installed(to.kind)) throw new Error(`${CLI_NAME[to.kind] ?? to.kind} isn't installed on this machine.`)
     const h = fitHarness(to)
@@ -1021,13 +1022,26 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const first = async () => {
       await this.agents.stopTurn(id)
       if (!from) return undefined
+      if (backup) {
+        if (from === h.kind) return hidden(backupKeptLine({ on: words, why: backup }), 'restart')
+        return hidden(coordinatorHandOverLine({ from: them, why: backup, tasks: this.openTasks(id), chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
+      }
       return from === h.kind ? hidden(resumedLine(words), 'restart') : hidden(restartLine({ from: them, to: words, chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
     }
     await this.coordinator(id, { as: h, restart: first })
-    const card = `restart:${id}:${Date.now()}`
-    this.chats.post(id, { id: card, card: { id: card, restart: true, text: `Restarted on ${words}` } })
+    const card = `${backup ? 'takeover' : 'restart'}:${id}:${Date.now()}`
+    const text = backup ? backupCardWords({ from: them, to: CLI_NAME[h.kind] ?? h.kind, words, same: from === h.kind, why: backup }) : `Restarted on ${words}`
+    this.chats.post(id, { id: card, card: { id: card, restart: true, text } })
     if (this.watched.includes(id)) this.emit('chat', id)
     return words
+  }
+
+  /** a space's tasks that are not done, one line each, for its coordinator's backup agent: they go on as they are */
+  private openTasks(id: string) {
+    return this.engine.tasks
+      .filter((t) => t.project === id && !t.closed && !t.merged && !t.landing)
+      .slice(0, 20)
+      .map((t) => `${t.id} ${t.title}`)
   }
 
   /** a coordinator (its place id) or a task's agent (ID/Agent) restarted: its role and space, what it runs on, what
@@ -1266,12 +1280,43 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (this.agents.record(key) && !this.peers?.owner(key)) this.retries.seen(key, this.chats.cutOff(key))
   }
 
-  /** an agent can't go on by itself: a task's backup agent takes over, or it waits for you; a coordinator tells you in
-   *  its chat, with an alert */
+  /** an agent can't go on by itself: its backup agent takes over once (a task's engine.ts cantGoOn, a coordinator's
+   *  below), or it waits for you in its chat, with an alert */
   private cannotGoOn(key: string, r: Retry) {
     if (key.includes('/')) return void this.engine.cantGoOn(key.split('/')[0], r.reason).catch(() => undefined)
+    void this.coordinatorCantGoOn(key, r).catch(() => undefined)
+  }
+
+  /**
+   * A coordinator that can't go on (retry.ts): Settings' coordinator.fallback takes the chat over once, on backup.model and
+   * backup.effort — the same CLI again, resuming its session, or another CLI, which is a takeover of the conversation and
+   * says so. Its tasks go on as they are. Else, or when its backup can't go either, it waits for you: a card in the space
+   * and an alert.
+   */
+  private async coordinatorCantGoOn(key: string, r: Retry) {
+    const from = this.agents.record(key)?.kind
+    const plan = from ? this.engine.backupFor('coordinator', this.spaceKey(key)) : {}
+    // once per agent: a backup that keeps failing waits for the human, never a loop
+    if (plan.to && from && !this.agents.tookOver(key)) {
+      const why = r.reason.charAt(0).toLowerCase() + r.reason.slice(1)
+      this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now() })
+      try {
+        await this.restartCoordinator(key, plan.to, why)
+        return
+      } catch (e) {
+        // it didn't start: the human hears why, and a later hand-over may try again
+        this.agents.markTookOver(key, undefined)
+        return this.cutOff(key, r, `its backup, ${CLI_NAME[plan.to.kind] ?? plan.to.kind}, couldn't start: ${(e as Error).message}`)
+      }
+    }
+    this.cutOff(key, r, plan.why ? `no backup agent took over: ${plan.why}` : undefined)
+  }
+
+  /** a coordinator whose agent can't go on waits for you: its space's card, and an alert; `also` says why no backup went in */
+  private cutOff(key: string, r: Retry, also?: string) {
     const id = `cut:${r.cut}`
-    this.chats.post(key, { id, card: { id, text: `Cut off by its provider: ${r.reason.charAt(0).toLowerCase()}${r.reason.slice(1)}. Write to carry on.` } })
+    const words = `Cut off by its provider: ${r.reason.charAt(0).toLowerCase()}${r.reason.slice(1)}.${also ? ` ${also.charAt(0).toUpperCase()}${also.slice(1)}.` : ''} Write to carry on.`
+    this.chats.post(key, { id, card: { id, text: words } })
     if (this.watched.includes(key)) this.emit('chat', key)
     this.alert({ id: randomUUID(), from: 'Shepherdr', title: `${this.chatName(key)} stopped`, body: `${r.reason}. ${r.words}`.slice(0, 200), go: { place: key, focus: id }, tag: `cut:${key}` })
   }

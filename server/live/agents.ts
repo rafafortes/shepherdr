@@ -100,6 +100,9 @@ export interface AgentRecord {
   fresh?: boolean
   /** the last start that threw, where it did, before a pane could be read: the reason a start failed (start.ts) */
   startError?: string
+  /** a backup agent went in once, where the agent it backs up can't go on (source.ts cannotGoOn): another one waits for
+   *  the human, so a backup that keeps failing never loops. A task's own record keeps the same mark (TaskRec.tookOver) */
+  tookOver?: { from: string; to: string; why: string; at: number }
 }
 
 export interface OutItem {
@@ -319,6 +322,19 @@ export class Agents extends Emitter<Events> {
 
   record(key: string) {
     return this.records[key]
+  }
+
+  /** the backup agent that took this chat over once, if it did (kept: a backup that keeps failing never loops) */
+  tookOver(key: string) {
+    return this.records[key]?.tookOver
+  }
+
+  /** mark this chat's agent as backed up once: another backup waits for the human */
+  markTookOver(key: string, tookOver: AgentRecord['tookOver']) {
+    const r = this.records[key]
+    if (!r) return
+    r.tookOver = tookOver
+    this.save()
   }
 
   info(key: string) {

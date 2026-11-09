@@ -10,7 +10,7 @@ const { agentLines, excerpt, findQuoted, line, matches, parseReply, parseUserLin
 const { parseMenu } = await import('../server/live/chats.ts')
 const { Automations } = await import('../server/live/automations.ts')
 const T = await import('../server/live/trigger.ts')
-const { CATALOG, Settings, effortFor, setForTask } = await import('../server/live/settings.ts')
+const { CATALOG, Settings, agentRow, effortFor, setForTask } = await import('../server/live/settings.ts')
 const { readBrief } = await import('../shared/brief.ts')
 const { Heartbeats, heartbeatFile, Wakes, pilotLine, wakeOf, wakeProblem } = await import('../server/live/heartbeat.ts')
 const { coordinatorPrompt, settingsBlock, splitBrief, taskPrompt } = await import('../server/live/prompts.ts')
@@ -832,6 +832,30 @@ describe('settings', () => {
     expect(s.set('task.fallback', 'Nonsense').ok).toBe(false)
     s.set('task.fallback', null)
   })
+  test("a coordinator's backup agent is off unless set, and the model and effort are one pair for both roles", () => {
+    const s = new Settings()
+    expect(s.get('coordinator.fallback')).toBe('off')
+    expect(s.set('coordinator.fallback', 'pi').ok).toBe(true)
+    expect(s.get('coordinator.fallback')).toBe('pi')
+    expect(s.set('coordinator.fallback', 'Off').ok).toBe(true)
+    expect(s.set('coordinator.fallback', 'Nonsense').ok).toBe(false)
+    // both roles back up: a model either CLI has is one the pair may hold, none of them is not
+    s.set('task.fallback', 'Codex')
+    s.set('coordinator.fallback', 'Claude Code')
+    expect(s.set('backup.model', 'gpt-6-sol').ok).toBe(true)
+    expect(s.set('backup.model', 'Sonnet 5.5').ok).toBe(true)
+    expect(s.set('backup.model', 'nope-9')).toMatchObject({ ok: false, error: expect.stringContaining('Neither Codex nor Claude Code has a model nope-9') })
+    const row = CATALOG.flatMap((x) => x.rows).find((r) => r.key === 'backup.model')!
+    const shown = agentRow(row, (k: string) => s.get(k), () => NO_PICKS)
+    expect(shown.options).toContain('GPT-6-Sol')
+    expect(shown.options).toContain('Sonnet 5.5')
+    // a space's own wins over Everywhere, as for every setting
+    expect(s.set('backup.model', 'Opus 5.5', { space: 'web' }).ok).toBe(true)
+    expect(s.pick('backup.model', { space: 'web' })).toEqual({ value: 'Opus 5.5', from: 'space' })
+    expect(s.pick('backup.model', 'machine').from).toBe('all')
+    for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model']) s.set(k, null)
+    writeJson('settings.json', {})
+  })
   test("the Settings screen shows what every new brief ends with, as it is now", () => {
     const s = new Settings()
     const note = () => s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note!
@@ -852,7 +876,7 @@ describe('settings', () => {
     s.set('brief.review', 'off')
     expect(note()).toContain("- Review: off. No review; the lines on reviewing below don't apply. (your setting for every machine)")
     s.set('brief.review', null)
-    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual(['Tasks', 'Tasks', 'Tasks', 'Coordinators', 'Coordinators', 'Coordinators', 'Backup', 'Backup', 'Backup'])
+    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual(['Tasks', 'Tasks', 'Tasks', 'Coordinators', 'Coordinators', 'Coordinators', 'Backup', 'Backup', 'Backup', 'Backup'])
   })
 })
 

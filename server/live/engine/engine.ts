@@ -24,10 +24,11 @@ import { launchesAgents, refusedLaunch } from '../launch-policy.ts'
 import { fromAgentLine } from '../chatlines.ts'
 import type { Chats } from '../chats.ts'
 import { HOST, placeId, type Places, type Space } from '../places.ts'
-import { privatePrompt, freshLine, goLine, handOverLine, restartLine, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
+import { privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, restartLine, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
-import { CLI_NAME, kindOf, type Settings } from '../settings.ts'
+import { CLI_NAME, FALLBACK_OF, kindOf, type Settings } from '../settings.ts'
+import { findModel, knowsModels } from '../models.ts'
 import { fitHarness, harnessWords, recentChat } from '../restart.ts'
 import * as G from './git.ts'
 import { Worktrees, type HerdrSpaces, type Made } from './worktrees.ts'
@@ -595,7 +596,10 @@ export class Engine extends Emitter<Events> {
       if (status === 'need') return this.reasonOf(key) ?? NEED.reply
       if (status === 'ready') return 'Ready to merge'
       if (status === 'merging') return landingLine(t.landing!, t.base)
-      if (this.handing.has(t.id) && t.tookOver) return fitStatus(`${CLI_NAME[t.tookOver.to] ?? t.tookOver.to} takes over: ${t.tookOver.why}`)
+      if (this.handing.has(t.id) && t.tookOver) {
+        const on = CLI_NAME[t.tookOver.to] ?? t.tookOver.to
+        return fitStatus(`${on} ${t.tookOver.from === t.tookOver.to ? 'starts again' : 'takes over'}: ${t.tookOver.why}`)
+      }
       const r = this.retry?.(key)
       if (r?.due) return `${r.reason} · retry in ${inMins(r.due)}`
       return 'Working'
@@ -1549,29 +1553,40 @@ export class Engine extends Emitter<Events> {
 
   /**
    * Its agent can't go on (retry.ts): out of allowance, signed out, or its provider still down after the last try. The
-   * backup agent (Settings' task.fallback) takes over once, in the same worktree and branch, with the brief and what
-   * was done so far; else, or when that one can't go on either, it waits for you.
+   * backup agent (Settings' task.fallback, on backup.model and backup.effort of its space) takes over once: the same CLI
+   * starts again and resumes its own session, so nothing is lost; another CLI takes over in the same worktree and branch,
+   * with the brief and what was done so far. Else, or when that one can't go on either, it waits for you.
    */
   async cantGoOn(id: string, why: string) {
     const t = this.task(id)
     if (!t || !this.mayRetry(this.key(t)) || this.handing.has(t.id)) return
     const key = this.key(t)
     const from = this.agents.record(key)?.kind ?? t.agent?.kind ?? ''
-    const to = kindOf(this.settings.get('task.fallback', this.nameOf(t)))
-    if (!to || to === from || t.tookOver || !t.worktree || !this.installed(to)) return this.settle(t)
+    const space = this.nameOf(t)
+    const plan = this.backupFor('task', space)
+    // its backup took over once already: a takeover that keeps failing is the human's, not a loop
+    if (t.tookOver || !t.worktree) return this.settle(t)
+    if (!plan.to) return this.noBackup(key, plan.why)
+    const to = plan.to.kind
+    const same = to === from
     const name = (k: string) => CLI_NAME[k] ?? k
     this.handing.add(t.id)
     t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now() }
     this.settle(t)
     try {
-      const first = `${taskFirst(t)}\n\n${handOverLine({ from: name(from), why: t.tookOver.why, ...(await this.soFar(t, key, name(from))) })}`
+      // Settings' Backup model and effort (its space's), or else the task's own effort, as near as the backup's model
+      // takes it
+      const effort = plan.to.effort ?? (t.agent ?? this.settings.harness('task', space)).effort
+      const h: Harness = { kind: to, model: plan.to.model, effort }
+      const words = harnessWords(fitHarness(h))
+      const first = same
+        ? backupKeptLine({ on: words, why: t.tookOver.why })
+        : `${taskFirst(t)}\n\n${handOverLine({ from: name(from), why: t.tookOver.why, ...(await this.soFar(t, key, name(from))) })}`
       await this.agents.finish(key)
-      // Settings' Backup model and effort (its project's), or else the task's own effort, as near as the backup's
-      // model takes it
-      const own = this.settings.modelOf('backup', to, this.nameOf(t))
-      await this.launch(t, first, undefined, { kind: to, model: own.model, effort: own.effort ?? (t.agent ?? this.settings.harness('task', this.nameOf(t))).effort })
+      await this.launch(t, first, undefined, h)
       const card = `takeover:${t.id}:${t.tookOver.at}`
-      this.chats.post(key, { id: card, card: { id: card, text: `${name(to)} took over from ${name(from)}: ${t.tookOver.why}` } })
+      const text = backupCardWords({ from: name(from), to: name(to), words, same, why: t.tookOver.why })
+      this.chats.post(key, { id: card, card: { id: card, text } })
     } catch (e) {
       // the backup didn't start: it went wrong, and a later hand-over may try again
       t.trouble = troubleOf(e)
@@ -1580,6 +1595,31 @@ export class Engine extends Emitter<Events> {
       this.handing.delete(t.id)
       this.settle(t)
     }
+  }
+
+  /**
+   * The backup agent a role's agent gets when it can't go on, by Settings at this level: its CLI, and the model and effort
+   * it starts on. Nothing when the backup is off, not installed, or set to a model that CLI doesn't have; `why` says why
+   * a backup the human set can't go in (their words in its chat), nothing when there is no backup at all.
+   */
+  backupFor(role: 'task' | 'coordinator', space?: string): { to?: { kind: string; model?: string; effort?: string }; why?: string } {
+    const to = kindOf(this.settings.get(FALLBACK_OF[role], space))
+    if (!to) return {}
+    const them = CLI_NAME[to] ?? to
+    if (!this.installed(to)) return { why: `${them} isn't installed on this machine` }
+    const model = this.settings.get('backup.model', space).trim()
+    if (model.toLowerCase() !== 'default' && knowsModels(to) && !findModel(to, model)) return { why: `${them} has no model ${model}: Backup → Model is set to one it doesn't have` }
+    return { to: { kind: to, ...this.settings.modelOf('backup', to, space) } }
+  }
+
+  /** no backup went in, and the human set one: its chat says why, so a backup that can't go leaves no silence */
+  private noBackup(key: string, why?: string) {
+    if (why) {
+      const id = `backup:${key}:${Date.now()}`
+      this.chats.post(key, { id, card: { id, text: `No backup agent took over: ${why}.` } })
+    }
+    const t = this.task(key.split('/')[0])
+    if (t && key === this.key(t)) this.settle(t)
   }
 
   /** what a backup agent is told was done: the branch's commits, what lies uncommitted, the chat's last messages */

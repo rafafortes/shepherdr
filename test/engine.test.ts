@@ -608,6 +608,72 @@ describe('a turn the provider cut off', () => {
     expect(w.started.filter((x) => x.key === key)).toHaveLength(2)
     expect(w.engine.view(t)).toMatchObject({ status: 'need', sub: 'Signed out' })
   })
+
+  test("the backup is the task's own CLI: it starts again on the Backup model, its session resumed, and one card says so", async () => {
+    const w = world()
+    const retries = cutOff(w)
+    w.engine.installed = () => true
+    w.settings.set('task.fallback', 'claude')
+    w.settings.set('backup.model', 'Sonnet 5.5')
+    w.settings.set('backup.effort', 'low')
+    const { t, key } = await started(w, repo(), 'retry-backup-same')
+    w.agentIs(key, 'idle')
+    await w.engine.cantGoOn(t.id, 'Out of allowance until 5pm')
+    const s = w.started.filter((x) => x.key === key)
+    expect(s).toHaveLength(2)
+    // the same CLI, on the backup's model and effort, in the same worktree: no second conversation, its session
+    expect(s[1]).toMatchObject({ kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low', cwd: t.worktree })
+    expect(s[1].first).toContain('Your turn was cut off by the model\'s provider (out of allowance until 5pm)')
+    expect(s[1].first).toContain('with your session as it was')
+    expect(s[1].first).not.toContain('Taking over')
+    expect(t.tookOver).toMatchObject({ from: 'claude', to: 'claude', why: 'out of allowance until 5pm' })
+    const cards = w.posted.filter((p) => p.key === key && p.card?.text.includes('started again'))
+    expect(cards.map((p) => p.card!.text)).toEqual(['Claude Code (Sonnet 5.5, low) started again, with its session: out of allowance until 5pm'])
+    expect(w.posted.some((p) => p.card?.text.includes('took over'))).toBe(false)
+    expect(w.engine.view(t)).toMatchObject({ status: 'work' })
+    // once per task: a backup that can't go on either waits for you, never another start
+    w.agentIs(key, 'idle')
+    retries[key] = { cut: 'e9', tries: 1, reason: 'Signed out', words: '401', over: true }
+    await w.engine.cantGoOn(t.id, 'Signed out')
+    expect(w.started.filter((x) => x.key === key)).toHaveLength(2)
+    expect(w.engine.view(t)).toMatchObject({ status: 'need', sub: 'Signed out' })
+    for (const k of ['task.fallback', 'backup.model', 'backup.effort']) w.settings.set(k, null)
+  })
+
+  test("a backup CLI that isn't installed is no takeover, and its chat says why", async () => {
+    const w = world()
+    const retries = cutOff(w)
+    w.settings.set('task.fallback', 'codex')
+    w.engine.installed = () => false
+    const { t, key } = await started(w, repo(), 'retry-backup-missing')
+    w.agentIs(key, 'idle')
+    retries[key] = { cut: 'e5', tries: 1, reason: 'Out of allowance until 5pm', words: 'limit', over: true }
+    await w.engine.cantGoOn(t.id, 'Out of allowance until 5pm')
+    expect(w.started.filter((x) => x.key === key)).toHaveLength(1)
+    expect(t.tookOver).toBeUndefined()
+    expect(w.posted.map((p) => p.card?.text)).toContain("No backup agent took over: Codex isn't installed on this machine.")
+    expect(w.engine.view(t)).toMatchObject({ status: 'need', sub: 'Out of allowance until 5pm' })
+    expect(w.news).toContain(`${t.id} needs you: Out of allowance until 5pm`)
+    w.settings.set('task.fallback', null)
+  })
+
+  test("a task's backup comes from its own space first: its CLI and the shared model, over Everywhere's", async () => {
+    const w = world()
+    cutOff(w)
+    w.engine.installed = () => true
+    // Everywhere: another CLI, on another model; this space: its own CLI, on its own model
+    w.settings.set('task.fallback', 'codex')
+    w.settings.set('backup.model', 'gpt-6-sol')
+    const { p, t, key } = await started(w, repo(), 'retry-backup-space')
+    expect(w.settings.set('task.fallback', 'claude', { space: p.name }).ok).toBe(true)
+    expect(w.settings.set('backup.model', 'Sonnet 5.5', { space: p.name }).ok).toBe(true)
+    w.agentIs(key, 'idle')
+    await w.engine.cantGoOn(t.id, 'Out of allowance until 5pm')
+    // this space's CLI, on this space's model, its session kept: Everywhere's Codex and its model did not go in
+    expect(w.started.filter((x) => x.key === key)[1]).toMatchObject({ kind: 'claude', model: 'claude-sonnet-5-5' })
+    expect(t.tookOver).toMatchObject({ from: 'claude', to: 'claude' })
+    for (const k of ['task.fallback', 'backup.model']) w.settings.set(k, null)
+  })
 })
 
 describe('restarting a task agent', () => {

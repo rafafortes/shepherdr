@@ -166,6 +166,27 @@ export function handOverLine(o: { from: string; why: string; commits: string; ch
   ].join('\n\n')
 }
 
+/** what a coordinator's backup agent is told when it takes the chat over on another CLI: who ran it until now, why it
+ *  stopped, its open tasks and the chat so far */
+export function coordinatorHandOverLine(o: { from: string; why: string; tasks: string[]; chat: string }) {
+  return [
+    `Taking over: ${o.from} ran this chat's coordinator until now and can't go on (${o.why}). You are its coordinator now, in the same folder: its tasks go on as they are and its settings are as they were. Look at what is there and go on from it, don't start over.`,
+    ...(o.tasks.length ? [`Its tasks that are not done:\n${o.tasks.join('\n')}`] : []),
+    ...(o.chat ? [`The chat so far, latest last:\n\n${o.chat}`] : []),
+  ].join('\n\n')
+}
+
+/** what an agent is told when the backup is its own CLI started again: the provider cut it off, and its session is as
+ *  it was (maybe on another model) */
+export function backupKeptLine(o: { on: string; why: string }) {
+  return `Your turn was cut off by the model's provider (${o.why}). Shepherdr started you again on ${o.on}, with your session as it was: carry on where you left off. If there is nothing left to do, reply with only <no-reply>backup</no-reply>.`
+}
+
+/** the words a chat's card says a backup went in: another CLI took over, or the same CLI started again with its session */
+export function backupCardWords(o: { from: string; to: string; words: string; same: boolean; why: string }) {
+  return o.same ? `${o.words} started again, with its session: ${o.why}` : `${o.to} took over from ${o.from}: ${o.why}`
+}
+
 /** what an agent started again on another CLI is told (a task's after its brief): who ran its role until now, and
  *  what was said and done; a task's commits and changes, none for a coordinator */
 export function restartLine(o: { from: string; to: string; chat: string; commits?: string; changes?: string }) {

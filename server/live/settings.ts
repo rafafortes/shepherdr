@@ -13,7 +13,7 @@ import type { SettingSection, TriggerRow } from '../../shared/types.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { SetBy } from '../../shared/brief.ts'
 import { settingsBlock, settingsLines, SEVERITIES, type Said, type Ways } from './prompts.ts'
-import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf } from './models.ts'
+import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf, nearest } from './models.ts'
 import { picksOf, rememberModel } from './model-picks.ts'
 import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
 import { eventRules, eventsText, eventWords, nextWords, OWN_ZONE, timeRule, timeWords, validZone, type EventRule } from './trigger.ts'
@@ -88,6 +88,16 @@ const NEWS_PRESETS = [
 /** the agents Settings picks a CLI, model and effort for */
 type Role = 'task' | 'coordinator' | 'reviewer' | 'backup'
 const ROLES: Role[] = ['task', 'coordinator', 'reviewer', 'backup']
+
+/** the role each backup CLI setting backs up: the CLI whose agent can't go on, its backup takes over from */
+export const FALLBACK_OF = { task: 'task.fallback', coordinator: 'coordinator.fallback' } as const
+const FALLBACKS: string[] = Object.values(FALLBACK_OF)
+const isFallback = (key: string) => FALLBACKS.includes(key)
+
+/** the CLIs backup agents start on, by these settings: the tasks' backup first, then the coordinators', each once */
+export function fallbackKinds(get: (key: string) => string): string[] {
+  return [...new Set([kindOf(get(FALLBACK_OF.task)), kindOf(get(FALLBACK_OF.coordinator))].filter((k): k is string => !!k))]
+}
 
 /** a count or a threshold: any number from min to max (step 1: whole numbers), kept with its unit ("7 days", "80%");
  *  off: it may be off too ("off"), zero: 0 is off */
@@ -188,12 +198,14 @@ export const CATALOG: Section[] = [
   {
     // which agent (CLI), model and effort each kind of agent starts with
     name: 'Agents',
-    about: "What each kind of agent starts with. Default is the agent's own model or effort. Backup takes a task over when its agent can't go on. Chat choices need a chat log reader; other installed CLIs cannot show replies here. Headless review is separate.",
+    about: "What each kind of agent starts with. Default is the agent's own model or effort. A backup takes over when an agent can't go on: the same CLI again on the Backup model and effort, keeping its session, or another CLI taking over. Chat choices need a chat log reader; other installed CLIs cannot show replies here. Headless review is separate.",
     rows: [
       ...agentRows('Tasks', 'task', [...CHAT_CLIS], 'default', 'default'),
       ...agentRows('Coordinators', 'coordinator', [...CHAT_CLIS], 'default', 'default'),
-      // a backup agent takes a task over where its agent can't go on (engine.ts cantGoOn)
-      { group: 'Backup', label: 'Agent', key: 'task.fallback', value: 'Codex', options: ['off', ...CHAT_CLIS] },
+      // a backup takes over where a task's or a coordinator's agent can't go on (engine.ts cantGoOn, source.ts
+      // cannotGoOn): the same CLI again on the Backup model and effort, keeping its session, or another CLI taking over
+      { group: 'Backup', label: "Tasks' backup", key: 'task.fallback', value: 'Codex', options: ['off', ...CHAT_CLIS] },
+      { group: 'Backup', label: "Coordinators' backup", key: 'coordinator.fallback', value: 'off', options: ['off', ...CHAT_CLIS] },
       { group: 'Backup', label: 'Model', key: 'backup.model', value: 'default', text: true },
       { group: 'Backup', label: 'Effort', key: 'backup.effort', value: 'default', options: [...EFFORTS] },
     ],
@@ -276,7 +288,7 @@ export const CATALOG: Section[] = [
 ]
 
 /** the CLI a role's agent runs, by these settings: its herdr kind; nothing for an unset backup */
-const roleKind = (role: Role, get: (key: string) => string) => kindOf(get(role === 'backup' ? 'task.fallback' : `${role}.agent`)) ?? (role === 'backup' ? undefined : 'claude')
+const roleKind = (role: Role, get: (key: string) => string) => (role === 'backup' ? fallbackKinds(get)[0] : (kindOf(get(`${role}.agent`)) ?? 'claude'))
 
 /** a role's Model and Effort rows as its CLI has them, by these settings (r.value is the row's own): a pick of its
  *  models and of the levels its model takes, each showing what it starts with (a level the model lacks shows as the
@@ -285,6 +297,9 @@ const roleKind = (role: Role, get: (key: string) => string) => kindOf(get(role =
 export function agentRow(r: Row, get: (key: string) => string, picksOfKind: (kind: string) => { pinned: string[]; recent: string[] } = picksOf): Row {
   const [role, what] = r.key.split('.') as [Role, string]
   if (!ROLES.includes(role) || (what !== 'model' && what !== 'effort')) return r
+  // the two roles' backups on different CLIs: the models and levels either of them takes
+  const backups = role === 'backup' ? fallbackKinds(get) : []
+  if (backups.length > 1) return backupRow(r, backups, get, picksOfKind)
   const kind = roleKind(role, get)
   const c = kind ? modelsOf(kind) : undefined
   if (!kind || !c) return { ...r, value: kind ? `${CLI_NAME[kind] ?? kind}'s own` : 'off', fixed: true, text: false }
@@ -308,6 +323,43 @@ export function agentRow(r: Row, get: (key: string) => string, picksOfKind: (kin
   const levels = effortsOf(kind, stored)
   if (!levels.length) return { ...r, value: 'none', fixed: true }
   return { ...r, value: effortFor(kind, r.value, stored) ?? 'default', options: ['default', ...levels] }
+}
+
+/** the Backup Model and Effort rows while the two roles back up on different CLIs (agentRow): every model either of them
+ *  lists, the tasks' backup's picks first, and every effort either of them takes; the value is the one it starts on for
+ *  the CLI that has it, so a pick always fits one of them (one neither has is no backup: engine.ts backupFor) */
+function backupRow(r: Row, kinds: string[], get: (key: string) => string, picksOfKind: (kind: string) => { pinned: string[]; recent: string[] }): Row {
+  const stored = get('backup.model')
+  if (r.key === 'backup.model') {
+    const lists: { kind: string; c: NonNullable<ReturnType<typeof modelsOf>> }[] = []
+    for (const kind of kinds) {
+      const c = modelsOf(kind)
+      if (c?.models.length) lists.push({ kind, c })
+    }
+    if (!lists.length) return { ...r, value: stored }
+    const labels: string[] = []
+    const ids: Record<string, string> = {}
+    for (const { kind, c } of lists) {
+      const picks = picksOfKind(kind)
+      // an older model it still takes by id stays on offer while it is pinned or was picked, as in the restart sheet
+      const saved = (c.others ?? []).filter((m) => picks.pinned.includes(m.id) || picks.recent.includes(m.id))
+      for (const m of orderByPicks([...c.models, ...saved], picks))
+        if (!labels.includes(m.label)) {
+          labels.push(m.label)
+          ids[m.label] = m.id
+        }
+    }
+    // what it starts on, when that is a model none of them still lists: kept on offer, to be replaced
+    const model = kinds.map((kind) => findModel(kind, stored)).find(Boolean)
+    if (model && !labels.includes(model.label)) {
+      labels.push(model.label)
+      ids[model.label] = model.id
+    }
+    return { ...r, text: false, value: model?.label ?? 'default', options: ['default', ...labels], ordered: true, ids }
+  }
+  const levels = [...new Set(kinds.flatMap((kind) => effortsOf(kind, stored)))]
+  if (!levels.length) return { ...r, value: 'none', fixed: true }
+  return { ...r, value: nearest(levels, r.value) ?? 'default', options: ['default', ...levels] }
 }
 
 const ROWS = CATALOG.flatMap((s) => s.rows)
@@ -398,7 +450,7 @@ export class Settings {
     if (!KEYS.includes(key)) return { ok: false, error: `No setting ${key}` }
     if (!levelsOf(key).includes(kindOfLevel(l))) return { ok: false, error: levelsOf(key).includes('machine') ? `${key} is set Everywhere or for one machine, not a space.` : `${key} is set Everywhere only.` }
     if (value !== null) {
-      const chat = key === 'task.agent' || key === 'coordinator.agent' || (key === 'task.fallback' && value.trim().toLowerCase() !== 'off')
+      const chat = key === 'task.agent' || key === 'coordinator.agent' || (isFallback(key) && value.trim().toLowerCase() !== 'off')
       const err = refuse(key, value) ?? (chat ? chatProblem(kindOf(value) ?? value) : undefined) ?? this.unfit(key, value, l)
       if (err) return { ok: false, error: err }
       const num = numOf(key)
@@ -408,8 +460,8 @@ export class Settings {
       else if (key === 'heartbeat.on') value = eventsText(eventRules(value))
       else if (key === 'time.zone') value = value.trim()
       // a CLI is kept by its name, however it was written
-      else if (key === 'task.fallback' && value.trim().toLowerCase() === 'off') value = 'off'
-      else if (key.endsWith('.agent') || key === 'task.fallback') value = CLI_NAME[kindOf(value)!]
+      else if (isFallback(key) && value.trim().toLowerCase() === 'off') value = 'off'
+      else if (key.endsWith('.agent') || isFallback(key)) value = CLI_NAME[kindOf(value)!]
     }
     const at = typeof l === 'object' ? (this.d.spaces[l.space] ??= {}) : this.at(l)
     if (value === null) delete at[key]
@@ -450,17 +502,32 @@ export class Settings {
     return roleKind(role, (k) => this.pick(k, l).value)
   }
 
+  /** the CLIs the backups at a level start on: the tasks' first, then the coordinators', each once */
+  backupKinds(l: Level = 'machine'): string[] {
+    return fallbackKinds((k) => this.pick(k, l).value)
+  }
+
   /** why a model or effort doesn't fit the role's CLI (or its model) at a level: it lists what does */
   private unfit(key: string, value: string, l: Level): string | undefined {
     const [role, what] = key.split('.') as [Role, string]
     if (!ROLES.includes(role) || (what !== 'model' && what !== 'effort') || value.trim().toLowerCase() === 'default') return undefined
-    const kind = this.kindOf(role, l)
-    if (!kind || !modelsOf(kind)) return undefined
-    if (what === 'model') return knowsModels(kind) && !findModel(kind, value) ? `${CLI_NAME[kind]} has no model ${value}. Pick one of: default · ${modelsOf(kind)!.models.map((m) => m.label).join(' · ')}.` : undefined
+    // a backup's model and effort are one pair for the tasks' and the coordinators' backups: either CLI may take them
+    const kinds = (role === 'backup' ? this.backupKinds(l) : [this.kindOf(role, l)]).filter((k): k is string => !!k && !!modelsOf(k))
+    if (!kinds.length) return undefined
+    if (what === 'model') {
+      const listed = kinds.filter(knowsModels)
+      if (!listed.length || listed.some((k) => findModel(k, value))) return undefined
+      const labels = [...new Set(listed.flatMap((k) => modelsOf(k)!.models.map((m) => m.label)))]
+      const them = listed.map((k) => CLI_NAME[k]).join(' nor ')
+      return listed.length === 1 ? `${CLI_NAME[listed[0]]} has no model ${value}. Pick one of: default · ${labels.join(' · ')}.` : `Neither ${them} has a model ${value}. Pick one of: default · ${labels.join(' · ')}.`
+    }
     const model = this.pick(`${role}.model`, l).value
-    const levels = effortsOf(kind, model)
+    const levels = [...new Set(kinds.flatMap((kind) => effortsOf(kind, model)))]
     if (levels.includes(value.trim().toLowerCase())) return undefined
-    return levels.length ? `${findModel(kind, model)?.label ?? CLI_NAME[kind]} takes ${['default', ...levels].join(' · ')}.` : `${findModel(kind, model)?.label ?? CLI_NAME[kind]} has no effort levels.`
+    const levelWords = levels.length ? `takes ${['default', ...levels].join(' · ')}.` : 'has no effort levels.'
+    if (kinds.length === 1) return `${findModel(kinds[0], model)?.label ?? CLI_NAME[kinds[0]]} ${levelWords}`
+    const which = kinds.map((k) => findModel(k, model)?.label ?? CLI_NAME[k])
+    return levels.length ? `${which.join(' and ')} take ${['default', ...levels].join(' · ')}.` : `${which.join(' and ')} have no effort levels.`
   }
 
   /** what every new brief is told about how to work, for a space (none: this machine), with what the coordinator set
@@ -748,7 +815,7 @@ export function machineNote(l: MachineLimits, cores = cpus().length, memGb = Mat
 /** why a value can't be set, or nothing */
 export function refuse(key: string, value: string): string | undefined {
   if (key.endsWith('.instructions') && (value.length > 16000 || value.includes('\0'))) return 'Use at most 16,000 characters, without null characters. Keep secrets in Secrets.'
-  const cli = key === 'task.agent' || key === 'coordinator.agent' || (key === 'task.fallback' && value.trim().toLowerCase() !== 'off')
+  const cli = key === 'task.agent' || key === 'coordinator.agent' || (isFallback(key) && value.trim().toLowerCase() !== 'off')
   if (cli && !kindOf(value)) return `${value} is not an agent herdr can start.`
   if (key === 'reviewer.agent' && !REVIEWERS.includes(CLI_NAME[kindOf(value) ?? ''] ?? '')) return `Pick one of: ${REVIEWERS.join(' · ')}.`
   if (/^(task|coordinator|reviewer|backup)\.model$/.test(key) && !/^[\w.:/@[\] -]+$/.test(value.trim())) return 'Write a model id like claude-opus-5-5, or default.'
@@ -767,7 +834,7 @@ export function refuse(key: string, value: string): string | undefined {
   if (key === 'dictate.language' && !options?.includes(value) && !/^(auto|[a-z]{2,3})$/i.test(value.trim()))
     return 'Pick a language, or write its whisper code (en, pt, es).'
   if (num && numValue(num, value) === undefined) return `Write a number from ${num.min} to ${num.max}${num.step ? '' : ' (whole)'}${num.unit ? `, in ${num.unit}` : ''}${num.off ? ', or off' : num.zero ? ' (0 is off)' : ''}.`
-  if (options && !cli && key !== 'reviewer.agent' && key !== 'alerts' && key !== 'task.fallback' && key !== 'dictate.language' && !options.includes(value)) return `Pick one of: ${options.join(' · ')}.`
+  if (options && !cli && key !== 'reviewer.agent' && key !== 'alerts' && !isFallback(key) && key !== 'dictate.language' && !options.includes(value)) return `Pick one of: ${options.join(' · ')}.`
   return undefined
 }
 
