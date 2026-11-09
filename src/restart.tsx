@@ -197,6 +197,39 @@ export function RestartHint(_props: { chatKey: string; cli: string }) {
   return null
 }
 
+/**
+ * "Restart 3 coordinators" in a machine's ⋯ menu (this machine's, whose coordinators are the ones it can restart):
+ * `shepherdr restart --all`, one action and one answer in the row itself, its label carrying how many it will touch.
+ * It touches no task's agent and no other machine's place, which the server says in the answer.
+ */
+export function RestartAllItem({ machine }: { machine: string }) {
+  const snap = useSnap()!
+  const [said, setSaid] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  // the ones whose Settings moved away from what they run on: the very places the command restarts
+  const count = snap.places.filter((p) => p.machine === machine && p.restart).length
+  const run = async () => {
+    setBusy(true)
+    try {
+      const r = (await act({ type: 'restart-all' })) as { ok?: boolean; error?: string; restarted?: number; failed?: number }
+      if (!r.ok || r.error) setSaid(r.error ?? 'It could not restart them.')
+      else if (!r.restarted && !r.failed) setSaid('Already on its Settings')
+      else setSaid(`Restarted ${r.restarted ?? 0}${r.failed ? `, ${r.failed} failed` : ''}`)
+    } catch (e) {
+      setSaid((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const answer = busy ? 'Restarting…' : said
+  const label = answer ?? (count ? `Restart ${count} coordinator${count === 1 ? '' : 's'}` : 'Restart coordinators')
+  return (
+    <MenuItem data-restart-all data-answer={answer ?? ''} icon={<RestartIcon className={ic} />} disabled={busy} onClick={run}>
+      {label}
+    </MenuItem>
+  )
+}
+
 /* ---------- in the ⋯ menus ---------- */
 
 /** a coordinator chat's top-right menu (placeMenu) */

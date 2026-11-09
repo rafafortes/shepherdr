@@ -114,7 +114,9 @@ Shepherdr's normal role prompt and skills still apply.
 
 A new launch snapshots the role's current effective instructions. Claude Code and pi use the existing appended
 prompt file; other CLIs receive the existing hidden initial prompt. Saving does not interrupt, restart or update an
-already-running agent. Start a new agent or explicitly restart it to deliver changes. On resume, a changed prompt
+already-running agent. Start a new agent or explicitly restart it to deliver changes (this machine's ⋯ in the places
+list restarts its coordinators on the new Settings at once, as `shepherdr restart --all` does; [the chat page](chat.md)
+says what that touches and what it never does). On resume, a changed prompt
 is sent again for CLIs without an append flag; it says the new private snapshot replaces the previous one, including
 when empty. This delivers words, not proof that a model read or obeyed them; old session history is still present.
 

@@ -11,7 +11,7 @@ import { DEMO_PRS, demoWorktree } from './code.ts'
 import { demoActivity } from './activity.ts'
 import { settingsBlock } from '../live/prompts.ts'
 import { CLI_NAME, repositorySection, defaultOf, kindOf } from '../live/settings.ts'
-import { harnessProblem, harnessWords, restartClis } from '../live/restart.ts'
+import { harnessProblem, harnessWords, restartAllWords, restartClis, type RestartAllRow } from '../live/restart.ts'
 import { picksIn, pickKey, withPin, withRecent, type Picks } from '../../shared/picks.ts'
 import { nextWords } from '../live/trigger.ts'
 import { pilotLine } from '../live/heartbeat.ts'
@@ -232,7 +232,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       name: 'Shepherdr',
       host: D.DEMO_HOST,
       ...sortPlaces(
-        this.places.map((p) => ({ ...p, ...(this.runNow(p) ? { runNow: this.runNow(p) } : {}) })),
+        this.places.map((p) => ({ ...p, ...(this.runNow(p) ? { runNow: this.runNow(p) } : {}), ...(this.chats[p.chat]?.restart ? { restart: true } : {}) })),
         this.machines,
         this.order,
         this.groups,
@@ -298,6 +298,23 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
 
   private cliOf(key: string) {
     return this.task(key.split('/')[0])?.agent?.cli ?? 'Claude Code'
+  }
+
+  /** a chat's agent started again on this CLI, model and effort, as the live one does: the card, and what it runs on */
+  private restartOn(key: string, to: { kind?: string; model?: string; effort?: string }): { ok: boolean; error?: string; on?: string } {
+    const c = this.chat(key)
+    if (!c) return { ok: false, error: 'No such chat.' }
+    const kind = to.kind ?? (c.restart ? kindOf(c.restart.want) : undefined) ?? kindOf(c.cli) ?? 'claude'
+    const problem = harnessProblem({ kind, model: to.model, effort: to.effort })
+    if (problem) return { ok: false, error: problem }
+    const words = harnessWords({ kind, model: to.model, effort: to.effort })
+    if (to.model) this.picks = withRecent(this.picks, pickKey(kind, to.model))
+    c.agent = { kind, model: to.model, effort: to.effort }
+    c.cli = CLI_NAME[kind] ?? kind
+    c.restart = undefined
+    c.messages.push(cardMessage({ id: `restart-${id()}`, restart: true, text: `Restarted on ${words}` }, Date.now() + seq))
+    this.emit('chat', key)
+    return { ok: true, on: words }
   }
 
   private art(aid: string) {
@@ -732,20 +749,31 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         this.picks = withPin(this.picks, pickKey(kind, m.id), !!a.on)
         return { ok: true, ...picksIn(this.picks, kind) }
       }
-      case 'restart': {
-        const c = this.chat(a.chat)
-        if (!c) return { ok: false, error: 'No such chat.' }
-        const kind = a.kind ?? (c.restart ? kindOf(c.restart.want) : undefined) ?? kindOf(c.cli) ?? 'claude'
-        const problem = harnessProblem({ kind, model: a.model, effort: a.effort })
-        if (problem) return { ok: false, error: problem }
-        const words = harnessWords({ kind, model: a.model, effort: a.effort })
-        if (a.model) this.picks = withRecent(this.picks, pickKey(kind, a.model))
-        c.agent = { kind, model: a.model, effort: a.effort }
-        c.cli = CLI_NAME[kind] ?? kind
-        c.restart = undefined
-        c.messages.push(cardMessage({ id: `restart-${id()}`, restart: true, text: `Restarted on ${words}` }, Date.now() + seq))
-        this.emit('chat', a.chat)
-        return { ok: true, on: words }
+      case 'restart':
+        return this.restartOn(a.chat, { kind: a.kind, model: a.model, effort: a.effort })
+      case 'restart-all': {
+        // this machine's own places only: another machine's coordinator is its own machine's to restart
+        const rows: RestartAllRow[] = []
+        for (const p of this.places.filter((x) => x.machine === D.DEMO_HOST)) {
+          const c = this.chat(p.chat)
+          if (!c?.restart) {
+            rows.push({ name: p.name, state: 'same', on: harnessWords(c?.agent ?? { kind: kindOf(c?.cli ?? '') ?? 'claude' }) })
+            continue
+          }
+          const interrupted = !!c.working
+          const r = this.restartOn(p.chat, { kind: kindOf(c.restart.want) ?? kindOf(c.cli) })
+          if (!r.ok) rows.push({ name: p.name, state: 'failed', error: r.error ?? 'It could not be restarted.' })
+          else rows.push({ name: p.name, state: 'restarted', on: r.on ?? '', ...(interrupted ? { interrupted } : {}) })
+        }
+        this.emit('snapshot')
+        const others = [...new Set(this.places.filter((x) => x.machine !== D.DEMO_HOST).map((x) => x.machine))]
+        return {
+          ok: true,
+          out: restartAllWords(rows, others),
+          restarted: rows.filter((r) => r.state === 'restarted').length,
+          same: rows.filter((r) => r.state === 'same').length,
+          failed: rows.filter((r) => r.state === 'failed').length,
+        }
       }
       case 'pause': {
         const t = this.task(a.chat.split('/')[0])
