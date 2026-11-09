@@ -366,7 +366,7 @@ export function agentRow(r: Row, get: (key: string) => string, picksOfKind: (kin
     return { ...r, text: false, value: model?.label ?? 'default', options: ['default', ...labels], ordered: true, ids }
   }
   const levels = effortsOf(kind, stored)
-  if (!levels.length) return { ...r, value: 'none', fixed: true }
+  if (!levels.length) return { ...r, value: 'none', fixed: true, hint: undefined }
   return { ...r, value: effortFor(kind, r.value, stored) ?? 'default', options: ['default', ...levels] }
 }
 
@@ -543,14 +543,25 @@ export class Settings {
    *  coordinators' own pair only where their backup has one of its own */
   private pairKinds(pair: Pair, what: 'model' | 'effort', l: Level): string[] {
     if (pair !== PAIRS.backup && pair !== PAIRS.coordinatorBackup) return [kindOf(this.pick(pair.cli, l).value)].filter((k): k is string => !!k)
+    const at: Level[] = l === 'all' ? ['all', 'machine'] : [l]
     const spaces: Level[] = l === 'all' || l === 'machine' ? Object.keys(this.d.spaces).map((space) => ({ space }) as Level) : []
-    const kinds = ([l, ...spaces] as Level[]).flatMap((x) => {
+    const kinds = [...at, ...spaces].flatMap((x) => {
+      // only a level that will read this value has to fit it: one whose own key is stored would win over it
+      if (x !== l && !this.readsAt(x, l, pair[what])) return []
       const get = (k: string) => this.pick(k, x).value
-      const follows = get(PAIRS.coordinatorBackup[what]).trim().toLowerCase() === 'default'
-      if (pair === PAIRS.backup) return follows ? fallbackKinds(get) : [kindOf(get(PAIRS.backup.cli))]
-      return x !== l && follows ? [] : [kindOf(get(PAIRS.coordinatorBackup.cli))]
+      // the tasks' pair is read by their backup, and by the coordinators' while their own is at default
+      if (pair === PAIRS.backup) return get(PAIRS.coordinatorBackup[what]).trim().toLowerCase() === 'default' ? fallbackKinds(get) : [kindOf(get(PAIRS.backup.cli))]
+      return [kindOf(get(PAIRS.coordinatorBackup.cli))]
     })
     return [...new Set(kinds.filter((k): k is string => !!k))]
+  }
+
+  /** whether a value set at a level would be the one a level below reads it: the first level of its chain that stores the
+   *  key is that one, or this value's when none does (pairKinds) */
+  private readsAt(x: Level, l: Level, key: string): boolean {
+    const chain: Level[] = x === 'all' ? ['all'] : x === 'machine' ? ['machine', 'all'] : [x, 'machine', 'all']
+    const first = chain.find((y) => this.at(y)[key] !== undefined)
+    return first === undefined || first === l
   }
 
   /** why a model or effort doesn't fit the CLI its own pair of keys names at a level: it lists what does */
@@ -720,6 +731,8 @@ export class Settings {
   private modelProblem(key: string, read: { value: string }, l: Level): string | undefined {
     const own = pairOfKey(key)
     if (!own || own.what !== 'model' || (own.pair !== PAIRS.backup && own.pair !== PAIRS.coordinatorBackup)) return undefined
+    // default is no model at all: a backup set to it starts on its CLI's own
+    if (read.value.trim().toLowerCase() === 'default') return undefined
     const kind = kindOf(this.pick(own.pair.cli, l).value)
     if (!kind || !knowsModels(kind) || findModel(kind, read.value)) return undefined
     return `${read.value} is no model ${CLI_NAME[kind] ?? kind} has: this backup doesn't go in until you set one here.`

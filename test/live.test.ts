@@ -877,6 +877,23 @@ describe('settings', () => {
     expect(other.set('task.fallback', 'Codex').ok).toBe(true)
     expect(row(other, 'backup.model').value).toBe('default')
     expect(row(other, 'backup.model').warn).toBe("Opus 5.5 is no model Codex has: this backup doesn't go in until you set one here.")
+    // default is no model at all: a backup set to it starts on its CLI's own, and nothing is said
+    expect(row(new Settings({ everywhere: {}, machine: {}, spaces: {} }), 'backup.model').warn).toBeUndefined()
+  })
+  test("a model set Everywhere is checked against this machine's backups too, and the spaces'", () => {
+    // a world of its own: this test writes no settings file
+    const s = new Settings({ everywhere: {}, machine: {}, spaces: {} })
+    // this machine's coordinators back up on Claude Code: Everywhere's model has to fit it, though Everywhere's own CLI is
+    // off, and a Claude model is one that backup may hold
+    expect(s.set('task.fallback', 'Claude Code', 'machine').ok).toBe(true)
+    expect(s.set('backup.model', 'Sonnet 5.5', 'all').ok).toBe(true)
+    expect(s.set('coordinator.fallback', 'Claude Code', 'machine').ok).toBe(true)
+    expect(s.set('coordinator.fallbackModel', 'Opus 5.5', 'all').ok).toBe(true)
+    expect(s.set('coordinator.fallbackModel', 'gpt-6-sol', 'all')).toMatchObject({ ok: false, error: expect.stringContaining('Claude Code has no model gpt-6-sol') })
+    // a space that sets its own pair wins over it, so Everywhere's value has not to fit that space's CLI
+    expect(s.set('coordinator.fallback', 'Codex', { space: 'web' }).ok).toBe(true)
+    expect(s.set('coordinator.fallbackModel', 'GPT-6-Sol', { space: 'web' }).ok).toBe(true)
+    expect(s.set('coordinator.fallbackModel', 'Opus 5.5', 'all').ok).toBe(true)
   })
   test("a task's backup agent is Codex unless set: any CLI herdr starts, or off", () => {
     const s = new Settings()
