@@ -114,6 +114,9 @@ export interface TaskRec {
   agent?: Harness
   /** the CLI, model and effort its brief says reviews its change: from Settings, or task add's --reviewer flags */
   reviewer?: Harness
+  /** the coordinator's --set for this task, kept as it was given: the backup values this one task keeps for itself
+   *  (task.fallback, backup.model, backup.effort) are read from here before its space's (cantGoOn) */
+  set?: Record<string, string>
   /** shepherdr merge waits for GitHub's checks, as its brief's Settings block said when it was added (Settings, or
    *  task add --set); none: a task from before, which follows Settings as they are now */
   waitChecks?: boolean
@@ -1174,6 +1177,7 @@ export class Engine extends Emitter<Events> {
       rounds: ways.rounds,
     }
     if (after.length) t.after = after
+    if (set) t.set = set
     // one that starts work now waits for room; one for later only reads its brief, so it starts at once
     const room = after.length || o.later ? {} : this.room()
     this.data.tasks.push(t)
@@ -1220,6 +1224,7 @@ export class Engine extends Emitter<Events> {
     t.reviewer = reviewer
     t.waitChecks = ways.waitChecks
     t.rounds = ways.rounds
+    if (set) t.set = set
   }
 
   /**
@@ -1563,7 +1568,8 @@ export class Engine extends Emitter<Events> {
     const key = this.key(t)
     const from = this.agents.record(key)?.kind ?? t.agent?.kind ?? ''
     const space = this.nameOf(t)
-    const plan = this.backupFor('task', space)
+    // what this task keeps for itself (task add --set) first, then its space's settings, its machine's and Everywhere's
+    const plan = this.backupFor('task', space, t.set)
     // its backup took over once already: a takeover that keeps failing is the human's, not a loop
     if (t.tookOver || !t.worktree) return this.settle(t)
     if (!plan.to) return this.noBackup(key, plan.why)
@@ -1574,10 +1580,12 @@ export class Engine extends Emitter<Events> {
     t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now() }
     this.settle(t)
     try {
-      // Settings' Backup model and effort (its space's), or else the task's own effort, as near as the backup's model
-      // takes it
-      const effort = plan.to.effort ?? (t.agent ?? this.settings.harness('task', space)).effort
-      const h: Harness = { kind: to, model: plan.to.model, effort }
+      // Settings' Backup model and effort (this task's own first), or else the task's own: its CLI may not take them, in
+      // which case it starts on its own default
+      const own = t.agent ?? this.settings.harness('task', space)
+      const model = plan.to.model ?? (own.model ? findModel(to, own.model)?.id : undefined)
+      const effort = plan.to.effort ?? own.effort
+      const h: Harness = { kind: to, model, effort }
       const words = harnessWords(fitHarness(h))
       const first = same
         ? backupKeptLine({ on: words, why: t.tookOver.why })
@@ -1599,23 +1607,26 @@ export class Engine extends Emitter<Events> {
 
   /**
    * The backup agent a role's agent gets when it can't go on, by Settings at this level: its CLI, and the model and effort
-   * it starts on. Nothing when the backup is off, not installed, or set to a model that CLI doesn't have; `why` says why
-   * a backup the human set can't go in (their words in its chat), nothing when there is no backup at all.
+   * it starts on. `own` is what one task keeps for itself (task add --set), read before the space's. Nothing when the
+   * backup is off, not installed, or set to a model that CLI doesn't have; `why` says why a backup the human set can't go
+   * in (its words in that chat), nothing when there is no backup at all.
    */
-  backupFor(role: 'task' | 'coordinator', space?: string): { to?: { kind: string; model?: string; effort?: string }; why?: string } {
-    const to = kindOf(this.settings.get(FALLBACK_OF[role], space))
+  backupFor(role: 'task' | 'coordinator', space?: string, own?: Record<string, string>): { to?: { kind: string; model?: string; effort?: string }; why?: string } {
+    const get = (key: string) => own?.[key] ?? this.settings.get(key, space)
+    const to = kindOf(get(FALLBACK_OF[role]))
     if (!to) return {}
     const them = CLI_NAME[to] ?? to
     if (!this.installed(to)) return { why: `${them} isn't installed on this machine` }
-    const model = this.settings.get('backup.model', space).trim()
+    const model = get('backup.model').trim()
     if (model.toLowerCase() !== 'default' && knowsModels(to) && !findModel(to, model)) return { why: `${them} has no model ${model}: Backup → Model is set to one it doesn't have` }
-    return { to: { kind: to, ...this.settings.modelOf('backup', to, space) } }
+    return { to: { kind: to, ...this.settings.modelOf('backup', to, space, get) } }
   }
 
   /** no backup went in, and the human set one: its chat says why, so a backup that can't go leaves no silence */
   private noBackup(key: string, why?: string) {
     if (why) {
-      const id = `backup:${key}:${Date.now()}`
+      // one card per reason: a cut that comes again says the same thing in the same card
+      const id = `backup:${key}:${why}`
       this.chats.post(key, { id, card: { id, text: `No backup agent took over: ${why}.` } })
     }
     const t = this.task(key.split('/')[0])

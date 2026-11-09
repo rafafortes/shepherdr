@@ -657,6 +657,24 @@ describe('a turn the provider cut off', () => {
     w.settings.set('task.fallback', null)
   })
 
+  test('a task --set keeps its own backup values for itself, over its space and Everywhere', async () => {
+    const w = world()
+    const retries = cutOff(w)
+    w.engine.installed = () => true
+    w.settings.set('task.fallback', 'claude')
+    w.settings.set('backup.model', 'Opus 5.5')
+    const p = await w.places.add(repo(), 'mine')
+    const t = w.engine.add({ project: p.name, title: 'Say hello', desc: 'Add hello.txt. Merge when done.', by: 'test', set: { 'backup.model': 'Haiku 5.5' } })
+    const key = `${t.id}/Agent`
+    await until(() => w.started.some((s) => s.key === key))
+    w.agentIs(key, 'idle')
+    retries[key] = { cut: 'e7', tries: 1, reason: 'Out of allowance', words: 'limit', over: true }
+    await w.engine.cantGoOn(t.id, 'Out of allowance')
+    // this task's own Backup model, over its space's and Everywhere's
+    expect(w.started.filter((x) => x.key === key)[1]).toMatchObject({ kind: 'claude', model: 'claude-haiku-5-5' })
+    for (const k of ['task.fallback', 'backup.model']) w.settings.set(k, null)
+  })
+
   test("a task's backup comes from its own space first: its CLI and the shared model, over Everywhere's", async () => {
     const w = world()
     cutOff(w)

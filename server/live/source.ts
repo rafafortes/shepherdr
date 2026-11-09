@@ -1277,7 +1277,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** what cut off an agent's last turn, if its log says the provider did */
   private checkCut(key: string) {
-    if (this.agents.record(key) && !this.peers?.owner(key)) this.retries.seen(key, this.chats.cutOff(key))
+    if (!this.agents.record(key) || this.peers?.owner(key)) return
+    const cut = this.chats.cutOff(key)
+    // a turn that ended well: its agent works again, so a backup may go in once more the next time it can't go on
+    if (!cut && !key.includes('/')) this.agents.markTookOver(key, undefined)
+    this.retries.seen(key, cut)
   }
 
   /** an agent can't go on by itself: its backup agent takes over once (a task's engine.ts cantGoOn, a coordinator's
@@ -1296,8 +1300,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   private async coordinatorCantGoOn(key: string, r: Retry) {
     const from = this.agents.record(key)?.kind
     const plan = from ? this.engine.backupFor('coordinator', this.spaceKey(key)) : {}
+    const took = this.agents.tookOver(key)
     // once per agent: a backup that keeps failing waits for the human, never a loop
-    if (plan.to && from && !this.agents.tookOver(key)) {
+    if (plan.to && from && !took) {
       const why = r.reason.charAt(0).toLowerCase() + r.reason.slice(1)
       this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now() })
       try {
@@ -1309,7 +1314,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return this.cutOff(key, r, `its backup, ${CLI_NAME[plan.to.kind] ?? plan.to.kind}, couldn't start: ${(e as Error).message}`)
       }
     }
-    this.cutOff(key, r, plan.why ? `no backup agent took over: ${plan.why}` : undefined)
+    const also = took ? `its backup agent (${CLI_NAME[took.to] ?? took.to}) already went in once` : plan.why ? `no backup agent took over: ${plan.why}` : undefined
+    this.cutOff(key, r, also)
   }
 
   /** a coordinator whose agent can't go on waits for you: its space's card, and an alert; `also` says why no backup went in */

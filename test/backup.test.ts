@@ -63,6 +63,9 @@ describe("a coordinator's backup agent", () => {
       expect(s.started[0].first).toContain('with your session as it was')
       expect(s.started[0].first).toContain('out of allowance until 5pm')
       expect(s.started[0].first).not.toContain('Taking over')
+      // the kind it starts on is the kind the CLI was running: what makes herdr's start resume that session
+      expect(s.started[0].kind).toBe(s.src.agents.record(s.key)!.kind)
+      expect(s.src.agents.args({ ...s.src.agents.record(s.key)!, sessionId: 'abc', logs: ['/tmp/x.jsonl'], resume: true } as never, true)).toContain('--resume')
       expect(s.src.agents.tookOver(s.key)).toMatchObject({ from: 'claude', to: 'claude', why: 'out of allowance until 5pm' })
       const card = s.cards().find((m) => m.card!.text.includes('started again'))!
       expect(card.card!.text).toBe('Claude Code (Sonnet 5.5, low) started again, with its session: out of allowance until 5pm')
@@ -110,6 +113,44 @@ describe("a coordinator's backup agent", () => {
       expect(s.src.agents.tookOver(s.key)).toBeUndefined()
       expect(s.cards().map((m) => m.card!.text)).toEqual(['Cut off by its provider: out of allowance until 5pm. Write to carry on.'])
       expect(s.alerts).toHaveLength(1)
+    } finally {
+      s.done()
+    }
+  })
+
+  test('a turn that ends well lets a backup go in once more; one that keeps failing never loops', async () => {
+    const s = await place('recover')
+    try {
+      expect(s.src.settings.set('coordinator.fallback', 'claude', { space: s.p.name }).ok).toBe(true)
+      await s.cut('Out of allowance until 5pm')
+      expect(s.started).toHaveLength(1)
+      expect(s.src.agents.tookOver(s.key)).toBeDefined()
+      // its turn ends well: it works again, so the next one that can't go on is backed up once more
+      ;(s.src as unknown as { checkCut(key: string): void }).checkCut(s.key)
+      expect(s.src.agents.tookOver(s.key)).toBeUndefined()
+      await s.cut('Signed out')
+      expect(s.started).toHaveLength(2)
+      // and a backup that can't go on either waits for you: its chat says the backup went in once already
+      await s.cut('Out of allowance')
+      expect(s.started).toHaveLength(2)
+      expect(s.cards().map((m) => m.card!.text).at(-1)).toContain('Its backup agent (Claude Code) already went in once')
+    } finally {
+      s.done()
+    }
+  })
+
+  test("a backup model the coordinator's CLI does not have is no takeover, and the space's card says why", async () => {
+    const s = await place('badmodel')
+    try {
+      expect(s.src.settings.set('coordinator.fallback', 'claude', { space: s.p.name }).ok).toBe(true)
+      // the tasks' Codex backup has it; the coordinators' Claude Code does not
+      expect(s.src.settings.set('backup.model', 'gpt-6-sol', { space: s.p.name }).ok).toBe(true)
+      await s.cut('Signed out')
+      expect(s.started).toHaveLength(0)
+      expect(s.src.agents.tookOver(s.key)).toBeUndefined()
+      expect(s.cards().map((m) => m.card!.text)).toEqual([
+        "Cut off by its provider: signed out. No backup agent took over: Claude Code has no model gpt-6-sol: Backup → Model is set to one it doesn't have. Write to carry on.",
+      ])
     } finally {
       s.done()
     }

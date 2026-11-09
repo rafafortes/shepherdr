@@ -332,7 +332,7 @@ export class Agents extends Emitter<Events> {
   /** mark this chat's agent as backed up once: another backup waits for the human */
   markTookOver(key: string, tookOver: AgentRecord['tookOver']) {
     const r = this.records[key]
-    if (!r) return
+    if (!r || JSON.stringify(r.tookOver ?? null) === JSON.stringify(tookOver ?? null)) return
     r.tookOver = tookOver
     this.save()
   }

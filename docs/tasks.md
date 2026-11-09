@@ -83,12 +83,13 @@
   over in the same worktree and branch, with the brief and a short handover: who it takes over from and why, the
   branch's commits, what lies uncommitted and the chat so far. Either way a card in the task's chat says who went in
   and why. If the backup can't go on either, isn't installed, or is set to a model its CLI doesn't have, the task
-  needs you, and its chat says why no backup went in.
-- A coordinator that can't go on is backed up the same way, once, when Settings → Agents → Backup → Coordinators'
-  backup (`coordinator.fallback`, off unless set) is on: the same CLI starts again on `backup.model` and
-  `backup.effort` with its session, or another CLI takes the chat over — a different conversation partner, which the
-  card in the space says — with the chat so far and its open tasks, its tasks going on as they are. Off, or no backup
-  able to go in, the space's chat says so and you are alerted, as before.
+  needs you: its chat says why where a backup setting is the reason, and one that couldn't start at all shows as
+  `Went wrong`.
+- A coordinator that can't go on is backed up the same way, when Settings → Agents → Backup → Coordinators' backup
+  (`coordinator.fallback`, off unless set) is on: the same CLI starts again on `backup.model` and `backup.effort` with
+  its session, or another CLI takes the chat over — a different conversation partner, which the card in the space
+  says — with the chat so far and its open tasks, its tasks going on as they are. Once, until a turn of it ends well
+  again; off, a backup already gone in, or one unable to go in, the space's chat says so and you are alerted.
 - Status, coordinators' too, is what the agent reports of itself. Every Claude Code Shepherdr starts gets a settings
   file of its own (`--settings`, in `~/.shepherdr/hooks/`; your own settings are never touched) whose hooks record
   each event: a turn starts or ends, what still runs in the background as it ends, a permission prompt (a subagent's

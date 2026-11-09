@@ -294,13 +294,13 @@ const roleKind = (role: Role, get: (key: string) => string) => (role === 'backup
  *  models and of the levels its model takes, each showing what it starts with (a level the model lacks shows as the
  *  nearest it has); a CLI that can't list its models takes any id; one Shepherdr passes neither to picks its own. The
  *  models are this machine's picks first (pinned, then recent), then the CLI's own order */
-export function agentRow(r: Row, get: (key: string) => string, picksOfKind: (kind: string) => { pinned: string[]; recent: string[] } = picksOf): Row {
+export function agentRow(r: Row, get: (key: string) => string, picksOfKind: (kind: string) => { pinned: string[]; recent: string[] } = picksOf, backups?: string[]): Row {
   const [role, what] = r.key.split('.') as [Role, string]
   if (!ROLES.includes(role) || (what !== 'model' && what !== 'effort')) return r
   // the two roles' backups on different CLIs: the models and levels either of them takes
-  const backups = role === 'backup' ? fallbackKinds(get) : []
-  if (backups.length > 1) return backupRow(r, backups, get, picksOfKind)
-  const kind = roleKind(role, get)
+  const kinds = role === 'backup' ? (backups ?? fallbackKinds(get)) : []
+  if (kinds.length > 1) return backupRow(r, kinds, get, picksOfKind)
+  const kind = role === 'backup' ? kinds[0] : roleKind(role, get)
   const c = kind ? modelsOf(kind) : undefined
   if (!kind || !c) return { ...r, value: kind ? `${CLI_NAME[kind] ?? kind}'s own` : 'off', fixed: true, text: false }
   const stored = get(`${role}.model`)
@@ -502,9 +502,12 @@ export class Settings {
     return roleKind(role, (k) => this.pick(k, l).value)
   }
 
-  /** the CLIs the backups at a level start on: the tasks' first, then the coordinators', each once */
+  /** the CLIs the backups at a level and the levels below it start on (unfit, agentRow): what is set at one level has to
+   *  fit a backup that will use it, a space's own included */
   backupKinds(l: Level = 'machine'): string[] {
-    return fallbackKinds((k) => this.pick(k, l).value)
+    const at: Level[] = l === 'all' ? ['all', 'machine'] : l === 'machine' ? ['machine'] : [l]
+    const spaces: Level[] = l === 'all' || l === 'machine' ? Object.keys(this.d.spaces).map((space) => ({ space }) as Level) : []
+    return [...new Set([...at, ...spaces].flatMap((x) => fallbackKinds((k) => this.pick(k, x).value)))]
   }
 
   /** why a model or effort doesn't fit the role's CLI (or its model) at a level: it lists what does */
@@ -625,17 +628,19 @@ export class Settings {
   }
 
   /** a role's model and effort as its CLI takes them, for a space (none: this machine): one it doesn't have is its
-   *  own default, a level its model lacks the nearest it has; nothing for the CLI's own */
-  modelOf(role: Role, kind?: string, space?: string): { model?: string; effort?: string } {
+   *  own default, a level its model lacks the nearest it has; nothing for the CLI's own. `own`: a value a task keeps
+   *  for itself (its own --set), read before the space's */
+  modelOf(role: Role, kind?: string, space?: string, own?: (key: string) => string): { model?: string; effort?: string } {
     const l: Level = space ? { space } : 'machine'
-    return this.modelAt(role, kind ?? this.kindOf(role, l), l)
+    return this.modelAt(role, kind ?? this.kindOf(role, l), l, own)
   }
 
-  private modelAt(role: Role, kind: string | undefined, l: Level): { model?: string; effort?: string } {
-    const stored = this.pick(`${role}.model`, l).value
+  private modelAt(role: Role, kind: string | undefined, l: Level, own?: (key: string) => string): { model?: string; effort?: string } {
+    const get = own ?? ((key: string) => this.pick(key, l).value)
+    const stored = get(`${role}.model`)
     if (!kind) return {}
     const model = stored === 'default' ? undefined : knowsModels(kind) ? findModel(kind, stored)?.id : modelsOf(kind) ? stored : undefined
-    return { model, effort: effortFor(kind, this.pick(`${role}.effort`, l).value, model) }
+    return { model, effort: effortFor(kind, get(`${role}.effort`), model) }
   }
 
   /** every key with its value for a space (none: this machine) and where it comes from, as shepherdr show prints
@@ -695,7 +700,7 @@ export class Settings {
         // set here: what a reset goes back to; not set here: where its value comes from
         const back = up ? this.pick(r.key, up) : { value: defaultOf(r.key) ?? '', from: 'default' as const }
         return {
-          ...agentRow({ ...r, value: p.value }, (k) => this.pick(k, l).value, (kind) => this.picksAt(kind)),
+          ...agentRow({ ...r, value: p.value }, (k) => this.pick(k, l).value, (kind) => this.picksAt(kind), this.backupKinds(l)),
           ...(lines[r.key] ? { line: lines[r.key] } : {}),
           ...this.triggerRow(r.key, p.value),
           ...(here ? { inherits: { value: back.value, from: back.from === 'default' && l === 'all' ? 'Default' : fromName(back.from) } } : l === 'all' ? {} : { from: fromName(p.from) }),
@@ -843,18 +848,25 @@ const numOf = (key: string) => ROWS.find((r) => r.key === key)?.num
 /** task add's --set for one task: a How tasks work key by its Settings key or its short name, and the flag of task
  *  add's own the agent and reviewer keys stand for */
 const ONE_TASK: Record<string, string> = { review: 'brief.review', merge: 'brief.merge', mustfix: 'review.mustFix', 'must-fix': 'review.mustFix', rounds: 'review.rounds', 'review-rounds': 'review.rounds' }
+/** the backup settings one task keeps for itself, its own fallback and pair, as engine.ts cantGoOn reads them first */
+const ONE_BACKUP: Record<string, string> = { 'task.fallback': 'task.fallback', fallback: 'task.fallback', 'backup.model': 'backup.model', 'backup.effort': 'backup.effort' }
 const FLAG_OF: Record<string, string> = { 'task.agent': 'agent', 'task.model': 'model', 'task.effort': 'effort', 'reviewer.agent': 'reviewer', 'reviewer.model': 'reviewer-model', 'reviewer.effort': 'reviewer-effort' }
 
 /** one --set key=value: a How tasks work setting for this task as Settings keeps it, the task add flag it stands for
- *  (agent, model, effort, reviewer…), or why it can't be */
+ *  (agent, model, effort, reviewer…), a backup value this one task keeps for itself, or why it can't be */
 export function setForTask(pair: string): { key: string; value: string } | { flag: string; value: string } | { error: string } {
   const eq = pair.indexOf('=')
   const name = pair.slice(0, eq).trim()
   const value = pair.slice(eq + 1).trim().replace(/^(['"])(.*)\1$/, '$2')
   const told = CATALOG.filter((x) => x.told).flatMap((x) => x.rows.map((r) => r.key))
   const short = name.toLowerCase()
-  const key = told.find((k) => k.toLowerCase() === short) ?? ONE_TASK[short] ?? (FLAG_OF[`task.${short}`] && `task.${short}`) ?? (short === 'reviewer' ? 'reviewer.agent' : Object.keys(FLAG_OF).find((k) => k.toLowerCase() === short))
-  if (eq < 1 || !key) return { error: `--set takes key=value, a key of: ${[...told.filter((k) => !FLAG_OF[k]), 'agent', 'model', 'effort', 'reviewer', 'reviewer.model', 'reviewer.effort'].join(', ')} (shepherdr show has them)` }
+  const key =
+    told.find((k) => k.toLowerCase() === short) ??
+    ONE_TASK[short] ??
+    ONE_BACKUP[short] ??
+    (FLAG_OF[`task.${short}`] && `task.${short}`) ??
+    (short === 'reviewer' ? 'reviewer.agent' : Object.keys(FLAG_OF).find((k) => k.toLowerCase() === short))
+  if (eq < 1 || !key) return { error: `--set takes key=value, a key of: ${[...told.filter((k) => !FLAG_OF[k]), ...Object.keys(ONE_BACKUP), 'agent', 'model', 'effort', 'reviewer', 'reviewer.model', 'reviewer.effort'].join(', ')} (shepherdr show has them)` }
   if (FLAG_OF[key]) return { flag: FLAG_OF[key], value }
   const err = refuse(key, value)
   if (err) return { error: `--set ${name}: ${err}` }
