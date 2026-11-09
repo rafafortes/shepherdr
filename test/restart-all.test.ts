@@ -164,6 +164,22 @@ describe('restarting every coordinator on new Settings', () => {
     })
   })
 
+  test("the app's answer says the counts and names the spaces that failed", async () => {
+    await world(async (w) => {
+      const p = await w.space('gtm', { kind: 'claude' })
+      const bad = await w.space('bad', { kind: 'claude' })
+      expect(w.src.settings.set('coordinator.agent', 'Codex', { space: p.name }).ok).toBe(true)
+      expect(w.src.settings.set('coordinator.agent', 'pi', { space: bad.name }).ok).toBe(true)
+      w.without('pi')
+      // what the places list's row reads: its count, and the space that failed by name
+      const r = (await w.src.act({ type: 'restart-all' })) as { ok?: boolean; out?: string; restarted?: number; same?: number; failed?: number; failures?: string[] }
+      expect(r).toMatchObject({ ok: true, restarted: 1, failed: 1, failures: ['bad'] })
+      // the home space: nothing running here, so it is no restart
+      expect(r.same).toBe(1)
+      expect(r.out).toContain("bad: could not restart: pi isn't installed on this machine.")
+    })
+  })
+
   test("another machine's spaces are left alone, and said so", async () => {
     await world(async (w) => {
       const mine = await w.space('mine', { kind: 'claude' })
