@@ -1004,7 +1004,9 @@ describe('settings', () => {
     s.set('brief.review', 'off')
     expect(note()).toContain("- Review: off. No review; the lines on reviewing below don't apply. (your setting for every machine)")
     s.set('brief.review', null)
-    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual(['Tasks', 'Tasks', 'Tasks', 'Coordinators', 'Coordinators', 'Coordinators', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup'])
+    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual(['Tasks', 'Tasks', 'Tasks', 'Coordinators', 'Coordinators', 'Coordinators', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup'])
+    // the last one says a backup hears its primary answering again; it never switches anything
+    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.at(-1)).toMatchObject({ key: 'backup.watchReturn', label: 'Tell me when it is back', value: 'on' })
   })
 })
 

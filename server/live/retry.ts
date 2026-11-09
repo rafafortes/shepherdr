@@ -86,6 +86,9 @@ export interface Retry {
   nudged?: number
   /** given up: what waiting can't fix, or still cut off after the last try. The human (or a backup agent) is next */
   over?: boolean
+  /** waiting can't fix it (out of allowance, signed out, a model that is not there, a refusal): only a backup or the
+   *  human can. Unset when the tries ran out on an error that passes by itself */
+  lasting?: boolean
 }
 
 /** the line a cut-off agent is told after the wait */
@@ -137,7 +140,7 @@ export class Retries {
       this.hooks.changed(key)
       return
     }
-    const r: Retry = { cut: cut.id, tries, reason: e.passing ? `${e.reason}, still after ${tries} tries` : e.reason, words, over: true }
+    const r: Retry = { cut: cut.id, tries, reason: e.passing ? `${e.reason}, still after ${tries} tries` : e.reason, words, over: true, ...(e.passing ? {} : { lasting: true }) }
     this.set(key, r)
     // told by what comes next: a backup agent takes over, or the human hears
     this.hooks.over(key, r)

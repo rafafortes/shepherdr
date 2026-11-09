@@ -411,6 +411,9 @@ export class Engine extends Emitter<Events> {
   peerTask?: PeerTask
   /** its agent's turn the provider cut off (retry.ts): waited out, or given up */
   retry?: (key: string) => Retry | undefined
+  /** its backup took over for a reason waiting can't fix: the primary Settings name is what the human may want back
+   *  (source.ts keeps it, and asks it later whether it answers again) */
+  noteTookOver?: (t: TaskRec, ran: Harness, to: Harness, why: string) => void
   /** its backup agent is taking over */
   private handing = new Set<string>()
   /** chats whose last start never became a turn (start.ts): when it failed and the words it shows, so a relaunch loop
@@ -1564,13 +1567,15 @@ export class Engine extends Emitter<Events> {
    * starts again and resumes its own session, so nothing is lost; another CLI takes over in the same worktree and branch,
    * with the brief and what was done so far. Else, or when that one can't go on either, it waits for you.
    */
-  async cantGoOn(id: string, why: string) {
+  async cantGoOn(id: string, why: string, lasting = false) {
     const t = this.task(id)
     if (!t || !this.mayRetry(this.key(t)) || this.handing.has(t.id)) return
     const key = this.key(t)
     const rec = this.agents.record(key)
     const from = rec?.kind ?? t.agent?.kind ?? ''
     const space = this.nameOf(t)
+    // the harness its agent really ran on: its own (task add --agent) where it has one, else what Settings name
+    const ran: Harness = rec ? { kind: rec.kind, model: rec.model, effort: rec.effort } : (t.agent ?? this.settings.harness('task', space))
     // what this task keeps for itself (task add --set) first, then its space's settings, its machine's and Everywhere's
     const plan = this.backupFor('task', space, t.set)
     // its backup took over once already: a takeover that keeps failing is the human's, not a loop
@@ -1600,6 +1605,14 @@ export class Engine extends Emitter<Events> {
       const card = `takeover:${t.id}:${t.tookOver.at}`
       const text = backupCardWords({ from: name(from), to: name(to), words, same, why: t.tookOver.why })
       this.chats.post(key, { id: card, card: { id: card, text } })
+      // a lasting one: the primary it ran out of is what the watch asks about later (return.ts). A note that can't be
+      // written must never undo the takeover that just went in
+      if (lasting)
+        try {
+          this.noteTookOver?.(t, ran, h, t.tookOver.why)
+        } catch (e) {
+          console.error(`shepherdr: couldn't keep that ${t.id} runs on a backup: ${(e as Error).message}`)
+        }
     } catch (e) {
       // the backup didn't start: it went wrong, and a later hand-over may try again
       t.trouble = troubleOf(e)

@@ -251,6 +251,10 @@ export const CATALOG: Section[] = [
       { group: 'Backup', label: "Coordinators' backup", key: 'coordinator.fallback', value: 'off', options: ['off', ...CHAT_CLIS] },
       { group: 'Backup', label: 'Model', key: 'coordinator.fallbackModel', value: 'default', text: true, hint: "While default: the tasks' backup's." },
       { group: 'Backup', label: 'Effort', key: 'coordinator.fallbackEffort', value: 'default', options: [...EFFORTS], hint: "While default: the tasks' backup's." },
+      // a backup stays in place until the human goes back: this asks the primary, now and then, whether it answers
+      // again, and says so in the chats still on the backup (source.ts watchReturns, return.ts). It never switches
+      // anything; a probe is one tiny request of one CLI, only while nobody on this machine works
+      { group: 'Backup', label: 'Tell me when it is back', key: 'backup.watchReturn', value: 'on', options: ['on', 'off'], hint: 'Asks the primary model now and then whether it answers again, and says so in each chat still on a backup. Never switches anything.' },
     ],
   },
   {
