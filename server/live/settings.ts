@@ -688,6 +688,8 @@ export class Settings {
     const rows = (s: Section, l: Level) => {
       // the words each row of How tasks work adds to a brief, as its Settings block has them at this level
       const told = s.told ? settingsLines('<id>', { ways: this.waysAt(l), reviewer: this.harnessAt('reviewer', l), by: this.setByAt(l) }) : []
+      // the backups a value set at this level must fit, read once for the section rather than once per row
+      const backups = s.name === 'Agents' ? this.backupKinds(l) : undefined
       const text = (said: Said) => told.find((x) => x.said === said)?.text
       const lines: Record<string, string | undefined> = s.told
         ? { 'brief.review': text('review'), 'reviewer.agent': text('reviewer'), 'review.mustFix': text('mustFix'), 'review.rounds': text('rounds'), 'brief.merge': text('merge') }
@@ -700,7 +702,7 @@ export class Settings {
         // set here: what a reset goes back to; not set here: where its value comes from
         const back = up ? this.pick(r.key, up) : { value: defaultOf(r.key) ?? '', from: 'default' as const }
         return {
-          ...agentRow({ ...r, value: p.value }, (k) => this.pick(k, l).value, (kind) => this.picksAt(kind), this.backupKinds(l)),
+          ...agentRow({ ...r, value: p.value }, (k) => this.pick(k, l).value, (kind) => this.picksAt(kind), backups),
           ...(lines[r.key] ? { line: lines[r.key] } : {}),
           ...this.triggerRow(r.key, p.value),
           ...(here ? { inherits: { value: back.value, from: back.from === 'default' && l === 'all' ? 'Default' : fromName(back.from) } } : l === 'all' ? {} : { from: fromName(p.from) }),

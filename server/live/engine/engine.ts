@@ -1575,8 +1575,9 @@ export class Engine extends Emitter<Events> {
     if (t.tookOver || !t.worktree) return this.settle(t)
     if (!plan.to) return this.noBackup(key, plan.why)
     const to = plan.to.kind
-    // only an agent that is there has a session to keep: one with no record starts fresh, with the brief and the chat
-    const same = to === from && !!rec
+    // only an agent whose session is there has one to keep: one with no record, or whose session is gone, starts fresh,
+    // with the brief and the chat
+    const same = to === from && !!rec && !rec.fresh && (!!rec.sessionId || rec.logs.length > 0)
     const name = (k: string) => CLI_NAME[k] ?? k
     this.handing.add(t.id)
     t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now() }
@@ -1590,7 +1591,7 @@ export class Engine extends Emitter<Events> {
       const h: Harness = { kind: to, model, effort }
       const words = harnessWords(fitHarness(h))
       const first = same
-        ? backupKeptLine({ on: words, why: t.tookOver.why })
+        ? hidden(backupKeptLine({ on: words, why: t.tookOver.why }), 'restart')
         : `${taskFirst(t)}\n\n${handOverLine({ from: name(from), why: t.tookOver.why, ...(await this.soFar(t, key, name(from))) })}`
       await this.agents.finish(key)
       await this.launch(t, first, undefined, h)

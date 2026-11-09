@@ -45,10 +45,11 @@ keeps failing waits for you.
   machine's, else Everywhere's. Where Backup → Model is default, a backup starts on the model and effort the agent it
   backs up ran on, when the backup's CLI has them.
 
-A model neither backup CLI has — at that level or any level below it — is refused when you set it; one only the other
-CLI has is not used for that one, which then doesn't go in and its chat says why. Effort it lacks becomes the nearest it
-takes. Only a backup that changed the CLI is a takeover; the same CLI again keeps the session it had. A task's backup
-goes in once, ever; a coordinator's once, until you start it again yourself.
+A model neither backup CLI has — at that level or any level below it — is refused when you set it in Settings; one only
+the other CLI has, or one set for a single task with `--set`, is not used for the backup that lacks it, which then
+doesn't go in and its chat says why. Effort it lacks becomes the nearest it takes. Only a backup that changed the CLI is
+a takeover; the same CLI again keeps the session it had. A task's backup goes in once (a start that fails leaves a later
+one to try again); a coordinator's once, until you start it again yourself.
 
 A backup on the CLI the agent already runs starts that CLI again on the Backup model and effort and resumes its own
 session, so nothing is lost; another CLI takes the work over — a task's with its brief, its branch and the chat so far, a

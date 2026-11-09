@@ -56,7 +56,7 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
   const started: { key: string; first?: string; cwd: string; system?: string; pane?: string }[] = []
   const status: Record<string, string> = {}
   const sent: { key: string; text: string }[] = []
-  const records: Record<string, { kind: string; started: number; finished?: boolean }> = {}
+  const records: Record<string, { kind: string; started: number; finished?: boolean; sessionId?: string; logs: string[] }> = {}
   const panes: Record<string, string> = {}
   const outbox: string[] = []
   /** work an agent started in the background that still runs: a subagent, or shells */
@@ -73,7 +73,8 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
         herdr.agentPanes.add(pane)
       }
       started.push({ ...s, pane })
-      records[s.key] = { kind: s.kind, started: Date.now() }
+      // a real start keeps the session its CLI was handed, which its own CLI resumes (agents.ts launch)
+      records[s.key] = { kind: s.kind, started: Date.now(), sessionId: `${s.key}-session`, logs: [`/tmp/${s.key}.jsonl`] }
       status[s.key] = o.boot ?? 'working'
       if (o.boot) outbox.push(s.key)
       return null
