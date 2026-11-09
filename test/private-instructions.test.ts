@@ -52,6 +52,25 @@ describe('private instructions', () => {
     expect(s.set('task.instructions', 'bad\0text').ok).toBe(false)
   })
 
+  test('a backup reviewer changes no rule of its own: one role\'s private rules still never reach the other', () => {
+    const s = settings()
+    s.set('task.instructions', 'Task only.')
+    s.set('reviewer.instructions', 'Reviewer only.')
+    s.set('reviewer.fallback', 'claude')
+    s.set('reviewer.fallbackModel', 'opus')
+    // the task agent gets its own rules and the reviewer block, marked as the reviewer's, nothing else
+    const task = privatePrompt(s.instructions('task'), s.instructions('reviewer'))
+    expect(task).toContain('Reviewer handoff only')
+    expect(task.indexOf('Task only.')).toBeLessThan(task.indexOf('Reviewer only.'))
+    expect(task.indexOf('Reviewer handoff only')).toBeLessThan(task.indexOf('Reviewer only.'))
+    expect(task).toContain('Do not pass your task-only private rules to reviewers.')
+    // what a backup reviewer adds is the brief's words, never a private rule of either role
+    const how = s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note!
+    expect(how).toContain('review with a headless Claude Code or a Claude Code subagent')
+    expect(how).not.toContain('Reviewer only.')
+    expect(how).not.toContain('Task only.')
+  })
+
   test('prompts keep reviewer rules separate and state privacy, replacement and precedence', () => {
     const s = settings()
     s.set('coordinator.instructions', 'Coordinator only.')

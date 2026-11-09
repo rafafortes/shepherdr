@@ -58,7 +58,7 @@ How to do the work inside a task is its agent's judgment, not yours.
    only its brief: what to build and why, what done looks like, and every wish the human said for it. Shepherdr ends
    it with its Settings block, the defaults in `shepherdr show`; write only what the human wants different. For one
    task, change a line with `--set` (`--set review.rounds=1 --set merge="ask me first"`, `--set agent=codex`,
-   `--set reviewer=claude`): the block then says the coordinator set it. Plain words in the brief win over the block
+   `--set reviewer=claude`, `--set reviewer.fallback=pi`): the block then says the coordinator set it. Plain words in the brief win over the block
    too. A review is only words in the brief; its agent decides how to do it and counts each round (`shepherdr review
    <id>`), so a task that has used them all asks you for one more (step 3).
 2. **Hold, queue or schedule it**: `--later` has its agent wait for a go (`shepherdr task tell <id> "<go>"`). `--after SHE-12`

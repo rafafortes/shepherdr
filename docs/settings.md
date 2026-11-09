@@ -14,6 +14,15 @@
   or dark), Light or Dark, set before the first paint, with the browser's bar and artifacts following it. A phone
   lists the sections in groups, as iOS's Settings does, and opens one over the list; a wider screen keeps the list
   down its side.
+- A reviewer has a backup, for the case where it cannot run at all. Settings → How tasks work → Reviewer → Backup
+  reviewer (`reviewer.fallback`, off until you set one) names a second reviewer CLI; `reviewer.fallbackModel` and
+  `reviewer.fallbackEffort` are its model and effort, its own keys so that neither reviewer replaces the other. When
+  it is set, the brief's Reviewer line ends with it: “If that reviewer cannot run at all (out of allowance, signed
+  out, its model is gone), review with … instead and say in your summary that you did.” It is still one reviewer a
+  round, run by the task's agent as `<task-id>/Reviewer`; it never changes what a review means (findings, the bar, the
+  rounds), and it is never a second opinion after findings. With it off (the default) the line reads exactly as before.
+  Like the rest, it is set Everywhere, for a machine or for a space (the most specific one set wins), and for one task
+  by its coordinator (`task add --set reviewer.fallback=pi`), which wins for that task.
 - Secrets (How Shepherdr runs) holds the keys, tokens and passwords agents use, by name: add, replace and remove them
   in masked boxes, Everywhere, for a machine or for a space; the most specific one wins. An agent that needs one asks
   with `shepherdr secret ask NAME --why "…"`: its chat shows a masked box, and the agent is told by name once it is

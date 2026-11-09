@@ -18,7 +18,7 @@ const { pastTimes, span } = await import('../server/live/estimates.ts')
 const { readJson, writeJson } = await import('../server/store.ts')
 const { HOST, keyFor, machineName, placeId } = await import('../server/live/places.ts')
 const { stripHidden, hidden } = await import('../server/live/agents.ts')
-const { setPicks } = await import('../server/live/model-picks.ts')
+const { picksOf: picksOfKind, setPicks } = await import('../server/live/model-picks.ts')
 const { NO_PICKS } = await import('../shared/picks.ts')
 const { ROOT } = await import('../server/root.ts')
 
@@ -735,6 +735,40 @@ describe('settings', () => {
     expect(row('Backup', 'Model').options![1]).toBe('GPT-6.1-Sol')
     for (const k of ['task.agent', 'task.model', 'task.effort']) s.set(k, null)
   })
+  test('a backup reviewer is off until set: its own CLI, model and effort, set as specifically as the rest', () => {
+    // a world of its own, kept in memory: this test writes no settings file and leaves no model pick behind
+    const s = new Settings({ everywhere: {}, machine: {}, spaces: {} })
+    // off: nothing reviews instead, and every brief reads as it always has
+    expect(s.get('reviewer.fallback')).toBe('off')
+    expect(s.reviewerBackup()).toBeUndefined()
+    expect(s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note).not.toContain('cannot run at all')
+    // a reviewer CLI, or off: one that can be out of allowance is what it is for
+    expect(s.set('reviewer.fallback', 'qwen').error).toBe('Pick one of: off · Codex · Claude Code · pi.')
+    expect(s.set('reviewer.fallback', 'claude code').ok).toBe(true)
+    expect(s.get('reviewer.fallback')).toBe('Claude Code')
+    // its model and effort are its own keys: the reviewer's stay what they were
+    s.set('reviewer.model', 'gpt-6-sol')
+    s.set('reviewer.fallbackModel', 'opus')
+    s.set('reviewer.fallbackEffort', 'high')
+    expect(s.reviewerBackup()).toEqual({ kind: 'claude', model: 'claude-opus-5-5', effort: 'high' })
+    expect(s.harness('reviewer')).toEqual({ kind: 'codex', model: 'gpt-6-sol', effort: undefined })
+    expect(s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note).toContain('review with a headless Claude Code or a Claude Code subagent (model claude-opus-5-5, high effort) instead')
+    // Everywhere, this machine, a space: the most specific one set wins
+    expect(s.set('reviewer.fallback', 'pi', 'machine').ok).toBe(true)
+    expect(s.set('reviewer.fallback', 'codex', { space: 'web' }).ok).toBe(true)
+    expect(s.reviewerBackup()).toEqual({ kind: 'pi', model: 'opus', effort: 'high' })
+    expect(s.reviewerBackup('web')).toMatchObject({ kind: 'codex' })
+    expect(s.reviewerBackup('api')).toMatchObject({ kind: 'pi' })
+    // where a space's own is set, the screen says where it comes from and what a reset goes back to
+    const row = (level: string) => s.sections([], [], null, 'vm', ['web']).find((x) => x.level === level && x.name === 'How tasks work')!.rows.find((r) => r.key === 'reviewer.fallback')!
+    expect(row('p:vm:web')).toMatchObject({ value: 'Codex', inherits: { value: 'pi', from: 'vm' } })
+    expect(row('m:vm')).toMatchObject({ value: 'pi', inherits: { value: 'Claude Code', from: 'Everywhere' } })
+    // off again: nothing anywhere
+    for (const l of ['machine', { space: 'web' }, 'all'] as const) s.set('reviewer.fallback', null, l)
+    expect(s.reviewerBackup()).toBeUndefined()
+    expect(s.set('reviewer.fallback', 'Off').ok).toBe(true)
+    expect(s.get('reviewer.fallback')).toBe('off')
+  })
   test("Autopilot's old limits and wake picks leave the saved file as soon as it is read", () => {
     writeJson('settings.json', { everywhere: { 'autopilot.tasksPerDay': '3', 'wake.merged': 'now', 'heartbeat.every': '45 min' }, machine: { 'wake.health': 'next heartbeat' }, projects: { gtm: { 'wake.added': 'now', 'heartbeat.quiet': '22:00-07:00' } } })
     const s = new Settings()
@@ -856,13 +890,25 @@ describe('settings', () => {
     for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model']) s.set(k, null)
     writeJson('settings.json', {})
   })
+  test("a model chosen for the backups is remembered whichever of the two roles' backups is set", () => {
+    const s = new Settings()
+    setPicks(NO_PICKS)
+    // the tasks' backup off, only the coordinators' set: the model is one of the human's picks all the same
+    s.set('task.fallback', 'off')
+    s.set('coordinator.fallback', 'claude')
+    expect(s.set('backup.model', 'opus').ok).toBe(true)
+    expect(picksOfKind('claude').recent[0]).toBe('claude-opus-5-5')
+    for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model']) s.set(k, null)
+    setPicks(NO_PICKS)
+    writeJson('settings.json', {})
+  })
   test("the Settings screen shows what every new brief ends with, as it is now", () => {
     const s = new Settings()
     const note = () => s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note!
     expect(note()).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).')
     // planning, what to fix and what proof to show are the agent's judgment, not settings
     const section = () => s.sections([], [], null).find((x) => x.name === 'How tasks work')!
-    expect(section().rows.map((r) => r.key)).toEqual(['brief.review', 'review.mustFix', 'review.rounds', 'brief.merge', 'reviewer.agent', 'reviewer.model', 'reviewer.effort'])
+    expect(section().rows.map((r) => r.key)).toEqual(['brief.review', 'review.mustFix', 'review.rounds', 'brief.merge', 'reviewer.agent', 'reviewer.model', 'reviewer.effort', 'reviewer.fallback', 'reviewer.fallbackModel', 'reviewer.fallbackEffort'])
     // only words in prompts: What agents are told, each row with the line it adds
     expect(section().told).toBe(true)
     expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.told).toBeUndefined()
@@ -949,6 +995,19 @@ describe('the brief\'s default way of working', () => {
     expect(settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: '' } })).toContain('- Reviewer: a headless pi or a pi subagent (model openai/gpt-5.5, its default effort).')
     expect(settingsBlock('X-1', { ways, agent: { kind: 'claude', effort: 'high' } })).toContain('- Agent: Claude Code (its default model, high effort). Only so you know what you run on.')
   })
+  test('with a backup reviewer the same line says who reviews instead, where that reviewer cannot run at all', () => {
+    const block = settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: 'high' }, fallback: { kind: 'claude', model: 'opus', effort: 'high' } })
+    expect(block).toContain(
+      '- Reviewer: a headless pi or a pi subagent (model openai/gpt-5.5, high effort). If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (model opus, high effort) instead and say in your summary that you did.',
+    )
+    // one line, still: the finding of a review, what to fix and the rounds are untouched
+    expect(block.split('\n').find((l) => l.startsWith('- Reviewer'))).not.toContain('\n')
+    expect(block).toContain('- Must fix: major.')
+    // no backup reviewer (the default): the line reads exactly as it always has
+    expect(settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: 'high' } })).not.toContain('cannot run at all')
+    // with Review off there is nothing to review with: the line still says who, and asks for nothing
+    expect(settingsBlock('X-1', { ways: { ...ways, review: false }, reviewer: { kind: 'codex' }, fallback: { kind: 'pi' } })).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).\n')
+  })
   test('a line that differs from the default says who changed it, and the screen reads it back', () => {
     const block = settingsBlock('X-1', { ways: { ...ways, rounds: 1, merge: 'ask me first' }, by: { rounds: 'task', merge: 'space' } })
     expect(block).toContain('- Review rounds: 1. One round, no review again. (set by coordinator for this task)')
@@ -970,6 +1029,19 @@ describe('the brief\'s default way of working', () => {
     expect(s.setBy('web', { 'review.mustFix': 'critical' })).toEqual({ rounds: 'machine', merge: 'space', mustFix: 'task' })
     expect(s.ways('web', { 'brief.merge': 'after GitHub checks' })).toMatchObject({ merge: 'on its own', waitChecks: true, rounds: 2 })
     for (const [k, l] of [['review.rounds', 'machine'], ['brief.merge', { space: 'web' }], ['review.mustFix', 'all']] as const) s.set(k, null, l)
+    // a backup reviewer marks the Reviewer line only where one is set: its model or effort alone changes no line
+    expect(s.set('reviewer.fallbackModel', 'opus').ok).toBe(true)
+    expect(s.setBy()).toEqual({})
+    s.set('reviewer.fallback', 'pi')
+    expect(s.setBy()).toEqual({ reviewer: 'all' })
+    s.set('reviewer.fallback', 'off')
+    expect(s.setBy()).toEqual({})
+    // and none of them marks it while Review is off: the line asks for no review, so it shows no fallback either
+    s.set('reviewer.fallback', 'pi')
+    s.set('brief.review', 'off')
+    expect(s.setBy()).toEqual({ review: 'all' })
+    s.set('brief.review', null)
+    for (const k of ['reviewer.fallback', 'reviewer.fallbackModel']) s.set(k, null)
   })
   test('task add --set takes a How tasks work key or its short name, or stands for a flag; a bad one says why', () => {
     expect(setForTask('review.rounds=1')).toEqual({ key: 'review.rounds', value: '1 round' })
@@ -979,6 +1051,10 @@ describe('the brief\'s default way of working', () => {
     expect(setForTask('agent=codex')).toEqual({ flag: 'agent', value: 'codex' })
     expect(setForTask('reviewer=claude')).toEqual({ flag: 'reviewer', value: 'claude' })
     expect(setForTask('reviewer.effort=high')).toEqual({ flag: 'reviewer-effort', value: 'high' })
+    // a backup reviewer for this one task, its model and effort beside it
+    expect(setForTask('reviewer.fallback=pi')).toEqual({ key: 'reviewer.fallback', value: 'pi' })
+    expect(setForTask('reviewer.fallbackModel=opus')).toEqual({ key: 'reviewer.fallbackModel', value: 'opus' })
+    expect(setForTask('reviewer.fallback=qwen')).toMatchObject({ error: '--set reviewer.fallback: Pick one of: off · Codex · Claude Code · pi.' })
     expect(setForTask('merge=whenever')).toMatchObject({ error: expect.stringContaining('Pick one of') })
     expect(setForTask('colour=blue')).toMatchObject({ error: expect.stringContaining('--set takes key=value') })
   })
