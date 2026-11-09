@@ -2779,7 +2779,9 @@ describe('a space whose repo moved', () => {
     renameSync(dir, to)
     const added = await src.cli(['space', 'add', to], {})
     expect(added.code).toBe(0)
-    expect(added.out).toContain(`Found shop again at ${to} (its folder was ${dir})`)
+    expect(added.out).toContain(`Found shop again at ${to} (its folder was ${dir}), by its repo: its name, tasks, chat and mode are as they were.`)
+    // and its coordinator was restarted in the folder the repo is in now (herdr isn't here, so the start itself fails)
+    expect(src.agents.record(placeId.space('shop'))?.cwd).toBe(to)
     expect(src.places.byName('shop')!.path).toBe(to)
     expect(src.places.spaces.filter((x) => x.name === 'shop').length).toBe(1)
     // the space's own view says where it is, and where it was
@@ -2788,5 +2790,11 @@ describe('a space whose repo moved', () => {
     const shown = await src.cli(['show', '--space', 'shop'], {})
     expect(shown.out).toContain(`Folder: ${to}`)
     expect(shown.out).toContain(`its repo moved here: it was ${dir}`)
+    // a name asked for is not taken: the space found again keeps the name it has, and the command says so
+    const again = await src.cli(['space', 'add', to, '--name', 'other'], {})
+    expect(again.out).toContain('shop is a space already')
+    renameSync(to, to + '-2')
+    const moved = await src.cli(['space', 'add', to + '-2', '--name', 'other'], {})
+    expect(moved.out).toContain('It keeps its name shop.')
   })
 })

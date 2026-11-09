@@ -220,6 +220,23 @@ describe('a space', () => {
     expect(await repoId(copy)).toBe(made.repoId!)
   })
 
+  test('a copy added while its space’s folder is gone takes the space, and the original becomes a space of its own', async () => {
+    // the one ambiguous case there is: with the space's folder gone, the first folder carrying its id is taken for it
+    const places = world()
+    const dir = repo()
+    const p = await places.add(dir, 'shop')
+    const copy = beside(dir, 'shop-copy')
+    cpSync(dir, copy, { recursive: true })
+    const was = dir
+    renameSync(dir, beside(dir, 'shop-moved'))
+    expect((await places.add(copy)).path).toBe(copy)
+    expect(places.spaces[0]!.was).toBe(was)
+    const real = await places.add(beside(was, 'shop-moved'))
+    expect(places.spaces.length).toBe(2)
+    expect(real.repoId).toBeTruthy()
+    expect(real.repoId).not.toBe(p.repoId)
+  })
+
   test('a worktree of a space whose folder is gone is refused too: the repo is that space', async () => {
     const places = world()
     const dir = repo()
@@ -320,7 +337,7 @@ describe('the doctor', () => {
     chmodSync(join(p.path, '.git'), 0o555)
     const said = (await places.doctor()).join('\n')
     chmodSync(join(p.path, '.git'), 0o755)
-    expect(said).toContain(`shop: ${p.path}, whose .git/config could not be given an id`)
+    expect(said).toContain(`shop: ${p.path}, whose .git/config could not be written with an id`)
   })
 
   test('says when a folder is there but is no longer a git repository', async () => {

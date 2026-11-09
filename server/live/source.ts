@@ -2504,7 +2504,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           const keeps = asked && asked !== pr.name ? ` It keeps its name ${named}.` : ''
           if (found && pr.was) {
             const turn = moved ? ` Its coordinator finishes its turn where it is: Restart agent in its row's menu puts it in the new folder.` : ''
-            return `Found ${named} again at ${pr.path} (its folder was ${pr.was}), by its repo's id: its name, tasks, chat and mode are as they were.${keeps}${turn}`
+            return `Found ${named} again at ${pr.path} (its folder was ${pr.was}), by its repo: its name, tasks, chat and mode are as they were.${keeps}${turn}`
           }
           if (existing) return `${named} is a space already (${pr.path}), with its tasks and chat.${keeps}`
           return `Added ${named} (${pr.path}) as a space; its tasks are ${pr.key}-1, ${pr.key}-2, …${pr.github ? ` GitHub: ${pr.github}.` : ' No GitHub remote: tasks merge here.'}`

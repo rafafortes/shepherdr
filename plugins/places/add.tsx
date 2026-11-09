@@ -128,7 +128,9 @@ function AddDialog() {
   const create = !!info && !info.repo && (!info.exists || info.dir)
   const ready = !!info && !info.added && (!!info.repo || create)
   const shownName = name ?? slugify(base(path))
-  const nameBad = nameProblem(shownName, snap.places.filter((p) => p.machine === machine).map((p) => p.name))
+  // a repo folder decides on its own: it may be a space already (its repo's id, or a link left at its old name), and a
+  // space found again keeps the name it has — the server refuses a taken name for a new one, and says so here
+  const nameBad = info?.repo ? null : nameProblem(shownName, snap.places.filter((p) => p.machine === machine).map((p) => p.name))
 
   // once it is added, wait for the new place to show, then open it
   useEffect(() => {

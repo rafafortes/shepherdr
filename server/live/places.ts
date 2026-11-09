@@ -361,7 +361,7 @@ export class Places {
         out.push(`${name}: ${p.path} is a worktree of a repo, not a repo of its own, so it keeps the folder it was added with`)
       else if (p.was && p.was !== p.path) out.push(`${name}: found again at ${p.path} (it was ${p.was})${p.repoId ? `, by its repo's id ${shortId(p.repoId)}` : ''}`)
       else if (p.repoId) out.push(`${name}: ${p.path}, found again by its repo's id ${shortId(p.repoId)} wherever the repo goes`)
-      else out.push(`${name}: ${p.path}, whose .git/config could not be given an id (no permission to write it), so it keeps the folder it was added with`)
+      else out.push(`${name}: ${p.path}, whose .git/config could not be written with an id, so it keeps the folder it was added with`)
     }
     return out
   }
