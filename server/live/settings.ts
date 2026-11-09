@@ -87,14 +87,10 @@ const NEWS_PRESETS = [
 
 /** the agents Settings picks a CLI, model and effort for */
 type Role = 'task' | 'coordinator' | 'reviewer' | 'backup'
-const ROLES: Role[] = ['task', 'coordinator', 'reviewer', 'backup']
 
-/** where a CLI, its model and its effort are set: a role's own three, an agent backup's (Agents → Backup, which covers
- *  both roles' backups), or a task's backup reviewer's (Reviewer → Backup reviewer), which has its own three so that
- *  neither reviewer replaces the other */
-
-/** where a CLI, its model and its effort are set: a role's own three, a task's backup agent's (Agents → Backup), or a
- *  task's backup reviewer's (Reviewer → Backup reviewer), which has its own three so that neither replaces the other */
+/** where a CLI, its model and its effort are set: a role's own three, an agent backup's (Agents → Backup, one pair for
+ *  both roles' backups), or a backup reviewer's (Reviewer → Backup reviewer), which has its own three so that neither
+ *  reviewer replaces the other */
 type Pair = { cli: string; model: string; effort: string }
 const PAIRS: Record<Role | 'reviewBackup', Pair> = {
   task: { cli: 'task.agent', model: 'task.model', effort: 'task.effort' },
@@ -326,17 +322,17 @@ const roleKind = (role: Role, get: (key: string) => string) => (role === 'backup
  *  models are this machine's picks first (pinned, then recent), then the CLI's own order. A backup's rows take the CLI
  *  their own pair of keys names, and the agents' backup pair covers both roles' backups */
 export function agentRow(r: Row, get: (key: string) => string, picksOfKind: (kind: string) => { pinned: string[]; recent: string[] } = picksOf, backups?: string[]): Row {
+  // only a role's own model and effort, or a backup's, are a pick of a CLI's: dictate.model, say, is free text
   const own = pairOfKey(r.key)
-  const [role, said] = r.key.split('.') as [Role, string]
-  const what = own?.what ?? said
-  if (!ROLES.includes(role) || (what !== 'model' && what !== 'effort')) return r
+  if (!own) return r
   // the two roles' backups on different CLIs: the models and levels either of them takes
-  const kinds = own?.pair === PAIRS.backup ? (backups ?? fallbackKinds(get)) : []
+  const kinds = own.pair === PAIRS.backup ? (backups ?? fallbackKinds(get)) : []
   if (kinds.length > 1) return backupRow(r, kinds, get, picksOfKind)
-  const kind = kinds.length ? kinds[0] : own ? kindOf(get(own.pair.cli)) : roleKind(role, get)
+  const kind = kinds.length ? kinds[0] : kindOf(get(own.pair.cli))
   const c = kind ? modelsOf(kind) : undefined
   if (!kind || !c) return { ...r, value: kind ? `${CLI_NAME[kind] ?? kind}'s own` : 'off', fixed: true, text: false }
-  const stored = get(own ? own.pair.model : `${role}.model`)
+  const what = own.what
+  const stored = get(own.pair.model)
   const model = findModel(kind, stored)
   if (what === 'model') {
     if (!c.models.length) return { ...r, value: stored }
@@ -493,7 +489,6 @@ export class Settings {
       else if (key === 'heartbeat.on') value = eventsText(eventRules(value))
       else if (key === 'time.zone') value = value.trim()
       // a CLI is kept by its name, however it was written
-      // a CLI is kept by its name, however it was written
       else if ((isFallback(key) || key === 'reviewer.fallback') && value.trim().toLowerCase() === 'off') value = 'off'
       else if (key.endsWith('.agent') || isFallback(key) || key === 'reviewer.fallback') value = CLI_NAME[kindOf(value)!]
     }
@@ -506,7 +501,8 @@ export class Settings {
     // own, the demo's, keeps its picks to itself)
     const own = pairOfKey(key)
     if (!this.seed && value !== null && own?.what === 'model') {
-      const kind = kindOf(this.pick(own.pair.cli, l).value)
+      // the agents' backup model takes whichever backup CLI is set, the tasks' or the coordinators' (kindOf('backup'))
+      const kind = own.pair === PAIRS.backup ? this.kindOf('backup', l) : kindOf(this.pick(own.pair.cli, l).value)
       const picked = kind ? findModel(kind, value) : undefined
       if (kind && picked) rememberModel(kind, picked.id)
     }

@@ -18,7 +18,7 @@ const { pastTimes, span } = await import('../server/live/estimates.ts')
 const { readJson, writeJson } = await import('../server/store.ts')
 const { HOST, keyFor, machineName, placeId } = await import('../server/live/places.ts')
 const { stripHidden, hidden } = await import('../server/live/agents.ts')
-const { setPicks } = await import('../server/live/model-picks.ts')
+const { picksOf: picksOfKind, setPicks } = await import('../server/live/model-picks.ts')
 const { NO_PICKS } = await import('../shared/picks.ts')
 const { ROOT } = await import('../server/root.ts')
 
@@ -736,7 +736,8 @@ describe('settings', () => {
     for (const k of ['task.agent', 'task.model', 'task.effort']) s.set(k, null)
   })
   test('a backup reviewer is off until set: its own CLI, model and effort, set as specifically as the rest', () => {
-    const s = new Settings()
+    // a world of its own, kept in memory: this test writes no settings file and leaves no model pick behind
+    const s = new Settings({ everywhere: {}, machine: {}, spaces: {} })
     // off: nothing reviews instead, and every brief reads as it always has
     expect(s.get('reviewer.fallback')).toBe('off')
     expect(s.reviewerBackup()).toBeUndefined()
@@ -767,7 +768,6 @@ describe('settings', () => {
     expect(s.reviewerBackup()).toBeUndefined()
     expect(s.set('reviewer.fallback', 'Off').ok).toBe(true)
     expect(s.get('reviewer.fallback')).toBe('off')
-    writeJson('settings.json', {})
   })
   test("Autopilot's old limits and wake picks leave the saved file as soon as it is read", () => {
     writeJson('settings.json', { everywhere: { 'autopilot.tasksPerDay': '3', 'wake.merged': 'now', 'heartbeat.every': '45 min' }, machine: { 'wake.health': 'next heartbeat' }, projects: { gtm: { 'wake.added': 'now', 'heartbeat.quiet': '22:00-07:00' } } })
@@ -888,6 +888,18 @@ describe('settings', () => {
     expect(s.pick('backup.model', { space: 'web' })).toEqual({ value: 'Opus 5.5', from: 'space' })
     expect(s.pick('backup.model', 'machine').from).toBe('all')
     for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model']) s.set(k, null)
+    writeJson('settings.json', {})
+  })
+  test("a model chosen for the backups is remembered whichever of the two roles' backups is set", () => {
+    const s = new Settings()
+    setPicks(NO_PICKS)
+    // the tasks' backup off, only the coordinators' set: the model is one of the human's picks all the same
+    s.set('task.fallback', 'off')
+    s.set('coordinator.fallback', 'claude')
+    expect(s.set('backup.model', 'opus').ok).toBe(true)
+    expect(picksOfKind('claude').recent[0]).toBe('claude-opus-5-5')
+    for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model']) s.set(k, null)
+    setPicks(NO_PICKS)
     writeJson('settings.json', {})
   })
   test("the Settings screen shows what every new brief ends with, as it is now", () => {
