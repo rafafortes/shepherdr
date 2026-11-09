@@ -736,7 +736,7 @@ describe('a turn the provider cut off', () => {
     for (const k of ['task.fallback', 'backup.model', 'backup.effort', 'coordinator.fallback', 'coordinator.fallbackModel', 'coordinator.fallbackEffort']) w.settings.set(k, null)
   })
 
-  test("a task's backup comes from its own space first: its CLI and the shared model, over Everywhere's", async () => {
+  test("a task's backup comes from its own space first: its CLI and its own model, over Everywhere's", async () => {
     const w = world()
     cutOff(w)
     w.engine.installed = () => true

@@ -560,7 +560,8 @@ export class Settings {
    *  key is that one, or this value's when none does (pairKinds) */
   private readsAt(x: Level, l: Level, key: string): boolean {
     const chain: Level[] = x === 'all' ? ['all'] : x === 'machine' ? ['machine', 'all'] : [x, 'machine', 'all']
-    const first = chain.find((y) => this.at(y)[key] !== undefined)
+    // the level being set already holds it: it is written after this check
+    const first = chain.find((y) => y === l || this.at(y)[key] !== undefined)
     return first === undefined || first === l
   }
 

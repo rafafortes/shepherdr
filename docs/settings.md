@@ -58,9 +58,10 @@ tasks go on as they are, and either way it happens once, so a backup that keeps 
   model that CLI has. While it is at default it reads `backup.model` and `backup.effort`, so every configuration in use
   keeps its meaning and its row shows the value it reads, saying it comes from the tasks' backup.
 
-A model the CLI a backup's row is set for doesn't have — at that level or any level below it — is refused when you set
-it in Settings; one the backup's CLI lacks where it goes in, such as one set for a single task with `--set`, is not
-used, so that backup doesn't go in and its chat says why. Effort it lacks becomes the nearest it takes. Only a backup that
+A model no backup that reads it can take — at the level it is set and every level below that reads it — is refused when
+you set it in Settings; one a backup's CLI lacks where it goes in, such as one set for a single task with `--set`, or one
+the other role's backup can take while the coordinators' pair follows it, is not used there, so that backup doesn't go in
+and its chat says why (and its Model row says so too). Effort it lacks becomes the nearest it takes. Only a backup that
 changed the CLI is a takeover; the same CLI again keeps the session it had. A task's backup goes in once (a start that
 fails leaves a later one to try again); a coordinator's once, until you start it again yourself.
 
