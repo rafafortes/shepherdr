@@ -226,7 +226,7 @@ export function RestartAllItem() {
   const answer = busy ? 'Restarting…' : said
   const label = answer ?? (count ? `Restart ${count} coordinator${count === 1 ? '' : 's'}` : 'Restart coordinators')
   return (
-    <MenuItem data-restart-all icon={<RestartIcon className={ic} />} disabled={busy} onClick={run}>
+    <MenuItem icon={<RestartIcon className={ic} />} disabled={busy} onClick={run}>
       {label}
     </MenuItem>
   )

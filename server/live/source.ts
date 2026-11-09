@@ -1112,7 +1112,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // nothing to restart: it agrees, or it was never started (its first start will be on what Settings say)
       if (!this.restartHintOf(p.chat)) {
         try {
-          rows.push({ name: p.name, state: 'same', on: harnessWords(fitHarness(this.restartable(p.chat).on)) })
+          const on = harnessWords(fitHarness(this.restartable(p.chat).on))
+          rows.push({ name: p.name, state: 'same', on, ...(this.agents.record(p.chat) ? {} : { idle: true }) })
         } catch (e) {
           rows.push({ name: p.name, state: 'failed', error: (e as Error).message })
         }
@@ -3360,10 +3361,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const usage = 'shepherdr restart <space|task id> [--agent CLI] [--model ID] [--effort LEVEL] [--save], or shepherdr restart --all'
     if (p.flags.has('all')) {
       const extra = [...Object.keys(p.opts), ...[...p.flags].filter((f) => f !== 'all')]
-      if (target || extra.length)
-        throw new Error(
-          `--all restarts every coordinator of this machine's spaces on what its Settings say, so it takes no space, task or --${extra[0] ?? 'agent'}: shepherdr restart --all`,
-        )
+      if (target) throw new Error(`--all restarts every coordinator of this machine's spaces on what its Settings say, so it takes no space or task, not ${target}: shepherdr restart --all`)
+      if (extra.length)
+        throw new Error(`--all restarts every coordinator of this machine's spaces on what its Settings say, so it takes no --${extra[0]} of its own: shepherdr restart --all`)
       if (ctx.chat?.includes('/')) throw new Error("A task's agent restarts only its own agent; ask your coordinator or the human for --all.")
       const r = (await this.act({ type: 'restart-all' })) as { ok: boolean; error?: string; out?: string }
       if (!r.ok || !r.out) throw new Error(r.error ?? 'The coordinators could not be restarted.')

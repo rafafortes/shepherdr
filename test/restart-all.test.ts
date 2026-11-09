@@ -120,7 +120,8 @@ describe('restarting every coordinator on new Settings', () => {
       const lines = r.out.trim().split('\n')
       expect(lines).toEqual([
         'ok: restarted on Codex',
-        'home: already on Claude Code, left alone',
+        // never started here (no agent record in this test): its line names what its next start will be on
+        'home: nothing running yet, so its next start is on Claude Code',
         "broken: could not restart: pi isn't installed on this machine.",
         '1 restarted, 1 already on it, 1 failed.',
         "Tasks are not restarted: a running task's brief was written when it started, and restarting its agent is its own choice (shepherdr restart <id>).",
@@ -199,10 +200,10 @@ describe('restarting every coordinator on new Settings', () => {
       expect(w.src.settings.set('coordinator.agent', 'Codex', { space: p.name }).ok).toBe(true)
       const withTarget = await w.src.cli(['restart', '--all', p.name], {})
       expect(withTarget.code).toBe(1)
-      expect(withTarget.out).toBe("--all restarts every coordinator of this machine's spaces on what its Settings say, so it takes no space, task or --agent: shepherdr restart --all\n")
+      expect(withTarget.out).toBe(`--all restarts every coordinator of this machine's spaces on what its Settings say, so it takes no space or task, not ${p.name}: shepherdr restart --all\n`)
       const withModel = await w.src.cli(['restart', '--all', '--model', 'Sonnet 5.5'], {})
       expect(withModel.code).toBe(1)
-      expect(withModel.out).toContain('so it takes no space, task or --model')
+      expect(withModel.out).toBe("--all restarts every coordinator of this machine's spaces on what its Settings say, so it takes no --model of its own: shepherdr restart --all\n")
       expect(w.started).toEqual([])
       const t = w.src.engine.add({ project: p.name, title: 'Say hello', desc: 'Add hello.txt.', by: 'test' })
       const fromTask = await w.src.cli(['restart', '--all'], { chat: `${t.id}/Agent` })
@@ -240,6 +241,21 @@ describe('restarting every coordinator on new Settings', () => {
 })
 
 describe('the words of restart --all', () => {
+  test('a coordinator that never started is no restart, and its line does not claim it is running', async () => {
+    await world(async (w) => {
+      const never = await w.space('never', { kind: 'claude' })
+      delete w.src.agents.records[never.key]
+      expect(w.src.settings.set('coordinator.agent', 'Codex', { space: never.name }).ok).toBe(true)
+      // one that does move, so the per-space lines are printed at all
+      const moved = await w.space('moved', { kind: 'claude' })
+      expect(w.src.settings.set('coordinator.agent', 'Codex', { space: moved.name }).ok).toBe(true)
+      const r = await w.src.cli(['restart', '--all'], {})
+      expect(r.code).toBe(0)
+      expect(w.started.map((x) => x.key)).toEqual([moved.key])
+      expect(r.out).toContain('never: nothing running yet, so its next start is on Codex')
+    })
+  })
+
   test('the failures last and named, the counts, and what it never touches', () => {
     const out = restartAllWords(
       [

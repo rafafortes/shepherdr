@@ -60,8 +60,8 @@ export function restartHint(on: Harness, set: Harness | undefined, want: Harness
 export type RestartAllRow =
   /** started again on `on`; interrupted: it was at work, and that turn was stopped first, as a single restart does */
   | { name: string; state: 'restarted'; on: string; interrupted?: boolean }
-  /** left alone: its agent runs on what Settings say now (or never started, so its first start will be on them) */
-  | { name: string; state: 'same'; on: string }
+  /** left alone: its agent runs on what Settings say now; idle: it never started, so its first start will be on them */
+  | { name: string; state: 'same'; on: string; idle?: boolean }
   /** it could not be restarted, and the ones after it were still tried */
   | { name: string; state: 'failed'; error: string }
 
@@ -80,7 +80,7 @@ export function restartAllWords(rows: RestartAllRow[], otherMachines: string[] =
     return [`Nothing new in the Settings of this machine's coordinators (${same.length}): nothing was restarted.`, ...tail].join('\n')
   return [
     ...restarted.map((r) => `${r.name}: restarted on ${r.on}${r.interrupted ? ', its working turn interrupted first' : ''}`),
-    ...same.map((r) => `${r.name}: already on ${r.on}, left alone`),
+    ...same.map((r) => (r.idle ? `${r.name}: nothing running yet, so its next start is on ${r.on}` : `${r.name}: already on ${r.on}, left alone`)),
     ...failed.map((r) => `${r.name}: could not restart: ${r.error}`),
     `${restarted.length} restarted, ${same.length} already on it, ${failed.length} failed.`,
     ...tail,
