@@ -40,7 +40,7 @@ import { Mirror } from './mirror.ts'
 import { claudeProjectDir, piSessionDir } from './readers/find.ts'
 import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
-import { asMode, HOME_SPACE, HOST, NAME, placeId, Places } from './places.ts'
+import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
 import { privatePrompt, coordinatorPrompt, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
 import { fitHarness, harnessProblem, harnessWords, recentChat, restartHint, restartInfo, type Harness } from './restart.ts'
 import { Revivals, type Wrong } from './revive.ts'
@@ -884,12 +884,19 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /* ---------- adding spaces ---------- */
 
-  /** a repo becomes a space: its own herdr space, with its coordinator in it */
-  private async addAsSpace(path: string, name?: string) {
-    const pr = await this.places.add(path, name)
-    this.coordinator(placeId.space(pr.name)).catch(() => undefined)
+  /** a repo becomes a space: its own herdr space, with its coordinator in it; `found`: this add found an existing
+   *  space again, by its repo's id, at the folder the repo is in now */
+  private async addAsSpace(path: string, name?: string): Promise<{ space: Space; found: boolean; existing: boolean; moved: boolean }> {
+    const added: { found?: boolean; existing?: boolean } = {}
+    const pr = await this.places.add(path, name, added)
+    const id = placeId.space(pr.name)
+    // its repo found again elsewhere here: its coordinator works in the folder it is in now — unless it is mid-turn,
+    // which it finishes where it is (the space's own folder is what its commands use from now on)
+    const busy = ['working', 'blocked'].includes(this.agents.status(id))
+    if (added.found && !busy) this.coordinator(id, { restart: async () => undefined }).catch(() => undefined)
+    else this.coordinator(id).catch(() => undefined)
     this.emit('snapshot')
-    return pr
+    return { space: pr, found: !!added.found, existing: !!added.existing, moved: !!added.found && busy }
   }
 
   /**
@@ -938,13 +945,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const l = this.peerFor(req.machine)
     if (l) return this.onPeer(l, '/api/spaces', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req) })
     const name = req.name === undefined ? undefined : req.name.trim()
-    const bad = name === undefined ? undefined : this.places.nameProblem(name)
-    if (bad) throw new Error(bad)
+    // its name is checked where the space is made, and only when it is a new one: a folder that turns out to be a space
+    // already (its repo's id, or a link left at the old name) keeps the name it has
     // never git init the home folder itself: it is the home space already
     if (resolveInHome(req.path).abs === resolveInHome('~').abs) throw new Error('Your home folder is the home space already: pick a folder in it.')
     const at = req.create ? await makeRepo(req.path) : resolveInHome(req.path).abs
-    const pr = await this.addAsSpace(at, name)
-    return { place: placeId.space(pr.name) }
+    const { space } = await this.addAsSpace(at, name)
+    return { place: placeId.space(space.name) }
   }
 
   /** take the main machine's Everywhere defaults (a worker for another machine), and what a change sets going */
@@ -2490,13 +2497,22 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (a1 === 'add') {
           const path = rest[0] ?? ctx.cwd
           if (!path) throw new Error('shepherdr space add <path> [--name NAME]')
-          const pr = await this.addAsSpace(path, one(p, 'name'))
-          return `Added ${this.places.nameOf(placeId.space(pr.name))} (${pr.path}) as a space; its tasks are ${pr.key}-1, ${pr.key}-2, …${pr.github ? ` GitHub: ${pr.github}.` : ' No GitHub remote: tasks merge here.'}`
+          const asked = one(p, 'name')
+          const { space: pr, found, existing, moved } = await this.addAsSpace(path, asked)
+          const named = this.places.nameOf(placeId.space(pr.name)) ?? pr.name
+          // a name asked for that the space already has does not take: say so, so it is not taken for the name it has
+          const keeps = asked && asked !== pr.name ? ` It keeps its name ${named}.` : ''
+          if (found && pr.was) {
+            const turn = moved ? ` Its coordinator finishes its turn where it is: Restart agent in its row's menu puts it in the new folder.` : ''
+            return `Found ${named} again at ${pr.path} (its folder was ${pr.was}), by its repo: its name, tasks, chat and mode are as they were.${keeps}${turn}`
+          }
+          if (existing) return `${named} is a space already (${pr.path}), with its tasks and chat.${keeps}`
+          return `Added ${named} (${pr.path}) as a space; its tasks are ${pr.key}-1, ${pr.key}-2, …${pr.github ? ` GitHub: ${pr.github}.` : ' No GitHub remote: tasks merge here.'}`
         }
         if (a1 === 'list' || !a1)
           return this.places
             .shown()
-            .map((x) => (x.space ? `${x.name}  ${x.space.key}  ${x.space.path}${x.space.github ? `  github:${x.space.github}` : ''}` : `${x.name}  (home space)  ${boxHome()}`))
+            .map((x) => (x.space ? `${x.name}  ${x.space.key}  ${this.places.folderLine(x.space)}${x.space.github ? `  github:${x.space.github}` : ''}` : `${x.name}  (home space)  ${boxHome()}`))
             .join('\n')
         if (a1 === 'rename') {
           const x = rest[0] ? this.places.find(rest[0]) : undefined
@@ -2623,7 +2639,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const beat = `\n\nHeartbeat on Autopilot: ${timeWords(h.time, h.zone)}${next.length ? ` (next ${next.join(', ')})` : ''}; news that wakes it at once: ${eventWords(h.on).toLowerCase()}, the rest waits for the heartbeat. Each brings the place's HEARTBEAT.md, its standing checklist: shepherdr heartbeat [<place>] shows it, shepherdr heartbeat set [<place>] < file changes it.`
         const block = settingsBlock('<id>', { ways: this.settings.ways(pr), reviewer: this.settings.harness('reviewer', pr), agent: this.settings.harness('task', pr), by: this.settings.setBy(pr) })
         const repo = pr ? this.places.byName(pr) : undefined
-        return `${head}${repo ? `\nBase branch: ${repo.base} (new tasks; per-task override: --base <branch>)` : ''}\n${this.settings.lines(pr, NAME)}${beat}${now}\n\nEvery new task's brief${pr ? ` in ${pr}` : ''} ends with:\n${block}\n\nFor one task, set any of these with task add: --set review.rounds=1 --set merge="ask me first" (--set agent=codex, model, effort, reviewer, reviewer.model, reviewer.effort too), or say so in its brief, which wins.`
+        const folder = repo ? `\nFolder: ${this.places.folderLine(repo)}${repo.repoId ? ` (found again by its repo's id ${shortId(repo.repoId)} if its folder is renamed or moved)` : ''}` : ''
+        return `${head}${repo ? `${folder}\nBase branch: ${repo.base} (new tasks; per-task override: --base <branch>)` : ''}\n${this.settings.lines(pr, NAME)}${beat}${now}\n\nEvery new task's brief${pr ? ` in ${pr}` : ''} ends with:\n${block}\n\nFor one task, set any of these with task add: --set review.rounds=1 --set merge="ask me first" (--set agent=codex, model, effort, reviewer, reviewer.model, reviewer.effort too), or say so in its brief, which wins.`
       }
       case 'models': {
         const kinds = a1 ? [kindOf(a1)] : ['claude', 'codex', 'pi']
@@ -2750,7 +2767,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'doctor': {
         if (BOX) throw new Error(`shepherdr doctor checks every machine from the main one: run it there (${HOST} is run from it over SSH).`)
         const own = `${NAME} (this machine, the main one): herdr ${this.agents.reachable ? 'answers' : 'does not answer'}${this.browsers ? `; shared browser ${this.browsers.status().ready ? 'ready' : this.browsers.status().hint}` : ''}`
-        return [own, ...this.pushWarnings().map((warning) => `Alerts: ${warning}`), ...((await this.peers?.doctor()) ?? [])].join('\n')
+        return [own, ...this.pushWarnings().map((warning) => `Alerts: ${warning}`), ...((await this.peers?.doctor()) ?? []), ...(await this.places.doctor())].join('\n')
       }
       case 'secret': {
         if (a1 !== 'elevenlabs') return this.secretCommand(a1, rest, p, ctx)

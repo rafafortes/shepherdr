@@ -1,7 +1,7 @@
 // The shepherdr command: who may merge, choice cards, files, modes, adding projects.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -2764,5 +2764,37 @@ describe('pinned models, from the screen', () => {
     } finally {
       setPicks(NO_PICKS)
     }
+  })
+})
+
+describe('a space whose repo moved', () => {
+  test('is found again by its repo’s id: adding it at its new folder is that space, said plainly, with its own folder line', async () => {
+    const base = tmp('src-moved')
+    const dir = join(base, 'shop')
+    mkdirSync(dir)
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'shop')
+    expect(p.repoId).toBeTruthy()
+    const to = join(base, 'shop-renamed')
+    renameSync(dir, to)
+    const added = await src.cli(['space', 'add', to], {})
+    expect(added.code).toBe(0)
+    expect(added.out).toContain(`Found shop again at ${to} (its folder was ${dir}), by its repo: its name, tasks, chat and mode are as they were.`)
+    // and its coordinator was restarted in the folder the repo is in now (herdr isn't here, so the start itself fails)
+    expect(src.agents.record(placeId.space('shop'))?.cwd).toBe(to)
+    expect(src.places.byName('shop')!.path).toBe(to)
+    expect(src.places.spaces.filter((x) => x.name === 'shop').length).toBe(1)
+    // the space's own view says where it is, and where it was
+    const listed = await src.cli(['space', 'list'], {})
+    expect(listed.out).toContain(`${to}  (its repo moved here: it was ${dir})`)
+    const shown = await src.cli(['show', '--space', 'shop'], {})
+    expect(shown.out).toContain(`Folder: ${to}`)
+    expect(shown.out).toContain(`its repo moved here: it was ${dir}`)
+    // a name asked for is not taken: the space found again keeps the name it has, and the command says so
+    const again = await src.cli(['space', 'add', to, '--name', 'other'], {})
+    expect(again.out).toContain('shop is a space already')
+    renameSync(to, to + '-2')
+    const moved = await src.cli(['space', 'add', to + '-2', '--name', 'other'], {})
+    expect(moved.out).toContain('It keeps its name shop.')
   })
 })
