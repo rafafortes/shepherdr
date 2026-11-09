@@ -107,6 +107,34 @@ describe('a task is its brief and one agent', () => {
     expect(w.news.some((n) => n.includes('was added'))).toBe(true)
   })
 
+  test("a backup reviewer, where the human set one, is named in the brief's Reviewer line and changes nothing else", async () => {
+    const w = world()
+    const p = await w.places.add(repo(), 'reviewbackup')
+    const add = (title: string, set?: Record<string, string>) => w.engine.add({ project: p.name, title, desc: 'x', by: 'test', ...(set ? { set } : {}) })
+    // off by default: the Reviewer line is the one every brief has always had
+    const plain = add('Plain')
+    expect(plain.desc).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).\n')
+    expect(plain.desc).not.toContain('cannot run at all')
+    // Everywhere: the same line ends with who reviews instead, in the brief's own words
+    w.settings.set('reviewer.fallback', 'claude')
+    w.settings.set('reviewer.fallbackEffort', 'high')
+    expect(add('Everywhere').desc).toContain(
+      '- Reviewer: a headless Codex or a Codex subagent (its default model and effort). If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (its default model, high effort) instead and say in your summary that you did. (your setting for every machine)',
+    )
+    // a space's own wins over Everywhere's
+    w.settings.set('reviewer.fallback', 'pi', { space: p.name })
+    expect(add('Space').desc).toContain('review with a headless pi or a pi subagent (its default model, high effort) instead')
+    // the coordinator's --set for this one task wins over both, its model and effort included
+    const own = add('One task', { 'reviewer.fallback': 'claude', 'reviewer.fallbackModel': 'opus' })
+    expect(own.desc).toContain('review with a headless Claude Code or a Claude Code subagent (model claude-opus-5-5, high effort) instead and say in your summary that you did. (set by coordinator for this task)')
+    // what a review is stays as it was: the findings' bar and the rounds its agent counts
+    expect(own.desc).toContain('- Must fix: major. Findings are tagged critical/major/minor/trivial; fix critical and major, then review again.')
+    expect(own.desc).toContain('- Review rounds: 3. Stop when a round finds none to fix, at most 3 rounds.')
+    expect(own.rounds).toBe(3)
+    // and off again is off, at any level
+    expect(w.settings.reviewerBackup(p.name, { 'reviewer.fallback': 'off' })).toBeUndefined()
+  })
+
   test('a server with a home of its own makes no worktree, no branch and no space, and starts no agent', async () => {
     const w = world()
     const dir = repo()

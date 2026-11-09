@@ -1024,6 +1024,10 @@ describe('the brief\'s default way of working', () => {
     expect(setForTask('agent=codex')).toEqual({ flag: 'agent', value: 'codex' })
     expect(setForTask('reviewer=claude')).toEqual({ flag: 'reviewer', value: 'claude' })
     expect(setForTask('reviewer.effort=high')).toEqual({ flag: 'reviewer-effort', value: 'high' })
+    // a backup reviewer for this one task, its model and effort beside it
+    expect(setForTask('reviewer.fallback=pi')).toEqual({ key: 'reviewer.fallback', value: 'pi' })
+    expect(setForTask('reviewer.fallbackModel=opus')).toEqual({ key: 'reviewer.fallbackModel', value: 'opus' })
+    expect(setForTask('reviewer.fallback=qwen')).toMatchObject({ error: '--set reviewer.fallback: Pick one of: off · Codex · Claude Code · pi.' })
     expect(setForTask('merge=whenever')).toMatchObject({ error: expect.stringContaining('Pick one of') })
     expect(setForTask('colour=blue')).toMatchObject({ error: expect.stringContaining('--set takes key=value') })
   })
