@@ -81,6 +81,9 @@ export interface Place {
   /** Autopilot's Run now from this screen, on this machine's own places on Autopilot (never another machine's): 'ready'
    *  to wake its coordinator once, or the tap that waits ('queued') or whose wake runs ('waking'), where it is refused */
   runNow?: 'ready' | 'queued' | 'waking'
+  /** its coordinator runs on other than what Settings for coordinators say now (the comparison its chat's hint makes):
+   *  one of the coordinators `shepherdr restart --all` restarts, which the places list's own item counts */
+  restart?: boolean
 }
 
 /** A machine, as a heading over its spaces in the sidebar: no chat, nothing to open. How it is doing shows on it and in
@@ -976,6 +979,9 @@ export type Action =
   /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as
       Settings say for its role); save: as its space's Settings for its role too */
   | { type: 'restart'; chat: string; kind?: string; model?: string; effort?: string; save?: boolean }
+  /** every coordinator of this machine's spaces whose agent runs on other than what its Settings say now, each started
+   *  again as a single restart does (never a task's agent, never another machine's place): the lines, and the counts */
+  | { type: 'restart-all' }
   /** pin a model to the top of its CLI's lists (on: false unpins it), on the machine that owns this chat (its picks are
       the machine's own): the answer is that CLI's pins and recents there */
   | { type: 'model-pin'; chat: string; kind: string; model: string; on: boolean }

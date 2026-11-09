@@ -8,7 +8,7 @@ export interface Parsed {
   flags: Set<string>
 }
 
-const FLAGS = new Set(['ordinary', 'other', 'multi', 'json', 'project-coordinator', 'off', 'help', 'force', 'archived', 'machine', 'later', 'save'])
+const FLAGS = new Set(['ordinary', 'other', 'multi', 'json', 'project-coordinator', 'off', 'help', 'force', 'archived', 'machine', 'later', 'save', 'all'])
 
 export function parseArgs(args: string[]): Parsed {
   const words: string[] = []
@@ -157,6 +157,14 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
                                                  same CLI resumes its session; another takes over with the chat so
                                                  far (a task's: its brief, commits and changes too). Its worktree,
                                                  branch and waiting messages stay; a coordinator's tasks go on
+  shepherdr restart --all                        every coordinator of this machine's spaces whose Settings now say other
+                                                 than what its agent runs on, one per space, exactly as a restart
+                                                 above (a working one interrupted first); the ones already on it
+                                                 are left alone and counted. One space that fails never stops
+                                                 the others: one line each, the failures last, and the counts.
+                                                 It touches no task's agent (its brief was written when it
+                                                 started: shepherdr restart <id> is its own choice) and no
+                                                 other machine's space, and says so
 
 Task agents
   shepherdr todo <id>                            the brief says to wait for a go: show as To do until one comes

@@ -56,6 +56,37 @@ export function restartHint(on: Harness, set: Harness | undefined, want: Harness
   return { on: `${effortOf(on) || 'default'} effort`, want: `${effortOf(want) || 'default'} effort` }
 }
 
+/** one place's answer to `restart --all`, as the line it prints says it */
+export type RestartAllRow =
+  /** started again on `on`; interrupted: it was at work, and that turn was stopped first, as a single restart does */
+  | { name: string; state: 'restarted'; on: string; interrupted?: boolean }
+  /** left alone: its agent runs on what Settings say now; idle: it never started, so its first start will be on them */
+  | { name: string; state: 'same'; on: string; idle?: boolean }
+  /** it could not be restarted, and the ones after it were still tried */
+  | { name: string; state: 'failed'; error: string }
+
+/**
+ * `shepherdr restart --all`'s words: one line per space, the failures last and named, the counts, and what it never
+ * touches (a task's agent is its own to restart; another machine's places belong to that machine).
+ */
+export function restartAllWords(rows: RestartAllRow[], otherMachines: string[] = []): string {
+  const restarted = rows.filter((r): r is Extract<RestartAllRow, { state: 'restarted' }> => r.state === 'restarted')
+  const same = rows.filter((r) => r.state === 'same')
+  const failed = rows.filter((r): r is Extract<RestartAllRow, { state: 'failed' }> => r.state === 'failed')
+  const tasks = "Tasks are not restarted: a running task's brief was written when it started, and restarting its agent is its own choice (shepherdr restart <id>)."
+  const others = otherMachines.length ? `Another machine's spaces are not touched here: ${otherMachines.join(', ')}.` : ''
+  const tail = [tasks, others].filter(Boolean)
+  if (!restarted.length && !failed.length)
+    return [`Nothing new in the Settings of this machine's coordinators (${same.length}): nothing was restarted.`, ...tail].join('\n')
+  return [
+    ...restarted.map((r) => `${r.name}: restarted on ${r.on}${r.interrupted ? ', its working turn interrupted first' : ''}`),
+    ...same.map((r) => (r.idle ? `${r.name}: nothing running yet, so its next start is on ${r.on}` : `${r.name}: already on ${r.on}, left alone`)),
+    ...failed.map((r) => `${r.name}: could not restart: ${r.error}`),
+    `${restarted.length} restarted, ${same.length} already on it, ${failed.length} failed.`,
+    ...tail,
+  ].join('\n')
+}
+
 /** each CLI the sheet offers: its models (with the levels each takes) where Shepherdr passes them, the human's pinned
  *  ones first and the ones picked last next, then the CLI's own order. An older model it still takes by id stays on
  *  offer while it is pinned or was picked: a pin never drops out of the list it belongs to. picksOfKind: this machine's

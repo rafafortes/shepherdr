@@ -1,6 +1,6 @@
 // Minimal restart dialogs for both chat roles; the whole check runs these browser tests (`bun run check:local`).
 import { describe, expect, test } from 'bun:test'
-import { layout } from './layout.ts'
+import { layout, settled } from './layout.ts'
 
 const { browser, world, server } = await layout({ everything: true })
 
@@ -73,6 +73,74 @@ describe.skipIf(!browser)('restarting an agent', () => {
     await sheet.waitFor({ state: 'detached' })
     expect(world.chats[p.chat].messages.filter((m) => m.card?.restart).length).toBe(cards)
     await ctx.close()
+  }, 30_000)
+
+  // Every coordinator on new Settings from the places list's own menu: one action, one answer in the row itself, its
+  // label carrying how many it will touch, and no task's agent.
+  const newSettings = () => {
+    for (const c of Object.values(world.chats)) c.restart = undefined
+    world.chats['p:vm-str:gtm'].restart = { on: 'Claude Code', want: 'Codex' }
+    world.chats['p:vm-str:herdr-projects'].restart = { on: 'Claude Code', want: 'pi' }
+    world.chats['HP-204/Agent'].restart = { on: 'Claude Code', want: 'Codex' }
+    world.emit('snapshot')
+  }
+
+  test("this machine's menu restarts every coordinator on new Settings, its label carrying how many, and no task's agent", async () => {
+    newSettings()
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
+      await page.waitForSelector('#places li')
+      // another machine's menu has no such item: its coordinators are its own to restart
+      const mac = page.locator('#places li[data-heading="m:mac"]')
+      await mac.hover()
+      await mac.getByRole('button', { name: 'More for mac' }).click()
+      expect(await page.getByRole('menuitem', { name: /Restart/ }).count()).toBe(0)
+      await page.keyboard.press('Escape')
+      const mine = page.locator('#places li[data-heading="m:vm-str"]')
+      await mine.hover()
+      await mine.getByRole('button', { name: 'More for vm-str' }).click()
+      // the two whose chat says Settings moved; the task's agent that also differs is no coordinator
+      const item = page.getByRole('menuitem', { name: 'Restart 2 coordinators', exact: true })
+      await item.waitFor()
+      const taskCards = world.chats['HP-204/Agent'].messages.filter((m) => m.card?.restart).length
+      await item.click()
+      await page.getByRole('menuitem', { name: 'Restarted 2', exact: true }).waitFor()
+      expect(world.chats['p:vm-str:gtm'].messages.at(-1)?.card).toMatchObject({ restart: true, text: 'Restarted on Codex' })
+      expect(world.chats['p:vm-str:herdr-projects'].messages.at(-1)?.card).toMatchObject({ restart: true, text: 'Restarted on pi' })
+      // the card in each chat, the task's agent left as it was, and nothing left to count
+      expect(world.chats['HP-204/Agent'].messages.filter((m) => m.card?.restart).length).toBe(taskCards)
+      expect(world.chats['HP-204/Agent'].restart).toMatchObject({ want: 'Codex' })
+      expect(world.snapshot().places.filter((p) => p.restart)).toEqual([])
+    } finally {
+      await page.close()
+    }
+  }, 30_000)
+
+  test('a phone: the same item in the machine\'s menu, one tap, its answer in the row', async () => {
+    newSettings()
+    const ctx = await browser!.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    const page = await ctx.newPage()
+    try {
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
+      await page.getByRole('button', { name: 'Places' }).first().click()
+      const nav = 'nav[aria-label="Places"]'
+      const heading = page.locator(`${nav} li[data-heading="m:vm-str"]`)
+      await heading.waitFor()
+      await settled(page)
+      // a finger holds the machine's heading: its menu, with the coordinators' restart on it
+      const box = (await heading.boundingBox())!
+      const cdp = await ctx.newCDPSession(page)
+      const pt = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [pt] })
+      await page.waitForTimeout(700)
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      await page.getByRole('menuitem', { name: 'Restart 2 coordinators', exact: true }).tap()
+      await page.getByRole('menuitem', { name: 'Restarted 2', exact: true }).waitFor()
+      expect(world.chats['p:vm-str:gtm'].messages.at(-1)?.card).toMatchObject({ restart: true, text: 'Restarted on Codex' })
+    } finally {
+      await ctx.close()
+    }
   }, 30_000)
 
   test('saving defaults is optional, scoped to the role, and sent only when selected', async () => {

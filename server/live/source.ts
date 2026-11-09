@@ -43,7 +43,7 @@ import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
 import { privatePrompt, coordinatorPrompt, backupCardWords, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
-import { fitHarness, harnessProblem, harnessWords, recentChat, restartHint, restartInfo, type Harness } from './restart.ts'
+import { fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, type Harness, type RestartAllRow } from './restart.ts'
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
@@ -423,6 +423,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       ...(this.runNow(id) ? { runNow: this.runNow(id) } : {}),
       // herdr gone: this machine's chats say so plainly
       ...(up ? {} : { herdrDown: clock(this.agents.lastReach) }),
+      // a coordinator Settings moved away from: what the places list's "Restart n coordinators" counts
+      ...(this.restartHintOf(id) ? { restart: true } : {}),
     }))
     for (const l of peers) {
       const m = l.snap?.machines?.find((x) => x.machine === l.rec.machine) ?? { id: placeId.machine(l.rec.machine), machine: l.rec.machine, name: l.rec.machine, status: 'idle' as const }
@@ -1094,6 +1096,51 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     } catch {
       return undefined
     }
+  }
+
+  /**
+   * `shepherdr restart --all` and the places list's own item: every coordinator of this machine's places whose agent
+   * runs on other than what its Settings say now (the very comparison a chat's hint makes), one at a time and exactly
+   * as a single restart does, never stopping at one that fails. A task's agent is its own to restart, and another
+   * machine's coordinator belongs to its machine: neither is touched here, and the words say so.
+   */
+  private async restartAllCoordinators() {
+    const rows: RestartAllRow[] = []
+    for (const p of this.placeList()) {
+      // another machine's place: its own coordinator's to restart
+      if (this.peers?.owner(p.id)) continue
+      // nothing to restart: it agrees, or it was never started (its first start will be on what Settings say)
+      if (!this.restartHintOf(p.chat)) {
+        try {
+          const on = harnessWords(fitHarness(this.restartable(p.chat).on))
+          rows.push({ name: p.name, state: 'same', on, ...(this.agents.record(p.chat) ? {} : { idle: true }) })
+        } catch (e) {
+          rows.push({ name: p.name, state: 'failed', error: (e as Error).message })
+        }
+        continue
+      }
+      // a turn at work is stopped first, inside the same restart a single one runs: the line says it was
+      const interrupted = this.agents.status(p.chat) === 'working'
+      try {
+        const on = await this.restart(p.chat, {})
+        rows.push({ name: p.name, state: 'restarted', on, ...(interrupted ? { interrupted } : {}) })
+      } catch (e) {
+        rows.push({ name: p.name, state: 'failed', error: (e as Error).message })
+      }
+    }
+    const count = (state: RestartAllRow['state']) => rows.filter((r) => r.state === state).length
+    // the ones that could not, by name: the row in the app says which beside the count (the full lines go to the CLI)
+    const failures = rows.filter((r): r is Extract<RestartAllRow, { state: 'failed' }> => r.state === 'failed').map((r) => r.name)
+    return { out: restartAllWords(rows, this.otherMachines()), restarted: count('restarted'), same: count('same'), failed: failures.length, failures }
+  }
+
+  /** the other machines' places, named for `restart --all`: theirs are not restarted from here */
+  private otherMachines() {
+    return (this.peers?.list() ?? []).map((l) => {
+      const name = l.snap?.machines?.find((x) => x.machine === l.rec.machine)?.name ?? l.rec.machine
+      const places = (l.snap?.places ?? []).filter((x) => !x.home).map((x) => x.name)
+      return places.length ? `${name} (${places.join(', ')})` : name
+    })
   }
 
   /** start a coordinator or a task's agent again, on Settings' CLI, model and effort or these; save: as its space's
@@ -1930,6 +1977,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           const kind = kindOf(a.kind)
           if (!kind) return { ok: false, error: `No CLI called ${a.kind}.` }
           return { ok: true, on: await this.restart(a.chat, { kind, model: a.model ?? '', effort: a.effort ?? '' }, !!a.save) }
+        } catch (e) {
+          return { ok: false, error: (e as Error).message }
+        }
+      }
+      case 'restart-all': {
+        try {
+          return { ok: true, ...(await this.restartAllCoordinators()) }
         } catch (e) {
           return { ok: false, error: (e as Error).message }
         }
@@ -3301,10 +3355,20 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     throw new Error('shepherdr task add|list|show|tell|queue|stop|close|archive|unarchive|pin|unpin|pause|review-more|merge|delete')
   }
 
-  /** shepherdr restart <space|id> [--agent CLI] [--model ID] [--effort LEVEL] [--save]: a task's agent restarts only
-   *  its own task's */
+  /** shepherdr restart <space|id> [--agent CLI] [--model ID] [--effort LEVEL] [--save], or --all: every coordinator of
+   *  this machine's spaces whose Settings changed; a task's agent restarts only its own task's */
   private async restartCommand(target: string | undefined, p: Parsed, ctx: { chat?: string }) {
-    const usage = 'shepherdr restart <space|task id> [--agent CLI] [--model ID] [--effort LEVEL] [--save]'
+    const usage = 'shepherdr restart <space|task id> [--agent CLI] [--model ID] [--effort LEVEL] [--save], or shepherdr restart --all'
+    if (p.flags.has('all')) {
+      const extra = [...Object.keys(p.opts), ...[...p.flags].filter((f) => f !== 'all')]
+      if (target) throw new Error(`--all restarts every coordinator of this machine's spaces on what its Settings say, so it takes no space or task, not ${target}: shepherdr restart --all`)
+      if (extra.length)
+        throw new Error(`--all restarts every coordinator of this machine's spaces on what its Settings say, so it takes no --${extra[0]} of its own: shepherdr restart --all`)
+      if (ctx.chat?.includes('/')) throw new Error("A task's agent restarts only its own agent; ask your coordinator or the human for --all.")
+      const r = (await this.act({ type: 'restart-all' })) as { ok: boolean; error?: string; out?: string }
+      if (!r.ok || !r.out) throw new Error(r.error ?? 'The coordinators could not be restarted.')
+      return r.out
+    }
     const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => !['agent', 'model', 'effort', 'save'].includes(f))
     if (!target || odd.length) throw new Error(odd.length ? `Restart takes no --${odd[0]}: ${usage}` : usage)
     const t = this.engine.task(target)

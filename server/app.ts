@@ -164,6 +164,9 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
         }
         if (path === '/api/action' && req.method === 'POST') {
           const a = (await req.json()) as Action
+          // one restart of every coordinator can outlast the idle cut-off (each turn that has to stop, each launch
+          // that retries): its answer is the count the row shows, so it gets no cut-off, as the command does
+          if (a.type === 'restart-all') srv.timeout(req, 0)
           return json((await source.act(a)) ?? {})
         }
         // an artifact: its page wrapped for a sealed frame, its data alone (pushed into open frames when only that

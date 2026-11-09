@@ -52,6 +52,20 @@ Every agent, coordinator or task agent, gets the same chat.
   from then on (the arrow keys reach it too, and Enter pins). Pins and recent picks belong to this machine, kept in
   `~/.shepherdr/model-picks.json`, never in a browser, so every device sees the same ones; Settings' model rows show
   them first too.
+- Changing Settings never restarts a running agent: it goes on the CLI, model and effort it started with, and the
+  restart sheet opens with what it runs on beside what Settings say now. A restart is one you run: its ⋯ (Restart
+  agent…) or `shepherdr restart <space|task id>` — the same CLI resumes its session, another takes the chat over with
+  the chat so far, a working agent's turn is interrupted first, and a card in the chat says what it is on.
+- One setting changed for every space is still one action. This machine's ⋯ in the places list carries the count —
+  Restart 3 coordinators, and it is there only while some coordinator's Settings moved — and runs it, its answer in the
+  row itself (the count, and the spaces that failed by name); `shepherdr restart --all` does the same from a terminal:
+  every coordinator of this machine's spaces whose Settings now say other than what its agent ran on when it started
+  (why a chat whose own pick differs while Settings did not move is left alone), one restart each exactly as above, one
+  line per space (what it runs on and that it was left alone, counted; the failures last and named), and one space that
+  fails never stops the others. It touches no task's agent — a running task's brief was
+  written when it started, so restarting its agent is its own choice (`shepherdr restart SHE-12`) — and no other
+  machine's space, whose coordinators are that machine's and its own command's; it says both in its answer. `--all`
+  takes no space and no CLI, model or effort of its own: each coordinator goes on what its Settings say.
 - A slash command you type (`/clear`, `/new`, `/compact`, `/model sonnet`, a custom one) goes into the agent's CLI as
   you typed it, once its turn is over, and the CLI runs it. The chat shows it as you typed it, and what the CLI printed
   as its answer. After `/clear` or `/new` a quiet New session line starts the new session, whose log the chat reads
