@@ -60,7 +60,21 @@ export async function repoId(path: string): Promise<string | null> {
 export async function ensureRepoId(path: string): Promise<RepoIdentity | null> {
   const ident = await repoIdentity(path)
   if (!ident || !ident.own || ident.id) return ident
+  return { ...ident, id: (await writeRepoId(ident.top)) ?? null }
+}
+
+/**
+ * A new id for a repo that already carries one — a copy of a space's repo keeps the id in the .git/config it was
+ * copied with, and two repos with one id could not be told apart. Only its own checkout is written to, as above.
+ */
+export async function freshRepoId(path: string): Promise<RepoIdentity | null> {
+  const ident = await repoIdentity(path)
+  if (!ident || !ident.own) return ident
+  return { ...ident, id: (await writeRepoId(ident.top)) ?? null }
+}
+
+async function writeRepoId(top: string): Promise<string | null> {
   const made = randomUUID()
-  const r = await git(ident.top, 'config', '--local', REPO_ID, made)
-  return { ...ident, id: r.ok ? made : null }
+  const r = await git(top, 'config', '--local', REPO_ID, made)
+  return r.ok ? made : null
 }

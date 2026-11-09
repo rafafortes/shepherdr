@@ -3,7 +3,7 @@
 // repos under /tmp, each test in a Shepherdr home of its own.
 import { describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -128,6 +128,64 @@ describe('a space', () => {
     expect(places.spaces.length).toBe(1)
   })
 
+  test('reached through a symlink after its folder was renamed is found again at the folder itself', async () => {
+    const places = world()
+    const dir = repo()
+    const p = await places.add(dir, 'shop')
+    // the host's own story: the folder renamed, and the old name left as a link to it
+    const real = beside(dir, 'shop-real')
+    renameSync(dir, real)
+    symlinkSync(real, dir)
+    expect(existsSync(dir)).toBe(true)
+    const found = await places.add(real)
+    expect(found.name).toBe(p.name)
+    expect(found.path).toBe(real)
+    expect(found.was).toBe(dir)
+    expect(places.spaces.length).toBe(1)
+  })
+
+  test('copied with its .git (cp -a) is a new space of its own, never the space it was copied from', async () => {
+    const places = world()
+    const dir = repo()
+    const p = await places.add(dir, 'shop')
+    const copy = beside(dir, 'shop-copy')
+    cpSync(dir, copy, { recursive: true })
+    // the copy brings the id in its .git/config
+    expect(await repoId(copy)).toBe(p.repoId!)
+    const made = await places.add(copy)
+    expect(made.name).toBe('shop-copy')
+    expect(made.path).toBe(copy)
+    expect(places.spaces.length).toBe(2)
+    // the space it was copied from is where it was, and the two carry an id each: no move, and nothing to confuse
+    expect(places.spaces.find((x) => x.name === 'shop')!.path).toBe(dir)
+    expect(places.spaces.find((x) => x.name === 'shop')!.repoId).toBe(p.repoId)
+    expect(made.repoId).toBeTruthy()
+    expect(made.repoId).not.toBe(p.repoId)
+    expect(await repoId(copy)).toBe(made.repoId!)
+  })
+
+  test('a worktree of a space whose folder is gone is refused too: the repo is that space', async () => {
+    const places = world()
+    const dir = repo()
+    const p = await places.add(dir, 'shop')
+    const real = beside(dir, 'shop-real')
+    renameSync(dir, real)
+    // a worktree made from the renamed repo (git worktree repair leaves exactly this on a repaired one)
+    const wt = beside(real, 'worktree')
+    sh(`git worktree add -q ${JSON.stringify(wt)}`, real)
+    let error = ''
+    try {
+      await places.add(wt)
+    } catch (e) {
+      error = (e as Error).message
+    }
+    expect(error).toContain('shop already')
+    expect(places.spaces.length).toBe(1)
+    expect(places.spaces[0]!.path).toBe(dir)
+    // and the repo itself is found again, so nothing is stuck
+    expect((await places.add(real)).path).toBe(real)
+  })
+
   test('of a worktree, a copy that shares its .git, is refused: it is the space already and never a second one', async () => {
     const places = world()
     const dir = repo()
@@ -196,6 +254,15 @@ describe('the doctor', () => {
     expect(places.spaces[0]!.repoId).toBe(id)
   })
 
+  test('says when a folder is there but is no longer a git repository', async () => {
+    const places = world()
+    const p = await places.add(repo(), 'shop')
+    rmSync(join(p.path, '.git'), { recursive: true, force: true })
+    const said = (await places.doctor()).join('\n')
+    expect(said).toContain(`shop: ${p.path} is no longer a git repository`)
+    expect(said).toContain('comes back as this space')
+  })
+
   test('says a folder is gone, and how adding the repo again finds the space', async () => {
     const places = world()
     const p = await places.add(repo(), 'shop')
@@ -207,20 +274,24 @@ describe('the doctor', () => {
 })
 
 describe('a space found again', () => {
-  test('moves no folder: a task’s worktree stays where it was made', async () => {
+  test('moves no folder: a task’s worktree stays where it was made, as it was', async () => {
     const places = world()
     const p = await places.add(repo(), 'shop')
-    // herdr makes a task's worktree next to the space's folder; what a task keeps is its own path
+    // herdr makes a task's worktree next to the space's folder on its own branch; what a task keeps is its own path
     const wt = beside(p.path, 'work-1-shop')
-    mkdirSync(wt)
+    sh(`git worktree add -q -b work/1-shop ${JSON.stringify(wt)}`, p.path)
     writeFileSync(join(wt, 'task.txt'), 'the work of SHE-1')
+    const link = readFileSync(join(wt, '.git'), 'utf8')
     const was = p.path
     const to = beside(was, 'shop-renamed')
     renameSync(was, to)
     const found = await places.add(to)
     expect(found.path).toBe(to)
-    // the worktree is where it was, with what it had, and nothing new appeared beside it
+    // the worktree is where it was, with what it had, and nothing new appeared beside it: this code moves none of it
+    // (git's own links point at the folder it was made in, so the person's `git worktree repair` is what puts them
+    // straight after a rename — never this)
     expect(readFileSync(join(wt, 'task.txt'), 'utf8')).toBe('the work of SHE-1')
+    expect(readFileSync(join(wt, '.git'), 'utf8')).toBe(link)
     expect(readdirSync(join(to, '..')).sort()).toEqual(['shop-renamed', 'work-1-shop'])
   })
 })

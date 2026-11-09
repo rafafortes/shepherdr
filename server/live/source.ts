@@ -886,17 +886,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** a repo becomes a space: its own herdr space, with its coordinator in it; `found`: this add found an existing
    *  space again, by its repo's id, at the folder the repo is in now */
-  private async addAsSpace(path: string, name?: string): Promise<{ space: Space; found: boolean }> {
-    const added = { found: false }
+  private async addAsSpace(path: string, name?: string): Promise<{ space: Space; found: boolean; existing: boolean; moved: boolean }> {
+    const added: { found?: boolean; existing?: boolean } = {}
     const pr = await this.places.add(path, name, added)
     const id = placeId.space(pr.name)
-    // its repo found again elsewhere here: its coordinator works in the folder it is in now, unless it is mid-turn (it
-    // keeps its turn, and the space's own folder is what its commands use)
-    if (added.found && !['working', 'blocked'].includes(this.agents.status(id)))
-      this.coordinator(id, { restart: async () => undefined }).catch(() => undefined)
+    // its repo found again elsewhere here: its coordinator works in the folder it is in now — unless it is mid-turn,
+    // which it finishes where it is (the space's own folder is what its commands use from now on)
+    const busy = ['working', 'blocked'].includes(this.agents.status(id))
+    if (added.found && !busy) this.coordinator(id, { restart: async () => undefined }).catch(() => undefined)
     else this.coordinator(id).catch(() => undefined)
     this.emit('snapshot')
-    return { space: pr, found: added.found }
+    return { space: pr, found: !!added.found, existing: !!added.existing, moved: !!added.found && busy }
   }
 
   /**
@@ -2497,10 +2497,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (a1 === 'add') {
           const path = rest[0] ?? ctx.cwd
           if (!path) throw new Error('shepherdr space add <path> [--name NAME]')
-          const { space: pr, found } = await this.addAsSpace(path, one(p, 'name'))
+          const asked = one(p, 'name')
+          const { space: pr, found, existing, moved } = await this.addAsSpace(path, asked)
           const named = this.places.nameOf(placeId.space(pr.name)) ?? pr.name
-          if (found && pr.was)
-            return `Found ${named} again at ${pr.path} (its folder was ${pr.was}), by its repo's id: its name, tasks, chat and mode are as they were.`
+          // a name asked for that the space already has does not take: say so, so it is not taken for the name it has
+          const keeps = asked && asked !== pr.name ? ` It keeps its name ${named}.` : ''
+          if (found && pr.was) {
+            const turn = moved ? ` Its coordinator finishes its turn where it is: Restart agent in its row's menu puts it in the new folder.` : ''
+            return `Found ${named} again at ${pr.path} (its folder was ${pr.was}), by its repo's id: its name, tasks, chat and mode are as they were.${keeps}${turn}`
+          }
+          if (existing) return `${named} is a space already (${pr.path}), with its tasks and chat.${keeps}`
           return `Added ${named} (${pr.path}) as a space; its tasks are ${pr.key}-1, ${pr.key}-2, …${pr.github ? ` GitHub: ${pr.github}.` : ' No GitHub remote: tasks merge here.'}`
         }
         if (a1 === 'list' || !a1)
