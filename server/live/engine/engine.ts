@@ -413,7 +413,7 @@ export class Engine extends Emitter<Events> {
   retry?: (key: string) => Retry | undefined
   /** its backup took over for a reason waiting can't fix: the primary Settings name is what the human may want back
    *  (source.ts keeps it, and asks it later whether it answers again) */
-  noteTookOver?: (t: TaskRec, to: Harness, why: string) => void
+  noteTookOver?: (t: TaskRec, ran: Harness, to: Harness, why: string) => void
   /** its backup agent is taking over */
   private handing = new Set<string>()
   /** chats whose last start never became a turn (start.ts): when it failed and the words it shows, so a relaunch loop
@@ -1574,6 +1574,8 @@ export class Engine extends Emitter<Events> {
     const rec = this.agents.record(key)
     const from = rec?.kind ?? t.agent?.kind ?? ''
     const space = this.nameOf(t)
+    // the harness its agent really ran on: its own (task add --agent) where it has one, else what Settings name
+    const ran: Harness = rec ? { kind: rec.kind, model: rec.model, effort: rec.effort } : (t.agent ?? this.settings.harness('task', space))
     // what this task keeps for itself (task add --set) first, then its space's settings, its machine's and Everywhere's
     const plan = this.backupFor('task', space, t.set)
     // its backup took over once already: a takeover that keeps failing is the human's, not a loop
@@ -1607,7 +1609,7 @@ export class Engine extends Emitter<Events> {
       // written must never undo the takeover that just went in
       if (lasting)
         try {
-          this.noteTookOver?.(t, h, t.tookOver.why)
+          this.noteTookOver?.(t, ran, h, t.tookOver.why)
         } catch (e) {
           console.error(`shepherdr: couldn't keep that ${t.id} runs on a backup: ${(e as Error).message}`)
         }

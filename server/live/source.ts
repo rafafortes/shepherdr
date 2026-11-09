@@ -239,9 +239,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.engine.on('changed', () => this.emit('snapshot'))
     this.engine.retry = (key) => this.retries.get(key)
     // a task's backup went in for a reason waiting can't fix: what the primary may answer again to (return.ts)
-    this.engine.noteTookOver = (t, to, why) => {
+    this.engine.noteTookOver = (t, ran, to, why) => {
       const space = this.places.space(t.project)?.name
-      if (space) this.returns.note({ role: 'task', space, primary: this.settings.harness('task', space), to, why, at: Date.now() })
+      if (!space) return
+      const primary = this.settings.harness('task', space)
+      // only a role whose agent ran the harness Settings name: one of its own (`task add --agent …`) that ran out is no
+      // primary coming back — a restart would take it to Settings' pair, not to what it ran
+      if (sameHarness(ran, primary)) this.returns.note({ role: 'task', space, primary, to, why, at: Date.now() })
     }
     this.artifacts.migratePages(
       (chat) => (chat.includes('/') ? (this.engine.task(chat.split('/')[0])?.project ?? placeId.home()) : chat),
@@ -1407,11 +1411,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now() })
       try {
         await this.restartCoordinator(key, on, why)
-        // a lasting one: the primary it ran out of is what the watch asks about later (return.ts). A note that can't be
-        // written must never undo the takeover that just went in
-        if (r.lasting)
+        // a lasting one: the primary it ran out of is what the watch asks about later (return.ts), and only while it ran
+        // what Settings name. A note that can't be written must never undo the takeover that just went in
+        const space = this.spaceKey(key) ?? ''
+        const primary = this.settings.harness('coordinator', space || undefined)
+        if (r.lasting && sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, primary))
           try {
-            this.returns.note({ role: 'coordinator', space: this.spaceKey(key) ?? '', primary: this.settings.harness('coordinator', this.spaceKey(key) || undefined), to: on, why, at: Date.now() })
+            this.returns.note({ role: 'coordinator', space, primary, to: on, why, at: Date.now() })
           } catch (e) {
             console.error(`shepherdr: couldn't keep that ${key} runs on a backup: ${(e as Error).message}`)
           }
@@ -1446,6 +1452,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   async watchReturns(now = Date.now()) {
     if (this.probing || this.working()) return
     this.noteReviewer(now)
+    /** the roles this pass already alerted for: a reviewer set Everywhere is one news, not one per space */
+    const alerted = new Set<string>()
     for (const o of this.returns.list()) {
       if (o.back || (o.due ?? 0) > now) continue
       if (this.settings.get('backup.watchReturn', o.space || undefined) !== 'on') continue
@@ -1476,7 +1484,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         continue
       }
       this.returns.answered(o.role, o.space, now)
-      this.sayBack(o, to)
+      this.sayBack(o, to, !alerted.has(o.role))
+      alerted.add(o.role)
     }
   }
 
@@ -1502,10 +1511,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (had) this.returns.forget('reviewer', p.name)
         continue
       }
-      // one whose backup reviewer or primary was set differently since: a new record, so a later recovery is a card of
-      // its own (one already told about, set the same way, stays quiet)
-      if (had && (!sameHarness(had.to, backup!) || !sameHarness(had.primary, primary))) this.returns.forget('reviewer', p.name)
+      // another backup reviewer than the one it was told about: a new record, so a later recovery is a card of its own
+      // (one already told about, set the same way, stays quiet). The primary set differently since is only what it will
+      // be asked about now: a primary changed by hand never failed, so it is no card on its own
+      if (had && !sameHarness(had.to, backup!)) this.returns.forget('reviewer', p.name)
       if (!this.returns.get('reviewer', p.name)) this.returns.note({ role: 'reviewer', space: p.name, primary, to: backup, why: 'a backup reviewer is set', at: now })
+      else this.returns.retarget('reviewer', p.name, primary)
     }
   }
 
@@ -1540,7 +1551,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** its primary answered: one card in each chat still on the backup, and an alert; the card names the way back */
-  private sayBack(o: Outage, to: { primary: Harness; chats: { key: string; task?: string }[] }) {
+  private sayBack(o: Outage, to: { primary: Harness; chats: { key: string; task?: string }[] }, alert = true) {
     const id = `back:${o.role}:${o.space}:${o.at}`
     // the name the space shows ('~' is a home space), which is what the restart command takes too
     const shown = this.places.nameOf(o.space === '~' ? placeId.home() : placeId.space(o.space)) ?? o.space
@@ -1551,6 +1562,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (this.watched.includes(c.key)) this.emit('chat', c.key)
     }
     const first = to.chats[0]
+    if (!alert) return
     this.alert({ id: randomUUID(), from: 'Shepherdr', title: 'The primary model answers again', body: words(first).slice(0, 200), go: { place: first.key, focus: id }, tag: `back:${o.role}:${o.space}:${o.at}`, ...(first.task ? { task: true as const } : {}) })
   }
 

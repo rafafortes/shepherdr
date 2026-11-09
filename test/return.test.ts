@@ -150,6 +150,27 @@ describe('what ran out is remembered', () => {
   })
 })
 
+describe('what a takeover of its own is not', () => {
+  test("a task on its own agent is no primary coming back, and is never recorded", async () => {
+    const s = await space('own-agent')
+    try {
+      expect(s.src.settings.set('task.fallback', 'codex', { space: s.p.name }).ok).toBe(true)
+      // the task runs pi of its own (task add --agent), where Settings name Claude Code for tasks
+      const { t } = task(s.p.name, 'pi')
+      ;(t as { agent?: { kind: string } }).agent = { kind: 'pi' }
+      t.worktree = tmp('return-wt')
+      await s.src.engine.cantGoOn(t.id, 'Signed out', true)
+      expect(t.tookOver).toMatchObject({ to: 'codex' })
+      // what would come back is Settings' Claude Code, which this task never ran: a restart takes it there, and that is
+      // the chat's restart hint, not a notice
+      expect(s.src.returns.list()).toEqual([])
+    } finally {
+      s.src.settings.set('task.fallback', null, { space: s.p.name })
+      s.done()
+    }
+  })
+})
+
 describe('when the primary answers again', () => {
   test("one card per chat still on the backup, each naming its own way back, and none the second time", async () => {
     const s = await space('back-tasks')
@@ -234,6 +255,50 @@ describe('when the primary answers again', () => {
     }
   })
 
+  test('a primary reviewer set again by hand is no card: only the backup it fell back to is a recovery', async () => {
+    const s = await space('back-primary')
+    try {
+      expect(s.src.settings.set('reviewer.model', 'GPT-6-Sol', { space: s.p.name }).ok).toBe(true)
+      expect(s.src.settings.set('reviewer.fallback', 'pi', { space: s.p.name }).ok).toBe(true)
+      coordinator(s.key, 'claude')
+      await s.src.watchReturns(later())
+      await s.src.watchReturns(later() + FIRST_WAIT * 2)
+      expect(cards(s.key)).toHaveLength(1)
+      // the human tries another primary model while the backup reviewer stays: nothing failed that new model, so no card
+      expect(s.src.settings.set('reviewer.model', 'GPT-6.1-Sol', { space: s.p.name }).ok).toBe(true)
+      await s.src.watchReturns(later() + 3_600_000)
+      await s.src.watchReturns(later() + 3_600_000 + FIRST_WAIT * 2)
+      expect(cards(s.key)).toHaveLength(1)
+      expect(asked).toEqual(['codex gpt-6-sol'])
+    } finally {
+      for (const k of ['reviewer.fallback', 'reviewer.model']) s.src.settings.set(k, null, { space: s.p.name })
+      s.done()
+    }
+  })
+
+  test('one backup reviewer set Everywhere is one alert, and one card in each space', async () => {
+    const a = await space('back-everywhere-a')
+    const b = await space('back-everywhere-b')
+    try {
+      for (const p of [a.p, b.p]) {
+        expect(a.src.settings.set('reviewer.model', 'GPT-6-Sol', { space: p.name }).ok).toBe(true)
+        expect(a.src.settings.set('reviewer.fallback', 'pi', { space: p.name }).ok).toBe(true)
+      }
+      coordinator(a.key, 'claude')
+      coordinator(b.key, 'claude')
+      await a.src.watchReturns(later())
+      await a.src.watchReturns(later() + FIRST_WAIT * 2)
+      expect(cards(a.key)).toHaveLength(1)
+      expect(cards(b.key)).toHaveLength(1)
+      // one news for the human, not one per space
+      expect(alerts.map((x) => x.title)).toEqual(['The primary model answers again'])
+    } finally {
+      for (const p of [a.p, b.p]) for (const k of ['reviewer.fallback', 'reviewer.model']) a.src.settings.set(k, null, { space: p.name })
+      b.done()
+      a.done()
+    }
+  })
+
   test('a reviewer whose backup is the same harness is never asked', async () => {
     const s = await space('back-same')
     try {
@@ -288,7 +353,7 @@ describe('when the primary still does not answer', () => {
     expect(wait(0)).toBeLessThanOrEqual(FIRST_WAIT * 1.2)
     expect(wait(20)).toBeGreaterThanOrEqual(LONGEST_WAIT * 0.8)
     expect(wait(20)).toBeLessThanOrEqual(LONGEST_WAIT * 1.2)
-    // a fifth either side, never the same moment for two roles
+    // a fifth either side, so two roles rarely fall due together
     expect(wait(0, 0)).toBe(FIRST_WAIT * 0.8)
     expect(wait(0, 1)).toBe(FIRST_WAIT * 1.2)
   })

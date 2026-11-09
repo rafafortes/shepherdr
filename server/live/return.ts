@@ -40,7 +40,7 @@ export const FIRST_WAIT = 30 * 60_000
 export const LONGEST_WAIT = 4 * 3_600_000
 /** how long one probe may take before it is killed: a provider that answers answers at once */
 export const PROBE_TIMEOUT = 45_000
-/** a fifth either side of the wait, so the probes of a machine's roles drift apart instead of falling due together */
+/** a fifth either side of the wait, so two roles rarely fall due together (when they do, the probes are taken one by one) */
 const JITTER = 0.2
 
 /** the one line a probe asks: the shortest that proves the provider answers */
@@ -133,13 +133,27 @@ export async function probeHarness(h: Harness, timeoutMs = PROBE_TIMEOUT): Promi
   } catch (e) {
     return { ok: false, said: (e as Error).message }
   }
-  const timer = setTimeout(() => p.kill(), timeoutMs)
+  // the timeout is the whole call's, not only the CLI's own life: a grandchild holding its pipes open must not keep the
+  // watch waiting (and so never dead)
+  let late: ReturnType<typeof setTimeout> | undefined
+  const timer = setTimeout(() => p.kill(9), timeoutMs)
+  const gaveUp = new Promise<undefined>((r) => {
+    late = setTimeout(() => r(undefined), timeoutMs + 2_000)
+  })
   try {
-    const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()])
-    const code = await p.exited
-    return { ok: code === 0, said: `${out}${err}`.replace(/\s+/g, ' ').trim().slice(0, 200) }
+    const read = (async () => {
+      const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()])
+      return { out, err, code: await p.exited }
+    })()
+    const got = await Promise.race([read.catch((e: Error) => ({ failed: e })), gaveUp])
+    if (!got) return { ok: false, said: 'timed out' }
+    if ('failed' in got) return { ok: false, said: got.failed.message }
+    return { ok: got.code === 0, said: `${got.out}${got.err}`.replace(/\s+/g, ' ').trim().slice(0, 200) }
+  } catch (e) {
+    return { ok: false, said: (e as Error).message }
   } finally {
     clearTimeout(timer)
+    clearTimeout(late)
   }
 }
 
@@ -176,6 +190,14 @@ export class Returns {
     if (!o) return
     o.back = at
     o.due = undefined
+    this.save()
+  }
+
+  /** what it would come back to, set again while it has not answered yet (no new card by that alone) */
+  retarget(role: ReturnRole, space: string, primary: Harness) {
+    const o = this.get(role, space)
+    if (!o || o.back) return
+    o.primary = fitHarness(primary)
     this.save()
   }
 
