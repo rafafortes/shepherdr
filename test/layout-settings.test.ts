@@ -89,11 +89,21 @@ describe.skipIf(!browser)('chat agent choices', () => {
       await settings.getByRole('button', { name: 'Agents', exact: true }).click()
       expect(await settings.textContent()).toContain('other installed CLIs cannot show replies here')
       expect(await settings.textContent()).toContain('Headless review is separate')
-      for (const group of ['Tasks', 'Coordinators', 'Backup']) {
+      for (const group of ['Tasks', 'Coordinators']) {
         await settings.getByRole('heading', { name: group, exact: true }).locator('..').getByRole('button', { name: /^Agent:/ }).click()
         const choices = await page.getByRole('menuitemradio').allTextContents()
         // the one it is on leads the list
-        expect(choices.map((v) => v.trim())).toEqual(group === 'Backup' ? ['Codex', 'Off', 'Claude Code', 'Pi'] : ['Claude Code', 'Codex', 'Pi'])
+        expect(choices.map((v) => v.trim())).toEqual(['Claude Code', 'Codex', 'Pi'])
+        await page.keyboard.press('Escape')
+      }
+      // each role's backup CLI: the tasks' backs up unless set, the coordinators' is off
+      const backup = settings.getByRole('heading', { name: 'Backup', exact: true }).locator('..')
+      for (const [row, choices] of [
+        ["Tasks' backup", ['Codex', 'Off', 'Claude Code', 'Pi']],
+        ["Coordinators' backup", ['Off', 'Claude Code', 'Codex', 'Pi']],
+      ] as const) {
+        await backup.getByRole('button', { name: new RegExp(`^${row}:`) }).click()
+        expect((await page.getByRole('menuitemradio').allTextContents()).map((v) => v.trim())).toEqual([...choices])
         await page.keyboard.press('Escape')
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375)

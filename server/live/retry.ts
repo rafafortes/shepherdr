@@ -1,8 +1,9 @@
 // A turn cut off by the model's provider: the agent did not stop, its provider did. Errors that pass by themselves
 // (overloaded, at capacity, a rate limit, a dropped connection, a server error) are waited out: the agent is told to
 // carry on after 1, 2, 4 and 8 minutes, so five tries over fifteen minutes, and only then does the human hear. Errors
-// waiting can't fix (signed out, out of allowance, a model that isn't there, anything not recognised) go to the human
-// at once, or to a task's backup agent (engine.ts handOver). Each CLI's log records the error (readers/), and this
+// waiting can't fix (signed out, out of allowance, a model that isn't there, anything not recognised) go to a task's or
+// a coordinator's backup agent at once where one is set (engine.ts cantGoOn, source.ts cannotGoOn), and otherwise to the
+// human. Each CLI's log records the error (readers/), and this
 // decides what it means. From herdr-projects' docs/provider-errors.md, without the weight.
 import { readJson, writeJson } from '../store.ts'
 import { hidden } from './agents.ts'
