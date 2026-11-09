@@ -345,7 +345,8 @@ export function agentRow(r: Row, get: (key: string) => string, picksOfKind: (kin
   if (!own) return r
   const kind = kindOf(get(own.pair.cli))
   const c = kind ? modelsOf(kind) : undefined
-  if (!kind || !c) return { ...r, value: kind ? `${CLI_NAME[kind] ?? kind}'s own` : 'off', fixed: true, text: false }
+  // nothing to choose: a row too, and no hint about what it would follow (there is no CLI to follow it on)
+  if (!kind || !c) return { ...r, value: kind ? `${CLI_NAME[kind] ?? kind}'s own` : 'off', fixed: true, text: false, hint: undefined }
   const what = own.what
   const stored = pairValue(get, own.pair, 'model')
   const model = findModel(kind, stored)
@@ -714,11 +715,11 @@ export class Settings {
     return q.value.trim().toLowerCase() === 'default' ? above : q
   }
 
-  /** a coordinator backup model row that reads the tasks' pair's model its own CLI has no model for: said where it is
-   *  read, so that a backup which won't go in (engine.ts backupFor) is no surprise */
-  private followedModelProblem(key: string, read: { value: string; follows?: string }, l: Level): string | undefined {
+  /** a backup's Model row whose CLI has no model for the value it reads — its own, or the tasks' pair's while it follows:
+   *  said where it is read, so that a backup which won't go in (engine.ts backupFor) is no surprise */
+  private modelProblem(key: string, read: { value: string }, l: Level): string | undefined {
     const own = pairOfKey(key)
-    if (read.follows !== 'backup.model' || !own) return undefined
+    if (!own || own.what !== 'model' || (own.pair !== PAIRS.backup && own.pair !== PAIRS.coordinatorBackup)) return undefined
     const kind = kindOf(this.pick(own.pair.cli, l).value)
     if (!kind || !knowsModels(kind) || findModel(kind, read.value)) return undefined
     return `${read.value} is no model ${CLI_NAME[kind] ?? kind} has: this backup doesn't go in until you set one here.`
@@ -736,7 +737,7 @@ export class Settings {
         const from = `${name[p.from]}${p.follows ? `, the tasks' backup's ${p.follows === 'backup.model' ? 'model' : 'effort'}` : ''}`
         // a trigger in words, as the human hears it; the rule as kept under it, for an agent to change
         const words = this.words(r.key, p.value)
-        return words ? `${r.key.padEnd(24)} ${words.trim()}  (${from})\n${''.padEnd(25)}as written: ${p.value}` : `${r.key.padEnd(24)} ${p.value}  (${from})`
+        return words ? `${r.key.padEnd(26)} ${words.trim()}  (${from})\n${''.padEnd(27)}as written: ${p.value}` : `${r.key.padEnd(26)} ${p.value}  (${from})`
       }))
     return `What agents are told (private launch instructions and new briefs):\n${keys(true).join('\n')}\n\nHow Shepherdr runs:\n${keys(false).join('\n')}`
   }
@@ -745,9 +746,9 @@ export class Settings {
   words(key: string, value: string) {
     if (key === 'heartbeat.when') {
       const next = nextWords(value, this.zone())
-      return `\n${''.padEnd(25)}${timeWords(value, this.zone())}${next.length ? `; next ${next.join(', ')}` : ''}`
+      return `\n${''.padEnd(27)}${timeWords(value, this.zone())}${next.length ? `; next ${next.join(', ')}` : ''}`
     }
-    return key === 'heartbeat.on' ? `\n${''.padEnd(25)}${eventWords(eventRules(value))}` : ''
+    return key === 'heartbeat.on' ? `\n${''.padEnd(27)}${eventWords(eventRules(value))}` : ''
   }
 
   /** a trigger row as Settings shows it: in words, its next runs, and its few ready-made picks */
@@ -786,7 +787,7 @@ export class Settings {
         const up = above(l)
         // set here: what a reset goes back to; not set here: where its value comes from
         const back = up ? this.resetTo(r.key, l, up) : { value: defaultOf(r.key) ?? '', from: 'default' as const }
-        const warn = this.followedModelProblem(r.key, read, l)
+        const warn = this.modelProblem(r.key, read, l)
         return {
           ...agentRow({ ...r, value: read.value }, (k) => this.readAt(k, l).value, (kind) => this.picksAt(kind)),
           ...(lines[r.key] ? { line: lines[r.key] } : {}),

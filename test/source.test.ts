@@ -587,17 +587,17 @@ describe("a task's CLI, model and effort", () => {
   })
   test('shepherdr show prints the settings and the lines every brief ends with', async () => {
     const out = (await src.cli(['show'], {})).out
-    expect(out).toContain('brief.review             on')
-    expect(out).toContain('review.mustFix           major')
-    expect(out).toContain('review.rounds            3 rounds')
+    expect(out).toContain('brief.review               on')
+    expect(out).toContain('review.mustFix             major')
+    expect(out).toContain('review.rounds              3 rounds')
     expect(out).not.toContain('brief.plan')
-    expect(out).toContain('reviewer.agent           Codex')
-    expect(out).toContain('reviewer.model           default')
-    expect(out).toContain('reviewer.effort          default')
+    expect(out).toContain('reviewer.agent             Codex')
+    expect(out).toContain('reviewer.model             default')
+    expect(out).toContain('reviewer.effort            default')
     // the backup reviewer is off until the human sets one, and its own three keys say so
-    expect(out).toContain('reviewer.fallback        off')
-    expect(out).toContain('reviewer.fallbackModel   default')
-    expect(out).toContain('reviewer.fallbackEffort  default')
+    expect(out).toContain('reviewer.fallback          off')
+    expect(out).toContain('reviewer.fallbackModel     default')
+    expect(out).toContain('reviewer.fallbackEffort    default')
     // each backup has its own pair, on its own line with its level; the coordinators' says where it reads it while default
     expect(out).toMatch(/^backup\.model\s+default\s+\(default\)$/m)
     expect(out).toMatch(/^backup\.effort\s+default\s+\(default\)$/m)
@@ -611,7 +611,7 @@ describe("a task's CLI, model and effort", () => {
     expect(out).toContain('--set review.rounds=1')
     // a coordinator hears how to set the backup reviewer for one task too
     expect(out).toContain('reviewer.fallback, reviewer.fallbackModel, reviewer.fallbackEffort')
-    expect(out).toContain('coordinator.agent        Claude Code')
+    expect(out).toContain('coordinator.agent          Claude Code')
     expect(out).toContain("Every new task's brief ends with:\nSettings:")
   })
   test("a coordinator first starts on Settings' CLI, model and effort for coordinators", async () => {

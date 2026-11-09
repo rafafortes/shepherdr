@@ -856,20 +856,27 @@ describe('settings', () => {
     expect(s.everywhere()).toEqual({ 'brief.review': 'on' })
     writeJson('settings.json', {})
   })
-  test("a coordinators' backup model the tasks' pair holds and its CLI has not is said where it is read", () => {
-    // a world of its own: this test writes no settings file
+  test("a backup model its own CLI has not is said where it is read, its own or the one it follows", () => {
+    // worlds of its own: these write no settings file
     const s = new Settings({ everywhere: {}, machine: {}, spaces: {} })
     s.set('task.fallback', 'Codex')
     s.set('coordinator.fallback', 'Claude Code')
     expect(s.set('backup.model', 'GPT-6-Sol').ok).toBe(true)
-    const model = () => s.sections([], [], null, 'host').find((x) => x.level === 'm:host' && x.name === 'Agents')!.rows.find((r) => r.key === 'coordinator.fallbackModel')!
+    const row = (x: InstanceType<typeof Settings>, key: string) => x.sections([], [], null, 'host').find((y) => y.level === 'm:host' && y.name === 'Agents')!.rows.find((r) => r.key === key)!
     // it follows the tasks' pair, whose model Claude Code has not: the row says why its backup won't go in
-    expect(model().value).toBe('default')
-    expect(model().warn).toBe("GPT-6-Sol is no model Claude Code has: this backup doesn't go in until you set one here.")
+    expect(row(s, 'coordinator.fallbackModel').value).toBe('default')
+    expect(row(s, 'coordinator.fallbackModel').warn).toBe("GPT-6-Sol is no model Claude Code has: this backup doesn't go in until you set one here.")
     // its own, one its own CLI has: nothing to say
     expect(s.set('coordinator.fallbackModel', 'Opus 5.5').ok).toBe(true)
-    expect(model().value).toBe('Opus 5.5')
-    expect(model().warn).toBeUndefined()
+    expect(row(s, 'coordinator.fallbackModel').value).toBe('Opus 5.5')
+    expect(row(s, 'coordinator.fallbackModel').warn).toBeUndefined()
+    // a model this machine's own backup CLI has no model for, once its CLI changed under it
+    const other = new Settings({ everywhere: {}, machine: {}, spaces: {} })
+    other.set('coordinator.fallback', 'Claude Code')
+    expect(other.set('backup.model', 'Opus 5.5').ok).toBe(true)
+    expect(other.set('task.fallback', 'Codex').ok).toBe(true)
+    expect(row(other, 'backup.model').value).toBe('default')
+    expect(row(other, 'backup.model').warn).toBe("Opus 5.5 is no model Codex has: this backup doesn't go in until you set one here.")
   })
   test("a task's backup agent is Codex unless set: any CLI herdr starts, or off", () => {
     const s = new Settings()
@@ -942,9 +949,9 @@ describe('settings', () => {
     expect(backupModelOf('task', (k) => s.get(k))).toEqual({ model: 'Sonnet 5.5', row: 'Backup → Model' })
     // shepherdr show says it too: each key on its own line, with its level
     const line = (space?: string) => s.lines(space, 'host').split('\n').filter((x) => x.startsWith('coordinator.fallback'))
-    expect(line()).toContain('coordinator.fallbackModel Sonnet 5.5  (Everywhere, the tasks\' backup\'s model)')
+    expect(line()).toContain('coordinator.fallbackModel  Sonnet 5.5  (Everywhere, the tasks\' backup\'s model)')
     expect(line()).toContain('coordinator.fallbackEffort low  (Everywhere, the tasks\' backup\'s effort)')
-    expect(line('web')).toContain('coordinator.fallbackModel Opus 5.5  (this space)')
+    expect(line('web')).toContain('coordinator.fallbackModel  Opus 5.5  (this space)')
     for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model', 'backup.effort', 'coordinator.fallbackModel']) for (const l of ['all', { space: 'web' }] as const) s.set(k, null, l)
     writeJson('settings.json', {})
   })
