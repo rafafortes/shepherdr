@@ -735,6 +735,40 @@ describe('settings', () => {
     expect(row('Backup', 'Model').options![1]).toBe('GPT-6.1-Sol')
     for (const k of ['task.agent', 'task.model', 'task.effort']) s.set(k, null)
   })
+  test('a backup reviewer is off until set: its own CLI, model and effort, set as specifically as the rest', () => {
+    const s = new Settings()
+    // off: nothing reviews instead, and every brief reads as it always has
+    expect(s.get('reviewer.fallback')).toBe('off')
+    expect(s.reviewerBackup()).toBeUndefined()
+    expect(s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note).not.toContain('cannot run at all')
+    // a reviewer CLI, or off: one that can be out of allowance is what it is for
+    expect(s.set('reviewer.fallback', 'qwen').error).toBe('Pick one of: off · Codex · Claude Code · pi.')
+    expect(s.set('reviewer.fallback', 'claude code').ok).toBe(true)
+    expect(s.get('reviewer.fallback')).toBe('Claude Code')
+    // its model and effort are its own keys: the reviewer's stay what they were
+    s.set('reviewer.model', 'gpt-6-sol')
+    s.set('reviewer.fallbackModel', 'opus')
+    s.set('reviewer.fallbackEffort', 'high')
+    expect(s.reviewerBackup()).toEqual({ kind: 'claude', model: 'claude-opus-5-5', effort: 'high' })
+    expect(s.harness('reviewer')).toEqual({ kind: 'codex', model: 'gpt-6-sol', effort: undefined })
+    expect(s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note).toContain('review with a headless Claude Code or a Claude Code subagent (model claude-opus-5-5, high effort) instead')
+    // Everywhere, this machine, a space: the most specific one set wins
+    expect(s.set('reviewer.fallback', 'pi', 'machine').ok).toBe(true)
+    expect(s.set('reviewer.fallback', 'codex', { space: 'web' }).ok).toBe(true)
+    expect(s.reviewerBackup()).toEqual({ kind: 'pi', model: 'opus', effort: 'high' })
+    expect(s.reviewerBackup('web')).toMatchObject({ kind: 'codex' })
+    expect(s.reviewerBackup('api')).toMatchObject({ kind: 'pi' })
+    // where a space's own is set, the screen says where it comes from and what a reset goes back to
+    const row = (level: string) => s.sections([], [], null, 'vm', ['web']).find((x) => x.level === level && x.name === 'How tasks work')!.rows.find((r) => r.key === 'reviewer.fallback')!
+    expect(row('p:vm:web')).toMatchObject({ value: 'Codex', inherits: { value: 'pi', from: 'vm' } })
+    expect(row('m:vm')).toMatchObject({ value: 'pi', inherits: { value: 'Claude Code', from: 'Everywhere' } })
+    // off again: nothing anywhere
+    for (const l of ['machine', { space: 'web' }, 'all'] as const) s.set('reviewer.fallback', null, l)
+    expect(s.reviewerBackup()).toBeUndefined()
+    expect(s.set('reviewer.fallback', 'Off').ok).toBe(true)
+    expect(s.get('reviewer.fallback')).toBe('off')
+    writeJson('settings.json', {})
+  })
   test("Autopilot's old limits and wake picks leave the saved file as soon as it is read", () => {
     writeJson('settings.json', { everywhere: { 'autopilot.tasksPerDay': '3', 'wake.merged': 'now', 'heartbeat.every': '45 min' }, machine: { 'wake.health': 'next heartbeat' }, projects: { gtm: { 'wake.added': 'now', 'heartbeat.quiet': '22:00-07:00' } } })
     const s = new Settings()
@@ -862,7 +896,7 @@ describe('settings', () => {
     expect(note()).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).')
     // planning, what to fix and what proof to show are the agent's judgment, not settings
     const section = () => s.sections([], [], null).find((x) => x.name === 'How tasks work')!
-    expect(section().rows.map((r) => r.key)).toEqual(['brief.review', 'review.mustFix', 'review.rounds', 'brief.merge', 'reviewer.agent', 'reviewer.model', 'reviewer.effort'])
+    expect(section().rows.map((r) => r.key)).toEqual(['brief.review', 'review.mustFix', 'review.rounds', 'brief.merge', 'reviewer.agent', 'reviewer.model', 'reviewer.effort', 'reviewer.fallback', 'reviewer.fallbackModel', 'reviewer.fallbackEffort'])
     // only words in prompts: What agents are told, each row with the line it adds
     expect(section().told).toBe(true)
     expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.told).toBeUndefined()
@@ -948,6 +982,17 @@ describe('the brief\'s default way of working', () => {
     expect(settingsBlock('X-1', { ways, reviewer: { kind: 'claude', model: 'opus', effort: 'high' } })).toContain('- Reviewer: a headless Claude Code or a Claude Code subagent (model opus, high effort).')
     expect(settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: '' } })).toContain('- Reviewer: a headless pi or a pi subagent (model openai/gpt-5.5, its default effort).')
     expect(settingsBlock('X-1', { ways, agent: { kind: 'claude', effort: 'high' } })).toContain('- Agent: Claude Code (its default model, high effort). Only so you know what you run on.')
+  })
+  test('with a backup reviewer the same line says who reviews instead, where that reviewer cannot run at all', () => {
+    const block = settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: 'high' }, fallback: { kind: 'claude', model: 'opus', effort: 'high' } })
+    expect(block).toContain(
+      '- Reviewer: a headless pi or a pi subagent (model openai/gpt-5.5, high effort). If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (model opus, high effort) instead and say in your summary that you did.',
+    )
+    // one line, still: the finding of a review, what to fix and the rounds are untouched
+    expect(block.split('\n').find((l) => l.startsWith('- Reviewer'))).not.toContain('\n')
+    expect(block).toContain('- Must fix: major.')
+    // no backup reviewer (the default): the line reads exactly as it always has
+    expect(settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: 'high' } })).not.toContain('cannot run at all')
   })
   test('a line that differs from the default says who changed it, and the screen reads it back', () => {
     const block = settingsBlock('X-1', { ways: { ...ways, rounds: 1, merge: 'ask me first' }, by: { rounds: 'task', merge: 'space' } })

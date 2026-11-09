@@ -1157,7 +1157,9 @@ export class Engine extends Emitter<Events> {
     // each line that differs from Shepherdr's own says who set it: the coordinator's flags, or a level of Settings
     const by = { ...this.settings.setBy(p.name, set), ...(Object.keys(o.reviewer ?? {}).length ? { reviewer: 'task' as const } : {}), ...(Object.keys(o.agent ?? {}).length ? { agent: 'task' as const } : {}) }
     const ways = this.settings.ways(p.name, set)
-    const how = settingsBlock(id, { ways, reviewer, agent, by })
+    // the backup reviewer, off unless the human set one (its own keys, or the coordinator's --set for this task)
+    const fallback = this.settings.reviewerBackup(p.name, set)
+    const how = settingsBlock(id, { ways, reviewer, fallback, agent, by })
     const desc = [work, o.later ? LATER : '', how].filter(Boolean).join('\n\n')
     const t: TaskRec = {
       id,
@@ -1219,7 +1221,7 @@ export class Engine extends Emitter<Events> {
     const set = s.set && Object.keys(s.set).length ? s.set : undefined
     const by = { ...this.settings.setBy(p.name, set), ...(Object.keys(s.reviewer ?? {}).length ? { reviewer: 'task' as const } : {}), ...(Object.keys(s.agent ?? {}).length ? { agent: 'task' as const } : {}) }
     const ways = this.settings.ways(p.name, set)
-    t.desc = [s.desc, s.later ? LATER : '', settingsBlock(t.id, { ways, reviewer, agent, by })].filter(Boolean).join('\n\n')
+    t.desc = [s.desc, s.later ? LATER : '', settingsBlock(t.id, { ways, reviewer, fallback: this.settings.reviewerBackup(p.name, set), agent, by })].filter(Boolean).join('\n\n')
     t.agent = agent
     t.reviewer = reviewer
     t.waitChecks = ways.waitChecks

@@ -102,7 +102,7 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
     // the keys (brief.plan) are for agents, not on the screen; the brief's end reads as words, not code
     expect(await section.textContent()).not.toContain('brief.plan')
     expect(await section.locator('pre').count()).toBe(0)
-    await section.getByRole('button', { name: 'Back' }).click()
+    await section.getByRole('button', { name: 'Back', exact: true }).click()
     await section.waitFor({ state: 'detached' })
     await list.getByRole('button', { name: 'Agents' }).waitFor()
     // the system's Back goes from a section to the list, then out of Settings

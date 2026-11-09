@@ -559,6 +559,41 @@ describe("a task's CLI, model and effort", () => {
     expect(codex.desc).toContain('- Reviewer: a headless Codex or a Codex subagent (model gpt-6-sol, low effort). (set by coordinator for this task)')
     src.settings.set('reviewer.model', null)
   })
+  test('a backup reviewer reaches its brief, the space winning over Everywhere and the coordinator over both', async () => {
+    const dir = tmp('src-repo')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'fallback-source')
+    const place = placeId.space(p.name)
+    const id = (out: string) => out.match(/([A-Z]+-\d+)/)![1]
+    const add = async (...args: string[]) => src.engine.task(id((await src.cli(['task', 'add', 'Reviewed', '--desc', 'x', ...args], { chat: place })).out))!
+    // off by default: the Reviewer line is the one every brief has always had
+    const plain = await add()
+    expect(plain.desc).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).\n')
+    expect(plain.desc).not.toContain('cannot run at all')
+    // Everywhere: the same line says who reviews instead, in the brief's own words
+    src.settings.set('reviewer.fallback', 'claude')
+    src.settings.set('reviewer.fallbackEffort', 'high')
+    const all = await add()
+    expect(all.desc).toContain(
+      '- Reviewer: a headless Codex or a Codex subagent (its default model and effort). If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (its default model, high effort) instead and say in your summary that you did. (your setting for every machine)',
+    )
+    // a space's own wins over Everywhere's
+    src.settings.set('reviewer.fallback', 'pi', { space: p.name })
+    expect((await add()).desc).toContain('review with a headless pi or a pi subagent (its default model, high effort) instead')
+    // the coordinator's --set for this one task wins over both, its model and effort included
+    const own = await add('--set', 'reviewer.fallback=claude', '--set', 'reviewer.fallbackModel=opus')
+    expect(own.desc).toContain('review with a headless Claude Code or a Claude Code subagent (model claude-opus-5-5, high effort) instead and say in your summary that you did. (set by coordinator for this task)')
+    // what a review is stays as it was: the bar, the rounds and its counting
+    expect(own.desc).toContain('- Must fix: major. Findings are tagged critical/major/minor/trivial; fix critical and major, then review again.')
+    expect(own.desc).toContain('- Review rounds: 3. Stop when a round finds none to fix, at most 3 rounds.')
+    expect(own.rounds).toBe(3)
+    // a backup reviewer that is no reviewer CLI is refused, plainly
+    const bad = await src.cli(['task', 'add', 'Odd', '--desc', 'x', '--set', 'reviewer.fallback=qwen'], { chat: place })
+    expect(bad.code).toBe(1)
+    expect(bad.out).toContain('--set reviewer.fallback: Pick one of: off · Codex · Claude Code · pi.')
+    for (const k of ['reviewer.fallback', 'reviewer.fallbackEffort']) src.settings.set(k, null)
+    src.settings.set('reviewer.fallback', null, { space: p.name })
+  })
   test('task add --set changes a line of its Settings block for that task alone, marked as set by its coordinator', async () => {
     const dir = tmp('src-repo')
     run(REPO, dir)
@@ -587,18 +622,23 @@ describe("a task's CLI, model and effort", () => {
   })
   test('shepherdr show prints the settings and the lines every brief ends with', async () => {
     const out = (await src.cli(['show'], {})).out
-    expect(out).toContain('brief.review           on')
-    expect(out).toContain('review.mustFix         major')
-    expect(out).toContain('review.rounds          3 rounds')
+    expect(out).toContain('brief.review             on')
+    expect(out).toContain('review.mustFix           major')
+    expect(out).toContain('review.rounds            3 rounds')
     expect(out).not.toContain('brief.plan')
-    expect(out).toContain('reviewer.agent         Codex')
-    expect(out).toContain('reviewer.model         default')
-    expect(out).toContain('reviewer.effort        default')
+    expect(out).toContain('reviewer.agent           Codex')
+    expect(out).toContain('reviewer.model           default')
+    expect(out).toContain('reviewer.effort          default')
+    // the backup reviewer is off until the human sets one, and its own three keys say so
+    expect(out).toContain('reviewer.fallback        off')
+    expect(out).toContain('reviewer.fallbackModel   default')
+    expect(out).toContain('reviewer.fallbackEffort  default')
     expect(out).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).')
+    expect(out).not.toContain('cannot run at all')
     expect(out).toContain('What agents are told (')
     expect(out).toContain('How Shepherdr runs:')
     expect(out).toContain('--set review.rounds=1')
-    expect(out).toContain('coordinator.agent      Claude Code')
+    expect(out).toContain('coordinator.agent        Claude Code')
     expect(out).toContain("Every new task's brief ends with:\nSettings:")
   })
   test("a coordinator first starts on Settings' CLI, model and effort for coordinators", async () => {

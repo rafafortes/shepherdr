@@ -79,7 +79,9 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
                                                  by the coordinator: --set review=off, --set review.mustFix=critical,
                                                  --set review.rounds=1, --set merge="ask me first"; --set agent=…,
                                                  model, effort, reviewer, reviewer.model and reviewer.effort are the
-                                                 flags below.
+                                                 flags below; --set reviewer.fallback=pi (with reviewer.fallbackModel
+                                                 and reviewer.fallbackEffort) names the backup reviewer this task
+                                                 reviews with where its reviewer cannot run at all.
                                                  --later: its agent reads the brief and waits for a go (To do); the go
                                                  is a message to it that says so (task tell).
                                                  --agent, --model and --effort pick the CLI (claude, codex, pi, …),

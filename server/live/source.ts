@@ -2722,7 +2722,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const h = this.settings.heartbeat(pr ? { space: pr } : 'machine')
         const next = nextWords(h.time, h.zone)
         const beat = `\n\nHeartbeat on Autopilot: ${timeWords(h.time, h.zone)}${next.length ? ` (next ${next.join(', ')})` : ''}; news that wakes it at once: ${eventWords(h.on).toLowerCase()}, the rest waits for the heartbeat. Each brings the place's HEARTBEAT.md, its standing checklist: shepherdr heartbeat [<place>] shows it, shepherdr heartbeat set [<place>] < file changes it.`
-        const block = settingsBlock('<id>', { ways: this.settings.ways(pr), reviewer: this.settings.harness('reviewer', pr), agent: this.settings.harness('task', pr), by: this.settings.setBy(pr) })
+        const block = settingsBlock('<id>', { ways: this.settings.ways(pr), reviewer: this.settings.harness('reviewer', pr), fallback: this.settings.reviewerBackup(pr), agent: this.settings.harness('task', pr), by: this.settings.setBy(pr) })
         const repo = pr ? this.places.byName(pr) : undefined
         const folder = repo ? `\nFolder: ${this.places.folderLine(repo)}${repo.repoId ? ` (found again by its repo's id ${shortId(repo.repoId)} if its folder is renamed or moved)` : ''}` : ''
         return `${head}${repo ? `${folder}\nBase branch: ${repo.base} (new tasks; per-task override: --base <branch>)` : ''}\n${this.settings.lines(pr, NAME)}${beat}${now}\n\nEvery new task's brief${pr ? ` in ${pr}` : ''} ends with:\n${block}\n\nFor one task, set any of these with task add: --set review.rounds=1 --set merge="ask me first" (--set agent=codex, model, effort, reviewer, reviewer.model, reviewer.effort too), or say so in its brief, which wins.`

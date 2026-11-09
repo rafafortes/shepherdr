@@ -12,7 +12,7 @@ import { NOTIFY, NOTIFY_DEFAULT, NOTIFY_KEY } from '../../shared/alerts.ts'
 import type { SettingSection, TriggerRow } from '../../shared/types.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { SetBy } from '../../shared/brief.ts'
-import { settingsBlock, settingsLines, SEVERITIES, type Said, type Ways } from './prompts.ts'
+import { settingsBlock, settingsLines, SEVERITIES, type Reviewer, type Said, type Ways } from './prompts.ts'
 import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf, nearest } from './models.ts'
 import { picksOf, rememberModel } from './model-picks.ts'
 import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
@@ -88,6 +88,30 @@ const NEWS_PRESETS = [
 /** the agents Settings picks a CLI, model and effort for */
 type Role = 'task' | 'coordinator' | 'reviewer' | 'backup'
 const ROLES: Role[] = ['task', 'coordinator', 'reviewer', 'backup']
+
+/** where a CLI, its model and its effort are set: a role's own three, an agent backup's (Agents → Backup, which covers
+ *  both roles' backups), or a task's backup reviewer's (Reviewer → Backup reviewer), which has its own three so that
+ *  neither reviewer replaces the other */
+
+/** where a CLI, its model and its effort are set: a role's own three, a task's backup agent's (Agents → Backup), or a
+ *  task's backup reviewer's (Reviewer → Backup reviewer), which has its own three so that neither replaces the other */
+type Pair = { cli: string; model: string; effort: string }
+const PAIRS: Record<Role | 'reviewBackup', Pair> = {
+  task: { cli: 'task.agent', model: 'task.model', effort: 'task.effort' },
+  coordinator: { cli: 'coordinator.agent', model: 'coordinator.model', effort: 'coordinator.effort' },
+  reviewer: { cli: 'reviewer.agent', model: 'reviewer.model', effort: 'reviewer.effort' },
+  backup: { cli: 'task.fallback', model: 'backup.model', effort: 'backup.effort' },
+  reviewBackup: { cli: 'reviewer.fallback', model: 'reviewer.fallbackModel', effort: 'reviewer.fallbackEffort' },
+}
+
+/** the pair a model or effort key belongs to, and which of the two it is */
+const pairOfKey = (key: string): { pair: Pair; what: 'model' | 'effort' } | undefined => {
+  for (const pair of Object.values(PAIRS)) {
+    if (pair.model === key) return { pair, what: 'model' }
+    if (pair.effort === key) return { pair, what: 'effort' }
+  }
+  return undefined
+}
 
 /** the role each backup CLI setting backs up: the CLI whose agent can't go on, its backup takes over from */
 export const FALLBACK_OF = { task: 'task.fallback', coordinator: 'coordinator.fallback' } as const
@@ -193,6 +217,12 @@ export const CATALOG: Section[] = [
       { label: 'Merge', key: 'brief.merge', value: 'on its own', options: ['on its own', 'after GitHub checks', 'ask me first'] },
       // only words in the brief's Reviewer line: the task's agent has its change reviewed however it sees fit
       ...agentRows('Reviewer', 'reviewer', [...REVIEWERS], 'default', 'default'),
+      // a reviewer that cannot run at all (out of allowance, signed out, its model is gone) leaves its task's agent
+      // stuck at that step: a backup reviewer, named in the same Reviewer line, reviews instead. Off until the human
+      // sets one: with it off the line reads exactly as it always has
+      { group: 'Reviewer', label: 'Backup reviewer', key: 'reviewer.fallback', value: 'off', options: ['off', ...REVIEWERS] },
+      { group: 'Reviewer', label: 'Backup model', key: 'reviewer.fallbackModel', value: 'default', text: true },
+      { group: 'Reviewer', label: 'Backup effort', key: 'reviewer.fallbackEffort', value: 'default', options: [...EFFORTS] },
     ],
   },
   {
@@ -293,17 +323,20 @@ const roleKind = (role: Role, get: (key: string) => string) => (role === 'backup
 /** a role's Model and Effort rows as its CLI has them, by these settings (r.value is the row's own): a pick of its
  *  models and of the levels its model takes, each showing what it starts with (a level the model lacks shows as the
  *  nearest it has); a CLI that can't list its models takes any id; one Shepherdr passes neither to picks its own. The
- *  models are this machine's picks first (pinned, then recent), then the CLI's own order */
+ *  models are this machine's picks first (pinned, then recent), then the CLI's own order. A backup's rows take the CLI
+ *  their own pair of keys names, and the agents' backup pair covers both roles' backups */
 export function agentRow(r: Row, get: (key: string) => string, picksOfKind: (kind: string) => { pinned: string[]; recent: string[] } = picksOf, backups?: string[]): Row {
-  const [role, what] = r.key.split('.') as [Role, string]
+  const own = pairOfKey(r.key)
+  const [role, said] = r.key.split('.') as [Role, string]
+  const what = own?.what ?? said
   if (!ROLES.includes(role) || (what !== 'model' && what !== 'effort')) return r
   // the two roles' backups on different CLIs: the models and levels either of them takes
-  const kinds = role === 'backup' ? (backups ?? fallbackKinds(get)) : []
+  const kinds = own?.pair === PAIRS.backup ? (backups ?? fallbackKinds(get)) : []
   if (kinds.length > 1) return backupRow(r, kinds, get, picksOfKind)
-  const kind = role === 'backup' ? kinds[0] : roleKind(role, get)
+  const kind = kinds.length ? kinds[0] : own ? kindOf(get(own.pair.cli)) : roleKind(role, get)
   const c = kind ? modelsOf(kind) : undefined
   if (!kind || !c) return { ...r, value: kind ? `${CLI_NAME[kind] ?? kind}'s own` : 'off', fixed: true, text: false }
-  const stored = get(`${role}.model`)
+  const stored = get(own ? own.pair.model : `${role}.model`)
   const model = findModel(kind, stored)
   if (what === 'model') {
     if (!c.models.length) return { ...r, value: stored }
@@ -460,8 +493,9 @@ export class Settings {
       else if (key === 'heartbeat.on') value = eventsText(eventRules(value))
       else if (key === 'time.zone') value = value.trim()
       // a CLI is kept by its name, however it was written
-      else if (isFallback(key) && value.trim().toLowerCase() === 'off') value = 'off'
-      else if (key.endsWith('.agent') || isFallback(key)) value = CLI_NAME[kindOf(value)!]
+      // a CLI is kept by its name, however it was written
+      else if ((isFallback(key) || key === 'reviewer.fallback') && value.trim().toLowerCase() === 'off') value = 'off'
+      else if (key.endsWith('.agent') || isFallback(key) || key === 'reviewer.fallback') value = CLI_NAME[kindOf(value)!]
     }
     const at = typeof l === 'object' ? (this.d.spaces[l.space] ??= {}) : this.at(l)
     if (value === null) delete at[key]
@@ -470,8 +504,9 @@ export class Settings {
     this.save()
     // a model chosen here is one of the human's picks: first among the recent ones in every model list (a world of its
     // own, the demo's, keeps its picks to itself)
-    if (!this.seed && value !== null && /^(task|coordinator|reviewer|backup)\.model$/.test(key)) {
-      const kind = this.kindOf(key.split('.')[0] as Role, l)
+    const own = pairOfKey(key)
+    if (!this.seed && value !== null && own?.what === 'model') {
+      const kind = kindOf(this.pick(own.pair.cli, l).value)
       const picked = kind ? findModel(kind, value) : undefined
       if (kind && picked) rememberModel(kind, picked.id)
     }
@@ -502,29 +537,21 @@ export class Settings {
     return roleKind(role, (k) => this.pick(k, l).value)
   }
 
-  /** the CLIs the backups at a level and the levels below it start on (unfit, agentRow): what is set at one level has to
-   *  fit a backup that will use it, a space's own included */
-  backupKinds(l: Level = 'machine'): string[] {
-    const at: Level[] = l === 'all' ? ['all', 'machine'] : l === 'machine' ? ['machine'] : [l]
-    const spaces: Level[] = l === 'all' || l === 'machine' ? Object.keys(this.d.spaces).map((space) => ({ space }) as Level) : []
-    return [...new Set([...at, ...spaces].flatMap((x) => fallbackKinds((k) => this.pick(k, x).value)))]
-  }
-
-  /** why a model or effort doesn't fit the role's CLI (or its model) at a level: it lists what does */
+  /** why a model or effort doesn't fit the CLI its own pair of keys names at a level: it lists what does */
   private unfit(key: string, value: string, l: Level): string | undefined {
-    const [role, what] = key.split('.') as [Role, string]
-    if (!ROLES.includes(role) || (what !== 'model' && what !== 'effort') || value.trim().toLowerCase() === 'default') return undefined
+    const own = pairOfKey(key)
+    if (!own || value.trim().toLowerCase() === 'default') return undefined
     // a backup's model and effort are one pair for the tasks' and the coordinators' backups: either CLI may take them
-    const kinds = (role === 'backup' ? this.backupKinds(l) : [this.kindOf(role, l)]).filter((k): k is string => !!k && !!modelsOf(k))
+    const kinds = (own.pair === PAIRS.backup ? this.backupKinds(l) : [kindOf(this.pick(own.pair.cli, l).value)]).filter((k): k is string => !!k && !!modelsOf(k))
     if (!kinds.length) return undefined
-    if (what === 'model') {
+    if (own.what === 'model') {
       const listed = kinds.filter(knowsModels)
       if (!listed.length || listed.some((k) => findModel(k, value))) return undefined
       const labels = [...new Set(listed.flatMap((k) => modelsOf(k)!.models.map((m) => m.label)))]
       const them = listed.map((k) => CLI_NAME[k]).join(' nor ')
       return listed.length === 1 ? `${CLI_NAME[listed[0]]} has no model ${value}. Pick one of: default · ${labels.join(' · ')}.` : `Neither ${them} has a model ${value}. Pick one of: default · ${labels.join(' · ')}.`
     }
-    const model = this.pick(`${role}.model`, l).value
+    const model = this.pick(own.pair.model, l).value
     const levels = [...new Set(kinds.flatMap((kind) => effortsOf(kind, model)))]
     if (levels.includes(value.trim().toLowerCase())) return undefined
     const levelWords = levels.length ? `takes ${['default', ...levels].join(' · ')}.` : 'has no effort levels.'
@@ -566,7 +593,7 @@ export class Settings {
     }
     const all: Record<Said, SetBy | undefined> = {
       review: by('brief.review'),
-      reviewer: by('reviewer.agent', 'reviewer.model', 'reviewer.effort'),
+      reviewer: by('reviewer.agent', 'reviewer.model', 'reviewer.effort', 'reviewer.fallback', 'reviewer.fallbackModel', 'reviewer.fallbackEffort'),
       mustFix: by('review.mustFix'),
       rounds: by('review.rounds'),
       merge: by('brief.merge'),
@@ -627,6 +654,18 @@ export class Settings {
     return { kind, ...this.modelAt(role, kind, l) }
   }
 
+  /** the backup reviewer's CLI, model and effort, for a space (none: this machine), with what the coordinator set for one
+   *  task on top (task add --set); nothing while it is off, so a brief's Reviewer line reads as it always has */
+  reviewerBackup(space?: string, set: Values = {}): { kind: string; model?: string; effort?: string } | undefined {
+    return this.reviewerBackupAt(space ? { space } : 'machine', set)
+  }
+
+  private reviewerBackupAt(l: Level, set: Values = {}) {
+    const get = (key: string) => set[key] ?? this.pick(key, l).value
+    const kind = kindOf(get(PAIRS.reviewBackup.cli))
+    return kind ? { kind, ...this.modelIn(PAIRS.reviewBackup, kind, l, get) } : undefined
+  }
+
   /** a role's model and effort as its CLI takes them, for a space (none: this machine): one it doesn't have is its
    *  own default, a level its model lacks the nearest it has; nothing for the CLI's own. `own`: a value a task keeps
    *  for itself (its own --set), read before the space's */
@@ -635,12 +674,25 @@ export class Settings {
     return this.modelAt(role, kind ?? this.kindOf(role, l), l, own)
   }
 
+  /** the CLIs the backups at a level and the levels below it start on (unfit, agentRow): what is set at one level has to
+   *  fit a backup that will use it, a space's own included */
+  backupKinds(l: Level = 'machine'): string[] {
+    const at: Level[] = l === 'all' ? ['all', 'machine'] : l === 'machine' ? ['machine'] : [l]
+    const spaces: Level[] = l === 'all' || l === 'machine' ? Object.keys(this.d.spaces).map((space) => ({ space }) as Level) : []
+    return [...new Set([...at, ...spaces].flatMap((x) => fallbackKinds((k) => this.pick(k, x).value)))]
+  }
+
   private modelAt(role: Role, kind: string | undefined, l: Level, own?: (key: string) => string): { model?: string; effort?: string } {
-    const get = own ?? ((key: string) => this.pick(key, l).value)
-    const stored = get(`${role}.model`)
+    return this.modelIn(PAIRS[role], kind, l, own ?? ((key: string) => this.pick(key, l).value))
+  }
+
+  /** one pair of keys' model and effort as a CLI takes them: one it doesn't have is its own default, a level its model
+   *  lacks the nearest it has; nothing for the CLI's own */
+  private modelIn(pair: Pair, kind: string | undefined, l: Level, get = (key: string) => this.pick(key, l).value): { model?: string; effort?: string } {
     if (!kind) return {}
+    const stored = get(pair.model)
     const model = stored === 'default' ? undefined : knowsModels(kind) ? findModel(kind, stored)?.id : modelsOf(kind) ? stored : undefined
-    return { model, effort: effortFor(kind, get(`${role}.effort`), model) }
+    return { model, effort: effortFor(kind, get(pair.effort), model) }
   }
 
   /** every key with its value for a space (none: this machine) and where it comes from, as shepherdr show prints
@@ -653,7 +705,7 @@ export class Settings {
         const p = this.pick(r.key, l)
         // a trigger in words, as the human hears it; the rule as kept under it, for an agent to change
         const words = this.words(r.key, p.value)
-        return words ? `${r.key.padEnd(22)} ${words.trim()}  (${name[p.from]})\n${''.padEnd(23)}as written: ${p.value}` : `${r.key.padEnd(22)} ${p.value}  (${name[p.from]})`
+        return words ? `${r.key.padEnd(24)} ${words.trim()}  (${name[p.from]})\n${''.padEnd(25)}as written: ${p.value}` : `${r.key.padEnd(24)} ${p.value}  (${name[p.from]})`
       }))
     return `What agents are told (private launch instructions and new briefs):\n${keys(true).join('\n')}\n\nHow Shepherdr runs:\n${keys(false).join('\n')}`
   }
@@ -662,9 +714,9 @@ export class Settings {
   words(key: string, value: string) {
     if (key === 'heartbeat.when') {
       const next = nextWords(value, this.zone())
-      return `\n${''.padEnd(23)}${timeWords(value, this.zone())}${next.length ? `; next ${next.join(', ')}` : ''}`
+      return `\n${''.padEnd(25)}${timeWords(value, this.zone())}${next.length ? `; next ${next.join(', ')}` : ''}`
     }
-    return key === 'heartbeat.on' ? `\n${''.padEnd(23)}${eventWords(eventRules(value))}` : ''
+    return key === 'heartbeat.on' ? `\n${''.padEnd(25)}${eventWords(eventRules(value))}` : ''
   }
 
   /** a trigger row as Settings shows it: in words, its next runs, and its few ready-made picks */
@@ -687,12 +739,12 @@ export class Settings {
     const above = (l: Level): Level | null => (l === 'all' ? null : l === 'machine' ? 'all' : 'machine')
     const rows = (s: Section, l: Level) => {
       // the words each row of How tasks work adds to a brief, as its Settings block has them at this level
-      const told = s.told ? settingsLines('<id>', { ways: this.waysAt(l), reviewer: this.harnessAt('reviewer', l), by: this.setByAt(l) }) : []
+      const told = s.told ? settingsLines('<id>', { ways: this.waysAt(l), reviewer: this.harnessAt('reviewer', l), fallback: this.reviewerBackupAt(l), by: this.setByAt(l) }) : []
       // the backups a value set at this level must fit, read once for the section rather than once per row
       const backups = s.name === 'Agents' ? this.backupKinds(l) : undefined
       const text = (said: Said) => told.find((x) => x.said === said)?.text
       const lines: Record<string, string | undefined> = s.told
-        ? { 'brief.review': text('review'), 'reviewer.agent': text('reviewer'), 'review.mustFix': text('mustFix'), 'review.rounds': text('rounds'), 'brief.merge': text('merge') }
+        ? { 'brief.review': text('review'), 'reviewer.agent': text('reviewer'), 'reviewer.fallback': text('reviewer'), 'review.mustFix': text('mustFix'), 'review.rounds': text('rounds'), 'brief.merge': text('merge') }
         : {}
       return s.rows.map((r) => {
         if (r.key === 'alerts') return { ...r, value: devices.length ? devices.join(', ') : 'No device yet', warn: pushWarnings.length ? `${pushWarnings.length} device${pushWarnings.length === 1 ? '' : 's'} could not receive the last alert.\n${pushWarnings.slice(0, 3).join('\n')}${pushWarnings.length > 3 ? '\nMore details: shepherdr doctor' : ''}` : undefined }
@@ -713,7 +765,7 @@ export class Settings {
       s.name === 'Private instructions'
         ? { noteTitle: 'When rules take effect', note: 'Used at the next start or restart. Saving leaves running agents alone. A resumed session may remember old rules: the new snapshot replaces those private rules. Task agents pass the reviewer snapshot from their own latest start to each review; restart the task agent to refresh it.' }
         : s.name === 'How tasks work'
-          ? { note: settingsBlock('<id>', { ways: this.waysAt(l), reviewer: this.harnessAt('reviewer', l), by: this.setByAt(l) }) }
+          ? { note: settingsBlock('<id>', { ways: this.waysAt(l), reviewer: this.harnessAt('reviewer', l), fallback: this.reviewerBackupAt(l), by: this.setByAt(l) }) }
         : s.name === AUTOPILOT
           ? autopilotNote()
           : s.name === 'Machine'
@@ -825,7 +877,9 @@ export function refuse(key: string, value: string): string | undefined {
   const cli = key === 'task.agent' || key === 'coordinator.agent' || (isFallback(key) && value.trim().toLowerCase() !== 'off')
   if (cli && !kindOf(value)) return `${value} is not an agent herdr can start.`
   if (key === 'reviewer.agent' && !REVIEWERS.includes(CLI_NAME[kindOf(value) ?? ''] ?? '')) return `Pick one of: ${REVIEWERS.join(' · ')}.`
-  if (/^(task|coordinator|reviewer|backup)\.model$/.test(key) && !/^[\w.:/@[\] -]+$/.test(value.trim())) return 'Write a model id like claude-opus-5-5, or default.'
+  // a backup reviewer: one of the reviewer CLIs, or off (there is none)
+  if (key === 'reviewer.fallback' && value.trim().toLowerCase() !== 'off' && !REVIEWERS.includes(CLI_NAME[kindOf(value) ?? ''] ?? '')) return `Pick one of: off · ${REVIEWERS.join(' · ')}.`
+  if (pairOfKey(key)?.what === 'model' && !/^[\w.:/@[\] -]+$/.test(value.trim())) return 'Write a model id like claude-opus-5-5, or default.'
   const num = numOf(key)
   if (key === 'heartbeat.when' || key === 'heartbeat.on') {
     try {
@@ -841,7 +895,7 @@ export function refuse(key: string, value: string): string | undefined {
   if (key === 'dictate.language' && !options?.includes(value) && !/^(auto|[a-z]{2,3})$/i.test(value.trim()))
     return 'Pick a language, or write its whisper code (en, pt, es).'
   if (num && numValue(num, value) === undefined) return `Write a number from ${num.min} to ${num.max}${num.step ? '' : ' (whole)'}${num.unit ? `, in ${num.unit}` : ''}${num.off ? ', or off' : num.zero ? ' (0 is off)' : ''}.`
-  if (options && !cli && key !== 'reviewer.agent' && key !== 'alerts' && !isFallback(key) && key !== 'dictate.language' && !options.includes(value)) return `Pick one of: ${options.join(' · ')}.`
+  if (options && !cli && key !== 'reviewer.agent' && key !== 'reviewer.fallback' && key !== 'alerts' && !isFallback(key) && key !== 'dictate.language' && !options.includes(value)) return `Pick one of: ${options.join(' · ')}.`
   return undefined
 }
 

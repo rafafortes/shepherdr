@@ -52,17 +52,26 @@ export function reviewerWords(r: Reviewer) {
   return `${who} (${[r.model ? `model ${r.model}` : 'its default model', r.effort ? `${r.effort} effort` : 'its default effort'].join(', ')})`
 }
 
+/** a brief's Reviewer line: who reviews, and — when the human set a backup reviewer — who reviews instead where that one
+ *  cannot run at all. A backup reviewer never replaces a finding: it is for a reviewer that could not work. */
+export function reviewerLine(r: Reviewer, backup?: Reviewer) {
+  const instead = backup ? ` If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with ${reviewerWords(backup)} instead and say in your summary that you did.` : ''
+  return `Reviewer: ${reviewerWords(r)}.${instead}`
+}
+
 /** a reviewer's tags for its findings, the worst first */
 export const SEVERITIES = ['critical', 'major', 'minor', 'trivial']
 
 /** the Settings block's lines, by the settings each comes from (Settings → How tasks work shows each under its row) */
 export type Said = 'review' | 'reviewer' | 'mustFix' | 'rounds' | 'merge' | 'agent'
 
-/** what a brief's Settings block says: How tasks work, who reviews, the agent it runs on (only so it knows), and who
- *  set the lines that differ from Shepherdr's own */
+/** what a brief's Settings block says: How tasks work, who reviews (and who does where that one cannot run at all), the
+ *  agent it runs on (only so it knows), and who set the lines that differ from Shepherdr's own */
 export interface Told {
   ways: Ways
   reviewer?: Reviewer
+  /** the backup reviewer, when the human set one: nothing, and the Reviewer line reads as it always has */
+  fallback?: Reviewer
   agent?: Reviewer
   by?: Partial<Record<Said, SetBy>>
 }
@@ -89,7 +98,7 @@ export function settingsLines(id: string, t: Told): { said: Said; text: string }
   // every line shows, review off too: nothing hidden, an override included
   const lines: { said: Said; text: string }[] = [
     { said: 'review', text: w.review ? 'Review: on. Have your change reviewed by fresh eyes before it merges.' : "Review: off. No review; the lines on reviewing below don't apply." },
-    ...(t.reviewer ? [{ said: 'reviewer' as const, text: `Reviewer: ${reviewerWords(t.reviewer)}.` }] : []),
+    ...(t.reviewer ? [{ said: 'reviewer' as const, text: reviewerLine(t.reviewer, t.fallback) }] : []),
     { said: 'mustFix', text: `Must fix: ${w.mustFix}. Findings are tagged ${SEVERITIES.join('/')}; fix ${fix.length === SEVERITIES.length ? 'all of them' : plural(fix)}${w.rounds > 1 ? ', then review again' : ''}.` },
     { said: 'rounds', text: w.rounds > 1 ? `Review rounds: ${w.rounds}. Stop when a round finds none to fix, at most ${w.rounds} rounds.` : 'Review rounds: 1. One round, no review again.' },
   ]
