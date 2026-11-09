@@ -41,6 +41,16 @@ also has a side panel: its live herdr terminal, its files, its diff against main
   TG…) is its own. A repo is added as it is; any other folder, or one not made yet, becomes a new repo first (git init
   on main with an empty first commit; files already there stay uncommitted). Either way it gets its own herdr space
   and coordinator, and opens. Only folders in your home are listed or made.
+- A space follows its repo. The first time a repo becomes a space, Shepherdr writes an id of its own in the repo's
+  `.git/config` (`shepherdr.id`: never committed, and never written in a worktree or in a folder a symlink reaches),
+  and the space records it. Rename or move the folder and add the repo again where it is (`shepherdr space add
+  <path>`, the sidebar's +, or your coordinator): that is the same space, with its name, key, tasks, chat, mode, base
+  branch and remote as they were, and its coordinator now works in the new folder. Its line in `shepherdr space
+  list`, in `shepherdr show` and in `shepherdr doctor` says where it is and where it was; with the folder gone,
+  `shepherdr doctor` says so and names the id that finds it. A worktree, a copy or a symlink that shares the repo's
+  `.git` is the space already, never a second one, and a task's worktree keeps the folder it was made in (after you
+  rename the repo by hand, `git worktree repair` puts git's own links straight). Spaces added before this have no id
+  yet: nothing changes for them until they are added again, or `shepherdr doctor` runs once and gives each repo its id.
 - New messages show like Slack's unread, for coordinators' chats only: a coordinator's chat with something new from it
   or Shepherdr that you haven't seen makes its space's row bold in the sidebar (a done task's last word comes as its
   card in the space's chat, so it counts). A folded heading still shows the spaces under it with something new or a

@@ -8,10 +8,12 @@ import { readFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { setOrder, type PlaceOrder, type SectionDefs } from '../../shared/order.ts'
 import { nameProblem, slugify, type Mode } from '../../shared/types.ts'
+import { existsSync } from './mfs.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import { Agents } from './agents.ts'
 import { boxHome } from './box.ts'
 import { validateBase, defaultBranch, github, githubRemote, isRepo, topLevel, type GitHub } from './engine/git.ts'
+import { ensureRepoId, repoIdentity, type RepoIdentity } from './engine/repo-id.ts'
 import { migrateToSpaces } from './migrate.ts'
 
 export interface Space {
@@ -23,7 +25,16 @@ export interface Space {
   github: string | null
   base: string
   added: number
+  /** the id in its repo's own .git/config (engine/repo-id.ts): a space whose folder is renamed or moved is found again by
+   *  it. Absent until its repo was given one (its next add, or the doctor's one-off backfill) */
+  repoId?: string
+  /** the folder it was in before its repo moved here (the last one, when it moved more than once): the space follows
+   *  its repo, and a task's worktree stays where it was made */
+  was?: string
 }
+
+/** an id as the doctor and a space's own line say it: enough of it to tell two apart */
+export const shortId = (id: string) => id.slice(0, 8)
 
 /** a mode read from disk, the CLI or another machine, any case */
 export const asMode = (m: unknown): Mode | undefined => {
@@ -215,14 +226,37 @@ export class Places {
     return this.spaces.find((p) => abs === p.path || abs.startsWith(`${p.path}/`))
   }
 
-  async add(path: string, name?: string): Promise<Space> {
+  async add(path: string, name?: string, out: { found?: boolean } = {}): Promise<Space> {
     const abs = resolve(path.replace(/^~(?=$|\/)/, boxHome()))
     if (abs === resolve(boxHome())) throw new Error('Your home folder is the home space already: pick a folder in it.')
     if (!(await isRepo(abs))) throw new Error(`${abs} is not a git repository`)
     const top = (await topLevel(abs)) ?? abs
     if (top === resolve(boxHome())) throw new Error('Your home folder is the home space already: pick a folder in it.')
     const existing = this.spaces.find((p) => p.path === top)
-    if (existing) return existing
+    if (existing) {
+      // an existing space gets its repo's id on the next add: until then it is exactly as it was
+      await this.backfill([existing])
+      return existing
+    }
+    const ident = await repoIdentity(top)
+    // one repo is one space: a worktree or a copy shares its .git, so it is the space already added (their real .git is
+    // the same folder), and a space is never moved onto one
+    const twin = await this.twin(ident)
+    if (twin) throw new Error(`${top} is ${this.nameOf(placeId.space(twin.name)) ?? twin.name} already (${twin.path}): it is the same repo through another folder, and its worktrees keep the folder they were made in.`)
+    const id = ident?.own ? ident.id : null
+    // a repo whose folder was renamed or moved: its space is the one recorded with its id, and follows it there
+    if (ident && id) {
+      const found = await this.movedTo(ident)
+      if (found) {
+        found.was = found.path
+        found.path = ident.top
+        found.repoId = id
+        this.save()
+        // to the caller that asked: this add found the space again, it was no new one
+        out.found = true
+        return found
+      }
+    }
     const nm = name ?? (slugify(basename(top)) || 'space')
     const bad = this.nameProblem(nm)
     if (bad) throw new Error(name === undefined ? `${bad} Give it another with --name.` : bad)
@@ -230,7 +264,8 @@ export class Places {
     // that one's key, so the new one gets a key of its own and shows the name asked for
     let key = nm
     for (let i = 2; this.spaces.some((x) => x.name === key); i++) key = `${nm}-${i}`
-    const p: Space = { name: key, path: top, key: keyFor(nm, [...this.spaces.map((x) => x.key), ...(this.takenTaskKeys?.() ?? [])]), github: await githubRemote(top), base: await defaultBranch(top), added: Date.now() }
+    const own = (await ensureRepoId(top))?.id ?? undefined
+    const p: Space = { name: key, path: top, key: keyFor(nm, [...this.spaces.map((x) => x.key), ...(this.takenTaskKeys?.() ?? [])]), github: await githubRemote(top), base: await defaultBranch(top), added: Date.now(), ...(own ? { repoId: own } : {}) }
     this.spaces.push(p)
     if (key !== nm) this.rename(placeId.space(key), nm)
     this.save()
@@ -244,6 +279,62 @@ export class Places {
     p.base = base
     this.save()
     return p
+  }
+
+  /** the space already added for that repo through another visible path (a worktree, a copy, a symlink), while the
+   *  folder it was added with is there: its real .git is the same folder */
+  private async twin(ident: RepoIdentity | null): Promise<Space | undefined> {
+    if (!ident?.gitDir) return undefined
+    for (const p of this.spaces) {
+      if (p.path === ident.top || !existsSync(p.path)) continue
+      const at = await repoIdentity(p.path).catch(() => null)
+      if (at?.gitDir && at.gitDir === ident.gitDir) return p
+    }
+    return undefined
+  }
+
+  /** the space of this repo, from another folder: one recorded with its id whose own folder no longer holds it */
+  private async movedTo(ident: RepoIdentity): Promise<Space | undefined> {
+    for (const p of this.spaces) {
+      if (!p.repoId || p.repoId !== ident.id || p.path === ident.top) continue
+      if (existsSync(p.path)) {
+        const at = await repoIdentity(p.path).catch(() => null)
+        if (at?.gitDir && at.gitDir === ident.gitDir) continue
+      }
+      return p
+    }
+    return undefined
+  }
+
+  /** give each space's repo the id that finds it again (a space with one changes nothing); the next add and the
+   *  doctor's one-off backfill of the spaces that came before it */
+  async backfill(spaces: Space[] = this.spaces): Promise<void> {
+    let changed = false
+    for (const p of spaces) {
+      const ident = await ensureRepoId(p.path).catch(() => null)
+      if (!ident?.id || ident.id === p.repoId) continue
+      p.repoId = ident.id
+      changed = true
+    }
+    if (changed) this.save()
+  }
+
+  /** a space's folder as its own line reads it: where it is now, and where it was when its repo moved */
+  folderLine(p: Space): string {
+    return `${p.path}${p.was && p.was !== p.path ? `  (its repo moved here: it was ${p.was})` : ''}`
+  }
+
+  /** what the doctor says of this machine's spaces, one line each: their folder, and the id that finds it again */
+  async doctor(): Promise<string[]> {
+    await this.backfill()
+    return this.spaces.map((p) => {
+      const name = this.nameOf(placeId.space(p.name)) ?? p.name
+      if (!existsSync(p.path))
+        return `${name}: its folder ${p.path} is gone${p.repoId ? `; add its repo again at its new place and its id ${shortId(p.repoId)} finds this space` : '; add its repo again once more'}`
+      if (p.was && p.was !== p.path) return `${name}: found again at ${p.path} (it was ${p.was})${p.repoId ? `, by its repo's id ${shortId(p.repoId)}` : ''}`
+      if (p.repoId) return `${name}: ${p.path}, found again by its repo's id ${shortId(p.repoId)} wherever the repo goes`
+      return `${name}: ${p.path}, which is not a repo of its own (a worktree, a copy, or none), so it keeps the folder it was added with`
+    })
   }
 
   remove(name: string) {
