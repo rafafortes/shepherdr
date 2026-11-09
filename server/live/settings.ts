@@ -593,8 +593,9 @@ export class Settings {
     }
     const all: Record<Said, SetBy | undefined> = {
       review: by('brief.review'),
-      // the three keys of a backup reviewer only count where it is set: with it off the line is the plain one
-      reviewer: by('reviewer.agent', 'reviewer.model', 'reviewer.effort', ...(this.reviewerBackupAt(l, set) ? ['reviewer.fallback', 'reviewer.fallbackModel', 'reviewer.fallbackEffort'] : [])),
+      // a backup reviewer's three keys mark the line only where the line shows one: with it off, and with Review off,
+      // the Reviewer line reads as the plain one
+      reviewer: by('reviewer.agent', 'reviewer.model', 'reviewer.effort', ...(this.waysAt(l, set).review && this.reviewerBackupAt(l, set) ? ['reviewer.fallback', 'reviewer.fallbackModel', 'reviewer.fallbackEffort'] : [])),
       mustFix: by('review.mustFix'),
       rounds: by('review.rounds'),
       merge: by('brief.merge'),

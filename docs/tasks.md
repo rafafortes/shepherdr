@@ -95,7 +95,6 @@
   you are alerted.
 - A reviewer has a backup of its own, and it is words in the brief rather than an agent Shepherdr runs: a reviewer is
   the task's own agent reviewing, so a reviewer that is out of allowance would leave that agent stuck at the review.
-<<<<<<< HEAD
   Settings → How tasks work → Reviewer → Backup reviewer (`reviewer.fallback`, off until set, with
   `reviewer.fallbackModel` and `reviewer.fallbackEffort`) makes the brief's Reviewer line name it: "If that reviewer
   cannot run at all (out of allowance, signed out, its model is gone), review with … instead and say in your summary
@@ -106,26 +105,10 @@
   always has.
   Shepherdr does not nudge an agent towards that backup, because it has no exact way to see a reviewer fail: the only
   failure it reads as a provider's is a cut-off turn of an agent it started itself (`retry.ts` on that chat's own
-  error event, and `checkCut` needs the agent's record), and a reviewer is no such agent — headless, it is a shell the
-  task's agent runs, whose log `activity.ts` reads for steps and turns only, and a subagent is background work of it.
-  A nudge would rest on a guess, and a wrong one would send an agent to its backup reviewer over a normal finding. The
-  brief's words are the trigger.
-=======
-  Settings → How tasks work → Backup reviewer (`reviewer.fallback`, off until set, with `reviewer.fallbackModel` and
-  `reviewer.fallbackEffort`) makes the brief's Reviewer line name it: "If that reviewer cannot run at all (out of
-  allowance, signed out, its model is gone), review with … instead and say in your summary that you did." The task's
-  agent runs it as it runs the reviewer, as `<task-id>/Reviewer`, and counts that round like any other
-  (`shepherdr review <id>`); nothing else about a review changes, and it is never a second opinion after findings. Set
-  Everywhere, for a machine, for a space or by its coordinator for one task (`task add --set reviewer.fallback=pi`),
-  the most specific winning; with none set the line reads exactly as it always has.
-  Shepherdr does not nudge an agent towards that backup, because it has no exact way to see a reviewer fail. The only
-  failure it reads as a provider's is a cut-off turn of an agent it started itself: `retry.ts` runs `providerError` on
-  that chat's own `error` event, and `checkCut` needs the agent's record (`source.ts`). A reviewer is no such agent —
-  headless, it is a shell the task's agent runs (its log is found through `readers/background.ts`, and `activity.ts`
-  reads steps and turns out of it, errors left out), and a subagent reviewer is to Shepherdr only background work of
-  the task's agent. So a nudge would rest on a guess, and a wrong one would send an agent to its backup reviewer over a
-  normal finding. The brief's words are the trigger.
->>>>>>> ea69c940 (SHE-39: round 1 review's findings)
+  `error` event, and `checkCut` needs the agent's record), and a reviewer is no such agent — headless, it is a shell
+  the task's agent runs, whose log `activity.ts` reads for steps and turns only, and a subagent is background work of
+  it. A nudge would rest on a guess, and a wrong one would send an agent to its backup reviewer over a normal finding.
+  The brief's words are the trigger.
 - Status, coordinators' too, is what the agent reports of itself. Every Claude Code Shepherdr starts gets a settings
   file of its own (`--settings`, in `~/.shepherdr/hooks/`; your own settings are never touched) whose hooks record
   each event: a turn starts or ends, what still runs in the background as it ends, a permission prompt (a subagent's

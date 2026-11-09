@@ -1024,6 +1024,11 @@ describe('the brief\'s default way of working', () => {
     expect(s.setBy()).toEqual({ reviewer: 'all' })
     s.set('reviewer.fallback', 'off')
     expect(s.setBy()).toEqual({})
+    // and none of them marks it while Review is off: the line asks for no review, so it shows no fallback either
+    s.set('reviewer.fallback', 'pi')
+    s.set('brief.review', 'off')
+    expect(s.setBy()).toEqual({ review: 'all' })
+    s.set('brief.review', null)
     for (const k of ['reviewer.fallback', 'reviewer.fallbackModel']) s.set(k, null)
   })
   test('task add --set takes a How tasks work key or its short name, or stands for a flag; a bad one says why', () => {
