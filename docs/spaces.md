@@ -42,7 +42,7 @@ also has a side panel: its live herdr terminal, its files, its diff against main
   on main with an empty first commit; files already there stay uncommitted). Either way it gets its own herdr space
   and coordinator, and opens. Only folders in your home are listed or made.
 - A space follows its repo. The first time a repo becomes a space, Shepherdr writes an id of its own in the repo's
-  `.git/config` (`shepherdr.id`: never committed, and never written in a worktree or in a folder a symlink reaches),
+  `.git/config` (`shepherdr.id`: never committed, and never written for a worktree, whose `.git/config` is its repo's),
   and the space records it. Rename or move the folder and add the repo again where it is (`shepherdr space add
   <path>`, the sidebar's +, or your coordinator): that is the same space, with its name, key, tasks, chat, mode, base
   branch and remote as they were, and its coordinator works in the new folder (one that is mid-turn finishes that turn
@@ -52,9 +52,10 @@ also has a side panel: its live herdr terminal, its files, its diff against main
   id that finds it, and it says so too when the folder is there but no longer a git repository. A worktree is the space
   already, never a second one, and a task's worktree keeps the folder it was made in: after renaming the repo by hand,
   `git worktree repair` puts git's own links straight. A copy of the repo (`cp -a`, with the id in the `.git/config`
-  it brings) is a repo of its own, so adding it makes a space of its own, with an id of its own. Spaces added before
-  this have no id yet: nothing changes for them until they are added again, or `shepherdr doctor` runs once and gives
-  each repo its id.
+  it brings) is a repo of its own, so adding it makes a space of its own, with an id of its own — unless the space's own
+  folder is gone already, when the first folder carrying its id is taken for that space. Spaces added before this have
+  no id yet: nothing changes for them until they are added again, or `shepherdr doctor` runs once and gives each repo
+  its id; a link left at the old name needs neither, since the link and the folder are one repo to git.
 - New messages show like Slack's unread, for coordinators' chats only: a coordinator's chat with something new from it
   or Shepherdr that you haven't seen makes its space's row bold in the sidebar (a done task's last word comes as its
   card in the space's chat, so it counts). A folded heading still shows the spaces under it with something new or a

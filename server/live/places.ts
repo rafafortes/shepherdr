@@ -242,19 +242,25 @@ export class Places {
     const ident = await repoIdentity(top)
     // the id git reads for this folder: its own checkout's, or, in a worktree, the repo's it shares (.git/config)
     const id = ident?.own ? ident.id : ident ? await repoId(ident.top).catch(() => null) : null
-    // one repo is one space: a folder that is not a repo of its own (a worktree, a copy that shares its .git) is that
-    // space already, never a second one — and a space is never moved onto one of them
+    // one repo is one space, and a space is its repo's own checkout: a worktree of it (its .git is a file pointing into
+    // its repo's, so its config, its id and its tasks are that repo's) is that space, or would be once added
     if (ident && !ident.own) {
       const twin = await this.twinOf(ident, id)
-      if (twin) throw new Error(`${top} is ${this.nameOf(placeId.space(twin.name)) ?? twin.name} already (${twin.path}): it is the same repo through another folder, and shepherdr keeps a repo's tasks, worktrees and pushes in the folder it was added with — add that folder, not a worktree or a copy of it.`)
+      throw new Error(
+        twin
+          ? `${top} is ${this.nameOf(placeId.space(twin.name)) ?? twin.name} already (${twin.path}): it is the same repo through another folder, and its tasks, branches and pushes belong to the folder it was added with.`
+          : `${top} is a worktree of a repo, not a repo of its own: add the repo's own folder as the space (its worktrees keep the folder they were made in).`,
+      )
     }
-    // a repo whose folder was renamed or moved: its space is the one recorded with its id, and follows the repo there
-    if (ident?.own && id) {
+    // a repo whose folder was renamed or moved: its space is the one that repo already is, and follows it there
+    if (ident?.own) {
       const found = await this.movedTo(ident)
       if (found) {
+        // the id that finds it again, given now to a repo that has none yet (a space from before this change)
+        const own = id ?? (await ensureRepoId(top))?.id ?? null
         found.was = found.path
         found.path = ident.top
-        found.repoId = id
+        if (own) found.repoId = own
         this.save()
         // to the caller that asked: this add found the space again, it was no new one
         out.found = true
@@ -301,19 +307,19 @@ export class Places {
     return undefined
   }
 
-  /** the space of this repo, from another folder: one recorded with its id whose own folder no longer holds it, or
-   *  holds it through a symlink (the repo is where it was added, and the space follows it to the folder itself) */
+  /** the space of this repo, from another folder: its own folder still reaches this repo through a link (the space is
+   *  the repo, at the folder itself), or it is gone and the id it recorded is this repo's */
   private async movedTo(ident: RepoIdentity): Promise<Space | undefined> {
     for (const p of this.spaces) {
-      if (!p.repoId || p.repoId !== ident.id || p.path === ident.top) continue
-      if (existsSync(p.path)) {
-        const at = await repoIdentity(p.path).catch(() => null)
-        // still its own repo there, through another visible path: the space is the repo, from where it really is
-        if (at?.gitDir && at.gitDir === ident.gitDir) return p
-        // another repo's folder with this id in it (a copy of the repo): that is no move
-        if (at?.gitDir) continue
-      }
-      return p
+      if (p.path === ident.top) continue
+      const at = existsSync(p.path) ? await repoIdentity(p.path).catch(() => null) : null
+      // its own folder reaches this repo (a link left at the old name): that is this repo, by git's own answer, and its
+      // id is recorded here as soon as the space follows it
+      if (at?.gitDir && at.gitDir === ident.gitDir) return p
+      // its folder holds another repo: the repo it was added with is gone, and a copy carrying its id is no move
+      if (at?.gitDir) continue
+      // its folder is gone or is no git repo at all: only a recorded id can say this is the same repo
+      if (p.repoId && p.repoId === ident.id) return p
     }
     return undefined
   }
@@ -351,9 +357,11 @@ export class Places {
         )
         continue
       }
-      if (p.was && p.was !== p.path) out.push(`${name}: found again at ${p.path} (it was ${p.was})${p.repoId ? `, by its repo's id ${shortId(p.repoId)}` : ''}`)
+      if (!ident.own)
+        out.push(`${name}: ${p.path} is a worktree of a repo, not a repo of its own, so it keeps the folder it was added with`)
+      else if (p.was && p.was !== p.path) out.push(`${name}: found again at ${p.path} (it was ${p.was})${p.repoId ? `, by its repo's id ${shortId(p.repoId)}` : ''}`)
       else if (p.repoId) out.push(`${name}: ${p.path}, found again by its repo's id ${shortId(p.repoId)} wherever the repo goes`)
-      else out.push(`${name}: ${p.path}, which shares its .git with a repo of its own (a worktree, a copy), so it keeps the folder it was added with`)
+      else out.push(`${name}: ${p.path}, whose .git/config could not be given an id (no permission to write it), so it keeps the folder it was added with`)
     }
     return out
   }

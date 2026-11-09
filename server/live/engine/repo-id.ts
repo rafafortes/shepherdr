@@ -6,8 +6,7 @@
 // Only a repo's own checkout gets one: a worktree's .git is a file and its config is its repo's, and a folder reached
 // through a symlink is the repo it points at, never a repo of its own (see `own` below).
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
-import { lstatSync, realpathSync } from '../mfs.ts'
+import { realpathSync } from '../mfs.ts'
 import { git, topLevel } from './git.ts'
 
 /** the key, in a repo's own .git/config: Shepherdr's, never read or written by anything else */
@@ -18,7 +17,9 @@ export interface RepoIdentity {
   top: string
   /** the real path of the .git it shares with its worktrees: two visible paths onto one repo have the same one */
   gitDir: string | null
-  /** `.git` is a folder of its own: a worktree's is a file, and a folder a symlink reaches is not a second repo */
+  /** the .git of this checkout is the repo's own: a worktree's is another folder under it, so its config is its
+   *  repo's and it is no repo of its own (a submodule and a `--separate-git-dir` checkout are: their .git folder is
+   *  their own repo's) */
   own: boolean
   /** the id in its own .git/config, when it has one (read only where it is its own) */
   id: string | null
@@ -28,21 +29,22 @@ export interface RepoIdentity {
 export async function repoIdentity(path: string): Promise<RepoIdentity | null> {
   const top = await topLevel(path)
   if (!top) return null
-  const common = await git(top, 'rev-parse', '--path-format=absolute', '--git-common-dir')
-  let gitDir: string | null = null
-  if (common.ok && common.out) {
+  const [common, here] = await Promise.all([
+    git(top, 'rev-parse', '--path-format=absolute', '--git-common-dir'),
+    git(top, 'rev-parse', '--path-format=absolute', '--git-dir'),
+  ])
+  const real = (r: { ok: boolean; out: string }) => {
+    if (!r.ok || !r.out) return null
     try {
-      gitDir = realpathSync(common.out)
+      return realpathSync(r.out)
     } catch {
-      gitDir = null
+      return null
     }
   }
-  let own = false
-  try {
-    own = lstatSync(join(top, '.git')).isDirectory()
-  } catch {
-    own = false
-  }
+  const gitDir = real(common)
+  // a worktree's .git points into a worktrees/ folder of its repo's, and everything there is that repo's: its config,
+  // its id, its tasks. Any other checkout (.git a folder, a file of a submodule, or of a separate git dir) is its own.
+  const own = !!gitDir && gitDir === real(here)
   return { top, gitDir, own, id: own ? await repoId(top) : null }
 }
 
@@ -53,9 +55,8 @@ export async function repoId(path: string): Promise<string | null> {
 }
 
 /**
- * The repo's identity, given an id when it has none yet. Only its own checkout is written to: a worktree, a folder
- * reached through a symlink and a plain folder are left exactly as they are, and so is a repo whose config can't be
- * written.
+ * The repo's identity, given an id when it has none yet. Only a repo's own checkout is written to: a worktree is left
+ * exactly as it is (its .git/config is its repo's), and so is a plain folder and a repo whose config can't be written.
  */
 export async function ensureRepoId(path: string): Promise<RepoIdentity | null> {
   const ident = await repoIdentity(path)

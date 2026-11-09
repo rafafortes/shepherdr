@@ -3,7 +3,7 @@
 // repos under /tmp, each test in a Shepherdr home of its own.
 import { describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -45,6 +45,19 @@ function world() {
 const beside = (path: string, name: string) => join(path, '..', name)
 
 describe('a repo’s id', () => {
+  test('is given to a checkout whose .git is a file of its own repo (a submodule, --separate-git-dir)', async () => {
+    const base = tmp('repo-id-separate')
+    const gitDir = join(base, 'the-git-dir')
+    const dir = join(base, 'checkout')
+    mkdirSync(dir)
+    sh(`git init -q -b main --separate-git-dir ${JSON.stringify(gitDir)} && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init`, dir)
+    const ident = await repoIdentity(dir)
+    // its .git is a file pointing at a repo of its own: its config is its own, so it gets an id like any checkout
+    expect(ident?.own).toBe(true)
+    expect((await ensureRepoId(dir))?.id).toBeTruthy()
+    expect(await repoId(dir)).toBeTruthy()
+  })
+
   test('is written in its own .git/config, once', async () => {
     const dir = repo()
     expect(await repoId(dir)).toBeNull()
@@ -141,6 +154,49 @@ describe('a space', () => {
     expect(found.name).toBe(p.name)
     expect(found.path).toBe(real)
     expect(found.was).toBe(dir)
+    expect(places.spaces.length).toBe(1)
+  })
+
+  test('from before this change, with a link left at its old name, is found again at the folder itself', async () => {
+    const places = world()
+    const dir = repo()
+    const p = await places.add(dir, 'shop')
+    // a space from before the ids: neither its repo nor its record has one
+    delete p.repoId
+    places.save()
+    sh(`git config --local --unset ${REPO_ID}`, dir)
+    const real = beside(dir, 'shop-real')
+    renameSync(dir, real)
+    symlinkSync(real, dir)
+    expect(await repoId(real)).toBeNull()
+    const found = await places.add(real)
+    expect(found.name).toBe('shop')
+    expect(found.path).toBe(real)
+    expect(found.was).toBe(dir)
+    expect(places.spaces.length).toBe(1)
+    // and it has the id now, so the next move is found by it
+    expect(found.repoId).toBeTruthy()
+    expect(found.repoId).toBe((await repoId(real))!)
+  })
+
+  test('a worktree is refused even when none of this machine’s spaces has an id yet', async () => {
+    const places = world()
+    const dir = repo()
+    const p = await places.add(dir, 'shop')
+    delete p.repoId
+    places.save()
+    sh(`git config --local --unset ${REPO_ID}`, dir)
+    const real = beside(dir, 'shop-real')
+    renameSync(dir, real)
+    const wt = beside(real, 'worktree')
+    sh(`git worktree add -q ${JSON.stringify(wt)}`, real)
+    let error = ''
+    try {
+      await places.add(wt)
+    } catch (e) {
+      error = (e as Error).message
+    }
+    expect(error).toContain('is a worktree of a repo, not a repo of its own')
     expect(places.spaces.length).toBe(1)
   })
 
@@ -254,6 +310,19 @@ describe('the doctor', () => {
     expect(places.spaces[0]!.repoId).toBe(id)
   })
 
+  test('says when a repo’s .git/config can’t be given an id', async () => {
+    const places = world()
+    const p = await places.add(repo(), 'shop')
+    delete p.repoId
+    places.save()
+    sh(`git config --local --unset ${REPO_ID}`, p.path)
+    // git writes its config through a lock file in .git: without write there, no id can be written
+    chmodSync(join(p.path, '.git'), 0o555)
+    const said = (await places.doctor()).join('\n')
+    chmodSync(join(p.path, '.git'), 0o755)
+    expect(said).toContain(`shop: ${p.path}, whose .git/config could not be given an id`)
+  })
+
   test('says when a folder is there but is no longer a git repository', async () => {
     const places = world()
     const p = await places.add(repo(), 'shop')
@@ -277,7 +346,7 @@ describe('a space found again', () => {
   test('moves no folder: a task’s worktree stays where it was made, as it was', async () => {
     const places = world()
     const p = await places.add(repo(), 'shop')
-    // herdr makes a task's worktree next to the space's folder on its own branch; what a task keeps is its own path
+    // a task's worktree (herdr makes it in its own folder, on a branch of its own): what a task keeps is its own path
     const wt = beside(p.path, 'work-1-shop')
     sh(`git worktree add -q -b work/1-shop ${JSON.stringify(wt)}`, p.path)
     writeFileSync(join(wt, 'task.txt'), 'the work of SHE-1')

@@ -945,8 +945,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const l = this.peerFor(req.machine)
     if (l) return this.onPeer(l, '/api/spaces', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req) })
     const name = req.name === undefined ? undefined : req.name.trim()
-    const bad = name === undefined ? undefined : this.places.nameProblem(name)
-    if (bad) throw new Error(bad)
+    // its name is checked where the space is made, and only when it is a new one: a folder that turns out to be a space
+    // already (its repo's id, or a link left at the old name) keeps the name it has
     // never git init the home folder itself: it is the home space already
     if (resolveInHome(req.path).abs === resolveInHome('~').abs) throw new Error('Your home folder is the home space already: pick a folder in it.')
     const at = req.create ? await makeRepo(req.path) : resolveInHome(req.path).abs
