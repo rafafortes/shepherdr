@@ -15,6 +15,7 @@ delete process.env.SHEPHERDR_MAIN
 const { LiveSource } = await import('../server/live/source.ts')
 const { placeId } = await import('../server/live/places.ts')
 const { FIRST_WAIT, LONGEST_WAIT, oneShot, probeHarness, wait } = await import('../server/live/return.ts')
+const { Retries } = await import('../server/live/retry.ts')
 type Retry = import('../server/live/retry.ts').Retry
 
 const src = new LiveSource()
@@ -89,6 +90,20 @@ const later = () => Date.now() + 2 * 3_600_000
 const cut = (key: string, reason: string, lasting: boolean) => sides.coordinatorCantGoOn(key, { cut: `e-${reason}`, tries: 1, reason, words: `${reason} (the provider's words)`, over: true, ...(lasting ? { lasting: true } : {}) })
 
 describe('what ran out is remembered', () => {
+  test('retry.ts decides what is lasting: an error that passes by itself never is', () => {
+    const seen: Retry[] = []
+    // no waits: a passing error gives up at once, a lasting one the same, and the flag is what differs
+    const retries = new Retries({ nudge: () => undefined, over: (_k: string, r: Retry) => seen.push(r), changed: () => undefined }, [])
+    retries.seen('a', { id: 'e1', at: Date.now(), text: 'You have hit your usage limit: resets 5pm' })
+    expect(seen[0]).toMatchObject({ over: true, lasting: true, reason: 'Out of allowance until 5pm' })
+    retries.seen('b', { id: 'e2', at: Date.now(), text: 'Provider overloaded, please try again later' })
+    expect(seen[1]).toMatchObject({ over: true })
+    expect(seen[1].lasting).toBeUndefined()
+    retries.seen('c', { id: 'e3', at: Date.now(), text: 'API error 401 Unauthorized: please run /login' })
+    expect(seen[2]).toMatchObject({ lasting: true, reason: 'Signed out' })
+    retries.stop()
+  })
+
   test('a lasting takeover is kept, per role and space: the primary and what took over', async () => {
     const s = await space('lasting')
     try {
@@ -183,7 +198,8 @@ describe('when the primary answers again', () => {
       const [text] = cards(s.key)
       expect(text).toContain('The primary model answers again: Codex (GPT-6-Sol).')
       expect(text).toContain('Reviews still fall back to pi (the backup reviewer: reviewer.fallback on reviewer.fallbackModel)')
-      expect(text).toContain('shepherdr set reviewer.model gpt-6-sol')
+      // the space's own, never Everywhere's: a plain set would change every space's reviewer
+      expect(text).toContain(`shepherdr set reviewer.model gpt-6-sol --space ${s.p.name}`)
       // nothing was started, and no setting was written: a reviewer is never Shepherdr's to start
       expect(s.src.settings.get('reviewer.fallback', s.p.name)).toBe('pi')
       await s.src.watchReturns(later() + 3_600_000)
@@ -350,9 +366,43 @@ describe('what is never asked', () => {
       } finally {
         s.src.agents.status = status
       }
-      // nobody works now, and one probe runs even where two roles are due
+      // nobody works now: it asks
       await s.src.watchReturns(later())
       expect(asked).toEqual(['claude'])
+    } finally {
+      s.done()
+    }
+  })
+
+  test('one probe at a time: a pass that comes while one runs asks nothing, and roles are asked one after another', async () => {
+    const s = await space('back-once')
+    try {
+      const a = task(s.p.name, 'codex', { from: 'claude' })
+      coordinator(s.key, 'codex')
+      const late = Date.now() - FIRST_WAIT * 2
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
+      s.src.returns.note({ role: 'coordinator', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
+      // a probe that answers only when this test says so
+      let release: () => void = () => undefined
+      const gate = new Promise<void>((r) => (release = r))
+      s.src.returns.probe = async (h: { kind: string }) => {
+        asked.push(h.kind)
+        await gate
+        return { ok: true, said: 'ok' }
+      }
+      const first = s.src.watchReturns(later())
+      await Bun.sleep(20)
+      expect(asked).toEqual(['claude'])
+      // a second pass while that one is in flight: nothing is asked, nothing posted yet
+      await s.src.watchReturns(later())
+      expect(asked).toEqual(['claude'])
+      expect(cards(a.key)).toEqual([])
+      release()
+      await first
+      // the first pass went on to the second role, one probe at a time, and both chats heard
+      expect(asked).toEqual(['claude', 'claude'])
+      expect(cards(a.key)).toHaveLength(1)
+      expect(cards(s.key)).toHaveLength(1)
     } finally {
       s.done()
     }

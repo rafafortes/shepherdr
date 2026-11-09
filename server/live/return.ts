@@ -40,7 +40,7 @@ export const FIRST_WAIT = 30 * 60_000
 export const LONGEST_WAIT = 4 * 3_600_000
 /** how long one probe may take before it is killed: a provider that answers answers at once */
 export const PROBE_TIMEOUT = 45_000
-/** a fifth either side of the wait, so two roles never ask at the same moment */
+/** a fifth either side of the wait, so the probes of a machine's roles drift apart instead of falling due together */
 const JITTER = 0.2
 
 /** the one line a probe asks: the shortest that proves the provider answers */
@@ -54,9 +54,9 @@ const name = (kind: string) => CLI_NAME[kind] ?? kind
 
 /**
  * A CLI's own one-shot for a probe — the shortest call that proves its provider answers: no tools, no MCP servers, no
- * settings, no session kept, its own coding-assistant prompt left out — and nothing for a CLI Shepherdr knows no such
- * call for (those are never asked: it cannot prove them quietly). Codex takes an effort in its config, not as a flag, so
- * a probe asks it on its own.
+ * session kept, its own coding-assistant prompt left out (Claude Code and pi), and nothing for a CLI Shepherdr knows no
+ * such call for (those are never asked: it cannot prove them quietly). Codex is run in its read-only sandbox on its own
+ * config, and takes an effort there in that config, not as a flag, so a probe asks it on its own.
  */
 export function oneShot(h: Harness): string[] | undefined {
   const model = h.model && h.model !== 'default' ? h.model : undefined
@@ -85,7 +85,7 @@ export function oneShot(h: Harness): string[] | undefined {
       '--no-session',
       '--no-mcp',
       '--no-skills',
-      '--no-extensions',
+      // extensions stay on: a provider one of them adds (a pi package) is one of the person's primaries
       '--no-context-files',
       '--system-prompt',
       JUST_ASK,
@@ -219,5 +219,7 @@ export function backCard(o: { role: ReturnRole; primary: Harness; to: Harness; t
   if (o.role === 'task') return `${back} ${o.task} still runs on its backup (${name(o.to.kind)}): restart it to go back — shepherdr restart ${o.task}, or ⋯ → Restart agent in its chat. Nothing was switched.`
   if (o.role === 'coordinator') return `${back} ${o.space}'s coordinator still runs on its backup (${name(o.to.kind)}): restart it to go back — shepherdr restart ${o.space}, or ⋯ → Restart agent in its chat. Nothing was switched.`
   const model = o.primary.model && o.primary.model !== 'default' ? o.primary.model : 'default'
-  return `${back} Reviews still fall back to ${name(o.to.kind)} (the backup reviewer: reviewer.fallback on reviewer.fallbackModel), and nothing switches by itself: go back with shepherdr set reviewer.model ${model} (Settings → How tasks work → Reviewer → Model).`
+  // the space's own, never Everywhere's: a plain set would change every space's reviewer
+  const where = o.space ? ` --space ${o.space}` : ''
+  return `${back} Reviews still fall back to ${name(o.to.kind)} (the backup reviewer: reviewer.fallback on reviewer.fallbackModel), and nothing switches by itself: go back with shepherdr set reviewer.model ${model}${where} (Settings → How tasks work → Reviewer → Model).`
 }

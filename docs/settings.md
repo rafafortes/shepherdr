@@ -81,20 +81,22 @@ one set wins) asks the primary now and then whether it answers again, and tells 
 backup.
 
 - **When it asks.** After a takeover for a reason waiting can't fix (out of allowance, signed out, a model that is not
-there, a provider's refusal — never an error that passes by itself), the primary is first asked about half an hour
-later, and while it still doesn't answer each wait doubles — an hour, then two, then four, the longest — with a fifth
-of the wait either way at random, so two roles never ask at the same moment. A probe is one tiny request through that
-CLI: its coding assistant's own prompt and the person's MCP servers and settings left out, one line in, one word out,
-no tools, no session kept, a hard timeout. It runs only while nobody on this machine is working, one at a time, and
-never at boot. It is nobody's turn: no chat line, no herdr pane, no agent's secret, and its own failure is silent for
-you — no card, no alert, nothing to answer, nothing of its words in a chat (the server's log says why, for the day it
-needs explaining).
+  there, a provider's refusal — never an error that passes by itself), the primary is first asked about half an hour
+  later, and while it still doesn't answer each wait doubles — an hour, then two, then four, the longest — with a fifth
+  of the wait either way at random, so a machine's roles do not fall due together. A probe is one tiny request through
+  that CLI: one line in, one word out, no tools, no session kept, a hard timeout — and, with Claude Code and pi, its own
+  coding assistant's prompt and the person's MCP servers and settings left out (Codex is run in its read-only sandbox, on
+  its own config). It runs only while none of this machine's agents is working, one at a time, and never at boot. It is
+  nobody's turn: no chat line, no herdr pane, no agent's secret, and its own failure is silent for you — no card, no
+  alert, nothing to answer, nothing of its words in a chat (the server's log says why, for the day it needs explaining).
 - **What it tells you.** One card in each chat still on the backup — each task's, the coordinator's own, the space's
   for a reviewer, which has none of its own — saying that the primary answers again and how to go back: `shepherdr
-  restart <task or space>` (or ⋯ → Restart agent) for a task or a coordinator, `shepherdr set reviewer.model <id>` for a
-  reviewer. And an alert, where your Notifications let one through. One card per recovery: a primary that keeps
-  answering posts nothing more, and a chat that already went back gets nothing. The chats it names are the ones still
-  running on what took over; nothing is said to a role whose Settings name the harness it runs on.
+  restart <task or space>` (or ⋯ → Restart agent) for a task or a coordinator, and for a reviewer `shepherdr set
+  reviewer.model <id> --space <name>` — the space's own, since a plain set would change every space's reviewer — with
+  nothing restarted: a new task's brief reads it, a task already running keeps the reviewer its brief named. And an
+  alert, where your Notifications let one through. One card per recovery: a primary that keeps answering posts nothing
+  more, and a chat that already went back gets nothing. The chats it names are the ones still running on what took over;
+  nothing is said to a role whose Settings name the harness it runs on.
 - **Which roles.** The roles whose primary can be in use somewhere else: the tasks' agents, the coordinators and the
   reviewer, each probed as Settings name its primary — the tasks' pair, the coordinators', the reviewer's
   (`reviewer.agent`, `reviewer.model`, `reviewer.effort`). For a reviewer the card names `reviewer.model`, where the

@@ -114,8 +114,9 @@
   probe rather than a log line: while one is set, Shepherdr asks the primary reviewer itself whether it answers again
   (Settings → Agents → Backup → Tell me when it is back, [settings](settings.md#tell-me-when-it-is-back)).
 - **Going back is yours.** A backup stays where it is until you restart the agent on what Settings name again (⋯ →
-  Restart agent, or `shepherdr restart <id>`) or, for a reviewer, until you set `reviewer.model` back: nothing switches
-  on its own. What Shepherdr does do is tell you when the primary answers again — one card in each chat still on a
+  Restart agent, or `shepherdr restart <id>`) or, for a reviewer, until you set `reviewer.model` back for that space
+  (`shepherdr set reviewer.model <id> --space <name>`; a plain set is Everywhere's) — a new task's brief reads it, while
+  a task already running keeps the reviewer its own brief named. Nothing switches on its own. What Shepherdr does do is tell you when the primary answers again — one card in each chat still on a
   backup, and no more — which is the setting above, `backup.watchReturn`, never a decision of the takeover itself.
 - Status, coordinators' too, is what the agent reports of itself. Every Claude Code Shepherdr starts gets a settings
   file of its own (`--settings`, in `~/.shepherdr/hooks/`; your own settings are never touched) whose hooks record
