@@ -42,13 +42,13 @@ keeps failing waits for you.
   space's own, then this machine's, then Everywhere's. Another machine's coordinator follows its own machine's settings.
 - **Model** and **Effort** (`backup.model`, `backup.effort`, default): one pair for both backups, read at the most
   specific level that sets it — a task's own `--set backup.model=…` (or `backup.effort=…`), else its space's, else this
-  machine's, else Everywhere's. Where Backup → Model is default, a task's backup starts on that task's own model when
-  the backup's CLI has it, and its effort likewise.
+  machine's, else Everywhere's. Where Backup → Model is default, a backup starts on the model and effort the agent it
+  backs up ran on, when the backup's CLI has them.
 
 A model neither backup CLI has — at that level or any level below it — is refused when you set it; one only the other
 CLI has is not used for that one, which then doesn't go in and its chat says why. Effort it lacks becomes the nearest it
-takes. In one task's chat, only a backup that changed who its agent runs as is a takeover; the same CLI again keeps the
-session it had.
+takes. Only a backup that changed the CLI is a takeover; the same CLI again keeps the session it had. A task's backup
+goes in once, ever; a coordinator's once, until you start it again yourself.
 
 A backup on the CLI the agent already runs starts that CLI again on the Backup model and effort and resumes its own
 session, so nothing is lost; another CLI takes the work over — a task's with its brief, its branch and the chat so far, a

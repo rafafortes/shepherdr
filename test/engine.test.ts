@@ -664,14 +664,22 @@ describe('a turn the provider cut off', () => {
     w.settings.set('task.fallback', 'claude')
     w.settings.set('backup.model', 'Opus 5.5')
     const p = await w.places.add(repo(), 'mine')
-    const t = w.engine.add({ project: p.name, title: 'Say hello', desc: 'Add hello.txt. Merge when done.', by: 'test', set: { 'backup.model': 'Haiku 5.5' } })
+    const t = w.engine.add({ project: p.name, title: 'Say hello', desc: 'Add hello.txt. Merge when done.', by: 'test', set: { 'backup.model': 'Haiku 5.5', 'backup.effort': 'low' } })
     const key = `${t.id}/Agent`
     await until(() => w.started.some((s) => s.key === key))
     w.agentIs(key, 'idle')
     retries[key] = { cut: 'e7', tries: 1, reason: 'Out of allowance', words: 'limit', over: true }
     await w.engine.cantGoOn(t.id, 'Out of allowance')
-    // this task's own Backup model, over its space's and Everywhere's
-    expect(w.started.filter((x) => x.key === key)[1]).toMatchObject({ kind: 'claude', model: 'claude-haiku-5-5' })
+    // this task's own Backup model and effort, over its space's and Everywhere's
+    expect(w.started.filter((x) => x.key === key)[1]).toMatchObject({ kind: 'claude', model: 'claude-haiku-5-5', effort: 'low' })
+    // and its own backup CLI: Codex for this task alone, where its space and Everywhere say Claude Code
+    const other = w.engine.add({ project: p.name, title: 'Say hello again', desc: 'Add hello.txt.', by: 'test', set: { 'task.fallback': 'codex', 'backup.model': 'default' } })
+    const otherKey = `${other.id}/Agent`
+    await until(() => w.started.some((s) => s.key === otherKey))
+    w.agentIs(otherKey, 'idle')
+    retries[otherKey] = { cut: 'e8', tries: 1, reason: 'Signed out', words: '401', over: true }
+    await w.engine.cantGoOn(other.id, 'Signed out')
+    expect(w.started.filter((x) => x.key === otherKey)[1]).toMatchObject({ kind: 'codex' })
     for (const k of ['task.fallback', 'backup.model']) w.settings.set(k, null)
   })
 

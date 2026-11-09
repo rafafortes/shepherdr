@@ -1566,7 +1566,8 @@ export class Engine extends Emitter<Events> {
     const t = this.task(id)
     if (!t || !this.mayRetry(this.key(t)) || this.handing.has(t.id)) return
     const key = this.key(t)
-    const from = this.agents.record(key)?.kind ?? t.agent?.kind ?? ''
+    const rec = this.agents.record(key)
+    const from = rec?.kind ?? t.agent?.kind ?? ''
     const space = this.nameOf(t)
     // what this task keeps for itself (task add --set) first, then its space's settings, its machine's and Everywhere's
     const plan = this.backupFor('task', space, t.set)
@@ -1574,7 +1575,8 @@ export class Engine extends Emitter<Events> {
     if (t.tookOver || !t.worktree) return this.settle(t)
     if (!plan.to) return this.noBackup(key, plan.why)
     const to = plan.to.kind
-    const same = to === from
+    // only an agent that is there has a session to keep: one with no record starts fresh, with the brief and the chat
+    const same = to === from && !!rec
     const name = (k: string) => CLI_NAME[k] ?? k
     this.handing.add(t.id)
     t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now() }

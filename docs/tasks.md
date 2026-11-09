@@ -88,8 +88,10 @@
 - A coordinator that can't go on is backed up the same way, when Settings → Agents → Backup → Coordinators' backup
   (`coordinator.fallback`, off unless set) is on: the same CLI starts again on `backup.model` and `backup.effort` with
   its session, or another CLI takes the chat over — a different conversation partner, which the card in the space
-  says — with the chat so far and its open tasks, its tasks going on as they are. Once, until a turn of it ends well
-  again; off, a backup already gone in, or one unable to go in, the space's chat says so and you are alerted.
+  says — with the chat so far and its open tasks, its tasks going on as they are, and on Backup → Model and Effort
+  where they are set, else on the model and effort it ran on. Once, until you start it again yourself (⋯ → Restart
+  agent, or `shepherdr restart`); off, a backup already gone in, or one unable to go in, the space's chat says so and
+  you are alerted.
 - Status, coordinators' too, is what the agent reports of itself. Every Claude Code Shepherdr starts gets a settings
   file of its own (`--settings`, in `~/.shepherdr/hooks/`; your own settings are never touched) whose hooks record
   each event: a turn starts or ends, what still runs in the background as it ends, a permission prompt (a subagent's

@@ -1091,6 +1091,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         }
     }
     const words = x.t ? await this.engine.restart(x.t.id, h) : await this.restartCoordinator(key, h)
+    // you started it again yourself: a backup may go in once more the next time it can't go on (a task keeps its own)
+    if (!x.t) this.agents.markTookOver(key, undefined)
     // the model it now runs on is one of the human's picks: first among the recent ones (only one a CLI lists, never
     // a word typed before its list was read)
     const picked = h.model ? findModel(h.kind, h.model) : undefined
@@ -1277,11 +1279,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** what cut off an agent's last turn, if its log says the provider did */
   private checkCut(key: string) {
-    if (!this.agents.record(key) || this.peers?.owner(key)) return
-    const cut = this.chats.cutOff(key)
-    // a turn that ended well: its agent works again, so a backup may go in once more the next time it can't go on
-    if (!cut && !key.includes('/')) this.agents.markTookOver(key, undefined)
-    this.retries.seen(key, cut)
+    if (this.agents.record(key) && !this.peers?.owner(key)) this.retries.seen(key, this.chats.cutOff(key))
   }
 
   /** an agent can't go on by itself: its backup agent takes over once (a task's engine.ts cantGoOn, a coordinator's
@@ -1298,15 +1296,22 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * and an alert.
    */
   private async coordinatorCantGoOn(key: string, r: Retry) {
-    const from = this.agents.record(key)?.kind
+    const rec = this.agents.record(key)
+    const from = rec?.kind
     const plan = from ? this.engine.backupFor('coordinator', this.spaceKey(key)) : {}
     const took = this.agents.tookOver(key)
-    // once per agent: a backup that keeps failing waits for the human, never a loop
+    // once per agent, until you restart it yourself: a backup that keeps failing waits for the human, never a loop
     if (plan.to && from && !took) {
       const why = r.reason.charAt(0).toLowerCase() + r.reason.slice(1)
+      // Backup → Model and Effort, or else the model and effort it ran on: a model the backup's CLI lacks is dropped
+      const on: Harness = {
+        kind: plan.to.kind,
+        model: plan.to.model ?? (rec.model ? findModel(plan.to.kind, rec.model)?.id : undefined),
+        effort: plan.to.effort ?? rec.effort,
+      }
       this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now() })
       try {
-        await this.restartCoordinator(key, plan.to, why)
+        await this.restartCoordinator(key, on, why)
         return
       } catch (e) {
         // it didn't start: the human hears why, and a later hand-over may try again

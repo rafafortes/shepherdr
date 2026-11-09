@@ -23,12 +23,12 @@ type CoordinatorSide = { coordinatorCantGoOn(key: string, r: Retry): Promise<voi
 const sides = src as unknown as CoordinatorSide
 
 /** a space whose coordinator runs on `kind`, with the agents' starts stubbed: what a backup would have started */
-async function place(name: string, kind = 'claude') {
+async function place(name: string, kind = 'claude', model?: string) {
   const dir = tmp('backup-repo')
   execSync(REPO, { cwd: dir, shell: '/bin/sh' })
   const p = await src.places.add(dir, name)
   const key = placeId.space(p.name)
-  src.agents.records[key] = { key, name: `shep-${p.name}`, kind, cwd: dir, workspace: p.name, logs: [], started: Date.now() }
+  src.agents.records[key] = { key, name: `shep-${p.name}`, kind, ...(model ? { model } : {}), cwd: dir, workspace: p.name, logs: [], started: Date.now() }
   src.engine.installed = () => true
   const started: { kind: string; model?: string; effort?: string; first?: string }[] = []
   const restart = src.agents.restart
@@ -118,22 +118,37 @@ describe("a coordinator's backup agent", () => {
     }
   })
 
-  test('a turn that ends well lets a backup go in once more; one that keeps failing never loops', async () => {
+  test('the same CLI again keeps the model and effort the coordinator ran on where Backup leaves them default', async () => {
+    // Backup → Model and Effort are default; the coordinator ran on Opus 5.5 at high effort
+    const s = await place('own', 'claude', 'claude-opus-5-5')
+    try {
+      s.src.agents.records[s.key].effort = 'high'
+      expect(s.src.settings.set('coordinator.fallback', 'claude', { space: s.p.name }).ok).toBe(true)
+      await s.cut('Out of allowance until 5pm')
+      expect(s.started).toHaveLength(1)
+      expect(s.started[0]).toMatchObject({ kind: 'claude', model: 'claude-opus-5-5', effort: 'high' })
+    } finally {
+      s.done()
+    }
+  })
+
+  test('a backup goes in once; starting it again yourself lets one go in once more', async () => {
     const s = await place('recover')
     try {
       expect(s.src.settings.set('coordinator.fallback', 'claude', { space: s.p.name }).ok).toBe(true)
       await s.cut('Out of allowance until 5pm')
       expect(s.started).toHaveLength(1)
       expect(s.src.agents.tookOver(s.key)).toBeDefined()
-      // its turn ends well: it works again, so the next one that can't go on is backed up once more
-      ;(s.src as unknown as { checkCut(key: string): void }).checkCut(s.key)
-      expect(s.src.agents.tookOver(s.key)).toBeUndefined()
+      // a backup that can't go on either waits for you, its chat saying the backup went in once already
       await s.cut('Signed out')
-      expect(s.started).toHaveLength(2)
-      // and a backup that can't go on either waits for you: its chat says the backup went in once already
-      await s.cut('Out of allowance')
-      expect(s.started).toHaveLength(2)
+      expect(s.started).toHaveLength(1)
       expect(s.cards().map((m) => m.card!.text).at(-1)).toContain('Its backup agent (Claude Code) already went in once')
+      // you start it again yourself: a backup may go in once more the next time it can't go on
+      await (s.src as unknown as { restart(key: string, to: object): Promise<string> }).restart(s.key, {})
+      expect(s.src.agents.tookOver(s.key)).toBeUndefined()
+      expect(s.started).toHaveLength(2)
+      await s.cut('Out of allowance')
+      expect(s.started).toHaveLength(3)
     } finally {
       s.done()
     }
