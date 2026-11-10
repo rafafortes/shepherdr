@@ -1305,9 +1305,35 @@ function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply:
       setBusy(false)
     }
   }
+  // the advisor answers its plain question instead (Settings → Agents → Advisor), at once
+  const [asking, setAsking] = useState(false)
+  const askAdvisor = async () => {
+    if (asking) return
+    setAsking(true)
+    setErr('')
+    try {
+      const r = await act({ type: 'advise', chat: ask.chat, question: `words:${reply.id}` })
+      if (r?.ok === false) setErr(r.error ?? "The advisor couldn't take it.")
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setAsking(false)
+    }
+  }
   const a = ask.answered
   return (
-    <CardShell title={`${task} asks`} source={source} dismiss={a ? undefined : () => void dismiss()}>
+    <CardShell
+      title={`${task} asks`}
+      source={source}
+      dismiss={a ? undefined : () => void dismiss()}
+      action={
+        ask.advise && !a ? (
+          <button type="button" data-ask-advisor className="relative shrink-0 self-start text-[0.8125rem] text-fg3 hover:text-fg hover:underline disabled:no-underline phone:min-h-11 phone:text-[0.9375rem]" disabled={asking} onClick={() => void askAdvisor()}>
+            {asking ? 'Asking the advisor…' : 'Ask the advisor'}
+          </button>
+        ) : undefined
+      }
+    >
       <div data-ask-text className="line-clamp-6 break-words whitespace-pre-wrap">{reply.text}</div>
       {a ? (
         <Sent>

@@ -115,32 +115,27 @@ describe('what the advisor is asked, and how it answers', () => {
 })
 
 describe('on the human’s word', () => {
-  test('Ask the advisor on a card: its suggestion is a card of its own, and Send it answers the question as the human would', async () => {
+  test('Ask the advisor on a card: it answers at once, as the human would, and the chat says it was the advisor', async () => {
     const w = await world('adv-manual')
     try {
       card(w.key, 'ask:m1', 'Which store for the outbox?', ['SQLite', 'Postgres'])
       // the card offers the advisor, where one is set
       expect(src.chat(w.key)!.messages.find((m) => m.question?.id === 'ask:m1')!.question!.advise).toBe(true)
       replies = [json({ decide: 'advisor', choice: 1, why: 'One file, no server: enough for an outbox.', sure: true })]
-      expect(await src.advise(w.key, 'ask:m1')).toEqual({ ok: true })
+      expect(await src.act({ type: 'advise', chat: w.key, question: 'ask:m1' })).toEqual({ ok: true })
       // run where the work is, on the space's advisor, read only
       expect(runs.map((r) => [r.kind, r.model, r.cwd])).toEqual([['pi', 'opencode-go/deepseek-v4.1-flash', w.dir]])
       expect(runs[0].prompt).toContain('Which store for the outbox?')
       expect(runs[0].prompt).toContain('Keep the outbox somewhere.')
-      // nothing reached the agent yet: a suggestion waits for the human
-      expect(to(w.key)).toEqual([])
-      const a = advice(w.key)!
-      expect(a.title).toBe('The advisor suggests: “SQLite”')
-      expect(a.choices.map((c) => c.label)).toEqual(['Send it', "I'll answer myself"])
-      expect(a.choices[0].description).toContain('One file, no server')
-      // asked once: the card no longer offers it
-      expect(src.chat(w.key)!.messages.find((m) => m.question?.id === 'ask:m1')!.question!.advise).toBeUndefined()
-      // Send it: the question is answered as the human would, in the human's name
-      expect(await src.act({ type: 'answer', chat: w.key, question: a.id, choice: 0 })).toEqual({ ok: true })
+      // no waiting for its two minutes, and no suggestion to send: the answer goes in now, named as the advisor's
       expect(to(w.key)).toHaveLength(1)
-      expect(to(w.key)[0]).toContain(`from="${src.user}"`)
+      expect(to(w.key)[0]).toContain('from="The advisor"')
       expect(to(w.key)[0]).toContain('SQLite')
       expect(src.chats.log(w.key).answers['ask:m1']).toBe(0)
+      expect(cards(w.key).at(-1)).toContain('The advisor answered as you asked: “SQLite”. One file, no server')
+      // the human asked and is looking: no alert
+      expect(alerts).toEqual([])
+      expect(advice(w.key)).toBeUndefined()
     } finally {
       w.done()
     }
@@ -163,15 +158,46 @@ describe('on the human’s word', () => {
     }
   })
 
-  test("I'll answer myself leaves the question as it was", async () => {
-    const w = await world('adv-decline')
+  test("the space's copy of a task's question offers the advisor too: its cards and its plain question", async () => {
+    const w = await world('adv-copies')
     try {
-      card(w.key, 'ask:d1', 'Retry or give up?', ['Retry', 'Give up'])
-      replies = [json({ decide: 'advisor', choice: 1, why: 'Transient.', sure: true })]
-      await src.advise(w.key, 'ask:d1')
-      await src.act({ type: 'answer', chat: w.key, question: advice(w.key)!.id, choice: 1 })
+      const t = src.engine.task(w.id)!
+      const settle = (src.engine as unknown as { settle(t: unknown): void }).settle.bind(src.engine)
+      card(w.key, 'ask:c1', 'Which store?', ['SQLite', 'Postgres'])
+      settle(t)
+      const copy = () => src.chat(w.coord)!.messages.findLast((m) => m.card?.task === w.id && m.card.ask)?.card?.ask
+      expect(copy()?.questions?.map((q) => [q.id, q.advise])).toEqual([['ask:c1', true]])
+      // answered, the copy offers nothing more
+      replies = [json({ decide: 'advisor', choice: 1, why: 'Small.', sure: true })]
+      await src.act({ type: 'advise', chat: w.key, question: 'ask:c1' })
+      expect(copy()?.questions?.[0].advise).toBeUndefined()
+    } finally {
+      w.done()
+    }
+  })
+
+  test("a plan's suggestion: Send it answers the plan in the human's name, I'll answer myself leaves it", async () => {
+    const w = await world('adv-plan-send')
+    try {
+      card(w.key, 'plan:d1', 'Plan: retry the sync', ['Approve', 'Change it'], 'Plan')
+      replies = [json({ decide: 'advisor', choice: 1, why: 'Sound.', sure: true })]
+      await src.advise(w.key, 'plan:d1')
       expect(to(w.key)).toEqual([])
-      expect(src.chats.log(w.key).answers['ask:d1']).toBeUndefined()
+      const a = advice(w.key)!
+      expect(a.title).toBe('The advisor suggests: “Approve”')
+      expect(a.choices.map((c) => c.label)).toEqual(['Send it', "I'll answer myself"])
+      expect(await src.act({ type: 'answer', chat: w.key, question: a.id, choice: 0 })).toEqual({ ok: true })
+      expect(to(w.key)).toHaveLength(1)
+      expect(to(w.key)[0]).toContain(`from="${src.user}"`)
+      expect(src.chats.log(w.key).answers['plan:d1']).toBe(0)
+      // another plan, its suggestion declined: nothing goes in, the plan still waits
+      card(w.key, 'plan:d2', 'Plan: drop the cache', ['Approve', 'Change it'], 'Plan')
+      replies = [json({ decide: 'advisor', choice: 1, why: 'Fine.', sure: true })]
+      await src.advise(w.key, 'plan:d2')
+      const b = src.chats.chat(w.key).messages.findLast((m) => m.question?.id.startsWith('advice:'))!.question!
+      await src.act({ type: 'answer', chat: w.key, question: b.id, choice: 1 })
+      expect(to(w.key)).toHaveLength(1)
+      expect(src.chats.log(w.key).answers['plan:d2']).toBeUndefined()
     } finally {
       w.done()
     }
