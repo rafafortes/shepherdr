@@ -80,12 +80,14 @@
   agent, a task's or a coordinator's, where one is set (below), and otherwise to you. Anything written to the agent
   starts the count again. Each CLI's log says what cut it off (`server/live/retry.ts` decides).
 - A task that goes back to work in the worktree it had (its agent starts again, the way back moves it to its primary, a
-  backup takes it over, or a queued task gets its go) is first brought up to its base: what was merged meanwhile (build
+  backup takes it over, a queued task gets its go, or words take its agent back from rest: your answer on a card, the
+  advisor's, a message to a task that waits on you, is To do or reported ready) is first brought up to its base: what was merged meanwhile (build
   settings, the check, its tools, AGENTS.md) reaches it at once instead of only at its merge. A clean worktree is rebased
   on the base; one with work not committed is left alone, and a rebase that conflicts is undone, so the worktree is
   always as it was or on top of the base. Its chat gets a small card (`Rebased on main: 3 new commits in main`), and its
   agent is told what came in, that AGENTS.md changed when it did, and, when it was not rebased, to commit and rebase at
-  its next good point. The base is the one here, which merges keep up to date: nothing is fetched.
+  its next good point. The base is the one here, which merges keep up to date: nothing is fetched. An agent mid-turn (a
+  permission, its CLI's own question) is never rebased under it.
 - When a task's agent can't go on (out of allowance, signed out, its provider still down after the tries), its
   **backup agent** goes in, once (a start that fails leaves a later one to try again), then the next of its chain where
   that one can't go on either ([settings](settings.md#a-chain-of-backups)): Settings → Agents → Backup →

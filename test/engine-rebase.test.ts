@@ -97,6 +97,55 @@ describe('back to work on a base that moved', () => {
     expect(w.started.filter((s) => s.key === a.key).at(-1)!.first).toContain('Shepherdr rebased your branch on main: 1 commit came into main')
   })
 
+  test('words that take an agent at rest back to work bring its branch up to its base first, and carry the note', async () => {
+    const w = world()
+    const dir = repo()
+    const a = await started(w, dir, 'rb-words', 'Work', 'Add a.txt.')
+    commit(a.t.worktree!, 'a.txt', 'a\n', 'Add a.txt')
+    onMain(dir, 'AGENTS.md', '# Rules\n', 'Say the rules')
+    // its turn ended without reporting done: it waits on you, its agent there
+    w.agentIs(a.key, 'idle')
+    expect(w.engine.statusOf(a.t)).toBe('need')
+    await w.engine.tell(a.t.id, 'Go on with b.txt.')
+    expect(onTop(a.t.worktree!)).toBe(true)
+    const said = w.sent.filter((s) => s.key === a.key).at(-1)!.text
+    expect(said).toStartWith('Go on with b.txt.\n\n<shepherdr><base>Before you went back to work, Shepherdr rebased your branch on main: 1 commit came into main')
+    expect(said).toContain('AGENTS.md changed among them')
+    // the next words find it on its base already: the words alone
+    await w.engine.tell(a.t.id, 'And c.txt.')
+    expect(w.sent.filter((s) => s.key === a.key).at(-1)!.text).toBe('And c.txt.')
+  })
+
+  test('never under an agent mid-turn (a permission, its own question) or at work: the words go in as they are', async () => {
+    const w = world()
+    const dir = repo()
+    const a = await started(w, dir, 'rb-midturn', 'Work', 'Add a.txt.')
+    onMain(dir, 'build.txt', 'cache on\n', 'Turn the build cache on')
+    const head = sh('git rev-parse HEAD', a.t.worktree!)
+    for (const st of ['blocked', 'working']) {
+      w.agentIs(a.key, st)
+      expect(await w.engine.beforeWords(a.t.id)).toBeUndefined()
+    }
+    w.agentIs(a.key, 'working')
+    await w.engine.tell(a.t.id, 'Also d.txt.')
+    expect(w.sent.filter((s) => s.key === a.key).at(-1)!.text).toBe('Also d.txt.')
+    expect(sh('git rev-parse HEAD', a.t.worktree!)).toBe(head)
+    // nor a task done, or one that isn't there
+    expect(await w.engine.beforeWords('NOPE-1')).toBeUndefined()
+  })
+
+  test('a To do task told to go is brought up to its base too', async () => {
+    const w = world()
+    const dir = repo()
+    const a = await started(w, dir, 'rb-todo', 'Later', "Add a.txt. Don't start yet, wait for a go.")
+    w.engine.todo(a.t.id)
+    w.agentIs(a.key, 'idle')
+    onMain(dir, 'build.txt', 'cache on\n', 'Turn the build cache on')
+    await w.engine.tell(a.t.id, 'Go.')
+    expect(onTop(a.t.worktree!)).toBe(true)
+    expect(w.sent.filter((s) => s.key === a.key).at(-1)!.text).toContain('<base>Before you went back to work')
+  })
+
   test('a queued task whose agent waits in the worktree it had gets its go once it is rebased on what the one before it merged', async () => {
     const w = world()
     const dir = repo()
