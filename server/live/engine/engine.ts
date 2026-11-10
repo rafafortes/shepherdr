@@ -25,7 +25,7 @@ import { launchesAgents, refusedLaunch } from '../launch-policy.ts'
 import { fromAgentLine } from '../chatlines.ts'
 import type { Chats } from '../chats.ts'
 import { HOST, placeId, type Places, type Space } from '../places.ts'
-import { privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, wentBackCardWords, restartLine, type BackWhy, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
+import { type BaseMoved, baseMovedCard, baseMovedLine, privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, wentBackCardWords, restartLine, type BackWhy, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
@@ -964,8 +964,13 @@ export class Engine extends Emitter<Events> {
     this.chats.post(key, { id, card: { id, task: t.id, status: 'work', text: `started: ${why}` } })
     this.save()
     // its agent hears it: one that never started (a scheduled task whose time came while it waited for another) is
-    // started first by `ensure`, and gets the go as its first message after the brief (starter)
-    this.agents.send(key, plain ? text : hidden(text, 'go'), { ensure: this.starter(t) }).catch(() => undefined)
+    // started first by `ensure`, and gets the go as its first message after the brief (starter). One waiting in a
+    // worktree it already has is brought up to its base first, and the go says how (launch does it for one whose agent
+    // is gone)
+    const go = plain ? text : hidden(text, 'go')
+    const send = (note?: string) => this.agents.send(key, note ? `${go}\n\n${note}` : go, { ensure: this.starter(t) }).catch(() => undefined)
+    if (t.worktree && existsSync(t.worktree) && this.agents.status(key) !== 'gone') void this.freshen(t).then(send, () => send())
+    else void send()
     this.settleOne(t)
     this.settleSoon(t, ANSWER_GRACE + 500)
   }
@@ -1517,6 +1522,14 @@ export class Engine extends Emitter<Events> {
       t.worktree = made.path
       this.save()
     }
+    // back to work in the worktree it had (not one made just now): what came into its base meanwhile reaches it first
+    const moved = made ? undefined : await this.freshen(t).catch(() => undefined)
+    if (moved) {
+      if (restart) {
+        const before = restart
+        restart = async () => [await before(), moved].filter(Boolean).join('\n\n')
+      } else first = first ? `${first}\n\n${moved}` : moved
+    }
     const env = this.env(key)
     // a task from before tasks kept their own CLI starts on Settings'
     const h = t.agent ?? this.settings.harness('task', this.nameOf(t))
@@ -1539,6 +1552,32 @@ export class Engine extends Emitter<Events> {
       pane: () => this.wt.agentPane({ home, wt: t.worktree!, label: labelOf(t), tab: 'Agent', env, made }),
     }
     return restart ? this.agents.restart(spec, restart) : this.agents.ensure(spec)
+  }
+
+  /**
+   * Bring a task's branch up to its base before its agent goes back to work in the worktree it had: what was merged into
+   * the base meanwhile (build settings, the check, its tools, AGENTS.md) reaches it at once instead of at its merge. Only
+   * a clean worktree is rebased, and a conflict leaves it as it was (G.rebase aborts). Its chat gets a card, and what
+   * comes back is its agent's note (hidden from the chat): rebased, or what to do at its next good point. Nothing when
+   * its base didn't move, or for a task done or on its way into its base. The local base is what merges here keep up to
+   * date: no fetch, so a way back of many tasks asks the remote nothing.
+   */
+  private async freshen(t: TaskRec): Promise<string | undefined> {
+    if (ended(t) || t.landing || !t.base || !t.worktree || !existsSync(t.worktree)) return
+    const wt = t.worktree
+    const base = t.base
+    if (!(await G.git(wt, 'rev-parse', '--verify', '--quiet', `refs/heads/${base}`)).ok) return
+    if ((await G.git(wt, 'merge-base', '--is-ancestor', base, 'HEAD')).ok) return
+    const from = (await G.git(wt, 'merge-base', base, 'HEAD')).out
+    if (!from) return
+    const commits = (await G.git(wt, 'log', '--format=%h %s', `${from}..${base}`)).out.split('\n').filter(Boolean)
+    const rules = (await G.git(wt, 'diff', '--name-only', `${from}..${base}`, '--', ':(glob)**/AGENTS.md', ':(glob)**/CLAUDE.md')).out.split('\n').filter(Boolean)
+    const state: BaseMoved['state'] = (await G.dirty(wt)) ? 'dirty' : (await G.rebase(wt, base)).ok ? 'rebased' : 'conflict'
+    const m: BaseMoved = { base, commits, rules, state }
+    const key = this.key(t)
+    const id = `base:${t.id}:${Date.now()}`
+    this.chats.post(key, { id, card: { id, task: t.id, text: baseMovedCard(m) } })
+    return hidden(baseMovedLine(m), 'base')
   }
 
   /**

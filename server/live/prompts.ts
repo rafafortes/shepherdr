@@ -166,6 +166,25 @@ export function taskFirst(t: { title: string; desc: string }) {
 }
 
 /** what a start is told when the session it was to resume is gone: a new one remembers none of it */
+/** what came into a task's base since its branch began, as Shepherdr found it before its agent went back to work */
+export type BaseMoved = { base: string; commits: string[]; rules: string[]; state: 'rebased' | 'conflict' | 'dirty' }
+
+/** what a task's agent is told when its base moved while it was away: rebased for it, or what to do at a good point */
+export function baseMovedLine(m: BaseMoved) {
+  const n = m.commits.length
+  const came = `${n} commit${n === 1 ? '' : 's'} came into ${m.base} since your branch began (${m.commits.slice(0, 5).join('; ')}${n > 5 ? '; …' : ''})`
+  const rules = m.rules.length ? ` ${m.rules.join(' and ')} changed among them: read ${m.rules.length === 1 ? 'it' : 'them'} again before you go on.` : ''
+  if (m.state === 'rebased') return `Before you went back to work, Shepherdr rebased your branch on ${m.base}: ${came}.${rules} What you build on moved, so run the checks again before you report done.`
+  if (m.state === 'conflict') return `${came}. Rebasing your branch on it conflicts, so Shepherdr left your worktree as it was: at your next good point, rebase on ${m.base} (git rebase ${m.base}), resolve the conflicts and run the checks.${rules}`
+  return `${came}. Your worktree has changes not committed, so Shepherdr didn't rebase it: at your next good point, commit, rebase on ${m.base} (git rebase ${m.base}) and run the checks.${rules}`
+}
+
+/** the card a task's chat gets for it */
+export function baseMovedCard(m: BaseMoved) {
+  const n = `${m.commits.length} new commit${m.commits.length === 1 ? '' : 's'} in ${m.base}`
+  return m.state === 'rebased' ? `Rebased on ${m.base}: ${n}` : `Not rebased (${m.state === 'conflict' ? 'it conflicts' : 'changes not committed'}): ${n}; its agent rebases at a good point`
+}
+
 export function freshLine() {
   return 'Your earlier session is gone, so this is a new one that remembers none of it. What was done is on the branch and in this chat: look at what is here before you start, and keep the work that is already done.'
 }

@@ -219,6 +219,8 @@ describe('Queued after other tasks', () => {
     expect(w.engine.statusOf(b)).toBe('queued')
     // the agent read a go in it
     expect(w.engine.queue(b.id, [], { self: true })).toEqual({ queued: [], went: true })
+    // the go goes in once its worktree is checked against its base
+    await until(() => w.sent.some((s) => s.key === bkey && s.text.includes('<go>')))
     w.agentIs(bkey, 'working')
     expect(w.engine.statusOf(b)).toBe('work')
     const told = w.sent.filter((s) => s.key === bkey).length
@@ -245,6 +247,8 @@ describe('Queued after other tasks', () => {
     w.engine.queue(b.id, [a.t.id, c.id], { self: true })
     expect(w.sent.length).toBe(n)
     expect(w.engine.queue(b.id, [])).toEqual({ queued: [], went: true })
+    // once its worktree is checked against its base (its base didn't move: the go alone)
+    await until(() => w.sent.at(-1)!.text.includes('<go>'))
     expect(w.sent.at(-1)!.text).toBe(`<shepherdr><go>Go: you no longer wait for ${a.t.id}, ${c.id}, start now.</go></shepherdr>`)
     expect(w.engine.statusOf(b)).toBe('work')
     // nothing to clear
