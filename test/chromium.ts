@@ -5,7 +5,7 @@
 // One browser for the whole run: scripts/test.ts starts it (this file, run on its own) and every test file connects to
 // it, each with contexts of its own, so a run holds one browser's processes instead of one browser per file. Run any
 // other way, a file launches its own. With SHEPHERDR_TEST_MAP set, it also records which lines of the screen's code
-// each test file runs (screen-map.ts).
+// each test file runs (screen-map.ts); with SHEPHERDR_TEST_COVER, whether each line of it ran (scripts/coverage.ts).
 import { chromium, webkit, type Browser } from 'playwright-core'
 
 /** a pretend microphone and camera, allowed without asking, and sound that plays without a tap (voice.test.ts) */
@@ -19,7 +19,7 @@ export async function launch(): Promise<Browser | null> {
     if (process.env.CI) throw e
     return null
   })
-  if (browser && process.env.SHEPHERDR_TEST_MAP) await (await import('./screen-map.ts')).record(browser, caller)
+  if (browser && (process.env.SHEPHERDR_TEST_MAP || process.env.SHEPHERDR_TEST_COVER)) await (await import('./screen-map.ts')).record(browser, caller)
   return browser
 }
 

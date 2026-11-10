@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The whole check on this machine, for this fork: the types, every test (the browser tests too) and the build.
+# The whole check on this machine, for this fork: the types, every test (the browser tests too), the coverage ratchet
+# (scripts/coverage.ts) and the build.
 # GitHub Actions is off on rafafortes/shepherdr (SHE-21), so this is the check every change goes through:
 #
 #   bun run check:local        # a task runs it before `shepherdr ready`; the coordinator before a release
@@ -108,6 +109,7 @@ step_note() {
   case $1 in
     tests) grep -oE 'Ran [0-9]+ tests across [0-9]+ files?' "$log" | tail -1 ;;
     build) grep -oE 'built in [0-9.]+m?s' "$log" | tail -1 ;;
+    coverage) grep -E '^Coverage: ' "$log" | tail -1 | sed -E 's/ \([0-9]+ of [0-9]+\)//g; s/^Coverage: //; s/;.*//' ;;
     *) true ;;
   esac
 }
@@ -180,6 +182,10 @@ show_failure() { # the reasons a step failed
       left=$(sed -n '/^This run left [0-9]* temporary folder/,/^$/p' "$log" | head -22)
       [ -n "$left" ] && { echo "Left behind:"; echo "$left" | sed 's/^/  /'; shown=$left; }
       ;;
+    coverage)
+      shown=$(sed -n '/^Coverage fell since the baseline/,$p' "$log" | head -14)
+      [ -n "$shown" ] && echo "$shown"
+      ;;
     types)
       shown=$(grep -E 'error TS[0-9]+' "$log" | sort -u | head -8)
       [ -n "$shown" ] && { echo "Type errors:"; echo "$shown" | sed 's/^/  /'; }
@@ -193,7 +199,7 @@ show_failure() { # the reasons a step failed
 
 # the dependencies first: a fresh worktree has none, neither the types nor a browser can be read without them, and a
 # lockfile that moved since the last install (bun install itself is a no-op when they are all there)
-total=4
+total=5
 say() { printf '%s\n' "$1" | tee -a "$V"; }
 dirty=''
 [ -n "$(git -C "$root" status --porcelain 2>/dev/null)" ] && dirty=' and what is not committed'
@@ -230,10 +236,22 @@ base=${base#origin/}
 [ -n "$base" ] || base=main
 map=()
 [ "$branch" = "$base" ] && map=(--map)
+# the coverage baseline the same way: the default branch's alone, which every task's coverage is held against
+record=()
+[ "$branch" = "$base" ] && record=(--record)
+cover="$logs/coverage"
 
 step types bun run typecheck
 # --force: a check never takes an earlier pass at this commit for its own (a browser that skipped then would hide here)
-step tests bun "$root/scripts/test.ts" --force ${map[@]+"${map[@]}"}
+step tests bun "$root/scripts/test.ts" --force --cover="$cover" ${map[@]+"${map[@]}"}
+# the ratchet (scripts/coverage.ts): no file may gain a line no test runs. Only after tests that all passed: what a
+# failed run ran is only a part of it
+if [[ " ${failed[*]} " != *" tests "* ]]; then
+  step coverage bun "$root/scripts/coverage.ts" "$cover" ${record[@]+"${record[@]}"}
+else
+  what+=(coverage)
+  say "${#what[@]}/$total coverage skipped: the tests failed, so what they ran is only a part"
+fi
 step build bun run build
 
 # a browser that died during the run skips its tests instead of failing them (test/chromium.ts): say so, as for the ones

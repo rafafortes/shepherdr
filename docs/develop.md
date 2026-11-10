@@ -7,7 +7,7 @@ bun run dev           # the screen with hot reload, on :5173, talking to the ser
 bun run typecheck     # types, in seconds: what to run while you work
 bun run test changed  # the tests that reach what you changed from the default branch
 bun run test          # every test, in parallel, a quarter of the cores as the check does (but no lock)
-bun run check:local   # the whole check: types, every test with the browser ones, the build (about 2 minutes)
+bun run check:local   # the whole check: types, every test with the browser ones, the coverage ratchet, the build (about 2 minutes)
 ```
 
 The whole check runs on this machine: GitHub Actions is off on this repo (2026-11-06), so `.github/workflows/check.yml`

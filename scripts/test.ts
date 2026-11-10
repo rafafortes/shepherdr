@@ -7,6 +7,8 @@
 //   bun run test changed --since=HEAD   only what changed since that commit (here: not committed yet)
 //   bun run test changed --list   which test files would run, without running them
 //   bun run test --map            and note which lines of the screen each browser test runs (screen-map.ts)
+//   bun run test --cover=<dir>    and leave in <dir> what the tests ran, the server's and the screen's, for
+//                                 scripts/coverage.ts (the check's coverage step)
 //
 // A change to the screen runs only the browser tests that run the lines it changed, by the map the check keeps on the
 // default branch (screen-map.ts, `bun run check:local`); every one where there is no map yet, or for a change to the
@@ -119,6 +121,9 @@ const list = args.includes('--list')
 // --map[=file]: note which lines of the screen each browser test runs, into that file (the one kept for every worktree)
 const mapArg = args.find((a) => a === '--map' || a.startsWith('--map='))
 const mapOut = mapArg ? (mapArg.includes('=') ? resolve(mapArg.slice('--map='.length)) : mapFile()) : null
+// --cover=<dir>: Bun's coverage of what the test processes load, and each browser test's lines of the screen (screen-map.ts)
+const coverArg = args.find((a) => a.startsWith('--cover='))
+const coverDir = coverArg ? resolve(coverArg.slice('--cover='.length)) : null
 const since = args.find((a) => a.startsWith('--since='))?.slice('--since='.length)
 // --since says what to compare with, so it means changed too
 const changed = args.includes('changed') || args.includes('--changed') || since !== undefined
@@ -126,7 +131,7 @@ const flags: string[] = []
 const words: string[] = []
 for (let i = 0; i < args.length; i++) {
   const a = args[i]
-  if (['--force', 'changed', '--changed', '--list'].includes(a) || a.startsWith('--since=') || a === mapArg) continue
+  if (['--force', 'changed', '--changed', '--list'].includes(a) || a.startsWith('--since=') || a === mapArg || a === coverArg) continue
   if (a.startsWith('-')) {
     flags.push(a)
     // flags that take the next word
@@ -220,6 +225,10 @@ const jobs = `--parallel=${process.env.SHEPHERDR_TEST_JOBS ?? Math.max(1, Math.f
 // a test may take longer while every core is busy (several tasks test at once): 5 s, bun's default, is too tight
 const decoder = new TextDecoder()
 const timeout = flags.some((f) => f.startsWith('--timeout')) ? [] : ['--timeout=20000']
+if (coverDir) {
+  rmSync(coverDir, { recursive: true, force: true })
+  flags.push('--coverage', '--coverage-reporter=lcov', `--coverage-dir=${join(coverDir, 'server')}`)
+}
 const cmd = [...lowPriority(), process.execPath, 'test', jobs, ...timeout, `--timings=${timings}`, '--update-timings', ...flags, ...(files ?? []).map((f) => `./${f}`)]
 if (files) console.log(`${files.length} test file${files.length === 1 ? '' : 's'}: ${files.map((f) => f.replace(/^test\//, '')).join(' ')}`)
 const t0 = Date.now()
@@ -247,6 +256,7 @@ if ((files ?? testFiles()).some((t) => reach(t).has('test/chromium.ts'))) {
   const line = await Promise.race([firstLine(), Bun.sleep(30_000).then(() => '')])
   if (line.startsWith('ws://')) env.SHEPHERDR_TEST_BROWSER = line.trim()
 }
+if (coverDir) env.SHEPHERDR_TEST_COVER = join(coverDir, 'screen')
 const mapParts = join(cache, `map-${process.pid}`)
 if (mapOut) {
   rmSync(mapParts, { recursive: true, force: true })

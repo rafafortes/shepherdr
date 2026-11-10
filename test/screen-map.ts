@@ -26,16 +26,21 @@ export type ScreenMap = { commit: string; sources: string[]; tests: Record<strin
 /* ---------- recording, in a browser test's own process ---------- */
 
 /** notes what each page of this browser runs, until the page (or its context, or the browser) closes; then writes it
- *  to $SHEPHERDR_TEST_MAP/<test file>.json */
+ *  to $SHEPHERDR_TEST_MAP/<test file>.json (the screen map), and to $SHEPHERDR_TEST_COVER/<test file>.json each line of
+ *  the screen's own files and whether it ran (the coverage scripts/coverage.ts keeps) */
 export async function record(browser: Browser, test: string) {
   const { builtScreen } = await import('./web.ts')
   const dist = await builtScreen()
   const spans: Record<string, [number, number][]> = {}
   const sources = new Set<string>()
+  const lines: Lines = {}
   const on = new Set<Page>()
   const stop = async (page: Page) => {
     if (!on.delete(page)) return
-    for (const e of await page.coverage.stopJSCoverage().catch(() => [])) note(dist, e, spans, sources)
+    for (const e of await page.coverage.stopJSCoverage().catch(() => [])) {
+      if (process.env.SHEPHERDR_TEST_MAP) note(dist, e, spans, sources)
+      if (process.env.SHEPHERDR_TEST_COVER) ran(dist, e, lines)
+    }
   }
   const watch = (ctx: BrowserContext) => {
     const newPage = ctx.newPage.bind(ctx)
@@ -56,28 +61,80 @@ export async function record(browser: Browser, test: string) {
   const close = browser.close.bind(browser)
   browser.close = async (o) => {
     await Promise.all([...on].map(stop))
-    const dir = process.env.SHEPHERDR_TEST_MAP!
-    mkdirSync(dir, { recursive: true })
-    const map: ScreenMap = { commit: '', sources: [...sources].sort(), tests: { [test]: Object.fromEntries(Object.entries(spans).map(([f, s]) => [f, merge(s)])) } }
-    writeFileSync(join(dir, `${basename(test)}.json`), JSON.stringify(map))
+    const dir = process.env.SHEPHERDR_TEST_MAP
+    if (dir) {
+      mkdirSync(dir, { recursive: true })
+      const map: ScreenMap = { commit: '', sources: [...sources].sort(), tests: { [test]: Object.fromEntries(Object.entries(spans).map(([f, s]) => [f, merge(s)])) } }
+      writeFileSync(join(dir, `${basename(test)}.json`), JSON.stringify(map))
+    }
+    const cover = process.env.SHEPHERDR_TEST_COVER
+    if (cover) {
+      mkdirSync(cover, { recursive: true })
+      writeFileSync(join(cover, `${basename(test)}.json`), JSON.stringify(lines))
+    }
     return close(o)
   }
+}
+
+/** each line of our own files that code was built from, by file: 1 where some of it ran, 0 where none did */
+export type Lines = Record<string, Record<number, 0 | 1>>
+
+/** whether each line of our own files in one of the built screen's scripts ran: V8's block coverage gives every range
+ *  (a function, a block in it) its count, and an offset takes the count of the innermost range that holds it, so a
+ *  function never called, or a branch never taken, is 0 however often what holds it ran */
+function ran(dist: string, e: Coverage, lines: Lines) {
+  const m = mapOf(dist, e)
+  if (!m) return
+  const counts = countsAt(e.functions.flatMap((f) => f.ranges), m.at)
+  for (let i = 0; i < m.at.length; i++) {
+    const file = m.files[m.src[i]]
+    if (file === null) continue
+    const own = (lines[file] ??= {})
+    if (counts[i] > 0) own[m.line[i]] = 1
+    else own[m.line[i]] ??= 0
+  }
+}
+
+/** for offsets in order, the count of the innermost range that holds each (0 outside them all). V8's ranges nest: a
+ *  function's, the blocks in it, the functions in those */
+export function countsAt(ranges: { startOffset: number; endOffset: number; count: number }[], offsets: number[]): number[] {
+  // outermost first where two start at the same offset
+  const sorted = [...ranges].sort((a, b) => a.startOffset - b.startOffset || b.endOffset - a.endOffset)
+  const open: (typeof sorted)[number][] = []
+  const out: number[] = []
+  let next = 0
+  for (const at of offsets) {
+    while (open.length && open.at(-1)!.endOffset <= at) open.pop()
+    while (next < sorted.length && sorted[next].startOffset <= at) {
+      const r = sorted[next++]
+      if (r.endOffset <= at) continue
+      while (open.length && open.at(-1)!.endOffset <= r.startOffset) open.pop()
+      open.push(r)
+    }
+    out.push(open.at(-1)?.count ?? 0)
+  }
+  return out
 }
 
 type Coverage = { url: string; source?: string; functions: { ranges: { startOffset: number; endOffset: number; count: number }[] }[] }
 const maps = new Map<string, { map: TraceMap; at: number[]; src: number[]; line: number[]; files: (string | null)[] } | null>()
 
+/** a built script's source map, flattened (null for one that has none, or isn't the screen's) */
+function mapOf(dist: string, e: Coverage) {
+  if (!e.source || !e.url.startsWith('http')) return null
+  const file = join(dist, new URL(e.url).pathname.replace(/^\//, '')) + '.map'
+  if (!maps.has(file)) maps.set(file, existsSync(file) ? flatten(file, e.source) : null)
+  return maps.get(file) ?? null
+}
+
 /** the lines of our own files that the functions run in one of the built screen's scripts cover */
 function note(dist: string, e: Coverage, spans: Record<string, [number, number][]>, sources: Set<string>) {
-  const file = join(dist, new URL(e.url).pathname.replace(/^\//, '')) + '.map'
-  if (!e.source || !e.url.startsWith('http')) return
-  if (!maps.has(file)) maps.set(file, existsSync(file) ? flatten(file, e.source) : null)
-  const m = maps.get(file)
+  const m = mapOf(dist, e)
   if (!m) return
   for (const f of m.files) if (f) sources.add(f)
   for (const fn of e.functions) {
     const r = fn.ranges[0]
-    if (!r?.count || (r.startOffset === 0 && r.endOffset >= e.source.length)) continue
+    if (!r?.count || (r.startOffset === 0 && r.endOffset >= e.source!.length)) continue
     // the mappings inside the function, in order of where they are in the built script
     let lo = 0
     let hi = m.at.length
