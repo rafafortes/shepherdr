@@ -514,8 +514,21 @@ export class Engine extends Emitter<Events> {
   }
 
   task(id: string) {
-    return this.data.tasks.find((t) => t.id.toUpperCase() === id.toUpperCase())
+    const list = this.data.tasks
+    const key = id.toUpperCase()
+    // by an index of ids: a task is looked up hundreds of times a snapshot (each queue, each dependency), and a scan of
+    // every id was most of a cold start. A hit is checked where it stands, so a list changed since never answers with
+    // the wrong task; anything else is the scan it always was, and makes the index again when it finds the task
+    const i = this.byId?.list === list ? this.byId.at.get(key) : undefined
+    const hit = i === undefined ? undefined : list[i]
+    if (hit && hit.id.toUpperCase() === key) return hit
+    const found = list.find((t) => t.id.toUpperCase() === key)
+    if (found) this.byId = { list, at: new Map(list.map((t, j) => [t.id.toUpperCase(), j])) }
+    return found
   }
+
+  /** where each task is in the list, by its id in capitals (task) */
+  private byId?: { list: TaskRec[]; at: Map<string, number> }
 
   private save() {
     writeJson('tasks.json', this.data, this.dir)
