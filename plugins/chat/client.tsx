@@ -1520,6 +1520,21 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
       }
     }
   }
+  // the advisor answers it instead (Settings → Agents → Advisor): its suggestion comes back as a card of its own
+  const [asking, setAsking] = useState(false)
+  const askAdvisor = async () => {
+    if (sent || asking) return
+    setAsking(true)
+    setErr('')
+    try {
+      const r = await act({ type: 'advise', chat: chat.key, question: q.id })
+      if (r?.ok === false) setErr(r.error ?? "The advisor couldn't take it.")
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setAsking(false)
+    }
+  }
   // Dismiss: closed without an answer, and the agent hears the person declined it (never a yes)
   const dismiss = async () => {
     if (sent || sending.current) return
@@ -1548,7 +1563,19 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
     if (composing) noteRef.current?.focus()
   }, [composing])
   return (
-    <CardShell title={q.title} plan={q.kind === 'Plan'} source={source} dismiss={sent || q.noDismiss ? undefined : () => void dismiss()}>
+    <CardShell
+      title={q.title}
+      plan={q.kind === 'Plan'}
+      source={source}
+      dismiss={sent || q.noDismiss ? undefined : () => void dismiss()}
+      action={
+        q.advise && !sent ? (
+          <button type="button" data-ask-advisor className="relative shrink-0 self-start text-[0.8125rem] text-fg3 hover:text-fg hover:underline disabled:no-underline phone:min-h-11 phone:text-[0.9375rem]" disabled={asking} onClick={() => void askAdvisor()}>
+            {asking ? 'Asking the advisor…' : 'Ask the advisor'}
+          </button>
+        ) : undefined
+      }
+    >
       {q.screen ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-fg2">{q.screen}</pre> : null}
       {q.terminal && has('terminal') ? <button type="button" className="text-left text-accent" onClick={() => setUI({ term: chat.key, arts: null, kb: true })}>Open terminal</button> : null}
       {q.steps ? (

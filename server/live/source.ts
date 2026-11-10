@@ -29,7 +29,7 @@ import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
 import { DISMISSED, dismissKind, dismissWords } from './dismiss.ts'
 import { dictate as dictation } from './dictate.ts'
-import { age, checkTitle, ended, Engine, fitStatus, type HeldWhy, type TaskRec } from './engine/engine.ts'
+import { age, askOf, checkTitle, ended, Engine, fitStatus, type HeldWhy, type TaskRec } from './engine/engine.ts'
 import { listFolders, makeRepo, resolveInHome } from './folders.ts'
 import { sh, validateBase } from './engine/git.ts'
 import { Artifacts, browserChecker, type ArtifactRec, type Checker } from './artifacts.ts'
@@ -45,6 +45,7 @@ import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } 
 import { privatePrompt, coordinatorPrompt, backupCardWords, wentBackCardWords, type BackWhy, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
 import { fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
 import { backCard, canProbe, FIRST_WAIT, FRESH, QUIET, returnMode, Returns, type Outage, type Probe } from './return.ts'
+import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvice, runAdvisor, type Advice, type AdviceQuestion } from './advisor.ts'
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
@@ -119,6 +120,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   returns = new Returns()
   /** one pass of the way back at a time (watchReturns): its probes, and the restarts that take agents back */
   private returning = false
+  /** what the advisor was asked, per question (Settings → Agents → Advisor; advisor.ts) */
+  advices = new Advices()
+  /** one advisor run at a time, the human's own first */
+  private advising = false
+  /** run one advisor (a test puts its own here) */
+  runAdvisor: typeof runAdvisor = runAdvisor
   /** this machine's load, memory, disks and herdr, sampled every 30 seconds; its coordinator hears when one is past
    *  its limit (Settings → the machine). Tests never measure the machine they run on: they tick it themselves */
   health = new Monitor(
@@ -306,6 +313,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           this.timers.push(setInterval(() => void this.watchReturns().catch(() => undefined), 60_000))
         }, 10 * 60_000) as unknown as ReturnType<typeof setInterval>,
       )
+    // a question that waited long enough for the human goes to the advisor by itself (watchAdvice)
+    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => void this.watchAdvice().catch(() => undefined), 30_000))
     // heartbeats: looked for twice a minute, so a busy coordinator gets its own soon after its turn ends
     this.timers.push(setInterval(() => this.heartbeat(), 30_000))
     this.timers.push(setInterval(() => this.emit('snapshot'), 30_000))
@@ -623,8 +632,187 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   chat(key: string): Chat | undefined {
     if (this.peers?.owner(key)) return this.peers.chat(key)
-    const c = { ...this.chats.chat(key), restart: this.restartHintOf(key) }
+    const c = this.withAdvice({ ...this.chats.chat(key), restart: this.restartHintOf(key) })
     return key.includes('/') ? c : this.withAsks(c)
+  }
+
+  /* ---------- the advisor ---------- */
+
+  /** a chat whose open questions the advisor can take: their cards carry Ask the advisor (none asked yet, one set) */
+  private withAdvice(c: Chat): Chat {
+    const open = new Set(this.advisable().filter((x) => x.need.chat === c.key && x.need.question).map((x) => x.qid))
+    if (!open.size) return c
+    return { ...c, messages: c.messages.map((m) => (m.question && open.has(m.question.id) ? { ...m, question: { ...m.question, advise: true } } : m)) }
+  }
+
+  /**
+   * The questions open for the human that the advisor can take: a choice card, the CLI's own question, a plan (only to
+   * suggest), or a task's plain question in words — never a permission or a terminal's own screen, nor what waits for
+   * other reasons (a provider's cut-off, a start that went wrong, a login). Only where an advisor is set for its space,
+   * and not asked about already.
+   */
+  private advisable(): { need: Need; qid: string; q: AdviceQuestion; space: string; cwd: string; asker: string; brief?: string }[] {
+    const out: ReturnType<LiveSource['advisable']> = []
+    for (const n of this.needs()) {
+      const t = n.task ? this.engine.task(n.task) : undefined
+      const space = t ? this.places.space(t.project)?.name : this.spaceKey(n.chat)
+      if (space === undefined || !this.settings.advisor(space)) continue
+      const cwd = (t ? t.worktree : this.places.coordinator(n.chat)?.cwd) ?? this.places.space(n.place)?.path
+      if (!cwd) continue
+      const asker = t ? `${t.id}'s agent` : `the coordinator of ${this.chatName(n.chat)}`
+      const brief = t ? `${t.title}\n\n${t.desc}`.trim() : undefined
+      let q: AdviceQuestion
+      let qid: string
+      if (n.question) {
+        const x = n.question
+        // a permission, or a terminal's own screen: the human's alone; and the advisor's own suggestion, the human's to send
+        if (x.id.startsWith('menu:') || x.id.startsWith('advice:') || x.terminal || x.screen) continue
+        q = { kind: 'choice', title: x.title, choices: x.choices.map((c) => ({ label: c.label, description: c.description })), multi: x.multi, other: x.other, plan: x.kind === 'Plan' || x.id.startsWith('plan:') }
+        qid = x.id
+      } else {
+        // a task's plain question: its last words ask something, and nothing else holds it (a cut-off, a start, a login)
+        if (!t || t.trouble || this.retries.get(n.chat)?.over || this.agents.status(n.chat) === 'blocked') continue
+        const last = this.chats.lastReply(n.chat)
+        const said = this.chats.chat(n.chat).messages.findLast((m) => m.who === 'agent' && m.text)
+        if (!last || !said || !askOf(last)) continue
+        q = { kind: 'words', title: last.slice(-3000) }
+        qid = `words:${said.id}`
+      }
+      const had = this.advices.get(n.chat, qid)
+      if (had && had.state !== 'failed') continue
+      out.push({ need: n, qid, q, space, cwd, asker, brief })
+    }
+    return out
+  }
+
+  /** the questions that waited long enough for the human go to the advisor by themselves, oldest first, one at a time */
+  async watchAdvice(now = Date.now()) {
+    if (this.advising) return
+    for (const x of this.advisable()) {
+      const after = this.settings.advisorAfter(x.space)
+      // a plan is never sent by itself: it waits for the human, who may ask for advice on it
+      if (after === null || x.q.plan || now - x.need.at < after || this.advices.get(x.need.chat, x.qid)) continue
+      await this.advise(x.need.chat, x.qid, true)
+      return
+    }
+  }
+
+  /**
+   * Ask the advisor about one open question: its primary, then its backup where the primary can't run or answers nothing
+   * that makes sense. On the human's word (auto false) or a plan, its answer is a card the human sends or not; once the
+   * question waited (auto), a sure answer goes to the agent as the human's would, and the chat says it was the advisor's.
+   * Unsure, or a question only the human decides: a card says so, and the question waits for them.
+   */
+  async advise(chat: string, qid: string, auto = false): Promise<{ ok: boolean; error?: string }> {
+    const x = this.advisable().find((y) => y.need.chat === chat && y.qid === qid)
+    if (!x) return { ok: false, error: this.advices.get(chat, qid) ? 'The advisor was asked about this already.' : 'This question no longer waits, or no advisor is set for its space.' }
+    if (this.advising) return { ok: false, error: 'The advisor is answering another question; try again in a moment.' }
+    this.advising = true
+    const rec = { chat, question: qid, at: Date.now(), state: 'asking' as const, ...(auto ? { auto } : {}) }
+    this.advices.set(rec)
+    this.emit('chat', chat)
+    try {
+      const prompt = advisorPrompt({ question: x.q, asker: x.asker, brief: x.brief, chat: recentChat(this.chats.chat(chat).messages, x.asker), folder: x.cwd, human: this.user })
+      let advice: Advice | undefined
+      let said = ''
+      for (const backup of [false, true]) {
+        const h = this.settings.advisor(x.space, backup)
+        if (!h || !canAdvise(h.kind) || !this.engine.installed(h.kind)) continue
+        const r = await this.runAdvisor(h, prompt, x.cwd)
+        const parsed = r.ok ? parseAdvice(r.out, x.q) : undefined
+        if (parsed) {
+          advice = { ...parsed, by: advisorWords(h) }
+          break
+        }
+        said = r.out.replace(/\s+/g, ' ').trim().slice(-200)
+        console.error(`shepherdr: the advisor (${advisorWords(h)}) gave no answer for ${chat}: ${said || 'nothing it said made sense'}`)
+      }
+      if (!advice) {
+        this.advices.set({ ...rec, state: 'failed' })
+        // asked by the human: they hear it went wrong; by itself, the question simply goes on waiting for them
+        if (!auto) this.adviceCard(chat, `The advisor couldn't answer: ${said || 'it gave no answer that fits the question'}`)
+        return { ok: false, error: 'The advisor gave no answer.' }
+      }
+      if (advice.human) {
+        this.advices.set({ ...rec, state: 'human', advice })
+        this.adviceCard(chat, `The advisor leaves this to you: ${advice.human} (${advice.by})`)
+        return { ok: true }
+      }
+      // still open? the human may have answered while it read
+      const open = this.needs().some((n) => n.chat === chat && (n.question?.id === qid || (!n.question && qid.startsWith('words:'))))
+      if (!open) {
+        this.advices.set({ ...rec, state: 'human', advice })
+        return { ok: true }
+      }
+      if (auto && !x.q.plan) {
+        const sent = await this.deliverAdvice(chat, qid, x.q, advice)
+        if (!sent.ok) {
+          this.advices.set({ ...rec, state: 'failed', advice })
+          return sent
+        }
+        this.advices.set({ ...rec, state: 'sent', advice })
+        const words = adviceWords(advice, x.q)
+        this.adviceCard(chat, `The advisor answered for you, as you didn't: “${words}”. ${advice.why} (${advice.by})`)
+        const t = x.need.task
+        this.alert({ id: randomUUID(), from: 'Shepherdr', title: `The advisor answered ${t ?? this.chatName(chat)}`, body: `${x.q.kind === 'choice' ? x.q.title : 'Its question'}: ${words}`.slice(0, 200), go: { place: chat }, tag: `advice:${chat}`, ...(t ? { task: true as const } : {}) })
+        return { ok: true }
+      }
+      // the human's own question, or a plan: a card they send or not
+      const card = `advice:${randomUUID().slice(0, 8)}`
+      const words = adviceWords(advice, x.q)
+      this.chats.post(chat, {
+        id: card,
+        question: { id: card, title: `The advisor suggests: “${words.slice(0, 300)}”`, kind: 'Question', choices: [{ label: 'Send it', description: `${advice.why} (${advice.by})` }, { label: "I'll answer myself" }], to: this.chatName(chat), noNote: true },
+      })
+      this.advices.set({ ...rec, state: 'suggested', advice, card })
+      this.emit('chat', chat)
+      return { ok: true }
+    } finally {
+      this.advising = false
+      this.emit('chat', chat)
+      this.emit('snapshot')
+    }
+  }
+
+  /** the advisor's answer goes to the agent as the human's would: the card's pick, the CLI's keys, or its words */
+  private async deliverAdvice(chat: string, qid: string, q: AdviceQuestion, a: Advice): Promise<{ ok: boolean; error?: string }> {
+    if (q.kind === 'words') {
+      await this.send(chat, `The advisor, answering for ${this.user} (who left your question to it): ${a.reply}`, [], true)
+      return { ok: true }
+    }
+    const r = (await this.answer({ type: 'answer', chat, question: qid, choice: a.choice ?? 0, choices: a.choices, other: a.other }, 'The advisor')) as { ok?: boolean; error?: string }
+    return r.ok ? { ok: true } : { ok: false, error: r.error ?? 'The question no longer takes that answer.' }
+  }
+
+  /** a short card from the advisor in the chat its question is in */
+  private adviceCard(chat: string, text: string) {
+    const id = `advice-note:${Date.now()}`
+    this.chats.post(chat, { id, card: { id, text } })
+    this.emit('chat', chat)
+  }
+
+  /** the advisor's suggestion card answered: sent to the agent as the human's own answer, or left there */
+  private async adviceAnswered(card: string, choice: number, dismiss = false): Promise<{ ok: boolean; error?: string }> {
+    const r = this.advices.byCard(card)
+    if (!r?.advice) return { ok: false, error: 'That advice is gone.' }
+    if (r.state !== 'suggested') return { ok: false, error: 'This advice was answered already.' }
+    this.chats.answer(r.chat, card, dismiss ? 1 : choice)
+    if (dismiss || choice !== 0) {
+      this.advices.set({ ...r, state: 'human' })
+      this.emit('chat', r.chat)
+      return { ok: true }
+    }
+    const x = this.needs().find((n) => n.chat === r.chat && (n.question?.id === r.question || (!n.question && r.question.startsWith('words:'))))
+    if (!x) {
+      this.advices.set({ ...r, state: 'human' })
+      return { ok: false, error: 'The question no longer waits: it was answered meanwhile.' }
+    }
+    const q: AdviceQuestion = x.question ? { kind: 'choice', title: x.question.title, choices: x.question.choices, multi: x.question.multi, other: x.question.other } : { kind: 'words', title: '' }
+    // sent on the human's word: their answer, the advisor's words
+    const sent = q.kind === 'words' ? (await this.send(r.chat, r.advice.reply ?? '', [], true), { ok: true }) : ((await this.answer({ type: 'answer', chat: r.chat, question: r.question, choice: r.advice.choice ?? 0, choices: r.advice.choices, other: r.advice.other })) as { ok?: boolean; error?: string })
+    this.advices.set({ ...r, state: sent.ok ? 'sent' : 'failed' })
+    this.emit('chat', r.chat)
+    return sent.ok ? { ok: true } : { ok: false, error: (sent as { error?: string }).error ?? 'The question no longer takes that answer.' }
   }
 
   /** a needs-you card in a space's chat carries what its task asks, to answer there as in the task's own chat: its
@@ -2183,6 +2371,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return this.react(a.chat, a.message, a.emoji)
       case 'answer':
         return this.answer(a)
+      case 'advise':
+        return this.advise(a.chat, a.question)
       case 'secret': {
         // kept on the main machine, whichever machine it is for: a worker never gets one from the screen
         if (BOX) return { ok: false, error: 'Secrets are kept on the main machine.' }
@@ -2590,9 +2780,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   private menuAnswers = new Set<string>()
 
-  private async answer(a: Extract<Action, { type: 'answer' }>) {
+  /** by: who answered, when it was not the human (the advisor): its words name it */
+  private async answer(a: Extract<Action, { type: 'answer' }>, by?: string) {
     const key = a.chat
     const qid = a.question
+    // the advisor's suggestion: sent as the human's own answer, or left to them (never a chat line of its own)
+    if (qid.startsWith('advice:')) return this.adviceAnswered(qid, a.choice, !!a.dismiss)
+    const answered = (title: string) => `${by ? `${by} answered` : 'Answered'} “${title}”`
     // answered on its copy in the space's chat: the task's chat says so, as does the copy
     const space = this.spaceOf(key, a.space)
     // a notification's button: only the card the chat still ends on, unanswered
@@ -2613,7 +2807,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const failed = await this.pressMenu(key, keys, qid)
         if (failed) return { ok: false, error: failed }
         const said = menu.multi ? (a.choices?.length ? a.choices.map((i) => menu.choices[i]).join(', ') : menu.reject) : menu.choices[a.choice]
-        this.chats.post(key, { id: `menu-answer:${Date.now()}`, who: 'you', answered: `Answered “${menu.title}”`, elsewhere: space ? this.chats.answeredIn(space) : undefined, text: said })
+        this.chats.post(key, { id: `menu-answer:${Date.now()}`, who: 'you', answered: answered(menu.title), elsewhere: space ? this.chats.answeredIn(space) : undefined, text: said })
         if (space) this.answeredHere(space, key, menu.title, said ?? '')
         if (a.note) await this.agents.send(key, a.note)
       } finally {
@@ -2636,7 +2830,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       q.sent = a.choice
       this.chats.answer(key, qid, a.choice, a.other, space)
       if (space) this.answeredHere(space, key, q.title, answer)
-      await this.send(key, `${line.answer(this.user, q.title, answer)}${a.note ? `\n${a.note}` : ''}`, [], true)
+      await this.send(key, `${line.answer(by ?? this.user, q.title, answer)}${a.note ? `\n${a.note}` : ''}`, [], true)
       this.emit('snapshot')
       return { ok: true }
     }
@@ -2662,7 +2856,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // the last question of a form: the CLI asks to submit
       if (Number(idx ?? 0) >= open.items.length - 1 && open.items.length > 1) setTimeout(() => this.agents.keys(key, ['enter']), 600)
       const label = a.other || (a.choices ?? [a.choice]).map((i) => item?.options[i]?.label).filter(Boolean).join(', ')
-      this.chats.post(key, { id: `cli-answer:${qid}`, who: 'you', answered: `Answered “${item?.question ?? ''}”`, elsewhere: space ? this.chats.answeredIn(space) : undefined, text: label })
+      this.chats.post(key, { id: `cli-answer:${qid}`, who: 'you', answered: answered(item?.question ?? ''), elsewhere: space ? this.chats.answeredIn(space) : undefined, text: label })
       if (space) this.answeredHere(space, key, item?.question ?? '', label)
       this.engine.youWrote(key, { go: false })
       this.emit('chat', key)

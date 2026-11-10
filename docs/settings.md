@@ -142,6 +142,34 @@ nothing to come back to, and is never asked.
   that isn't installed here, never asks one Shepherdr has no silent one-shot for (only Claude Code, Codex and pi have
   one), and it is never part of the takeover's decision.
 
+## Advisor
+
+A task's agent or a coordinator often waits on a question you can't answer well: a choice between libraries, a design
+trade-off, what a test failure means. Settings → Agents → **Advisor** (`advisor.agent`, `advisor.model`,
+`advisor.effort`; off until you set one, Everywhere, for a machine or for a space) names a model that answers them,
+and **Backup** (`advisor.fallback`, `advisor.fallbackModel`, `advisor.fallbackEffort`) the one that answers where it
+can't run at all, as every other role has one.
+
+- **On your word.** Each question card the advisor can take — a choice card, one question of the CLI's own question
+  tool, a plan — shows **Ask the advisor** beside Dismiss. Its answer comes back as a card of its own: what it picks (or
+  its words), why, and which model said it, with **Send it** (the question is answered as you would, in your name) and
+  **I'll answer myself** (the question stays as it was).
+- **By itself.** A question nobody answered goes to the advisor once it has waited **Answers for you after**
+  (`advisor.after`: 2 min unless set; off never sends one by itself). A sure answer goes to the agent at once, named as
+  the advisor's (`from="The advisor"`), with a card in the chat (what it answered and why) and an alert. A task's plain
+  question in words (its last words ask you something, and nothing else holds it) gets an answer in words the same
+  way. A plan is never sent by itself: it only ever gets a suggestion.
+- **What it never decides.** A permission, a terminal's own screen, a provider's cut-off, a start that went wrong or a
+  login are never its to answer, and it leaves to you — a card says so, and the question keeps waiting — anything it
+  is not sure of, and anything that would decide a permission, deleting or losing work, force-pushing, changing
+  Settings, secrets or credentials, merging past "ask me first", spending money or a paid plan, or what touches a live
+  site or other people.
+- **How it runs.** One headless run per question, read only: Claude Code with Read, Grep and Glob only, pi with its
+  read, grep, find and ls tools, Codex in its read-only sandbox; no MCP servers, no session kept, no agent's secret,
+  in the task's worktree (a coordinator's folder for its own questions), for at most eight minutes. It reads the
+  question and its options, the brief, the chat so far and the repository, and ends with one line of JSON: its pick or
+  words, why, and whether it is sure. One question at a time, each once (`advice.json` keeps what it was asked).
+
 ## Dictation
 
 Talk to type (the microphone beside the message box) records in the browser with `MediaRecorder`, sends the
