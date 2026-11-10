@@ -1058,17 +1058,43 @@ export class Engine extends Emitter<Events> {
     return !!t.held && !ended(t) && !t.stopped && !this.queued(t)
   }
 
-  /** a task at work, or on its way to it: those count against the machine's limit */
+  /**
+   * A task that holds one of the machine's slots: at work, on its way to it, or waiting on you with its agent there. One
+   * that asks you something keeps its slot, as upstream counts every task with a live agent (3.x queueReason): your
+   * answer, the advisor's or its coordinator's takes it back to work without going past the limit (it once read 12 of
+   * 10 working, the tasks answered after others had taken their slots).
+   */
   private busy(t: TaskRec) {
     if (ended(t) || t.archived || t.stopped || this.holding(t) || !this.places.space(t.project)) return false
     // a go sent just now counts before its agent is seen at work; one left from long ago (its agent gone) doesn't
     const going = !!t.going && Date.now() - (this.wrote.get(t.id) ?? 0) < BRIEF_WAIT
-    return this.starting.has(t.id) || going || (this.briefing.has(t.id) && !t.todo) || this.statusOf(t) === 'work'
+    if (this.starting.has(t.id) || going || (this.briefing.has(t.id) && !t.todo)) return true
+    const st = this.statusOf(t)
+    return st === 'work' || (st === 'need' && this.waitsOnYou(t))
   }
 
-  /** how many tasks are at work here now */
+  /** it needs you and its agent is there to go on once you answer: not one whose start went wrong, that waits on a task
+   *  it is queued after, whose agent is gone, or that its provider cut off (the way back brings that one, at a free slot) */
+  private waitsOnYou(t: TaskRec) {
+    const key = this.key(t)
+    return !!t.worktree && !t.trouble && !this.queued(t) && this.agents.status(key) !== 'gone' && !this.retry?.(key)?.over
+  }
+
+  /** how many of the machine's slots are taken now: tasks at work, and the ones waiting on you with their agent there */
   working() {
     return this.tasks.filter((t) => this.busy(t)).length
+  }
+
+  /** of those, how many wait on you */
+  waitingOnYou() {
+    return this.tasks.filter((t) => this.busy(t) && this.statusOf(t) === 'need').length
+  }
+
+  /** the slots in words: "7 of 10 working", and how many of them wait on you ("10 of 10 working, 3 of them waiting on
+   *  you") */
+  slotsWords(max = this.settings.machine().max) {
+    const waiting = this.waitingOnYou()
+    return `${this.working()}${max === null ? '' : ` of ${max}`} working${waiting ? `, ${waiting} of them waiting on you` : ''}`
   }
 
   /** whether one more task may start now (this one, when one is named), and if not, why: its slots are all taken, the
@@ -1103,7 +1129,7 @@ export class Engine extends Emitter<Events> {
     t.todo = undefined
     const id = `held:${t.id}:${Date.now()}`
     const words = {
-      slots: `waiting for a free slot (${this.working()} of ${l.max} working)`,
+      slots: `waiting for a free slot (${this.slotsWords(l.max)})`,
       machine: 'waiting for the machine: it is busy',
       models: 'waiting: every model of this space ran out, so a start would only be cut off too',
       resume: 'waiting: the tasks that were cut off go back to work first',
@@ -1128,7 +1154,7 @@ export class Engine extends Emitter<Events> {
     if (this.releasing) return
     this.releasing = true
     try {
-      const byLoad = this.settings.machine().startLoad !== null
+      const byLoad = this.settings.machine().startLoad !== null || this.settings.machine().startPressure !== null
       for (const t of this.heldTasks()) {
         const r = this.room(t)
         // its own space waits for its models: another space's may still start

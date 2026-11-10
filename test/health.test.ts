@@ -22,6 +22,11 @@ const at = (load: number, memPct = 40, disk = 50, gpus: { name: string; util: nu
 describe('reading the machine', () => {
   test('/proc/loadavg, /proc/meminfo and nvidia-smi', () => {
     expect(H.parseLoad('27.31 21.63 22.17 29/4304 1205109\n')).toBe(27.31)
+    // the 5-minute load, and the CPU pressure a kernel with PSI keeps (none without them)
+    expect(H.parseLoad5('27.31 21.63 22.17 29/4304 1205109\n')).toBe(21.63)
+    expect(H.parseLoad5('')).toBeUndefined()
+    expect(H.parsePressure('some avg10=1.01 avg60=27.40 avg300=5.89 total=7063159309\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n')).toBe(27.4)
+    expect(H.parsePressure('')).toBeUndefined()
     const m = H.parseMem('MemTotal:       32858064 kB\nMemFree:         3661672 kB\nMemAvailable:   20015576 kB\n')
     expect(m.total).toBe(32858064 * 1024)
     expect(m.used).toBe((32858064 - 20015576) * 1024)
@@ -41,7 +46,7 @@ describe('reading the machine', () => {
 
 describe('limits', () => {
   test('defaults: 10 at once, start under 1× cores and 80% memory; told at 1.5× cores, 90% memory and disk, herdr', () => {
-    expect(limits()).toEqual({ max: 10, startLoad: 1, startMemory: 80, alertLoad: 1.5, alertMemory: 90, alertDisk: 90, alertHerdr: true })
+    expect(limits()).toEqual({ max: 10, startLoad: 1, startPressure: null, startMemory: 80, alertLoad: 1.5, alertMemory: 90, alertDisk: 90, alertHerdr: true })
     const s = new Settings()
     // any number in range, not a fixed list
     expect(s.set('machine.maxTasks', '13').ok).toBe(true)
@@ -67,6 +72,29 @@ describe('limits', () => {
     expect(H.busy(at(2, 81), l)).toBe('memory')
     expect(H.busy(undefined, l)).toBeUndefined()
     expect(H.busy(at(40, 99), { ...l, startLoad: null, startMemory: null })).toBeUndefined()
+  })
+
+  test("the load limit reads the 5-minute load, which a burst's lull doesn't bring under; CPU pressure holds starts once set", () => {
+    const l = limits()
+    // a lull in the 1-minute load while the 5-minute one is still over: starts wait (the 1-minute one let them in)
+    expect(H.busy({ ...at(7), load5: 40 }, l)).toBe('cpu')
+    // a short burst over a quiet five minutes: they go
+    expect(H.busy({ ...at(90), load5: 12 }, l)).toBeUndefined()
+    // a machine that gives no 5-minute load is read on its 1-minute one, as before
+    expect(H.busy(at(16.1), l)).toBe('cpu')
+    // CPU pressure: off by default, a share of the last minute once set; none where the kernel keeps none
+    expect(l.startPressure).toBeNull()
+    expect(H.busy({ ...at(2), load5: 2, cpuSome: 60 }, l)).toBeUndefined()
+    const p = { ...l, startPressure: 20 }
+    expect(H.busy({ ...at(2), load5: 2, cpuSome: 27.4 }, p)).toBe('cpu')
+    expect(H.busy({ ...at(2), load5: 2, cpuSome: 12 }, p)).toBeUndefined()
+    expect(H.busy({ ...at(2), load5: 2 }, p)).toBeUndefined()
+    const s = new Settings()
+    expect(s.set('machine.startPressure', '25%', 'machine').ok).toBe(true)
+    expect(s.machine().startPressure).toBe(25)
+    expect(s.set('machine.startPressure', 'off', 'machine').ok).toBe(true)
+    expect(s.machine().startPressure).toBeNull()
+    s.set('machine.startPressure', null, 'machine')
   })
 
   test('the load is told after 2 minutes over its limit, once; again only when it is back well under', () => {
@@ -110,6 +138,9 @@ describe('limits', () => {
       ['GPU', 12, 'ok'],
     ])
     expect(m[0].detail).toBe('load 20.0 on 16 cores')
+    // its 5-minute load and pressure, where the machine gives them; amber by what holds starts back
+    const n = H.meters({ ...at(8), load5: 21, cpuSome: 27.6 }, limits(), {})
+    expect(n[0]).toMatchObject({ detail: 'load 8.0 (5 min 21.0) on 16 cores · pressure 28%', level: 'busy' })
   })
 
   test('the watch: what was told is kept, so a restart tells nothing again while it is still over', () => {

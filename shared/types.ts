@@ -139,6 +139,8 @@ export interface MachineHealth {
   herdr: boolean
   /** tasks at work now, and how many may be (none: no limit by number) */
   working: number
+  /** of those, the ones waiting on you: they keep their slot until they are answered */
+  waiting?: number
   max?: number
   /** tasks Shepherdr holds until there is room, and why the first one waits */
   held: number

@@ -208,6 +208,8 @@ export interface MachineLimits {
   /** new tasks wait while the 1-minute load is over this many times the cores, or this much memory is in use (%);
    *  none: not limited by load */
   startLoad: number | null
+  /** new tasks wait while some task waited for a CPU more than this share of the last minute (%, Linux PSI); none: off */
+  startPressure: number | null
   startMemory: number | null
   /** the coordinator is told when the load stays over this many times the cores for 2 minutes, memory or a disk is
    *  fuller than this (%), or herdr stops answering; null: that one is off */
@@ -387,7 +389,11 @@ export const CATALOG: Section[] = [
     about: "When a machine starts more tasks, and when its coordinator hears that it struggles. Set one machine's own to fit its cores and memory.",
     rows: [
       { group: 'Working tasks', label: 'Max tasks working at once', key: 'machine.maxTasks', value: '10', num: { min: 1, max: 200 } },
-      { group: 'Working tasks', label: 'Wait while CPU load is over', key: 'machine.startLoad', value: '1× cores', num: CORES },
+      // the 5-minute load: the 1-minute one swings between a tenth and three times the cores within minutes while builds
+      // come and go, so it let tasks start in every lull. CPU pressure (Linux PSI) is the share of time some task waited
+      // for a CPU: off unless set (health.ts busy)
+      { group: 'Working tasks', label: 'Wait while CPU load is over', key: 'machine.startLoad', value: '1× cores', num: CORES, hint: 'The 5-minute load average, against the cores.' },
+      { group: 'Working tasks', label: 'Wait while CPU pressure is over', key: 'machine.startPressure', value: 'off', num: { ...PCT, off: true }, hint: 'The share of the last minute some task spent waiting for a CPU (Linux pressure, /proc/pressure/cpu).' },
       { group: 'Working tasks', label: 'Wait while memory is over', key: 'machine.startMemory', value: '80%', num: PCT },
       { group: 'Tell its coordinator when', label: 'CPU load stays over (2 min)', key: 'machine.alertLoad', value: '1.5× cores', num: { ...CORES, off: true } },
       { group: 'Tell its coordinator when', label: 'Memory is over', key: 'machine.alertMemory', value: '90%', num: { ...PCT, off: true } },
@@ -774,6 +780,7 @@ export class Settings {
     return {
       max: Math.max(1, Math.round(num('machine.maxTasks') ?? 10)),
       startLoad: num('machine.startLoad'),
+      startPressure: num('machine.startPressure'),
       startMemory: num('machine.startMemory'),
       alertLoad: num('machine.alertLoad'),
       alertMemory: num('machine.alertMemory'),

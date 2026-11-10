@@ -52,7 +52,9 @@ describe('a task that starts by itself at a time', () => {
     expect(w.engine.statusOf(t)).toBe('queued')
     expect(t.worktree).toBeUndefined()
     expect(w.started.some((s) => s.key === `${t.id}/Agent`)).toBe(false)
-    // the one at work ends its turn: a slot is free, and the one whose time came starts
+    // the one at work is done (one that only waits on you keeps its slot): a slot is free, and the one whose time came
+    // starts
+    await w.engine.done(a.t.id, 'Nothing to change.')
     w.agentIs(a.key, 'idle')
     await until(() => w.started.some((s) => s.key === `${t.id}/Agent`), 15_000)
   }, 30_000)
