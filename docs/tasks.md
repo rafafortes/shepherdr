@@ -29,13 +29,16 @@
   Tap it and you are in its chat, like any other: say go when you are ready, or say what to change. The agent decides
   from your words.
 - "Do this after that" ("then", "once that is merged", "after SHE-12") queues it: the coordinator adds it with
-  `--after SHE-12` (`shepherdr task queue <id> --after …` changes or clears it on a task that exists). Its agent starts
-  at once, reads the brief and waits; the task shows under Queued, its line naming what it still waits for (`after
-  SHE-12, SHE-13`). Once they are all done (merged, or nothing to merge), Shepherdr tells its agent to go,
-  and a small card in its chat says why it started. A task of another machine is named with its machine first
+  `--after SHE-12` (`shepherdr task queue <id> --after …` changes or clears it on a task that exists). It has no agent,
+  worktree or herdr space while it waits: the task shows under Queued, its line naming what it still waits for
+  (`after SHE-12, SHE-13`). Once they are all done (merged, or nothing to merge) and the machine has room, Shepherdr
+  makes its worktree from the base as it is then and starts its agent on the brief and the go, and a small card in its
+  chat says why it started. Tasks queued by 2.0.27 or earlier got an agent at once: `shepherdr task park` lists those
+  and `--yes` puts away the ones that never began, so they wait the same way. A task of another machine is named with its machine first
   (`vm-str:SHE-12`), from the main machine's home space. If one it waits for is stopped or goes wrong, the queued task needs
   you, saying which; it goes back to waiting once that task is going again. Want it started early? Just write to it:
-  its agent decides from your words, and clears its queue itself when they are a go (a note leaves it queued).
+  its agent starts on the brief and your words, decides from them, and clears its queue itself when they are a go (a
+  note leaves it queued).
 - "Do this tomorrow morning" schedules it: the coordinator adds it with `--at "tomorrow 9:00"` (`"fri 8:15"`,
   `"today 18:00"`, `"2026-11-06 09:00"`, `"18:00"`) or `--in 6h` (`"90m"`, `"2 days"`, `"1h 30m"`), one or the
   other, in the time zone Settings sets (time.zone). Until then it has no agent at all and shows under Scheduled, its

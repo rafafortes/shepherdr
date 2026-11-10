@@ -92,8 +92,8 @@ describe('room on the machine', () => {
     w.brief(a.key)
     const b = w.engine.add({ project: a.p.name, title: 'After', desc: 'Add b.txt.', by: 'test', after: [a.t.id] })
     const bkey = `${b.id}/Agent`
-    await until(() => w.started.some((s) => s.key === bkey))
-    w.agentIs(bkey, 'idle')
+    // it waits with no agent
+    expect(w.started.some((s) => s.key === bkey)).toBe(false)
     // a later for-later task, already started and waiting for its go
     const t = w.engine.add({ project: a.p.name, title: 'Saved', desc: 'Add t.txt.', by: 'test', later: true })
     const tkey = `${t.id}/Agent`

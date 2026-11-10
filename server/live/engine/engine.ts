@@ -5,7 +5,8 @@ import { trustWorktree } from '../trust.ts'
 // first, ask a reviewer, merge or wait for a yes). Its status comes from that agent alone: working, waiting on you, To
 // do (it waits for a go: shepherdr todo), ready (shepherdr ready) or done (shepherdr merge, or closed with nothing to
 // merge: shepherdr task close, or shepherdr ready on a branch with no changes). A task may also be queued after other
-// tasks (--after): its agent starts all the same and waits until Shepherdr tells it to go. On a GitHub repo gh is
+// tasks (--after): it has no agent, worktree or herdr space until they are done and the machine has room, when its
+// agent starts on the brief and the go. On a GitHub repo gh is
 // logged in to, its work goes through a pull request: shepherdr pr pushes its branch and opens one (a draft until it
 // reports done), shepherdr checks waits for GitHub's checks, and shepherdr merge squash-merges it on GitHub at the
 // commit this machine has, then brings main here up to date. Anywhere else it is squash-merged here.
@@ -262,6 +263,8 @@ const splitRef = (ref: string): [string | undefined, string] => {
 }
 
 /** while load decides, held tasks start one at a time this far apart, so each one shows in the load first */
+/** a waiting task whose agent replied more than this since its brief may have begun: task park leaves it as it is */
+const PARK_REPLIES = 4
 const START_GAP = 30_000
 
 /** the line a held task shows */
@@ -576,7 +579,8 @@ export class Engine extends Emitter<Events> {
     if (this.queued(t)) return this.halts(t).length ? 'need' : 'queued'
     // held until the machine has room
     if (this.holding(t)) return 'queued'
-    if (t.todo || this.starting.has(t.id) || this.briefing.has(t.id)) return 'todo'
+    // its agent starting, or reading its brief, is To do; one its go starts (a queued task's turn came) is at work
+    if (t.todo || ((this.starting.has(t.id) || this.briefing.has(t.id)) && !t.going)) return 'todo'
     // on its way into main, nothing for you to do (a question or a card it asks is handled above: then it needs you)
     if (t.reported && t.landing && (st === 'working' || !this.asks(key))) return 'merging'
     if (st === 'working' || this.handing.has(t.id)) return 'work'
@@ -1236,7 +1240,9 @@ export class Engine extends Emitter<Events> {
     }
     if (after.length) t.after = after
     if (set) t.set = set
-    // one that starts work now waits for room; one for later only reads its brief, so it starts at once
+    // one that starts work now waits for room; one for later only reads its brief, so it starts at once. One queued
+    // after other tasks gets no worktree, agent or herdr space while it waits: its go starts it (starter), as the
+    // scheduler starts a queued task at its turn upstream (3.x herdr-task tick), and a message to it starts it sooner
     const room = after.length || o.later ? {} : this.room(t)
     this.data.tasks.push(t)
     if (room.why) {
@@ -1244,7 +1250,7 @@ export class Engine extends Emitter<Events> {
       this.hold(t, room.why)
     } else this.save()
     this.emit('news', t.project, `${t.id} was added: ${t.title}`, 'added', { task: t.id, event: 'added' })
-    if (!room.why) this.startTask(t).catch((e) => this.troubled(t, e))
+    if (!room.why && !after.length) this.startTask(t).catch((e) => this.troubled(t, e))
     return t
   }
 
@@ -2563,6 +2569,94 @@ export class Engine extends Emitter<Events> {
       if (left) await this.cleanup(t, true).catch(() => undefined)
     }
     await this.wt.closeRepoSpaces()
+  }
+
+  /**
+   * Tasks that wait (queued after others, or held for room) with an agent, a herdr space and a worktree they got when
+   * they were added, from before a waiting task was given none, each with what keeps it as it is: work in its worktree
+   * or branch, your words to it beyond its brief, its agent at work, asking something, or past a few replies (it may have
+   * begun). The rest can be parked; `notes`: what other agents wrote to it, which goes into its brief when it is.
+   */
+  async parkable(): Promise<{ t: TaskRec; keep?: string; notes: string[] }[]> {
+    const out: { t: TaskRec; keep?: string; notes: string[] }[] = []
+    for (const t of this.tasks.filter((t) => this.waitsToStart(t) && (t.worktree || this.agents.record(this.key(t))))) {
+      const key = this.key(t)
+      const st = this.agents.status(key)
+      const held = await this.holds(t)
+      const w = this.wordsTo(t)
+      const keep =
+        st === 'working' ? 'its agent is at work'
+        : st === 'blocked' || this.asks(key) ? 'its agent asks something'
+        : held.length ? held.join(', ')
+        : w.yours ? `${w.yours === 1 ? 'a message of yours' : `${w.yours} messages of yours`} to it beyond its brief`
+        : w.replies > PARK_REPLIES ? `its agent replied ${w.replies} times: it may have begun`
+        : undefined
+      out.push({ t, ...(keep ? { keep } : {}), notes: w.notes })
+    }
+    return out
+  }
+
+  /**
+   * Park the tasks `parkable` finds nothing to keep in (only `ids`, when named): what other agents wrote to it goes into
+   * its brief, its agent closes with its herdr space, its worktree and branch go, and it waits as a task added now does,
+   * with none of them; its turn starts it on its brief. Returns those parked, and those left as they were with why.
+   */
+  async park(ids?: string[]): Promise<{ parked: string[]; kept: string[] }> {
+    const want = ids?.map((i) => this.req(i).id)
+    const parked: string[] = []
+    const kept: string[] = []
+    for (const { t, keep, notes } of await this.parkable()) {
+      if (want && !want.includes(t.id)) continue
+      if (keep) {
+        kept.push(`${t.id}: ${keep}`)
+        continue
+      }
+      const p = this.places.space(t.project)
+      if (!p || !this.waitsToStart(t)) continue
+      const key = this.key(t)
+      this.cleaning.add(t.id)
+      try {
+        const r = await this.putAway(t, p.path, p.base)
+        if (r.busy || r.kept.length) {
+          kept.push(`${t.id}: ${r.kept.join(', ')}`)
+          continue
+        }
+        // above the Settings block, plain, as a brief takes words written to a task with no agent (tell)
+        if (notes.length) {
+          const [work, how] = splitBrief(t.desc)
+          t.desc = [work, `Written to this task while it waited:\n\n${notes.join('\n\n')}`, how].filter(Boolean).join('\n\n')
+        }
+        t.worktree = undefined
+        t.branch = undefined
+        this.briefing.delete(t.id)
+        // a fresh start at its turn: its brief again, on what Settings say then, never the closed agent's session
+        this.agents.forget(key)
+        this.save()
+        this.settleOne(t)
+        parked.push(t.id)
+      } finally {
+        this.cleaning.delete(t.id)
+      }
+    }
+    return { parked, kept }
+  }
+
+  /** it waits for other tasks or for room, and its turn is what starts it: not a time, a stop, or the way back */
+  private waitsToStart(t: TaskRec) {
+    return (this.queued(t) || this.holding(t)) && !t.scheduled && !ended(t) && !t.stopped && !this.goesBack?.(t) && !this.starting.has(t.id) && !this.cleaning.has(t.id)
+  }
+
+  /** what was written to a task beyond its brief (the first of your messages): yours (a count), other agents' (as they
+   *  wrote them, with who), and how many times its agent replied */
+  private wordsTo(t: TaskRec) {
+    const ms = this.chats.chat(this.key(t)).messages.filter((m) => m.text && !m.card)
+    const yours = ms.filter((m) => m.who === 'you')
+    const brief = yours[0]?.text!.trim().startsWith(t.title) ? 1 : 0
+    return {
+      yours: yours.length - brief,
+      notes: ms.filter((m) => m.who === 'peer').map((m) => `${m.peer?.name ?? 'Another agent'}: ${m.text!.trim()}`),
+      replies: ms.filter((m) => m.who === 'agent').length,
+    }
   }
 
   /** finished tasks that kept a worktree or branch, and why: for shepherdr status */

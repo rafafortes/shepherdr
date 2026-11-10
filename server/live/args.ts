@@ -8,7 +8,7 @@ export interface Parsed {
   flags: Set<string>
 }
 
-const FLAGS = new Set(['ordinary', 'other', 'multi', 'json', 'project-coordinator', 'off', 'help', 'force', 'archived', 'machine', 'later', 'save', 'all'])
+const FLAGS = new Set(['ordinary', 'other', 'multi', 'json', 'project-coordinator', 'off', 'help', 'force', 'archived', 'machine', 'later', 'save', 'all', 'yes'])
 
 export function parseArgs(args: string[]): Parsed {
   const words: string[] = []
@@ -91,9 +91,10 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
                                                  that CLI and model take (shepherdr models), or default.
                                                  --reviewer, --reviewer-model and --reviewer-effort pick who reviews
                                                  its change (codex, claude, pi), named in its brief's Review line.
-                                                 --after queues it: its agent reads the brief and waits, and Shepherdr
-                                                 tells it to go once those tasks are all done (merged, or nothing to
-                                                 merge); vm-str:SHE-12 is another machine's.
+                                                 --after queues it with no agent, worktree or herdr space: its agent
+                                                 starts on the brief once those tasks are all done (merged, or nothing
+                                                 to merge) and the machine has room; vm-str:SHE-12 is another
+                                                 machine's.
                                                  --at ("2026-11-06 09:00", "tomorrow 9:00", "fri 8:15", "today
                                                  18:00", "18:00") or --in ("6h", "90m", "2 days", "1h 30m"), one or
                                                  the other, in the time zone Settings sets (time.zone): the task starts
@@ -143,6 +144,12 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
                                                  agent is stopped first. Done tasks archive themselves after
                                                  tasks.archiveAfter (default 7 days; off allowed)
   shepherdr task unarchive <id>                  bring it back into its lists
+  shepherdr task park [<id> …] [--yes]           the waiting tasks (queued after others, or held for room) that hold
+                                                 an agent and a worktree from before a waiting task got none, and
+                                                 which keep theirs (work in them, your words to them, an agent at
+                                                 work or asking); --yes parks the rest: other agents' notes go into
+                                                 its brief, its agent, herdr space, empty worktree and branch go, and
+                                                 each starts fresh on its brief at its turn
   shepherdr task pause <id>                      only when the human asks: interrupt its working agent (as Esc does;
                                                  it stays alive) and put it in To do, as shepherdr todo; its work,
                                                  worktree and chat stay, and any message to it (task tell) goes on

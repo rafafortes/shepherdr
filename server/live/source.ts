@@ -2255,6 +2255,28 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** how many tasks work here, against the limit: "3 of 5 working, 2 held" */
   /** why a task is held, in the words the command says it */
+  /** shepherdr task park [ID …] [--yes]: the waiting tasks that hold an agent and a worktree from before a waiting
+   *  task got none (engine.parkable), listed; with --yes, parked */
+  private async parkCommand(ids: string[], yes: boolean, ctx: { chat?: string }) {
+    if (ctx.chat?.includes('/')) throw new Error("A task's agent doesn't park tasks: its coordinator or the human does.")
+    if (yes) {
+      const r = await this.engine.park(ids.length ? ids : undefined)
+      return [`Parked ${r.parked.length}${r.parked.length ? `: ${r.parked.join(', ')}` : ''}. Each waits as before, with no agent, worktree or herdr space, and starts on its brief at its turn.`, ...(r.kept.length ? [`Left as they were: ${r.kept.join('; ')}.`] : [])].join('\n')
+    }
+    const want = ids.map((i) => i.toUpperCase())
+    const all = (await this.engine.parkable()).filter(({ t }) => !want.length || want.includes(t.id.toUpperCase()))
+    if (!all.length) return 'No waiting task holds an agent or a worktree: nothing to park.'
+    const go = all.filter((x) => !x.keep)
+    const stay = all.filter((x) => x.keep)
+    const row = (t: TaskRec, why: string) => `  ${t.id.padEnd(8)} ${t.title}  · ${why}`
+    return [
+      go.length ? `${go.length} waiting task${go.length === 1 ? '' : 's'} would be parked (its agent and herdr space close, its empty worktree and branch go; it starts fresh on its brief at its turn):` : 'None can be parked.',
+      ...go.map(({ t, notes }) => row(t, `${this.engine.subOf(t)}${notes.length ? ` · ${notes.length === 1 ? 'a note' : `${notes.length} notes`} from another agent go${notes.length === 1 ? 'es' : ''} into its brief` : ''}`)),
+      ...(stay.length ? [`${stay.length} kept as ${stay.length === 1 ? 'it is' : 'they are'}:`, ...stay.map(({ t, keep }) => row(t, keep!))] : []),
+      go.length ? `Park ${go.length === 1 ? 'it' : 'them'}: shepherdr task park${ids.length ? ` ${ids.join(' ')}` : ''} --yes` : '',
+    ].filter(Boolean).join('\n')
+  }
+
   private heldWords(why: HeldWhy) {
     return {
       slots: `all ${this.settings.machine().max} slots are taken`,
@@ -3896,7 +3918,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return `Added ${t.id}: ${t.title}, ${starts.toLowerCase()}. It has no agent yet: it starts by itself then, once ${waits}, on the Settings as they are then.${p.flags.has('later') ? ` Its agent then reads the brief and waits for a go (shepherdr task tell ${t.id} "go").` : ''}`
       }
       const on = [CLI_NAME[t.agent!.kind] ?? t.agent!.kind, t.agent!.model, t.agent!.effort && `${t.agent!.effort} effort`].filter(Boolean).join(', ')
-      if (t.after?.length) return `Added ${t.id}: ${t.title}, queued after ${t.after.join(', ')}. Its agent (${on}) reads the brief now and waits; Shepherdr tells it to go once ${t.after.length === 1 ? 'that task is' : 'they are all'} done.`
+      if (t.after?.length) return `Added ${t.id}: ${t.title}, queued after ${t.after.join(', ')}. It has no agent, worktree or herdr space while it waits: once ${t.after.length === 1 ? 'that task is' : 'they are all'} done and the machine has room, its agent (${on}) starts on the brief. A message to it (shepherdr task tell ${t.id} …) starts its agent sooner, still queued.`
       if (p.flags.has('later')) return `Added ${t.id}: ${t.title}, for later. Its agent (${on}) reads the brief now and waits for a go (shepherdr task tell ${t.id} "go").`
       if (t.held) return `Added ${t.id}: ${t.title}, held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and its agent (${on}) starts by itself when there's room, oldest first.`
       return `Added ${t.id}: ${t.title}. Its agent (${on}) starts on the brief now.${after.length ? ' What it would wait for is done already.' : ''}`
@@ -3915,6 +3937,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       return (rows.join('\n') || (p.flags.has('archived') ? 'No archived tasks.' : 'No tasks.')) + tail
     }
     if (sub === 'merge') return this.mergeCommand(rest[0], ctx)
+    if (sub === 'park') return this.parkCommand(rest.filter(Boolean), p.flags.has('yes'), ctx)
     if (sub === 'delete') {
       if (ctx.chat?.includes('/')) throw new Error("A task's agent can't delete tasks; only a coordinator does, when the human plainly asks.")
       const t = this.engine.task(rest[0] ?? '')

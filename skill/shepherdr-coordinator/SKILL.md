@@ -62,7 +62,8 @@ How to do the work inside a task is its agent's judgment, not yours.
    too. A review is only words in the brief; its agent decides how to do it and counts each round (`shepherdr review
    <id>`), so a task that has used them all asks you for one more (step 3).
 2. **Hold, queue or schedule it**: `--later` has its agent wait for a go (`shepherdr task tell <id> "<go>"`). `--after SHE-12`
-   queues it until those are all done; Shepherdr then sends the go. `shepherdr task queue <id> --after …|none` changes
+   queues it until those are all done, with no agent or worktree meanwhile; Shepherdr then starts it on its brief and
+   the go (a message to it starts its agent sooner, still queued). `shepherdr task queue <id> --after …|none` changes
    it; another machine's task is `vm-str:SHE-12`. One it waits for stopped or gone wrong: ask the human.
    A time ("tomorrow 9:00", "in 6 hours", "after the weekend", a day they name) is `--at "tomorrow 9:00"` or `--in 6h`,
    one or the other, in their words turned into a time in the zone `time.zone` sets: it has no agent until then, waits
