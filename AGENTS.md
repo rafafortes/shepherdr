@@ -34,7 +34,7 @@ The operator's fork, used on their desktop since 2026-11-04 (herdr installs the 
   `herdr-plugin.toml` carry the same version. The desktop moves to it with
   `herdr plugin install rafafortes/shepherdr --ref <tag> --yes`, then the plugin's start action swaps the running
   server.
-- **Tests.** The whole check (the types, every test with the browser ones, the build) runs on this machine: GitHub
+- **Tests.** The whole check (the types, every test with the browser ones, the coverage ratchet, the build) runs on this machine: GitHub
   Actions is off on this repository since 2026-11-06. `bun run check:local` is what a task runs before `shepherdr
   ready`, and the coordinator runs it on `herdr-tui` before a release (Tests, below).
 - Nothing of the operator's host goes into this repository: settings, secrets, hosts and paths stay in
@@ -92,6 +92,16 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   libraries come from `sudo bun x playwright-core install-deps webkit`, which only the operator runs.
 - Still write tests with your change: the check runs them here. A new browser test goes in the `layout-*.test.ts` file
   of its topic (setup in `test/layout.ts`); split a file that grows past about 20 s.
+- **Coverage never falls (the operator's rule, 2026-11-10).** The check's coverage step (`scripts/coverage.ts`) counts,
+  file by file, the lines no test runs: the server's from Bun's own coverage, the screen's from what the browser tests
+  run (`test/screen-map.ts`). It fails when a file has more of them than at the default branch's baseline, when a new
+  file comes in with any, or when no test runs a file a test ran. So every change keeps or raises the coverage of what
+  it touches, and new code comes in with every line run by a test; the aim is every file whole, so cover more of a file
+  you work in where it is cheap. A line no test can reach on this machine (an error path of a CLI or herdr that can't
+  fail here) says why on it or on the line above: `// coverage-exempt: <why>`, never to skip a test you could write. The
+  lines each file misses are in the check's logs, `coverage/report.txt`. The baseline is the default branch's, recorded
+  by the coordinator's check there before a release, in the repo's `.git` like the screen map; until the first one
+  nothing is compared. Say the coverage line of your check in `--facts`.
 - GitHub Actions is off: `.github/workflows/check.yml` keeps only `workflow_dispatch`, so nothing waits for GitHub and
   `shepherdr checks` finds nothing to wait for. A branch can still be checked there by hand (`gh workflow run check.yml
   --ref <branch>`, then `gh run watch`), only for a rare case such as a review asking for it.
