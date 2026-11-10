@@ -74,7 +74,13 @@ export function openCards(chat: Chat | undefined): Card[] {
     // beside the questions (the advisor's, by its id too for the ones posted before notes said so): none of them
     // answers a question
     if (m.waiting || m.card?.aside || m.card?.id.startsWith('advice-note:')) continue
-    if (!m.question) break
+    if (!m.question) {
+      // the human's own words after them: what was asked before is answered by them, or moot. Anything else after a
+      // question — the agent's own words ("asked you the one thing…"), Shepherdr's cards, another agent's message, an
+      // answer to one of the others — leaves it waiting for its answer (the operator's decision, 2026-11-10: SHE-19)
+      if (m.who === 'you' && !m.answered) break
+      continue
+    }
     if (m.question.sent === undefined) out.unshift(m as Card)
   }
   return out
