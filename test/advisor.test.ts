@@ -99,6 +99,8 @@ describe('what the advisor is asked, and how it answers', () => {
     expect(parseAdvice('{"decide":"advisor","choices":[1,2],"why":"both","sure":true}', { ...q, multi: true })).toEqual({ choice: 0, choices: [0, 1], why: 'both' })
     expect(parseAdvice('{"decide":"advisor","reply":"Use SQLite.","why":"small","sure":true}', { kind: 'words', title: 'Which store?' })).toEqual({ reply: 'Use SQLite.', why: 'small' })
     expect(parseAdvice('no json at all', q)).toBeUndefined()
+    // braces that are no JSON are passed over for the last object that is
+    expect(parseAdvice('{"decide":"advisor","choice":1,"why":"first","sure":true} then {not json}', q)).toEqual({ choice: 0, why: 'first' })
   })
 
   test('its own words on a question that takes them: with no pick, a null one, or the slot after the options', () => {
@@ -328,6 +330,26 @@ describe('by itself, once a question waited', () => {
       expect(to(w.key)[0]).toContain('from="The advisor"')
       expect(cards(w.key).at(-1)).toContain('(Codex')
     } finally {
+      w.done()
+    }
+  })
+
+  test('a chain of advisor backups: each answers in turn where the ones before it can’t; one that is off is passed over', async () => {
+    const w = await world('adv-chain')
+    try {
+      for (const [k, v] of [['advisor.fallback2', 'off'], ['advisor.fallback3', 'claude'], ['advisor.fallback3Model', 'Haiku 5.5']]) expect(src.settings.set(k, v, { space: w.p.name }).ok).toBe(true)
+      card(w.key, 'ask:c1', 'Which?', ['A', 'B'])
+      replies = [{ ok: false, out: '402 Insufficient account funds' }, { ok: false, out: 'Not logged in' }, json({ decide: 'advisor', choice: 1, why: 'A fits.', sure: true })]
+      await src.advise(w.key, 'ask:c1')
+      expect(runs.map((r) => [r.kind, r.model])).toEqual([['pi', 'opencode-go/deepseek-v4.1-flash'], ['codex', undefined], ['claude', 'claude-haiku-5-5']])
+      expect(cards(w.key).at(-1)).toContain('(Claude Code')
+      // none of them answers: the human hears it once
+      card(w.key, 'ask:c2', 'Which now?', ['A', 'B'])
+      replies = []
+      expect(await src.advise(w.key, 'ask:c2')).toEqual({ ok: false, error: 'The advisor gave no answer.' })
+      expect(runs).toHaveLength(6)
+    } finally {
+      for (const k of ['advisor.fallback2', 'advisor.fallback3', 'advisor.fallback3Model']) src.settings.set(k, null, { space: w.p.name })
       w.done()
     }
   })

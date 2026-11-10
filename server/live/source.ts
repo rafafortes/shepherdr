@@ -49,7 +49,7 @@ import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvi
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
-import { CATALOG, CLI_NAME, CLIS, kindOf, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
+import { CATALOG, CLI_NAME, CLIS, kindOf, MAX_BACKUPS, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
 import { startVoice } from './voice.ts'
 import { SECRET_NAME, secretPages, Vault } from './secrets.ts'
 import { diffFiles, diffPatch, listFiles, pullRequest, readFile } from './worktree.ts'
@@ -258,7 +258,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a task cut off for good waits for the human: started again once its provider answers (return.ts)
     this.engine.noteStuck = (t, ran, why) => {
       const space = this.places.space(t.project)?.name
-      if (space !== undefined) this.noteStuck('task', space, ran, why, this.engine.backupFor('task', space, t.set).to, `${t.id}/Agent`)
+      if (space !== undefined) this.noteStuck('task', space, ran, why, this.engine.backupHarnesses('task', space, t.set), `${t.id}/Agent`)
     }
     // a space whose models all ran out starts no task (each would be cut off too), and its cut-off tasks go back to
     // work before a new one takes a slot
@@ -726,8 +726,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const prompt = advisorPrompt({ question: x.q, asker: x.asker, brief: x.brief, chat: recentChat(this.chats.chat(chat).messages, x.asker), folder: x.cwd, human: this.user, note: note?.trim() || undefined })
       let advice: Advice | undefined
       let said = ''
-      for (const backup of [false, true]) {
-        const h = this.settings.advisor(x.space, backup)
+      // the advisor, then each of its backups in turn
+      for (let n = 0; n <= MAX_BACKUPS; n++) {
+        const h = this.settings.advisor(x.space, n)
         if (!h || !canAdvise(h.kind) || !this.engine.installed(h.kind)) continue
         const r = await this.runAdvisor(h, prompt, x.cwd)
         const parsed = r.ok ? parseAdvice(r.out, x.q) : undefined
@@ -1634,19 +1635,23 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /**
-   * A coordinator that can't go on (retry.ts): Settings' coordinator.fallback takes the chat over once, on the
-   * coordinators' backup model and effort (coordinator.fallbackModel and coordinator.fallbackEffort, or the tasks'
-   * backup.model and backup.effort while those are at default) — the same CLI again, resuming its session, or another CLI,
-   * which is a takeover of the conversation and says so. Its tasks go on as they are. Else, or when its backup can't go
-   * either, it waits for you: a card in the space and an alert.
+   * A coordinator that can't go on (retry.ts): the next backup of its chain takes the chat over, each once (Settings'
+   * coordinator.fallback on the coordinators' backup model and effort — coordinator.fallbackModel and
+   * coordinator.fallbackEffort, or the tasks' backup.model and backup.effort while those are at default — then the 2nd to
+   * the 5th): the same CLI again, resuming its session, or another CLI, which is a takeover of the conversation and says
+   * so. Its tasks go on as they are. Past the last one, or with none, it waits for you: a card in the space and an alert.
    */
   private async coordinatorCantGoOn(key: string, r: Retry) {
     const rec = this.agents.record(key)
     const from = rec?.kind
-    const plan = from ? this.engine.backupFor('coordinator', this.spaceKey(key)) : {}
+    const chain = from ? this.engine.backupsFor('coordinator', this.spaceKey(key)) : []
     const took = this.agents.tookOver(key)
-    // once per agent, until you restart it yourself: a backup that keeps failing waits for the human, never a loop
-    if (plan.to && from && !took) {
+    // the backups after the one it is on (all of them while none took over): each once, until you restart it yourself,
+    // so a chain that keeps failing waits for the human, never a loop
+    const later = chain.filter((p) => p.n > (took ? (took.step ?? 1) : 0))
+    const plan = later.find((p) => p.to) ?? later[0] ?? {}
+    const backups = chain.flatMap((p) => (p.to ? [p.to] : []))
+    if (plan.to && from && rec) {
       const why = r.reason.charAt(0).toLowerCase() + r.reason.slice(1)
       // the coordinators' Model and Effort, or else the model and effort it ran on: a model the backup's CLI lacks is dropped
       const on: Harness = {
@@ -1654,7 +1659,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         model: plan.to.model ?? (rec.model ? findModel(plan.to.kind, rec.model)?.id : undefined),
         effort: plan.to.effort ?? rec.effort,
       }
-      this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now() })
+      // the same mark as before it, with its place in the chain
+      const prior = took
+      this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now(), step: plan.n })
       try {
         await this.restartCoordinator(key, on, why)
         // a lasting one: the primary it ran out of is what the watch asks about later (return.ts), and only while it ran
@@ -1670,35 +1677,35 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return
       } catch (e) {
         // it didn't start: the human hears why, and a later hand-over may try again
-        this.agents.markTookOver(key, undefined)
-        this.coordinatorStuck(key, r, plan.to)
+        this.agents.markTookOver(key, prior)
+        this.coordinatorStuck(key, r, backups)
         return this.cutOff(key, r, `its backup, ${CLI_NAME[plan.to.kind] ?? plan.to.kind}, couldn't start: ${(e as Error).message}`)
       }
     }
-    const also = took ? `its backup agent (${CLI_NAME[took.to] ?? took.to}) already went in once` : plan.why ? `no backup agent took over: ${plan.why}` : undefined
-    this.coordinatorStuck(key, r, plan.to)
+    const also = took ? `its backup agent (${CLI_NAME[took.to] ?? took.to}) already went in once${chain.length > 1 ? ', the last of its backups' : ''}` : plan.why ? `no backup agent took over: ${plan.why}` : undefined
+    this.coordinatorStuck(key, r, backups)
     this.cutOff(key, r, also)
   }
 
   /** a coordinator cut off for good waits for the human: started again once its provider answers (return.ts) */
-  private coordinatorStuck(key: string, r: Retry, backup?: Harness) {
+  private coordinatorStuck(key: string, r: Retry, backups: Harness[]) {
     const rec = this.agents.record(key)
     if (!r.lasting || !rec) return
-    this.noteStuck('coordinator', this.spaceKey(key) ?? '', { kind: rec.kind, model: rec.model, effort: rec.effort }, r.reason.charAt(0).toLowerCase() + r.reason.slice(1), backup, key)
+    this.noteStuck('coordinator', this.spaceKey(key) ?? '', { kind: rec.kind, model: rec.model, effort: rec.effort }, r.reason.charAt(0).toLowerCase() + r.reason.slice(1), backups, key)
   }
 
   /**
    * An agent of that role cut off for good, on `ran`, that waits for the human: its outage is kept (or, open already, it
    * counts one more cut-off), so the watch asks its primary and starts it again once that one answers (return.ts). Only
-   * an agent on what Settings name for its role, or on its backup: one on a harness of its own is not the primary's to
-   * bring back. A note that can't be written never changes what happens to the agent.
+   * an agent on what Settings name for its role, or on one of its backups: one on a harness of its own is not the
+   * primary's to bring back. A note that can't be written never changes what happens to the agent.
    */
-  private noteStuck(role: 'task' | 'coordinator', space: string, ran: Harness, why: string, backup: Harness | undefined, key: string) {
+  private noteStuck(role: 'task' | 'coordinator', space: string, ran: Harness, why: string, backups: Harness[], key: string) {
     try {
       const primary = this.settings.harness(role, space || undefined)
-      if (!sameHarness(ran, primary) && !(backup && sameHarness(ran, backup))) return
-      // its backup was cut off too, or there is none: every model of that role ran out here
-      const allOut = !backup || sameHarness(backup, primary) || sameHarness(ran, backup)
+      if (!sameHarness(ran, primary) && !backups.some((b) => sameHarness(ran, b))) return
+      // its last backup was cut off too, or there is none: every model of that role ran out here
+      const allOut = noneLeft(ran, primary, backups)
       const o = this.returns.get(role, space)
       // a cut-off on the backup says nothing of the primary: only one on the primary puts its answer off
       if (o && !o.back) this.returns.cut(role, space, Date.now(), { key, allOut, onPrimary: sameHarness(ran, primary) })
@@ -1824,12 +1831,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     for (const t of this.engine.tasks) {
       if (ended(t) || t.stopped || t.archived || !t.worktree) continue
       const space = this.places.space(t.project)?.name
-      if (space !== undefined) this.adopt('task', space, `${t.id}/Agent`, t.tookOver?.at, this.engine.backupFor('task', space, t.set).to, now)
+      if (space !== undefined) this.adopt('task', space, `${t.id}/Agent`, t.tookOver?.at, this.engine.backupHarnesses('task', space, t.set), now)
     }
     for (const { id } of this.places.shown()) {
       if (!this.places.coordinator(id)) continue
       const space = this.spaceKey(id) ?? ''
-      this.adopt('coordinator', space, id, this.agents.tookOver(id)?.at, this.engine.backupFor('coordinator', space || undefined).to, now)
+      this.adopt('coordinator', space, id, this.agents.tookOver(id)?.at, this.engine.backupHarnesses('coordinator', space || undefined), now)
     }
   }
 
@@ -1841,7 +1848,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return r ? `${key}:cut:${r.cut}` : `${key}:took:${took ?? ''}`
   }
 
-  private adopt(role: 'task' | 'coordinator', space: string, key: string, took: number | undefined, backup: Harness | undefined, now: number) {
+  private adopt(role: 'task' | 'coordinator', space: string, key: string, took: number | undefined, backups: Harness[], now: number) {
     const o = this.returns.get(role, space)
     if (o && !o.back) return
     const rec = this.agents.record(key)
@@ -1849,15 +1856,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const ran: Harness = { kind: rec.kind, model: rec.model, effort: rec.effort }
     const primary = this.settings.harness(role, space || undefined)
     const r = this.retries.get(key)
-    const cut = !!r?.over && !!r.lasting && (sameHarness(ran, primary) || (!!backup && sameHarness(ran, backup)))
-    // still on the backup that took it over (the backup may work: it goes back once the primary answers)
-    const away = !!took && !!backup && !sameHarness(backup, primary) && sameHarness(ran, backup)
+    const onBackup = backups.some((b) => !sameHarness(b, primary) && sameHarness(ran, b))
+    const cut = !!r?.over && !!r.lasting && (sameHarness(ran, primary) || onBackup)
+    // still on a backup that took it over (the backup may work: it goes back once the primary answers)
+    const away = !!took && onBackup
     if (!cut && !away) return
     const seen = this.cutMark(key, cut ? r : undefined, cut ? undefined : took)
     if (this.adopted.has(seen)) return
     this.adopted.add(seen)
-    // its backup was cut off too, or there is none: every model of that role ran out here
-    const allOut = cut && (!backup || sameHarness(backup, primary) || sameHarness(ran, backup))
+    // its last backup was cut off too, or there is none: every model of that role ran out here
+    const allOut = cut && noneLeft(ran, primary, backups)
     const why = r?.reason ? r.reason.charAt(0).toLowerCase() + r.reason.slice(1) : 'its backup took it over'
     // noted as old as it is: its first question due now (past its first wait and its random fifth), no quiet to wait for
     this.returns.note({ role, space, primary, to: ran, why, at: now - 2 * FIRST_WAIT }, { key, allOut })
@@ -2005,7 +2013,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const primary = this.settings.harness(o.role, o.space || undefined)
     // its agents ran on a backup (else it had none: only the ones cut off come back)
     const away = !sameHarness(primary, o.to)
-    const backup = o.role === 'reviewer' ? undefined : this.engine.backupFor(o.role, o.space || undefined).to
+    const backups = o.role === 'reviewer' ? [] : this.engine.backupHarnesses(o.role, o.space || undefined)
     const on = (key: string) => {
       const r = this.agents.record(key)
       return r ? ({ kind: r.kind, model: r.model, effort: r.effort } as Harness) : undefined
@@ -2014,8 +2022,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (o.moved?.includes(key)) return undefined
       const h = on(key)
       if (!h) return undefined
-      // still on what took over (or on the backup Settings name): one that went back asks nothing
-      if ((away && sameHarness(h, o.to)) || (backup && !sameHarness(backup, primary) && sameHarness(h, backup))) return {}
+      // still on what took over (or on one of the backups Settings name): one that went back asks nothing
+      if ((away && sameHarness(h, o.to)) || backups.some((b) => !sameHarness(b, primary) && sameHarness(h, b))) return {}
       // cut off for good on the primary: it waits, on the model that answers again
       const r = this.retries.get(key)
       return r?.over && r.lasting && sameHarness(h, primary) ? { stuck: true } : undefined
@@ -3465,10 +3473,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const h = this.settings.heartbeat(pr ? { space: pr } : 'machine')
         const next = nextWords(h.time, h.zone)
         const beat = `\n\nHeartbeat on Autopilot: ${timeWords(h.time, h.zone)}${next.length ? ` (next ${next.join(', ')})` : ''}; news that wakes it at once: ${eventWords(h.on).toLowerCase()}, the rest waits for the heartbeat. Each brings the place's HEARTBEAT.md, its standing checklist: shepherdr heartbeat [<place>] shows it, shepherdr heartbeat set [<place>] < file changes it.`
-        const block = settingsBlock('<id>', { ways: this.settings.ways(pr), reviewer: this.settings.harness('reviewer', pr), fallback: this.settings.reviewerBackup(pr), agent: this.settings.harness('task', pr), by: this.settings.setBy(pr) })
+        const block = settingsBlock('<id>', { ways: this.settings.ways(pr), reviewer: this.settings.harness('reviewer', pr), fallback: this.settings.reviewerBackups(pr), agent: this.settings.harness('task', pr), by: this.settings.setBy(pr) })
         const repo = pr ? this.places.byName(pr) : undefined
         const folder = repo ? `\nFolder: ${this.places.folderLine(repo)}${repo.repoId ? ` (found again by its repo's id ${shortId(repo.repoId)} if its folder is renamed or moved)` : ''}` : ''
-        return `${head}${repo ? `${folder}\nBase branch: ${repo.base} (new tasks; per-task override: --base <branch>)` : ''}\n${this.settings.lines(pr, NAME)}${beat}${now}\n\nEvery new task's brief${pr ? ` in ${pr}` : ''} ends with:\n${block}\n\nFor one task, set any of these with task add: --set review.rounds=1 --set merge="ask me first" (--set agent=codex, model, effort, reviewer, reviewer.model, reviewer.effort, reviewer.fallback, reviewer.fallbackModel, reviewer.fallbackEffort, task.fallback, coordinator.fallback, backup.model, backup.effort too), or say so in its brief, which wins.`
+        return `${head}${repo ? `${folder}\nBase branch: ${repo.base} (new tasks; per-task override: --base <branch>)` : ''}\n${this.settings.lines(pr, NAME)}${beat}${now}\n\nEvery new task's brief${pr ? ` in ${pr}` : ''} ends with:\n${block}\n\nFor one task, set any of these with task add: --set review.rounds=1 --set merge="ask me first" (--set agent=codex, model, effort, reviewer, reviewer.model, reviewer.effort, reviewer.fallback, reviewer.fallbackModel, reviewer.fallbackEffort, task.fallback, coordinator.fallback, backup.model, backup.effort too, and a chain's 2nd to 5th backups by their own keys: task.fallback2, task.fallback2Model, task.fallback2Effort, reviewer.fallback2…), or say so in its brief, which wins.`
       }
       case 'models': {
         const kinds = a1 ? [kindOf(a1)] : ['claude', 'codex', 'pi']
@@ -4117,6 +4125,13 @@ const REPLY_AFTER_CARD =
 /** who added a task an automation added: "the automation “Nightly”" */
 const BY_AUTOMATION = 'the automation'
 
+
+/** no backup is left after the harness an agent ran on: it was the last of its chain that differs from the primary, or
+ *  none differs (then it ran on the primary): every model of that role ran out */
+export function noneLeft(ran: Harness, primary: Harness, backups: Harness[]) {
+  const i = backups.findIndex((b) => sameHarness(b, ran))
+  return !backups.slice(i + 1).some((b) => !sameHarness(b, primary) && !sameHarness(b, ran))
+}
 
 const heldWords = (h: string) => /\(([^)]*)\)$/.exec(h)?.[1] ?? h
 

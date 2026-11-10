@@ -155,6 +155,38 @@ describe("a coordinator's backup agent", () => {
     }
   })
 
+  test("a chain of coordinator backups: each takes the chat over in turn, then it waits for you, its card naming the last", async () => {
+    const s = await place('chain')
+    try {
+      for (const [k, v] of [['coordinator.fallback', 'claude'], ['coordinator.fallback2', 'off'], ['coordinator.fallback3', 'codex']]) expect(s.src.settings.set(k, v, { space: s.p.name }).ok).toBe(true)
+      await s.cut('Out of allowance until 5pm')
+      expect(s.started.map((x) => x.kind)).toEqual(['claude'])
+      expect(s.src.agents.tookOver(s.key)).toMatchObject({ from: 'claude', to: 'claude', step: 1 })
+      // Backup 1 can't go on either: Backup 2 is off, so Backup 3 takes the chat over
+      await s.cut('Signed out')
+      expect(s.started.map((x) => x.kind)).toEqual(['claude', 'codex'])
+      expect(s.started[1].first).toContain("Taking over: Claude Code ran this chat's coordinator until now and can't go on (signed out)")
+      expect(s.src.agents.tookOver(s.key)).toMatchObject({ to: 'codex', step: 3 })
+      // past the last one: no loop, the human hears it
+      await s.cut('Signed out again')
+      expect(s.started).toHaveLength(2)
+      expect(s.cards().map((m) => m.card!.text).at(-1)).toContain('Its backup agent (Codex) already went in once, the last of its backups')
+      expect(s.alerts.length).toBeGreaterThan(0)
+      // a start that fails keeps its place in the chain: the one before it stays marked, and the next cut tries it again
+      s.src.agents.markTookOver(s.key, { from: 'claude', to: 'claude', why: 'x', at: Date.now(), step: 1 })
+      const restart = s.src.agents.restart
+      s.src.agents.restart = (async () => {
+        throw new Error('no pane')
+      }) as never
+      await s.cut('Signed out once more')
+      expect(s.src.agents.tookOver(s.key)).toMatchObject({ step: 1 })
+      s.src.agents.restart = restart
+    } finally {
+      for (const k of ['coordinator.fallback', 'coordinator.fallback2', 'coordinator.fallback3']) s.src.settings.set(k, null, { space: s.p.name })
+      s.done()
+    }
+  })
+
   test("the coordinators' backup on its own pair takes over on its own model, apart from the tasks' backup's", async () => {
     const s = await place('ownpair')
     try {

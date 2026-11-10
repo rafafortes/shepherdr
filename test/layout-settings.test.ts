@@ -172,6 +172,51 @@ describe.skipIf(!browser)('two backups, each with its own model and effort', () 
   })
 })
 
+describe.skipIf(!browser)('a chain of backups', () => {
+  test("+ Add a tasks' backup adds the next one on the same CLI; Off takes it out; with no Backup 1 there is nothing to add", async () => {
+    const store = world.stores['vm-str']
+    store.set('task.fallback', 'Codex')
+    store.set('coordinator.fallback', 'off')
+    world.sections = (await import('../server/demo/data.ts')).settings(world.stores)
+    world.emit('snapshot')
+    const page = await browser!.newPage({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })
+    try {
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.getByRole('button', { name: 'Agents', exact: true }).click()
+      const backup = settings.getByRole('heading', { name: 'Backup', exact: true }).locator('..')
+      // the 2nd to 5th stay out of sight while off; Backup 1 of the coordinators is off, so it offers none
+      expect(await backup.textContent()).not.toContain("Tasks' backup 2")
+      expect(await backup.getByRole('button', { name: "Add a tasks' backup", exact: true }).count()).toBe(1)
+      expect(await backup.getByRole('button', { name: "Add a coordinators' backup", exact: true }).count()).toBe(0)
+      await backup.getByRole('button', { name: "Add a tasks' backup", exact: true }).tap()
+      await settled(page)
+      expect(store.get('task.fallback2', '~')).toBe('Codex')
+      // its three rows, and the next one to add after them
+      await backup.getByRole('button', { name: "Tasks' backup 2: Codex", exact: true }).waitFor()
+      // the coordinators' Backup 1 is off, its Model a fixed row: the tasks' two backups have a pick each
+      expect(await backup.getByRole('button', { name: /^Model:/ }).count()).toBe(2)
+      expect(await backup.getByRole('button', { name: "Add a tasks' backup", exact: true }).count()).toBe(1)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375)
+      // Off takes it out again, from its own pick
+      await backup.getByRole('button', { name: "Tasks' backup 2: Codex", exact: true }).click()
+      await page.getByRole('menuitemradio', { name: 'Off', exact: true }).click()
+      await settled(page)
+      expect(store.get('task.fallback2', '~')).toBe('off')
+      await backup.getByRole('button', { name: /^Tasks' backup 2:/ }).waitFor({ state: 'detached' })
+      expect(await backup.getByRole('button', { name: "Add a tasks' backup", exact: true }).count()).toBe(1)
+      expect(await backup.getByRole('button', { name: /^Model:/ }).count()).toBe(1)
+    } finally {
+      for (const k of ['task.fallback', 'task.fallback2', 'coordinator.fallback']) for (const l of ['all', { space: '~' }] as const) store.set(k, null, l)
+      world.sections = (await import('../server/demo/data.ts')).settings(world.stores)
+      world.emit('snapshot')
+      await page.close()
+    }
+  })
+})
+
 describe.skipIf(!browser)('Task IDs space settings', () => {
   test('shows only for its space, with two fields and a useful refusal', async () => {
     const { taskIdsSection } = await import('../server/live/task-ids.ts')

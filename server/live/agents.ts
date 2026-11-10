@@ -102,7 +102,7 @@ export interface AgentRecord {
   startError?: string
   /** a backup agent went in once, where the agent it backs up can't go on (source.ts cannotGoOn): another one waits for
    *  the human, so a backup that keeps failing never loops. A task's own record keeps the same mark (TaskRec.tookOver) */
-  tookOver?: { from: string; to: string; why: string; at: number }
+  tookOver?: { from: string; to: string; why: string; at: number; step?: number }
 }
 
 export interface OutItem {
