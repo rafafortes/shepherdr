@@ -520,11 +520,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * with what it waits with. Read from the original chats only: a card forwarded to a space must never count twice.
    * The Needs you view lists these and every count counts these, so a number and its list always agree.
    */
-  private needs(): Need[] {
+  /** only: one chat's needs alone (the advisor's look at a chat), without a look at every task */
+  private needs(only?: string): Need[] {
     const out: Need[] = []
     const open = (chat: string) => new Map(openCards(this.chats.chat(chat)).map((m) => [m.question.id, m]))
     // a coordinator: the cards it asked that still wait, then the CLI's own menu, then a menu nobody reads
     for (const p of [placeId.home(), ...this.places.spaces.map((x) => placeId.space(x.name))]) {
+      if (only && p !== only) continue
       const log = this.chats.log(p)
       const cards = open(p)
       const blocked = this.agents.status(p) === 'blocked'
@@ -542,7 +544,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     // a task that needs you: one need per card it waits on, else one for what it waits with
     for (const t of this.engine.tasks) {
-      if (t.archived || this.engine.statusOf(t) !== 'need') continue
+      if ((only && only !== `${t.id}/Agent`) || t.archived || this.engine.statusOf(t) !== 'need') continue
       const key = `${t.id}/Agent`
       const cards = [...open(key).values()]
       const menu = this.chats.startMenuUp(key) && !cards.length ? this.chats.menu(key) : undefined
@@ -640,7 +642,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** a chat whose open questions the advisor can take: their cards carry Ask the advisor (none asked yet, one set) */
   private withAdvice(c: Chat): Chat {
-    const open = new Set(this.advisable().filter((x) => x.need.chat === c.key && x.need.question).map((x) => x.qid))
+    // nothing asked here: no need of any task to look at (a chat is drawn often, and a cold start draws hundreds)
+    if (!c.messages.some((m) => m.question && m.question.sent === undefined && !m.question.dismissed)) return c
+    const open = new Set(this.advisable(c.key).filter((x) => x.need.question).map((x) => x.qid))
     if (!open.size) return c
     return { ...c, messages: c.messages.map((m) => (m.question && open.has(m.question.id) ? { ...m, question: { ...m.question, advise: true } } : m)) }
   }
@@ -651,15 +655,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * other reasons (a provider's cut-off, a start that went wrong, a login). Only where an advisor is set for its space,
    * and not asked about already.
    */
-  private advisable(): { need: Need; qid: string; q: AdviceQuestion; space: string; cwd: string; asker: string; brief?: string }[] {
+  private advisable(only?: string): { need: Need; qid: string; q: AdviceQuestion; space: string; cwd: string; asker: string; brief?: string }[] {
     const out: ReturnType<LiveSource['advisable']> = []
-    for (const n of this.needs()) {
+    for (const n of this.needs(only)) {
       const t = n.task ? this.engine.task(n.task) : undefined
       const space = t ? this.places.space(t.project)?.name : this.spaceKey(n.chat)
       if (space === undefined || !this.settings.advisor(space)) continue
       const cwd = (t ? t.worktree : this.places.coordinator(n.chat)?.cwd) ?? this.places.space(n.place)?.path
       if (!cwd) continue
-      const asker = t ? `${t.id}'s agent` : `the coordinator of ${this.chatName(n.chat)}`
+      const asker = t ? `${t.id}'s agent` : `the coordinator of ${this.places.nameOf(n.chat) ?? n.chat}`
       const brief = t ? `${t.title}\n\n${t.desc}`.trim() : undefined
       let q: AdviceQuestion
       let qid: string
@@ -704,7 +708,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * Unsure, or a question only the human decides: a card says so, and the question waits for them.
    */
   async advise(chat: string, qid: string, auto = false): Promise<{ ok: boolean; error?: string }> {
-    const x = this.advisable().find((y) => y.need.chat === chat && y.qid === qid)
+    const x = this.advisable(chat).find((y) => y.qid === qid)
     if (!x) return { ok: false, error: this.advices.get(chat, qid) ? 'The advisor was asked about this already.' : 'This question no longer waits, or no advisor is set for its space.' }
     if (this.advising) return { ok: false, error: 'The advisor is answering another question; try again in a moment.' }
     this.advising = true
@@ -741,7 +745,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return { ok: true }
       }
       // still open? the human may have answered while it read
-      const open = this.needs().some((n) => n.chat === chat && (n.question?.id === qid || (!n.question && qid.startsWith('words:'))))
+      const open = this.needs(chat).some((n) => n.question?.id === qid || (!n.question && qid.startsWith('words:')))
       if (!open) {
         this.advices.set({ ...rec, state: 'human', advice })
         return { ok: true }
@@ -819,7 +823,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       this.emit('chat', r.chat)
       return { ok: true }
     }
-    const x = this.needs().find((n) => n.chat === r.chat && (n.question?.id === r.question || (!n.question && r.question.startsWith('words:'))))
+    const x = this.needs(r.chat).find((n) => n.question?.id === r.question || (!n.question && r.question.startsWith('words:')))
     if (!x) {
       this.advices.set({ ...r, state: 'human' })
       return { ok: false, error: 'The question no longer waits: it was answered meanwhile.' }

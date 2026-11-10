@@ -86,6 +86,29 @@ describe('recovered private routing failures', () => {
   })
 })
 
+describe('finding a task by its id', () => {
+  test('whatever happens to the list since the last look: refilled with as many, reordered, one removed, in any case', () => {
+    const w = world()
+    const t = (id: string) => ({ id, title: id }) as never
+    const ids = (xs: (string | undefined)[]) => xs
+    w.engine.tasks.push(t('A-1'), t('A-2'))
+    expect(ids([w.engine.task('a-1')?.id, w.engine.task('A-2')?.id, w.engine.task('A-3')?.id])).toEqual(['A-1', 'A-2', undefined])
+    // emptied and filled again with as many others: the old index never answers
+    w.engine.tasks.length = 0
+    w.engine.tasks.push(t('B-1'), t('B-2'))
+    expect(ids([w.engine.task('A-1')?.id, w.engine.task('B-1')?.id, w.engine.task('b-2')?.id])).toEqual([undefined, 'B-1', 'B-2'])
+    // reordered in place, and one replaced by another of the same id: each found where it is now
+    w.engine.tasks.reverse()
+    const fresh = t('B-1')
+    w.engine.tasks[w.engine.tasks.findIndex((x) => x.id === 'B-1')] = fresh
+    expect(w.engine.task('B-1')).toBe(fresh)
+    expect(w.engine.task('B-2')?.id).toBe('B-2')
+    // the one in front removed: the other is found where it moved to, the removed one is gone
+    w.engine.tasks.splice(0, 1)
+    expect(ids([w.engine.task('B-1')?.id, w.engine.task('B-2')?.id])).toEqual(['B-1', undefined])
+  })
+})
+
 describe('a task is its brief and one agent', () => {
   test('adding a task starts its agent at once, in its own worktree from main, with the brief first', async () => {
     const w = world()

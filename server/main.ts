@@ -18,6 +18,9 @@ async function makeSource(): Promise<Source> {
 }
 
 const source = await makeSource()
+// the first snapshot reads every chat's log, seconds on a busy machine: read before the server takes connections, so a
+// screen that opens right after a restart gets its first snapshot at once, instead of giving up on it and trying again
+if (kind === 'live') source.snapshot()
 const push = kind === 'live' && !process.env.SHEPHERDR_BOX ? new Push() : undefined
 if (push && 'devices' in source && 'pushWarnings' in source) {
   (source as { devices: () => string[] }).devices = () => push.devices.map(deviceName)
