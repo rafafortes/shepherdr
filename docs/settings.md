@@ -19,8 +19,9 @@
   reviewer (`reviewer.fallback`, off until you set one) names a second reviewer CLI; `reviewer.fallbackModel` and
   `reviewer.fallbackEffort` are its model and effort, its own keys so that neither reviewer replaces the other. When
   it is set, the brief's Reviewer line ends with it: “If that reviewer cannot run at all (out of allowance, signed
-  out, its model is gone), review with … instead and say in your summary that you did.” It is still one reviewer a
-  round, run by the task's agent as `<task-id>/Reviewer`; it never changes what a review means (findings, the bar, the
+  out, its model is gone), review with … instead for that round only, and say in your summary that you did; every
+  round asks that reviewer first again.” So a reviewer goes back to its primary by itself, the next round after it
+  answers again. It is still one reviewer a round, run by the task's agent as `<task-id>/Reviewer`; it never changes what a review means (findings, the bar, the
   rounds), and it is never a second opinion after findings. With it off (the default) the line reads exactly as before.
   Like the rest, it is set Everywhere, for a machine or for a space (the most specific one set wins), and for one task
   by its coordinator (`task add --set reviewer.fallback=pi`), which wins for that task.

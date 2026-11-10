@@ -53,9 +53,10 @@ export function reviewerWords(r: Reviewer) {
 }
 
 /** a brief's Reviewer line: who reviews, and — when the human set a backup reviewer — who reviews instead where that one
- *  cannot run at all. A backup reviewer never replaces a finding: it is for a reviewer that could not work. */
+ *  cannot run at all. A backup reviewer never replaces a finding: it is for a reviewer that could not work, for that
+ *  round only, so a primary that answers again reviews the next round (the way back, as return.ts is for agents) */
 export function reviewerLine(r: Reviewer, backup?: Reviewer) {
-  const instead = backup ? ` If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with ${reviewerWords(backup)} instead and say in your summary that you did.` : ''
+  const instead = backup ? ` If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with ${reviewerWords(backup)} instead for that round only, and say in your summary that you did; every round asks that reviewer first again.` : ''
   return `Reviewer: ${reviewerWords(r)}.${instead}`
 }
 
