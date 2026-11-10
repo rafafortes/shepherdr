@@ -110,14 +110,17 @@
   `error` event, and `checkCut` needs the agent's record), and a reviewer is no such agent — headless, it is a shell
   the task's agent runs, whose log `activity.ts` reads for steps and turns only, and a subagent is background work of
   it. A nudge would rest on a guess, and a wrong one would send an agent to its backup reviewer over a normal finding.
-  The brief's words are the trigger. For the same reason, what tells you a backup reviewer is no longer needed is a
-  probe rather than a log line: while one is set, Shepherdr asks the primary reviewer itself whether it answers again
-  (Settings → Agents → Backup → Tell me when it is back, [settings](settings.md#tell-me-when-it-is-back)).
-- **Going back is yours.** A backup stays where it is until you restart the agent on what Settings name again (⋯ →
-  Restart agent, or `shepherdr restart <id>`) or, for a reviewer, until you set `reviewer.model` back for that space
-  (`shepherdr set reviewer.model <id> --space <name>`; a plain set is Everywhere's) — a new task's brief reads it, while
-  a task already running keeps the reviewer its own brief named. Nothing switches on its own. What Shepherdr does do is tell you when the primary answers again — one card in each chat still on a
-  backup, and no more — which is the setting above, `backup.watchReturn`, never a decision of the takeover itself.
+  The brief's words are the trigger. Each review asks the primary reviewer first, so a reviewer goes back by itself as
+  soon as its primary answers; with **tell me** (below), Shepherdr also asks the primary reviewer whether it answers
+  again while a backup reviewer is set, and says so ([settings](settings.md#when-the-primary-is-back)).
+- **Going back.** Once the primary answers again, each agent still on a backup starts again on what Settings name, when
+  it is idle — never mid-turn, never a paused task, never one asking you something — with a card in its chat, and its
+  backup may take over again the next time the primary runs out; at most three times a day per role and space, after
+  which it waits for you. Settings → Agents → Backup → When the primary is back (`backup.watchReturn`): **go back**,
+  the default; **tell me**, a card in each chat still on a backup naming the way back (⋯ → Restart agent, or `shepherdr
+  restart <id>`; for a reviewer `shepherdr set reviewer.model <id> --space <name>`, a plain set being Everywhere's),
+  and nothing switches; or **off**. It goes back to what Settings name now, never to what ran before, and it is never
+  a decision of the takeover itself.
 - Status, coordinators' too, is what the agent reports of itself. Every Claude Code Shepherdr starts gets a settings
   file of its own (`--settings`, in `~/.shepherdr/hooks/`; your own settings are never touched) whose hooks record
   each event: a turn starts or ends, what still runs in the background as it ends, a permission prompt (a subagent's

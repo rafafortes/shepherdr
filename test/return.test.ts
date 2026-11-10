@@ -1,9 +1,9 @@
 // When a model's provider runs out for good (out of allowance, signed out, a model that is not there) a backup takes
-// that role's agent over, and it stays there: going back was a manual restart. Shepherdr remembers the takeover per
-// role and space and asks the primary now and then whether it answers again — one card in each chat still on the
-// backup, naming the way back, and nothing else. Never a switch. A real LiveSource, its agents' starts stubbed at the
-// one place they start (no herdr here), a herdr socket that isn't there, and the probe stubbed at the one place it
-// asks: no CLI is run, and no model is asked anything.
+// that role's agent over. Shepherdr remembers the takeover per role and space and asks the primary now and then whether
+// it answers again. Going back (the default), each agent still on the backup starts again on what Settings name once it
+// is idle; told (tell me), one card in each of those chats names the way back, and nothing switches. A real LiveSource,
+// its agents' starts stubbed at the one place they start (no herdr here), a herdr socket that isn't there, and the probe
+// stubbed at the one place it asks: no CLI is run, and no model is asked anything.
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import { join } from 'node:path'
@@ -14,7 +14,7 @@ process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock'
 delete process.env.SHEPHERDR_MAIN
 const { LiveSource } = await import('../server/live/source.ts')
 const { placeId } = await import('../server/live/places.ts')
-const { FIRST_WAIT, LONGEST_WAIT, oneShot, probeHarness, wait } = await import('../server/live/return.ts')
+const { FIRST_WAIT, FRESH, LONGEST_WAIT, MAX_RETURNS, oneShot, probeHarness, wait } = await import('../server/live/return.ts')
 const { Retries } = await import('../server/live/retry.ts')
 type Retry = import('../server/live/retry.ts').Retry
 
@@ -50,6 +50,8 @@ beforeEach(() => {
     asked.push(`${h.kind}${h.model ? ` ${h.model}` : ''}`)
     return { ok: answers, said: answers ? 'ok' : 'Out of allowance until 5pm' }
   }
+  // what the human is told is what most of these look at; going back by itself has its own describe below
+  src.settings.set('backup.watchReturn', 'tell me')
 })
 
 /** a space of its own, with the agents' starts stubbed: what a backup would have started, and nothing in herdr */
@@ -315,6 +317,208 @@ describe('when the primary answers again', () => {
   })
 })
 
+describe('going back by itself', () => {
+  /** a space going back by itself, whose agents start for real as far as Shepherdr knows: each start is kept, with what
+   *  its agent is told first, and every agent is idle unless a test says otherwise */
+  async function goingBack(name: string) {
+    const s = await space(name)
+    expect(s.src.settings.set('backup.watchReturn', 'go back', { space: s.p.name }).ok).toBe(true)
+    const started: { key: string; kind: string; first?: string }[] = []
+    s.src.agents.restart = (async (spec: { key: string; kind: string; model?: string }, before?: () => Promise<string | void>) => {
+      started.push({ key: spec.key, kind: spec.kind, first: (await before?.()) as string | undefined })
+      // what a real start leaves: its agent runs on what it started on
+      const r = s.src.agents.records[spec.key]
+      if (r) Object.assign(r, { kind: spec.kind, model: spec.model })
+      return null
+    }) as never
+    const status = s.src.agents.status
+    const busy = new Set<string>()
+    s.src.agents.status = ((k: string) => (busy.has(k) ? 'working' : 'idle')) as never
+    /** a task of the space on the backup, started as a real one is: its worktree and branch are the space's own */
+    const onBackup = () => {
+      const x = task(s.p.name, 'codex', { from: 'claude' })
+      Object.assign(x.t, { worktree: s.p.path, branch: 'main', base: 'main', agent: { kind: 'codex' } })
+      return x
+    }
+    const done = () => {
+      s.src.agents.status = status
+      s.src.settings.set('backup.watchReturn', null, { space: s.p.name })
+      s.done()
+    }
+    return { ...s, started, busy, onBackup, done }
+  }
+
+  test('each idle agent on the backup starts again on what Settings name, told why, and its backup may go in again', async () => {
+    const s = await goingBack('home-again')
+    try {
+      const a = s.onBackup()
+      coordinator(s.key, 'codex')
+      s.src.agents.markTookOver(s.key, { from: 'claude', to: 'codex', why: 'out of allowance until 5pm', at: Date.now() })
+      const late = Date.now() - FIRST_WAIT * 2
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: late })
+      s.src.returns.note({ role: 'coordinator', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: late })
+      await s.src.watchReturns(later())
+      expect(asked).toEqual(['claude', 'claude'])
+      // both started again on Settings' primary: Claude Code, which the task's brief and the coordinator's chat carry over
+      expect(s.started.map((x) => [x.key, x.kind])).toEqual([
+        [a.key, 'claude'],
+        [s.key, 'claude'],
+      ])
+      expect(s.started[0].first).toContain('Shepherdr moved this task back to its primary model, which answers again: Claude Code. Codex, its backup, ran it until now')
+      expect(s.started[1].first).toContain('Shepherdr moved this chat back to its primary model, which answers again: Claude Code.')
+      // the card in each chat says so; nothing of "the human restarted" in it
+      expect(s.src.chats.chat(a.key).messages.filter((m) => m.card?.restart).map((m) => m.card!.text)).toEqual(['Back on the primary model, which answers again: Claude Code'])
+      expect(s.src.chats.chat(s.key).messages.filter((m) => m.card?.restart).map((m) => m.card!.text)).toEqual(['Back on the primary model, which answers again: Claude Code'])
+      expect(alerts.map((x) => x.title)).toEqual(['Back on the primary model', 'Back on the primary model'])
+      // the backup's one go is given back: the next time the primary runs out, it takes over again
+      expect(a.t.tookOver).toBeUndefined()
+      expect(a.t.agent).toEqual({ kind: 'claude' })
+      expect(s.src.agents.tookOver(s.key)).toBeUndefined()
+      // over: counted as one return of the day each, and nothing more is asked or started
+      expect(s.src.returns.get('task', s.p.name)).toMatchObject({ back: expect.any(Number), returned: [expect.any(Number)] })
+      await s.src.watchReturns(later() + 3_600_000)
+      expect(asked).toHaveLength(2)
+      expect(s.started).toHaveLength(2)
+    } finally {
+      s.done()
+    }
+  })
+
+  test('one at work, paused or waiting for an answer goes back on a later pass, unasked while the answer is fresh', async () => {
+    const s = await goingBack('home-later')
+    try {
+      const a = s.onBackup()
+      const b = s.onBackup()
+      const c = s.onBackup()
+      s.busy.add(a.key)
+      b.t.paused = 'idle'
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: Date.now() - FIRST_WAIT * 2 })
+      const now = later()
+      await s.src.watchReturns(now)
+      // never mid-turn and never a pause of yours: only the idle one went back
+      expect(s.started.map((x) => x.key)).toEqual([c.key])
+      expect(b.t.paused).toBe('idle')
+      expect(s.src.returns.get('task', s.p.name)!.back).toBeUndefined()
+      // its turn is over a minute later: it follows, and the primary is not asked again
+      s.busy.delete(a.key)
+      await s.src.watchReturns(now + 60_000)
+      expect(asked).toEqual(['claude'])
+      expect(s.started.map((x) => x.key)).toEqual([c.key, a.key])
+      // one return of the day, however many chats it took
+      expect(s.src.returns.get('task', s.p.name)!.returned).toHaveLength(1)
+      // the pause is over, and the answer is not fresh any more: the primary is asked again first
+      b.t.paused = undefined
+      await s.src.watchReturns(now + FRESH + 60_000)
+      expect(asked).toEqual(['claude', 'claude'])
+      expect(s.started.map((x) => x.key)).toEqual([c.key, a.key, b.key])
+      expect(s.src.returns.get('task', s.p.name)!.back).toBeDefined()
+      // one alert, for the first pass that took some back
+      expect(alerts.map((x) => x.title)).toEqual(['Back on the primary model'])
+    } finally {
+      s.done()
+    }
+  })
+
+  test('one that cannot go back for long (a pause of days) has the primary asked less and less often', async () => {
+    const s = await goingBack('home-paused')
+    try {
+      const b = s.onBackup()
+      b.t.paused = 'idle'
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: Date.now() - FIRST_WAIT * 2 })
+      let now = later()
+      await s.src.watchReturns(now)
+      expect(asked).toHaveLength(1)
+      // each time it answers, its next question waits twice as long: a quarter of an hour, half an hour, an hour...
+      for (const gap of [FRESH, FRESH * 2, FRESH * 4]) {
+        expect(s.src.returns.get('task', s.p.name)!.due).toBe(now + gap)
+        await s.src.watchReturns(now + gap - 60_000)
+        const before = asked.length
+        now += gap
+        await s.src.watchReturns(now)
+        expect(asked).toHaveLength(before + 1)
+      }
+      expect(s.started).toEqual([])
+    } finally {
+      s.done()
+    }
+  })
+
+  test('one pass at a time: a pass while another takes agents back starts none of them twice', async () => {
+    const s = await goingBack('home-twice')
+    try {
+      // a coordinator: nothing else keeps a second start of it out while the first is under way
+      coordinator(s.key, 'codex')
+      s.src.returns.note({ role: 'coordinator', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: Date.now() - FIRST_WAIT * 2 })
+      // a start that ends only when this test says so
+      let release: () => void = () => undefined
+      const gate = new Promise<void>((r) => (release = r))
+      const stub = s.src.agents.restart
+      s.src.agents.restart = (async (spec: never, before?: never) => {
+        await gate
+        return (stub as (a: never, b?: never) => Promise<null>)(spec, before)
+      }) as never
+      const first = s.src.watchReturns(later())
+      await Bun.sleep(20)
+      await s.src.watchReturns(later() + 60_000)
+      release()
+      await first
+      expect(s.started.map((x) => x.key)).toEqual([s.key])
+      expect(asked).toEqual(['claude'])
+    } finally {
+      s.done()
+    }
+  })
+
+  test('a primary that keeps running out after going back: past a few returns a day, it only tells', async () => {
+    const s = await goingBack('home-often')
+    try {
+      const a = s.onBackup()
+      let at = Date.now() - 6 * 3_600_000
+      /** it ran out again: its backup took it over once more */
+      const ranOut = (when: number) => {
+        Object.assign(s.src.agents.records[a.key], { kind: 'codex', model: undefined })
+        s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance', at: when })
+      }
+      for (let i = 0; i < MAX_RETURNS; i++) {
+        ranOut(at)
+        await s.src.watchReturns(at + FIRST_WAIT * 2)
+        at += 3_600_000
+      }
+      expect(s.started).toHaveLength(MAX_RETURNS)
+      // one more takeover the same day: the human hears instead, and nothing starts
+      ranOut(at)
+      await s.src.watchReturns(at + FIRST_WAIT * 2)
+      expect(s.started).toHaveLength(MAX_RETURNS)
+      expect(cards(a.key).at(-1)).toContain(`It went back by itself ${MAX_RETURNS} times today and ran out again each time, so this time it waits for you.`)
+      expect(cards(a.key).at(-1)).toContain(`restart it to go back — shepherdr restart ${a.id}`)
+      // a day later the count is gone: it goes back by itself again
+      const day = at + 25 * 3_600_000
+      ranOut(day)
+      await s.src.watchReturns(day + FIRST_WAIT * 2)
+      expect(s.started).toHaveLength(MAX_RETURNS + 1)
+    } finally {
+      s.done()
+    }
+  })
+
+  test('going back, a reviewer is never asked: every review asks the primary reviewer first', async () => {
+    const s = await goingBack('home-reviewer')
+    try {
+      expect(s.src.settings.set('reviewer.model', 'GPT-6-Sol', { space: s.p.name }).ok).toBe(true)
+      expect(s.src.settings.set('reviewer.fallback', 'pi', { space: s.p.name }).ok).toBe(true)
+      coordinator(s.key, 'claude')
+      await s.src.watchReturns(later())
+      await s.src.watchReturns(later() + FIRST_WAIT * 2)
+      expect(asked).toEqual([])
+      expect(s.src.returns.get('reviewer', s.p.name)).toBeUndefined()
+      expect(cards(s.key)).toEqual([])
+    } finally {
+      for (const k of ['reviewer.fallback', 'reviewer.model']) s.src.settings.set(k, null, { space: s.p.name })
+      s.done()
+    }
+  })
+})
+
 describe('when the primary still does not answer', () => {
   test('nothing is posted, nothing alerts, and the wait doubles up to a few hours', async () => {
     const s = await space('back-fails')
@@ -416,25 +620,24 @@ describe('what is never asked', () => {
     expect(oneShot({ kind: 'opencode' })).toBeUndefined()
   })
 
-  test('a probe waits for real work to be over, and one runs at a time', async () => {
+  test('a probe waits for work on the model it asks, and work on another model goes on beside it', async () => {
     const s = await space('back-busy')
+    const status = s.src.agents.status
     try {
       const a = task(s.p.name, 'codex', { from: 'claude' })
+      // its coordinator runs the primary: a local model takes one request at a time, so a probe never queues beside it
+      coordinator(s.key, 'claude')
       s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: Date.now() - FIRST_WAIT * 2 })
-      // somebody on this machine works: nothing is asked, and nothing is posted
-      const status = s.src.agents.status
-      s.src.agents.status = (() => 'working') as never
-      try {
-        await s.src.watchReturns(later())
-        expect(asked).toEqual([])
-        expect(cards(a.key)).toEqual([])
-      } finally {
-        s.src.agents.status = status
-      }
-      // nobody works now: it asks
+      s.src.agents.status = ((k: string) => (k === s.key ? 'working' : status.call(s.src.agents, k))) as never
+      await s.src.watchReturns(later())
+      expect(asked).toEqual([])
+      expect(cards(a.key)).toEqual([])
+      // only the backup at work now: the primary is asked beside it
+      s.src.agents.status = ((k: string) => (k === a.key ? 'working' : status.call(s.src.agents, k))) as never
       await s.src.watchReturns(later())
       expect(asked).toEqual(['claude'])
     } finally {
+      s.src.agents.status = status
       s.done()
     }
   })

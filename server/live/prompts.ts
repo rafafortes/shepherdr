@@ -196,25 +196,34 @@ export function backupCardWords(o: { from: string; to: string; words: string; sa
   return o.same ? `${o.words} started again, with its session: ${o.why}` : `${o.to} took over from ${o.from}: ${o.why}`
 }
 
+/** the words a chat's card says its agent went back by itself to its primary model, which answers again (return.ts) */
+export function wentBackCardWords(words: string) {
+  return `Back on the primary model, which answers again: ${words}`
+}
+
 /** what an agent started again on another CLI is told (a task's after its brief): who ran its role until now, and
- *  what was said and done; a task's commits and changes, none for a coordinator */
-export function restartLine(o: { from: string; to: string; chat: string; commits?: string; changes?: string }) {
+ *  what was said and done; a task's commits and changes, none for a coordinator. back: Shepherdr took it back to its
+ *  primary model, which answers again, from the backup that ran it (return.ts), not the human */
+export function restartLine(o: { from: string; to: string; chat: string; commits?: string; changes?: string; back?: boolean }) {
   const task = o.commits !== undefined
+  const who = o.back ? `Shepherdr moved this ${task ? 'task' : 'chat'} back to its primary model, which answers again: ${o.to}. ${o.from}, its backup,` : `the human restarted this ${task ? 'task' : 'chat'} on ${o.to}. ${o.from}`
   return [
-    `Restarted: the human restarted this ${task ? 'task' : 'chat'} on ${o.to}. ${o.from} ran it until now; you carry on from here, in the same ${task ? 'worktree and branch' : 'folder'}. Look at what is there and go on from it, don't start over.`,
+    `Restarted: ${who} ran it until now; you carry on from here, in the same ${task ? 'worktree and branch' : 'folder'}. Look at what is there and go on from it, don't start over.`,
     ...(task ? [`Commits on the branch so far:\n${o.commits || 'none'}`, `Uncommitted changes:\n${o.changes || 'none'}`] : []),
     ...(o.chat ? [`The chat so far, latest last:\n\n${o.chat}`] : []),
     `If you were in the middle of something, carry on; else reply in one short line that you are here and end your turn.`,
   ].join('\n\n')
 }
 
-/** what an agent started again on its own CLI is told, its session resumed (a model or an effort changed) */
 /** what an agent Shepherdr started again by itself is told, when it was at work as it stopped */
 export function relaunchedLine() {
   return `Your agent had stopped (herdr restarted, or it ran on outdated settings): Shepherdr started you again, with your session as it was. Carry on where you left off; if there is nothing left to do, reply with only <no-reply>relaunched</no-reply>.`
 }
 
-export function resumedLine(on: string) {
+/** what an agent started again on its own CLI is told, its session resumed (a model or an effort changed). back:
+ *  Shepherdr took it back to its primary model, which answers again (return.ts), not the human */
+export function resumedLine(on: string, back = false) {
+  if (back) return `The primary model answers again, so Shepherdr moved you back to it from your backup: ${on}, with your session as it was. If you were in the middle of something, carry on where you left off; else reply with only <no-reply>back</no-reply>.`
   return `The human restarted you on ${on}, with your session as it was. If you were in the middle of something, carry on where you left off; else reply with only <no-reply>restarted</no-reply>.`
 }
 

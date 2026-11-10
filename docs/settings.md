@@ -72,13 +72,33 @@ coordinator's chat with its open tasks and its chat so far, which changes who yo
 who went in and why. A backup that isn't installed, or set to a model its CLI doesn't have, doesn't go in: the chat says
 why. Each value shows where it comes from, with Reset to the inherited one, like every other setting.
 
-## Tell me when it is back
+## When the primary is back
 
-A backup stays in place until you go back to the primary yourself — a restart for a task or a coordinator, a Settings
-key for a reviewer — so a model that comes back to life went unnoticed. Settings → Agents → Backup → **Tell me when it
-is back** (`backup.watchReturn`, on unless you set it off; Everywhere, for a machine or for a space, the most specific
-one set wins) asks the primary now and then whether it answers again, and tells you in the chats that are still on a
-backup.
+A backup takes over by itself when the primary can't go on; this is the way back. Settings → Agents → Backup → **When
+the primary is back** (`backup.watchReturn`; Everywhere, for a machine or for a space, the most specific one set wins)
+asks the primary now and then whether it answers again, and then:
+
+- **go back** (the default): each agent still on the backup — each task's, the coordinator's — starts again on what
+  Settings name for its role, once it is idle: never mid-turn, never a paused task, never one asking you something (a
+  question, a plan, a choice) and never one whose start went wrong. The same CLI resumes its session; another takes
+  over with the chat so far (a task's: its brief, commits and changes too), as a restart does. Its chat gets a card
+  ("Back on the primary model, which answers again: …") and the agent is told why it was started again; one alert per
+  return. The ones still busy follow on later passes, a minute apart, without asking the primary again while its answer
+  is fresh (a quarter of an hour); after that it is asked again first, and while some can't go back yet (a pause of
+  days) each answer makes the next question wait twice as long, up to four hours. One pass at a time, so no agent is
+  started twice. Going back gives the backup its one go
+  back: the next time the primary runs out, the backup takes over again.
+- **tell me**: nothing switches. One card in each chat still on the backup says that the primary answers again and how
+  to go back — `shepherdr restart <task or space>` (or ⋯ → Restart agent) for a task or a coordinator, and for a
+  reviewer `shepherdr set reviewer.model <id> --space <name>` — and an alert, where your Notifications let one through.
+- **off**: it never asks.
+
+`on`, this setting's other value before going back by itself came, reads as **tell me**.
+
+What it goes back to is always what Settings name for that role now, never what ran before: a model you set by hand is
+the primary from then on. To lean on a backup for a while, leave Settings as they are and let the backup take over by
+itself; going back undoes it once the primary answers. A role whose Settings name the harness its agents run on has
+nothing to come back to, and is never asked.
 
 - **When it asks.** After a takeover for a reason waiting can't fix (out of allowance, signed out, a model that is not
   there, a provider's refusal — never an error that passes by itself), the primary is first asked about half an hour
@@ -87,34 +107,27 @@ backup.
   CLI: one line in, one word out, no tools, a hard timeout. Claude Code and pi are asked with their coding assistant's
   prompt and the person's MCP servers and settings left out, and keep no session; pi does load its own extensions, which
   is how a provider one of them adds (a pi package) is asked at all. Codex runs in its read-only sandbox with its own
-  config, and may keep its rollout file. It starts only when none of this machine's agents is working, one at a time,
-  and never at boot. It is nobody's turn: no chat line, no herdr pane, no agent's secret, and its own failure is silent
-  for you — no card, no alert, nothing to answer, nothing of its words in a chat (the server's log says why, for the day
-  it needs explaining — an option its CLI is too old to know shows up there too).
-- **What it tells you.** One card in each chat still on the backup — each task's, the coordinator's own, the space's
-  for a reviewer, which has none of its own — saying that the primary answers again and how to go back: `shepherdr
-  restart <task or space>` (or ⋯ → Restart agent) for a task or a coordinator, and for a reviewer `shepherdr set
-  reviewer.model <id> --space <name>` — the space's own, since a plain set would change every space's reviewer — with
-  nothing restarted: a new task's brief reads it, a task already running keeps the reviewer its brief named. And an
-  alert, where your Notifications let one through. One card per recovery: a primary that keeps answering posts nothing
-  more, and a chat that already went back gets nothing. The chats it names are the ones still running on what took over;
-  nothing is said to a role whose Settings name the harness it runs on. A backup reviewer set Everywhere is one alert,
-  and one card in each space's chat, since each space reviews with its own Settings.
-- **Which roles.** The roles whose primary can be in use somewhere else: the tasks' agents, the coordinators and the
-  reviewer, each probed as Settings name its primary — the tasks' pair, the coordinators', the reviewer's
-  (`reviewer.agent`, `reviewer.model`, `reviewer.effort`). For a reviewer the card names `reviewer.model`, where the
-  backup reviewer's own model is `reviewer.fallbackModel`. Shepherdr never starts a reviewer, so it never sees one fail:
-  a backup reviewer being set is what it knows of a reviewer whose primary can't run, and while one is set at a level of
-  Settings (with Review on, on a harness of its own: another CLI, or another model or effort) the primary reviewer is
-  what it asks, so you can go back to it; one a coordinator set for a single task (`task add --set
-  reviewer.fallback=…`) is that task's, and is not watched. A role whose primary is the harness in use is never asked: a
-  backup set to the same harness as the primary, or the backup reviewer itself, which has no backup of its own, leaves
-  nothing to come back to.
-- **What it never does.** It never switches anything: no setting is written, no agent restarted, no model chosen — the
-  card is the whole action. It never asks another machine's models (the record lives in this machine's
-  `returns.json`), never asks a CLI that isn't installed here, never asks one Shepherdr has no silent one-shot for
-  (only Claude Code, Codex and pi have one), and it is never part of the takeover's decision: the probe reads, and
-  nothing else.
+  config, and may keep its rollout file. It never starts while an agent of this machine works on that very model (a
+  local model takes one request at a time); work on other models, the backup's included, goes on beside it. One at a
+  time, and never at boot. It is nobody's turn: no chat line, no herdr pane, no agent's secret, and its own failure is
+  silent for you — no card, no alert, nothing to answer, nothing of its words in a chat (the server's log says why, for
+  the day it needs explaining — an option its CLI is too old to know shows up there too).
+- **Never a loop.** A role and space go back by themselves at most three times a day. A primary that runs out again
+  each time leaves the next return to you: its chats get the tell me card instead, saying so, and a day later the count
+  starts over.
+- **Which roles.** The tasks' agents and the coordinators, each as Settings name its primary — the tasks' pair, the
+  coordinators'. The reviewer has nothing to move: Shepherdr never starts one, and every review asks the primary
+  reviewer first and falls back only when it can't run (the brief says so), so going back is already what each review
+  does. With **tell me**, a backup reviewer being set is what Shepherdr knows of a reviewer whose primary can't run:
+  while one is set at a level of Settings (with Review on, on a harness of its own: another CLI, or another model or
+  effort) the primary reviewer is asked, and the card in the space's chat names `reviewer.model`, where the backup
+  reviewer's own model is `reviewer.fallbackModel`; one a coordinator set for a single task (`task add --set
+  reviewer.fallback=…`) is that task's, and is not watched. A backup reviewer set Everywhere is one alert, and one card
+  in each space's chat, since each space reviews with its own Settings.
+- **What it never does.** It never writes a setting and never chooses a model: going back is a restart on what Settings
+  name. It never asks another machine's models (the record lives in this machine's `returns.json`), never asks a CLI
+  that isn't installed here, never asks one Shepherdr has no silent one-shot for (only Claude Code, Codex and pi have
+  one), and it is never part of the takeover's decision.
 
 ## Dictation
 

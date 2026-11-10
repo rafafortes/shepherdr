@@ -192,6 +192,8 @@ function upgrade(v: Values): Values {
   }
   if (/^[1-9]\d* rounds?$/.test(out['brief.review'] ?? '')) out['brief.review'] = 'on'
   if (out['brief.waitChecks'] === 'on' && out['brief.merge'] !== 'ask me first') out['brief.merge'] = 'after GitHub checks'
+  // when the primary is back: on was its only other value before going back by itself came, and it meant tell me
+  if (out['backup.watchReturn'] === 'on') out['backup.watchReturn'] = 'tell me'
   return out
 }
 
@@ -251,10 +253,10 @@ export const CATALOG: Section[] = [
       { group: 'Backup', label: "Coordinators' backup", key: 'coordinator.fallback', value: 'off', options: ['off', ...CHAT_CLIS] },
       { group: 'Backup', label: 'Model', key: 'coordinator.fallbackModel', value: 'default', text: true, hint: "While default: the tasks' backup's." },
       { group: 'Backup', label: 'Effort', key: 'coordinator.fallbackEffort', value: 'default', options: [...EFFORTS], hint: "While default: the tasks' backup's." },
-      // a backup stays in place until the human goes back: this asks the primary, now and then, whether it answers
-      // again, and says so in the chats still on the backup (source.ts watchReturns, return.ts). It never switches
-      // anything; a probe is one tiny request of one CLI, only while nobody on this machine works
-      { group: 'Backup', label: 'Tell me when it is back', key: 'backup.watchReturn', value: 'on', options: ['on', 'off'], hint: 'Asks the primary model now and then whether it answers again, and says so in each chat still on a backup. Never switches anything.' },
+      // the way back from a backup: the primary is asked, now and then, whether it answers again (source.ts
+      // watchReturns, return.ts); go back starts each agent still on the backup again on what Settings name once it is
+      // idle, tell me only says so in their chats. A probe is one tiny request of one CLI, never beside work on that model
+      { group: 'Backup', label: 'When the primary is back', key: 'backup.watchReturn', value: 'go back', options: ['go back', 'tell me', 'off'], hint: 'Asks the primary model now and then whether it answers again. Go back: each agent still on a backup starts again on it once idle, never mid-turn. Tell me: only says so in their chats. Off: never asks.' },
     ],
   },
   {
@@ -529,7 +531,8 @@ export class Settings {
 
   /** take the main machine's Everywhere level (this one is not the main one) */
   adopt(all: Values) {
-    const next = Object.fromEntries(Object.entries(all).filter(([k, v]) => KEYS.includes(k) && typeof v === 'string' && !refuse(k, v)))
+    // read as today's words, as a level loaded from settings.json is: the main machine may run older code
+    const next = Object.fromEntries(Object.entries(upgrade(all)).filter(([k, v]) => KEYS.includes(k) && typeof v === 'string' && !refuse(k, v)))
     if (JSON.stringify(next) === JSON.stringify(this.d.everywhere)) return false
     this.d.everywhere = next
     this.save()
