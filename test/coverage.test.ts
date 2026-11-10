@@ -99,6 +99,19 @@ describe('the ratchet', () => {
     expect(C.compare({ 'server/a.ts': c([1]) }, base)).toEqual([])
   })
 
+  test("the screen's files may wobble a few lines from one run to the next: the server's never", () => {
+    const screen = { lines: 2000, missed: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], measured: true }
+    expect(C.slack('plugins/chat/client.tsx', screen)).toBe(10)
+    expect(C.slack('src/ui.tsx', { lines: 100, missed: [], measured: true })).toBe(3)
+    expect(C.slack('server/live/source.ts', screen)).toBe(0)
+    const at = (n: number) => ({ commit: 'abc1234', at: 1, files: { 'plugins/chat/client.tsx': n, 'server/x.ts': 0 } })
+    expect(C.compare({ 'plugins/chat/client.tsx': screen }, at(2))).toEqual([])
+    expect(C.compare({ 'plugins/chat/client.tsx': screen }, at(1))[0]).toContain('11 more lines no test runs (12 now, 1 at the baseline, 10 allowed for the screen')
+    // a new screen file comes in within its wobble too; a new server file with none
+    expect(C.compare({ 'src/new.tsx': { lines: 50, missed: [4, 5], measured: true } }, at(0))).toEqual([])
+    expect(C.compare({ 'src/new.tsx': { lines: 50, missed: [1, 2, 3, 4], measured: true } }, at(0))).toHaveLength(1)
+  })
+
   test('fell: a file with more of them, one no test runs any more, a new file with some or none run at all', () => {
     expect(C.compare({ 'server/a.ts': c([1, 2, 5]), 'server/out.ts': c([], false), 'server/new.ts': c([4]), 'server/new2.ts': c([1, 2]), 'server/new3.ts': c([], false) }, base)).toEqual([
       'server/a.ts: 1 more line no test runs (3 now, 2 at the baseline; lines 1-2, 5)',

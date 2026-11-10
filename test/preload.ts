@@ -27,6 +27,20 @@ process.env.SHEPHERDR_LAUNCH_AGENTS = '1'
 process.env.HERDR_SOCKET_PATH = join(home, 'no-herdr.sock')
 for (const k of ['SHEPHERDR_URL', 'SHEPHERDR_CHAT', 'HERDR_SOCKET', 'HERDR_PANE_ID', 'HERDR_WORKSPACE_ID', 'HERDR_TAB_ID']) delete process.env[k]
 
+// What this file sets above reaches every child too. Bun.spawn and Bun.spawnSync hand a child the environment the
+// process started with, not process.env as changed since (Bun 1.4.4): a command the code under test starts with no env of
+// its own would get this machine's Shepherdr home and herdr socket, and look itself up in the PATH a test can't change.
+// Such a start gets process.env as it is now; one that passes its own env keeps it.
+for (const name of ['spawn', 'spawnSync'] as const) {
+  const started = Bun[name] as (cmd: unknown, opts?: Record<string, unknown>) => unknown
+  Object.assign(Bun, {
+    [name]: (cmd: unknown, opts?: Record<string, unknown>) =>
+      Array.isArray(cmd)
+        ? started(cmd, opts && 'env' in opts ? opts : { ...opts, env: { ...process.env } })
+        : started('env' in (cmd as object) ? cmd : { ...(cmd as object), env: { ...process.env } }),
+  })
+}
+
 const root = join(import.meta.dir, '..')
 const modules = join(root, 'node_modules')
 const stamp = join(modules, '.shepherdr-deps')

@@ -95,7 +95,8 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
 - **Coverage never falls (the operator's rule, 2026-11-10).** The check's coverage step (`scripts/coverage.ts`) counts,
   file by file, the lines no test runs: the server's from Bun's own coverage, the screen's from what the browser tests
   run (`test/screen-map.ts`). It fails when a file has more of them than at the default branch's baseline, when a new
-  file comes in with any, or when no test runs a file a test ran. So every change keeps or raises the coverage of what
+  file comes in with any, or when no test runs a file a test ran (a screen file is allowed the few lines its browser
+  tests take or miss by timing from one run to the next). So every change keeps or raises the coverage of what
   it touches, and new code comes in with every line run by a test; the aim is every file whole, so cover more of a file
   you work in where it is cheap. A line no test can reach on this machine (an error path of a CLI or herdr that can't
   fail here) says why on it or on the line above: `// coverage-exempt: <why>`, never to skip a test you could write. The
