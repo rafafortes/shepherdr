@@ -1581,6 +1581,21 @@ export class Engine extends Emitter<Events> {
   }
 
   /**
+   * Words about to go in to a task's agent that waits at rest, its turn over: it asked you something on a card, ended
+   * its turn without reporting done, is To do, or reported ready. They take it back to work, so its branch is brought up
+   * to its base first (freshen), and they carry the note. Nothing for an agent mid-turn (a permission, its CLI's own
+   * question: the answer goes in as keys while its turn goes on), at work, or gone (its start does this), nor for a task
+   * done or queued (the way back starts that one).
+   */
+  async beforeWords(id: string): Promise<string | undefined> {
+    const t = this.task(id)
+    if (!t || ended(t)) return
+    if (['working', 'blocked', 'gone'].includes(this.agents.status(this.key(t)))) return
+    if (!['need', 'todo', 'ready'].includes(this.statusOf(t))) return
+    return this.freshen(t).catch(() => undefined)
+  }
+
+  /**
    * Writing to a task whose agent stopped starts it again, with its memory. `fresh`: its session is gone (start.ts), so
    * it starts on a new one and is told its brief again: all it remembers of the work is the branch and the chat.
    */
@@ -2802,7 +2817,9 @@ export class Engine extends Emitter<Events> {
       await this.startTask(t)
       return {}
     }
-    await this.agents.send(this.key(t), said, { ensure: () => this.launch(t) })
+    // one at rest waiting on you goes back to work on its base as it is now (beforeWords)
+    const note = await this.beforeWords(t.id)
+    await this.agents.send(this.key(t), note ? `${said}\n\n${note}` : said, { ensure: () => this.launch(t) })
     this.youWrote(this.key(t))
     return {}
   }

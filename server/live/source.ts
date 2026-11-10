@@ -2816,7 +2816,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     const ensure = key.includes('/') ? () => this.resumeTaskAgent(key) : () => this.coordinator(key)
     if (!key.includes('/') && this.agents.status(key) === 'gone') await this.coordinator(key).catch(() => undefined)
-    const r = await this.agents.send(key, full, { ensure, cid })
+    // a task's agent at rest that your words take back to work is brought up to its base first (engine.beforeWords)
+    const note = key.includes('/') ? await this.engine.beforeWords(key.split('/')[0]) : undefined
+    const r = await this.agents.send(key, note ? `${full}\n\n${note}` : full, { ensure, cid })
     if (key.includes('/')) this.engine.youWrote(key)
     void fromScreen
     this.emit('chat', key)
