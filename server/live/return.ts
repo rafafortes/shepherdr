@@ -34,6 +34,13 @@ export interface Outage {
   /** the provider's reason, in words ("out of allowance until 5pm") */
   why: string
   at: number
+  /** the last cut-off of this outage, when: an agent at work on the primary is its answer only once none came for a while */
+  lastCut?: number
+  /** the chats this outage started again already (or tried to): never twice for one outage */
+  moved?: string[]
+  /** its backup was cut off too, or it has none: every model of that role ran out, so a new task waits (source.ts
+   *  startsWait) until the primary answers */
+  allOut?: boolean
   /** probes since, when the last one ran, and when the next may: the wait doubles with each failure */
   tries?: number
   probed?: number
@@ -63,6 +70,9 @@ export const FRESH = 15 * 60_000
  *  next return to the human (a card says so), never a loop */
 export const MAX_RETURNS = 3
 const DAY = 24 * 3_600_000
+/** how long without a new cut-off before an agent at work on the primary counts as its answer: a turn already under way
+ *  when the provider began refusing may still be working for a while */
+export const QUIET = 10 * 60_000
 /** a fifth either side of the wait, so two roles rarely fall due together (when they do, the probes are taken one by one) */
 const JITTER = 0.2
 
@@ -202,21 +212,54 @@ export class Returns {
 
   /** a backup took that role's agent over for a reason waiting can't fix: from now on, until it answers, its primary is
    *  asked now and then whether it is back. A new takeover starts a new count */
-  note(o: Pick<Outage, 'role' | 'space' | 'primary' | 'to' | 'why' | 'at'>) {
+  note(o: Pick<Outage, 'role' | 'space' | 'primary' | 'to' | 'why' | 'at'>, also: { key?: string; allOut?: boolean } = {}) {
+    const was = this.get(o.role, o.space)
     // the returns of the day before it stay: a primary that runs out again right after going back counts
-    const returned = (this.get(o.role, o.space)?.returned ?? []).filter((at) => o.at - at < DAY)
-    this.data[keyOf(o.role, o.space)] = { ...o, primary: fitHarness(o.primary), to: fitHarness(o.to), tries: 0, due: o.at + wait(0), ...(returned.length ? { returned } : {}) }
+    const returned = (was?.returned ?? []).filter((at) => o.at - at < DAY)
+    const fresh: Outage = { ...o, primary: fitHarness(o.primary), to: fitHarness(o.to), lastCut: o.at, tries: 0, due: o.at + wait(0), ...(returned.length ? { returned } : {}), ...(also.allOut ? { allOut: true } : {}) }
+    // one more cut-off of an outage still open keeps its schedule: a night of cut-offs never puts its question off
+    // again and again (one that answered or is over starts a new count)
+    if (was && !was.back && !was.ok) {
+      this.data[keyOf(o.role, o.space)] = { ...was, to: fresh.to, why: o.why, lastCut: o.at, allOut: also.allOut ?? was.allOut }
+      this.again(was, also.key)
+    } else this.data[keyOf(o.role, o.space)] = fresh
+    this.save()
+  }
+
+  /** one more agent of that role cut off for good while its outage is open: what tells an agent at work on the primary
+   *  from one whose turn began before the provider refused (QUIET). allOut: its backup was cut off too, or it has none */
+  cut(role: ReturnRole, space: string, at = Date.now(), also: { key?: string; allOut?: boolean } = {}) {
+    const o = this.get(role, space)
+    if (!o || o.back) return
+    o.lastCut = at
+    o.ok = undefined
+    if (also.allOut) o.allOut = true
+    this.again(o, also.key)
+    this.save()
+  }
+
+  /** a chat this outage started again was cut off once more: it may be started again when the primary answers next */
+  private again(o: Outage, key?: string) {
+    if (key && o.moved?.includes(key)) o.moved = o.moved.filter((k) => k !== key)
+  }
+
+  /** what this outage started again (or tried to): each chat once */
+  moved(role: ReturnRole, space: string, keys: string[]) {
+    const o = this.get(role, space)
+    if (!o || !keys.length) return
+    o.moved = [...new Set([...(o.moved ?? []), ...keys])]
     this.save()
   }
 
   /** its provider answered a probe: going back, what is still busy follows while the answer is fresh, and the primary is
    *  asked again after that — a quarter of an hour, then twice as long each time it answers, up to the longest wait */
-  ok(role: ReturnRole, space: string, at = Date.now()) {
+  ok(role: ReturnRole, space: string, at = Date.now(), probed = true) {
     const o = this.get(role, space)
     if (!o) return
     o.ok = at
-    o.oks = (o.oks ?? 0) + 1
-    o.due = at + Math.min(FRESH * 2 ** (o.oks - 1), LONGEST_WAIT)
+    // an agent seen at work on it asked nothing: only a probe that answered makes the next one wait longer
+    if (probed) o.oks = (o.oks ?? 0) + 1
+    o.due = at + Math.min(FRESH * 2 ** Math.max(0, (o.oks ?? 1) - 1), LONGEST_WAIT)
     this.save()
   }
 
@@ -296,9 +339,12 @@ export function wait(tries: number, random = Math.random()): number {
  * else. A task and a coordinator go back with a restart; a reviewer, which Shepherdr never starts, with its Settings
  * key. `space` is the space's name, `task` the task's id.
  */
-export function backCard(o: { role: ReturnRole; primary: Harness; to: Harness; task?: string; space?: string; often?: boolean }): string {
+export function backCard(o: { role: ReturnRole; primary: Harness; to: Harness; task?: string; space?: string; often?: boolean; stuck?: boolean }): string {
   // it went back by itself as often as it may in a day and ran out again each time: this one is the human's
   const back = `The primary model answers again: ${harnessWords(o.primary)}.${o.often ? ` It went back by itself ${MAX_RETURNS} times today and ran out again each time, so this time it waits for you.` : ''}`
+  // cut off on the primary itself (no backup, or one that couldn't go in): it waits, on the model that answers again
+  if (o.stuck && o.role === 'task') return `${back} ${o.task} was cut off and waits for you: restart it to carry on — shepherdr restart ${o.task}, or ⋯ → Restart agent in its chat. Nothing was restarted.`
+  if (o.stuck && o.role === 'coordinator') return `${back} ${o.space}'s coordinator was cut off and waits for you: restart it to carry on — shepherdr restart ${o.space}, or ⋯ → Restart agent in its chat. Nothing was restarted.`
   if (o.role === 'task') return `${back} ${o.task} still runs on its backup (${name(o.to.kind)}): restart it to go back — shepherdr restart ${o.task}, or ⋯ → Restart agent in its chat. Nothing was switched.`
   if (o.role === 'coordinator') return `${back} ${o.space}'s coordinator still runs on its backup (${name(o.to.kind)}): restart it to go back — shepherdr restart ${o.space}, or ⋯ → Restart agent in its chat. Nothing was switched.`
   const model = o.primary.model && o.primary.model !== 'default' ? o.primary.model : 'default'

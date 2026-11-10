@@ -79,16 +79,23 @@ A backup takes over by itself when the primary can't go on; this is the way back
 the primary is back** (`backup.watchReturn`; Everywhere, for a machine or for a space, the most specific one set wins)
 asks the primary now and then whether it answers again, and then:
 
-- **go back** (the default): each agent still on the backup — each task's, the coordinator's — starts again on what
-  Settings name for its role, once it is idle: never mid-turn, never a paused task, never one asking you something (a
-  question, a plan, a choice) and never one whose start went wrong. The same CLI resumes its session; another takes
-  over with the chat so far (a task's: its brief, commits and changes too), as a restart does. Its chat gets a card
-  ("Back on the primary model, which answers again: …") and the agent is told why it was started again; one alert per
-  return. The ones still busy follow on later passes, a minute apart, without asking the primary again while its answer
-  is fresh (a quarter of an hour); after that it is asked again first, and while some can't go back yet (a pause of
-  days) each answer makes the next question wait twice as long, up to four hours. One pass at a time, so no agent is
-  started twice. Going back gives the backup its one go
-  back: the next time the primary runs out, the backup takes over again.
+- **go back** (the default): each agent still on the backup — each task's, the coordinator's — and each one cut off for
+  good on the primary itself (it had no backup, its backup couldn't start, or the backup ran out too and it waits for
+  you) starts again on what Settings name for its role, once it is idle: never mid-turn, never a paused task, never one
+  asking you something (a question, a plan, a choice). The same CLI resumes its session; another takes over with the
+  chat so far (a task's: its brief, commits and changes too), as a restart does, and a start that had gone wrong is
+  over once it starts. Its chat gets a card ("Back on the primary model, which answers again: …", or "Started again on
+  …: its provider answers again") and the agent is told why it was started again; one alert per return. A task takes a
+  free slot as a new one would (Settings → the machine → Max tasks working at once), so a night's worth of them comes
+  back a slot at a time, and while some still wait for one no new task of that space starts ("Waiting: cut-off tasks
+  go back to work first"). The ones still busy follow on later passes, a minute apart, without asking the primary
+  again while its answer is fresh (a quarter of an hour); after that it is asked again first, and while some can't go
+  back yet (a pause of days) each answer makes the next question wait twice as long, up to four hours. Each chat once
+  per outage, and one pass at a time, so no agent is started twice. Going back gives the backup its one go back: the
+  next time the primary runs out, the backup takes over again.
+- **Every model out.** When the backup is cut off too, or there is none, a new task of that space waits instead of
+  starting only to be cut off as well ("Waiting: every model ran out"), until the primary answers; the tasks already
+  cut off then go back first.
 - **tell me**: nothing switches. One card in each chat still on the backup says that the primary answers again and how
   to go back — `shepherdr restart <task or space>` (or ⋯ → Restart agent) for a task or a coordinator, and for a
   reviewer `shepherdr set reviewer.model <id> --space <name>` — and an alert, where your Notifications let one through.
@@ -108,9 +115,10 @@ nothing to come back to, and is never asked.
   CLI: one line in, one word out, no tools, a hard timeout. Claude Code and pi are asked with their coding assistant's
   prompt and the person's MCP servers and settings left out, and keep no session; pi does load its own extensions, which
   is how a provider one of them adds (a pi package) is asked at all. Codex runs in its read-only sandbox with its own
-  config, and may keep its rollout file. It never starts while an agent of this machine works on that very model (a
-  local model takes one request at a time); work on other models, the backup's included, goes on beside it. One at a
-  time, and never at boot. It is nobody's turn: no chat line, no herdr pane, no agent's secret, and its own failure is
+  config, and may keep its rollout file. An agent of this machine at work on that very model, with no cut-off of its own
+  and none in that outage for ten minutes (a turn already under way when the provider began refusing may still be
+  working a while), is the answer itself, and nothing is asked. One cut-off after another keeps the schedule of the
+  first: a night of them never puts the question off. One at a time, and never at boot. It is nobody's turn: no chat line, no herdr pane, no agent's secret, and its own failure is
   silent for you — no card, no alert, nothing to answer, nothing of its words in a chat (the server's log says why, for
   the day it needs explaining — an option its CLI is too old to know shows up there too).
 - **Never a loop.** A role and space go back by themselves at most three times a day. A primary that runs out again

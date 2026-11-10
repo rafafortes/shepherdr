@@ -589,6 +589,25 @@ describe('a turn the provider cut off', () => {
     expect(w.engine.statusOf(t)).toBe('ready')
   })
 
+  test('cut off for good and left waiting for you, it is noted for when its provider answers again (never one that passes)', async () => {
+    const w = world()
+    cutOff(w)
+    w.settings.set('task.fallback', 'off')
+    const { t, key } = await started(w, repo(), 'retry-stuck')
+    const noted: string[] = []
+    w.engine.noteStuck = (x, ran, why) => noted.push(`${x.id} ${ran.kind}: ${why}`)
+    w.engine.retry = () => ({ cut: 'e6', tries: 1, reason: 'Out of allowance until 5pm', words: 'Out', over: true, lasting: true })
+    w.agentIs(key, 'idle')
+    // an error that passes by itself is no outage: nothing to bring it back from
+    await w.engine.cantGoOn(t.id, 'Provider overloaded, still after 5 tries')
+    expect(noted).toEqual([])
+    await w.engine.cantGoOn(t.id, 'Out of allowance until 5pm', true)
+    expect(noted).toHaveLength(1)
+    expect(noted[0]).toStartWith(`${t.id} `)
+    expect(noted[0]).toEndWith(': out of allowance until 5pm')
+    w.settings.set('task.fallback', null)
+  })
+
   test('given up with no backup agent, it waits for you with the reason', async () => {
     const w = world()
     cutOff(w)
