@@ -1,4 +1,4 @@
-// Machine health: every 30 seconds Shepherdr reads how loaded this machine is (its 1-minute load against its cores,
+// Machine health: every 30 seconds Shepherdr reads how loaded this machine is (its 1- and 5-minute load against its cores, its CPU pressure,
 // memory in use, how full home and /tmp are, a GPU's use where nvidia-smi is there) and whether herdr answers. Cheap:
 // /proc, statfs and one nvidia-smi call. It only measures and tells: past a limit in Settings (machine.*) its
 // coordinator hears once, with the numbers and what uses the machine most, and again only after it came back under.
@@ -38,6 +38,11 @@ export interface Sample {
   cores: number
   /** 1-minute load average */
   load: number
+  /** 5-minute load average: what holds starts back (busy), steadier than the 1-minute one */
+  load5?: number
+  /** the share of the last minute some task waited for a CPU (%, /proc/pressure/cpu some avg60); none where the kernel
+   *  has no pressure stall information */
+  cpuSome?: number
   memTotal: number
   memUsed: number
   disks: Disk[]
@@ -46,6 +51,18 @@ export interface Sample {
 
 /** 1-minute load from /proc/loadavg */
 export const parseLoad = (text: string) => Number.parseFloat(text.split(/\s+/)[0]) || 0
+
+/** 5-minute load from /proc/loadavg; none when it isn't there */
+export const parseLoad5 = (text: string) => {
+  const n = Number.parseFloat(text.split(/\s+/)[1] ?? '')
+  return Number.isFinite(n) ? n : undefined
+}
+
+/** `some avg60` of /proc/pressure/cpu: the share of the last minute some task waited for a CPU (%); none without it */
+export const parsePressure = (text: string) => {
+  const m = /^some\b.*\bavg60=([\d.]+)/m.exec(text)
+  return m ? Number(m[1]) : undefined
+}
 
 /** total and in-use memory (bytes) from /proc/meminfo: in use is what is not available */
 export function parseMem(text: string) {
@@ -112,7 +129,10 @@ export function sample(): Sample {
     const d = diskOf(p)
     if (d && !disks.some((x) => x.dev === d.dev)) disks.push(d)
   }
-  return { at: Date.now(), cores: cpus().length || 1, load: parseLoad(read('/proc/loadavg')), memTotal: mem.total, memUsed: mem.used, disks, gpus: gpus() }
+  const avg = read('/proc/loadavg')
+  const load5 = parseLoad5(avg)
+  const cpuSome = parsePressure(read('/proc/pressure/cpu'))
+  return { at: Date.now(), cores: cpus().length || 1, load: parseLoad(avg), ...(load5 !== undefined ? { load5 } : {}), ...(cpuSome !== undefined ? { cpuSome } : {}), memTotal: mem.total, memUsed: mem.used, disks, gpus: gpus() }
 }
 
 export const cpuPct = (s: Sample) => Math.round((s.load / s.cores) * 100)
@@ -122,13 +142,18 @@ const tilde = (p: string) => (p === homedir() ? 'home' : p)
 
 /* ---------- limits ---------- */
 
-/** new tasks wait: the load or memory is over its start limit (nothing when the limit is by number only) */
+/** new tasks wait: the 5-minute load (the 1-minute one where a machine gives no other), CPU pressure or memory is over
+ *  its start limit (nothing when the limit is by number only) */
 export function busy(s: Sample | undefined, l: MachineLimits): 'cpu' | 'memory' | undefined {
   if (!s) return undefined
-  if (l.startLoad !== null && s.load > l.startLoad * s.cores) return 'cpu'
+  if (cpuOver(s, l)) return 'cpu'
   if (l.startMemory !== null && memPct(s) > l.startMemory) return 'memory'
   return undefined
 }
+
+/** the CPU is past a start limit: its 5-minute load against the cores, or its pressure */
+const cpuOver = (s: Sample, l: MachineLimits) =>
+  (l.startLoad !== null && (s.load5 ?? s.load) > l.startLoad * s.cores) || (l.startPressure !== null && s.cpuSome !== undefined && s.cpuSome > l.startPressure)
 
 export type Kind = 'cpu' | 'memory' | 'disk' | 'herdr'
 
@@ -182,7 +207,7 @@ export function meters(s: Sample, l: MachineLimits, told: Partial<Record<Kind, W
   const level = (kind: Kind, start: boolean): HealthLevel => (told[kind]?.told ? 'over' : start ? 'busy' : 'ok')
   const disk = s.disks.reduce<Disk | undefined>((a, d) => (!a || d.pct > a.pct ? d : a), undefined)
   return [
-    { name: 'CPU', pct: cpuPct(s), detail: `load ${s.load.toFixed(1)} on ${s.cores} cores`, level: level('cpu', l.startLoad !== null && s.load > l.startLoad * s.cores) },
+    { name: 'CPU', pct: cpuPct(s), detail: `load ${s.load.toFixed(1)}${s.load5 !== undefined ? ` (5 min ${s.load5.toFixed(1)})` : ''} on ${s.cores} cores${s.cpuSome !== undefined ? ` · pressure ${Math.round(s.cpuSome)}%` : ''}`, level: level('cpu', cpuOver(s, l)) },
     { name: 'Memory', pct: memPct(s), detail: `${gb(s.memUsed)} of ${gb(s.memTotal)}`, level: level('memory', l.startMemory !== null && memPct(s) > l.startMemory) },
     ...(disk ? [{ name: 'Disk', pct: disk.pct, detail: s.disks.map((d) => `${tilde(d.path)} ${d.pct}%`).join(' · '), level: level('disk', false) }] : []),
     ...s.gpus.map((g, i) => ({ name: s.gpus.length > 1 ? `GPU ${i + 1}` : 'GPU', pct: g.util, detail: `${g.name} · memory ${g.memPct}%`, level: 'ok' as const })),

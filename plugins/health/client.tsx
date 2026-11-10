@@ -81,7 +81,7 @@ function Details({ m, h, onClose }: { m: Machine; h: MachineHealth; onClose: () 
   useDismiss(ref, onClose)
   const ui = useUI((u) => u)
   const page = settingsPageOf(snap.settings, m.machine, ui)
-  const tasks = `${h.working}${h.max ? ` of ${h.max}` : ''} working${h.held ? ` · ${h.held} waiting` : ''}`
+  const tasks = `${h.working}${h.max ? ` of ${h.max}` : ''} working${h.waiting ? `, ${h.waiting} of them waiting on you` : ''}${h.held ? ` · ${h.held} waiting` : ''}`
   return (
     <div
       ref={ref}

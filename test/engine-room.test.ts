@@ -46,13 +46,14 @@ describe('room on the machine', () => {
     await expect(w.places.setBase(a.p.name, '--all')).rejects.toThrow('Choose a branch name')
     expect(a.p.base).toBe('develop')
     expect(sh('git branch --show-current', dir)).toBe('main')
+    await w.engine.done(a.t.id, 'Nothing to change.')
     w.agentIs(a.key, 'idle')
     await until(() => w.started.some((s) => s.key === `${b.id}/Agent`))
     expect(b.base).toBe('main')
     expect(w.started.find((s) => s.key === `${b.id}/Agent`)!.system).toContain('(from main)')
   })
 
-  test('past the max working, a new task waits as Queued with no agent yet, and starts by itself once one stops working', async () => {
+  test('past the max working, a new task waits as Queued with no agent yet; one waiting on you keeps its slot, and the next starts once it is done', async () => {
     const w = fresh({ 'machine.maxTasks': '1' })
     const a = await started(w, repo(), 'room-a', 'First', 'Add a.txt.')
     w.brief(a.key)
@@ -67,7 +68,15 @@ describe('room on the machine', () => {
     expect(w.started.some((s) => s.key === `${b.id}/Agent`)).toBe(false)
     expect(w.posted.some((x) => x.key === `${b.id}/Agent` && x.id.startsWith('held:'))).toBe(true)
     expect(w.news.some((n) => n.includes(`${b.id} needs you`))).toBe(false)
-    // the first one waits on you now: only working tasks count, so the oldest held one starts, on its brief
+    // the first one waits on you now: it keeps its slot (your answer takes it back to work within the limit), so the held
+    // ones still wait, and the line says why
+    w.agentIs(a.key, 'idle')
+    await Bun.sleep(50)
+    expect(w.engine.statusOf(a.t)).toBe('need')
+    expect(w.started.some((s) => s.key === `${b.id}/Agent`)).toBe(false)
+    expect(w.engine.slotsWords()).toBe('1 of 1 working, 1 of them waiting on you')
+    // it reports done: its slot is free, and the oldest held one starts, on its brief
+    await w.engine.done(a.t.id, 'Nothing to change.')
     w.agentIs(a.key, 'idle')
     await until(() => w.started.some((s) => s.key === `${b.id}/Agent`))
     expect(w.started.find((s) => s.key === `${b.id}/Agent`)!.first).toStartWith('Second\n\nAdd b.txt.')
@@ -75,6 +84,32 @@ describe('room on the machine', () => {
     // the next waits for b's slot
     expect(w.engine.statusOf(c)).toBe('queued')
     expect(c.worktree).toBeUndefined()
+  })
+
+  test("a task waiting on you keeps its slot, so answering it never goes past the limit; one cut off for good holds none", async () => {
+    const w = fresh({ 'machine.maxTasks': '2' })
+    const a = await started(w, repo(), 'room-wait', 'First', 'Add a.txt.')
+    w.brief(a.key)
+    const b = w.engine.add({ project: a.p.name, title: 'Second', desc: 'Add b.txt.', by: 'test' })
+    await until(() => w.started.some((s) => s.key === `${b.id}/Agent`))
+    w.brief(`${b.id}/Agent`)
+    // a asks you something: it waits on you, and keeps its slot, so a new task waits
+    w.agentIs(a.key, 'blocked')
+    expect(w.engine.statusOf(a.t)).toBe('need')
+    const c = w.engine.add({ project: a.p.name, title: 'Third', desc: 'Add c.txt.', by: 'test' })
+    expect(w.engine.statusOf(c)).toBe('queued')
+    expect(w.engine.slotsWords()).toBe('2 of 2 working, 1 of them waiting on you')
+    expect(w.engine.waitingOnYou()).toBe(1)
+    // you answer: back to work, two of two, never three
+    w.agentIs(a.key, 'working')
+    await Bun.sleep(50)
+    expect(w.engine.working()).toBe(2)
+    expect(w.started.some((s) => s.key === `${c.id}/Agent`)).toBe(false)
+    // cut off for good by its provider: the way back brings it at a free slot, so meanwhile it holds none
+    w.engine.retry = (k: string) => (k === a.key ? { cut: 'x', tries: 1, reason: 'Out of allowance', words: 'out', over: true, lasting: true } : undefined)
+    w.agentIs(a.key, 'idle')
+    await until(() => w.started.some((s) => s.key === `${c.id}/Agent`))
+    expect(w.engine.slotsWords()).toBe('2 of 2 working')
   })
 
   test('a task for later reads its brief at once: only work waits for room', async () => {
@@ -111,7 +146,8 @@ describe('room on the machine', () => {
     expect(r.held).toBe('slots')
     expect(w.sent.some((s) => s.key === tkey)).toBe(false)
     expect(w.engine.statusOf(t)).toBe('queued')
-    // a's turn ends: b, the oldest, gets its go; t still waits
+    // a is done: b, the oldest, gets its go; t still waits
+    await w.engine.done(a.t.id, 'Nothing to change.')
     w.agentIs(a.key, 'idle')
     await until(() => w.sent.some((s) => s.key === bkey && s.text.includes(`Go: you no longer wait for ${a.t.id}, start now.`)), 12_000)
     expect(w.engine.statusOf(t)).toBe('queued')

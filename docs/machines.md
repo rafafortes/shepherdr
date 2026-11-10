@@ -26,18 +26,25 @@ pull requests of GitHub repos); nothing to install by hand.
 
 ## Health and limits
 
-Each machine watches its own health: every 30 seconds it reads its 1-minute load against its cores, memory in use,
+Each machine watches its own health: every 30 seconds it reads its 1- and 5-minute load against its cores, its CPU
+pressure (Linux: the share of the last minute some task waited for a CPU, `/proc/pressure/cpu`), memory in use,
 how full home and /tmp are, a GPU's use (nvidia-smi, where there is one) and whether herdr answers. A small meter at
 the top right of its home space's chat shows it (thin bars, the numbers in words where there is room; grey while all is
 well, amber while new tasks wait, red past an alert limit), and a tap shows the numbers, the tasks at work against
 the limit, herdr, and its settings. Settings → Each machine → its name holds its limits, each machine keeping its
 own, scaled to its cores and memory: limit working tasks by Number of tasks, Machine load or Both (Both); max tasks
-working at once (10); new tasks wait while the load is over 1× the cores or memory over 80%; its coordinator is told
+working at once (10); new tasks wait while the 5-minute load is over 1× the cores (the 1-minute one swings with every
+build, and let tasks start in each lull), CPU pressure over its limit (off until set: Wait while CPU pressure is over,
+`machine.startPressure`, a share such as 20%) or memory over 80%; its coordinator is told
 when the load stays over 1.5× the cores for 2 minutes, memory or a disk is over 90%, or herdr stops answering.
 - **Room for tasks** (Shepherdr enforces it): a task added, or told to go (a queued task's go, or a coordinator's
   `task tell` to one that waits), waits as Queued, `Waiting for a free slot` or `Waiting for the machine`, with no
   agent started yet, and starts by itself once there's room, oldest first; while load counts, one at a time, 30
-  seconds apart. Only working tasks count. Your own message to a task starts it at once.
+  seconds apart. A task holds its slot while it works and while it waits on you with its agent there (a question, a
+  permission, a turn that ended), so your answer, the advisor's or its coordinator's takes it back to work within the
+  limit; the line says how many of the working wait on you (`10 of 10 working, 3 of them waiting on you`). One that is
+  done (ready, merged), stopped, whose agent is gone or whose provider cut it off for good (the way back brings it at a
+  free slot) holds none. Your own message to a To do or stopped task starts it at once.
 - **Alerts** (the coordinator decides): past a limit, a card shows in the machine's home space and its coordinator (and
   the main machine's home space's) gets the numbers and what uses the machine most, by task; once more when it
   is back under. The shepherdr-coordinator skill says what to weigh: pause or queue tasks, clean the disk, or tell
