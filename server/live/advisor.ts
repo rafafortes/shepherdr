@@ -148,12 +148,21 @@ export function parseAdvice(out: string, q: AdviceQuestion): Omit<Advice, 'by'> 
     // unsure, or the human's to decide: it says why, and answers nothing
     if (j.decide === 'human' || j.sure !== true) return { why, human: why || 'it is not sure' }
     const n = (q.choices ?? []).length
-    const pick = (x: unknown) => (typeof x === 'number' && Number.isInteger(x) && x >= 1 && x <= n ? x - 1 : undefined)
+    // a number, or a number written as words of JSON ("2"): an option's, counted from one
+    const num = (x: unknown) => (typeof x === 'string' && /^\s*\d+\s*$/.test(x) ? Number(x) : x)
+    const pick = (x: unknown) => {
+      const v = num(x)
+      return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= n ? v - 1 : undefined
+    }
     if (q.kind === 'words') {
       const reply = typeof j.reply === 'string' ? j.reply.trim() : ''
       return reply ? { reply: reply.slice(0, 4000), why } : undefined
     }
-    if (q.other && typeof j.other === 'string' && j.other.trim() && j.choice === undefined && j.choices === undefined) return { other: j.other.trim().slice(0, 2000), why, choice: n }
+    // its own words, where the question takes them: with no pick (none, null), or with the pick right after the options
+    // (where an "Other" would be)
+    const words = typeof j.other === 'string' ? j.other.trim() : ''
+    const none = (x: unknown) => x === undefined || x === null || (Array.isArray(x) && !x.length) || num(x) === n + 1
+    if (q.other && words && none(j.choice) && none(j.choices)) return { other: words.slice(0, 2000), why, choice: n }
     if (q.multi) {
       const picks = Array.isArray(j.choices) ? j.choices.map(pick) : [pick(j.choice)]
       if (!picks.length || picks.some((x) => x === undefined)) return undefined
