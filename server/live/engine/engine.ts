@@ -24,7 +24,7 @@ import { launchesAgents, refusedLaunch } from '../launch-policy.ts'
 import { fromAgentLine } from '../chatlines.ts'
 import type { Chats } from '../chats.ts'
 import { HOST, placeId, type Places, type Space } from '../places.ts'
-import { privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, wentBackCardWords, restartLine, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
+import { privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, wentBackCardWords, restartLine, type BackWhy, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { backupModelOf, CLI_NAME, FALLBACK_OF, kindOf, type Settings } from '../settings.ts'
@@ -91,7 +91,7 @@ export interface TaskRec {
   /** held by Shepherdr until this machine has room for it (Settings → the machine's limits): why it waits (all its
    *  slots are taken, or the machine is too loaded) and since when. go: the message its agent gets then, and why it
    *  starts (none: it has no agent yet, and starts then on its brief). Anything you write to it lets it go at once */
-  held?: { why: 'slots' | 'machine'; since: number; go?: string; goWhy?: string; plain?: boolean }
+  held?: { why: HeldWhy; since: number; go?: string; goWhy?: string; plain?: boolean }
   /** shepherdr task stop closed its agent and space; writing to it again clears it */
   stopped?: boolean
   /** the words of a start that never became a turn (start.ts), kept so a restart still knows which trouble a turn, or a
@@ -265,7 +265,10 @@ const splitRef = (ref: string): [string | undefined, string] => {
 const START_GAP = 30_000
 
 /** the line a held task shows */
-export const HELD = { slots: 'Waiting for a free slot', machine: 'Waiting for the machine' } as const
+/** why a task waits to start: its slots are taken, the machine is busy, every model of its space ran out (a start
+ *  would only be cut off as well), or its tasks that were cut off go back to work first (source.ts, return.ts) */
+export type HeldWhy = 'slots' | 'machine' | 'models' | 'resume'
+export const HELD = { slots: 'Waiting for a free slot', machine: 'Waiting for the machine', models: 'Waiting: every model ran out', resume: 'Waiting: cut-off tasks go back to work first' } as const
 
 /** queued tasks are first looked at once herdr has told which agents are alive: a go sent before would start a second */
 const RECHECK_FIRST = 15_000
@@ -414,6 +417,11 @@ export class Engine extends Emitter<Events> {
   /** its backup took over for a reason waiting can't fix: the primary Settings name is what the human may want back
    *  (source.ts keeps it, and asks it later whether it answers again) */
   noteTookOver?: (t: TaskRec, ran: Harness, to: Harness, why: string) => void
+  /** its agent was cut off for good and waits for the human (no backup, one that couldn't start, or the backup cut off
+   *  too): what started again once its provider answers (source.ts, return.ts) */
+  noteStuck?: (t: TaskRec, ran: Harness, why: string) => void
+  /** its space waits before a task starts: every model ran out, or its cut-off tasks go back to work first */
+  startsWait?: (t: TaskRec) => 'models' | 'resume' | undefined
   /** its backup agent is taking over */
   private handing = new Set<string>()
   /** chats whose last start never became a turn (start.ts): when it failed and the words it shows, so a relaunch loop
@@ -1035,13 +1043,23 @@ export class Engine extends Emitter<Events> {
     return this.tasks.filter((t) => this.busy(t)).length
   }
 
-  /** whether one more task may start now, and if not, why: its slots are all taken, or the machine is too loaded */
-  room(): { why?: 'slots' | 'machine' } {
+  /** whether one more task may start now (this one, when one is named), and if not, why: its slots are all taken, the
+   *  machine is too loaded, or its space waits for its models (startsWait) */
+  room(t?: TaskRec): { why?: HeldWhy } {
     const l = this.settings.machine()
     if (l.max !== null && this.working() >= l.max) return { why: 'slots' }
     const m = this.machine?.()
     if (m && (m.busy || !m.herdr)) return { why: 'machine' }
-    return {}
+    const w = t ? this.startsWait?.(t) : undefined
+    return w ? { why: w } : {}
+  }
+
+  /** how many more tasks may work here now: none while the machine is too loaded */
+  freeSlots() {
+    const r = this.room()
+    if (r.why) return 0
+    const l = this.settings.machine()
+    return l.max === null ? Infinity : Math.max(0, l.max - this.working())
   }
 
   /** tasks held now, oldest first */
@@ -1050,13 +1068,18 @@ export class Engine extends Emitter<Events> {
   }
 
   /** hold it until there's room: its line says why, and its chat gets a small card */
-  private hold(t: TaskRec, why: 'slots' | 'machine', go?: { text: string; why: string; plain?: boolean }) {
+  private hold(t: TaskRec, why: HeldWhy, go?: { text: string; why: string; plain?: boolean }) {
     const l = this.settings.machine()
     t.held = { why, since: t.held?.since ?? Date.now(), ...(go ? { go: go.text, goWhy: go.why, plain: go.plain } : {}) }
     t.after = undefined
     t.todo = undefined
     const id = `held:${t.id}:${Date.now()}`
-    const words = why === 'slots' ? `waiting for a free slot (${this.working()} of ${l.max} working)` : 'waiting for the machine: it is busy'
+    const words = {
+      slots: `waiting for a free slot (${this.working()} of ${l.max} working)`,
+      machine: 'waiting for the machine: it is busy',
+      models: 'waiting: every model of this space ran out, so a start would only be cut off too',
+      resume: 'waiting: the tasks that were cut off go back to work first',
+    }[why]
     this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: words } })
     this.save()
     this.settleOne(t)
@@ -1064,7 +1087,7 @@ export class Engine extends Emitter<Events> {
 
   /** the go, now if this machine has room, else once it has */
   private goWhenRoom(t: TaskRec, text: string, why: string, plain = false) {
-    const r = this.room()
+    const r = this.room(t)
     if (r.why) return this.hold(t, r.why, { text, why, plain })
     this.go(t, text, why, plain)
   }
@@ -1079,7 +1102,16 @@ export class Engine extends Emitter<Events> {
     try {
       const byLoad = this.settings.machine().startLoad !== null
       for (const t of this.heldTasks()) {
-        const r = this.room()
+        const r = this.room(t)
+        // its own space waits for its models: another space's may still start
+        if (r.why === 'models' || r.why === 'resume') {
+          if (t.held!.why !== r.why) {
+            t.held!.why = r.why
+            this.save()
+            this.settleOne(t)
+          }
+          continue
+        }
         if (r.why) {
           // each one waits for the same reason: its line says the one that holds them now
           const stale = this.heldTasks().filter((x) => x.held!.why !== r.why)
@@ -1089,7 +1121,7 @@ export class Engine extends Emitter<Events> {
         }
         if (byLoad && now - this.lastStart < START_GAP) return
         this.lastStart = now
-        const why = t.held!.why === 'slots' ? 'a slot is free' : 'the machine has room'
+        const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work' }[t.held!.why]
         if (t.held!.go) this.go(t, t.held!.go, `${t.held!.goWhy ?? why} · ${why}`, t.held!.plain)
         else {
           t.held = undefined
@@ -1184,7 +1216,7 @@ export class Engine extends Emitter<Events> {
     if (after.length) t.after = after
     if (set) t.set = set
     // one that starts work now waits for room; one for later only reads its brief, so it starts at once
-    const room = after.length || o.later ? {} : this.room()
+    const room = after.length || o.later ? {} : this.room(t)
     this.data.tasks.push(t)
     if (room.why) {
       t.told = 'queued'
@@ -1298,7 +1330,7 @@ export class Engine extends Emitter<Events> {
       this.settleOne(t)
       return
     }
-    const r = this.room()
+    const r = this.room(t)
     if (r.why) {
       this.hold(t, r.why)
       return
@@ -1316,7 +1348,7 @@ export class Engine extends Emitter<Events> {
    * start it now, waiting for room and for what it waits for like a task added now. A task already at work, or one
    * whose agent ran before, keeps its own life: only one that has not started can be scheduled.
    */
-  schedule(id: string, at: number | null): { at?: number; queued?: string[]; held?: 'slots' | 'machine' } {
+  schedule(id: string, at: number | null): { at?: number; queued?: string[]; held?: HeldWhy } {
     const t = this.req(id)
     if (ended(t)) throw new Error(`${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'})`)
     if (t.worktree || this.starting.has(t.id) || this.agents.record(this.key(t))) throw new Error(`${t.id} has already started: only a task that has not started yet can wait for a time. Write to its chat, or stop it first (shepherdr task stop ${t.id}).`)
@@ -1345,7 +1377,7 @@ export class Engine extends Emitter<Events> {
       this.settle(t)
       return { queued: open }
     }
-    const r = this.room()
+    const r = this.room(t)
     if (r.why) {
       this.hold(t, r.why)
       return { held: r.why }
@@ -1508,10 +1540,11 @@ export class Engine extends Emitter<Events> {
    * Its agent started again on this CLI, model and effort (the restart sheet, shepherdr restart). Mid-turn it is
    * interrupted first. The same CLI resumes its session; another takes over with the brief, the branch's commits,
    * what lies uncommitted and the chat's last messages. What you sent meanwhile waits for it; its worktree and branch
-   * stay as they are; a card in its chat marks it. back: Shepherdr takes it back to its primary model, which answers
-   * again (return.ts): it is told so, and its backup may go in again the next time that one runs out.
+   * stay as they are; a card in its chat marks it. back: Shepherdr starts it again once the primary answers again
+   * (return.ts) — back from its backup, or again on the model that cut it off: it is told so, and its backup may go in
+   * again the next time that one runs out. A start that went wrong before is over once it starts.
    */
-  async restart(id: string, to: Harness, back = false) {
+  async restart(id: string, to: Harness, back?: BackWhy) {
     const t = this.req(id)
     if (ended(t)) throw new Error(`${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'}): it has no agent to restart.`)
     if (!t.worktree) throw new Error(`${t.id} hasn't started yet: it starts on what its brief says.`)
@@ -1528,17 +1561,19 @@ export class Engine extends Emitter<Events> {
       const first = async () => {
         await this.agents.stopTurn(key)
         if (from === h.kind) return hidden(resumedLine(words, back), 'restart')
-        return hidden(`${taskFirst(t)}\n\n${restartLine({ from: name(from), to: words, back, ...(await this.soFar(t, key, name(from))) })}`, 'restart')
+        return hidden(`${taskFirst(t)}\n\n${restartLine({ from: name(from), to: words, back: !!back, ...(await this.soFar(t, key, name(from))) })}`, 'restart')
       }
       await this.launch(t, undefined, undefined, { ...h, model: h.model ?? '', effort: h.effort ?? '' }, first)
       // a pause or a stop is over: it carries on
       t.stopped = undefined
       t.paused = undefined
       t.agent = h
+      // it started: what went wrong with a start before is over
+      t.trouble = undefined
       // back on its primary: the backup's one go is given back, for the next time that one runs out
       if (back) t.tookOver = undefined
       const card = `restart:${t.id}:${Date.now()}`
-      this.chats.post(key, { id: card, card: { id: card, restart: true, text: back ? wentBackCardWords(words) : `Restarted on ${words}` } })
+      this.chats.post(key, { id: card, card: { id: card, restart: true, text: back ? wentBackCardWords(words, back) : `Restarted on ${words}` } })
     } finally {
       this.handing.delete(t.id)
       this.save()
@@ -1581,9 +1616,25 @@ export class Engine extends Emitter<Events> {
     const ran: Harness = rec ? { kind: rec.kind, model: rec.model, effort: rec.effort } : (t.agent ?? this.settings.harness('task', space))
     // what this task keeps for itself (task add --set) first, then its space's settings, its machine's and Everywhere's
     const plan = this.backupFor('task', space, t.set)
+    // waits for the human from here: one cut off for good is started again once its provider answers (return.ts). A
+    // note that can't be written never changes what happens to the task
+    const stuck = () => {
+      if (!lasting) return
+      try {
+        this.noteStuck?.(t, ran, why.charAt(0).toLowerCase() + why.slice(1))
+      } catch (e) {
+        console.error(`shepherdr: couldn't keep that ${t.id} waits for its provider: ${(e as Error).message}`)
+      }
+    }
     // its backup took over once already: a takeover that keeps failing is the human's, not a loop
-    if (t.tookOver || !t.worktree) return this.settle(t)
-    if (!plan.to) return this.noBackup(key, plan.why)
+    if (t.tookOver || !t.worktree) {
+      if (t.worktree) stuck()
+      return this.settle(t)
+    }
+    if (!plan.to) {
+      stuck()
+      return this.noBackup(key, plan.why)
+    }
     const to = plan.to.kind
     // only an agent whose session is there has one to keep: one with no record, or whose session is gone, starts fresh,
     // with the brief and the chat
@@ -1620,6 +1671,7 @@ export class Engine extends Emitter<Events> {
       // the backup didn't start: it went wrong, and a later hand-over may try again
       t.trouble = troubleOf(e)
       t.tookOver = undefined
+      stuck()
     } finally {
       this.handing.delete(t.id)
       this.settle(t)
@@ -2505,7 +2557,7 @@ export class Engine extends Emitter<Events> {
    * it at once and stays queued: its agent clears the queue itself if the words are a go. `from`: another agent sent it
    * (its shell ran the command), so its agent reads who it came from, and the chat draws it as that agent's message.
    */
-  async tell(id: string, text: string, { gate = false, from }: { gate?: boolean; from?: TellFrom } = {}): Promise<{ held?: 'slots' | 'machine' }> {
+  async tell(id: string, text: string, { gate = false, from }: { gate?: boolean; from?: TellFrom } = {}): Promise<{ held?: HeldWhy }> {
     const t = this.req(id)
     // what its agent reads, once it has an agent to read it: another agent's message says who sent it, in the envelope
     // herdr's messaging writes (chatlines.fromAgents). A brief is never wrapped: those words are the task's own
@@ -2523,7 +2575,7 @@ export class Engine extends Emitter<Events> {
     }
     // a stopped task is no wait for room: its agent is closed, and the words start it again where it is
     const waits = wasScheduled || (this.statusOf(t) === 'todo' && !t.stopped) || this.holding(t)
-    const r = gate && waits && !ended(t) ? this.room() : {}
+    const r = gate && waits && !ended(t) ? this.room(t) : {}
     if (r.why) {
       if (!t.worktree) {
         // its brief takes the words, as below, plain: a brief is its own words, never another agent's envelope; it

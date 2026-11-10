@@ -29,7 +29,7 @@ import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
 import { DISMISSED, dismissKind, dismissWords } from './dismiss.ts'
 import { dictate as dictation } from './dictate.ts'
-import { age, checkTitle, ended, Engine, fitStatus, type TaskRec } from './engine/engine.ts'
+import { age, checkTitle, ended, Engine, fitStatus, type HeldWhy, type TaskRec } from './engine/engine.ts'
 import { listFolders, makeRepo, resolveInHome } from './folders.ts'
 import { sh, validateBase } from './engine/git.ts'
 import { Artifacts, browserChecker, type ArtifactRec, type Checker } from './artifacts.ts'
@@ -42,9 +42,9 @@ import { claudeProjectDir, piSessionDir } from './readers/find.ts'
 import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
-import { privatePrompt, coordinatorPrompt, backupCardWords, wentBackCardWords, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
+import { privatePrompt, coordinatorPrompt, backupCardWords, wentBackCardWords, type BackWhy, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
 import { fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
-import { backCard, canProbe, FRESH, returnMode, Returns, type Outage, type Probe } from './return.ts'
+import { backCard, canProbe, FRESH, QUIET, returnMode, Returns, type Outage, type Probe } from './return.ts'
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
@@ -245,8 +245,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const primary = this.settings.harness('task', space)
       // only a role whose agent ran the harness Settings name: one of its own (`task add --agent …`) that ran out is no
       // primary coming back — a restart would take it to Settings' pair, not to what it ran
-      if (sameHarness(ran, primary)) this.returns.note({ role: 'task', space, primary, to, why, at: Date.now() })
+      // a backup that went in is no model out: a new task may start, and one this outage took back may come back again
+      if (sameHarness(ran, primary)) this.returns.note({ role: 'task', space, primary, to, why, at: Date.now() }, { key: `${t.id}/Agent`, allOut: false })
     }
+    // a task cut off for good waits for the human: started again once its provider answers (return.ts)
+    this.engine.noteStuck = (t, ran, why) => {
+      const space = this.places.space(t.project)?.name
+      if (space !== undefined) this.noteStuck('task', space, ran, why, this.engine.backupFor('task', space, t.set).to, `${t.id}/Agent`)
+    }
+    // a space whose models all ran out starts no task (each would be cut off too), and its cut-off tasks go back to
+    // work before a new one takes a slot
+    this.engine.startsWait = (t) => this.startsWait(t)
     this.artifacts.migratePages(
       (chat) => (chat.includes('/') ? (this.engine.task(chat.split('/')[0])?.project ?? placeId.home()) : chat),
       (chat, id) => this.chats.repostPage(chat, id),
@@ -1074,7 +1083,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    *  with its role's prompt and the chat's last words. Its tasks go on as they are; a card in its chat marks it. A
    *  backup's own start (`backup`: the reason its agent can't go on) says so in the card and in what it is told, and so
    *  does one going back to its primary model, which answers again (`back`, return.ts) */
-  private async restartCoordinator(id: string, to: Harness, backup?: string, back = false) {
+  private async restartCoordinator(id: string, to: Harness, backup?: string, back?: BackWhy) {
     if (!this.places.coordinator(id)) throw new Error(`No place ${id}`)
     if (!this.engine.installed(to.kind)) throw new Error(`${CLI_NAME[to.kind] ?? to.kind} isn't installed on this machine.`)
     const h = fitHarness(to)
@@ -1089,11 +1098,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (from === h.kind) return hidden(backupKeptLine({ on: words, why: backup }), 'restart')
         return hidden(coordinatorHandOverLine({ from: them, why: backup, tasks: this.openTasks(id), chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
       }
-      return from === h.kind ? hidden(resumedLine(words, back), 'restart') : hidden(restartLine({ from: them, to: words, back, chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
+      return from === h.kind ? hidden(resumedLine(words, back), 'restart') : hidden(restartLine({ from: them, to: words, back: !!back, chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
     }
     await this.coordinator(id, { as: h, restart: first })
     const card = `${backup ? 'takeover' : 'restart'}:${id}:${Date.now()}`
-    const text = backup ? backupCardWords({ from: them, to: CLI_NAME[h.kind] ?? h.kind, words, same: from === h.kind, why: backup }) : back ? wentBackCardWords(words) : `Restarted on ${words}`
+    const text = backup ? backupCardWords({ from: them, to: CLI_NAME[h.kind] ?? h.kind, words, same: from === h.kind, why: backup }) : back ? wentBackCardWords(words, back) : `Restarted on ${words}`
     this.chats.post(id, { id: card, card: { id: card, restart: true, text } })
     if (this.watched.includes(id)) this.emit('chat', id)
     return words
@@ -1179,7 +1188,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** start a coordinator or a task's agent again, on Settings' CLI, model and effort or these; save: as its space's
    *  Settings too; back: Shepherdr takes it back to its primary, which answers again (return.ts), not the human */
-  private async restart(key: string, to: Partial<Harness>, save = false, back = false) {
+  private async restart(key: string, to: Partial<Harness>, save = false, back?: BackWhy) {
     const x = this.restartable(key)
     const requested = { ...x.want, ...to, kind: to.kind ?? x.want.kind }
     const problem = harnessProblem(requested)
@@ -1436,11 +1445,40 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       } catch (e) {
         // it didn't start: the human hears why, and a later hand-over may try again
         this.agents.markTookOver(key, undefined)
+        this.coordinatorStuck(key, r, plan.to)
         return this.cutOff(key, r, `its backup, ${CLI_NAME[plan.to.kind] ?? plan.to.kind}, couldn't start: ${(e as Error).message}`)
       }
     }
     const also = took ? `its backup agent (${CLI_NAME[took.to] ?? took.to}) already went in once` : plan.why ? `no backup agent took over: ${plan.why}` : undefined
+    this.coordinatorStuck(key, r, plan.to)
     this.cutOff(key, r, also)
+  }
+
+  /** a coordinator cut off for good waits for the human: started again once its provider answers (return.ts) */
+  private coordinatorStuck(key: string, r: Retry, backup?: Harness) {
+    const rec = this.agents.record(key)
+    if (!r.lasting || !rec) return
+    this.noteStuck('coordinator', this.spaceKey(key) ?? '', { kind: rec.kind, model: rec.model, effort: rec.effort }, r.reason.charAt(0).toLowerCase() + r.reason.slice(1), backup, key)
+  }
+
+  /**
+   * An agent of that role cut off for good, on `ran`, that waits for the human: its outage is kept (or, open already, it
+   * counts one more cut-off), so the watch asks its primary and starts it again once that one answers (return.ts). Only
+   * an agent on what Settings name for its role, or on its backup: one on a harness of its own is not the primary's to
+   * bring back. A note that can't be written never changes what happens to the agent.
+   */
+  private noteStuck(role: 'task' | 'coordinator', space: string, ran: Harness, why: string, backup: Harness | undefined, key: string) {
+    try {
+      const primary = this.settings.harness(role, space || undefined)
+      if (!sameHarness(ran, primary) && !(backup && sameHarness(ran, backup))) return
+      // its backup was cut off too, or there is none: every model of that role ran out here
+      const allOut = !backup || sameHarness(backup, primary) || sameHarness(ran, backup)
+      const o = this.returns.get(role, space)
+      if (o && !o.back) this.returns.cut(role, space, Date.now(), { key, allOut })
+      else this.returns.note({ role, space, primary, to: ran, why, at: Date.now() }, { key, allOut })
+    } catch (e) {
+      console.error(`shepherdr: couldn't keep that a ${role} of ${space || 'this machine'} waits for its provider: ${(e as Error).message}`)
+    }
   }
 
   /** a coordinator whose agent can't go on waits for you: its space's card, and an alert; `also` says why no backup went in */
@@ -1477,12 +1515,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.noteReviewer(now)
     /** the roles this pass already alerted for: a reviewer set Everywhere is one news, not one per space */
     const alerted = new Set<string>()
+    /** the spaces whose cut-off tasks still wait for a slot, found again each pass: a wait over is never kept */
+    const resuming = new Set<string>()
     for (const o of this.returns.list()) {
       if (o.back) continue
       const mode = returnMode(this.settings.get('backup.watchReturn', o.space || undefined))
       if (mode === 'off') continue
       const to = this.backTo(o)
-      // nothing of this machine's is on that backup any more: there is nothing to come back to
+      // nothing of this machine's is on that backup or cut off any more: there is nothing to come back to
       if (!to) {
         this.returns.over(o.role, o.space, now)
         continue
@@ -1493,26 +1533,28 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const moves = mode === 'go back' && o.role !== 'reviewer' && !often
       // the primary answered a moment ago: what is still on the backup follows, without asking it again
       if (!(moves && o.ok && now - o.ok < FRESH)) {
-        if ((o.due ?? 0) > now) continue
-        // a CLI this machine doesn't have, or one Shepherdr has no silent one-shot for, is never asked
-        if (!canProbe(to.primary.kind) || !this.engine.installed(to.primary.kind)) continue
-        // somebody works on that very model: a probe never queues beside real work on it (a local model takes one
-        // request at a time); work on other models goes on beside it
-        if (this.busyOn(to.primary)) continue
-        let probe: Probe
-        try {
-          probe = await this.returns.probe(to.primary)
-        } catch (e) {
-          probe = { ok: false, said: (e as Error).message }
+        // an agent of this machine at work on that very model, with no cut-off of its own, and none in this outage for
+        // a while: the primary answers, and nothing needs asking
+        if (now - (o.lastCut ?? o.at) >= QUIET && this.answersNow(to.primary)) this.returns.ok(o.role, o.space, now, false)
+        else {
+          if ((o.due ?? 0) > now) continue
+          // a CLI this machine doesn't have, or one Shepherdr has no silent one-shot for, is never asked
+          if (!canProbe(to.primary.kind) || !this.engine.installed(to.primary.kind)) continue
+          let probe: Probe
+          try {
+            probe = await this.returns.probe(to.primary)
+          } catch (e) {
+            probe = { ok: false, said: (e as Error).message }
+          }
+          // its failure is silent for the human — no card, no alert, nothing to answer — and leaves only the log and a
+          // longer wait
+          if (!probe.ok) {
+            console.error(`shepherdr: ${to.primary.kind} doesn't answer yet: ${probe.said.slice(0, 160)}`)
+            this.returns.failed(o.role, o.space, now)
+            continue
+          }
+          this.returns.ok(o.role, o.space, now)
         }
-        // its failure is silent for the human — no card, no alert, nothing to answer — and leaves only the log and a
-        // longer wait
-        if (!probe.ok) {
-          console.error(`shepherdr: ${to.primary.kind} doesn't answer yet: ${probe.said.slice(0, 160)}`)
-          this.returns.failed(o.role, o.space, now)
-          continue
-        }
-        this.returns.ok(o.role, o.space, now)
       }
       if (!moves) {
         this.returns.answered(o.role, o.space, now)
@@ -1520,7 +1562,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         alerted.add(o.role)
         continue
       }
-      const moved = await this.goBack(to.chats)
+      const { moved, waiting } = await this.goBack(o, to.chats)
+      // the tasks that wait for a slot go back before any new one takes a slot on this machine (startsWait)
+      if (o.role === 'task' && waiting) resuming.add(o.space)
       if (!moved.length) continue
       // one alert per return: the chats that follow on later passes go back quietly, their cards only
       const first = !o.went
@@ -1530,45 +1574,81 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (first && !alerted.has(o.role)) {
         alerted.add(o.role)
         const names = moved.map((k) => this.chatName(k))
-        this.alert({ id: randomUUID(), from: 'Shepherdr', title: 'Back on the primary model', body: `${harnessWords(to.primary)} answers again: ${names.join(', ')} went back to it from the backup.`.slice(0, 200), go: { place: moved[0] }, tag: `back:${o.role}:${o.space}:${o.at}`, ...(moved[0].includes('/') ? { task: true as const } : {}) })
+        const more = waiting ? `; ${waiting} more as slots free up` : ''
+        this.alert({ id: randomUUID(), from: 'Shepherdr', title: 'Back to work on the primary model', body: `${harnessWords(to.primary)} answers again: ${names.join(', ')} started again on it${more}.`.slice(0, 200), go: { place: moved[0] }, tag: `back:${o.role}:${o.space}:${o.at}`, ...(moved[0].includes('/') ? { task: true as const } : {}) })
       }
     }
+    this.resuming = resuming
+    // a wait over (its models answer, or its cut-off tasks went back): the queue goes on, or waits on with its reason
+    this.engine.release()
   }
 
-  /** Each chat still on a backup whose agent is idle now starts again on its primary, which answers again: the ones at
-   *  work, asking you something, paused or already starting again wait for a later pass. The keys that went back. */
-  private async goBack(chats: { key: string; task?: string }[]) {
+  /** the spaces whose cut-off tasks still wait for a slot to go back to work: a slot is this machine's, so no new task
+   *  of any space takes one before them */
+  private resuming = new Set<string>()
+
+  /**
+   * Each chat still on a backup, or cut off for good, whose agent is idle now starts again on its primary, which answers
+   * again: the ones at work, asking you something or paused wait for a later pass, and a task takes a free slot as a new
+   * one would (Settings → the machine's limit), the rest following as slots free up. Each chat once per outage: one
+   * that can't start again (or goes on failing) is the human's. The keys that went back, and how many wait for a slot.
+   */
+  private async goBack(o: Outage, chats: { key: string; task?: string; stuck?: boolean }[]) {
     const moved: string[] = []
+    const tried: string[] = []
+    let slots = this.engine.freeSlots()
+    let waiting = 0
     for (const c of chats) {
       const st = this.agents.status(c.key)
-      // between turns, with nothing of its own still running: what a restart would cut short waits
-      if ((st !== 'idle' && st !== 'done') || this.agents.background(c.key)) continue
+      // between turns, with nothing of its own still running: what a restart would cut short waits. One whose pane is
+      // gone has nothing to cut short (its start had failed, or herdr closed it): it starts again too, while herdr answers
+      if ((st !== 'idle' && st !== 'done' && !(st === 'gone' && this.agents.reachable)) || this.agents.background(c.key)) continue
       // a try of its own still due, or what it asks you (a question, a plan or a choice, a start stopped on a screen of
       // its own): yours to answer on the agent that asked
       const r = this.retries.get(c.key)
       if ((r && !r.over) || this.chats.openQuestion(c.key) || this.chats.openCard(c.key) || this.chats.startMenuUp(c.key)) continue
       if (c.task) {
         const t = this.engine.task(c.task)
-        // a pause is yours to end (a restart would end it), and a start that went wrong yours to look at
-        if (!t || t.paused || t.trouble) continue
+        // a pause is yours to end (a restart would end it)
+        if (!t || t.paused) continue
+        if (slots <= 0) {
+          waiting++
+          continue
+        }
       }
+      tried.push(c.key)
       try {
-        await this.restart(c.key, {}, false, true)
+        // back from its backup, or again on the very model that cut it off: its provider answers again either way
+        await this.restart(c.key, {}, false, c.stuck ? 'again' : 'backup')
         moved.push(c.key)
+        if (c.task) slots--
       } catch (e) {
-        console.error(`shepherdr: couldn't take ${c.key} back to its primary model: ${(e as Error).message}`)
+        console.error(`shepherdr: couldn't start ${c.key} again on its primary model: ${(e as Error).message}`)
       }
     }
-    return moved
+    this.returns.moved(o.role, o.space, tried)
+    return { moved, waiting }
   }
 
-  /** somebody on this machine works on that model now (whatever its effort): a probe of it waits for its turn */
-  private busyOn(h: Harness) {
+  /** an agent of this machine works on that model now (whatever its effort), and nothing cut it off: it answers */
+  private answersNow(h: Harness) {
     const model = { kind: h.kind, model: h.model }
     return Object.keys(this.agents.records).some((k) => {
       const r = this.agents.record(k)
-      return !!r && this.agents.status(k) === 'working' && sameHarness({ kind: r.kind, model: r.model }, model)
+      return !!r && this.agents.status(k) === 'working' && !this.retries.get(k) && sameHarness({ kind: r.kind, model: r.model }, model)
     })
+  }
+
+  /** why a task waits before it starts (engine.ts room): this machine's cut-off tasks go back to work first (a slot is
+   *  the machine's, whichever space), or every model of its space ran out and a start would only be cut off too, until
+   *  the primary answers again */
+  private startsWait(t: TaskRec): 'models' | 'resume' | undefined {
+    if (this.resuming.size) return 'resume'
+    const space = this.places.space(t.project)?.name
+    if (space === undefined) return undefined
+    const o = this.returns.get('task', space)
+    if (!o || o.back || returnMode(this.settings.get('backup.watchReturn', space)) === 'off') return undefined
+    return o.allOut && !o.ok ? 'models' : undefined
   }
 
   /**
@@ -1599,42 +1679,55 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /**
-   * What a role's outage comes back to now: the primary Settings name, and the chats still on the backup (a task's per
-   * task, a coordinator's own, a space's for a reviewer, which has no chat of its own). Nothing while Settings name the
-   * harness in use, and nothing once no agent here runs on the backup any more.
+   * What a role's outage comes back to now: the primary Settings name, and the chats to start again on it — the ones
+   * still on the backup (what took over, or the backup Settings name), and the ones cut off for good on the primary
+   * itself (stuck: no backup, one that couldn't go in, or taken back already): a task's per task, a coordinator's own, a
+   * space's for a reviewer, which has no chat of its own. Never one this outage started again already, and nothing once
+   * none is left.
    */
-  private backTo(o: Outage): { primary: Harness; chats: { key: string; task?: string }[] } | undefined {
+  private backTo(o: Outage): { primary: Harness; chats: { key: string; task?: string; stuck?: boolean }[] } | undefined {
     const primary = this.settings.harness(o.role, o.space || undefined)
-    if (sameHarness(primary, o.to)) return undefined
+    // its agents ran on a backup (else it had none: only the ones cut off come back)
+    const away = !sameHarness(primary, o.to)
+    const backup = o.role === 'reviewer' ? undefined : this.engine.backupFor(o.role, o.space || undefined).to
     const on = (key: string) => {
       const r = this.agents.record(key)
       return r ? ({ kind: r.kind, model: r.model, effort: r.effort } as Harness) : undefined
     }
-    const chats: { key: string; task?: string }[] = []
+    const pick = (key: string): { stuck?: boolean } | undefined => {
+      if (o.moved?.includes(key)) return undefined
+      const h = on(key)
+      if (!h) return undefined
+      // still on what took over (or on the backup Settings name): one that went back asks nothing
+      if ((away && sameHarness(h, o.to)) || (backup && !sameHarness(backup, primary) && sameHarness(h, backup))) return {}
+      // cut off for good on the primary: it waits, on the model that answers again
+      const r = this.retries.get(key)
+      return r?.over && r.lasting && sameHarness(h, primary) ? { stuck: true } : undefined
+    }
+    const chats: { key: string; task?: string; stuck?: boolean }[] = []
     if (o.role === 'task') {
       for (const t of this.engine.tasks) {
         if ((this.places.space(t.project)?.name ?? '') !== o.space || ended(t) || t.stopped || t.archived) continue
-        const h = on(`${t.id}/Agent`)
-        // still on what took over: one that went back (or was restarted on the primary) asks nothing
-        if (h && sameHarness(h, o.to)) chats.push({ key: `${t.id}/Agent`, task: t.id })
+        const p = pick(`${t.id}/Agent`)
+        if (p) chats.push({ key: `${t.id}/Agent`, task: t.id, ...p })
       }
     } else {
       const id = o.space === '~' ? placeId.home() : placeId.space(o.space)
       if (o.role === 'coordinator') {
-        const h = on(id)
-        if (h && sameHarness(h, o.to)) chats.push({ key: id })
-      } else if (this.places.coordinator(id)) chats.push({ key: id })
+        const p = pick(id)
+        if (p) chats.push({ key: id, ...p })
+      } else if (away && this.places.coordinator(id)) chats.push({ key: id })
     }
     return chats.length ? { primary, chats } : undefined
   }
 
   /** its primary answered: one card in each chat still on the backup, and an alert; the card names the way back. often:
    *  it went back by itself as often as it may today, so this time it is the human's */
-  private sayBack(o: Outage, to: { primary: Harness; chats: { key: string; task?: string }[] }, alert = true, often = false) {
+  private sayBack(o: Outage, to: { primary: Harness; chats: { key: string; task?: string; stuck?: boolean }[] }, alert = true, often = false) {
     const id = `back:${o.role}:${o.space}:${o.at}`
     // the name the space shows ('~' is a home space), which is what the restart command takes too
     const shown = this.places.nameOf(o.space === '~' ? placeId.home() : placeId.space(o.space)) ?? o.space
-    const words = (c: { task?: string }) => backCard({ role: o.role, primary: to.primary, to: o.to, task: c.task, space: shown, often })
+    const words = (c: { task?: string; stuck?: boolean }) => backCard({ role: o.role, primary: to.primary, to: o.to, task: c.task, space: shown, often, stuck: c.stuck })
     for (const c of to.chats) {
       const text = words(c)
       this.chats.post(c.key, { id, card: { id, text } })
@@ -1846,6 +1939,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /* ---------- machine health ---------- */
 
   /** how many tasks work here, against the limit: "3 of 5 working, 2 held" */
+  /** why a task is held, in the words the command says it */
+  private heldWords(why: HeldWhy) {
+    return {
+      slots: `all ${this.settings.machine().max} slots are taken`,
+      machine: 'the machine is busy',
+      models: 'every model of its space ran out, so it would only be cut off too, until the primary answers again',
+      resume: 'the tasks that were cut off go back to work first',
+    }[why]
+  }
+
   private workingLine() {
     const max = this.settings.machine().max
     const held = this.engine.heldTasks().length
@@ -3509,7 +3612,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // a coordinator's go to a task that waits starts it only when this machine has room; a message an agent's own
         // shell sends says who it came from, so the chat shows it as that agent's and never as the human's words
         const r = await this.engine.tell(t.id, rest.slice(1).join(' '), { gate: !ctx.chat?.includes('/'), from: await this.toldFrom(ctx) })
-        if (r.held) return `${t.id} is held: ${r.held === 'slots' ? `all ${this.settings.machine().max} slots are taken` : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and gets your message when there's room, oldest first.`
+        if (r.held) return `${t.id} is held: ${this.heldWords(r.held)} (${this.workingLine()}). It shows as Queued and gets your message when there's room, oldest first.`
         return `Told ${t.id}.`
       }
       case 'queue': {
@@ -3522,7 +3625,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           if (within === undefined && /^(none|nothing|off|-|)$/i.test((at ?? '').trim())) {
             const r = this.engine.schedule(t.id, null)
             if (r.queued?.length) return `${t.id} no longer waits for a time: it starts once ${r.queued.join(', ')} ${r.queued.length === 1 ? 'is' : 'are'} done.`
-            if (r.held) return `${t.id} no longer waits for a time, but is held: ${r.held === 'slots' ? `all ${this.settings.machine().max} slots are taken` : 'the machine is busy'} (${this.workingLine()}). It starts as soon as there's room, oldest first.`
+            if (r.held) return `${t.id} no longer waits for a time, but is held: ${this.heldWords(r.held)} (${this.workingLine()}). It starts as soon as there's room, oldest first.`
             return `${t.id} no longer waits for a time: it starts now.`
           }
           const when = whenFrom(at, within, this.settings.zone())

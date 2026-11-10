@@ -114,10 +114,11 @@
   again, so a reviewer goes back by itself as soon as its primary answers (a task already running keeps the reviewer
   its own brief named); with **tell me** (below), Shepherdr also asks the primary reviewer whether it answers
   again while a backup reviewer is set, and says so ([settings](settings.md#when-the-primary-is-back)).
-- **Going back.** Once the primary answers again, each agent still on a backup starts again on what Settings name, when
-  it is idle — never mid-turn, never a paused task, never one asking you something — with a card in its chat, and its
-  backup may take over again the next time the primary runs out; at most three times a day per role and space, after
-  which it waits for you. Settings → Agents → Backup → When the primary is back (`backup.watchReturn`): **go back**,
+- **Going back.** Once the primary answers again, each agent still on a backup, and each one cut off for good on the
+  primary itself, starts again on what Settings name, when it is idle — never mid-turn, never a paused task, never one
+  asking you something — a free slot at a time and before any new task, with a card in its chat, and its backup may
+  take over again the next time the primary runs out; at most three times a day per role and space, after which it
+  waits for you. While every model of a space has run out, its new tasks wait instead of starting only to be cut off. Settings → Agents → Backup → When the primary is back (`backup.watchReturn`): **go back**,
   the default; **tell me**, a card in each chat still on a backup naming the way back (⋯ → Restart agent, or `shepherdr
   restart <id>`; for a reviewer `shepherdr set reviewer.model <id> --space <name>`, a plain set being Everywhere's),
   and nothing switches; or **off**. It goes back to what Settings name now, never to what ran before, and it is never
