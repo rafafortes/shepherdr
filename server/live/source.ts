@@ -713,7 +713,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * gets a card the human sends or not. Unsure, or a question only the human decides: a card says so, and the question
    * waits for them.
    */
-  async advise(chat: string, qid: string, auto = false): Promise<{ ok: boolean; error?: string }> {
+  /** note: the human's words for the advisor, when they chose Ask the advisor with a note */
+  async advise(chat: string, qid: string, auto = false, note?: string): Promise<{ ok: boolean; error?: string }> {
     const x = this.advisable(chat).find((y) => y.qid === qid)
     if (!x) return { ok: false, error: this.advices.get(chat, qid) ? 'The advisor was asked about this already.' : 'This question no longer waits, or no advisor is set for its space.' }
     if (this.advising) return { ok: false, error: 'The advisor is answering another question; try again in a moment.' }
@@ -722,7 +723,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.advices.set(rec)
     this.emit('chat', chat)
     try {
-      const prompt = advisorPrompt({ question: x.q, asker: x.asker, brief: x.brief, chat: recentChat(this.chats.chat(chat).messages, x.asker), folder: x.cwd, human: this.user })
+      const prompt = advisorPrompt({ question: x.q, asker: x.asker, brief: x.brief, chat: recentChat(this.chats.chat(chat).messages, x.asker), folder: x.cwd, human: this.user, note: note?.trim() || undefined })
       let advice: Advice | undefined
       let said = ''
       for (const backup of [false, true]) {
@@ -2466,7 +2467,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'answer':
         return this.answer(a)
       case 'advise':
-        return this.advise(a.chat, a.question)
+        return this.advise(a.chat, a.question, false, a.note)
       case 'secret': {
         // kept on the main machine, whichever machine it is for: a worker never gets one from the screen
         if (BOX) return { ok: false, error: 'Secrets are kept on the main machine.' }

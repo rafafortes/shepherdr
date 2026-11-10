@@ -141,6 +141,24 @@ describe('on the human’s word', () => {
     }
   })
 
+  test('Ask the advisor with a note: the note goes to the advisor, and wins over its own reading', async () => {
+    const w = await world('adv-note')
+    try {
+      card(w.key, 'ask:n1', 'Which store for the outbox?', ['SQLite', 'Postgres'])
+      replies = [json({ decide: 'advisor', choice: 2, why: 'You asked for one the other services share.', sure: true })]
+      expect(await src.act({ type: 'advise', chat: w.key, question: 'ask:n1', note: '  It has to be shared with the billing service.  ' })).toEqual({ ok: true })
+      expect(runs[0].prompt).toContain('with this note for you; where it and your own reading differ, the note wins:\nIt has to be shared with the billing service.')
+      expect(to(w.key)[0]).toContain('Postgres')
+      // none, or only blanks: no note in the prompt
+      card(w.key, 'ask:n2', 'Which queue?', ['Redis', 'SQS'])
+      replies = [json({ decide: 'advisor', choice: 1, why: 'Simple.', sure: true })]
+      await src.act({ type: 'advise', chat: w.key, question: 'ask:n2', note: '   ' })
+      expect(runs[1].prompt).not.toContain('note for you')
+    } finally {
+      w.done()
+    }
+  })
+
   test('its suggestion is the human’s to send: never advised itself, never sent by itself, however long it waits', async () => {
     const w = await world('adv-suggestion')
     try {
