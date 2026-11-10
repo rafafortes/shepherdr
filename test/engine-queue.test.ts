@@ -98,14 +98,15 @@ describe('To do: its agent waits for a go', () => {
 })
 
 describe('Queued after other tasks', () => {
-  /** a first task, and a second queued after it (both started) */
+  /** a first task, started, and a second queued after it, which waits with no worktree or agent */
   async function chain(name: string, after?: (first: string) => string[]) {
     const w = world()
     const dir = repo()
     const a = await started(w, dir, name, 'First', 'Add a.txt.')
     const b = w.engine.add({ project: a.p.name, title: 'Second', desc: 'Add b.txt.', by: 'test', after: after ? after(a.t.id) : [a.t.id] })
     const bkey = `${b.id}/Agent`
-    await until(() => w.started.some((s) => s.key === bkey))
+    await Bun.sleep(50)
+    expect(w.started.some((s) => s.key === bkey)).toBe(false)
     return { w, dir, a, b, bkey }
   }
   const commit = (wt: string, file: string) => {
@@ -113,28 +114,32 @@ describe('Queued after other tasks', () => {
     sh(`git add -A && git commit -qm "add ${file}"`, wt)
   }
 
-  test('its agent starts at once with the brief and the wait; it shows Queued, and goes by itself once that task is merged', async () => {
+  test('it waits as Queued with no worktree, agent or herdr space; once that task is merged its agent starts on the brief and the go', async () => {
     const { w, a, b, bkey } = await chain('queued')
     expect(b.after).toEqual([a.t.id])
-    const first = w.started.find((s) => s.key === bkey)!.first!
-    // the brief, with the default way of working Shepherdr ends it with, then the wait
-    expect(first.startsWith('Second\n\nAdd b.txt.\n\nSettings:')).toBe(true)
-    expect(first).toContain('\n\nQueued: this task waits for')
-    expect(first).toContain(a.t.id)
-    // Queued while its agent reads the brief, and once its turn ends: never Needs you
+    // nothing of it is made while it waits: no worktree or branch, no herdr space, no agent
+    expect([b.worktree, b.branch]).toEqual([undefined, undefined])
+    expect(w.herdr.spaces.some((x) => x.label?.includes(b.id))).toBe(false)
     expect(w.engine.statusOf(b)).toBe('queued')
-    w.agentIs(bkey, 'idle')
-    await Bun.sleep(50)
     const v = w.engine.view(b)
-    expect([v.status, v.agent?.status, v.sub]).toEqual(['queued', 'queued', `After ${a.t.id}`])
+    expect([v.status, v.sub]).toEqual(['queued', `After ${a.t.id}`])
     expect(v.after).toEqual([a.t.id])
     expect(v.state).toMatch(/^Queued · /)
     expect(w.news.some((n) => n.startsWith(`${b.id} needs you`))).toBe(false)
-    // the first is merged: the second's agent is told to go (hidden from its chat, a card says why it started)
+    // the first is merged: the second gets its worktree and its agent, on the brief, and the go as its first message
+    // (hidden from its chat, a card says why it started)
     commit(a.t.worktree!, 'a.txt')
     await w.engine.done(a.t.id, 'Added a.txt.')
     expect(w.engine.statusOf(b)).toBe('queued')
     expect((await w.engine.merge(a.t.id, { self: true })).ok).toBe(true)
+    await until(() => w.started.some((s) => s.key === bkey))
+    const first = w.started.find((s) => s.key === bkey)!.first!
+    // the brief, with the default way of working Shepherdr ends it with, and no wait in it: it starts now
+    expect(first.startsWith('Second\n\nAdd b.txt.\n\nSettings:')).toBe(true)
+    expect(first).not.toContain('Queued: this task waits for')
+    expect(b.worktree).toBeTruthy()
+    // made from the base as it is now, with the first task's merged work in it
+    expect(existsSync(join(b.worktree!, 'a.txt'))).toBe(true)
     const go = w.sent.find((s) => s.key === bkey)!
     expect(go.text).toBe(`<shepherdr><go>Go: ${a.t.id} is done, start now.\n${a.t.id} (First): Added a.txt.</go></shepherdr>`)
     expect(w.posted.some((x) => x.key === bkey && x.id.startsWith('go:'))).toBe(true)
@@ -166,7 +171,8 @@ describe('Queued after other tasks', () => {
     const a = await started(w, dir, 'waits-all', 'First', 'Look into a.')
     const c = w.engine.add({ project: a.p.name, title: 'Other', desc: 'Look into c.', by: 'test' })
     const b = w.engine.add({ project: a.p.name, title: 'Third', desc: 'Then this.', by: 'test', after: [`${a.t.id.toLowerCase()}, ${c.id}`] })
-    await until(() => w.started.some((s) => s.key === `${b.id}/Agent`) && w.started.some((s) => s.key === `${c.id}/Agent`))
+    await until(() => w.started.some((s) => s.key === `${c.id}/Agent`))
+    expect(w.started.some((s) => s.key === `${b.id}/Agent`)).toBe(false)
     expect(b.after).toEqual([a.t.id, c.id])
     expect(w.engine.subOf(b)).toBe(`After ${a.t.id}, ${c.id}`)
     await w.engine.done(a.t.id, 'Nothing to change.')
@@ -179,7 +185,6 @@ describe('Queued after other tasks', () => {
 
   test('a task it waits for is stopped or goes wrong: it needs you, with the reason; going again puts it back', async () => {
     const { w, a, b, bkey } = await chain('halts')
-    w.agentIs(bkey, 'idle')
     await w.engine.stopTask(a.t.id)
     expect(w.engine.statusOf(b)).toBe('need')
     expect(w.engine.subOf(b)).toBe(`${a.t.id} was stopped`)
@@ -195,15 +200,19 @@ describe('Queued after other tasks', () => {
   })
 
   test('a task it waits for is deleted: it needs you, saying so', async () => {
-    const { w, a, b, bkey } = await chain('deleted')
-    w.agentIs(bkey, 'idle')
+    const { w, a, b } = await chain('deleted')
     await w.engine.deleteTask(a.t.id)
     expect(w.engine.statusOf(b)).toBe('need')
     expect(w.engine.subOf(b)).toBe(`${a.t.id} is gone`)
   })
 
-  test('a message reaches a queued task and leaves it queued: its agent clears the queue itself when it is a go', async () => {
+  test('a message to a queued task starts its agent on the brief, the words and the wait; it stays queued, and its agent clears the queue itself when it is a go', async () => {
     const { w, a, b, bkey } = await chain('early')
+    await w.engine.tell(b.id, 'Start now: b.txt does not need a.txt.')
+    await until(() => w.started.some((s) => s.key === bkey))
+    const first = w.started.find((s) => s.key === bkey)!.first!
+    expect(first).toContain('Start now: b.txt does not need a.txt.')
+    expect(first).toContain(`Queued: this task waits for ${a.t.id}`)
     w.agentIs(bkey, 'idle')
     w.engine.youWrote(bkey)
     expect(b.after).toEqual([a.t.id])
@@ -260,6 +269,8 @@ describe('Queued after other tasks', () => {
 
   test('waiting on you because one was stopped, a message leaves it to its agent to clear the queue', async () => {
     const { w, a, b, bkey } = await chain('halted-go')
+    await w.engine.tell(b.id, 'Read the brief, the go comes later.')
+    await until(() => w.started.some((s) => s.key === bkey))
     w.agentIs(bkey, 'idle')
     w.engine.youWrote(bkey, { go: false })
     expect(b.after).toEqual([a.t.id])
@@ -269,6 +280,59 @@ describe('Queued after other tasks', () => {
     expect(b.after).toEqual([a.t.id])
     w.engine.queue(b.id, [], { self: true })
     expect(b.after).toBeUndefined()
+  })
+
+  test('task park: one that holds an agent and a worktree from before (2.0.27) is put away and waits with none; its turn starts it fresh', async () => {
+    const { w, dir, a, b, bkey } = await chain('park')
+    // as 2.0.27 left it: its agent started at once, read the brief and the wait, and its turn ended
+    await w.engine.tell(b.id, 'Read it now.')
+    await until(() => w.started.some((s) => s.key === bkey) && !!b.worktree)
+    w.agentIs(bkey, 'idle')
+    const wt = b.worktree!
+    const branch = b.branch!
+    expect(existsSync(wt)).toBe(true)
+    expect(w.engine.statusOf(b)).toBe('queued')
+    // its brief alone in its chat, and its agent's line: nothing to keep. The first task, at work, is no waiting one
+    w.chat.messages = [{ who: 'you', text: `${b.title}\n\nAdd b.txt.` }, { who: 'agent', text: 'I have the brief and wait.' }]
+    expect((await w.engine.parkable()).map((x) => [x.t.id, x.keep])).toEqual([[b.id, undefined]])
+    // what keeps it as it is: your words to it beyond its brief, an agent past a few replies, its agent at work, work in
+    // its worktree
+    w.chat.messages.push({ who: 'you', text: 'Use the new names.' })
+    expect((await w.engine.parkable())[0].keep).toBe('a message of yours to it beyond its brief')
+    w.chat.messages.pop()
+    w.chat.messages.push(...Array.from({ length: 4 }, () => ({ who: 'agent', text: 'Still waiting.' })))
+    expect((await w.engine.parkable())[0].keep).toBe('its agent replied 5 times: it may have begun')
+    w.chat.messages.splice(2)
+    w.agentIs(bkey, 'working')
+    expect((await w.engine.parkable())[0].keep).toBe('its agent is at work')
+    w.agentIs(bkey, 'idle')
+    writeFileSync(join(wt, 'draft.txt'), 'draft\n')
+    expect((await w.engine.parkable())[0].keep).toContain('uncommitted changes')
+    expect(await w.engine.park()).toEqual({ parked: [], kept: [expect.stringContaining(`${b.id}: `)] })
+    sh('rm draft.txt', wt)
+    // another agent's note is no reason to keep it: it goes into its brief
+    w.chat.messages.push({ who: 'peer', text: 'Not a go: rebase on main first when it comes.', peer: { name: 'WEB-9 agent' } } as never)
+    expect((await w.engine.parkable())[0]).toMatchObject({ notes: ['WEB-9 agent: Not a go: rebase on main first when it comes.'] })
+    expect((await w.engine.parkable())[0].keep).toBeUndefined()
+    // parked: its agent closes and is forgotten, its worktree and branch go, and it waits as one added now
+    expect(await w.engine.park([b.id.toLowerCase()])).toEqual({ parked: [b.id], kept: [] })
+    expect(b.desc).toContain('Written to this task while it waited:\n\nWEB-9 agent: Not a go: rebase on main first when it comes.\n\nSettings:')
+    expect(existsSync(wt)).toBe(false)
+    expect(sh(`git branch --list ${branch}`, dir)).toBe('')
+    expect([b.worktree, b.branch]).toEqual([undefined, undefined])
+    expect(w.forgot).toContain(bkey)
+    expect(w.engine.statusOf(b)).toBe('queued')
+    expect(w.engine.subOf(b)).toBe(`After ${a.t.id}`)
+    expect(await w.engine.parkable()).toEqual([])
+    // its turn: a new worktree and agent, on its brief, with the go
+    const starts = w.started.filter((s) => s.key === bkey).length
+    await w.engine.done(a.t.id, 'Nothing to change.')
+    await until(() => w.started.filter((s) => s.key === bkey).length === starts + 1)
+    expect(w.started.at(-1)!.first).toStartWith('Second\n\nAdd b.txt.')
+    expect(w.started.at(-1)!.first).toContain('WEB-9 agent: Not a go')
+    expect(w.started.at(-1)!.first).not.toContain('Queued: this task waits for')
+    expect(w.sent.filter((s) => s.key === bkey).at(-1)!.text).toContain(`Go: ${a.t.id} is done, start now.`)
+    expect(existsSync(b.worktree!)).toBe(true)
   })
 
   test('after a restart: what it waits for is kept and checked again, and a go cut off is sent again', async () => {
@@ -305,7 +369,7 @@ describe('Queued after other tasks', () => {
     expect(() => w.engine.add({ project: p.name, title: 'X', by: 'test', after: ['vm-y:ELA-3'] })).toThrow('no machine called vm-y')
     expect(() => w.engine.add({ project: p.name, title: 'X', by: 'test', after: ['vm-x:ELA-9'] })).toThrow('vm-x has no task ELA-9')
     const t = w.engine.add({ project: p.name, title: 'Use their API', desc: 'Then use it.', by: 'test', after: ['VM-X:ela-3'] })
-    await until(() => w.started.some((s) => s.key === `${t.id}/Agent`))
+    expect(t.worktree).toBeUndefined()
     expect(t.after).toEqual(['vm-x:ELA-3'])
     expect(w.engine.subOf(t)).toBe('After vm-x:ELA-3')
     // that machine can't be reached: it keeps waiting, and says so

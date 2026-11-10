@@ -273,6 +273,20 @@ describe.if(perl)('session-owned command routing', () => {
   })
 })
 
+describe('a long answer through a pipe', () => {
+  test('comes out whole, and its exit code with it (process.exit after the write cut it at 8 or 16 KB)', async () => {
+    const big = 'x'.repeat(200_000) + '\n'
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json({ out: big, code: 3 }) })
+    try {
+      const env = { SHEPHERDR_URL: `http://127.0.0.1:${server.port}` }
+      // a shell pipe, as `shepherdr task list --json | jq` and the bridges' subprocess calls read it
+      const r = await run(['sh', '-c', `"${process.execPath}" "${join(root, 'server', 'cli.ts')}" task list --json | wc -c`], env)
+      expect(r.out.trim()).toBe(String(big.length))
+      expect((await run([process.execPath, join(root, 'server', 'cli.ts'), 'task', 'list', '--json'], env)).code).toBe(3)
+    } finally { server.stop(true) }
+  })
+})
+
 describe('who a task tell comes from', () => {
   test("the command says which chat and pane its shell runs in, so the message reaches the task as that agent's", async () => {
     const bodies: { args?: string[]; chat?: string; pane?: string }[] = []
