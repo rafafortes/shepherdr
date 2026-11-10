@@ -20,6 +20,16 @@ The operator's fork, used on their desktop since 2026-11-04 (herdr installs the 
 - **Upstream intake.** How we watch upstream and what a change must keep (the terminal plugin, our login, pi task
   agents, polylog-bridge's commands) before it comes in: [docs/upstream.md](docs/upstream.md), each improvement since
   v2.0.0 weighed in [docs/upstream-ledger.md](docs/upstream-ledger.md).
+- **Look upstream first (the operator's rule, 2026-11-10).** Before you fix a problem or build a feature — a task's
+  agent, its reviewer, the coordinator writing a brief, anyone working here — find out whether upstream already solved
+  it or offers what we are after. `git fetch upstream main v2.0 --tags`, then search both lines' code and history
+  (`git grep -n '<words>' upstream/main`, the same on `upstream/v2.0`, `git log upstream/main -i --grep '<words>'`), its
+  public issues and pull requests, read only (`gh issue list -R eliasstravik/shepherdr --state all --search '<words>'`,
+  the same with `gh pr list`), and what [docs/upstream-ledger.md](docs/upstream-ledger.md) already weighed. Upstream's
+  3.x is a rewrite (`core/`, `mods/`, a Python `herdr-task`): its code rarely ports as it is, but its design often
+  answers the same problem, so port the idea to 2.0's code when it fits what we keep (above). Say what you found in
+  your summary and `--facts`: the upstream commit or issue and what it does, ported or not fit because of what, or
+  "upstream: nothing for this"; an upstream improvement taken or turned down gets its line in the ledger.
 - **Releases.** A tag `v2.0.<n>` on `herdr-tui`, only with the operator's yes (as below); `package.json` and
   `herdr-plugin.toml` carry the same version. The desktop moves to it with
   `herdr plugin install rafafortes/shepherdr --ref <tag> --yes`, then the plugin's start action swaps the running
