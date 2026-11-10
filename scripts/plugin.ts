@@ -2,9 +2,11 @@
 // share. herdr's startup hooks are one-shot, so start detaches a small supervisor that runs the server, and rebuilds
 // and restarts it within seconds whenever the checkout moves to a new commit or the plugin list file changes. A herdr
 // plugin update builds the new version in a new folder and starts nothing: the next start (herdr's, or the open
-// action) finds the old one answering from another folder or version, and swaps it for this one.
+// action) finds the old one answering from another folder or version — or holding the port while too busy to answer in
+// time, its supervisor then known by its command line — and swaps it for this one.
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { takeOver } from './take-over.ts'
@@ -28,13 +30,31 @@ function pid(): number | null {
   }
 }
 
+/** something answers on the port: any reply counts, to the cheapest question (a snapshot can take seconds on a large
+ *  machine, and a server at work on one answers nothing else meanwhile) */
 async function answering() {
   try {
-    const r = await fetch(`http://127.0.0.1:${PORT}/api/snapshot`, { signal: AbortSignal.timeout(1500) })
-    return r.ok
+    await fetch(`http://127.0.0.1:${PORT}/api/version`, { signal: AbortSignal.timeout(1500) })
+    return true
   } catch {
     return false
   }
+}
+
+/** something holds the port, answering or not: a server too busy to answer in time still holds it, and a second one
+ *  started beside it could never listen there */
+function portTaken(): Promise<boolean> {
+  return new Promise((done) => {
+    const probe = createServer()
+    probe.once('error', () => done(true))
+    probe.listen(PORT, '127.0.0.1', () => probe.close(() => done(false)))
+  })
+}
+
+/** the checkout a supervisor runs from, read from its command line (that checkout's scripts/supervise.ts) */
+function supervisorRoot(p: number): string | undefined {
+  const ps = spawnSync('ps', ['-o', 'args=', '-p', String(p)], { encoding: 'utf8' })
+  return ps.status === 0 ? ps.stdout.match(/(\S+)\/scripts\/supervise\.ts/)?.[1] : undefined
 }
 
 /** which Shepherdr answers (none: an older one that doesn't say) */
@@ -55,16 +75,23 @@ const real = (p: string) => {
   }
 }
 
-/** stop a supervisor with the server it runs (its process group), and wait until the port is free */
+/** stop a supervisor with the server it runs (its process group), and wait until the port is free: a server that is
+ *  still finishing what it does gets 20 seconds, then is stopped at once */
 async function kill(p: number) {
-  try {
-    process.kill(-p, 'SIGTERM')
-  } catch {
+  const signal = (sig: NodeJS.Signals) => {
     try {
-      process.kill(p, 'SIGTERM')
-    } catch {}
+      process.kill(-p, sig)
+    } catch {
+      try {
+        process.kill(p, sig)
+      } catch {}
+    }
   }
-  for (let i = 0; i < 40 && (await answering()); i++) await Bun.sleep(250)
+  signal('SIGTERM')
+  for (let i = 0; i < 80 && (await portTaken()); i++) await Bun.sleep(250)
+  if (!(await portTaken())) return
+  signal('SIGKILL')
+  for (let i = 0; i < 20 && (await portTaken()); i++) await Bun.sleep(250)
 }
 
 async function start(): Promise<boolean> {
@@ -85,6 +112,22 @@ async function start(): Promise<boolean> {
     }
     console.log(`Shepherdr ${r.version} is running from ${r.root}: restarting it on ${VERSION} from ${ROOT}`)
     replace = r
+  } else if (await portTaken()) {
+    // the port is held by a server too busy to answer in time (a long snapshot blocks it), not by none: taken for none,
+    // a second supervisor would start beside it and never listen. The one this plugin started last is swapped when it
+    // runs another checkout, and left alone when it runs this one
+    const sup = pid()
+    const root = sup ? supervisorRoot(sup) : undefined
+    if (!sup || !root) {
+      console.error(`Port ${PORT} is held by something that doesn't answer, and not by a Shepherdr this plugin started; see ${LOG}`)
+      return false
+    }
+    if (real(root) === real(ROOT)) {
+      console.log(`Shepherdr is running on http://127.0.0.1:${PORT} (busy: it didn't answer in time)`)
+      return true
+    }
+    console.log(`Shepherdr from ${root} holds the port without answering in time: restarting it on ${VERSION} from ${ROOT}`)
+    replace = { root, version: 'that doesn\'t answer', supervisor: sup }
   }
   const error = await prepare(ROOT)
   if (error) {
@@ -93,7 +136,7 @@ async function start(): Promise<boolean> {
   }
   if (replace) {
     await kill(replace.supervisor!)
-    if (await answering()) {
+    if (await portTaken()) {
       console.log(`Shepherdr ${replace.version} did not stop; see ${LOG}`)
       return false
     }
