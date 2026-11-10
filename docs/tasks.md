@@ -99,8 +99,8 @@
   the task's own agent reviewing, so a reviewer that is out of allowance would leave that agent stuck at the review.
   Settings → How tasks work → Reviewer → Backup reviewer (`reviewer.fallback`, off until set, with
   `reviewer.fallbackModel` and `reviewer.fallbackEffort`) makes the brief's Reviewer line name it: "If that reviewer
-  cannot run at all (out of allowance, signed out, its model is gone), review with … instead and say in your summary
-  that you did." The task's agent runs it as it runs the reviewer, as `<task-id>/Reviewer`, and counts that round like
+  cannot run at all (out of allowance, signed out, its model is gone), review with … instead for that round only, and
+  say in your summary that you did; every round asks that reviewer first again." The task's agent runs it as it runs the reviewer, as `<task-id>/Reviewer`, and counts that round like
   any other (`shepherdr review <id>`); nothing else about a review changes, and it is never a second opinion after
   findings. Set Everywhere, for a machine, for a space or by its coordinator for one task (`task add --set
   reviewer.fallback=pi`), the most specific winning; with none set, or with Review off, the line reads exactly as it
@@ -110,8 +110,9 @@
   `error` event, and `checkCut` needs the agent's record), and a reviewer is no such agent — headless, it is a shell
   the task's agent runs, whose log `activity.ts` reads for steps and turns only, and a subagent is background work of
   it. A nudge would rest on a guess, and a wrong one would send an agent to its backup reviewer over a normal finding.
-  The brief's words are the trigger. Each review asks the primary reviewer first, so a reviewer goes back by itself as
-  soon as its primary answers; with **tell me** (below), Shepherdr also asks the primary reviewer whether it answers
+  The brief's words are the trigger, and they are the way back too: every round asks the primary reviewer first
+  again, so a reviewer goes back by itself as soon as its primary answers (a task already running keeps the reviewer
+  its own brief named); with **tell me** (below), Shepherdr also asks the primary reviewer whether it answers
   again while a backup reviewer is set, and says so ([settings](settings.md#when-the-primary-is-back)).
 - **Going back.** Once the primary answers again, each agent still on a backup starts again on what Settings name, when
   it is idle — never mid-turn, never a paused task, never one asking you something — with a card in its chat, and its

@@ -1094,7 +1094,7 @@ describe('the brief\'s default way of working', () => {
   test('with a backup reviewer the same line says who reviews instead, where that reviewer cannot run at all', () => {
     const block = settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: 'high' }, fallback: { kind: 'claude', model: 'opus', effort: 'high' } })
     expect(block).toContain(
-      '- Reviewer: a headless pi or a pi subagent (model openai/gpt-5.5, high effort). If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (model opus, high effort) instead and say in your summary that you did.',
+      '- Reviewer: a headless pi or a pi subagent (model openai/gpt-5.5, high effort). If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (model opus, high effort) instead for that round only, and say in your summary that you did; every round asks that reviewer first again.',
     )
     // one line, still: the finding of a review, what to fix and the rounds are untouched
     expect(block.split('\n').find((l) => l.startsWith('- Reviewer'))).not.toContain('\n')
