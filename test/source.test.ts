@@ -2264,6 +2264,32 @@ describe('artifacts from the command', () => {
     expect(src.snapshot().artifacts.find((a) => a.id === id)!.keeper).toBe('kept')
   })
 
+  test("one snapshot builds the places list once, however many artifacts name their keeper by it", async () => {
+    src.checker = ok
+    // kept by the coordinator: each one's keeper is a place, named from the places list
+    const { t } = await workedTask('many-kept')
+    await src.cli(['merge', t.id], {})
+    for (let i = 0; i < 5; i++) await src.cli(['artifact', 'new', 'board.html', '--title', `Kept ${i}`], { chat: `${t.id}/Agent`, cwd: files })
+    // each build of the list reads every coordinator's restart hint: once per artifact was seconds on a real machine
+    const side = src as unknown as { listed(): unknown }
+    const build = side.listed
+    let built = 0
+    side.listed = function (this: unknown) {
+      built++
+      return build.call(this)
+    }
+    try {
+      const keepers = src.snapshot().artifacts.filter((a) => a.title.startsWith('Kept ')).map((a) => a.keeper)
+      expect(keepers).toEqual(Array(5).fill('many-kept'))
+      expect(built).toBe(1)
+      // outside a snapshot, a name is read from a list built for it, as before
+      expect(src.chatName(t.project)).toBe('many-kept')
+      expect(built).toBe(2)
+    } finally {
+      side.listed = build
+    }
+  })
+
   test('render and preview are gone and say what replaced them', async () => {
     for (const c of ['render', 'preview']) {
       const r = await src.cli([c, 'board.html'], { cwd: files })

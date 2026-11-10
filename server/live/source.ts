@@ -415,8 +415,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   private placeList(): Place[] {
-    return this.listed().places
+    return this.placesNow ?? this.listed().places
   }
+
+  /** the places list of the snapshot being made (snapshot() is synchronous): the names it reads by the hundred — one
+   *  per artifact, need and chat — come from that one list instead of each building it again, restart hints and all */
+  private placesNow?: Place[]
 
   /** every space and every machine, as the sidebar shows them: this machine's, then the others' as they last showed
    *  themselves (just after a start, while they connect, as before it), the names the human gave them, in their order */
@@ -541,56 +545,61 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   snapshot(): Snapshot {
     const { places, machines, sections } = this.listed()
-    const peers = this.peers?.list() ?? []
-    const automations: Snapshot['automations'] = Object.fromEntries(places.map((p) => [p.id, this.automations.view(p.id, this.settings.zone())]))
-    const asks = this.asks()
-    const needs = [...this.needs(), ...peers.flatMap((l) => l.snap?.needs ?? [])].sort((a, b) => a.at - b.at)
-    // the same needs by chat, for plugins and older machines that read the field it replaced
-    const attentionRequests: Record<string, string[]> = {}
-    for (const n of needs) (attentionRequests[n.chat] ??= []).push(n.id)
-    for (const l of peers) {
-      Object.assign(automations, l.snap?.automations ?? {})
-      Object.assign(asks, l.snap?.asks ?? {})
-    }
-    return this.withSecrets({
-      name: 'Shepherdr',
-      host: HOST,
-      places,
-      machines,
-      tasks: [
-        ...this.engine.tasks
-          .filter((t) => this.places.space(t.project))
-          .map((t) => ({ ...this.engine.view(t), ...(this.browsers && !ended(t) ? { browser: t.stopped ? STOPPED : this.browsers.status() } : {}) })),
-        ...peers.flatMap((l) => l.snap?.tasks ?? []),
-      ],
-      automations,
-      artifacts: [...Object.values(this.artifacts.list).map((a) => this.artifactView(a)), ...peers.flatMap((l) => l.snap?.artifacts ?? [])].sort((a, b) => b.at - a.at),
-      asks,
-      needs,
-      attentionRequests,
-      last: Object.assign({}, ...peers.map((l) => l.snap?.last ?? {}), this.unread.last),
-      read: this.unread.read,
-      sections,
-      settings: this.settings.sections(
-        this.devices(),
-        [
-          { name: NAME, state: `${BOX ? `Run from the main machine over SSH (${BOX.target})` : 'Main'} · ${this.agents.reachable ? 'reachable' : 'herdr not answering'}` },
-          ...(this.peers?.rows() ?? []),
+    this.placesNow = places
+    try {
+      const peers = this.peers?.list() ?? []
+      const automations: Snapshot['automations'] = Object.fromEntries(places.map((p) => [p.id, this.automations.view(p.id, this.settings.zone())]))
+      const asks = this.asks()
+      const needs = [...this.needs(), ...peers.flatMap((l) => l.snap?.needs ?? [])].sort((a, b) => a.at - b.at)
+      // the same needs by chat, for plugins and older machines that read the field it replaced
+      const attentionRequests: Record<string, string[]> = {}
+      for (const n of needs) (attentionRequests[n.chat] ??= []).push(n.id)
+      for (const l of peers) {
+        Object.assign(automations, l.snap?.automations ?? {})
+        Object.assign(asks, l.snap?.asks ?? {})
+      }
+      return this.withSecrets({
+        name: 'Shepherdr',
+        host: HOST,
+        places,
+        machines,
+        tasks: [
+          ...this.engine.tasks
+            .filter((t) => this.places.space(t.project))
+            .map((t) => ({ ...this.engine.view(t), ...(this.browsers && !ended(t) ? { browser: t.stopped ? STOPPED : this.browsers.status() } : {}) })),
+          ...peers.flatMap((l) => l.snap?.tasks ?? []),
         ],
-        pluginSection(),
-        HOST,
-        ['~', ...this.places.spaces.map((p) => p.name)],
-        NAME,
-        (id) => this.heartbeats.read(id, this.roleOf(id)),
-        this.pushWarnings(),
-      ).concat(this.places.spaces.map((p) => {
-        const id = placeId.space(p.name)
-        this.engine.taskIds.ensure(id, p.key)
-        const seq = this.engine.taskIds.get(id)
-        return taskIdsSection(id, HOST, seq.prefix, seq.last + 1)
-      })).concat(this.places.spaces.map((p) => repositorySection(placeId.space(p.name), HOST, p.base))).concat(peers.flatMap((l) => (l.snap?.settings ?? []).filter((x) => x.machine === l.rec.machine))),
-      user: this.user,
-    })
+        automations,
+        artifacts: [...Object.values(this.artifacts.list).map((a) => this.artifactView(a)), ...peers.flatMap((l) => l.snap?.artifacts ?? [])].sort((a, b) => b.at - a.at),
+        asks,
+        needs,
+        attentionRequests,
+        last: Object.assign({}, ...peers.map((l) => l.snap?.last ?? {}), this.unread.last),
+        read: this.unread.read,
+        sections,
+        settings: this.settings.sections(
+          this.devices(),
+          [
+            { name: NAME, state: `${BOX ? `Run from the main machine over SSH (${BOX.target})` : 'Main'} · ${this.agents.reachable ? 'reachable' : 'herdr not answering'}` },
+            ...(this.peers?.rows() ?? []),
+          ],
+          pluginSection(),
+          HOST,
+          ['~', ...this.places.spaces.map((p) => p.name)],
+          NAME,
+          (id) => this.heartbeats.read(id, this.roleOf(id)),
+          this.pushWarnings(),
+        ).concat(this.places.spaces.map((p) => {
+          const id = placeId.space(p.name)
+          this.engine.taskIds.ensure(id, p.key)
+          const seq = this.engine.taskIds.get(id)
+          return taskIdsSection(id, HOST, seq.prefix, seq.last + 1)
+        })).concat(this.places.spaces.map((p) => repositorySection(placeId.space(p.name), HOST, p.base))).concat(peers.flatMap((l) => (l.snap?.settings ?? []).filter((x) => x.machine === l.rec.machine))),
+        user: this.user,
+      })
+    } finally {
+      this.placesNow = undefined
+    }
   }
 
   /** each level's Secrets page, after its other pages: the names kept there, never a value. The main machine's
