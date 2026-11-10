@@ -1195,6 +1195,25 @@ function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard;
         </span>
       </div>
     )
+  // the advisor's note: what it answered and why, whole, never cut to one line; in a space's chat its task's id opens it
+  if (c.aside || c.id.startsWith('advice-note:')) {
+    const task = c.task
+    const text = task && c.text.startsWith(`${task}: `) ? c.text.slice(task.length + 2) : c.text
+    return (
+      <div data-anchor data-advice-note {...press} {...keys} className={clsx(cardBox, 'items-start', className)}>
+        <QuestionIcon className={clsx(ic, 'mt-[3px] shrink-0 text-fg2')} />
+        <span className="min-w-0 text-pretty break-words whitespace-pre-wrap">
+          {task ? (
+            <button type="button" className="font-semibold hover:underline" onClick={() => openTask(task)}>
+              {task}
+            </button>
+          ) : null}
+          {task ? ' ' : ''}
+          {text}
+        </span>
+      </div>
+    )
+  }
   // its agent started again: on what
   if (c.restart)
     return (

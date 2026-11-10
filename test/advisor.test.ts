@@ -267,7 +267,8 @@ describe('by itself, once a question waited', () => {
       // its note closes nothing: the question still waits, in the task's chat and on its needs-you card
       expect(src.snapshot().needs.filter((n) => n.chat === w.key).map((n) => n.question?.id)).toEqual(['ask:h1'])
       // and the space's chat, where that card shows, has the note too
-      expect(cards(w.coord).at(-1)).toBe(`${w.id}: The advisor leaves this to you: Deleting a branch is yours to decide. (pi (opencode-go/deepseek-v4.1-flash))`)
+      const note = src.chats.chat(w.coord).messages.findLast((m) => m.card)!.card!
+      expect(note).toMatchObject({ aside: true, task: w.id, text: 'The advisor leaves this to you: Deleting a branch is yours to decide. (pi (opencode-go/deepseek-v4.1-flash))' })
     } finally {
       w.done()
     }
