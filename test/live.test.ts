@@ -1004,9 +1004,13 @@ describe('settings', () => {
     s.set('brief.review', 'off')
     expect(note()).toContain("- Review: off. No review; the lines on reviewing below don't apply. (your setting for every machine)")
     s.set('brief.review', null)
-    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual(['Tasks', 'Tasks', 'Tasks', 'Coordinators', 'Coordinators', 'Coordinators', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup'])
-    // the last one is the way back from a backup: its agents go back to the primary once it answers again
-    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.at(-1)).toMatchObject({ key: 'backup.watchReturn', label: 'When the primary is back', value: 'go back', options: ['go back', 'tell me', 'off'] })
+    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual(['Tasks', 'Tasks', 'Tasks', 'Coordinators', 'Coordinators', 'Coordinators', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Advisor', 'Advisor', 'Advisor', 'Advisor', 'Advisor', 'Advisor', 'Advisor'])
+    const agents = s.sections([], [], null).find((x) => x.name === 'Agents')!.rows
+    // the way back from a backup: its agents go back to the primary once it answers again
+    expect(agents.find((r) => r.key === 'backup.watchReturn')).toMatchObject({ label: 'When the primary is back', value: 'go back', options: ['go back', 'tell me', 'off'] })
+    // the advisor: off until set, and a question goes to it by itself after two minutes
+    expect(agents.find((r) => r.key === 'advisor.agent')).toMatchObject({ value: 'off', options: ['off', 'Codex', 'Claude Code', 'pi'] })
+    expect(agents.at(-1)).toMatchObject({ key: 'advisor.after', label: 'Answers for you after', value: '2 min' })
   })
 
   test("when the primary is back: on, its only other value before going back by itself came, reads as tell me", () => {

@@ -93,7 +93,7 @@ type Role = 'task' | 'coordinator' | 'reviewer' | 'backup'
  *  own CLI has; or a backup reviewer's (Reviewer → Backup reviewer), its own three so that neither reviewer replaces the
  *  other */
 type Pair = { cli: string; model: string; effort: string }
-type PairName = Role | 'reviewBackup' | 'coordinatorBackup'
+type PairName = Role | 'reviewBackup' | 'coordinatorBackup' | 'advisor' | 'advisorBackup'
 const PAIRS: Record<PairName, Pair> = {
   task: { cli: 'task.agent', model: 'task.model', effort: 'task.effort' },
   coordinator: { cli: 'coordinator.agent', model: 'coordinator.model', effort: 'coordinator.effort' },
@@ -101,7 +101,14 @@ const PAIRS: Record<PairName, Pair> = {
   backup: { cli: 'task.fallback', model: 'backup.model', effort: 'backup.effort' },
   coordinatorBackup: { cli: 'coordinator.fallback', model: 'coordinator.fallbackModel', effort: 'coordinator.fallbackEffort' },
   reviewBackup: { cli: 'reviewer.fallback', model: 'reviewer.fallbackModel', effort: 'reviewer.fallbackEffort' },
+  advisor: { cli: 'advisor.agent', model: 'advisor.model', effort: 'advisor.effort' },
+  advisorBackup: { cli: 'advisor.fallback', model: 'advisor.fallbackModel', effort: 'advisor.fallbackEffort' },
 }
+
+/** the advisor's CLI keys: off (no advisor), or one of the CLIs Shepherdr runs headless */
+const ADVISOR_CLI_KEYS = ['advisor.agent', 'advisor.fallback']
+/** how long a question waits for the human before it goes to the advisor by itself (advisor.after) */
+export const ADVISOR_AFTER = ['off', '1 min', '2 min', '5 min', '10 min', '30 min']
 
 /** the key a backup pair key is read from while it is at default: the coordinators' backup has its own model and effort,
  *  and follows the tasks' pair until the human sets one, so every configuration in use keeps its meaning */
@@ -257,6 +264,16 @@ export const CATALOG: Section[] = [
       // watchReturns, return.ts); go back starts each agent still on the backup again on what Settings name once it is
       // idle, tell me only says so in their chats. A probe is one tiny request of one CLI, never beside work on that model
       { group: 'Backup', label: 'When the primary is back', key: 'backup.watchReturn', value: 'go back', options: ['go back', 'tell me', 'off'], hint: 'Asks the primary model now and then whether it answers again. Go back: each agent still on a backup starts again on it once idle, never mid-turn. Tell me: only says so in their chats. Off: never asks.' },
+      // the advisor: a question a task or a coordinator opens for the human can go to it (Ask the advisor on its card),
+      // and goes by itself once it has waited this long; it answers questions and choices, never a permission, a plan
+      // or what only the human decides (source.ts advise, advisor.ts). One headless run per question, read-only
+      { group: 'Advisor', label: 'Advisor', key: 'advisor.agent', value: 'off', options: ['off', ...REVIEWERS], hint: 'Off: no advisor. Answers the questions tasks and coordinators open for you, when you ask it or once one has waited.' },
+      { group: 'Advisor', label: 'Model', key: 'advisor.model', value: 'default', text: true },
+      { group: 'Advisor', label: 'Effort', key: 'advisor.effort', value: 'default', options: [...EFFORTS] },
+      { group: 'Advisor', label: 'Backup', key: 'advisor.fallback', value: 'off', options: ['off', ...REVIEWERS], hint: 'Answers instead where the advisor cannot run at all.' },
+      { group: 'Advisor', label: 'Backup model', key: 'advisor.fallbackModel', value: 'default', text: true },
+      { group: 'Advisor', label: 'Backup effort', key: 'advisor.fallbackEffort', value: 'default', options: [...EFFORTS] },
+      { group: 'Advisor', label: 'Answers for you after', key: 'advisor.after', value: '2 min', options: [...ADVISOR_AFTER], hint: 'A question nobody answered goes to the advisor by itself after this long. Never a permission, a plan, or what only you decide.' },
     ],
   },
   {
@@ -493,8 +510,8 @@ export class Settings {
       else if (key === 'heartbeat.on') value = eventsText(eventRules(value))
       else if (key === 'time.zone') value = value.trim()
       // a CLI is kept by its name, however it was written
-      else if ((isFallback(key) || key === 'reviewer.fallback') && value.trim().toLowerCase() === 'off') value = 'off'
-      else if (key.endsWith('.agent') || isFallback(key) || key === 'reviewer.fallback') value = CLI_NAME[kindOf(value)!]
+      else if ((isFallback(key) || key === 'reviewer.fallback' || ADVISOR_CLI_KEYS.includes(key)) && value.trim().toLowerCase() === 'off') value = 'off'
+      else if (key.endsWith('.agent') || isFallback(key) || key === 'reviewer.fallback' || ADVISOR_CLI_KEYS.includes(key)) value = CLI_NAME[kindOf(value)!]
     }
     const at = typeof l === 'object' ? (this.d.spaces[l.space] ??= {}) : this.at(l)
     if (value === null) delete at[key]
@@ -700,6 +717,21 @@ export class Settings {
     const get = (key: string) => set[key] ?? this.pick(key, l).value
     const kind = kindOf(get(PAIRS.reviewBackup.cli))
     return kind ? { kind, ...this.modelIn(PAIRS.reviewBackup, kind, l, get) } : undefined
+  }
+
+  /** the advisor's CLI, model and effort for a space (none: this machine), or its backup's; nothing while it is off */
+  advisor(space?: string, backup = false): { kind: string; model?: string; effort?: string } | undefined {
+    const l: Level = space ? { space } : 'machine'
+    const pair = backup ? PAIRS.advisorBackup : PAIRS.advisor
+    const kind = kindOf(this.pick(pair.cli, l).value)
+    return kind ? { kind, ...this.modelIn(pair, kind, l) } : undefined
+  }
+
+  /** how long a question waits for the human before it goes to the advisor by itself, for a space; null: never */
+  advisorAfter(space?: string): number | null {
+    const v = this.pick('advisor.after', space ? { space } : 'machine').value
+    const m = /^(\d+) min$/.exec(v)
+    return m ? Number(m[1]) * 60_000 : null
   }
 
   /** a role's model and effort as its CLI takes them, for a space (none: this machine): one it doesn't have is its
@@ -936,6 +968,8 @@ export function refuse(key: string, value: string): string | undefined {
   if (key === 'reviewer.agent' && !REVIEWERS.includes(CLI_NAME[kindOf(value) ?? ''] ?? '')) return `Pick one of: ${REVIEWERS.join(' · ')}.`
   // a backup reviewer: one of the reviewer CLIs, or off (there is none)
   if (key === 'reviewer.fallback' && value.trim().toLowerCase() !== 'off' && !REVIEWERS.includes(CLI_NAME[kindOf(value) ?? ''] ?? '')) return `Pick one of: off · ${REVIEWERS.join(' · ')}.`
+  // the advisor and its backup: off, or one of the CLIs Shepherdr runs headless
+  if (ADVISOR_CLI_KEYS.includes(key) && value.trim().toLowerCase() !== 'off' && !REVIEWERS.includes(CLI_NAME[kindOf(value) ?? ''] ?? '')) return `Pick one of: off · ${REVIEWERS.join(' · ')}.`
   if (pairOfKey(key)?.what === 'model' && !/^[\w.:/@[\] -]+$/.test(value.trim())) return 'Write a model id like claude-opus-5-5, or default.'
   const num = numOf(key)
   if (key === 'heartbeat.when' || key === 'heartbeat.on') {
@@ -952,7 +986,7 @@ export function refuse(key: string, value: string): string | undefined {
   if (key === 'dictate.language' && !options?.includes(value) && !/^(auto|[a-z]{2,3})$/i.test(value.trim()))
     return 'Pick a language, or write its whisper code (en, pt, es).'
   if (num && numValue(num, value) === undefined) return `Write a number from ${num.min} to ${num.max}${num.step ? '' : ' (whole)'}${num.unit ? `, in ${num.unit}` : ''}${num.off ? ', or off' : num.zero ? ' (0 is off)' : ''}.`
-  if (options && !cli && key !== 'reviewer.agent' && key !== 'reviewer.fallback' && key !== 'alerts' && !isFallback(key) && key !== 'dictate.language' && !options.includes(value)) return `Pick one of: ${options.join(' · ')}.`
+  if (options && !cli && key !== 'reviewer.agent' && key !== 'reviewer.fallback' && !ADVISOR_CLI_KEYS.includes(key) && key !== 'alerts' && !isFallback(key) && key !== 'dictate.language' && !options.includes(value)) return `Pick one of: ${options.join(' · ')}.`
   return undefined
 }
 
