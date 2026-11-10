@@ -89,18 +89,24 @@ export function spans(ns: number[]): string {
   return out.join(', ')
 }
 
+/** how many more missed lines a file may show than at the baseline: none for the server's (Bun counts the same lines
+ *  every run); a little for the screen's, whose browser tests take a branch or two by timing (a card a moment late),
+ *  so the same code reads a few lines up or down from one run to the next */
+export const slack = (f: string, c: FileCount) => (isScreen(f) ? Math.max(3, Math.ceil(c.lines * 0.005)) : 0)
+
 /** what fell since the baseline, one line per file, in words; none: it held */
 export function compare(now: Record<string, FileCount>, base: Baseline): string[] {
   const fell: string[] = []
   for (const [f, c] of Object.entries(now)) {
     const was = base.files[f]
     const lines = (ns: number[]) => `line${ns.length === 1 ? '' : 's'} ${spans(ns).slice(0, 120)}`
+    const leeway = slack(f, c)
     if (!(f in base.files)) {
       if (!c.measured) fell.push(`${f}: a new file no test runs at all`)
-      else if (c.missed.length) fell.push(`${f}: a new file with ${c.missed.length} line${c.missed.length === 1 ? '' : 's'} no test runs (${lines(c.missed)})`)
+      else if (c.missed.length > leeway) fell.push(`${f}: a new file with ${c.missed.length} line${c.missed.length === 1 ? '' : 's'} no test runs (${lines(c.missed)})`)
     } else if (was !== null && was !== undefined) {
       if (!c.measured) fell.push(`${f}: no test runs it any more (it had ${was} line${was === 1 ? '' : 's'} no test ran)`)
-      else if (c.missed.length > was) fell.push(`${f}: ${c.missed.length - was} more line${c.missed.length - was === 1 ? '' : 's'} no test runs (${c.missed.length} now, ${was} at the baseline; ${lines(c.missed)})`)
+      else if (c.missed.length > was + leeway) fell.push(`${f}: ${c.missed.length - was} more line${c.missed.length - was === 1 ? '' : 's'} no test runs (${c.missed.length} now, ${was} at the baseline${leeway ? `, ${leeway} allowed for the screen's run-to-run wobble` : ''}; ${lines(c.missed)})`)
     }
   }
   return fell
@@ -191,7 +197,7 @@ export function main(args: string[], o: { repo?: string; baseline?: string; log?
       log(`\nCoverage fell since the baseline (${base.commit.slice(0, 7)}): ${fell.length} file${fell.length === 1 ? '' : 's'}. Test what you added or changed, or mark a line no test can reach here with a coverage-exempt: comment saying why.`)
       for (const f of fell) log(`  ${f}`)
       code = 1
-    } else log(`Coverage held: no file has a line no test runs that it didn't have at ${base.commit.slice(0, 7)}.`)
+    } else log(`Coverage held: no file has more lines no test runs than at ${base.commit.slice(0, 7)}.`)
   }
   if (rest.includes('--record')) {
     const commit = git(repo, 'rev-parse', 'HEAD')?.trim() ?? ''
