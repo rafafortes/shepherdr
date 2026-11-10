@@ -24,7 +24,7 @@ import { launchesAgents, refusedLaunch } from '../launch-policy.ts'
 import { fromAgentLine } from '../chatlines.ts'
 import type { Chats } from '../chats.ts'
 import { HOST, placeId, type Places, type Space } from '../places.ts'
-import { privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, restartLine, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
+import { privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, wentBackCardWords, restartLine, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { backupModelOf, CLI_NAME, FALLBACK_OF, kindOf, type Settings } from '../settings.ts'
@@ -1508,9 +1508,10 @@ export class Engine extends Emitter<Events> {
    * Its agent started again on this CLI, model and effort (the restart sheet, shepherdr restart). Mid-turn it is
    * interrupted first. The same CLI resumes its session; another takes over with the brief, the branch's commits,
    * what lies uncommitted and the chat's last messages. What you sent meanwhile waits for it; its worktree and branch
-   * stay as they are; a card in its chat marks it.
+   * stay as they are; a card in its chat marks it. back: Shepherdr takes it back to its primary model, which answers
+   * again (return.ts): it is told so, and its backup may go in again the next time that one runs out.
    */
-  async restart(id: string, to: Harness) {
+  async restart(id: string, to: Harness, back = false) {
     const t = this.req(id)
     if (ended(t)) throw new Error(`${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'}): it has no agent to restart.`)
     if (!t.worktree) throw new Error(`${t.id} hasn't started yet: it starts on what its brief says.`)
@@ -1526,16 +1527,18 @@ export class Engine extends Emitter<Events> {
       // what it is told, read once its turn has stopped: what it did meanwhile counts
       const first = async () => {
         await this.agents.stopTurn(key)
-        if (from === h.kind) return hidden(resumedLine(words), 'restart')
-        return hidden(`${taskFirst(t)}\n\n${restartLine({ from: name(from), to: words, ...(await this.soFar(t, key, name(from))) })}`, 'restart')
+        if (from === h.kind) return hidden(resumedLine(words, back), 'restart')
+        return hidden(`${taskFirst(t)}\n\n${restartLine({ from: name(from), to: words, back, ...(await this.soFar(t, key, name(from))) })}`, 'restart')
       }
       await this.launch(t, undefined, undefined, { ...h, model: h.model ?? '', effort: h.effort ?? '' }, first)
       // a pause or a stop is over: it carries on
       t.stopped = undefined
       t.paused = undefined
       t.agent = h
+      // back on its primary: the backup's one go is given back, for the next time that one runs out
+      if (back) t.tookOver = undefined
       const card = `restart:${t.id}:${Date.now()}`
-      this.chats.post(key, { id: card, card: { id: card, restart: true, text: `Restarted on ${words}` } })
+      this.chats.post(key, { id: card, card: { id: card, restart: true, text: back ? wentBackCardWords(words) : `Restarted on ${words}` } })
     } finally {
       this.handing.delete(t.id)
       this.save()

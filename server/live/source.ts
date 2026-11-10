@@ -42,9 +42,9 @@ import { claudeProjectDir, piSessionDir } from './readers/find.ts'
 import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
-import { privatePrompt, coordinatorPrompt, backupCardWords, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
+import { privatePrompt, coordinatorPrompt, backupCardWords, wentBackCardWords, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
 import { fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
-import { backCard, canProbe, Returns, type Outage, type Probe } from './return.ts'
+import { backCard, canProbe, FRESH, returnMode, Returns, type Outage, type Probe } from './return.ts'
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
@@ -115,10 +115,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     },
   })
   /** the primary models of the roles whose agents a backup took over: asked now and then whether they answer again
-   *  (Settings → Agents → Backup → Tell me when it is back; return.ts) */
+   *  (Settings → Agents → Backup → When the primary is back; return.ts) */
   returns = new Returns()
-  /** one probe runs at a time, and none beside real work */
-  private probing = false
+  /** one pass of the way back at a time (watchReturns): its probes, and the restarts that take agents back */
+  private returning = false
   /** this machine's load, memory, disks and herdr, sampled every 30 seconds; its coordinator hears when one is past
    *  its limit (Settings → the machine). Tests never measure the machine they run on: they tick it themselves */
   health = new Monitor(
@@ -289,7 +289,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.timers.push(setInterval(() => Object.keys(this.agents.records).forEach((k) => this.agents.status(k) !== 'gone' && this.fresh(k)), 5000))
     this.timers.push(setInterval(() => this.runSchedules(), 60_000))
     // whether a primary that ran out answers again: never at boot, the first look ten minutes after this machine
-    // started, and every minute after that; never beside real work (watchReturns)
+    // started, and every minute after that; never beside work on the model it asks (watchReturns)
     if (process.env.NODE_ENV !== 'test')
       this.timers.push(
         setTimeout(() => {
@@ -1063,8 +1063,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** a coordinator started again on this CLI, model and effort: the same CLI resumes its session, another takes over
    *  with its role's prompt and the chat's last words. Its tasks go on as they are; a card in its chat marks it. A
-   *  backup's own start (`backup`: the reason its agent can't go on) says so in the card and in what it is told */
-  private async restartCoordinator(id: string, to: Harness, backup?: string) {
+   *  backup's own start (`backup`: the reason its agent can't go on) says so in the card and in what it is told, and so
+   *  does one going back to its primary model, which answers again (`back`, return.ts) */
+  private async restartCoordinator(id: string, to: Harness, backup?: string, back = false) {
     if (!this.places.coordinator(id)) throw new Error(`No place ${id}`)
     if (!this.engine.installed(to.kind)) throw new Error(`${CLI_NAME[to.kind] ?? to.kind} isn't installed on this machine.`)
     const h = fitHarness(to)
@@ -1079,11 +1080,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (from === h.kind) return hidden(backupKeptLine({ on: words, why: backup }), 'restart')
         return hidden(coordinatorHandOverLine({ from: them, why: backup, tasks: this.openTasks(id), chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
       }
-      return from === h.kind ? hidden(resumedLine(words), 'restart') : hidden(restartLine({ from: them, to: words, chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
+      return from === h.kind ? hidden(resumedLine(words, back), 'restart') : hidden(restartLine({ from: them, to: words, back, chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
     }
     await this.coordinator(id, { as: h, restart: first })
     const card = `${backup ? 'takeover' : 'restart'}:${id}:${Date.now()}`
-    const text = backup ? backupCardWords({ from: them, to: CLI_NAME[h.kind] ?? h.kind, words, same: from === h.kind, why: backup }) : `Restarted on ${words}`
+    const text = backup ? backupCardWords({ from: them, to: CLI_NAME[h.kind] ?? h.kind, words, same: from === h.kind, why: backup }) : back ? wentBackCardWords(words) : `Restarted on ${words}`
     this.chats.post(id, { id: card, card: { id: card, restart: true, text } })
     if (this.watched.includes(id)) this.emit('chat', id)
     return words
@@ -1168,8 +1169,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** start a coordinator or a task's agent again, on Settings' CLI, model and effort or these; save: as its space's
-   *  Settings too */
-  private async restart(key: string, to: Partial<Harness>, save = false) {
+   *  Settings too; back: Shepherdr takes it back to its primary, which answers again (return.ts), not the human */
+  private async restart(key: string, to: Partial<Harness>, save = false, back = false) {
     const x = this.restartable(key)
     const requested = { ...x.want, ...to, kind: to.kind ?? x.want.kind }
     const problem = harnessProblem(requested)
@@ -1188,12 +1189,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           this.settingChanged(`${x.role}.${k}`)
         }
     }
-    const words = x.t ? await this.engine.restart(x.t.id, h) : await this.restartCoordinator(key, h)
-    // you started it again yourself: a backup may go in once more the next time it can't go on (a task keeps its own)
+    const words = x.t ? await this.engine.restart(x.t.id, h, back) : await this.restartCoordinator(key, h, undefined, back)
+    // you started it again yourself, or it went back to its primary: a backup may go in once more the next time it
+    // can't go on (a task keeps its own, unless it went back: engine.ts restart)
     if (!x.t) this.agents.markTookOver(key, undefined)
     // the model it now runs on is one of the human's picks: first among the recent ones (only one a CLI lists, never
-    // a word typed before its list was read)
-    const picked = h.model ? findModel(h.kind, h.model) : undefined
+    // a word typed before its list was read). Going back to its primary is no pick of theirs
+    const picked = h.model && !back ? findModel(h.kind, h.model) : undefined
     if (picked) rememberModel(h.kind, picked.id)
     this.emit('snapshot')
     this.emit('chat', key)
@@ -1444,54 +1446,120 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /* ---------- when the primary model is back ---------- */
 
   /**
-   * Settings → Agents → Backup → Tell me when it is back: the model a backup took over from is asked now and then
-   * whether it answers again, and one card in each chat still on the backup says so, with the way back named — never a switch
-   * (return.ts). A probe runs only while nothing on this machine works, one at a time, and its failures only lengthen
-   * the wait: no card, no alert, nothing of its words anywhere.
+   * Settings → Agents → Backup → When the primary is back: the model a backup took over from is asked now and then
+   * whether it answers again (return.ts). Go back: each agent still on the backup starts again on what Settings name,
+   * once it is idle — never mid-turn, never a paused task, never one asking you something — and the ones still busy
+   * follow on later passes while the answer is fresh. Tell me: one card in each of those chats says so, with the way
+   * back named, and nothing switches. A probe never runs beside work on the model it asks, one at a time, and its
+   * failures only lengthen the wait: no card, no alert, nothing of its words anywhere.
    */
   async watchReturns(now = Date.now()) {
-    if (this.probing || this.working()) return
+    // a pass still at it (a probe, or an agent starting again) is the only one: two would start the same agent twice
+    if (this.returning) return
+    this.returning = true
+    try {
+      await this.returnPass(now)
+    } finally {
+      this.returning = false
+    }
+  }
+
+  private async returnPass(now: number) {
     this.noteReviewer(now)
     /** the roles this pass already alerted for: a reviewer set Everywhere is one news, not one per space */
     const alerted = new Set<string>()
     for (const o of this.returns.list()) {
-      if (o.back || (o.due ?? 0) > now) continue
-      if (this.settings.get('backup.watchReturn', o.space || undefined) !== 'on') continue
+      if (o.back) continue
+      const mode = returnMode(this.settings.get('backup.watchReturn', o.space || undefined))
+      if (mode === 'off') continue
       const to = this.backTo(o)
       // nothing of this machine's is on that backup any more: there is nothing to come back to
       if (!to) {
-        this.returns.forget(o.role, o.space)
+        this.returns.over(o.role, o.space, now)
         continue
       }
-      // a CLI this machine doesn't have, or one Shepherdr has no silent one-shot for, is never asked
-      if (!canProbe(to.primary.kind) || !this.engine.installed(to.primary.kind)) continue
-      // somebody may have begun working while the role before this one was asked
-      if (this.working()) return
-      let probe: Probe
-      this.probing = true
-      try {
-        probe = await this.returns.probe(to.primary)
-      } catch (e) {
-        probe = { ok: false, said: (e as Error).message }
-      } finally {
-        this.probing = false
+      // a reviewer has nothing to move (every review asks the primary reviewer first), and a role that went back by
+      // itself too often today waits for the human: both only hear
+      const often = this.returns.tooOften(o, now)
+      const moves = mode === 'go back' && o.role !== 'reviewer' && !often
+      // the primary answered a moment ago: what is still on the backup follows, without asking it again
+      if (!(moves && o.ok && now - o.ok < FRESH)) {
+        if ((o.due ?? 0) > now) continue
+        // a CLI this machine doesn't have, or one Shepherdr has no silent one-shot for, is never asked
+        if (!canProbe(to.primary.kind) || !this.engine.installed(to.primary.kind)) continue
+        // somebody works on that very model: a probe never queues beside real work on it (a local model takes one
+        // request at a time); work on other models goes on beside it
+        if (this.busyOn(to.primary)) continue
+        let probe: Probe
+        try {
+          probe = await this.returns.probe(to.primary)
+        } catch (e) {
+          probe = { ok: false, said: (e as Error).message }
+        }
+        // its failure is silent for the human — no card, no alert, nothing to answer — and leaves only the log and a
+        // longer wait
+        if (!probe.ok) {
+          console.error(`shepherdr: ${to.primary.kind} doesn't answer yet: ${probe.said.slice(0, 160)}`)
+          this.returns.failed(o.role, o.space, now)
+          continue
+        }
+        this.returns.ok(o.role, o.space, now)
       }
-      // its failure is silent for the human — no card, no alert, nothing to answer — and leaves only the log and a
-      // longer wait
-      if (!probe.ok) {
-        console.error(`shepherdr: ${to.primary.kind} doesn't answer yet: ${probe.said.slice(0, 160)}`)
-        this.returns.failed(o.role, o.space, now)
+      if (!moves) {
+        this.returns.answered(o.role, o.space, now)
+        this.sayBack(o, to, !alerted.has(o.role), often)
+        alerted.add(o.role)
         continue
       }
-      this.returns.answered(o.role, o.space, now)
-      this.sayBack(o, to, !alerted.has(o.role))
-      alerted.add(o.role)
+      const moved = await this.goBack(to.chats)
+      if (!moved.length) continue
+      // one alert per return: the chats that follow on later passes go back quietly, their cards only
+      const first = !o.went
+      this.returns.wentBack(o.role, o.space, now)
+      // every chat went back: it is over (a later pass finds none left either, and says nothing)
+      if (moved.length === to.chats.length) this.returns.answered(o.role, o.space, now)
+      if (first && !alerted.has(o.role)) {
+        alerted.add(o.role)
+        const names = moved.map((k) => this.chatName(k))
+        this.alert({ id: randomUUID(), from: 'Shepherdr', title: 'Back on the primary model', body: `${harnessWords(to.primary)} answers again: ${names.join(', ')} went back to it from the backup.`.slice(0, 200), go: { place: moved[0] }, tag: `back:${o.role}:${o.space}:${o.at}`, ...(moved[0].includes('/') ? { task: true as const } : {}) })
+      }
     }
   }
 
-  /** somebody on this machine works now: a probe waits for its turn, it never runs beside real work */
-  private working() {
-    return Object.keys(this.agents.records).some((k) => this.agents.status(k) === 'working')
+  /** Each chat still on a backup whose agent is idle now starts again on its primary, which answers again: the ones at
+   *  work, asking you something, paused or already starting again wait for a later pass. The keys that went back. */
+  private async goBack(chats: { key: string; task?: string }[]) {
+    const moved: string[] = []
+    for (const c of chats) {
+      const st = this.agents.status(c.key)
+      // between turns, with nothing of its own still running: what a restart would cut short waits
+      if ((st !== 'idle' && st !== 'done') || this.agents.background(c.key)) continue
+      // a try of its own still due, or what it asks you (a question, a plan or a choice, a start stopped on a screen of
+      // its own): yours to answer on the agent that asked
+      const r = this.retries.get(c.key)
+      if ((r && !r.over) || this.chats.openQuestion(c.key) || this.chats.openCard(c.key) || this.chats.startMenuUp(c.key)) continue
+      if (c.task) {
+        const t = this.engine.task(c.task)
+        // a pause is yours to end (a restart would end it), and a start that went wrong yours to look at
+        if (!t || t.paused || t.trouble) continue
+      }
+      try {
+        await this.restart(c.key, {}, false, true)
+        moved.push(c.key)
+      } catch (e) {
+        console.error(`shepherdr: couldn't take ${c.key} back to its primary model: ${(e as Error).message}`)
+      }
+    }
+    return moved
+  }
+
+  /** somebody on this machine works on that model now (whatever its effort): a probe of it waits for its turn */
+  private busyOn(h: Harness) {
+    const model = { kind: h.kind, model: h.model }
+    return Object.keys(this.agents.records).some((k) => {
+      const r = this.agents.record(k)
+      return !!r && this.agents.status(k) === 'working' && sameHarness({ kind: r.kind, model: r.model }, model)
+    })
   }
 
   /**
@@ -1503,9 +1571,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     for (const p of this.places.spaces) {
       const primary = this.settings.harness('reviewer', p.name)
       const backup = this.settings.reviewerBackup(p.name)
-      // nothing while the human set the watch off, or when there is nothing to come back to
+      // nothing while the human set the watch to go back or off: going back, a reviewer has nothing to move (every
+      // review asks the primary reviewer first), so only tell me asks about it
       const worth =
-        this.settings.get('backup.watchReturn', p.name) === 'on' && !!backup && this.settings.ways(p.name).review && !sameHarness(primary, backup) && canProbe(primary.kind)
+        returnMode(this.settings.get('backup.watchReturn', p.name)) === 'tell me' && !!backup && this.settings.ways(p.name).review && !sameHarness(primary, backup) && canProbe(primary.kind)
       const had = this.returns.get('reviewer', p.name)
       if (!worth) {
         if (had) this.returns.forget('reviewer', p.name)
@@ -1550,12 +1619,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return chats.length ? { primary, chats } : undefined
   }
 
-  /** its primary answered: one card in each chat still on the backup, and an alert; the card names the way back */
-  private sayBack(o: Outage, to: { primary: Harness; chats: { key: string; task?: string }[] }, alert = true) {
+  /** its primary answered: one card in each chat still on the backup, and an alert; the card names the way back. often:
+   *  it went back by itself as often as it may today, so this time it is the human's */
+  private sayBack(o: Outage, to: { primary: Harness; chats: { key: string; task?: string }[] }, alert = true, often = false) {
     const id = `back:${o.role}:${o.space}:${o.at}`
     // the name the space shows ('~' is a home space), which is what the restart command takes too
     const shown = this.places.nameOf(o.space === '~' ? placeId.home() : placeId.space(o.space)) ?? o.space
-    const words = (c: { task?: string }) => backCard({ role: o.role, primary: to.primary, to: o.to, task: c.task, space: shown })
+    const words = (c: { task?: string }) => backCard({ role: o.role, primary: to.primary, to: o.to, task: c.task, space: shown, often })
     for (const c of to.chats) {
       const text = words(c)
       this.chats.post(c.key, { id, card: { id, text } })

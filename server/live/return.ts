@@ -1,9 +1,9 @@
 // A model's provider can run out for good: out of allowance, signed out, a model that is not there, a provider that
-// refuses it. The backup agent takes that role's agent over (engine.ts cantGoOn, source.ts coordinatorCantGoOn) and it
-// stays there: going back was always a manual restart, so nothing ever noticed the primary answering again. This
-// remembers, per role and space, what ran out and what took over, and asks the primary now and then whether it answers:
-// a card in the chats still on the backup, and an alert. Never a switch — no setting is written, no agent restarted, no
-// model chosen on its own.
+// refuses it. The backup agent takes that role's agent over (engine.ts cantGoOn, source.ts coordinatorCantGoOn), and
+// this is the way back: it remembers, per role and space, what ran out and what took over, and asks the primary now and
+// then whether it answers. When it does, each agent still on the backup starts again on what Settings name, once it is
+// idle (Settings → Agents → Backup → When the primary is back: go back), or a card in those chats says so and how to go
+// back (tell me). No setting is ever written and no model chosen on its own: what it goes back to is what Settings name.
 //
 // It is kept across a restart (returns.json, like retries.json) and it is this machine's own: a machine never asks
 // another machine's models, and a CLI Shepherdr has no silent one-shot for is never asked at all.
@@ -15,6 +15,13 @@ import { CLI_NAME } from './settings.ts'
 /** the roles a backup takes over from: a task's agent, a space's coordinator, the reviewer a brief names (whose backup
  *  is the backup reviewer, reviewer.fallback) */
 export type ReturnRole = 'task' | 'coordinator' | 'reviewer'
+
+/** what happens once a primary answers again (backup.watchReturn): its agents go back to it, a card says so, or nothing
+ *  is asked at all */
+export type ReturnMode = 'go back' | 'tell me' | 'off'
+
+/** the setting as stored: 'on' was its only other value before going back by itself came, and meant tell me */
+export const returnMode = (value: string | undefined): ReturnMode => (value === 'off' ? 'off' : value === 'tell me' || value === 'on' ? 'tell me' : 'go back')
 
 /** a role's primary that ran out, and what took its agents over */
 export interface Outage {
@@ -33,6 +40,16 @@ export interface Outage {
   due?: number
   /** the primary answered, when: nothing more is asked or posted for this one */
   back?: number
+  /** the primary answered this probe, when: going back, its chats still busy then follow without asking it again while
+   *  this is fresh */
+  ok?: number
+  /** how many probes it answered: one that keeps answering while a chat can't go back yet (a pause of days) is asked
+   *  again less and less often */
+  oks?: number
+  /** its agents began going back by themselves, when (once per outage) */
+  went?: number
+  /** each time this role and space went back by itself, kept across takeovers for a day: past MAX_RETURNS it only tells */
+  returned?: number[]
 }
 
 /** how long after a takeover its primary is first asked, and how far the wait doubles while it keeps failing */
@@ -40,6 +57,12 @@ export const FIRST_WAIT = 30 * 60_000
 export const LONGEST_WAIT = 4 * 3_600_000
 /** how long one probe may take before it is killed: a provider that answers answers at once */
 export const PROBE_TIMEOUT = 45_000
+/** how long an answer of the primary counts, going back: its chats still busy then follow once idle, unasked */
+export const FRESH = 15 * 60_000
+/** how many times a role and space go back by themselves in a day: a primary that keeps running out again leaves the
+ *  next return to the human (a card says so), never a loop */
+export const MAX_RETURNS = 3
+const DAY = 24 * 3_600_000
 /** a fifth either side of the wait, so two roles rarely fall due together (when they do, the probes are taken one by one) */
 const JITTER = 0.2
 
@@ -180,8 +203,35 @@ export class Returns {
   /** a backup took that role's agent over for a reason waiting can't fix: from now on, until it answers, its primary is
    *  asked now and then whether it is back. A new takeover starts a new count */
   note(o: Pick<Outage, 'role' | 'space' | 'primary' | 'to' | 'why' | 'at'>) {
-    this.data[keyOf(o.role, o.space)] = { ...o, primary: fitHarness(o.primary), to: fitHarness(o.to), tries: 0, due: o.at + wait(0) }
+    // the returns of the day before it stay: a primary that runs out again right after going back counts
+    const returned = (this.get(o.role, o.space)?.returned ?? []).filter((at) => o.at - at < DAY)
+    this.data[keyOf(o.role, o.space)] = { ...o, primary: fitHarness(o.primary), to: fitHarness(o.to), tries: 0, due: o.at + wait(0), ...(returned.length ? { returned } : {}) }
     this.save()
+  }
+
+  /** its provider answered a probe: going back, what is still busy follows while the answer is fresh, and the primary is
+   *  asked again after that — a quarter of an hour, then twice as long each time it answers, up to the longest wait */
+  ok(role: ReturnRole, space: string, at = Date.now()) {
+    const o = this.get(role, space)
+    if (!o) return
+    o.ok = at
+    o.oks = (o.oks ?? 0) + 1
+    o.due = at + Math.min(FRESH * 2 ** (o.oks - 1), LONGEST_WAIT)
+    this.save()
+  }
+
+  /** its agents began going back by themselves: one return of the day, however many chats it took */
+  wentBack(role: ReturnRole, space: string, at = Date.now()) {
+    const o = this.get(role, space)
+    if (!o || o.went) return
+    o.went = at
+    o.returned = [...(o.returned ?? []).filter((x) => at - x < DAY), at]
+    this.save()
+  }
+
+  /** it went back by itself MAX_RETURNS times in the last day and ran out again each time: the human decides now */
+  tooOften(o: Outage, now = Date.now()) {
+    return !o.went && (o.returned ?? []).filter((at) => now - at < DAY).length >= MAX_RETURNS
   }
 
   /** its provider answered: nothing more is asked or posted for it (a new takeover notes it again) */
@@ -190,6 +240,7 @@ export class Returns {
     if (!o) return
     o.back = at
     o.due = undefined
+    o.ok = undefined
     this.save()
   }
 
@@ -209,6 +260,15 @@ export class Returns {
     o.probed = at
     o.due = at + wait(o.tries)
     this.save()
+  }
+
+  /** nothing is on that backup any more: it is over, though a role that went back by itself today keeps its count (as
+   *  answered) for the next takeover to read */
+  over(role: ReturnRole, space: string, at = Date.now()) {
+    const o = this.get(role, space)
+    if (!o) return
+    if ((o.returned ?? []).some((x) => at - x < DAY)) return this.answered(role, space, at)
+    this.forget(role, space)
   }
 
   /** nothing is on that backup any more (or the human set the watch off): there is nothing to come back to */
@@ -236,8 +296,9 @@ export function wait(tries: number, random = Math.random()): number {
  * else. A task and a coordinator go back with a restart; a reviewer, which Shepherdr never starts, with its Settings
  * key. `space` is the space's name, `task` the task's id.
  */
-export function backCard(o: { role: ReturnRole; primary: Harness; to: Harness; task?: string; space?: string }): string {
-  const back = `The primary model answers again: ${harnessWords(o.primary)}.`
+export function backCard(o: { role: ReturnRole; primary: Harness; to: Harness; task?: string; space?: string; often?: boolean }): string {
+  // it went back by itself as often as it may in a day and ran out again each time: this one is the human's
+  const back = `The primary model answers again: ${harnessWords(o.primary)}.${o.often ? ` It went back by itself ${MAX_RETURNS} times today and ran out again each time, so this time it waits for you.` : ''}`
   if (o.role === 'task') return `${back} ${o.task} still runs on its backup (${name(o.to.kind)}): restart it to go back — shepherdr restart ${o.task}, or ⋯ → Restart agent in its chat. Nothing was switched.`
   if (o.role === 'coordinator') return `${back} ${o.space}'s coordinator still runs on its backup (${name(o.to.kind)}): restart it to go back — shepherdr restart ${o.space}, or ⋯ → Restart agent in its chat. Nothing was switched.`
   const model = o.primary.model && o.primary.model !== 'default' ? o.primary.model : 'default'

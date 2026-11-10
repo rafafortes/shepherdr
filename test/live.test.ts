@@ -1005,8 +1005,20 @@ describe('settings', () => {
     expect(note()).toContain("- Review: off. No review; the lines on reviewing below don't apply. (your setting for every machine)")
     s.set('brief.review', null)
     expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual(['Tasks', 'Tasks', 'Tasks', 'Coordinators', 'Coordinators', 'Coordinators', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup'])
-    // the last one says a backup hears its primary answering again; it never switches anything
-    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.at(-1)).toMatchObject({ key: 'backup.watchReturn', label: 'Tell me when it is back', value: 'on' })
+    // the last one is the way back from a backup: its agents go back to the primary once it answers again
+    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.at(-1)).toMatchObject({ key: 'backup.watchReturn', label: 'When the primary is back', value: 'go back', options: ['go back', 'tell me', 'off'] })
+  })
+
+  test("when the primary is back: on, its only other value before going back by itself came, reads as tell me", () => {
+    // kept in settings.json at any level, and handed over by a main machine that runs older code
+    const s = new Settings({ everywhere: { 'backup.watchReturn': 'on' }, machine: {}, spaces: { web: { 'backup.watchReturn': 'off' } } })
+    expect(s.get('backup.watchReturn')).toBe('tell me')
+    expect(s.get('backup.watchReturn', 'web')).toBe('off')
+    s.adopt({ 'backup.watchReturn': 'on' })
+    expect(s.get('backup.watchReturn')).toBe('tell me')
+    // and a new value is one of the three
+    expect(s.set('backup.watchReturn', 'on').ok).toBe(false)
+    expect(s.set('backup.watchReturn', 'go back').ok).toBe(true)
   })
 })
 
