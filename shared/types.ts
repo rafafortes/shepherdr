@@ -547,6 +547,8 @@ export interface ReplyQuote {
 /** One small update card Shepherdr posts in a project's coordinator chat. */
 export interface UpdateCard {
   id: string
+  /** a note beside the questions before it (the advisor's): it answers and closes none of them, so they still wait */
+  aside?: true
   /** the task it is about; none on a mode card */
   task?: string
   /** the task's state when posted */

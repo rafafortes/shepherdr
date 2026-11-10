@@ -805,11 +805,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
   }
 
-  /** a short card from the advisor in the chat its question is in */
+  /** a short note from the advisor in the chat its question is in, and in the space's chat for a task's (where its
+   *  needs-you card shows the question too): beside the question, which still waits wherever it shows */
   private adviceCard(chat: string, text: string) {
-    const id = `advice-note:${Date.now()}`
-    this.chats.post(chat, { id, card: { id, text } })
-    this.emit('chat', chat)
+    const at = Date.now()
+    const t = chat.includes('/') ? this.engine.task(chat.split('/')[0]) : undefined
+    for (const key of [chat, ...(t ? [t.project] : [])]) {
+      const id = `advice-note:${at}:${key === chat ? 'chat' : 'space'}`
+      this.chats.post(key, { id, card: { id, aside: true, text: key === chat ? text : `${t!.id}: ${text}`, ...(t ? { task: t.id } : {}) } })
+      this.emit('chat', key)
+    }
   }
 
   /** the advisor's suggestion card answered: sent to the agent as the human's own answer, or left there */

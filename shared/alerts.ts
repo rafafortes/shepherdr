@@ -70,8 +70,10 @@ type Card = Message & { question: Question }
 export function openCards(chat: Chat | undefined): Card[] {
   const out: Card[] = []
   for (const m of [...(chat?.messages ?? [])].reverse()) {
-    // what you sent that waits for the menu to be answered, and another agent's message still on its way in
-    if (m.waiting) continue
+    // what you sent that waits for the menu to be answered, another agent's message still on its way in, and a note
+    // beside the questions (the advisor's, by its id too for the ones posted before notes said so): none of them
+    // answers a question
+    if (m.waiting || m.card?.aside || m.card?.id.startsWith('advice-note:')) continue
     if (!m.question) break
     if (m.question.sent === undefined) out.unshift(m as Card)
   }
