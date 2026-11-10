@@ -422,6 +422,8 @@ export class Engine extends Emitter<Events> {
   noteStuck?: (t: TaskRec, ran: Harness, why: string) => void
   /** its space waits before a task starts: every model ran out, or its cut-off tasks go back to work first */
   startsWait?: (t: TaskRec) => 'models' | 'resume' | undefined
+  /** it was cut off and the way back takes it again (source.ts goingBack): once a slot is free, or once its model answers */
+  goesBack?: (t: TaskRec) => 'slot' | 'model' | undefined
   /** its backup agent is taking over */
   private handing = new Set<string>()
   /** chats whose last start never became a turn (start.ts): when it failed and the words it shows, so a relaunch loop
@@ -557,6 +559,9 @@ export class Engine extends Emitter<Events> {
   /** the one status the task list, the task's own chat, the place dots and the command all show */
   statusOf(t: TaskRec): TaskStatus {
     if (ended(t)) return 'done'
+    // cut off by its provider, and the way back starts it again once its model answers and a slot is free: in line,
+    // nothing of the human's to do (a start that went wrong on the way to its backup included)
+    if (this.goesBack?.(t)) return 'queued'
     if (t.trouble) return 'need'
     // stopped (task stop, or the way on from a delete that was refused): its agent is closed and it is To do, whatever
     // card its chat still ends on, until something is written to it
@@ -615,6 +620,9 @@ export class Engine extends Emitter<Events> {
       // when it starts by itself: the countdown the screen keeps is its own
       if (status === 'scheduled' && t.scheduled) return startsLine(t.scheduled.at, Date.now(), this.zone())
       if (status === 'need' && (this.agents.status(key) === 'blocked' || this.asks(key) || this.chats.startMenuUp(key))) return this.reasonOf(key) ?? NEED.question
+      // in line to go back to work: what it waits for, before what went wrong on its way to the backup
+      const back = status === 'queued' ? this.goesBack?.(t) : undefined
+      if (back) return back === 'slot' ? 'Waiting for a free slot to go back to work' : 'Waiting for its model to answer again'
       if (t.trouble) return fitStatus(`Went wrong: ${t.trouble}`)
       // a To do row is its title alone
       if (status === 'todo') return ''

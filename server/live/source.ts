@@ -263,6 +263,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a space whose models all ran out starts no task (each would be cut off too), and its cut-off tasks go back to
     // work before a new one takes a slot
     this.engine.startsWait = (t) => this.startsWait(t)
+    // a task the way back takes again shows in line, not as one that needs the human
+    this.engine.goesBack = (t) => this.goingBack.get(`${t.id}/Agent`)
+    // known at once after a start, not only at the watch's first pass ten minutes on
+    if (process.env.NODE_ENV !== 'test') setTimeout(() => this.refreshGoingBack(), 0)
     this.artifacts.migratePages(
       (chat) => (chat.includes('/') ? (this.engine.task(chat.split('/')[0])?.project ?? placeId.home()) : chat),
       (chat, id) => this.chats.repostPage(chat, id),
@@ -677,7 +681,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // a task's plain question: its last words ask something, and nothing else holds it (a cut-off, a start, a login)
         if (!t || t.trouble || this.retries.get(n.chat)?.over || this.agents.status(n.chat) === 'blocked') continue
         const last = this.chats.lastReply(n.chat)
-        const said = this.chats.chat(n.chat).messages.findLast((m) => m.who === 'agent' && m.text)
+        // its last words, as the space's needs-you card shows them (alerts.ts lastReply): the same id either side
+        const said = this.chats.chat(n.chat).messages.findLast((m) => m.who === 'agent' && m.text && !m.card)
         if (!last || !said || !askOf(last)) continue
         q = { kind: 'words', title: last.slice(-3000) }
         qid = `words:${said.id}`
@@ -703,9 +708,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /**
    * Ask the advisor about one open question: its primary, then its backup where the primary can't run or answers nothing
-   * that makes sense. On the human's word (auto false) or a plan, its answer is a card the human sends or not; once the
-   * question waited (auto), a sure answer goes to the agent as the human's would, and the chat says it was the advisor's.
-   * Unsure, or a question only the human decides: a card says so, and the question waits for them.
+   * that makes sense. A sure answer goes to the agent as the human's would, and the chat says it was the advisor's — at
+   * once on the human's word (Ask the advisor), or once the question waited (auto), which also alerts. A plan only ever
+   * gets a card the human sends or not. Unsure, or a question only the human decides: a card says so, and the question
+   * waits for them.
    */
   async advise(chat: string, qid: string, auto = false): Promise<{ ok: boolean; error?: string }> {
     const x = this.advisable(chat).find((y) => y.qid === qid)
@@ -750,7 +756,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         this.advices.set({ ...rec, state: 'human', advice })
         return { ok: true }
       }
-      if (auto && !x.q.plan) {
+      if (!x.q.plan) {
         const sent = await this.deliverAdvice(chat, qid, x.q, advice)
         if (!sent.ok) {
           this.advices.set({ ...rec, state: 'failed', advice })
@@ -758,12 +764,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         }
         this.advices.set({ ...rec, state: 'sent', advice })
         const words = adviceWords(advice, x.q)
-        this.adviceCard(chat, `The advisor answered for you, as you didn't: “${words}”. ${advice.why} (${advice.by})`)
+        this.adviceCard(chat, `The advisor answered ${auto ? "for you, as you didn't" : 'as you asked'}: “${words}”. ${advice.why} (${advice.by})`)
+        // asked by the human, they are looking at it: an alert only for one that went by itself
+        if (!auto) return { ok: true }
         const t = x.need.task
         this.alert({ id: randomUUID(), from: 'Shepherdr', title: `The advisor answered ${t ?? this.chatName(chat)}`, body: `${x.q.kind === 'choice' ? x.q.title : 'Its question'}: ${words}`.slice(0, 200), go: { place: chat }, tag: `advice:${chat}`, ...(t ? { task: true as const } : {}) })
         return { ok: true }
       }
-      // the human's own question, or a plan: a card they send or not
+      // a plan: a card the human sends or not
       const card = `advice:${randomUUID().slice(0, 8)}`
       const words = adviceWords(advice, x.q)
       this.chats.post(chat, {
@@ -885,11 +893,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    *  gone once answered), whether it still takes an answer, and where it was answered */
   private askOf(ask: CardAsk, tc: Chat, waits: boolean, task = ask.chat.split('/')[0]): CardAsk {
     const link = (label: string) => ({ label, chat: ask.chat, name: `${task} chat` })
+    // what the advisor can take of it, as on the task's own cards: Ask the advisor shows here too
+    const advisable = waits ? new Set(this.advisable(ask.chat).map((x) => x.qid)) : new Set<string>()
     if (ask.reply) {
       const at = tc.messages.findIndex((m) => m.id === ask.reply!.id)
       const yours = at >= 0 ? tc.messages.slice(at + 1).find((m) => m.who === 'you' && !m.waiting && (m.text || m.file)) : undefined
       const answered = ask.answered ?? (yours ? { where: 'task' as const, text: yours.text ?? yours.file?.name } : !waits ? { where: 'task' as const } : undefined)
-      return { ...ask, answered, open: !answered && waits }
+      return { ...ask, answered, open: !answered && waits, ...(!answered && advisable.has(`words:${ask.reply.id}`) ? { advise: true } : {}) }
     }
     const live = new Map(tc.messages.flatMap((m) => (m.question ? [[m.question.id, m.question] as const] : [])))
     const open = new Set(openCards(tc).map((m) => m.question.id))
@@ -902,7 +912,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (q.sent === undefined && !open.has(q.id)) return { ...q, sent: -1, elsewhere: link('No longer waits ·') }
       // the words it was answered with show on the card; the message that said them is in the task's chat
       // each question says how it was settled: a dismissed one among answered ones says so for itself
-      return q.sent === undefined ? q : { ...q, via: undefined, elsewhere: link(q.dismissed ? 'Dismissed ·' : answeredLabel) }
+      return q.sent === undefined ? { ...q, ...(advisable.has(q.id) ? { advise: true } : {}) } : { ...q, via: undefined, elsewhere: link(q.dismissed ? 'Dismissed ·' : answeredLabel) }
     })
     return { ...ask, questions, answered: settled ? { where, text: ask.answered?.text, dismissed: dismissed || undefined } : undefined, open: !settled && questions.some((q) => q.sent === undefined) }
   }
@@ -1692,6 +1702,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // a cut-off on the backup says nothing of the primary: only one on the primary puts its answer off
       if (o && !o.back) this.returns.cut(role, space, Date.now(), { key, allOut, onPrimary: sameHarness(ran, primary) })
       else this.returns.note({ role, space, primary, to: ran, why, at: Date.now() }, { key, allOut })
+      // it shows in line at once, not as needing the human until the watch's next pass
+      this.refreshGoingBack()
     } catch (e) {
       console.error(`shepherdr: couldn't keep that a ${role} of ${space || 'this machine'} waits for its provider: ${(e as Error).message}`)
     }
@@ -1796,6 +1808,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       }
     }
     this.resuming = resuming
+    this.refreshGoingBack()
     // a wait over (its models answer, or its cut-off tasks went back): the queue goes on, or waits on with its reason
     this.engine.release()
   }
@@ -1847,6 +1860,38 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const why = r?.reason ? r.reason.charAt(0).toLowerCase() + r.reason.slice(1) : 'its backup took it over'
     // noted as old as it is: its first question due now (past its first wait and its random fifth), no quiet to wait for
     this.returns.note({ role, space, primary, to: ran, why, at: now - 2 * FIRST_WAIT }, { key, allOut })
+  }
+
+  /** the task chats the way back takes again, and what each waits for: a free slot (its primary answers) or its model */
+  private goingBack = new Map<string, 'slot' | 'model'>()
+
+  /**
+   * Which cut-off tasks the way back will take again, while it goes back by itself: the ones cut off for good (on the
+   * backup, or on the primary itself), not paused and asking nothing of their own. They show as queued (engine.ts
+   * statusOf) instead of needing the human; one at work on its backup shows as it is. Told me or off, the human is the
+   * way back and they still need them.
+   */
+  private refreshGoingBack() {
+    try {
+      const next = new Map<string, 'slot' | 'model'>()
+      for (const o of this.returns.list()) {
+        if (o.back || o.role !== 'task' || this.returns.tooOften(o) || returnMode(this.settings.get('backup.watchReturn', o.space || undefined)) !== 'go back') continue
+        for (const c of this.backTo(o)?.chats ?? []) {
+          const t = c.task ? this.engine.task(c.task) : undefined
+          // a pause, or a question of its own, is the human's: it shows as it is
+          if (!t || t.paused || this.chats.openQuestion(c.key) || this.chats.openCard(c.key) || this.chats.startMenuUp(c.key)) continue
+          // only one its provider cut off for good: one that works on its backup (or is done there) is no wait
+          const r = this.retries.get(c.key)
+          if (!r?.over || !r.lasting) continue
+          next.set(c.key, o.ok ? 'slot' : 'model')
+        }
+      }
+      const changed = next.size !== this.goingBack.size || [...next].some(([k, v]) => this.goingBack.get(k) !== v)
+      this.goingBack = next
+      if (changed) this.emit('snapshot')
+    } catch (e) {
+      console.error(`shepherdr: couldn't tell which tasks go back to work: ${(e as Error).message}`)
+    }
   }
 
   /** the spaces whose cut-off tasks still wait for a slot to go back to work: a slot is this machine's, so no new task

@@ -599,6 +599,9 @@ describe('the night every model ran out', () => {
       expect(s.started[0].first).toContain('Shepherdr moved this task back to its primary model')
       expect(s.src.engine.room(next.t)).toEqual({ why: 'resume' })
       expect(s.src.engine.room(other.t)).toEqual({ why: 'resume' })
+      // the one waiting for the slot is in line, not needing the human (its start that went wrong included)
+      expect(s.src.engine.statusOf(b.t)).toBe('queued')
+      expect(s.src.engine.subOf(b.t)).toBe('Waiting for a free slot to go back to work')
       expect(alerts.map((x) => x.body)).toEqual([`Claude Code answers again: ${a.id} agent started again on it; 1 more as slots free up.`])
       // a minute later its slot is free: the one cut off on the primary starts again there, told so, its trouble over
       await s.src.watchReturns(now + 60_000)
@@ -638,6 +641,29 @@ describe('the night every model ran out', () => {
       expect(s.src.returns.get('task', s.p.name)!.lastCut).not.toBe(lastCut)
     } finally {
       s.src.agents.status = status
+      s.done()
+    }
+  })
+
+  test('cut off for good and going back by itself: in line, not needing the human; told me, it needs them', async () => {
+    const s = await nightWorld('night-queued', 4)
+    try {
+      const a = s.cutOff('codex')
+      // one at work on its backup, never cut off: it shows as it is
+      const fine = task(s.p.name, 'codex', { from: 'claude' })
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'provider refused it', at: Date.now() - FIRST_WAIT * 2 }, { allOut: true })
+      // the primary doesn't answer yet: it waits for its model
+      answers = false
+      await s.src.watchReturns(later())
+      expect(s.src.engine.statusOf(a.t)).toBe('queued')
+      expect(s.src.engine.subOf(a.t)).toBe('Waiting for its model to answer again')
+      expect(s.src.snapshot().needs.some((n) => n.task === a.id)).toBe(false)
+      expect(s.src.engine.statusOf(fine.t)).not.toBe('queued')
+      // told me instead: the human is the way back, so it needs them
+      expect(s.src.settings.set('backup.watchReturn', 'tell me', { space: s.p.name }).ok).toBe(true)
+      await s.src.watchReturns(later())
+      expect(s.src.engine.statusOf(a.t)).toBe('need')
+    } finally {
       s.done()
     }
   })

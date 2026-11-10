@@ -581,6 +581,8 @@ export interface CardAsk {
   answered?: { where: 'space' | 'task' | 'terminal'; text?: string; dismissed?: true }
   /** on screen: it still waits, so it takes an answer here */
   open?: boolean
+  /** its plain question can go to the advisor (Settings → Agents → Advisor): the card offers Ask the advisor */
+  advise?: boolean
 }
 
 /** One thing waiting on the human, from any agent: its own card, never a forwarded copy. The Needs you view lists these
