@@ -812,7 +812,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const t = chat.includes('/') ? this.engine.task(chat.split('/')[0]) : undefined
     for (const key of [chat, ...(t ? [t.project] : [])]) {
       const id = `advice-note:${at}:${key === chat ? 'chat' : 'space'}`
-      this.chats.post(key, { id, card: { id, aside: true, text: key === chat ? text : `${t!.id}: ${text}`, ...(t ? { task: t.id } : {}) } })
+      // in the space's chat its task's id leads it, as a link to the task
+      this.chats.post(key, { id, card: { id, aside: true, text, ...(t && key !== chat ? { task: t.id } : {}) } })
       this.emit('chat', key)
     }
   }
