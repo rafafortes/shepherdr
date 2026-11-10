@@ -2721,7 +2721,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** what you write: a coordinator wakes for it (resumed with its memory); a task agent is resumed if it finished.
-   *  keepAsks: a close without an answer, which leaves the chat's other cards as they were (a message answers them all) */
+   *  keepAsks: a card's own answer or a close without one, which leaves the chat's other cards as they were (a message
+   *  typed answers them all) */
   private async send(key: string, text: string, files: string[], fromScreen = false, cid?: string, opts: { keepAsks?: boolean } = {}) {
     const at = Date.now()
     const lines = files.map((p) => line.attach(this.user, p.split('/').pop()!.replace(/^[a-z0-9]+-/, ''), p))
@@ -2856,7 +2857,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       q.sent = a.choice
       this.chats.answer(key, qid, a.choice, a.other, space)
       if (space) this.answeredHere(space, key, q.title, answer)
-      await this.send(key, `${line.answer(by ?? this.user, q.title, answer)}${a.note ? `\n${a.note}` : ''}`, [], true)
+      // the answer of this card alone: the chat's other cards still wait for theirs (a message of the human's own, typed,
+      // is what answers them all)
+      await this.send(key, `${line.answer(by ?? this.user, q.title, answer)}${a.note ? `\n${a.note}` : ''}`, [], true, undefined, { keepAsks: true })
       this.emit('snapshot')
       return { ok: true }
     }
