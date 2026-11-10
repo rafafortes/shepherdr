@@ -710,6 +710,91 @@ describe('a turn the provider cut off', () => {
     for (const k of ['task.fallback', 'backup.model', 'backup.effort']) w.settings.set(k, null)
   })
 
+  test('a chain of backups: each takes over in turn where the one before it cannot go on either, then it waits for you', async () => {
+    const w = world()
+    const retries = cutOff(w)
+    w.engine.installed = () => true
+    const keys = { 'task.fallback': 'claude', 'backup.model': 'Sonnet 5.5', 'task.fallback2': 'codex', 'task.fallback3': 'claude', 'task.fallback3Model': 'Haiku 5.5', 'task.fallback3Effort': 'low' }
+    for (const [k, v] of Object.entries(keys)) expect(w.settings.set(k, v).ok).toBe(true)
+    try {
+      const { t, key } = await started(w, repo(), 'chain-walk')
+      const cut = async (reason: string) => {
+        w.agentIs(key, 'idle')
+        retries[key] = { cut: `e-${reason}`, tries: 1, reason, words: reason, over: true }
+        await w.engine.cantGoOn(t.id, reason)
+      }
+      const starts = () => w.started.filter((x) => x.key === key)
+      // Backup 1: the same CLI on its model, its session kept
+      await cut('Out of allowance until 5pm')
+      expect(starts()[1]).toMatchObject({ kind: 'claude', model: 'claude-sonnet-5-5' })
+      expect(t.tookOver).toMatchObject({ from: 'claude', to: 'claude', step: 1 })
+      // Backup 2: another CLI takes over from Backup 1, with the brief and what was done
+      await cut('Signed out')
+      expect(starts()).toHaveLength(3)
+      expect(starts()[2]).toMatchObject({ kind: 'codex', cwd: t.worktree })
+      expect(starts()[2].first).toContain("Taking over: Claude Code worked on this task until now and can't go on (signed out)")
+      expect(t.tookOver).toMatchObject({ from: 'claude', to: 'codex', step: 2 })
+      expect(w.engine.view(t)).toMatchObject({ status: 'work', on: 'Codex' })
+      // Backup 3, its own model and effort
+      await cut('Out of credits')
+      expect(starts()[3]).toMatchObject({ kind: 'claude', model: 'claude-haiku-5-5', effort: 'low' })
+      expect(t.tookOver).toMatchObject({ from: 'codex', to: 'claude', step: 3 })
+      // past the last one: it waits for you, never a loop
+      await cut('Signed out again')
+      expect(starts()).toHaveLength(4)
+      expect(w.engine.view(t)).toMatchObject({ status: 'need', sub: 'Signed out again' })
+    } finally {
+      for (const k of Object.keys(keys)) w.settings.set(k, null)
+    }
+  })
+
+  test('a backup of the chain that cannot go in is passed over: the next one takes over; one it cannot reach says why', async () => {
+    const w = world()
+    const retries = cutOff(w)
+    w.engine.installed = (k: string) => k !== 'codex'
+    const keys = { 'task.fallback': 'codex', 'task.fallback2': 'off', 'task.fallback3': 'claude', 'task.fallback3Model': 'Sonnet 5.5' }
+    for (const [k, v] of Object.entries(keys)) expect(w.settings.set(k, v).ok).toBe(true)
+    try {
+      const { t, key } = await started(w, repo(), 'chain-skip')
+      w.agentIs(key, 'idle')
+      retries[key] = { cut: 'e1', tries: 1, reason: 'Out of allowance', words: 'limit', over: true }
+      await w.engine.cantGoOn(t.id, 'Out of allowance')
+      // Backup 1 isn't installed and Backup 2 is off: Backup 3 goes in
+      expect(w.started.filter((x) => x.key === key)[1]).toMatchObject({ kind: 'claude', model: 'claude-sonnet-5-5' })
+      expect(t.tookOver).toMatchObject({ step: 3 })
+      expect(w.engine.backupsFor('task').map((p) => [p.n, p.to?.kind, p.why])).toEqual([[1, undefined, "Codex isn't installed on this machine"], [3, 'claude', undefined]])
+    } finally {
+      for (const k of Object.keys(keys)) w.settings.set(k, null)
+    }
+  })
+
+  test("what one task keeps for itself (task add --set) wins in its chain; a takeover from before chains is Backup 1; back on the primary, it starts from Backup 1 again", async () => {
+    const w = world()
+    const retries = cutOff(w)
+    w.engine.installed = () => true
+    expect(w.settings.set('task.fallback', 'claude').ok).toBe(true)
+    try {
+      const { t, key } = await started(w, repo(), 'chain-own')
+      t.set = { 'task.fallback2': 'codex' }
+      // taken over by an older Shepherdr: no step, so it is on Backup 1, and the next is its own Backup 2
+      t.tookOver = { from: 'claude', to: 'claude', why: 'out of allowance', at: Date.now() - 60_000 }
+      w.agentIs(key, 'idle')
+      retries[key] = { cut: 'e2', tries: 1, reason: 'Signed out', words: '401', over: true }
+      await w.engine.cantGoOn(t.id, 'Signed out')
+      expect(w.started.filter((x) => x.key === key).at(-1)).toMatchObject({ kind: 'codex' })
+      expect(t.tookOver).toMatchObject({ to: 'codex', step: 2 })
+      // the way back starts it on the primary: its chain is whole again
+      await w.engine.restart(t.id, {} as never, 'backup')
+      expect(t.tookOver).toBeUndefined()
+      w.agentIs(key, 'idle')
+      retries[key] = { cut: 'e3', tries: 1, reason: 'Out of allowance', words: 'limit', over: true }
+      await w.engine.cantGoOn(t.id, 'Out of allowance')
+      expect(t.tookOver).toMatchObject({ to: 'claude', step: 1 })
+    } finally {
+      w.settings.set('task.fallback', null)
+    }
+  })
+
   test("a backup CLI that isn't installed is no takeover, and its chat says why", async () => {
     const w = world()
     const retries = cutOff(w)

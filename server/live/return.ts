@@ -182,8 +182,6 @@ export async function probeHarness(h: Harness, timeoutMs = PROBE_TIMEOUT): Promi
     if (!got) return { ok: false, said: 'timed out' }
     if ('failed' in got) return { ok: false, said: got.failed.message }
     return { ok: got.code === 0, said: `${got.out}${got.err}`.replace(/\s+/g, ' ').trim().slice(0, 200) }
-  } catch (e) {
-    return { ok: false, said: (e as Error).message }
   } finally {
     clearTimeout(timer)
     clearTimeout(late)

@@ -718,6 +718,9 @@ export interface SettingRow {
   label: string
   key: string
   value: string
+  /** one of a role's backups, in turn (n: 1 is Backup 1): the screen shows the 2nd to the 5th once their CLI (cli: its
+   *  row) is on, and adds the next one with `add`, the words of its button */
+  chain?: { of: string; n: number; cli?: true; add?: string }
   /** free text instead of a pick list */
   text?: boolean
   /** private instruction text, saved explicitly without a repository file */

@@ -80,7 +80,8 @@
   agent, a task's or a coordinator's, where one is set (below), and otherwise to you. Anything written to the agent
   starts the count again. Each CLI's log says what cut it off (`server/live/retry.ts` decides).
 - When a task's agent can't go on (out of allowance, signed out, its provider still down after the tries), its
-  **backup agent** goes in, once (a start that fails leaves a later one to try again): Settings → Agents → Backup →
+  **backup agent** goes in, once (a start that fails leaves a later one to try again), then the next of its chain where
+  that one can't go on either ([settings](settings.md#a-chain-of-backups)): Settings → Agents → Backup →
   Tasks' backup (`task.fallback`, Codex unless set, or
   off), on its own `backup.model` and `backup.effort`. The same CLI as the agent that can't go on starts again on that model
   and effort and resumes its own session, so nothing is lost, its worktree and branch unchanged; another CLI takes

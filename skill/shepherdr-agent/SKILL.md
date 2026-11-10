@@ -63,9 +63,9 @@ build, check and review the work is your own judgment.
    the facts, unfixed; an open choice no experiment can settle goes to the human as a card. Count each round before it
    starts, `shepherdr review <id>`: at most Review rounds, and past them it refuses. Out of rounds with your final
    commit unreviewed: say why in your chat and end your turn; only your coordinator adds a round (`shepherdr task
-   review-more <id>`), which arrives in your chat as one more to run. Where your Reviewer line names a backup reviewer,
-   it is for a reviewer that cannot run at all — out of allowance, signed out, its model is gone — and for nothing
-   else: it is that same round, launched the same way with `SHEPHERDR_CHAT=<task-id>/Reviewer` and counted with
+   review-more <id>`), which arrives in your chat as one more to run. Where your Reviewer line names a backup reviewer
+   (or several, in turn: each where the one before it cannot run either), it is for a reviewer that cannot run at all —
+   out of allowance, signed out, its model is gone — and for nothing else: it is that same round, launched the same way with `SHEPHERDR_CHAT=<task-id>/Reviewer` and counted with
    `shepherdr review <id>` like any other, never a second opinion on findings an earlier reviewer made, and you say in
    your summary that you reviewed with it.
 4. **Proof.** One artifact, `shepherdr artifact new <file> --title "<id>: Proof"`: what changed in one to three plain

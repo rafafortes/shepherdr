@@ -28,7 +28,7 @@ import { HOST, placeId, type Places, type Space } from '../places.ts'
 import { privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, wentBackCardWords, restartLine, type BackWhy, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
-import { backupModelOf, CLI_NAME, FALLBACK_OF, kindOf, type Settings } from '../settings.ts'
+import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
 import { findModel, knowsModels } from '../models.ts'
 import { fitHarness, harnessWords, recentChat } from '../restart.ts'
 import * as G from './git.ts'
@@ -131,7 +131,7 @@ export interface TaskRec {
   /** what its agent last said of its own progress (shepherdr status): kept while it works or waits on you */
   report?: Reported
   /** its backup agent took over once its agent couldn't go on (retry.ts): from which CLI, to which, and why */
-  tookOver?: { from: string; to: string; why: string; at: number }
+  tookOver?: { from: string; to: string; why: string; at: number; step?: number }
   /** coordinators were told it stalled: its last sign of life then (`life`), and the report (by its time) it ran far
    *  past (`over`); each is told once, until it shows life again or reports anew */
   stalled?: { life?: number; over?: number }
@@ -282,6 +282,9 @@ const MISSED_BY = 60_000
 
 /** the branch every task's worktree gets */
 const branchFor = (t: TaskRec) => `work/${t.n}-${G.slug(t.title)}`
+
+/** one backup of a role's chain, in turn (n: its place, 1 for Backup 1): the harness it goes in on, or why it can't */
+export type BackupPlan = { n: number; to?: { kind: string; model?: string; effort?: string }; why?: string }
 
 /** its herdr space's name */
 const labelOf = (t: TaskRec) => `${t.id} ${t.title}`
@@ -1218,7 +1221,7 @@ export class Engine extends Emitter<Events> {
     const by = { ...this.settings.setBy(p.name, set), ...(Object.keys(o.reviewer ?? {}).length ? { reviewer: 'task' as const } : {}), ...(Object.keys(o.agent ?? {}).length ? { agent: 'task' as const } : {}) }
     const ways = this.settings.ways(p.name, set)
     // the backup reviewer, off unless the human set one (its own keys, or the coordinator's --set for this task)
-    const fallback = this.settings.reviewerBackup(p.name, set)
+    const fallback = this.settings.reviewerBackups(p.name, set)
     const how = settingsBlock(id, { ways, reviewer, fallback, agent, by })
     const desc = [work, o.later ? LATER : '', how].filter(Boolean).join('\n\n')
     const t: TaskRec = {
@@ -1283,7 +1286,7 @@ export class Engine extends Emitter<Events> {
     const set = s.set && Object.keys(s.set).length ? s.set : undefined
     const by = { ...this.settings.setBy(p.name, set), ...(Object.keys(s.reviewer ?? {}).length ? { reviewer: 'task' as const } : {}), ...(Object.keys(s.agent ?? {}).length ? { agent: 'task' as const } : {}) }
     const ways = this.settings.ways(p.name, set)
-    t.desc = [s.desc, s.later ? LATER : '', settingsBlock(t.id, { ways, reviewer, fallback: this.settings.reviewerBackup(p.name, set), agent, by })].filter(Boolean).join('\n\n')
+    t.desc = [s.desc, s.later ? LATER : '', settingsBlock(t.id, { ways, reviewer, fallback: this.settings.reviewerBackups(p.name, set), agent, by })].filter(Boolean).join('\n\n')
     t.agent = agent
     t.reviewer = reviewer
     t.waitChecks = ways.waitChecks
@@ -1628,9 +1631,10 @@ export class Engine extends Emitter<Events> {
 
   /**
    * Its agent can't go on (retry.ts): out of allowance, signed out, or its provider still down after the last try. The
-   * backup agent (Settings' task.fallback, on backup.model and backup.effort of its space) takes over once: the same CLI
-   * starts again and resumes its own session, so nothing is lost; another CLI takes over in the same worktree and branch,
-   * with the brief and what was done so far. Else, or when that one can't go on either, it waits for you.
+   * next backup of its chain (Settings' task.fallback on backup.model and backup.effort, then the 2nd to the 5th, of its
+   * space) takes over, each once: the same CLI starts again and resumes its own session, so nothing is lost; another CLI
+   * takes over in the same worktree and branch, with the brief and what was done so far. Once the last one can't go on
+   * either, or none is set, it waits for you.
    */
   async cantGoOn(id: string, why: string, lasting = false) {
     const t = this.task(id)
@@ -1641,8 +1645,11 @@ export class Engine extends Emitter<Events> {
     const space = this.nameOf(t)
     // the harness its agent really ran on: its own (task add --agent) where it has one, else what Settings name
     const ran: Harness = rec ? { kind: rec.kind, model: rec.model, effort: rec.effort } : (t.agent ?? this.settings.harness('task', space))
-    // what this task keeps for itself (task add --set) first, then its space's settings, its machine's and Everywhere's
-    const plan = this.backupFor('task', space, t.set)
+    // what this task keeps for itself (task add --set) first, then its space's settings, its machine's and Everywhere's:
+    // the backups after the one it is on now (all of them, while none took over), the first that can go in
+    const at = t.tookOver ? (t.tookOver.step ?? 1) : 0
+    const later = this.backupsFor('task', space, t.set).filter((p) => p.n > at)
+    const plan = later.find((p) => p.to)
     // waits for the human from here: one cut off for good is started again once its provider answers (return.ts). A
     // note that can't be written never changes what happens to the task
     const stuck = () => {
@@ -1653,14 +1660,11 @@ export class Engine extends Emitter<Events> {
         console.error(`shepherdr: couldn't keep that ${t.id} waits for its provider: ${(e as Error).message}`)
       }
     }
-    // its backup took over once already: a takeover that keeps failing is the human's, not a loop
-    if (t.tookOver || !t.worktree) {
-      if (t.worktree) stuck()
-      return this.settle(t)
-    }
-    if (!plan.to) {
+    if (!t.worktree) return this.settle(t)
+    // each backup goes in once: past the last one, a takeover that keeps failing is the human's, not a loop
+    if (!plan?.to) {
       stuck()
-      return this.noBackup(key, plan.why)
+      return this.noBackup(key, later.find((p) => p.why)?.why)
     }
     const to = plan.to.kind
     // only an agent whose session is there has one to keep: one with no record, or whose session is gone, starts fresh,
@@ -1668,7 +1672,7 @@ export class Engine extends Emitter<Events> {
     const same = to === from && !!rec && !rec.fresh && (!!rec.sessionId || rec.logs.length > 0)
     const name = (k: string) => CLI_NAME[k] ?? k
     this.handing.add(t.id)
-    t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now() }
+    t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now(), step: plan.n }
     this.settle(t)
     try {
       // Settings' Backup model and effort (this task's own first), or else the task's own: its CLI may not take them, in
@@ -1714,14 +1718,30 @@ export class Engine extends Emitter<Events> {
    * words in that chat), nothing when there is no backup at all.
    */
   backupFor(role: 'task' | 'coordinator', space?: string, own?: Record<string, string>): { to?: { kind: string; model?: string; effort?: string }; why?: string } {
+    const first = this.backupsFor(role, space, own)[0]
+    return first?.n === 1 ? { ...(first.to ? { to: first.to } : {}), ...(first.why ? { why: first.why } : {}) } : {}
+  }
+
+  /** every backup of a role's chain that is on, in turn (n: its place, 1 for Backup 1), each as backupFor says it: the
+   *  harness it goes in on, or why it can't. Backup 1's model follows the tasks' pair as it always did (backupModelOf);
+   *  the 2nd to the 5th read their own */
+  backupsFor(role: 'task' | 'coordinator', space?: string, own?: Record<string, string>): BackupPlan[] {
     const get = (key: string) => own?.[key] ?? this.settings.get(key, space)
-    const to = kindOf(get(FALLBACK_OF[role]))
-    if (!to) return {}
-    const them = CLI_NAME[to] ?? to
-    if (!this.installed(to)) return { why: `${them} isn't installed on this machine` }
-    const { model, row } = backupModelOf(role, get)
-    if (model.toLowerCase() !== 'default' && knowsModels(to) && !findModel(to, model)) return { why: `${them} has no model ${model}: ${row} is set to one it doesn't have` }
-    return { to: { kind: to, ...this.settings.modelOf(role === 'task' ? 'backup' : 'coordinatorBackup', to, space, get) } }
+    return chainPairs(role).flatMap((p, i): BackupPlan[] => {
+      const n = i + 1
+      const to = kindOf(get(p.cli))
+      if (!to) return []
+      const them = CLI_NAME[to] ?? to
+      if (!this.installed(to)) return [{ n, why: `${them} isn't installed on this machine` }]
+      const { model, row } = n === 1 ? backupModelOf(role, get) : { model: get(p.model), row: `Backup → ${role === 'task' ? "Tasks'" : "Coordinators'"} backup ${n} → Model` }
+      if (model.toLowerCase() !== 'default' && knowsModels(to) && !findModel(to, model)) return [{ n, why: `${them} has no model ${model}: ${row} is set to one it doesn't have` }]
+      return [{ n, to: { kind: to, ...this.settings.modelOf(p.name, to, space, get) } }]
+    })
+  }
+
+  /** the harnesses a role's chain goes in on, in turn: what the way back counts as being on a backup (source.ts) */
+  backupHarnesses(role: 'task' | 'coordinator', space?: string, own?: Record<string, string>) {
+    return this.backupsFor(role, space, own).flatMap((p) => (p.to ? [p.to] : []))
   }
 
   /** no backup went in, and the human set one: its chat says why, so a backup that can't go leaves no silence */

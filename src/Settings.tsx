@@ -730,13 +730,34 @@ const follows = (row: SettingRow, value: string) => (row.inherits && value === r
 /** the rows whose few short choices sit side by side */
 const SEGMENTS = new Set(['notify', 'review.mustFix'])
 
+/** a page's row, or the button that adds the next backup of a role's chain under its last one */
+type Item = SettingRow | { add: { key: string; value: string; label: string }; group?: string }
+
 /** a page's settings: its rows under their group's heading (Tasks, Coordinators, Reviewer), and what it notes under them */
 function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phone: boolean; set: (key: string, value: string | null) => void; refused: (key: string) => string | undefined; clear: (key: string) => void; hint?: string }) {
   // Autopilot's Run now on a space's page: what its chat's pill offers, where the heartbeat is set
   const snap = useSnap()
   const woken = page.name === 'Autopilot' && page.level?.startsWith('p:') ? snap?.places.find((p) => p.id === page.level) : undefined
-  const groups: { name?: string; rows: Page['rows'] }[] = []
-  for (const row of page.rows) {
+  // a role's 2nd to 5th backups show once their CLI is on (or was just added here); its last one shown is followed by a
+  // button that adds the next, on the same CLI as the one before it
+  const [added, setAdded] = useState<string[]>([])
+  const cliOf = (of: string, n: number) => page.rows.find((r) => r.chain?.of === of && r.chain.n === n && r.chain.cli)
+  const on = (r?: SettingRow) => !!r && r.value.trim().toLowerCase() !== 'off'
+  const shows = (r: SettingRow) => !r.chain || r.chain.n === 1 || on(cliOf(r.chain.of, r.chain.n)) || added.includes(cliOf(r.chain.of, r.chain.n)?.key ?? '')
+  // one just added shows until its value comes back on; from then its value decides, so Off takes it out again
+  useEffect(() => setAdded((a) => (a.some((k) => on(page.rows.find((r) => r.key === k))) ? a.filter((k) => !on(page.rows.find((r) => r.key === k))) : a)), [page.rows])
+  const visible = page.rows.filter(shows)
+  const items: Item[] = []
+  visible.forEach((r, i) => {
+    items.push(r)
+    if (!r.chain || visible[i + 1]?.chain?.of === r.chain.of || !on(cliOf(r.chain.of, 1))) return
+    const next = page.rows.find((x) => x.chain?.of === r.chain!.of && x.chain.cli && !shows(x))
+    if (!next) return
+    const last = visible.slice(0, i + 1).findLast((x) => x.chain?.of === r.chain!.of && x.chain.cli && on(x))
+    items.push({ add: { key: next.key, value: last?.value ?? next.options?.find((o) => o !== 'off') ?? 'off', label: next.chain!.add ?? 'Add a backup' }, group: r.group })
+  })
+  const groups: { name?: string; rows: Item[] }[] = []
+  for (const row of items) {
     if (groups.length && groups.at(-1)!.name === row.group) groups.at(-1)!.rows.push(row)
     else groups.push({ name: row.group, rows: [row] })
   }
@@ -788,7 +809,22 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
           {name ? <h3 className={heading(phone)}>{name}</h3> : null}
           <dl className={phone ? card : undefined}>
             {rows.map((row) =>
-              row.doc || row.multiline ? (
+              'add' in row ? (
+                <div key={`add:${row.add.key}`} className={rowLook(phone)}>
+                  <button
+                    type="button"
+                    data-add-backup={row.add.key}
+                    onClick={() => {
+                      setAdded((a) => [...a, row.add.key])
+                      set(row.add.key, row.add.value)
+                    }}
+                    className="press-dim relative flex min-h-9 items-center gap-1.5 font-medium text-accent after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:min-h-11"
+                  >
+                    <PlusIcon className={ic} />
+                    {row.add.label}
+                  </button>
+                </div>
+              ) : row.doc || row.multiline ? (
                 <div key={row.key} className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2.5 pb-3!', row.inherits && 'border-l-2 border-accent pl-3')}>
                   <dt className="flex min-w-0 flex-col">
                     {row.label}

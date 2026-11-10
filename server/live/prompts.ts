@@ -55,9 +55,12 @@ export function reviewerWords(r: Reviewer) {
 /** a brief's Reviewer line: who reviews, and — when the human set a backup reviewer — who reviews instead where that one
  *  cannot run at all. A backup reviewer never replaces a finding: it is for a reviewer that could not work, for that
  *  round only, so a primary that answers again reviews the next round (the way back, as return.ts is for agents) */
-export function reviewerLine(r: Reviewer, backup?: Reviewer) {
-  const instead = backup ? ` If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with ${reviewerWords(backup)} instead for that round only, and say in your summary that you did; every round asks that reviewer first again.` : ''
-  return `Reviewer: ${reviewerWords(r)}.${instead}`
+export function reviewerLine(r: Reviewer, backup?: Reviewer | Reviewer[]) {
+  const all = backup === undefined ? [] : Array.isArray(backup) ? backup : [backup]
+  const cannot = 'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with'
+  if (all.length <= 1) return `Reviewer: ${reviewerWords(r)}.${all[0] ? ` ${cannot} ${reviewerWords(all[0])} instead for that round only, and say in your summary that you did; every round asks that reviewer first again.` : ''}`
+  // a chain of them: each in turn, where the one before it cannot run either
+  return `Reviewer: ${reviewerWords(r)}. ${cannot} ${reviewerWords(all[0])} instead for that round only; where that one cannot run either, the next of, in turn: ${all.slice(1).map(reviewerWords).join('; ')}. Say in your summary which one you used; every round asks that reviewer first again.`
 }
 
 /** a reviewer's tags for its findings, the worst first */
@@ -71,8 +74,9 @@ export type Said = 'review' | 'reviewer' | 'mustFix' | 'rounds' | 'merge' | 'age
 export interface Told {
   ways: Ways
   reviewer?: Reviewer
-  /** the backup reviewer, when the human set one: nothing, and the Reviewer line reads as it always has */
-  fallback?: Reviewer
+  /** the backup reviewer (or its chain, in turn), when the human set one: nothing, and the Reviewer line reads as it
+   *  always has */
+  fallback?: Reviewer | Reviewer[]
   agent?: Reviewer
   by?: Partial<Record<Said, SetBy>>
 }

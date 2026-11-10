@@ -10,10 +10,10 @@ const { agentLines, excerpt, findQuoted, line, matches, parseReply, parseUserLin
 const { parseMenu } = await import('../server/live/chats.ts')
 const { Automations } = await import('../server/live/automations.ts')
 const T = await import('../server/live/trigger.ts')
-const { CATALOG, Settings, agentRow, backupModelOf, effortFor, setForTask } = await import('../server/live/settings.ts')
+const { CATALOG, Settings, agentRow, backupModelOf, effortFor, fallbackKinds, setForTask } = await import('../server/live/settings.ts')
 const { readBrief } = await import('../shared/brief.ts')
 const { Heartbeats, heartbeatFile, Wakes, pilotLine, wakeOf, wakeProblem } = await import('../server/live/heartbeat.ts')
-const { coordinatorPrompt, settingsBlock, splitBrief, taskPrompt } = await import('../server/live/prompts.ts')
+const { coordinatorPrompt, reviewerLine, settingsBlock, splitBrief, taskPrompt } = await import('../server/live/prompts.ts')
 const { pastTimes, span } = await import('../server/live/estimates.ts')
 const { readJson, writeJson } = await import('../server/store.ts')
 const { HOST, keyFor, machineName, placeId } = await import('../server/live/places.ts')
@@ -990,7 +990,9 @@ describe('settings', () => {
     expect(note()).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).')
     // planning, what to fix and what proof to show are the agent's judgment, not settings
     const section = () => s.sections([], [], null).find((x) => x.name === 'How tasks work')!
-    expect(section().rows.map((r) => r.key)).toEqual(['brief.review', 'review.mustFix', 'review.rounds', 'brief.merge', 'reviewer.agent', 'reviewer.model', 'reviewer.effort', 'reviewer.fallback', 'reviewer.fallbackModel', 'reviewer.fallbackEffort'])
+    // a backup chain's 2nd to 5th, each with its own three keys
+    const extra = (c: string) => [2, 3, 4, 5].flatMap((n) => [`${c}.fallback${n}`, `${c}.fallback${n}Model`, `${c}.fallback${n}Effort`])
+    expect(section().rows.map((r) => r.key)).toEqual(['brief.review', 'review.mustFix', 'review.rounds', 'brief.merge', 'reviewer.agent', 'reviewer.model', 'reviewer.effort', 'reviewer.fallback', 'reviewer.fallbackModel', 'reviewer.fallbackEffort', ...extra('reviewer')])
     // only words in prompts: What agents are told, each row with the line it adds
     expect(section().told).toBe(true)
     expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.told).toBeUndefined()
@@ -1004,7 +1006,8 @@ describe('settings', () => {
     s.set('brief.review', 'off')
     expect(note()).toContain("- Review: off. No review; the lines on reviewing below don't apply. (your setting for every machine)")
     s.set('brief.review', null)
-    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual(['Tasks', 'Tasks', 'Tasks', 'Coordinators', 'Coordinators', 'Coordinators', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Backup', 'Advisor', 'Advisor', 'Advisor', 'Advisor', 'Advisor', 'Advisor', 'Advisor'])
+    const n = (group: string, times: number) => Array<string>(times).fill(group)
+    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual([...n('Tasks', 3), ...n('Coordinators', 3), ...n('Backup', 3 + 12 + 3 + 12 + 1), ...n('Advisor', 3 + 3 + 12 + 1)])
     const agents = s.sections([], [], null).find((x) => x.name === 'Agents')!.rows
     // the way back from a backup: its agents go back to the primary once it answers again
     expect(agents.find((r) => r.key === 'backup.watchReturn')).toMatchObject({ label: 'When the primary is back', value: 'go back', options: ['go back', 'tell me', 'off'] })
@@ -1241,5 +1244,76 @@ describe('interactive chat capabilities', () => {
     expect(stopped).toBe(false)
     expect(agents.record(spec.key)).toBeUndefined()
     agents.stop()
+  })
+})
+
+describe('a chain of backups in Settings', () => {
+  test('the 2nd to 5th of each role are off until set; each is kept by its CLI name, and a model must be one its CLI has', () => {
+    const s = new Settings()
+    for (const c of ['task', 'coordinator', 'reviewer', 'advisor']) for (const n of [2, 3, 4, 5]) expect(s.get(`${c}.fallback${n}`)).toBe('off')
+    expect(s.set('task.fallback2', 'claude code', 'all').ok).toBe(true)
+    expect(s.get('task.fallback2')).toBe('Claude Code')
+    expect(s.set('task.fallback2', 'OFF', 'all').ok).toBe(true)
+    expect(s.get('task.fallback2')).toBe('off')
+    expect(s.set('task.fallback6', 'codex', 'all')).toEqual({ ok: false, error: 'No setting task.fallback6' })
+    // a model its own CLI doesn't have is refused, as for Backup 1
+    expect(s.set('task.fallback2', 'claude', 'all').ok).toBe(true)
+    expect(s.set('task.fallback2Model', 'Sonnet 5.5', 'all').ok).toBe(true)
+    expect(s.set('task.fallback2Model', 'no-such-model', 'all').ok).toBe(false)
+    // the reviewer's and the advisor's take only the CLIs that review headless
+    expect(s.set('reviewer.fallback3', 'codex', 'all').ok).toBe(true)
+    expect(s.get('reviewer.fallback3')).toBe('Codex')
+    expect(s.set('advisor.fallback2', 'pi', 'all').ok).toBe(true)
+    for (const k of ['task.fallback2', 'task.fallback2Model', 'reviewer.fallback3', 'advisor.fallback2']) s.set(k, null, 'all')
+  })
+
+  test("its CLIs count among the backups' (fallbackKinds), its models offer its own CLI's, and the reviewers and the advisor read it in turn", () => {
+    const s = new Settings()
+    const v: Record<string, string> = { 'task.fallback': 'off', 'coordinator.fallback': 'off', 'task.fallback3': 'Claude Code', 'coordinator.fallback2': 'Codex' }
+    expect(fallbackKinds((k) => v[k] ?? 'off').sort()).toEqual(['claude', 'codex'])
+    for (const [k, x] of [['reviewer.fallback', 'codex'], ['reviewer.fallback2', 'off'], ['reviewer.fallback3', 'claude'], ['reviewer.fallback3Model', 'Sonnet 5.5']]) expect(s.set(k, x, 'all').ok).toBe(true)
+    expect(s.reviewerBackups().map((r) => [r.kind, r.model])).toEqual([['codex', undefined], ['claude', 'claude-sonnet-5-5']])
+    // what one task keeps for itself is read first
+    expect(s.reviewerBackups(undefined, { 'reviewer.fallback2': 'pi' }).map((r) => r.kind)).toEqual(['codex', 'pi', 'claude'])
+    expect(s.set('advisor.agent', 'pi', 'all').ok && s.set('advisor.fallback', 'off', 'all').ok && s.set('advisor.fallback2', 'codex', 'all').ok).toBe(true)
+    expect([0, 1, 2, 5, 6].map((n) => s.advisor(undefined, n)?.kind)).toEqual(['pi', undefined, 'codex', undefined, undefined])
+    expect(s.advisor(undefined, true)).toBeUndefined()
+    // the model row of a 2nd backup lists its own CLI's models
+    const row = s.sections([], [], null).find((x) => x.name === 'How tasks work')!.rows.find((r) => r.key === 'reviewer.fallback3Model')!
+    expect(row.value).toBe('Sonnet 5.5')
+    expect(row.options).toContain('Haiku 5.5')
+    expect(row.chain).toEqual({ of: 'reviewer', n: 3 })
+    for (const k of ['reviewer.fallback', 'reviewer.fallback2', 'reviewer.fallback3', 'reviewer.fallback3Model', 'advisor.agent', 'advisor.fallback', 'advisor.fallback2']) s.set(k, null, 'all')
+  })
+
+  test('the screen marks each chain: Backup 1 with its add words, the rest off until set; shepherdr show lists only those on', () => {
+    const s = new Settings()
+    const agents = () => s.sections([], [], null).find((x) => x.name === 'Agents')!.rows
+    expect(agents().find((r) => r.key === 'task.fallback')!.chain).toEqual({ of: 'task', n: 1, cli: true, add: "Add a tasks' backup" })
+    expect(agents().find((r) => r.key === 'backup.model')!.chain).toEqual({ of: 'task', n: 1 })
+    expect(agents().find((r) => r.key === 'coordinator.fallback4')).toMatchObject({ label: "Coordinators' backup 4", value: 'off', chain: { of: 'coordinator', n: 4, cli: true, add: "Add a coordinators' backup" } })
+    expect(s.lines()).not.toContain('task.fallback2')
+    expect(s.set('task.fallback2', 'codex', 'all').ok).toBe(true)
+    expect(s.lines()).toContain('task.fallback2             Codex')
+    expect(s.lines()).toContain('task.fallback2Model')
+    expect(s.lines()).not.toContain('task.fallback3')
+    s.set('task.fallback2', null, 'all')
+  })
+
+  test('task add --set takes the rest of its chain by their own keys', () => {
+    expect(setForTask('task.fallback2=codex')).toEqual({ key: 'task.fallback2', value: 'codex' })
+    expect(setForTask('task.fallback3Model=Sonnet 5.5')).toEqual({ key: 'task.fallback3Model', value: 'Sonnet 5.5' })
+    expect(setForTask('reviewer.fallback2=claude')).toEqual({ key: 'reviewer.fallback2', value: 'claude' })
+    expect('error' in setForTask('task.fallback9=codex')).toBe(true)
+  })
+
+  test("the brief's Reviewer line: one backup reads as it always has; a chain, each in turn", () => {
+    const r = { kind: 'claude' }
+    expect(reviewerLine(r)).toBe(reviewerLine(r, []))
+    expect(reviewerLine(r, [{ kind: 'codex' }])).toBe(reviewerLine(r, { kind: 'codex' }))
+    expect(reviewerLine(r, { kind: 'codex' })).toContain('instead for that round only, and say in your summary that you did')
+    const chain = reviewerLine(r, [{ kind: 'codex' }, { kind: 'pi' }, { kind: 'claude', model: 'claude-haiku-5-5' }])
+    expect(chain).toContain('review with a headless Codex or a Codex subagent (its default model and effort) instead for that round only; where that one cannot run either, the next of, in turn: a headless pi or a pi subagent (its default model and effort); a headless Claude Code or a Claude Code subagent (model claude-haiku-5-5, its default effort).')
+    expect(chain).toContain('Say in your summary which one you used; every round asks that reviewer first again.')
   })
 })

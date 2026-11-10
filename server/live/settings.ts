@@ -9,7 +9,7 @@
 import { CHAT_KINDS, chatProblem } from './readers/index.ts'
 import { cpus, totalmem } from 'node:os'
 import { NOTIFY, NOTIFY_DEFAULT, NOTIFY_KEY } from '../../shared/alerts.ts'
-import type { SettingSection, TriggerRow } from '../../shared/types.ts'
+import type { SettingRow, SettingSection, TriggerRow } from '../../shared/types.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { SetBy } from '../../shared/brief.ts'
 import { settingsBlock, settingsLines, SEVERITIES, type Reviewer, type Said, type Ways } from './prompts.ts'
@@ -93,8 +93,25 @@ type Role = 'task' | 'coordinator' | 'reviewer' | 'backup'
  *  own CLI has; or a backup reviewer's (Reviewer → Backup reviewer), its own three so that neither reviewer replaces the
  *  other */
 type Pair = { cli: string; model: string; effort: string }
-type PairName = Role | 'reviewBackup' | 'coordinatorBackup' | 'advisor' | 'advisorBackup'
+
+/**
+ * Each role's backups, in order: a chain. Backup 1 is the pair the role always had (task.fallback, coordinator.fallback,
+ * reviewer.fallback, advisor.fallback and theirs); the 2nd to the 5th have three keys each, `<role>.fallback<n>`,
+ * `<role>.fallback<n>Model` and `<role>.fallback<n>Effort`, off until the human adds one. One that is off is skipped. The
+ * next one takes over where the one before it can't go on either (engine.ts cantGoOn, source.ts coordinatorCantGoOn,
+ * the brief's Reviewer line, source.ts advise); the way back still asks the primary alone (return.ts).
+ */
+export const MAX_BACKUPS = 5
+export type Chain = 'task' | 'coordinator' | 'reviewer' | 'advisor'
+const CHAINS: Chain[] = ['task', 'coordinator', 'reviewer', 'advisor']
+const EXTRA = [2, 3, 4, 5] as const
+type ExtraName = `${Chain}${(typeof EXTRA)[number]}`
+const FIRST_BACKUP = { task: 'backup', coordinator: 'coordinatorBackup', reviewer: 'reviewBackup', advisor: 'advisorBackup' } as const
+const extraPair = (c: Chain, n: number): Pair => ({ cli: `${c}.fallback${n}`, model: `${c}.fallback${n}Model`, effort: `${c}.fallback${n}Effort` })
+
+type PairName = Role | 'reviewBackup' | 'coordinatorBackup' | 'advisor' | 'advisorBackup' | ExtraName
 const PAIRS: Record<PairName, Pair> = {
+  ...(Object.fromEntries(CHAINS.flatMap((c) => EXTRA.map((n) => [`${c}${n}`, extraPair(c, n)]))) as Record<ExtraName, Pair>),
   task: { cli: 'task.agent', model: 'task.model', effort: 'task.effort' },
   coordinator: { cli: 'coordinator.agent', model: 'coordinator.model', effort: 'coordinator.effort' },
   reviewer: { cli: 'reviewer.agent', model: 'reviewer.model', effort: 'reviewer.effort' },
@@ -105,8 +122,17 @@ const PAIRS: Record<PairName, Pair> = {
   advisorBackup: { cli: 'advisor.fallback', model: 'advisor.fallbackModel', effort: 'advisor.fallbackEffort' },
 }
 
-/** the advisor's CLI keys: off (no advisor), or one of the CLIs Shepherdr runs headless */
-const ADVISOR_CLI_KEYS = ['advisor.agent', 'advisor.fallback']
+/** a chain's pairs, Backup 1 first */
+export const chainNames = (c: Chain): PairName[] => [FIRST_BACKUP[c], ...EXTRA.map((n) => `${c}${n}` as ExtraName)]
+/** a chain's pairs with their keys, Backup 1 first */
+export const chainPairs = (c: Chain) => chainNames(c).map((name) => ({ name, ...PAIRS[name] }))
+const chainKeys = (c: Chain) => chainNames(c).map((n) => PAIRS[n].cli)
+/** the backup reviewers' CLI keys: off, or one of the CLIs Shepherdr runs headless */
+const REVIEWER_BACKUP_KEYS = chainKeys('reviewer')
+/** the advisor's CLI keys, its backups' too: off (no advisor), or one of the CLIs Shepherdr runs headless */
+const ADVISOR_CLI_KEYS = ['advisor.agent', ...chainKeys('advisor')]
+/** a backup's CLI key, of any chain: off, or a CLI kept by its name */
+const isBackupCli = (key: string) => isFallback(key) || REVIEWER_BACKUP_KEYS.includes(key) || ADVISOR_CLI_KEYS.includes(key)
 /** how long a question waits for the human before it goes to the advisor by itself (advisor.after) */
 export const ADVISOR_AFTER = ['off', '1 min', '2 min', '5 min', '10 min', '30 min']
 
@@ -132,12 +158,14 @@ const pairOfKey = (key: string): { pair: Pair; what: 'model' | 'effort' } | unde
 
 /** the role each backup CLI setting backs up: the CLI whose agent can't go on, its backup takes over from */
 export const FALLBACK_OF = { task: 'task.fallback', coordinator: 'coordinator.fallback' } as const
-const FALLBACKS: string[] = Object.values(FALLBACK_OF)
+/** the CLI keys of the tasks' and the coordinators' backups, every one of their chains: chat CLIs, as the agents they
+ *  take over from */
+const FALLBACKS: string[] = (['task', 'coordinator'] as const).flatMap((c) => [`${c}.fallback`, ...EXTRA.map((n) => `${c}.fallback${n}`)])
 const isFallback = (key: string) => FALLBACKS.includes(key)
 
-/** the CLIs backup agents start on, by these settings: the tasks' backup first, then the coordinators', each once */
+/** the CLIs backup agents start on, by these settings: the tasks' backups first, then the coordinators', each once */
 export function fallbackKinds(get: (key: string) => string): string[] {
-  return [...new Set([kindOf(get(FALLBACK_OF.task)), kindOf(get(FALLBACK_OF.coordinator))].filter((k): k is string => !!k))]
+  return [...new Set(FALLBACKS.map((k) => kindOf(get(k))).filter((k): k is string => !!k))]
 }
 
 /** a count or a threshold: any number from min to max (step 1: whole numbers), kept with its unit ("7 days", "80%");
@@ -153,7 +181,22 @@ export interface Num {
   zero?: boolean
 }
 
-type Row = { label: string; key: string; value: string; options?: string[]; ordered?: boolean; ids?: Record<string, string>; text?: boolean; multiline?: boolean; fixed?: boolean; group?: string; num?: Num; hint?: string; warn?: string }
+type Row = { label: string; key: string; value: string; options?: string[]; ordered?: boolean; ids?: Record<string, string>; text?: boolean; multiline?: boolean; fixed?: boolean; group?: string; num?: Num; hint?: string; warn?: string; chain?: SettingRow['chain'] }
+
+/** a chain's Backup 1 rows marked as its first, and the 2nd to the 5th after them: each shows once it is on, and the
+ *  screen adds the next with its add words (src/Settings.tsx) */
+const chainRows = (c: Chain, first: Row[], label: (n: number) => string, model: string, effort: string, clis: readonly string[], add: string): Row[] => [
+  ...first.map((r, i) => ({ ...r, chain: { of: c, n: 1, ...(i === 0 ? { cli: true as const, add } : {}) } })),
+  ...EXTRA.flatMap((n) => {
+    const p = extraPair(c, n)
+    const group = first[0].group
+    return [
+      { group, label: label(n), key: p.cli, value: 'off', options: ['off', ...clis], hint: 'Off takes it out.', chain: { of: c, n, cli: true as const, add } },
+      { group, label: model, key: p.model, value: 'default', text: true, chain: { of: c, n } },
+      { group, label: effort, key: p.effort, value: 'default', options: [...EFFORTS], chain: { of: c, n } },
+    ]
+  }),
+]
 /** the levels a section's defaults may be set at (all three when none): a machine's capacity has no space level;
  *  alerts and voice are one for all */
 type Section = { name: string; about?: string; rows: Row[]; levels?: LevelKind[]; told?: boolean; prompt?: boolean }
@@ -239,9 +282,21 @@ export const CATALOG: Section[] = [
       // a reviewer that cannot run at all (out of allowance, signed out, its model is gone) leaves its task's agent
       // stuck at that step: a backup reviewer, named in the same Reviewer line, reviews instead. Off until the human
       // sets one: with it off the line reads exactly as it always has
-      { group: 'Reviewer', label: 'Backup reviewer', key: 'reviewer.fallback', value: 'off', options: ['off', ...REVIEWERS] },
-      { group: 'Reviewer', label: 'Backup model', key: 'reviewer.fallbackModel', value: 'default', text: true },
-      { group: 'Reviewer', label: 'Backup effort', key: 'reviewer.fallbackEffort', value: 'default', options: [...EFFORTS] },
+      // sets one: with it off the line reads exactly as it always has. More of them review in turn, each where the one
+      // before it cannot run
+      ...chainRows(
+        'reviewer',
+        [
+          { group: 'Reviewer', label: 'Backup reviewer', key: 'reviewer.fallback', value: 'off', options: ['off', ...REVIEWERS] },
+          { group: 'Reviewer', label: 'Backup model', key: 'reviewer.fallbackModel', value: 'default', text: true },
+          { group: 'Reviewer', label: 'Backup effort', key: 'reviewer.fallbackEffort', value: 'default', options: [...EFFORTS] },
+        ],
+        (n) => `Backup reviewer ${n}`,
+        'Backup model',
+        'Backup effort',
+        REVIEWERS,
+        'Add a backup reviewer',
+      ),
     ],
   },
   {
@@ -253,13 +308,34 @@ export const CATALOG: Section[] = [
       ...agentRows('Coordinators', 'coordinator', [...CHAT_CLIS], 'default', 'default'),
       // a backup takes over where a task's or a coordinator's agent can't go on (engine.ts cantGoOn, source.ts
       // cannotGoOn): the same CLI again on the backup's model and effort, keeping its session, or another CLI taking over
-      { group: 'Backup', label: "Tasks' backup", key: 'task.fallback', value: 'Codex', options: ['off', ...CHAT_CLIS] },
-      { group: 'Backup', label: 'Model', key: 'backup.model', value: 'default', text: true },
-      { group: 'Backup', label: 'Effort', key: 'backup.effort', value: 'default', options: [...EFFORTS] },
+      // each takes over in turn: the 2nd where the 1st can't go on either, and so on
+      ...chainRows(
+        'task',
+        [
+          { group: 'Backup', label: "Tasks' backup", key: 'task.fallback', value: 'Codex', options: ['off', ...CHAT_CLIS] },
+          { group: 'Backup', label: 'Model', key: 'backup.model', value: 'default', text: true },
+          { group: 'Backup', label: 'Effort', key: 'backup.effort', value: 'default', options: [...EFFORTS] },
+        ],
+        (n) => `Tasks' backup ${n}`,
+        'Model',
+        'Effort',
+        CHAT_CLIS,
+        "Add a tasks' backup",
+      ),
       // the coordinators' own pair, so that it can be on another CLI than the tasks' one and on a model that CLI has
-      { group: 'Backup', label: "Coordinators' backup", key: 'coordinator.fallback', value: 'off', options: ['off', ...CHAT_CLIS] },
-      { group: 'Backup', label: 'Model', key: 'coordinator.fallbackModel', value: 'default', text: true, hint: "While default: the tasks' backup's." },
-      { group: 'Backup', label: 'Effort', key: 'coordinator.fallbackEffort', value: 'default', options: [...EFFORTS], hint: "While default: the tasks' backup's." },
+      ...chainRows(
+        'coordinator',
+        [
+          { group: 'Backup', label: "Coordinators' backup", key: 'coordinator.fallback', value: 'off', options: ['off', ...CHAT_CLIS] },
+          { group: 'Backup', label: 'Model', key: 'coordinator.fallbackModel', value: 'default', text: true, hint: "While default: the tasks' backup's." },
+          { group: 'Backup', label: 'Effort', key: 'coordinator.fallbackEffort', value: 'default', options: [...EFFORTS], hint: "While default: the tasks' backup's." },
+        ],
+        (n) => `Coordinators' backup ${n}`,
+        'Model',
+        'Effort',
+        CHAT_CLIS,
+        "Add a coordinators' backup",
+      ),
       // the way back from a backup: the primary is asked, now and then, whether it answers again (source.ts
       // watchReturns, return.ts); go back starts each agent still on the backup again on what Settings name once it is
       // idle, tell me only says so in their chats. A probe is one tiny request of one CLI, never beside work on that model
@@ -270,9 +346,19 @@ export const CATALOG: Section[] = [
       { group: 'Advisor', label: 'Advisor', key: 'advisor.agent', value: 'off', options: ['off', ...REVIEWERS], hint: 'Off: no advisor. Answers the questions tasks and coordinators open for you, when you ask it or once one has waited.' },
       { group: 'Advisor', label: 'Model', key: 'advisor.model', value: 'default', text: true },
       { group: 'Advisor', label: 'Effort', key: 'advisor.effort', value: 'default', options: [...EFFORTS] },
-      { group: 'Advisor', label: 'Backup', key: 'advisor.fallback', value: 'off', options: ['off', ...REVIEWERS], hint: 'Answers instead where the advisor cannot run at all.' },
-      { group: 'Advisor', label: 'Backup model', key: 'advisor.fallbackModel', value: 'default', text: true },
-      { group: 'Advisor', label: 'Backup effort', key: 'advisor.fallbackEffort', value: 'default', options: [...EFFORTS] },
+      ...chainRows(
+        'advisor',
+        [
+          { group: 'Advisor', label: 'Backup', key: 'advisor.fallback', value: 'off', options: ['off', ...REVIEWERS], hint: 'Answers instead where the advisor cannot run at all.' },
+          { group: 'Advisor', label: 'Backup model', key: 'advisor.fallbackModel', value: 'default', text: true },
+          { group: 'Advisor', label: 'Backup effort', key: 'advisor.fallbackEffort', value: 'default', options: [...EFFORTS] },
+        ],
+        (n) => `Backup ${n}`,
+        'Backup model',
+        'Backup effort',
+        REVIEWERS,
+        'Add an advisor backup',
+      ),
       { group: 'Advisor', label: 'Answers for you after', key: 'advisor.after', value: '2 min', options: [...ADVISOR_AFTER], hint: 'A question nobody answered goes to the advisor by itself after this long. Never a permission, a plan, or what only you decide.' },
     ],
   },
@@ -510,8 +596,8 @@ export class Settings {
       else if (key === 'heartbeat.on') value = eventsText(eventRules(value))
       else if (key === 'time.zone') value = value.trim()
       // a CLI is kept by its name, however it was written
-      else if ((isFallback(key) || key === 'reviewer.fallback' || ADVISOR_CLI_KEYS.includes(key)) && value.trim().toLowerCase() === 'off') value = 'off'
-      else if (key.endsWith('.agent') || isFallback(key) || key === 'reviewer.fallback' || ADVISOR_CLI_KEYS.includes(key)) value = CLI_NAME[kindOf(value)!]
+      else if (isBackupCli(key) && value.trim().toLowerCase() === 'off') value = 'off'
+      else if (key.endsWith('.agent') || isBackupCli(key)) value = CLI_NAME[kindOf(value)!]
     }
     const at = typeof l === 'object' ? (this.d.spaces[l.space] ??= {}) : this.at(l)
     if (value === null) delete at[key]
@@ -646,7 +732,7 @@ export class Settings {
       review: by('brief.review'),
       // a backup reviewer's three keys mark the line only where the line shows one: with it off, and with Review off,
       // the Reviewer line reads as the plain one
-      reviewer: by('reviewer.agent', 'reviewer.model', 'reviewer.effort', ...(this.waysAt(l, set).review && this.reviewerBackupAt(l, set) ? ['reviewer.fallback', 'reviewer.fallbackModel', 'reviewer.fallbackEffort'] : [])),
+      reviewer: by('reviewer.agent', 'reviewer.model', 'reviewer.effort', ...(this.waysAt(l, set).review ? chainNames('reviewer').filter((n) => kindOf((set[PAIRS[n].cli] ?? this.pick(PAIRS[n].cli, l).value))).flatMap((n) => Object.values(PAIRS[n])) : [])),
       mustFix: by('review.mustFix'),
       rounds: by('review.rounds'),
       merge: by('brief.merge'),
@@ -713,16 +799,34 @@ export class Settings {
     return this.reviewerBackupAt(space ? { space } : 'machine', set)
   }
 
+  /** the backup reviewers, in turn (the chain's ones that are on), for a space (none: this machine), with what the
+   *  coordinator set for this task first */
+  reviewerBackups(space?: string, set: Values = {}): { kind: string; model?: string; effort?: string }[] {
+    return this.reviewerBackupsAt(space ? { space } : 'machine', set)
+  }
+
+  private reviewerBackupsAt(l: Level, set: Values = {}): { kind: string; model?: string; effort?: string }[] {
+    const get = (key: string) => set[key] ?? this.pick(key, l).value
+    return chainNames('reviewer').flatMap((n) => {
+      const kind = kindOf(get(PAIRS[n].cli))
+      return kind ? [{ kind, ...this.modelIn(PAIRS[n], kind, l, get) }] : []
+    })
+  }
+
   private reviewerBackupAt(l: Level, set: Values = {}) {
     const get = (key: string) => set[key] ?? this.pick(key, l).value
     const kind = kindOf(get(PAIRS.reviewBackup.cli))
     return kind ? { kind, ...this.modelIn(PAIRS.reviewBackup, kind, l, get) } : undefined
   }
 
-  /** the advisor's CLI, model and effort for a space (none: this machine), or its backup's; nothing while it is off */
-  advisor(space?: string, backup = false): { kind: string; model?: string; effort?: string } | undefined {
+  /** the advisor's CLI, model and effort for a space (none: this machine), or its nth backup's (true: the 1st); nothing
+   *  while that one is off */
+  advisor(space?: string, backup: boolean | number = false): { kind: string; model?: string; effort?: string } | undefined {
     const l: Level = space ? { space } : 'machine'
-    const pair = backup ? PAIRS.advisorBackup : PAIRS.advisor
+    const n = backup === true ? 1 : backup === false ? 0 : backup
+    const name = n ? chainNames('advisor')[n - 1] : undefined
+    if (n && !name) return undefined
+    const pair = name ? PAIRS[name] : PAIRS.advisor
     const kind = kindOf(this.pick(pair.cli, l).value)
     return kind ? { kind, ...this.modelIn(pair, kind, l) } : undefined
   }
@@ -784,7 +888,8 @@ export class Settings {
     const l: Level = space ? { space } : 'machine'
     const name = { space: 'this space', machine: host, all: 'Everywhere', default: 'default' }
     const keys = (told: boolean) =>
-      CATALOG.filter((s) => !!(s.told || s.prompt) === told).flatMap((s) => s.rows.filter((r) => r.key !== 'alerts').map((r) => {
+      // a chain's 2nd to 5th backups only once they are on: the rest say nothing
+      CATALOG.filter((s) => !!(s.told || s.prompt) === told).flatMap((s) => s.rows.filter((r) => r.key !== 'alerts' && !(r.chain && r.chain.n > 1 && !kindOf(this.readAt(extraPair(r.chain.of as Chain, r.chain.n).cli, l).value))).map((r) => {
         const p = this.readAt(r.key, l)
         // a backup's own key at default reads the tasks' pair's, which the line says
         const from = `${name[p.from]}${p.follows ? `, the tasks' backup's ${p.follows === 'backup.model' ? 'model' : 'effort'}` : ''}`
@@ -826,10 +931,10 @@ export class Settings {
     const above = (l: Level): Level | null => (l === 'all' ? null : l === 'machine' ? 'all' : 'machine')
     const rows = (s: Section, l: Level) => {
       // the words each row of How tasks work adds to a brief, as its Settings block has them at this level
-      const told = s.told ? settingsLines('<id>', { ways: this.waysAt(l), reviewer: this.harnessAt('reviewer', l), fallback: this.reviewerBackupAt(l), by: this.setByAt(l) }) : []
+      const told = s.told ? settingsLines('<id>', { ways: this.waysAt(l), reviewer: this.harnessAt('reviewer', l), fallback: this.reviewerBackupsAt(l), by: this.setByAt(l) }) : []
       const text = (said: Said) => told.find((x) => x.said === said)?.text
       const lines: Record<string, string | undefined> = s.told
-        ? { 'brief.review': text('review'), 'reviewer.agent': text('reviewer'), 'reviewer.fallback': text('reviewer'), 'review.mustFix': text('mustFix'), 'review.rounds': text('rounds'), 'brief.merge': text('merge') }
+        ? { 'brief.review': text('review'), 'reviewer.agent': text('reviewer'), ...Object.fromEntries(REVIEWER_BACKUP_KEYS.map((k) => [k, text('reviewer')])), 'review.mustFix': text('mustFix'), 'review.rounds': text('rounds'), 'brief.merge': text('merge') }
         : {}
       return s.rows.map((r) => {
         if (r.key === 'alerts') return { ...r, value: devices.length ? devices.join(', ') : 'No device yet', warn: pushWarnings.length ? `${pushWarnings.length} device${pushWarnings.length === 1 ? '' : 's'} could not receive the last alert.\n${pushWarnings.slice(0, 3).join('\n')}${pushWarnings.length > 3 ? '\nMore details: shepherdr doctor' : ''}` : undefined }
@@ -854,7 +959,7 @@ export class Settings {
       s.name === 'Private instructions'
         ? { noteTitle: 'When rules take effect', note: 'Used at the next start or restart. Saving leaves running agents alone. A resumed session may remember old rules: the new snapshot replaces those private rules. Task agents pass the reviewer snapshot from their own latest start to each review; restart the task agent to refresh it.' }
         : s.name === 'How tasks work'
-          ? { note: settingsBlock('<id>', { ways: this.waysAt(l), reviewer: this.harnessAt('reviewer', l), fallback: this.reviewerBackupAt(l), by: this.setByAt(l) }) }
+          ? { note: settingsBlock('<id>', { ways: this.waysAt(l), reviewer: this.harnessAt('reviewer', l), fallback: this.reviewerBackupsAt(l), by: this.setByAt(l) }) }
         : s.name === AUTOPILOT
           ? autopilotNote()
           : s.name === 'Machine'
@@ -967,7 +1072,7 @@ export function refuse(key: string, value: string): string | undefined {
   if (cli && !kindOf(value)) return `${value} is not an agent herdr can start.`
   if (key === 'reviewer.agent' && !REVIEWERS.includes(CLI_NAME[kindOf(value) ?? ''] ?? '')) return `Pick one of: ${REVIEWERS.join(' · ')}.`
   // a backup reviewer: one of the reviewer CLIs, or off (there is none)
-  if (key === 'reviewer.fallback' && value.trim().toLowerCase() !== 'off' && !REVIEWERS.includes(CLI_NAME[kindOf(value) ?? ''] ?? '')) return `Pick one of: off · ${REVIEWERS.join(' · ')}.`
+  if (REVIEWER_BACKUP_KEYS.includes(key) && value.trim().toLowerCase() !== 'off' && !REVIEWERS.includes(CLI_NAME[kindOf(value) ?? ''] ?? '')) return `Pick one of: off · ${REVIEWERS.join(' · ')}.`
   // the advisor and its backup: off, or one of the CLIs Shepherdr runs headless
   if (ADVISOR_CLI_KEYS.includes(key) && value.trim().toLowerCase() !== 'off' && !REVIEWERS.includes(CLI_NAME[kindOf(value) ?? ''] ?? '')) return `Pick one of: off · ${REVIEWERS.join(' · ')}.`
   if (pairOfKey(key)?.what === 'model' && !/^[\w.:/@[\] -]+$/.test(value.trim())) return 'Write a model id like claude-opus-5-5, or default.'
@@ -986,7 +1091,7 @@ export function refuse(key: string, value: string): string | undefined {
   if (key === 'dictate.language' && !options?.includes(value) && !/^(auto|[a-z]{2,3})$/i.test(value.trim()))
     return 'Pick a language, or write its whisper code (en, pt, es).'
   if (num && numValue(num, value) === undefined) return `Write a number from ${num.min} to ${num.max}${num.step ? '' : ' (whole)'}${num.unit ? `, in ${num.unit}` : ''}${num.off ? ', or off' : num.zero ? ' (0 is off)' : ''}.`
-  if (options && !cli && key !== 'reviewer.agent' && key !== 'reviewer.fallback' && !ADVISOR_CLI_KEYS.includes(key) && key !== 'alerts' && !isFallback(key) && key !== 'dictate.language' && !options.includes(value)) return `Pick one of: ${options.join(' · ')}.`
+  if (options && !cli && key !== 'reviewer.agent' && !isBackupCli(key) && key !== 'alerts' && key !== 'dictate.language' && !options.includes(value)) return `Pick one of: ${options.join(' · ')}.`
   return undefined
 }
 
@@ -996,7 +1101,14 @@ const numOf = (key: string) => ROWS.find((r) => r.key === key)?.num
  *  add's own the agent and reviewer keys stand for */
 const ONE_TASK: Record<string, string> = { review: 'brief.review', merge: 'brief.merge', mustfix: 'review.mustFix', 'must-fix': 'review.mustFix', rounds: 'review.rounds', 'review-rounds': 'review.rounds' }
 /** the backup settings one task keeps for itself, its own fallback and pair, as engine.ts cantGoOn reads them first */
-const ONE_BACKUP: Record<string, string> = { 'task.fallback': 'task.fallback', fallback: 'task.fallback', 'backup.model': 'backup.model', 'backup.effort': 'backup.effort' }
+const ONE_BACKUP: Record<string, string> = {
+  'task.fallback': 'task.fallback',
+  fallback: 'task.fallback',
+  'backup.model': 'backup.model',
+  'backup.effort': 'backup.effort',
+  // the rest of its chain, by their own keys
+  ...Object.fromEntries(EXTRA.flatMap((n) => Object.values(extraPair('task', n)).map((k) => [k.toLowerCase(), k]))),
+}
 const FLAG_OF: Record<string, string> = { 'task.agent': 'agent', 'task.model': 'model', 'task.effort': 'effort', 'reviewer.agent': 'reviewer', 'reviewer.model': 'reviewer-model', 'reviewer.effort': 'reviewer-effort' }
 
 /** one --set key=value: a How tasks work setting for this task as Settings keeps it, the task add flag it stands for

@@ -73,6 +73,20 @@ coordinator's chat with its open tasks and its chat so far, which changes who yo
 who went in and why. A backup that isn't installed, or set to a model its CLI doesn't have, doesn't go in: the chat says
 why. Each value shows where it comes from, with Reset to the inherited one, like every other setting.
 
+### A chain of backups
+
+Each role's backup is the first of a chain: **+ Add a tasks' backup** (and the coordinators', the reviewer's and the
+advisor's) under its last one adds the next, up to five, each with its own CLI, Model and Effort
+(`task.fallback2`, `task.fallback2Model`, `task.fallback2Effort` … `task.fallback5…`; `coordinator.fallback2…`,
+`reviewer.fallback2…`, `advisor.fallback2…`). The new one starts on the CLI of the one before it; Off takes it out. They
+go in turn: where the agent on Backup 1 can't go on either, Backup 2 takes over, the same way (the same CLI resumes its
+session, another CLI takes the work over with the handover), each once, and past the last one it waits for you. One
+that is off, isn't installed or is set to a model its CLI lacks is passed over for the next. A backup reviewer's chain is
+the brief's Reviewer line, each in turn for that round only; the advisor's is tried in turn on a question. A task's
+own `task add --set task.fallback2=…` wins in its chain, as for Backup 1. `shepherdr show` lists only the ones on. The
+way back still asks the primary alone: an agent on any backup of the chain starts again on the primary once it answers,
+and its chain is whole again for the next time; every model of a role has run out once its last backup is cut off too.
+
 ## When the primary is back
 
 A backup takes over by itself when the primary can't go on; this is the way back. Settings → Agents → Backup → **When

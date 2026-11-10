@@ -740,6 +740,83 @@ describe('cut off before outages were kept', () => {
   })
 })
 
+describe('a chain of backups, and the way back', () => {
+  test('cut off for good on the last of its backups, every model ran out; on one with another after it, not yet', async () => {
+    const s = await nightWorld('chain-out', 4)
+    try {
+      expect(s.src.settings.set('task.fallback2', 'pi', { space: s.p.name }).ok).toBe(true)
+      const next = task(s.p.name, 'claude')
+      const a = s.cutOff('codex')
+      s.src.engine.noteStuck!(a.t, { kind: 'codex' }, 'out of allowance until tomorrow')
+      // Backup 2 is still there: a new task may start
+      expect(s.src.returns.get('task', s.p.name)!.allOut).toBeFalsy()
+      expect(s.src.engine.room(next.t)).toEqual({})
+      const b = s.cutOff('pi')
+      s.src.engine.noteStuck!(b.t, { kind: 'pi' }, 'out of allowance until tomorrow')
+      expect(s.src.returns.get('task', s.p.name)!.allOut).toBe(true)
+      expect(s.src.engine.room(next.t)).toEqual({ why: 'models' })
+    } finally {
+      s.src.settings.set('task.fallback2', null, { space: s.p.name })
+      s.done()
+    }
+  })
+
+  test('the morning: each one on its 2nd backup, cut off or at work, goes back to the primary; waiting, it is in line', async () => {
+    const s = await nightWorld('chain-morning', 4)
+    try {
+      expect(s.src.settings.set('task.fallback2', 'pi', { space: s.p.name }).ok).toBe(true)
+      const a = s.cutOff('pi', { tookOver: { from: 'codex', to: 'pi', why: 'signed out', at: Date.now(), step: 2 } })
+      // one at work on Backup 2, never cut off itself
+      const fine = task(s.p.name, 'pi', { from: 'codex' })
+      Object.assign(fine.t, { worktree: s.p.path, branch: 'main', base: 'main', agent: { kind: 'pi' } })
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'provider refused it', at: Date.now() - FIRST_WAIT * 2 }, { allOut: true })
+      answers = false
+      await s.src.watchReturns(later())
+      expect(s.src.engine.statusOf(a.t)).toBe('queued')
+      expect(s.src.engine.subOf(a.t)).toBe('Waiting for its model to answer again')
+      answers = true
+      await s.src.watchReturns(Date.now() + 48 * 3_600_000)
+      // each one goes back on its own: the second may still be starting when the pass returns
+      for (const t0 = Date.now(); s.started.length < 2 && Date.now() - t0 < 5000; ) await Bun.sleep(20)
+      expect(s.started.map((x) => [x.key, x.kind]).sort()).toEqual([[a.key, 'claude'], [fine.key, 'claude']].sort())
+      // back on the primary, its chain is whole again for the next time
+      expect(a.t.tookOver).toBeUndefined()
+    } finally {
+      s.src.settings.set('task.fallback2', null, { space: s.p.name })
+      s.done()
+    }
+  })
+
+  test('a task cut off on its 2nd backup before outages were kept is taken in and goes back', async () => {
+    const s = await nightWorld('chain-adopt-task')
+    try {
+      expect(s.src.settings.set('task.fallback2', 'pi', { space: s.p.name }).ok).toBe(true)
+      const a = s.cutOff('pi')
+      await s.src.watchReturns(Date.now())
+      expect(asked).toEqual(['claude'])
+      expect(s.started.map((x) => [x.key, x.kind])).toEqual([[a.key, 'claude']])
+    } finally {
+      s.src.settings.set('task.fallback2', null, { space: s.p.name })
+      s.done()
+    }
+  })
+
+  test('a coordinator still on its 2nd backup, nothing cut off, is taken in and goes back', async () => {
+    const s = await nightWorld('chain-adopt-coord')
+    try {
+      for (const [k, v] of [['coordinator.fallback', 'codex'], ['coordinator.fallback2', 'pi']]) expect(s.src.settings.set(k, v, { space: s.p.name }).ok).toBe(true)
+      coordinator(s.key, 'pi')
+      s.src.agents.markTookOver(s.key, { from: 'codex', to: 'pi', why: 'signed out', at: Date.now() - 6 * 3_600_000, step: 2 })
+      await s.src.watchReturns(Date.now())
+      expect(asked).toEqual(['claude'])
+      expect(s.started.map((x) => [x.key, x.kind])).toEqual([[s.key, 'claude']])
+    } finally {
+      for (const k of ['coordinator.fallback', 'coordinator.fallback2']) s.src.settings.set(k, null, { space: s.p.name })
+      s.done()
+    }
+  })
+})
+
 describe('when the primary still does not answer', () => {
   test('nothing is posted, nothing alerts, and the wait doubles up to a few hours', async () => {
     const s = await space('back-fails')
