@@ -1474,7 +1474,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // its backup was cut off too, or there is none: every model of that role ran out here
       const allOut = !backup || sameHarness(backup, primary) || sameHarness(ran, backup)
       const o = this.returns.get(role, space)
-      if (o && !o.back) this.returns.cut(role, space, Date.now(), { key, allOut })
+      // a cut-off on the backup says nothing of the primary: only one on the primary puts its answer off
+      if (o && !o.back) this.returns.cut(role, space, Date.now(), { key, allOut, onPrimary: sameHarness(ran, primary) })
       else this.returns.note({ role, space, primary, to: ran, why, at: Date.now() }, { key, allOut })
     } catch (e) {
       console.error(`shepherdr: couldn't keep that a ${role} of ${space || 'this machine'} waits for its provider: ${(e as Error).message}`)

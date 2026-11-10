@@ -226,13 +226,16 @@ export class Returns {
     this.save()
   }
 
-  /** one more agent of that role cut off for good while its outage is open: what tells an agent at work on the primary
-   *  from one whose turn began before the provider refused (QUIET). allOut: its backup was cut off too, or it has none */
-  cut(role: ReturnRole, space: string, at = Date.now(), also: { key?: string; allOut?: boolean } = {}) {
+  /** one more agent of that role cut off for good while its outage is open. On the primary (onPrimary), it says the primary
+   *  refuses again: its answer is not fresh any more, and an agent at work on it counts only after a quiet while (QUIET);
+   *  on the backup it says nothing of the primary. allOut: its backup was cut off too, or it has none */
+  cut(role: ReturnRole, space: string, at = Date.now(), also: { key?: string; allOut?: boolean; onPrimary?: boolean } = {}) {
     const o = this.get(role, space)
     if (!o || o.back) return
-    o.lastCut = at
-    o.ok = undefined
+    if (also.onPrimary) {
+      o.lastCut = at
+      o.ok = undefined
+    }
     if (also.allOut) o.allOut = true
     this.again(o, also.key)
     this.save()

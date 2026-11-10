@@ -622,6 +622,26 @@ describe('the night every model ran out', () => {
     }
   })
 
+  test('a cut-off on the backup says nothing of the primary: an agent at work on it is still its answer', async () => {
+    const s = await nightWorld('night-backup-cut', 4)
+    const status = s.src.agents.status
+    try {
+      const a = s.cutOff('codex')
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'provider refused it', at: Date.now() - FIRST_WAIT * 2 })
+      const lastCut = s.src.returns.get('task', s.p.name)!.lastCut
+      // the backup cuts one off again (news it was sent, say): the primary's quiet goes on
+      s.src.engine.noteStuck!(a.t, { kind: 'codex' }, 'out of allowance until tomorrow')
+      expect(s.src.returns.get('task', s.p.name)!.lastCut).toBe(lastCut)
+      // one on the primary does put it off
+      const b = s.cutOff('claude')
+      s.src.engine.noteStuck!(b.t, { kind: 'claude' }, 'provider refused it')
+      expect(s.src.returns.get('task', s.p.name)!.lastCut).not.toBe(lastCut)
+    } finally {
+      s.src.agents.status = status
+      s.done()
+    }
+  })
+
   test('a night of cut-offs never puts the question off: one more keeps the schedule of the first', async () => {
     const s = await nightWorld('night-schedule', 4)
     try {
