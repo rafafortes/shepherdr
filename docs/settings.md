@@ -96,6 +96,10 @@ asks the primary now and then whether it answers again, and then:
 - **Every model out.** When the backup is cut off too, or there is none, a new task of that space waits instead of
   starting only to be cut off as well ("Waiting: every model ran out"), until the primary answers; the tasks already
   cut off then go back first.
+- **Cut off before it was kept.** A chat cut off for good, or still on the backup that took it over, that no outage
+  covers (cut off before Shepherdr kept outages, or whose note was lost) is taken in on the watch's next pass: its
+  primary is asked at once, as its cut-off is old, and it goes back like any other. Each cut-off or takeover once per
+  server run, and never one the way back already started again.
 - **tell me**: nothing switches. One card in each chat still on the backup says that the primary answers again and how
   to go back — `shepherdr restart <task or space>` (or ⋯ → Restart agent) for a task or a coordinator, and for a
   reviewer `shepherdr set reviewer.model <id> --space <name>` — and an alert, where your Notifications let one through.

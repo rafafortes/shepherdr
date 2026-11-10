@@ -519,47 +519,49 @@ describe('going back by itself', () => {
   })
 })
 
-describe('the night every model ran out', () => {
-  /** a space whose backup is Codex, its agents' starts stubbed and kept, every agent idle, and `max` slots */
-  async function night(name: string, max: number) {
-    const s = await space(name)
-    expect(s.src.settings.set('task.fallback', 'codex', { space: s.p.name }).ok).toBe(true)
-    expect(s.src.settings.set('backup.watchReturn', 'go back', { space: s.p.name }).ok).toBe(true)
-    expect(s.src.settings.set('machine.maxTasks', String(max), 'machine').ok).toBe(true)
-    const started: { key: string; kind: string; first?: string }[] = []
-    s.src.agents.restart = (async (spec: { key: string; kind: string; model?: string }, before?: () => Promise<string | void>) => {
-      started.push({ key: spec.key, kind: spec.kind, first: (await before?.()) as string | undefined })
-      const r = s.src.agents.records[spec.key]
-      if (r) Object.assign(r, { kind: spec.kind, model: spec.model })
-      return null
-    }) as never
-    const status = s.src.agents.status
-    /** the agents whose pane is gone (a start that failed, or herdr closed it): the others are idle */
-    const gone = new Set<string>()
-    s.src.agents.status = ((k: string) => (gone.has(k) ? 'gone' : 'idle')) as never
-    const reachable = s.src.agents.reachable
-    s.src.agents.reachable = true
-    const retries = s.src.retries as unknown as { data: Record<string, Retry> }
-    /** a task of the space started as a real one is, its agent on `on` and its last turn cut off for good */
-    const cutOff = (on: string, extra: object = {}) => {
-      const x = task(s.p.name, on, on === 'codex' ? { from: 'claude' } : undefined)
-      Object.assign(x.t, { worktree: s.p.path, branch: 'main', base: 'main', agent: { kind: on } }, extra)
-      retries.data[x.key] = { cut: `c-${x.id}`, tries: 1, reason: 'Out of allowance until tomorrow', words: 'out', over: true, lasting: true }
-      return x
-    }
-    const done = () => {
-      s.src.agents.status = status
-      s.src.agents.reachable = reachable
-      for (const k of ['task.fallback', 'backup.watchReturn']) s.src.settings.set(k, null, { space: s.p.name })
-      s.src.settings.set('machine.maxTasks', null, 'machine')
-      for (const k of Object.keys(retries.data)) delete retries.data[k]
-      s.done()
-    }
-    return { ...s, started, cutOff, gone, done }
+/** a space whose backup is Codex, its agents' starts stubbed and kept, every agent idle, and `max` slots */
+async function nightWorld(name: string, max = 4) {
+  const s = await space(name)
+  expect(s.src.settings.set('task.fallback', 'codex', { space: s.p.name }).ok).toBe(true)
+  expect(s.src.settings.set('backup.watchReturn', 'go back', { space: s.p.name }).ok).toBe(true)
+  expect(s.src.settings.set('machine.maxTasks', String(max), 'machine').ok).toBe(true)
+  const started: { key: string; kind: string; first?: string }[] = []
+  s.src.agents.restart = (async (spec: { key: string; kind: string; model?: string }, before?: () => Promise<string | void>) => {
+    started.push({ key: spec.key, kind: spec.kind, first: (await before?.()) as string | undefined })
+    const r = s.src.agents.records[spec.key]
+    if (r) Object.assign(r, { kind: spec.kind, model: spec.model })
+    return null
+  }) as never
+  const status = s.src.agents.status
+  /** the agents whose pane is gone (a start that failed, or herdr closed it): the others are idle */
+  const gone = new Set<string>()
+  s.src.agents.status = ((k: string) => (gone.has(k) ? 'gone' : 'idle')) as never
+  // herdr answers, whatever the source's own looks at the missing socket say meanwhile (a loaded machine runs one mid-test)
+  const reachable = s.src.agents.reachable
+  Object.defineProperty(s.src.agents, 'reachable', { get: () => true, set: () => undefined, configurable: true })
+  const retries = s.src.retries as unknown as { data: Record<string, Retry> }
+  /** a task of the space started as a real one is, its agent on `on` and its last turn cut off for good */
+  const cutOff = (on: string, extra: object = {}) => {
+    const x = task(s.p.name, on, on === 'codex' ? { from: 'claude' } : undefined)
+    Object.assign(x.t, { worktree: s.p.path, branch: 'main', base: 'main', agent: { kind: on } }, extra)
+    retries.data[x.key] = { cut: `c-${x.id}`, tries: 1, reason: 'Out of allowance until tomorrow', words: 'out', over: true, lasting: true }
+    return x
   }
+  const done = () => {
+    s.src.agents.status = status
+    Object.defineProperty(s.src.agents, 'reachable', { value: reachable, writable: true, configurable: true, enumerable: true })
+    for (const k of ['task.fallback', 'backup.watchReturn']) s.src.settings.set(k, null, { space: s.p.name })
+    s.src.settings.set('machine.maxTasks', null, 'machine')
+    for (const k of Object.keys(retries.data)) delete retries.data[k]
+    s.done()
+  }
+  return { ...s, started, cutOff, gone, done }
+}
+
+describe('the night every model ran out', () => {
 
   test('its backup cut off too: a new task waits instead of being cut off as well, until the primary answers', async () => {
-    const s = await night('night-out', 4)
+    const s = await nightWorld('night-out', 4)
     try {
       const a = s.cutOff('codex')
       // the backup ran out as well: what the engine notes when it leaves a task waiting for the human
@@ -577,7 +579,7 @@ describe('the night every model ran out', () => {
   })
 
   test('the morning: each one cut off, on the backup or on the primary itself, starts again a free slot at a time, before any new task', async () => {
-    const s = await night('night-morning', 1)
+    const s = await nightWorld('night-morning', 1)
     try {
       // the backup took it over, then ran out too
       const a = s.cutOff('codex')
@@ -620,14 +622,92 @@ describe('the night every model ran out', () => {
     }
   })
 
+  test('a cut-off on the backup says nothing of the primary: an agent at work on it is still its answer', async () => {
+    const s = await nightWorld('night-backup-cut', 4)
+    const status = s.src.agents.status
+    try {
+      const a = s.cutOff('codex')
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'provider refused it', at: Date.now() - FIRST_WAIT * 2 })
+      const lastCut = s.src.returns.get('task', s.p.name)!.lastCut
+      // the backup cuts one off again (news it was sent, say): the primary's quiet goes on
+      s.src.engine.noteStuck!(a.t, { kind: 'codex' }, 'out of allowance until tomorrow')
+      expect(s.src.returns.get('task', s.p.name)!.lastCut).toBe(lastCut)
+      // one on the primary does put it off
+      const b = s.cutOff('claude')
+      s.src.engine.noteStuck!(b.t, { kind: 'claude' }, 'provider refused it')
+      expect(s.src.returns.get('task', s.p.name)!.lastCut).not.toBe(lastCut)
+    } finally {
+      s.src.agents.status = status
+      s.done()
+    }
+  })
+
   test('a night of cut-offs never puts the question off: one more keeps the schedule of the first', async () => {
-    const s = await night('night-schedule', 4)
+    const s = await nightWorld('night-schedule', 4)
     try {
       const at = Date.now() - 3 * 3_600_000
       s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'provider refused it', at })
       const due = s.src.returns.get('task', s.p.name)!.due
       s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'provider refused it', at: at + 3_600_000 })
       expect(s.src.returns.get('task', s.p.name)).toMatchObject({ due, lastCut: at + 3_600_000 })
+    } finally {
+      s.done()
+    }
+  })
+})
+
+describe('cut off before outages were kept', () => {
+  test('a task cut off on its backup, with no outage kept, is taken in: its primary is asked at once, and it goes back', async () => {
+    const s = await nightWorld('adopt-task')
+    try {
+      const a = s.cutOff('codex')
+      expect(s.src.returns.get('task', s.p.name)).toBeUndefined()
+      await s.src.watchReturns(Date.now())
+      expect(asked).toEqual(['claude'])
+      expect(s.started.map((x) => [x.key, x.kind])).toEqual([[a.key, 'claude']])
+    } finally {
+      s.done()
+    }
+  })
+
+  test('a coordinator still on the backup that took it over, nothing cut off, is taken in and goes back', async () => {
+    const s = await nightWorld('adopt-coord')
+    try {
+      expect(s.src.settings.set('coordinator.fallback', 'codex', { space: s.p.name }).ok).toBe(true)
+      coordinator(s.key, 'codex')
+      s.src.agents.markTookOver(s.key, { from: 'claude', to: 'codex', why: 'out of allowance', at: Date.now() - 6 * 3_600_000 })
+      await s.src.watchReturns(Date.now())
+      expect(asked).toEqual(['claude'])
+      expect(s.started.map((x) => [x.key, x.kind])).toEqual([[s.key, 'claude']])
+    } finally {
+      s.src.settings.set('coordinator.fallback', null, { space: s.p.name })
+      s.done()
+    }
+  })
+
+  test('each cut-off is taken in once per run: one that cannot start again is not asked about again and again', async () => {
+    const s = await nightWorld('adopt-once')
+    try {
+      s.cutOff('codex')
+      s.src.agents.restart = (async () => {
+        throw new Error('pane not found')
+      }) as never
+      await s.src.watchReturns(Date.now())
+      expect(asked).toEqual(['claude'])
+      for (const later of [60_000, 3_600_000, 6 * 3_600_000]) await s.src.watchReturns(Date.now() + later)
+      expect(asked).toEqual(['claude'])
+    } finally {
+      s.done()
+    }
+  })
+
+  test('one on its own harness (neither the primary nor the backup) is not the primary\'s to bring back', async () => {
+    const s = await nightWorld('adopt-own')
+    try {
+      s.cutOff('opencode')
+      await s.src.watchReturns(Date.now())
+      expect(asked).toEqual([])
+      expect(s.src.returns.get('task', s.p.name)).toBeUndefined()
     } finally {
       s.done()
     }
