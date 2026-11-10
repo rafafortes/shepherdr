@@ -48,14 +48,14 @@ try {
   process.stderr.write(`Cannot reach the shepherdr command at ${url}. Check the target URL or use this session's installed helper. Do not start another server to repair routing.\n`)
   process.exit(2)
 }
-if (j.secrets && secret === 'run') process.exit(await run(command, j.secrets))
-if (j.secrets && secret === 'env') {
-  const f = envFile(args, j.secrets)
+// the exit code is set and the command ends by itself once its words are out: process.exit right after a write to a
+// pipe drops what Bun hasn't handed over yet, so `shepherdr task list --json | jq` got the first 8 or 16 KB alone
+if (j.secrets && secret === 'run') process.exitCode = await run(command, j.secrets)
+else {
+  const f = j.secrets && secret === 'env' ? envFile(args, j.secrets) : j
+  process.exitCode = f.code
   process.stdout.write(f.out)
-  process.exit(f.code)
 }
-process.stdout.write(j.out)
-process.exit(j.code)
 
 /** what to do when shepherdr merge heard nothing back (the helper's shepherdr says the same) */
 function noAnswer(ms: number, id = '<id>') {
