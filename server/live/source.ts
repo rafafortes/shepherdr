@@ -44,7 +44,7 @@ import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
 import { privatePrompt, coordinatorPrompt, backupCardWords, wentBackCardWords, type BackWhy, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
 import { fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
-import { backCard, canProbe, FRESH, QUIET, returnMode, Returns, type Outage, type Probe } from './return.ts'
+import { backCard, canProbe, FIRST_WAIT, FRESH, QUIET, returnMode, Returns, type Outage, type Probe } from './return.ts'
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
@@ -1513,6 +1513,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   private async returnPass(now: number) {
     this.noteReviewer(now)
+    this.adoptCutOffs(now)
     /** the roles this pass already alerted for: a reviewer set Everywhere is one news, not one per space */
     const alerted = new Set<string>()
     /** the spaces whose cut-off tasks still wait for a slot, found again each pass: a wait over is never kept */
@@ -1583,6 +1584,55 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.engine.release()
   }
 
+  /**
+   * The chats cut off for good, or still on the backup that took them over, that no open outage covers — cut off before
+   * Shepherdr kept them, or whose note was lost — are taken in, so their primary is asked like any other's, at once
+   * (their cut-off is old). Each cut-off or takeover once per server run: one that can't start again is not taken in
+   * again and again.
+   */
+  private adoptCutOffs(now: number) {
+    for (const t of this.engine.tasks) {
+      if (ended(t) || t.stopped || t.archived || !t.worktree) continue
+      const space = this.places.space(t.project)?.name
+      if (space !== undefined) this.adopt('task', space, `${t.id}/Agent`, t.tookOver?.at, this.engine.backupFor('task', space, t.set).to, now)
+    }
+    for (const { id } of this.places.shown()) {
+      if (!this.places.coordinator(id)) continue
+      const space = this.spaceKey(id) ?? ''
+      this.adopt('coordinator', space, id, this.agents.tookOver(id)?.at, this.engine.backupFor('coordinator', space || undefined).to, now)
+    }
+  }
+
+  /** the cut-offs and takeovers taken in this run (adoptCutOffs), and the ones the way back already started again */
+  private adopted = new Set<string>()
+
+  /** one cut-off (its retry) or one takeover (its time) of a chat, as adoptCutOffs tells them apart */
+  private cutMark(key: string, r?: Retry, took?: number) {
+    return r ? `${key}:cut:${r.cut}` : `${key}:took:${took ?? ''}`
+  }
+
+  private adopt(role: 'task' | 'coordinator', space: string, key: string, took: number | undefined, backup: Harness | undefined, now: number) {
+    const o = this.returns.get(role, space)
+    if (o && !o.back) return
+    const rec = this.agents.record(key)
+    if (!rec) return
+    const ran: Harness = { kind: rec.kind, model: rec.model, effort: rec.effort }
+    const primary = this.settings.harness(role, space || undefined)
+    const r = this.retries.get(key)
+    const cut = !!r?.over && !!r.lasting && (sameHarness(ran, primary) || (!!backup && sameHarness(ran, backup)))
+    // still on the backup that took it over (the backup may work: it goes back once the primary answers)
+    const away = !!took && !!backup && !sameHarness(backup, primary) && sameHarness(ran, backup)
+    if (!cut && !away) return
+    const seen = this.cutMark(key, cut ? r : undefined, cut ? undefined : took)
+    if (this.adopted.has(seen)) return
+    this.adopted.add(seen)
+    // its backup was cut off too, or there is none: every model of that role ran out here
+    const allOut = cut && (!backup || sameHarness(backup, primary) || sameHarness(ran, backup))
+    const why = r?.reason ? r.reason.charAt(0).toLowerCase() + r.reason.slice(1) : 'its backup took it over'
+    // noted as old as it is: its first question due now (past its first wait and its random fifth), no quiet to wait for
+    this.returns.note({ role, space, primary, to: ran, why, at: now - 2 * FIRST_WAIT }, { key, allOut })
+  }
+
   /** the spaces whose cut-off tasks still wait for a slot to go back to work: a slot is this machine's, so no new task
    *  of any space takes one before them */
   private resuming = new Set<string>()
@@ -1617,6 +1667,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         }
       }
       tried.push(c.key)
+      // started again by the way back: never taken in again for the same cut-off or takeover
+      const took = c.task ? this.engine.task(c.task)?.tookOver?.at : this.agents.tookOver(c.key)?.at
+      if (r) this.adopted.add(this.cutMark(c.key, r))
+      if (took) this.adopted.add(this.cutMark(c.key, undefined, took))
       try {
         // back from its backup, or again on the very model that cut it off: its provider answers again either way
         await this.restart(c.key, {}, false, c.stuck ? 'again' : 'backup')
