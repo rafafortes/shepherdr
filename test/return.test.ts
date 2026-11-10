@@ -536,8 +536,9 @@ async function nightWorld(name: string, max = 4) {
   /** the agents whose pane is gone (a start that failed, or herdr closed it): the others are idle */
   const gone = new Set<string>()
   s.src.agents.status = ((k: string) => (gone.has(k) ? 'gone' : 'idle')) as never
+  // herdr answers, whatever the source's own looks at the missing socket say meanwhile (a loaded machine runs one mid-test)
   const reachable = s.src.agents.reachable
-  s.src.agents.reachable = true
+  Object.defineProperty(s.src.agents, 'reachable', { get: () => true, set: () => undefined, configurable: true })
   const retries = s.src.retries as unknown as { data: Record<string, Retry> }
   /** a task of the space started as a real one is, its agent on `on` and its last turn cut off for good */
   const cutOff = (on: string, extra: object = {}) => {
@@ -548,7 +549,7 @@ async function nightWorld(name: string, max = 4) {
   }
   const done = () => {
     s.src.agents.status = status
-    s.src.agents.reachable = reachable
+    Object.defineProperty(s.src.agents, 'reachable', { value: reachable, writable: true, configurable: true, enumerable: true })
     for (const k of ['task.fallback', 'backup.watchReturn']) s.src.settings.set(k, null, { space: s.p.name })
     s.src.settings.set('machine.maxTasks', null, 'machine')
     for (const k of Object.keys(retries.data)) delete retries.data[k]
