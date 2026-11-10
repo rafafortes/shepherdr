@@ -76,6 +76,59 @@ describe.skipIf(!browser)('answer cards', () => {
     }
   }, 30_000)
 
+  test('Ask the advisor is one of the answers: picked, with a note, and sent; at once on an ordinary card; beside Send on a plain question', async () => {
+    const chat = world.chats['p:vm-str:~']
+    const q = { id: 'adv:q', title: 'Which store?', kind: 'Question' as const, choices: [{ label: 'SQLite' }, { label: 'Postgres' }], to: 'LV-3 agent', advise: true }
+    const fast = { ...q, id: 'adv:fast', kind: 'Form' as const, ordinary: true }
+    const copy = (id: string, ask: object, at: number) => ({ id, who: 'agent' as const, at, card: { id, task: 'LV-3', status: 'need' as const, text: 'needs you', ask: { chat: 'LV-3/Agent', open: true, ...ask } } })
+    chat.messages.push(copy('adv-copy', { questions: [q] }, Date.now()), copy('adv-fast', { questions: [fast] }, Date.now() + 1), copy('adv-words', { reply: { id: 'r1', text: 'Which port should it use?' }, advise: true }, Date.now() + 2))
+    const asked: Action[] = []
+    const act = world.act
+    world.act = async (a: Action) => (a.type === 'advise' || a.type === 'answer' ? (asked.push(a), { ok: true }) : act(a))
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
+    try {
+      await page.goto(url())
+      const card = page.locator('[data-whole="adv-copy"] [data-card]')
+      await card.waitFor()
+      // the last of its answers, drawn as they are; no link of its own in the card's head
+      const row = card.locator('[data-ask-advisor]')
+      expect(await row.count()).toBe(1)
+      expect((await card.locator('button[aria-pressed]').allTextContents()).at(-1)).toStartWith('Ask the advisor')
+      expect(await row.textContent()).toContain('with your note if you add one')
+      expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+      const send = card.getByRole('button', { name: 'Send', exact: true })
+      expect(await send.isDisabled()).toBe(true)
+      await row.tap()
+      expect(await row.getAttribute('aria-pressed')).toBe('true')
+      expect(await send.isEnabled()).toBe(true)
+      expect(asked).toEqual([])
+      // a pick of one's own takes its place, and back
+      await card.getByRole('button', { name: 'SQLite', exact: true }).tap()
+      expect(await row.getAttribute('aria-pressed')).toBe('false')
+      await row.tap()
+      expect(await card.getByRole('button', { name: 'SQLite', exact: true }).getAttribute('aria-pressed')).toBe('false')
+      await card.getByRole('textbox', { name: 'Note', exact: true }).fill('It must be shared with billing.')
+      await send.tap()
+      await until(() => asked.length === 1)
+      expect(asked[0]).toEqual({ type: 'advise', chat: 'LV-3/Agent', question: 'adv:q', note: 'It must be shared with billing.' })
+      // where a pick sends at once, so does the advisor's
+      await page.locator('[data-whole="adv-fast"] [data-card] [data-ask-advisor]').tap()
+      await until(() => asked.length === 2)
+      expect(asked[1]).toEqual({ type: 'advise', chat: 'LV-3/Agent', question: 'adv:fast' })
+      // a plain question: beside Send, with what was typed as its note
+      const words = page.locator('[data-whole="adv-words"] [data-card]')
+      await words.getByRole('textbox', { name: 'Reply to LV-3' }).fill('Prefer one above 8000.')
+      await words.getByRole('button', { name: 'Ask the advisor', exact: true }).tap()
+      await until(() => asked.length === 3)
+      expect(asked[2]).toEqual({ type: 'advise', chat: 'LV-3/Agent', question: 'words:r1', note: 'Prefer one above 8000.' })
+      expect(asked.some((a) => a.type === 'answer')).toBe(false)
+    } finally {
+      world.act = act
+      chat.messages = chat.messages.filter((m) => !m.id.startsWith('adv-'))
+      await page.close()
+    }
+  }, 30_000)
+
   test('permissions, startup prompts, plans, multiple picks, required notes and unknown cards keep confirmation', async () => {
     const chat = world.chats['p:vm-str:~']
     const base = { title: 'Choose', kind: 'Form' as const, ordinary: true, choices: [{ label: 'First' }, { label: 'Second' }], to: 'home' }

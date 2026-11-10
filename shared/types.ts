@@ -946,7 +946,7 @@ export type Action =
   /** dismiss: the card closed without an answer (its Dismiss, or Esc on it) instead of a pick */
   | { type: 'answer'; chat: string; question: string; choice: number; choices?: number[]; note?: string; other?: string; fromAlert?: boolean; space?: string; dismiss?: boolean }
   /** the advisor answers this open question (Settings → Agents → Advisor): its suggestion comes back as a card to send or not */
-  | { type: 'advise'; chat: string; question: string }
+  | { type: 'advise'; chat: string; question: string; note?: string }
   | { type: 'page-send'; chat: string; page: string; text: string }
   | { type: 'page-note'; chat: string; page: string; note: string; target?: string }
   /** an artifact's page sent something, you noted on it, or wrote about it in its viewer: to its keeper. By its place,

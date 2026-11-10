@@ -1305,15 +1305,17 @@ function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply:
       setBusy(false)
     }
   }
-  // the advisor answers its plain question instead (Settings → Agents → Advisor), at once
+  // the advisor answers its plain question instead (Settings → Agents → Advisor), at once, with what you typed as a
+  // note for it
   const [asking, setAsking] = useState(false)
   const askAdvisor = async () => {
     if (asking) return
     setAsking(true)
     setErr('')
     try {
-      const r = await act({ type: 'advise', chat: ask.chat, question: `words:${reply.id}` })
+      const r = await act({ type: 'advise', chat: ask.chat, question: `words:${reply.id}`, ...(text.trim() ? { note: text.trim() } : {}) })
       if (r?.ok === false) setErr(r.error ?? "The advisor couldn't take it.")
+      else setText('')
     } catch (e) {
       setErr((e as Error).message)
     } finally {
@@ -1326,13 +1328,6 @@ function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply:
       title={`${task} asks`}
       source={source}
       dismiss={a ? undefined : () => void dismiss()}
-      action={
-        ask.advise && !a ? (
-          <button type="button" data-ask-advisor className="relative shrink-0 self-start text-[0.8125rem] text-fg3 hover:text-fg hover:underline disabled:no-underline phone:min-h-11 phone:text-[0.9375rem]" disabled={asking} onClick={() => void askAdvisor()}>
-            {asking ? 'Asking the advisor…' : 'Ask the advisor'}
-          </button>
-        ) : undefined
-      }
     >
       <div data-ask-text className="line-clamp-6 break-words whitespace-pre-wrap">{reply.text}</div>
       {a ? (
@@ -1347,7 +1342,13 @@ function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply:
           <TextBox name="reply" data-kept label={`Reply to ${task}`} className={noteBox} placeholder="Type something…" value={text} onChange={setText} />
           <div className="flex items-center justify-end gap-2">
             {err ? <span role="alert" className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
-            <Primary soft disabled={busy || !text.trim()} onClick={send}>
+            {/* the other answer: the advisor's, with what you typed as a note for it */}
+            {ask.advise ? (
+              <Primary soft data-ask-advisor disabled={busy || asking} onClick={() => void askAdvisor()}>
+                {asking ? 'Asking the advisor…' : 'Ask the advisor'}
+              </Primary>
+            ) : null}
+            <Primary soft disabled={busy || asking || !text.trim()} onClick={send}>
               Send
             </Primary>
           </div>
@@ -1534,11 +1535,16 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
   const by = answeredBy(q, chat, msg)
   // a plan sent back says what to change in the note
   const needNote = q.noteRequiredFor !== undefined && sel[0] === q.noteRequiredFor
-  const picked = sel.length > 0 || !!other.trim()
+  // Ask the advisor, picked as one of the answers: Send hands it the question, with the note
+  const [adv, setAdv] = useState(false)
+  const picked = sel.length > 0 || !!other.trim() || adv
   // Positive opt-in, plus structural exclusions: unknown kinds and older/plugin cards remain confirmed.
   const ordinary = q.ordinary === true && (q.kind === 'Form' || q.kind === 'Question') && !q.multi && !q.terminal && !q.screen && !q.steps && !q.reject && !q.noNote && q.noteRequiredFor === undefined && !q.id.startsWith('menu:')
   const immediate = ordinary && !sent && !composing && !note && !other
-  const choose = (j: number) => setSel(q.multi ? (sel.includes(j) ? sel.filter((x) => x !== j) : [...sel, j]) : [j])
+  const choose = (j: number) => {
+    setAdv(false)
+    setSel(q.multi ? (sel.includes(j) ? sel.filter((x) => x !== j) : [...sel, j]) : [j])
+  }
   const send = async (reject = false, choice = sel[0] ?? -1) => {
     if (sent || sending.current) return
     // sending a plan back needs a note: the box says so and takes the focus
@@ -1565,19 +1571,26 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
       }
     }
   }
-  // the advisor answers it instead (Settings → Agents → Advisor): its suggestion comes back as a card of its own
+  // the advisor answers it instead (Settings → Agents → Advisor), with what you wrote for it: a plan's answer comes
+  // back as a suggestion card of its own, any other is sent for you
   const [asking, setAsking] = useState(false)
   const askAdvisor = async () => {
     if (sent || asking) return
     setAsking(true)
     setErr('')
     try {
-      const r = await act({ type: 'advise', chat: chat.key, question: q.id })
+      const words = [other.trim(), note.trim()].filter(Boolean).join('\n\n')
+      const r = await act({ type: 'advise', chat: chat.key, question: q.id, ...(words ? { note: words } : {}) })
       if (r?.ok === false) setErr(r.error ?? "The advisor couldn't take it.")
+      else {
+        setNote('')
+        setOther('')
+      }
     } catch (e) {
       setErr((e as Error).message)
     } finally {
       setAsking(false)
+      setAdv(false)
     }
   }
   // Dismiss: closed without an answer, and the agent hears the person declined it (never a yes)
@@ -1613,13 +1626,6 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
       plan={q.kind === 'Plan'}
       source={source}
       dismiss={sent || q.noDismiss ? undefined : () => void dismiss()}
-      action={
-        q.advise && !sent ? (
-          <button type="button" data-ask-advisor className="relative shrink-0 self-start text-[0.8125rem] text-fg3 hover:text-fg hover:underline disabled:no-underline phone:min-h-11 phone:text-[0.9375rem]" disabled={asking} onClick={() => void askAdvisor()}>
-            {asking ? 'Asking the advisor…' : 'Ask the advisor'}
-          </button>
-        ) : undefined
-      }
     >
       {q.screen ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-fg2">{q.screen}</pre> : null}
       {q.terminal && has('terminal') ? <button type="button" className="text-left text-accent" onClick={() => setUI({ term: chat.key, arts: null, kb: true })}>Open terminal</button> : null}
@@ -1665,6 +1671,29 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
           </button>
         )
       })}
+      {/* one more answer: the advisor's, at once where a pick sends now, else on Send with your note */}
+      {q.advise && !sent ? (
+        <button
+          type="button"
+          data-ask-advisor
+          aria-pressed={immediate ? undefined : adv || asking}
+          disabled={busy || asking}
+          onClick={() => {
+            if (immediate) return void askAdvisor()
+            setSel([])
+            setAdv(true)
+          }}
+          className="group press relative flex min-h-10 w-full items-center gap-2.5 rounded-row px-3 py-2 text-left shadow-[inset_0_0_0_1px_var(--line2)] enabled:hover:bg-hover disabled:cursor-default disabled:opacity-40 aria-pressed:shadow-[inset_0_0_0_1.5px_var(--fg)] disabled:aria-pressed:opacity-100 coarse:min-h-11 phone:min-h-12"
+        >
+          {immediate ? null : <span aria-hidden="true" className="size-4 shrink-0 rounded-full shadow-[inset_0_0_0_1.5px_var(--fg3)] group-aria-pressed:shadow-[inset_0_0_0_5px_var(--fg)]" />}
+          <span>
+            <span className="block">{asking ? 'Asking the advisor…' : 'Ask the advisor'}</span>
+            <span className="block text-[0.75rem]/[18px] text-fg2 phone:text-[0.8125rem]/5">
+              {q.kind === 'Plan' ? 'It reads the task and the plan and suggests an answer, for you to send or not.' : immediate ? 'It reads the task and answers for you now.' : 'It reads the task and answers for you now, with your note if you add one.'}
+            </span>
+          </span>
+        </button>
+      ) : null}
       {q.other && !sent ? (
         <input
           name="other"
@@ -1676,8 +1705,11 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
           value={other}
           onChange={(e) => {
             setOther(e.target.value)
-            // a typed answer replaces the choices
-            if (e.target.value.trim()) setSel([])
+            // a typed answer replaces the choices, the advisor's too
+            if (e.target.value.trim()) {
+              setSel([])
+              setAdv(false)
+            }
           }}
         />
       ) : null}
@@ -1714,7 +1746,7 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
           <div className="flex items-center justify-end gap-2">
             {err ? <span role="alert" className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
             {q.reject ? <button type="button" disabled={busy} onClick={() => send(true)}>{q.reject}</button> : null}
-            {!immediate ? <Primary soft disabled={busy || !picked} onClick={() => send()}>
+            {!immediate ? <Primary soft disabled={busy || asking || !picked} onClick={() => void (adv ? askAdvisor() : send())}>
               Send
             </Primary> : null}
             {busy ? <span role="status" className="text-[0.8125rem] text-fg2">Sending…</span> : null}

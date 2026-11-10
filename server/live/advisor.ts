@@ -50,7 +50,7 @@ const HUMANS_ONLY = [
 ]
 
 /** the run's prompt: who it answers for, the rules, the context, the question, and the one line it ends with */
-export function advisorPrompt(o: { question: AdviceQuestion; asker: string; brief?: string; chat: string; folder: string; human?: string }): string {
+export function advisorPrompt(o: { question: AdviceQuestion; asker: string; brief?: string; chat: string; folder: string; human?: string; note?: string }): string {
   const q = o.question
   const who = o.human ?? 'the human'
   const choices = (q.choices ?? []).map((c, i) => `${i + 1}. ${c.label}${c.description ? ` — ${c.description}` : ''}`).join('\n')
@@ -64,6 +64,8 @@ export function advisorPrompt(o: { question: AdviceQuestion; asker: string; brie
     o.brief ? `The brief:\n${o.brief}` : '',
     o.chat ? `The chat so far, latest last:\n\n${o.chat}` : '',
     q.kind === 'choice' ? `The question: ${q.title}${q.plan ? ' (a plan to approve)' : ''}\nThe options:\n${choices}${q.multi ? '\nMore than one may be picked.' : ''}` : `The question, in the agent's own words:\n${q.title}`,
+    // asked with a note: what the human wants weighs more than your own reading
+    o.note ? `${who} asked you to answer it, with this note for you; where it and your own reading differ, the note wins:\n${o.note}` : '',
     `End your answer with one line of JSON and nothing after it: ${shape}`,
   ]
     .filter(Boolean)
