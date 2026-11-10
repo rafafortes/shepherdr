@@ -4,6 +4,7 @@
 // run stubbed at the one place it runs: no CLI is run, and no model is asked anything.
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -98,6 +99,18 @@ describe('what the advisor is asked, and how it answers', () => {
     expect(parseAdvice('{"decide":"advisor","choices":[1,2],"why":"both","sure":true}', { ...q, multi: true })).toEqual({ choice: 0, choices: [0, 1], why: 'both' })
     expect(parseAdvice('{"decide":"advisor","reply":"Use SQLite.","why":"small","sure":true}', { kind: 'words', title: 'Which store?' })).toEqual({ reply: 'Use SQLite.', why: 'small' })
     expect(parseAdvice('no json at all', q)).toBeUndefined()
+  })
+
+  test('its own words on a question that takes them: with no pick, a null one, or the slot after the options', () => {
+    const q = { kind: 'choice' as const, title: 'What do I record?', choices: [{ label: 'Both' }, { label: 'Aldo only' }, { label: 'Leave it' }], other: true }
+    const words = { other: 'Record Aldo now; keep Marisa open until her card is confirmed.', why: 'Only one is proven.', choice: 3 }
+    expect(parseAdvice('{"decide":"advisor","other":"Record Aldo now; keep Marisa open until her card is confirmed.","why":"Only one is proven.","sure":true}', q)).toEqual(words)
+    expect(parseAdvice('{"decide":"advisor","choice":null,"other":"Record Aldo now; keep Marisa open until her card is confirmed.","why":"Only one is proven.","sure":true}', q)).toEqual(words)
+    expect(parseAdvice('{"decide":"advisor","choice":4,"other":"Record Aldo now; keep Marisa open until her card is confirmed.","why":"Only one is proven.","sure":true}', q)).toEqual(words)
+    // a number written as JSON words is still a pick
+    expect(parseAdvice('{"decide":"advisor","choice":"2","why":"Aldo is proven.","sure":true}', q)).toEqual({ choice: 1, why: 'Aldo is proven.' })
+    // words where the question takes none: no answer
+    expect(parseAdvice('{"decide":"advisor","choice":null,"other":"x","why":"y","sure":true}', { ...q, other: false })).toBeUndefined()
   })
 })
 
@@ -242,6 +255,21 @@ describe('by itself, once a question waited', () => {
       expect(runs.map((r) => r.kind)).toEqual(['pi', 'codex'])
       expect(to(w.key)[0]).toContain('from="The advisor"')
       expect(cards(w.key).at(-1)).toContain('(Codex')
+    } finally {
+      w.done()
+    }
+  })
+
+  test('words that give no answer are kept whole, for the day they need explaining', async () => {
+    const w = await world('adv-kept')
+    try {
+      card(w.key, 'ask:k1', 'Which?', ['A', 'B'])
+      replies = [{ ok: true, out: 'I looked at it at length.\n{"decide":"advisor","choice":9,"why":"neither","sure":true}' }, json({ decide: 'advisor', choice: 1, why: 'A fits.', sure: true })]
+      await src.watchAdvice(Date.now() + 3 * 60_000)
+      const dir = join(process.env.SHEPHERDR_HOME!, 'advisor')
+      const files = readdirSync(dir).filter((f) => f.includes(w.id))
+      expect(files).toHaveLength(1)
+      expect(readFileSync(join(dir, files[0]), 'utf8')).toContain('I looked at it at length.')
     } finally {
       w.done()
     }

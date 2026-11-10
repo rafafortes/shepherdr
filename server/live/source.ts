@@ -4,7 +4,7 @@ import { coordinatorRequestIds } from '../../shared/attention.ts'
 // only what herdr can't tell it (spaces, tasks, modes, cards, settings). Assembled from the base plugins' parts.
 import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { BODY_MAX, clip, lastReply, openCards, taskAlert, TITLE_MAX } from '../../shared/alerts.ts'
@@ -725,7 +725,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           break
         }
         said = r.out.replace(/\s+/g, ' ').trim().slice(-200)
-        console.error(`shepherdr: the advisor (${advisorWords(h)}) gave no answer for ${chat}: ${said || 'nothing it said made sense'}`)
+        // what it said whole, for the day it needs explaining: the log keeps only its end
+        const kept = this.keepAdvisorOutput(chat, r.out)
+        console.error(`shepherdr: the advisor (${advisorWords(h)}) gave no answer for ${chat}: ${said || 'nothing it said made sense'}${kept ? ` (whole: ${kept})` : ''}`)
       }
       if (!advice) {
         this.advices.set({ ...rec, state: 'failed' })
@@ -782,6 +784,21 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     const r = (await this.answer({ type: 'answer', chat, question: qid, choice: a.choice ?? 0, choices: a.choices, other: a.other }, 'The advisor')) as { ok?: boolean; error?: string }
     return r.ok ? { ok: true } : { ok: false, error: r.error ?? 'The question no longer takes that answer.' }
+  }
+
+  /** an advisor run's words that gave no answer, kept whole in ~/.shepherdr/advisor (the twenty newest): its file */
+  private keepAdvisorOutput(chat: string, out: string): string | undefined {
+    try {
+      const dir = join(HOME, 'advisor')
+      mkdirSync(dir, { recursive: true })
+      const file = join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${chat.replace(/[^\w-]+/g, '_')}.txt`)
+      writeFileSync(file, out)
+      const old = readdirSync(dir).sort().slice(0, -20)
+      for (const f of old) rmSync(join(dir, f), { force: true })
+      return file
+    } catch {
+      return undefined
+    }
   }
 
   /** a short card from the advisor in the chat its question is in */
