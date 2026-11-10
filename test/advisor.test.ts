@@ -221,6 +221,29 @@ describe('by itself, once a question waited', () => {
     }
   })
 
+  test('two cards open: the answer to one (the advisor’s or the human’s) leaves the other waiting', async () => {
+    const w = await world('adv-two')
+    try {
+      card(w.key, 'ask:t1', 'Who redraws the art?', ['A follow-up task', 'This task'])
+      card(w.key, 'ask:t2', 'What do I record for the voices?', ['Both', 'Aldo only'])
+      replies = [json({ decide: 'advisor', choice: 1, why: 'Its own task.', sure: true })]
+      await src.watchAdvice(Date.now() + 3 * 60_000)
+      expect(src.chats.log(w.key).answers['ask:t1']).toBe(0)
+      // the other card still waits for its own answer, where the human sees it
+      expect(src.chats.log(w.key).answers['ask:t2']).toBeUndefined()
+      expect(src.snapshot().needs.filter((n) => n.chat === w.key).map((n) => n.question?.id)).toEqual(['ask:t2'])
+      // the human's own pick on it answers it, and nothing else
+      card(w.key, 'ask:t3', 'And the README?', ['Now', 'Later'])
+      expect(await src.act({ type: 'answer', chat: w.key, question: 'ask:t2', choice: 0 })).toEqual({ ok: true })
+      expect(src.chats.log(w.key).answers['ask:t3']).toBeUndefined()
+      // a message typed answers what is still open
+      await src.act({ type: 'send', chat: w.key, text: 'Later is fine.' })
+      expect(src.chats.log(w.key).answers['ask:t3']).toBe(-1)
+    } finally {
+      w.done()
+    }
+  })
+
   test('its wait is a setting: off, it never goes by itself', async () => {
     const w = await world('adv-off')
     try {
