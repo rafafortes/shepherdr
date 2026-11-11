@@ -132,6 +132,9 @@ export interface TaskRec {
   report?: Reported
   /** its backup agent took over once its agent couldn't go on (retry.ts): from which CLI, to which, and why */
   tookOver?: { from: string; to: string; why: string; at: number; step?: number }
+  /** why its last merge stopped, in words its row shows until the next one starts: the gate's refusal with its last
+   *  line ("Refused by the gate: …") */
+  mergeStop?: string
   /** first in line (start now, or a coordinator's priority mark for a fix of a red main): it goes ahead of the other
    *  held tasks and past the machine's load, pressure and spacing, never past its slots (room, release) */
   priority?: true
@@ -166,7 +169,10 @@ export interface Scheduled {
  * for (GitHub's checks, its agent's rebase, the merge itself), since when, and when the checks should be through (ms).
  */
 export interface Landing {
-  step: 'checks' | 'rebase' | 'merge' | 'gate'
+  /** queue: in line behind another merge into its repo (behind: that task; gate: its space has a merge gate) */
+  step: 'checks' | 'rebase' | 'merge' | 'gate' | 'queue'
+  behind?: string
+  gate?: boolean
   at: number
   due?: number
   /** its agent, at rest with the checks through, was told to merge once */
@@ -178,6 +184,7 @@ export function landingLine(l: Landing, base = 'main', now = Date.now()) {
   if (l.step === 'rebase') return `Rebasing on ${base}`
   if (l.step === 'merge') return 'Merging'
   if (l.step === 'gate') return 'Running the merge gate'
+  if (l.step === 'queue') return l.gate ? `Waiting for the merge gate (${l.behind}'s runs)` : `Waiting for ${l.behind}'s merge`
   const left = l.due === undefined ? 0 : Math.ceil((l.due - now) / 60_000)
   return left > 0 ? `Checks running · ~${left}m` : 'Checks running'
 }
@@ -274,6 +281,9 @@ const splitRef = (ref: string): [string | undefined, string] => {
 const PARK_REPLIES = 4
 /** how long a space's merge gate may run (engine.gate) before it is stopped and the merge refused */
 export const GATE_TIMEOUT = 45 * 60_000
+/** what an agent is told when the gate refuses its merge: the gate is the merge's full check, so none of its own */
+export const GATE_AGAIN = "The merge gate is the merge's full check: fix what its lines name, prove the fix with targeted tests, then run shepherdr merge again; no full check of your own first."
+
 /** how many times main may move while a merge gate runs before the merge gives up for now */
 const GATE_ROUNDS = 3
 
@@ -412,6 +422,8 @@ export class Engine extends Emitter<Events> {
   private later = new Map<string, ReturnType<typeof setTimeout>>()
   /** one merge at a time per repo: each one's main checkout is shared */
   private merging = new Map<string, Promise<unknown>>()
+  /** the task whose merge runs in each repo now: one asked meanwhile waits behind it (merge) */
+  private mergingNow = new Map<string, string>()
   /** each task's merge while it runs */
   private landings = new Map<string, Promise<{ ok: boolean; error?: string; note?: string }>>()
   /** how long shepherdr merge may take before it answers that it isn't through yet (tests shorten it) */
@@ -595,7 +607,8 @@ export class Engine extends Emitter<Events> {
     // its agent starting, or reading its brief, is To do; one its go starts (a queued task's turn came) is at work
     if (t.todo || ((this.starting.has(t.id) || this.briefing.has(t.id)) && !t.going)) return 'todo'
     // on its way into main, nothing for you to do (a question or a card it asks is handled above: then it needs you)
-    if (t.reported && t.landing && (st === 'working' || !this.asks(key))) return 'merging'
+    // a merge stopped on a conflict is its agent's to rebase by hand: no merging meanwhile, its own status (subOf says so)
+    if (t.reported && t.landing && t.landing.step !== 'rebase' && (st === 'working' || !this.asks(key))) return 'merging'
     if (st === 'working' || this.handing.has(t.id)) return 'work'
     if (this.agents.waiting(key).length || Date.now() - (this.wrote.get(t.id) ?? 0) < ANSWER_GRACE) return 'work'
     if (t.reported) return 'ready'
@@ -646,6 +659,10 @@ export class Engine extends Emitter<Events> {
       if (status === 'queued') return this.holding(t) ? `${t.priority ? 'First in line · ' : ''}${HELD[t.held!.why]}` : this.waitLine(t)
       if (status === 'need' && this.queued(t) && this.agents.status(key) !== 'blocked') return fitStatus(this.halts(t).join(' · '))
       if (status === 'need') return this.reasonOf(key) ?? NEED.reply
+      // why its last merge stopped, while its agent is on it: a conflict to rebase by hand, or the gate's refusal
+      // Shepherdr's own words, not an agent's line: the row's whole length (below), so the gate's line shows
+      const stop = t.landing?.step === 'rebase' ? `Merge stopped on a conflict with ${t.base}: rebasing by hand` : t.mergeStop
+      if (stop && status !== 'merging') return stop.replace(/\s+/g, ' ')
       if (status === 'ready') return 'Ready to merge'
       if (status === 'merging') return landingLine(t.landing!, t.base)
       if (this.handing.has(t.id) && t.tookOver) {
@@ -1658,7 +1675,7 @@ export class Engine extends Emitter<Events> {
     const commits = (await G.git(wt, 'log', '--format=%h %s', `${from}..${base}`)).out.split('\n').filter(Boolean)
     const rules = (await G.git(wt, 'diff', '--name-only', `${from}..${base}`, '--', ':(glob)**/AGENTS.md', ':(glob)**/CLAUDE.md')).out.split('\n').filter(Boolean)
     const state: BaseMoved['state'] = (await G.dirty(wt)) ? 'dirty' : (await G.rebase(wt, base)).ok ? 'rebased' : 'conflict'
-    const m: BaseMoved = { base, commits, rules, state }
+    const m: BaseMoved = { base, commits, rules, state, ...(this.gateOf(t) ? { gate: true } : {}) }
     const key = this.key(t)
     const id = `base:${t.id}:${Date.now()}`
     this.chats.post(key, { id, card: { id, task: t.id, text: baseMovedCard(m) } })
@@ -2219,8 +2236,8 @@ export class Engine extends Emitter<Events> {
    * on it and the gate runs again.
    */
   private async gate(t: TaskRec, repo: string, space: string, wt: string): Promise<{ ok: true; line?: string } | { ok: false; error: string }> {
-    const cmd = (t.set?.['merge.gate'] ?? this.settings.get('merge.gate', space)).trim()
-    if (!cmd || cmd.toLowerCase() === 'off') return { ok: true }
+    const cmd = this.gateOf(t, space)
+    if (!cmd) return { ok: true }
     const tip = async () => (await G.git(repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out
     for (let round = 1; round <= GATE_ROUNDS; round++) {
       const at = await tip()
@@ -2228,9 +2245,12 @@ export class Engine extends Emitter<Events> {
       const r = await G.sh(['/bin/sh', '-c', cmd], wt, { timeoutMs: this.gateTimeout, env: { SHEPHERDR_TASK: t.id, SHEPHERDR_BASE: t.base! } })
       if (!r.ok) {
         const said = `${r.out}\n${r.err}`.trim().split('\n').slice(-20).join('\n').slice(-2000)
+        // its row says it until the next merge: the last line the gate printed
+        const last = `${r.out}`.split('\n').filter((l) => l.trim()).at(-1)?.trim() ?? (r.code === 124 ? 'it ran out of time' : `exit ${r.code}`)
+        t.mergeStop = `Refused by the gate: ${last}`
         const limit = this.gateTimeout < 60_000 ? `${Math.round(this.gateTimeout / 1000)} s` : `${Math.round(this.gateTimeout / 60_000)} min`
         const why = r.code === 124 ? `didn't finish in ${limit}` : `failed (exit ${r.code})`
-        return { ok: false, error: `${t.id}'s merge gate (${cmd}) ${why}: nothing was merged, and ${t.base} is as it was.${said ? ` Its output ends:\n${said}` : ''}` }
+        return { ok: false, error: `${t.id}'s merge gate (${cmd}) ${why}: nothing was merged, and ${t.base} is as it was.${said ? ` Its output ends:\n${said}` : ''}\n${GATE_AGAIN}` }
       }
       if ((await tip()) === at) return { ok: true, line: r.out.split('\n').filter((l) => l.trim()).at(-1)?.trim() }
       // main moved while it ran: on top of it again, and the gate once more
@@ -2241,6 +2261,12 @@ export class Engine extends Emitter<Events> {
       }
     }
     return { ok: false, error: `${t.base} kept moving while ${t.id}'s merge gate ran (${GATE_ROUNDS} times): nothing was merged. Run shepherdr merge ${t.id} again.` }
+  }
+
+  /** a task's merge gate command, its own --set first, then its space's; nothing while it is off */
+  private gateOf(t: TaskRec, space = this.nameOf(t)) {
+    const cmd = (t.set?.['merge.gate'] ?? this.settings.get('merge.gate', space)).trim()
+    return cmd && cmd.toLowerCase() !== 'off' ? cmd : undefined
   }
 
   /** how long a merge gate may run: GATE_TIMEOUT, shorter in a test */
@@ -2533,10 +2559,21 @@ export class Engine extends Emitter<Events> {
     let run = this.landings.get(t.id)
     if (!run) {
       const repo = this.places.space(t.project)?.path ?? ''
+      // in line behind another merge into its repo: its row says whose, and whether that one runs the gate
+      const ahead = this.mergingNow.get(repo)
+      if (ahead && ahead !== t.id && t.reported && !ended(t)) {
+        t.landing = { step: 'queue', at: Date.now(), behind: ahead, gate: this.gateOf(t) !== undefined }
+        this.save()
+        this.settle(t)
+      }
       const now = (this.merging.get(repo) ?? Promise.resolve())
-        .then(() => this.onGitHub(() => this.mergeNow(t, !!opts.self), (error) => ({ ok: false, error: `Can't merge ${t.id}: ${error}` })))
+        .then(() => {
+          this.mergingNow.set(repo, t.id)
+          return this.onGitHub(() => this.mergeNow(t, !!opts.self), (error) => ({ ok: false, error: `Can't merge ${t.id}: ${error}` }))
+        })
+        .finally(() => this.mergingNow.get(repo) === t.id && this.mergingNow.delete(repo))
         // stopped short with nothing more to wait for (failed checks, GitHub refused): Ready again, or back at work
-        .then((r) => (!r.ok && (t.landing?.step === 'merge' || t.landing?.step === 'gate') && this.land(t), r))
+        .then((r) => (!r.ok && (t.landing?.step === 'merge' || t.landing?.step === 'gate' || t.landing?.step === 'queue') && this.land(t), r))
       run = now
       this.landings.set(t.id, now)
       const tail = now.catch(() => undefined)
@@ -2580,6 +2617,7 @@ export class Engine extends Emitter<Events> {
     if (this.chats.unseen(this.key(t)).length)
       return { ok: false, error: self ? 'You have a new message in your chat: read and handle it, then merge again.' : `${t.id}'s agent has a new message it hasn't read yet: let it handle that first.` }
     this.land(t, 'merge')
+    t.mergeStop = undefined
     const p = this.proj(t)
     const wt = t.worktree
     // main here first catches up with the remote's, so the branch is rebased on what main really is
