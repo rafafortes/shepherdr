@@ -7,7 +7,7 @@ import { writeJson, placeId, repo, sh, started, until, world } from './engine-wo
 function fresh(limits: Record<string, string>) {
   const w = world()
   w.engine.tasks.splice(0)
-  for (const k of ['machine.maxTasks', 'machine.startLoad', 'machine.startMemory']) w.settings.set(k, null)
+  for (const k of ['machine.maxTasks', 'machine.startLoad', 'machine.startMemory', 'machine.startEvery', 'machine.startPressure']) w.settings.set(k, null)
   for (const [k, v] of Object.entries(limits)) expect(w.settings.set(k, v).ok).toBe(true)
   return w
 }
@@ -158,7 +158,7 @@ describe('room on the machine', () => {
     expect(w.engine.statusOf(t)).toBe('work')
   }, 20_000)
 
-  test('a busy machine holds new tasks ("Waiting for the machine") and lets them go one at a time, 30 seconds apart', async () => {
+  test('a busy machine holds new tasks ("Waiting for the machine") and lets them go one at a time, machine.startEvery apart', async () => {
     const w = fresh({})
     let m: { busy?: 'cpu' | 'memory'; herdr: boolean } = { busy: 'cpu', herdr: true }
     w.engine.machine = () => m
@@ -176,9 +176,27 @@ describe('room on the machine', () => {
     w.engine.release(now)
     await until(() => w.started.some((s) => s.key === `${a.id}/Agent`))
     expect(w.engine.statusOf(b)).toBe('queued')
-    w.engine.release(now + 10_000)
+    // two minutes apart by default: the load averages show a's load before b starts
+    w.engine.release(now + 60_000)
     expect(b.held).toBeTruthy()
-    w.engine.release(now + 31_000)
+    expect(w.engine.startsNow(now + 60_000)).toBe(0)
+    w.engine.release(now + 121_000)
     await until(() => w.started.some((s) => s.key === `${b.id}/Agent`))
+  })
+
+  test('starts spaced out as Settings says: 0 lets every held task go at once; a way back start counts too', async () => {
+    const w = fresh({ 'machine.startEvery': '0' })
+    expect(w.engine.startsNow()).toBe(Infinity)
+    const p = await w.places.add(repo(), 'room-burst')
+    let m: { busy?: 'cpu' | 'memory'; herdr: boolean } = { busy: 'cpu', herdr: true }
+    w.engine.machine = () => m
+    const ts = [1, 2, 3].map((n) => w.engine.add({ project: p.name, title: `T${n}`, desc: 'Add t.txt.', by: 'test' }))
+    m = { herdr: true }
+    w.engine.release()
+    await until(() => ts.every((t) => w.started.some((s) => s.key === `${t.id}/Agent`)))
+    // 5 minutes apart: a start the way back made holds the next one back until then
+    w.settings.set('machine.startEvery', '5 min', 'machine')
+    w.engine.noteStart(1_000_000)
+    expect([w.engine.startsNow(1_000_000 + 4 * 60_000), w.engine.startsNow(1_000_000 + 5 * 60_000)]).toEqual([0, 1])
   })
 })

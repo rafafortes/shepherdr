@@ -210,6 +210,8 @@ export interface MachineLimits {
   startLoad: number | null
   /** new tasks wait while some task waited for a CPU more than this share of the last minute (%, Linux PSI); none: off */
   startPressure: number | null
+  /** minutes between two starts Shepherdr makes by itself (held tasks, the way back); none: as many as there's room for */
+  startEvery: number | null
   startMemory: number | null
   /** the coordinator is told when the load stays over this many times the cores for 2 minutes, memory or a disk is
    *  fuller than this (%), or herdr stops answering; null: that one is off */
@@ -279,6 +281,10 @@ export const CATALOG: Section[] = [
       // on its own: once its own quick checks pass; GitHub's run on (pull request, main), and main's going red is told
       // to its coordinator (engine.watchMain). After GitHub checks: shepherdr merge waits for them
       { label: 'Merge', key: 'brief.merge', value: 'on its own', options: ['on its own', 'after GitHub checks', 'ask me first'] },
+      // a command of the space's own, run in the task's worktree after its rebase and before it goes into main
+      // (engine.gate): exit 0 lets it in, anything else stops it. Never a git hook: a hook refusing an update leaves
+      // what it would write in the space's checkout, which may be a live service's folder
+      { label: 'Merge gate', key: 'merge.gate', value: 'off', text: true, hint: "A command run in the task's worktree after its rebase, before it goes into main (here, not through a pull request): exit 0 lets it in, with its last line in the merge commit; anything else stops the merge, with its output, and main stays as it was. Off: none." },
       // only words in the brief's Reviewer line: the task's agent has its change reviewed however it sees fit
       ...agentRows('Reviewer', 'reviewer', [...REVIEWERS], 'default', 'default'),
       // a reviewer that cannot run at all (out of allowance, signed out, its model is gone) leaves its task's agent
@@ -395,6 +401,9 @@ export const CATALOG: Section[] = [
       { group: 'Working tasks', label: 'Wait while CPU load is over', key: 'machine.startLoad', value: '1× cores', num: CORES, hint: 'The 5-minute load average, against the cores.' },
       { group: 'Working tasks', label: 'Wait while CPU pressure is over', key: 'machine.startPressure', value: 'off', num: { ...PCT, off: true }, hint: 'The share of the last minute some task spent waiting for a CPU (Linux pressure, /proc/pressure/cpu).' },
       { group: 'Working tasks', label: 'Wait while memory is over', key: 'machine.startMemory', value: '80%', num: PCT },
+      // the load averages take minutes to show what a start adds: tasks Shepherdr starts by itself go one at a time
+      // (engine.release, source.goBack); one you or a coordinator add starts at once when there is room
+      { group: 'Working tasks', label: 'Start one task at most every', key: 'machine.startEvery', value: '2 min', num: { min: 0, max: 30, step: 0.5, unit: 'min', zero: true }, hint: "The tasks Shepherdr starts by itself (held ones, the way back's) go this far apart, so each one's load shows before the next. 0: as many at once as there's room for." },
       { group: 'Tell its coordinator when', label: 'CPU load stays over (2 min)', key: 'machine.alertLoad', value: '1.5× cores', num: { ...CORES, off: true } },
       { group: 'Tell its coordinator when', label: 'Memory is over', key: 'machine.alertMemory', value: '90%', num: { ...PCT, off: true } },
       { group: 'Tell its coordinator when', label: 'Disk is over', key: 'machine.alertDisk', value: '90%', num: { ...PCT, off: true } },
@@ -781,6 +790,7 @@ export class Settings {
       max: Math.max(1, Math.round(num('machine.maxTasks') ?? 10)),
       startLoad: num('machine.startLoad'),
       startPressure: num('machine.startPressure'),
+      startEvery: num('machine.startEvery'),
       startMemory: num('machine.startMemory'),
       alertLoad: num('machine.alertLoad'),
       alertMemory: num('machine.alertMemory'),

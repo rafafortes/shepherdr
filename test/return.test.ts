@@ -19,6 +19,8 @@ const { Retries } = await import('../server/live/retry.ts')
 type Retry = import('../server/live/retry.ts').Retry
 
 const src = new LiveSource()
+// the way back as many at once as there are slots: starts spaced out (machine.startEvery) have a test of their own
+src.settings.set('machine.startEvery', '0', 'machine')
 afterAll(() => src.stop())
 
 const REPO = 'git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init'
@@ -677,6 +679,31 @@ describe('the night every model ran out', () => {
       s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'provider refused it', at: at + 3_600_000 })
       expect(s.src.returns.get('task', s.p.name)).toMatchObject({ due, lastCut: at + 3_600_000 })
     } finally {
+      s.done()
+    }
+  })
+})
+
+describe('the way back, starts spaced out', () => {
+  test('one cut-off task goes back per pass while machine.startEvery holds the next, then the next one', async () => {
+    const s = await nightWorld('night-paced', 4)
+    try {
+      expect(s.src.settings.set('machine.startEvery', '2 min', 'machine').ok).toBe(true)
+      // no start of an earlier test's clock to wait for
+      s.src.engine.noteStart(0)
+      const a = s.cutOff('codex')
+      const b = s.cutOff('codex')
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'provider refused it', at: Date.now() - FIRST_WAIT * 2 }, { allOut: true })
+      const now = later()
+      await s.src.watchReturns(now)
+      expect(s.started).toHaveLength(1)
+      // still within its two minutes: the other waits, in line
+      await s.src.watchReturns(now + 60_000)
+      expect(s.started).toHaveLength(1)
+      await s.src.watchReturns(now + 121_000)
+      expect(s.started.map((x) => x.key).sort()).toEqual([a.key, b.key].sort())
+    } finally {
+      s.src.settings.set('machine.startEvery', '0', 'machine')
       s.done()
     }
   })

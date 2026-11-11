@@ -1799,7 +1799,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         alerted.add(o.role)
         continue
       }
-      const { moved, waiting } = await this.goBack(o, to.chats)
+      const { moved, waiting } = await this.goBack(o, to.chats, now)
       // the tasks that wait for a slot go back before any new one takes a slot on this machine (startsWait)
       if (o.role === 'task' && waiting) resuming.add(o.space)
       if (!moved.length) continue
@@ -1913,10 +1913,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * one would (Settings → the machine's limit), the rest following as slots free up. Each chat once per outage: one
    * that can't start again (or goes on failing) is the human's. The keys that went back, and how many wait for a slot.
    */
-  private async goBack(o: Outage, chats: { key: string; task?: string; stuck?: boolean }[]) {
+  private async goBack(o: Outage, chats: { key: string; task?: string; stuck?: boolean }[], now = Date.now()) {
     const moved: string[] = []
     const tried: string[] = []
-    let slots = this.engine.freeSlots()
+    // as many as there's room for, and one at a time where starts are spaced out (machine.startEvery)
+    let slots = Math.min(this.engine.freeSlots(), this.engine.startsNow(now))
     let waiting = 0
     for (const c of chats) {
       const st = this.agents.status(c.key)
@@ -1945,7 +1946,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // back from its backup, or again on the very model that cut it off: its provider answers again either way
         await this.restart(c.key, {}, false, c.stuck ? 'again' : 'backup')
         moved.push(c.key)
-        if (c.task) slots--
+        if (c.task) {
+          slots--
+          this.engine.noteStart(now)
+        }
       } catch (e) {
         console.error(`shepherdr: couldn't start ${c.key} again on its primary model: ${(e as Error).message}`)
       }

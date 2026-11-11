@@ -79,6 +79,14 @@
   alert. Errors waiting can't fix (signed out, out of allowance, a model that isn't there) go in at once to the backup
   agent, a task's or a coordinator's, where one is set (below), and otherwise to you. Anything written to the agent
   starts the count again. Each CLI's log says what cut it off (`server/live/retry.ts` decides).
+- A space may have a **merge gate** (Settings → How tasks work → Merge gate, `merge.gate`, off by default; a task's own
+  `--set merge.gate=…` wins): a command run in the task's worktree after its rebase and before it goes into main here
+  (not through a pull request), with `SHEPHERDR_TASK` and `SHEPHERDR_BASE` set. Exit 0 lets it in, and the last line it
+  printed goes into the merge commit; anything else, or 45 minutes without an end, refuses the merge with the end of its
+  output, main stays as it was and the task is Ready again. Merges into one repo go one at a time, so the others wait
+  while it runs; a `shepherdr merge` that asks meanwhile hears that the gate still runs. If main moved anyway while it
+  ran, the branch is rebased on it and the gate runs again (three times at most). It is never a git hook: a hook that
+  refuses an update leaves what it would write in the space's checkout.
 - A task that goes back to work in the worktree it had (its agent starts again, the way back moves it to its primary, a
   backup takes it over, a queued task gets its go, or words take its agent back from rest: your answer on a card, the
   advisor's, a message to a task that waits on you, is To do or reported ready) is first brought up to its base: what was merged meanwhile (build
