@@ -137,7 +137,8 @@ const calls = (label: string) => jsonl<{ target: string; kind: string; script: s
 const kinds = (label: string) => calls(label).map((c) => c.kind)
 const workers = (label: string) => jsonl<{ pid: number; argv: string[]; box: { label: string; target: string; path: string; home: string }; env: Record<string, string> }>(join(dir, 'workers.jsonl')).filter((w) => w.box.label === label)
 
-async function until(what: string, f: () => boolean, ms = 15_000) {
+// a fake worker is a bun process of its own: on a loaded machine (load ~50) it can take longer than 15 s to answer
+async function until(what: string, f: () => boolean, ms = 45_000) {
   const end = performance.now() + ms
   while (!f()) {
     if (performance.now() > end) throw new Error(`timed out waiting: ${what}`)
