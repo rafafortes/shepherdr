@@ -337,6 +337,15 @@ function forgetGate(run: GateRun) {
   for (const f of [run.log, run.exit, `${run.exit}.tmp`]) fs.rmSync(f, { force: true })
 }
 
+/** a gate run thrown away (a newer one replaces it, or a restart left it dead): its files go now, and again each second
+ *  while its process still goes on, since it writes its exit code as it ends. Never killed here; the polling stops at the
+ *  gate's own limit */
+function dropGate(run: GateRun) {
+  const going = alive(run.pid)
+  forgetGate(run)
+  if (going && Date.now() - run.at < GATE_TIMEOUT) setTimeout(() => dropGate(run), 1000).unref()
+}
+
 /** a gate's end: its exit code and words; past timeoutMs from its start, its process group is killed (124); gone with no
  *  code, GATE_GONE */
 export async function waitGate(run: GateRun, timeoutMs: number, every = 250): Promise<{ code: number; out: string }> {
@@ -529,6 +538,7 @@ export class Engine extends Emitter<Events> {
       }
       const gate = t.landing!.step === 'gate'
       t.landing = undefined
+      if (g) dropGate(g)
       t.gateRun = undefined
       // a turn alone cut short is over too: the task rides a train again
       t.alone = undefined
@@ -2416,6 +2426,8 @@ export class Engine extends Emitter<Events> {
     }
     const g = t.gateRun
     const run = g && g.head === head && g.tip === at && (fs.existsSync(g.exit) || alive(g.pid)) ? g : startGate(cmd, wt, env, join(home(), 'gates'), t.id, { head, tip: at })
+    // an earlier run this one does not pick up is thrown away: its files go, its process is left to end
+    if (g && g !== run) dropGate(g)
     t.gateRun = run
     this.save()
     const ran = await waitGate(run, this.gateTimeout)

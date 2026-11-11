@@ -355,6 +355,47 @@ describe('shepherdr merge', () => {
       expect(w.engine.subOf(t)).toBe('Merge interrupted by a restart: run shepherdr merge again')
     })
 
+    test('a run the merge does not pick up is thrown away with its files, its process left to end: the gates folder keeps none of them', async () => {
+      const go = join(tmp('gate-stale-merge'), 'go')
+      const { w, t } = await gated('gate-stale-merge', 'echo green')
+      const { startGate } = await import('../server/live/engine/engine.ts')
+      const gates = join(process.env.SHEPHERDR_HOME!, 'gates')
+      // a run a restart left going at another head: the merge starts its own, and drops that one
+      const stale = startGate(`while [ ! -f ${go} ]; do sleep 0.05; done; echo stale`, t.worktree!, {}, gates, t.id, { head: 'old-head', tip: 'old-tip' })
+      t.gateRun = stale
+      expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
+      expect(readdirSync(gates)).toEqual([])
+      // its process is not killed: it goes on, and as it ends it writes its exit code, which goes too
+      const running = () => {
+        try {
+          process.kill(stale.pid, 0)
+          return true
+        } catch {
+          return false
+        }
+      }
+      expect(running()).toBe(true)
+      writeFileSync(go, 'go\n')
+      await until(() => !running())
+      await until(() => readdirSync(gates).length === 0)
+    })
+
+    test('a restart that finds a gate run dead with no exit code drops it with its files', async () => {
+      const { w, t } = await gated('gate-dead', 'echo fine')
+      const gates = join(process.env.SHEPHERDR_HOME!, 'gates')
+      mkdirSync(gates, { recursive: true })
+      // what a run left when it died before its exit code: its log, and a half-written exit file
+      const log = join(gates, 'dead.log')
+      writeFileSync(log, 'partial\n')
+      writeFileSync(join(gates, 'dead.exit.tmp'), '')
+      t.landing = { step: 'gate', at: Date.now() }
+      t.gateRun = { pid: 999_999_999, log, exit: join(gates, 'dead.exit'), at: Date.now(), head: 'x', tip: 'y' }
+      w.engine.resumeMerges()
+      expect(t.gateRun).toBeUndefined()
+      expect(readdirSync(gates)).toEqual([])
+      expect(w.engine.subOf(t)).toBe('Merge gate interrupted by a restart: run shepherdr merge again')
+    })
+
     test('a stale run of the same task, still going after a newer one began, never writes over the newer run\'s exit code', async () => {
       const { startGate, waitGate } = await import('../server/live/engine/engine.ts')
       const dir = tmp('gate-stale')
