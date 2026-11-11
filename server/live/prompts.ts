@@ -167,16 +167,18 @@ export function taskFirst(t: { title: string; desc: string }) {
 
 /** what a start is told when the session it was to resume is gone: a new one remembers none of it */
 /** what came into a task's base since its branch began, as Shepherdr found it before its agent went back to work */
-export type BaseMoved = { base: string; commits: string[]; rules: string[]; state: 'rebased' | 'conflict' | 'dirty' }
+export type BaseMoved = { base: string; commits: string[]; rules: string[]; state: 'rebased' | 'conflict' | 'dirty'; gate?: boolean }
 
 /** what a task's agent is told when its base moved while it was away: rebased for it, or what to do at a good point */
 export function baseMovedLine(m: BaseMoved) {
   const n = m.commits.length
   const came = `${n} commit${n === 1 ? '' : 's'} came into ${m.base} since your branch began (${m.commits.slice(0, 5).join('; ')}${n > 5 ? '; …' : ''})`
   const rules = m.rules.length ? ` ${m.rules.join(' and ')} changed among them: read ${m.rules.length === 1 ? 'it' : 'them'} again before you go on.` : ''
-  if (m.state === 'rebased') return `Before you went back to work, Shepherdr rebased your branch on ${m.base}: ${came}.${rules} What you build on moved, so run the checks again before you report done.`
-  if (m.state === 'conflict') return `${came}. Rebasing your branch on it conflicts, so Shepherdr left your worktree as it was: at your next good point, rebase on ${m.base} (git rebase ${m.base}), resolve the conflicts and run the checks.${rules}`
-  return `${came}. Your worktree has changes not committed, so Shepherdr didn't rebase it: at your next good point, commit, rebase on ${m.base} (git rebase ${m.base}) and run the checks.${rules}`
+  // a space with a merge gate runs its full check at the merge: an agent proves its own change, never the whole again
+  const checks = m.gate ? 'test what you changed (the merge gate runs the full check when you merge)' : 'run the checks'
+  if (m.state === 'rebased') return `Before you went back to work, Shepherdr rebased your branch on ${m.base}: ${came}.${rules} What you build on moved, so ${m.gate ? 'test what you changed again; the merge gate runs the full check when you merge' : 'run the checks again before you report done'}.`
+  if (m.state === 'conflict') return `${came}. Rebasing your branch on it conflicts, so Shepherdr left your worktree as it was: at your next good point, rebase on ${m.base} (git rebase ${m.base}), resolve the conflicts and ${checks}.${rules}`
+  return `${came}. Your worktree has changes not committed, so Shepherdr didn't rebase it: at your next good point, commit, rebase on ${m.base} (git rebase ${m.base}) and ${checks}.${rules}`
 }
 
 /** the card a task's chat gets for it */

@@ -434,6 +434,49 @@ describe('A tell with no chat of its own', () => {
   })
 })
 
+describe('first in line, from the command and the screen', () => {
+  test('task add --priority and task priority mark one first in line; task start is yours, task priority anyone but its agent', async () => {
+    const dir = tmp('src-repo')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'prio')
+    const place = placeId.space(p.name)
+    const idOf = (out: string) => out.match(/([A-Z]+-\d+)/)![1]
+    const engine = src.engine as unknown as { machine?: () => { busy?: string; herdr: boolean } }
+    const was = engine.machine
+    // herdr not answering holds even one first in line: they all wait, marked or not
+    engine.machine = () => ({ herdr: false })
+    try {
+      const plain = idOf((await src.cli(['task', 'add', 'Later on', '--desc', 'x'], { chat: place })).out)
+      expect(src.engine.task(plain)!.held?.why).toBe('machine')
+      const fix = idOf((await src.cli(['task', 'add', 'Fix main', '--desc', 'y', '--priority'], { chat: place })).out)
+      expect(src.engine.task(fix)!.priority).toBe(true)
+      expect((await src.cli(['task', 'priority', plain], { chat: place })).out).toContain(`${plain} is first in line: it starts at the next free slot, past the machine's load`)
+      expect((await src.cli(['task', 'priority', plain, 'off'], { chat: place })).out.trim()).toBe(`${plain} is back in line by its age.`)
+      expect((await src.cli(['task', 'priority', plain], { chat: `${fix}/Agent` })).out).toContain("A task's agent doesn't set priorities")
+      // start now is the human's: a coordinator is pointed at task priority
+      expect((await src.cli(['task', 'start', plain], { chat: place })).out).toContain(`Only the human starts a task now. To put ${plain} first in line, run shepherdr task priority ${plain}.`)
+      // still no herdr: first in line, at the next chance
+      const held = (await src.cli(['task', 'start', plain], {})).out
+      expect(held).toStartWith(`${plain} is first in line: the machine is busy (`)
+      expect(held).toContain("It starts as soon as there's room, ahead of the others.")
+      // herdr back, the machine still loaded: started at once, past the load
+      engine.machine = () => ({ busy: 'cpu', herdr: true })
+      expect((await src.cli(['task', 'start', plain], {})).out.trim()).toBe(`Started ${plain} now.`)
+      expect((await src.cli(['task', 'start', plain], {})).out).toContain(`${plain} isn't waiting to start`)
+      // the screen's Start now with…: a CLI there is none of, a model its CLI lacks, or the worker picked
+      const third = idOf((await src.cli(['task', 'add', 'Third', '--desc', 'z'], { chat: place })).out)
+      expect(await src.act({ type: 'start-now', chat: 'NOPE-9/Agent' })).toEqual({ ok: false, error: 'No such task.' })
+      expect(await src.act({ type: 'start-now', chat: `${third}/Agent`, kind: 'nope' })).toEqual({ ok: false, error: 'No CLI called nope.' })
+      expect(((await src.act({ type: 'start-now', chat: `${third}/Agent`, kind: 'claude', model: 'no-such-model' })) as { ok: boolean }).ok).toBe(false)
+      expect(await src.act({ type: 'start-now', chat: `${third}/Agent`, kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).toEqual({ ok: true })
+      expect(src.engine.task(third)!.agent).toEqual({ kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })
+      expect(((await src.act({ type: 'start-now', chat: `${third}/Agent` })) as { ok: boolean }).ok).toBe(false)
+    } finally {
+      engine.machine = was
+    }
+  })
+})
+
 describe('Queued from the command', () => {
   test('task add --after queues it; task queue changes or clears it; what is not there, or a circle, is refused', async () => {
     const dir = tmp('src-repo')

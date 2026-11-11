@@ -2675,6 +2675,22 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           return { ok: false, error: (e as Error).message }
         }
       }
+      case 'start-now': {
+        const t = this.engine.task(a.chat.split('/')[0])
+        if (!t) return { ok: false, error: 'No such task.' }
+        try {
+          const kind = a.kind ? kindOf(a.kind) : undefined
+          if (a.kind && !kind) return { ok: false, error: `No CLI called ${a.kind}.` }
+          const on: Harness | undefined = kind ? { kind, ...(a.model ? { model: a.model } : {}), ...(a.effort ? { effort: a.effort } : {}) } : undefined
+          const problem = on ? harnessProblem(on) : undefined
+          if (problem) return { ok: false, error: problem }
+          const r = await this.engine.startNow(t.id, on)
+          this.emit('snapshot')
+          return { ok: true, ...(r.held ? { held: this.heldWords(r.held) } : {}) }
+        } catch (e) {
+          return { ok: false, error: (e as Error).message }
+        }
+      }
       case 'restart-all': {
         try {
           return { ok: true, ...(await this.restartAllCoordinators()) }
@@ -3877,8 +3893,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (sub === 'add') {
       if (!rest[0]?.trim()) throw new Error('shepherdr task add "<title>" --desc "<the whole brief>"')
       if (p.flags.has('after')) throw new Error('--after needs the tasks it waits for: --after SHE-12,SHE-13')
-      const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => !['brief', 'desc', 'space', 'base', 'after', 'at', 'in', 'later', 'agent', 'model', 'effort', 'reviewer', 'reviewer-model', 'reviewer-effort', 'set'].includes(f))
-      if (odd.length) throw new Error(`Task add takes no --${odd[0]}: only --desc, --space, --base, --after, --at, --in, --later, --set, --agent, --model, --effort, --reviewer, --reviewer-model and --reviewer-effort`)
+      const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => !['brief', 'desc', 'space', 'base', 'after', 'at', 'in', 'later', 'priority', 'agent', 'model', 'effort', 'reviewer', 'reviewer-model', 'reviewer-effort', 'set'].includes(f))
+      if (odd.length) throw new Error(`Task add takes no --${odd[0]}: only --desc, --space, --base, --after, --at, --in, --later, --priority, --set, --agent, --model, --effort, --reviewer, --reviewer-model and --reviewer-effort`)
       // --set key=value: a How tasks work setting for this task, or what --agent, --reviewer and the like set
       const set: Record<string, string> = {}
       for (const pair of p.opts.set ?? []) {
@@ -3887,7 +3903,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if ('flag' in r) (p.opts[r.flag] ??= []).push(r.value)
         else set[r.key] = r.value
       }
-      const bare = [...p.flags].filter((f) => f !== 'later')[0]
+      const bare = [...p.flags].filter((f) => f !== 'later' && f !== 'priority')[0]
       if (bare) throw new Error(`--${bare} needs a value`)
       const title = checkTitle(rest[0])
       const named = one(p, 'space')
@@ -3926,7 +3942,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const after = p.opts.after ?? []
       const agent = harnessOf(p, this.settings)
       const reviewer = reviewerOf(p, this.settings)
-      const t = this.engine.add({ project: pr.name, base: one(p, 'base'), title, desc: one(p, 'brief') ?? one(p, 'desc'), by: this.byWho(ctx), requester: this.requestedNews.known(ctx.chat), after, later: p.flags.has('later'), at: when, agent, reviewer, set })
+      const t = this.engine.add({ project: pr.name, base: one(p, 'base'), title, desc: one(p, 'brief') ?? one(p, 'desc'), by: this.byWho(ctx), requester: this.requestedNews.known(ctx.chat), after, later: p.flags.has('later'), at: when, agent, reviewer, set, priority: p.flags.has('priority') })
       // one added for a time has no agent yet: nothing of Settings is read until it starts
       if (t.scheduled) {
         const starts = startsWords(t.scheduled.at, Date.now(), this.settings.zone())
@@ -3977,6 +3993,21 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const r = await this.engine.tell(t.id, rest.slice(1).join(' '), { gate: !ctx.chat?.includes('/'), from: await this.toldFrom(ctx) })
         if (r.held) return `${t.id} is held: ${this.heldWords(r.held)} (${this.workingLine()}). It shows as Queued and gets your message when there's room, oldest first.`
         return `Told ${t.id}.`
+      }
+      case 'start': {
+        // yours alone: a coordinator puts one first in line with task priority, and the machine starts it at its turn
+        if (ctx.chat) throw new Error(`Only the human starts a task now. To put ${t.id} first in line, run shepherdr task priority ${t.id}.`)
+        const on = harnessOf(p, this.settings)
+        const r = await this.engine.startNow(t.id, on.kind ? (on as Harness) : undefined)
+        this.emit('snapshot')
+        return r.held ? `${t.id} is first in line: ${this.heldWords(r.held)} (${this.workingLine()}). It starts as soon as there's room, ahead of the others.` : `Started ${t.id} now${on.kind ? ` on ${harnessWords(fitHarness(on as Harness))}` : ''}.`
+      }
+      case 'priority': {
+        if (ctx.chat?.includes('/')) throw new Error("A task's agent doesn't set priorities: its coordinator or the human does.")
+        const off = /^(off|no|none)$/i.test(rest[1] ?? '')
+        this.engine.setPriority(t.id, !off)
+        this.emit('snapshot')
+        return off ? `${t.id} is back in line by its age.` : `${t.id} is first in line: it starts at the next free slot, past the machine's load, pressure and spacing (never past its ${this.settings.machine().max ?? 'unlimited'} slots)${t.after?.length ? `, once ${t.after.join(', ')} ${t.after.length === 1 ? 'is' : 'are'} done` : ''}.`
       }
       case 'queue': {
         const refs = p.opts.after ?? []

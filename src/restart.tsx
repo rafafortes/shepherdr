@@ -6,18 +6,19 @@ import { NO_PICKS, orderByPicks, type Picks } from '@shared/picks.ts'
 import { act, setUI, taskOf, useSnap, useStore } from './kernel.ts'
 import { Dialog } from './rowmenu.tsx'
 import { Pick, shown, Switch, TextValue } from './Settings.tsx'
-import { EffortIcon, ic, MenuItem, ModelIcon, ModeIcon, Primary, RestartIcon, UpDownIcon } from './ui.tsx'
+import { EffortIcon, ic, MenuItem, ModelIcon, ModeIcon, PlayIcon, Primary, RestartIcon, UpDownIcon } from './ui.tsx'
 
 /* ---------- the sheet ---------- */
 
-type Opening = { chat: string; name: string; current?: boolean }
+/** start: a task that waits, started now on the worker picked here, for it alone (no saving for the others) */
+type Opening = { chat: string; name: string; current?: boolean; start?: boolean }
 let opening: Opening | null = null
 const listeners = new Set<() => void>()
 const subscribe = (f: () => void) => (listeners.add(f), () => void listeners.delete(f))
 
 /** open the restart sheet for a coordinator (chat: its place id) or a task's agent (ID/Agent); name: what it is called */
-export function openRestart(chat: string, name: string, current = false) {
-  opening = { chat, name, current }
+export function openRestart(chat: string, name: string, current = false, start = false) {
+  opening = { chat, name, current, start }
   listeners.forEach((f) => f())
 }
 
@@ -29,7 +30,7 @@ const close = () => {
 /** the sheet, while one is open: each anew, its picks fresh */
 export function RestartSheet() {
   const o = useSyncExternalStore(subscribe, () => opening)
-  return o ? <Sheet key={o.chat} chat={o.chat} name={o.name} current={o.current} /> : null
+  return o ? <Sheet key={o.chat} chat={o.chat} name={o.name} current={o.current} start={o.start} /> : null
 }
 
 /** "Restart agent" in a ⋯ menu */
@@ -47,13 +48,40 @@ export function RestartItem({ chat, name, onPick }: { chat: string; name: string
   )
 }
 
+/** "Start now" and "Start now with…" in a waiting task's ⋯ menu: first in line, past the machine's load (within its
+ *  slots); the second on a worker picked for this task alone */
+export function StartNowItems({ chat, name, onPick }: { chat: string; name: string; onPick?: () => void }) {
+  return (
+    <>
+      <MenuItem
+        icon={<PlayIcon className={ic} />}
+        onClick={() => {
+          onPick?.()
+          void act({ type: 'start-now', chat }).catch(() => undefined)
+        }}
+      >
+        Start now
+      </MenuItem>
+      <MenuItem
+        icon={<PlayIcon className={ic} />}
+        onClick={() => {
+          onPick?.()
+          openRestart(chat, name, false, true)
+        }}
+      >
+        Start now with…
+      </MenuItem>
+    </>
+  )
+}
+
 const DEFAULT = 'default'
 
 /** a CLI's model choices by name, and the levels the one picked takes */
 const modelsOf = (c?: RestartCli) => c?.models ?? []
 const levelsOf = (c: RestartCli | undefined, model?: string) => (model ? modelsOf(c).find((m) => m.id === model)?.efforts : undefined) ?? c?.efforts ?? []
 
-function Sheet({ chat, name, current }: Opening) {
+function Sheet({ chat, name, current, start }: Opening) {
   const [info, setInfo] = useState<RestartInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -68,7 +96,8 @@ function Sheet({ chat, name, current }: Opening) {
       .then((r: { ok?: boolean; error?: string; info?: RestartInfo; waiting?: boolean }) => {
         if (!r.info) return setError(r.waiting ? 'Its machine is out of reach: restart it once it is back.' : r.error || 'It could not be restarted.')
         setInfo(r.info)
-        const pick = current ? r.info.on : r.info.want
+        // started now: what this task would run on (its own, else Settings'); a restart: what Settings say, or what it runs on
+        const pick = current || start ? r.info.on : r.info.want
         setKind(pick.kind)
         setModel(pick.model ?? '')
         setEffort(pick.effort ?? '')
@@ -93,7 +122,7 @@ function Sheet({ chat, name, current }: Opening) {
   const go = async () => {
     setBusy(true)
     setError(null)
-    const r = await act({ type: 'restart', chat, kind, model, effort, save }).catch((e: Error) => ({ ok: false, error: e.message }))
+    const r = await act(start ? { type: 'start-now', chat, kind, model, effort } : { type: 'restart', chat, kind, model, effort, save }).catch((e: Error) => ({ ok: false, error: e.message }))
     setBusy(false)
     if (r.ok === false) return setError(r.error || 'It could not be restarted.')
     close()
@@ -124,11 +153,11 @@ function Sheet({ chat, name, current }: Opening) {
   }
   return (
     <Dialog
-      title={task ? `Restart ${name} agent?` : 'Restart coordinator?'}
+      title={start ? `Start ${name} now?` : task ? `Restart ${name} agent?` : 'Restart coordinator?'}
       onCancel={close}
       buttons={
         <Primary autoFocus disabled={!info || busy || unavailable} onClick={go}>
-          {busy ? 'Restarting…' : 'Restart'}
+          {start ? (busy ? 'Starting…' : 'Start now') : busy ? 'Restarting…' : 'Restart'}
         </Primary>
       }
     >
@@ -164,13 +193,15 @@ function Sheet({ chat, name, current }: Opening) {
               </Line>
             ) : <Line label="Effort"><span className="text-fg3">Default</span></Line>}
             {unavailable ? <p className="text-need-fg">{model} is unavailable. Choose Default or an available model before restarting.</p> : null}
-            {changed || save ? (
+            {!start && (changed || save) ? (
               <Line label={saveWords(info)}>
                 <Switch label={saveWords(info)} on={save} onChange={setSave} />
               </Line>
             ) : null}
           </div>
-          {other ? <p className="text-sm text-fg3">{cli?.name ?? shown(kind)} starts a new session with this chat{task ? ', the brief and branch' : ''}.</p> : null}
+          {start ? (
+            <p className="text-sm text-fg3">Only this task's agent runs on it; its reviewer and backups stay as Settings say. It no longer waits for the tasks it was queued after, and goes ahead of the machine's load, within its slots.</p>
+          ) : other ? <p className="text-sm text-fg3">{cli?.name ?? shown(kind)} starts a new session with this chat{task ? ', the brief and branch' : ''}.</p> : null}
           {error ? <p className="text-need-fg">{error}</p> : null}
         </div>
       ) : (

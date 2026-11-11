@@ -41,6 +41,18 @@ describe('back to work on a base that moved', () => {
     expect(w.posted.some((p) => p.key === a.key && p.card?.text === 'Rebased on main: 2 new commits in main')).toBe(true)
   })
 
+  test('in a space with a merge gate, it is told to test what it changed: the gate runs the full check at the merge', async () => {
+    const w = world()
+    const dir = repo()
+    const a = await started(w, dir, 'rb-gated', 'Work', 'Add a.txt.')
+    expect(w.settings.set('merge.gate', 'tools/merge-gate.sh', { space: a.p.name }).ok).toBe(true)
+    commit(a.t.worktree!, 'a.txt', 'a\n', 'Add a.txt')
+    onMain(dir, 'build.txt', 'cache on\n', 'Turn the build cache on')
+    w.agentIs(a.key, 'gone')
+    await w.engine.resume(a.t.id)
+    expect(w.started.filter((s) => s.key === a.key).at(-1)!.first).toContain('What you build on moved, so test what you changed again; the merge gate runs the full check when you merge.')
+  })
+
   test('its base did not move: nothing to do, nothing said', async () => {
     const w = world()
     const a = await started(w, repo(), 'rb-still', 'Work', 'Add a.txt.')

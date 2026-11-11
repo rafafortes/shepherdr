@@ -992,6 +992,8 @@ export type Action =
   /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as
       Settings say for its role); save: as its space's Settings for its role too */
   | { type: 'restart'; chat: string; kind?: string; model?: string; effort?: string; save?: boolean }
+  /** start a task that waits now, first in line (on a worker of the human's choosing, for it alone) */
+  | { type: 'start-now'; chat: string; kind?: string; model?: string; effort?: string }
   /** every coordinator of this machine's spaces whose agent runs on other than what its Settings say now, each started
    *  again as a single restart does (never a task's agent, never another machine's place): the lines, and the counts */
   | { type: 'restart-all' }
