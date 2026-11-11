@@ -343,6 +343,21 @@ export async function mergeHere(repo: string, branch: string, base: string, mess
   return ff.ok ? ff : { ...ff, err: overwriteRefusal(base, said, 'then merge again') ?? `${base} here could not be brought up to the merge (${gitReason(said)}). Nothing was changed in that checkout: run the merge again.` }
 }
 
+/**
+ * A merge train going in: commits with these trees, each on the one before and the first on `base` at `at`, put on
+ * `base` here as mergeHere puts one (its checkout moved forward by git only, never over work of yours). Their ids, or
+ * nothing when `base` moved since `at` or its checkout can't be brought up to them: then nothing changed.
+ */
+export async function landStack(repo: string, base: string, at: string, commits: { tree: string; message: string }[]): Promise<string[] | undefined> {
+  const ids: string[] = []
+  let top = at
+  for (const c of commits) ids.push((top = (await git(repo, 'commit-tree', c.tree, '-p', top, '-m', c.message)).out))
+  if (ids.some((x) => !x)) return undefined
+  const here = (await git(repo, 'branch', '--show-current')).out === base
+  const moved = here ? await git(repo, 'merge', '--ff-only', '--no-autostash', '--no-overwrite-ignore', '--quiet', top) : await git(repo, 'update-ref', `refs/heads/${base}`, top, at)
+  return moved.ok ? ids : undefined
+}
+
 /* ---------- GitHub, through gh ---------- */
 
 /** gh for one repo: its host in GH_HOST (gh can't tell github.localhost from the remote alone), never a prompt */

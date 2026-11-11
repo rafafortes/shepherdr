@@ -443,6 +443,75 @@ describe('shepherdr merge', () => {
       }
     })
 
+    describe('a merge train', () => {
+      /** a line of `n` with its gate logging each run (`runs`), waiting for go-<the task it gates for>, then green */
+      async function train(name: string, n: number, k: string, gate = '') {
+        const l = await line(name, n)
+        const runs = join(l.gates, 'runs')
+        const space = l.w.engine.view(l.ts[0]).place.split(':').pop()!
+        expect(l.w.settings.set('merge.gate', `echo "$SHEPHERDR_TASK" >> ${runs}; ${gate}while [ ! -f ${l.gates}/go-$SHEPHERDR_TASK ]; do sleep 0.05; done; echo "Gate: green on $(git rev-parse --short HEAD^{tree})"`, { space }).ok).toBe(true)
+        expect(l.w.settings.set('merge.train', k, { space }).ok).toBe(true)
+        // their agents at rest, as told while their merges wait
+        for (const t of l.ts) l.w.agentIs(`${t.id}/Agent`, 'idle')
+        const ran = () => (existsSync(runs) ? readFileSync(runs, 'utf8').trim().split('\n') : [])
+        return { ...l, ran }
+      }
+
+      test('the first in line take the next ones along on one gate run, each going in as its own commit with its line', async () => {
+        const { w, dir, ts, go, ran } = await train('train-go', 4, '3')
+        const [x, a, b, c] = ts
+        // a worktree a train's gate left at the top of its stack (a restart while it ran) is back on its branch first
+        sh('git checkout -q --detach', x.worktree!)
+        const runs = [w.engine.merge(x.id, { self: true })]
+        await until(() => x.landing?.step === 'gate')
+        for (const t of [a, b, c]) runs.push(w.engine.merge(t.id, { self: true }))
+        expect(w.engine.subOf(c)).toBe(`Waiting for the merge gate (${x.id}'s runs)`)
+        go(x)
+        // a's turn: b and c go in with it, on one run
+        await until(() => a.landing?.cars === 3)
+        expect(w.engine.subOf(a)).toBe('Running the merge gate (a train of 3)')
+        expect(w.engine.subOf(b)).toBe(`Going in with ${a.id}'s merge train`)
+        expect(w.engine.subOf(c)).toBe(`Going in with ${a.id}'s merge train`)
+        // a's worktree is at the top of the stack while the gate runs: all three changes there
+        expect(['2.txt', '3.txt', '4.txt'].every((f) => existsSync(join(a.worktree!, f)))).toBe(true)
+        go(a)
+        const said = await Promise.all(runs)
+        expect(said.map((r) => r.ok)).toEqual([true, true, true, true])
+        expect(said[2].note).toBe(`it went in with ${a.id}'s merge train`)
+        expect(ran()).toEqual([x.id, a.id])
+        expect(sh('git log --format=%s -n 5', dir).split('\n')).toEqual([`${c.id}: Task 4`, `${b.id}: Task 3`, `${a.id}: Task 2`, `${x.id}: Task 1`, 'init'])
+        for (const t of [a, b, c]) {
+          const body = sh(`git log -1 --format=%b ${t.squash}`, dir)
+          expect(body).toContain(`Added ${ts.indexOf(t) + 1}.txt.`)
+          expect(body).toContain('Gate: green on ')
+          expect(body).toContain(`Merge train: ${a.id}, ${b.id}, ${c.id} (one merge gate run)`)
+          expect(w.engine.statusOf(t)).toBe('done')
+        }
+        expect(b.train).toBe(a.id)
+      })
+
+      test("one that conflicts stays out for its own turn; a refusal goes back to one at a time", async () => {
+        // the gate refuses whenever 4.txt (the last task's) is in the tree it checks
+        const { w, ts, go, ran } = await train('train-red', 4, '4', 'test -f 4.txt && { echo "4.txt is not wanted"; exit 1; }; ')
+        const [x, a, b, c] = ts
+        // b adds 2.txt too, as a does, with other words: it can't stack on a
+        writeFileSync(join(b.worktree!, '2.txt'), 'b too\n')
+        sh('git add -A && git commit -qm "b adds 2.txt"', b.worktree!)
+        const runs = [w.engine.merge(x.id, { self: true })]
+        await until(() => x.landing?.step === 'gate')
+        for (const t of [a, b, c]) runs.push(w.engine.merge(t.id, { self: true }))
+        for (const t of [x, a, c]) go(t)
+        const [rx, ra, rb, rc] = await Promise.all(runs)
+        expect([rx.ok, ra.ok]).toEqual([true, true])
+        // the train (a and c) was refused, so a went alone; b then conflicted with a on its own turn; c was refused alone
+        expect(ran()).toEqual([x.id, a.id, a.id, c.id])
+        expect(rb.error).toContain('Conflict with main')
+        expect(rc.error).toContain(`${c.id}'s merge gate`)
+        expect(rc.error).toContain('4.txt is not wanted')
+        expect(c.landing?.train).toBeUndefined()
+      })
+    })
+
     test('a gate killed from outside is no answer: the merge says it was stopped, and nothing went in', async () => {
       const { w, dir, t } = await gated('gate-killed', 'sleep 30')
       const main = sh('git rev-parse main', dir)

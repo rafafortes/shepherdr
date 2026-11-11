@@ -139,6 +139,8 @@ export interface TaskRec {
   mergeStop?: string
   /** its merge gate's run, detached so that a restart of Shepherdr doesn't stop it (startGate): found again then */
   gateRun?: GateRun
+  /** merged with this task's merge train, on its gate run (train) */
+  train?: string
   /** first in line (start now, or a coordinator's priority mark for a fix of a red main): it goes ahead of the other
    *  held tasks and past the machine's load, pressure and spacing, never past its slots (room, release) */
   priority?: true
@@ -177,6 +179,10 @@ export interface Landing {
   step: 'checks' | 'rebase' | 'merge' | 'gate' | 'queue'
   behind?: string
   gate?: boolean
+  /** queue: it goes in with this task's merge train, on that one's gate run (train) */
+  train?: string
+  /** gate: the merges its run is for, this one's included, when it gates a train */
+  cars?: number
   at: number
   due?: number
   /** its agent, at rest with the checks through, was told to merge once */
@@ -187,7 +193,8 @@ export interface Landing {
 export function landingLine(l: Landing, base = 'main', now = Date.now()) {
   if (l.step === 'rebase') return `Rebasing on ${base}`
   if (l.step === 'merge') return 'Merging'
-  if (l.step === 'gate') return 'Running the merge gate'
+  if (l.step === 'gate') return l.cars ? `Running the merge gate (a train of ${l.cars})` : 'Running the merge gate'
+  if (l.step === 'queue' && l.train) return `Going in with ${l.train}'s merge train`
   if (l.step === 'queue') return l.gate ? `Waiting for the merge gate (${l.behind}'s runs)` : `Waiting for ${l.behind}'s merge`
   const left = l.due === undefined ? 0 : Math.ceil((l.due - now) / 60_000)
   return left > 0 ? `Checks running · ~${left}m` : 'Checks running'
@@ -343,6 +350,8 @@ export async function waitGate(run: GateRun, timeoutMs: number, every = 250): Pr
 
 /** how many times main may move while a merge gate runs before the merge gives up for now */
 const GATE_ROUNDS = 3
+/** the most merges one train takes (merge.train) */
+const TRAIN_MAX = 5
 
 /** the line a held task shows */
 /** why a task waits to start: its slots are taken, the machine is busy, every model of its space ran out (a start
@@ -2356,23 +2365,7 @@ export class Engine extends Emitter<Events> {
       const at = await tip()
       const head = (await G.git(wt, 'rev-parse', 'HEAD')).out
       this.land(t, 'gate')
-      // this very commit's run, on the base as it is, still going (or done) since Shepherdr restarted: that one, not a
-      // second beside it
-      const env = { SHEPHERDR_TASK: t.id, SHEPHERDR_BASE: t.base! }
-      let ran: { code: number; out: string }
-      if (BOX) {
-        // a worker machine runs it over its own link, as every command there: it ends with Shepherdr as before
-        const r = await G.sh(['/bin/sh', '-c', cmd], wt, { timeoutMs: this.gateTimeout, env })
-        ran = { code: r.code, out: [r.out, r.err].filter(Boolean).join('\n') }
-      } else {
-        const g = t.gateRun
-        const run = g && g.head === head && g.tip === at && (fs.existsSync(g.exit) || alive(g.pid)) ? g : startGate(cmd, wt, env, join(home(), 'gates'), t.id, { head, tip: at })
-        t.gateRun = run
-        this.save()
-        ran = await waitGate(run, this.gateTimeout)
-        t.gateRun = undefined
-        this.save()
-      }
+      const ran = await this.runGate(t, cmd, wt, head, at)
       if (ran.code === GATE_GONE) return { ok: false, error: `${t.id}'s merge gate (${cmd}) was stopped before it ended (a restart, or a kill): nothing was merged. Run shepherdr merge ${t.id} again.` }
       const r = { ok: ran.code === 0, code: ran.code, out: ran.out, err: '' }
       if (!r.ok) {
@@ -2393,6 +2386,114 @@ export class Engine extends Emitter<Events> {
       }
     }
     return { ok: false, error: `${t.base} kept moving while ${t.id}'s merge gate ran (${GATE_ROUNDS} times): nothing was merged. Run shepherdr merge ${t.id} again.` }
+  }
+
+  /**
+   * One run of the gate in `wt` at `head`, on the base at `at`: this very commit's run on the base as it is, still going
+   * (or done) since Shepherdr restarted, when there is one, not a second beside it; else a new one, detached (startGate).
+   */
+  private async runGate(t: TaskRec, cmd: string, wt: string, head: string, at: string): Promise<{ code: number; out: string }> {
+    const env = { SHEPHERDR_TASK: t.id, SHEPHERDR_BASE: t.base! }
+    if (BOX) {
+      // a worker machine runs it over its own link, as every command there: it ends with Shepherdr as before
+      const r = await G.sh(['/bin/sh', '-c', cmd], wt, { timeoutMs: this.gateTimeout, env })
+      return { code: r.code, out: [r.out, r.err].filter(Boolean).join('\n') }
+    }
+    const g = t.gateRun
+    const run = g && g.head === head && g.tip === at && (fs.existsSync(g.exit) || alive(g.pid)) ? g : startGate(cmd, wt, env, join(home(), 'gates'), t.id, { head, tip: at })
+    t.gateRun = run
+    this.save()
+    const ran = await waitGate(run, this.gateTimeout)
+    t.gateRun = undefined
+    this.save()
+    return ran
+  }
+
+  /** how many merges a space's train takes at most (merge.train): 1 while it is off */
+  private trainSize(space: string) {
+    const n = Number(this.settings.get('merge.train', space).trim())
+    return Number.isInteger(n) && n >= 2 ? Math.min(n, TRAIN_MAX) : 1
+  }
+
+  /**
+   * A merge train (merge.train): with a merge gate and others in line behind `t` in its repo, the first of them, in line
+   * order, go in with it on one gate run. Their changes are stacked on main as the squash commits they would each be
+   * (built by git, no checkout touched), the gate runs once in t's worktree at the top of the stack, its branch as it was
+   * after, and on exit 0 each goes in as its own commit carrying the gate's line. One that doesn't stack cleanly on those
+   * before it, or adds nothing to them, stays in line for its own turn. A refusal, or main moving meanwhile, leaves them
+   * all in line and t goes on alone (nothing returned): one at a time, as without a train.
+   */
+  private async train(t: TaskRec, p: Space, wt: string): Promise<{ ok: boolean; error?: string; note?: string } | undefined> {
+    const cmd = this.gateOf(t, p.name)
+    const k = this.trainSize(p.name)
+    if (k < 2 || !cmd || BOX) return undefined
+    const riders = this.tasks
+      .filter((x) => x !== t && x.landing?.step === 'queue' && this.landings.has(x.id) && !ended(x) && x.project === t.project && x.base === t.base && !!x.worktree && !!x.branch && this.gateOf(x, p.name) === cmd)
+      // its own turn decides what an agent still at work, or a message it hasn't read, changes
+      .filter((x) => this.agents.status(this.key(x)) !== 'working' && !this.chats.unseen(this.key(x)).length)
+      .sort((a, b) => a.landing!.at - b.landing!.at)
+    if (!riders.length) return undefined
+    const at = (await G.git(p.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out
+    // made the same way each time (main's tip's date): after a restart, the same stack finds its gate's run again
+    const date = (await G.git(p.path, 'log', '-1', '--format=%cI', at)).out
+    const cars: { t: TaskRec; tree: string }[] = []
+    let top = at
+    for (const x of [t, ...riders]) {
+      if (cars.length === k) break
+      if (x !== t) await G.commitAll(x.worktree!, `${x.id}: ${x.title}`)
+      const merged = await G.git(p.path, 'merge-tree', '--write-tree', top, x.branch!)
+      const tree = merged.out.split('\n')[0]
+      if (!merged.ok || tree === (await G.git(p.path, 'rev-parse', `${top}^{tree}`)).out) continue
+      const c = await G.sh(['git', 'commit-tree', tree, '-p', top, '-m', `${x.id}: ${x.title}`], p.path, { env: { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } })
+      cars.push({ t: x, tree })
+      top = c.out
+    }
+    if (cars.length < 2 || cars[0].t !== t) return undefined
+    const names = cars.map((c) => c.t.id)
+    const riding = cars.slice(1).map((c) => c.t)
+    for (const x of riding) x.landing = { ...x.landing!, train: t.id }
+    this.save()
+    riding.forEach((x) => this.settle(x))
+    // the gate, once, in t's worktree at the top of the stack; its branch is back as it was after
+    let ran: { code: number; out: string } | undefined
+    if ((await G.git(wt, 'checkout', '--quiet', '--detach', top)).ok) {
+      this.land(t, 'gate', undefined, { cars: cars.length })
+      try {
+        ran = await this.runGate(t, cmd, wt, top, at)
+      } finally {
+        await G.git(wt, 'checkout', '--quiet', t.branch!)
+      }
+    }
+    // on main as the gate saw it: each its own commit, with the gate's line and who went in together
+    const line = ran?.out.split('\n').filter((l) => l.trim()).at(-1)?.trim()
+    const together = `Merge train: ${names.join(', ')} (one merge gate run)`
+    const shas = ran?.code === 0 ? await G.landStack(p.path, t.base!, at, cars.map((c) => ({ tree: c.tree, message: this.mergeMessage(c.t, line, together) }))) : undefined
+    if (!shas) {
+      for (const x of riding) if (x.landing?.train === t.id) x.landing = { ...x.landing, train: undefined }
+      this.save()
+      riding.forEach((x) => this.settle(x))
+      return undefined
+    }
+    cars.forEach((c, i) => (c.t.squash = shas[i]))
+    const note = await this.pushBase(p, t.base!, `it went in with ${names.slice(1).join(', ')} on one merge gate run`)
+    for (const x of riding) {
+      x.train = t.id
+      await this.markMerged(x, `it went in with ${t.id}'s merge train`)
+    }
+    return this.markMerged(t, note)
+  }
+
+  /** a merge commit's words: the task and its title, what its agent said it did, its facts, then the lines after */
+  private mergeMessage(t: TaskRec, ...after: (string | undefined)[]) {
+    return [`${t.id}: ${t.title}`, t.said, t.facts && `Facts: ${t.facts}`, ...after].filter(Boolean).join('\n\n')
+  }
+
+  /** a GitHub remote gh can't use (not logged in): main is pushed as it is here, and the note says how that went */
+  private async pushBase(p: Space, base: string, note?: string) {
+    if (!p.github) return note
+    const push = await G.git(p.path, 'push', '--quiet', 'origin', base)
+    const pushed = push.ok ? `pushed ${base} to GitHub` : `could not push ${base} to GitHub: ${push.err.split('\n')[0]}`
+    return note ? `${note}; ${pushed}` : pushed
   }
 
   /** a task's merge gate command, its own --set first, then its space's; nothing while it is off */
@@ -2482,9 +2583,9 @@ export class Engine extends Emitter<Events> {
   }
 
   /** a ready task's next step into main (Merging), or none: Ready again, or back at work */
-  private land(t: TaskRec, step?: Landing['step'], due?: number) {
+  private land(t: TaskRec, step?: Landing['step'], due?: number, more?: Partial<Landing>) {
     if (!t.reported || ended(t)) return
-    t.landing = step ? { step, at: Date.now(), due } : undefined
+    t.landing = step ? { step, at: Date.now(), due, ...more } : undefined
     this.save()
     this.settle(t)
   }
@@ -2765,7 +2866,8 @@ export class Engine extends Emitter<Events> {
   }
 
   private async mergeNow(t: TaskRec, self: boolean): Promise<{ ok: boolean; error?: string; note?: string }> {
-    if (t.merged) return { ok: false, error: `${t.id} is already merged` }
+    // one a merge train took along went in on that train's gate: its own turn only says so
+    if (t.merged) return t.train ? { ok: true, note: `it went in with ${t.train}'s merge train` } : { ok: false, error: `${t.id} is already merged` }
     if (t.closed) return { ok: false, error: `${t.id} is Done: it had nothing to merge` }
     if (!t.worktree || !t.branch || !t.base) return { ok: false, error: `${t.id} has no branch yet` }
     if (!self && this.agents.status(this.key(t)) === 'working') return { ok: false, error: `${t.id}'s agent is working: wait for its turn to end, or ask it to merge (shepherdr task tell ${t.id} "merge it").` }
@@ -2781,6 +2883,8 @@ export class Engine extends Emitter<Events> {
     // main here first catches up with the remote's, so the branch is rebased on what main really is
     const up = await G.catchUp(p.path, t.base)
     if (!up.ok) return { ok: false, error: `Can't merge ${t.id}: ${up.err}` }
+    // a train's gate left it at the top of its stack (Shepherdr stopped while it ran): back on its branch first
+    if (!(await G.git(wt, 'branch', '--show-current')).out) await G.git(wt, 'checkout', '--quiet', t.branch)
     await G.commitAll(wt, `${t.id}: ${t.title}`)
     const g = await this.hub(p)
     if (g) return this.mergeOnGitHub(t, p, g, self)
@@ -2798,11 +2902,13 @@ export class Engine extends Emitter<Events> {
         this.land(t, 'rebase')
         return { ok: false, error: `Conflict with ${t.base}: rebase ${t.branch} on ${t.base} by hand, commit, then run shepherdr merge ${t.id} again.` }
       }
+      // others in line behind it go in with it on one gate run, when its space takes merge trains
+      const train = await this.train(t, p, wt)
+      if (train) return train
       // the space's merge gate, on the branch as it would go in: its last line goes into the commit
       const gate = await this.gate(t, p.path, p.name, wt)
       if (!gate.ok) return { ok: false, error: gate.error }
-      const message = `${t.id}: ${t.title}${t.said ? `\n\n${t.said}` : ''}${t.facts ? `\n\nFacts: ${t.facts}` : ''}${gate.line ? `\n\n${gate.line}` : ''}`
-      const m = await G.mergeHere(p.path, t.branch, t.base, message, true)
+      const m = await G.mergeHere(p.path, t.branch, t.base, this.mergeMessage(t, gate.line), true)
       if (!m.ok) {
         // mergeHere marks a conflict with its own prefix, so a file name (conflicts.md) is never taken for one
         const conflict = m.err.startsWith('conflict:')
@@ -2812,13 +2918,7 @@ export class Engine extends Emitter<Events> {
       }
       t.squash = (await G.git(p.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out || undefined
     }
-    // a GitHub remote gh can't use (not logged in): main is pushed as it is here
-    if (p.github) {
-      const push = await G.git(p.path, 'push', '--quiet', 'origin', t.base)
-      const pushed = push.ok ? `pushed ${t.base} to GitHub` : `could not push ${t.base} to GitHub: ${push.err.split('\n')[0]}`
-      note = note ? `${note}; ${pushed}` : pushed
-    }
-    return this.markMerged(t, note)
+    return this.markMerged(t, await this.pushBase(p, t.base, note))
   }
 
   /**
