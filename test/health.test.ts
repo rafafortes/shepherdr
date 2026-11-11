@@ -46,7 +46,7 @@ describe('reading the machine', () => {
 
 describe('limits', () => {
   test('defaults: 10 at once, start under 1× cores and 80% memory; told at 1.5× cores, 90% memory and disk, herdr', () => {
-    expect(limits()).toEqual({ max: 10, startLoad: 1, startPressure: null, startMemory: 80, alertLoad: 1.5, alertMemory: 90, alertDisk: 90, alertHerdr: true })
+    expect(limits()).toEqual({ max: 10, startLoad: 1, startPressure: null, startEvery: 2, startMemory: 80, alertLoad: 1.5, alertMemory: 90, alertDisk: 90, alertHerdr: true })
     const s = new Settings()
     // any number in range, not a fixed list
     expect(s.set('machine.maxTasks', '13').ok).toBe(true)

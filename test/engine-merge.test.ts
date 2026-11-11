@@ -189,6 +189,81 @@ describe('shepherdr merge', () => {
     expect((await w.engine.merge(t.id)).ok).toBe(true)
   })
 
+  describe("the space's merge gate", () => {
+    /** a task with a commit of its own, reported done, and its space's gate set to `cmd` */
+    async function gated(name: string, cmd: string) {
+      const w = world()
+      const dir = repo()
+      const s = await started(w, dir, name)
+      writeFileSync(join(s.t.worktree!, 'hello.txt'), 'hello\n')
+      sh('git add -A && git commit -qm "add hello"', s.t.worktree!)
+      expect(w.settings.set('merge.gate', cmd, { space: s.p.name }).ok).toBe(true)
+      await w.engine.done(s.t.id, 'Added hello.txt.')
+      return { w, dir, ...s }
+    }
+
+    test('it runs in the worktree after the rebase: exit 0 lets it in, and its last line goes into the merge commit', async () => {
+      const { w, dir, t } = await gated('gate-ok', 'test -f hello.txt && echo checking && echo "Merge gate: green for $SHEPHERDR_TASK on $SHEPHERDR_BASE"')
+      expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
+      expect(sh('git log -1 --format=%b', dir)).toBe(`Added hello.txt.\n\nMerge gate: green for ${t.id} on main`)
+      expect(w.engine.statusOf(t)).toBe('done')
+    })
+
+    test('anything but exit 0 refuses the merge with the end of its output; main is as it was, and the task is Ready again', async () => {
+      const { w, dir, t } = await gated('gate-red', 'echo building; echo "2 tests failed" >&2; exit 3')
+      const main = sh('git rev-parse main', dir)
+      const r = await w.engine.merge(t.id, { self: true })
+      expect(r.ok).toBe(false)
+      expect(r.error).toBe(`${t.id}'s merge gate (echo building; echo "2 tests failed" >&2; exit 3) failed (exit 3): nothing was merged, and main is as it was. Its output ends:\nbuilding\n2 tests failed`)
+      expect(sh('git rev-parse main', dir)).toBe(main)
+      expect(sh('git status --porcelain', dir)).toBe('')
+      expect(t.merged).toBeFalsy()
+      expect(t.landing).toBeUndefined()
+    })
+
+    test('one that runs too long is stopped and refuses the merge; while it runs, merge says so and goes on', async () => {
+      const { w, t } = await gated('gate-slow', 'sleep 5')
+      w.engine.gateTimeout = 1500
+      const first = w.engine.merge(t.id, { self: true })
+      await until(() => t.landing?.step === 'gate')
+      // asked again while the gate runs: it waits for the same one, and by its deadline says the gate still runs
+      w.engine.mergeDeadline = 100
+      expect((await w.engine.merge(t.id, { self: true })).error).toContain('its merge gate still runs')
+      w.engine.mergeDeadline = 30_000
+      expect((await first).error).toContain(`${t.id}'s merge gate (sleep 5) didn't finish in 2 s: nothing was merged`)
+    })
+
+    test('main moved while it ran: the branch is rebased on it and the gate runs again; a conflict then stops it', async () => {
+      const mark = join(tmp('gate-mark'), 'ran')
+      const { w, dir, t } = await gated('gate-moved', `echo run >> ${mark}; if [ $(wc -l < ${mark}) = 1 ]; then (cd ${'$'}MAIN && echo other > other.txt && git add -A && git commit -qm "moved meanwhile"); fi; echo "gate ok"`)
+      process.env.MAIN = dir
+      expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
+      expect(readFileSync(mark, 'utf8').trim().split('\n')).toHaveLength(2)
+      expect(sh('git log --format=%s -n 3', dir).split('\n')).toEqual([`${t.id}: Say hello`, 'moved meanwhile', 'init'])
+      // a conflicting change on main meanwhile: nothing goes in, and the agent rebases by hand
+      const c = await gated('gate-conflict', `cd ${'$'}MAIN2 && test -f moved || (touch moved && echo theirs > hello.txt && git add hello.txt && git commit -qm "theirs too")`)
+      process.env.MAIN2 = c.dir
+      const r = await c.w.engine.merge(c.t.id, { self: true })
+      expect(r.error).toStartWith('Conflict with main, which moved while the merge gate ran')
+      expect(c.t.landing?.step).toBe('rebase')
+      delete process.env.MAIN
+      delete process.env.MAIN2
+    })
+
+    test('main that keeps moving while it runs: after a few rounds the merge gives up for now', async () => {
+      const { w, dir, t } = await gated('gate-busy', `(cd ${'$'}MAIN3 && date +%s%N > busy.txt && git add -A && git commit -qm busy)`)
+      process.env.MAIN3 = dir
+      const r = await w.engine.merge(t.id, { self: true })
+      expect(r.error).toBe(`main kept moving while ${t.id}'s merge gate ran (3 times): nothing was merged. Run shepherdr merge ${t.id} again.`)
+      delete process.env.MAIN3
+    })
+
+    test('off, or none set: no gate', async () => {
+      const { w, t } = await gated('gate-off', 'off')
+      expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
+    })
+  })
+
   test('two merges into one repo at once both go in, one after the other', async () => {
     const w = world()
     const dir = repo()

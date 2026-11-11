@@ -160,7 +160,7 @@ export interface Scheduled {
  * for (GitHub's checks, its agent's rebase, the merge itself), since when, and when the checks should be through (ms).
  */
 export interface Landing {
-  step: 'checks' | 'rebase' | 'merge'
+  step: 'checks' | 'rebase' | 'merge' | 'gate'
   at: number
   due?: number
   /** its agent, at rest with the checks through, was told to merge once */
@@ -171,6 +171,7 @@ export interface Landing {
 export function landingLine(l: Landing, base = 'main', now = Date.now()) {
   if (l.step === 'rebase') return `Rebasing on ${base}`
   if (l.step === 'merge') return 'Merging'
+  if (l.step === 'gate') return 'Running the merge gate'
   const left = l.due === undefined ? 0 : Math.ceil((l.due - now) / 60_000)
   return left > 0 ? `Checks running · ~${left}m` : 'Checks running'
 }
@@ -265,7 +266,10 @@ const splitRef = (ref: string): [string | undefined, string] => {
 /** while load decides, held tasks start one at a time this far apart, so each one shows in the load first */
 /** a waiting task whose agent replied more than this since its brief may have begun: task park leaves it as it is */
 const PARK_REPLIES = 4
-const START_GAP = 30_000
+/** how long a space's merge gate may run (engine.gate) before it is stopped and the merge refused */
+export const GATE_TIMEOUT = 45 * 60_000
+/** how many times main may move while a merge gate runs before the merge gives up for now */
+const GATE_ROUNDS = 3
 
 /** the line a held task shows */
 /** why a task waits to start: its slots are taken, the machine is busy, every model of its space ran out (a start
@@ -1113,6 +1117,18 @@ export class Engine extends Emitter<Events> {
     return w ? { why: w } : {}
   }
 
+  /** how many starts Shepherdr may make by itself now (machine.startEvery): one once the last is that long ago, none
+   *  before; with none set, as many as there's room for */
+  startsNow(now = Date.now()) {
+    const every = this.settings.machine().startEvery
+    return !every ? Infinity : now - this.lastStart >= every * 60_000 ? 1 : 0
+  }
+
+  /** a start Shepherdr made by itself (the way back's), counted for the next one's wait */
+  noteStart(now = Date.now()) {
+    this.lastStart = now
+  }
+
   /** how many more tasks may work here now: none while the machine is too loaded */
   freeSlots() {
     const r = this.room()
@@ -1152,14 +1168,13 @@ export class Engine extends Emitter<Events> {
   }
 
   /**
-   * Start held tasks while this machine has room, oldest first. While load decides, one at a time, START_GAP apart:
-   * the load average takes a moment to show what a task adds. Called on each health sample and status change.
+   * Start held tasks while this machine has room, oldest first, one at a time machine.startEvery apart (2 min by
+   * default): the load averages take minutes to show what a task adds. Called on each health sample and status change.
    */
   release(now = Date.now()) {
     if (this.releasing) return
     this.releasing = true
     try {
-      const byLoad = this.settings.machine().startLoad !== null || this.settings.machine().startPressure !== null
       for (const t of this.heldTasks()) {
         const r = this.room(t)
         // its own space waits for its models: another space's may still start
@@ -1178,7 +1193,7 @@ export class Engine extends Emitter<Events> {
           if (stale.length) this.save()
           return
         }
-        if (byLoad && now - this.lastStart < START_GAP) return
+        if (!this.startsNow(now)) return
         this.lastStart = now
         const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work' }[t.held!.why]
         if (t.held!.go) this.go(t, t.held!.go, `${t.held!.goWhy ?? why} · ${why}`, t.held!.plain)
@@ -2126,6 +2141,41 @@ export class Engine extends Emitter<Events> {
     await G.readyPr(g, p.path, t.pr.number)
   }
 
+  /**
+   * A space's merge gate (Settings → How tasks work → Merge gate, a command of its own): run in the task's worktree
+   * after its rebase and before it goes into main, here. Exit 0 lets it in, with the last line it printed; anything else
+   * (or GATE_TIMEOUT) refuses the merge with the end of its output, and main is untouched. Merges into one repo go one at
+   * a time (merge), so the others wait while it runs; main moved meanwhile anyway (by hand, say), the branch is rebased
+   * on it and the gate runs again.
+   */
+  private async gate(t: TaskRec, repo: string, space: string, wt: string): Promise<{ ok: true; line?: string } | { ok: false; error: string }> {
+    const cmd = (t.set?.['merge.gate'] ?? this.settings.get('merge.gate', space)).trim()
+    if (!cmd || cmd.toLowerCase() === 'off') return { ok: true }
+    const tip = async () => (await G.git(repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out
+    for (let round = 1; round <= GATE_ROUNDS; round++) {
+      const at = await tip()
+      this.land(t, 'gate')
+      const r = await G.sh(['/bin/sh', '-c', cmd], wt, { timeoutMs: this.gateTimeout, env: { SHEPHERDR_TASK: t.id, SHEPHERDR_BASE: t.base! } })
+      if (!r.ok) {
+        const said = `${r.out}\n${r.err}`.trim().split('\n').slice(-20).join('\n').slice(-2000)
+        const limit = this.gateTimeout < 60_000 ? `${Math.round(this.gateTimeout / 1000)} s` : `${Math.round(this.gateTimeout / 60_000)} min`
+        const why = r.code === 124 ? `didn't finish in ${limit}` : `failed (exit ${r.code})`
+        return { ok: false, error: `${t.id}'s merge gate (${cmd}) ${why}: nothing was merged, and ${t.base} is as it was.${said ? ` Its output ends:\n${said}` : ''}` }
+      }
+      if ((await tip()) === at) return { ok: true, line: r.out.split('\n').filter((l) => l.trim()).at(-1)?.trim() }
+      // main moved while it ran: on top of it again, and the gate once more
+      const rb = await G.rebase(wt, t.base!)
+      if (!rb.ok) {
+        this.land(t, 'rebase')
+        return { ok: false, error: `Conflict with ${t.base}, which moved while the merge gate ran: rebase ${t.branch} on ${t.base} by hand, commit, then run shepherdr merge ${t.id} again.` }
+      }
+    }
+    return { ok: false, error: `${t.base} kept moving while ${t.id}'s merge gate ran (${GATE_ROUNDS} times): nothing was merged. Run shepherdr merge ${t.id} again.` }
+  }
+
+  /** how long a merge gate may run: GATE_TIMEOUT, shorter in a test */
+  gateTimeout = GATE_TIMEOUT
+
   /** push the task's branch as it is committed, to GitHub: forced, since it is rebased on main and only its agent's */
   private async push(t: TaskRec) {
     const sha = (await G.git(t.worktree!, 'rev-parse', 'HEAD')).out
@@ -2416,7 +2466,7 @@ export class Engine extends Emitter<Events> {
       const now = (this.merging.get(repo) ?? Promise.resolve())
         .then(() => this.onGitHub(() => this.mergeNow(t, !!opts.self), (error) => ({ ok: false, error: `Can't merge ${t.id}: ${error}` })))
         // stopped short with nothing more to wait for (failed checks, GitHub refused): Ready again, or back at work
-        .then((r) => (!r.ok && t.landing?.step === 'merge' && this.land(t), r))
+        .then((r) => (!r.ok && (t.landing?.step === 'merge' || t.landing?.step === 'gate') && this.land(t), r))
       run = now
       this.landings.set(t.id, now)
       const tail = now.catch(() => undefined)
@@ -2431,7 +2481,7 @@ export class Engine extends Emitter<Events> {
     let timer: ReturnType<typeof setTimeout> | undefined
     const late = new Promise<{ ok: boolean; error: string }>((done) => {
       timer = setTimeout(
-        () => done({ ok: false, error: `${t.id}'s merge isn't through after ${Math.round(this.mergeDeadline / 1000)} s (git or GitHub is slow, or another merge into this repo still runs); Shepherdr goes on with it. Run shepherdr merge ${t.id} again in a minute: it waits for this one, then says it's merged or what stopped it.` }),
+        () => done({ ok: false, error: `${t.id}'s merge isn't through after ${Math.round(this.mergeDeadline / 1000)} s (${t.landing?.step === 'gate' ? 'its merge gate still runs' : 'git or GitHub is slow, or another merge into this repo still runs'}); Shepherdr goes on with it. Run shepherdr merge ${t.id} again in a minute: it waits for this one, then says it's merged or what stopped it.` }),
         this.mergeDeadline,
       )
     })
@@ -2482,7 +2532,10 @@ export class Engine extends Emitter<Events> {
         this.land(t, 'rebase')
         return { ok: false, error: `Conflict with ${t.base}: rebase ${t.branch} on ${t.base} by hand, commit, then run shepherdr merge ${t.id} again.` }
       }
-      const message = `${t.id}: ${t.title}${t.said ? `\n\n${t.said}` : ''}${t.facts ? `\n\nFacts: ${t.facts}` : ''}`
+      // the space's merge gate, on the branch as it would go in: its last line goes into the commit
+      const gate = await this.gate(t, p.path, p.name, wt)
+      if (!gate.ok) return { ok: false, error: gate.error }
+      const message = `${t.id}: ${t.title}${t.said ? `\n\n${t.said}` : ''}${t.facts ? `\n\nFacts: ${t.facts}` : ''}${gate.line ? `\n\n${gate.line}` : ''}`
       const m = await G.mergeHere(p.path, t.branch, t.base, message, true)
       if (!m.ok) {
         // mergeHere marks a conflict with its own prefix, so a file name (conflicts.md) is never taken for one
