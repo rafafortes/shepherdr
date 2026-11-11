@@ -25,6 +25,11 @@
   rounds), and it is never a second opinion after findings. With it off (the default) the line reads exactly as before.
   Like the rest, it is set Everywhere, for a machine or for a space (the most specific one set wins), and for one task
   by its coordinator (`task add --set reviewer.fallback=pi`), which wins for that task.
+- Merge gate and Merge train (How tasks work, `merge.gate` and `merge.train`), per space like the rest. The gate is a
+  command a merge made here must pass (exit 0) before it goes into main. The train (2 to 5, the most merges one takes,
+  the head included; off by default) lets the first merges in line go in together on one gate run, each as its own
+  commit. It needs a gate set and works only for merges made here, not through a GitHub pull request. Off means one at
+  a time. What each row does is in [tasks](tasks.md).
 - Secrets (How Shepherdr runs) holds the keys, tokens and passwords agents use, by name: add, replace and remove them
   in masked boxes, Everywhere, for a machine or for a space; the most specific one wins. An agent that needs one asks
   with `shepherdr secret ask NAME --why "…"`: its chat shows a masked box, and the agent is told by name once it is
