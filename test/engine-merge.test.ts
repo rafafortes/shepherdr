@@ -529,6 +529,79 @@ describe('shepherdr merge', () => {
         expect(c.landing?.train).toBeUndefined()
       })
 
+      /** the gate refuses while bad.txt is in the tree (a task's commit of its own) */
+      const REFUSE_BAD = 'test -f bad.txt && { echo "bad.txt is not wanted"; exit 1; }; '
+
+      test('a refused train: each member goes alone once, only the one whose change fails is told, and it rides again after its turn alone', async () => {
+        const { w, dir, ts, go, ran } = await train('train-refused', 4, '3', REFUSE_BAD)
+        const [x, a, b, c] = ts
+        const space = w.engine.view(x).place.split(':').pop()!
+        writeFileSync(join(c.worktree!, 'bad.txt'), 'bad\n')
+        sh('git add -A && git commit -qm "c adds bad.txt"', c.worktree!)
+        const runs = [w.engine.merge(x.id, { self: true })]
+        await until(() => x.landing?.step === 'gate')
+        for (const t of [a, b, c]) runs.push(w.engine.merge(t.id, { self: true }))
+        go(x)
+        go(a)
+        go(b)
+        const [rx, ra, rb, rc] = await Promise.all(runs)
+        expect([rx.ok, ra.ok, rb.ok]).toEqual([true, true, true])
+        // the train of a, b and c is refused by c's change: a goes alone and goes in, then b, then c alone is refused
+        expect(ran()).toEqual([x.id, a.id, a.id, b.id, c.id])
+        expect(rc.error).toContain(`${c.id}'s merge gate`)
+        expect(rc.error).toContain('bad.txt is not wanted')
+        expect(rb.error).toBeUndefined()
+        // nobody but c heard about a refused train: none of the three was sent a word on it
+        expect(w.sent.filter((m) => m.text.includes('train'))).toEqual([])
+        expect([a, b, c].map((t) => t.alone)).toEqual([undefined, undefined, undefined])
+        expect(c.landing).toBeUndefined()
+        // c fixes its change: it rides again, behind d (its train's head, queued first) while e's gate runs
+        sh('git rm -q bad.txt && git commit -qm "c drops bad.txt"', c.worktree!)
+        const more = async (title: string, file: string) => {
+          const t = w.engine.add({ project: space, title, desc: `Add ${file}.`, by: 'test' })
+          await until(() => !!t.worktree)
+          writeFileSync(join(t.worktree!, file), `${file}\n`)
+          sh(`git add -A && git commit -qm "add ${file}"`, t.worktree!)
+          await w.engine.done(t.id, `Added ${file}.`)
+          w.agentIs(`${t.id}/Agent`, 'idle')
+          return t
+        }
+        const e = await more('Task 5', '5.txt')
+        const d = await more('Task 6', '6.txt')
+        go(d)
+        const runE = w.engine.merge(e.id, { self: true })
+        await until(() => e.landing?.step === 'gate')
+        const runD = w.engine.merge(d.id, { self: true })
+        const runC = w.engine.merge(c.id, { self: true })
+        go(e)
+        const [re, rd, rc2] = await Promise.all([runE, runD, runC])
+        expect([re.ok, rd.ok, rc2.ok]).toEqual([true, true, true])
+        expect(rc2.note).toBe(`it went in with ${d.id}'s merge train`)
+        expect(c.train).toBe(d.id)
+        expect(ran()).toEqual([x.id, a.id, a.id, b.id, c.id, e.id, d.id])
+        expect(sh(`git log -1 --format=%b ${c.squash}`, dir)).toContain(`Merge train: ${d.id}, ${c.id} (one merge gate run)`)
+      })
+
+      test('a refused train\'s members keep their turn alone across a restart: the Shepherdr that comes back reads the marks', async () => {
+        const { w, ts, go, ran } = await train('train-mark', 4, '3', REFUSE_BAD)
+        const [x, a, b, c] = ts
+        writeFileSync(join(c.worktree!, 'bad.txt'), 'bad\n')
+        sh('git add -A && git commit -qm "c adds bad.txt"', c.worktree!)
+        const runs = [w.engine.merge(x.id, { self: true })]
+        await until(() => x.landing?.step === 'gate')
+        for (const t of [a, b, c]) runs.push(w.engine.merge(t.id, { self: true }))
+        go(x)
+        // a's turn alone waits for its go: until then the three are marked, a in its turn and b and c in line
+        await until(() => ran().length === 3 && !!b.alone && !!c.alone)
+        const second = world()
+        expect([a, b, c].map((t) => second.engine.task(t.id)!.alone)).toEqual([true, true, true])
+        go(a)
+        go(b)
+        expect((await Promise.all(runs)).map((r) => r.ok)).toEqual([true, true, true, false])
+        expect(ran()).toEqual([x.id, a.id, a.id, b.id, c.id])
+        expect([a, b, c].map((t) => t.alone)).toEqual([undefined, undefined, undefined])
+      })
+
       test("a rider whose merge passes its deadline while it rides hears it goes in with the train's gate", async () => {
         const { w, ts, go, ran } = await train('train-late', 4, '3')
         const [x, a, b, c] = ts

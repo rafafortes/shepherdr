@@ -142,6 +142,9 @@ export interface TaskRec {
   gateRun?: GateRun
   /** merged with this task's merge train, on its gate run (train) */
   train?: string
+  /** a member of a merge train its gate refused: its next merge goes alone, on its own gate, before it rides or heads a
+   *  train again (alone); cleared when that turn ends, however it ends (merged, refused or stopped) */
+  alone?: true
   /** first in line (start now, or a coordinator's priority mark for a fix of a red main): it goes ahead of the other
    *  held tasks and past the machine's load, pressure and spacing, never past its slots (room, release) */
   priority?: true
@@ -527,6 +530,8 @@ export class Engine extends Emitter<Events> {
       const gate = t.landing!.step === 'gate'
       t.landing = undefined
       t.gateRun = undefined
+      // a turn alone cut short is over too: the task rides a train again
+      t.alone = undefined
       t.mergeStop = `Merge${gate ? ' gate' : ''} interrupted by a restart: run shepherdr merge again`
       this.save()
       this.settle(t)
@@ -2437,9 +2442,10 @@ export class Engine extends Emitter<Events> {
   private async train(t: TaskRec, p: Space, wt: string): Promise<{ ok: boolean; error?: string; note?: string } | undefined> {
     const cmd = this.gateOf(t, p.name)
     const k = this.trainSize(p.name)
-    if (k < 2 || !cmd || BOX) return undefined
+    if (k < 2 || !cmd || BOX || t.alone) return undefined
+    // a task a refused train took in goes alone first (alone): it rides none until then
     const riders = this.tasks
-      .filter((x) => x !== t && x.landing?.step === 'queue' && this.landings.has(x.id) && !ended(x) && x.project === t.project && x.base === t.base && !!x.worktree && !!x.branch && this.gateOf(x, p.name) === cmd)
+      .filter((x) => x !== t && x.landing?.step === 'queue' && this.landings.has(x.id) && !ended(x) && x.project === t.project && x.base === t.base && !!x.worktree && !!x.branch && this.gateOf(x, p.name) === cmd && !x.alone)
       // its own turn decides what an agent still at work, or a message it hasn't read, changes
       .filter((x) => this.agents.status(this.key(x)) !== 'working' && !this.chats.unseen(this.key(x)).length)
       .sort((a, b) => a.landing!.at - b.landing!.at)
@@ -2480,6 +2486,9 @@ export class Engine extends Emitter<Events> {
     const together = `Merge train: ${names.join(', ')} (one merge gate run)`
     const shas = ran?.code === 0 ? await G.landStack(p.path, t.base!, at, cars.map((c) => ({ tree: c.tree, message: this.mergeMessage(c.t, line, together) }))) : undefined
     if (!shas) {
+      // a refusal by the gate marks every member, the head included: each goes alone once. A base that moved, or a gate
+      // that never ran, marks none: the change did not fail
+      if (ran && ran.code !== 0 && ran.code !== GATE_GONE) for (const c of cars) c.t.alone = true
       for (const x of riding) if (x.landing?.train === t.id) x.landing = { ...x.landing, train: undefined }
       this.save()
       riding.forEach((x) => this.settle(x))
@@ -2918,6 +2927,11 @@ export class Engine extends Emitter<Events> {
       if (train) return train
       // the space's merge gate, on the branch as it would go in: its last line goes into the commit
       const gate = await this.gate(t, p.path, p.name, wt)
+      // its turn alone is over, however it ended: it may ride a train again
+      if (t.alone) {
+        t.alone = undefined
+        this.save()
+      }
       if (!gate.ok) return { ok: false, error: gate.error }
       const m = await G.mergeHere(p.path, t.branch, t.base, this.mergeMessage(t, gate.line), true)
       if (!m.ok) {
