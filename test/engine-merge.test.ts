@@ -511,6 +511,29 @@ describe('shepherdr merge', () => {
         expect(c.landing?.train).toBeUndefined()
       })
 
+      test("a rider whose merge passes its deadline while it rides hears it goes in with the train's gate", async () => {
+        const { w, ts, go, ran } = await train('train-late', 4, '3')
+        const [x, a, b, c] = ts
+        const runs = [w.engine.merge(x.id, { self: true })]
+        await until(() => x.landing?.step === 'gate')
+        runs.push(w.engine.merge(a.id, { self: true }), w.engine.merge(b.id, { self: true }), w.engine.merge(c.id, { self: true }))
+        go(x)
+        // a's train takes b and c along: their mark is on, and a's gate runs
+        await until(() => b.landing?.train === a.id && a.landing?.cars === 3)
+        expect(w.engine.subOf(b)).toBe(`Going in with ${a.id}'s merge train`)
+        // b asked again, its deadline short: by then it rides, and says so (its first merge still waits for the same one)
+        w.engine.mergeDeadline = 100
+        const late = await w.engine.merge(b.id, { self: true })
+        w.engine.mergeDeadline = 30_000
+        expect(late.ok).toBe(false)
+        expect(late.error).toContain(`${b.id}'s merge goes in with ${a.id}'s merge train (its gate runs)`)
+        expect(late.error).not.toContain('waits in line')
+        go(a)
+        expect((await Promise.all(runs)).map((r) => r.ok)).toEqual([true, true, true, true])
+        expect(ran()).toEqual([x.id, a.id])
+      })
+
+
       test('a restart while the train\'s gate runs: the head re-attaches to its run, the riders resume in line, and the train lands', async () => {
         const { w, dir, ts, go, ran } = await train('train-restart', 3, '3')
         const [a, b, c] = ts

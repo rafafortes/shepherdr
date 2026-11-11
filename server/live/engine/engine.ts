@@ -2833,7 +2833,7 @@ export class Engine extends Emitter<Events> {
       timer = setTimeout(() => {
         this.lateFor.add(t.id)
         const l = t.landing
-        const where = l?.step === 'queue' ? `waits in line behind ${l.behind}'s${l.gate ? ' (one merge gate at a time)' : ''}` : l?.step === 'gate' ? 'is in its gate: its merge gate still runs' : `isn't through after ${Math.round(this.mergeDeadline / 1000)} s (git or GitHub is slow)`
+        const where = l?.step === 'queue' && l.train ? `goes in with ${l.train}'s merge train (its gate runs)` : l?.step === 'queue' ? `waits in line behind ${l.behind}'s${l.gate ? ' (one merge gate at a time)' : ''}` : l?.step === 'gate' ? 'is in its gate: its merge gate still runs' : `isn't through after ${Math.round(this.mergeDeadline / 1000)} s (git or GitHub is slow)`
         done({ ok: false, error: `${t.id}'s merge ${where}. Shepherdr goes on with it and tells you here how it went (merged, or what stopped it): end your turn now, without polling or sleeping. A shepherdr merge ${t.id} meanwhile only waits for this one.` })
       }, this.mergeDeadline)
     })
