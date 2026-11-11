@@ -86,25 +86,26 @@ was not run again after that last edit, and `bun run check:local` was not run at
 
 ## What is left
 
-1. Run `bun run check:local` and fix what it finds. The coverage ratchet (AGENTS.md, Tests) wants every new line run by
-   a test: look at `coverage/report.txt` for `engine.ts` and `git.ts`. Likely gaps: `landStack`'s `update-ref` branch
-   (a base not checked out in the space's folder) and its refusal when the base moved, `train()`'s fall-back when the
-   checkout fails, `pushBase` from the train.
-2. A test for a restart while a train's gate runs: the head re-attaches to its run, the riders resume in line
-   (`resumeMerges` re-queues them, rank 1 after the gate) and the train lands. Check that the stack really is the same
-   commits again (the fixed dates) and that the riders' `train` mark survives the restart or is set again.
-3. The deadline note: a rider whose `shepherdr merge` passes its 90 s while it rides still hears "waits in line behind
-   X's". Say "goes in with X's merge train (its gate runs)" when `landing.train` is set.
-4. Refusals that repeat. After a refused train the head goes alone; the next train may take the same failing change
-   again and pay one more gate run each time. Either bisect (gate the first half of a refused train, as proposed) or
-   remember the members of a refused train and let each have one turn alone before it rides again. Tell only the task
-   whose change failed, as the proposal says.
+1. **Done.** `bun run check:local` passes with "Coverage held" (phase 2), and every line the train adds to `engine.ts`,
+   `git.ts` and `settings.ts` is run by a test; the lines no test runs are older code. `landStack`'s `update-ref` branch,
+   its refusal when the base moved, and `train()`'s fall-back when the checkout fails are covered.
+2. **Done.** The restart test (`a restart while the train's gate runs`): the head re-attaches to its run, the riders
+   resume in line with their mark, and the train lands on the same commits.
+3. **Done.** A rider past its deadline is told it "goes in with X's merge train (its gate runs)" when its `train` mark
+   is set.
+4. **Done.** Refusals no longer repeat. A refused train marks each member, the head included, with `alone` (persisted on
+   the task). A marked task rides no train and heads none until its own single gate has ended (merged, refused or
+   stopped); then the mark is cleared, and a restart that cuts such a turn short clears it too. Only the task whose
+   change fails is told of its refusal; the riders go back to plain queue. Bisect was not built. Tests: a refused train
+   of three (each member goes alone once, the failing one alone is told, a task rides again after its turn alone) and
+   the mark surviving a restart.
 5. Docs: `docs/tasks.md` (the merge gate paragraph and the merge queue paragraph) and `docs/settings.md`; the
    coordinator skill (`skill/shepherdr-coordinator/SKILL.md`) needs nothing unless its words about one gate at a time
    become wrong.
-6. Look again at `startGate`'s files: the log and exit file are named by task id, so a stale detached run of the same
-   task could write its exit code over a newer run's. A train makes more runs per head task; a run-unique name (the id
-   plus the run's start time) closes it.
+6. **Done.** `startGate`'s files are named for the run (the task, its start and a random part), so a stale run never
+   writes over a newer run's exit code. A run that is thrown away (a newer one replaces it, or a restart leaves it dead)
+   has its files removed (`dropGate`); a run still going is never killed, and its exit file goes once it ends. The
+   gates folder keeps none of them (tests cover both paths).
 7. Before a release: the operator's yes (AGENTS.md, Releases). Then the setting for the space that asked for it is the
    operator's to turn on (`shepherdr set merge.train 4 --space <name>`).
 
