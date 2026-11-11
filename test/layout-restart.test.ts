@@ -186,7 +186,7 @@ describe.skipIf(!browser)('restarting an agent', () => {
   test("a waiting task's ⋯ offers Start now and Start now with…: the sheet picks what it would run on, saves nothing for others", async () => {
     const sent: { type: string; chat?: string; kind?: string; model?: string; effort?: string }[] = []
     const act = world.act
-    world.act = async (a) => (a.type === 'start-now' ? (sent.push(a as never), { ok: true }) : act(a))
+    world.act = async (a) => (a.type === 'start-now' || a.type === 'start-with' ? (sent.push(a as never), { ok: true }) : act(a))
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:herdr-projects')}`)
@@ -210,6 +210,15 @@ describe.skipIf(!browser)('restarting an agent', () => {
       await sheet.getByRole('button', { name: 'Start now', exact: true }).click()
       await sheet.waitFor({ state: 'detached' })
       expect(sent.at(-1)).toMatchObject({ type: 'start-now', chat: 'HP-203/Agent', kind: 'pi' })
+      // Start with…: only its worker, it stays in line
+      await open()
+      await page.getByRole('menuitem', { name: 'Start with…' }).click()
+      const later = page.getByRole('alertdialog', { name: 'Start HP-203 with?' })
+      await later.locator('[data-restart]').waitFor()
+      expect(await later.textContent()).toContain('when its turn comes; it stays in line as it is')
+      await later.getByRole('button', { name: 'Save', exact: true }).click()
+      await later.waitFor({ state: 'detached' })
+      expect(sent.at(-1)).toMatchObject({ type: 'start-with', chat: 'HP-203/Agent' })
       // a task at work offers neither
       const working = page.locator('section[aria-label="Tasks"] li', { hasText: 'HP-202', hasNotText: 'After HP-202' })
       await working.hover()

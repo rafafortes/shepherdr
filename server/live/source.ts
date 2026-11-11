@@ -2675,6 +2675,22 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           return { ok: false, error: (e as Error).message }
         }
       }
+      case 'start-with': {
+        const t = this.engine.task(a.chat.split('/')[0])
+        if (!t) return { ok: false, error: 'No such task.' }
+        try {
+          const kind = kindOf(a.kind)
+          if (!kind) return { ok: false, error: `No CLI called ${a.kind}.` }
+          const on: Harness = { kind, ...(a.model ? { model: a.model } : {}), ...(a.effort ? { effort: a.effort } : {}) }
+          const problem = harnessProblem(on)
+          if (problem) return { ok: false, error: problem }
+          this.engine.setWorker(t.id, on)
+          this.emit('snapshot')
+          return { ok: true }
+        } catch (e) {
+          return { ok: false, error: (e as Error).message }
+        }
+      }
       case 'start-now': {
         const t = this.engine.task(a.chat.split('/')[0])
         if (!t) return { ok: false, error: 'No such task.' }

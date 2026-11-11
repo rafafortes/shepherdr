@@ -471,6 +471,13 @@ describe('first in line, from the command and the screen', () => {
       expect(await src.act({ type: 'start-now', chat: `${third}/Agent`, kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).toEqual({ ok: true })
       expect(src.engine.task(third)!.agent).toEqual({ kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })
       expect(((await src.act({ type: 'start-now', chat: `${third}/Agent` })) as { ok: boolean }).ok).toBe(false)
+      // Start with…: its worker only, in line as it is
+      const fourth = idOf((await src.cli(['task', 'add', 'Fourth', '--desc', 'w'], { chat: place })).out)
+      expect(await src.act({ type: 'start-with', chat: 'NOPE-9/Agent', kind: 'pi' })).toEqual({ ok: false, error: 'No such task.' })
+      expect(await src.act({ type: 'start-with', chat: `${fourth}/Agent`, kind: 'nope' })).toEqual({ ok: false, error: 'No CLI called nope.' })
+      expect(((await src.act({ type: 'start-with', chat: `${fourth}/Agent`, kind: 'claude', model: 'no-such-model' })) as { ok: boolean }).ok).toBe(false)
+      expect(await src.act({ type: 'start-with', chat: `${fourth}/Agent`, kind: 'claude', model: 'claude-sonnet-5-5' })).toEqual({ ok: true })
+      expect(src.engine.task(fourth)!.agent).toEqual({ kind: 'claude', model: 'claude-sonnet-5-5' })
     } finally {
       engine.machine = was
     }
