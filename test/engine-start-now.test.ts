@@ -154,3 +154,27 @@ describe('started now by you', () => {
     await expect(w.engine.startNow('NOPE-1')).rejects.toThrow('No task NOPE-1')
   })
 })
+
+describe('started with a worker of your choosing, in its turn', () => {
+  test('Start with…: the worker is set for it alone and it stays in line; its turn starts it on that one', async () => {
+    const { w, startedOf } = fresh({ 'machine.maxTasks': '1' })
+    const a = await started(w, repo(), 'with-later', 'At work', 'Add a.txt.')
+    w.brief(a.key)
+    const t = w.engine.add({ project: a.p.name, title: 'On the Spark', desc: 'Add s.txt.', by: 'test' })
+    expect(t.held?.why).toBe('slots')
+    w.engine.setWorker(t.id, { kind: 'pi', model: 'spark/qwen' })
+    expect([t.agent, t.held?.why, t.priority]).toEqual([{ kind: 'pi', model: 'spark/qwen' }, 'slots', undefined])
+    expect(w.posted.some((x) => x.card?.text === 'Starts on pi (spark/qwen) when its turn comes')).toBe(true)
+    await w.engine.done(a.t.id, 'Nothing to change.')
+    w.agentIs(a.key, 'idle')
+    await until(() => startedOf(t.id))
+    expect(w.started.find((s) => s.key === `${t.id}/Agent`)).toMatchObject({ kind: 'pi' })
+    // a scheduled one keeps it for its time; one at work is refused
+    const later = w.engine.add({ project: a.p.name, title: 'Tomorrow', desc: 'Add t.txt.', by: 'test', at: Date.now() + 86_400_000 })
+    w.engine.setWorker(later.id, { kind: 'codex' })
+    expect(later.scheduled?.agent).toEqual({ kind: 'codex' })
+    w.brief(`${t.id}/Agent`)
+    expect(() => w.engine.setWorker(t.id, { kind: 'codex' })).toThrow(`${t.id} isn't waiting to start`)
+  })
+})
+

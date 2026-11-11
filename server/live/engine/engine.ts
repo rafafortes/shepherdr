@@ -11,11 +11,13 @@ import { trustWorktree } from '../trust.ts'
 // reports done), shepherdr checks waits for GitHub's checks, and shepherdr merge squash-merges it on GitHub at the
 // commit this machine has, then brings main here up to date. Anywhere else it is squash-merged here.
 import { existsSync, statSync } from '../mfs.ts'
-import { agentEnv } from '../box.ts'
+import { agentEnv, BOX } from '../box.ts'
 import { join } from 'node:path'
 import { STATUS_MAX, TITLE_MAX, type Question, type Report, type Task, type TaskStatus, type UpdateCard } from '../../../shared/types.ts'
 import { clockWords, startsLine } from '../../../shared/when.ts'
 import { Emitter } from '../../source.ts'
+import { spawn } from 'node:child_process'
+import * as fs from 'node:fs'
 import { home, readJson, writeJson } from '../../store.ts'
 import { ROOT } from '../../root.ts'
 import { has } from '../../plugins.ts'
@@ -135,6 +137,8 @@ export interface TaskRec {
   /** why its last merge stopped, in words its row shows until the next one starts: the gate's refusal with its last
    *  line ("Refused by the gate: …") */
   mergeStop?: string
+  /** its merge gate's run, detached so that a restart of Shepherdr doesn't stop it (startGate): found again then */
+  gateRun?: GateRun
   /** first in line (start now, or a coordinator's priority mark for a fix of a red main): it goes ahead of the other
    *  held tasks and past the machine's load, pressure and spacing, never past its slots (room, release) */
   priority?: true
@@ -284,6 +288,59 @@ export const GATE_TIMEOUT = 45 * 60_000
 /** what an agent is told when the gate refuses its merge: the gate is the merge's full check, so none of its own */
 export const GATE_AGAIN = "The merge gate is the merge's full check: fix what its lines name, prove the fix with targeted tests, then run shepherdr merge again; no full check of your own first."
 
+/** a merge gate's run: its process group, the files its words and its exit code go to, and the commit it gates (head)
+ *  on the base as it was then (tip) */
+export type GateRun = { pid: number; log: string; exit: string; at: number; head: string; tip: string }
+
+/** a gate's process is gone with no exit code: a restart, or a kill, ended it */
+const GATE_GONE = -1
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** a merge gate's command, in a session of its own (detached): a restart of Shepherdr, which ends its own process group,
+ *  leaves it running, and the Shepherdr that comes back reads its words and exit code from their files */
+export function startGate(cmd: string, wt: string, env: Record<string, string>, dir: string, id: string, at: { head: string; tip: string }): GateRun {
+  fs.mkdirSync(dir, { recursive: true })
+  const log = join(dir, `${id}.log`)
+  const exit = join(dir, `${id}.exit`)
+  for (const f of [log, exit]) fs.rmSync(f, { force: true })
+  const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
+  const c = spawn('/bin/sh', ['-c', `(${cmd}) > ${q(log)} 2>&1; echo $? > ${q(exit)}.tmp && mv ${q(exit)}.tmp ${q(exit)}`], { cwd: wt, env: { ...process.env, ...env }, detached: true, stdio: 'ignore' })
+  c.unref()
+  return { pid: c.pid ?? 0, log, exit, at: Date.now(), ...at }
+}
+
+/** a gate's end: its exit code and words; past timeoutMs from its start, its process group is killed (124); gone with no
+ *  code, GATE_GONE */
+export async function waitGate(run: GateRun, timeoutMs: number, every = 250): Promise<{ code: number; out: string }> {
+  const read = () => (fs.existsSync(run.log) ? fs.readFileSync(run.log, 'utf8') : '')
+  for (;;) {
+    if (fs.existsSync(run.exit)) return { code: Number(fs.readFileSync(run.exit, 'utf8').trim()), out: read().trimEnd() }
+    if (!alive(run.pid)) {
+      // it may have written its code just as it ended
+      await Bun.sleep(50)
+      return fs.existsSync(run.exit) ? { code: Number(fs.readFileSync(run.exit, 'utf8').trim()), out: read().trimEnd() } : { code: GATE_GONE, out: read().trimEnd() }
+    }
+    if (Date.now() - run.at > timeoutMs) {
+      try {
+        process.kill(-run.pid, 'SIGKILL')
+        // coverage-exempt: the group ended between the alive check above and this kill, a race no test can time
+      } catch {
+        /* gone meanwhile */
+      }
+      return { code: 124, out: read().trimEnd() }
+    }
+    await Bun.sleep(every)
+  }
+}
+
 /** how many times main may move while a merge gate runs before the merge gives up for now */
 const GATE_ROUNDS = 3
 
@@ -422,6 +479,38 @@ export class Engine extends Emitter<Events> {
   private later = new Map<string, ReturnType<typeof setTimeout>>()
   /** one merge at a time per repo: each one's main checkout is shared */
   private merging = new Map<string, Promise<unknown>>()
+  /** merges whose caller heard by the deadline that they go on: their agent is told how each went (tellMerge) */
+  private lateFor = new Set<string>()
+
+  /** a merge that went on past its caller's deadline is through: its agent hears how it went, and wakes on it */
+  private tellMerge(t: TaskRec, r: { ok: boolean; error?: string; note?: string }) {
+    const words = r.ok ? `Your merge went in${r.note ? ` (${r.note})` : ''}: ${t.id} is merged. Nothing more to do for it: end your turn.` : `Your merge didn't go in: ${r.error}`
+    void this.agents.send(this.key(t), hidden(words, 'merge')).catch(() => undefined)
+  }
+
+  /**
+   * Merges a restart of Shepherdr cut short: a gate that went on by itself (startGate) is found again, and its merge goes
+   * on from it, its agent told how it went; any other merge in flight went with the server that ran it, so the task is
+   * back at its turn, its row and its agent saying to merge again.
+   */
+  resumeMerges() {
+    for (const t of this.tasks.filter((x) => !ended(x) && !this.landings.has(x.id) && x.landing && ['gate', 'merge', 'queue'].includes(x.landing.step))) {
+      const g = t.gateRun
+      if (t.landing!.step === 'gate' && g && (fs.existsSync(g.exit) || alive(g.pid))) {
+        this.lateFor.add(t.id)
+        void this.merge(t.id, { self: true }).catch(() => undefined)
+        continue
+      }
+      const gate = t.landing!.step === 'gate'
+      t.landing = undefined
+      t.gateRun = undefined
+      t.mergeStop = `Merge${gate ? ' gate' : ''} interrupted by a restart: run shepherdr merge again`
+      this.save()
+      this.settle(t)
+      void this.agents.send(this.key(t), hidden(`Shepherdr restarted while your merge ran${gate ? ' (its gate was stopped)' : ''}: nothing was merged. Run shepherdr merge ${t.id} again.`, 'merge')).catch(() => undefined)
+    }
+  }
+
   /** the task whose merge runs in each repo now: one asked meanwhile waits behind it (merge) */
   private mergingNow = new Map<string, string>()
   /** each task's merge while it runs */
@@ -511,6 +600,7 @@ export class Engine extends Emitter<Events> {
       this.duePass()
       this.armDue()
       this.resumeQueue()
+      this.resumeMerges()
     }, RECHECK_FIRST)
     recheck.unref?.()
     this.sweeps.push(recheck)
@@ -1103,6 +1193,8 @@ export class Engine extends Emitter<Events> {
    */
   private busy(t: TaskRec) {
     if (ended(t) || t.archived || t.stopped || this.holding(t) || !this.places.space(t.project)) return false
+    // in line for its merge, or in its gate: its repo's merges go one at a time already, so no slot of the machine's
+    if (t.landing?.step === 'queue' || t.landing?.step === 'gate') return false
     // a go sent just now counts before its agent is seen at work; one left from long ago (its agent gone) doesn't
     const going = !!t.going && Date.now() - (this.wrote.get(t.id) ?? 0) < BRIEF_WAIT
     if (this.starting.has(t.id) || going || (this.briefing.has(t.id) && !t.todo)) return true
@@ -1642,6 +1734,23 @@ export class Engine extends Emitter<Events> {
       this.startTask(t).catch((e) => this.troubled(t, e))
     }
     return {}
+  }
+
+  /** Start with…: the worker a task that waits starts on, for it alone (its own agent, never Settings'), and nothing
+   *  else: it stays in line as it is. One whose agent waits in its worktree on another is restarted on it at its go */
+  setWorker(id: string, on: Harness) {
+    const t = this.req(id)
+    if (ended(t) || !['queued', 'todo', 'scheduled'].includes(this.statusOf(t))) throw new Error(`${t.id} isn't waiting to start: Restart agent… changes what it runs on`)
+    t.agent = on
+    if (t.scheduled) t.scheduled.agent = on
+    const rec = this.agents.record(this.key(t))
+    const live = !!t.worktree && existsSync(t.worktree) && this.agents.status(this.key(t)) !== 'gone'
+    t.switchTo = live && rec && !sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, on) ? on : undefined
+    const id2 = `worker:${t.id}:${Date.now()}`
+    this.chats.post(this.key(t), { id: id2, card: { id: id2, task: t.id, text: `Starts on ${harnessWords(fitHarness(on))} when its turn comes` } })
+    this.save()
+    this.settleOne(t)
+    return t
   }
 
   /** a coordinator's mark (task priority, task add --priority): first in line, past the machine's load, pressure and
@@ -2241,12 +2350,31 @@ export class Engine extends Emitter<Events> {
     const tip = async () => (await G.git(repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out
     for (let round = 1; round <= GATE_ROUNDS; round++) {
       const at = await tip()
+      const head = (await G.git(wt, 'rev-parse', 'HEAD')).out
       this.land(t, 'gate')
-      const r = await G.sh(['/bin/sh', '-c', cmd], wt, { timeoutMs: this.gateTimeout, env: { SHEPHERDR_TASK: t.id, SHEPHERDR_BASE: t.base! } })
+      // this very commit's run, on the base as it is, still going (or done) since Shepherdr restarted: that one, not a
+      // second beside it
+      const env = { SHEPHERDR_TASK: t.id, SHEPHERDR_BASE: t.base! }
+      let ran: { code: number; out: string }
+      if (BOX) {
+        // a worker machine runs it over its own link, as every command there: it ends with Shepherdr as before
+        const r = await G.sh(['/bin/sh', '-c', cmd], wt, { timeoutMs: this.gateTimeout, env })
+        ran = { code: r.code, out: [r.out, r.err].filter(Boolean).join('\n') }
+      } else {
+        const g = t.gateRun
+        const run = g && g.head === head && g.tip === at && (fs.existsSync(g.exit) || alive(g.pid)) ? g : startGate(cmd, wt, env, join(home(), 'gates'), t.id, { head, tip: at })
+        t.gateRun = run
+        this.save()
+        ran = await waitGate(run, this.gateTimeout)
+        t.gateRun = undefined
+        this.save()
+      }
+      if (ran.code === GATE_GONE) return { ok: false, error: `${t.id}'s merge gate (${cmd}) was stopped before it ended (a restart, or a kill): nothing was merged. Run shepherdr merge ${t.id} again.` }
+      const r = { ok: ran.code === 0, code: ran.code, out: ran.out, err: '' }
       if (!r.ok) {
-        const said = `${r.out}\n${r.err}`.trim().split('\n').slice(-20).join('\n').slice(-2000)
+        const said = r.out.trim().split('\n').slice(-20).join('\n').slice(-2000)
         // its row says it until the next merge: the last line the gate printed
-        const last = `${r.out}`.split('\n').filter((l) => l.trim()).at(-1)?.trim() ?? (r.code === 124 ? 'it ran out of time' : `exit ${r.code}`)
+        const last = r.out.split('\n').filter((l) => l.trim()).at(-1)?.trim() ?? (r.code === 124 ? 'it ran out of time' : `exit ${r.code}`)
         t.mergeStop = `Refused by the gate: ${last}`
         const limit = this.gateTimeout < 60_000 ? `${Math.round(this.gateTimeout / 1000)} s` : `${Math.round(this.gateTimeout / 60_000)} min`
         const why = r.code === 124 ? `didn't finish in ${limit}` : `failed (exit ${r.code})`
@@ -2574,6 +2702,8 @@ export class Engine extends Emitter<Events> {
         .finally(() => this.mergingNow.get(repo) === t.id && this.mergingNow.delete(repo))
         // stopped short with nothing more to wait for (failed checks, GitHub refused): Ready again, or back at work
         .then((r) => (!r.ok && (t.landing?.step === 'merge' || t.landing?.step === 'gate' || t.landing?.step === 'queue') && this.land(t), r))
+        // its caller heard by the deadline that it goes on: its agent hears now how it went, and wakes on it
+        .then((r) => (this.lateFor.delete(t.id) && this.tellMerge(t, r), r))
       run = now
       this.landings.set(t.id, now)
       const tail = now.catch(() => undefined)
@@ -2587,10 +2717,12 @@ export class Engine extends Emitter<Events> {
     // on until the agent's shell moves it to the background, where its answer is lost. The merge itself goes on.
     let timer: ReturnType<typeof setTimeout> | undefined
     const late = new Promise<{ ok: boolean; error: string }>((done) => {
-      timer = setTimeout(
-        () => done({ ok: false, error: `${t.id}'s merge isn't through after ${Math.round(this.mergeDeadline / 1000)} s (${t.landing?.step === 'gate' ? 'its merge gate still runs' : 'git or GitHub is slow, or another merge into this repo still runs'}); Shepherdr goes on with it. Run shepherdr merge ${t.id} again in a minute: it waits for this one, then says it's merged or what stopped it.` }),
-        this.mergeDeadline,
-      )
+      timer = setTimeout(() => {
+        this.lateFor.add(t.id)
+        const l = t.landing
+        const where = l?.step === 'queue' ? `waits in line behind ${l.behind}'s${l.gate ? ' (one merge gate at a time)' : ''}` : l?.step === 'gate' ? 'is in its gate: its merge gate still runs' : `isn't through after ${Math.round(this.mergeDeadline / 1000)} s (git or GitHub is slow)`
+        done({ ok: false, error: `${t.id}'s merge ${where}. Shepherdr goes on with it and tells you here how it went (merged, or what stopped it): end your turn now, without polling or sleeping. A shepherdr merge ${t.id} meanwhile only waits for this one.` })
+      }, this.mergeDeadline)
     })
     return Promise.race([run, late]).finally(() => clearTimeout(timer))
   }

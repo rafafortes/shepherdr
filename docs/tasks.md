@@ -86,7 +86,8 @@
   for the tasks it was queued after or for its time, and starts at once when a slot is free (else at the next free one).
   **Start now with…** picks its worker too, the CLI, model and effort for this task's agent alone (the task's own
   `--agent`, never Settings': its reviewer and backups stay as Settings say), as for one you want on the DGX Spark while
-  the others run on a plan.
+  the others run on a plan. **Start with…** picks its worker and nothing more: it stays in line as it is and starts on
+  that worker when its turn comes.
 - A space may have a **merge gate** (Settings → How tasks work → Merge gate, `merge.gate`, off by default; a task's own
   `--set merge.gate=…` wins): a command run in the task's worktree after its rebase and before it goes into main here
   (not through a pull request), with `SHEPHERDR_TASK` and `SHEPHERDR_BASE` set. Exit 0 lets it in, and the last line it
@@ -94,7 +95,14 @@
   output, main stays as it was and the task is Ready again. Merges into one repo go one at a time, so the others wait
   while it runs; a `shepherdr merge` that asks meanwhile hears that the gate still runs. If main moved anyway while it
   ran, the branch is rebased on it and the gate runs again (three times at most). It is never a git hook: a hook that
-  refuses an update leaves what it would write in the space's checkout.
+  refuses an update leaves what it would write in the space's checkout. The gate runs detached, its words and exit code
+  in files of their own, so a restart of Shepherdr (an update) leaves it running: the Shepherdr that comes back goes on
+  from it and merges once it passes. A merge a restart cut short with nothing left of it is back at its turn, its row
+  reading `Merge gate interrupted by a restart: run shepherdr merge again` and its agent told so.
+- A merge that waits in line behind another, or runs its gate, past `shepherdr merge`'s 90 s: its agent is told to end
+  its turn instead of polling, and Shepherdr wakes it with how it went (merged, refused with the gate's lines, or a
+  conflict). Waiting in line or in its gate, a task holds none of the machine's slots: its repo's merges go one at a
+  time already.
 - A task that goes back to work in the worktree it had (its agent starts again, the way back moves it to its primary, a
   backup takes it over, a queued task gets its go, or words take its agent back from rest: your answer on a card, the
   advisor's, a message to a task that waits on you, is To do or reported ready) is first brought up to its base: what was merged meanwhile (build

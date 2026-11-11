@@ -10,14 +10,15 @@ import { EffortIcon, ic, MenuItem, ModelIcon, ModeIcon, PlayIcon, Primary, Resta
 
 /* ---------- the sheet ---------- */
 
-/** start: a task that waits, started now on the worker picked here, for it alone (no saving for the others) */
-type Opening = { chat: string; name: string; current?: boolean; start?: boolean }
+/** start: a task that waits, on the worker picked here for it alone (no saving for the others): started now, or (later)
+ *  only its worker set, the task staying in line */
+type Opening = { chat: string; name: string; current?: boolean; start?: 'now' | 'later' }
 let opening: Opening | null = null
 const listeners = new Set<() => void>()
 const subscribe = (f: () => void) => (listeners.add(f), () => void listeners.delete(f))
 
 /** open the restart sheet for a coordinator (chat: its place id) or a task's agent (ID/Agent); name: what it is called */
-export function openRestart(chat: string, name: string, current = false, start = false) {
+export function openRestart(chat: string, name: string, current = false, start?: 'now' | 'later') {
   opening = { chat, name, current, start }
   listeners.forEach((f) => f())
 }
@@ -66,10 +67,19 @@ export function StartNowItems({ chat, name, onPick }: { chat: string; name: stri
         icon={<PlayIcon className={ic} />}
         onClick={() => {
           onPick?.()
-          openRestart(chat, name, false, true)
+          openRestart(chat, name, false, 'now')
         }}
       >
         Start now with…
+      </MenuItem>
+      <MenuItem
+        icon={<ModeIcon className={ic} />}
+        onClick={() => {
+          onPick?.()
+          openRestart(chat, name, false, 'later')
+        }}
+      >
+        Start with…
       </MenuItem>
     </>
   )
@@ -122,7 +132,7 @@ function Sheet({ chat, name, current, start }: Opening) {
   const go = async () => {
     setBusy(true)
     setError(null)
-    const r = await act(start ? { type: 'start-now', chat, kind, model, effort } : { type: 'restart', chat, kind, model, effort, save }).catch((e: Error) => ({ ok: false, error: e.message }))
+    const r = await act(start === 'later' ? { type: 'start-with', chat, kind, model, effort } : start ? { type: 'start-now', chat, kind, model, effort } : { type: 'restart', chat, kind, model, effort, save }).catch((e: Error) => ({ ok: false, error: e.message }))
     setBusy(false)
     if (r.ok === false) return setError(r.error || 'It could not be restarted.')
     close()
@@ -153,11 +163,11 @@ function Sheet({ chat, name, current, start }: Opening) {
   }
   return (
     <Dialog
-      title={start ? `Start ${name} now?` : task ? `Restart ${name} agent?` : 'Restart coordinator?'}
+      title={start === 'later' ? `Start ${name} with?` : start ? `Start ${name} now?` : task ? `Restart ${name} agent?` : 'Restart coordinator?'}
       onCancel={close}
       buttons={
         <Primary autoFocus disabled={!info || busy || unavailable} onClick={go}>
-          {start ? (busy ? 'Starting…' : 'Start now') : busy ? 'Restarting…' : 'Restart'}
+          {start === 'later' ? (busy ? 'Saving…' : 'Save') : start ? (busy ? 'Starting…' : 'Start now') : busy ? 'Restarting…' : 'Restart'}
         </Primary>
       }
     >
@@ -199,7 +209,9 @@ function Sheet({ chat, name, current, start }: Opening) {
               </Line>
             ) : null}
           </div>
-          {start ? (
+          {start === 'later' ? (
+            <p className="text-sm text-fg3">Only this task's agent runs on it, when its turn comes; it stays in line as it is. Its reviewer and backups stay as Settings say.</p>
+          ) : start ? (
             <p className="text-sm text-fg3">Only this task's agent runs on it; its reviewer and backups stay as Settings say. It no longer waits for the tasks it was queued after, and goes ahead of the machine's load, within its slots.</p>
           ) : other ? <p className="text-sm text-fg3">{cli?.name ?? shown(kind)} starts a new session with this chat{task ? ', the brief and branch' : ''}.</p> : null}
           {error ? <p className="text-need-fg">{error}</p> : null}

@@ -221,7 +221,8 @@ describe('shepherdr merge', () => {
       expect(t.landing).toBeUndefined()
       // its row says why until its next merge starts: the last line the gate printed
       expect(w.engine.statusOf(t)).not.toBe('merging')
-      expect(w.engine.subOf(t)).toBe('Refused by the gate: building')
+      // the last line it wrote, its errors included
+      expect(w.engine.subOf(t)).toBe('Refused by the gate: 2 tests failed')
       w.settings.set('merge.gate', 'echo fine', { space: w.engine.view(t).place.split(':').pop()! })
       expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
       expect(t.mergeStop).toBeUndefined()
@@ -301,6 +302,61 @@ describe('shepherdr merge', () => {
       const r = await w.engine.merge(t.id, { self: true })
       expect(r.error).toBe(`main kept moving while ${t.id}'s merge gate ran (3 times): nothing was merged. Run shepherdr merge ${t.id} again.`)
       delete process.env.MAIN3
+    })
+
+    test('a merge that runs past its deadline tells its agent to end its turn, then wakes it with how it went', async () => {
+      const go = join(tmp('gate-late'), 'go')
+      const { w, t, key } = await gated('gate-late', `while [ ! -f ${go} ]; do sleep 0.05; done; echo "Gate: green"`)
+      w.engine.mergeDeadline = 300
+      const first = await w.engine.merge(t.id, { self: true })
+      expect(first.error).toContain(`${t.id}'s merge is in its gate: its merge gate still runs`)
+      expect(first.error).toContain('end your turn now, without polling or sleeping')
+      // waiting in its gate, it holds none of the machine's slots
+      expect(w.engine.working()).toBe(0)
+      writeFileSync(go, 'go\n')
+      await until(() => w.sent.some((x) => x.key === key && x.text.includes('Your merge went in')))
+      expect(w.engine.statusOf(t)).toBe('done')
+    })
+
+    test('a restart leaves its gate running: the Shepherdr that comes back goes on from it, and its agent hears how it went', async () => {
+      const go = join(tmp('gate-resume'), 'go')
+      const { w, dir, t, key } = await gated('gate-resume', `while [ ! -f ${go} ]; do sleep 0.05; done; echo "Gate: green after the restart"`)
+      const { startGate } = await import('../server/live/engine/engine.ts')
+      // as a restart leaves it: its merge in its gate, its gate's process going on by itself
+      sh(`git rebase -q main`, t.worktree!)
+      const head = sh('git rev-parse HEAD', t.worktree!)
+      const tip = sh('git rev-parse main', dir)
+      t.landing = { step: 'gate', at: Date.now() }
+      t.gateRun = startGate(`while [ ! -f ${go} ]; do sleep 0.05; done; echo "Gate: green after the restart"`, t.worktree!, {}, tmp('gate-files'), t.id, { head, tip })
+      w.engine.resumeMerges()
+      await until(() => t.landing?.step === 'gate')
+      writeFileSync(go, 'go\n')
+      await until(() => w.sent.some((x) => x.key === key && x.text.includes('Your merge went in')))
+      expect(sh('git log -1 --format=%b', dir)).toContain('Gate: green after the restart')
+    })
+
+    test('a merge a restart cut short with nothing left of it is back at its turn: its row and its agent say to merge again', async () => {
+      const { w, t, key } = await gated('gate-lost', 'echo fine')
+      t.landing = { step: 'gate', at: Date.now() }
+      t.gateRun = { pid: 999_999_999, log: '/nonexistent/log', exit: '/nonexistent/exit', at: Date.now(), head: 'x', tip: 'y' }
+      w.engine.resumeMerges()
+      expect(t.landing).toBeUndefined()
+      expect(t.gateRun).toBeUndefined()
+      expect(w.engine.subOf(t)).toBe('Merge gate interrupted by a restart: run shepherdr merge again')
+      expect(w.sent.filter((x) => x.key === key).at(-1)!.text).toContain(`Shepherdr restarted while your merge ran (its gate was stopped): nothing was merged. Run shepherdr merge ${t.id} again.`)
+      t.landing = { step: 'merge', at: Date.now() }
+      w.engine.resumeMerges()
+      expect(w.engine.subOf(t)).toBe('Merge interrupted by a restart: run shepherdr merge again')
+    })
+
+    test('a gate killed from outside is no answer: the merge says it was stopped, and nothing went in', async () => {
+      const { w, dir, t } = await gated('gate-killed', 'sleep 30')
+      const main = sh('git rev-parse main', dir)
+      const run = w.engine.merge(t.id, { self: true })
+      await until(() => !!t.gateRun?.pid)
+      process.kill(-t.gateRun!.pid, 'SIGKILL')
+      expect((await run).error).toContain(`${t.id}'s merge gate (sleep 30) was stopped before it ended`)
+      expect(sh('git rev-parse main', dir)).toBe(main)
     })
 
     test('off, or none set: no gate', async () => {
@@ -1141,7 +1197,9 @@ describe('on GitHub: a pull request per task', () => {
     const first = await w.engine.merge(t.id, { self: true })
     expect(first.ok).toBe(false)
     expect(first.error).toContain(`${t.id}'s merge isn't through after 1 s`)
-    expect(first.error).toContain(`Run shepherdr merge ${t.id} again`)
+    // its agent ends its turn rather than polling: it is told how it went
+    expect(first.error).toContain('end your turn now, without polling or sleeping')
+    expect(first.error).toContain(`A shepherdr merge ${t.id} meanwhile only waits for this one.`)
     expect(w.engine.statusOf(t)).toBe('merging')
     // asked again while it still runs: no second merge beside it, the same one's answer
     w.engine.mergeDeadline = 30_000

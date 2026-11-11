@@ -170,6 +170,17 @@ describe('a worker for another machine', () => {
     expect((await check('<h1>Board</h1>', undefined, [])).report).toContain('the main machine could not open its browser')
   })
 
+  test("a merge gate runs on that machine over its link, and its failure there refuses the merge", async () => {
+    // (it is not left running detached, as on the main machine: there it ends with this worker, as every command does)
+    const t = { id: 'FA-1', title: 'Gate there', base: 'main', set: { 'merge.gate': 'tools/far-gate.sh' } }
+    const gate = (src.engine as unknown as Record<string, (...a: unknown[]) => Promise<{ ok: boolean; error?: string }>>).gate.bind(src.engine)
+    const r = await gate(t, join(boxHome, 'repo'), 'far', join(boxHome, 'wt'))
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain("FA-1's merge gate (tools/far-gate.sh) failed (exit 255): nothing was merged")
+    expect((t as { mergeStop?: string }).mergeStop).toBe('Refused by the gate: ssh: Could not resolve hostname (test)')
+    expect(readFileSync(sshLog, 'utf8')).toContain('tools/far-gate.sh')
+  })
+
   test("a file a chat names outside that machine's inbox is none of its own, even with no older inbox there", async () => {
     mkdirSync(join(boxHome, '.shepherdr', 'helper', 'inbox'), { recursive: true })
     const file = join(home, 'elsewhere.png')
