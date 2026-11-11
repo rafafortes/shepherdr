@@ -307,7 +307,10 @@ describe('shepherdr merge', () => {
     test('a merge that runs past its deadline tells its agent to end its turn, then wakes it with how it went', async () => {
       const go = join(tmp('gate-late'), 'go')
       const { w, t, key } = await gated('gate-late', `while [ ! -f ${go} ]; do sleep 0.05; done; echo "Gate: green"`)
-      w.engine.mergeDeadline = 300
+      const run = w.engine.merge(t.id, { self: true })
+      // in its gate (a loaded machine takes a while to get there): asked now, its deadline says so
+      await until(() => t.landing?.step === 'gate')
+      w.engine.mergeDeadline = 100
       const first = await w.engine.merge(t.id, { self: true })
       expect(first.error).toContain(`${t.id}'s merge is in its gate: its merge gate still runs`)
       expect(first.error).toContain('end your turn now, without polling or sleeping')
@@ -316,6 +319,7 @@ describe('shepherdr merge', () => {
       writeFileSync(go, 'go\n')
       await until(() => w.sent.some((x) => x.key === key && x.text.includes('Your merge went in')))
       expect(w.engine.statusOf(t)).toBe('done')
+      expect((await run).ok).toBe(true)
     })
 
     test('a restart leaves its gate running: the Shepherdr that comes back goes on from it, and its agent hears how it went', async () => {
