@@ -143,7 +143,8 @@ export interface TaskRec {
   /** merged with this task's merge train, on its gate run (train) */
   train?: string
   /** a member of a merge train its gate refused: its next merge goes alone, on its own gate, before it rides or heads a
-   *  train again (alone); cleared when that turn ends, however it ends (merged, refused or stopped) */
+   *  train again (alone); cleared once that lone gate ran to its end (passed, refused or timed out). A turn a restart or
+   *  a kill cut short never gated, so it keeps the mark and goes alone on its next merge */
   alone?: true
   /** first in line (start now, or a coordinator's priority mark for a fix of a red main): it goes ahead of the other
    *  held tasks and past the machine's load, pressure and spacing, never past its slots (room, release) */
@@ -540,8 +541,6 @@ export class Engine extends Emitter<Events> {
       t.landing = undefined
       if (g) dropGate(g)
       t.gateRun = undefined
-      // a turn alone cut short is over too: the task rides a train again
-      t.alone = undefined
       t.mergeStop = `Merge${gate ? ' gate' : ''} interrupted by a restart: run shepherdr merge again`
       this.save()
       this.settle(t)
@@ -2382,7 +2381,7 @@ export class Engine extends Emitter<Events> {
    * a time (merge), so the others wait while it runs; main moved meanwhile anyway (by hand, say), the branch is rebased
    * on it and the gate runs again.
    */
-  private async gate(t: TaskRec, repo: string, space: string, wt: string): Promise<{ ok: true; line?: string } | { ok: false; error: string }> {
+  private async gate(t: TaskRec, repo: string, space: string, wt: string): Promise<{ ok: true; line?: string } | { ok: false; error: string; stopped?: true }> {
     const cmd = this.gateOf(t, space)
     if (!cmd) return { ok: true }
     const tip = async () => (await G.git(repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out
@@ -2391,7 +2390,7 @@ export class Engine extends Emitter<Events> {
       const head = (await G.git(wt, 'rev-parse', 'HEAD')).out
       this.land(t, 'gate')
       const ran = await this.runGate(t, cmd, wt, head, at)
-      if (ran.code === GATE_GONE) return { ok: false, error: `${t.id}'s merge gate (${cmd}) was stopped before it ended (a restart, or a kill): nothing was merged. Run shepherdr merge ${t.id} again.` }
+      if (ran.code === GATE_GONE) return { ok: false, error: `${t.id}'s merge gate (${cmd}) was stopped before it ended (a restart, or a kill): nothing was merged. Run shepherdr merge ${t.id} again.`, stopped: true }
       const r = { ok: ran.code === 0, code: ran.code, out: ran.out, err: '' }
       if (!r.ok) {
         const said = r.out.trim().split('\n').slice(-20).join('\n').slice(-2000)
@@ -2939,8 +2938,8 @@ export class Engine extends Emitter<Events> {
       if (train) return train
       // the space's merge gate, on the branch as it would go in: its last line goes into the commit
       const gate = await this.gate(t, p.path, p.name, wt)
-      // its turn alone is over, however it ended: it may ride a train again
-      if (t.alone) {
+      // its turn alone is over once its gate ran to its end, however that ended: it may ride a train again
+      if (t.alone && !gate.stopped) {
         t.alone = undefined
         this.save()
       }

@@ -643,6 +643,37 @@ describe('shepherdr merge', () => {
         expect([a, b, c].map((t) => t.alone)).toEqual([undefined, undefined, undefined])
       })
 
+      test('a marked task whose turn a restart cut short keeps the mark: its next merge goes alone, behind the train it could ride', async () => {
+        const { w, ts, go, ran } = await train('train-cut', 4, '3')
+        const [g, x, a, b] = ts
+        const runs = [w.engine.merge(g.id, { self: true })]
+        await until(() => g.landing?.step === 'gate')
+        // x was marked by a refused train; a restart cut its turn alone short (its gate never ended, nothing left running)
+        x.alone = true
+        x.landing = { step: 'gate', at: Date.now() }
+        x.gateRun = { pid: 999_999_999, log: '/nonexistent/log', exit: '/nonexistent/exit', at: Date.now(), head: 'x', tip: 'y' }
+        w.engine.resumeMerges()
+        expect(x.landing).toBeUndefined()
+        expect(x.alone).toBe(true)
+        // a and b wait behind g, x last in line: a rides with b, while x, marked, waits for its own turn alone
+        runs.push(w.engine.merge(a.id, { self: true }), w.engine.merge(b.id, { self: true }), w.engine.merge(x.id, { self: true }))
+        expect(w.engine.subOf(x)).toBe(`Waiting for the merge gate (${g.id}'s runs)`)
+        go(g)
+        await until(() => a.landing?.cars === 2)
+        expect(w.engine.subOf(b)).toBe(`Going in with ${a.id}'s merge train`)
+        expect(w.engine.subOf(x)).toBe(`Waiting for the merge gate (${a.id}'s runs)`)
+        go(a)
+        // x's turn: a gate of its own, no train
+        await until(() => x.landing?.step === 'gate')
+        expect(x.landing!.cars).toBeUndefined()
+        go(x)
+        expect((await Promise.all(runs)).map((r) => r.ok)).toEqual([true, true, true, true])
+        expect(ran()).toEqual([g.id, a.id, x.id])
+        expect(x.alone).toBeUndefined()
+        expect(b.train).toBe(a.id)
+        expect(x.train).toBeUndefined()
+      })
+
       test("a rider whose merge passes its deadline while it rides hears it goes in with the train's gate", async () => {
         const { w, ts, go, ran } = await train('train-late', 4, '3')
         const [x, a, b, c] = ts
@@ -713,11 +744,14 @@ describe('shepherdr merge', () => {
     test('a gate killed from outside is no answer: the merge says it was stopped, and nothing went in', async () => {
       const { w, dir, t } = await gated('gate-killed', 'sleep 30')
       const main = sh('git rev-parse main', dir)
+      // a marked task's lone turn: a gate that never ended keeps the mark
+      t.alone = true
       const run = w.engine.merge(t.id, { self: true })
       await until(() => !!t.gateRun?.pid)
       process.kill(-t.gateRun!.pid, 'SIGKILL')
       expect((await run).error).toContain(`${t.id}'s merge gate (sleep 30) was stopped before it ended`)
       expect(sh('git rev-parse main', dir)).toBe(main)
+      expect(t.alone).toBe(true)
     })
 
     test('off, or none set: no gate', async () => {
