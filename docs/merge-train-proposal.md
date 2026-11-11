@@ -60,7 +60,8 @@ Everything is in `server/live/engine/engine.ts` (the merge path) and `server/liv
   caller or its agent (`lateFor` → `tellMerge`) hears that its merge went in.
 - **Refused, or anything else.** A refusal, a gate that can't start, or a base that moved: the riders lose their
   `train` mark (back to plain `queue`) and the head goes on alone through the existing single path, which runs its own
-  gate. So a refusal costs one more gate run, and the riders follow one at a time or in the next train.
+  gate. A refusal by the gate also marks every member (`alone`): each goes alone once, on its own gate, before it rides
+  or heads a train again, so a change that fails is gated once more, not again in every train.
 - **A worktree left detached.** Shepherdr stopping while a train's gate ran leaves the head's worktree detached at the
   top of the stack. `mergeNow` now puts a worktree with no current branch back on the task's branch before anything else.
 
