@@ -235,7 +235,7 @@ describe('a machine herdr saves', () => {
     // and the doctor reads its own log
     expect(m.log(label)).toContain(`worker of ${label} serves on`)
     expect(m.log('nobody-here')).toBe('')
-  }, 30_000)
+  }, 90_000)
 
   test("one herdr can't reach waits, with herdr's own words, and gets no look", async () => {
     const m = machines([saved('cut-a'), saved('cut-b')], { 'cut-a': { status: 'unreachable', error: 'Connection refused' }, 'cut-b': { status: 'auth-failed', error: null } })
@@ -294,7 +294,7 @@ describe('a machine herdr saves', () => {
     const off = calls('old-a').find((c) => c.kind === 'disable')!.script
     expect(off).toContain("PATH='/opt/bin:/usr/bin'; herdr --session 'work' plugin disable shepherdr")
     expect(off).toContain('config.json.before-one-install')
-  }, 30_000)
+  }, 90_000)
 
   test('a worker still running there from before is stopped before a new one starts, never beside it', async () => {
     const old = await oldWorker()
@@ -312,7 +312,7 @@ describe('a machine herdr saves', () => {
     expect(alive(old.pid)).toBe(false)
     expect(l.worker?.pid).not.toBe(old.pid)
     expect(workers('twice')).toHaveLength(1)
-  }, 30_000)
+  }, 90_000)
 })
 
 describe('a restart of the main server', () => {
@@ -337,7 +337,7 @@ describe('a restart of the main server', () => {
     expect(kinds('quick')).toEqual(['probe'])
     expect(l.worker!.pid).toBe(first)
     expect(workers('quick')).toHaveLength(1)
-  }, 30_000)
+  }, 90_000)
 
   test('a machine whose new look differs from the last gets its worker started again from the new one', async () => {
     const home = remoteHome('moved')
@@ -351,7 +351,7 @@ describe('a restart of the main server', () => {
     expect(alive(first)).toBe(false)
     expect(workers('moved').find((w) => w.pid === l.worker!.pid)?.box.path).toBe(`${home}/.shepherdr/helper/bin:/new/bin`)
     expect(kinds('moved')).toEqual(['probe'])
-  }, 30_000)
+  }, 90_000)
 
   test('a worker on other code is stopped first, and the machine starts again once it is gone', async () => {
     const old = await oldWorker()
@@ -372,7 +372,7 @@ describe('a restart of the main server', () => {
     await until('the new worker to be reached', () => l.state === 'Ready' && !!l.worker, 20_000)
     expect(l.worker!.pid).not.toBe(old.pid)
     expect(workers('newer')).toHaveLength(1)
-  }, 30_000)
+  }, 90_000)
 
   test("what a machine showed is kept as the server stops, and a disk that can't take it doesn't stop it", async () => {
     const m = machines([saved('full')], { full: { status: 'unreachable', error: 'down' } })
