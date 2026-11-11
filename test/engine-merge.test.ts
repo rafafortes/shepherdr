@@ -510,6 +510,50 @@ describe('shepherdr merge', () => {
         expect(rc.error).toContain('4.txt is not wanted')
         expect(c.landing?.train).toBeUndefined()
       })
+
+      test('a restart while the train\'s gate runs: the head re-attaches to its run, the riders resume in line, and the train lands', async () => {
+        const { w, dir, ts, go, ran } = await train('train-restart', 3, '3')
+        const [a, b, c] = ts
+        const space = w.engine.view(a).place.split(':').pop()!
+        const { startGate } = await import('../server/live/engine/engine.ts')
+        // the train's stack, built as the engine builds it: each rider's squash commit on the one before, dated as main's tip
+        const at = sh('git rev-parse main', dir)
+        const date = sh('git log -1 --format=%cI main', dir)
+        let top = at
+        for (const x of [a, b, c]) {
+          const tree = sh(`git merge-tree --write-tree ${top} ${x.branch}`, dir).split('\n')[0]
+          top = sh(`GIT_AUTHOR_DATE='${date}' GIT_COMMITTER_DATE='${date}' git commit-tree ${tree} -p ${top} -m '${x.id}: ${x.title}'`, dir)
+        }
+        // as a restart leaves it: a's worktree at the top of the stack, its gate going on by itself, and b and c in line
+        // with the mark of the train they ride
+        sh(`git checkout -q --detach ${top}`, a.worktree!)
+        a.landing = { step: 'gate', at: 1, cars: 3 }
+        a.gateRun = startGate(w.settings.get('merge.gate', space), a.worktree!, { SHEPHERDR_TASK: a.id, SHEPHERDR_BASE: 'main' }, join(process.env.SHEPHERDR_HOME!, 'gates'), a.id, { head: top, tip: at })
+        b.landing = { step: 'queue', at: 2, behind: a.id, gate: true, train: a.id }
+        c.landing = { step: 'queue', at: 3, behind: a.id, gate: true, train: a.id }
+        await until(() => ran().length === 1)
+        // a while later, the stack is built again on the same tip: the same commits, so the same run is found again
+        await Bun.sleep(1100)
+        w.engine.resumeMerges()
+        // a's merge is back: it has rebuilt the stack and its row says the train's gate runs
+        await until(() => a.landing?.step === 'gate' && a.landing.at > 1)
+        expect(w.engine.subOf(a)).toBe('Running the merge gate (a train of 3)')
+        expect(w.engine.subOf(b)).toBe(`Going in with ${a.id}'s merge train`)
+        expect(b.landing?.train).toBe(a.id)
+        expect(c.landing?.train).toBe(a.id)
+        expect(ran()).toEqual([a.id])
+        go(a)
+        await until(() => ts.every((t) => w.sent.some((x) => x.key === `${t.id}/Agent` && x.text.includes('Your merge went in'))))
+        // one gate run in all: the one a restart left, found again; the three go in on it, in line order
+        expect(ran()).toEqual([a.id])
+        expect(sh('git log --format=%s -n 4', dir).split('\n')).toEqual([`${c.id}: Task 3`, `${b.id}: Task 2`, `${a.id}: Task 1`, 'init'])
+        for (const t of [a, b, c]) {
+          expect(sh(`git log -1 --format=%b ${t.squash}`, dir)).toContain(`Merge train: ${a.id}, ${b.id}, ${c.id} (one merge gate run)`)
+          expect(w.engine.statusOf(t)).toBe('done')
+        }
+        expect([b.train, c.train]).toEqual([a.id, a.id])
+        expect(w.sent.filter((x) => x.key === `${b.id}/Agent`).at(-1)!.text).toContain(`it went in with ${a.id}'s merge train`)
+      })
     })
 
     test('a gate killed from outside is no answer: the merge says it was stopped, and nothing went in', async () => {
