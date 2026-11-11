@@ -643,6 +643,31 @@ describe('shepherdr merge', () => {
         expect([a, b, c].map((t) => t.alone)).toEqual([undefined, undefined, undefined])
       })
 
+      test("main moves while the train's gate runs: nothing lands as a train, the head goes alone, its riders wait in line with no mark", async () => {
+        const { w, dir, ts, go, ran } = await train('train-moved', 4, '3')
+        const [g, x, a, b] = ts
+        const runs = [w.engine.merge(g.id, { self: true })]
+        await until(() => g.landing?.step === 'gate')
+        runs.push(w.engine.merge(x.id, { self: true }), w.engine.merge(a.id, { self: true }), w.engine.merge(b.id, { self: true }))
+        go(g)
+        // x heads a train with a and b on its gate run; main moves on while that run goes on
+        await until(() => x.landing?.cars === 3)
+        sh('git commit -q --allow-empty -m "main moves on"', dir)
+        go(x)
+        // the stack is no longer main's next commit: x goes alone, and a and b wait in line, plain
+        await until(() => x.landing?.cars === undefined && x.landing?.step === 'gate')
+        expect(a.landing?.train).toBeUndefined()
+        expect(b.landing?.train).toBeUndefined()
+        expect([a, b, x].map((t) => t.alone)).toEqual([undefined, undefined, undefined])
+        go(a)
+        expect((await Promise.all(runs)).map((r) => r.ok)).toEqual([true, true, true, true])
+        // g, then x's train run and its own alone run, then a's train with b
+        expect(ran()).toEqual([g.id, x.id, x.id, a.id])
+        expect(sh(`git log -1 --format=%b ${x.squash}`, dir)).not.toContain('Merge train:')
+        expect(sh(`git log -1 --format=%b ${a.squash}`, dir)).toContain(`Merge train: ${a.id}, ${b.id} (one merge gate run)`)
+        expect(b.train).toBe(a.id)
+      })
+
       test('a marked task whose turn a restart cut short keeps the mark: its next merge goes alone, behind the train it could ride', async () => {
         const { w, ts, go, ran } = await train('train-cut', 4, '3')
         const [g, x, a, b] = ts
