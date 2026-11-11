@@ -1934,6 +1934,8 @@ describe("Autopilot's heartbeat", () => {
     run('git init -q -b main', dir)
     const p = await src.places.add(dir, 'now')
     const place = placeId.space(p.name)
+    // the time rule is not what this test is about: with it off, the clock's half hours cannot add a beat to the count
+    expect(src.settings.set('heartbeat.when', 'off', { space: p.name }).ok).toBe(true)
     const sent: { k: string; text: string }[] = []
     const send = src.agents.send
     const status = src.agents.status
