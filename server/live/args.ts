@@ -8,7 +8,7 @@ export interface Parsed {
   flags: Set<string>
 }
 
-const FLAGS = new Set(['ordinary', 'other', 'multi', 'json', 'project-coordinator', 'off', 'help', 'force', 'archived', 'machine', 'later', 'save', 'all', 'yes'])
+const FLAGS = new Set(['ordinary', 'other', 'multi', 'json', 'project-coordinator', 'off', 'help', 'force', 'archived', 'machine', 'later', 'save', 'all', 'yes', 'priority'])
 
 export function parseArgs(args: string[]): Parsed {
   const words: string[] = []
@@ -144,6 +144,15 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
                                                  agent is stopped first. Done tasks archive themselves after
                                                  tasks.archiveAfter (default 7 days; off allowed)
   shepherdr task unarchive <id>                  bring it back into its lists
+  shepherdr task start <id> [--agent … --model … --effort …]
+                                                 yours alone: start a task that waits now, first in line, past the
+                                                 machine's load, pressure and spacing (within its slots), no longer
+                                                 waiting for the tasks it was queued after; --agent and the like pick
+                                                 its worker for this task alone
+  shepherdr task priority <id> [off]             first in line: ahead of the other held tasks and past the machine's
+                                                 load, pressure and spacing, within its slots (for a fix of a red main
+                                                 or merge gate); off: back in line by its age. task add --priority
+                                                 marks a new one so
   shepherdr task park [<id> …] [--yes]           the waiting tasks (queued after others, or held for room) that hold
                                                  an agent and a worktree from before a waiting task got none, and
                                                  which keep theirs (work in them, your words to them, an agent at

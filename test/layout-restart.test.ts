@@ -182,4 +182,43 @@ describe.skipIf(!browser)('restarting an agent', () => {
     }
   }, 30_000)
 
+
+  test("a waiting task's ⋯ offers Start now and Start now with…: the sheet picks what it would run on, saves nothing for others", async () => {
+    const sent: { type: string; chat?: string; kind?: string; model?: string; effort?: string }[] = []
+    const act = world.act
+    world.act = async (a) => (a.type === 'start-now' ? (sent.push(a as never), { ok: true }) : act(a))
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:herdr-projects')}`)
+      const row = page.locator('section[aria-label="Tasks"] li', { hasText: 'HP-203' })
+      const open = async () => {
+        await row.hover()
+        await row.getByRole('button', { name: 'More for this task' }).click()
+      }
+      await open()
+      await page.getByRole('menuitem', { name: 'Start now', exact: true }).click()
+      expect(sent.at(-1)).toEqual({ type: 'start-now', chat: 'HP-203/Agent' })
+      await open()
+      await page.getByRole('menuitem', { name: 'Start now with…' }).click()
+      const sheet = page.getByRole('alertdialog', { name: 'Start HP-203 now?' })
+      await sheet.locator('[data-restart]').waitFor()
+      // for this task alone: no switch to keep it for the others, and the words say what stays as Settings say
+      expect(await sheet.getByRole('switch').count()).toBe(0)
+      expect(await sheet.textContent()).toContain("Only this task's agent runs on it; its reviewer and backups stay as Settings say.")
+      await sheet.getByRole('button', { name: /^Agent: / }).click()
+      await page.getByRole('menuitemradio', { name: 'pi' }).click()
+      await sheet.getByRole('button', { name: 'Start now', exact: true }).click()
+      await sheet.waitFor({ state: 'detached' })
+      expect(sent.at(-1)).toMatchObject({ type: 'start-now', chat: 'HP-203/Agent', kind: 'pi' })
+      // a task at work offers neither
+      const working = page.locator('section[aria-label="Tasks"] li', { hasText: 'HP-202', hasNotText: 'After HP-202' })
+      await working.hover()
+      await working.getByRole('button', { name: 'More for this task' }).click()
+      expect(await page.getByRole('menuitem', { name: 'Start now', exact: true }).count()).toBe(0)
+      expect(await page.getByRole('menuitem', { name: 'Restart agent…' }).count()).toBe(1)
+    } finally {
+      world.act = act
+      await page.close()
+    }
+  }, 30_000)
 })

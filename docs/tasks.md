@@ -79,6 +79,14 @@
   alert. Errors waiting can't fix (signed out, out of allowance, a model that isn't there) go in at once to the backup
   agent, a task's or a coordinator's, where one is set (below), and otherwise to you. Anything written to the agent
   starts the count again. Each CLI's log says what cut it off (`server/live/retry.ts` decides).
+- **First in line.** A coordinator marks a task with `shepherdr task priority <id>` (or adds it with `--priority`), as
+  for a fix of a red main or merge gate: it goes ahead of the other held tasks and past the machine's load, pressure
+  and spacing, never past its slots or a herdr that doesn't answer; what it is queued after still holds it. You start
+  one that waits now, from its ⋯ (**Start now**) or `shepherdr task start <id>`: it is first in line and no longer waits
+  for the tasks it was queued after or for its time, and starts at once when a slot is free (else at the next free one).
+  **Start now with…** picks its worker too, the CLI, model and effort for this task's agent alone (the task's own
+  `--agent`, never Settings': its reviewer and backups stay as Settings say), as for one you want on the DGX Spark while
+  the others run on a plan.
 - A space may have a **merge gate** (Settings → How tasks work → Merge gate, `merge.gate`, off by default; a task's own
   `--set merge.gate=…` wins): a command run in the task's worktree after its rebase and before it goes into main here
   (not through a pull request), with `SHEPHERDR_TASK` and `SHEPHERDR_BASE` set. Exit 0 lets it in, and the last line it

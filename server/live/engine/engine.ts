@@ -30,7 +30,7 @@ import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
 import { findModel, knowsModels } from '../models.ts'
-import { fitHarness, harnessWords, recentChat } from '../restart.ts'
+import { fitHarness, harnessWords, recentChat, sameHarness } from '../restart.ts'
 import * as G from './git.ts'
 import { Worktrees, type HerdrSpaces, type Made } from './worktrees.ts'
 
@@ -132,6 +132,12 @@ export interface TaskRec {
   report?: Reported
   /** its backup agent took over once its agent couldn't go on (retry.ts): from which CLI, to which, and why */
   tookOver?: { from: string; to: string; why: string; at: number; step?: number }
+  /** first in line (start now, or a coordinator's priority mark for a fix of a red main): it goes ahead of the other
+   *  held tasks and past the machine's load, pressure and spacing, never past its slots (room, release) */
+  priority?: true
+  /** started now on a worker of the human's choosing while its agent waited in its worktree: its go restarts it on
+   *  this first (go) */
+  switchTo?: Harness
   /** coordinators were told it stalled: its last sign of life then (`life`), and the report (by its time) it ran far
    *  past (`over`); each is told once, until it shows life again or reports anew */
   stalled?: { life?: number; over?: number }
@@ -637,7 +643,7 @@ export class Engine extends Emitter<Events> {
       if (t.trouble) return fitStatus(`Went wrong: ${t.trouble}`)
       // a To do row is its title alone
       if (status === 'todo') return ''
-      if (status === 'queued') return this.holding(t) ? HELD[t.held!.why] : this.waitLine(t)
+      if (status === 'queued') return this.holding(t) ? `${t.priority ? 'First in line · ' : ''}${HELD[t.held!.why]}` : this.waitLine(t)
       if (status === 'need' && this.queued(t) && this.agents.status(key) !== 'blocked') return fitStatus(this.halts(t).join(' · '))
       if (status === 'need') return this.reasonOf(key) ?? NEED.reply
       if (status === 'ready') return 'Ready to merge'
@@ -973,7 +979,12 @@ export class Engine extends Emitter<Events> {
     // is gone)
     const go = plain ? text : hidden(text, 'go')
     const send = (note?: string) => this.agents.send(key, note ? `${go}\n\n${note}` : go, { ensure: this.starter(t) }).catch(() => undefined)
-    if (t.worktree && existsSync(t.worktree) && this.agents.status(key) !== 'gone') void this.freshen(t).then(send, () => send())
+    // started now on a worker of your choosing while its agent waited: on that one first (its restart brings it up to
+    // its base), then the go
+    const to = t.switchTo
+    t.switchTo = undefined
+    if (to && t.worktree && existsSync(t.worktree)) void this.restart(t.id, to).then(() => send(), () => send())
+    else if (t.worktree && existsSync(t.worktree) && this.agents.status(key) !== 'gone') void this.freshen(t).then(send, () => send())
     else void send()
     this.settleOne(t)
     this.settleSoon(t, ANSWER_GRACE + 500)
@@ -1112,9 +1123,11 @@ export class Engine extends Emitter<Events> {
     const l = this.settings.machine()
     if (l.max !== null && this.working() >= l.max) return { why: 'slots' }
     const m = this.machine?.()
-    if (m && (m.busy || !m.herdr)) return { why: 'machine' }
+    // one first in line goes past the machine's load and pressure, and ahead of the cut-off tasks' way back; never past
+    // a herdr that doesn't answer, nor its space's models all out (it would only be cut off)
+    if (m && (!m.herdr || (m.busy && !t?.priority))) return { why: 'machine' }
     const w = t ? this.startsWait?.(t) : undefined
-    return w ? { why: w } : {}
+    return w && !(w === 'resume' && t?.priority) ? { why: w } : {}
   }
 
   /** how many starts Shepherdr may make by itself now (machine.startEvery): one once the last is that long ago, none
@@ -1139,7 +1152,8 @@ export class Engine extends Emitter<Events> {
 
   /** tasks held now, oldest first */
   heldTasks() {
-    return this.tasks.filter((t) => this.holding(t) && !t.archived).sort((a, b) => a.held!.since - b.held!.since)
+    // first in line first, then the oldest
+    return this.tasks.filter((t) => this.holding(t) && !t.archived).sort((a, b) => Number(!!b.priority) - Number(!!a.priority) || a.held!.since - b.held!.since)
   }
 
   /** hold it until there's room: its line says why, and its chat gets a small card */
@@ -1193,7 +1207,8 @@ export class Engine extends Emitter<Events> {
           if (stale.length) this.save()
           return
         }
-        if (!this.startsNow(now)) return
+        // one first in line doesn't wait for the spacing either
+        if (!t.priority && !this.startsNow(now)) return
         this.lastStart = now
         const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work' }[t.held!.why]
         if (t.held!.go) this.go(t, t.held!.go, `${t.held!.goWhy ?? why} · ${why}`, t.held!.plain)
@@ -1217,7 +1232,7 @@ export class Engine extends Emitter<Events> {
    * with no agent yet, and takes its Settings when it starts. The brief ends with the default way of working from
    * Settings; its CLI, model and effort are Settings' too, unless the coordinator chose others for it.
    */
-  add(o: { project: string; base?: string; title: string; desc?: string; by: string; requester?: string; after?: string[]; later?: boolean; at?: number; agent?: Partial<Harness>; reviewer?: Partial<Harness>; set?: Record<string, string> }) {
+  add(o: { project: string; base?: string; title: string; desc?: string; by: string; requester?: string; after?: string[]; later?: boolean; at?: number; agent?: Partial<Harness>; reviewer?: Partial<Harness>; set?: Record<string, string>; priority?: boolean }) {
     const p = this.places.byName(o.project) ?? this.places.byKey(o.project) ?? this.places.space(o.project)
     if (!p) throw new Error(`No project called ${o.project}`)
     // a new task is in no circle; those already done are not waited for
@@ -1244,6 +1259,7 @@ export class Engine extends Emitter<Events> {
         updated: Date.now(),
         told: 'scheduled',
         ...(after.length ? { after } : {}),
+        ...(o.priority ? { priority: true as const } : {}),
         scheduled: {
           at: o.at,
           desc: work,
@@ -1286,6 +1302,7 @@ export class Engine extends Emitter<Events> {
       reviewer,
       waitChecks: ways.waitChecks,
       rounds: ways.rounds,
+      ...(o.priority ? { priority: true as const } : {}),
     }
     if (after.length) t.after = after
     if (set) t.set = set
@@ -1567,6 +1584,59 @@ export class Engine extends Emitter<Events> {
       pane: () => this.wt.agentPane({ home, wt: t.worktree!, label: labelOf(t), tab: 'Agent', env, made }),
     }
     return restart ? this.agents.restart(spec, restart) : this.agents.ensure(spec)
+  }
+
+  /**
+   * You start a task that waits (queued, held, To do, scheduled) now: it no longer waits for the tasks it was queued
+   * after nor for a time, and it is first in line, past the machine's load, pressure and spacing; never past its slots,
+   * where it waits for the next free one ahead of the others. `on`: a worker of your choosing for this task's agent
+   * alone (its reviewer and its backups stay as Settings say). Returns what still holds it.
+   */
+  async startNow(id: string, on?: Harness): Promise<{ held?: HeldWhy }> {
+    const t = this.req(id)
+    if (ended(t)) throw new Error(`${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'})`)
+    if (this.starting.has(t.id) || this.handing.has(t.id) || ['work', 'merging', 'need', 'ready'].includes(this.statusOf(t)))
+      throw new Error(`${t.id} isn't waiting to start${on ? ': Restart agent… changes what it runs on' : ''}`)
+    if (t.scheduled) {
+      this.materialize(t)
+      t.scheduled = undefined
+      this.armDue()
+    }
+    const was = this.queued(t) ? t.after! : []
+    if (on) t.agent = on
+    Object.assign(t, { priority: true as const, after: undefined, todo: undefined, stopped: undefined, paused: undefined, held: undefined })
+    const live = !!t.worktree && existsSync(t.worktree) && this.agents.status(this.key(t)) !== 'gone'
+    const rec = this.agents.record(this.key(t))
+    t.switchTo = on && live && rec && !sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, on) ? on : undefined
+    const why = `you started it now${on ? ` on ${harnessWords(fitHarness(on))}` : ''}${was.length ? `; it no longer waits for ${was.join(', ')}` : ''}`
+    const goText = was.length ? goLine(was, [], true) : 'Go: you were started now, start the work.'
+    const r = this.room(t)
+    if (r.why) {
+      if (t.worktree) this.hold(t, r.why, { text: goText, why })
+      else this.hold(t, r.why)
+      return { held: r.why }
+    }
+    if (t.worktree) this.go(t, goText, why)
+    else {
+      const card = `go:${t.id}:${Date.now()}`
+      this.chats.post(this.key(t), { id: card, card: { id: card, task: t.id, status: 'work', text: `started: ${why}` } })
+      this.save()
+      // as a task added with room starts: one that can't start says so on the task
+      this.startTask(t).catch((e) => this.troubled(t, e))
+    }
+    return {}
+  }
+
+  /** a coordinator's mark (task priority, task add --priority): first in line, past the machine's load, pressure and
+   *  spacing, within its slots; off: back in line by its age. Nothing more: what it is queued after still holds it */
+  setPriority(id: string, on: boolean) {
+    const t = this.req(id)
+    if (ended(t)) throw new Error(`${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'})`)
+    t.priority = on ? true : undefined
+    this.save()
+    this.settleOne(t)
+    this.release()
+    return t
   }
 
   /**

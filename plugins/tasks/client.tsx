@@ -84,7 +84,7 @@ import {
 import type { Automation, Place, Snapshot, Task } from '@shared/types.ts'
 import { useFlip } from '@client/motion.ts'
 import { and, Dialog, RowMenu, RowMenuButton, useRowMenu, type RowMenuState } from '@client/rowmenu.tsx'
-import { RestartItem } from '@client/restart.tsx'
+import { RestartItem, StartNowItems } from '@client/restart.tsx'
 
 /**
  * A task, with one line under its title (taskLine). Working, its pie fills with the % done its agent reported and the minutes
@@ -156,6 +156,7 @@ export function TaskActions({ task: t, close }: { task: Task; close: () => void 
           Pin
         </MenuItem>
       )}
+      {['queued', 'todo', 'scheduled'].includes(t.status) && !t.archived ? <StartNowItems chat={t.agent?.chat ?? `${t.id}/Agent`} name={t.id} onPick={close} /> : null}
       {t.status !== 'done' && !t.archived ? <RestartItem chat={t.agent?.chat ?? `${t.id}/Agent`} name={t.id} onPick={close} /> : null}
       {t.status !== 'done' && !t.archived && (t.status !== 'todo' || t.agent?.running) ? (
         <MenuItem icon={<StopIcon className={ic} />} onClick={then(() => setConfirm({ t, kind: 'stop' }))}>
