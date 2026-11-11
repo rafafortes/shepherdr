@@ -478,6 +478,9 @@ describe('first in line, from the command and the screen', () => {
       expect(((await src.act({ type: 'start-with', chat: `${fourth}/Agent`, kind: 'claude', model: 'no-such-model' })) as { ok: boolean }).ok).toBe(false)
       expect(await src.act({ type: 'start-with', chat: `${fourth}/Agent`, kind: 'claude', model: 'claude-sonnet-5-5' })).toEqual({ ok: true })
       expect(src.engine.task(fourth)!.agent).toEqual({ kind: 'claude', model: 'claude-sonnet-5-5' })
+      // one that is no longer waiting to start is Restart agent…'s
+      src.engine.task(fourth)!.closed = true
+      expect(await src.act({ type: 'start-with', chat: `${fourth}/Agent`, kind: 'pi' })).toEqual({ ok: false, error: `${fourth} isn't waiting to start: Restart agent… changes what it runs on` })
     } finally {
       engine.machine = was
     }

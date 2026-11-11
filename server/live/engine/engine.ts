@@ -331,6 +331,7 @@ export async function waitGate(run: GateRun, timeoutMs: number, every = 250): Pr
     if (Date.now() - run.at > timeoutMs) {
       try {
         process.kill(-run.pid, 'SIGKILL')
+        // coverage-exempt: the group ended between the alive check above and this kill, a race no test can time
       } catch {
         /* gone meanwhile */
       }
