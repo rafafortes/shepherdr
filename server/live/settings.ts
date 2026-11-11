@@ -285,6 +285,8 @@ export const CATALOG: Section[] = [
       // (engine.gate): exit 0 lets it in, anything else stops it. Never a git hook: a hook refusing an update leaves
       // what it would write in the space's checkout, which may be a live service's folder
       { label: 'Merge gate', key: 'merge.gate', value: 'off', text: true, hint: "A command run in the task's worktree after its rebase, before it goes into main (here, not through a pull request): exit 0 lets it in, with its last line in the merge commit; anything else stops the merge, with its output, and main stays as it was. Off: none." },
+      // with a merge gate, the first merges in line go in together on one gate run (engine.train)
+      { label: 'Merge train', key: 'merge.train', value: 'off', options: ['off', '2', '3', '4', '5'], hint: "With a merge gate, for merges made here (not through a pull request): when several merges wait in line, the first ones, up to this many, go in together on one gate run, each as its own commit with the gate's line. One that conflicts with those before it waits for its own turn. A refusal makes each merge of the train go alone once. Off: one at a time." },
       // only words in the brief's Reviewer line: the task's agent has its change reviewed however it sees fit
       ...agentRows('Reviewer', 'reviewer', [...REVIEWERS], 'default', 'default'),
       // a reviewer that cannot run at all (out of allowance, signed out, its model is gone) leaves its task's agent

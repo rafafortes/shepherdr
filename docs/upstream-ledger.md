@@ -272,6 +272,13 @@ symptoms. So it is ours to fix, and it is the highest-value row here even though
 | --- | --- | --- | --- | --- | --- |
 | **Complete a herdr launch by asking for the agent by name** (PR #3, `server/live/agents.ts`) | every look at herdr asks for each of Shepherdr's own pending agents by name, for at most 90 s, one ask in flight and never awaited; herdr finishes the launch, readiness arrives as for any agent, and the brief goes in through the outbox. A launch that never goes ready is not kept alive by the asking past 90 s (herdr's own timeout on an unasked launch then ends it, and the relaunch loop starts it again). A relaunch closes the pane a dropped launch left at a prompt | **done** (PR #3, for `herdr-tui`; ours: upstream never made one) | Every pi task could stall, and the stall then blocked its own merge (the unread-message rule). Proved on herdr 0.9.5 with the nudge stopped: a pi task agent read its brief and started working, and with the fix taken out the same launch stayed `launch_pending` with the brief in `outbox.json` | The outside nudge (`shepherdr-launch-nudge`, `~/www/misc/host-tools`) is no longer needed and can be removed once a release with this fix is live: it stays on meanwhile, and both asking at once does no harm | S–M |
 
+## Not from upstream: merge trains, built here
+
+Checked 2026-11-11 against upstream `main` (`be647c82`, 3.1.32) and `v2.0` (`ebb17d58`), code, history, issues and pull requests: neither merges several
+tasks on one gate run. Upstream's only merge queue is GitHub's own (SHEP-160 on `main`, for repos that have one), which
+a merge made here never reaches. So the train is ours: `merge.train`, for merges made here only; see
+[docs/tasks.md](tasks.md).
+
 ## Ranked: adopt and port, by value to us
 
 Order is the sequence the operator would get the most from; each is one task and one pull request. **SHE-2 merged the

@@ -4,7 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { catchUp, mergeHere, namedFiles } from '../server/live/engine/git.ts'
+import { catchUp, landStack, mergeHere, namedFiles } from '../server/live/engine/git.ts'
 import { tmp } from './tmp.ts'
 
 const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8' }).trim()
@@ -109,5 +109,57 @@ describe('catching main up with its remote', () => {
     expect(r.ok).toBe(false)
     expect(r.err).toBe("main here holds work of its own that would be overwritten: notes.txt. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes it first, then merge again.")
     expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe('mine\n')
+  })
+})
+
+describe('a merge train going in', () => {
+  /** the tree the stack's first commit has: main with work/task merged, built by git (no checkout touched) */
+  const treeOf = (dir: string) => sh('git merge-tree --write-tree main work/task', dir).split('\n')[0]
+
+  test('main not checked out here: its branch moves by update-ref, and the checkout here is not touched', async () => {
+    const dir = setup()
+    sh('git checkout -q -b elsewhere', dir)
+    // work of the human's in the folder, uncommitted
+    writeFileSync(join(dir, 'a.txt'), 'a, mine\n')
+    const at = sh('git rev-parse main', dir)
+    const ids = await landStack(dir, 'main', at, [{ tree: treeOf(dir), message: 'SHE-7: Test' }])
+    expect(ids).toHaveLength(1)
+    expect(sh('git rev-parse main', dir)).toBe(ids![0])
+    expect(sh('git rev-parse main^', dir)).toBe(at)
+    expect(sh('git log -1 --format=%s main', dir)).toBe('SHE-7: Test')
+    expect(sh('git rev-parse --abbrev-ref HEAD', dir)).toBe('elsewhere')
+    expect(readFileSync(join(dir, 'README.md'), 'utf8')).toBe('hi\n')
+    expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('a, mine\n')
+    expect(sh('git status --porcelain', dir)).toBe('M a.txt')
+  })
+
+  test('main moved since the stack was built, checked out here: nothing changes, not the branch nor the checkout', async () => {
+    const dir = setup()
+    const at = sh('git rev-parse main', dir)
+    const tree = treeOf(dir)
+    // main moves on by a commit of its own (here, in the checkout) while the stack waits for its gate
+    sh('printf "moved\n" > b.txt && git add -A && git commit -qm moved', dir)
+    writeFileSync(join(dir, 'a.txt'), 'a, mine\n')
+    const before = sh('git rev-parse main', dir)
+    expect(await landStack(dir, 'main', at, [{ tree, message: 'SHE-8: Test' }])).toBeUndefined()
+    expect(sh('git rev-parse main', dir)).toBe(before)
+    expect(sh('git rev-parse --abbrev-ref HEAD', dir)).toBe('main')
+    expect(readFileSync(join(dir, 'b.txt'), 'utf8')).toBe('moved\n')
+    expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('a, mine\n')
+    expect(sh('git status --porcelain', dir)).toBe('M a.txt')
+  })
+
+  test('main moved since the stack was built, not checked out here: its ref stays where it moved to', async () => {
+    const dir = setup()
+    sh('git checkout -q -b elsewhere', dir)
+    const at = sh('git rev-parse main', dir)
+    const tree = treeOf(dir)
+    sh('git checkout -q main && printf "moved\n" > b.txt && git add -A && git commit -qm moved && git checkout -q elsewhere', dir)
+    const before = sh('git rev-parse main', dir)
+    expect(before).not.toBe(at)
+    expect(await landStack(dir, 'main', at, [{ tree, message: 'SHE-9: Test' }])).toBeUndefined()
+    expect(sh('git rev-parse main', dir)).toBe(before)
+    expect(sh('git rev-parse --abbrev-ref HEAD', dir)).toBe('elsewhere')
+    expect(sh('git status --porcelain', dir)).toBe('')
   })
 })

@@ -1934,6 +1934,8 @@ describe("Autopilot's heartbeat", () => {
     run('git init -q -b main', dir)
     const p = await src.places.add(dir, 'now')
     const place = placeId.space(p.name)
+    // the time rule is not what this test is about: with it off, the clock's half hours cannot add a beat to the count
+    expect(src.settings.set('heartbeat.when', 'off', { space: p.name }).ok).toBe(true)
     const sent: { k: string; text: string }[] = []
     const send = src.agents.send
     const status = src.agents.status
@@ -2049,11 +2051,15 @@ describe('automations add tasks with fresh agents', () => {
 describe('adding a space from the sidebar', () => {
   const home = tmp('home')
   const realHome = process.env.HOME
+  // git's identity sits in the operator's ~/.gitconfig, which this HOME hides: the commits made here get one of their own
+  const identity = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@test', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@test' }
   beforeAll(() => {
     process.env.HOME = home
+    Object.assign(process.env, identity)
   })
   afterAll(() => {
     process.env.HOME = realHome
+    for (const k of Object.keys(identity)) delete process.env[k]
   })
 
   test('on this machine: a new folder becomes a repo and a space, like shepherdr space add', async () => {

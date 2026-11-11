@@ -992,7 +992,7 @@ describe('settings', () => {
     const section = () => s.sections([], [], null).find((x) => x.name === 'How tasks work')!
     // a backup chain's 2nd to 5th, each with its own three keys
     const extra = (c: string) => [2, 3, 4, 5].flatMap((n) => [`${c}.fallback${n}`, `${c}.fallback${n}Model`, `${c}.fallback${n}Effort`])
-    expect(section().rows.map((r) => r.key)).toEqual(['brief.review', 'review.mustFix', 'review.rounds', 'brief.merge', 'merge.gate', 'reviewer.agent', 'reviewer.model', 'reviewer.effort', 'reviewer.fallback', 'reviewer.fallbackModel', 'reviewer.fallbackEffort', ...extra('reviewer')])
+    expect(section().rows.map((r) => r.key)).toEqual(['brief.review', 'review.mustFix', 'review.rounds', 'brief.merge', 'merge.gate', 'merge.train', 'reviewer.agent', 'reviewer.model', 'reviewer.effort', 'reviewer.fallback', 'reviewer.fallbackModel', 'reviewer.fallbackEffort', ...extra('reviewer')])
     // only words in prompts: What agents are told, each row with the line it adds
     expect(section().told).toBe(true)
     expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.told).toBeUndefined()

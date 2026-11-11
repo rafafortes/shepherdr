@@ -101,11 +101,24 @@
   order it had, and its agent hears how it went. A merge a restart cut short with nothing left of it (a gate that was
   stopped, or the merge itself halfway) is back at its turn, its row reading `Merge gate interrupted by a restart: run
   shepherdr merge again` and its agent told so.
+- A space with a merge gate may also take **merge trains** (Settings → How tasks work → Merge train, `merge.train`: off
+  by default, or 2 to 5, the most merges one train takes, the head included). When several merges wait in line here,
+  the first one in line runs the gate once for them all: their changes are stacked on main, one on top of the other,
+  and the gate runs once on the top of that stack, in the head task's worktree (detached there, so no task's branch
+  changes). If it passes, each merge goes in as its own commit, with its task's words and the gate's last line, and the
+  line `Merge train: A, B, C (one merge gate run)`. The riders are the next tasks in line with the same gate, whose agent
+  is at rest and has read its messages. One whose change conflicts with the ones before it, or adds nothing to them,
+  keeps its place and goes in on its own turn, as usual. Only merges made here take part (not GitHub pull requests).
+  If the gate refuses the train, nothing of it lands: each member then goes alone once, on its own gate, before it rides
+  a train again, and only the task whose change fails is told of the refusal. If main moves while the train's gate
+  runs, the head goes alone and the riders wait in line as before.
 - A merge that waits in line behind another, or runs its gate, past `shepherdr merge`'s 90 s: its agent is told to end
   its turn instead of polling, and Shepherdr wakes it with how it went (merged, refused with the gate's lines, or a
   conflict). Waiting in line or in its gate, a task holds none of the machine's slots: its repo's merges go one at a
   time already. Its row names the merge that runs now (`Waiting for the merge gate (POL-223's runs)`), and moves on
-  to the next as each one ends. A task written to after it reported (a coordinator's "rebase on main and merge") is
+  to the next as each one ends. With a merge train, the head's row reads `Running the merge gate (a train of 3)` and
+  each rider's reads `Going in with POL-223's merge train`; a rider's own `shepherdr merge` then answers that it went in
+  with that train. A task written to after it reported (a coordinator's "rebase on main and merge") is
   working again, not done; its own `shepherdr merge` says it is done again, so it shows as Merging, never Needs you,
   while its agent waits as told.
 - A task that goes back to work in the worktree it had (its agent starts again, the way back moves it to its primary, a
