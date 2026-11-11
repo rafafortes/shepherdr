@@ -2939,7 +2939,7 @@ export class Engine extends Emitter<Events> {
       // the space's merge gate, on the branch as it would go in: its last line goes into the commit
       const gate = await this.gate(t, p.path, p.name, wt)
       // its turn alone is over once its gate ran to its end, however that ended: it may ride a train again
-      if (t.alone && !gate.stopped) {
+      if (t.alone && !(!gate.ok && gate.stopped)) {
         t.alone = undefined
         this.save()
       }
