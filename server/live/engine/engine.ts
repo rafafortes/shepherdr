@@ -17,6 +17,7 @@ import { STATUS_MAX, TITLE_MAX, type Question, type Report, type Task, type Task
 import { clockWords, startsLine } from '../../../shared/when.ts'
 import { Emitter } from '../../source.ts'
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
 import { home, readJson, writeJson } from '../../store.ts'
 import { ROOT } from '../../root.ts'
@@ -312,16 +313,25 @@ const alive = (pid: number) => {
 }
 
 /** a merge gate's command, in a session of its own (detached): a restart of Shepherdr, which ends its own process group,
- *  leaves it running, and the Shepherdr that comes back reads its words and exit code from their files */
+ *  leaves it running, and the Shepherdr that comes back reads its words and exit code from their files. The files are
+ *  named for this run (its task, its start and a random part): a stale run of the same task, still going after a newer
+ *  one began, writes its exit code to its own files, never over the newer run's */
 export function startGate(cmd: string, wt: string, env: Record<string, string>, dir: string, id: string, at: { head: string; tip: string }): GateRun {
   fs.mkdirSync(dir, { recursive: true })
-  const log = join(dir, `${id}.log`)
-  const exit = join(dir, `${id}.exit`)
+  const start = Date.now()
+  const name = `${id}-${start}-${randomUUID().slice(0, 8)}`
+  const log = join(dir, `${name}.log`)
+  const exit = join(dir, `${name}.exit`)
   for (const f of [log, exit]) fs.rmSync(f, { force: true })
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
   const c = spawn('/bin/sh', ['-c', `(${cmd}) > ${q(log)} 2>&1; echo $? > ${q(exit)}.tmp && mv ${q(exit)}.tmp ${q(exit)}`], { cwd: wt, env: { ...process.env, ...env }, detached: true, stdio: 'ignore' })
   c.unref()
-  return { pid: c.pid ?? 0, log, exit, at: Date.now(), ...at }
+  return { pid: c.pid ?? 0, log, exit, at: start, ...at }
+}
+
+/** a gate run's files once its outcome is read: nothing keeps them, each run has its own */
+function forgetGate(run: GateRun) {
+  for (const f of [run.log, run.exit, `${run.exit}.tmp`]) fs.rmSync(f, { force: true })
 }
 
 /** a gate's end: its exit code and words; past timeoutMs from its start, its process group is killed (124); gone with no
@@ -2406,6 +2416,7 @@ export class Engine extends Emitter<Events> {
     const ran = await waitGate(run, this.gateTimeout)
     t.gateRun = undefined
     this.save()
+    forgetGate(run)
     return ran
   }
 

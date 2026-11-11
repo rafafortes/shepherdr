@@ -1,7 +1,7 @@
 // shepherdr merge on a real git repo (engine-world.ts): it squash-merges into main and cleans up, here (rebased) or
 // through a pull request on GitHub (a stand-in; rebased only on a conflict).
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { sh, repo, world, until, started, G, Settings } from './engine-world.ts'
@@ -206,6 +206,8 @@ describe('shepherdr merge', () => {
       const { w, dir, t } = await gated('gate-ok', 'test -f hello.txt && echo checking && echo "Merge gate: green for $SHEPHERDR_TASK on $SHEPHERDR_BASE"')
       expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
       expect(sh('git log -1 --format=%b', dir)).toBe(`Added hello.txt.\n\nMerge gate: green for ${t.id} on main`)
+      // a run's files go once its outcome is read
+      expect(readdirSync(join(process.env.SHEPHERDR_HOME!, 'gates'))).toEqual([])
       expect(w.engine.statusOf(t)).toBe('done')
     })
 
@@ -351,6 +353,22 @@ describe('shepherdr merge', () => {
       t.landing = { step: 'merge', at: Date.now() }
       w.engine.resumeMerges()
       expect(w.engine.subOf(t)).toBe('Merge interrupted by a restart: run shepherdr merge again')
+    })
+
+    test('a stale run of the same task, still going after a newer one began, never writes over the newer run\'s exit code', async () => {
+      const { startGate, waitGate } = await import('../server/live/engine/engine.ts')
+      const dir = tmp('gate-stale')
+      const goOld = join(dir, 'go-old')
+      const goNew = join(dir, 'go-new')
+      // the run a restart left going (its head is no longer the one a merge asks for), and the one that replaced it
+      const old = startGate(`while [ ! -f ${goOld} ]; do sleep 0.05; done; echo old; exit 0`, dir, {}, dir, 'STALE-1', { head: 'h1', tip: 't' })
+      const fresh = startGate(`while [ ! -f ${goNew} ]; do sleep 0.05; done; echo new; exit 3`, dir, {}, dir, 'STALE-1', { head: 'h2', tip: 't' })
+      expect(fresh.exit).not.toBe(old.exit)
+      writeFileSync(goOld, 'go\n')
+      await until(() => existsSync(old.exit))
+      writeFileSync(goNew, 'go\n')
+      expect(await waitGate(fresh, 10_000)).toEqual({ code: 3, out: 'new' })
+      expect(readFileSync(old.exit, 'utf8').trim()).toBe('0')
     })
 
     /** `n` tasks of one repo, each with a file of its own committed and reported done; its gate waits for `go-<id>` */
@@ -532,7 +550,6 @@ describe('shepherdr merge', () => {
         expect((await Promise.all(runs)).map((r) => r.ok)).toEqual([true, true, true, true])
         expect(ran()).toEqual([x.id, a.id])
       })
-
 
       test('a restart while the train\'s gate runs: the head re-attaches to its run, the riders resume in line, and the train lands', async () => {
         const { w, dir, ts, go, ran } = await train('train-restart', 3, '3')
