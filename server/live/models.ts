@@ -1,8 +1,9 @@
 // What each CLI's models and effort levels really are, so the + menu, Settings and task add offer only what it takes.
 // Each CLI is asked itself where it can tell: Claude Code's own model catalog in its install (which models it knows
 // and which take xhigh and max) and its --help, `codex debug models`, `pi --list-models` and pi's --help. What they
-// said is kept in cli-models.json and asked again by version (claude) or every few hours; until then, or where a CLI
-// can't tell, the table below holds. A level a model lacks becomes the nearest it has (nearest), never an error at start.
+// said is kept in cli-models.json and asked again by version (claude), as soon as pi's own files change (a provider or
+// model added to its models.json, a login), or every few hours; until then, or where a CLI can't tell, the table below
+// holds. A level a model lacks becomes the nearest it has (nearest), never an error at start.
 // pi lists every model of every provider it has a login for: where its settings name the models it cycles through
 // (enabledModels), the menus offer only those, and the rest stay usable by id (others).
 import { readFileSync, realpathSync, statSync } from 'node:fs'
@@ -180,8 +181,8 @@ function ask(kind: string) {
   if (Date.now() - (looked.get(kind) ?? 0) < 60_000) return
   looked.set(kind, Date.now())
   const c = cache[kind]
-  const from = kind === 'claude' ? claudeBinary() : undefined
-  if (c && (kind === 'claude' ? c.from === from : Date.now() - (c.at ?? 0) < STALE)) return
+  const from = kind === 'claude' ? claudeBinary() : kind === 'pi' ? piFrom() : undefined
+  if (stillHolds(kind, c, from)) return
   if (asking.has(kind)) return
   asking.add(kind)
   read(kind, from)
@@ -192,6 +193,30 @@ function ask(kind: string) {
     })
     .catch(() => {})
     .finally(() => asking.delete(kind))
+}
+
+/**
+ * What pi's list is made from: its providers and their models (models.json) and its logins (auth.json), by when each
+ * last changed. Only looked at, never read: a model added there is in the menus within a minute, not hours later. (A new
+ * version of pi itself waits for STALE: npm keeps the same paths and dates across versions.)
+ */
+export function piFrom(dir = piHome()) {
+  const at = (f: string) => {
+    try {
+      return statSync(join(dir, f)).mtimeMs
+    } catch {
+      return 0
+    }
+  }
+  return `models.json@${at('models.json')} auth.json@${at('auth.json')}`
+}
+
+/** whether a list kept from before still holds: claude's while its install is the same one; pi's while its files are
+ *  as they were, for STALE at most; another CLI's for STALE */
+export function stillHolds(kind: string, c: CliModels | undefined, from: string | undefined, now = Date.now()) {
+  if (!c) return false
+  if (kind === 'claude') return c.from === from
+  return (kind !== 'pi' || c.from === from) && now - (c.at ?? 0) < STALE
 }
 
 /** the Claude Code install that runs, by its path and when it changed: a new version is read again */

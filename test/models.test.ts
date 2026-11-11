@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test'
 import { utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { effortFor, findModel, helpLevels, modelsOf, nearest, parseClaude, parseCodex, parsePi, piEnabled, scopePi, setModels } from '../server/live/models.ts'
+import { effortFor, findModel, helpLevels, modelsOf, nearest, parseClaude, parseCodex, parsePi, piEnabled, piFrom, scopePi, setModels, stillHolds } from '../server/live/models.ts'
 import { tmp } from './tmp.ts'
 
 describe('reading what each CLI takes', () => {
@@ -97,6 +97,39 @@ describe('reading what each CLI takes', () => {
       else process.env.PI_CODING_AGENT_DIR = was
     }
   })
+  test("pi's list is asked again as soon as its models.json or its logins change, and every few hours anyway", () => {
+    const dir = tmp('pi-from')
+    const models = join(dir, 'models.json')
+    // no files yet: a pi with nothing of its own
+    const none = piFrom(dir)
+    expect(none).toBe('models.json@0 auth.json@0')
+    writeFileSync(models, '{"providers":{}}')
+    utimesSync(models, new Date(), new Date(1_800_000_000_000))
+    const one = piFrom(dir)
+    expect(one).not.toBe(none)
+    // looked at again with nothing changed: the same
+    expect(piFrom(dir)).toBe(one)
+    // a model added to a provider (the Spark's new resident)
+    utimesSync(models, new Date(), new Date(1_800_000_060_000))
+    const two = piFrom(dir)
+    expect(two).not.toBe(one)
+    // a new login
+    writeFileSync(join(dir, 'auth.json'), '{}')
+    expect(piFrom(dir)).not.toBe(two)
+    const kept = { models: [{ id: 'spark/qwen', label: 'spark/qwen', efforts: [] }], efforts: [], from: two, at: 1_000 }
+    expect(stillHolds('pi', kept, two, 2_000)).toBe(true)
+    expect(stillHolds('pi', kept, piFrom(dir), 2_000)).toBe(false)
+    // one kept before pi's files were looked at holds nothing: it is asked again once
+    expect(stillHolds('pi', { ...kept, from: undefined }, two, 2_000)).toBe(false)
+    expect(stillHolds('pi', kept, two, 1_000 + 6 * 3_600_000)).toBe(false)
+    // claude by its install alone; another CLI by the hours alone; none kept holds nothing
+    expect(stillHolds('claude', { ...kept, from: 'bin@1' }, 'bin@1', 1e15)).toBe(true)
+    expect(stillHolds('claude', { ...kept, from: 'bin@1' }, 'bin@2', 2_000)).toBe(false)
+    expect(stillHolds('codex', kept, undefined, 2_000)).toBe(true)
+    expect(stillHolds('codex', kept, undefined, 1_000 + 6 * 3_600_000)).toBe(false)
+    expect(stillHolds('pi', undefined, two)).toBe(false)
+  })
+
   test("pi's scoped list is kept while neither its list nor its enabledModels change", () => {
     // a snapshot asks for pi's models thousands of times (each place's restart hint): scoping them every time made it
     // take seconds, and the screen never loaded

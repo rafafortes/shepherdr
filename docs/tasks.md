@@ -97,12 +97,15 @@
   ran, the branch is rebased on it and the gate runs again (three times at most). It is never a git hook: a hook that
   refuses an update leaves what it would write in the space's checkout. The gate runs detached, its words and exit code
   in files of their own, so a restart of Shepherdr (an update) leaves it running: the Shepherdr that comes back goes on
-  from it and merges once it passes. A merge a restart cut short with nothing left of it is back at its turn, its row
-  reading `Merge gate interrupted by a restart: run shepherdr merge again` and its agent told so.
+  from it and merges once it passes. A merge that only waited in line takes its place in line again by itself, in the
+  order it had, and its agent hears how it went. A merge a restart cut short with nothing left of it (a gate that was
+  stopped, or the merge itself halfway) is back at its turn, its row reading `Merge gate interrupted by a restart: run
+  shepherdr merge again` and its agent told so.
 - A merge that waits in line behind another, or runs its gate, past `shepherdr merge`'s 90 s: its agent is told to end
   its turn instead of polling, and Shepherdr wakes it with how it went (merged, refused with the gate's lines, or a
   conflict). Waiting in line or in its gate, a task holds none of the machine's slots: its repo's merges go one at a
-  time already.
+  time already. Its row names the merge that runs now (`Waiting for the merge gate (POL-223's runs)`), and moves on
+  to the next as each one ends.
 - A task that goes back to work in the worktree it had (its agent starts again, the way back moves it to its primary, a
   backup takes it over, a queued task gets its go, or words take its agent back from rest: your answer on a card, the
   advisor's, a message to a task that waits on you, is To do or reported ready) is first brought up to its base: what was merged meanwhile (build

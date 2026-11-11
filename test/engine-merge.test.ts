@@ -349,6 +349,69 @@ describe('shepherdr merge', () => {
       expect(w.engine.subOf(t)).toBe('Merge interrupted by a restart: run shepherdr merge again')
     })
 
+    /** `n` tasks of one repo, each with a file of its own committed and reported done; its gate waits for `go-<id>` */
+    async function line(name: string, n: number) {
+      const w = world()
+      const dir = repo()
+      const gates = tmp(`${name}-go`)
+      const a = await started(w, dir, name, 'Task 1', 'Add 1.txt.')
+      expect(w.settings.set('merge.gate', `while [ ! -f ${gates}/go-$SHEPHERDR_TASK ]; do sleep 0.05; done; echo "Gate: green for $SHEPHERDR_TASK"`, { space: a.p.name }).ok).toBe(true)
+      const ts = [a.t]
+      for (let i = 2; i <= n; i++) ts.push(w.engine.add({ project: a.p.name, title: `Task ${i}`, desc: `Add ${i}.txt.`, by: 'test' }))
+      await until(() => ts.every((t) => !!t.worktree))
+      for (const [i, t] of ts.entries()) {
+        writeFileSync(join(t.worktree!, `${i + 1}.txt`), `${i + 1}\n`)
+        sh(`git add -A && git commit -qm "add ${i + 1}"`, t.worktree!)
+        await w.engine.done(t.id, `Added ${i + 1}.txt.`)
+      }
+      const go = (t: { id: string }) => writeFileSync(join(gates, `go-${t.id}`), 'go\n')
+      return { w, dir, ts, go, gates }
+    }
+
+    test('in line, its row names the merge that runs now, and moves on to the next as each one ends', async () => {
+      const { w, ts, go } = await line('gate-now', 3)
+      const [a, b, c] = ts
+      const runs = [w.engine.merge(a.id, { self: true })]
+      await until(() => a.landing?.step === 'gate')
+      runs.push(w.engine.merge(b.id, { self: true }), w.engine.merge(c.id, { self: true }))
+      expect(w.engine.subOf(b)).toBe(`Waiting for the merge gate (${a.id}'s runs)`)
+      expect(w.engine.subOf(c)).toBe(`Waiting for the merge gate (${a.id}'s runs)`)
+      go(a)
+      await until(() => b.landing?.step === 'gate')
+      // the one ahead is through: the last in line now waits on the one gating, not on the one it first stood behind
+      expect(w.engine.subOf(c)).toBe(`Waiting for the merge gate (${b.id}'s runs)`)
+      go(b)
+      go(c)
+      expect((await Promise.all(runs)).map((r) => r.ok)).toEqual([true, true, true])
+    })
+
+    test('a merge that only waited in line goes on by itself after a restart, behind the gate that went on, as it stood', async () => {
+      const { w, dir, ts, go, gates } = await line('gate-requeue', 3)
+      const [g, q1, q2] = ts
+      const { startGate } = await import('../server/live/engine/engine.ts')
+      // as a restart leaves them: g in its gate, its process going on by itself; q1 and q2 in line (q2 first), though
+      // their places come after g's
+      sh('git rebase -q main', g.worktree!)
+      const head = sh('git rev-parse HEAD', g.worktree!)
+      g.landing = { step: 'gate', at: 3 }
+      g.gateRun = startGate(`while [ ! -f ${gates}/go-${g.id} ]; do sleep 0.05; done; echo "Gate: green for ${g.id}"`, g.worktree!, {}, tmp('gate-requeue-files'), g.id, { head, tip: sh('git rev-parse main', dir) })
+      q1.landing = { step: 'queue', at: 2, behind: 'GONE-1', gate: true }
+      q2.landing = { step: 'queue', at: 1, behind: 'GONE-1', gate: true }
+      w.engine.resumeMerges()
+      await until(() => w.engine.subOf(q1) === `Waiting for the merge gate (${g.id}'s runs)`)
+      expect(w.engine.subOf(q2)).toBe(`Waiting for the merge gate (${g.id}'s runs)`)
+      for (const t of ts) go(t)
+      await until(() => ts.every((t) => w.engine.statusOf(t) === 'done'))
+      // g first, then the two in the order they stood in line
+      expect(sh('git log --format=%s -n 4', dir).split('\n')).toEqual([`${q1.id}: Task 2`, `${q2.id}: Task 3`, `${g.id}: Task 1`, 'init'])
+      for (const t of ts) {
+        const said = w.sent.filter((x) => x.key === `${t.id}/Agent`).map((x) => x.text)
+        await until(() => w.sent.some((x) => x.key === `${t.id}/Agent` && x.text.includes('Your merge went in')))
+        // nobody was asked to merge again
+        expect(said.some((x) => x.includes('Run shepherdr merge'))).toBe(false)
+      }
+    })
+
     test('a gate killed from outside is no answer: the merge says it was stopped, and nothing went in', async () => {
       const { w, dir, t } = await gated('gate-killed', 'sleep 30')
       const main = sh('git rev-parse main', dir)

@@ -490,13 +490,17 @@ export class Engine extends Emitter<Events> {
 
   /**
    * Merges a restart of Shepherdr cut short: a gate that went on by itself (startGate) is found again, and its merge goes
-   * on from it, its agent told how it went; any other merge in flight went with the server that ran it, so the task is
-   * back at its turn, its row and its agent saying to merge again.
+   * on from it, its agent told how it went; a merge that only waited in line takes its place in line again, in the
+   * order it had, and its agent hears how it went as well; any other merge in flight went with the server that ran it,
+   * so the task is back at its turn, its row and its agent saying to merge again.
    */
   resumeMerges() {
-    for (const t of this.tasks.filter((x) => !ended(x) && !this.landings.has(x.id) && x.landing && ['gate', 'merge', 'queue'].includes(x.landing.step))) {
+    const cut = this.tasks.filter((x) => !ended(x) && !this.landings.has(x.id) && x.landing && ['gate', 'merge', 'queue'].includes(x.landing.step))
+    // the gate that goes on is first in its repo's line, then those that waited, as they stood
+    const rank = (x: TaskRec) => (x.landing!.step === 'gate' ? 0 : x.landing!.step === 'queue' ? 1 : 2)
+    for (const t of cut.sort((a, b) => rank(a) - rank(b) || a.landing!.at - b.landing!.at)) {
       const g = t.gateRun
-      if (t.landing!.step === 'gate' && g && (fs.existsSync(g.exit) || alive(g.pid))) {
+      if ((t.landing!.step === 'gate' && g && (fs.existsSync(g.exit) || alive(g.pid))) || t.landing!.step === 'queue') {
         this.lateFor.add(t.id)
         void this.merge(t.id, { self: true }).catch(() => undefined)
         continue
@@ -2697,6 +2701,7 @@ export class Engine extends Emitter<Events> {
       const now = (this.merging.get(repo) ?? Promise.resolve())
         .then(() => {
           this.mergingNow.set(repo, t.id)
+          this.inLineBehind(repo, t)
           return this.onGitHub(() => this.mergeNow(t, !!opts.self), (error) => ({ ok: false, error: `Can't merge ${t.id}: ${error}` }))
         })
         .finally(() => this.mergingNow.get(repo) === t.id && this.mergingNow.delete(repo))
@@ -2725,6 +2730,18 @@ export class Engine extends Emitter<Events> {
       }, this.mergeDeadline)
     })
     return Promise.race([run, late]).finally(() => clearTimeout(timer))
+  }
+
+  /** `t`'s merge into `repo` takes its turn: each merge still in line there now waits behind it, and its row says so */
+  private inLineBehind(repo: string, t: TaskRec) {
+    let moved = false
+    for (const x of this.tasks) {
+      if (x === t || x.landing?.step !== 'queue' || x.landing.behind === t.id || (this.places.space(x.project)?.path ?? '') !== repo) continue
+      x.landing = { ...x.landing, behind: t.id }
+      this.settle(x)
+      moved = true
+    }
+    if (moved) this.save()
   }
 
   /**
