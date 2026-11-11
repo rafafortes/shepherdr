@@ -276,7 +276,7 @@ symptoms. So it is ours to fix, and it is the highest-value row here even though
 
 Checked 2026-11-11 against upstream `main` (`be647c82`, 3.1.32) and `v2.0` (`ebb17d58`), code, history, issues and pull requests: neither merges several
 tasks on one gate run. Upstream's only merge queue is GitHub's own (SHEP-160 on `main`, for repos that have one), which
-a merge made here never reaches. So the train is ours: `merge.train` on `herdr-tui`, merges made here only; see
+a merge made here never reaches. So the train is ours: `merge.train`, for merges made here only; see
 [docs/tasks.md](tasks.md).
 
 ## Ranked: adopt and port, by value to us
