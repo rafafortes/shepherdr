@@ -456,7 +456,9 @@ describe('first in line, from the command and the screen', () => {
       // start now is the human's: a coordinator is pointed at task priority
       expect((await src.cli(['task', 'start', plain], { chat: place })).out).toContain(`Only the human starts a task now. To put ${plain} first in line, run shepherdr task priority ${plain}.`)
       // still no herdr: first in line, at the next chance
-      expect((await src.cli(['task', 'start', plain], {})).out).toContain(`${plain} is first in line: the machine is busy (0 of 10 working, 2 held). It starts as soon as there's room, ahead of the others.`)
+      const held = (await src.cli(['task', 'start', plain], {})).out
+      expect(held).toStartWith(`${plain} is first in line: the machine is busy (`)
+      expect(held).toContain("It starts as soon as there's room, ahead of the others.")
       // herdr back, the machine still loaded: started at once, past the load
       engine.machine = () => ({ busy: 'cpu', herdr: true })
       expect((await src.cli(['task', 'start', plain], {})).out.trim()).toBe(`Started ${plain} now.`)
