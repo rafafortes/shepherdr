@@ -879,6 +879,25 @@ describe('shepherdr merge', () => {
         ])
       })
 
+      test('a train takes as many as merge.train and says who waits for the next one', async () => {
+        const { w, dir, ts, go, heads } = await train('train-full', 5, '3')
+        const [g, x, a, b, c] = ts
+        const runs = [w.engine.merge(g.id, { self: true })]
+        await until(() => g.landing?.step === 'gate')
+        runs.push(w.engine.merge(x.id, { self: true }), w.engine.merge(a.id, { self: true }), w.engine.merge(b.id, { self: true }), w.engine.merge(c.id, { self: true }))
+        go(g)
+        // x heads a train of three; c is in line behind it and goes alone, on its own turn
+        await until(() => x.landing?.cars === 3)
+        go(x)
+        await until(() => c.landing?.step === 'gate')
+        go(c)
+        expect((await Promise.all(runs)).map((r) => r.ok)).toEqual([true, true, true, true, true])
+        expect(decisions()).toEqual([
+          `shepherdr: ${x.id}'s merge train: ${x.id}, ${a.id}, ${b.id} (one gate run on ${heads()[1]}, main at ${short(dir, g.squash)}). Left out: ${c.id} waits (the train is full at 3)`,
+          `shepherdr: ${x.id}'s merge train went in: ${x.id} ${short(dir, x.squash)}, ${a.id} ${short(dir, a.squash)}, ${b.id} ${short(dir, b.squash)}`,
+        ])
+      })
+
       test('a turn with nobody else in line says nothing about the train', async () => {
         const { w, ts, go } = await train('train-quiet', 1, '3')
         go(ts[0])
