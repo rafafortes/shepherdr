@@ -307,7 +307,10 @@ describe('shepherdr merge', () => {
     test('a merge that runs past its deadline tells its agent to end its turn, then wakes it with how it went', async () => {
       const go = join(tmp('gate-late'), 'go')
       const { w, t, key } = await gated('gate-late', `while [ ! -f ${go} ]; do sleep 0.05; done; echo "Gate: green"`)
-      w.engine.mergeDeadline = 300
+      const run = w.engine.merge(t.id, { self: true })
+      // in its gate (a loaded machine takes a while to get there): asked now, its deadline says so
+      await until(() => t.landing?.step === 'gate')
+      w.engine.mergeDeadline = 100
       const first = await w.engine.merge(t.id, { self: true })
       expect(first.error).toContain(`${t.id}'s merge is in its gate: its merge gate still runs`)
       expect(first.error).toContain('end your turn now, without polling or sleeping')
@@ -316,6 +319,7 @@ describe('shepherdr merge', () => {
       writeFileSync(go, 'go\n')
       await until(() => w.sent.some((x) => x.key === key && x.text.includes('Your merge went in')))
       expect(w.engine.statusOf(t)).toBe('done')
+      expect((await run).ok).toBe(true)
     })
 
     test('a restart leaves its gate running: the Shepherdr that comes back goes on from it, and its agent hears how it went', async () => {
@@ -383,6 +387,33 @@ describe('shepherdr merge', () => {
       go(b)
       go(c)
       expect((await Promise.all(runs)).map((r) => r.ok)).toEqual([true, true, true])
+    })
+
+    test("written to after it reported, its own merge still puts it on its way into main: never Needs you while it waits", async () => {
+      // a coordinator's "rebase on main and run shepherdr merge" makes it work again, not done; its agent then merges
+      const { w, ts, go } = await line('gate-asked', 3)
+      const [a, b, c] = ts
+      const first = w.engine.merge(a.id, { self: true })
+      await until(() => a.landing?.step === 'gate')
+      w.engine.youWrote(`${b.id}/Agent`)
+      expect(b.reported).toBe(false)
+      const second = w.engine.merge(b.id, { self: true })
+      expect(b.reported).toBe(true)
+      expect(w.engine.statusOf(b)).toBe('merging')
+      expect(w.engine.subOf(b)).toBe(`Waiting for the merge gate (${a.id}'s runs)`)
+      // a restart finds it in line, as any other
+      expect(b.landing?.step).toBe('queue')
+      // asked by you or a coordinator, with its agent at rest: once it goes in, it is merging too
+      w.engine.youWrote(`${c.id}/Agent`)
+      w.agentIs(`${c.id}/Agent`, 'idle')
+      const third = w.engine.merge(c.id)
+      expect(c.reported).toBe(false)
+      for (const t of [a, b]) go(t)
+      await until(() => c.landing?.step === 'gate')
+      expect(c.reported).toBe(true)
+      expect(w.engine.statusOf(c)).toBe('merging')
+      go(c)
+      expect((await Promise.all([first, second, third])).map((r) => r.ok)).toEqual([true, true, true])
     })
 
     test('a merge that only waited in line goes on by itself after a restart, behind the gate that went on, as it stood', async () => {

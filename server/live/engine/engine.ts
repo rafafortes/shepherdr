@@ -2689,6 +2689,13 @@ export class Engine extends Emitter<Events> {
     if (this.closing) return Promise.resolve({ ok: false, error: `Shepherdr is restarting: nothing was merged. Run shepherdr merge ${t.id} again in a minute.` })
     // asked again while its merge still runs: the same one is waited for, never a second beside it
     let run = this.landings.get(t.id)
+    // its own agent asking to merge says its work is ready, as shepherdr done does: one written to since it reported (a
+    // coordinator's "rebase on main and merge") is on its way into main, and its row, its place in line and a restart
+    // say so; never Needs you while its agent waits, as told, for how it went
+    if (!run && opts.self && !t.reported && !ended(t)) {
+      t.reported = true
+      this.save()
+    }
     if (!run) {
       const repo = this.places.space(t.project)?.path ?? ''
       // in line behind another merge into its repo: its row says whose, and whether that one runs the gate
@@ -2765,6 +2772,8 @@ export class Engine extends Emitter<Events> {
     // a late note from you or a coordinator, not read yet, may change what goes in
     if (this.chats.unseen(this.key(t)).length)
       return { ok: false, error: self ? 'You have a new message in your chat: read and handle it, then merge again.' : `${t.id}'s agent has a new message it hasn't read yet: let it handle that first.` }
+    // asked by you or a coordinator, with its agent at rest: going in, it is on its way into main as one reported is
+    if (!t.reported) t.reported = true
     this.land(t, 'merge')
     t.mergeStop = undefined
     const p = this.proj(t)

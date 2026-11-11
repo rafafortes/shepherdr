@@ -105,7 +105,9 @@
   its turn instead of polling, and Shepherdr wakes it with how it went (merged, refused with the gate's lines, or a
   conflict). Waiting in line or in its gate, a task holds none of the machine's slots: its repo's merges go one at a
   time already. Its row names the merge that runs now (`Waiting for the merge gate (POL-223's runs)`), and moves on
-  to the next as each one ends.
+  to the next as each one ends. A task written to after it reported (a coordinator's "rebase on main and merge") is
+  working again, not done; its own `shepherdr merge` says it is done again, so it shows as Merging, never Needs you,
+  while its agent waits as told.
 - A task that goes back to work in the worktree it had (its agent starts again, the way back moves it to its primary, a
   backup takes it over, a queued task gets its go, or words take its agent back from rest: your answer on a card, the
   advisor's, a message to a task that waits on you, is To do or reported ready) is first brought up to its base: what was merged meanwhile (build
