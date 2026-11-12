@@ -131,7 +131,7 @@ and its chain is whole again for the next time; every model of a role has run ou
 ## When the primary is back
 
 A backup takes over by itself when the primary can't go on; this is the way back. Settings → Agents → **When the
-primary is back** (`backup.watchReturn`, in a Backups group of its own at the end: it applies to every backup above;
+primary is back** (`backup.watchReturn`, in a group of its own at the end, Back to the primary: it applies to every backup above;
 Everywhere, for a machine or for a space, the most specific one set wins)
 asks the primary now and then whether it answers again, and then:
 

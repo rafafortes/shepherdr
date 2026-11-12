@@ -745,12 +745,12 @@ const runsOf = (rows: Item[]) =>
     return runs
   }, [])
 
-/** a role's backups under its own rows: a small heading (a labelled group for a screen reader), indented with a thin rule
- *  down its left, as a nested list has it; in a phone's group, its own rounded group inside the indent */
+/** a role's backups under its own rows: a small heading (a labelled group for a screen reader), indented with a 2px rule
+ *  down its left (fg3 at half strength: visible in light and dark, under the words), as a nested list has it; in a phone's group, its own rounded group inside the indent */
 function SubBlock({ name, phone, children }: { name: string; phone: boolean; children: ReactNode }) {
   const id = useId()
   return (
-    <div role="group" aria-labelledby={id} className={clsx('mt-3 border-l border-line', phone ? 'ml-2 pl-2' : 'ml-1 pl-4')}>
+    <div role="group" aria-labelledby={id} className={clsx('mt-3 border-l-2 border-fg3/50', phone ? 'ml-2 pl-2' : 'ml-1 pl-4')}>
       <h4 id={id} className={subHeading(phone)}>
         {name}
       </h4>

@@ -43,7 +43,7 @@ describe.skipIf(!browser)('backups under their role on Settings → Agents', () 
       await settings.getByRole('button', { name: 'Agents', exact: true }).click()
       await settled(page)
       // the headings in order: each role, its Backups sub-heading, then the way back's group
-      expect(await headingsOf(settings)).toEqual(['Tasks', 'Backups', 'Coordinators', 'Backups', 'Advisor', 'Backups', 'Backups'])
+      expect(await headingsOf(settings)).toEqual(['Tasks', 'Backups', 'Coordinators', 'Backups', 'Advisor', 'Backups', 'Back to the primary'])
       // a role's own three rows, then its Backups sub-block with its rows and the add button, last inside the sub-block
       expect(await rowNames(groupOf(settings, 'Tasks'))).toEqual(['Agent', 'Model', 'Effort', 'Backup', 'Backup model', 'Backup effort', 'Add a backup'])
       expect(await rowNames(backupsOf(groupOf(settings, 'Tasks')))).toEqual(['Backup', 'Backup model', 'Backup effort', 'Add a backup'])
@@ -56,7 +56,7 @@ describe.skipIf(!browser)('backups under their role on Settings → Agents', () 
       // the way back: a group of its own, outside every role's sub-block
       const back = settings.getByRole('button', { name: /^When the primary is back:/ })
       expect(await back.evaluate((el) => el.closest('[role="group"]'))).toBeNull()
-      expect(await rowNames(groupOf(settings, 'Backups'))).toEqual(['When the primary is back'])
+      expect(await rowNames(groupOf(settings, 'Back to the primary'))).toEqual(['When the primary is back'])
 
       // the sub-block is indented from its role's rows and has a rule down its left (computed, not guessed)
       const roleRows = (await groupOf(settings, 'Tasks').locator(':scope > dl').first().boundingBox())!
@@ -64,7 +64,7 @@ describe.skipIf(!browser)('backups under their role on Settings → Agents', () 
       const subRows = (await sub.locator(':scope > dl').boundingBox())!
       expect(subRows.x - roleRows.x).toBeGreaterThanOrEqual(16)
       const rule = await sub.evaluate((el) => ({ width: getComputedStyle(el).borderLeftWidth, style: getComputedStyle(el).borderLeftStyle, color: getComputedStyle(el).borderLeftColor }))
-      expect(rule).toEqual({ width: '1px', style: 'solid', color: expect.stringMatching(/^rgba\(/) })
+      expect(rule).toEqual({ width: '2px', style: 'solid', color: expect.stringMatching(/(\/ 0\.5\)|,\s*0\.5\))$/) }) // fg3 at half strength, not the 7% line
 
       // a 2nd backup of the tasks lands inside the tasks' sub-block, not the coordinators'
       await backupsOf(groupOf(settings, 'Tasks')).getByRole('button', { name: 'Add a backup', exact: true }).click()
@@ -89,7 +89,7 @@ describe.skipIf(!browser)('backups under their role on Settings → Agents', () 
       const settings = page.getByRole('region', { name: 'Settings' })
       await settings.getByRole('button', { name: 'Agents', exact: true }).tap()
       await settled(page)
-      expect(await headingsOf(settings)).toEqual(['Tasks', 'Backups', 'Coordinators', 'Backups', 'Advisor', 'Backups', 'Backups'])
+      expect(await headingsOf(settings)).toEqual(['Tasks', 'Backups', 'Coordinators', 'Backups', 'Advisor', 'Backups', 'Back to the primary'])
       // the coordinators' Backup 1 is off: its sub-block has no add button, and its Model is still a row of its own
       expect(await rowNames(backupsOf(groupOf(settings, 'Coordinators')))).toEqual(['Backup', 'Backup model', 'Backup effort'])
       // indented: the sub-block's rounded group starts right of the role's own

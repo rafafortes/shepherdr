@@ -361,8 +361,8 @@ export const CATALOG: Section[] = [
       // the way back from a backup: the primary is asked, now and then, whether it answers again (source.ts
       // watchReturns, return.ts); go back starts each agent still on the backup again on what Settings name once it is
       // idle, tell me only says so in their chats. A probe is one tiny request of one CLI, never beside work on that model.
-      // It applies to every backup above, so it sits under a group of its own
-      { group: 'Backups', label: 'When the primary is back', key: 'backup.watchReturn', value: 'go back', options: ['go back', 'tell me', 'off'], hint: 'Applies to every backup above. Asks the primary model now and then whether it answers again. Go back: each agent still on a backup starts again on it once idle, never mid-turn. Tell me: only says so in their chats. Off: never asks.' },
+      // It applies to every backup above, so it sits under a group of its own, named for what it does
+      { group: 'Back to the primary', label: 'When the primary is back', key: 'backup.watchReturn', value: 'go back', options: ['go back', 'tell me', 'off'], hint: 'Applies to every backup above. Asks the primary model now and then whether it answers again. Go back: each agent still on a backup starts again on it once idle, never mid-turn. Tell me: only says so in their chats. Off: never asks.' },
     ],
   },
   {

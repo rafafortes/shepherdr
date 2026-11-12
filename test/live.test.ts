@@ -1008,7 +1008,7 @@ describe('settings', () => {
     s.set('brief.review', null)
     const n = (group: string, times: number) => Array<string>(times).fill(group)
     // each role's chain sits under its own rows, in its Backups sub-block; the way back is a group of its own, last
-    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual([...n('Tasks', 3 + 15), ...n('Coordinators', 3 + 15), ...n('Advisor', 3 + 15 + 1), ...n('Backups', 1)])
+    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual([...n('Tasks', 3 + 15), ...n('Coordinators', 3 + 15), ...n('Advisor', 3 + 15 + 1), ...n('Back to the primary', 1)])
     expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.filter((r) => r.sub).map((r) => r.sub).every((x) => x === 'Backups')).toBe(true)
     const agents = s.sections([], [], null).find((x) => x.name === 'Agents')!.rows
     // the way back from a backup: its agents go back to the primary once it answers again
@@ -1016,7 +1016,7 @@ describe('settings', () => {
     // the advisor: off until set, and a question goes to it by itself after two minutes
     expect(agents.find((r) => r.key === 'advisor.agent')).toMatchObject({ value: 'off', options: ['off', 'Codex', 'Claude Code', 'pi'] })
     expect(agents.find((r) => r.key === 'advisor.after')).toMatchObject({ group: 'Advisor', label: 'Answers for you after', value: '2 min' })
-    expect(agents.at(-1)).toMatchObject({ key: 'backup.watchReturn', group: 'Backups' })
+    expect(agents.at(-1)).toMatchObject({ key: 'backup.watchReturn', group: 'Back to the primary' })
   })
 
   test("when the primary is back: on, its only other value before going back by itself came, reads as tell me", () => {
