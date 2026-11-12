@@ -107,7 +107,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     const archived = w.engine.add({ project: p.name, title: 'Archived', desc: 'Add d.txt.', by: 'test' })
     archived.archived = Date.now()
     const done = w.engine.add({ project: p.name, title: 'Done', desc: 'Add e.txt.', by: 'test' })
-    done.merged = Date.now()
+    done.merged = true
     const before = [work.desc, asking.desc, archived.desc, done.desc]
     expect(w.settings.set('reviewer.agent', 'pi', { space: p.name }).ok).toBe(true)
     expect(w.engine.retuneReviewers({ space: p.name })).toEqual({ changed: 0, same: 0, follow: 0, pinned: 0, running: 2, kept: [], spaces: [] })
