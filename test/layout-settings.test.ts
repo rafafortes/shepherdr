@@ -336,6 +336,8 @@ describe.skipIf(!browser)('repository base', () => {
 describe.skipIf(!browser)('a task agent saved, and the tasks already waiting', () => {
   /** the demo's tasks back as they were, and its Settings for the spaces this file changes */
   const reset = async () => {
+    // Everywhere's agent too (the phone test sets it), on both machines
+    for (const store of Object.values(world.stores)) store.set('task.agent', null, 'all')
     for (const space of ['herdr-projects', 'lilla-varlden'] as const) {
       world.stores[space === 'lilla-varlden' ? 'mac' : 'vm-str'].set('task.agent', null, { space })
     }
