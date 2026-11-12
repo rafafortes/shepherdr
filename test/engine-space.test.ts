@@ -2,7 +2,7 @@
 // have room. A space at its cap holds its next task as Waiting for a free slot of its space, and no other space waits
 // for it; a first in line passes neither limit (engine-world.ts).
 import { describe, expect, test } from 'bun:test'
-import { repo, started, until, world } from './engine-world.ts'
+import { placeId, repo, started, until, world } from './engine-world.ts'
 
 /** a fresh world with nothing from earlier tests; the machine's limits as given, its spacing off unless set */
 function fresh(limits: Record<string, string> = {}) {
@@ -90,7 +90,7 @@ describe("a space's own cap inside the machine's limit", () => {
     expect(a2.held).toBeUndefined()
     // a cap set, then off again: the same
     cap(w, a.p.name, '1')
-    expect(w.engine.spaceCap(a.t)).toEqual({ space: a.p.name, max: 1, working: 2 })
+    expect(w.engine.spaceCap(a.t)).toEqual({ space: a.p.name, shown: a.p.name, max: 1, working: 2 })
     cap(w, a.p.name, 'off')
     expect(w.engine.spaceCap(a.t)).toBeUndefined()
     expect(w.engine.room(a.t)).toEqual({ why: 'slots' })
@@ -123,9 +123,42 @@ describe("a space's own cap inside the machine's limit", () => {
     expect(w.engine.room(b.t)).toEqual({})
     // Everywhere's 1 caps the space that has none of its own, not a space with its own value
     expect(w.settings.set('space.maxTasks', '1', 'all').ok).toBe(true)
-    expect(w.engine.spaceCap(b.t)).toEqual({ space: b.p.name, max: 1, working: 1 })
-    expect(w.engine.spaceCap(a.t)).toEqual({ space: a.p.name, max: 1, working: 1 })
+    expect(w.engine.spaceCap(b.t)).toEqual({ space: b.p.name, shown: b.p.name, max: 1, working: 1 })
+    expect(w.engine.spaceCap(a.t)).toEqual({ space: a.p.name, shown: a.p.name, max: 1, working: 1 })
     cap(w, a.p.name, '4')
-    expect(w.engine.spaceCap(a.t)).toEqual({ space: a.p.name, max: 4, working: 1 })
+    expect(w.engine.spaceCap(a.t)).toEqual({ space: a.p.name, shown: a.p.name, max: 4, working: 1 })
+  })
+})
+
+describe('a renamed space: its cap, held line and card name it as it shows; its settings keep the name it was added under', () => {
+  test('a space added as site-cap and renamed lyvora-site: the cap holds, and the held line and the card say lyvora-site', async () => {
+    const w = fresh({ 'machine.maxTasks': '3' })
+    const a = await started(w, repo(), 'site-cap', 'A1', 'Add a1.txt.')
+    w.places.rename(placeId.space(a.p.name), 'lyvora-site')
+    expect(w.places.shownName(a.p.name)).toBe('lyvora-site')
+    cap(w, a.p.name, '1')
+    w.brief(a.key)
+    const a2 = w.engine.add({ project: a.p.name, title: 'A2', desc: 'Add a2.txt.', by: 'test' })
+    expect(a2.held?.why).toBe('space')
+    expect(w.engine.subOf(a2)).toBe('Waiting for a free slot of lyvora-site')
+    expect(w.posted.some((x) => x.key === `${a2.id}/Agent` && x.id.startsWith('held:') && x.card?.text === 'waiting for a free slot of lyvora-site (1 of 1 of its tasks working)')).toBe(true)
+    expect(startedOf(w, a2.id)).toBe(false)
+    // the cap is found by the name it was added under: it is that space's, and not a space called lyvora-site's
+    expect(w.engine.spaceCap(a.t)).toEqual({ space: a.p.name, shown: 'lyvora-site', max: 1, working: 1 })
+    expect(w.settings.get('space.maxTasks', a.p.name)).toBe('1')
+    expect(w.settings.get('space.maxTasks', 'lyvora-site')).toBe('off')
+    expect(w.engine.room(a2)).toEqual({ why: 'space' })
+    // its task ends: the held one starts, as before the rename
+    await w.engine.done(a.t.id, 'Nothing to change.')
+    w.agentIs(a.key, 'idle')
+    await until(() => startedOf(w, a2.id))
+    expect(a2.held).toBeUndefined()
+  })
+
+  test('a space with no name of its own shows the name it was added under, and so does a name no space has', async () => {
+    const w = fresh()
+    const a = await started(w, repo(), 'plain-cap', 'A1', 'Add a1.txt.')
+    expect(w.places.shownName(a.p.name)).toBe(a.p.name)
+    expect(w.places.shownName('nowhere')).toBe('nowhere')
   })
 })

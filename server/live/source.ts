@@ -2329,7 +2329,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       machine: 'the machine is busy',
       models: 'every model of its space ran out, so it would only be cut off too, until the primary answers again',
       resume: 'the tasks that were cut off go back to work first',
-      space: cap ? `${cap.space}'s own limit of ${cap.max} tasks is taken` : 'its space is at its own limit',
+      space: cap ? `${cap.shown}'s own limit of ${cap.max} tasks is taken` : 'its space is at its own limit',
     }[why]
   }
 
@@ -3603,7 +3603,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         this.settingChanged(a1)
         const applied = waiting ? this.applyWaiting(a1, level) : undefined
         const appliedWords = applied ? (waitingKind(a1) === 'reviewer' ? reviewRetuneLine(applied) : retuneLine(applied)) : undefined
-        const where = pr ? `${named}'s` : level === 'machine' ? `${NAME}'s` : "Everywhere's"
+        // the space as it shows (its settings are keyed by the name it was added under, and --space may name it by that)
+        const where = pr ? `${this.places.nameOf(pr === '~' ? placeId.home() : placeId.space(pr)) ?? named}'s` : level === 'machine' ? `${NAME}'s` : "Everywhere's"
         const now = this.settings.get(a1, pr)
         // a trigger in words too, to tell the human
         return `${a0 === 'unset' ? `${a1}: ${where} own is unset; it is ${now} now.` : `${a1} = ${now} (${where})`}${this.settings.words(a1, now).replace(/^\n\s*/, '\nIn words: ')}${a1.endsWith('.instructions') ? '\nUsed at the next start or restart; running agents are unchanged. Reviewer changes need a new or restarted task agent.' : ''}${appliedWords ? `\n${appliedWords}` : ''}`

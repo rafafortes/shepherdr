@@ -204,4 +204,16 @@ describe('a reviewer changed in Settings, and the demo tasks waiting for it', ()
     expect(await w.act({ type: 'apply-to-waiting', key: 'advisor.agent', place, dry: true })).toMatchObject({ ok: false })
     expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.instructions', place, dry: true })).toMatchObject({ ok: false })
   })
+
+  test('a renamed space: the answer names it as it shows, and its settings still answer under the name they were set with', async () => {
+    const w = new DemoWorld()
+    const place = 'p:vm-str:herdr-projects'
+    // as above: HP-204 is scheduled, so it follows Settings at its time
+    w.tasks.find((t) => t.id === 'HP-204')!.status = 'scheduled'
+    expect(await w.act({ type: 'rename', id: place, name: 'hp-shown' })).toMatchObject({ ok: true })
+    w.stores['vm-str'].set('reviewer.model', 'GPT-6-Sol', { space: 'herdr-projects' })
+    expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place, dry: true })).toMatchObject({ ok: true, changed: 1, follow: 1, running: 2, spaces: [{ name: 'hp-shown', words: 'Codex (GPT-6-Sol)', changed: 1 }] })
+    // the place id is what the dialog sends, and the same space answers
+    expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place: 'p:vm-str:herdr-projects', dry: true })).toMatchObject({ changed: 1 })
+  })
 })

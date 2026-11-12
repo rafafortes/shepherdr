@@ -732,7 +732,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
           const name = p.id.split(':')[2]!
           const tasks = this.tasks.filter((t) => t.place === p.id && !t.archived && t.status !== 'done')
           if (!bySpace && store.pick(a.key, { space: name }).from === 'space') {
-            if (tasks.some((t) => WAITING.includes(t.status))) out.kept.push(name)
+            if (tasks.some((t) => WAITING.includes(t.status))) out.kept.push(p.name)
             continue
           }
           const on = kind === 'reviewer' ? store.harness('reviewer', name) : store.harness('task', name)
@@ -759,7 +759,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
               if (!a.dry) t.agent = { ...t.agent, cli: CLI_NAME[on.kind] }
             }
           }
-          if (changed) out.spaces.push({ name, words: harnessWords(on), changed })
+          if (changed) out.spaces.push({ name: p.name, words: harnessWords(on), changed })
           out.changed += changed
         }
         if (!a.dry && out.changed) this.emit('snapshot')

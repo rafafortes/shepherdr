@@ -3096,3 +3096,83 @@ describe("a tile's small copy of a chat's picture or video", () => {
     }
   })
 })
+
+describe('a renamed space: the replies name it as it shows, and its settings, cap and apply-to-waiting find it by either name', () => {
+  test('set, apply-to-waiting and --space: the shown name in each answer, the place id and the shown name both find it', async () => {
+    const dir = tmp('src-repo')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'site-added')
+    src.places.rename(placeId.space(p.name), 'lyvora-site')
+    const place = placeId.space(p.name)
+    const idOf = (out: string) => out.match(/([A-Z]+-\d+)/)![1]
+    const engine = src.engine as unknown as { machine?: () => { busy?: string; herdr: boolean } }
+    const was = engine.machine
+    // herdr not answering holds every task: they all wait
+    engine.machine = () => ({ herdr: false })
+    try {
+      const a = idOf((await src.cli(['task', 'add', 'Waits', '--desc', 'x'], { chat: place })).out)
+      const b = idOf((await src.cli(['task', 'add', 'Waits too', '--desc', 'y'], { chat: place })).out)
+      expect(src.engine.task(a)!.agent).toMatchObject({ kind: 'claude' })
+      // the cap is set by the shown name: its answer names the space as it shows, and the cap is kept under the name it was added with
+      expect((await src.cli(['set', 'space.maxTasks', '2', '--space', 'lyvora-site'], { chat: place })).out).toContain("space.maxTasks = 2 (lyvora-site's)")
+      expect(src.settings.get('space.maxTasks', p.name)).toBe('2')
+      expect(src.settings.get('space.maxTasks', 'lyvora-site')).toBe('off')
+      expect((await src.cli(['set', 'space.maxTasks', 'off', '--space', 'lyvora-site'], { chat: place })).out).toContain("(lyvora-site's)")
+      // the question by the place id: the answer names the space as it shows
+      expect(await src.act({ type: 'setting', key: 'task.agent', value: 'pi', place })).toEqual({ ok: true })
+      expect(await src.act({ type: 'apply-to-waiting', key: 'task.agent', place, dry: true })).toMatchObject({ ok: true, changed: 2, spaces: [{ name: 'lyvora-site', words: 'pi', changed: 2 }] })
+      expect(src.engine.task(a)!.agent).toMatchObject({ kind: 'claude' })
+      // yes, by the shown name: the command's line names it as it shows
+      const byName = await src.cli(['set', 'task.agent', 'pi', '--space', 'lyvora-site', '--apply-waiting'], { chat: place })
+      expect(byName.out).toContain('2 waiting tasks in lyvora-site will start on pi when their turn comes.')
+      expect([src.engine.task(a)!.agent, src.engine.task(b)!.agent]).toEqual([{ kind: 'pi' }, { kind: 'pi' }])
+      // the same by the place id, back to Claude Code: the one scope, whichever name it is given by
+      const byPlace = await src.cli(['set', 'task.agent', 'Claude Code', '--space', place, '--apply-waiting'], { chat: place })
+      expect(byPlace.out).toContain('2 waiting tasks in lyvora-site will start on Claude Code when their turn comes.')
+      expect(src.engine.task(a)!.agent).toMatchObject({ kind: 'claude' })
+      // its own agent: Everywhere's change keeps it, and the answer says so under the shown name
+      expect((await src.cli(['set', 'task.agent', 'Codex', '--space', 'lyvora-site'], { chat: place })).code).toBe(0)
+      const kept = await src.cli(['set', 'task.agent', 'pi', '--machine', '--apply-waiting'], { chat: place })
+      expect(kept.code).toBe(0)
+      // among the other spaces this file's world holds: the list names it as it shows (one or several, keep or keeps)
+      expect(kept.out).toMatch(/lyvora-site keeps? its own setting/)
+      expect(kept.out).not.toContain(`${p.name} keep`)
+      expect(src.engine.task(a)!.agent).toMatchObject({ kind: 'claude' })
+    } finally {
+      engine.machine = was
+    }
+  })
+})
+
+describe("a renamed space's own cap: the held replies name it as it shows", () => {
+  test("a space added as cap-added and shown as lyvora-cap: its cap holds, and task add, tell and start say lyvora-cap, never the added name", async () => {
+    const dir = tmp('src-repo')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'cap-added')
+    src.places.rename(placeId.space(p.name), 'lyvora-cap')
+    const place = placeId.space(p.name)
+    const idOf = (out: string) => out.match(/([A-Z]+-\d+)/)![1]
+    const engine = src.engine as unknown as { machine?: () => { busy?: string; herdr: boolean } }
+    const was = engine.machine
+    // herdr here: a task starts (its agent is stubbed at work below), so the space's cap is what holds the next one
+    engine.machine = () => ({ herdr: true })
+    try {
+      expect((await src.cli(['set', 'space.maxTasks', '1', '--space', 'lyvora-cap'], { chat: place })).out).toContain("space.maxTasks = 1 (lyvora-cap's)")
+      const busy = idOf((await src.cli(['task', 'add', 'Busy', '--desc', 'x'], { chat: place })).out)
+      await settle(() => src.engine.working() >= 1, 'the first task to take the space slot')
+      const held = idOf((await src.cli(['task', 'add', 'Second', '--desc', 'y'], { chat: place })).out)
+      expect(src.engine.task(held)!.held?.why).toBe('space')
+      expect(src.engine.subOf(src.engine.task(held)!)).toBe('Waiting for a free slot of lyvora-cap')
+      const added = (await src.cli(['task', 'add', 'Third', '--desc', 'z'], { chat: place })).out
+      expect(added).toContain("held: lyvora-cap's own limit of 1 tasks is taken")
+      expect((await src.cli(['task', 'tell', held, 'Go.'], {})).out).toContain("is held: lyvora-cap's own limit of 1 tasks is taken")
+      expect((await src.cli(['task', 'start', held], {})).out).toContain("is first in line: lyvora-cap's own limit of 1 tasks is taken")
+      expect(JSON.stringify([added, src.engine.subOf(src.engine.task(held)!)])).not.toContain('cap-added')
+      // the cap is still the space's: the one that works is counted, and its settings answer under the added name
+      expect(src.engine.spaceCap(src.engine.task(busy)!)).toMatchObject({ space: p.name, shown: 'lyvora-cap', max: 1 })
+    } finally {
+      engine.machine = was
+      src.settings.set('space.maxTasks', null, { space: p.name })
+    }
+  })
+})
