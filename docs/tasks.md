@@ -143,8 +143,8 @@
   permission, its CLI's own question) is never rebased under it.
 - When a task's agent can't go on (out of allowance, signed out, its provider still down after the tries), its
   **backup agent** goes in, once (a start that fails leaves a later one to try again), then the next of its chain where
-  that one can't go on either ([settings](settings.md#a-chain-of-backups)): Settings → Agents → Backup →
-  Tasks' backup (`task.fallback`, Codex unless set, or
+  that one can't go on either ([settings](settings.md#a-chain-of-backups)): Settings → Agents → Tasks → Backups →
+  Backup (`task.fallback`, Codex unless set, or
   off), on its own `backup.model` and `backup.effort`. The same CLI as the agent that can't go on starts again on that model
   and effort and resumes its own session, so nothing is lost, its worktree and branch unchanged; another CLI takes
   over in the same worktree and branch, with the brief and a short handover: who it takes over from and why, the
@@ -152,7 +152,7 @@
   and why. If the backup can't go on either, isn't installed, or is set to a model its CLI doesn't have, the task
   needs you: its chat says why where a backup setting is the reason, and one that couldn't start at all shows as
   `Went wrong`.
-- A coordinator that can't go on is backed up the same way, when Settings → Agents → Backup → Coordinators' backup
+- A coordinator that can't go on is backed up the same way, when Settings → Agents → Coordinators → Backups → Backup
   (`coordinator.fallback`, off unless set) is on: the two backups have their own model and effort, and the coordinators'
   own pair (`coordinator.fallbackModel`, `coordinator.fallbackEffort`) reads `backup.model` and `backup.effort` while it
   is at default, so one backup can be on Claude Code and the other on pi, each on a model its CLI has. The same CLI starts
@@ -163,7 +163,7 @@
   space's chat says so and you are alerted.
 - A reviewer has a backup of its own, and it is words in the brief rather than an agent Shepherdr runs: a reviewer is
   the task's own agent reviewing, so a reviewer that is out of allowance would leave that agent stuck at the review.
-  Settings → How tasks work → Reviewer → Backup reviewer (`reviewer.fallback`, off until set, with
+  Settings → How tasks work → Reviewer → Backups → Backup (`reviewer.fallback`, off until set, with
   `reviewer.fallbackModel` and `reviewer.fallbackEffort`) makes the brief's Reviewer line name it: "If that reviewer
   cannot run at all (out of allowance, signed out, its model is gone), review with … instead for that round only, and
   say in your summary that you did; every round asks that reviewer first again." The task's agent runs it as it runs the reviewer, as `<task-id>/Reviewer`, and counts that round like
@@ -184,7 +184,7 @@
   primary itself, starts again on what Settings name, when it is idle — never mid-turn, never a paused task, never one
   asking you something — a free slot at a time and before any new task, with a card in its chat, and its backup may
   take over again the next time the primary runs out; at most three times a day per role and space, after which it
-  waits for you. While every model of a space has run out, its new tasks wait instead of starting only to be cut off. Settings → Agents → Backup → When the primary is back (`backup.watchReturn`): **go back**,
+  waits for you. While every model of a space has run out, its new tasks wait instead of starting only to be cut off. Settings → Agents → When the primary is back (`backup.watchReturn`): **go back**,
   the default; **tell me**, a card in each chat still on a backup naming the way back (⋯ → Restart agent, or `shepherdr
   restart <id>`; for a reviewer `shepherdr set reviewer.model <id> --space <name>`, a plain set being Everywhere's),
   and nothing switches; or **off**. It goes back to what Settings name now, never to what ran before, and it is never

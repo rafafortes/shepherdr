@@ -80,20 +80,22 @@
 
 ## Backup agents
 
-Settings → Agents → Backup holds both backups in one group: two CLIs, each with its own Model and Effort — the
-coordinators' pair reads the tasks' pair until you set its own. They go in when an agent can't go on (signed out, out of
-allowance, its provider still down after the retries): a task's agent keeps its worktree and branch, a coordinator's
-tasks go on as they are, and either way it happens once, so a backup that keeps failing waits for you.
+Settings → Agents shows each role's backups under the role's own rows, in a Backups sub-block (indented, under its
+own small heading): the tasks' under Tasks, the coordinators' under Coordinators, the advisor's under Advisor. Each
+backup is a CLI with its own Model and Effort — the coordinators' pair reads the tasks' pair until you set its own.
+They go in when an agent can't go on (signed out, out of allowance, its provider still down after the retries): a
+task's agent keeps its worktree and branch, a coordinator's tasks go on as they are, and either way it happens once,
+so a backup that keeps failing waits for you.
 
-- **Tasks' backup** (`task.fallback`, Codex unless set, or off): the CLI a task's backup goes in on — the task's own
+- **Backup** under Tasks (`task.fallback`, Codex unless set, or off): the CLI a task's backup goes in on — the task's own
   `task add --set task.fallback=…` first, then its space's, this machine's and Everywhere's.
-- **Coordinators' backup** (`coordinator.fallback`, off unless set): the CLI a coordinator's backup goes in on — its
+- **Backup** under Coordinators (`coordinator.fallback`, off unless set): the CLI a coordinator's backup goes in on — its
   space's own, then this machine's, then Everywhere's. Another machine's coordinator follows its own machine's settings.
-- **Model** and **Effort** (`backup.model`, `backup.effort`, default): the tasks' backup's own pair, read at the most
+- **Backup model** and **Backup effort** under Tasks (`backup.model`, `backup.effort`, default): the tasks' backup's own pair, read at the most
   specific level that sets it — a task's own `--set backup.model=…` (or `backup.effort=…`), else its space's, else this
   machine's, else Everywhere's. Where it is default, a backup starts on the model and effort the agent it backs up ran
   on, when the backup's CLI has them.
-- **Coordinators' Model** and **Effort** (`coordinator.fallbackModel`, `coordinator.fallbackEffort`, default): the
+- **Backup model** and **Backup effort** under Coordinators (`coordinator.fallbackModel`, `coordinator.fallbackEffort`, default): the
   coordinators' backup's own pair, set at the same levels, so that it can be on a CLI other than the tasks' one and on a
   model that CLI has. While it is at default it reads `backup.model` and `backup.effort`, so every configuration in use
   keeps its meaning and its row shows the value it reads, saying it comes from the tasks' backup.
@@ -113,8 +115,9 @@ why. Each value shows where it comes from, with Reset to the inherited one, like
 
 ### A chain of backups
 
-Each role's backup is the first of a chain: **+ Add a tasks' backup** (and the coordinators', the reviewer's and the
-advisor's) under its last one adds the next, up to five, each with its own CLI, Model and Effort
+Each role's backup is the first of a chain: **+ Add a backup**, at the end of that role's Backups sub-block (Tasks,
+Coordinators, Reviewer, Advisor), adds the next under its last one, up to five, each with its own CLI, Model and Effort
+(Backup 2, Backup 2 model, Backup 2 effort …)
 (`task.fallback2`, `task.fallback2Model`, `task.fallback2Effort` … `task.fallback5…`; `coordinator.fallback2…`,
 `reviewer.fallback2…`, `advisor.fallback2…`). The new one starts on the CLI of the one before it; Off takes it out. They
 go in turn: where the agent on Backup 1 can't go on either, Backup 2 takes over, the same way (the same CLI resumes its
@@ -127,8 +130,9 @@ and its chain is whole again for the next time; every model of a role has run ou
 
 ## When the primary is back
 
-A backup takes over by itself when the primary can't go on; this is the way back. Settings → Agents → Backup → **When
-the primary is back** (`backup.watchReturn`; Everywhere, for a machine or for a space, the most specific one set wins)
+A backup takes over by itself when the primary can't go on; this is the way back. Settings → Agents → **When the
+primary is back** (`backup.watchReturn`, in a Backups group of its own at the end: it applies to every backup above;
+Everywhere, for a machine or for a space, the most specific one set wins)
 asks the primary now and then whether it answers again, and then:
 
 - **go back** (the default): each agent still on the backup — each task's, the coordinator's — and each one cut off for
