@@ -332,3 +332,142 @@ describe.skipIf(!browser)('repository base', () => {
     }
   })
 })
+
+describe.skipIf(!browser)('a task agent saved, and the tasks already waiting', () => {
+  /** the demo's tasks back as they were, and its Settings for the spaces this file changes */
+  const reset = async () => {
+    // Everywhere's agent too (the phone test sets it), on both machines
+    for (const store of Object.values(world.stores)) store.set('task.agent', null, 'all')
+    for (const space of ['herdr-projects', 'lilla-varlden'] as const) {
+      world.stores[space === 'lilla-varlden' ? 'mac' : 'vm-str'].set('task.agent', null, { space })
+    }
+    world.sections = (await import('../server/demo/data.ts')).settings(world.stores)
+    world.emit('snapshot')
+  }
+  const cli = (id: string) => world.tasks.find((t) => t.id === id)!.agent?.cli
+
+  test('a space\'s agent asks how many waiting tasks take it: Apply moves them, Only new tasks leaves them, and a change that moves none asks nothing', async () => {
+    const tasks = structuredClone(world.tasks)
+    const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } })
+    try {
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.getByRole('button', { name: 'Editing: home · vm-str', exact: true }).click()
+      await page.getByRole('menuitemradio', { name: 'herdr-projects · vm-str', exact: true }).click()
+      await settings.getByRole('button', { name: 'Editing: herdr-projects · vm-str', exact: true }).waitFor()
+      await settings.getByRole('button', { name: 'Agents', exact: true }).click()
+      // the Tasks group's Agent row, whatever it reads now
+      const agent = settings.getByRole('heading', { name: 'Tasks', exact: true }).locator('..').getByRole('button', { name: /^Agent: / })
+      // this space's two waiting tasks (HP-203 queued, HP-204 To do) would change; HP-202 is at work and keeps its agent
+      await agent.click()
+      await page.getByRole('menuitemradio', { name: 'Pi', exact: true }).click()
+      const ask = page.getByRole('alertdialog')
+      await ask.waitFor()
+      expect(await ask.getByRole('heading', { name: 'Apply to the tasks already created?' }).count()).toBe(1)
+      const text = (await ask.textContent()) ?? ''
+      expect(text).toContain('2 waiting tasks of herdr-projects (queued, To do, scheduled) start on pi (high) when their turn comes.')
+      expect(text).toContain('Running tasks keep their agent.')
+      expect(cli('HP-203')).toBe('Claude Code')
+      await ask.getByRole('button', { name: 'Only new tasks', exact: true }).click()
+      await ask.waitFor({ state: 'detached' })
+      expect([cli('HP-203'), cli('HP-204'), cli('HP-202')]).toEqual(['Claude Code', 'Claude Code', 'Codex'])
+      expect(world.stores['vm-str'].get('task.agent', 'herdr-projects')).toBe('pi')
+      // the next change asks again, and Apply moves both
+      await agent.click()
+      await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).click()
+      await ask.getByRole('button', { name: 'Apply to 2 tasks', exact: true }).waitFor()
+      await ask.getByRole('button', { name: 'Apply to 2 tasks', exact: true }).click()
+      await ask.getByText('Applied to 2 waiting tasks.', { exact: true }).waitFor()
+      expect(await ask.getByRole('button', { name: 'Done', exact: true }).count()).toBe(1)
+      expect([cli('HP-203'), cli('HP-204'), cli('HP-202')]).toEqual(['Codex', 'Codex', 'Codex'])
+      await ask.getByRole('button', { name: 'Done', exact: true }).click()
+      await ask.waitFor({ state: 'detached' })
+      // a space with nothing waiting: its change asks nothing
+      await settings.getByRole('button', { name: 'Editing: herdr-projects · vm-str', exact: true }).click()
+      await page.getByRole('menuitemradio', { name: 'lilla-varlden · mac', exact: true }).click()
+      await settings.getByRole('button', { name: 'Editing: lilla-varlden · mac', exact: true }).waitFor()
+      await settings.getByRole('button', { name: 'Agents', exact: true }).click()
+      await settings.getByRole('heading', { name: 'Tasks', exact: true }).locator('..').getByRole('button', { name: 'Agent: Claude Code', exact: true }).click()
+      await page.getByRole('menuitemradio', { name: 'Pi', exact: true }).click()
+      await settings.getByRole('heading', { name: 'Tasks', exact: true }).locator('..').getByRole('button', { name: 'Agent: Pi', exact: true }).waitFor()
+      await settled(page)
+      await Bun.sleep(300)
+      expect(await page.getByRole('alertdialog').count()).toBe(0)
+    } finally {
+      world.tasks = tasks
+      await reset()
+      await page.close()
+    }
+  })
+
+  test('on a phone the question fits the screen, and Apply on Everywhere moves the tasks of the spaces that follow it', async () => {
+    const tasks = structuredClone(world.tasks)
+    const page = await browser!.newPage({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })
+    try {
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      // Everywhere (the page opens on this machine's home space, which has nothing waiting)
+      await settings.getByRole('button', { name: 'Editing: home · vm-str', exact: true }).tap()
+      await page.getByRole('menuitemradio', { name: 'Everywhere', exact: true }).tap()
+      await settings.getByRole('button', { name: 'Agents', exact: true }).tap()
+      await settings.getByRole('heading', { name: 'Tasks', exact: true }).locator('..').getByRole('button', { name: 'Agent: Claude Code', exact: true }).tap()
+      await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).tap()
+      const ask = page.getByRole('alertdialog')
+      await ask.waitFor()
+      // Everywhere: gtm keeps its own Codex, herdr-projects' two waiting tasks move
+      const text = (await ask.textContent()) ?? ''
+      expect(text).toContain('2 waiting tasks of herdr-projects (queued, To do, scheduled) start on Codex (high) when their turn comes.')
+      expect(text).toContain('gtm keeps its own setting.')
+      const box = (await ask.boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(375.5)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375)
+      await ask.getByRole('button', { name: 'Apply to 2 tasks', exact: true }).tap()
+      await ask.getByText('Applied to 2 waiting tasks.', { exact: true }).waitFor()
+      expect([cli('HP-203'), cli('HP-204')]).toEqual(['Codex', 'Codex'])
+      // gtm keeps its own agent, so its waiting task stays as it was
+      expect(cli('GTM-17')).toBe('Claude Code')
+    } finally {
+      world.tasks = tasks
+      await reset()
+      await page.close()
+    }
+  })
+
+  test('Everywhere reaches the waiting tasks of every space that does not set the agent itself: the question names each, and Apply moves them all', async () => {
+    const tasks = structuredClone(world.tasks)
+    const store = world.stores['vm-str']
+    // gtm gives up its own agent for this test (its Codex is put back after it)
+    store.set('task.agent', null, { space: 'gtm' })
+    const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } })
+    try {
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.getByRole('button', { name: 'Editing: home · vm-str', exact: true }).click()
+      await page.getByRole('menuitemradio', { name: 'Everywhere', exact: true }).click()
+      await settings.getByRole('button', { name: 'Editing: Everywhere', exact: true }).waitFor()
+      await settings.getByRole('button', { name: 'Agents', exact: true }).click()
+      await settings.getByRole('heading', { name: 'Tasks', exact: true }).locator('..').getByRole('button', { name: /^Agent: / }).click()
+      await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).click()
+      const ask = page.getByRole('alertdialog')
+      await ask.waitFor()
+      // gtm's GTM-17 (To do) and herdr-projects' two; the order of the spaces is not the point
+      const text = (await ask.textContent()) ?? ''
+      expect(text).toContain('3 waiting tasks in 2 spaces (queued, To do, scheduled) start on what Settings name for each one when their turn comes')
+      expect(text).toContain('gtm on Codex (high)')
+      expect(text).toContain('herdr-projects on Codex (high)')
+      await ask.getByRole('button', { name: 'Apply to 3 tasks', exact: true }).click()
+      await ask.getByText('Applied to 3 waiting tasks.', { exact: true }).waitFor()
+      expect([cli('GTM-17'), cli('HP-203'), cli('HP-204')]).toEqual(['Codex', 'Codex', 'Codex'])
+    } finally {
+      world.tasks = tasks
+      store.set('task.agent', 'Codex', { space: 'gtm' })
+      await reset()
+      await page.close()
+    }
+  })
+})

@@ -906,13 +906,16 @@ describe('shepherdr merge', () => {
       })
 
       test('a train whose gate is stopped before it ends says so: nothing went in, and its head goes alone', async () => {
-        const { w, dir, ts, go, heads } = await train('train-killed', 4, '3')
+        const { w, dir, ts, go, ran, heads } = await train('train-killed', 4, '3')
         const [g, x, a, b] = ts
         const runs = [w.engine.merge(g.id, { self: true })]
         await until(() => g.landing?.step === 'gate')
         runs.push(w.engine.merge(x.id, { self: true }), w.engine.merge(a.id, { self: true }), w.engine.merge(b.id, { self: true }))
         go(g)
         await until(() => !!x.gateRun?.pid)
+        // the train's gate has logged the commit it runs on before it is killed: a kill that won the race left no line,
+        // and every run after it moved up one in heads()
+        await until(() => ran().length === 2)
         process.kill(-x.gateRun!.pid, 'SIGKILL')
         // its head goes on alone, on a gate of its own waiting for its go like any
         await until(() => x.landing?.step === 'gate' && x.landing.cars === undefined)

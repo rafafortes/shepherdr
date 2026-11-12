@@ -291,6 +291,16 @@ tasks on one gate run. Upstream's only merge queue is GitHub's own (SHEP-160 on 
 a merge made here never reaches. So the train is ours: `merge.train`, for merges made here only; see
 [docs/tasks.md](tasks.md).
 
+## Not from upstream: a Settings change applied to the tasks already waiting, built here
+
+Checked 2026-11-12 against upstream `main` (`ef3be074`, 3.1.32 line) and `v2.0` (`ebb17d58`): code, history, issues and
+pull requests (`gh issue list` and `gh pr list` with "settings", "waiting", "queued", "existing tasks"). Nothing does
+it. Both lines keep a waiting task on what it was given: `v2.0`'s base branch is "existing and waiting tasks keep their
+own target" (`docs/spaces.md`), and 3.x's live model switch (SHEP-181, `45d7e850`) changes a running agent in place, not
+a waiting task. So the question after a Settings change, and its two answers, is ours: `retuneWaiting` on
+`Start with…`'s own worker change (see [docs/settings.md](settings.md)). Upstream's base-branch rule stays as it is here
+too: a base branch never moves a waiting task.
+
 ## Ranked: adopt and port, by value to us
 
 Order is the sequence the operator would get the most from; each is one task and one pull request. **SHE-2 merged the

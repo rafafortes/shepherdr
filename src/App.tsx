@@ -37,6 +37,7 @@ import {
 import { PANE_MIN } from './panes.ts'
 import { ChatColumn, Frame, PanelColumn, PlacesColumn, PlacesToggle } from './Frame.tsx'
 import { FocusToggle, PanelSheet, PanelToggle, TaskMenu, TaskPanel } from './Panel.tsx'
+import { ApplyWaitingSheet } from './apply-waiting.tsx'
 import { Drawer as SlideDrawer, Stack } from './Stack.tsx'
 import { machineName, type Place, type Snapshot, type Task } from '@shared/types.ts'
 import {
@@ -98,6 +99,7 @@ export default function App() {
       <div className="relative flex min-h-0 flex-1 flex-col">
         {device === 'phone' ? <PhoneLayout snap={snap} /> : <WideLayout snap={snap} />}
         <PanelSheet />
+        <ApplyWaitingSheet />
         {registry.overlays.map((O, i) => (
           <O key={i} />
         ))}

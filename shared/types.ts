@@ -976,6 +976,10 @@ export type Action =
   | { type: 'call'; chat: string; on: boolean }
   /** place: the level it is set at, as a place id (all when none); a machine's or project's goes to that machine */
   | { type: 'setting'; key: string; value: string | null; place?: string }
+  /** a task agent Setting (task.agent, task.model, task.effort) changed at a level (place: a space, this machine, or none
+   *  for Everywhere): the waiting tasks it reaches take what Settings name for their space, as Start with… gives each
+   *  (engine retuneWaiting). dry: the counts only, for the question asked first. Running tasks keep their agent */
+  | { type: 'apply-to-waiting'; key: string; place?: string; dry?: boolean }
   /** archive a task (on: true; its agent stops first) or bring it back; chat is its agent's key (ID/Agent) */
   | { type: 'archive'; chat: string; on: boolean }
   /** pin a task to the top of its lists (on: true) or unpin it */

@@ -116,6 +116,9 @@ export interface TaskRec {
   pinned?: number
   /** the CLI, model and effort its agent first starts with: from Settings, or task add's flags */
   agent?: Harness
+  /** task add's --agent, --model or --effort chose `agent`, not Settings: counted apart when Settings' task agent is
+   *  applied to the waiting tasks (retuneWaiting); a worker picked later (Start with…) clears it */
+  chosen?: true
   /** the CLI, model and effort its brief says reviews its change: from Settings, or task add's --reviewer flags */
   reviewer?: Harness
   /** the coordinator's --set for this task, kept as it was given: the backup values this one task keeps for itself
@@ -221,6 +224,28 @@ export interface Harness {
   effort?: string
 }
 
+/** what retuneWaiting changed (or, a dry run, would change) and what it left alone */
+export interface Retune {
+  /** waiting tasks whose agent changed to what Settings name for their space */
+  changed: number
+  /** waiting tasks already on it */
+  same: number
+  /** waiting tasks that start on Settings at their turn anyway: a scheduled one with no CLI of its own, or one the way
+   *  back starts again on what Settings name */
+  follow: number
+  /** of the changed, those task add's flags chose (not Settings) */
+  pinned: number
+  /** tasks of the scope already started (working, asking, ready, merging): they keep their agent */
+  running: number
+  /** spaces whose own setting keeps its agent (machine scope only), with waiting tasks */
+  kept: string[]
+  /** the spaces whose waiting tasks changed, with the worker they take and how many */
+  spaces: { name: string; on: Harness; changed: number }[]
+}
+
+/** the states a task waits to start in (Start with… takes its worker) */
+const WAITING: TaskStatus[] = ['queued', 'todo', 'scheduled']
+
 /** what a task that waits on you shows instead of its agent's message: a few words on why, never the message itself */
 export const NEED = {
   plan: 'Plan to approve',
@@ -273,6 +298,24 @@ export function askOf(text = ''): string | undefined {
 
 /** finished: merged, or closed with nothing to merge */
 export const ended = (t: TaskRec) => !!(t.merged || t.closed)
+
+/** a retuneWaiting result in words, as the command line says it */
+export function retuneLine(r: Retune) {
+  const n = (k: number, one: string) => `${k} ${k === 1 ? one : `${one}s`}`
+  const to = r.spaces.map((s) => `${s.name} on ${harnessWords(fitHarness(s.on))}`)
+  const start = r.spaces.length === 1
+    ? `${n(r.changed, 'waiting task')} in ${r.spaces[0].name} will start on ${harnessWords(fitHarness(r.spaces[0].on))} when ${r.changed === 1 ? 'its' : 'their'} turn comes`
+    : `${n(r.changed, 'waiting task')} in ${r.spaces.length} spaces will start on what Settings name for each (${to.join('; ')})`
+  const bits = [
+    r.changed ? start : 'no waiting task changes',
+    r.pinned ? `${r.pinned} of them had a worker of its own from task add, and changes too` : '',
+    r.same ? `${r.same} already on it` : '',
+    r.follow ? `${r.follow} start on Settings at their turn anyway` : '',
+    r.running ? `${n(r.running, 'running task')} keep${r.running === 1 ? 's' : ''} its agent` : '',
+    r.kept.length ? `${r.kept.join(', ')} keep${r.kept.length === 1 ? 's' : ''} its own setting` : '',
+  ]
+  return `${bits.filter(Boolean).join('; ')}.`
+}
 
 const STATE: Record<TaskStatus, string> = { need: 'Needs you', ready: 'Ready', merging: 'Merging', work: 'Working', scheduled: 'Scheduled', queued: 'Queued', todo: 'To do', done: 'Done' }
 
@@ -1439,6 +1482,7 @@ export class Engine extends Emitter<Events> {
           ...(Object.keys(o.agent ?? {}).length ? { agent: o.agent } : {}),
           ...(Object.keys(o.reviewer ?? {}).length ? { reviewer: o.reviewer } : {}),
         },
+        ...(Object.keys(o.agent ?? {}).length ? { chosen: true as const } : {}),
       }
       this.data.tasks.push(t)
       this.save()
@@ -1474,6 +1518,7 @@ export class Engine extends Emitter<Events> {
       waitChecks: ways.waitChecks,
       rounds: ways.rounds,
       ...(o.priority ? { priority: true as const } : {}),
+      ...(Object.keys(o.agent ?? {}).length ? { chosen: true as const } : {}),
     }
     if (after.length) t.after = after
     if (set) t.set = set
@@ -1522,6 +1567,7 @@ export class Engine extends Emitter<Events> {
     const ways = this.settings.ways(p.name, set)
     t.desc = [s.desc, s.later ? LATER : '', settingsBlock(t.id, { ways, reviewer, fallback: this.settings.reviewerBackups(p.name, set), agent, by })].filter(Boolean).join('\n\n')
     t.agent = agent
+    t.chosen = Object.keys(s.agent ?? {}).length ? true : undefined
     t.reviewer = reviewer
     t.waitChecks = ways.waitChecks
     t.rounds = ways.rounds
@@ -1804,6 +1850,8 @@ export class Engine extends Emitter<Events> {
     const t = this.req(id)
     if (ended(t) || !['queued', 'todo', 'scheduled'].includes(this.statusOf(t))) throw new Error(`${t.id} isn't waiting to start: Restart agent… changes what it runs on`)
     t.agent = on
+    // a worker picked here is no task add's flag any more
+    t.chosen = undefined
     if (t.scheduled) t.scheduled.agent = on
     const rec = this.agents.record(this.key(t))
     const live = !!t.worktree && existsSync(t.worktree) && this.agents.status(this.key(t)) !== 'gone'
@@ -1813,6 +1861,54 @@ export class Engine extends Emitter<Events> {
     this.save()
     this.settleOne(t)
     return t
+  }
+
+  /**
+   * Settings' task agent changed (task.agent, task.model or task.effort): the waiting tasks it reaches take what
+   * Settings now name for their space, each as Start with… sets it (setWorker), so they run on it at their turn.
+   * Scope: `space` (that space's waiting tasks, whatever its own setting), or `key` at the Everywhere or machine level
+   * (every space of this machine that does not set that key itself: one that does keeps its own). Running tasks keep
+   * their agent, and so does one already on it. `dry`: count only, change nothing.
+   */
+  retuneWaiting(scope: { space: string } | { key: string }, dry = false): Retune {
+    const out: Retune = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [], spaces: [] }
+    const plan: { t: TaskRec; on: Harness }[] = []
+    const perSpace = new Map<string, { on: Harness; changed: number }>()
+    for (const t of this.tasks) {
+      const space = this.nameOf(t)
+      if (t.archived || ended(t) || !space || ('space' in scope && space !== scope.space)) continue
+      const waiting = WAITING.includes(this.statusOf(t))
+      if (!('space' in scope) && this.settings.pick(scope.key, { space }).from === 'space') {
+        if (waiting && !out.kept.includes(space)) out.kept.push(space)
+        continue
+      }
+      if (!waiting) {
+        out.running++
+        continue
+      }
+      // a scheduled task takes Settings when it starts, over the flags task add gave it (if any): with none, it follows
+      // Settings already; so does one the way back starts again on what Settings name
+      const flags = t.scheduled?.agent
+      const cur = t.scheduled ? (flags && Object.keys(flags).length ? this.harness(flags, 'task', space) : undefined) : t.agent
+      if (!cur || this.goesBack?.(t)) {
+        out.follow++
+        continue
+      }
+      const on = this.settings.harness('task', space)
+      if (sameHarness(cur, on)) {
+        out.same++
+        continue
+      }
+      out.changed++
+      if (t.chosen) out.pinned++
+      const s = perSpace.get(space) ?? { on, changed: 0 }
+      s.changed++
+      perSpace.set(space, s)
+      plan.push({ t, on })
+    }
+    if (!dry) for (const { t, on } of plan) this.setWorker(t.id, on)
+    out.spaces = [...perSpace].map(([name, s]) => ({ name, ...s }))
+    return out
   }
 
   /** a coordinator's mark (task priority, task add --priority): first in line, past the machine's load, pressure and
