@@ -732,7 +732,7 @@ describe('settings', () => {
     // a CLI Shepherdr passes neither to picks its own; the backup has its own model and effort
     s.set('task.agent', 'pi')
     expect(row('Tasks', 'Model')).toMatchObject({ text: true })
-    expect(row('Backup', 'Model').options![1]).toBe('GPT-6.1-Sol')
+    expect(row('Tasks', 'Backup model').options![1]).toBe('GPT-6.1-Sol')
     for (const k of ['task.agent', 'task.model', 'task.effort']) s.set(k, null)
   })
   test('a backup reviewer is off until set: its own CLI, model and effort, set as specifically as the rest', () => {
@@ -961,9 +961,9 @@ describe('settings', () => {
     expect(s.modelOf('coordinatorBackup', 'claude', 'web')).toEqual({ model: 'claude-opus-5-5', effort: 'low' })
     expect(s.modelOf('coordinatorBackup', 'claude')).toEqual({ model: 'claude-sonnet-5-5', effort: 'low' })
     // backupModelOf names the row the model is set in: the tasks' while it follows, the coordinators' once it is its own
-    expect(backupModelOf('coordinator', (k) => s.get(k))).toEqual({ model: 'Sonnet 5.5', row: 'Backup → Model' })
-    expect(backupModelOf('coordinator', (k) => s.get(k, 'web'))).toEqual({ model: 'Opus 5.5', row: "Backup → Coordinators' backup → Model" })
-    expect(backupModelOf('task', (k) => s.get(k))).toEqual({ model: 'Sonnet 5.5', row: 'Backup → Model' })
+    expect(backupModelOf('coordinator', (k) => s.get(k))).toEqual({ model: 'Sonnet 5.5', row: 'Tasks → Backup model' })
+    expect(backupModelOf('coordinator', (k) => s.get(k, 'web'))).toEqual({ model: 'Opus 5.5', row: 'Coordinators → Backup model' })
+    expect(backupModelOf('task', (k) => s.get(k))).toEqual({ model: 'Sonnet 5.5', row: 'Tasks → Backup model' })
     // shepherdr show says it too: each key on its own line, with its level
     const line = (space?: string) => s.lines(space, 'host').split('\n').filter((x) => x.startsWith('coordinator.fallback'))
     expect(line()).toContain('coordinator.fallbackModel  Sonnet 5.5  (Everywhere, the tasks\' backup\'s model)')
@@ -1007,13 +1007,16 @@ describe('settings', () => {
     expect(note()).toContain("- Review: off. No review; the lines on reviewing below don't apply. (your setting for every machine)")
     s.set('brief.review', null)
     const n = (group: string, times: number) => Array<string>(times).fill(group)
-    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual([...n('Tasks', 3), ...n('Coordinators', 3), ...n('Backup', 3 + 12 + 3 + 12 + 1), ...n('Advisor', 3 + 3 + 12 + 1)])
+    // each role's chain sits under its own rows, in its Backups sub-block; the way back is a group of its own, last
+    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual([...n('Tasks', 3 + 15), ...n('Coordinators', 3 + 15), ...n('Advisor', 3 + 15 + 1), ...n('Backups', 1)])
+    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.filter((r) => r.sub).map((r) => r.sub).every((x) => x === 'Backups')).toBe(true)
     const agents = s.sections([], [], null).find((x) => x.name === 'Agents')!.rows
     // the way back from a backup: its agents go back to the primary once it answers again
     expect(agents.find((r) => r.key === 'backup.watchReturn')).toMatchObject({ label: 'When the primary is back', value: 'go back', options: ['go back', 'tell me', 'off'] })
     // the advisor: off until set, and a question goes to it by itself after two minutes
     expect(agents.find((r) => r.key === 'advisor.agent')).toMatchObject({ value: 'off', options: ['off', 'Codex', 'Claude Code', 'pi'] })
-    expect(agents.at(-1)).toMatchObject({ key: 'advisor.after', label: 'Answers for you after', value: '2 min' })
+    expect(agents.find((r) => r.key === 'advisor.after')).toMatchObject({ group: 'Advisor', label: 'Answers for you after', value: '2 min' })
+    expect(agents.at(-1)).toMatchObject({ key: 'backup.watchReturn', group: 'Backups' })
   })
 
   test("when the primary is back: on, its only other value before going back by itself came, reads as tell me", () => {
@@ -1289,9 +1292,10 @@ describe('a chain of backups in Settings', () => {
   test('the screen marks each chain: Backup 1 with its add words, the rest off until set; shepherdr show lists only those on', () => {
     const s = new Settings()
     const agents = () => s.sections([], [], null).find((x) => x.name === 'Agents')!.rows
-    expect(agents().find((r) => r.key === 'task.fallback')!.chain).toEqual({ of: 'task', n: 1, cli: true, add: "Add a tasks' backup" })
+    expect(agents().find((r) => r.key === 'task.fallback')).toMatchObject({ label: 'Backup', group: 'Tasks', sub: 'Backups', chain: { of: 'task', n: 1, cli: true, add: 'Add a backup' } })
     expect(agents().find((r) => r.key === 'backup.model')!.chain).toEqual({ of: 'task', n: 1 })
-    expect(agents().find((r) => r.key === 'coordinator.fallback4')).toMatchObject({ label: "Coordinators' backup 4", value: 'off', chain: { of: 'coordinator', n: 4, cli: true, add: "Add a coordinators' backup" } })
+    expect(agents().find((r) => r.key === 'coordinator.fallback4')).toMatchObject({ label: 'Backup 4', group: 'Coordinators', sub: 'Backups', value: 'off', chain: { of: 'coordinator', n: 4, cli: true, add: 'Add a backup' } })
+    expect(agents().find((r) => r.key === 'coordinator.fallback4Model')).toMatchObject({ label: 'Backup 4 model', group: 'Coordinators', sub: 'Backups' })
     expect(s.lines()).not.toContain('task.fallback2')
     expect(s.set('task.fallback2', 'codex', 'all').ok).toBe(true)
     expect(s.lines()).toContain('task.fallback2             Codex')

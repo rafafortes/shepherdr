@@ -6,7 +6,7 @@
 // plugins add (a desktop's keyboard shortcuts). A phone lists the sections in rounded groups, as iOS's Settings does, and a tap pushes one over
 // the list; a wider screen keeps the list down its side.
 import clsx from 'clsx'
-import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type FC, type ReactNode } from 'react'
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentType, type FC, type ReactNode } from 'react'
 import { machineName, type Place, type SettingRow, type SettingSection, type Snapshot } from '@shared/types.ts'
 import { act, registry, setUI, useSnap, useUI, type UI } from './kernel.ts'
 import { usePluginErrors } from './guard.tsx'
@@ -648,6 +648,8 @@ export const rowLook = (phone: boolean) =>
     ? 'relative flex min-h-12 items-center justify-between gap-3 px-4 py-2.5 not-first:before:absolute not-first:before:inset-x-0 not-first:before:top-0 not-first:before:left-4 not-first:before:h-px not-first:before:bg-line'
     : 'flex min-h-12 items-center justify-between gap-3 py-2 not-first:border-t not-first:border-line'
 const heading = (phone: boolean) => (phone ? 'px-4 pb-1.5 text-[0.8125rem] text-fg2' : 'pb-1 text-[0.75rem] font-medium text-fg3')
+/** a sub-block's heading (a role's Backups): the same words, flush with the rule the sub-block hangs from */
+const subHeading = (phone: boolean) => (phone ? 'pb-1.5 text-[0.8125rem] text-fg2' : 'pb-1 text-[0.75rem] font-medium text-fg3')
 
 /** Appearance: System, Light or Dark, kept on this device */
 function AppearancePick({ phone }: { phone: boolean }) {
@@ -732,7 +734,30 @@ const follows = (row: SettingRow, value: string) => (row.inherits && value === r
 const SEGMENTS = new Set(['notify', 'review.mustFix'])
 
 /** a page's row, or the button that adds the next backup of a role's chain under its last one */
-type Item = SettingRow | { add: { key: string; value: string; label: string }; group?: string }
+type Item = SettingRow | { add: { key: string; value: string; label: string }; group?: string; sub?: string }
+
+/** a group's rows in runs: each role's backups (sub) as one run of their own, the rows around them as the others */
+const runsOf = (rows: Item[]) =>
+  rows.reduce<{ sub?: string; rows: Item[] }[]>((runs, row) => {
+    const last = runs.at(-1)
+    if (last && last.sub === row.sub) last.rows.push(row)
+    else runs.push({ sub: row.sub, rows: [row] })
+    return runs
+  }, [])
+
+/** a role's backups under its own rows: a small heading (a labelled group for a screen reader), indented with a thin rule
+ *  down its left, as a nested list has it; in a phone's group, its own rounded group inside the indent */
+function SubBlock({ name, phone, children }: { name: string; phone: boolean; children: ReactNode }) {
+  const id = useId()
+  return (
+    <div role="group" aria-labelledby={id} className={clsx('mt-3 border-l border-line', phone ? 'ml-2 pl-2' : 'ml-1 pl-4')}>
+      <h4 id={id} className={subHeading(phone)}>
+        {name}
+      </h4>
+      {children}
+    </div>
+  )
+}
 
 /** a page's settings: its rows under their group's heading (Tasks, Coordinators, Reviewer), and what it notes under them */
 function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phone: boolean; set: (key: string, value: string | null) => void; refused: (key: string) => string | undefined; clear: (key: string) => void; hint?: string }) {
@@ -755,7 +780,7 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
     const next = page.rows.find((x) => x.chain?.of === r.chain!.of && x.chain.cli && !shows(x))
     if (!next) return
     const last = visible.slice(0, i + 1).findLast((x) => x.chain?.of === r.chain!.of && x.chain.cli && on(x))
-    items.push({ add: { key: next.key, value: last?.value ?? next.options?.find((o) => o !== 'off') ?? 'off', label: next.chain!.add ?? 'Add a backup' }, group: r.group })
+    items.push({ add: { key: next.key, value: last?.value ?? next.options?.find((o) => o !== 'off') ?? 'off', label: next.chain!.add ?? 'Add a backup' }, group: r.group, sub: r.sub })
   })
   const groups: { name?: string; rows: Item[] }[] = []
   for (const row of items) {
@@ -794,6 +819,72 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
       ) : null}
     </>
   )
+  // one row of a group, or the button that adds the next backup of its chain
+  const rowOf = (row: Item) => {
+    if ('add' in row)
+      return (
+        <div className={rowLook(phone)}>
+          <button
+            type="button"
+            data-add-backup={row.add.key}
+            onClick={() => {
+              setAdded((a) => [...a, row.add.key])
+              set(row.add.key, row.add.value)
+            }}
+            className="press-dim relative flex min-h-9 items-center gap-1.5 font-medium text-accent after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:min-h-11"
+          >
+            <PlusIcon className={ic} />
+            {row.add.label}
+          </button>
+        </div>
+      )
+    if (row.doc || row.multiline)
+      return (
+        <div className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2.5 pb-3!', row.inherits && 'border-l-2 border-accent pl-3')}>
+          <dt className="flex min-w-0 flex-col">
+            {row.label}
+            {row.doc ? <Small className="text-pretty">Its coordinator goes through it each heartbeat, and may edit it too.</Small> : null}
+            {under(row)}
+          </dt>
+          <dd>
+            <DocValue label={row.label} file={row.multiline ? 'Private · this role only' : 'HEARTBEAT.md'} privateRules={row.multiline} phone={phone} value={row.value} onSave={(x) => set(row.key, row.multiline ? follows(row, x) : x)} />
+          </dd>
+        </div>
+      )
+    // a trigger: its words, next runs and picks under its label, as wide as the page
+    if (row.trigger)
+      return (
+        <div className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2 pb-3!', row.inherits && 'border-l-2 border-accent pl-3')}>
+          <dt className="flex min-w-0 flex-col">
+            {row.label}
+            {under(row)}
+          </dt>
+          <dd>
+            <TriggerValue row={{ ...row, trigger: row.trigger }} phone={phone} onPick={(x) => set(row.key, follows(row, x))} />
+          </dd>
+        </div>
+      )
+    // on a phone, a row's segments fill a line of their own under its label
+    return (
+      <div className={clsx(rowLook(phone), row.inherits && 'border-l-2 border-accent pl-3', phone && SEGMENTS.has(row.key) && 'flex-col items-stretch! gap-2.5 pb-3!')}>
+        <dt className="flex min-w-0 flex-1 flex-col">
+          {row.label}
+          {under(row)}
+        </dt>
+        <dd className={clsx('flex min-w-0 shrink-0 flex-col', phone && SEGMENTS.has(row.key) ? 'items-stretch' : 'max-w-[65%] items-end')}>
+          <Control row={row} phone={phone} set={(x) => set(row.key, follows(row, x))} edit={() => clear(row.key)} />
+        </dd>
+      </div>
+    )
+  }
+  // a run of rows as one list: a phone's rounded group, a little apart from the run before it
+  const list = (rows: Item[], apart = false) => (
+    <dl className={clsx(phone && card, apart && 'mt-3')}>
+      {rows.map((row) => (
+        <Fragment key={'add' in row ? `add:${row.add.key}` : row.key || row.label}>{rowOf(row)}</Fragment>
+      ))}
+    </dl>
+  )
   return (
     <div className={clsx('flex w-full flex-col', phone ? 'gap-6 px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+--spacing(8))]' : 'max-w-[720px] gap-6 px-6 pt-5 pb-8')}>
       <div className={clsx('flex flex-col gap-1', phone && 'px-4')}>
@@ -808,59 +899,11 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
       {groups.map(({ name, rows }, g) => (
         <div key={name ?? g} className="w-full">
           {name ? <h3 className={heading(phone)}>{name}</h3> : null}
-          <dl className={phone ? card : undefined}>
-            {rows.map((row) =>
-              'add' in row ? (
-                <div key={`add:${row.add.key}`} className={rowLook(phone)}>
-                  <button
-                    type="button"
-                    data-add-backup={row.add.key}
-                    onClick={() => {
-                      setAdded((a) => [...a, row.add.key])
-                      set(row.add.key, row.add.value)
-                    }}
-                    className="press-dim relative flex min-h-9 items-center gap-1.5 font-medium text-accent after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:min-h-11"
-                  >
-                    <PlusIcon className={ic} />
-                    {row.add.label}
-                  </button>
-                </div>
-              ) : row.doc || row.multiline ? (
-                <div key={row.key} className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2.5 pb-3!', row.inherits && 'border-l-2 border-accent pl-3')}>
-                  <dt className="flex min-w-0 flex-col">
-                    {row.label}
-                    {row.doc ? <Small className="text-pretty">Its coordinator goes through it each heartbeat, and may edit it too.</Small> : null}
-                    {under(row)}
-                  </dt>
-                  <dd>
-                    <DocValue label={row.label} file={row.multiline ? 'Private · this role only' : 'HEARTBEAT.md'} privateRules={row.multiline} phone={phone} value={row.value} onSave={(x) => set(row.key, row.multiline ? follows(row, x) : x)} />
-                  </dd>
-                </div>
-              ) : row.trigger ? (
-                // a trigger: its words, next runs and picks under its label, as wide as the page
-                <div key={row.key} className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2 pb-3!', row.inherits && 'border-l-2 border-accent pl-3')}>
-                  <dt className="flex min-w-0 flex-col">
-                    {row.label}
-                    {under(row)}
-                  </dt>
-                  <dd>
-                    <TriggerValue row={{ ...row, trigger: row.trigger }} phone={phone} onPick={(x) => set(row.key, follows(row, x))} />
-                  </dd>
-                </div>
-              ) : (
-                // on a phone, a row's segments fill a line of their own under its label
-                <div key={row.key || row.label} className={clsx(rowLook(phone), row.inherits && 'border-l-2 border-accent pl-3', phone && SEGMENTS.has(row.key) && 'flex-col items-stretch! gap-2.5 pb-3!')}>
-                  <dt className="flex min-w-0 flex-1 flex-col">
-                    {row.label}
-                    {under(row)}
-                  </dt>
-                  <dd className={clsx('flex min-w-0 shrink-0 flex-col', phone && SEGMENTS.has(row.key) ? 'items-stretch' : 'max-w-[65%] items-end')}>
-                    <Control row={row} phone={phone} set={(x) => set(row.key, follows(row, x))} edit={() => clear(row.key)} />
-                  </dd>
-                </div>
-              ),
-            )}
-          </dl>
+          {runsOf(rows).map((run, i) => (
+            <Fragment key={i}>
+              {run.sub ? <SubBlock name={run.sub} phone={phone}>{list(run.rows)}</SubBlock> : list(run.rows, i > 0)}
+            </Fragment>
+          ))}
         </div>
       ))}
       {page.note ? (

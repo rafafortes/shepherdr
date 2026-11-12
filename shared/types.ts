@@ -748,6 +748,9 @@ export interface SettingRow {
   num?: { min: number; max: number; step?: number; unit?: string; one?: string; off?: boolean; zero?: boolean }
   /** the small heading it sits under (Tasks, Coordinators) */
   group?: string
+  /** the sub-block of its group it sits in (Backups): drawn indented under its own small heading, the rows after it
+   *  back at the group's level */
+  sub?: string
   /** not set at this level: where its value comes from (All machines, a machine's name) */
   from?: string
   /** set at this level: the value a reset goes back to, and where that comes from (Default at All machines) */

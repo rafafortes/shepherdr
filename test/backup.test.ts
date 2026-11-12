@@ -120,7 +120,7 @@ describe("a coordinator's backup agent", () => {
   })
 
   test('the same CLI again keeps the model and effort the coordinator ran on where Backup leaves them default', async () => {
-    // Backup → Model and Effort are default; the coordinator ran on Opus 5.5 at high effort
+    // Tasks → Backup model and effort are default; the coordinator ran on Opus 5.5 at high effort
     const s = await place('own', 'claude', 'claude-opus-5-5')
     try {
       s.src.agents.records[s.key].effort = 'high'
@@ -245,7 +245,7 @@ describe("a coordinator's backup agent", () => {
       expect(s.started).toHaveLength(0)
       expect(s.src.agents.tookOver(s.key)).toBeUndefined()
       expect(s.cards().map((m) => m.card!.text)).toEqual([
-        "Cut off by its provider: signed out. No backup agent took over: Claude Code has no model gpt-6-sol: Backup → Coordinators' backup → Model is set to one it doesn't have. Write to carry on.",
+        "Cut off by its provider: signed out. No backup agent took over: Claude Code has no model gpt-6-sol: Coordinators → Backup model is set to one it doesn't have. Write to carry on.",
       ])
       expect(s.alerts).toHaveLength(1)
     } finally {
@@ -285,7 +285,7 @@ describe("a coordinator's backup agent", () => {
       expect(s.started).toHaveLength(0)
       expect(s.src.agents.tookOver(s.key)).toBeUndefined()
       expect(s.cards().map((m) => m.card!.text)).toEqual([
-        "Cut off by its provider: signed out. No backup agent took over: Claude Code has no model gpt-6-sol: Backup → Model is set to one it doesn't have. Write to carry on.",
+        "Cut off by its provider: signed out. No backup agent took over: Claude Code has no model gpt-6-sol: Tasks → Backup model is set to one it doesn't have. Write to carry on.",
       ])
     } finally {
       s.done()

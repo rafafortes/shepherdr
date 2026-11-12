@@ -2182,7 +2182,7 @@ export class Engine extends Emitter<Events> {
       if (!to) return []
       const them = CLI_NAME[to] ?? to
       if (!this.installed(to)) return [{ n, why: `${them} isn't installed on this machine` }]
-      const { model, row } = n === 1 ? backupModelOf(role, get) : { model: get(p.model), row: `Backup → ${role === 'task' ? "Tasks'" : "Coordinators'"} backup ${n} → Model` }
+      const { model, row } = n === 1 ? backupModelOf(role, get) : { model: get(p.model), row: `${role === 'task' ? 'Tasks' : 'Coordinators'} → Backup ${n} model` }
       if (model.toLowerCase() !== 'default' && knowsModels(to) && !findModel(to, model)) return [{ n, why: `${them} has no model ${model}: ${row} is set to one it doesn't have` }]
       return [{ n, to: { kind: to, ...this.settings.modelOf(p.name, to, space, get) } }]
     })

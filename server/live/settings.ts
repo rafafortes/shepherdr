@@ -88,10 +88,10 @@ const NEWS_PRESETS = [
 /** the agents Settings picks a CLI, model and effort for */
 type Role = 'task' | 'coordinator' | 'reviewer' | 'backup'
 
-/** where a CLI, its model and its effort are set: a role's own three; each agent backup's own three (Agents → Backup,
- *  the tasks' backup on task.fallback and the coordinators' on coordinator.fallback), so that each starts on a model its
- *  own CLI has; or a backup reviewer's (Reviewer → Backup reviewer), its own three so that neither reviewer replaces the
- *  other */
+/** where a CLI, its model and its effort are set: a role's own three; each agent backup's own three (Agents → Tasks or
+ *  Coordinators → Backups, the tasks' backup on task.fallback and the coordinators' on coordinator.fallback), so that each
+ *  starts on a model its own CLI has; or a backup reviewer's (How tasks work → Reviewer → Backups), its own three so that
+ *  neither reviewer replaces the other */
 type Pair = { cli: string; model: string; effort: string }
 
 /**
@@ -181,19 +181,24 @@ export interface Num {
   zero?: boolean
 }
 
-type Row = { label: string; key: string; value: string; options?: string[]; ordered?: boolean; ids?: Record<string, string>; text?: boolean; multiline?: boolean; fixed?: boolean; group?: string; num?: Num; hint?: string; warn?: string; chain?: SettingRow['chain'] }
+type Row = { label: string; key: string; value: string; options?: string[]; ordered?: boolean; ids?: Record<string, string>; text?: boolean; multiline?: boolean; fixed?: boolean; group?: string; sub?: string; num?: Num; hint?: string; warn?: string; chain?: SettingRow['chain'] }
 
-/** a chain's Backup 1 rows marked as its first, and the 2nd to the 5th after them: each shows once it is on, and the
- *  screen adds the next with its add words (src/Settings.tsx) */
-const chainRows = (c: Chain, first: Row[], label: (n: number) => string, model: string, effort: string, clis: readonly string[], add: string): Row[] => [
-  ...first.map((r, i) => ({ ...r, chain: { of: c, n: 1, ...(i === 0 ? { cli: true as const, add } : {}) } })),
+/** the small heading of a role's backups, under the role's own rows: its chain sits in a sub-block of that name */
+const BACKUPS = 'Backups'
+/** the button that adds the next backup of a chain (src/Settings.tsx) */
+const ADD = 'Add a backup'
+
+/** a role's chain of backups, under its own rows (group): Backup 1 first (the rows as given, the CLI first), then the 2nd
+ *  to the 5th, each with its Model and Effort. Every row is in the role's Backups sub-block; the 2nd to the 5th show once
+ *  they are on, and the screen adds the next one with the button at the sub-block's end (src/Settings.tsx) */
+const chainRows = (c: Chain, group: string, first: Row[], clis: readonly string[]): Row[] => [
+  ...first.map((r, i) => ({ ...r, group, sub: BACKUPS, chain: { of: c, n: 1, ...(i === 0 ? { cli: true as const, add: ADD } : {}) } })),
   ...EXTRA.flatMap((n) => {
     const p = extraPair(c, n)
-    const group = first[0].group
     return [
-      { group, label: label(n), key: p.cli, value: 'off', options: ['off', ...clis], hint: 'Off takes it out.', chain: { of: c, n, cli: true as const, add } },
-      { group, label: model, key: p.model, value: 'default', text: true, chain: { of: c, n } },
-      { group, label: effort, key: p.effort, value: 'default', options: [...EFFORTS], chain: { of: c, n } },
+      { group, sub: BACKUPS, label: `Backup ${n}`, key: p.cli, value: 'off', options: ['off', ...clis], hint: 'Off takes it out.', chain: { of: c, n, cli: true as const, add: ADD } },
+      { group, sub: BACKUPS, label: `Backup ${n} model`, key: p.model, value: 'default', text: true, chain: { of: c, n } },
+      { group, sub: BACKUPS, label: `Backup ${n} effort`, key: p.effort, value: 'default', options: [...EFFORTS], chain: { of: c, n } },
     ]
   }),
 ]
@@ -291,65 +296,51 @@ export const CATALOG: Section[] = [
       ...agentRows('Reviewer', 'reviewer', [...REVIEWERS], 'default', 'default'),
       // a reviewer that cannot run at all (out of allowance, signed out, its model is gone) leaves its task's agent
       // stuck at that step: a backup reviewer, named in the same Reviewer line, reviews instead. Off until the human
-      // sets one: with it off the line reads exactly as it always has
       // sets one: with it off the line reads exactly as it always has. More of them review in turn, each where the one
       // before it cannot run
       ...chainRows(
         'reviewer',
+        'Reviewer',
         [
-          { group: 'Reviewer', label: 'Backup reviewer', key: 'reviewer.fallback', value: 'off', options: ['off', ...REVIEWERS] },
-          { group: 'Reviewer', label: 'Backup model', key: 'reviewer.fallbackModel', value: 'default', text: true },
-          { group: 'Reviewer', label: 'Backup effort', key: 'reviewer.fallbackEffort', value: 'default', options: [...EFFORTS] },
+          { label: 'Backup', key: 'reviewer.fallback', value: 'off', options: ['off', ...REVIEWERS] },
+          { label: 'Backup model', key: 'reviewer.fallbackModel', value: 'default', text: true },
+          { label: 'Backup effort', key: 'reviewer.fallbackEffort', value: 'default', options: [...EFFORTS] },
         ],
-        (n) => `Backup reviewer ${n}`,
-        'Backup model',
-        'Backup effort',
         REVIEWERS,
-        'Add a backup reviewer',
       ),
     ],
   },
   {
-    // which agent (CLI), model and effort each kind of agent starts with
+    // which agent (CLI), model and effort each kind of agent starts with, and each role's backups under it
     name: 'Agents',
-    about: "What each kind of agent starts with. Default is the agent's own model or effort. A backup takes over when an agent can't go on: the same CLI again on its backup's model and effort, keeping its session, or another CLI taking over. Each backup has its own model and effort; the coordinators' backup follows the tasks' one until you set its own. Chat choices need a chat log reader; other installed CLIs cannot show replies here. Headless review is separate.",
+    about: "What each kind of agent starts with. Default is the agent's own model or effort. Each role's backups sit under its own rows: a backup takes over when an agent can't go on, the same CLI again on its backup's model and effort (keeping its session), or another CLI taking over. Each backup has its own model and effort; the coordinators' backup follows the tasks' one until you set its own. When the primary is back applies to every backup. Chat choices need a chat log reader; other installed CLIs cannot show replies here. Headless review is separate.",
     rows: [
       ...agentRows('Tasks', 'task', [...CHAT_CLIS], 'default', 'default'),
-      ...agentRows('Coordinators', 'coordinator', [...CHAT_CLIS], 'default', 'default'),
       // a backup takes over where a task's or a coordinator's agent can't go on (engine.ts cantGoOn, source.ts
       // cannotGoOn): the same CLI again on the backup's model and effort, keeping its session, or another CLI taking over
       // each takes over in turn: the 2nd where the 1st can't go on either, and so on
       ...chainRows(
         'task',
+        'Tasks',
         [
-          { group: 'Backup', label: "Tasks' backup", key: 'task.fallback', value: 'Codex', options: ['off', ...CHAT_CLIS] },
-          { group: 'Backup', label: 'Model', key: 'backup.model', value: 'default', text: true },
-          { group: 'Backup', label: 'Effort', key: 'backup.effort', value: 'default', options: [...EFFORTS] },
+          { label: 'Backup', key: 'task.fallback', value: 'Codex', options: ['off', ...CHAT_CLIS] },
+          { label: 'Backup model', key: 'backup.model', value: 'default', text: true },
+          { label: 'Backup effort', key: 'backup.effort', value: 'default', options: [...EFFORTS] },
         ],
-        (n) => `Tasks' backup ${n}`,
-        'Model',
-        'Effort',
         CHAT_CLIS,
-        "Add a tasks' backup",
       ),
+      ...agentRows('Coordinators', 'coordinator', [...CHAT_CLIS], 'default', 'default'),
       // the coordinators' own pair, so that it can be on another CLI than the tasks' one and on a model that CLI has
       ...chainRows(
         'coordinator',
+        'Coordinators',
         [
-          { group: 'Backup', label: "Coordinators' backup", key: 'coordinator.fallback', value: 'off', options: ['off', ...CHAT_CLIS] },
-          { group: 'Backup', label: 'Model', key: 'coordinator.fallbackModel', value: 'default', text: true, hint: "While default: the tasks' backup's." },
-          { group: 'Backup', label: 'Effort', key: 'coordinator.fallbackEffort', value: 'default', options: [...EFFORTS], hint: "While default: the tasks' backup's." },
+          { label: 'Backup', key: 'coordinator.fallback', value: 'off', options: ['off', ...CHAT_CLIS] },
+          { label: 'Backup model', key: 'coordinator.fallbackModel', value: 'default', text: true, hint: "While default: the tasks' backup's." },
+          { label: 'Backup effort', key: 'coordinator.fallbackEffort', value: 'default', options: [...EFFORTS], hint: "While default: the tasks' backup's." },
         ],
-        (n) => `Coordinators' backup ${n}`,
-        'Model',
-        'Effort',
         CHAT_CLIS,
-        "Add a coordinators' backup",
       ),
-      // the way back from a backup: the primary is asked, now and then, whether it answers again (source.ts
-      // watchReturns, return.ts); go back starts each agent still on the backup again on what Settings name once it is
-      // idle, tell me only says so in their chats. A probe is one tiny request of one CLI, never beside work on that model
-      { group: 'Backup', label: 'When the primary is back', key: 'backup.watchReturn', value: 'go back', options: ['go back', 'tell me', 'off'], hint: 'Asks the primary model now and then whether it answers again. Go back: each agent still on a backup starts again on it once idle, never mid-turn. Tell me: only says so in their chats. Off: never asks.' },
       // the advisor: a question a task or a coordinator opens for the human can go to it (Ask the advisor on its card),
       // and goes by itself once it has waited this long; it answers questions and choices, never a permission, a plan
       // or what only the human decides (source.ts advise, advisor.ts). One headless run per question, read-only
@@ -358,18 +349,20 @@ export const CATALOG: Section[] = [
       { group: 'Advisor', label: 'Effort', key: 'advisor.effort', value: 'default', options: [...EFFORTS] },
       ...chainRows(
         'advisor',
+        'Advisor',
         [
-          { group: 'Advisor', label: 'Backup', key: 'advisor.fallback', value: 'off', options: ['off', ...REVIEWERS], hint: 'Answers instead where the advisor cannot run at all.' },
-          { group: 'Advisor', label: 'Backup model', key: 'advisor.fallbackModel', value: 'default', text: true },
-          { group: 'Advisor', label: 'Backup effort', key: 'advisor.fallbackEffort', value: 'default', options: [...EFFORTS] },
+          { label: 'Backup', key: 'advisor.fallback', value: 'off', options: ['off', ...REVIEWERS], hint: 'Answers instead where the advisor cannot run at all.' },
+          { label: 'Backup model', key: 'advisor.fallbackModel', value: 'default', text: true },
+          { label: 'Backup effort', key: 'advisor.fallbackEffort', value: 'default', options: [...EFFORTS] },
         ],
-        (n) => `Backup ${n}`,
-        'Backup model',
-        'Backup effort',
         REVIEWERS,
-        'Add an advisor backup',
       ),
       { group: 'Advisor', label: 'Answers for you after', key: 'advisor.after', value: '2 min', options: [...ADVISOR_AFTER], hint: 'A question nobody answered goes to the advisor by itself after this long. Never a permission, a plan, or what only you decide.' },
+      // the way back from a backup: the primary is asked, now and then, whether it answers again (source.ts
+      // watchReturns, return.ts); go back starts each agent still on the backup again on what Settings name once it is
+      // idle, tell me only says so in their chats. A probe is one tiny request of one CLI, never beside work on that model.
+      // It applies to every backup above, so it sits under a group of its own
+      { group: 'Backups', label: 'When the primary is back', key: 'backup.watchReturn', value: 'go back', options: ['go back', 'tell me', 'off'], hint: 'Applies to every backup above. Asks the primary model now and then whether it answers again. Go back: each agent still on a backup starts again on it once idle, never mid-turn. Tell me: only says so in their chats. Off: never asks.' },
     ],
   },
   {
@@ -517,7 +510,7 @@ export function backupModelOf(role: 'task' | 'coordinator', get: (key: string) =
   const pair = PAIRS[role === 'task' ? 'backup' : 'coordinatorBackup']
   const model = pairValue(get, pair, 'model')
   const follows = role === 'coordinator' && get(pair.model).trim().toLowerCase() === 'default' && model.trim().toLowerCase() !== 'default'
-  return { model, row: role === 'task' || follows ? 'Backup → Model' : "Backup → Coordinators' backup → Model" }
+  return { model, row: role === 'task' || follows ? 'Tasks → Backup model' : 'Coordinators → Backup model' }
 }
 
 /** a level defaults are set at: Everywhere, this machine, or one of its spaces */
