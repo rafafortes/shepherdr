@@ -1115,7 +1115,7 @@ export default function Settings() {
     // set at the page's level: a machine's or a space's goes to that machine
     const r = (await act({ type: 'setting', key, value, ...((page.targets?.[key] ?? page.level) ? { place: page.targets?.[key] ?? page.level } : {}) })) as { ok?: boolean; error?: string; waiting?: boolean }
     setRefused((x) => ({ ...x, [at(key)]: r?.ok === false ? (r.error ?? 'Refused.') : r?.waiting ? `Set once ${machineName(snap.machines, page.machine)} is back.` : '' }))
-    // a task's agent saved: the tasks already waiting may take it too, asked first (none asked when none would change)
+    // a task's agent or reviewer saved: the tasks already waiting may take it too, asked first (none asked when none would change)
     if (r?.ok && !r.waiting) void askWaiting(key, page.targets?.[key] ?? page.level)
   }
   const close = () => setUI({ settings: null })

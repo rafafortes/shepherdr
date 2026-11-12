@@ -472,3 +472,95 @@ describe.skipIf(!browser)('a task agent saved, and the tasks already waiting', (
     }
   })
 })
+
+describe.skipIf(!browser)("a reviewer saved, and the tasks already waiting", () => {
+  /** the demo's tasks back as they were, and its Settings for the spaces this file changes */
+  const reset = async () => {
+    for (const store of Object.values(world.stores)) {
+      store.set('reviewer.agent', null, 'all')
+      store.set('reviewer.model', null, 'all')
+      store.set('advisor.agent', null, 'all')
+    }
+    world.stores['vm-str'].set('reviewer.model', null, { space: 'herdr-projects' })
+    world.stores['vm-str'].set('reviewer.agent', null, { space: 'herdr-projects' })
+    world.stores['vm-str'].set('advisor.agent', null, { space: 'herdr-projects' })
+    world.sections = (await import('../server/demo/data.ts')).settings(world.stores)
+    world.emit('snapshot')
+  }
+  const desc = (id: string) => world.tasks.find((t) => t.id === id)!.desc ?? ''
+  /** the Reviewer line of a demo task's brief */
+  const reviewerLine = (id: string) => desc(id).split('\n').find((l) => l.startsWith('- Reviewer: '))
+  const PLAIN = '- Reviewer: a headless Codex or a Codex subagent (its default model and effort).'
+
+  test("a space's reviewer model asks how many waiting tasks take it: Apply rewrites their brief, Only new tasks leaves them, and an advisor change asks nothing", async () => {
+    const tasks = structuredClone(world.tasks)
+    const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } })
+    try {
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.getByRole('button', { name: 'Editing: home · vm-str', exact: true }).click()
+      await page.getByRole('menuitemradio', { name: 'herdr-projects · vm-str', exact: true }).click()
+      await settings.getByRole('button', { name: 'Editing: herdr-projects · vm-str', exact: true }).waitFor()
+      await settings.getByRole('button', { name: 'How tasks work', exact: true }).click()
+      // the Reviewer group's Model: the same picker as the task agent's, here on Codex's models
+      const reviewer = settings.getByRole('heading', { name: 'Reviewer', exact: true }).locator('..')
+      await reviewer.getByRole('button', { name: /^Model: / }).click()
+      await page.getByRole('menuitemradio', { name: 'GPT-6-Sol', exact: true }).click()
+      const ask = page.getByRole('alertdialog')
+      await ask.waitFor()
+      expect(await ask.getByRole('heading', { name: 'Apply to the tasks already created?' }).count()).toBe(1)
+      const text = (await ask.textContent()) ?? ''
+      // this space's two waiting tasks (HP-203 queued, HP-204 To do) are reviewed by the new one; HP-202 is at work
+      expect(text).toContain('2 waiting tasks of herdr-projects (queued, To do, scheduled) are reviewed by Codex (GPT-6-Sol')
+      expect(text).toContain('when their turn comes.')
+      expect(text).toContain('Running tasks keep their reviewer.')
+      expect(text).not.toContain('start on')
+      expect(reviewerLine('HP-203')).toBe(PLAIN)
+      await ask.getByRole('button', { name: 'Only new tasks', exact: true }).click()
+      await ask.waitFor({ state: 'detached' })
+      expect(reviewerLine('HP-203')).toBe(PLAIN)
+      expect(world.stores['vm-str'].get('reviewer.model', 'herdr-projects')).toBe('GPT-6-Sol')
+      // the next change asks again, and Apply rewrites both waiting briefs, the words above their blocks unchanged
+      await reviewer.getByRole('button', { name: /^Model: / }).click()
+      await page.getByRole('menuitemradio', { name: 'GPT-6-Astra', exact: true }).click()
+      await ask.getByRole('button', { name: 'Apply to 2 tasks', exact: true }).waitFor()
+      await ask.getByRole('button', { name: 'Apply to 2 tasks', exact: true }).click()
+      await ask.getByText('Reviewer applied to 2 waiting tasks.', { exact: true }).waitFor()
+      expect(await ask.getByRole('button', { name: 'Done', exact: true }).count()).toBe(1)
+      // the picker writes the model as it lists it or by its id: either names the same model
+      expect(reviewerLine('HP-203')).toMatch(/model gpt-6-astra, its default effort\). \(this space's setting\)$|model GPT-6-Astra, its default effort\). \(this space's setting\)$/)
+      expect(reviewerLine('HP-204')).toBe(reviewerLine('HP-203'))
+      // only the Reviewer line of each brief moved
+      expect(desc('HP-203')).toBe(tasks.find((t) => t.id === 'HP-203')!.desc!.replace(PLAIN, reviewerLine('HP-203')!))
+      expect(reviewerLine('HP-202')).toBe(PLAIN)
+      await ask.getByRole('button', { name: 'Done', exact: true }).click()
+      await ask.waitFor({ state: 'detached' })
+
+      // an advisor's agent asks nothing: it applies at once already
+      await settings.getByRole('button', { name: 'Agents', exact: true }).click()
+      await settings.getByRole('heading', { name: 'Advisor', exact: true }).locator('..').getByRole('button', { name: /^Advisor: / }).click()
+      await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).click()
+      await settled(page)
+      await Bun.sleep(300)
+      expect(await page.getByRole('alertdialog').count()).toBe(0)
+      expect(world.stores['vm-str'].get('advisor.agent', 'herdr-projects')).toBe('Codex')
+
+      // a space with nothing waiting: its reviewer change asks nothing either
+      await settings.getByRole('button', { name: 'Editing: herdr-projects · vm-str', exact: true }).click()
+      await page.getByRole('menuitemradio', { name: 'lilla-varlden · mac', exact: true }).click()
+      await settings.getByRole('button', { name: 'Editing: lilla-varlden · mac', exact: true }).waitFor()
+      await settings.getByRole('button', { name: 'How tasks work', exact: true }).click()
+      const other = settings.getByRole('heading', { name: 'Reviewer', exact: true }).locator('..')
+      await other.getByRole('button', { name: /^Model: / }).click()
+      await page.getByRole('menuitemradio', { name: 'GPT-6-Luna', exact: true }).click()
+      await settled(page)
+      await Bun.sleep(300)
+      expect(await page.getByRole('alertdialog').count()).toBe(0)
+    } finally {
+      world.tasks = tasks
+      await reset()
+      await page.close()
+    }
+  })
+})

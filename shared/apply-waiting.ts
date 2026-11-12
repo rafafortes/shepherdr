@@ -18,8 +18,11 @@ export const REVIEWER_KEYS = [
   ...[2, 3, 4, 5].flatMap((n) => [`reviewer.fallback${n}`, `reviewer.fallback${n}Model`, `reviewer.fallback${n}Effort`]),
 ]
 
-/** which waiting tasks a change of this key reaches: the task agent's, or the reviewer's; undefined for any other key */
-export function waitingKind(key: string): 'agent' | 'reviewer' | undefined {
+/** whose waiting tasks a change reaches: the task agent's, or the reviewer's */
+export type WaitingKind = 'agent' | 'reviewer'
+
+/** which waiting tasks a change of this key reaches; undefined for any other key */
+export function waitingKind(key: string): WaitingKind | undefined {
   if (TASK_AGENT_KEYS.includes(key)) return 'agent'
   if (REVIEWER_KEYS.includes(key)) return 'reviewer'
   return undefined
