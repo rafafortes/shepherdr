@@ -509,7 +509,7 @@ describe('Settings changed: the waiting tasks take it, from the screen and the c
       expect(src.engine.task(a)!.agent).toMatchObject({ kind: 'claude' })
       // yes
       const yes = await src.act({ type: 'apply-to-waiting', key: 'task.agent', place })
-      expect(yes).toMatchObject({ ok: true, changed: 2, spaces: [{ name: p.name, on: { kind: 'pi' }, changed: 2 }] })
+      expect(yes).toMatchObject({ ok: true, changed: 2, spaces: [{ name: p.name, words: 'pi', changed: 2 }] })
       expect([src.engine.task(a)!.agent, src.engine.task(b)!.agent]).toEqual([{ kind: 'pi' }, { kind: 'pi' }])
       expect(await src.act({ type: 'apply-to-waiting', key: 'task.agent', place, dry: true })).toMatchObject({ changed: 0, same: 2 })
       // the command twin: a line says what it did; the flag goes with a task agent key only
