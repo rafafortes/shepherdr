@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { ROOT } from '../server/root.ts'
 import { tmp } from './tmp.ts'
 
 process.env.SHEPHERDR_HOME = tmp('test')
@@ -1175,7 +1176,8 @@ describe("a coordinator's instructions", () => {
       expect(p).not.toContain('home space')
       expect(p).toContain('skill/shepherdr/SKILL.md first')
       expect(p).toContain('skill/shepherdr-coordinator/SKILL.md')
-      expect(p).not.toContain('shepherdr-agent')
+      // the checkout's own path may hold the word (a worktree named shepherdr-agents-layout): the skill's path must not
+      expect(p.split(ROOT).join('')).not.toContain('shepherdr-agent')
       expect(p).toContain(`Autopilot is ${mode === 'autopilot' ? 'on' : 'off'} now.`)
     }
     // a home space's also looks after its machine; the main machine's also keeps every machine's overview
