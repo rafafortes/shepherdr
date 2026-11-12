@@ -487,6 +487,45 @@ describe('first in line, from the command and the screen', () => {
   })
 })
 
+describe('Settings changed: the waiting tasks take it, from the screen and the command', () => {
+  test('the screen asks first (dry) and applies on yes; the command says what it applied with --apply-waiting; other keys are refused', async () => {
+    const dir = tmp('src-repo')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'retune-src')
+    const place = placeId.space(p.name)
+    const idOf = (out: string) => out.match(/([A-Z]+-\d+)/)![1]
+    const engine = src.engine as unknown as { machine?: () => { busy?: string; herdr: boolean } }
+    const was = engine.machine
+    // herdr not answering holds every task: they all wait
+    engine.machine = () => ({ herdr: false })
+    try {
+      const a = idOf((await src.cli(['task', 'add', 'Waits', '--desc', 'x'], { chat: place })).out)
+      const b = idOf((await src.cli(['task', 'add', 'Waits too', '--desc', 'y'], { chat: place })).out)
+      expect(src.engine.task(a)!.held?.why).toBe('machine')
+      expect(await src.act({ type: 'apply-to-waiting', key: 'space.base', place, dry: true })).toEqual({ ok: false, error: 'space.base is not a task agent setting.' })
+      expect(await src.act({ type: 'setting', key: 'task.agent', value: 'pi', place })).toEqual({ ok: true })
+      // the question first: what would change, and nothing does
+      expect(await src.act({ type: 'apply-to-waiting', key: 'task.agent', place, dry: true })).toMatchObject({ ok: true, changed: 2, same: 0, running: 0, kept: [] })
+      expect(src.engine.task(a)!.agent).toMatchObject({ kind: 'claude' })
+      // yes
+      const yes = await src.act({ type: 'apply-to-waiting', key: 'task.agent', place })
+      expect(yes).toMatchObject({ ok: true, changed: 2, spaces: [{ name: p.name, on: { kind: 'pi' }, changed: 2 }] })
+      expect([src.engine.task(a)!.agent, src.engine.task(b)!.agent]).toEqual([{ kind: 'pi' }, { kind: 'pi' }])
+      expect(await src.act({ type: 'apply-to-waiting', key: 'task.agent', place, dry: true })).toMatchObject({ changed: 0, same: 2 })
+      // the command twin: a line says what it did; the flag goes with a task agent key only
+      expect((await src.cli(['set', 'space.maxTasks', '3', '--space', p.name, '--apply-waiting'], { chat: place })).out).toContain('--apply-waiting goes with shepherdr set task.agent, task.model or task.effort')
+      const cli = await src.cli(['set', 'task.agent', 'Claude Code', '--space', p.name, '--apply-waiting'], { chat: place })
+      expect(cli.code).toBe(0)
+      expect(cli.out).toContain('2 waiting tasks in ' + p.name + ' will start on Claude Code when their turn comes.')
+      expect(src.engine.task(a)!.agent).toMatchObject({ kind: 'claude' })
+      // a space that is not there is refused
+      expect(await src.act({ type: 'apply-to-waiting', key: 'task.agent', place: 'p:nowhere:nothing', dry: true })).toEqual({ ok: false, error: 'No such space.' })
+    } finally {
+      engine.machine = was
+    }
+  })
+})
+
 describe('Queued from the command', () => {
   test('task add --after queues it; task queue changes or clears it; what is not there, or a circle, is refused', async () => {
     const dir = tmp('src-repo')

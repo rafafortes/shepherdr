@@ -8,7 +8,7 @@ export interface Parsed {
   flags: Set<string>
 }
 
-const FLAGS = new Set(['ordinary', 'other', 'multi', 'json', 'project-coordinator', 'off', 'help', 'force', 'archived', 'machine', 'later', 'save', 'all', 'yes', 'priority'])
+const FLAGS = new Set(['ordinary', 'other', 'multi', 'json', 'project-coordinator', 'off', 'help', 'force', 'archived', 'machine', 'later', 'save', 'all', 'yes', 'priority', 'apply-waiting'])
 
 export function parseArgs(args: string[]): Parsed {
   const words: string[] = []
@@ -259,12 +259,16 @@ Settings and automations
                                                  voice) as they are where it runs (its space, else this machine),
                                                  each with where it comes from, and the lines every brief ends with
   shepherdr models [CLI]                         each CLI's models and the effort levels each takes, as the CLI says
-  shepherdr set <key> <value> [--machine | --space NAME]
+  shepherdr set <key> <value> [--machine | --space NAME] [--apply-waiting]
   shepherdr unset <key> [--machine | --space NAME]
                                                  defaults are set Everywhere (none), for this machine (--machine)
                                                  or one space (--space); the most specific one set wins.
                                                  unset drops that level's own, so the level above it counts again.
-                                                 Counts and limits take any number in their range
+                                                 Counts and limits take any number in their range.
+                                                 --apply-waiting (task.agent, task.model, task.effort only): the
+                                                 waiting tasks it reaches (of that space; else of each space of this
+                                                 machine that doesn't set it itself) start on what Settings name now,
+                                                 as Start with… gives each; running tasks keep their agent
   shepherdr automation add "<name>" --task "<title>" [--brief "<brief>"] [--when "<time rule>"] [--on "<events>"]
                          [--agent CLI] [--model ID] [--effort LEVEL] [--space NAME]
                                                  each run adds that task to the space, with a fresh agent; it runs on
