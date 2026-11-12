@@ -116,7 +116,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     },
   })
   /** the primary models of the roles whose agents a backup took over: asked now and then whether they answer again
-   *  (Settings → Agents → Backup → When the primary is back; return.ts) */
+   *  (Settings → Agents → When the primary is back; return.ts) */
   returns = new Returns()
   /** one pass of the way back at a time (watchReturns): its probes, and the restarts that take agents back */
   private returning = false
@@ -1737,7 +1737,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /* ---------- when the primary model is back ---------- */
 
   /**
-   * Settings → Agents → Backup → When the primary is back: the model a backup took over from is asked now and then
+   * Settings → Agents → When the primary is back: the model a backup took over from is asked now and then
    * whether it answers again (return.ts). Go back: each agent still on the backup starts again on what Settings name,
    * once it is idle — never mid-turn, never a paused task, never one asking you something — and the ones still busy
    * follow on later passes while the answer is fresh. Tell me: one card in each of those chats says so, with the way

@@ -2,7 +2,7 @@
 // refuses it. The backup agent takes that role's agent over (engine.ts cantGoOn, source.ts coordinatorCantGoOn), and
 // this is the way back: it remembers, per role and space, what ran out and what took over, and asks the primary now and
 // then whether it answers. When it does, each agent still on the backup starts again on what Settings name, once it is
-// idle (Settings → Agents → Backup → When the primary is back: go back), or a card in those chats says so and how to go
+// idle (Settings → Agents → When the primary is back: go back), or a card in those chats says so and how to go
 // back (tell me). No setting is ever written and no model chosen on its own: what it goes back to is what Settings name.
 //
 // It is kept across a restart (returns.json, like retries.json) and it is this machine's own: a machine never asks
