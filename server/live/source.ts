@@ -2651,7 +2651,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (!TASK_HARNESS.includes(a.key)) return { ok: false, error: `${a.key} is not a task agent setting.` }
         const pr = a.place?.startsWith('p:') ? this.spaceKey(a.place) : undefined
         if (a.place?.startsWith('p:') && !pr) return { ok: false, error: 'No such space.' }
-        return { ok: true, ...this.applyWaiting(a.key, pr ? { space: pr } : 'machine', !!a.dry) }
+        const r = this.applyWaiting(a.key, pr ? { space: pr } : 'machine', !!a.dry)
+        return { ok: true, ...r, spaces: r.spaces.map((s) => ({ name: s.name, words: harnessWords(fitHarness(s.on)), changed: s.changed })) }
       }
       case 'archive': {
         const t = this.engine.task(a.chat.split('/')[0])
