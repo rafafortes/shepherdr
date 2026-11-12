@@ -15,6 +15,28 @@
   or dark), Light or Dark, set before the first paint, with the browser's bar and artifacts following it. A phone
   lists the sections in groups, as iOS's Settings does, and opens one over the list; a wider screen keeps the list
   down its side.
+- **The tasks already created** (`task.agent`, `task.model`, `task.effort`). A task's CLI, model and effort are fixed when
+  it is added, so a change here reaches the tasks added after it. Right after you save one, Settings asks **Apply to the
+  tasks already created?** when a waiting task would change, with what it would do: "2 waiting tasks of herdr-projects
+  (queued, To do, scheduled) start on pi (high) when their turn comes. Running tasks keep their agent." **Apply to 2 tasks**
+  sets each waiting task's worker the way Start with… does (for that task alone; it stays in line as it is, and one whose
+  agent already sits in its worktree is restarted on the new worker at its go). **Only new tasks** changes nothing. With no
+  waiting task that would change, nothing is asked. The result (how many changed, how many were already on it) stays in the
+  dialog until you press Done.
+  - **Which tasks.** Waiting means queued (after others, or held for room), To do and scheduled. Running, asking, ready,
+    merging, done and archived tasks keep what they run on, and so does one already on the new worker. A scheduled task
+    with no CLI of its own takes Settings when it starts, so it needs nothing; one the way back is starting again starts
+    on what Settings name for its role, too.
+  - **Which spaces.** A change of a space's own setting reaches that space's waiting tasks. A change at Everywhere or this
+    machine reaches the waiting tasks of every space of this machine that does not set that key itself: a space with its
+    own setting keeps it, and the dialog says which ones ("gtm keeps its own setting."). Tasks of the home space are not
+    among them.
+  - **Chosen at task add.** A task whose CLI, model or effort a coordinator set with `task add --agent`, `--model` or
+    `--effort` changes too, and the dialog counts those apart ("1 of them was given its own worker when added, and changes
+    too"). Once changed it runs on Settings like the others.
+  - **From the command.** `shepherdr set task.model <model> --space NAME --apply-waiting` (also `task.agent` and `task.effort`, with
+    `--machine`, or Everywhere without `--space`) makes the same change and says in one line what it did, with the same counts.
+    Without `--apply-waiting` nothing waiting moves.
 - A reviewer has a backup, for the case where it cannot run at all. Settings → How tasks work → Reviewer → Backup
   reviewer (`reviewer.fallback`, off until you set one) names a second reviewer CLI; `reviewer.fallbackModel` and
   `reviewer.fallbackEffort` are its model and effort, its own keys so that neither reviewer replaces the other. When
