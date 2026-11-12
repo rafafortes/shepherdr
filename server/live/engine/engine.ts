@@ -2886,7 +2886,7 @@ export class Engine extends Emitter<Events> {
     if (!t.worktree || !t.branch || !t.base) return { ok: false, text: `${t.id} has no branch yet.` }
     const p = this.proj(t)
     const g = await this.hub(p)
-    if (!g) return { ok: true, text: `No pull request: ${p.name} has no GitHub remote, or gh isn't logged in to it (gh auth status). shepherdr merge ${t.id} squash-merges it here.` }
+    if (!g) return { ok: true, text: `No pull request: ${this.places.shownName(p.name)} has no GitHub remote, or gh isn't logged in to it (gh auth status). shepherdr merge ${t.id} squash-merges it here.` }
     if ((await G.aheadCount(t.worktree, t.base)) === 0) return { ok: false, text: `${t.id} has no commits yet: commit your work, then run shepherdr pr ${t.id} again.` }
     const dirty = await G.dirty(t.worktree)
     const pushed = await this.push(t)
@@ -2966,7 +2966,7 @@ export class Engine extends Emitter<Events> {
     if (!t.worktree || !t.branch) return { ok: false, text: `${t.id} has no branch yet.` }
     const p = this.proj(t)
     const g = await this.hub(p)
-    if (!g) return { ok: true, text: `No GitHub checks: ${p.name} has no GitHub remote, or gh isn't logged in to it. Run the project's own checks here.` }
+    if (!g) return { ok: true, text: `No GitHub checks: ${this.places.shownName(p.name)} has no GitHub remote, or gh isn't logged in to it. Run the project's own checks here.` }
     const pr = await this.prOf(t, g, t.worktree)
     if (!pr) return { ok: false, text: `${t.id} has no pull request yet: shepherdr pr ${t.id} pushes the branch and opens one.` }
     const head = (await G.git(t.worktree, 'rev-parse', 'HEAD')).out

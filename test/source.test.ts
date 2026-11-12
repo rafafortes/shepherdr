@@ -3176,3 +3176,88 @@ describe("a renamed space's own cap: the held replies name it as it shows", () =
     }
   })
 })
+
+describe('a renamed space: every message that names it reads the name it shows, and its lookups keep the name it was added under', () => {
+  test('pr and checks without GitHub name the space as it shows', async () => {
+    const { t, place } = await workedTask('pr-added')
+    src.places.rename(place, 'lyvora-pr')
+    const pr = await src.cli(['pr', t.id], { chat: `${t.id}/Agent` })
+    expect(pr.out).toContain('No pull request: lyvora-pr has no GitHub remote')
+    expect(pr.out).not.toContain('pr-added')
+    const checks = await src.cli(['checks', t.id], { chat: `${t.id}/Agent` })
+    expect(checks.out).toContain('No GitHub checks: lyvora-pr has no GitHub remote')
+    expect(checks.out).not.toContain('pr-added')
+    // the task still finds its space by the name it was added under
+    expect(src.places.space(place)!.name).toBe('pr-added')
+  })
+
+  test('space set base and set space.base name the space as it shows', async () => {
+    const dir = tmp('base-shown')
+    run('git init -q -b main && git config user.email t@t && git config user.name T && touch README && git add . && git commit -qm init && git branch develop', dir)
+    const p = await src.places.add(dir, 'base-added')
+    src.places.rename(placeId.space(p.name), 'lyvora-base')
+    const byCommand = await src.cli(['space', 'set', 'base', 'develop', '--space', p.name], {})
+    expect(byCommand.out).toContain('lyvora-base: new tasks start from and merge into develop. Existing tasks keep their target.')
+    const bySetting = await src.cli(['set', 'space.base', 'main', '--space', p.name], {})
+    expect(bySetting.out).toContain('lyvora-base: base branch main. Existing tasks keep their target.')
+    expect(p.base).toBe('main')
+  })
+
+  test('an automation names the space it adds its tasks to as it shows, in its reply and its list', async () => {
+    const dir = tmp('auto-shown')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'auto-added')
+    src.places.rename(placeId.space(p.name), 'lyvora-auto')
+    const place = placeId.space(p.name)
+    const add = await src.cli(['automation', 'add', 'ShownNightly', '--task', 'Bump deps', '--brief', 'Bump and test.', '--when', 'FREQ=MINUTELY;INTERVAL=5'], { chat: place })
+    expect(add.out).toContain('It adds the task “Bump deps” to lyvora-auto, with a fresh agent.')
+    expect(add.out).not.toContain('auto-added')
+    const list = await src.cli(['automation', 'list'], { chat: place })
+    expect(list.out).toContain('ShownNightly · ')
+    expect(list.out).toContain(' · lyvora-auto · ')
+    expect(list.out).not.toContain('auto-added')
+    expect(src.automations.find(place, 'ShownNightly')).toBeDefined()
+  })
+
+  test("show's defaults for a task name the space as it shows", async () => {
+    const dir = tmp('show-shown')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'show-added')
+    src.places.rename(placeId.space(p.name), 'lyvora-show')
+    const out = (await src.cli(['show', '--space', p.name], {})).out
+    expect(out).toContain("Every new task's brief in lyvora-show ends with:")
+    expect(out).not.toContain('show-added')
+  })
+
+  test("a second Run now while a renamed space's coordinator wakes names it as it shows", async () => {
+    const dir = tmp('hb-shown')
+    run('git init -q -b main', dir)
+    const p = await src.places.add(dir, 'hb-added')
+    src.places.rename(placeId.space(p.name), 'lyvora-hb')
+    const place = placeId.space(p.name)
+    expect(src.settings.set('heartbeat.when', 'off', { space: p.name }).ok).toBe(true)
+    const send = src.agents.send
+    const status = src.agents.status
+    const reachable = src.agents.reachable
+    let st = 'idle'
+    src.agents.send = (async () => ({ waiting: false })) as unknown as typeof send
+    src.agents.status = ((k: string) => (k === place ? st : 'gone')) as typeof status
+    src.agents.reachable = true
+    try {
+      src.places.setMode(place, 'autopilot')
+      expect(await src.act({ type: 'setting', key: 'heartbeat.md', value: '- Check the tasks', place })).toEqual({ ok: true })
+      expect(await src.act({ type: 'heartbeat', place, op: 'run' })).toEqual({ ok: true, queued: false })
+      expect(await src.act({ type: 'heartbeat', place, op: 'run' })).toEqual({ ok: false, error: "lyvora-hb's coordinator is already waking: one wake at a time." })
+    } finally {
+      // the wake is over: the next turn's end clears it
+      st = 'working'
+      src.heartbeat(Date.now())
+      st = 'idle'
+      src.heartbeat(Date.now() + 60_000)
+      src.places.setMode(place, 'regular')
+      src.agents.send = send
+      src.agents.status = status
+      src.agents.reachable = reachable
+    }
+  })
+})
