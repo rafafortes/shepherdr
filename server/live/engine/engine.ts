@@ -378,9 +378,10 @@ const TRAIN_MAX = 5
 
 /** the line a held task shows */
 /** why a task waits to start: its slots are taken, the machine is busy, every model of its space ran out (a start
- *  would only be cut off as well), or its tasks that were cut off go back to work first (source.ts, return.ts) */
-export type HeldWhy = 'slots' | 'machine' | 'models' | 'resume'
-export const HELD = { slots: 'Waiting for a free slot', machine: 'Waiting for the machine', models: 'Waiting: every model ran out', resume: 'Waiting: cut-off tasks go back to work first' } as const
+ *  would only be cut off as well), its tasks that were cut off go back to work first (source.ts, return.ts), or its
+ *  space's own cap (space.maxTasks, inside the machine's) is full: another space's task may still start */
+export type HeldWhy = 'slots' | 'machine' | 'models' | 'resume' | 'space'
+export const HELD = { slots: 'Waiting for a free slot', machine: 'Waiting for the machine', models: 'Waiting: every model ran out', resume: 'Waiting: cut-off tasks go back to work first', space: 'Waiting for a free slot of its space' } as const
 
 /** queued tasks are first looked at once herdr has told which agents are alive: a go sent before would start a second */
 const RECHECK_FIRST = 15_000
@@ -783,7 +784,7 @@ export class Engine extends Emitter<Events> {
       if (t.trouble) return fitStatus(`Went wrong: ${t.trouble}`)
       // a To do row is its title alone
       if (status === 'todo') return ''
-      if (status === 'queued') return this.holding(t) ? `${t.priority ? 'First in line · ' : ''}${HELD[t.held!.why]}` : this.waitLine(t)
+      if (status === 'queued') return this.holding(t) ? `${t.priority ? 'First in line · ' : ''}${this.heldLabel(t)}` : this.waitLine(t)
       if (status === 'need' && this.queued(t) && this.agents.status(key) !== 'blocked') return fitStatus(this.halts(t).join(' · '))
       if (status === 'need') return this.reasonOf(key) ?? NEED.reply
       // why its last merge stopped, while its agent is on it: a conflict to rebase by hand, or the gate's refusal
@@ -1264,7 +1265,7 @@ export class Engine extends Emitter<Events> {
   }
 
   /** whether one more task may start now (this one, when one is named), and if not, why: its slots are all taken, the
-   *  machine is too loaded, or its space waits for its models (startsWait) */
+   *  machine is too loaded, its space waits for its models (startsWait), or its space's own cap is full (spaceCap) */
   room(t?: TaskRec): { why?: HeldWhy } {
     const l = this.settings.machine()
     if (l.max !== null && this.working() >= l.max) return { why: 'slots' }
@@ -1273,7 +1274,25 @@ export class Engine extends Emitter<Events> {
     // a herdr that doesn't answer, nor its space's models all out (it would only be cut off)
     if (m && (!m.herdr || (m.busy && !t?.priority))) return { why: 'machine' }
     const w = t ? this.startsWait?.(t) : undefined
-    return w && !(w === 'resume' && t?.priority) ? { why: w } : {}
+    if (w && !(w === 'resume' && t?.priority)) return { why: w }
+    // a first in line passes neither: its space's cap is as much its slots as the machine's are
+    const cap = t ? this.spaceCap(t) : undefined
+    return cap && cap.working >= cap.max ? { why: 'space' } : {}
+  }
+
+  /** a task's space's own cap on this machine (space.maxTasks), with how many of that space's tasks work now (busy, as
+   *  the machine's count is); none when the space has no cap of its own */
+  spaceCap(t: TaskRec): { space: string; max: number; working: number } | undefined {
+    const space = this.places.space(t.project)?.name
+    const max = space === undefined ? null : this.settings.spaceMax(space)
+    if (space === undefined || max === null) return undefined
+    return { space, max, working: this.tasks.filter((x) => this.places.space(x.project)?.name === space && this.busy(x)).length }
+  }
+
+  /** a held task's line in its row: a task held by its space's cap names the space */
+  private heldLabel(t: TaskRec) {
+    const cap = t.held!.why === 'space' ? this.spaceCap(t) : undefined
+    return cap ? `Waiting for a free slot of ${cap.space}` : HELD[t.held!.why]
   }
 
   /** how many starts Shepherdr may make by itself now (machine.startEvery): one once the last is that long ago, none
@@ -1309,11 +1328,13 @@ export class Engine extends Emitter<Events> {
     t.after = undefined
     t.todo = undefined
     const id = `held:${t.id}:${Date.now()}`
+    const cap = why === 'space' ? this.spaceCap(t) : undefined
     const words = {
       slots: `waiting for a free slot (${this.slotsWords(l.max)})`,
       machine: 'waiting for the machine: it is busy',
       models: 'waiting: every model of this space ran out, so a start would only be cut off too',
       resume: 'waiting: the tasks that were cut off go back to work first',
+      space: `waiting for a free slot of ${cap?.space ?? 'its space'} (${cap?.working ?? 0} of ${cap?.max ?? 0} of its tasks working)`,
     }[why]
     this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: words } })
     this.save()
@@ -1337,8 +1358,8 @@ export class Engine extends Emitter<Events> {
     try {
       for (const t of this.heldTasks()) {
         const r = this.room(t)
-        // its own space waits for its models: another space's may still start
-        if (r.why === 'models' || r.why === 'resume') {
+        // its own space waits for its models, or its cap is full: another space's may still start
+        if (r.why === 'models' || r.why === 'resume' || r.why === 'space') {
           if (t.held!.why !== r.why) {
             t.held!.why = r.why
             this.save()
@@ -1356,7 +1377,7 @@ export class Engine extends Emitter<Events> {
         // one first in line doesn't wait for the spacing either
         if (!t.priority && !this.startsNow(now)) return
         this.lastStart = now
-        const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work' }[t.held!.why]
+        const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work', space: 'a slot of its space is free' }[t.held!.why]
         if (t.held!.go) this.go(t, t.held!.go, `${t.held!.goWhy ?? why} · ${why}`, t.held!.plain)
         else {
           t.held = undefined
