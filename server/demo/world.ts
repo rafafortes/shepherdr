@@ -713,7 +713,40 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         }
         this.sections = D.settings(this.stores, this.checklists, this.pluginsOff)
         this.emit('snapshot')
-        return {}
+        return { ok: true }
+      }
+      case 'apply-to-waiting': {
+        // as the live one, for this machine's spaces: the waiting tasks of the place (or of each space that doesn't set
+        // the key itself) take the CLI its Settings name now; a demo task has one CLI, so only that is compared
+        const bySpace = a.place?.startsWith('p:')
+        const spaces = this.places.filter((p) => (bySpace ? p.id === a.place : p.machine === D.DEMO_HOST))
+        if (bySpace && !spaces.length) return { ok: false, error: 'No such space.' }
+        const store = this.stores[D.DEMO_HOST]
+        const WAITING = ['queued', 'todo', 'scheduled']
+        const out = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [] as string[], spaces: [] as { name: string; words: string; changed: number }[] }
+        for (const p of spaces) {
+          const name = p.id.split(':')[2]
+          const tasks = this.tasks.filter((t) => t.place === p.id && !t.archived && t.status !== 'done')
+          if (!bySpace && store.pick(a.key, { space: name }).from === 'space') {
+            if (tasks.some((t) => WAITING.includes(t.status))) out.kept.push(name)
+            continue
+          }
+          const on = store.harness('task', name)
+          let changed = 0
+          for (const t of tasks) {
+            if (!WAITING.includes(t.status)) out.running++
+            else if (!t.agent) out.follow++
+            else if (t.agent.cli === CLI_NAME[on.kind]) out.same++
+            else {
+              changed++
+              if (!a.dry) t.agent = { ...t.agent, cli: CLI_NAME[on.kind] }
+            }
+          }
+          if (changed) out.spaces.push({ name, words: harnessWords(on), changed })
+          out.changed += changed
+        }
+        if (!a.dry && out.changed) this.emit('snapshot')
+        return { ok: true, ...out }
       }
       case 'archive': {
         const t = this.task(a.chat.split('/')[0])
