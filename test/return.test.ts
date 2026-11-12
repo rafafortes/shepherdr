@@ -580,6 +580,36 @@ describe('the night every model ran out', () => {
     }
   })
 
+  test("a cut-off task of a space at its own cap waits for a slot of that space: its new tasks wait too, another space's start, and it goes back when its space has a slot", async () => {
+    const s = await nightWorld('night-cap', 4)
+    const other = tmp('return-repo')
+    execSync(REPO, { cwd: other, shell: '/bin/sh' })
+    const elsewhere = await s.src.places.add(other, 'night-cap-elsewhere')
+    try {
+      expect(s.src.settings.set('space.maxTasks', '1', { space: s.p.name }).ok).toBe(true)
+      // its one slot is taken by a task at work
+      const busy = task(s.p.name, 'claude')
+      const status = s.src.agents.status
+      s.src.agents.status = ((k: string) => (k === busy.key ? 'working' : status(k))) as never
+      const a = s.cutOff('codex')
+      s.src.engine.noteStuck!(a.t, { kind: 'codex' }, 'out of allowance until tomorrow')
+      const next = task(s.p.name, 'claude')
+      const other2 = task(elsewhere.name, 'claude')
+      await s.src.watchReturns(later())
+      // the cut-off one waits for its space's slot, and no new task of that space starts before it; another space's does
+      expect(s.started).toEqual([])
+      expect(s.src.engine.room(next.t)).toEqual({ why: 'resume' })
+      expect(s.src.engine.room(other2.t)).toEqual({})
+      // the busy task is done: its space has a slot, and the cut-off task goes back to work
+      s.src.agents.status = status
+      await s.src.watchReturns(later() + 60_000)
+      expect(s.started.map((x) => x.key)).toEqual([a.key])
+    } finally {
+      s.src.settings.set('space.maxTasks', null, { space: s.p.name })
+      s.done()
+    }
+  })
+
   test('the morning: each one cut off, on the backup or on the primary itself, starts again a free slot at a time, before any new task', async () => {
     const s = await nightWorld('night-morning', 1)
     try {

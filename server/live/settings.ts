@@ -373,6 +373,14 @@ export const CATALOG: Section[] = [
     ],
   },
   {
+    // how many of one space's tasks work at once on this machine, inside the machine's own limit (engine.room): a space
+    // that matters more may have more of them running. Off: only the machine's limit. Set at any of the three levels,
+    // the most specific one that sets it wins (pick)
+    name: 'Space',
+    about: "How many of a space's tasks work at once on this machine. It works together with the machine's limit (Machine → Max tasks working at once): a task starts only when both have room. Off: only the machine's limit.",
+    rows: [{ label: 'Max tasks of this space working at once', key: 'space.maxTasks', value: 'off', num: { min: 1, max: 200, off: true }, hint: "Caps this space's working tasks within the machine's own limit, so a space that matters more can have more of them running than the others. Off: only the machine's limit." }],
+  },
+  {
     // Done tasks put themselves in their place's Archived view this long after they finished (engine.autoArchive)
     name: 'Tasks',
     about: 'Done tasks move to their place\'s Archived list after this long.',
@@ -799,6 +807,13 @@ export class Settings {
       alertDisk: num('machine.alertDisk'),
       alertHerdr: get('machine.alertHerdr') !== 'off',
     }
+  }
+
+  /** how many of one space's tasks may work on this machine at once (space.maxTasks, inside the machine's own limit): the
+   *  most specific level that sets it; none: the space has no cap of its own */
+  spaceMax(space: string): number | null {
+    const n = Number.parseFloat(this.get('space.maxTasks', space))
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : null
   }
 
   /** the CLI, model and effort tasks or coordinators start with, or tasks are reviewed by, for a space (none: this

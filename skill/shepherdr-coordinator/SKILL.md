@@ -63,7 +63,7 @@ How to do the work inside a task is its agent's judgment, not yours.
    <id>`), so a task that has used them all asks you for one more (step 4).
 2. **First in line**: a fix of a red main or a red merge gate goes ahead of everything else: add it with `--priority`
    (or `shepherdr task priority <id>` on one there already). It then starts at the next free slot, past the machine's
-   load and pressure; it still waits for what it is `--after`. Only the human starts one now (`shepherdr task start`).
+   load and pressure, but never past its space's own cap (Settings → Space, when one is set); it still waits for what it is `--after`. Only the human starts one now (`shepherdr task start`).
 3. **Hold, queue or schedule it**: `--later` has its agent wait for a go (`shepherdr task tell <id> "<go>"`). `--after SHE-12`
    queues it until those are all done, with no agent or worktree meanwhile; Shepherdr then starts it on its brief and
    the go (a message to it starts its agent sooner, still queued). `shepherdr task queue <id> --after …|none` changes
