@@ -375,6 +375,10 @@ export async function waitGate(run: GateRun, timeoutMs: number, every = 250): Pr
 const GATE_ROUNDS = 3
 /** the most merges one train takes (merge.train) */
 const TRAIN_MAX = 5
+/** one line of the server's log about a merge train's decision: what it decided and why, never a file's contents */
+const trainLog = (line: string) => console.error(`shepherdr: ${line}`)
+/** up to three paths, then how many more: `a.md, b.md, c.md and 2 more` */
+const pathList = (files: string[]) => (files.length > 3 ? `${files.slice(0, 3).join(', ')} and ${files.length - 3} more` : files.join(', '))
 
 /** the line a held task shows */
 /** why a task waits to start: its slots are taken, the machine is busy, every model of its space ran out (a start
@@ -2436,6 +2440,29 @@ export class Engine extends Emitter<Events> {
     return ran
   }
 
+  /**
+   * The merges in line behind `t` in its repo (queued for a merge into its base, reported, with a branch), in line order:
+   * those a train with `t` may take (riders), and every one of them with `why` set when it may not (another merge gate, marked
+   * alone, its agent at work, a message it hasn't read). Its own turn decides what an agent still at work, or a message it
+   * hasn't read, changes.
+   */
+  private trainLine(t: TaskRec, p: Space, cmd: string) {
+    const inLine = this.tasks
+      .filter((x) => x !== t && x.landing?.step === 'queue' && this.landings.has(x.id) && !ended(x) && x.project === t.project && x.base === t.base && !!x.worktree && !!x.branch)
+      .sort((a, b) => a.landing!.at - b.landing!.at)
+      .map((x) => ({ t: x, why: this.trainBlock(x, p, cmd) }))
+    return { riders: inLine.filter((e) => !e.why).map((e) => e.t), inLine }
+  }
+
+  /** why a merge in line can't ride a train of gate `cmd` (its gate, its mark, its agent, a message it hasn't read), or nothing */
+  private trainBlock(x: TaskRec, p: Space, cmd: string): string | undefined {
+    if (this.gateOf(x, p.name) !== cmd) return `${x.id} has a different merge gate`
+    if (x.alone) return `${x.id} is marked alone (its turn after a refused train)`
+    if (this.agents.status(this.key(x)) === 'working') return `${x.id}'s agent is working`
+    if (this.chats.unseen(this.key(x)).length) return `${x.id} has a message it hasn't read`
+    return undefined
+  }
+
   /** how many merges a space's train takes at most (merge.train): 1 while it is off */
   private trainSize(space: string) {
     const n = Number(this.settings.get('merge.train', space).trim())
@@ -2453,32 +2480,58 @@ export class Engine extends Emitter<Events> {
   private async train(t: TaskRec, p: Space, wt: string): Promise<{ ok: boolean; error?: string; note?: string } | undefined> {
     const cmd = this.gateOf(t, p.name)
     const k = this.trainSize(p.name)
-    if (k < 2 || !cmd || BOX || t.alone) return undefined
-    // a task a refused train took in goes alone first (alone): it rides none until then
-    const riders = this.tasks
-      .filter((x) => x !== t && x.landing?.step === 'queue' && this.landings.has(x.id) && !ended(x) && x.project === t.project && x.base === t.base && !!x.worktree && !!x.branch && this.gateOf(x, p.name) === cmd && !x.alone)
-      // its own turn decides what an agent still at work, or a message it hasn't read, changes
-      .filter((x) => this.agents.status(this.key(x)) !== 'working' && !this.chats.unseen(this.key(x)).length)
-      .sort((a, b) => a.landing!.at - b.landing!.at)
-    if (!riders.length) return undefined
+    if (k < 2 || !cmd || BOX) return undefined
+    // a task a refused train took in goes alone first (alone): it rides none until then, and heads none
+    if (t.alone) {
+      trainLog(`${t.id}'s merge goes alone (its turn alone after a refused train)`)
+      return undefined
+    }
+    const { riders, inLine } = this.trainLine(t, p, cmd)
+    // why each merge in line that does not ride is left out, in line order: the reason it had on the way in (its gate,
+    // its mark, its agent), or the one stacking gave it (a conflict, nothing new, a full train); the head's too, when its
+    // change does not stack on main
+    const why = new Map<TaskRec, string>(inLine.flatMap((e) => (e.why ? [[e.t, e.why] as const] : [])))
+    const leftOut = () => [t, ...inLine.map((e) => e.t)].flatMap((x) => (why.has(x) ? [why.get(x)!] : []))
+    if (!riders.length) {
+      // nothing else in line: a quiet turn, nothing to explain; someone in line who can't ride is said here
+      if (inLine.length) trainLog(`${t.id}'s merge goes alone: ${leftOut().join('; ')}`)
+      return undefined
+    }
     const at = (await G.git(p.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out
     // made the same way each time (main's tip's date): after a restart, the same stack finds its gate's run again
     const date = (await G.git(p.path, 'log', '-1', '--format=%cI', at)).out
     const cars: { t: TaskRec; tree: string }[] = []
     let top = at
-    for (const x of [t, ...riders]) {
-      if (cars.length === k) break
+    for (const [i, x] of [t, ...riders].entries()) {
+      if (cars.length === k) {
+        for (const r of riders.slice(i - 1)) why.set(r, `${r.id} waits (the train is full at ${k})`)
+        break
+      }
       if (x !== t) await G.commitAll(x.worktree!, `${x.id}: ${x.title}`)
-      const merged = await G.git(p.path, 'merge-tree', '--write-tree', top, x.branch!)
+      const merged = await G.git(p.path, 'merge-tree', '--write-tree', '--no-messages', '--name-only', top, x.branch!)
       const tree = merged.out.split('\n')[0]
-      if (!merged.ok || tree === (await G.git(p.path, 'rev-parse', `${top}^{tree}`)).out) continue
+      // the head stacks on main, every other on those before it
+      const before = i ? 'those before it' : 'main'
+      if (!merged.ok) {
+        const files = G.conflictedPaths(merged.out)
+        why.set(x, `${x.id} conflicts with ${before}${files.length ? ` (${pathList(files)})` : ''}`)
+        continue
+      }
+      if (tree === (await G.git(p.path, 'rev-parse', `${top}^{tree}`)).out) {
+        why.set(x, `${x.id} adds nothing to ${before}`)
+        continue
+      }
       const c = await G.sh(['git', 'commit-tree', tree, '-p', top, '-m', `${x.id}: ${x.title}`], p.path, { env: { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } })
       cars.push({ t: x, tree })
       top = c.out
     }
-    if (cars.length < 2 || cars[0].t !== t) return undefined
+    if (cars.length < 2 || cars[0].t !== t) {
+      trainLog(`${t.id}'s merge goes alone: ${leftOut().join('; ')}`)
+      return undefined
+    }
     const names = cars.map((c) => c.t.id)
     const riding = cars.slice(1).map((c) => c.t)
+    trainLog(`${t.id}'s merge train: ${names.join(', ')} (one gate run on ${top.slice(0, 7)}, main at ${at.slice(0, 7)})${leftOut().length ? `. Left out: ${leftOut().join('; ')}` : ''}`)
     for (const x of riding) x.landing = { ...x.landing!, train: t.id }
     this.save()
     riding.forEach((x) => this.settle(x))
@@ -2493,10 +2546,15 @@ export class Engine extends Emitter<Events> {
       }
     }
     // on main as the gate saw it: each its own commit, with the gate's line and who went in together
-    const line = ran?.out.split('\n').filter((l) => l.trim()).at(-1)?.trim()
+    const last = ran?.out.split('\n').filter((l) => l.trim()).at(-1)?.trim()
     const together = `Merge train: ${names.join(', ')} (one merge gate run)`
-    const shas = ran?.code === 0 ? await G.landStack(p.path, t.base!, at, cars.map((c) => ({ tree: c.tree, message: this.mergeMessage(c.t, line, together) }))) : undefined
+    const shas = ran?.code === 0 ? await G.landStack(p.path, t.base!, at, cars.map((c) => ({ tree: c.tree, message: this.mergeMessage(c.t, last, together) }))) : undefined
     if (!shas) {
+      // what ends it: then each merge in it goes its own way (the head alone, the riders in line as before)
+      if (!ran) trainLog(`${t.id}'s merge train: its gate could not start (checkout of ${top.slice(0, 7)} failed): ${t.id} goes alone`)
+      else if (ran.code === GATE_GONE) trainLog(`${t.id}'s merge train stopped before its gate ended (a restart, or a kill): nothing went in`)
+      else if (ran.code !== 0) trainLog(`${t.id}'s merge train refused (exit ${ran.code}): each goes alone once`)
+      else trainLog(`${t.id}'s merge train: main moved while its gate ran: ${t.id} goes alone`)
       // a refusal by the gate marks every member, the head included: each goes alone once. A base that moved, or a gate
       // that never ran, marks none: the change did not fail
       if (ran && ran.code !== 0 && ran.code !== GATE_GONE) for (const c of cars) c.t.alone = true
@@ -2506,6 +2564,7 @@ export class Engine extends Emitter<Events> {
       return undefined
     }
     cars.forEach((c, i) => (c.t.squash = shas[i]))
+    trainLog(`${t.id}'s merge train went in: ${cars.map((c, i) => `${c.t.id} ${shas[i].slice(0, 7)}`).join(', ')}`)
     const note = await this.pushBase(p, t.base!, `it went in with ${names.slice(1).join(', ')} on one merge gate run`)
     for (const x of riding) {
       x.train = t.id

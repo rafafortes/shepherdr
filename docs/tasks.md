@@ -111,7 +111,9 @@
   keeps its place and goes in on its own turn, as usual. Only merges made here take part (not GitHub pull requests).
   If the gate refuses the train, nothing of it lands: each member then goes alone once, on its own gate, before it rides
   a train again, and only the task whose change fails is told of the refusal. If main moves while the train's gate
-  runs, the head goes alone and the riders wait in line as before.
+  runs, the head goes alone and the riders wait in line as before. The server's log names each train decision and why a
+  waiting merge was left out, one `shepherdr: ` line each (`server.log` in the server's run folder: the herdr plugin's state
+  folder, or `run/` in Shepherdr's home, `~/.shepherdr` by default); a turn with nobody else in line says nothing.
 - A merge that waits in line behind another, or runs its gate, past `shepherdr merge`'s 90 s: its agent is told to end
   its turn instead of polling, and Shepherdr wakes it with how it went (merged, refused with the gate's lines, or a
   conflict). Waiting in line or in its gate, a task holds none of the machine's slots: its repo's merges go one at a

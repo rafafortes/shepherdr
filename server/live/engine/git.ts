@@ -148,6 +148,9 @@ async function mergesTo(repo: string, into: string, ref: string, is: string) {
 /** merging `ref` into `base` goes through without a conflict: what GitHub calls mergeable */
 export const mergesCleanly = async (repo: string, base: string, ref: string) => (await git(repo, 'merge-tree', '--write-tree', base, ref)).ok
 
+/** the paths a `merge-tree --write-tree --no-messages --name-only` run reports as conflicting: the lines after its tree id */
+export const conflictedPaths = (out: string) => out.split('\n').slice(1).filter(Boolean)
+
 /** the commits on `base` a task's squash merge made: by Shepherdr's subject, "<id>: <title>" */
 export async function squashesOf(repo: string, base: string, id: string) {
   const r = await git(repo, 'log', '--format=%H %s', '-n', '5000', base)
