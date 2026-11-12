@@ -8,7 +8,7 @@
   or default for the CLI's own; effort: default, lowest, low, medium, high, xhigh or max, each CLI taking it its own
   way, and in words on screen — Extra high for xhigh) and the backup agents that take over when a task's or a
   coordinator's agent can't go on, whether one of those is told when its primary answers again, when Done tasks archive
-  themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, the idle browser, dictation, Notifications
+  themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits and each space's cap on its working tasks, the idle browser, dictation, Notifications
   and Voice. Notifications gathers scoped delivery rules and device enrolment; device delivery is Everywhere. Space menus still offer Notify. Its
   defaults are set Everywhere, for a machine or for a space (`shepherdr set <key> <value> [--machine | --space NAME]`, from any machine);
   the most specific one set wins. Editing above the content names the scope; its searchable hierarchy handles many machines and spaces. Values set here are highlighted, with their inherited value, source and Reset beside them. And, kept on each device, its Appearance: System (the device's own light
@@ -30,6 +30,17 @@
   the head included; off by default) lets the first merges in line go in together on one gate run, each as its own
   commit. It needs a gate set and works only for merges made here, not through a GitHub pull request. Off means one at
   a time. What each row does is in [tasks](tasks.md).
+- **Max tasks of this space working at once** (`space.maxTasks`, the Space section; off by default, or 1 to 200) caps how
+  many of one space's tasks work on this machine at once. It works together with the machine's own limit (Machine → Max
+  tasks working at once, `machine.maxTasks`): a task starts only when the machine has a free slot and its space is under
+  its cap, so the caps never add up past the machine's limit. Off means only the machine's limit. Set it Everywhere, for
+  a machine or for a space; the most specific one set wins, as for the rest. For example, a machine at 9 tasks at once
+  with `lyvora-app` at 6 and `product-intel` at 2 (`shepherdr set machine.maxTasks 9 --machine`, `shepherdr set
+  space.maxTasks 6 --space lyvora-app`, `shepherdr set space.maxTasks 2 --space product-intel`): lyvora-app may have 6 of
+  its tasks working, product-intel 2, and a space with no cap of its own only has the machine's limit left, never more
+  than 9 in all. A held task of a space at its cap reads `Waiting for a free slot of <space>` and the other spaces'
+  tasks start past it; a first in line does not pass the cap either, and the way back honours it too. What waits and
+  why is in [tasks](tasks.md) and [machines](machines.md).
 - Secrets (How Shepherdr runs) holds the keys, tokens and passwords agents use, by name: add, replace and remove them
   in masked boxes, Everywhere, for a machine or for a space; the most specific one wins. An agent that needs one asks
   with `shepherdr secret ask NAME --why "…"`: its chat shows a masked box, and the agent is told by name once it is
@@ -105,7 +116,7 @@ asks the primary now and then whether it answers again, and then:
   chat so far (a task's: its brief, commits and changes too), as a restart does, and a start that had gone wrong is
   over once it starts. Its chat gets a card ("Back on the primary model, which answers again: …", or "Started again on
   …: its provider answers again") and the agent is told why it was started again; one alert per return. A task takes a
-  free slot as a new one would (Settings → the machine → Max tasks working at once), so a night's worth of them comes
+  free slot as a new one would (Settings → the machine → Max tasks working at once, and its space's cap if it has one), so a night's worth of them comes
   back a slot at a time, and while some still wait for one no new task of that space starts ("Waiting: cut-off tasks
   go back to work first"). The ones still busy follow on later passes, a minute apart, without asking the primary
   again while its answer is fresh (a quarter of an hour); after that it is asked again first, and while some can't go

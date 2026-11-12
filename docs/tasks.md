@@ -81,13 +81,21 @@
   starts the count again. Each CLI's log says what cut it off (`server/live/retry.ts` decides).
 - **First in line.** A coordinator marks a task with `shepherdr task priority <id>` (or adds it with `--priority`), as
   for a fix of a red main or merge gate: it goes ahead of the other held tasks and past the machine's load, pressure
-  and spacing, never past its slots or a herdr that doesn't answer; what it is queued after still holds it. You start
+  and spacing, never past its slots, its space's own cap (Settings → Space) or a herdr that doesn't answer; what it is
+  queued after still holds it. You start
   one that waits now, from its ⋯ (**Start now**) or `shepherdr task start <id>`: it is first in line and no longer waits
   for the tasks it was queued after or for its time, and starts at once when a slot is free (else at the next free one).
   **Start now with…** picks its worker too, the CLI, model and effort for this task's agent alone (the task's own
   `--agent`, never Settings': its reviewer and backups stay as Settings say), as for one you want on the DGX Spark while
   the others run on a plan. **Start with…** picks its worker and nothing more: it stays in line as it is and starts on
   that worker when its turn comes.
+- **Held for room.** A task waits for room as Queued, with no agent yet, and its row says why: `Waiting for a free slot`
+  (the machine's slots are all taken), `Waiting for the machine` (its load, pressure or memory, or a herdr that doesn't
+  answer), `Waiting for a free slot of <space>` (that space's own cap, Settings → Space, `space.maxTasks`, is full),
+  `Waiting: every model ran out`, or `Waiting: cut-off tasks go back to work first`. A task held for its space's cap is
+  passed over: a task of another space with room starts past it in the same pass, and the space's held tasks start in
+  turn (first in line, then oldest) as its own tasks end and free a slot. The machine's limit still comes first, so a
+  space's cap never lets more tasks work than the machine has slots.
 - A space may have a **merge gate** (Settings → How tasks work → Merge gate, `merge.gate`, off by default; a task's own
   `--set merge.gate=…` wins): a command run in the task's worktree after its rebase and before it goes into main here
   (not through a pull request), with `SHEPHERDR_TASK` and `SHEPHERDR_BASE` set. Exit 0 lets it in, and the last line it
