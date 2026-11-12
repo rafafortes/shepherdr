@@ -179,3 +179,29 @@ describe("a row's menu", () => {
     expect(t(open.id)).toBeUndefined()
   })
 })
+
+describe('a reviewer changed in Settings, and the demo tasks waiting for it', () => {
+  test("the question counts a waiting brief as changed, a scheduled one as following Settings, a running one as kept; Apply rewrites only the waiting Reviewer lines", async () => {
+    const w = new DemoWorld()
+    const place = 'p:vm-str:herdr-projects'
+    const task = (id: string) => w.tasks.find((t) => t.id === id)!
+    // HP-204 is To do; make it scheduled (its brief is built at its time from Settings, so it follows them)
+    task('HP-204').status = 'scheduled'
+    const queued = task('HP-203').desc!
+    const running = task('HP-202').desc!
+    w.stores['vm-str'].set('reviewer.model', 'GPT-6-Sol', { space: 'herdr-projects' })
+    const dry = await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place, dry: true })
+    // HP-201 and HP-202 are at work or waiting on you: both keep their reviewer
+    expect(dry).toMatchObject({ ok: true, changed: 1, follow: 1, running: 2, same: 0, kept: [], spaces: [{ name: 'herdr-projects', words: 'Codex (GPT-6-Sol)', changed: 1 }] })
+    // a dry run changes nothing
+    expect(task('HP-203').desc).toBe(queued)
+    expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place })).toMatchObject({ ok: true, changed: 1 })
+    expect(task('HP-203').desc).toBe(queued.replace('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).', '- Reviewer: a headless Codex or a Codex subagent (model gpt-6-sol, its default effort). (this space\'s setting)'))
+    expect(task('HP-202').desc).toBe(running)
+    // the next answer finds it the same
+    expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place, dry: true })).toMatchObject({ changed: 0, same: 1, follow: 1, running: 2 })
+    // an advisor's key is refused: it applies at once already
+    expect(await w.act({ type: 'apply-to-waiting', key: 'advisor.agent', place, dry: true })).toMatchObject({ ok: false })
+    expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.instructions', place, dry: true })).toMatchObject({ ok: false })
+  })
+})
