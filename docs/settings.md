@@ -37,6 +37,26 @@
   - **From the command.** `shepherdr set task.model <model> --space NAME --apply-waiting` (also `task.agent` and `task.effort`, with
     `--machine`, or Everywhere without `--space`) makes the same change and says in one line what it did, with the same counts.
     Without `--apply-waiting` nothing waiting moves.
+- **The reviewer of the tasks already created** (`reviewer.agent`, `reviewer.model`, `reviewer.effort`, and the backup reviewers'
+  keys, `reviewer.fallback…`). A task's reviewer is written into its brief when it is added, in the Reviewer line of its Settings
+  block, so the same question follows a change of Settings' reviewer. Right after you save one, Settings asks **Apply to the
+  tasks already created?** when a waiting task would change, with what it would do: "2 waiting tasks of lyvora-site (queued, To do,
+  scheduled) are reviewed by pi (opencode-go/…) when their turn comes. Running tasks keep their reviewer." **Apply to 2 tasks**
+  rewrites the Reviewer line of each waiting task's brief (the words above the block, and its other lines, stay as they are), so the
+  task is reviewed by the new reviewer, and its backups too, when its turn comes. **Only new tasks** changes nothing.
+  - **Which tasks, and which spaces.** The same as for the task agent above: queued, To do and scheduled tasks change; running,
+    asking, ready, merging, done and archived ones keep their reviewer. A space's own setting for the key that changed is kept
+    when the change is Everywhere or this machine's, and the dialog says which spaces keep theirs.
+  - **A task whose agent already has its brief.** A To do task, or a held one that had started before, is not started by the change.
+    Its agent reads its brief once, so the new Reviewer line reaches it with its go, or with the first message written to it, or
+    on a restart: "Your reviewer changed while you waited; your brief's Settings block now says: …". Until then its chat says
+    "Reviewed by pi: its agent is told at its go".
+  - **A scheduled task** builds its brief at its time from Settings, so it follows Settings like the others, and a reviewer its
+    coordinator gave it with `task add --reviewer` goes too (counted apart: "1 of them had a reviewer of its own from task add, and
+    changes too"). **Chosen at task add:** a reviewer a coordinator set with `task add --reviewer`, `--reviewer-model` or
+    `--reviewer-effort` changes too, and then runs on Settings like the others.
+  - **From the command.** `shepherdr set reviewer.model <id> --space NAME --apply-waiting` (any reviewer key, `--machine`, or Everywhere
+    without `--space`) says in one line what it did, in the same words.
 - A reviewer has a backup, for the case where it cannot run at all. Settings → How tasks work → Reviewer → Backup
   reviewer (`reviewer.fallback`, off until you set one) names a second reviewer CLI; `reviewer.fallbackModel` and
   `reviewer.fallbackEffort` are its model and effort, its own keys so that neither reviewer replaces the other. When
@@ -204,7 +224,9 @@ A task's agent or a coordinator often waits on a question you can't answer well:
 trade-off, what a test failure means. Settings → Agents → **Advisor** (`advisor.agent`, `advisor.model`,
 `advisor.effort`; off until you set one, Everywhere, for a machine or for a space) names a model that answers them,
 and **Backup** (`advisor.fallback`, `advisor.fallbackModel`, `advisor.fallbackEffort`) the one that answers where it
-can't run at all, as every other role has one.
+can't run at all, as every other role has one. A change of the advisor applies at once to every task, running ones included:
+each question is advised with the advisor Settings name when it is asked, so there is no waiting task to apply it to, and
+the question about the tasks already created never comes up for it (`shepherdr set advisor.* --apply-waiting` is refused).
 
 - **On your word.** Each question card the advisor can take — a choice card, one question of the CLI's own question
   tool, a plan — shows **Ask the advisor** beside Dismiss. Its answer comes back as a card of its own: what it picks (or

@@ -29,7 +29,8 @@ import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
 import { DISMISSED, dismissKind, dismissWords } from './dismiss.ts'
 import { dictate as dictation } from './dictate.ts'
-import { age, askOf, checkTitle, ended, Engine, fitStatus, retuneLine, type HeldWhy, type Retune, type TaskRec } from './engine/engine.ts'
+import { age, askOf, checkTitle, ended, Engine, fitStatus, retuneLine, reviewRetuneLine, type HeldWhy, type Retune, type TaskRec } from './engine/engine.ts'
+import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { listFolders, makeRepo, resolveInHome } from './folders.ts'
 import { sh, validateBase } from './engine/git.ts'
 import { Artifacts, browserChecker, type ArtifactRec, type Checker } from './artifacts.ts'
@@ -1271,10 +1272,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.emit('snapshot')
   }
 
-  /** a task agent Setting changed at a level (Everywhere, this machine, or a space): the waiting tasks it reaches take
-   *  what Settings name for their space now (engine.retuneWaiting); dry: the counts only */
+  /** a task agent's or a reviewer's Setting changed at a level (Everywhere, this machine, or a space): the waiting tasks
+   *  it reaches take what Settings name for their space now (engine.retuneWaiting, engine.retuneReviewers); dry: the
+   *  counts only */
   private applyWaiting(key: string, level: Level, dry = false): Retune {
-    const r = this.engine.retuneWaiting(typeof level === 'object' ? { space: level.space } : { key }, dry)
+    const scope = typeof level === 'object' ? { space: level.space } : { key }
+    const r = waitingKind(key) === 'reviewer' ? this.engine.retuneReviewers(scope, dry) : this.engine.retuneWaiting(scope, dry)
     if (!dry && r.changed) this.emit('snapshot')
     return r
   }
@@ -2646,9 +2649,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return r
       }
       case 'apply-to-waiting': {
-        // a task agent Setting changed at a level: the tasks that wait for it take what it names now (the dialog after
-        // the change asks first, with dry: true, which only counts)
-        if (!TASK_HARNESS.includes(a.key)) return { ok: false, error: `${a.key} is not a task agent setting.` }
+        // a task agent's or a reviewer's Setting changed at a level: the tasks that wait for it take what it names now
+        // (the dialog after the change asks first, with dry: true, which only counts)
+        if (!waitingKind(a.key)) return { ok: false, error: a.key.startsWith('advisor.') ? ADVISOR_AT_ONCE : `${a.key} is not a task agent or reviewer setting.` }
         const pr = a.place?.startsWith('p:') ? this.spaceKey(a.place) : undefined
         if (a.place?.startsWith('p:') && !pr) return { ok: false, error: 'No such space.' }
         const r = this.applyWaiting(a.key, pr ? { space: pr } : 'machine', !!a.dry)
@@ -3582,7 +3585,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         }
         if (!CATALOG.some((s) => s.rows.some((r) => r.key === a1))) throw new Error(`No setting ${a1}; shepherdr show lists them`)
         const waiting = p.flags.has('apply-waiting')
-        if (waiting && (a0 !== 'set' || !TASK_HARNESS.includes(a1))) throw new Error('--apply-waiting goes with shepherdr set task.agent, task.model or task.effort')
+        if (waiting && a0 === 'set' && a1.startsWith('advisor.')) throw new Error(`${ADVISOR_AT_ONCE} Set it without --apply-waiting.`)
+        if (waiting && (a0 !== 'set' || !waitingKind(a1))) throw new Error('--apply-waiting goes with shepherdr set task.agent, task.model, task.effort or a reviewer.* key')
         // Everywhere unless it says --machine (this machine's own) or --space NAME (that space's own)
         const named = one(p, 'space')
         const pr = named ? (this.places.find(named)?.id === placeId.home() ? '~' : this.projectFor(p, ctx).name) : undefined
@@ -3598,10 +3602,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         }
         this.settingChanged(a1)
         const applied = waiting ? this.applyWaiting(a1, level) : undefined
+        const appliedWords = applied ? (waitingKind(a1) === 'reviewer' ? reviewRetuneLine(applied) : retuneLine(applied)) : undefined
         const where = pr ? `${named}'s` : level === 'machine' ? `${NAME}'s` : "Everywhere's"
         const now = this.settings.get(a1, pr)
         // a trigger in words too, to tell the human
-        return `${a0 === 'unset' ? `${a1}: ${where} own is unset; it is ${now} now.` : `${a1} = ${now} (${where})`}${this.settings.words(a1, now).replace(/^\n\s*/, '\nIn words: ')}${a1.endsWith('.instructions') ? '\nUsed at the next start or restart; running agents are unchanged. Reviewer changes need a new or restarted task agent.' : ''}${applied ? `\n${retuneLine(applied)}` : ''}`
+        return `${a0 === 'unset' ? `${a1}: ${where} own is unset; it is ${now} now.` : `${a1} = ${now} (${where})`}${this.settings.words(a1, now).replace(/^\n\s*/, '\nIn words: ')}${a1.endsWith('.instructions') ? '\nUsed at the next start or restart; running agents are unchanged. Reviewer changes need a new or restarted task agent.' : ''}${appliedWords ? `\n${appliedWords}` : ''}`
       }
       case 'automation': {
         const op = a1 ?? 'list'
@@ -4221,8 +4226,6 @@ const REPLY_AFTER_CARD =
 /** what a task holds, in words for the screen without its path: "uncommitted changes" */
 /** who added a task an automation added: "the automation “Nightly”" */
 const BY_AUTOMATION = 'the automation'
-/** the Settings keys of a task's agent: what a change of them can apply to the tasks already waiting (retuneWaiting) */
-const TASK_HARNESS = ['task.agent', 'task.model', 'task.effort']
 
 
 /** no backup is left after the harness an agent ran on: it was the last of its chain that differs from the primary, or

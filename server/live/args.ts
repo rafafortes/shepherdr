@@ -265,10 +265,12 @@ Settings and automations
                                                  or one space (--space); the most specific one set wins.
                                                  unset drops that level's own, so the level above it counts again.
                                                  Counts and limits take any number in their range.
-                                                 --apply-waiting (task.agent, task.model, task.effort only): the
-                                                 waiting tasks it reaches (of that space; else of each space of this
-                                                 machine that doesn't set it itself) start on what Settings name now,
-                                                 as Start with… gives each; running tasks keep their agent
+                                                 --apply-waiting (task.agent, task.model, task.effort, or a reviewer.*
+                                                 key): the waiting tasks it reaches (of that space; else of each space
+                                                 of this machine that doesn't set it itself) start on what Settings
+                                                 name now, as Start with… gives each (a reviewer: their brief names
+                                                 it, and each one's agent hears it at its go); running tasks keep
+                                                 theirs. advisor.* is refused: it applies at once already
   shepherdr automation add "<name>" --task "<title>" [--brief "<brief>"] [--when "<time rule>"] [--on "<events>"]
                          [--agent CLI] [--model ID] [--effort LEVEL] [--space NAME]
                                                  each run adds that task to the space, with a fresh agent; it runs on

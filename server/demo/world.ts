@@ -9,7 +9,8 @@ import * as D from './data.ts'
 import { ARTIFACT_DATA, ARTIFACT_HTML, thumb } from './artifacts.ts'
 import { DEMO_PRS, demoWorktree } from './code.ts'
 import { demoActivity } from './activity.ts'
-import { settingsBlock } from '../live/prompts.ts'
+import { rebriefReviewer, settingsBlock } from '../live/prompts.ts'
+import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { CLI_NAME, repositorySection, defaultOf, kindOf } from '../live/settings.ts'
 import { harnessProblem, harnessWords, restartAllWords, restartClis, type RestartAllRow } from '../live/restart.ts'
 import { picksIn, pickKey, withPin, withRecent, type Picks } from '../../shared/picks.ts'
@@ -717,7 +718,10 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       }
       case 'apply-to-waiting': {
         // as the live one, for this machine's spaces: the waiting tasks of the place (or of each space that doesn't set
-        // the key itself) take the CLI its Settings name now; a demo task has one CLI, so only that is compared
+        // the key itself) take what its Settings name now. A task agent's key: the CLI, which a demo task has one of, so
+        // only that is compared. A reviewer's: the Reviewer line of its brief's Settings block is written again
+        const kind = waitingKind(a.key)
+        if (!kind) return { ok: false, error: a.key.startsWith('advisor.') ? ADVISOR_AT_ONCE : `${a.key} is not a task agent or reviewer setting.` }
         const bySpace = a.place?.startsWith('p:')
         const spaces = this.places.filter((p) => (bySpace ? p.id === a.place : p.machine === D.DEMO_HOST))
         if (bySpace && !spaces.length) return { ok: false, error: 'No such space.' }
@@ -725,17 +729,30 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const WAITING = ['queued', 'todo', 'scheduled']
         const out = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [] as string[], spaces: [] as { name: string; words: string; changed: number }[] }
         for (const p of spaces) {
-          const name = p.id.split(':')[2]
+          const name = p.id.split(':')[2]!
           const tasks = this.tasks.filter((t) => t.place === p.id && !t.archived && t.status !== 'done')
           if (!bySpace && store.pick(a.key, { space: name }).from === 'space') {
             if (tasks.some((t) => WAITING.includes(t.status))) out.kept.push(name)
             continue
           }
-          const on = store.harness('task', name)
+          const on = kind === 'reviewer' ? store.harness('reviewer', name) : store.harness('task', name)
           let changed = 0
           for (const t of tasks) {
             if (!WAITING.includes(t.status)) out.running++
-            else if (!t.agent) out.follow++
+            else if (kind === 'reviewer') {
+              // a scheduled demo task has no brief yet: it follows Settings at its time
+              if (t.status === 'scheduled') {
+                out.follow++
+                continue
+              }
+              const before = t.desc ?? ''
+              const desc = rebriefReviewer(before, { reviewer: on, fallback: store.reviewerBackups(name), review: store.ways(name).review, by: store.setBy(name).reviewer })
+              if (desc === before) out.same++
+              else {
+                changed++
+                if (!a.dry) t.desc = desc
+              }
+            } else if (!t.agent) out.follow++
             else if (t.agent.cli === CLI_NAME[on.kind]) out.same++
             else {
               changed++

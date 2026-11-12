@@ -21,6 +21,7 @@ const { Worktrees } = await import('../server/live/engine/worktrees.ts')
 const { fakeHerdr } = await import('./fake-herdr.ts')
 const { setPicks } = await import('../server/live/model-picks.ts')
 const { NO_PICKS } = await import('../shared/picks.ts')
+const { ADVISOR_AT_ONCE } = await import('../shared/apply-waiting.ts')
 
 const src = new LiveSource()
 // herdr makes task worktrees: a stand-in on real git; no terminal opens for their agents (no herdr is there)
@@ -502,7 +503,7 @@ describe('Settings changed: the waiting tasks take it, from the screen and the c
       const a = idOf((await src.cli(['task', 'add', 'Waits', '--desc', 'x'], { chat: place })).out)
       const b = idOf((await src.cli(['task', 'add', 'Waits too', '--desc', 'y'], { chat: place })).out)
       expect(src.engine.task(a)!.held?.why).toBe('machine')
-      expect(await src.act({ type: 'apply-to-waiting', key: 'space.base', place, dry: true })).toEqual({ ok: false, error: 'space.base is not a task agent setting.' })
+      expect(await src.act({ type: 'apply-to-waiting', key: 'space.base', place, dry: true })).toEqual({ ok: false, error: 'space.base is not a task agent or reviewer setting.' })
       expect(await src.act({ type: 'setting', key: 'task.agent', value: 'pi', place })).toEqual({ ok: true })
       // the question first: what would change, and nothing does
       expect(await src.act({ type: 'apply-to-waiting', key: 'task.agent', place, dry: true })).toMatchObject({ ok: true, changed: 2, same: 0, running: 0, kept: [] })
@@ -513,7 +514,7 @@ describe('Settings changed: the waiting tasks take it, from the screen and the c
       expect([src.engine.task(a)!.agent, src.engine.task(b)!.agent]).toEqual([{ kind: 'pi' }, { kind: 'pi' }])
       expect(await src.act({ type: 'apply-to-waiting', key: 'task.agent', place, dry: true })).toMatchObject({ changed: 0, same: 2 })
       // the command twin: a line says what it did; the flag goes with a task agent key only
-      expect((await src.cli(['set', 'space.maxTasks', '3', '--space', p.name, '--apply-waiting'], { chat: place })).out).toContain('--apply-waiting goes with shepherdr set task.agent, task.model or task.effort')
+      expect((await src.cli(['set', 'space.maxTasks', '3', '--space', p.name, '--apply-waiting'], { chat: place })).out).toContain('--apply-waiting goes with shepherdr set task.agent, task.model, task.effort or a reviewer.* key')
       const cli = await src.cli(['set', 'task.agent', 'Claude Code', '--space', p.name, '--apply-waiting'], { chat: place })
       expect(cli.code).toBe(0)
       expect(cli.out).toContain('2 waiting tasks in ' + p.name + ' will start on Claude Code when their turn comes.')
@@ -523,6 +524,63 @@ describe('Settings changed: the waiting tasks take it, from the screen and the c
     } finally {
       engine.machine = was
     }
+  })
+})
+
+describe("Settings reviewer changed: the waiting tasks' reviewer, from the screen and the command", () => {
+  test('a reviewer key asks and applies like the task agent; an advisor key is refused: it applies at once already', async () => {
+    const dir = tmp('src-repo')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'retune-rev')
+    const place = placeId.space(p.name)
+    const idOf = (out: string) => out.match(/([A-Z]+-\d+)/)![1]
+    const engine = src.engine as unknown as { machine?: () => { busy?: string; herdr: boolean } }
+    const was = engine.machine
+    // herdr not answering holds every task: they all wait, with no worktree
+    engine.machine = () => ({ herdr: false })
+    try {
+      const a = idOf((await src.cli(['task', 'add', 'Waits', '--desc', 'x'], { chat: place })).out)
+      const b = idOf((await src.cli(['task', 'add', 'Waits too', '--desc', 'y'], { chat: place })).out)
+      const codex = src.engine.task(a)!.desc
+      expect(codex).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).')
+      expect(await src.act({ type: 'setting', key: 'reviewer.agent', value: 'pi', place })).toEqual({ ok: true })
+      // the question first: what would change, and nothing does
+      expect(await src.act({ type: 'apply-to-waiting', key: 'reviewer.agent', place, dry: true })).toMatchObject({ ok: true, changed: 2, same: 0, running: 0, kept: [], spaces: [{ name: p.name, words: 'pi', changed: 2 }] })
+      expect(src.engine.task(a)!.desc).toBe(codex)
+      // yes: the Reviewer line of each brief says pi, and nothing else of it moves
+      expect(await src.act({ type: 'apply-to-waiting', key: 'reviewer.agent', place })).toMatchObject({ ok: true, changed: 2 })
+      expect(src.engine.task(a)!.desc).toBe(codex.replace('a headless Codex or a Codex subagent (its default model and effort).', "a headless pi or a pi subagent (its default model and effort). (this space's setting)"))
+      expect([src.engine.task(a)!.reviewer?.kind, src.engine.task(b)!.reviewer?.kind]).toEqual(['pi', 'pi'])
+      expect(await src.act({ type: 'apply-to-waiting', key: 'reviewer.agent', place, dry: true })).toMatchObject({ changed: 0, same: 2 })
+      // a backup reviewer's key goes through the same action, and the chain's keys too
+      expect(await src.act({ type: 'apply-to-waiting', key: 'reviewer.fallback3Model', place, dry: true })).toMatchObject({ ok: true, changed: 0, same: 2 })
+      // the command twin: a line says what it did, in the reviewer's words
+      const cli = await src.cli(['set', 'reviewer.agent', 'Codex', '--space', p.name, '--apply-waiting'], { chat: place })
+      expect(cli.code).toBe(0)
+      expect(cli.out).toContain('2 waiting tasks in ' + p.name + ' are reviewed by Codex when their turn comes.')
+      expect(src.engine.task(a)!.reviewer?.kind).toBe('codex')
+      // an advisor's key is refused by the action and by the command, which changes nothing
+      const advisor = await src.act({ type: 'apply-to-waiting', key: 'advisor.agent', place, dry: true })
+      expect(advisor).toEqual({ ok: false, error: ADVISOR_AT_ONCE })
+      const advisorBefore = src.settings.get('advisor.agent', p.name)
+      const refused = await src.cli(['set', 'advisor.agent', 'pi', '--space', p.name, '--apply-waiting'], { chat: place })
+      expect(refused.out).toContain('advisor.* applies at once')
+      expect(refused.out).toContain('Set it without --apply-waiting.')
+      expect(src.settings.get('advisor.agent', p.name)).toBe(advisorBefore)
+      // a key that is neither: refused, as before
+      expect(await src.act({ type: 'apply-to-waiting', key: 'reviewer.instructions', place, dry: true })).toEqual({ ok: false, error: 'reviewer.instructions is not a task agent or reviewer setting.' })
+    } finally {
+      engine.machine = was
+    }
+  })
+
+  test('every key the waiting tasks read is a real Settings row', async () => {
+    const { REVIEWER_KEYS, TASK_AGENT_KEYS, waitingKind } = await import('../shared/apply-waiting.ts')
+    const { CATALOG } = await import('../server/live/settings.ts')
+    const rows = new Set(CATALOG.flatMap((s) => s.rows.map((r) => r.key)))
+    for (const key of [...REVIEWER_KEYS, ...TASK_AGENT_KEYS]) expect([key, rows.has(key)]).toEqual([key, true])
+    expect(REVIEWER_KEYS).toHaveLength(18)
+    expect([waitingKind('reviewer.fallback4Effort'), waitingKind('task.model'), waitingKind('advisor.agent'), waitingKind('reviewer.instructions')]).toEqual(['reviewer', 'agent', undefined, undefined])
   })
 })
 

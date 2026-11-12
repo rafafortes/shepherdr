@@ -28,7 +28,7 @@ import { launchesAgents, refusedLaunch } from '../launch-policy.ts'
 import { fromAgentLine } from '../chatlines.ts'
 import type { Chats } from '../chats.ts'
 import { HOST, placeId, type Places, type Space } from '../places.ts'
-import { type BaseMoved, baseMovedCard, baseMovedLine, privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, wentBackCardWords, restartLine, type BackWhy, resumedLine, settingsBlock, prNewsLine, queuedLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
+import { type BaseMoved, baseMovedCard, baseMovedLine, privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, wentBackCardWords, restartLine, type BackWhy, resumedLine, settingsBlock, prNewsLine, queuedLine, rebriefReviewer, briefReview, reviewerChangedLine, reviewerLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
@@ -121,6 +121,12 @@ export interface TaskRec {
   chosen?: true
   /** the CLI, model and effort its brief says reviews its change: from Settings, or task add's --reviewer flags */
   reviewer?: Harness
+  /** task add's --reviewer flags chose `reviewer`, not Settings: counted apart when Settings' reviewer is applied to the
+   *  waiting tasks (retuneReviewers); a reviewer picked later clears it */
+  reviewerChosen?: true
+  /** Settings' reviewer changed while the task waited, and its agent already has its brief: the line its agent hears
+   *  with its go, or with the first message that reaches it (takeNote) */
+  reviewerNote?: string
   /** the coordinator's --set for this task, kept as it was given: the backup values this one task keeps for itself
    *  (task.fallback, backup.model, backup.effort) are read from here before its space's (cantGoOn) */
   set?: Record<string, string>
@@ -312,6 +318,24 @@ export function retuneLine(r: Retune) {
     r.same ? `${r.same} already on it` : '',
     r.follow ? `${r.follow} start on Settings at their turn anyway` : '',
     r.running ? `${n(r.running, 'running task')} keep${r.running === 1 ? 's' : ''} its agent` : '',
+    r.kept.length ? `${r.kept.join(', ')} keep${r.kept.length === 1 ? 's' : ''} its own setting` : '',
+  ]
+  return `${bits.filter(Boolean).join('; ')}.`
+}
+
+/** a retuneReviewers result in words, as the command line says it */
+export function reviewRetuneLine(r: Retune) {
+  const n = (k: number, one: string) => `${k} ${k === 1 ? one : `${one}s`}`
+  const by = r.spaces.map((s) => `${s.name} by ${harnessWords(fitHarness(s.on))}`)
+  const reviewed = r.spaces.length === 1
+    ? `${n(r.changed, 'waiting task')} in ${r.spaces[0].name} ${r.changed === 1 ? 'is' : 'are'} reviewed by ${harnessWords(fitHarness(r.spaces[0].on))} when ${r.changed === 1 ? 'its' : 'their'} turn comes`
+    : `${n(r.changed, 'waiting task')} in ${r.spaces.length} spaces ${r.changed === 1 ? 'is' : 'are'} reviewed by what Settings name for each (${by.join('; ')})`
+  const bits = [
+    r.changed ? reviewed : 'no waiting task changes',
+    r.pinned ? `${r.pinned} of them had a reviewer of its own from task add, and changes too` : '',
+    r.same ? `${r.same} already on it` : '',
+    r.follow ? `${r.follow} take${r.follow === 1 ? 's' : ''} Settings' reviewer at ${r.follow === 1 ? 'its' : 'their'} turn anyway` : '',
+    r.running ? `${n(r.running, 'running task')} ${r.running === 1 ? 'keeps its' : 'keep their'} reviewer` : '',
     r.kept.length ? `${r.kept.join(', ')} keep${r.kept.length === 1 ? 's' : ''} its own setting` : '',
   ]
   return `${bits.filter(Boolean).join('; ')}.`
@@ -1143,6 +1167,20 @@ export class Engine extends Emitter<Events> {
     })
   }
 
+  /** a task whose agent has its brief already: it was started once (a worktree, or an agent's record). One that was not
+   *  reads Settings from its brief when it starts, so its brief is all that changes */
+  private hasBrief(t: TaskRec) {
+    return !!t.worktree || !!this.agents.record(this.key(t))
+  }
+
+  /** the reviewer line a waiting task's agent is still to hear (retuneReviewers), taken: it goes in once, with the
+   *  message that reaches the agent next */
+  private takeNote(t: TaskRec) {
+    const note = t.reviewerNote
+    t.reviewerNote = undefined
+    return note
+  }
+
   /** the go: its agent hears it (hidden from the chat, where a small card says why it started) and starts on the work */
   private go(t: TaskRec, text: string, why: string, plain = false) {
     // a server that may start no agent spends none of its queue on one: the task says why instead
@@ -1159,7 +1197,9 @@ export class Engine extends Emitter<Events> {
     t.reported = false
     this.briefing.delete(t.id)
     // a coordinator's own words go in as they are, and are not sent again after a restart
-    t.going = plain ? undefined : text
+    // a reviewer Settings changed while it waited goes in with the go, once (its agent read the brief before)
+    const reviewer = this.takeNote(t)
+    t.going = plain ? undefined : [text, reviewer].filter(Boolean).join('\n\n')
     this.wrote.set(t.id, Date.now())
     const key = this.key(t)
     const id = `go:${t.id}:${Date.now()}`
@@ -1170,13 +1210,13 @@ export class Engine extends Emitter<Events> {
     // worktree it already has is brought up to its base first, and the go says how (launch does it for one whose agent
     // is gone)
     const go = plain ? text : hidden(text, 'go')
-    const send = (note?: string) => this.agents.send(key, note ? `${go}\n\n${note}` : go, { ensure: this.starter(t) }).catch(() => undefined)
+    const send = (more?: string) => this.agents.send(key, [go, more, reviewer].filter(Boolean).join('\n\n'), { ensure: this.starter(t) }).catch(() => undefined)
     // started now on a worker of your choosing while its agent waited: on that one first (its restart brings it up to
     // its base), then the go
     const to = t.switchTo
     t.switchTo = undefined
     if (to && t.worktree && existsSync(t.worktree)) void this.restart(t.id, to).then(() => send(), () => send())
-    else if (t.worktree && existsSync(t.worktree) && this.agents.status(key) !== 'gone') void this.freshen(t).then(send, () => send())
+    else if (t.worktree && existsSync(t.worktree) && this.agents.status(key) !== 'gone') void this.freshen(t).then((moved) => send(moved), () => send())
     else void send()
     this.settleOne(t)
     this.settleSoon(t, ANSWER_GRACE + 500)
@@ -1519,6 +1559,7 @@ export class Engine extends Emitter<Events> {
       rounds: ways.rounds,
       ...(o.priority ? { priority: true as const } : {}),
       ...(Object.keys(o.agent ?? {}).length ? { chosen: true as const } : {}),
+      ...(Object.keys(o.reviewer ?? {}).length ? { reviewerChosen: true as const } : {}),
     }
     if (after.length) t.after = after
     if (set) t.set = set
@@ -1569,6 +1610,7 @@ export class Engine extends Emitter<Events> {
     t.agent = agent
     t.chosen = Object.keys(s.agent ?? {}).length ? true : undefined
     t.reviewer = reviewer
+    t.reviewerChosen = Object.keys(s.reviewer ?? {}).length ? true : undefined
     t.waitChecks = ways.waitChecks
     t.rounds = ways.rounds
     if (set) t.set = set
@@ -1911,6 +1953,89 @@ export class Engine extends Emitter<Events> {
     return out
   }
 
+  /**
+   * Settings' reviewer changed (reviewer.agent, reviewer.model, reviewer.effort, and the backup reviewers' keys): the
+   * waiting tasks it reaches take what Settings now name for their space, as a task added now would. Their brief's
+   * Settings block says it: its Reviewer line is written again (rebriefReviewer), the words above it untouched. Scope as
+   * retuneWaiting: a space's own setting for the key it changes is kept. A task whose agent has its brief already cannot
+   * read a changed block, so its agent hears the new Reviewer line with its go (takeNote), and nothing is sent now. A
+   * scheduled task builds its brief at its time, so it follows Settings unless task add gave it a reviewer of its own
+   * (that goes). A reviewer task add chose (reviewerChosen) is changed too, and counted apart. `dry`: count only.
+   */
+  retuneReviewers(scope: { space: string } | { key: string }, dry = false): Retune {
+    const out: Retune = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [], spaces: [] }
+    const plan: (() => void)[] = []
+    const perSpace = new Map<string, { on: Harness; changed: number }>()
+    const told = (t: TaskRec, on: Harness) => {
+      const words = `Reviewed by ${harnessWords(fitHarness(on))}`
+      const id = `reviewer:${t.id}:${Date.now()}`
+      const text = this.hasBrief(t) ? `${words}: its agent is told at its go` : `${words} when its turn comes`
+      this.chats.post(this.key(t), { id, card: { id, task: t.id, text } })
+    }
+    for (const t of this.tasks) {
+      const space = this.nameOf(t)
+      if (t.archived || ended(t) || !space || ('space' in scope && space !== scope.space)) continue
+      const waiting = WAITING.includes(this.statusOf(t))
+      if (!('space' in scope) && this.settings.pick(scope.key, { space }).from === 'space') {
+        if (waiting && !out.kept.includes(space)) out.kept.push(space)
+        continue
+      }
+      if (!waiting) {
+        out.running++
+        continue
+      }
+      const on = this.settings.harness('reviewer', space)
+      let pinned: boolean
+      let changed: () => void
+      if (t.scheduled) {
+        // its brief is built at its time from Settings: only a reviewer task add gave it is a change
+        const flags = t.scheduled.reviewer
+        if (!flags || !Object.keys(flags).length) {
+          out.follow++
+          continue
+        }
+        if (sameHarness(this.harness(flags, 'reviewer', space), on)) {
+          out.same++
+          continue
+        }
+        pinned = true
+        changed = () => {
+          t.scheduled!.reviewer = undefined
+          told(t, on)
+        }
+      } else {
+        const fallback = this.settings.reviewerBackups(space, t.set)
+        const review = this.settings.ways(space, t.set).review
+        const desc = rebriefReviewer(t.desc, { reviewer: on, fallback, review, by: this.settings.setBy(space, t.set).reviewer })
+        if ((!t.reviewer || sameHarness(t.reviewer, on)) && desc === t.desc && !t.reviewerChosen) {
+          out.same++
+          continue
+        }
+        pinned = !!t.reviewerChosen
+        changed = () => {
+          const line = reviewerLine(on, (briefReview(desc) ?? review) ? fallback : undefined)
+          t.reviewer = on
+          t.desc = desc
+          t.reviewerChosen = undefined
+          if (this.hasBrief(t)) t.reviewerNote = reviewerChangedLine(line)
+          told(t, on)
+        }
+      }
+      out.changed++
+      if (pinned) out.pinned++
+      const s = perSpace.get(space) ?? { on, changed: 0 }
+      s.changed++
+      perSpace.set(space, s)
+      plan.push(changed)
+    }
+    if (!dry && plan.length) {
+      for (const f of plan) f()
+      this.save()
+    }
+    out.spaces = [...perSpace].map(([name, s]) => ({ name, ...s }))
+    return out
+  }
+
   /** a coordinator's mark (task priority, task add --priority): first in line, past the machine's load, pressure and
    *  spacing, within its slots; off: back in line by its age. Nothing more: what it is queued after still holds it */
   setPriority(id: string, on: boolean) {
@@ -2039,7 +2164,10 @@ export class Engine extends Emitter<Events> {
       // what it is told, read once its turn has stopped: what it did meanwhile counts
       const first = async () => {
         await this.agents.stopTurn(key)
-        if (from === h.kind) return hidden(resumedLine(words, back), 'restart')
+        // a reviewer Settings changed meanwhile: the same CLI, which reads its brief from its session, is told it now;
+        // another CLI reads the brief as it is now (taskFirst), which has it
+        const reviewer = this.takeNote(t)
+        if (from === h.kind) return hidden([resumedLine(words, back), reviewer].filter(Boolean).join('\n\n'), 'restart')
         return hidden(`${taskFirst(t)}\n\n${restartLine({ from: name(from), to: words, back: !!back, ...(await this.soFar(t, key, name(from))) })}`, 'restart')
       }
       await this.launch(t, undefined, undefined, { ...h, model: h.model ?? '', effort: h.effort ?? '' }, first)
@@ -3359,6 +3487,7 @@ export class Engine extends Emitter<Events> {
         }
         t.worktree = undefined
         t.branch = undefined
+        t.reviewerNote = undefined
         this.briefing.delete(t.id)
         // a fresh start at its turn: its brief again, on what Settings say then, never the closed agent's session
         this.agents.forget(key)
@@ -3448,9 +3577,11 @@ export class Engine extends Emitter<Events> {
       await this.startTask(t)
       return {}
     }
-    // one at rest waiting on you goes back to work on its base as it is now (beforeWords)
+    // one at rest waiting on you goes back to work on its base as it is now (beforeWords); a reviewer Settings changed
+    // while it waited goes in with the first message that reaches it
+    const reviewer = this.takeNote(t)
     const note = await this.beforeWords(t.id)
-    await this.agents.send(this.key(t), note ? `${said}\n\n${note}` : said, { ensure: () => this.launch(t) })
+    await this.agents.send(this.key(t), [said, reviewer, note].filter(Boolean).join('\n\n'), { ensure: () => this.launch(t) })
     this.youWrote(this.key(t))
     return {}
   }

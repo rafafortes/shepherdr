@@ -89,7 +89,8 @@
   `--agent`, never Settings': its reviewer and backups stay as Settings say), as for one you want on the DGX Spark while
   the others run on a plan. **Start with…** picks its worker and nothing more: it stays in line as it is and starts on
   that worker when its turn comes. Settings' task agent, model or effort changed in Settings can go to the waiting tasks
-  the same way, when you answer yes to its question (or `shepherdr set … --apply-waiting`): see [settings](settings.md).
+  the same way, when you answer yes to its question (or `shepherdr set … --apply-waiting`), and so can the reviewer: a
+  waiting task's brief names the new one, and its agent hears it at its turn: see [settings](settings.md).
 - **Held for room.** A task waits for room as Queued, with no agent yet, and its row says why: `Waiting for a free slot`
   (the machine's slots are all taken), `Waiting for the machine` (its load, pressure or memory, or a herdr that doesn't
   answer), `Waiting for a free slot of <space>` (that space's own cap, Settings → Space, `space.maxTasks`, is full),

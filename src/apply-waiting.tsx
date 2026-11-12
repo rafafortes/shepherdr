@@ -1,29 +1,28 @@
-// After a change of a task's agent in Settings (task.agent, task.model, task.effort): "Apply to the tasks already
-// created?". It asks only when a waiting task would change (a dry run first, so nothing moves until yes), and "Only new
-// tasks" leaves them as they are. Running tasks keep their agent whichever answer.
+// After a change of a task's agent (task.agent, task.model, task.effort) or of its reviewer in Settings (reviewer.*):
+// "Apply to the tasks already created?". It asks only when a waiting task would change (a dry run first, so nothing
+// moves until yes), and "Only new tasks" leaves them as they are. Running tasks keep their agent and reviewer whichever
+// answer. The advisor's keys never ask: they apply at once already.
 import { useState, useSyncExternalStore } from 'react'
+import { waitingKind, type WaitingKind } from '@shared/apply-waiting.ts'
 import { act } from './kernel.ts'
 import { Dialog } from './rowmenu.tsx'
 import { Primary } from './ui.tsx'
 
-/** the Settings keys of a task's agent */
-const KEYS = ['task.agent', 'task.model', 'task.effort']
-
 /** what a change would do to the tasks already waiting, as the server counts it (apply-to-waiting) */
 export interface Waiting {
-  /** waiting tasks that take the new agent */
+  /** waiting tasks that take the new agent, or the new reviewer */
   changed: number
   /** waiting tasks already on it */
   same: number
   /** waiting tasks that start on Settings at their turn anyway */
   follow: number
-  /** of the changed, those a task add gave a worker of their own */
+  /** of the changed, those a task add gave a worker (or a reviewer) of their own */
   pinned: number
-  /** tasks already started, which keep their agent */
+  /** tasks already started, which keep their agent (their reviewer) */
   running: number
   /** spaces of this machine that keep their own setting */
   kept: string[]
-  /** the spaces whose waiting tasks change, with the worker they take in words */
+  /** the spaces whose waiting tasks change, with the worker (reviewer) they take in words */
   spaces: { name: string; words: string; changed: number }[]
 }
 
@@ -43,9 +42,9 @@ const subscribe = (f: () => void) => {
 }
 const tell = () => listeners.forEach((f) => f())
 
-/** after a saved change of a task's agent: ask, if any waiting task would change (no question otherwise) */
+/** after a saved change of a task's agent or reviewer: ask, if any waiting task would change (no question otherwise) */
 export async function askWaiting(key: string, place?: string) {
-  if (!KEYS.includes(key)) return
+  if (!waitingKind(key)) return
   const r = (await act({ type: 'apply-to-waiting', key, place, dry: true }).catch(() => null)) as (Waiting & { ok?: boolean }) | null
   if (!r?.ok || !r.changed) return
   asking = { key, place, waiting: r }
@@ -60,19 +59,40 @@ export function ApplyWaitingSheet() {
 
 const tasks = (n: number) => `${n} waiting ${n === 1 ? 'task' : 'tasks'}`
 
-/** the sentences the question says, from what the change would do */
-export function waitingWords(w: Waiting) {
+/** the sentences the question says, from what the change would do: for a task agent, the CLI a waiting task starts on;
+ *  for the reviewer, the one its brief names */
+export function waitingWords(w: Waiting, kind: WaitingKind = 'agent') {
   const n = w.changed
-  const one = w.spaces.length === 1
-  const start = one
-    ? `${tasks(n)} of ${w.spaces[0].name} (queued, To do, scheduled) ${n === 1 ? 'starts' : 'start'} on ${w.spaces[0].words} when ${n === 1 ? 'its' : 'their'} turn comes.`
-    : `${tasks(n)} in ${w.spaces.length} spaces (queued, To do, scheduled) start on what Settings name for each one when their turn comes: ${w.spaces.map((s) => `${s.name} on ${s.words}`).join('; ')}.`
+  const reviewer = kind === 'reviewer'
+  const [verb, by] = reviewer ? [n === 1 ? 'is reviewed' : 'are reviewed', 'by'] : [n === 1 ? 'starts' : 'start', 'on']
+  const start =
+    w.spaces.length === 1
+      ? `${tasks(n)} of ${w.spaces[0].name} (queued, To do, scheduled) ${verb} ${by} ${w.spaces[0].words} when ${n === 1 ? 'its' : 'their'} turn comes.`
+      : `${tasks(n)} in ${w.spaces.length} spaces (queued, To do, scheduled) ${verb} ${by} what Settings name for each one when ${n === 1 ? 'its' : 'their'} turn comes: ${w.spaces.map((s) => `${s.name} ${by} ${s.words}`).join('; ')}.`
   return [
     start,
-    'Running tasks keep their agent.',
-    w.pinned ? `${w.pinned} of them ${w.pinned === 1 ? 'was' : 'were'} given ${w.pinned === 1 ? 'its' : 'their'} own worker when added, and ${w.pinned === 1 ? 'changes' : 'change'} too.` : '',
+    reviewer ? 'Running tasks keep their reviewer.' : 'Running tasks keep their agent.',
+    w.pinned ? `${w.pinned} of them ${w.pinned === 1 ? 'was' : 'were'} given ${w.pinned === 1 ? 'its' : 'their'} own ${reviewer ? 'reviewer' : 'worker'} when added, and ${w.pinned === 1 ? 'changes' : 'change'} too.` : '',
     w.kept.length ? `${w.kept.join(', ')} ${w.kept.length === 1 ? 'keeps' : 'keep'} its own setting.` : '',
   ].filter(Boolean)
+}
+
+/** what the answer did, in the words of the question */
+function doneWords(r: Partial<Waiting>, kind: WaitingKind) {
+  const same = r.same ?? 0
+  const follow = r.follow ?? 0
+  const reviewer = kind === 'reviewer'
+  const changed = r.changed ?? 0
+  const followed = reviewer
+    ? `${follow} ${follow === 1 ? 'takes' : 'take'} Settings' reviewer at ${follow === 1 ? 'its' : 'their'} turn anyway.`
+    : `${follow} start${follow === 1 ? 's' : ''} on Settings at ${follow === 1 ? 'its' : 'their'} turn anyway.`
+  return [
+    reviewer ? `Reviewer applied to ${tasks(changed)}.` : `Applied to ${tasks(changed)}.`,
+    same ? `${same} ${same === 1 ? 'was' : 'were'} already on it.` : '',
+    follow ? followed : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
 }
 
 function Question({ ask }: { ask: Ask }) {
@@ -80,6 +100,7 @@ function Question({ ask }: { ask: Ask }) {
   const [done, setDone] = useState<string | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
   const n = ask.waiting.changed
+  const kind = waitingKind(ask.key) ?? 'agent'
   const close = () => {
     asking = null
     tell()
@@ -90,11 +111,7 @@ function Question({ ask }: { ask: Ask }) {
     const r = (await act({ type: 'apply-to-waiting', key: ask.key, place: ask.place }).catch((e: Error) => ({ ok: false, error: e.message }))) as Partial<Waiting> & { ok?: boolean; error?: string }
     setBusy(false)
     if (!r.ok) return setFailed(r.error || 'It could not be applied.')
-    const same = r.same ?? 0
-    const follow = r.follow ?? 0
-    setDone(
-      [`Applied to ${tasks(r.changed ?? 0)}.`, same ? `${same} ${same === 1 ? 'was' : 'were'} already on it.` : '', follow ? `${follow} start${follow === 1 ? 's' : ''} on Settings at ${follow === 1 ? 'its' : 'their'} turn anyway.` : ''].filter(Boolean).join(' '),
-    )
+    setDone(doneWords(r, kind))
   }
   return (
     <Dialog
@@ -113,7 +130,7 @@ function Question({ ask }: { ask: Ask }) {
         <p>{done}</p>
       ) : (
         <div className="flex flex-col gap-1.5">
-          {waitingWords(ask.waiting).map((x) => (
+          {waitingWords(ask.waiting, kind).map((x) => (
             <p key={x}>{x}</p>
           ))}
           {failed ? <p className="text-need-fg">{failed}</p> : null}

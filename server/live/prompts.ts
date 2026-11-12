@@ -109,13 +109,60 @@ export function settingsLines(id: string, t: Told): { said: Said; text: string }
   ]
   lines.push({ said: 'merge', text: `Merge: ${merge}` })
   if (t.agent) lines.push({ said: 'agent', text: `Agent: ${onWords(t.agent)}. Only so you know what you run on.` })
-  return lines.map((l) => (t.by?.[l.said] ? { ...l, text: `${l.text} (${SET_BY[t.by[l.said]!]})` } : l))
+  return lines.map((l) => ({ ...l, text: marked(l.text, t.by?.[l.said]) }))
+}
+
+/** a block line's text, with who set it where it differs from Shepherdr's own default */
+const marked = (text: string, by?: SetBy) => (by ? `${text} (${SET_BY[by]})` : text)
+
+/** where a brief's Settings block starts (the head of the kind it has, as splitBrief reads it); -1 when there is none */
+function blockAt(desc: string) {
+  return [SETTINGS_HEAD, ...OLD_HEADS].map((h) => desc.lastIndexOf(h)).find((x) => x >= 0) ?? -1
 }
 
 /** a brief split into the coordinator's words and the Settings block Shepherdr ended it with (empty when it has none) */
 export function splitBrief(desc: string): [work: string, how: string] {
-  const i = [SETTINGS_HEAD, ...OLD_HEADS].map((h) => desc.lastIndexOf(h)).find((x) => x >= 0) ?? -1
+  const i = blockAt(desc)
   return i < 0 ? [desc, ''] : [desc.slice(0, i).trimEnd(), desc.slice(i)]
+}
+
+/**
+ * A brief with its Settings block's Reviewer line said again, for a reviewer Settings changed: who reviews now, the
+ * backup reviewers too where the block says Review is on (its own Review line; `review`, when it has none), and who set
+ * it. The words above the block and every other line of it stay byte for byte. A brief with no block, or with no
+ * Reviewer line in it, comes back as it is.
+ */
+export function rebriefReviewer(desc: string, r: { reviewer: Reviewer; fallback?: Reviewer | Reviewer[]; review: boolean; by?: SetBy }): string {
+  const i = blockAt(desc)
+  if (i < 0) return desc
+  const lines = desc.slice(i).split('\n')
+  const n = blockEnd(lines)
+  const k = lines.findIndex((l, j) => j > 0 && j < n && l.startsWith('- Reviewer: '))
+  if (k < 0) return desc
+  const review = briefReview(desc) ?? r.review
+  lines[k] = `- ${marked(reviewerLine(r.reviewer, review ? r.fallback : undefined), r.by)}`
+  return desc.slice(0, i) + lines.join('\n')
+}
+
+/** the number of lines of a block read from its head (lines[0]): its "- " lines, as readBrief reads them */
+function blockEnd(lines: string[]) {
+  const end = lines.findIndex((l, j) => j > 0 && !l.startsWith('- '))
+  return end < 0 ? lines.length : end
+}
+
+/** whether a brief's Settings block says Review is on (true) or off (false); undefined when the brief has no such line */
+export function briefReview(desc: string): boolean | undefined {
+  const i = blockAt(desc)
+  if (i < 0) return undefined
+  const lines = desc.slice(i).split('\n')
+  const line = lines.slice(1, blockEnd(lines)).find((l) => l.startsWith('- Review: '))
+  return line === undefined ? undefined : line.startsWith('- Review: on.')
+}
+
+/** the line a waiting task's agent hears with its go when its reviewer changed while it waited: its brief was read
+ *  before, so this says what the brief's Settings block says now */
+export function reviewerChangedLine(line: string) {
+  return `Your reviewer changed while you waited; your brief's Settings block now says: "${line}" Review with that reviewer from now on.`
 }
 
 /**
