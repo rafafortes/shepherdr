@@ -2,7 +2,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ROOT } from '../server/root.ts'
 import { tmp } from './tmp.ts'
 
 process.env.SHEPHERDR_HOME = tmp('test')
