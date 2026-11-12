@@ -573,8 +573,12 @@ describe('Queued from the command', () => {
       health: new WorkerHealth(),
     })
     expect((await src.cli(['task', 'add', 'Use it', '--desc', 'y', '--after', 'vm-x:ELA-3'], { chat: place })).out).toContain("can't reach vm-x")
-    ;(links.get('vm-x') as { reachable: boolean }).reachable = true
+    // the link is marked reachable right before each add that needs it: the machine poller marks it away again (its URL
+    // answers nothing), and a poll between this line and a slow add (git, under load) made the add say "can't reach"
+    const reach = () => ((links.get('vm-x') as { reachable: boolean }).reachable = true)
+    reach()
     expect((await src.cli(['task', 'add', 'Use it', '--desc', 'y', '--after', 'vm-x:ELA-9'], { chat: place })).out).toContain('vm-x has no task ELA-9')
+    reach()
     const used = await src.cli(['task', 'add', 'Use it', '--desc', 'y', '--after', 'Vm-X:ela-3'], { chat: place })
     expect(used.out).toContain('queued after vm-x:ELA-3')
     const use = src.engine.task(idOf(used.out))!
