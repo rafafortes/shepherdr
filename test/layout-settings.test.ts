@@ -434,4 +434,38 @@ describe.skipIf(!browser)('a task agent saved, and the tasks already waiting', (
       await page.close()
     }
   })
+
+  test('Everywhere reaches the waiting tasks of every space that does not set the agent itself: the question names each, and Apply moves them all', async () => {
+    const tasks = structuredClone(world.tasks)
+    const store = world.stores['vm-str']
+    // gtm gives up its own agent for this test (its Codex is put back after it)
+    store.set('task.agent', null, { space: 'gtm' })
+    const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } })
+    try {
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.getByRole('button', { name: 'Editing: home · vm-str', exact: true }).click()
+      await page.getByRole('menuitemradio', { name: 'Everywhere', exact: true }).click()
+      await settings.getByRole('button', { name: 'Editing: Everywhere', exact: true }).waitFor()
+      await settings.getByRole('button', { name: 'Agents', exact: true }).click()
+      await settings.getByRole('heading', { name: 'Tasks', exact: true }).locator('..').getByRole('button', { name: /^Agent: / }).click()
+      await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).click()
+      const ask = page.getByRole('alertdialog')
+      await ask.waitFor()
+      // gtm's GTM-17 (To do) and herdr-projects' two; the order of the spaces is not the point
+      const text = (await ask.textContent()) ?? ''
+      expect(text).toContain('3 waiting tasks in 2 spaces (queued, To do, scheduled) start on what Settings name for each one when their turn comes')
+      expect(text).toContain('gtm on Codex (high)')
+      expect(text).toContain('herdr-projects on Codex (high)')
+      await ask.getByRole('button', { name: 'Apply to 3 tasks', exact: true }).click()
+      await ask.getByText('Applied to 3 waiting tasks.', { exact: true }).waitFor()
+      expect([cli('GTM-17'), cli('HP-203'), cli('HP-204')]).toEqual(['Codex', 'Codex', 'Codex'])
+    } finally {
+      world.tasks = tasks
+      store.set('task.agent', 'Codex', { space: 'gtm' })
+      await reset()
+      await page.close()
+    }
+  })
 })
