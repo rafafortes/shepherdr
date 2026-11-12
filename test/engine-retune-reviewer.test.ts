@@ -3,7 +3,7 @@
 // again, the words above it stay byte for byte; a task whose agent already has its brief hears the new line with its
 // go (or with the first message that reaches it), and is not started early. Running tasks keep their reviewer.
 import { describe, expect, test } from 'bun:test'
-import { repo, until, world } from './engine-world.ts'
+import { placeId, repo, until, world } from './engine-world.ts'
 import { reviewRetuneLine, type Retune } from '../server/live/engine/engine.ts'
 import { briefReview, rebriefReviewer, reviewerChangedLine, reviewerLine, splitBrief } from '../server/live/prompts.ts'
 import { OLD_HEADS, SETTINGS_HEAD } from '../shared/brief.ts'
@@ -316,5 +316,34 @@ describe('the brief helpers', () => {
     )
     expect(reviewRetuneLine({ ...base, changed: 1, spaces: [{ name: 'a', on: { kind: 'pi' }, changed: 1 }] })).toBe('1 waiting task in a is reviewed by pi when its turn comes.')
     expect(reviewRetuneLine({ ...base, same: 2, follow: 2, running: 2 })).toBe('no waiting task changes; 2 already on it; 2 take Settings\' reviewer at their turn anyway; 2 running tasks keep their reviewer.')
+  })
+})
+
+describe('a renamed space: the reviewer answer names it as it shows, and a scope by either name or its place id reaches it', () => {
+  test('its waiting task is reviewed by pi under its shown name, the kept list names its own setting, and each way to name it works', async () => {
+    const w = fresh()
+    const plain = await w.places.add(repo(), 'rv-site')
+    const own = await w.places.add(repo(), 'rv-own')
+    w.places.rename(placeId.space('rv-site'), 'lyvora-site')
+    w.places.rename(placeId.space('rv-own'), 'lyvora-app')
+    expect(w.settings.set('reviewer.agent', 'codex', { space: own.name }).ok).toBe(true)
+    const first = w.engine.add({ project: plain.name, title: 'At work', desc: 'Add a.txt.', by: 'test' })
+    await until(() => w.started.some((s) => s.key === `${first.id}/Agent`))
+    const waits = w.engine.add({ project: plain.name, title: 'Waits', desc: 'Add b.txt.', by: 'test' })
+    const kept = w.engine.add({ project: own.name, title: 'Kept', desc: 'Add c.txt.', by: 'test' })
+    expect([w.engine.statusOf(waits), w.engine.statusOf(kept)]).toEqual(['queued', 'queued'])
+    expect(w.settings.set('reviewer.agent', 'pi', 'all').ok).toBe(true)
+
+    const everywhere: Retune = { changed: 1, same: 0, follow: 0, pinned: 0, running: 1, kept: ['lyvora-app'], spaces: [{ name: 'lyvora-site', on: { kind: 'pi' }, changed: 1 }] }
+    expect(w.engine.retuneReviewers({ key: 'reviewer.agent' }, true)).toEqual(everywhere)
+    for (const scope of [plain.name, 'lyvora-site', placeId.space(plain.name)]) {
+      expect(w.engine.retuneReviewers({ space: scope }, true)).toEqual({ ...everywhere, kept: [] })
+    }
+    expect(w.engine.retuneReviewers({ space: 'nowhere' }, true)).toEqual({ changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [], spaces: [] })
+
+    expect(w.engine.retuneReviewers({ key: 'reviewer.agent' })).toEqual(everywhere)
+    expect(waits.reviewer).toMatchObject({ kind: 'pi' })
+    expect(kept.reviewer).toMatchObject({ kind: 'codex' })
+    expect(reviewRetuneLine(everywhere)).toBe('1 waiting task in lyvora-site is reviewed by pi when its turn comes; 1 running task keeps its reviewer; lyvora-app keeps its own setting.')
   })
 })

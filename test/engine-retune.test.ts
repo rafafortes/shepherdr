@@ -3,7 +3,7 @@
 // they run on, a task already on it is counted as the same, and a scheduled task with no flags of its own follows
 // Settings when it starts. A space with its own setting keeps it when the change is Everywhere or this machine's.
 import { describe, expect, test } from 'bun:test'
-import { repo, started, until, world } from './engine-world.ts'
+import { placeId, repo, started, until, world } from './engine-world.ts'
 import { retuneLine, type Retune } from '../server/live/engine/engine.ts'
 
 /** a world where one task at a time runs on this machine: the rest wait for a slot */
@@ -125,5 +125,42 @@ describe('the answer in words', () => {
     )
     expect(retuneLine({ ...base, same: 2 })).toBe('no waiting task changes; 2 already on it.')
     expect(retuneLine({ ...base, changed: 1, spaces: [{ name: 'a', on: { kind: 'pi' }, changed: 1 }] })).toBe('1 waiting task in a will start on pi when its turn comes.')
+  })
+})
+
+describe('a renamed space: the answer names it as it shows, and a scope by either name or by its place id reaches it', () => {
+  test('its waiting tasks take the worker; spaces and kept name it as it shows; each way to name it changes the same tasks', async () => {
+    const { w, startedOf } = fresh()
+    // added as website, shown as lyvora-site; the other added as web-own and shown as lyvora-app, with its own agent
+    const plain = await w.places.add(repo(), 'website')
+    const own = await w.places.add(repo(), 'web-own')
+    w.places.rename(placeId.space('website'), 'lyvora-site')
+    w.places.rename(placeId.space('web-own'), 'lyvora-app')
+    expect(w.settings.set('task.agent', 'codex', { space: own.name }).ok).toBe(true)
+    const first = w.engine.add({ project: plain.name, title: 'At work', desc: 'Add a.txt.', by: 'test' })
+    await until(() => startedOf(first.id))
+    const waits = w.engine.add({ project: plain.name, title: 'Waits', desc: 'Add b.txt.', by: 'test' })
+    const kept = w.engine.add({ project: own.name, title: 'Kept', desc: 'Add c.txt.', by: 'test' })
+    expect([w.engine.statusOf(waits), w.engine.statusOf(kept)]).toEqual(['queued', 'queued'])
+    expect(kept.agent).toMatchObject({ kind: 'codex' })
+    expect(w.settings.set('task.agent', 'pi', 'all').ok).toBe(true)
+
+    // Everywhere: the space with its own agent keeps it, under its shown name; the other one takes pi
+    const everywhere: Retune = { changed: 1, same: 0, follow: 0, pinned: 0, running: 1, kept: ['lyvora-app'], spaces: [{ name: 'lyvora-site', on: { kind: 'pi' }, changed: 1 }] }
+    expect(w.engine.retuneWaiting({ key: 'task.agent' }, true)).toEqual(everywhere)
+    // a scope names the space by the name it was added under, the name it shows, or its place id: the same tasks
+    for (const scope of [plain.name, 'lyvora-site', placeId.space(plain.name)]) {
+      expect(w.engine.retuneWaiting({ space: scope }, true)).toEqual({ ...everywhere, kept: [], spaces: [{ name: 'lyvora-site', on: { kind: 'pi' }, changed: 1 }] })
+    }
+    // the space with its own agent, scoped by either name: its target is its own agent, so its task is already on it
+    for (const scope of [own.name, 'lyvora-app']) expect(w.engine.retuneWaiting({ space: scope }, true)).toMatchObject({ changed: 0, same: 1, spaces: [] })
+    // a name no space of this machine has changes nothing
+    expect(w.engine.retuneWaiting({ space: 'nowhere' }, true)).toEqual({ changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [], spaces: [] })
+
+    // the apply, by Everywhere: the words name the shown spaces
+    expect(w.engine.retuneWaiting({ key: 'task.agent' })).toEqual(everywhere)
+    expect(waits.agent).toMatchObject({ kind: 'pi' })
+    expect(kept.agent).toMatchObject({ kind: 'codex' })
+    expect(retuneLine(everywhere)).toBe('1 waiting task in lyvora-site will start on pi when its turn comes; 1 running task keeps its agent; lyvora-app keeps its own setting.')
   })
 })

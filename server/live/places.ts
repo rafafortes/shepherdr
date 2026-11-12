@@ -176,6 +176,12 @@ export class Places {
     return this.shown().find((x) => x.id === id)?.name
   }
 
+  /** the name a repo space shows, given the name it was added under (its id, folder, herdr space and settings keep that
+   *  one): the canonical name for anything a human or an agent reads. Lookups stay keyed by the added name. */
+  shownName(added: string) {
+    return this.nameOf(placeId.space(added)) ?? added
+  }
+
   /** a space of this machine by the name it shows, or its id */
   find(name: string) {
     return this.shown().find((x) => x.name === name || x.id === name)

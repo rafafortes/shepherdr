@@ -1368,18 +1368,25 @@ export class Engine extends Emitter<Events> {
   }
 
   /** a task's space's own cap on this machine (space.maxTasks), with how many of that space's tasks work now (busy, as
-   *  the machine's count is); none when the space has no cap of its own */
-  spaceCap(t: TaskRec): { space: string; max: number; working: number } | undefined {
+   *  the machine's count is); none when the space has no cap of its own. `space` is the name it was added under (the
+   *  key its settings and returns keep); `shown` is the name the human reads (places.shownName) */
+  spaceCap(t: TaskRec): { space: string; shown: string; max: number; working: number } | undefined {
     const space = this.places.space(t.project)?.name
     const max = space === undefined ? null : this.settings.spaceMax(space)
     if (space === undefined || max === null) return undefined
-    return { space, max, working: this.tasks.filter((x) => this.places.space(x.project)?.name === space && this.busy(x)).length }
+    return { space, shown: this.places.shownName(space), max, working: this.tasks.filter((x) => this.places.space(x.project)?.name === space && this.busy(x)).length }
   }
 
-  /** a held task's line in its row: a task held by its space's cap names the space */
+  /** a held task's line in its row: a task held by its space's cap names the space, as it shows */
   private heldLabel(t: TaskRec) {
     const cap = t.held!.why === 'space' ? this.spaceCap(t) : undefined
-    return cap ? `Waiting for a free slot of ${cap.space}` : HELD[t.held!.why]
+    return cap ? `Waiting for a free slot of ${cap.shown}` : HELD[t.held!.why]
+  }
+
+  /** the name a space of this machine was added under, for a scope that names it: its place id, the name it was added
+   *  under (what the settings and the tasks hold, so checked first), or the name it shows (the CLI's --space takes that) */
+  private addedNameOf(name: string) {
+    return this.places.space(name)?.name ?? this.places.spaces.find((p) => p.name === name)?.name ?? this.places.byName(name)?.name
   }
 
   /** how many starts Shepherdr may make by itself now (machine.startEvery): one once the last is that long ago, none
@@ -1421,7 +1428,7 @@ export class Engine extends Emitter<Events> {
       machine: 'waiting for the machine: it is busy',
       models: 'waiting: every model of this space ran out, so a start would only be cut off too',
       resume: 'waiting: the tasks that were cut off go back to work first',
-      space: `waiting for a free slot of ${cap?.space ?? 'its space'} (${cap?.working ?? 0} of ${cap?.max ?? 0} of its tasks working)`,
+      space: `waiting for a free slot of ${cap?.shown ?? 'its space'} (${cap?.working ?? 0} of ${cap?.max ?? 0} of its tasks working)`,
     }[why]
     this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: words } })
     this.save()
@@ -1914,11 +1921,12 @@ export class Engine extends Emitter<Events> {
    */
   retuneWaiting(scope: { space: string } | { key: string }, dry = false): Retune {
     const out: Retune = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [], spaces: [] }
+    const want = 'space' in scope ? this.addedNameOf(scope.space) : undefined
     const plan: { t: TaskRec; on: Harness }[] = []
     const perSpace = new Map<string, { on: Harness; changed: number }>()
     for (const t of this.tasks) {
       const space = this.nameOf(t)
-      if (t.archived || ended(t) || !space || ('space' in scope && space !== scope.space)) continue
+      if (t.archived || ended(t) || !space || ('space' in scope && space !== want)) continue
       const waiting = WAITING.includes(this.statusOf(t))
       if (!('space' in scope) && this.settings.pick(scope.key, { space }).from === 'space') {
         if (waiting && !out.kept.includes(space)) out.kept.push(space)
@@ -1949,7 +1957,9 @@ export class Engine extends Emitter<Events> {
       plan.push({ t, on })
     }
     if (!dry) for (const { t, on } of plan) this.setWorker(t.id, on)
-    out.spaces = [...perSpace].map(([name, s]) => ({ name, ...s }))
+    // the answer names each space as it shows; the scope and the settings keep the name it was added under
+    out.kept = out.kept.map((name) => this.places.shownName(name))
+    out.spaces = [...perSpace].map(([name, s]) => ({ name: this.places.shownName(name), ...s }))
     return out
   }
 
@@ -1964,6 +1974,7 @@ export class Engine extends Emitter<Events> {
    */
   retuneReviewers(scope: { space: string } | { key: string }, dry = false): Retune {
     const out: Retune = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [], spaces: [] }
+    const want = 'space' in scope ? this.addedNameOf(scope.space) : undefined
     const plan: (() => void)[] = []
     const perSpace = new Map<string, { on: Harness; changed: number }>()
     const told = (t: TaskRec, on: Harness) => {
@@ -1974,7 +1985,7 @@ export class Engine extends Emitter<Events> {
     }
     for (const t of this.tasks) {
       const space = this.nameOf(t)
-      if (t.archived || ended(t) || !space || ('space' in scope && space !== scope.space)) continue
+      if (t.archived || ended(t) || !space || ('space' in scope && space !== want)) continue
       const waiting = WAITING.includes(this.statusOf(t))
       if (!('space' in scope) && this.settings.pick(scope.key, { space }).from === 'space') {
         if (waiting && !out.kept.includes(space)) out.kept.push(space)
@@ -2032,7 +2043,9 @@ export class Engine extends Emitter<Events> {
       for (const f of plan) f()
       this.save()
     }
-    out.spaces = [...perSpace].map(([name, s]) => ({ name, ...s }))
+    // as retuneWaiting: the answer names each space as it shows
+    out.kept = out.kept.map((name) => this.places.shownName(name))
+    out.spaces = [...perSpace].map(([name, s]) => ({ name: this.places.shownName(name), ...s }))
     return out
   }
 
@@ -2873,7 +2886,7 @@ export class Engine extends Emitter<Events> {
     if (!t.worktree || !t.branch || !t.base) return { ok: false, text: `${t.id} has no branch yet.` }
     const p = this.proj(t)
     const g = await this.hub(p)
-    if (!g) return { ok: true, text: `No pull request: ${p.name} has no GitHub remote, or gh isn't logged in to it (gh auth status). shepherdr merge ${t.id} squash-merges it here.` }
+    if (!g) return { ok: true, text: `No pull request: ${this.places.shownName(p.name)} has no GitHub remote, or gh isn't logged in to it (gh auth status). shepherdr merge ${t.id} squash-merges it here.` }
     if ((await G.aheadCount(t.worktree, t.base)) === 0) return { ok: false, text: `${t.id} has no commits yet: commit your work, then run shepherdr pr ${t.id} again.` }
     const dirty = await G.dirty(t.worktree)
     const pushed = await this.push(t)
@@ -2953,7 +2966,7 @@ export class Engine extends Emitter<Events> {
     if (!t.worktree || !t.branch) return { ok: false, text: `${t.id} has no branch yet.` }
     const p = this.proj(t)
     const g = await this.hub(p)
-    if (!g) return { ok: true, text: `No GitHub checks: ${p.name} has no GitHub remote, or gh isn't logged in to it. Run the project's own checks here.` }
+    if (!g) return { ok: true, text: `No GitHub checks: ${this.places.shownName(p.name)} has no GitHub remote, or gh isn't logged in to it. Run the project's own checks here.` }
     const pr = await this.prOf(t, g, t.worktree)
     if (!pr) return { ok: false, text: `${t.id} has no pull request yet: shepherdr pr ${t.id} pushes the branch and opens one.` }
     const head = (await G.git(t.worktree, 'rev-parse', 'HEAD')).out

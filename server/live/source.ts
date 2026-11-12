@@ -2329,7 +2329,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       machine: 'the machine is busy',
       models: 'every model of its space ran out, so it would only be cut off too, until the primary answers again',
       resume: 'the tasks that were cut off go back to work first',
-      space: cap ? `${cap.space}'s own limit of ${cap.max} tasks is taken` : 'its space is at its own limit',
+      space: cap ? `${cap.shown}'s own limit of ${cap.max} tasks is taken` : 'its space is at its own limit',
     }[why]
   }
 
@@ -3442,7 +3442,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           if (!rest[1]) throw new Error('shepherdr space set base <branch> --space NAME')
           await this.places.setBase(pr.name, rest[1])
           this.emit('snapshot')
-          return `${pr.name}: new tasks start from and merge into ${pr.base}. Existing tasks keep their target.`
+          return `${this.places.shownName(pr.name)}: new tasks start from and merge into ${pr.base}. Existing tasks keep their target.`
         }
         if (a1 === 'remove') {
           if (!rest[0]) throw new Error('shepherdr space remove <name>')
@@ -3558,7 +3558,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const block = settingsBlock('<id>', { ways: this.settings.ways(pr), reviewer: this.settings.harness('reviewer', pr), fallback: this.settings.reviewerBackups(pr), agent: this.settings.harness('task', pr), by: this.settings.setBy(pr) })
         const repo = pr ? this.places.byName(pr) : undefined
         const folder = repo ? `\nFolder: ${this.places.folderLine(repo)}${repo.repoId ? ` (found again by its repo's id ${shortId(repo.repoId)} if its folder is renamed or moved)` : ''}` : ''
-        return `${head}${repo ? `${folder}\nBase branch: ${repo.base} (new tasks; per-task override: --base <branch>)` : ''}\n${this.settings.lines(pr, NAME)}${beat}${now}\n\nEvery new task's brief${pr ? ` in ${pr}` : ''} ends with:\n${block}\n\nFor one task, set any of these with task add: --set review.rounds=1 --set merge="ask me first" (--set agent=codex, model, effort, reviewer, reviewer.model, reviewer.effort, reviewer.fallback, reviewer.fallbackModel, reviewer.fallbackEffort, task.fallback, coordinator.fallback, backup.model, backup.effort too, and a chain's 2nd to 5th backups by their own keys: task.fallback2, task.fallback2Model, task.fallback2Effort, reviewer.fallback2…), or say so in its brief, which wins.`
+        return `${head}${repo ? `${folder}\nBase branch: ${repo.base} (new tasks; per-task override: --base <branch>)` : ''}\n${this.settings.lines(pr, NAME)}${beat}${now}\n\nEvery new task's brief${pr ? ` in ${this.places.shownName(pr)}` : ''} ends with:\n${block}\n\nFor one task, set any of these with task add: --set review.rounds=1 --set merge="ask me first" (--set agent=codex, model, effort, reviewer, reviewer.model, reviewer.effort, reviewer.fallback, reviewer.fallbackModel, reviewer.fallbackEffort, task.fallback, coordinator.fallback, backup.model, backup.effort too, and a chain's 2nd to 5th backups by their own keys: task.fallback2, task.fallback2Model, task.fallback2Effort, reviewer.fallback2…), or say so in its brief, which wins.`
       }
       case 'models': {
         const kinds = a1 ? [kindOf(a1)] : ['claude', 'codex', 'pi']
@@ -3581,7 +3581,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           const pr = this.projectFor(p, ctx)
           await this.places.setBase(pr.name, value!)
           this.emit('snapshot')
-          return `${pr.name}: base branch ${pr.base}. Existing tasks keep their target.`
+          return `${this.places.shownName(pr.name)}: base branch ${pr.base}. Existing tasks keep their target.`
         }
         if (!CATALOG.some((s) => s.rows.some((r) => r.key === a1))) throw new Error(`No setting ${a1}; shepherdr show lists them`)
         const waiting = p.flags.has('apply-waiting')
@@ -3603,7 +3603,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         this.settingChanged(a1)
         const applied = waiting ? this.applyWaiting(a1, level) : undefined
         const appliedWords = applied ? (waitingKind(a1) === 'reviewer' ? reviewRetuneLine(applied) : retuneLine(applied)) : undefined
-        const where = pr ? `${named}'s` : level === 'machine' ? `${NAME}'s` : "Everywhere's"
+        // the space as it shows (its settings are keyed by the name it was added under, and --space may name it by that)
+        const where = pr ? `${this.places.nameOf(pr === '~' ? placeId.home() : placeId.space(pr)) ?? named}'s` : level === 'machine' ? `${NAME}'s` : "Everywhere's"
         const now = this.settings.get(a1, pr)
         // a trigger in words too, to tell the human
         return `${a0 === 'unset' ? `${a1}: ${where} own is unset; it is ${now} now.` : `${a1} = ${now} (${where})`}${this.settings.words(a1, now).replace(/^\n\s*/, '\nIn words: ')}${a1.endsWith('.instructions') ? '\nUsed at the next start or restart; running agents are unchanged. Reviewer changes need a new or restarted task agent.' : ''}${appliedWords ? `\n${appliedWords}` : ''}`
@@ -3627,7 +3628,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (op === 'add') {
           if (!name || !one(p, 'task') || (!one(p, 'when') && !one(p, 'on'))) throw new Error('shepherdr automation add "<name>" --task "<title>" [--brief "<brief>"] [--when "<time rule>"] [--on "<events>"] (one or both)')
           const x = this.automation(place, 'add', undefined, { name, when: one(p, 'when'), on: one(p, 'on'), title: one(p, 'task')!, brief, agent }) as Automation
-          return `Automation “${x.name}” is on: ${told(x)}. It adds the task “${x.task.title}” to ${pr!.name}, with a fresh agent. Tell the human when it runs in these words.`
+          return `Automation “${x.name}” is on: ${told(x)}. It adds the task “${x.task.title}” to ${this.places.shownName(pr!.name)}, with a fresh agent. Tell the human when it runs in these words.`
         }
         if (op === 'edit') {
           if (!name) throw new Error('shepherdr automation edit "<name>" [--name "<new name>"] [--task …] [--brief …] [--when "<time rule>" | off] [--on "<events>" | none] [--agent …]')
@@ -3647,7 +3648,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return (
           this.automations.list
             .filter((x) => !place || x.place === place)
-            .map((x) => `${x.name} · ${told(x)} · adds “${x.task.title}”${x.task.agent?.kind ? ` (${[x.task.agent.kind, x.task.agent.model, x.task.agent.effort].filter(Boolean).join(', ')})` : ''} · ${this.places.space(x.place)?.name ?? x.place}${x.on ? '' : ' · paused'} · ${runs(x)}`)
+            .map((x) => `${x.name} · ${told(x)} · adds “${x.task.title}”${x.task.agent?.kind ? ` (${[x.task.agent.kind, x.task.agent.model, x.task.agent.effort].filter(Boolean).join(', ')})` : ''} · ${this.places.space(x.place) ? this.places.nameOf(x.place) : x.place}${x.on ? '' : ' · paused'} · ${runs(x)}`)
             .join('\n') || 'No automations.'
         )
       }
