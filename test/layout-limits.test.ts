@@ -75,6 +75,36 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
     }
   })
 
+  test("a limit's three choices: this machine's Max tasks at 0 starts no task, reads 0 · starts none in the warning colour, and No cap takes it back", async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      const cell = page.getByRole('button', { name: /^vm-str · Max tasks working at once: 10/ })
+      await cell.scrollIntoViewIfNeeded()
+      await cell.click()
+      const pop = page.getByRole('dialog', { name: 'Edit this setting' })
+      // the three separate choices, and no number box beside No cap or 0
+      expect(await pop.getByRole('radio', { name: 'No cap', exact: true }).count()).toBe(1)
+      expect(await pop.getByRole('radio', { name: '0 · starts none', exact: true }).count()).toBe(1)
+      expect(await pop.getByRole('radio', { name: 'Limit', exact: true }).count()).toBe(1)
+      await pop.getByRole('radio', { name: '0 · starts none', exact: true }).check()
+      await pop.waitFor({ state: 'detached' })
+      // 0 is a value of its own: the cell says so, in the warning colour, not as no cap
+      const zero = page.getByRole('button', { name: /^vm-str · Max tasks working at once: 0 · starts none/ })
+      await zero.waitFor()
+      expect(await zero.getAttribute('class')).toContain('text-need-fg')
+      // No cap is unlimited for this machine: the cell reads it faint
+      await zero.click()
+      await pop.getByRole('radio', { name: 'No cap', exact: true }).check()
+      await pop.waitFor({ state: 'detached' })
+      const none = page.getByRole('button', { name: /^vm-str · Max tasks working at once: no cap/ })
+      await none.waitFor()
+      expect(await none.getAttribute('class')).toContain('text-fg3')
+    } finally {
+      await page.close()
+    }
+  })
+
   test("+ column adds a provider; a space's sub-limit under it is set at that space, and reads its runs of the cap", async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {

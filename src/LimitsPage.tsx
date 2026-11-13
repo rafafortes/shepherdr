@@ -218,7 +218,7 @@ export function LimitValue({ title, cell, machine, phone }: { title: string; cel
         aria-label={`${title}: ${words}${cell.now ? `, ${cell.now}` : ''}`}
         title={`${words}${cell.now ? `, ${cell.now}` : ''}`}
         onClick={() => (open ? close() : setOpen(true))}
-        className={clsx('press-dim block max-w-full rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel', lim?.tone === 'zero' ? 'font-medium text-need-fg' : cell.set ? 'font-medium text-fg' : 'text-fg3')}
+        className={clsx('press-dim block max-w-full rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel', lim?.tone === 'zero' ? 'font-medium text-need-fg' : lim?.tone === 'none' || !cell.set ? 'text-fg3' : 'font-medium text-fg')}
       >
         <span className="block truncate">{words}</span>
         {cell.now ? <span className="block truncate text-[0.75rem] font-normal text-fg3">{cell.now}</span> : null}

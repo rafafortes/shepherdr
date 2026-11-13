@@ -74,6 +74,35 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
     }
   })
 
+  test('a blocked row: its cap is blocked · 0 allowed in the warning colour, and its editor offers the three choices', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      const s = await openModels(page)
+      await s.scrollIntoViewIfNeeded()
+      const table = s.getByRole('table', { name: 'Providers and models' })
+      const spark = table.getByRole('row').filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) }).first()
+      await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).click()
+      const pop = page.getByRole('dialog', { name: 'Edit this setting' })
+      // the three choices of a cap: No cap, Blocked · 0 allowed, and a Limit with its number
+      expect(await pop.getByRole('radio', { name: 'Blocked · 0 allowed', exact: true }).count()).toBe(1)
+      await pop.getByRole('radio', { name: 'Blocked · 0 allowed', exact: true }).check()
+      await pop.getByRole('button', { name: 'Save', exact: true }).click()
+      await pop.waitFor({ state: 'detached' })
+      const blocked = spark.getByRole('button', { name: /^Spark \(local\): blocked · 0 allowed/ })
+      await blocked.waitFor()
+      expect(await blocked.getAttribute('class')).toContain('text-need-fg')
+      expect(await blocked.getAttribute('data-blocked')).toBe('true')
+      // and No cap takes the block back
+      await blocked.click()
+      await pop.getByRole('radio', { name: 'No cap', exact: true }).check()
+      await pop.getByRole('button', { name: 'Save', exact: true }).click()
+      await pop.waitFor({ state: 'detached' })
+      await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).waitFor()
+    } finally {
+      await page.close()
+    }
+  })
+
   test('a task held for its model’s cap reads so in the Tasks list', async () => {
     const task = world.tasks.find((t) => t.id === 'HP-203')!
     const saved = { status: task.status, sub: task.sub }

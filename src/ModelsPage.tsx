@@ -132,9 +132,10 @@ export function Editor({ phone, title, controls, reset, error, onSet, onReset, f
       {title ? <Small className="text-pretty font-medium">{title}</Small> : null}
       <dl className="flex flex-col gap-1.5">
         {controls.map((row) => (
-          <div key={row.key} className="flex min-h-9 items-center justify-between gap-3">
+          // a limit's three choices are a column of their own under its name (LimitChoice), not a control beside it
+          <div key={row.key} className={clsx('flex min-h-9 gap-3', row.num?.limit ? 'flex-col items-start' : 'items-center justify-between')}>
             <dt className="shrink-0 text-fg2">{row.label}</dt>
-            <dd className="flex min-w-0 max-w-[65%] justify-end">
+            <dd className={clsx('flex min-w-0', row.num?.limit ? 'w-full' : 'max-w-[65%] justify-end')}>
               <Control row={row} phone={phone} set={(v) => onSet(row.key, v)} edit={() => undefined} />
             </dd>
           </div>
