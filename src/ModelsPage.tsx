@@ -384,36 +384,37 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
 
   return (
     <div className="flex w-full flex-col gap-3 px-6 pt-5 pb-8">
-      <div className="max-w-full overflow-x-auto overscroll-x-contain">
+      {/* the table scrolls in its own box, both ways: its header rows and the Level column stay in view */}
+      <div className="max-h-[min(70vh,44rem)] max-w-full overflow-auto overscroll-contain">
         <table aria-label="Models by level" className="w-max border-separate border-spacing-0 text-[0.8125rem]">
           <thead>
             <tr>
-              <th rowSpan={2} scope="col" className="sticky left-0 z-20 min-w-44 bg-bg pr-4 pb-2 text-left align-bottom font-medium text-fg3">
+              <th rowSpan={2} scope="col" className="sticky top-0 left-0 z-30 min-w-44 bg-bg pr-4 pb-2 text-left align-bottom font-medium text-fg3">
                 Level
               </th>
               {groups.map((g) => (
-                <th key={g.role} colSpan={g.slots.length + (g.plus ? 1 : 0)} scope="colgroup" className="border-l border-line px-2 pt-0.5 pb-1 text-left font-medium text-fg2">
+                <th key={g.role} colSpan={g.slots.length + (g.plus ? 1 : 0)} scope="colgroup" className="sticky top-0 z-20 h-7 border-l border-line bg-bg px-2 pt-0.5 pb-1 text-left font-medium text-fg2">
                   {g.title}
                 </th>
               ))}
-              <th rowSpan={2} scope="col" className="border-l border-line px-2 pb-2 text-left align-bottom font-medium text-fg3">
+              <th rowSpan={2} scope="col" className="sticky top-0 z-20 border-l border-line bg-bg px-2 pb-2 text-left align-bottom font-medium text-fg3">
                 Max tasks
               </th>
-              <th rowSpan={2} scope="col" className="px-2 pb-2 text-left align-bottom font-medium text-fg3">
+              <th rowSpan={2} scope="col" className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium text-fg3">
                 Merge train
               </th>
             </tr>
             <tr>
               {groups.flatMap((g) => [
                 ...g.slots.map((slot, i) => (
-                  <th key={slot.id} scope="col" className={clsx('px-2 pb-2 text-left align-bottom font-medium whitespace-nowrap text-fg3', i === 0 && 'border-l border-line')}>
+                  <th key={slot.id} scope="col" className={clsx('sticky top-7 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium whitespace-nowrap text-fg3', i === 0 && 'border-l border-line')}>
                     <span className="inline-flex items-center gap-1">
                       {slot.name}
                       {more(`slot:${slot.id}`, `More for ${g.title} · ${slot.name}`, setEverySpace(slot))}
                     </span>
                   </th>
                 )),
-                ...(g.plus ? [<th key={`${g.role}-plus`} scope="col" className="px-2 pb-2 text-left align-bottom font-medium text-fg3">+</th>] : []),
+                ...(g.plus ? [<th key={`${g.role}-plus`} scope="col" className="sticky top-7 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium text-fg3">+</th>] : []),
               ])}
             </tr>
           </thead>
