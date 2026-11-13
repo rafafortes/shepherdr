@@ -4,7 +4,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import type { ProfilesView } from '../shared/types.ts'
-import { nextRun, ruleOf } from '../server/live/trigger.ts'
+import { nextRun } from '../server/live/trigger.ts'
 import { tmp } from './tmp.ts'
 
 const { LiveSource } = await import('../server/live/source.ts')
