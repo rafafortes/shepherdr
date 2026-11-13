@@ -859,6 +859,10 @@ export interface QuotaWindow {
   resetAt?: number
   /** what is left of a count that has no cap (Command Code's credits) */
   left?: number
+  /** an estimate's usage in the window: pi's cost estimate, when its logs gave one */
+  cost?: number
+  /** an estimate's learned limit: what the window held when the provider ran out, the latest few, newest first */
+  learned?: { at: number; tokens: number; cost?: number }[]
 }
 /** a provider's quota figure: its windows, where the read came from and when, and whether the numbers are an estimate */
 export interface QuotaFigure {

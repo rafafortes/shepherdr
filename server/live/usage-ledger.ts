@@ -178,6 +178,23 @@ export class UsageLedger {
     return t
   }
 
+  /** what the keys matching `match` used between two moments, in whole hours (the hours `from` and `to` fall in count) */
+  between(match: (key: string) => boolean, from: number, to: number): UsageTotals {
+    const first = Math.floor(from / HOUR)
+    const last = Math.floor(to / HOUR)
+    const t: UsageTotals = { tokens: 0, calls: 0 }
+    for (const [key, hours] of Object.entries(this.data.usage)) {
+      if (!match(key)) continue
+      for (const [h, b] of Object.entries(hours)) {
+        if (Number(h) < first || Number(h) > last) continue
+        t.tokens += b.tokens
+        t.calls += b.calls
+        if (b.cost !== undefined) t.cost = (t.cost ?? 0) + b.cost
+      }
+    }
+    return t
+  }
+
   /** the latest hour a call of the keys matching `match` was counted in (0: none) */
   private lastCallHour(match: (key: string) => boolean): number {
     let last = 0
