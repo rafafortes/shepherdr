@@ -1554,6 +1554,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const first = start.skipped[0]
     if (start.step > 0) {
       this.capStarts.set(id, { step: start.step })
+      this.saveCapStarts()
       this.capNote(id, `Started on ${harnessWords(fitHarness(start.h))}${first ? `: ${capWords(first, (x) => this.places.shownName(x))}` : ''}`)
     } else if (start.past && first) {
       this.capNote(id, `Runs past the cap: ${capWords(first, (x) => this.places.shownName(x))}. Every model it may use is full, so it starts on ${harnessWords(fitHarness(start.h))} anyway.`)
@@ -1568,8 +1569,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** the coordinators a first start put on a backup by the caps (place id, and its step in the chain): the way back takes
-   *  them to their primary once idle and the primary has room (backFromCap). In memory: until then they stay where they are */
-  private capStarts = new Map<string, { step: number }>()
+   *  them to their primary once idle and the primary has room (backFromCap). Kept in cap-starts.json, so a restart of
+   *  Shepherdr still knows which one is on a backup because of a cap */
+  private capStarts = new Map<string, { step: number }>(Object.entries(readJson<Record<string, { step: number }>>('cap-starts.json', {})))
+
+  /** the caps' marks as the file keeps them (capStarts) */
+  private saveCapStarts() {
+    writeJson('cap-starts.json', Object.fromEntries(this.capStarts))
+  }
 
   /** whether a model key's provider is out now, and until when: its run-outs (the Summary reads them the same way, for every
    *  model of the provider) and the return watch's outage that has not seen its primary back yet. The choice skips it */
@@ -1617,6 +1624,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     for (const id of [...this.capStarts.keys()]) {
       if (!this.places.coordinator(id) || !this.agents.record(id)) {
         this.capStarts.delete(id)
+        this.saveCapStarts()
         continue
       }
       const space = this.spaceKey(id)
@@ -1628,6 +1636,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       try {
         await this.restartCoordinator(id, primary, undefined, 'room')
         this.capStarts.delete(id)
+        this.saveCapStarts()
       } catch (e) {
         console.error(`shepherdr: couldn't move ${id} back to its primary: ${(e as Error).message}`)
       }

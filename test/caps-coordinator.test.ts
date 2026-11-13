@@ -6,6 +6,7 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import { join } from 'node:path'
+import { readJson } from '../server/store.ts'
 import { tmp } from './tmp.ts'
 
 process.env.SHEPHERDR_HOME = tmp('caps-coordinator')
@@ -232,6 +233,36 @@ describe("a coordinator a cap started on a backup goes back too, and a way back 
     expect(starts.at(-1)).toMatchObject({ key: id, kind: 'pi' })
     expect((src as unknown as { capStarts: Map<string, unknown> }).capStarts.has(id)).toBe(false)
     expect(cards(id).some((c) => c.startsWith('Back on pi'))).toBe(true)
+  })
+
+  test('a coordinator a cap put on its backup is still on it after a restart, and its way back still applies', async () => {
+    src.settings.set('models.maxAtOnce', 'pi=1', 'machine')
+    const busy = await space('caps-restart-busy')
+    src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'pi', logs: [], started: Date.now() } as never
+    working.add(busy.id)
+    const { id } = await space('caps-restart')
+    await startCoordinator(id)
+    expect(starts.at(-1)).toMatchObject({ key: id, kind: 'codex' })
+    // the mark is kept on disk: a Shepherdr started again reads it
+    expect(readJson<Record<string, unknown>>('cap-starts.json', {})[id]).toEqual({ step: 1 })
+    const again = new LiveSource()
+    try {
+      expect((again as unknown as { capStarts: Map<string, unknown> }).capStarts.get(id)).toEqual({ step: 1 })
+      // the busy one ends, and the coordinator is idle: the restarted Shepherdr takes it back to its primary
+      const restarts: { key: string; kind: string }[] = []
+      again.agents.status = (() => 'idle') as never
+      again.agents.restart = (async (spec: { key: string; kind: string }) => {
+        restarts.push({ key: spec.key, kind: spec.kind })
+        return null
+      }) as never
+      again.agents.record = ((k: string) => (k === id ? { key: id, name: id, kind: 'codex', logs: [], started: Date.now() } : undefined)) as never
+      again.agents.reachable = true
+      await again.watchReturns()
+      expect(restarts.at(-1)).toMatchObject({ key: id, kind: 'pi' })
+      expect(readJson<Record<string, unknown>>('cap-starts.json', {})[id]).toBeUndefined()
+    } finally {
+      again.stop()
+    }
   })
 
   test('a way back that fails is logged and the agent stays where it is', async () => {
