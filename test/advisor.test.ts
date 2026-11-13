@@ -89,7 +89,11 @@ describe('what the advisor is asked, and how it answers', () => {
     expect(claude.cmd).toEqual(expect.arrayContaining(['--allowedTools', 'Read,Grep,Glob', '--no-session-persistence', '--strict-mcp-config']))
     expect(claude.stdin).toBe('Q')
     expect(adviceArgs({ kind: 'codex' }, 'Q')!.cmd).toEqual(expect.arrayContaining(['--sandbox', 'read-only']))
-    expect(adviceArgs({ kind: 'opencode' }, 'Q')).toBeUndefined()
+    // OpenCode: its plan agent, read only; its model and effort as one id; the question as the last word
+    expect(adviceArgs({ kind: 'opencode', model: 'opencode/minimax-m3.1-flash-free', effort: 'high' }, 'Q')!.cmd).toEqual(['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-advisor', '-m', 'opencode/minimax-m3.1-flash-free#high', 'Q'])
+    expect(adviceArgs({ kind: 'opencode', model: 'default', effort: 'default' }, 'Q')!.cmd).toEqual(['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-advisor', 'Q'])
+    expect(adviceArgs({ kind: 'opencode' }, 'Q')!.stdin).toBeUndefined()
+    expect(adviceArgs({ kind: 'gemini' }, 'Q')).toBeUndefined()
   })
 
   test('its last line of JSON is its answer: a pick in range, several, its own words, or the human', () => {

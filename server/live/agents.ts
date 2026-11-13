@@ -8,11 +8,12 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, watch, type FSWatcher } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Emitter } from '../source.ts'
-import { readJson, writeJson } from '../store.ts'
+import { home, readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
 import { herdr, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
 import { ClaudeSessions, Reviewers, screenBackground, sessionBackground, type Background } from './readers/background.ts'
-import { claudeHome, claudeLogPath, findClaudeLog, findCodexLog, findLog, findPiLog, logKind } from './readers/find.ts'
+import { claudeHome, claudeLogPath, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind } from './readers/find.ts'
+import { createSession, mirrorSession, opencodeLogPath, putInstructions, switchModel } from './opencode.ts'
 import { effortFor, modelArg } from './models.ts'
 import { tag } from './chatlines.ts'
 import { hookSettings, HookLogs, type Said } from './readers/hooks.ts'
@@ -50,6 +51,18 @@ function addLog(r: AgentRecord, f: string): boolean {
   return true
 }
 
+/** an OpenCode session's log: its mirror brought up to date once. The path comes back whether or not that worked (the
+ *  next look reads it again), and a failure is said, never thrown */
+function mirrorOpencode(id: string): string {
+  const f = opencodeLogPath(home(), id)
+  try {
+    mirrorSession(id, f)
+  } catch (e) {
+    console.error(`shepherdr: could not mirror OpenCode session ${id}: ${(e as Error).message}`)
+  }
+  return f
+}
+
 /** a Claude Code session, copied into the project folder of the cwd it resumes in (Claude Code looks for it only
  *  there) from wherever it was written on that machine; its log path, or nothing when there is none */
 export function carryClaudeSession(id: string, cwd: string): string | undefined {
@@ -63,7 +76,7 @@ export interface AgentRecord {
   key: string
   /** herdr agent name */
   name: string
-  /** herdr agent kind: claude, codex, pi */
+  /** herdr agent kind: claude, codex, pi, opencode */
   kind: string
   cwd: string
   /** herdr workspace label it lives in */
@@ -707,6 +720,8 @@ export class Agents extends Emitter<Events> {
     const r = this.records[key]
     const s = a?.agent_session
     if (!r || !s) return
+    // OpenCode's session is known from its API and read from its own mirror: herdr's report of a session is never followed
+    if (r.kind === 'opencode') return
     if (s.kind === 'path' && addLog(r, mirrored(s.value))) {
       this.save()
       this.emit('logs', key)
@@ -743,8 +758,10 @@ export class Agents extends Emitter<Events> {
     const look = () => {
       const f = findLog(r.kind, r.cwd, since - 1000)
       if (!f || !addLog(r, f)) return
-      // Claude Code and pi resume by the id in its name; Codex by its last log
-      if (r.kind !== 'codex') r.sessionId = f.match(/([0-9a-f-]{36})\.jsonl$/)?.[1] ?? r.sessionId
+      // Claude Code and pi resume by the id in its name, OpenCode by its session id (its mirror is named by it); Codex by
+      // its last log
+      if (r.kind === 'opencode') r.sessionId = logName(f).replace(/\.jsonl$/, '')
+      else if (r.kind !== 'codex') r.sessionId = f.match(/([0-9a-f-]{36})\.jsonl$/)?.[1] ?? r.sessionId
       this.save()
       this.emit('logs', key)
     }
@@ -757,7 +774,7 @@ export class Agents extends Emitter<Events> {
     const r = this.records[key]
     if (!r) return
     const since = r.started - 5000
-    const f = r.kind === 'claude' ? (r.sessionId ? claudeLogPath(r.cwd, r.sessionId) : findClaudeLog(r.cwd, since)) : r.kind === 'codex' ? findCodexLog(r.cwd, since) : r.kind === 'pi' ? findPiLog(r.cwd, since) : undefined
+    const f = r.kind === 'claude' ? (r.sessionId ? claudeLogPath(r.cwd, r.sessionId) : findClaudeLog(r.cwd, since)) : r.kind === 'codex' ? findCodexLog(r.cwd, since) : r.kind === 'pi' ? findPiLog(r.cwd, since) : r.kind === 'opencode' ? (r.sessionId ? mirrorOpencode(r.sessionId) : findOpencodeLog(r.cwd, since)) : undefined
     if (f && addLog(r, f)) {
       this.save()
       this.emit('logs', key)
@@ -853,7 +870,8 @@ export class Agents extends Emitter<Events> {
     r.resumed = !!resume
     r.startError = undefined
     delete r.fresh
-    if (!resume) r.sessionId = r.kind === 'codex' ? undefined : randomUUID()
+    // codex and opencode name their session when they start: OpenCode's id comes from its own API (prepareOpencode)
+    if (!resume) r.sessionId = r.kind === 'codex' || r.kind === 'opencode' ? undefined : randomUUID()
     // a run of its own: what its hooks record starts over
     if (r.hooks) this.hooks.forget(mirrored(r.hooks))
     r.hooks = undefined
@@ -870,6 +888,7 @@ export class Agents extends Emitter<Events> {
     const pane = place ? await place() : await this.paneFor(r, was)
     await this.closeLeftPane(r, pane)
     r.lastPane = pane
+    await this.prepareOpencode(r, !!resume, changedPrompt)
     const args = this.args(r, !!resume)
     this.save()
     // a new pane needs a moment before its shell is at the prompt
@@ -889,13 +908,35 @@ export class Agents extends Emitter<Events> {
     }
     await this.refresh()
     await this.bindRoute(r, pane)
-    // CLIs without an option for extra instructions get them first, hidden from the chat. Both wait until the CLI is
-    // ready, ahead of what you sent meanwhile (a restart)
-    this.queue(r.key, [r.kind !== 'claude' && r.kind !== 'pi' && (!resume || changedPrompt) && r.system ? hidden(r.system) : '', first ?? ''].filter(Boolean), true)
+    // CLIs without an option for extra instructions get them first, hidden from the chat: Claude Code and pi take them as
+    // a flag, OpenCode in its session (prepareOpencode). Both wait until the CLI is ready, ahead of what you sent
+    // meanwhile (a restart)
+    this.queue(r.key, [r.kind !== 'claude' && r.kind !== 'pi' && r.kind !== 'opencode' && (!resume || changedPrompt) && r.system ? hidden(r.system) : '', first ?? ''].filter(Boolean), true)
     setTimeout(() => this.deliver(r.key), 1000)
     setTimeout(() => this.discoverLog(r.key), 3000)
     setTimeout(() => this.discoverLog(r.key), 15000)
     return this.live.get(r.name) ?? null
+  }
+
+  /**
+   * OpenCode's session is made here, before its TUI starts on it. A fresh start creates it (folder, the agent's name as
+   * title, model and effort, its permissions when it asks) and puts its instructions in; a failure fails the launch. A
+   * resume keeps the session: its model is switched, and changed instructions are put in again. A failure there is
+   * logged and the launch goes on.
+   */
+  private async prepareOpencode(r: AgentRecord, resume: boolean, changedPrompt: boolean) {
+    if (r.kind !== 'opencode') return
+    const model = modelArg(r.kind, r.model)
+    const effort = effortFor(r.kind, r.effort, r.model)
+    if (resume && r.sessionId) {
+      if (model) await switchModel(r.sessionId, model, effort, r.cwd).catch((e) => console.error(`shepherdr: ${r.name} could not switch its model: ${(e as Error).message}`))
+      if (r.system && changedPrompt) await putInstructions(r.sessionId, r.system, r.cwd).catch((e) => console.error(`shepherdr: ${r.name} could not update its instructions: ${(e as Error).message}`))
+      return
+    }
+    r.sessionId = await createSession({ cwd: r.cwd, title: r.name, model, effort, ask: r.access === 'ask' })
+    addLog(r, opencodeLogPath(home(), r.sessionId))
+    if (r.system) await putInstructions(r.sessionId, r.system, r.cwd)
+    this.save()
   }
 
   args(r: AgentRecord, resume: boolean): string[] {
@@ -932,6 +973,10 @@ export class Agents extends Emitter<Events> {
       if (r.access !== 'ask') a.push('--dangerously-bypass-approvals-and-sandbox')
       if (model) a.push('-m', model)
       if (effort) a.push('-c', `model_reasoning_effort="${effort}"`)
+    } else if (r.kind === 'opencode') {
+      // --standalone always: its shell commands then run in the pane's own process tree, where helper/route.pl finds
+      // this agent. No model flag (the TUI has none): the model and effort live in its session (prepareOpencode)
+      a.push('--standalone', ...(r.sessionId ? ['--session', r.sessionId] : []), ...(r.access !== 'ask' ? ['--auto'] : []))
     }
     return a
   }

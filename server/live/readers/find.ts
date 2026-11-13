@@ -3,6 +3,8 @@
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { home } from '../../store.ts'
+import { mirrorSession, newestSession, opencodeLogPath } from '../opencode.ts'
 
 const env = (k: string) => process.env[k] || undefined
 
@@ -150,11 +152,31 @@ export function piSessionDir(cwd: string): string {
 /** the newest pi session log for this cwd, changed at or after sinceMs */
 export const findPiLog = (cwd: string, sinceMs?: number) => newestLog(piSessionDir(cwd), sinceMs)
 
+/* ---------- OpenCode ---------- */
+
+/** the newest top-level OpenCode session of this folder (its database says), mirrored into Shepherdr's home as a log;
+ *  changed at or after sinceMs. Discovery never throws: a database or a mirror that fails leaves no log, and the look goes on */
+export function findOpencodeLog(cwd: string, sinceMs?: number): string | undefined {
+  let id: string | undefined
+  try {
+    id = newestSession(trimSlash(cwd.trim()), sinceMs)
+  } catch {
+    return undefined
+  }
+  if (!id) return undefined
+  const file = opencodeLogPath(home(), id)
+  try {
+    mirrorSession(id, file)
+  } catch {}
+  return file
+}
+
 /** Runtime log discovery, also used to decide which kinds can supply chat. */
 export const LOG_FINDERS: Record<string, (cwd: string, sinceMs?: number) => string | undefined> = {
   claude: findClaudeLog,
   codex: findCodexLog,
   pi: findPiLog,
+  opencode: findOpencodeLog,
 }
 
 /** the newest log of this CLI for this cwd */
@@ -168,5 +190,6 @@ export function logKind(file: string): string | undefined {
   if (under(join(claudeHome(), 'projects'))) return 'claude'
   if (under(join(codexHome(), 'sessions'))) return 'codex'
   if (under(join(piHome(), 'sessions'))) return 'pi'
+  if (under(join(home(), 'opencode'))) return 'opencode'
   return undefined
 }

@@ -90,6 +90,9 @@ export function adviceArgs(h: Harness, prompt: string): { cmd: string[]; stdin?:
     }
   if (h.kind === 'pi') return { cmd: ['pi', '-p', '--no-session', '--no-mcp', '--no-skills', '--tools', 'read,grep,find,ls', ...(model ? ['--model', model] : []), ...(effort ? ['--thinking', effort] : []), prompt] }
   if (h.kind === 'codex') return { cmd: ['codex', 'exec', '--sandbox', 'read-only', '--skip-git-repo-check', ...(model ? ['--model', model] : []), prompt] }
+  // OpenCode's plan agent is its read-only one; its answer is the text of its default output
+  if (h.kind === 'opencode')
+    return { cmd: ['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-advisor', ...(model ? ['-m', effort ? `${model}#${effort}` : model] : []), prompt] }
   return undefined
 }
 

@@ -26,11 +26,11 @@ describe('the models matrix: slots and rows', () => {
     const task = slots.filter((x) => x.role === 'task')
     expect(task.map((x) => x.name)).toEqual(['Primary', 'Backup 1', 'Backup 2', 'Backup 3', 'Backup 4', 'Backup 5'])
     expect(task[0]).toMatchObject({ title: 'Tasks', cli: 'task.agent', model: 'task.model', effort: 'task.effort', n: 0 })
-    expect(task[1]).toMatchObject({ cli: 'task.fallback', model: 'backup.model', effort: 'backup.effort', clis: ['off', 'Claude Code', 'Codex', 'pi'] })
+    expect(task[1]).toMatchObject({ cli: 'task.fallback', model: 'backup.model', effort: 'backup.effort', clis: ['off', 'Claude Code', 'Codex', 'pi', 'OpenCode'] })
     expect(task[2]).toMatchObject({ cli: 'task.fallback2', model: 'task.fallback2Model', effort: 'task.fallback2Effort' })
     expect(slots.find((x) => x.id === 'coordinator.1')).toMatchObject({ cli: 'coordinator.fallback', model: 'coordinator.fallbackModel' })
-    expect(slots.find((x) => x.id === 'reviewer.0')).toMatchObject({ cli: 'reviewer.agent', clis: ['Codex', 'Claude Code', 'pi'] })
-    expect(slots.find((x) => x.id === 'advisor.0')!.clis).toEqual(['off', 'Codex', 'Claude Code', 'pi'])
+    expect(slots.find((x) => x.id === 'reviewer.0')).toMatchObject({ cli: 'reviewer.agent', clis: ['Codex', 'Claude Code', 'pi', 'OpenCode'] })
+    expect(slots.find((x) => x.id === 'advisor.0')!.clis).toEqual(['off', 'Codex', 'Claude Code', 'pi', 'OpenCode'])
   })
 
   test('rows are Everywhere, this machine and each space; the home space only when it sets one of these keys', () => {

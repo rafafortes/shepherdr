@@ -1,8 +1,8 @@
 // Each CLI's models and effort levels, as read from the CLI itself (models.ts): what its output looks like here
 import { describe, expect, test } from 'bun:test'
-import { utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { effortFor, findModel, helpLevels, modelsOf, nearest, parseClaude, parseCodex, parsePi, piEnabled, piFrom, scopePi, setModels, stillHolds } from '../server/live/models.ts'
+import { effortFor, effortsOf, findModel, helpLevels, knowsModels, modelsOf, nearest, opencodeList, parseClaude, parseCodex, parsePi, piEnabled, piFrom, read, scopePi, setModels, stillHolds } from '../server/live/models.ts'
 import { tmp } from './tmp.ts'
 
 describe('reading what each CLI takes', () => {
@@ -168,5 +168,77 @@ describe('reading what each CLI takes', () => {
     // aliases name a family's newest
     expect(findModel('claude', 'sonnet')?.id).toBe('claude-sonnet-5-5')
     expect(findModel('claude', 'HAIKU 5.5')?.id).toBe('claude-haiku-5-5')
+  })
+
+  test('a level with no rank is taken only as it is written; the nearest is picked among the ranked ones', () => {
+    expect(nearest(['thinking', 'high'], 'thinking')).toBe('thinking')
+    expect(nearest(['thinking', 'high'], 'low')).toBe('high')
+    expect(nearest(['none', 'thinking'], 'low')).toBe('none')
+    expect(nearest(['low', 'thinking'], 'medium')).toBe('low')
+    expect(nearest(['thinking', 'default'], 'high')).toBeUndefined()
+    expect(nearest(['thinking', 'default'], 'thinking')).toBe('thinking')
+    expect(nearest(['thinking'], 'max')).toBeUndefined()
+    // a level that has no rank asks for nothing nearer
+    expect(nearest(['low', 'high'], 'thinking')).toBeUndefined()
+  })
+})
+
+describe('OpenCode: its own models and variants', () => {
+  test('its enabled models with their variants as efforts; the levels of all of them, ranked ones first', async () => {
+    const dir = tmp('models-opencode')
+    const bin = join(dir, 'opencode')
+    const data = [
+      { id: 'minimax-m3.1-flash-free', providerID: 'opencode', name: 'MiniMax M3.1 Flash', variants: [{ id: 'high' }, { id: 'thinking' }, { id: 'none' }], enabled: true },
+      { id: 'z-ai/glm-5.3-flash', providerID: 'nvidia', name: 'GLM 5.3 Flash', variants: [{ id: 'default' }, { id: 'low' }], enabled: true },
+      { id: 'old', providerID: 'opencode', name: 'Old', variants: [{ id: 'max' }], enabled: false },
+    ]
+    // a stand-in for `opencode api --standalone model.list`: prints the answer and nothing else
+    writeFileSync(bin, `#!/bin/sh
+printf '%s' '${JSON.stringify({ data })}'
+`)
+    chmodSync(bin, 0o755)
+    const saved = process.env.SHEPHERDR_OPENCODE_BIN
+    process.env.SHEPHERDR_OPENCODE_BIN = bin
+    try {
+      expect(await read('opencode')).toEqual({
+        models: [
+          { id: 'opencode/minimax-m3.1-flash-free', label: 'MiniMax M3.1 Flash', efforts: ['high', 'thinking', 'none'] },
+          { id: 'nvidia/z-ai/glm-5.3-flash', label: 'GLM 5.3 Flash', efforts: ['default', 'low'] },
+        ],
+        efforts: ['none', 'low', 'high', 'thinking', 'default'],
+      })
+    } finally {
+      if (saved === undefined) delete process.env.SHEPHERDR_OPENCODE_BIN
+      else process.env.SHEPHERDR_OPENCODE_BIN = saved
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('a model takes its own variants as its efforts, found by id or name; a model with none takes none', () => {
+    setModels('opencode', opencodeList([
+      { id: 'opencode/m', label: 'M', efforts: ['thinking', 'high'] },
+      { id: 'nvidia/g', label: 'G', efforts: [] },
+    ]))
+    try {
+      expect(effortsOf('opencode', 'opencode/m')).toEqual(['thinking', 'high'])
+      expect(effortsOf('opencode', 'M')).toEqual(['thinking', 'high'])
+      expect(effortsOf('opencode', 'nvidia/g')).toEqual([])
+      expect(findModel('opencode', 'opencode/m')?.id).toBe('opencode/m')
+      expect(effortFor('opencode', 'thinking', 'opencode/m')).toBe('thinking')
+      expect(effortFor('opencode', 'low', 'opencode/m')).toBe('high')
+      expect(knowsModels('opencode')).toBe(true)
+    } finally {
+      setModels('opencode', undefined)
+    }
+  })
+
+  test('nothing is listed until OpenCode is asked (no models, no levels); its list holds for six hours, and no pi scoping applies', () => {
+    expect(modelsOf('opencode')).toEqual({ models: [], efforts: [] })
+    expect(knowsModels('opencode')).toBe(false)
+    const now = Date.now()
+    const c = { ...opencodeList([{ id: 'opencode/m', label: 'M', efforts: ['high'] }]), at: now }
+    expect(stillHolds('opencode', c, undefined, now + 3_600_000)).toBe(true)
+    expect(stillHolds('opencode', c, undefined, now + 7 * 3_600_000)).toBe(false)
+    expect(stillHolds('opencode', c, 'anything', now)).toBe(true)
   })
 })

@@ -64,7 +64,7 @@ all four at once), or the idea is ported to 2.0's code instead of its herdr-core
    identity header, no `tailscale serve`). Nothing in the change may make a request's origin or identity decide who
    gets in. The plugin's `share` action (upstream's `tailscale serve`) stays unused for us.
 3. **pi task agents beside Claude Code.** pi is first-class: model and effort flags, the log reader (its chat shows
-   its replies), the folder-trust handling, and the brief reaching it. pi runs on OpenCode Go and on the local models.
+   its replies), the folder-trust handling, and the brief reaching it. pi runs on OpenCode Go and on the local models. OpenCode agents run in their own TUI and their chats read a copy of OpenCode's session rows (see [the ledger](upstream-ledger.md)).
    Claude Code stays the coordinator and the reviewer line.
 4. **What polylog-bridge relies on.** `~/www/hermes-assistant/host/polylog-bridge`, a timer on the operator's
    host, is the only outside consumer of our CLI, and it is what turns tester feedback into tasks. It uses exactly this, and any

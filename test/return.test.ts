@@ -972,7 +972,10 @@ describe('what is never asked', () => {
     // the shortest call each CLI has that proves its provider answers: no tools, no MCP servers, nothing written
     expect(oneShot({ kind: 'claude' })).toEqual(expect.arrayContaining(['-p', '--strict-mcp-config', '--restricted', '--no-session-persistence']))
     expect(oneShot({ kind: 'pi' })).toEqual(expect.arrayContaining(['-p', '--no-tools', '--no-mcp', '--no-session']))
-    expect(oneShot({ kind: 'opencode' })).toBeUndefined()
+    // OpenCode: its plan agent, the question alone (`opencode run` has no flag for a system prompt), model#effort when set
+    expect(oneShot({ kind: 'opencode' })).toEqual(['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-probe', 'Reply with only the two letters: ok'])
+    expect(oneShot({ kind: 'opencode', model: 'nvidia/z-ai/glm-5.3-flash', effort: 'thinking' })).toEqual(expect.arrayContaining(['-m', 'nvidia/z-ai/glm-5.3-flash#thinking']))
+    expect(oneShot({ kind: 'gemini' })).toBeUndefined()
   })
 
   test('an agent at work on the primary, none cut off for a while, is its answer: nothing is asked', async () => {

@@ -4181,7 +4181,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'profile':
         return this.profileCommand(a1, rest, p)
       case 'models': {
-        const kinds = a1 ? [kindOf(a1)] : ['claude', 'codex', 'pi']
+        const kinds = a1 ? [kindOf(a1)] : ['claude', 'codex', 'pi', 'opencode']
         if (!kinds[0]) throw new Error(`No CLI called ${a1}; herdr starts ${CLIS.join(', ')}`)
         return kinds
           .map((k) => {

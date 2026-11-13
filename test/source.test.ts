@@ -699,7 +699,7 @@ describe("a task's CLI, model and effort", () => {
     run(REPO, dir)
     const place = placeId.space((await src.places.add(dir, 'reviewer-source')).name)
     for (const [args, says] of <[string[], string][]>[
-      [['--reviewer', 'gemini'], '--reviewer gemini: Pick one of: Codex · Claude Code · pi.'],
+      [['--reviewer', 'gemini'], '--reviewer gemini: Pick one of: Codex · Claude Code · pi · OpenCode.'],
       [['--reviewer-effort', 'extreme'], '--reviewer-effort takes default, low, medium, high, xhigh, max, ultra on Codex'],
       [['--reviewer-model', 'opus'], 'Codex has no such model'],
     ]) {
@@ -744,6 +744,8 @@ describe("a task's CLI, model and effort", () => {
     expect(out).toContain('claude-haiku-5-5             Haiku 5.5: low, medium, high, xhigh, max')
     expect(out).toContain('gpt-6-luna                   GPT-6-Luna: low, medium, high, xhigh, max\n')
     expect(out).toContain('pi (--agent pi), effort levels off, minimal, low, medium, high, xhigh, max:\n  any model id it knows')
+    // OpenCode is listed by default, and asked for its own models (none until it is asked)
+    expect(out).toContain('OpenCode (--agent opencode)')
     expect((await src.cli(['models', 'gemini'], {})).out).toContain('Shepherdr passes it no model or effort')
   })
   test('shepherdr show prints the settings and the lines every brief ends with', async () => {
@@ -2933,6 +2935,9 @@ test('native and npm agent CLI process identities', () => {
   expect(isAgentProcess('pi', ['/usr/bin/node', '/opt/node_modules/@mariozechner/pi-coding-agent/dist/cli.js'])).toBe(true)
   expect(isAgentProcess('claude', ['/usr/bin/node', '/opt/node_modules/@anthropic-ai/claude-code/cli.js'])).toBe(true)
   expect(isAgentProcess('pi', ['/usr/bin/node', '/some/app.js', 'pi'])).toBe(false)
+  // OpenCode is a native binary: its argv[0] is its own name, wherever it is installed
+  expect(isAgentProcess('opencode', ['/home/u/.opencode/bin/opencode', '--standalone', '--session', 'ses_x', '--auto'])).toBe(true)
+  expect(isAgentProcess('opencode', ['/home/u/.local/bin/bash', '-c', 'opencode'])).toBe(false)
 })
 
 describe('Task IDs live only in repository space Settings', () => {

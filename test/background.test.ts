@@ -301,6 +301,10 @@ describe('headless reviewers', () => {
     expect(headless(['node', '/usr/lib/node_modules/@openai/codex/bin/codex.js', 'exec', '-'])).toBe(true)
     expect(headless(['claude', '-p', '--model', 'opus'])).toBe(true)
     expect(headless(['pi', '--print'])).toBe(true)
+    expect(headless(['opencode', 'run', '--standalone', 'Review this change'])).toBe(true)
+    expect(headless(['/home/u/.opencode/bin/opencode', 'run'])).toBe(true)
+    // OpenCode's interactive TUI is not a one-shot
+    expect(headless(['opencode', '--standalone', '--session', 'ses_x', '--auto'])).toBe(false)
     expect(headless(['claude', '--settings', 'x.json'])).toBe(false)
     expect(headless(['codex', 'resume'])).toBe(false)
     expect(headless(['grep', 'codex', 'exec'])).toBe(false)
