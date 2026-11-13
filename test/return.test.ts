@@ -1091,3 +1091,58 @@ describe('the way back honours a model’s cap (models.maxAtOnce)', () => {
     }
   })
 })
+
+describe('OpenCode as the primary: asked and gone back to like the others', () => {
+  test('its provider is asked with its own one-shot, and its task goes back on its model and variant once it answers', async () => {
+    const GO = 'opencode-go/deepseek-v4.1-flash'
+    const { setModels, opencodeList } = await import('../server/live/models.ts')
+    setModels('opencode', opencodeList([{ id: GO, label: GO, efforts: ['high', 'thinking'] }], GO))
+    const s = await nightWorld('opencode-back', 4)
+    try {
+      expect(s.src.settings.set('task.agent', 'OpenCode', { space: s.p.name }).ok).toBe(true)
+      expect(s.src.settings.set('task.model', GO, { space: s.p.name }).ok).toBe(true)
+      expect(s.src.settings.set('task.effort', 'thinking', { space: s.p.name }).ok).toBe(true)
+      // the takeover: OpenCode's provider ran out for good, and its task went in on the backup (Codex)
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: GO, effort: 'thinking' }, to: { kind: 'codex' }, why: 'Out of allowance until tomorrow', at: Date.now() - FIRST_WAIT * 2 })
+      const a = s.cutOff('codex')
+      await s.src.watchReturns(later())
+      // asked with its own one-shot (opencode run --agent plan), on its model
+      expect(asked).toEqual([`opencode ${GO}`])
+      // it answered: the task that is on the backup starts again on OpenCode, on the model and variant Settings name
+      expect(s.started.map((x) => [x.key, x.kind])).toEqual([[a.key, 'opencode']])
+      expect(s.src.agents.records[a.key]).toMatchObject({ kind: 'opencode', model: GO })
+    } finally {
+      setModels('opencode', undefined)
+      s.done()
+    }
+  })
+
+  test('a primary on OpenCode with no room under its cap is not started: the task waits for the slot, and goes back once one frees', async () => {
+    const GO = 'opencode-go/deepseek-v4.1-flash'
+    const { setModels, opencodeList } = await import('../server/live/models.ts')
+    setModels('opencode', opencodeList([{ id: GO, label: GO, efforts: [] }], GO))
+    const s = await nightWorld('opencode-cap', 4)
+    try {
+      expect(s.src.settings.set('task.agent', 'OpenCode', { space: s.p.name }).ok).toBe(true)
+      expect(s.src.settings.set('task.model', GO, { space: s.p.name }).ok).toBe(true)
+      expect(s.src.settings.set('models.maxAtOnce', `${GO}=1`, 'machine').ok).toBe(true)
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: GO }, to: { kind: 'codex' }, why: 'Out of allowance until tomorrow', at: Date.now() - FIRST_WAIT * 2 })
+      const waiting = s.cutOff('codex')
+      // one OpenCode agent of the machine runs on that model already: the cap of 1 is full
+      const running = task(s.p.name, 'opencode')
+      Object.assign(running.t, { worktree: s.p.path, branch: 'main', base: 'main', agent: { kind: 'opencode', model: GO } })
+      s.src.agents.status = ((k: string) => (k === running.key ? 'working' : 'idle')) as never
+      await s.src.watchReturns(later())
+      expect(s.started.map((x) => x.key)).toEqual([])
+      // the run ends (its task is done with its slot): the slot is free, and the task goes back on OpenCode
+      running.t.archived = true
+      s.src.agents.status = (() => 'idle') as never
+      await s.src.watchReturns(later() + 60_000)
+      expect(s.started.map((x) => [x.key, x.kind])).toEqual([[waiting.key, 'opencode']])
+    } finally {
+      s.src.settings.set('models.maxAtOnce', null, 'machine')
+      setModels('opencode', undefined)
+      s.done()
+    }
+  })
+})

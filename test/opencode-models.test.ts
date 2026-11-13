@@ -15,6 +15,8 @@ const NOW = Date.now()
 const GO = 'opencode-go/deepseek-v4.1-flash'
 const ZEN = 'opencode/minimax-m3.1-flash-free'
 const NV = 'nvidia/z-ai/glm-5.3-flash'
+/** a model whose variants are OpenCode's own words (not the levels Shepherdr ranks) */
+const THINK = 'opencode-go/mimo-v2.6-flash'
 
 /** OpenCode's list as its models are kept, with the model it starts on */
 const listed = (def?: string) =>
@@ -23,6 +25,7 @@ const listed = (def?: string) =>
       { id: GO, label: GO, efforts: ['high'] },
       { id: ZEN, label: ZEN, efforts: [] },
       { id: NV, label: NV, efforts: [] },
+      { id: THINK, label: THINK, efforts: ['thinking', 'none'] },
     ],
     def,
   )
@@ -141,6 +144,12 @@ describe('OpenCode: its model and variant are kept, compared and written like th
       expect(s.set('task.model', GO).ok).toBe(true)
       expect(s.set('task.effort', 'high').ok).toBe(true)
       expect(s.set('task.effort', 'low')).toMatchObject({ ok: false, error: expect.stringContaining('takes default · high') })
+      // a variant of its own words is taken by a model that has it, and only by that model
+      expect(s.set('task.model', THINK).ok).toBe(true)
+      expect(s.set('task.effort', 'thinking').ok).toBe(true)
+      expect(s.set('task.effort', 'Thinking')).toMatchObject({ ok: false })
+      expect(s.set('task.effort', 'default').ok).toBe(true)
+      expect(s.set('task.model', GO).ok).toBe(true)
       expect(s.set('task.model', 'opencode/nope')).toMatchObject({ ok: false, error: expect.stringContaining('OpenCode has no model opencode/nope') })
       // the models with no variant take no effort at all
       expect(s.set('task.model', ZEN).ok).toBe(true)

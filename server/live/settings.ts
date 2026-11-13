@@ -735,7 +735,8 @@ export class Settings {
     const own = pairOfKey(key)
     if (!own || value.trim().toLowerCase() === 'default') return undefined
     const kinds = this.pairKinds(own.pair, own.what, l).filter((k) => !!modelsOf(k))
-    if (!kinds.length) return undefined
+    // no CLI to ask (its own or none set): an effort is one of the levels Shepherdr knows
+    if (!kinds.length) return own.what === 'effort' && !EFFORTS.includes(value.trim().toLowerCase()) ? `Pick one of: ${EFFORTS.join(' · ')}.` : undefined
     if (own.what === 'model') {
       const listed = kinds.filter(knowsModels)
       if (!listed.length || listed.some((k) => findModel(k, value))) return undefined
@@ -1168,7 +1169,10 @@ export function refuse(key: string, value: string): string | undefined {
   if (key === 'dictate.language' && !options?.includes(value) && !/^(auto|[a-z]{2,3})$/i.test(value.trim()))
     return 'Pick a language, or write its whisper code (en, pt, es).'
   if (num && numValue(num, value) === undefined) return `Write a number from ${num.min} to ${num.max}${num.step ? '' : ' (whole)'}${num.unit ? `, in ${num.unit}` : ''}${num.off ? ', or off' : num.zero ? ' (0 is off)' : ''}.`
-  if (options && !cli && key !== 'reviewer.agent' && !isBackupCli(key) && key !== 'alerts' && key !== 'dictate.language' && !options.includes(value)) return `Pick one of: ${options.join(' · ')}.`
+  // an effort word is checked against the levels its model takes (unfit): OpenCode's variants are its own lowercase words
+  // (thinking, none…), not LEVELS, so only a word that is not lowercase is refused here
+  const variant = pairOfKey(key)?.what === 'effort' && value === value.trim().toLowerCase()
+  if (options && !cli && key !== 'reviewer.agent' && !isBackupCli(key) && key !== 'alerts' && key !== 'dictate.language' && !variant && !options.includes(value)) return `Pick one of: ${options.join(' · ')}.`
   return undefined
 }
 
