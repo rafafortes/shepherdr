@@ -16,6 +16,7 @@ import { settingsBlock, settingsLines, SEVERITIES, type Reviewer, type Said, typ
 import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf } from './models.ts'
 import { picksOf, rememberModel } from './model-picks.ts'
 import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
+import { formatMaxAtOnce, parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
 import { eventRules, eventsText, eventWords, nextWords, OWN_ZONE, timeRule, timeWords, validZone, type EventRule } from './trigger.ts'
 
 /** every agent kind herdr can start (interactive chat requires runtime log discovery and a reader) */
@@ -416,6 +417,9 @@ export const CATALOG: Section[] = [
     about: "When a machine starts more tasks, and when its coordinator hears that it struggles. Set one machine's own to fit its cores and memory.",
     rows: [
       { group: 'Working tasks', label: 'Max tasks working at once', key: 'machine.maxTasks', value: '10', num: { min: 1, max: 200 } },
+      // per provider or per model, inside the machine's limit (engine.room): a local server's own capacity, say. Kept here
+      // and not per space: the capacity is the machine's or the server's (model-caps.ts, engine.ts modelCapOf)
+      { group: 'Working tasks', label: 'Max at once per model or provider', key: 'models.maxAtOnce', value: 'off', text: true, hint: `Most agents of one provider or model at once on this machine, inside Max tasks working at once: spark=4 caps every spark model, anthropic/claude-opus-5-5=2 one model (a model's own entry wins). A task waits for a free slot of its model, and the others start past it. Counts this machine's tasks and coordinators on it; requests from other apps on the same server are not seen. Off: no cap per model.` },
       // the 5-minute load: the 1-minute one swings between a tenth and three times the cores within minutes while builds
       // come and go, so it let tasks start in every lull. CPU pressure (Linux PSI) is the share of time some task waited
       // for a CPU: off unless set (health.ts busy)
@@ -634,6 +638,10 @@ export class Settings {
       else if (key === 'heartbeat.when') value = timeRule(value)
       else if (key === 'heartbeat.on') value = eventsText(eventRules(value))
       else if (key === 'time.zone') value = value.trim()
+      else if (key === 'models.maxAtOnce') {
+        const cap = parseMaxAtOnce(value)
+        value = cap.ok ? formatMaxAtOnce(cap.entries) || 'off' : value
+      }
       // a CLI is kept by its name, however it was written
       else if (isBackupCli(key) && value.trim().toLowerCase() === 'off') value = 'off'
       else if (key.endsWith('.agent') || isBackupCli(key)) value = CLI_NAME[kindOf(value)!]
@@ -826,6 +834,13 @@ export class Settings {
       alertDisk: num('machine.alertDisk'),
       alertHerdr: get('machine.alertHerdr') !== 'off',
     }
+  }
+
+  /** the most agents at once per provider or per model on this machine (models.maxAtOnce, this machine's or Everywhere's),
+   *  as entries; none while it is off (model-caps.ts) */
+  maxAtOnce(): MaxEntry[] {
+    const p = parseMaxAtOnce(this.get('models.maxAtOnce'))
+    return p.ok ? p.entries : []
   }
 
   /** how many of one space's tasks may work on this machine at once (space.maxTasks, inside the machine's own limit): the
@@ -1137,6 +1152,10 @@ export function refuse(key: string, value: string): string | undefined {
     } catch (e) {
       return (e as Error).message
     }
+  }
+  if (key === 'models.maxAtOnce') {
+    const p = parseMaxAtOnce(value)
+    if (!p.ok) return p.error
   }
   if (key === 'time.zone' && !validZone(value.trim())) return `${value} is no time zone: write one like Europe/Stockholm.`
   const options = ROWS.find((r) => r.key === key)?.options
