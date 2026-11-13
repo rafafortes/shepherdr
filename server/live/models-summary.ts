@@ -5,10 +5,11 @@
 // `now` as a parameter so a test gives it the clock it needs. A provider's quota is its last good read (the ledger holds
 // it, quotas.ts sets it), or OpenCode Go's estimate built for this look; the warning share and each read's state come in
 // with the input (quota), and a window at or over the share is a warning here.
-import type { MatrixRole, ModelsSummary, QuotaFigure, QuotaRead, QuotaWindow, SummaryAtOnce, SummaryConfigured, SummaryModel, SummaryNow, SummaryProvider, SummaryRow, SummaryRunOuts, SummaryUsage, SummaryWarning } from '../../shared/types.ts'
+import type { MatrixRole, ModelsSummary, QuotaFigure, QuotaRead, QuotaWindow, SummaryAtOnce, SummaryConfigured, SummarySpaceCap, SummaryModel, SummaryNow, SummaryProvider, SummaryRow, SummaryRunOuts, SummaryUsage, SummaryWarning } from '../../shared/types.ts'
 import { shareOf } from '../../shared/quota-words.ts'
 import { parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
 import type { Harness } from './engine/engine.ts'
+import { covers } from './engine/choose.ts'
 import { findModel, modelsOf } from './models.ts'
 import { placeId } from './places.ts'
 import { type Chain, kindOf, type Level, rolePairs, Settings } from './settings.ts'
@@ -85,13 +86,19 @@ export interface SummaryInput {
   watch: { key: string; back?: number }[]
   /** the quota figures and reads (quotas.ts); none in a test that has no quota side */
   quota?: QuotaInput
-  /** the model keys of the agents that count toward models.maxAtOnce now (engine.runsOn) */
-  runs?: string[]
+  /** the runs that count toward models.maxAtOnce now (engine.runs): the model key each runs on, and its space's key */
+  runs?: RunOn[]
   /** the entry that holds each task now waiting for a model's cap, by its name (the model key or the provider) */
   heldBy?: string[]
 }
 
 export { shareOf }
+
+/** a run that counts toward models.maxAtOnce now: the model key it runs on, and the key of its space ('~': the home space) */
+export interface RunOn {
+  key: string
+  space: string
+}
 
 /** a moment in words, in this machine's time: "Fri 3:00 PM" */
 export const clock = (at: number) => new Date(at).toLocaleString('en', { weekday: 'short', hour: 'numeric', minute: '2-digit' })
@@ -202,19 +209,28 @@ export function capsOf(s: Settings): { entries: MaxEntry[]; from: 'all' | 'machi
 }
 
 /** what a provider row or a model row counts toward its cap now, its own entry, the provider's that also holds a model,
- *  and the tasks waiting for it. A provider row counts every agent of its provider; a model row its own agents */
+ *  the sub-limits its spaces set for it, and the tasks waiting for it. A provider row counts every agent of its provider; a
+ *  model row its own agents */
 function atOnceOf(f: SummaryInput, provider: string, model?: string): SummaryAtOnce {
   const { entries, from } = capsOf(f.settings)
   const runs = f.runs ?? []
   const key = model ?? provider
-  const counted = model === undefined ? runs.filter((k) => providerOf(k) === provider) : runs.filter((k) => k === model)
+  const counted = model === undefined ? runs.filter((r) => providerOf(r.key) === provider) : runs.filter((r) => r.key === model)
   const own = entries.find((e) => e.pattern === key)
   const via = model !== undefined ? entries.find((e) => e.pattern === provider && !e.pattern.includes('/')) : undefined
   const held = (f.heldBy ?? []).filter((p) => p === key).length
+  // a space's own text sets its sub-limits: the entry for this row, counting the runs of that space it covers
+  const spaces = f.spaces.flatMap((sp): SummarySpaceCap[] => {
+    const pick = f.settings.pick('models.maxAtOnce', { space: sp.key })
+    const p = pick.from === 'space' ? parseMaxAtOnce(pick.value) : undefined
+    const e = p?.ok ? p.entries.find((x) => x.pattern === key) : undefined
+    return e ? [{ key: sp.key, name: sp.name, max: e.max, now: runs.filter((r) => r.space === sp.key && covers(key, r.key)).length }] : []
+  })
   return {
     now: counted.length,
     ...(own ? { own: { pattern: own.pattern, max: own.max, from } } : {}),
     ...(via ? { via: { pattern: via.pattern, max: via.max, from } } : {}),
+    ...(spaces.length ? { spaces } : {}),
     held,
   }
 }
@@ -237,7 +253,7 @@ export function modelsSummary(f: SummaryInput): ModelsSummary {
   const conf = configuredOf(f.settings, f.spaces)
   const d7 = f.usage.byKey(f.now - WEEK)
   // every provider that has a slot, runs, waits, used something in the week, or ran out in it
-  const keys = new Set<string>([...conf.map((c) => c.key), ...f.agents.filter((a) => a.status !== 'gone').map((a) => keyOf(a.kind, a.model)), ...(f.runs ?? []), ...d7.keys(), ...f.usage.runOuts(() => true).filter((r) => r.at >= f.now - WEEK).map((r) => r.key)])
+  const keys = new Set<string>([...conf.map((c) => c.key), ...f.agents.filter((a) => a.status !== 'gone').map((a) => keyOf(a.kind, a.model)), ...(f.runs ?? []).map((r) => r.key), ...d7.keys(), ...f.usage.runOuts(() => true).filter((r) => r.at >= f.now - WEEK).map((r) => r.key)])
   const providers = [...new Set([...keys].map(providerOf))]
   const totalDay = [...f.usage.byKey(f.now - 24 * HOUR).values()].reduce((n, t) => n + t.tokens, 0)
   const totalWeek = [...d7.values()].reduce((n, t) => n + t.tokens, 0)
@@ -271,13 +287,18 @@ export function modelsSummary(f: SummaryInput): ModelsSummary {
   return { at: f.now, ...(f.usage.backfilled !== undefined ? { backfilled: f.usage.backfilled } : {}), providers: rows, warnings, caps: capsTextOf(f) }
 }
 
-/** models.maxAtOnce as each level holds its own text ('' where it sets none), and this machine's place a write goes to */
+/** models.maxAtOnce as each level holds its own text ('' where it sets none), this machine's place a write goes to, and
+ *  each space's own text with its place (the home space's is placeId.home) */
 function capsTextOf(f: SummaryInput): ModelsSummary['caps'] {
   const own = (level: 'all' | 'machine') => {
     const pick = f.settings.pick('models.maxAtOnce', level === 'all' ? 'all' : 'machine')
     return pick.from === level ? pick.value : ''
   }
-  return { all: own('all'), machine: own('machine'), place: placeId.machine(f.host) }
+  const spaces = f.spaces.map((sp) => {
+    const pick = f.settings.pick('models.maxAtOnce', { space: sp.key })
+    return { key: sp.key, name: sp.name, place: sp.key === '~' ? placeId.home(f.host) : placeId.space(sp.key, f.host), text: pick.from === 'space' ? pick.value : '' }
+  })
+  return { all: own('all'), machine: own('machine'), place: placeId.machine(f.host), spaces }
 }
 
 /** the rule-based warnings: each is a fact about the settings or a provider now, with its fix in words, and a button into

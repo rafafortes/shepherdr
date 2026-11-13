@@ -4,7 +4,7 @@
 // entry wins over its provider's. Patterns are lowercase, as the model keys are kept.
 
 /** the most entries one setting holds: a few providers and the models that need their own limit */
-import type { SummaryAtOnce } from './types.ts'
+import type { SummaryAtOnce, SummarySpaceCap } from './types.ts'
 
 export const MAX_CAP_ENTRIES = 20
 /** the highest number an entry may hold */
@@ -58,6 +58,9 @@ export function capFor(entries: MaxEntry[], key: string): MaxEntry | undefined {
   const k = key.toLowerCase()
   return entries.find((e) => e.pattern === k) ?? entries.find((e) => e.pattern === providerOfKey(k) && !e.pattern.includes('/'))
 }
+
+/** a space's sub-limit under a row, in words: its name, what of its runs count under it now, and its cap (`lyvora-app: 1 of 2 at once`) */
+export const spaceCapWords = (s: SummarySpaceCap) => `${s.name}: ${s.now} of ${s.max} at once`
 
 /** a row's cap in words: what runs now, its own cap, or the provider's that holds it, and what waits for it */
 export function atOnceWords(a: SummaryAtOnce): { words: string; title: string } {

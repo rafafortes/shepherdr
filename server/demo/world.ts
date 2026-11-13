@@ -766,7 +766,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const tasks: TaskFact[] = this.tasks.map((t) => ({ status: t.status, ...(t.agent ? { agent: { kind: kindOf(t.agent.cli) ?? 'claude' } } : {}) }))
         const now = Date.now()
         // what counts toward models.maxAtOnce: the working tasks, each on its model (the live source's runsOn)
-        const runs = agents.map((a) => keyOf(a.kind, a.model))
+        const runs = agents.map((a) => ({ key: keyOf(a.kind, a.model), space: '~' }))
         return modelsSummary({ now, settings: this.stores[D.DEMO_HOST], host: D.DEMO_HOST, spaces, rows, usage: this.usage, agents, tasks, watch: [], quota: demoQuota(this.usage, now), runs })
       }
       case 'quota-refresh':

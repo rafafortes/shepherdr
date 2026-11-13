@@ -926,6 +926,22 @@ export interface SummaryAtOnce {
   own?: { pattern: string; max: number; from: 'all' | 'machine' }
   via?: { pattern: string; max: number; from: 'all' | 'machine' }
   held: number
+  /** the sub-limits the spaces set for this row (their own entry for it, inside the machine's total), with what each runs */
+  spaces?: SummarySpaceCap[]
+}
+/** one space's sub-limit on a row: its key and name, its most at once, and how many of its runs count under it now */
+export interface SummarySpaceCap {
+  key: string
+  name: string
+  max: number
+  now: number
+}
+/** one space's own models.maxAtOnce text (its key, name and place id, '' where it sets none): the cell editor's writes */
+export interface SummarySpaceText {
+  key: string
+  name: string
+  place: string
+  text: string
 }
 /** one row of the summary: a provider, or one of its models */
 export interface SummaryRow {
@@ -970,7 +986,7 @@ export interface ModelsSummary {
   warnings: SummaryWarning[]
   /** models.maxAtOnce as each level holds it (its text, '' for none), and the machine's place id a write goes to: the
    *  cap editors write the entries at the level they pick */
-  caps: { all: string; machine: string; place: string }
+  caps: { all: string; machine: string; place: string; spaces: SummarySpaceText[] }
 }
 
 /** Settings → Models → profiles (server/live/profiles.ts): one setting a profile changes, as the preview and the answer

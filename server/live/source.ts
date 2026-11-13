@@ -502,7 +502,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const watch = this.returns.list().map((o) => ({ key: keyOf(o.primary.kind, o.primary.model), back: o.back }))
     const now = Date.now()
     // what counts toward models.maxAtOnce now, and the entry each task held for a model's cap waits for
-    const runs = this.engine.runs().map((r) => r.key)
+    const runs = this.engine.runs().map((r) => ({ key: r.key, space: r.space }))
     const heldBy = this.engine.heldTasks().filter((t) => t.held?.why === 'model').flatMap((t) => this.engine.waitingFor(t))
     return modelsSummary({ now, settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch, quota: this.quotas.summary(now), runs, heldBy })
   }
