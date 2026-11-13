@@ -90,6 +90,8 @@ export interface SummaryInput {
   runs?: RunOn[]
   /** the entry that holds each task now waiting for a model's cap, by its name (the model key or the provider) */
   heldBy?: string[]
+  /** providers to show even when nothing else names them (a provider a models.maxAtOnce entry caps, with no agent yet) */
+  providers?: string[]
 }
 
 export { shareOf }
@@ -254,7 +256,7 @@ export function modelsSummary(f: SummaryInput): ModelsSummary {
   const d7 = f.usage.byKey(f.now - WEEK)
   // every provider that has a slot, runs, waits, used something in the week, or ran out in it
   const keys = new Set<string>([...conf.map((c) => c.key), ...f.agents.filter((a) => a.status !== 'gone').map((a) => keyOf(a.kind, a.model)), ...(f.runs ?? []).map((r) => r.key), ...d7.keys(), ...f.usage.runOuts(() => true).filter((r) => r.at >= f.now - WEEK).map((r) => r.key)])
-  const providers = [...new Set([...keys].map(providerOf))]
+  const providers = [...new Set([...[...keys].map(providerOf), ...(f.providers ?? [])])]
   const totalDay = [...f.usage.byKey(f.now - 24 * HOUR).values()].reduce((n, t) => n + t.tokens, 0)
   const totalWeek = [...d7.values()].reduce((n, t) => n + t.tokens, 0)
 

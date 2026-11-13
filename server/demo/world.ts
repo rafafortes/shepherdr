@@ -24,6 +24,8 @@ import { excerpt } from '../live/chatlines.ts'
 import { findModel, TABLE } from '../live/models.ts'
 import { modelsMatrix } from '../live/models-matrix.ts'
 import { keyOf, modelsSummary, type LiveAgent, type TaskFact } from '../live/models-summary.ts'
+import { entryPatterns, knownOf, limitsView, type HeldFact } from '../live/limits-view.ts'
+import { providerOf } from '../live/usage-ledger.ts'
 import { demoQuota, demoUsage } from './usage.ts'
 import { ProfileSchedules } from '../live/profile-schedule.ts'
 import { Profiles, ProfileStore, type Site } from '../live/profiles.ts'
@@ -530,6 +532,54 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     return this.places.filter((p) => p.machine === D.DEMO_HOST).map((p) => ({ key: p.id.split(':')[2]!, name: p.name }))
   }
 
+  /** the summary as the live source reads it, over the demo's own tasks: the working ones are its live agents, and what
+   *  they run on is what counts toward models.maxAtOnce; `providers` show even with nothing else */
+  private summaryNow(providers: string[] = []) {
+    const spaces = this.matrixSpaces()
+    const rows = modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, spaces).rows.map((r) => r.id)
+    const agents: LiveAgent[] = this.tasks.filter((t) => t.status === 'work').map((t) => ({ key: `${t.id}/Agent`, kind: kindOf(t.agent?.cli ?? 'Claude Code') ?? 'claude', status: 'working' }))
+    const tasks: TaskFact[] = this.tasks.map((t) => ({ status: t.status, ...(t.agent ? { agent: { kind: kindOf(t.agent.cli) ?? 'claude' } } : {}) }))
+    const now = Date.now()
+    return modelsSummary({ now, settings: this.stores[D.DEMO_HOST], host: D.DEMO_HOST, spaces, rows, usage: this.usage, agents, tasks, watch: [], quota: demoQuota(this.usage, now), runs: this.runsNow(), providers })
+  }
+
+  /** what counts toward models.maxAtOnce now: each working task, on the model its CLI runs, in its space */
+  private runsNow() {
+    return this.tasks
+      .filter((t) => t.status === 'work')
+      .map((t) => ({ key: keyOf(kindOf(t.agent?.cli ?? 'Claude Code') ?? 'claude'), space: t.place.split(':')[2]!, role: 'task' as const }))
+  }
+
+  /** Settings → Limits as the live source builds it, over the demo's world: its machine's numbers are the demo's health
+   *  (D.HEALTH), what holds its tasks is a fixture of the demo (D.heldFor), and its settings are the demo's own */
+  private limitsNow() {
+    const s = this.stores[D.DEMO_HOST]
+    const spaces = this.matrixSpaces()
+    const matrix = modelsMatrix(s, { host: D.DEMO_HOST, name: D.DEMO_HOST }, spaces)
+    const summary = this.summaryNow(entryPatterns(s, spaces.map((x) => x.key)).map(providerOf))
+    const working = this.tasks.filter((t) => t.status === 'work')
+    const workingIn = Object.fromEntries(spaces.map((x) => [x.key, working.filter((t) => t.place.split(':')[2] === x.key).length]))
+    const held = D.heldFor(s, workingIn)
+    return limitsView({
+      now: Date.now(),
+      settings: s,
+      host: D.DEMO_HOST,
+      machineName: D.DEMO_HOST,
+      matrix,
+      summary,
+      runs: this.runsNow(),
+      held: held.held,
+      working: working.length,
+      waitingOnYou: this.tasks.filter((t) => t.status === 'need').length,
+      workingIn,
+      sample: D.demoSample(),
+      herdr: true,
+      advisor: held.advisor,
+      reviews: held.reviews,
+      known: knownOf(matrix, summary),
+    })
+  }
+
   /** what a profile reads and writes: this machine's settings (the demo's own store) and its spaces */
   private profileSite(): Site {
     return { settings: this.stores[D.DEMO_HOST], machine: { host: D.DEMO_HOST, name: D.DEMO_HOST }, spaces: this.matrixSpaces() }
@@ -758,17 +808,10 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       case 'models-matrix':
         // this machine's levels, as the live one reads them: its Everywhere, machine and spaces
         return modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, this.matrixSpaces())
-      case 'models-summary': {
-        // the working tasks are the live agents; the waiting ones start (or are reviewed) on their CLI's own default model
-        const spaces = this.matrixSpaces()
-        const rows = modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, spaces).rows.map((r) => r.id)
-        const agents: LiveAgent[] = this.tasks.filter((t) => t.status === 'work').map((t) => ({ key: `${t.id}/Agent`, kind: kindOf(t.agent?.cli ?? 'Claude Code') ?? 'claude', status: 'working' }))
-        const tasks: TaskFact[] = this.tasks.map((t) => ({ status: t.status, ...(t.agent ? { agent: { kind: kindOf(t.agent.cli) ?? 'claude' } } : {}) }))
-        const now = Date.now()
-        // what counts toward models.maxAtOnce: the working tasks, each on its model (the live source's runsOn)
-        const runs = agents.map((a) => ({ key: keyOf(a.kind, a.model), space: '~' }))
-        return modelsSummary({ now, settings: this.stores[D.DEMO_HOST], host: D.DEMO_HOST, spaces, rows, usage: this.usage, agents, tasks, watch: [], quota: demoQuota(this.usage, now), runs })
-      }
+      case 'models-summary':
+        return this.summaryNow()
+      case 'limits-view':
+        return this.limitsNow()
       case 'quota-refresh':
         // the demo reads no quota: its figures are fictional, and no CLI or API is called from it
         return { ok: false, error: 'The demo reads no quota: its figures are made up.' }

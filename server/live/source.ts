@@ -10,7 +10,7 @@ import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { BODY_MAX, clip, lastReply, openCards, taskAlert, TITLE_MAX } from '../../shared/alerts.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, sortPlaces } from '../../shared/order.ts'
-import { asEmoji, doneNewestFirst, modeCard, NAME_MAX, nameProblem, slugify, STATUS_MAX, type Action, type ActivityAnswer, type ActivityAsk, type AddSpace, type Alert, type Artifact, type CardAsk, type Chat, type RestartInfo, type Peer, type Question, type Folders, type Machine, type Need, type Place, type Section, type Snapshot, type Task, type TaskStatus, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
+import { asEmoji, doneNewestFirst, modeCard, NAME_MAX, nameProblem, slugify, STATUS_MAX, type Action, type ActivityAnswer, type ActivityAsk, type AddSpace, type Alert, type Artifact, type CardAsk, type Chat, type RestartInfo, type Peer, type Question, type Folders, type LimitsView, type Machine, type Need, type Place, type Section, type Snapshot, type Task, type TaskStatus, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
 import { Emitter, type Overview, type Source, type SourceEvents } from '../source.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
 import { ROOT } from '../root.ts'
@@ -52,7 +52,8 @@ import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvi
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, resetOf, type Cut, type Retry } from './retry.ts'
-import { modelsSummary, keyOf, providerName, roleOfChat, type LiveAgent, type TaskFact } from './models-summary.ts'
+import { modelsSummary, keyOf, providerName, roleOfChat, type LiveAgent, type SummaryInput, type TaskFact } from './models-summary.ts'
+import { entryPatterns, knownOf, limitsView, type HeldFact } from './limits-view.ts'
 import { readClaude, type Reading } from './plan-limits.ts'
 import { readCommandCode as readCommandCodeQuota, SECRET as COMMANDCODE_KEY } from './command-code-quota.ts'
 import { alertShare, Quotas } from './quotas.ts'
@@ -497,6 +498,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** Settings → Models → Summary: the providers and models, what runs and waits, the usage and run-outs, the warnings */
   private modelsSummaryNow() {
+    return modelsSummary(this.summaryInput())
+  }
+
+  /** the inputs the summary (models-summary.ts) and the Limits page read, built once so the two agree: this machine's
+   *  table, what runs and waits now, the usage, the return watch and the quotas. `providers`: providers that show even with
+   *  nothing else (a provider a cap entry names) */
+  private summaryInput(providers: string[] = []): SummaryInput {
     const spaces = this.matrixSpaces()
     const rows = modelsMatrix(this.settings, { host: HOST, name: NAME }, spaces).rows.map((r) => r.id)
     const agents: LiveAgent[] = Object.values(this.agents.records).map((r) => ({ key: r.key, kind: r.kind, model: r.model, status: this.agents.status(r.key) }))
@@ -506,7 +514,58 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // what counts toward models.maxAtOnce now, and the entry each task held for a model's cap waits for
     const runs = this.engine.runs().map((r) => ({ key: r.key, space: r.space }))
     const heldBy = this.engine.heldTasks().filter((t) => t.held?.why === 'model').flatMap((t) => this.engine.waitingFor(t))
-    return modelsSummary({ now, settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch, quota: this.quotas.summary(now), runs, heldBy })
+    return { now, settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch, quota: this.quotas.summary(now), runs, heldBy, providers }
+  }
+
+  /** Settings → Limits (limits-view.ts): every limit of this machine at its levels with the numbers now, the spaces' and the
+   *  providers' caps, and what waits and why. Read only: a cell's write is the setting action at its place */
+  private limitsNow(): LimitsView {
+    const now = Date.now()
+    const spaces = this.matrixSpaces()
+    const matrix = modelsMatrix(this.settings, { host: HOST, name: NAME }, spaces)
+    // a provider that a cap entry names shows even with no agent or usage yet
+    const summary = modelsSummary(this.summaryInput(entryPatterns(this.settings, spaces.map((x) => x.key)).map(providerOf)))
+    const runs = this.engine.runs()
+    const workingIn = Object.fromEntries(spaces.map((x) => [x.key, this.engine.workingIn(x.key)]))
+    const held = this.engine.heldTasks().map((t): HeldFact => {
+      const key = this.places.space(t.project)?.name ?? '~'
+      const why = t.held!.why
+      const c = why === 'model' ? this.engine.taskChoice(t) : undefined
+      const full = c && 'wait' in c ? c.wait.find((b) => b.why === 'full' && b.cap) : undefined
+      const cap = why === 'space' ? this.engine.spaceCap(t) : undefined
+      return {
+        id: t.id,
+        space: key,
+        spaceName: this.places.shownName(key),
+        why,
+        words: this.engine.holdLine(t),
+        ...(t.priority ? { priority: true } : {}),
+        ...(full?.cap ? { entry: { name: full.name, count: full.cap.count, max: full.cap.max } } : cap ? { entry: { name: cap.shown, count: cap.working, max: cap.max } } : {}),
+      }
+    })
+    const advisor = this.advices.waiting().flatMap((r) => {
+      const x = this.advisable(r.chat).find((y) => y.qid === r.question)
+      return x ? [{ chat: r.chat, ...(r.chat.includes('/') ? { task: r.chat.split('/')[0] } : {}), words: `${x.asker} asks: ${x.q.title}` }] : []
+    })
+    const reviews = this.engine.reviewWaits().map((r) => ({ task: r.id, space: this.places.shownName(r.space), words: `Waits for a reviewer: ${r.words}` }))
+    return limitsView({
+      now,
+      settings: this.settings,
+      host: HOST,
+      machineName: NAME,
+      matrix,
+      summary,
+      runs: runs.map((r) => ({ key: r.key, space: r.space, role: r.role })),
+      held,
+      working: this.engine.working(),
+      waitingOnYou: this.engine.waitingOnYou(),
+      workingIn,
+      sample: this.health.last,
+      herdr: this.agents.reachable,
+      advisor,
+      reviews,
+      known: knownOf(matrix, summary),
+    })
   }
 
   /* ---------- unread ---------- */
@@ -3014,6 +3073,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return modelsMatrix(this.settings, { host: HOST, name: NAME }, this.matrixSpaces())
       case 'models-summary':
         return this.modelsSummaryNow()
+      case 'limits-view':
+        return this.limitsNow()
       case 'quota-refresh':
         return this.quotas.refresh()
       case 'profiles':
