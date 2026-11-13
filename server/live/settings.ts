@@ -650,6 +650,11 @@ export class Settings {
     return this.seed ? NO_PICKS : picksOf(kind)
   }
 
+  /** a copy of every level's values, to try writes on (a dry run, profiles.ts): it never reaches this one or the file */
+  copy(): Settings {
+    return new Settings(structuredClone(this.d))
+  }
+
   /** the Everywhere level, as the main machine hands it to the others */
   everywhere(): Values {
     return { ...this.d.everywhere }
