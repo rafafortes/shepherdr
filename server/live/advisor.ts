@@ -191,12 +191,16 @@ export interface AdviceRec {
   /** the question it answers: a card's id, or `words:<id of the agent's last words>` for a plain question */
   question: string
   at: number
-  state: 'asking' | 'suggested' | 'sent' | 'human' | 'failed'
+  /** asking: a run is going; waiting: no harness of its chain has room under the caps (and the card says which), it is
+   *  asked again when one does (source.retryAdvice) */
+  state: 'asking' | 'waiting' | 'suggested' | 'sent' | 'human' | 'failed'
   /** it went by itself (the question had waited), not on the human's word */
   auto?: boolean
   advice?: Advice
   /** the card the advice is shown on in the chat */
   card?: string
+  /** the chain positions (0: the primary, n: backup n) whose run gave no answer: they are not run again for this question */
+  tried?: number[]
 }
 
 /** what the advisor was asked, per chat and question, kept across a restart (advice.json): never asked twice */
@@ -207,6 +211,11 @@ export class Advices {
 
   get(chat: string, question: string): AdviceRec | undefined {
     return this.data[this.key(chat, question)]
+  }
+
+  /** the questions that wait for a harness with room, oldest first */
+  waiting(): AdviceRec[] {
+    return Object.values(this.data).filter((r) => r.state === 'waiting').sort((a, b) => a.at - b.at)
   }
 
   byCard(card: string): AdviceRec | undefined {

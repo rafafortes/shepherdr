@@ -31,7 +31,7 @@ import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
 import { DISMISSED, dismissKind, dismissWords } from './dismiss.ts'
 import { dictate as dictation } from './dictate.ts'
 import { age, askOf, backupHarness, capWords, checkTitle, ended, Engine, fitStatus, retuneLine, reviewRetuneLine, type HeldWhy, type Retune, type TaskRec } from './engine/engine.ts'
-import type { Blocked, Run } from './engine/choose.ts'
+import { waitWords, type Blocked, type Run } from './engine/choose.ts'
 import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { listFolders, makeRepo, resolveInHome } from './folders.ts'
 import { sh, validateBase } from './engine/git.ts'
@@ -48,7 +48,7 @@ import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } 
 import { privatePrompt, coordinatorPrompt, backupCardWords, wentBackCardWords, type BackWhy, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
 import { fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
 import { backCard, canProbe, FIRST_WAIT, FRESH, QUIET, returnMode, Returns, type Outage, type Probe } from './return.ts'
-import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvice, runAdvisor, type Advice, type AdviceQuestion } from './advisor.ts'
+import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvice, runAdvisor, type Advice, type AdviceQuestion, type AdviceRec } from './advisor.ts'
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, resetOf, type Cut, type Retry } from './retry.ts'
@@ -420,6 +420,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       void this.sweepBrowsers().catch(() => undefined)
     }
     this.engine.release(now)
+    // a question the advisor waits to answer goes on once a harness of its chain has room (the same look as the caps)
+    void this.retryAdvice().catch(() => undefined)
     if (this.health.last?.at !== at) this.emit('snapshot')
   }
 
@@ -789,7 +791,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         qid = `words:${said.id}`
       }
       const had = this.advices.get(n.chat, qid)
-      if (had && had.state !== 'failed') continue
+      // a failed one is asked again by hand; a waiting one goes on as soon as a harness of its chain has room (retryAdvice)
+      if (had && had.state !== 'failed' && had.state !== 'waiting') continue
       out.push({ need: n, qid, q, space, cwd, asker, brief })
     }
     return out
@@ -820,27 +823,57 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (!x) return { ok: false, error: this.advices.get(chat, qid) ? 'The advisor was asked about this already.' : 'This question no longer waits, or no advisor is set for its space.' }
     if (this.advising) return { ok: false, error: 'The advisor is answering another question; try again in a moment.' }
     this.advising = true
-    const rec = { chat, question: qid, at: Date.now(), state: 'asking' as const, ...(auto ? { auto } : {}) }
+    const before = this.advices.get(chat, qid)
+    // a question that waited keeps the harnesses that gave no answer: they are not run again for it
+    const tried = before?.state === 'waiting' ? [...(before.tried ?? [])] : []
+    const rec: AdviceRec = { chat, question: qid, at: Date.now(), state: 'asking', ...(auto ? { auto } : {}), ...(tried.length ? { tried } : {}) }
     this.advices.set(rec)
     this.emit('chat', chat)
     try {
       const prompt = advisorPrompt({ question: x.q, asker: x.asker, brief: x.brief, chat: recentChat(this.chats.chat(chat).messages, x.asker), folder: x.cwd, human: this.user, note: note?.trim() || undefined })
       let advice: Advice | undefined
       let said = ''
-      // the advisor, then each of its backups in turn
-      for (let n = 0; n <= MAX_BACKUPS; n++) {
-        const h = this.settings.advisor(x.space, n)
-        if (!h || !canAdvise(h.kind) || !this.engine.installed(h.kind)) continue
-        const r = await this.runAdvisor(h, prompt, x.cwd)
+      let wait: Blocked<unknown>[] | undefined
+      // the advisor, then each of its backups in turn: the first that has room under the caps and is not out (choose.ts) runs
+      // the question, held for the run as a lease; one that gives no answer falls to the next that has room; when every one
+      // left is full or out, the question waits (retryAdvice). Nothing is run while none has room
+      for (let left = this.adviceChain(x.space).filter((c) => !tried.includes(c.n)); left.length; ) {
+        const c = this.engine.decide(x.space, this.engine.chainOptions(left))
+        if ('wait' in c) {
+          wait = c.wait
+          break
+        }
+        const { n, h } = c.harness
+        // a question that waited gets its card told it is asked now, before the run
+        if (before?.state === 'waiting' && !tried.length) this.adviceWait(chat, qid, `The advisor is asking ${advisorWords(h)} now.`)
+        const lease = `advisor:${chat}|${qid}`
+        this.engine.lease(lease, 'advisor', keyOf(h.kind, h.model), x.space)
+        let r: { ok: boolean; out: string }
+        try {
+          r = await this.runAdvisor(h, prompt, x.cwd)
+        } catch (e) {
+          r = { ok: false, out: (e as Error).message }
+        } finally {
+          this.engine.unlease(lease)
+        }
         const parsed = r.ok ? parseAdvice(r.out, x.q) : undefined
         if (parsed) {
           advice = { ...parsed, by: advisorWords(h) }
           break
         }
+        tried.push(n)
+        this.advices.set({ ...rec, tried })
         said = r.out.replace(/\s+/g, ' ').trim().slice(-200)
         // what it said whole, for the day it needs explaining: the log keeps only its end
         const kept = this.keepAdvisorOutput(chat, r.out)
         console.error(`shepherdr: the advisor (${advisorWords(h)}) gave no answer for ${chat}: ${said || 'nothing it said made sense'}${kept ? ` (whole: ${kept})` : ''}`)
+        left = left.filter((o) => o.n !== n)
+      }
+      if (!advice && wait) {
+        // none of the harnesses left has room now: the question waits, and its card says which are full or out
+        this.advices.set({ ...rec, state: 'waiting', tried })
+        this.adviceWait(chat, qid, `The advisor waits: ${waitWords(wait, (s) => this.places.shownName(s))}`)
+        return { ok: true }
       }
       if (!advice) {
         this.advices.set({ ...rec, state: 'failed' })
@@ -888,7 +921,53 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       this.advising = false
       this.emit('chat', chat)
       this.emit('snapshot')
+      // a run that ended frees its slot: a question that waits for one goes on now
+      void this.retryAdvice().catch(() => undefined)
     }
+  }
+
+  /** the advisor's chain as it may run now: its primary (0), then its backups in order (n), each one that is set and whose
+   *  CLI runs headless here (canAdvise) and is installed */
+  private adviceChain(space: string): { n: number; h: Harness }[] {
+    const out: { n: number; h: Harness }[] = []
+    for (let n = 0; n <= MAX_BACKUPS; n++) {
+      const h = this.settings.advisor(space, n)
+      if (h && canAdvise(h.kind) && this.engine.installed(h.kind)) out.push({ n, h })
+    }
+    return out
+  }
+
+  /**
+   * The questions that wait for a harness with room (advise: `waiting`) are asked again as soon as one of their chain has
+   * room: looked at with every health look (the caps are read there) and after each advisor run ends. One run at a time
+   * (advise). A question no longer open was answered meanwhile: it is never answered now, its record is closed as the
+   * human's. Nothing is started while every harness left is still full or out.
+   */
+  async retryAdvice(): Promise<void> {
+    if (this.advising) return
+    for (const r of this.advices.waiting()) {
+      const x = this.advisable(r.chat).find((y) => y.qid === r.question)
+      if (!x) {
+        this.advices.set({ ...r, state: 'human' })
+        this.emit('chat', r.chat)
+        continue
+      }
+      const left = this.adviceChain(x.space).filter((c) => !(r.tried ?? []).includes(c.n))
+      if (!left.length) {
+        this.advices.set({ ...r, state: 'failed' })
+        continue
+      }
+      if ('harness' in this.engine.decide(x.space, this.engine.chainOptions(left))) {
+        await this.advise(r.chat, r.question, r.auto ?? false).catch(() => undefined)
+        return
+      }
+    }
+  }
+
+  /** the card that says an advisor question waits (or is asked now): one per question, updated in place, in its chat and,
+   *  for a task's question, in its space's chat too (adviceCard) */
+  private adviceWait(chat: string, qid: string, text: string) {
+    this.adviceCard(chat, text, `advice-wait:${qid}`)
   }
 
   /** the advisor's answer goes to the agent as the human's would: the card's pick, the CLI's keys, or its words */
@@ -918,11 +997,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** a short note from the advisor in the chat its question is in, and in the space's chat for a task's (where its
    *  needs-you card shows the question too): beside the question, which still waits wherever it shows */
-  private adviceCard(chat: string, text: string) {
+  private adviceCard(chat: string, text: string, card?: string) {
     const at = Date.now()
     const t = chat.includes('/') ? this.engine.task(chat.split('/')[0]) : undefined
     for (const key of [chat, ...(t ? [t.project] : [])]) {
-      const id = `advice-note:${at}:${key === chat ? 'chat' : 'space'}`
+      const id = `${card ?? `advice-note:${at}`}:${key === chat ? 'chat' : 'space'}`
       // in the space's chat its task's id leads it, as a link to the task
       this.chats.post(key, { id, card: { id, aside: true, text, ...(t && key !== chat ? { task: t.id } : {}) } })
       this.emit('chat', key)
