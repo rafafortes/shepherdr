@@ -34,8 +34,8 @@ import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
 import { findModel, knowsModels } from '../models.ts'
 import { keyOf } from '../models-summary.ts'
-import { choose, waitWords, type Blocked, type Choice, type Option, type Run } from './choose.ts'
-import { fitHarness, harnessWords, recentChat, sameHarness } from '../restart.ts'
+import { choose, waitShort, waitWords, type Blocked, type Choice, type Option, type Run } from './choose.ts'
+import { chainWords, fitHarness, harnessWords, recentChat, sameHarness } from '../restart.ts'
 import * as G from './git.ts'
 import { Worktrees, type HerdrSpaces, type Made } from './worktrees.ts'
 
@@ -864,7 +864,7 @@ export class Engine extends Emitter<Events> {
    * the second line of a list row: what the status is about, in one short standard line, never the brief. While it
    * works, its agent's own status line (shepherdr status) takes its place on screen and in the CLI (source.ts).
    */
-  subOf(t: TaskRec, status = this.statusOf(t)): string {
+  subOf(t: TaskRec, status = this.statusOf(t), full = false): string {
     const key = this.key(t)
     const s = (() => {
       // a few words, never the summary: that is in its chat's card
@@ -878,7 +878,7 @@ export class Engine extends Emitter<Events> {
       if (t.trouble) return fitStatus(`Went wrong: ${t.trouble}`)
       // a To do row is its title alone
       if (status === 'todo') return ''
-      if (status === 'queued') return this.holding(t) ? `${t.priority ? 'First in line · ' : ''}${this.heldLabel(t)}` : this.waitLine(t)
+      if (status === 'queued') return this.holding(t) ? `${t.priority ? 'First in line · ' : ''}${this.heldLabel(t, full)}` : this.waitLine(t)
       if (status === 'need' && this.queued(t) && this.agents.status(key) !== 'blocked') return fitStatus(this.halts(t).join(' · '))
       if (status === 'need') return this.reasonOf(key) ?? NEED.reply
       // why its last merge stopped, while its agent is on it: a conflict to rebase by hand, or the gate's refusal
@@ -895,7 +895,8 @@ export class Engine extends Emitter<Events> {
       if (r?.due) return `${r.reason} · retry in ${inMins(r.due)}`
       return 'Working'
     })()
-    return s.length > 90 ? `${s.slice(0, 89).trimEnd()}…` : s
+    // the title of a cut-short row keeps the whole line (full); a row's line is kept to 90 characters
+    return s.length > 90 && !full ? `${s.slice(0, 89).trimEnd()}…` : s
   }
 
   /**
@@ -1007,6 +1008,8 @@ export class Engine extends Emitter<Events> {
     const rec = this.agents.record(key)
     const cli = CLI_NAME[rec?.kind ?? t.agent?.kind ?? ''] ?? this.settings.get('task.agent', this.nameOf(t))
     const sub = this.subOf(t, status)
+    // a row's line may be cut short: its title names what the line says in full (a held task's whole chain)
+    const longSub = this.subOf(t, status, true)
     const doneAt = status === 'done' ? (t.doneAt ?? t.updated) : undefined
     return {
       id: t.id,
@@ -1014,6 +1017,7 @@ export class Engine extends Emitter<Events> {
       status,
       place: t.project,
       sub,
+      ...(longSub !== sub ? { subTitle: longSub } : {}),
       age: age(t.archived ?? doneAt ?? (status === 'todo' || status === 'scheduled' ? t.created : t.updated)),
       doneAt,
       branch: t.branch,
@@ -1477,10 +1481,15 @@ export class Engine extends Emitter<Events> {
     return 'wait' in c ? c.wait.map((b) => b.name) : []
   }
 
-  /** a wait in words for a held row and a card: `spark (4 of 4 at once), commandcode (out until 17:00) — every model it may
+  /** a wait in words for a card: `Codex (default) (4 of 4 at once), pi · spark/… (out until 17:00) — every model it may
    *  use is full or out` */
-  capWaitLine(wait: Blocked<unknown>[]) {
-    return `${waitWords(wait, (s) => this.places.shownName(s))} — every model it may use is full or out`
+  capWaitLine(wait: Blocked<{ step: number; h: Harness }>[]) {
+    return `${this.waitIn(wait)} — every model it may use is full or out`
+  }
+
+  /** a chain's wait in words, each harness as its chain names it (chainWords), the spaces as they show */
+  private waitIn(wait: Blocked<{ h: Harness }>[]) {
+    return waitWords(wait, { words: (x) => chainWords(x.h), shown: (s) => this.places.shownName(s) })
   }
 
   /** a task's space's own cap on this machine (space.maxTasks), with how many of that space's tasks work now (busy, as
@@ -1494,11 +1503,12 @@ export class Engine extends Emitter<Events> {
   }
 
   /** a held task's line in its row: a task held by its space's cap names the space, as it shows; one held for its models
-   *  names each harness of its chain and why it cannot start (waitLine) */
-  private heldLabel(t: TaskRec) {
+   *  names each harness of its chain, short (waitShort), and in full when `full` (the row's title) */
+  private heldLabel(t: TaskRec, full = false) {
     if (t.held!.why === 'model') {
       const c = this.taskChoice(t)
-      if ('wait' in c) return `Waiting: ${waitWords(c.wait, (x) => this.places.shownName(x))}`
+      // the row is one short line (waitShort); its title, and the card, name the whole chain (full)
+      if ('wait' in c) return `Waiting: ${full ? this.waitIn(c.wait) : waitShort(c.wait, (x) => this.places.shownName(x))}`
     }
     const cap = t.held!.why === 'space' ? this.spaceCap(t) : undefined
     return cap ? `Waiting for a free slot of ${cap.shown}` : HELD[t.held!.why]

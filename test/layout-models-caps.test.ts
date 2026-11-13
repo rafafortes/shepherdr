@@ -85,15 +85,23 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
     }
   })
 
-  test('a task held for its models reads the chain it waits on: each harness, and how full it is', async () => {
+  test('a task held for its models reads one short line in its row; its title names the whole chain', async () => {
     const task = world.tasks.find((t) => t.id === 'HP-203')!
-    const saved = { status: task.status, sub: task.sub }
+    const saved = { status: task.status, sub: task.sub, subTitle: task.subTitle }
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
-      Object.assign(task, { status: 'queued', sub: 'Waiting: spark (1 of 1 at once), commandcode (out until 17:00)' })
+      const full = 'Waiting: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (4 of 4 at once), Command Code (out until 17:00)'
+      Object.assign(task, { status: 'queued', sub: 'Waiting: spark 4/4 · commandcode out', subTitle: full })
       await page.goto(url())
       await page.waitForSelector('section[aria-label="Tasks"] li')
-      await page.locator('section[aria-label="Tasks"] li', { hasText: 'HP-203' }).getByText('Waiting: spark (1 of 1 at once), commandcode (out until 17:00)').waitFor()
+      const row = page.locator('section[aria-label="Tasks"] li', { hasText: 'HP-203' })
+      // the row shows the short words, whole: nothing cut off in it
+      await row.getByText('Waiting: spark 4/4 · commandcode out', { exact: true }).waitFor()
+      expect(await row.getByText('Waiting: spark 4/4 · commandcode out', { exact: true }).evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+      // the whole chain is the title of the line
+      expect(await row.locator('span[title]').evaluate((el) => el.getAttribute('title'))).toBe(full)
+      // a screenshot of the row, as the proof of it
+      await row.screenshot({ path: process.env.CAP_ROW_SHOT ?? '/tmp/cap-row-short.png' })
     } finally {
       Object.assign(task, saved)
       await page.close()

@@ -1,7 +1,7 @@
 // The cap-aware choice (server/live/engine/choose.ts): the first harness of a chain that is not out and has room under every
 // entry that applies to it, at this machine's total and at its space's own sub-limit. Each combination of the brief.
 import { describe, expect, test } from 'bun:test'
-import { choose, covers, waitWords, type ChooseInput, type Option, type Run } from '../server/live/engine/choose.ts'
+import { choose, covers, waitShort, waitWords, type ChooseInput, type Option, type Run } from '../server/live/engine/choose.ts'
 import type { MaxEntry } from '../shared/model-caps.ts'
 
 const SPARK = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
@@ -74,7 +74,7 @@ describe('the cap-aware choice: the two scopes', () => {
     const c = pick([opt('primary', SPARK), opt('b1', CODE)], { machine: [e('spark', 4)], own: [e('spark', 1)], runs: [run(SPARK, 'app')] })
     expect(c).toMatchObject({ harness: 'b1', index: 1, skipped: [{ harness: 'primary', why: 'full', name: 'spark', cap: { scope: 'space', count: 1, max: 1 } }] })
     if (!('skipped' in c)) throw new Error('expected a choice')
-    expect(waitWords(c.skipped, (s) => `${s}!`)).toBe('spark in app! (1 of 1 at once)')
+    expect(waitWords(c.skipped, { words: (h) => `${h}:`, shown: (s) => `${s}!` })).toBe('primary: in app! (1 of 1 at once)')
   })
 
   test("a space's sub-limit counts only its own runs: another space's runs leave it room", () => {
@@ -157,10 +157,14 @@ describe('the words of a wait', () => {
   test('full entries say how many run at once, out ones until when', () => {
     const c = pick([opt('primary', SPARK), opt('b1', CODE, { until: '17:00' })], { machine: [e('spark', 4)], runs: [run(SPARK), run(SPARK), run(SPARK), run(SPARK)] })
     if (!('wait' in c)) throw new Error('expected a wait')
-    expect(waitWords(c.wait)).toBe('spark (4 of 4 at once), commandcode (out until 17:00)')
+    expect(waitWords(c.wait, { words: (h) => `${h}` })).toBe('primary (4 of 4 at once), b1 (out until 17:00)')
+    // the row's short form: the provider and its count, or that it is out; a model's own entry names the model
+    expect(waitShort(c.wait)).toBe('spark 4/4 · commandcode out')
+    expect(waitShort([{ harness: 'x', why: 'full', name: 'anthropic/claude-opus-5-5', cap: { scope: 'machine', count: 1, max: 1 } }])).toBe('claude-opus-5-5 1/1')
+    expect(waitShort([{ harness: 'x', why: 'full', name: 'spark', cap: { scope: 'space', space: 'app', count: 1, max: 1 } }], (s) => `${s}!`)).toBe('spark 1/1 in app!')
   })
 
   test('an out provider with no time says only that it is out', () => {
-    expect(waitWords([{ harness: 'x', why: 'out', name: 'radeon' }])).toBe('radeon (out)')
+    expect(waitWords([{ harness: 'x', why: 'out', name: 'radeon' }], { words: (h) => h })).toBe('x (out)')
   })
 })

@@ -24,6 +24,14 @@ const REPO = 'git init -q -b main && git config user.email t@t && git config use
 const cards = (key: string) => src.chats.chat(key).messages.filter((m) => m.card).map((m) => m.card!.text)
 
 describe("a model's cap in words: the row, the card and the replies name the entry that holds the task", () => {
+  test('a harness in a chain is named as the chain names it, never by its model key', async () => {
+    const { chainWords } = await import('../server/live/restart.ts')
+    // Codex with no model is its default, not openai/unknown; pi names its model in words
+    expect(chainWords({ kind: 'codex' })).toBe('Codex (default)')
+    expect(chainWords({ kind: 'codex', model: 'default' })).toBe('Codex (default)')
+    expect(chainWords({ kind: 'pi', model: SPARK })).toBe(`pi · ${SPARK}`)
+  })
+
   test('a task held by a provider at its cap reads so in its row, its card and the add and tell replies', async () => {
     const dir = tmp('model-cap-repo')
     execSync(REPO, { cwd: dir, shell: '/bin/sh' })
@@ -44,12 +52,12 @@ describe("a model's cap in words: the row, the card and the replies name the ent
       const id = add.out.match(/([A-Z]+-\d+)/)![1]
       const t = src.engine.task(id)!
       expect(t.held?.why).toBe('model')
-      expect(src.engine.subOf(t)).toBe('Waiting: spark (1 of 1 at once)')
-      expect(add.out).toContain('held: spark (1 of 1 at once) — every model it may use is full or out')
-      expect(cards(`${id}/Agent`)).toContain('waiting: spark (1 of 1 at once) — every model it may use is full or out')
+      expect(src.engine.subOf(t)).toBe('Waiting: spark 1/1')
+      expect(add.out).toContain('held: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (1 of 1 at once) — every model it may use is full or out')
+      expect(cards(`${id}/Agent`)).toContain('waiting: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (1 of 1 at once) — every model it may use is full or out')
       // a tell to the held task is held the same way, its reply says why, and its words wait with it
       const tell = await src.cli(['task', 'tell', id, 'Go when you can.'], { chat })
-      expect(tell.out).toContain(`${id} is held: spark (1 of 1 at once) — every model it may use is full or out`)
+      expect(tell.out).toContain(`${id} is held: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (1 of 1 at once) — every model it may use is full or out`)
     } finally {
       src.agents.status = status
       src.settings.set('models.maxAtOnce', null, 'machine')

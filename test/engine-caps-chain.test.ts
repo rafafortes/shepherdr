@@ -108,8 +108,12 @@ describe('the caps and the backup chain: held with the chain named, and started 
     expect(kindOf(w, `${s2.id}/Agent`)).toBe('codex')
     const s3 = add(w, s1.p, 'S3')
     expect(s3.held?.why).toBe('model')
-    expect(w.engine.subOf(s3)).toBe('Waiting: spark (1 of 1 at once), openai (1 of 1 at once)')
-    expect(cards(w, `${s3.id}/Agent`)).toContain('waiting: spark (1 of 1 at once), openai (1 of 1 at once) — every model it may use is full or out')
+    expect(w.engine.subOf(s3)).toBe('Waiting: spark 1/1 · openai 1/1')
+    // the row is one short line; its title names the whole chain, in words
+    expect(w.engine.view(s3).sub).toBe('Waiting: spark 1/1 · openai 1/1')
+    expect(w.engine.view(s3).subTitle).toBe('Waiting: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (1 of 1 at once), Codex (default) (1 of 1 at once)')
+    expect(w.engine.view(s1.t).subTitle).toBeUndefined()
+    expect(cards(w, `${s3.id}/Agent`)).toContain('waiting: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (1 of 1 at once), Codex (default) (1 of 1 at once) — every model it may use is full or out')
     expect(startedOn(w, s3.id)).toBe(false)
     expect(w.engine.waitingFor(s3)).toEqual(['spark', 'openai'])
     // a start that finds the wait (as one a pass races) holds the task again, and starts nothing
@@ -131,7 +135,7 @@ describe('the caps and the backup chain: held with the chain named, and started 
     const s1 = await running(w, dir, 'out-s1', 'S1')
     const s2 = add(w, s1.p, 'S2')
     expect(s2.held?.why).toBe('model')
-    expect(w.engine.subOf(s2)).toBe('Waiting: spark (1 of 1 at once), openai (out until 17:00)')
+    expect(w.engine.subOf(s2)).toBe('Waiting: spark 1/1 · openai out')
     // the out backup is never the one a start goes in on, and the wait says so
     expect(w.engine.taskChoice(s2)).toMatchObject({ wait: [{ why: 'full' }, { why: 'out', until: '17:00' }] })
     w.engine.outNow = () => undefined
@@ -159,7 +163,7 @@ describe('the caps and the backup chain: held with the chain named, and started 
     w.engine.lease('advisor-1', 'advisor', SPARK, p.name)
     const t = add(w, p, 'L1')
     expect(t.held?.why).toBe('model')
-    expect(w.engine.subOf(t)).toBe('Waiting: spark (1 of 1 at once)')
+    expect(w.engine.subOf(t)).toBe('Waiting: spark 1/1')
     w.engine.unlease('advisor-1')
     w.engine.release()
     await until(() => startedOn(w, t.id))
@@ -207,7 +211,7 @@ describe("a space's own sub-limit sits inside the machine's total", () => {
     expect(w.settings.set('models.maxAtOnce', 'spark=1', { space: a.p.name }).ok).toBe(true)
     const a2 = add(w, a.p, 'A2')
     expect(a2.held?.why).toBe('model')
-    expect(w.engine.subOf(a2)).toBe(`Waiting: spark in ${a.p.name} (1 of 1 at once)`)
+    expect(w.engine.subOf(a2)).toBe(`Waiting: spark 1/1 in ${a.p.name}`)
     // another space: its own sub-limit has room, and the machine's total has room
     const b = await w.places.add(repo(), 'sub-b')
     const b1 = add(w, b, 'B1')
@@ -224,7 +228,7 @@ describe("a space's own sub-limit sits inside the machine's total", () => {
     const b = await w.places.add(repo(), 'total-b')
     const b1 = add(w, b, 'B1')
     expect(b1.held?.why).toBe('model')
-    expect(w.engine.subOf(b1)).toBe('Waiting: spark (1 of 1 at once)')
+    expect(w.engine.subOf(b1)).toBe('Waiting: spark 1/1')
     expect(a.t.id).toBeTruthy()
   })
 })

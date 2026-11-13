@@ -209,6 +209,8 @@ export interface Task {
   place: string
   /** second line in lists */
   sub?: string
+  /** the whole of `sub` when the line is cut short (a held task's chain, shortened in the row): the row's title */
+  subTitle?: string
   age: string
   /** when a Done task finished (ms): the Done group shows newest first */
   doneAt?: number

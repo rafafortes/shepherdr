@@ -46,7 +46,7 @@ import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
 import { privatePrompt, coordinatorPrompt, backupCardWords, wentBackCardWords, type BackWhy, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
-import { fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
+import { chainWords, fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
 import { backCard, canProbe, FIRST_WAIT, FRESH, QUIET, returnMode, Returns, type Outage, type Probe } from './return.ts'
 import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvice, runAdvisor, type Advice, type AdviceQuestion, type AdviceRec } from './advisor.ts'
 import { Revivals, type Wrong } from './revive.ts'
@@ -833,7 +833,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const prompt = advisorPrompt({ question: x.q, asker: x.asker, brief: x.brief, chat: recentChat(this.chats.chat(chat).messages, x.asker), folder: x.cwd, human: this.user, note: note?.trim() || undefined })
       let advice: Advice | undefined
       let said = ''
-      let wait: Blocked<unknown>[] | undefined
+      let wait: Blocked<{ n: number; h: Harness }>[] | undefined
       // a question that waited says on its card that it is asked now, once, when a run starts
       let announced = false
       // the advisor, then each of its backups in turn: the first that has room under the caps and is not out (choose.ts) runs
@@ -875,7 +875,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (!advice && wait) {
         // none of the harnesses left has room now: the question waits, and its card says which are full or out
         this.advices.set({ ...rec, state: 'waiting', tried })
-        this.adviceWait(chat, qid, `The advisor waits: ${waitWords(wait, (s) => this.places.shownName(s))}`)
+        this.adviceWait(chat, qid, `The advisor waits: ${waitWords(wait, { words: (x) => chainWords(x.h), shown: (s) => this.places.shownName(s) })}`)
         return { ok: true }
       }
       if (!advice) {

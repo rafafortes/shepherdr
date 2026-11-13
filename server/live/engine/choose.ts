@@ -93,15 +93,33 @@ export function choose<H>(input: ChooseInput<H>): Choice<H> {
   return { wait: skipped }
 }
 
-/** a wait in words, for a held row and a card: `spark (4 of 4 at once), commandcode (out until 17:00)`; `shown` names a
- *  space the way it shows (a space's own sub-limit says so) */
-export function waitWords<H>(wait: Blocked<H>[], shown: (space: string) => string = (s) => s): string {
+/** a wait in words, for a card: `Codex (default) (4 of 4 at once), pi · spark/qwen… (out until 17:00)`. `words` names each
+ *  harness as the chain lists it, never by its model key (a Codex default key reads openai/unknown); `shown` names a space
+ *  the way it shows (a space's own sub-limit says so) */
+export function waitWords<H>(wait: Blocked<H>[], o: { words?: (h: H) => string; shown?: (space: string) => string } = {}): string {
+  const words = o.words ?? ((h: H) => String(h))
+  const shown = o.shown ?? ((s: string) => s)
   return wait
     .map((b) => {
-      if (b.why === 'out') return `${b.name} (out${b.until ? ` until ${b.until}` : ''})`
+      if (b.why === 'out') return `${words(b.harness)} (out${b.until ? ` until ${b.until}` : ''})`
       const c = b.cap!
       const where = c.scope === 'space' ? ` in ${shown(c.space!)}` : ''
-      return `${b.name}${where} (${c.count} of ${c.max} at once)`
+      return `${words(b.harness)}${where} (${c.count} of ${c.max} at once)`
     })
     .join(', ')
+}
+
+/** a wait in short, for a row that must fit one line: the provider and how many of it run, or that it is out
+ *  (`spark 4/4 · commandcode out`), a space's own sub-limit with its space's name (`spark 1/1 in app`); the full chain is
+ *  the title of the row (waitWords) */
+export function waitShort<H>(wait: Blocked<H>[], shown: (space: string) => string = (s) => s): string {
+  // a model's own entry names the model (its provider is the row's); a provider's entry names the provider
+  const name = (b: Blocked<H>) => (b.name.includes('/') ? b.name.slice(b.name.indexOf('/') + 1) : b.name)
+  return wait
+    .map((b) => {
+      if (b.why === 'out') return `${providerOfKey(b.name)} out`
+      const c = b.cap!
+      return `${name(b)} ${c.count}/${c.max}${c.scope === 'space' ? ` in ${shown(c.space!)}` : ''}`
+    })
+    .join(' · ')
 }

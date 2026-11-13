@@ -115,7 +115,7 @@
     spark is at its limit (1 of 1 at once)`), and the agent is told it runs on a backup with the same brief. Once started,
     it stays on that backup while it works; when it goes idle and its primary has room (and backup.watchReturn is go
     back), it goes back to its primary, as the way back does. Every harness full or out: the task is held, its row naming
-    the chain (`Waiting: spark (1 of 1 at once), openai (out until 17:00)`), and release starts it on the first that frees.
+    the chain (its row, short: `Waiting: spark 1/1 · openai out`; the row's title and its card name each harness in words, `Codex (default)`, `pi · spark/…`), and release starts it on the first that frees.
     A cut-off task's takeover skips the full backups, and waits for one with room the same way.
   - **Coordinators are never held.** A coordinator's first start takes the first harness of its chain with room. When every
     one is full or out it starts on its primary anyway, and its chat says it runs past the cap. A coordinator's backup takeover
@@ -507,7 +507,7 @@ the question about the tasks already created never comes up for it (`shepherdr s
   then its backups in order) with room under the caps and not out runs the question, and holds a slot of its model for
   the run. A run that gives no answer falls to the next harness that has room, each harness once for that question. When
   every harness left is full or out, nothing runs: the question **waits**, and its card names each one that is full or
-  out (`The advisor waits: spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (4 of 4 at once), openai/unknown (out until 17:00)`).
+  out, in words (`The advisor waits: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (4 of 4 at once), Codex (default) (out until 17:00)`).
   It is asked again by itself as soon as a harness has room (looked at with every health look, and when an advisor run
   ends), and the human's Ask the advisor asks it again at once. A question answered meanwhile is never answered by the
   advisor: it is closed as yours. The wait is not a time limit: the advisor's own timing (Answers for you after) decided

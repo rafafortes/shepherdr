@@ -107,7 +107,7 @@
     [settings](settings.md).
   - **Its chain.** A task whose primary is at its cap starts on its first backup with room, not held (`Started on Codex: spark
     is at its limit (1 of 1 at once)` in its chat). Held only when every harness of its chain is full or out, and its row names
-    each one: `Waiting: spark (1 of 1 at once), openai (out until 17:00)`; its card and replies say it in full, ending
+    each one, short: `Waiting: spark 1/1 · openai out` (its row's title, and its card and replies, say it in full: `Codex (default) (out until 17:00)`), ending
     `every model it may use is full or out`. A cut-off task's takeover skips the full backups the same way and, with none with
     room, waits (`Waiting: …`) until one frees. Its way back to the primary is in [settings](settings.md) (the caps and the chain).
 - A space may have a **merge gate** (Settings → How tasks work → Merge gate, `merge.gate`, off by default; a task's own

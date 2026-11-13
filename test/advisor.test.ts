@@ -482,7 +482,7 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
       expect(await src.advise(w.key, 'cap:w1')).toEqual({ ok: true })
       expect(runs).toEqual([])
       expect(src.advices.get(w.key, 'cap:w1')!.state).toBe('waiting')
-      expect(cards(w.key).at(-1)).toBe(`The advisor waits: ${OPENCODE} (1 of 1 at once), ${CODEX} (1 of 1 at once)`)
+      expect(cards(w.key).at(-1)).toBe(`The advisor waits: pi · ${OPENCODE} (1 of 1 at once), Codex (default) (1 of 1 at once)`)
       // on the task's card, in its space's chat too
       expect(src.chats.chat(w.coord).messages.findLast((m) => m.card?.aside)?.card?.text).toContain('The advisor waits:')
       // one card per question: asked again while it still waits, its card is updated, not repeated
@@ -562,7 +562,7 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
       await src.advise(w.key, 'cap:t1')
       expect(runs.map((r) => r.kind)).toEqual(['pi'])
       expect(src.advices.get(w.key, 'cap:t1')).toMatchObject({ state: 'waiting', tried: [0] })
-      expect(cards(w.key).at(-1)).toBe(`The advisor waits: ${CODEX} (1 of 1 at once)`)
+      expect(cards(w.key).at(-1)).toBe('The advisor waits: Codex (default) (1 of 1 at once)')
       // the slot frees: only the backup runs, the primary is not asked again
       free('busy-t')
       replies = [json({ decide: 'advisor', choice: 1, why: 'A.', sure: true })]
