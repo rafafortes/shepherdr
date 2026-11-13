@@ -40,8 +40,10 @@ describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => 
       // OpenCode Go ran out twice this week, and is out now until a time
       expect(await table.getByText(/^2 run-outs in 7 d$/).count()).toBeGreaterThan(0)
       expect(await table.getByText(/^Out until /).count()).toBeGreaterThan(0)
-      // the quota slot is there, and empty until a read gives it
+      // the quota slot is there: the windows a read gave, the refilled one left out; — where none was read
       expect(await table.getByRole('columnheader', { name: 'Quota' }).count()).toBe(1)
+      expect(await table.getByText(/^5 h 62% used/).count()).toBe(1)
+      expect(await table.getByText(/Last month/).count()).toBe(0)
       expect(await table.getByText('—').count()).toBeGreaterThan(0)
     } finally {
       await page.close()
@@ -82,6 +84,10 @@ describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => 
       const other = await openModels(fresh)
       await other.scrollIntoViewIfNeeded()
       expect(await warnings(fresh).count()).toBe(shown)
+      // hidden one by one, the last one takes the list with it
+      for (let left = shown - 1; left > 0; left--) await warnings(fresh).first().getByRole('button', { name: /^Hide for this session/ }).click()
+      await warnings(fresh).first().getByRole('button', { name: /^Hide for this session/ }).click()
+      expect(await fresh.locator('section[aria-label="Warnings"]').count()).toBe(0)
     } finally {
       await page.close()
       await fresh.close()

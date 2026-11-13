@@ -19,9 +19,9 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 function readHidden(): string[] {
   try {
-    const v = JSON.parse(sessionStorage.getItem(HIDDEN) ?? '[]')
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+    return (JSON.parse(sessionStorage.getItem(HIDDEN) ?? '[]') as unknown[]).filter((x): x is string => typeof x === 'string')
   } catch {
+    // coverage-exempt: a browser that keeps no session storage (a private window) shows every warning again
     return []
   }
 }
@@ -56,10 +56,12 @@ export function runWords(r: SummaryRunOuts) {
   return { count, last, out }
 }
 
-/** a quota figure in words: each window's share used or count against its cap, and an estimate's word; — when none */
-export function quotaWords(q?: QuotaFigure): string {
+/** a quota figure in words: each window's share used or count against its cap, and an estimate's word; — when none. A
+ *  window that has refilled since its read (its reset is past) says nothing of now, so it is left out (as upstream's
+ *  plan limits leave out a refilled window) */
+export function quotaWords(q: QuotaFigure | undefined, now: number): string {
   if (!q) return '—'
-  const parts = q.windows.map((w) => {
+  const parts = q.windows.filter((w) => w.resetAt === undefined || w.resetAt > now).map((w) => {
     const used = w.usedPct !== undefined ? `${Math.round(w.usedPct)}% used` : w.used !== undefined && w.cap !== undefined ? `${tokens(w.used)} of ${tokens(w.cap)}` : w.used !== undefined ? `${tokens(w.used)} used` : ''
     return [w.name, used].filter(Boolean).join(' ')
   })
@@ -81,7 +83,7 @@ function Shares({ row }: { row: SummaryProvider }) {
     { k: '24 h', v: row.share.h24 },
     { k: '7 d', v: row.share.d7 },
   ].filter((x): x is { k: string; v: number } => x.v !== undefined)
-  if (!lines.length) return null
+  if (!lines.length) return null // no tokens in the week: no bar
   return (
     <span className="mt-1 flex flex-col gap-1">
       {lines.map((x) => (
@@ -108,7 +110,7 @@ function Warnings({ list, go }: { list: SummaryWarning[]; go: (row: string, slot
     try {
       sessionStorage.setItem(HIDDEN, JSON.stringify(next))
     } catch {
-      // a browser that keeps no session: it is hidden until the screen is read again
+      // coverage-exempt: a browser that keeps no session storage hides it until the screen is read again
     }
   }
   return (
@@ -146,7 +148,7 @@ export default function ModelsSummary({ s, phone, go }: { s: Summary; phone: boo
       <h2 className="font-medium">Summary</h2>
       <Warnings list={s.warnings} go={go} />
       {s.backfilled === undefined ? <Small className="text-pretty">Reading the logs once from their start: the numbers grow until it is done.</Small> : null}
-      {s.providers.length ? (phone ? <Cards providers={s.providers} /> : <Table providers={s.providers} />) : <Small className="text-pretty">Nothing configured, run or used yet.</Small>}
+      {s.providers.length ? (phone ? <Cards providers={s.providers} now={s.at} /> : <Table providers={s.providers} now={s.at} />) : <Small className="text-pretty">Nothing configured, run or used yet.</Small>}
       <Small className="text-pretty">
         Usage is read from the logs of this machine's agents, and kept 35 days. Cost is pi's own estimate, not a bill. Quota shows once a read of the provider has given it.
       </Small>
@@ -155,7 +157,7 @@ export default function ModelsSummary({ s, phone, go }: { s: Summary; phone: boo
 }
 
 /** the table on a desktop: a provider's row, then its models under it */
-function Table({ providers }: { providers: SummaryProvider[] }) {
+function Table({ providers, now }: { providers: SummaryProvider[]; now: number }) {
   const head = ['Provider', 'Configured, and now', 'Used', 'Run-outs', 'Quota']
   return (
     <div className="max-w-full overflow-x-auto overscroll-contain">
@@ -172,9 +174,9 @@ function Table({ providers }: { providers: SummaryProvider[] }) {
         <tbody>
           {providers.map((p) => (
             <Fragment key={p.provider}>
-              <Line name={p.name} local={p.local} row={p} quota={p.quota} shares={<Shares row={p} />} bold />
+              <Line name={p.name} local={p.local} row={p} quota={p.quota} now={now} shares={<Shares row={p} />} bold />
               {p.models.map((m) => (
-                <Line key={m.key} name={m.label} row={m} indent />
+                <Line key={m.key} name={m.label} row={m} now={now} indent />
               ))}
             </Fragment>
           ))}
@@ -206,7 +208,7 @@ function UsedLines({ row }: { row: SummaryRow }) {
 }
 
 /** one table row: a provider or a model, its numbers in the columns */
-function Line({ name, local, row, quota, shares, bold, indent }: { name: string; local?: boolean; row: SummaryRow; quota?: QuotaFigure; shares?: ReactNode; bold?: boolean; indent?: boolean }) {
+function Line({ name, local, row, quota, now, shares, bold, indent }: { name: string; local?: boolean; row: SummaryRow; quota?: QuotaFigure; now: number; shares?: ReactNode; bold?: boolean; indent?: boolean }) {
   const conf = configuredWords(row.configured)
   const runs = runWords(row.runOuts)
   return (
@@ -229,7 +231,7 @@ function Line({ name, local, row, quota, shares, bold, indent }: { name: string;
         <RunOutWords runs={runs} />
       </td>
       <td className="py-2 align-top text-fg2">
-        <QuotaCell quota={quota} />
+        <QuotaCell quota={quota} now={now} />
       </td>
     </tr>
   )
@@ -246,12 +248,12 @@ function RunOutWords({ runs }: { runs: ReturnType<typeof runWords> }) {
 }
 
 /** a provider's quota: its windows when a read gave them, a dash until then (4b fills it) */
-function QuotaCell({ quota }: { quota?: QuotaFigure }) {
-  return <span className={clsx(!quota && 'text-fg3')}>{quotaWords(quota)}</span>
+function QuotaCell({ quota, now }: { quota?: QuotaFigure; now: number }) {
+  return <span className={clsx(!quota && 'text-fg3')}>{quotaWords(quota, now)}</span>
 }
 
 /** the phone: one card per provider, its models under it */
-function Cards({ providers }: { providers: SummaryProvider[] }) {
+function Cards({ providers, now }: { providers: SummaryProvider[]; now: number }) {
   return (
     <ul className="flex flex-col gap-3">
       {providers.map((p) => {
@@ -274,7 +276,7 @@ function Cards({ providers }: { providers: SummaryProvider[] }) {
               <Pair k="Last 24 h" v={usageWords(p.usage.h24).main} sub={usageWords(p.usage.h24).sub} />
               <Pair k="Last 7 d" v={usageWords(p.usage.d7).main} sub={usageWords(p.usage.d7).sub} />
               <Pair k="Run-outs" v={runs.count} sub={[runs.last, runs.out].filter(Boolean).join(' · ')} need={!!runs.out} />
-              <Pair k="Quota" v={quotaWords(p.quota)} muted={!p.quota} />
+              <Pair k="Quota" v={quotaWords(p.quota, now)} muted={!p.quota} />
             </dl>
             {p.models.length ? (
               <ul className="flex flex-col gap-1.5 border-t border-line pt-2">

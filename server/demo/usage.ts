@@ -30,7 +30,17 @@ export function demoUsage(now = Date.now()): UsageLedger {
   // OpenCode Go ran out twice this week: the second time, now, until a reset three hours on (out now)
   l.runOut({ at: now - 50 * HOUR, key: 'opencode-go/deepseek-v4.1-flash', chat: 'HP-202/Agent', role: 'task', reason: 'Out of allowance until 6pm', words: 'You have hit your usage limit · resets 6pm', reset: '6pm', resetAt: now - 40 * HOUR }, now)
   l.runOut({ at: now - 2 * HOUR, key: 'opencode-go/deepseek-v4.1-flash', chat: 'HP-202/Agent', role: 'task', reason: 'Out of allowance until 5pm', words: 'You have hit your usage limit · resets 5pm', reset: '5pm', resetAt: now + 3 * HOUR }, now)
-  // the demo's week was read already: no backfill notice
+  // the demo's week was read already: no backfill notice. Claude Code's plan limits, as a read of its own would give them
+  // (fictional, as the rest of the demo): one window refilled since, which says nothing of now
+  l.setQuota('anthropic', {
+    windows: [
+      { name: '5 h', usedPct: 62, resetAt: now + 2 * HOUR },
+      { name: 'Week', usedPct: 41, resetAt: now + 3 * 24 * HOUR },
+      { name: 'Last month', usedPct: 10, resetAt: now - HOUR },
+    ],
+    source: 'demo',
+    at: now,
+  })
   l.markBackfilled(now)
   return l
 }
