@@ -41,6 +41,35 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
     }
   })
 
+  test("a space's own sub-limit reads under its row, and its line opens the editor on that space: This space, then Clear here", async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      const s = await openModels(page)
+      await s.scrollIntoViewIfNeeded()
+      const table = s.getByRole('table', { name: 'Providers and models' })
+      const spark = table.getByRole('row').filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) }).first()
+      await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).click()
+      const pop = page.getByRole('dialog', { name: 'Edit this setting' })
+      await pop.getByRole('radio', { name: /This space/ }).check()
+      await pop.getByLabel('Which space').selectOption('gtm')
+      await pop.getByLabel('Most Spark (local) at once, in gtm').fill('2')
+      await pop.getByRole('button', { name: 'Save', exact: true }).click()
+      await pop.waitFor({ state: 'detached' })
+      // the line under the row names the space, its count of runs and its cap (none in the demo's world: 0 of 2)
+      const line = spark.getByRole('button', { name: /^Spark \(local\) in gtm: 0 of 2 at once/ })
+      await line.waitFor()
+      await line.click()
+      expect(await pop.getByRole('radio', { name: /This space/ }).isChecked()).toBe(true)
+      expect(await pop.getByLabel('Which space').inputValue()).toBe('gtm')
+      await pop.getByRole('button', { name: 'Clear here', exact: true }).click()
+      await pop.waitFor({ state: 'detached' })
+      await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).waitFor()
+      await line.waitFor({ state: 'detached' })
+    } finally {
+      await page.close()
+    }
+  })
+
   test('a task held for its model’s cap reads so in the Tasks list', async () => {
     const task = world.tasks.find((t) => t.id === 'HP-203')!
     const saved = { status: task.status, sub: task.sub }
@@ -50,6 +79,21 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
       await page.goto(url())
       await page.waitForSelector('section[aria-label="Tasks"] li')
       await page.locator('section[aria-label="Tasks"] li', { hasText: 'HP-203' }).getByText('Waiting for a free slot of spark (4 of 4 at once)').waitFor()
+    } finally {
+      Object.assign(task, saved)
+      await page.close()
+    }
+  })
+
+  test('a task held for its models reads the chain it waits on: each harness, and how full it is', async () => {
+    const task = world.tasks.find((t) => t.id === 'HP-203')!
+    const saved = { status: task.status, sub: task.sub }
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      Object.assign(task, { status: 'queued', sub: 'Waiting: spark (1 of 1 at once), commandcode (out until 17:00)' })
+      await page.goto(url())
+      await page.waitForSelector('section[aria-label="Tasks"] li')
+      await page.locator('section[aria-label="Tasks"] li', { hasText: 'HP-203' }).getByText('Waiting: spark (1 of 1 at once), commandcode (out until 17:00)').waitFor()
     } finally {
       Object.assign(task, saved)
       await page.close()

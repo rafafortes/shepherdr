@@ -251,7 +251,7 @@ function Line({ name, local, row, quota, read, now, shares, bold, indent, cap }:
         <span className="block whitespace-nowrap text-fg2">{conf.words}</span>
         <span className="block truncate text-[0.75rem] text-fg3">{nowWords(row.now)}</span>
         <span className="mt-0.5 block text-[0.75rem]">
-          <CapCell name={name} pattern={cap.pattern} atOnce={row.atOnce} caps={cap.caps} phone={false} open={cap.open === `cap|${cap.pattern}`} onOpen={cap.onOpen} />
+          <CapCell name={name} pattern={cap.pattern} atOnce={row.atOnce} caps={cap.caps} phone={false} openId={cap.open} onOpen={cap.onOpen} />
         </span>
       </td>
     </tr>
@@ -365,7 +365,7 @@ function Cards({ providers, now, cap }: { providers: SummaryProvider[]; now: num
               <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3">
                 <dt className="text-fg3">At once</dt>
                 <dd className="min-w-0">
-                  <CapCell name={p.name} pattern={p.provider} atOnce={p.atOnce} caps={cap.caps} phone open={cap.open === `cap|${p.provider}`} onOpen={cap.onOpen} />
+                  <CapCell name={p.name} pattern={p.provider} atOnce={p.atOnce} caps={cap.caps} phone openId={cap.open} onOpen={cap.onOpen} />
                 </dd>
               </div>
             </dl>
@@ -377,7 +377,7 @@ function Cards({ providers, now, cap }: { providers: SummaryProvider[]; now: num
                       <span className="min-w-0 truncate text-fg2">{m.label}</span>
                       <span className="shrink-0 text-right tabular-nums">{tokens(m.usage.d7.tokens)} in 7 d</span>
                     </span>
-                    <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={cap.caps} phone open={cap.open === `cap|${m.key}`} onOpen={cap.onOpen} />
+                    <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={cap.caps} phone openId={cap.open} onOpen={cap.onOpen} />
                   </li>
                 ))}
               </ul>
