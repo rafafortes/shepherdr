@@ -39,6 +39,8 @@ const CODE_PASSING: Record<string, string> = {
 const CODE_LASTING = ['unauthorized', 'bad_request', 'context_window_exceeded', 'usage_limit_exceeded', 'sandbox_error', 'authentication_failed', 'billing_error', 'invalid_request', 'model_not_found', 'max_output_tokens']
 const WORDS_AUTH = /\b(?:status|error|HTTP)\b[^\n]{0,12}\b40[13]\b|\b401 Unauthorized\b|please run \/login|login expired|not logged in|oauth token/i
 const WORDS_ALLOWANCE = /usage limit|(?<!rate.?)limit reached|hit your [\w ]*limit|\bquota\b|billing|credit balance|payment/i
+/** a prepaid balance that ran out: the provider says so with 402 Payment Required, or in these words */
+const WORDS_CREDIT = /insufficient (?:account )?(?:funds|balance|credits?)|out of credits?|credit balance|payment required/i
 const WORDS_LASTING = /not supported|unsupported|does not exist|may not exist|not found|unknown (?:provider|model)|invalid|context (?:window|length)|flagged|content policy/i
 const WORDS_PASSING: [RegExp, string][] = [
   [/at capacity/i, 'Model at capacity'],
@@ -48,12 +50,35 @@ const WORDS_PASSING: [RegExp, string][] = [
   [/\b(?:API error|status|HTTP)\b[^\n]{0,12}\b5\d\d\b|internal server error|bad gateway|service unavailable|upstream|server error|you can retry your request|try again later/i, 'Provider server error'],
 ]
 
-/** when an allowance comes back, as the provider says it ("resets 5pm", "try again at 5:00 PM"): " until 5pm" */
-const until = (words: string) => {
-  const m = words.match(/\bresets (?:at )?([^\n·.,;()]{1,24})|try again (?:at|after) ([^\n.,;()]{1,24})/i)
-  const when = (m?.[1] ?? m?.[2])?.trim()
-  return when ? ` until ${when}` : ''
+/** when an allowance comes back, as the provider says it: "resets 5pm", "try again at 5:00 PM", or an ISO time
+ *  ("resets at 2026-11-11T20:44:33Z", Command Code's) */
+const RESET = /\bresets (?:at )?(\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)|\bresets (?:at )?([^\n·.,;()]{1,24})|try again (?:at|after) ([^\n.,;()]{1,24})/i
+
+/** an ISO time, in this machine's time zone and with its name: "11 Nov, 17:44 GMT-3" (as it is given when it can't be read) */
+const local = (iso: string) => {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }).format(d)
 }
+
+/** the reset the provider's words give: what to show ("5pm", "11 Nov, 17:44 GMT-3") and, for an ISO time, when (ms) */
+export function resetOf(words: string): { when: string; at?: number } | undefined {
+  const m = RESET.exec(words)
+  if (!m) return undefined
+  if (m[1]) {
+    const at = Date.parse(m[1])
+    return { when: local(m[1]), ...(Number.isNaN(at) ? {} : { at }) }
+  }
+  const when = (m[2] ?? m[3])?.trim()
+  return when ? { when } : undefined
+}
+
+const until = (words: string) => {
+  const r = resetOf(words)
+  return r ? ` until ${r.when}` : ''
+}
+
+/** a reason that is a provider's run-out: its allowance or its credit is used up (retry.ts providerError) */
+export const runOutOf = (reason: string) => /^Out of (?:allowance|credit)/.test(reason)
 
 /** which errors pass by themselves. The CLI's own code decides where it has one (Codex codex_error_info, Claude Code's
  *  error and HTTP status); its words decide for the rest. Not recognised: it doesn't pass. */
@@ -61,6 +86,8 @@ export function providerError(words: string, code = '', status = 0): ProviderErr
   const c = code.toLowerCase()
   const said = WORDS_PASSING.find(([re]) => re.test(words))?.[1]
   if (c === 'unauthorized' || c === 'authentication_failed' || status === 401 || status === 403 || WORDS_AUTH.test(words)) return { passing: false, reason: 'Signed out' }
+  // a prepaid balance that is spent (402, or its words) is out of credit; a plan's allowance is out of allowance
+  if (status === 402 || WORDS_CREDIT.test(words)) return { passing: false, reason: `Out of credit${until(words)}` }
   if (c === 'usage_limit_exceeded' || c === 'billing_error' || WORDS_ALLOWANCE.test(words)) return { passing: false, reason: `Out of allowance${until(words)}` }
   if (CODE_LASTING.includes(c) || (status >= 400 && status < 500 && status !== 408 && status !== 429) || WORDS_LASTING.test(words)) return { passing: false, reason: c === 'context_window_exceeded' || /context (?:window|length)|too long/i.test(words) ? 'Context window full' : c === 'model_not_found' || /model/i.test(words) ? 'Model not available' : 'Provider refused it' }
   if (CODE_PASSING[c]) return { passing: true, reason: said ?? CODE_PASSING[c] }
@@ -112,6 +139,8 @@ export class Retries {
       /** it can't go on by itself: the human, or a backup agent */
       over: (key: string, r: Retry) => void
       changed: (key: string) => void
+      /** a new cut-off turn that is a provider's run-out (runOutOf): its log's cut, once (usage-ledger.ts keeps it) */
+      runOut?: (key: string, cut: Cut, reason: string) => void
     },
     private waits = WAITS,
   ) {
@@ -142,6 +171,7 @@ export class Retries {
     }
     const r: Retry = { cut: cut.id, tries, reason: e.passing ? `${e.reason}, still after ${tries} tries` : e.reason, words, over: true, ...(e.passing ? {} : { lasting: true }) }
     this.set(key, r)
+    if (!e.passing && runOutOf(e.reason)) this.hooks.runOut?.(key, cut, e.reason)
     // told by what comes next: a backup agent takes over, or the human hears
     this.hooks.over(key, r)
   }
