@@ -48,6 +48,22 @@ export function parseMaxAtOnce(text: string): { ok: true; entries: MaxEntry[] } 
   return { ok: true, entries }
 }
 
+/** the text a cap write starts from at a level: this machine's (Everywhere's, while it sets none), Everywhere's, or a space's
+ *  OWN text only. A space that sets none starts from nothing, never from the machine's entries: copying them there would
+ *  freeze them in the space, so a later change of the machine would not reach it */
+export function levelText(level: 'all' | 'machine' | 'space', t: { all: string; machine: string; space: string }): string {
+  return level === 'all' ? t.all : level === 'machine' ? t.machine || t.all : t.space
+}
+
+/** a level's text with one entry set to `max`, or with the entry taken out when `max` is undefined: the other entries of
+ *  the text stay as they are (an unreadable text keeps none of them) */
+export function withEntry(text: string, pattern: string, max?: number): string {
+  const p = parseMaxAtOnce(text)
+  const entries = (p.ok ? p.entries : []).filter((e) => e.pattern !== pattern)
+  if (max !== undefined) entries.push({ pattern, max })
+  return formatMaxAtOnce(entries)
+}
+
 /** the setting's text for some entries, in the order given ("" for none: off) */
 export function formatMaxAtOnce(entries: MaxEntry[]): string {
   return entries.map((e) => `${e.pattern}=${e.max}`).join(', ')

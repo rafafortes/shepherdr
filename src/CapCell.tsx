@@ -6,7 +6,7 @@
 // what Everywhere sets for the others.
 import { useState } from 'react'
 import { act } from './kernel.ts'
-import { atOnceWords, formatMaxAtOnce, MAX_CAP, parseMaxAtOnce, spaceCapWords, type MaxEntry } from '../shared/model-caps.ts'
+import { atOnceWords, levelText, MAX_CAP, parseMaxAtOnce, spaceCapWords, withEntry, type MaxEntry } from '../shared/model-caps.ts'
 import type { SummaryAtOnce, SummarySpaceText } from '../shared/types.ts'
 import { Pop } from './cell-pop.tsx'
 import { Ghost, Primary, Small } from './ui.tsx'
@@ -82,24 +82,24 @@ export function CapEditor({ name, pattern, caps, phone, space, onClose }: { name
   const [draft, setDraft] = useState(String(own(scope) ?? (scope === 'space' ? undefined : own('all')) ?? ''))
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  // a level's text starts from what it reads (the level above's, while it sets none of its own), so a change of one entry keeps
-  // the others as they are: this machine's from Everywhere's, a space's from this machine's (its sub-limit is the machine's list)
-  const base = (level: 'all' | 'machine' | 'space') => (level === 'all' ? caps.all : level === 'machine' ? caps.machine || caps.all : textOf('space') || caps.machine || caps.all)
+  // a write starts from the level's OWN entries (levelText): this machine's from Everywhere's while it sets none, a space's
+  // from its own text only, so a change of one entry keeps the others as they are and copies nothing into a space
+  const base = (level: 'all' | 'machine' | 'space') => levelText(level, { all: caps.all, machine: caps.machine, space: textOf('space') })
   const here = own(scope)
   const inherited = scope === 'machine' && here === undefined ? own('all') : scope === 'space' && here === undefined ? (own('machine') ?? own('all')) : undefined
   const above = scope === 'space' ? 'This machine' : 'Everywhere'
   const write = async (clear: boolean) => {
-    const next = entriesOf(base(scope)).filter((e) => e.pattern !== pattern)
+    let max: number | undefined
     if (!clear) {
       const n = Number(draft)
       if (!Number.isInteger(n) || n < 1 || n > MAX_CAP) {
         setError(`Write a whole number from 1 to ${MAX_CAP}, or clear the cap.`)
         return
       }
-      next.push({ pattern, max: n })
+      max = n
     }
     // nothing left at this level: its value goes back to what the level above gives, never to "off" (which would hold it)
-    const text = formatMaxAtOnce(next)
+    const text = withEntry(base(scope), pattern, max)
     const place = scope === 'all' ? 'all' : scope === 'machine' ? caps.place : (shown?.place ?? caps.place)
     setBusy(true)
     setError('')

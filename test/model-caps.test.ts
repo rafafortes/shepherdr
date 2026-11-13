@@ -2,7 +2,7 @@
 // (shared/model-caps.ts), kept at the machine's level or Everywhere (never a space's), and the entry that caps a model is
 // its own model entry, else its provider's (capFor).
 import { describe, expect, test } from 'bun:test'
-import { capFor, formatMaxAtOnce, MAX_CAP_ENTRIES, parseMaxAtOnce, providerOfKey } from '../shared/model-caps.ts'
+import { capFor, formatMaxAtOnce, levelText, MAX_CAP_ENTRIES, parseMaxAtOnce, providerOfKey, withEntry } from '../shared/model-caps.ts'
 import { Settings } from '../server/live/settings.ts'
 
 const fresh = () => new Settings({ everywhere: {}, machine: {}, spaces: {} })
@@ -52,6 +52,22 @@ describe('the text of models.maxAtOnce', () => {
   test('formats entries back to the text it reads', () => {
     expect(formatMaxAtOnce([{ pattern: 'spark', max: 4 }, { pattern: 'radeon', max: 1 }])).toBe('spark=4, radeon=1')
     expect(formatMaxAtOnce([])).toBe('')
+  })
+
+  test("a space's sub-limit is written from its own text only: a space that sets none copies nothing of the machine's", () => {
+    // this machine sets spark=4 and radeon=1; the space sets nothing of its own yet
+    const texts = { all: '', machine: 'spark=4, radeon=1', space: '' }
+    expect(levelText('space', texts)).toBe('')
+    // saving spark=2 for the space writes that entry alone, never the machine's radeon=1 along with it
+    expect(withEntry(levelText('space', texts), 'spark', 2)).toBe('spark=2')
+    // a space's own entries stay as they are when another one changes, and clearing takes only that one out
+    const own = { ...texts, space: 'spark=2, anthropic=1' }
+    expect(withEntry(levelText('space', own), 'spark', 3)).toBe('anthropic=1, spark=3')
+    expect(withEntry(levelText('space', own), 'spark')).toBe('anthropic=1')
+    // the machine's own write still starts from Everywhere's entries while the machine sets none
+    expect(levelText('machine', { all: 'radeon=1', machine: '', space: '' })).toBe('radeon=1')
+    // an unreadable text keeps none of its entries: the write sets only the one it was given
+    expect(withEntry('not a cap', 'spark', 2)).toBe('spark=2')
   })
 
   test('a model key names its provider; a model entry caps its model, else its provider caps it', () => {
