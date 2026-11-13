@@ -56,6 +56,26 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(providerError('bad request', 'invalid_request', 400).reason).toBe('Provider refused it')
   })
 
+  test("OpenCode's own errors: its plan's or free models' allowance, a rate limit, a dead key, a model it lacks", () => {
+    // its quota error is out of allowance, unless the provider says it is a rate limit: then it waits
+    expect(ending('opencode-go-usage-limit-made')).toEqual({ passing: false, reason: 'Out of allowance' })
+    expect(ending('opencode-rate-limit-made')).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(ending('opencode-auth-made')).toEqual({ passing: false, reason: 'Signed out' })
+    expect(ending('opencode-transport-made')).toEqual({ passing: true, reason: 'Connection dropped' })
+    expect(ending('opencode-no-route-made')).toEqual({ passing: false, reason: 'Model not available' })
+    // its free models' allowance says the same words, and a reset in them is kept
+    expect(providerError('Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to Go to keep going.', 'provider.quota', 429).reason).toBe('Out of allowance')
+    expect(providerError('Rate limit exceeded. Please try again later.', 'provider.quota', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('Rate limit exceeded, resets 5pm', 'provider.quota', 429).reason).toBe('Rate limited')
+    expect(providerError('Insufficient balance. Top up your OpenCode account.', 'provider.quota', 402)).toEqual({ passing: false, reason: 'Out of credit' })
+    expect(providerError('OpenAI Chat stream ended without finish_reason', 'provider.invalid-output', 200)).toEqual({ passing: true, reason: 'Connection dropped' })
+    expect(providerError('Model answer cut short', 'provider.invalid-output', 200)).toEqual({ passing: true, reason: 'Provider answer cut short' })
+    expect(providerError('Streaming response failed: capacity is temporarily limited', 'provider.rate-limit', 200)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('Upstream failed', 'provider.internal', 500)).toEqual({ passing: true, reason: 'Provider server error' })
+    expect(providerError('Function not found', 'provider.invalid-request', 404)).toEqual({ passing: false, reason: 'Provider refused it' })
+    expect(providerError('Blocked by content filter', 'provider.content-filter')).toEqual({ passing: false, reason: 'Provider refused it' })
+  })
+
   test('a reset given as an ISO time is shown in this machine\'s time, with its zone name', () => {
     const iso = '2026-11-11T20:44:33Z'
     const shown = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }).format(new Date(iso))
