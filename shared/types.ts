@@ -857,6 +857,8 @@ export interface QuotaWindow {
   used?: number
   cap?: number
   resetAt?: number
+  /** what is left of a count that has no cap (Command Code's credits) */
+  left?: number
 }
 /** a provider's quota figure: its windows, where the read came from and when, and whether the numbers are an estimate */
 export interface QuotaFigure {
