@@ -43,8 +43,9 @@ export type LogEvent =
   | { kind: 'question'; id: string; at: number; tool: string; items: CliQuestionItem[] }
   /** the question with this tool call id got its answer */
   | { kind: 'answered'; id: string; at: number }
-  /** tokens one model call used (input, cached input and output together); ids are unique per call, so they sum */
-  | { kind: 'usage'; id: string; at: number; tokens: number }
+  /** tokens one model call used (input, cached input and output together); ids are unique per call, so they sum. model:
+   *  the model it ran on as the CLI names it (pi's with its provider in front); cost: pi's own estimate of it, in dollars */
+  | { kind: 'usage'; id: string; at: number; tokens: number; model?: string; cost?: number }
   /** the agent's turn began: your message, news, or (Claude Code) its background work woke it */
   | { kind: 'turn-start'; id: string; at: number }
   /** the agent's turn ended (the CLI wrote its end-of-turn marker) */
