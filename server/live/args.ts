@@ -276,6 +276,16 @@ Settings and automations
                                                  it; the last five apply points are kept
   shepherdr profile rename <name> <new-name>     (quote a name with spaces)
   shepherdr profile delete <name>                the saved values go; the undo points that name it stay until used
+  shepherdr profile schedule <name> "<rule>" [--waiting]
+                                                 applies the profile when the rule comes due, in the time zone of Settings:
+                                                 "daily 22:00", "weekdays 8:00", "mon,fri 16:00", "once 2026-11-20 9:00", or an
+                                                 RRULE. --waiting also moves the waiting tasks its task and reviewer settings
+                                                 reach, as --apply-waiting does. Only this machine runs schedules; one that
+                                                 came due while Shepherdr was off applies its latest due time, once, on start
+  shepherdr profile schedules                    each profile's schedules, numbered, with their next and last runs
+  shepherdr profile schedule-on <name> [<n>]     switch a schedule on or off (<n> from profile schedules; needed when a profile
+  shepherdr profile schedule-off <name> [<n>]    has more than one)
+  shepherdr profile unschedule <name> [<n>]      removes a schedule; the profile stays
   shepherdr set <key> <value> [--machine | --space NAME] [--apply-waiting]
   shepherdr unset <key> [--machine | --space NAME]
                                                  defaults are set Everywhere (none), for this machine (--machine)

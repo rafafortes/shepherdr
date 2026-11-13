@@ -53,7 +53,7 @@ import { carryOn, Retries, type Retry } from './retry.ts'
 import { CATALOG, CLI_NAME, CLIS, kindOf, MAX_BACKUPS, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
 import { modelsMatrix } from './models-matrix.ts'
 import { changeWords, Profiles, ProfileStore, previewWords, PROFILES_ON_MAIN, waitingPicks, type Change, type Site } from './profiles.ts'
-import { ProfileSchedules } from './profile-schedule.ts'
+import { ProfileSchedules, scheduleRows, scheduleWords } from './profile-schedule.ts'
 import { startVoice } from './voice.ts'
 import { SECRET_NAME, secretPages, Vault } from './secrets.ts'
 import { diffFiles, diffPatch, listFiles, pullRequest, readFile } from './worktree.ts'
@@ -3498,11 +3498,34 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return n ? [`${n} waiting ${n === 1 ? 'task' : 'tasks'} would change with it: add --apply-waiting to move ${n === 1 ? 'it' : 'them'} too.`] : []
   }
 
-  /** shepherdr profile list | save | show | preview | apply | undo | rename | delete: named settings of this machine (profiles.ts) */
+  /** the profile a command's words open with: the longest run of them that is a saved name (a name may have spaces
+   *  unquoted), and the words after it */
+  private profileWords(rest: string[]): { name?: string; words: string[] } {
+    for (let k = rest.length; k > 0; k--) {
+      const found = this.profiles.find(rest.slice(0, k).join(' '))
+      if (found) return { name: found.name, words: rest.slice(k) }
+    }
+    return { words: rest }
+  }
+
+  /** the id of a profile's schedule by its number in shepherdr profile schedules: the only one needs no number */
+  private scheduleRef(name: string, n: string | undefined): string {
+    const list = this.profiles.find(name)?.schedules ?? []
+    if (!list.length) throw new Error(`${name} has no schedule. shepherdr profile schedules lists them.`)
+    if (n === undefined) {
+      if (list.length === 1) return list[0]!.id
+      throw new Error(`${name} has ${list.length} schedules: give the number of one, 1 to ${list.length} (shepherdr profile schedules lists them).`)
+    }
+    const i = /^\d+$/.test(n) ? Number(n) : 0
+    if (i < 1 || i > list.length) throw new Error(`No schedule ${n} on ${name}: 1 to ${list.length}.`)
+    return list[i - 1]!.id
+  }
+
+  /** shepherdr profile list | save | show | preview | apply | undo | rename | delete | schedule…: named settings of this machine (profiles.ts) */
   private profileCommand(op: string | undefined, rest: string[], p: Parsed): string {
     if (BOX) throw new Error(PROFILES_ON_MAIN)
     const name = rest.join(' ')
-    const usage = 'shepherdr profile list | save <name> [--limits] [--force] | show <name> | preview <name> | apply <name> [--apply-waiting] | undo [--apply-waiting] | rename <name> <new-name> | delete <name>'
+    const usage = 'shepherdr profile list | save <name> [--limits] [--force] | show <name> | preview <name> | apply <name> [--apply-waiting] | undo [--apply-waiting] | rename <name> <new-name> | delete <name> | schedule <name> "<rule>" [--waiting] | schedules | schedule-on|schedule-off <name> [<n>] | unschedule <name> [<n>]'
     const refusals = (r: { error?: string; refused: { where: string; label: string; error: string }[] }) => [r.error, ...r.refused.map((x) => `  ${x.where} · ${x.label}: ${x.error}`)].join('\n')
     switch (op) {
       case undefined:
@@ -3563,6 +3586,52 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (!r.ok) throw new Error(r.error)
         this.emit('snapshot')
         return `Deleted ${name}. Its undo points stay until they are used.`
+      }
+      case 'schedule': {
+        const usageSchedule = 'shepherdr profile schedule <name> "<rule>" [--waiting], the rule in words ("daily 22:00") or as an RRULE'
+        const found = this.profileWords(rest)
+        if (!found.name) throw new Error(rest.length ? `No profile called ${rest[0]}.` : usageSchedule)
+        const rule = found.words.join(' ')
+        if (!rule) throw new Error(usageSchedule)
+        const r = this.profileSchedules.add(found.name, rule, { waiting: p.flags.has('waiting') })
+        if (!r.ok) throw new Error(r.error)
+        this.emit('snapshot')
+        const next = scheduleRows({ schedules: [r.schedule!] }, this.settings.zone())[0]?.next
+        return `Scheduled ${found.name}: ${scheduleWords(r.schedule!, this.settings.zone())}.${next ? ` Next: ${next}.` : ''}`
+      }
+      case 'schedules': {
+        const v = this.profiles.view()
+        const rows = v.profiles.filter((x) => x.schedules?.length)
+        if (!rows.length) return 'No schedules yet. shepherdr profile schedule <name> "daily 22:00" adds one.'
+        return [
+          ...rows.flatMap((x) => [
+            x.name,
+            ...(x.schedules ?? []).map((s, i) => `  ${i + 1}  ${s.words}${s.waiting ? ' · also the waiting tasks' : ''}${s.on ? '' : ' · off'}${s.next ? ` · next ${s.next}` : ''}${s.last ? ` · ${s.last}` : ''}`),
+          ]),
+          ...(v.next ? [v.next] : []),
+        ].join('\n')
+      }
+      case 'schedule-on':
+      case 'schedule-off':
+      case 'unschedule': {
+        const found = this.profileWords(rest)
+        if (!found.name) throw new Error(rest.length ? `No profile called ${rest[0]}.` : usage)
+        const id = this.scheduleRef(found.name, found.words[0])
+        // the row as it reads now, and again once changed (a switch on has its next run then)
+        const rowOf = () => this.profiles.view().profiles.find((x) => x.name === found.name)?.schedules?.find((s) => s.id === id)
+        const what = `${found.name}: ${rowOf()?.words ?? 'its schedule'}`
+        if (op === 'unschedule') {
+          const r = this.profileSchedules.remove(found.name, id)
+          if (!r.ok) throw new Error(r.error)
+          this.emit('snapshot')
+          return `Removed the schedule of ${what}.`
+        }
+        const on = op === 'schedule-on'
+        const r = this.profileSchedules.edit(found.name, id, { on })
+        if (!r.ok) throw new Error(r.error)
+        this.emit('snapshot')
+        const next = rowOf()?.next
+        return `${what} is ${on ? 'on' : 'off'} now.${on && next ? ` Next: ${next}.` : ''}`
       }
       default:
         throw new Error(usage)

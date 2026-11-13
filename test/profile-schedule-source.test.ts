@@ -134,3 +134,45 @@ describe('scheduled profiles: a due one applies, says so, and moves what it reac
     expect(view().next).toBeUndefined()
   })
 })
+
+describe('shepherdr profile schedule: the command, verb by verb', () => {
+  test('schedule, schedules, schedule-off and -on, and unschedule say what they did; a mistake says what to type', async () => {
+    expect(src.settings.set('time.zone', 'Europe/Madrid', 'all')).toEqual({ ok: true })
+    expect(await src.act({ type: 'profile-save', name: 'cs-night', force: true })).toMatchObject({ ok: true })
+    const cli = (args: string[]) => src.cli(args, {})
+    // a rule in words, quoted or not, with --waiting: the profile's name is the longest run of words that is one
+    const one = await cli(['profile', 'schedule', 'cs-night', 'daily 22:00', '--waiting'])
+    expect(one.code).toBe(0)
+    expect(one.out).toMatch(/^Scheduled cs-night: Every day at 22:00 \(Madrid\) · also the waiting tasks\. Next: .+\.\n$/)
+    expect((await cli(['profile', 'schedule', 'cs-night', 'weekdays', '8:00'])).out).toMatch(/^Scheduled cs-night: Monday to Friday at 8:00/)
+    expect((await cli(['profile', 'schedule', 'cs-night', 'FREQ=DAILY;BYHOUR=21;BYMINUTE=30'])).code).toBe(0)
+    // the list: numbered, with what each is, and the next runs
+    const list = await cli(['profile', 'schedules'])
+    expect(list.code).toBe(0)
+    expect(list.out).toMatch(/^cs-night\n  1  Every day at 22:00 \(Madrid\) · also the waiting tasks · next .+\n  2  Monday to Friday at 8:00 \(Madrid\) .+\n  3  Every day at 21:30 \(Madrid\) .+\n/)
+    // a number is needed once a profile has more than one schedule
+    expect(await cli(['profile', 'schedule-off', 'cs-night'])).toEqual({ out: 'cs-night has 3 schedules: give the number of one, 1 to 3 (shepherdr profile schedules lists them).\n', code: 1 })
+    expect(await cli(['profile', 'schedule-off', 'cs-night', '9'])).toEqual({ out: 'No schedule 9 on cs-night: 1 to 3.\n', code: 1 })
+    const off = await cli(['profile', 'schedule-off', 'cs-night', '2'])
+    expect(off).toEqual({ out: 'cs-night: Monday to Friday at 8:00 (Madrid) is off now.\n', code: 0 })
+    expect((await cli(['profile', 'schedules'])).out).toContain('  2  Monday to Friday at 8:00 (Madrid) · off\n')
+    const on = await cli(['profile', 'schedule-on', 'cs-night', '2'])
+    expect(on.out).toMatch(/^cs-night: Monday to Friday at 8:00 \(Madrid\) is on now\. Next: .+\.\n$/)
+    expect(await cli(['profile', 'unschedule', 'cs-night', '3'])).toEqual({ out: 'Removed the schedule of cs-night: Every day at 21:30 (Madrid).\n', code: 0 })
+    expect(await cli(['profile', 'unschedule', 'cs-night', '2'])).toMatchObject({ code: 0 })
+    // one left: its number is not needed
+    expect(await cli(['profile', 'schedule-on', 'cs-night'])).toMatchObject({ code: 0, out: expect.stringContaining('is on now') })
+    expect(await cli(['profile', 'unschedule', 'cs-night'])).toMatchObject({ code: 0 })
+    expect(await cli(['profile', 'unschedule', 'cs-night'])).toEqual({ out: 'cs-night has no schedule. shepherdr profile schedules lists them.\n', code: 1 })
+    expect(await cli(['profile', 'schedules'])).toMatchObject({ code: 0 })
+    // a mistake says what to type
+    expect(await cli(['profile', 'schedule'])).toMatchObject({ code: 1, out: expect.stringContaining('shepherdr profile schedule <name> "<rule>" [--waiting]') })
+    expect(await cli(['profile', 'schedule', 'cs-night'])).toMatchObject({ code: 1, out: expect.stringContaining('shepherdr profile schedule <name>') })
+    expect(await cli(['profile', 'schedule', 'nope', 'daily 22:00'])).toEqual({ out: 'No profile called nope.\n', code: 1 })
+    expect(await cli(['profile', 'schedule', 'cs-night', 'every evening, more or less'])).toMatchObject({ code: 1, out: expect.stringContaining("Can't read the time rule") })
+    expect(await cli(['profile', 'schedule', 'cs-night', 'off'])).toMatchObject({ code: 1, out: expect.stringContaining('Say when it applies') })
+    expect(await src.act({ type: 'profile-delete', name: 'cs-night' })).toEqual({ ok: true })
+    expect(src.settings.set('time.zone', null, 'all')).toEqual({ ok: true })
+    expect(await cli(['profile', 'schedules'])).toEqual({ out: 'No schedules yet. shepherdr profile schedule <name> "daily 22:00" adds one.\n', code: 0 })
+  })
+})
