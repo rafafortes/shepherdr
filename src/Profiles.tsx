@@ -5,12 +5,12 @@
 import clsx from 'clsx'
 import { useEffect, useState } from 'react'
 import { waitingKind } from '@shared/apply-waiting.ts'
-import type { ProfileChange, ProfilePreview, ProfileRefusal, ProfileSummary, ProfilesView } from '@shared/types.ts'
+import type { ProfileChange, ProfilePreview, ProfileRefusal, ProfileScheduleRow, ProfileSummary, ProfilesView } from '@shared/types.ts'
 import { act, useSnap } from './kernel.ts'
 import { askWaitingMany } from './apply-waiting.tsx'
 import { Anchored, OnTop } from './anchored.tsx'
 import { Dialog } from './rowmenu.tsx'
-import { Ghost, Menu, MenuItem, MenuLabel, MenuSeparator, Primary, Small, field } from './ui.tsx'
+import { Ghost, Menu, MenuItem, MenuLabel, MenuSeparator, Primary, Small, Tab, Tabs, field } from './ui.tsx'
 
 /** a time in words on the screen: just now, 5 min ago, 2 h ago, 3 d ago */
 function since(t: number) {
@@ -83,6 +83,7 @@ export function ProfilesBar({ phone }: { phone: boolean }) {
           <span className="truncate font-medium text-fg">{view.active}</span>
         </div>
         {status ? <Small className="truncate">{status}</Small> : null}
+        {view.next ? <Small className="truncate">{view.next}</Small> : null}
       </div>
       <span className="relative inline-flex">
         <Ghost aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
@@ -300,10 +301,127 @@ function UndoDialog({ name, label, onClose, onNote }: { name: string; label: str
   )
 }
 
-/** Manage profiles: rename one, or delete it (its saved values go; the undo points that name it stay until they are used) */
+/** the days a schedule runs on, as the editor offers them: every day, weekdays, weekends, or the days picked (0 is Monday) */
+type Days = 'every' | 'weekdays' | 'weekends' | 'some'
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const DAY_CODES = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
+const sameDays = (a: number[] | null, b: number[] | null) => (a === null || b === null ? a === b : a.length === b.length && a.every((x, i) => x === b[i]))
+/** the rule the editor writes: one time a day, every day or on the days picked (time rules, trigger.ts, read it back) */
+export function ruleWritten(time: string, days: number[] | null) {
+  const [h, m] = time.split(':').map(Number)
+  const by = days?.length ? `BYDAY=${days.map((d) => DAY_CODES[d]).join(',')};` : ''
+  return `FREQ=${by ? 'WEEKLY' : 'DAILY'};${by}BYHOUR=${h};BYMINUTE=${m}`
+}
+/** a schedule's days as the editor shows them: from its own shape, or every day for one the editor does not write */
+function shapeOf(row?: ProfileScheduleRow): { days: Days; picked: number[]; time: string } {
+  const f = row?.form
+  if (!f) return { days: 'every', picked: [], time: '22:00' }
+  if (f.days === null) return { days: 'every', picked: [], time: f.time }
+  if (sameDays(f.days, [0, 1, 2, 3, 4])) return { days: 'weekdays', picked: f.days, time: f.time }
+  if (sameDays(f.days, [5, 6])) return { days: 'weekends', picked: f.days, time: f.time }
+  return { days: 'some', picked: f.days, time: f.time }
+}
+const DAYS_LABEL: Record<Days, string> = { every: 'Every day', weekdays: 'Weekdays', weekends: 'Weekends', some: 'Some days' }
+
+/** a schedule's line: its words, whether it waits for the tasks and is on, and its next and last run */
+function scheduleText(s: ProfileScheduleRow) {
+  return `${s.words}${s.waiting ? ' · also the waiting tasks' : ''}${s.on ? '' : ' · off'}`
+}
+
+/** one schedule's editor, for a new one (no row) or a change: the days, the time, waiting tasks and on. Saved through the
+ *  server, which refuses a rule it cannot read and says why; a change that keeps the rule keeps its next time */
+function ScheduleForm({ name, row, onNote, onDone, onCancel }: { name: string; row?: ProfileScheduleRow; onNote: (s: string) => void; onDone: () => void; onCancel: () => void }) {
+  const start = shapeOf(row)
+  const [days, setDays] = useState<Days>(start.days)
+  const [picked, setPicked] = useState<number[]>(start.picked)
+  const [time, setTime] = useState(start.time)
+  const [waiting, setWaiting] = useState(row?.waiting ?? false)
+  const [on, setOn] = useState(row?.on ?? true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const chosen = days === 'some' ? picked : days === 'every' ? null : days === 'weekdays' ? [0, 1, 2, 3, 4] : [5, 6]
+  const kept = !!row?.form && row.form.time === time && sameDays(row.form.days, chosen)
+  const words = `${days === 'some' ? (picked.length ? [...picked].sort((a, b) => a - b).map((d) => DAY_NAMES[d]).join(', ') : 'Some days') : DAYS_LABEL[days]} at ${time || '—'}${waiting ? ' · also the waiting tasks' : ''}`
+  const toggleDay = (d: number) => setPicked(picked.includes(d) ? picked.filter((x) => x !== d) : [...picked, d])
+  const save = async () => {
+    if (!time) return setError('Give the time, like 22:00.')
+    if (days === 'some' && !picked.length) return setError('Pick the days it applies on.')
+    setBusy(true)
+    setError('')
+    const body = { type: 'profile-schedule' as const, name, ...(row ? { id: row.id } : {}), ...(row && kept ? {} : { rule: ruleWritten(time, chosen) }), waiting, on }
+    const r = (await act(body).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok: boolean; error?: string }
+    setBusy(false)
+    if (!r.ok) return setError(r.error ?? "That didn't save.")
+    onNote(`Saved the schedule of ${name}: ${words}.`)
+    onDone()
+  }
+  return (
+    <form
+      aria-label={row ? `Change a schedule of ${name}` : `Add a schedule to ${name}`}
+      className="flex flex-col gap-3 rounded-box p-3 shadow-[inset_0_0_0_1px_var(--line2)]"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void save()
+      }}
+    >
+      <Tabs label="Days" className="flex-wrap">
+        {(['every', 'weekdays', 'weekends', 'some'] as Days[]).map((d) => (
+          <Tab key={d} on={days === d} onClick={() => setDays(d)}>
+            {DAYS_LABEL[d]}
+          </Tab>
+        ))}
+      </Tabs>
+      {days === 'some' ? (
+        <div role="group" aria-label="Days of the week" className="flex flex-wrap gap-1.5">
+          {DAY_NAMES.map((d, i) => (
+            <button
+              key={d}
+              type="button"
+              aria-pressed={picked.includes(i)}
+              onClick={() => toggleDay(i)}
+              className="press-dim h-8 min-w-11 rounded-full px-2 text-[0.8125rem] text-fg2 shadow-[inset_0_0_0_1px_var(--line2)] aria-pressed:bg-fg aria-pressed:text-bg coarse:h-10 phone:h-10 phone:text-[0.875rem]"
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="flex flex-col gap-1">
+        <label className="flex flex-wrap items-center gap-2">
+          <span className="text-fg2">At</span>
+          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={clsx('h-9 rounded-full px-3 text-fg', field)} />
+        </label>
+        <Small>In the time zone of Settings.</Small>
+      </div>
+      <label className="flex items-start gap-2">
+        <input type="checkbox" checked={waiting} onChange={() => setWaiting(!waiting)} className="mt-1" />
+        <span>Also the waiting tasks: they take the profile's task and reviewer settings too, with no question</span>
+      </label>
+      <label className="flex items-center gap-2">
+        <input type="checkbox" checked={on} onChange={() => setOn(!on)} />
+        <span>On</span>
+      </label>
+      <Small className="text-pretty">{words}</Small>
+      {error ? <Refused text={error} /> : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <Primary type="submit" disabled={busy}>
+          {busy ? 'Saving…' : 'Save'}
+        </Primary>
+        <Ghost onClick={onCancel}>Cancel</Ghost>
+      </div>
+    </form>
+  )
+}
+
+/** Manage profiles: rename one, or delete it (its saved values go; the undo points that name it stay until they are used),
+ *  and its schedules: each one in words, with its next and last run, changed, switched on or off, or removed */
 function ManageDialog({ onClose, onNote }: { onClose: () => void; onNote: (s: string) => void }) {
   const [list, setList] = useState<ProfileSummary[]>([])
   const [edit, setEdit] = useState<{ name: string; mode: 'rename' | 'delete'; to: string } | null>(null)
+  // a schedule's editor: of a profile, and which one (none: a new one)
+  const [form, setForm] = useState<{ name: string; id?: string } | null>(null)
+  // a schedule waiting for its removal to be confirmed
+  const [gone, setGone] = useState<{ name: string; id: string } | null>(null)
   const [error, setError] = useState('')
   const reload = () =>
     act({ type: 'profiles' })
@@ -320,43 +438,91 @@ function ManageDialog({ onClose, onNote }: { onClose: () => void; onNote: (s: st
     setEdit(null)
     void reload()
   }
+  /** a schedule's editor is done: closed, and the list reads again */
+  const done = () => {
+    setForm(null)
+    void reload()
+  }
+  /** a schedule switched on or off, or removed: the server answers, then the list reads again */
+  const scheduleChange = async (body: { type: 'profile-schedule'; name: string; id: string; on: boolean } | { type: 'profile-schedule-remove'; name: string; id: string }) => {
+    setError('')
+    const r = (await act(body).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok: boolean; error?: string }
+    if (!r.ok) return setError(r.error ?? "That didn't change.")
+    onNote(body.type === 'profile-schedule-remove' ? `Removed a schedule of ${body.name}.` : `${body.name}'s schedule is ${body.on ? 'on' : 'off'} now.`)
+    setGone(null)
+    void reload()
+  }
   return (
     <Dialog title="Manage profiles" cancel="Done" onCancel={onClose} buttons={null}>
-      <ul className="flex flex-col gap-3">
-        {list.map((p) => (
-          <li key={p.name} className="flex flex-col gap-1.5">
-            {edit?.name === p.name && edit.mode === 'rename' ? (
-              <form
-                className="flex flex-wrap items-center gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  void change({ type: 'profile-rename', name: p.name, to: edit.to })
-                }}
-              >
-                <input aria-label={`New name for ${p.name}`} className={clsx('h-9 min-w-0 flex-1 rounded-full px-3 text-fg', field)} value={edit.to} maxLength={40} autoFocus onChange={(e) => setEdit({ ...edit, to: e.target.value })} />
-                <Primary type="submit" disabled={!edit.to.trim()}>
-                  Rename
-                </Primary>
-                <Ghost onClick={() => setEdit(null)}>Cancel</Ghost>
-              </form>
-            ) : edit?.name === p.name && edit.mode === 'delete' ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <Small className="min-w-0 flex-1 text-pretty">{`Delete ${p.name}? Its saved values go; the undo points that name it stay until they are used.`}</Small>
-                <Ghost onClick={() => setEdit(null)}>Cancel</Ghost>
-                <Primary onClick={() => change({ type: 'profile-delete', name: p.name })}>Delete</Primary>
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate font-medium text-fg">{p.name}</span>
-                  <Small>{`${holds(p)} · saved ${since(p.saved)}${p.applied ? ` · applied ${since(p.applied)}` : ''}`}</Small>
+      <ul className="flex flex-col gap-4">
+        {list.map((p) => {
+          const editing = form?.name === p.name
+          return (
+            <li key={p.name} className="flex flex-col gap-2">
+              {edit?.name === p.name && edit.mode === 'rename' ? (
+                <form
+                  className="flex flex-wrap items-center gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    void change({ type: 'profile-rename', name: p.name, to: edit.to })
+                  }}
+                >
+                  <input aria-label={`New name for ${p.name}`} className={clsx('h-9 min-w-0 flex-1 rounded-full px-3 text-fg', field)} value={edit.to} maxLength={40} autoFocus onChange={(e) => setEdit({ ...edit, to: e.target.value })} />
+                  <Primary type="submit" disabled={!edit.to.trim()}>
+                    Rename
+                  </Primary>
+                  <Ghost onClick={() => setEdit(null)}>Cancel</Ghost>
+                </form>
+              ) : edit?.name === p.name && edit.mode === 'delete' ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Small className="min-w-0 flex-1 text-pretty">{`Delete ${p.name}? Its saved values and its schedules go; the undo points that name it stay until they are used.`}</Small>
+                  <Ghost onClick={() => setEdit(null)}>Cancel</Ghost>
+                  <Primary onClick={() => change({ type: 'profile-delete', name: p.name })}>Delete</Primary>
                 </div>
-                <Ghost onClick={() => setEdit({ name: p.name, mode: 'rename', to: p.name })}>Rename</Ghost>
-                <Ghost onClick={() => setEdit({ name: p.name, mode: 'delete', to: p.name })}>Delete</Ghost>
-              </div>
-            )}
-          </li>
-        ))}
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate font-medium text-fg">{p.name}</span>
+                    <Small>{`${holds(p)} · saved ${since(p.saved)}${p.applied ? ` · applied ${since(p.applied)}` : ''}`}</Small>
+                  </div>
+                  <Ghost onClick={() => setEdit({ name: p.name, mode: 'rename', to: p.name })}>Rename</Ghost>
+                  <Ghost onClick={() => setEdit({ name: p.name, mode: 'delete', to: p.name })}>Delete</Ghost>
+                </div>
+              )}
+              {/* its schedules: each one, then the editor of one, or the button that adds one */}
+              {(p.schedules ?? []).map((s) =>
+                editing && form?.id === s.id ? (
+                  <ScheduleForm key={s.id} name={p.name} row={s} onNote={onNote} onDone={done} onCancel={() => setForm(null)} />
+                ) : gone?.name === p.name && gone.id === s.id ? (
+                  <div key={s.id} role="group" aria-label="Remove this schedule?" className="flex flex-wrap items-center gap-2 pl-3">
+                    <Small className="min-w-0 flex-1 text-pretty">{`Remove ${s.words}? The profile stays.`}</Small>
+                    <Ghost onClick={() => setGone(null)}>Cancel</Ghost>
+                    <Primary onClick={() => scheduleChange({ type: 'profile-schedule-remove', name: p.name, id: s.id })}>Remove</Primary>
+                  </div>
+                ) : (
+                  <div key={s.id} className="flex flex-wrap items-center gap-2 pl-3">
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className={clsx('text-pretty', s.on ? 'text-fg' : 'text-fg2')}>{scheduleText(s)}</span>
+                      <Small className="text-pretty">{[s.on && s.next ? `Next ${s.next}` : '', s.last ?? ''].filter(Boolean).join(' · ')}</Small>
+                    </div>
+                    <Ghost onClick={() => setForm({ name: p.name, id: s.id })}>Change</Ghost>
+                    <Ghost onClick={() => scheduleChange({ type: 'profile-schedule', name: p.name, id: s.id, on: !s.on })}>{s.on ? 'Turn off' : 'Turn on'}</Ghost>
+                    <Ghost onClick={() => setGone({ name: p.name, id: s.id })}>Remove</Ghost>
+                  </div>
+                ),
+              )}
+              {editing && !form?.id ? (
+                <div className="pl-3">
+                  <ScheduleForm name={p.name} onNote={onNote} onDone={done} onCancel={() => setForm(null)} />
+                </div>
+              ) : editing ? null : (
+                <div className="pl-3">
+                  <Ghost onClick={() => setForm({ name: p.name })}>Add a schedule…</Ghost>
+                </div>
+              )}
+            </li>
+          )
+        })}
       </ul>
       {error ? <Refused text={error} /> : null}
     </Dialog>
