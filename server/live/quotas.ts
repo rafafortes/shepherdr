@@ -4,7 +4,7 @@
 // why; a read that gives a hint (no bubblewrap, no key) says what to add and fails nothing. Each window at or over the
 // warning share (quota.alertAt) alerts once, and again only once it has refilled or a new window came, or after it was
 // under the share.
-import { clock, providerName, shareOf, type QuotaInput } from './models-summary.ts'
+import { clock, leftWords, providerName, shareOf, type QuotaInput } from './models-summary.ts'
 import { opencodeEstimate, OPENCODE } from './quota-estimate.ts'
 import type { Reading } from './plan-limits.ts'
 import type { UsageLedger } from './usage-ledger.ts'
@@ -173,9 +173,8 @@ export class Quotas {
       if (armed === (w.resetAt ?? 0)) continue
       if (armed !== undefined && w.resetAt === undefined) continue
       this.d.usage.setAlerted(key, w.resetAt ?? 0)
-      const left = Math.max(0, Math.round(100 - pct))
       const refill = w.resetAt !== undefined ? `it refills ${clock(w.resetAt)}` : f.estimate ? "it drains as its calls leave the window" : "it has no refill time"
-      this.d.alert(provider, w.name, `${providerName(provider)} is at ${Math.round(pct)}%`, `${w.name} window: ${left}% left, and ${refill}.`)
+      this.d.alert(provider, w.name, `${providerName(provider)} is at ${Math.round(pct)}%`, `${w.name} window: ${leftWords(pct)}, and ${refill}.`)
     }
   }
 }

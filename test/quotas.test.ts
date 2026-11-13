@@ -169,6 +169,7 @@ describe('the warning share: each window alerts once, and again only after it re
     expect(w.alerts).toHaveLength(1)
     expect(w.alerts[0]).toMatchObject({ provider: 'anthropic', window: '5 h', title: 'Claude Code is at 85%' })
     expect(w.alerts[0]!.body).toMatch(/^5 h window: 15% left, and it refills \w{3}/)
+    expect(w.alerts[0]!.body).not.toMatch(/over|at its limit/)
     // the same window, read again: no second alert
     await w.q.tick(T + EVERY)
     expect(w.alerts).toHaveLength(1)

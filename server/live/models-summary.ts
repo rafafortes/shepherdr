@@ -318,6 +318,9 @@ function warningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): 
   return out.sort((a, b) => (a.level === b.level ? 0 : a.level === 'risk' ? -1 : 1))
 }
 
+/** what is left of a window in words: its share used against 100 (an estimate past its learned limit is over it) */
+export const leftWords = (share: number) => (share > 100 ? 'over its limit' : share === 100 ? 'at its limit' : `${Math.round(100 - share)}% left`)
+
 /** a window's share used, in percent: its own, or its count against its cap (none for a count with no cap) */
 export const shareOf = (w: QuotaWindow): number | undefined => w.usedPct ?? (w.used !== undefined && w.cap ? (w.used / w.cap) * 100 : undefined)
 
@@ -340,7 +343,7 @@ function quotaWarningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider
     if (r.local || !r.quota) continue
     const over = overWindows(r.quota, at, f.now)
     if (!over.length) continue
-    const words = over.map(({ w, share }) => `${w.name} is at ${Math.round(share)}%: ${Math.max(0, Math.round(100 - share))}% left${w.resetAt !== undefined ? `, refills ${clock(w.resetAt)}` : ''}`).join('; ')
+    const words = over.map(({ w, share }) => `${w.name} is at ${Math.round(share)}%: ${leftWords(share)}${w.resetAt !== undefined ? `, refills ${clock(w.resetAt)}` : ''}`).join('; ')
     // the cells that use it most: the configured slots of this provider, counted by role and space, the top two
     const cells = new Map<string, { role: MatrixRole; spaceKey: string; space: string; n: number }>()
     for (const c of conf.filter((x) => providerOf(x.key) === r.provider)) {
