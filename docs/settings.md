@@ -160,8 +160,9 @@ It needs OpenCode 2.x.
 - **Providers.** A call counts under its provider, as pi's do. `opencode-go` is the Go plan: a call of it made from pi and
   one made from OpenCode are one plan, one estimate ([Quotas](#quotas)). `opencode` is OpenCode Zen, whose free models
   have no quota (its row says so: "OpenCode Zen (free)"). `nvidia` is NVIDIA's API ("NVIDIA API"). `lmstudio` and `ollama` are
-  local servers OpenCode has built in: local, like the Spark, with no quota. Another provider OpenCode adds shows its id
-  until it has a name here.
+  local servers OpenCode has built in: local, like the Spark, with no quota. Another provider OpenCode adds shows its id in
+  words until it has a name here (`amd-tokenlab` is "AMD TokenLab" and has one; an id with no name is title-cased, with the
+  acronyms AI, AMD, API, GPU, LLM and NVIDIA in capitals).
 - **Its errors.** OpenCode's own error types are read as they are: `provider.quota` is out of allowance (a plan's, or a
   free model's "usage limit"), unless the provider says it is a rate limit, which waits like one; `provider.auth` is signed
   out; `provider.rate-limit`, a timeout or a dropped connection wait and try again; `provider.no-route` is a model it does
@@ -226,6 +227,18 @@ of this machine's agents (`usage.json` in Shepherdr's home, read from the agents
   (`models-summary`, a read action). A provider is `opencode-go`, `commandcode`, `spark`… (pi's model ids carry it), `anthropic`
   for Claude Code and `openai` for Codex; OpenCode's are `opencode` (Zen, free models), `nvidia` and its local servers (see
   [OpenCode](#opencode)). A local server (spark, radeon, avell, dell, lmstudio, ollama) has no quota: it is marked local.
+  Each provider is named as the table names it (`nvidia` is "NVIDIA API", `amd-tokenlab` "AMD TokenLab"; an id with no name
+  of its own is title-cased, see [OpenCode](#opencode)).
+- **Every provider a CLI offers.** The table lists each provider that any CLI offers on this machine, read from each CLI's
+  own list: pi's models (the ones its `enabledModels` names, see below), OpenCode's models, Claude Code's models (its
+  `anthropic`) and Codex's (its `openai`). A provider in use (a slot, an agent, a task waiting on it, a run or a run-out in
+  the last 7 days, or a cap) comes first, by its week's tokens. The others are under **Other providers (N)**, closed here: each
+  with its models (the ones its CLI lists) and dashes for the numbers, so nothing is shown as used that is not. Each one has
+  its cap cell too (as on Limits, below), so a cap can be set before the provider is used.
+- **Which models a list offers.** pi's list holds every model of every provider it has a login for; Shepherdr offers the ones
+  its `enabledModels` (in pi's settings) names, in the order those patterns name them. To offer more of a provider's models,
+  name them there, or with a glob: `nvidia/**` offers every NVIDIA model (in this reading a single `*` stops at the `/` inside
+  an id, so `nvidia/*` does not reach `nvidia/mistralai/…`). OpenCode's list is what `opencode` has enabled.
 - **Configured, and now**: how many role slots point at it, as primaries or backups (its roles, and its spaces, in the
   tooltip), and what runs on it now: live agents (working ones counted apart), tasks waiting to start on it, and tasks
   waiting to be reviewed by it.
@@ -373,7 +386,10 @@ row. The profiles bar sits above it (a profile saved from here includes the limi
   counted now (`1 of 2 at once`). A cell with no entry of its own says `machine's total applies (4 at once)`, or `no
   sub-limit` when the machine sets none. A sub-limit sits inside the machine's total: it never raises it.
 - **Providers and models**. Each provider with a cap, an agent, a run or usage, with its models under it (OpenCode's providers
-  too: `opencode-go`, the free `opencode` Zen models, `nvidia`, a local `ollama`, each as its own row). **Max at once** is the
+  too: `opencode-go`, the free `opencode` Zen models, `nvidia`, a local `ollama`, each as its own row). **Other providers (N)**,
+  open here, lists every other provider a CLI offers on this machine (the same list as the Models summary, see
+  [Summary](#summary)): `NVIDIA API`, `AMD TokenLab` and the rest, each with its models and the cap cell of its own, so a cap is
+  set before the provider is used; once it has one, it moves up with the providers in use. **Max at once** is the
   machine's total for the row (the cap of [Most agents at once](#models), set at this machine or Everywhere; its sub-limits show
   under it). Beside it: **running now** by role (tasks, coordinators, the advisor, reviewers), **held**, **out now** (until
   when), and the **quota**, read only (the details are in Models). A local server is marked local.
