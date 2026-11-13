@@ -111,6 +111,11 @@ describe('the caps and the backup chain: held with the chain named, and started 
     expect(w.engine.subOf(s3)).toBe('Waiting: spark (1 of 1 at once), openai (1 of 1 at once)')
     expect(cards(w, `${s3.id}/Agent`)).toContain('waiting: spark (1 of 1 at once), openai (1 of 1 at once) — every model it may use is full or out')
     expect(startedOn(w, s3.id)).toBe(false)
+    expect(w.engine.waitingFor(s3)).toEqual(['spark', 'openai'])
+    // a start that finds the wait (as one a pass races) holds the task again, and starts nothing
+    await (w.engine as unknown as { startTask(t: unknown): Promise<void> }).startTask(s3)
+    expect(s3.held?.why).toBe('model')
+    expect(startedOn(w, s3.id)).toBe(false)
     // the codex one ends: the held task starts on the first that frees, its backup (openai) with room
     await w.engine.done(s2.id, 'Nothing to change.')
     w.agentIs(`${s2.id}/Agent`, 'idle')

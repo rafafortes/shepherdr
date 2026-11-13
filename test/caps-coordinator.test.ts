@@ -183,3 +183,56 @@ describe('a start the caps put on a backup goes back to its primary once it is i
     expect(t.t.onBackup).toBeDefined()
   })
 })
+
+describe("a coordinator a cap started on a backup goes back too, and a way back that fails is logged", () => {
+  test('its primary has room again and it is idle: it goes back to the primary; a stale mark of a gone place is dropped', async () => {
+    src.settings.set('models.maxAtOnce', 'pi=1', 'machine')
+    const busy = await space('caps-cback-busy')
+    src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'pi', logs: [], started: Date.now() } as never
+    working.add(busy.id)
+    const { id } = await space('caps-cback')
+    await startCoordinator(id)
+    expect(starts.at(-1)).toMatchObject({ key: id, kind: 'codex' })
+    // a mark of a place that is gone is no coordinator any more
+    ;(src as unknown as { capStarts: Map<string, { step: number }> }).capStarts.set('p:gone:nowhere', { step: 1 })
+    // still busy: it stays on its backup
+    await src.watchReturns()
+    expect(starts.filter((x) => x.key === id)).toHaveLength(1)
+    // the busy one ends, and the coordinator is idle: it goes back to its primary
+    working.delete(busy.id)
+    idle.add(id)
+    working.delete(id)
+    await src.watchReturns()
+    expect(starts.at(-1)).toMatchObject({ key: id, kind: 'pi' })
+    expect((src as unknown as { capStarts: Map<string, unknown> }).capStarts.has(id)).toBe(false)
+    expect(cards(id).some((c) => c.startsWith('Back on pi'))).toBe(true)
+  })
+
+  test('a way back that fails is logged and the agent stays where it is', async () => {
+    src.settings.set('models.maxAtOnce', 'pi=1', 'machine')
+    const busy = await space('caps-fail-busy')
+    src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'pi', logs: [], started: Date.now() } as never
+    working.add(busy.id)
+    const { id } = await space('caps-fail')
+    await startCoordinator(id)
+    working.delete(busy.id)
+    idle.add(id)
+    working.delete(id)
+    const restart = src.agents.restart
+    src.agents.restart = (async () => {
+      throw new Error('herdr is not answering')
+    }) as never
+    const errors: string[] = []
+    const was = console.error
+    console.error = (...a: unknown[]) => void errors.push(a.join(' '))
+    try {
+      await src.watchReturns()
+    } finally {
+      console.error = was
+      src.agents.restart = restart
+    }
+    expect(errors.some((e) => e.includes(`couldn't move ${id} back to its primary: herdr is not answering`))).toBe(true)
+    expect(starts.at(-1)).toMatchObject({ key: id, kind: 'codex' })
+  })
+})
+
