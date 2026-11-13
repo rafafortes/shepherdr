@@ -128,6 +128,49 @@ before it, as Agents' Add a backup does), and at the end **Max tasks** (`space.m
   read action; the summary phase reads the same table).
 - Only this machine's levels are shown. Another machine's models are on that machine's Settings page.
 
+### Summary
+
+Under the table (on a phone, under the cards) is the **Summary**: where the work runs, per provider and per model, and what
+the providers have been doing. It is read from the same settings as the table, plus what runs and waits now and the usage
+of this machine's agents (`usage.json` in Shepherdr's home, read from the agents' logs, never from another session folder).
+
+- **Per provider**: a row with its share of the tokens in the last 24 h and 7 d (a thin bar each), its **models** under it
+  (`models-summary`, a read action). A provider is `opencode-go`, `commandcode`, `spark`… (pi's model ids carry it), `anthropic`
+  for Claude Code and `openai` for Codex. A local server (spark, radeon, avell, dell) has no quota: it is marked local.
+- **Configured, and now**: how many role slots point at it, as primaries or backups (its roles, and its spaces, in the
+  tooltip), and what runs on it now: live agents (working ones counted apart), tasks waiting to start on it, and tasks
+  waiting to be reviewed by it.
+- **Used**: the tokens and calls of the last 5 h, 24 h and 7 d. The windows are whole hours: the hour a window starts in
+  counts whole, so "5 h" is 5 to 6 hours.
+- **Run-outs**: how many a provider had in the last 7 days, the last one (its reason, when, and its reset when the provider
+  gave one), and whether it is **out right now**: until its known reset, or until its return watch sees the primary back, or
+  until a call of it goes through after the run-out. A reset that has passed says nothing of now.
+- **Quota**: each provider's quota windows, once a read of its quota has given them (the read is a later step: until then
+  the cell shows —). A window that has refilled since its read is left out.
+
+**Warnings** come first, each with what to do in words, and a **Change…** that opens the cell it names (a setting change), or
+**Hide**. Hide keeps it off the list for this browser session only (it is back in a new one). The rules:
+
+- a role whose **primary and every backup** sit on providers that are out right now (a risk);
+- every role of a space on **one cloud provider**, with no backup on another (a note; a local server is not warned about, as it has no quota);
+- a backup on the **same model** as its primary on a cloud provider: when the primary runs out, the backup does too (a note);
+- a provider that **ran out twice in 7 days** (a note);
+- **several working agents on one local model**: counted, since Shepherdr sets no limit for a local model yet (a note).
+
+**What is an estimate.** The tokens and the calls are what the logs say each model call used. pi's cost is its own catalog
+estimate for each call, shown as "≈ $… estimate": it is never a bill, and a provider whose logs carry no cost shows none.
+
+**What is kept, and for how long.** Each call is counted once, however often its log is read (a resumed session copies the
+calls before it into its new file, and those are not counted again). The first read after the update reads every log of
+Shepherdr's agents from its start (the backfill, once: until it is done the summary says so). Calls are kept 35 days, run-outs
+60 days. A run-out alert, below, is the only thing that is sent.
+
+**Run-outs and alerts.** A turn a provider cut off because its allowance or its credit is used up (a "usage limit", a "resets
+…" time, or a 402 "Insufficient account funds") is a **run-out**: it is kept with its time and model, and the agent's
+backup takes over as before. The first one of a provider that was fine before alerts you once: the title says "OpenCode Go
+ran out", the body names the chat it cut off and the reason; the others while it is still out do not. A reset the provider gives as an
+ISO time is shown in this machine's time, with its zone name.
+
 ### Profiles
 
 A **profile** is a named snapshot of the models of this machine's levels: Everywhere, this machine and each space (the home
@@ -211,6 +254,17 @@ The rule words are `daily 22:00`, `weekdays 8:00`, `weekends 9:30`, `mon,fri 16:
 (`FREQ=DAILY;BYHOUR=22;BYMINUTE=0`). A profile with one schedule takes `schedule-off night` with no number; with more, the
 number from `shepherdr profile schedules`. With the two above, the card comes at 22:00 each day with the night setup, and
 at 08:00 with the day one, and the bar says which of them is next.
+
+## Quota
+
+**Warn when a provider is at** (`quota.alertAt`, Everywhere only): the share of a provider's quota at which Shepherdr warns,
+from 50 to 95 %, or off. It is used once a provider's quota is read (see Summary); until then only a run-out alerts. Off:
+only a run-out alerts.
+
+```sh
+shepherdr set quota.alertAt 80%    # warn at 80 %, the default
+shepherdr set quota.alertAt off    # only a run-out alerts
+```
 
 ## Backup agents
 

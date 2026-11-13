@@ -414,3 +414,23 @@ whole v2.0 line**, so most of this list is in; what is left is what upstream nev
 32. **[done, PR #36](https://github.com/rafafortes/shepherdr/pull/36) [3.1.15–3.1.28] A repo's tasks follow a renamed or moved folder** (`6dfedbd8`, part of SHEP-141; S–M) — a space is
     found again by its repo's own id, so renaming `~/www/misc/...` stops needing a symlink (`lyvora-app` and its
     `polylog` link); risk: it must never land on a copy that shares a `.git`, and a task's worktree stays where it is.
+
+## Not from upstream: the Models summary, its warnings and the usage ledger, built here
+
+Checked 2026-11-13 against upstream `main` (3.x line) and `v2.0` (fetched that day): `git grep` for run-out, "out of
+allowance", 402, credit, usage ledger and per-model usage in both lines' code, `git log -i` for usage, quota and limit,
+and the public issues with "usage limit quota" (`gh issue list`, none matched). Upstream counts no model's calls per
+provider and remembers no run-out; what it has is plan limits, and an insights add-on that counts how the person uses the
+screens. Taken and turned down, from those:
+
+- **Taken: the window of a plan limit, and that a refilled window says nothing of now** (`3a3ce931`, #553 "plan usage
+  limits"): the quota slot is a list of windows with a used share, a count and a refill time, and the summary leaves out a
+  window whose refill is past. Its reads are not here: they are the next step's (the Claude Code reader, `/usage`, and
+  Codex's rate-limit read, in the sealed processes of `c0ee1971`, #561, which that step ports to 2.0's code, not its
+  helpers).
+- **Turned down: the usage insights add-on** (`181d3568`, SHEP-100): it records screens, features and time on them for the
+  person, on their own machines; it is not a count of the model calls, and its architecture (`mods/`, `service/`) is not
+  2.0's. Nothing from it is in this line.
+- **Ours: the per-provider ledger** (`usage-ledger.ts`, `usage-feed.ts`): each model call counted once per chat by its own
+  id, from the logs of Shepherdr's agents only, with the run-outs (retry.ts: allowance, credit, the 402) and the alert once
+  per run of them. See [settings](settings.md#summary).
