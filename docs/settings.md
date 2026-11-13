@@ -131,7 +131,8 @@ before it, as Agents' Add a backup does), and at the end **Max tasks** (`space.m
 ### Summary
 
 Under the table (on a phone, under the cards) is the **Summary**: where the work runs, per provider and per model, and what
-the providers have been doing. It is read from the same settings as the table, plus what runs and waits now and the usage
+the providers have been doing. Its table reads Provider, Quota, Run-outs, Used, Configured and now, left to right, and fits
+a 1280 to 1440 px window without sideways scroll (the Provider column stays in view if it must scroll). It is read from the same settings as the table, plus what runs and waits now and the usage
 of this machine's agents (`usage.json` in Shepherdr's home, read from the agents' logs, never from another session folder).
 
 - **Per provider**: a row with its share of the tokens in the last 24 h and 7 d (a thin bar each), its **models** under it
@@ -140,7 +141,8 @@ of this machine's agents (`usage.json` in Shepherdr's home, read from the agents
 - **Configured, and now**: how many role slots point at it, as primaries or backups (its roles, and its spaces, in the
   tooltip), and what runs on it now: live agents (working ones counted apart), tasks waiting to start on it, and tasks
   waiting to be reviewed by it.
-- **Used**: the tokens and calls of the last 5 h, 24 h and 7 d. The windows are whole hours: the hour a window starts in
+- **Used**: the tokens and calls of the last 5 h, 24 h and 7 d, one line each ("5 h 237k · 12": tokens, then calls; the
+  full words and pi's estimated cost are in the line's tooltip). The windows are whole hours: the hour a window starts in
   counts whole, so "5 h" is 5 to 6 hours.
 - **Run-outs**: how many a provider had in the last 7 days, the last one (its reason, when, and its reset when the provider
   gave one), and whether it is **out right now**: until its known reset, or until its return watch sees the primary back, or

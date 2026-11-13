@@ -34,9 +34,10 @@ describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => 
       // a bar per provider: its share of the tokens in a day and in a week
       expect(await s.getByRole('img', { name: /^24 h: \d+% of the tokens$/ }).count()).toBeGreaterThan(0)
       expect(await s.getByRole('img', { name: /^7 d: \d+% of the tokens$/ }).count()).toBeGreaterThan(0)
-      // what each window used, in tokens and calls; pi's cost as an estimate
-      expect(await table.getByText(/tokens · \d+ calls/).count()).toBeGreaterThan(0)
-      expect(await table.getByText(/est\.$/).count()).toBeGreaterThan(0)
+      // what each window used, one compact line ("5 h 237k · 12"); the words in full and pi's cost as an estimate are its tooltip
+      expect(await table.getByText(/^5 h \d+k · \d+$/).count()).toBeGreaterThan(0)
+      expect(await table.locator('li[title$="est."]').count()).toBeGreaterThan(0)
+      expect(await table.locator('li[title^="5 h: "]').first().getAttribute('title')).toMatch(/^5 h: .+ tokens · \d+ calls?/)
       // OpenCode Go ran out twice this week, and is out now until a time
       expect(await table.getByText(/^2 run-outs in 7 d$/).count()).toBeGreaterThan(0)
       expect(await table.getByText(/^Out until /).count()).toBeGreaterThan(0)
@@ -45,6 +46,28 @@ describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => 
       expect(await table.getByRole('img', { name: '5 h: 62% used' }).count()).toBe(1)
       expect(await table.getByText(/Last month/).count()).toBe(0)
       expect(await table.getByText('—').count()).toBeGreaterThan(0)
+    } finally {
+      await page.close()
+    }
+  })
+
+  test('the columns in order, Provider first and Configured last; the whole summary fits a 1440 px window with no sideways scroll', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      const s = await openModels(page)
+      await s.scrollIntoViewIfNeeded()
+      const table = s.getByRole('table', { name: 'Providers and models' })
+      expect(await table.getByRole('columnheader').allTextContents()).toEqual(['Provider', 'Quota', 'Run-outs', 'Used', 'Configured, and now'])
+      // the table is no wider than its box, and the page does not scroll sideways
+      const fit = await table.evaluate((el) => {
+        const box = el.parentElement!
+        return { table: el.getBoundingClientRect().width, box: box.clientWidth, scroll: box.scrollWidth, page: document.documentElement.scrollWidth, view: document.documentElement.clientWidth }
+      })
+      expect(fit.scroll).toBeLessThanOrEqual(fit.box)
+      expect(fit.page).toBeLessThanOrEqual(fit.view)
+      // a long model id is cut with an ellipsis and keeps its full name in the tooltip
+      const id = table.locator('th[scope="row"] span.truncate').last()
+      expect(await id.getAttribute('title')).toBeTruthy()
     } finally {
       await page.close()
     }

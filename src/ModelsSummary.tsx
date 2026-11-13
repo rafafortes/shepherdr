@@ -155,14 +155,22 @@ export default function ModelsSummary({ s, phone, go, extra }: { s: Summary; pho
 
 /** the table on a desktop: a provider's row, then its models under it */
 function Table({ providers, now }: { providers: SummaryProvider[]; now: number }) {
-  const head = ['Provider', 'Configured, and now', 'Used', 'Run-outs', 'Quota']
+  // the Provider column stays in view when the table is narrower than its content (a phone-sized window): sticky, opaque
+  const head = ['Provider', 'Quota', 'Run-outs', 'Used', 'Configured, and now']
   return (
     <div className="max-w-full overflow-x-auto overscroll-contain">
-      <table aria-label="Providers and models" className="w-full min-w-[44rem] border-separate border-spacing-0 text-[0.8125rem]">
+      <table aria-label="Providers and models" className="w-full table-fixed border-separate border-spacing-0 text-[0.8125rem]">
+        <colgroup>
+          <col className="w-[22%]" />
+          <col className="w-[30%]" />
+          <col className="w-[13%]" />
+          <col className="w-[16%]" />
+          <col className="w-[19%]" />
+        </colgroup>
         <thead>
           <tr>
             {head.map((h) => (
-              <th key={h} scope="col" className="pr-4 pb-2 text-left font-medium text-fg3">
+              <th key={h} scope="col" className={clsx('pr-4 pb-2 text-left font-medium text-fg3', h === 'Provider' && 'sticky left-0 z-[1] bg-bg dark:bg-bubble')}>
                 {h}
               </th>
             ))}
@@ -183,7 +191,8 @@ function Table({ providers, now }: { providers: SummaryProvider[]; now: number }
   )
 }
 
-/** the three windows of a row's usage, one line each: the tokens, the calls, and pi's cost as an estimate */
+/** the three windows of a row's usage, one compact line each ("5 h 237k · 12": tokens, then calls); the words in full,
+ *  with pi's cost as an estimate, are the line's tooltip */
 function UsedLines({ row }: { row: SummaryRow }) {
   const lines: [string, SummaryUsage][] = [
     ['5 h', row.usage.h5],
@@ -191,16 +200,17 @@ function UsedLines({ row }: { row: SummaryRow }) {
     ['7 d', row.usage.d7],
   ]
   return (
-    <dl className="grid grid-cols-[2.25rem_auto] gap-x-2 whitespace-nowrap tabular-nums">
+    <ul className="flex flex-col whitespace-nowrap tabular-nums">
       {lines.map(([k, u]) => (
-        <Fragment key={k}>
-          <dt className="text-fg3">{k}</dt>
-          <dd className={u.calls ? 'text-fg' : 'text-fg3'}>
-            {u.calls ? [`${tokens(u.tokens)} tokens`, plural(u.calls, 'call', 'calls'), u.cost !== undefined ? `≈ $${u.cost.toFixed(2)} est.` : ''].filter(Boolean).join(' · ') : '—'}
-          </dd>
-        </Fragment>
+        <li
+          key={k}
+          className={u.calls ? 'text-fg' : 'text-fg3'}
+          title={u.calls ? [`${k}: ${tokens(u.tokens)} tokens`, plural(u.calls, 'call', 'calls'), u.cost !== undefined ? `≈ $${u.cost.toFixed(2)} est.` : ''].filter(Boolean).join(' · ') : `${k}: no calls`}
+        >
+          <span className="text-fg3">{k}</span> {u.calls ? `${tokens(u.tokens)} · ${u.calls}` : '—'}
+        </li>
       ))}
-    </dl>
+    </ul>
   )
 }
 
@@ -210,25 +220,25 @@ function Line({ name, local, row, quota, read, now, shares, bold, indent }: { na
   const runs = runWords(row.runOuts)
   return (
     <tr className={clsx(bold && 'border-t border-line')}>
-      <th scope="row" className={clsx('max-w-56 py-2 pr-4 text-left align-top font-normal', indent && 'pl-5')}>
+      <th scope="row" className={clsx('sticky left-0 z-[1] bg-bg py-2 pr-4 text-left align-top font-normal dark:bg-bubble', indent && 'pl-5')}>
         <span className={clsx('block truncate', bold ? 'font-medium' : 'text-fg2')} title={name}>
           {name}
           {local ? <span className="ml-1.5 text-fg3">local</span> : null}
         </span>
         {shares}
       </th>
-      <td className="pr-4 py-2 align-top" title={conf.title}>
-        <span className="block whitespace-nowrap text-fg2">{conf.words}</span>
-        <span className="block text-[0.75rem] whitespace-nowrap text-fg3">{nowWords(row.now)}</span>
+      <td className="py-2 pr-4 align-top text-fg2">
+        <QuotaView quota={quota} read={read} now={now} />
       </td>
-      <td className="pr-4 py-2 align-top">
-        <UsedLines row={row} />
-      </td>
-      <td className="pr-4 py-2 align-top">
+      <td className="py-2 pr-4 align-top">
         <RunOutWords runs={runs} />
       </td>
-      <td className="py-2 align-top text-fg2">
-        <QuotaView quota={quota} read={read} now={now} />
+      <td className="py-2 pr-4 align-top">
+        <UsedLines row={row} />
+      </td>
+      <td className="py-2 align-top" title={conf.title}>
+        <span className="block whitespace-nowrap text-fg2">{conf.words}</span>
+        <span className="block truncate text-[0.75rem] text-fg3">{nowWords(row.now)}</span>
       </td>
     </tr>
   )
@@ -326,18 +336,18 @@ function Cards({ providers, now }: { providers: SummaryProvider[]; now: number }
             </div>
             <Shares row={p} />
             <dl className="flex flex-col gap-1.5 text-[0.8125rem] phone:text-[0.9375rem]">
-              <Pair k="Configured" v={conf.words} title={conf.title} />
-              <Pair k="Now" v={nowWords(p.now)} />
-              <Pair k="Last 5 h" v={usageWords(p.usage.h5).main} sub={usageWords(p.usage.h5).sub} />
-              <Pair k="Last 24 h" v={usageWords(p.usage.h24).main} sub={usageWords(p.usage.h24).sub} />
-              <Pair k="Last 7 d" v={usageWords(p.usage.d7).main} sub={usageWords(p.usage.d7).sub} />
-              <Pair k="Run-outs" v={runs.count} sub={[runs.last, runs.out].filter(Boolean).join(' · ')} need={!!runs.out} />
               <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3">
                 <dt className="text-fg3">Quota</dt>
                 <dd className="min-w-0">
                   <QuotaView quota={p.quota} read={p.quotaRead} now={now} />
                 </dd>
               </div>
+              <Pair k="Run-outs" v={runs.count} sub={[runs.last, runs.out].filter(Boolean).join(' · ')} need={!!runs.out} />
+              <Pair k="Last 5 h" v={usageWords(p.usage.h5).main} sub={usageWords(p.usage.h5).sub} />
+              <Pair k="Last 24 h" v={usageWords(p.usage.h24).main} sub={usageWords(p.usage.h24).sub} />
+              <Pair k="Last 7 d" v={usageWords(p.usage.d7).main} sub={usageWords(p.usage.d7).sub} />
+              <Pair k="Configured" v={conf.words} title={conf.title} />
+              <Pair k="Now" v={nowWords(p.now)} />
             </dl>
             {p.models.length ? (
               <ul className="flex flex-col gap-1.5 border-t border-line pt-2">
