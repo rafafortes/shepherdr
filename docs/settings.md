@@ -217,6 +217,9 @@ It needs OpenCode 2.x.
   their session in OpenCode's history.
 - **Free models.** OpenCode's free `opencode/*-free` models work, because the agent is OpenCode's own client. Shepherdr
   never gives a session an id of its own: OpenCode's free models refuse one.
+- **Models shown.** `opencode.models` (Settings → OpenCode, Everywhere or this machine) limits the models the menus offer to
+  glob patterns on `provider/model` or on the model alone, comma or space separated, any case: `shepherdr set opencode.models '*-free'`.
+  `all` (the default, or empty) offers every model OpenCode lists. The others stay usable by id.
 
 ## Models
 
