@@ -104,10 +104,11 @@
     mix. A first in line passes neither.
   - **What counts.** The agents of this machine that hold a slot now (its working, starting or waiting-on-you tasks, as the
     machine's own limit counts them), each on the model its agent runs (its live agent's model, else the model it starts
-    on), and this machine's coordinators that are working on a model right now. A merge waiting in line or in its gate
-    holds no slot, so it counts nothing. **Not counted:** the advisor's and the reviewers' headless runs, and any request
-    that comes from outside Shepherdr (another app or a script on the same server): Shepherdr cannot see those, so a
-    server that serves them too needs a lower cap than its own work alone would.
+    on), this machine's coordinators that are working on a model right now, and the advisor's headless runs while each one
+    runs (a slot of the model it runs on, held for the whole run and given back when it ends, even on a failure). A merge
+    waiting in line or in its gate holds no slot, so it counts nothing. **Not counted yet:** the reviewers' headless runs,
+    and any request that comes from outside Shepherdr (another app or a script on the same server): Shepherdr cannot see
+    those, so a server that serves them too needs a lower cap than its own work alone would.
   - **Where a task starts.** A task starts on the first harness of its chain that is not out and has room under every entry
     that covers it: its own agent first, then its backups in the order its coordinator's `--set` keeps them (Settings'
     `task.fallback…` otherwise). A primary at its cap starts the task on Backup 1 (a card in its chat: `Started on Codex:
@@ -500,6 +501,15 @@ the question about the tasks already created never comes up for it (`shepherdr s
   is not sure of, and anything that would decide a permission, deleting or losing work, force-pushing, changing
   Settings, secrets or credentials, merging past "ask me first", spending money or a paid plan, or what touches a live
   site or other people.
+- **Caps.** The advisor's runs count toward models.maxAtOnce like a task's: the first harness of its chain (its primary,
+  then its backups in order) with room under the caps and not out runs the question, and holds a slot of its model for
+  the run. A run that gives no answer falls to the next harness that has room, each harness once for that question. When
+  every harness left is full or out, nothing runs: the question **waits**, and its card names each one that is full or
+  out (`The advisor waits: spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (4 of 4 at once), openai/unknown (out until 17:00)`).
+  It is asked again by itself as soon as a harness has room (looked at with every health look, and when an advisor run
+  ends), and the human's Ask the advisor asks it again at once. A question answered meanwhile is never answered by the
+  advisor: it is closed as yours. The wait is not a time limit: the advisor's own timing (Answers for you after) decided
+  when it was first asked, and the wait goes on from there.
 - **How it runs.** One headless run per question, read only: Claude Code with Read, Grep and Glob only, pi with its
   read, grep, find and ls tools, Codex in its read-only sandbox; no MCP servers, no session kept, no agent's secret,
   in the task's worktree (a coordinator's folder for its own questions), for at most eight minutes. It reads the
