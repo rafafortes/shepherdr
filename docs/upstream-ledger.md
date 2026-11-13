@@ -311,6 +311,16 @@ Settings at each level. Upstream's Autopilot presets are trigger shortcuts. So a
 models and the limits, applied in one step with a preview, all-or-nothing writes and undo, is ours: `profiles.ts`, the
 profiles bar on Settings → Models, and `shepherdr profile`. See [settings](settings.md#profiles).
 
+## Not from upstream: scheduled profiles, built here
+
+Checked 2026-11-13 against upstream `main` (3.x line) and `v2.0` (fetched that day): `git grep` for schedul, profile and
+switch in both lines' code, `git log -i --grep` for profile, schedul and switch, and the public issues (`gh issue list`
+with "profile" and "schedule settings"). Nothing switches a settings snapshot by the clock: upstream's schedules are
+tasks and automations (`b5bd88da`, `efce7768`), and its agent profiles (`f92ab4aa`, #51) are launch setups picked by name.
+So a profile that applies itself on a rule, with the waiting tasks on or off and a note in the home chat, is ours:
+`profile-schedule.ts` and the schedules in Manage profiles. Its rules are the time rules automations use (`trigger.ts`).
+See [settings](settings.md#schedules).
+
 ## Not from upstream: a Settings change applied to the tasks already waiting, built here
 
 Checked 2026-11-12 against upstream `main` (`ef3be074`, 3.1.32 line) and `v2.0` (`ebb17d58`): code, history, issues and

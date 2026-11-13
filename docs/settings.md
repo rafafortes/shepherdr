@@ -169,6 +169,49 @@ shepherdr profile preview night             # what applying it would change now
 `shepherdr profile show <name>` says what a profile sets, at each level; `rename <name> <new-name>` (quote a name with spaces)
 and `delete <name>` keep the list tidy; `undo` does what the screen's undo does.
 
+#### Schedules
+
+A profile can apply itself at a time: a **schedule** is a rule (every day at 22:00, on weekdays at 8:00, on some days) and
+the profile it applies. Each profile may have several. The rules are the ones Autopilot's heartbeat and automations use: a
+time rule in the time zone Settings sets (time.zone), written as an RRULE or as "once 2026-11-20 9:00". Shepherdr keeps them
+on the profile, in `profiles.json`.
+
+- **Manage profiles** (the bar's menu) lists each profile's schedules in words, with its next and last run: **Change**
+  (days, time, waiting tasks, on), **Turn off** or **Turn on**, **Remove** (asked first), and **Add a schedule…**. The bar
+  says what comes next under the profile in force: "Next: night at 22:00, then day at 08:00".
+- **Also the waiting tasks** (off by default). Off: the apply changes the settings, and only new tasks take them. On: the
+  tasks already created that have not started (queued, To do, scheduled) take the profile's task and reviewer settings
+  when the schedule applies, exactly as the apply-to-waiting question would make them, without asking.
+- **It applies like a manual apply.** The same all-or-nothing check, the same undo point (Undo last apply puts it back), and
+  the same skipped and added spaces. A refused setting stops it, and nothing is written.
+- **Where it runs.** On the main machine only: a worker keeps no profiles and applies none. Shepherdr checks every minute.
+- **Where the note goes.** Each run leaves a card in the home space's chat: "Applied night, due Today 22:00: 3 settings
+  changed. Undo last apply puts them back." A refused apply also sends one alert, "night was not applied", so it is seen
+  without opening the chat: one per refused run, never one every minute.
+- **A time it was off for.** When Shepherdr starts, a rule that came due while it was off applies its latest due time, once,
+  and the card says it was due while Shepherdr was not running. Earlier times it missed are not applied, nor applied
+  one by one: a burst of profiles after a night off is never what the schedule meant. The one left out is named in the card.
+- **Two rules at the same time.** When two are due in the same minute, the one defined later wins (a new rule counts as
+  defined when it was made, or when its rule or its on switch last changed). The other is left out, and the card says so.
+  Shepherdr does not refuse overlapping rules when they are saved: two profiles at 22:00 are a mistake the card points out.
+- **A refused apply is not retried in a loop.** It is reported once, with what was refused, and its next due time tries
+  again. A rule switched off, or one switched on again, is not caught up: it counts from when it came back.
+
+For example, the night and day setups from above, switched by the clock:
+
+```sh
+shepherdr profile schedule night "daily 22:00" --waiting   # tonight's setup at 22:00, the waiting tasks too
+shepherdr profile schedule day "daily 8:00" --waiting      # the cloud models again at 08:00
+shepherdr profile schedules                                # both, numbered, with their next runs
+shepherdr profile schedule-off night 1                     # one is kept, not applied
+shepherdr profile unschedule day 1                         # removed; the profile stays
+```
+
+The rule words are `daily 22:00`, `weekdays 8:00`, `weekends 9:30`, `mon,fri 16:00`, `once 2026-11-20 9:00`, or an RRULE
+(`FREQ=DAILY;BYHOUR=22;BYMINUTE=0`). A profile with one schedule takes `schedule-off night` with no number; with more, the
+number from `shepherdr profile schedules`. With the two above, the card comes at 22:00 each day with the night setup, and
+at 08:00 with the day one, and the bar says which of them is next.
+
 ## Backup agents
 
 Settings → Agents shows each role's backups under the role's own rows, in a Backups sub-block (indented, under its
