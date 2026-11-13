@@ -1,5 +1,5 @@
-// OpenCode as an agent kind: its local API (`opencode api <operationId>`, which talks to OpenCode's background service
-// and prints {"data": ...}), its SQLite database (read only, to copy a session's final rows into a JSONL file that the
+// OpenCode as an agent kind: its local API (`opencode api --standalone <operationId>`: a private server for each call,
+// not OpenCode's background service; it prints {"data": ...}), its SQLite database (read only, to copy a session's final rows into a JSONL file that the
 // chat reads like any other CLI log), and the model list. Commands run with an argv array, never through a shell.
 import { Database } from 'bun:sqlite'
 import { appendFileSync, existsSync, fstatSync, mkdirSync, openSync, readSync, closeSync } from 'node:fs'
@@ -173,6 +173,25 @@ function readRows(db: string, sessionId: string, after: number): Row[] {
     return handle
       .query<Row, [string, number]>('SELECT id, type, seq, time_created, data FROM session_message WHERE session_id = ? AND seq > ? ORDER BY seq')
       .all(sessionId, after)
+  } finally {
+    handle.close()
+  }
+}
+
+/**
+ * The newest top-level session of a folder (subagents' sessions and archived ones left out), last changed at or after
+ * sinceMs when given. Nothing when there is no database or no such session.
+ */
+export function newestSession(cwd: string, sinceMs?: number, db: string = opencodeDb()): string | undefined {
+  if (!existsSync(db)) return undefined
+  const handle = new Database(db, { readonly: true })
+  const since = sinceMs ?? null
+  try {
+    return handle
+      .query<{ id: string }, [string, number | null, number | null]>(
+        'SELECT id FROM session_v2 WHERE directory = ? AND parent_id IS NULL AND time_archived IS NULL AND (? IS NULL OR time_updated >= ?) ORDER BY time_updated DESC LIMIT 1',
+      )
+      .get(cwd, since, since)?.id
   } finally {
     handle.close()
   }

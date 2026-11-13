@@ -1,18 +1,22 @@
 // Picks the reader for a CLI, and tails a log file: each read() returns the events of the lines written since the
 // last one.
 import { closeSync, openSync, readSync, statSync } from 'node:fs'
+import { basename } from 'node:path'
+import { mirrorSession } from '../opencode.ts'
 import { ClaudeReader } from './claude.ts'
 import { CodexReader } from './codex.ts'
+import { OpencodeReader } from './opencode.ts'
 import { PiReader } from './pi.ts'
 import { LOG_FINDERS } from './find.ts'
 import type { LogEvent, Reader } from './types.ts'
 
-export { ClaudeReader, CodexReader, PiReader }
+export { ClaudeReader, CodexReader, OpencodeReader, PiReader }
 
 const READERS: Record<string, () => Reader> = {
   claude: () => new ClaudeReader(),
   codex: () => new CodexReader(),
   pi: () => new PiReader(),
+  opencode: () => new OpencodeReader(),
 }
 
 /** Kinds with both runtime log discovery and a transcript reader. */
@@ -62,6 +66,7 @@ export class LogTail {
    *  ends in the middle of is kept, and comes whole from a later read); starts over when the file shrank or was
    *  replaced */
   read(max = Infinity): LogEvent[] {
+    this.refresh()
     let size: number
     this.more = false
     try {
@@ -131,6 +136,15 @@ export class LogTail {
   readAll(): LogEvent[] {
     this.ino = -1
     return this.read()
+  }
+
+  /** OpenCode's log is a copy of its session (opencode.ts mirrorSession): copied again before each read, so the rows
+   *  OpenCode wrote since are read too. A failure never breaks the read */
+  private refresh() {
+    if (this.reader.cli !== 'opencode') return
+    try {
+      mirrorSession(basename(this.file, '.jsonl'), this.file)
+    } catch {}
   }
 
   private restart(ino: number) {
