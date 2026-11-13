@@ -147,6 +147,20 @@ describe('the providers: every provider with an entry, an agent, a run or usage,
     expect(spark!.models.find((m) => m.key === SPARK)!.byRole).toEqual({ task: 1, advisor: 1 })
   })
 
+  test('the tasks running on a provider or a model are named by id, in their order; a row with no task names none', () => {
+    const runs = [
+      { key: SPARK, space: 'gtm', role: 'task' as const, id: 'POL-314' },
+      { key: 'spark/other', space: 'gtm', role: 'task' as const, id: 'POL-9' },
+      { key: SPARK, space: 'gtm', role: 'task' as const, id: 'POL-313' },
+      { key: SPARK, space: '~', role: 'coordinator' as const },
+    ]
+    const spark = limitsView(input(settings(), { runs })).providers.find((p) => p.provider === 'spark')!
+    expect(spark).toMatchObject({ byRole: { task: 3, coordinator: 1 }, tasks: ['POL-9', 'POL-313', 'POL-314'] })
+    expect(spark.models.find((m) => m.key === SPARK)).toMatchObject({ byRole: { task: 2, coordinator: 1 }, tasks: ['POL-313', 'POL-314'] })
+    const none = limitsView(input(settings(), { runs: [{ key: SPARK, space: '~', role: 'coordinator' }] })).providers.find((p) => p.provider === 'spark')!
+    expect(none.tasks).toBeUndefined()
+  })
+
   test('the + column can add any provider or model the summary or the CLIs list, each once, in lowercase', () => {
     const view = limitsView(input(settings()))
     const keys = view.known.map((k) => k.pattern)

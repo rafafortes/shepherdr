@@ -561,7 +561,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       machineName: NAME,
       matrix,
       summary,
-      runs: runs.map((r) => ({ key: r.key, space: r.space, role: r.role })),
+      runs: runs.map((r) => ({ key: r.key, space: r.space, role: r.role, ...(r.role === 'task' && r.id ? { id: r.id } : {}) })),
       held,
       working: this.engine.working(),
       waitingOnYou: this.engine.waitingOnYou(),

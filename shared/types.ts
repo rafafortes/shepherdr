@@ -1048,13 +1048,14 @@ export interface LimitSpaces extends LimitTable {
    *  sub-limit sits inside */
   totals: Record<string, { pattern: string; max: number }>
 }
-/** what runs now by role on a provider or a model (the runs that count toward models.maxAtOnce) */
+/** what runs now by role on a provider or a model (the runs that count toward models.maxAtOnce), and the ids of the tasks
+ *  among them, in order (none while no task runs there) */
 export interface LimitByRole {
   byRole: Partial<Record<MatrixRole, number>>
+  tasks?: string[]
 }
 /** a provider of the Providers table: the summary's row (quota, run-outs, its cap), with what runs by role and its models */
-export interface LimitProvider extends Omit<SummaryProvider, 'models'> {
-  byRole: LimitByRole['byRole']
+export interface LimitProvider extends Omit<SummaryProvider, 'models'>, LimitByRole {
   models: (SummaryModel & LimitByRole)[]
 }
 /** a task that waits now, by its id and space (its key, shown as its name), and its line as its row says it */

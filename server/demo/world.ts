@@ -547,7 +547,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   private runsNow() {
     return this.tasks
       .filter((t) => t.status === 'work')
-      .map((t) => ({ key: keyOf(kindOf(t.agent?.cli ?? 'Claude Code') ?? 'claude'), space: t.place.split(':')[2]!, role: 'task' as const }))
+      .map((t) => ({ key: keyOf(kindOf(t.agent?.cli ?? 'Claude Code') ?? 'claude'), space: t.place.split(':')[2]!, role: 'task' as const, id: t.id }))
   }
 
   /** Settings → Limits as the live source builds it, over the demo's world: its machine's numbers are the demo's health

@@ -453,7 +453,8 @@ row. The profiles bar sits above it (a profile saved from here includes the limi
   [Summary](#summary)): `NVIDIA API`, `AMD TokenLab` and the rest, each with its models and the cap cell of its own, so a cap is
   set before the provider is used; once it has one, it moves up with the providers in use. **Max at once** is the
   machine's total for the row (the cap of [Most agents at once](#models), set at this machine or Everywhere; its sub-limits show
-  under it). Beside it: **running now** by role (tasks, coordinators, the advisor, reviewers), **held**, **out now** (until
+  under it). Beside it: **running now** by role (tasks, coordinators, the advisor, reviewers), the tasks named after their
+  count, each id a button that opens it (`3 tasks POL-313 POL-314 POL-315 · 1 coordinator`), **held**, **out now** (until
   when), and the **quota**, read only (the details are in Models). A local server is marked local.
 - **Waiting now** (at the top, read only). The held tasks grouped by what holds them, each group with its count and its limit
   now: **machine slots**, **this machine set to 0 tasks**, the **machine's** load, pressure or memory (or herdr that does not

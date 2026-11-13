@@ -4,7 +4,7 @@
 // at each level the way Settings reads them (Settings.pick), the numbers now come from the health sample and the engine's
 // own accessors, the providers from the summary (models-summary.ts), and a write is the setting action at the cell's
 // place. The page's cells, the held groups and the waits are built from these, with `now` as a parameter for a test.
-import type { LimitCell, LimitColumn, LimitKnown, LimitProvider, LimitRow, LimitSpaceRow, LimitTable, LimitsView, MatrixRole, ModelsMatrix, ModelsSummary, SettingRow, WaitingGroup, WaitingNow, WaitingTask } from '../../shared/types.ts'
+import type { LimitByRole, LimitCell, LimitColumn, LimitKnown, LimitProvider, LimitRow, LimitSpaceRow, LimitTable, LimitsView, MatrixRole, ModelsMatrix, ModelsSummary, SettingRow, WaitingGroup, WaitingNow, WaitingTask } from '../../shared/types.ts'
 import { capFor, parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
 import { busy, memPct, type Sample } from './health.ts'
 import { placeId } from './places.ts'
@@ -40,8 +40,9 @@ export interface LimitsInput {
   machineName: string
   matrix: ModelsMatrix
   summary: ModelsSummary
-  /** what counts toward models.maxAtOnce now: the model key, the space's key (~ for home) and the role that runs it */
-  runs: (RunOn & { role: MatrixRole })[]
+  /** what counts toward models.maxAtOnce now: the model key, the space's key (~ for home), the role that runs it and, for a
+   *  task, its id */
+  runs: (RunOn & { role: MatrixRole; id?: string })[]
   held: HeldFact[]
   working: number
   waitingOnYou: number
@@ -200,11 +201,18 @@ export function knownOf(matrix: ModelsMatrix, summary: ModelsSummary): LimitKnow
   return [...out.values()]
 }
 
-/** the runs that cover a pattern (a provider or a model key), by the role that runs them */
-function byRoleOf(runs: (RunOn & { role: MatrixRole })[], covered: (key: string) => boolean): LimitProvider['byRole'] {
-  const out: LimitProvider['byRole'] = {}
-  for (const r of runs) if (covered(r.key)) out[r.role] = (out[r.role] ?? 0) + 1
-  return out
+/** the runs that cover a pattern (a provider or a model key), by the role that runs them, and the tasks among them by id
+ *  (in their space's order and number: POL-2 before POL-10) */
+function byRoleOf(runs: LimitsInput['runs'], covered: (key: string) => boolean): LimitByRole {
+  const byRole: LimitProvider['byRole'] = {}
+  const tasks: string[] = []
+  for (const r of runs) {
+    if (!covered(r.key)) continue
+    byRole[r.role] = (byRole[r.role] ?? 0) + 1
+    if (r.role === 'task' && r.id) tasks.push(r.id)
+  }
+  tasks.sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
+  return tasks.length ? { byRole, tasks } : { byRole }
 }
 
 /** the Spaces table: each space of this machine, its Max tasks and Merge train, and its sub-limit per pattern column */
@@ -252,8 +260,8 @@ function spacesOf(input: LimitsInput): LimitsView['spaces'] {
 function providersOf(input: LimitsInput): LimitProvider[] {
   return input.summary.providers.map((p) => ({
     ...p,
-    byRole: byRoleOf(input.runs, (k) => providerOf(k) === p.provider),
-    models: p.models.map((m) => ({ ...m, byRole: byRoleOf(input.runs, (k) => k === m.key) })),
+    ...byRoleOf(input.runs, (k) => providerOf(k) === p.provider),
+    models: p.models.map((m) => ({ ...m, ...byRoleOf(input.runs, (k) => k === m.key) })),
   }))
 }
 

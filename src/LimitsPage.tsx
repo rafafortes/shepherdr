@@ -73,14 +73,35 @@ export function nameOf(v: LimitsView, pattern: string): string {
   return v.known.find((k) => k.pattern === pattern)?.name ?? v.providers.find((p) => p.provider === pattern)?.name ?? pattern
 }
 
-/** the roles that run now on a provider or a model, in words ("2 tasks · 1 advisor"), or a dash */
+/** each role's words, one and many */
 const ROLE_WORDS = { task: ['task', 'tasks'], coordinator: ['coordinator', 'coordinators'], advisor: ['advisor', 'advisor'], reviewer: ['reviewer', 'reviewers'] } as const
-export function roleWords(byRole: LimitProvider['byRole']): string {
+
+/** what runs now on a provider or a model: each role in words ("2 tasks · 1 advisor"), the tasks' ids after their count,
+ *  each a button that opens it ("3 tasks POL-313 POL-314 POL-315 · 1 coordinator"), or a dash */
+export function RunningNow({ byRole, tasks }: { byRole: LimitProvider['byRole']; tasks?: string[] }) {
   const parts = (Object.keys(ROLE_WORDS) as (keyof typeof ROLE_WORDS)[]).flatMap((r) => {
     const n = byRole[r] ?? 0
-    return n ? [`${n} ${n === 1 ? ROLE_WORDS[r][0] : ROLE_WORDS[r][1]}`] : []
+    return n ? [{ r, words: `${n} ${n === 1 ? ROLE_WORDS[r][0] : ROLE_WORDS[r][1]}` }] : []
   })
-  return parts.join(' · ') || '—'
+  if (!parts.length) return <>—</>
+  return (
+    <span data-running>
+      {parts.map((p, i) => (
+        <span key={p.r}>
+          {i ? ' · ' : ''}
+          {p.words}
+          {p.r === 'task' && tasks?.length ? (
+            <>
+              {' '}
+              {tasks.map((id) => (
+                <TaskButton key={id} id={id} />
+              ))}
+            </>
+          ) : null}
+        </span>
+      ))}
+    </span>
+  )
 }
 
 /** a provider's quota in one short line: each window's share used, why there is none, or a dash (models have none) */
@@ -415,13 +436,13 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
         <div className="flex flex-col gap-1 px-4 pb-2">
           <Small className="text-fg2">Max at once</Small>
           <CapCell name={p.name} pattern={p.provider} atOnce={p.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
-          <ProviderFacts byRole={p.byRole} held={p.atOnce.held} runOuts={p.runOuts} quota={p.quota} read={p.quotaRead} />
+          <ProviderFacts byRole={p.byRole} tasks={p.tasks} held={p.atOnce.held} runOuts={p.runOuts} quota={p.quota} read={p.quotaRead} />
         </div>
         {p.models.map((m) => (
           <div key={m.key} className="flex flex-col gap-1 border-t border-line px-4 py-2">
             <span className="truncate text-fg2">{m.label}</span>
             <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
-            <ProviderFacts byRole={m.byRole} held={m.atOnce.held} runOuts={m.runOuts} />
+            <ProviderFacts byRole={m.byRole} tasks={m.tasks} held={m.atOnce.held} runOuts={m.runOuts} />
           </div>
         ))}
       </section>
@@ -654,12 +675,14 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
 }
 
 /** a provider's or a model's facts beside its cap: what runs by role, what is held, whether it is out, and its quota */
-function ProviderFacts({ byRole, held, runOuts, quota, read }: { byRole: LimitProvider['byRole']; held: number; runOuts: LimitProvider['runOuts']; quota?: LimitProvider['quota']; read?: LimitProvider['quotaRead'] }) {
+function ProviderFacts({ byRole, tasks, held, runOuts, quota, read }: { byRole: LimitProvider['byRole']; tasks?: string[]; held: number; runOuts: LimitProvider['runOuts']; quota?: LimitProvider['quota']; read?: LimitProvider['quotaRead'] }) {
   return (
     <dl className="flex flex-col gap-0.5 text-fg2">
       <div className="flex gap-2">
         <dt className="text-fg3">Running now</dt>
-        <dd className="tabular-nums">{roleWords(byRole)}</dd>
+        <dd className="tabular-nums">
+          <RunningNow byRole={byRole} tasks={tasks} />
+        </dd>
       </div>
       <div className="flex gap-2">
         <dt className="text-fg3">Held</dt>
@@ -682,7 +705,7 @@ function ProviderFacts({ byRole, held, runOuts, quota, read }: { byRole: LimitPr
 /** a provider's row and its models' rows, as the desktop table draws them: the cap (its row's ⋯ clears the spaces' sub-limits),
  *  what runs by role, what is held, whether it is out, and its quota (a provider's only; a details link to Models) */
 function ProviderRows({ p, v, capOpen, setCapOpen, menu, setMenu, hasSubs, onClear }: { p: LimitProvider; v: LimitsView; capOpen: string | null; setCapOpen: (id: string | null) => void; menu: string | null; setMenu: (m: string | null) => void; hasSubs: boolean; onClear: () => void }) {
-  const cells = (name: string, pattern: string, atOnce: LimitProvider['atOnce'], byRole: LimitProvider['byRole'], runOuts: LimitProvider['runOuts'], held: number, quota?: LimitProvider['quota'], read?: LimitProvider['quotaRead'], clear?: boolean) => (
+  const cells = (name: string, pattern: string, atOnce: LimitProvider['atOnce'], byRole: LimitProvider['byRole'], tasks: string[] | undefined, runOuts: LimitProvider['runOuts'], held: number, quota?: LimitProvider['quota'], read?: LimitProvider['quotaRead'], clear?: boolean) => (
     <>
       <td className="relative py-1.5 pr-3 align-top">
         <span className="flex items-start gap-1">
@@ -709,7 +732,9 @@ function ProviderRows({ p, v, capOpen, setCapOpen, menu, setMenu, hasSubs, onCle
           ) : null}
         </span>
       </td>
-      <td className="py-1.5 pr-3 align-top text-fg2 tabular-nums">{roleWords(byRole)}</td>
+      <td className="py-1.5 pr-3 align-top text-fg2 tabular-nums">
+        <RunningNow byRole={byRole} tasks={tasks} />
+      </td>
       <td className="py-1.5 pr-3 align-top text-fg2 tabular-nums">{held || '—'}</td>
       <td className="py-1.5 pr-3 align-top text-fg2">{outWords(runOuts)}</td>
       <td className="py-1.5 pr-3 align-top text-fg2 tabular-nums">
@@ -730,14 +755,14 @@ function ProviderRows({ p, v, capOpen, setCapOpen, menu, setMenu, hasSubs, onCle
             {p.local ? <span className="shrink-0 text-[0.75rem] text-fg3">local</span> : null}
           </span>
         </th>
-        {cells(p.name, p.provider, p.atOnce, p.byRole, p.runOuts, p.atOnce.held, p.quota, p.quotaRead, hasSubs)}
+        {cells(p.name, p.provider, p.atOnce, p.byRole, p.tasks, p.runOuts, p.atOnce.held, p.quota, p.quotaRead, hasSubs)}
       </tr>
       {p.models.map((m) => (
         <tr key={m.key}>
           <th scope="row" className="sticky left-0 z-10 bg-bg py-1 pr-4 pl-6 text-left align-top font-normal">
             <span className="block truncate text-fg2" title={m.key}>{m.label}</span>
           </th>
-          {cells(m.label, m.key, m.atOnce, m.byRole, m.runOuts, m.atOnce.held)}
+          {cells(m.label, m.key, m.atOnce, m.byRole, m.tasks, m.runOuts, m.atOnce.held)}
         </tr>
       ))}
     </>
