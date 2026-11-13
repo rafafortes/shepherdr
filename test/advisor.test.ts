@@ -489,6 +489,9 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
       await src.advise(w.key, 'cap:w1')
       expect(cards(w.key).filter((c) => c.startsWith('The advisor waits'))).toHaveLength(1)
       expect(runs).toEqual([])
+      // Settings → Limits lists the question under Waiting now, with the task it is for
+      const view = (await src.act({ type: 'limits-view' })) as { waiting: { advisor: { chat: string; task?: string; words: string }[] } }
+      expect(view.waiting.advisor).toEqual([{ chat: w.key, task: w.key.split('/')[0], words: expect.stringContaining('Which store?') }])
       free('busy-a')
       free('busy-b')
     } finally {

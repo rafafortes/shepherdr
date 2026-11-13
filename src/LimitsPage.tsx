@@ -14,7 +14,7 @@ import type { LimitCell, LimitColumn, LimitKnown, LimitProvider, LimitRow, Limit
 import { act, openTask, useSnap } from './kernel.ts'
 import { askWaitingMany } from './apply-waiting.tsx'
 import { Anchored, OnTop } from './anchored.tsx'
-import { CAP_KEY, CapCell, CapEditor, capId } from './CapCell.tsx'
+import { CAP_KEY, CapCell, CapEditor } from './CapCell.tsx'
 import { Pop } from './cell-pop.tsx'
 import { Editor, Refused } from './ModelsPage.tsx'
 import { ProfilesBar } from './Profiles.tsx'
@@ -215,7 +215,8 @@ export function LimitValue({ title, cell, machine, phone }: { title: string; cel
 /** a space's sub-limit for one pattern: its own entry (strong: its runs now, of its max), or none (faint: the machine's total
  *  applies, or no sub-limit). Either opens the cap editor at this space: a number, or Clear here */
 function SpaceCapCell({ name, pattern, space, caps, total, phone, openId, onOpen }: { name: string; pattern: string; space: LimitSpaceRow; caps: Caps; total?: number; phone: boolean; openId: string | null; onOpen: (id: string | null) => void }) {
-  const id = capId(pattern, space.key)
+  // its own id: a provider's cap (CapCell) names the same space's line as cap|<pattern>|<space>, which must not open with this one
+  const id = `space-cap|${pattern}|${space.key}`
   const mine = space.caps[pattern]
   const open = openId === id
   const words = mine ? `${mine.now} of ${mine.max} at once` : total ? `machine's total applies (${total} at once)` : 'no sub-limit'

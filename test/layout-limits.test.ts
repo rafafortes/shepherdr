@@ -15,6 +15,7 @@ async function fresh(page: Page) {
   await set('space.maxTasks', '2', 'p:vm-str:gtm')
   await set('space.maxTasks', null, 'p:vm-str:herdr-projects')
   for (const place of ['all', 'm:vm-str', 'p:vm-str:gtm', 'p:vm-str:herdr-projects']) await set('models.maxAtOnce', null, place)
+  await set('space.maxTasks', null, 'all')
   await page.goto(url())
   await page.evaluate(() => localStorage.removeItem('limits:columns'))
 }
@@ -132,6 +133,37 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
     }
   })
 
+  test('a press outside an open editor closes it without writing; Set for every space… with Everywhere resets the spaces to it', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      const cell = page.getByRole('button', { name: /^vm-str · Max tasks working at once: 10/ })
+      await cell.scrollIntoViewIfNeeded()
+      await cell.click()
+      const pop = page.getByRole('dialog', { name: 'Edit this setting' })
+      await pop.waitFor()
+      // a press outside the editor closes it, and writes nothing (Escape would close the sheet too)
+      await page.getByRole('heading', { name: 'Waiting now', exact: true }).click()
+      await pop.waitFor({ state: 'detached' })
+      await page.getByRole('button', { name: /^vm-str · Max tasks working at once: 10/ }).waitFor()
+      // the column's Everywhere mode: Everywhere gets 5, and each space loses its own value (gtm had 2)
+      await page.getByRole('button', { name: 'More for Max tasks', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Set for every space…', exact: true }).click()
+      const dialog = page.getByRole('alertdialog', { name: 'Set Max tasks for every space' })
+      await dialog.getByRole('radio', { name: /Everywhere, and reset the spaces/ }).check()
+      await dialog.getByRole('textbox', { name: 'Max tasks of this space working at once' }).fill('5')
+      await dialog.getByRole('textbox', { name: 'Max tasks of this space working at once' }).press('Enter')
+      await dialog.getByRole('button', { name: 'Set for 2 spaces', exact: true }).click()
+      await dialog.waitFor({ state: 'detached' })
+      // gtm now reads Everywhere's value, faint, from there
+      const gtm = page.getByRole('button', { name: /^gtm · Max tasks: 5, / })
+      await gtm.waitFor()
+      await gtm.getByText('Everywhere', { exact: true }).waitFor()
+    } finally {
+      await page.close()
+    }
+  })
+
   test("a column's Set for every space… writes each space its own value, and the dialog closes once they are written", async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
@@ -145,6 +177,30 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await dialog.waitFor({ state: 'detached' })
       await page.getByRole('button', { name: /^gtm · Max tasks: 4, / }).waitFor()
       await page.getByRole('button', { name: /^herdr-projects · Max tasks: 4, / }).waitFor()
+    } finally {
+      await page.close()
+    }
+  })
+  test('a browser that keeps no storage still shows the page, and a column added stays for the page while it is open', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      // the columns' keys are refused by the browser's storage: the page keeps them for this view only
+      await page.addInitScript(() => {
+        const get = Storage.prototype.getItem
+        const put = Storage.prototype.setItem
+        Storage.prototype.getItem = function (k: string) {
+          if (k.startsWith('limits:')) throw new Error('no storage')
+          return get.call(this, k)
+        }
+        Storage.prototype.setItem = function (k: string, v: string) {
+          if (k.startsWith('limits:')) throw new Error('no storage')
+          put.call(this, k, v)
+        }
+      })
+      await openLimits(page)
+      await page.getByRole('button', { name: '+ column', exact: true }).click()
+      await page.getByRole('menuitem', { name: /^Spark \(local\)/ }).click()
+      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^Spark \(local\) in gtm: no sub-limit$/ }).waitFor()
     } finally {
       await page.close()
     }
@@ -164,6 +220,27 @@ describe.skipIf(!browser)('Settings → Limits on a phone', () => {
       await page.getByRole('region', { name: 'Providers and models' }).scrollIntoViewIfNeeded()
       await page.getByRole('region', { name: 'Claude Code' }).waitFor()
     } finally {
+      await page.close()
+    }
+  })
+
+  test("a space's sub-limit line on a phone opens its editor under it, with the number of its runs now", async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    try {
+      await openLimits(page, true)
+      // set after the page opened (opening starts from the demo's own limits): the page reads again on the change
+      await set('models.maxAtOnce', 'spark=4', 'm:vm-str')
+      await set('models.maxAtOnce', 'spark=2', 'p:vm-str:gtm')
+      const space = page.getByRole('region', { name: 'Space gtm' })
+      await space.scrollIntoViewIfNeeded()
+      await space.getByRole('button', { name: /^Spark \(local\) in gtm: 0 of 2 at once/ }).tap()
+      await page.getByRole('spinbutton', { name: 'Most Spark (local) at once, in gtm' }).waitFor()
+      await page.getByRole('button', { name: 'Cancel', exact: true }).tap()
+      await page.getByRole('spinbutton', { name: 'Most Spark (local) at once, in gtm' }).waitFor({ state: 'detached' })
+    } finally {
+      await set('models.maxAtOnce', null, 'm:vm-str')
+      await set('models.maxAtOnce', null, 'p:vm-str:gtm')
       await page.close()
     }
   })

@@ -29,6 +29,21 @@ describe('the Limits action', () => {
     src.engine.tasks.splice(src.engine.tasks.findIndex((t) => t.id === 'LIM-1'), 1)
   })
 
+  test('a review round that waits for a reviewer is listed with the reviewers that are full, and its task opens from there', async () => {
+    // the default reviewer is Codex: its one slot is taken by another run, so the round of this task waits for it
+    expect(src.settings.set('models.maxAtOnce', 'openai=1', 'machine').ok).toBe(true)
+    src.engine.lease('busy-review', 'reviewer', 'openai/gpt-6-sol', '~')
+    src.engine.tasks.push({ id: 'LIM-2', n: 2, project: 'nowhere', title: 'Reviewed', desc: '', by: 'test', created: Date.now(), updated: Date.now(), reviewWait: { since: Date.now() } } as never)
+    try {
+      const v = (await src.act({ type: 'limits-view' })) as View
+      expect(v.waiting.reviews).toEqual([{ task: 'LIM-2', space: expect.any(String), words: expect.stringContaining('Waits for a reviewer: Codex') }])
+    } finally {
+      src.engine.unlease('busy-review')
+      src.engine.tasks.splice(src.engine.tasks.findIndex((t) => t.id === 'LIM-2'), 1)
+      expect(src.settings.set('models.maxAtOnce', null, 'machine').ok).toBe(true)
+    }
+  })
+
   test("a cell's write goes to its place with the setting's own key, and the next look reads it back, from where it is set", async () => {
     const before = (await src.act({ type: 'limits-view' })) as View
     const here = before.machine.id

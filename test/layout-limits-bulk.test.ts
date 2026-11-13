@@ -47,6 +47,21 @@ describe.skipIf(!browser)('the bulk actions of the sub-limits', () => {
     }
   })
 
+  test("a column's ⋯ clears its sub-limit in every space too, asked first", async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openWithSparkCaps(page)
+      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: 'More for Spark (local)', exact: true }).click()
+      await page.getByRole('menuitem', { name: "Clear every space's sub-limit" }).click()
+      await page.getByRole('alertdialog', { name: "Clear Spark (local)'s sub-limit in every space" }).getByRole('button', { name: 'Clear in 1 space', exact: true }).click()
+      await page.getByRole('alertdialog', { name: "Clear Spark (local)'s sub-limit in every space" }).waitFor({ state: 'detached' })
+      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^Spark \(local\) in gtm: machine's total applies/ }).waitFor()
+    } finally {
+      await restore()
+      await page.close()
+    }
+  })
+
   test("a column's Set for every space… writes a sub-limit at each space; a column the + column added with no entry is removed from its ⋯", async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
