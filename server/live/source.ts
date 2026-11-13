@@ -420,8 +420,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       void this.sweepBrowsers().catch(() => undefined)
     }
     this.engine.release(now)
-    // a question the advisor waits to answer goes on once a harness of its chain has room (the same look as the caps)
+    // a question the advisor waits to answer goes on once a harness of its chain has room (the same look as the caps), and
+    // so does a task's review round that waits for a reviewer
     void this.retryAdvice().catch(() => undefined)
+    this.engine.retryReviews()
     if (this.health.last?.at !== at) this.emit('snapshot')
   }
 
@@ -4016,13 +4018,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return this.taskCommand(a1, rest, p, ctx)
       case 'restart':
         return this.restartCommand(a1, p, ctx)
-      // a task's own agent counts each review round it starts, so its brief's at most so many are kept by
+      // a task's own agent counts each review round it starts, and is told which reviewer the caps leave it for that round
+      // (engine.reviewRound); --done when the round's review has finished
       case 'review': {
         const t = this.engine.task(a1 ?? '')
         if (!t) throw new Error(`No task ${a1 ?? ''}; shepherdr review <id>`)
         if (ctx.chat !== `${t.id}/Agent`) throw new Error(`${t.id}'s own agent counts its review rounds, not ${ctx.chat ? 'this chat' : 'you at the command'}; a coordinator adds one with shepherdr task review-more ${t.id}`)
-        const { round, rounds } = this.engine.reviewRound(t.id)
-        return `Round ${round} of ${rounds} counted for ${t.id}: review its final commit before you report ready.`
+        if (p.flags.has('done')) return this.engine.reviewDone(t.id) ? `Review of ${t.id} is done: its reviewer is free again.` : `No review of ${t.id} is running: nothing to release.`
+        const r = await this.engine.reviewRound(t.id)
+        return 'wait' in r ? this.engine.reviewWaitWords(t.id, r.wait) : this.engine.reviewWords(t.id, r)
       }
       // done is ready's old name, still taken
       case 'ready':

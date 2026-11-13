@@ -14,6 +14,7 @@ const { CATALOG, Settings, agentRow, backupModelOf, effortFor, fallbackKinds, se
 const { readBrief } = await import('../shared/brief.ts')
 const { Heartbeats, heartbeatFile, Wakes, pilotLine, wakeOf, wakeProblem } = await import('../server/live/heartbeat.ts')
 const { coordinatorPrompt, reviewerLine, settingsBlock, splitBrief, taskPrompt } = await import('../server/live/prompts.ts')
+const { ASK, CODEX_WORDS, reviewerLineFor } = await import('./reviewer-line.ts')
 const { pastTimes, span } = await import('../server/live/estimates.ts')
 const { readJson, writeJson } = await import('../server/store.ts')
 const { HOST, keyFor, machineName, placeId } = await import('../server/live/places.ts')
@@ -696,7 +697,7 @@ describe('settings', () => {
     expect(s.get('reviewer.agent')).toBe('Claude Code')
     s.set('reviewer.effort', 'high')
     expect(s.harness('reviewer')).toEqual({ kind: 'claude', model: undefined, effort: 'high' })
-    expect(s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note).toContain("- Reviewer: a headless Claude Code or a Claude Code subagent (its default model, high effort). (your setting for every machine)")
+    expect(s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note).toContain(reviewerLineFor('a headless Claude Code or a Claude Code subagent (its default model, high effort).', '<id>', '', '(your setting for every machine)'))
     for (const k of ['reviewer.agent', 'reviewer.effort']) s.set(k, null)
   })
   test("each CLI and model takes its own levels: one it lacks goes in as the nearest it has", () => {
@@ -1073,7 +1074,7 @@ describe('the brief\'s default way of working', () => {
   test("the human's defaults only, one line each: review, the reviewer, the bar, the rounds and merge on its own", () => {
     expect(settingsBlock('X-1', { ways, reviewer: { kind: 'codex' } })).toBe(`Settings: (from shepherdr show; where the brief above says otherwise, it wins)
 - Review: on. Have your change reviewed by fresh eyes before it merges.
-- Reviewer: a headless Codex or a Codex subagent (its default model and effort).
+${reviewerLineFor(CODEX_WORDS, 'X-1')}
 - Must fix: major. Findings are tagged critical/major/minor/trivial; fix critical and major, then review again.
 - Review rounds: 3. Stop when a round finds none to fix, at most 3 rounds.
 - Merge: on its own. Merge it yourself once it works (shepherdr merge X-1). Don't wait for GitHub's checks.`)
@@ -1097,22 +1098,22 @@ describe('the brief\'s default way of working', () => {
     expect(settingsBlock('X-1', { ways: { ...ways, mustFix: 'trivial' } })).toContain('fix all of them, then review again')
   })
   test('the Reviewer line names the reviewer, its model and effort; the Agent line what it runs on, only so it knows', () => {
-    expect(settingsBlock('X-1', { ways, reviewer: { kind: 'claude', model: 'opus', effort: 'high' } })).toContain('- Reviewer: a headless Claude Code or a Claude Code subagent (model opus, high effort).')
-    expect(settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: '' } })).toContain('- Reviewer: a headless pi or a pi subagent (model openai/gpt-5.5, its default effort).')
+    expect(settingsBlock('X-1', { ways, reviewer: { kind: 'claude', model: 'opus', effort: 'high' } })).toContain(reviewerLineFor('a headless Claude Code or a Claude Code subagent (model opus, high effort).', 'X-1'))
+    expect(settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: '' } })).toContain(reviewerLineFor('a headless pi or a pi subagent (model openai/gpt-5.5, its default effort).', 'X-1'))
     expect(settingsBlock('X-1', { ways, agent: { kind: 'claude', effort: 'high' } })).toContain('- Agent: Claude Code (its default model, high effort). Only so you know what you run on.')
   })
   test('with a backup reviewer the same line says who reviews instead, where that reviewer cannot run at all', () => {
     const block = settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: 'high' }, fallback: { kind: 'claude', model: 'opus', effort: 'high' } })
     expect(block).toContain(
-      '- Reviewer: a headless pi or a pi subagent (model openai/gpt-5.5, high effort). If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (model opus, high effort) instead for that round only, and say in your summary that you did; every round asks that reviewer first again.',
+      reviewerLineFor('a headless pi or a pi subagent (model openai/gpt-5.5, high effort).', 'X-1', 'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (model opus, high effort) instead for that round only, and say in your summary that you did.'),
     )
     // one line, still: the finding of a review, what to fix and the rounds are untouched
     expect(block.split('\n').find((l) => l.startsWith('- Reviewer'))).not.toContain('\n')
     expect(block).toContain('- Must fix: major.')
     // no backup reviewer (the default): the line reads exactly as it always has
     expect(settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: 'high' } })).not.toContain('cannot run at all')
-    // with Review off there is nothing to review with: the line still says who, and asks for nothing
-    expect(settingsBlock('X-1', { ways: { ...ways, review: false }, reviewer: { kind: 'codex' }, fallback: { kind: 'pi' } })).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).\n')
+    // with Review off the line still says who (its Review line says the lines on reviewing don't apply)
+    expect(settingsBlock('X-1', { ways: { ...ways, review: false }, reviewer: { kind: 'codex' }, fallback: { kind: 'pi' } })).toContain(`${reviewerLineFor(CODEX_WORDS, 'X-1')}\n`)
   })
   test('a line that differs from the default says who changed it, and the screen reads it back', () => {
     const block = settingsBlock('X-1', { ways: { ...ways, rounds: 1, merge: 'ask me first' }, by: { rounds: 'task', merge: 'space' } })
@@ -1314,11 +1315,14 @@ describe('a chain of backups in Settings', () => {
 
   test("the brief's Reviewer line: one backup reads as it always has; a chain, each in turn", () => {
     const r = { kind: 'claude' }
-    expect(reviewerLine(r)).toBe(reviewerLine(r, []))
-    expect(reviewerLine(r, [{ kind: 'codex' }])).toBe(reviewerLine(r, { kind: 'codex' }))
-    expect(reviewerLine(r, { kind: 'codex' })).toContain('instead for that round only, and say in your summary that you did')
-    const chain = reviewerLine(r, [{ kind: 'codex' }, { kind: 'pi' }, { kind: 'claude', model: 'claude-haiku-5-5' }])
-    expect(chain).toContain('review with a headless Codex or a Codex subagent (its default model and effort) instead for that round only; where that one cannot run either, the next of, in turn: a headless pi or a pi subagent (its default model and effort); a headless Claude Code or a Claude Code subagent (model claude-haiku-5-5, its default effort).')
-    expect(chain).toContain('Say in your summary which one you used; every round asks that reviewer first again.')
+    expect(reviewerLine(r, undefined, 'X-1')).toBe(reviewerLine(r, [], 'X-1'))
+    expect(reviewerLine(r, [{ kind: 'codex' }], 'X-1')).toBe(reviewerLine(r, { kind: 'codex' }, 'X-1'))
+    expect(reviewerLine(r, { kind: 'codex' }, 'X-1')).toContain('instead for that round only, and say in your summary that you did')
+    expect(reviewerLine(r, undefined, 'X-1')).toBe(reviewerLineFor('a headless Claude Code or a Claude Code subagent (its default model and effort).', 'X-1').slice('- '.length))
+    const chain = reviewerLine(r, [{ kind: 'codex' }, { kind: 'pi' }, { kind: 'claude', model: 'claude-haiku-5-5' }], 'X-1')
+    expect(chain).toContain('review with a headless Codex or a Codex subagent (its default model and effort) instead for that round only; where that one cannot run either, the next of, in turn: a headless pi or a pi subagent (its default model and effort); a headless Claude Code or a Claude Code subagent (model claude-haiku-5-5, its default effort), and say in your summary that you did.')
+    // the line asks the command first, and names it again after the review: one line, and each round asks it anew
+    expect(chain).toContain('run `shepherdr review X-1` first')
+    expect(chain).toContain('run `shepherdr review X-1 --done`.')
   })
 })

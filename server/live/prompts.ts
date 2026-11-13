@@ -52,15 +52,18 @@ export function reviewerWords(r: Reviewer) {
   return `${who} (${[r.model ? `model ${r.model}` : 'its default model', r.effort ? `${r.effort} effort` : 'its default effort'].join(', ')})`
 }
 
-/** a brief's Reviewer line: who reviews, and — when the human set a backup reviewer — who reviews instead where that one
- *  cannot run at all. A backup reviewer never replaces a finding: it is for a reviewer that could not work, for that
- *  round only, so a primary that answers again reviews the next round (the way back, as return.ts is for agents) */
-export function reviewerLine(r: Reviewer, backup?: Reviewer | Reviewer[]) {
+/** a brief's Reviewer line: who reviews, and how a round asks which reviewer it runs with (`shepherdr review <id>`, which
+ *  counts the round and names the reviewer the caps leave; `--done` when its review has finished). When the human set
+ *  backup reviewers, the line also says who reviews instead where the one named cannot run at all, for that round only:
+ *  a backup never replaces a finding, and every round asks the command again, so a primary that answers again reviews the
+ *  next round */
+export function reviewerLine(r: Reviewer, backup: Reviewer | Reviewer[] | undefined, id: string) {
   const all = backup === undefined ? [] : Array.isArray(backup) ? backup : [backup]
-  const cannot = 'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with'
-  if (all.length <= 1) return `Reviewer: ${reviewerWords(r)}.${all[0] ? ` ${cannot} ${reviewerWords(all[0])} instead for that round only, and say in your summary that you did; every round asks that reviewer first again.` : ''}`
+  const ask = `Each round, run \`shepherdr review ${id}\` first: it names the reviewer for that round and the words to pass. After the review, run \`shepherdr review ${id} --done\`.`
+  if (!all.length) return `Reviewer: ${reviewerWords(r)}. ${ask}`
   // a chain of them: each in turn, where the one before it cannot run either
-  return `Reviewer: ${reviewerWords(r)}. ${cannot} ${reviewerWords(all[0])} instead for that round only; where that one cannot run either, the next of, in turn: ${all.slice(1).map(reviewerWords).join('; ')}. Say in your summary which one you used; every round asks that reviewer first again.`
+  const rest = all.length > 1 ? `; where that one cannot run either, the next of, in turn: ${all.slice(1).map(reviewerWords).join('; ')}` : ''
+  return `Reviewer: ${reviewerWords(r)}. ${ask} If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with ${reviewerWords(all[0])} instead for that round only${rest}, and say in your summary that you did.`
 }
 
 /** a reviewer's tags for its findings, the worst first */
@@ -103,7 +106,7 @@ export function settingsLines(id: string, t: Told): { said: Said; text: string }
   // every line shows, review off too: nothing hidden, an override included
   const lines: { said: Said; text: string }[] = [
     { said: 'review', text: w.review ? 'Review: on. Have your change reviewed by fresh eyes before it merges.' : "Review: off. No review; the lines on reviewing below don't apply." },
-    ...(t.reviewer ? [{ said: 'reviewer' as const, text: reviewerLine(t.reviewer, w.review ? t.fallback : undefined) }] : []),
+    ...(t.reviewer ? [{ said: 'reviewer' as const, text: reviewerLine(t.reviewer, w.review ? t.fallback : undefined, id) }] : []),
     { said: 'mustFix', text: `Must fix: ${w.mustFix}. Findings are tagged ${SEVERITIES.join('/')}; fix ${fix.length === SEVERITIES.length ? 'all of them' : plural(fix)}${w.rounds > 1 ? ', then review again' : ''}.` },
     { said: 'rounds', text: w.rounds > 1 ? `Review rounds: ${w.rounds}. Stop when a round finds none to fix, at most ${w.rounds} rounds.` : 'Review rounds: 1. One round, no review again.' },
   ]
@@ -132,7 +135,7 @@ export function splitBrief(desc: string): [work: string, how: string] {
  * it. The words above the block and every other line of it stay byte for byte. A brief with no block, or with no
  * Reviewer line in it, comes back as it is.
  */
-export function rebriefReviewer(desc: string, r: { reviewer: Reviewer; fallback?: Reviewer | Reviewer[]; review: boolean; by?: SetBy }): string {
+export function rebriefReviewer(desc: string, r: { id: string; reviewer: Reviewer; fallback?: Reviewer | Reviewer[]; review: boolean; by?: SetBy }): string {
   const i = blockAt(desc)
   if (i < 0) return desc
   const lines = desc.slice(i).split('\n')
@@ -140,7 +143,7 @@ export function rebriefReviewer(desc: string, r: { reviewer: Reviewer; fallback?
   const k = lines.findIndex((l, j) => j > 0 && j < n && l.startsWith('- Reviewer: '))
   if (k < 0) return desc
   const review = briefReview(desc) ?? r.review
-  lines[k] = `- ${marked(reviewerLine(r.reviewer, review ? r.fallback : undefined), r.by)}`
+  lines[k] = `- ${marked(reviewerLine(r.reviewer, review ? r.fallback : undefined, r.id), r.by)}`
   return desc.slice(0, i) + lines.join('\n')
 }
 

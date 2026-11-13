@@ -831,7 +831,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
                 continue
               }
               const before = t.desc ?? ''
-              const desc = rebriefReviewer(before, { reviewer: on, fallback: store.reviewerBackups(name), review: store.ways(name).review, by: store.setBy(name).reviewer })
+              const desc = rebriefReviewer(before, { id: t.id, reviewer: on, fallback: store.reviewerBackups(name), review: store.ways(name).review, by: store.setBy(name).reviewer })
               if (desc === before) out.same++
               else {
                 changed++

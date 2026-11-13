@@ -4,6 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { sh, repo, world, until, started, placeId, settingsBlock, writeJson, fakeHerdr } from './engine-world.ts'
+import { CODEX_WORDS, reviewerLineFor } from './reviewer-line.ts'
 const { fitStatus, reportOf, STALL_QUIET } = await import('../server/live/engine/engine.ts')
 
 describe('recovered private routing failures', () => {
@@ -136,20 +137,22 @@ describe('a task is its brief and one agent', () => {
     const add = (title: string, set?: Record<string, string>) => w.engine.add({ project: p.name, title, desc: 'x', by: 'test', ...(set ? { set } : {}) })
     // off by default: the Reviewer line is the one every brief has always had
     const plain = add('Plain')
-    expect(plain.desc).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).\n')
+    expect(plain.desc).toContain(`${reviewerLineFor(CODEX_WORDS, plain.id)}\n`)
     expect(plain.desc).not.toContain('cannot run at all')
     // Everywhere: the same line ends with who reviews instead, in the brief's own words
     w.settings.set('reviewer.fallback', 'claude')
     w.settings.set('reviewer.fallbackEffort', 'high')
-    expect(add('Everywhere').desc).toContain(
-      '- Reviewer: a headless Codex or a Codex subagent (its default model and effort). If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (its default model, high effort) instead for that round only, and say in your summary that you did; every round asks that reviewer first again. (your setting for every machine)',
+    // the backup's sentence follows the round's ask (its id is the task's own)
+    const everywhere = add('Everywhere')
+    expect(everywhere.desc).toContain(
+      reviewerLineFor(CODEX_WORDS, everywhere.id, 'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (its default model, high effort) instead for that round only, and say in your summary that you did.'),
     )
     // a space's own wins over Everywhere's
     w.settings.set('reviewer.fallback', 'pi', { space: p.name })
     expect(add('Space').desc).toContain('review with a headless pi or a pi subagent (its default model, high effort) instead')
     // the coordinator's --set for this one task wins over both, its model and effort included
     const own = add('One task', { 'reviewer.fallback': 'claude', 'reviewer.fallbackModel': 'opus' })
-    expect(own.desc).toContain('review with a headless Claude Code or a Claude Code subagent (model claude-opus-5-5, high effort) instead for that round only, and say in your summary that you did; every round asks that reviewer first again. (set by coordinator for this task)')
+    expect(own.desc).toContain('review with a headless Claude Code or a Claude Code subagent (model claude-opus-5-5, high effort) instead for that round only, and say in your summary that you did. (set by coordinator for this task)')
     // what a review is stays as it was: the findings' bar and the rounds its agent counts
     expect(own.desc).toContain('- Must fix: major. Findings are tagged critical/major/minor/trivial; fix critical and major, then review again.')
     expect(own.desc).toContain('- Review rounds: 3. Stop when a round finds none to fix, at most 3 rounds.')

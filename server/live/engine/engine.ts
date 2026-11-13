@@ -28,7 +28,7 @@ import { launchesAgents, refusedLaunch } from '../launch-policy.ts'
 import { fromAgentLine } from '../chatlines.ts'
 import type { Chats } from '../chats.ts'
 import { HOST, placeId, type Places, type Space } from '../places.ts'
-import { type BaseMoved, baseMovedCard, baseMovedLine, privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, wentBackCardWords, restartLine, type BackWhy, resumedLine, settingsBlock, prNewsLine, queuedLine, rebriefReviewer, briefReview, reviewerChangedLine, reviewerLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
+import { type BaseMoved, baseMovedCard, baseMovedLine, privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, wentBackCardWords, restartLine, type BackWhy, resumedLine, settingsBlock, prNewsLine, queuedLine, rebriefReviewer, briefReview, reviewerChangedLine, reviewerLine, splitBrief, taskFirst, taskPrompt, reviewerWords } from '../prompts.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
@@ -143,6 +143,9 @@ export interface TaskRec {
   rounds?: number
   /** review rounds its agent has counted (shepherdr review): what the brief's at most so many are kept by */
   reviews?: number
+  /** its agent asked for a round while every reviewer of its chain was full or out, and was told to end its turn: the
+   *  round is counted and its reviewer named once one is free (retryReviews); cleared when its step is over */
+  reviewWait?: { since: number }
   /** rounds its coordinator added past those (shepherdr task review-more): one at most, and never by its own agent */
   reviewsAdded?: number
   /** what its agent last said of its own progress (shepherdr status): kept while it works or waits on you */
@@ -470,6 +473,23 @@ const pathList = (files: string[]) => (files.length > 3 ? `${files.slice(0, 3).j
  *  would only be cut off as well), its tasks that were cut off go back to work first (source.ts, return.ts), or its
  *  space's own cap (space.maxTasks, inside the machine's) is full: another space's task may still start */
 export type HeldWhy = 'slots' | 'machine' | 'models' | 'resume' | 'space' | 'model'
+/** a reviewer of a task's chain: its step (0: its own reviewer, n: its backup n) and its harness */
+export interface ReviewStep {
+  n: number
+  h: Harness
+}
+
+/** a round the agent counted, and the reviewer it runs with (leased until --done): `why` is the primary's block, when the
+ *  round runs on a backup */
+export interface Round {
+  round: number
+  rounds: number
+  reviewer: Harness
+  n: number
+  key: string
+  why?: Blocked<ReviewStep>
+}
+
 export const HELD = { slots: 'Waiting for a free slot', machine: 'Waiting for the machine', models: 'Waiting: every model ran out', resume: 'Waiting: cut-off tasks go back to work first', space: 'Waiting for a free slot of its space', model: 'Waiting for a free slot of its model' } as const
 
 /** queued tasks are first looked at once herdr has told which agents are alive: a go sent before would start a second */
@@ -508,6 +528,13 @@ const CHECKS_SHOW = 90_000
  *  moves a command to the background. The shepherdr command itself gives up a little later (server/cli.ts, the
  *  helper's shepherdr) */
 export const MERGE_DEADLINE = 90_000
+/** how long `shepherdr review` waits for a free reviewer before it asks its agent to end its turn (as the merge waits) */
+export const REVIEW_DEADLINE = 90_000
+/** how often that wait looks for a free reviewer */
+const REVIEW_POLL = 2_000
+/** how long a round's reviewer may hold its slot: 45 minutes from the round's count (the headless reviews the brief allows
+ *  run minutes: the skill's timeout is 9), and as long after its agent's turn ended without `shepherdr review --done` */
+export const REVIEW_TIMEOUT = 45 * 60_000
 
 /** done tasks' pull requests are looked at for news (failed checks, comments) this long after starting, then this often */
 const WATCH_FIRST = 30_000
@@ -680,6 +707,15 @@ export class Engine extends Emitter<Events> {
   outNow?: (key: string) => { until?: string } | undefined
   /** the headless runs (the advisor's, the reviewer's) that hold a slot while they run: lease, unlease */
   private leased = new Map<string, Run>()
+  /** the rounds running now: when each was counted, and since when its agent's turn has not been working */
+  private reviewing = new Map<string, { since: number; idle?: number }>()
+  /** tasks whose `shepherdr review` is waiting for a reviewer now (retryReviews leaves them to it) */
+  private reviewLive = new Set<string>()
+  /** how long `shepherdr review` waits for a free reviewer (tests shorten it), how often it looks, and how long a round
+   *  holds its reviewer (REVIEW_TIMEOUT) */
+  reviewDeadline = REVIEW_DEADLINE
+  reviewPoll = REVIEW_POLL
+  reviewTimeout = REVIEW_TIMEOUT
   /** how loaded this machine is now: over a start limit (health.ts busy), and whether herdr answers; none until first
    *  measured, which holds nothing by load */
   machine?: () => { busy?: 'cpu' | 'memory'; herdr: boolean } | undefined
@@ -928,6 +964,7 @@ export class Engine extends Emitter<Events> {
 
   /** settle one task, then the tasks queued after others: what it did may be what one of them waits for */
   private settle(t: TaskRec) {
+    if (!this.atReviewStep(t)) this.endReview(t.id)
     this.settleOne(t)
     this.recheck()
     // what it did may free room for a held one
@@ -1580,6 +1617,7 @@ export class Engine extends Emitter<Events> {
    * default): the load averages take minutes to show what a task adds. Called on each health sample and status change.
    */
   release(now = Date.now()) {
+    this.sweepReviews(now)
     if (this.releasing) return
     this.releasing = true
     try {
@@ -2175,14 +2213,14 @@ export class Engine extends Emitter<Events> {
       } else {
         const fallback = this.settings.reviewerBackups(space, t.set)
         const review = this.settings.ways(space, t.set).review
-        const desc = rebriefReviewer(t.desc, { reviewer: on, fallback, review, by: this.settings.setBy(space, t.set).reviewer })
+        const desc = rebriefReviewer(t.desc, { id: t.id, reviewer: on, fallback, review, by: this.settings.setBy(space, t.set).reviewer })
         if ((!t.reviewer || sameHarness(t.reviewer, on)) && desc === t.desc && !t.reviewerChosen) {
           out.same++
           continue
         }
         pinned = !!t.reviewerChosen
         changed = () => {
-          const line = reviewerLine(on, (briefReview(desc) ?? review) ? fallback : undefined)
+          const line = reviewerLine(on, (briefReview(desc) ?? review) ? fallback : undefined, t.id)
           t.reviewer = on
           t.desc = desc
           t.reviewerChosen = undefined
@@ -2575,16 +2613,142 @@ export class Engine extends Emitter<Events> {
   }
 
   /**
-   * Its own agent counts the review round it starts (shepherdr review): no round goes by uncounted, so one that has
-   * used them all is refused and asks its coordinator instead of reviewing on its own for ever.
+   * `shepherdr review <id>`: the round is counted and its reviewer chosen by the caps, from the task's reviewer chain (its
+   * own reviewer, then its backups in turn: choose.ts). Its reviewer is leased for the round, until `shepherdr review
+   * --done` (reviewDone) or the end of the task's step (endReview). When every reviewer of the chain is full or out, the
+   * round waits, up to reviewDeadline (as shepherdr merge does), for one to free; then it is not counted yet: the
+   * answer says so, and retryReviews counts it and names the reviewer once one is free.
    */
-  reviewRound(id: string) {
+  async reviewRound(id: string): Promise<Round | { wait: Blocked<ReviewStep>[] }> {
     const t = this.req(id)
     if (ended(t)) throw new Error(`${t.id} is Done already: it has no review to run`)
     if (this.reviewsLeft(t) <= 0) throw new Error(this.roundsUsed(t))
+    const deadline = Date.now() + this.reviewDeadline
+    // retryReviews leaves a round alone while this call waits for it
+    this.reviewLive.add(t.id)
+    try {
+      for (;;) {
+        const a = this.attemptRound(t)
+        if (!('wait' in a) || !this.atReviewStep(t)) return a
+        const left = deadline - Date.now()
+        if (left <= 0) {
+          t.reviewWait = { since: Date.now() }
+          this.save()
+          return a
+        }
+        await Bun.sleep(Math.min(this.reviewPoll, left))
+        if (!this.atReviewStep(t)) return a
+      }
+    } finally {
+      this.reviewLive.delete(t.id)
+    }
+  }
+
+  /** one try at a round: the first reviewer of its chain with room under the caps and not out is leased and the round
+   *  counted, or the wait names each reviewer that cannot run (choose.ts). A round that replaces an unreleased one ends it */
+  private attemptRound(t: TaskRec): Round | { wait: Blocked<ReviewStep>[] } {
+    this.endReview(t.id)
+    const c = this.reviewChoice(t)
+    if ('wait' in c) return { wait: c.wait }
+    const { n, h } = c.harness
+    const key = keyOf(h.kind, h.model)
     t.reviews = (t.reviews ?? 0) + 1
+    t.reviewWait = undefined
     this.save()
-    return { round: t.reviews, rounds: this.roundsOf(t) }
+    this.lease(`review:${t.id}`, 'reviewer', key, this.nameOf(t) ?? '')
+    this.reviewing.set(t.id, { since: Date.now() })
+    const why = n > 0 ? c.skipped.find((b) => b.harness.n === 0) : undefined
+    return { round: t.reviews, rounds: this.roundsOf(t), reviewer: h, n, key, ...(why ? { why } : {}) }
+  }
+
+  /** the reviewers a task's rounds may use, in order: its own (task add's reviewer, else Settings'), then its backups in
+   *  turn (the task's --set, else its space's and the machine's: reviewerBackups) */
+  reviewChain(t: TaskRec): ReviewStep[] {
+    const space = this.nameOf(t) ?? ''
+    const own = t.reviewer ?? this.settings.harness('reviewer', space)
+    return [{ n: 0, h: own }, ...this.settings.reviewerBackups(space, t.set).map((h, i) => ({ n: i + 1, h }))]
+  }
+
+  /** the reviewer a round would run with now, under the caps and out (choose.ts); the task's own run is the one asking, so
+   *  it is not held against its reviewer */
+  private reviewChoice(t: TaskRec): Choice<ReviewStep> {
+    return this.decide(this.nameOf(t) ?? '', this.chainOptions(this.reviewChain(t)), t.id)
+  }
+
+  /** whether a task is still at the step its review belongs to: not ended, reported, stopped or archived */
+  private atReviewStep(t: TaskRec) {
+    return !ended(t) && !t.reported && !t.stopped && !t.archived
+  }
+
+  /** `shepherdr review <id> --done`: the round's review has finished, so its reviewer is free again (no round is counted).
+   *  A round that waits for a reviewer is counted when one frees, as before */
+  reviewDone(id: string): boolean {
+    const t = this.req(id)
+    const had = this.reviewing.has(t.id)
+    this.endReview(t.id)
+    if (had) this.retryReviews()
+    return had
+  }
+
+  /** the lease of a task's review ends: its reviewer is free (the round is over, or its step is) */
+  private endReview(id: string) {
+    this.reviewing.delete(id)
+    this.unlease(`review:${id}`)
+  }
+
+  /**
+   * A round that waited for a reviewer is counted, and its reviewer named, as soon as one of its chain is free: looked at with
+   * every health look (as the advisor's questions are). Its agent is woken with the answer in a message. Never a task that
+   * is past its step (reported, stopped, ended, archived), and never one whose command is still waiting for the reviewer.
+   */
+  retryReviews(): void {
+    for (const t of this.tasks) {
+      if (!t.reviewWait || this.reviewLive.has(t.id)) continue
+      if (!this.atReviewStep(t) || this.reviewsLeft(t) <= 0) {
+        t.reviewWait = undefined
+        this.save()
+        continue
+      }
+      const a = this.attemptRound(t)
+      if ('wait' in a) continue
+      void this.sendBack(t, hidden(`A reviewer is free now. ${this.reviewWords(t.id, a)}`, 'review', { task: t.id }))
+    }
+  }
+
+  /** the answer to a round that was counted: the reviewer and the words to pass, and why it is not the primary */
+  reviewWords(id: string, a: Round) {
+    const why = a.why ? ` (${a.why.why === 'out' ? `${chainWords(a.why.harness.h)} is out${a.why.until ? ` until ${a.why.until}` : ''}` : `${chainWords(a.why.harness.h)} is at its limit, ${a.why.cap!.count} of ${a.why.cap!.max} at once`})` : ''
+    return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. Run \`shepherdr review ${id} --done\` when the round's review has finished.`
+  }
+
+  /** the answer to a round every reviewer of which is full or out: it ends its turn, and is woken with the reviewer */
+  reviewWaitWords(id: string, wait: Blocked<ReviewStep>[]) {
+    return `Every reviewer ${id} may use is full or out: ${this.waitIn(wait)}. End your turn now; Shepherdr wakes you here when one is free, with the reviewer to use.`
+  }
+
+  /**
+   * What holds a reviewer while its round runs ends: its task reported, stopped, ended or archived (the sweep of release,
+   * and reviewDone, endReview where they happen), REVIEW_TIMEOUT passed since the round was counted, or its agent's turn
+   * ended and REVIEW_TIMEOUT passed without `--done`. Each wait for a reviewer ends with its step as well. A restart keeps
+   * no lease (it is in memory, as the advisor's and the other runs' are): a round the restart cut off is over, and the
+   * agent's next `shepherdr review` counts and leases a new one.
+   */
+  private sweepReviews(now: number) {
+    for (const [id, r] of [...this.reviewing]) {
+      const t = this.task(id)
+      if (!t || !this.atReviewStep(t) || now - r.since >= this.reviewTimeout) {
+        this.endReview(id)
+        continue
+      }
+      if (this.agents.status(this.key(t)) === 'working') r.idle = undefined
+      else if (r.idle === undefined) r.idle = now
+      else if (now - r.idle >= this.reviewTimeout) this.endReview(id)
+    }
+    for (const t of this.tasks) {
+      if (!t.reviewWait || this.atReviewStep(t)) continue
+      t.reviewWait = undefined
+      this.save()
+    }
   }
 
   /** what a task out of review rounds is told: the rounds are a limit, so only its coordinator raises it */
@@ -2634,6 +2798,8 @@ export class Engine extends Emitter<Events> {
   async done(id: string, summary: string, facts?: string): Promise<{ state: 'ready' | 'closed' | 'merged' | 'ended'; note?: string }> {
     const t = this.req(id)
     if (ended(t)) return { state: 'ended' }
+    // reported: its review is over, and its reviewer is free
+    this.endReview(t.id)
     if (summary) t.said = summary
     if (facts) t.facts = facts
     t.reported = true
@@ -3792,6 +3958,7 @@ export class Engine extends Emitter<Events> {
   async stopTask(id: string): Promise<string[]> {
     const t = this.req(id)
     t.stopped = true
+    this.endReview(t.id)
     // To do, as task pause leaves it: its agent is closed, and writing to it is how it starts again. A start that failed
     // is no longer what it waits on (writing tries it again, and says so if it fails again); a time it waited for is
     // dropped too, so it does not start by itself while it is stopped

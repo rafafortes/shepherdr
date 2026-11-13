@@ -184,9 +184,12 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
 
 Task agents
   shepherdr todo <id>                            the brief says to wait for a go: show as To do until one comes
-  shepherdr review <id>                          count the review round you are starting: its brief's Review rounds
-                                                 at most, then say in your chat what is still unreviewed and end
-                                                 your turn (only your coordinator adds a round: task review-more)
+  shepherdr review <id>                          count the review round you are starting (its brief's Review rounds
+                                                 at most) and get the reviewer to use this round, the caps choosing
+                                                 it from your Reviewer line; when every reviewer is full or out it
+                                                 waits, then has you end your turn (only your coordinator adds a
+                                                 round: task review-more)
+  shepherdr review <id> --done                   the round's review has finished: its reviewer is free again
   shepherdr ready <id> --summary "<what changed>" [--facts "<PR · commit · checks · review · not proven>"]
                                                  the summary at most ${SUMMARY_MAX} characters, in plain words for the
                                                  human (longer is refused); the facts go in the PR,
