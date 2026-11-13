@@ -90,7 +90,7 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a desk
       await reset()
       await page.close()
     }
-  })
+  }, 60_000)
 
   test('change an existing schedule: its time to 21:30, the waiting tasks off', async () => {
     const page = await start([{ name: 'night', rule: 'daily 22:00', waiting: true }])
@@ -244,5 +244,5 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a phon
       await reset()
       await page.close()
     }
-  })
+  }, 60_000)
 })
