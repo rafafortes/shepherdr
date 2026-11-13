@@ -114,6 +114,19 @@ export class LogTail {
     return out
   }
 
+  /** where the next read goes on from: the file's inode and the byte offset of its first line not read yet (what the
+   *  usage ledger keeps, so a restart reads on from there and never counts a call twice) */
+  get position(): { ino: number; offset: number } {
+    return { ino: this.ino, offset: this.offset }
+  }
+
+  /** starts reading at a position kept from an earlier run: the lines before it were read already */
+  seek(p: { ino: number; offset: number }) {
+    this.ino = p.ino
+    this.offset = this.pos = p.offset
+    this.carry = []
+  }
+
   /** every event in the file, from the start (later read() calls go on from the end) */
   readAll(): LogEvent[] {
     this.ino = -1
