@@ -128,6 +128,23 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a desk
   })
 })
 
+describe.skipIf(!browser)('Settings → Models: a due schedule in the demo', () => {
+  test('a due schedule posts its note as a card in the home space\'s chat (the demo sends no alert)', async () => {
+    await reset()
+    // a profile of the settings as they are: due, it changes nothing, and says so
+    await world.act({ type: 'profile-save', name: 'tick-now' })
+    await world.act({ type: 'profile-schedule', name: 'tick-now', rule: 'daily 22:00' })
+    const home = world.places.find((p) => p.home && p.machine === 'vm-str')!.chat
+    const before = world.chats[home]!.messages.length
+    // two days on, the 22:00 of the last day has come due
+    world.profileSchedules.tick(Date.now() + 2 * 86_400_000)
+    const cards = world.chats[home]!.messages.filter((m) => m.card?.text?.includes('tick-now')).map((m) => m.card!.text)
+    expect(world.chats[home]!.messages.length).toBe(before + 1)
+    expect(cards).toEqual([expect.stringContaining('nothing changed, the settings read as tick-now says already.')])
+    await reset()
+  })
+})
+
 describe.skipIf(!browser)('Settings → Models: schedules of a profile on a phone', () => {
   test('the schedules sit under each profile in the dialog, the editor fits the screen and saves, and nothing is wider than the screen', async () => {
     await reset()
