@@ -49,6 +49,16 @@ describe('the text of models.maxAtOnce', () => {
     expect(parseMaxAtOnce(many)).toMatchObject({ ok: false, error: expect.stringContaining(`At most ${MAX_CAP_ENTRIES} entries`) })
   })
 
+  test('a machine with five CLIs keeps a limit for each of its many models: 21 entries and more are taken, saved as written', () => {
+    // 21 entries was once refused ("At most 20 entries"): a machine that capped its agy models hit it
+    const entries = Array.from({ length: 21 }, (_, i) => `agy/model-${i}=1`)
+    expect(parseMaxAtOnce(entries.join(', '))).toMatchObject({ ok: true, entries: expect.any(Array) })
+    const s = fresh()
+    expect(s.set('models.maxAtOnce', entries.join(', '), 'machine').ok).toBe(true)
+    expect(s.maxAtOnce()).toHaveLength(21)
+    expect(MAX_CAP_ENTRIES).toBe(200)
+  })
+
   test('formats entries back to the text it reads', () => {
     expect(formatMaxAtOnce([{ pattern: 'spark', max: 4 }, { pattern: 'radeon', max: 1 }])).toBe('spark=4, radeon=1')
     expect(formatMaxAtOnce([])).toBe('')

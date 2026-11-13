@@ -97,7 +97,7 @@
   `lyvora-app` means the Spark takes at most four in all, and lyvora-app at most two of them. Off for a space is no
   sub-limit of its own; the total still holds for it. Its text is checked when
   it is set: a pattern is a provider or a model key in lowercase, a number from 0 to 200 is needed, a pattern may not
-  repeat, and at most 20 entries (a refusal says which). Values are kept as written, lowercased.
+  repeat, and at most 200 entries (a refusal says which). Values are kept as written, lowercased.
   - **The three choices, for every limit.** Each limit editor (Settings' Machine and Space rows, the Limits cells and bulk
     dialogs, a model's cap cell in Models → Summary) offers three separate choices, never one number that stands for two:
     **No cap** (unlimited: no entry, or `off` for a task count; the cell reads `no cap`, faint), **Blocked · 0 allowed** (`0`;
