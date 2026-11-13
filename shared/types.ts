@@ -842,9 +842,10 @@ export interface MatrixCatalog {
 export interface ModelsMatrix {
   machine: { id: string; name: string }
   slots: MatrixSlot[]
-  /** the plain columns after the roles: a key of its own and its title */
-  plain: { key: string; title: string }[]
+  /** the plain columns after the roles: a key of its own, its title, and what it takes (a choice or a number) */
+  plain: { key: string; title: string; options?: string[]; num?: SettingRow['num'] }[]
   rows: MatrixRow[]
+  /** by the CLI's name (Codex, Claude Code, pi): what each one takes */
   catalog: Record<string, MatrixCatalog>
 }
 

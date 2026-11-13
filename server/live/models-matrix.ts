@@ -19,9 +19,9 @@ const ROLES: { role: MatrixRole; title: string; chain: Chain }[] = [
 ]
 
 /** the plain columns after the roles: one key each, its title on screen */
-export const PLAIN_COLUMNS = [
-  { key: 'space.maxTasks', title: 'Max tasks' },
-  { key: 'merge.train', title: 'Merge train' },
+export const PLAIN_COLUMNS: ModelsMatrix['plain'] = [
+  { key: 'space.maxTasks', title: 'Max tasks', num: { min: 1, max: 200, off: true } },
+  { key: 'merge.train', title: 'Merge train', options: optionsOf('merge.train') },
 ]
 
 /** the home space's key: its settings are the `~` level (places.ts placeId.home) */
@@ -116,9 +116,10 @@ export function modelsMatrix(s: Settings, machine: { host: string; name: string 
     return { id, name, kind, values, cells }
   })
   const catalog: Record<string, MatrixCatalog> = {}
+  // keyed by the CLI's name, as a cell's value and the choices of its row are
   for (const x of slots) for (const c of x.clis) {
     const kind = kindOf(c)
-    if (kind && !catalog[kind]) catalog[kind] = catalogOf(s, kind)
+    if (kind && !catalog[CLI_NAME[kind] ?? kind]) catalog[CLI_NAME[kind] ?? kind] = catalogOf(s, kind)
   }
   return { machine: { id: placeId.machine(machine.host), name: machine.name }, slots, plain, rows, catalog }
 }

@@ -43,8 +43,8 @@ describe('the models matrix: slots and rows', () => {
       [`p:${HOST}:docs`, 'Docs site', 'space'],
     ])
     expect(m.plain).toEqual([
-      { key: 'space.maxTasks', title: 'Max tasks' },
-      { key: 'merge.train', title: 'Merge train' },
+      { key: 'space.maxTasks', title: 'Max tasks', num: { min: 1, max: 200, off: true } },
+      { key: 'merge.train', title: 'Merge train', options: ['off', '2', '3', '4', '5'] },
     ])
     // the home space sets one of them: its row comes, named as the sidebar names it
     const home = matrix(fresh({ spaces: { '~': { 'space.maxTasks': '2' } } }), [{ key: '~', name: 'home' }, ...SPACES])
@@ -118,12 +118,12 @@ describe('the models matrix: slots and rows', () => {
 describe('the models matrix: what each CLI takes', () => {
   test('a catalog per CLI of the table: its models (ids and labels) with the efforts each takes, and its own levels', () => {
     const m = matrix(fresh())
-    const codex = m.catalog.codex!
+    const codex = m.catalog.Codex!
     expect(codex.known).toBe(true)
     expect(codex.models.map((x) => x.id)).toContain('gpt-6-sol')
     expect(codex.models.find((x) => x.id === 'gpt-6-sol')!.efforts).toContain('high')
     expect(codex.efforts).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].filter((l) => codex.efforts.includes(l)))
-    expect(m.catalog.claude!.models.map((x) => x.label)).toContain('Opus 5.5')
+    expect(m.catalog['Claude Code']!.models.map((x) => x.label)).toContain('Opus 5.5')
     // pi lists its models only once asked: until then any id goes, and the catalog says so
     expect(m.catalog.pi).toEqual({ known: false, models: [], efforts: expect.arrayContaining(['low', 'high']) })
   })
