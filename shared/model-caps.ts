@@ -4,6 +4,8 @@
 // entry wins over its provider's. Patterns are lowercase, as the model keys are kept.
 
 /** the most entries one setting holds: a few providers and the models that need their own limit */
+import type { SummaryAtOnce } from './types.ts'
+
 export const MAX_CAP_ENTRIES = 20
 /** the highest number an entry may hold */
 export const MAX_CAP = 200
@@ -55,4 +57,13 @@ export function formatMaxAtOnce(entries: MaxEntry[]): string {
 export function capFor(entries: MaxEntry[], key: string): MaxEntry | undefined {
   const k = key.toLowerCase()
   return entries.find((e) => e.pattern === k) ?? entries.find((e) => e.pattern === providerOfKey(k) && !e.pattern.includes('/'))
+}
+
+/** a row's cap in words: what runs now, its own cap, or the provider's that holds it, and what waits for it */
+export function atOnceWords(a: SummaryAtOnce): { words: string; title: string } {
+  const where = (from: 'all' | 'machine') => (from === 'machine' ? 'this machine' : 'Everywhere')
+  const held = a.held ? ` · ${a.held} held` : ''
+  if (a.own) return { words: `${a.now} of ${a.own.max} at once${held}`, title: `Its cap: ${a.own.pattern}=${a.own.max}, set ${where(a.own.from)}. Click to change.` }
+  if (a.via) return { words: `${a.now} at once · no cap of its own${held}`, title: `Held by ${a.via.pattern}=${a.via.max}, set ${where(a.via.from)}. Click to set its own.` }
+  return { words: `${a.now} at once · no cap${held}`, title: 'No cap for this row. Click to set one.' }
 }

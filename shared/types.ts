@@ -918,12 +918,22 @@ export interface SummaryRunOuts {
   out: boolean
   until?: number
 }
+/** the most agents at once on this machine for a row (models.maxAtOnce): what counts toward it now, the entry that caps
+ *  the row itself (its own, set at the machine or Everywhere), the provider's entry that also holds a model (via), and
+ *  how many tasks wait for the entry now */
+export interface SummaryAtOnce {
+  now: number
+  own?: { pattern: string; max: number; from: 'all' | 'machine' }
+  via?: { pattern: string; max: number; from: 'all' | 'machine' }
+  held: number
+}
 /** one row of the summary: a provider, or one of its models */
 export interface SummaryRow {
   configured: SummaryConfigured
   now: SummaryNow
   usage: SummaryWindows<SummaryUsage>
   runOuts: SummaryRunOuts
+  atOnce: SummaryAtOnce
 }
 export interface SummaryModel extends SummaryRow {
   /** the model key (provider/model) and the model's name in words */
@@ -958,6 +968,9 @@ export interface ModelsSummary {
   backfilled?: number
   providers: SummaryProvider[]
   warnings: SummaryWarning[]
+  /** models.maxAtOnce as each level holds it (its text, '' for none), and the machine's place id a write goes to: the
+   *  cap editors write the entries at the level they pick */
+  caps: { all: string; machine: string; place: string }
 }
 
 /** Settings → Models → profiles (server/live/profiles.ts): one setting a profile changes, as the preview and the answer

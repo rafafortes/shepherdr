@@ -9,6 +9,7 @@ import { Fragment, useState, type ReactNode } from 'react'
 import type { ModelsSummary as Summary, QuotaFigure, QuotaRead, QuotaWindow, SummaryConfigured, SummaryNow, SummaryProvider, SummaryRow, SummaryRunOuts, SummaryUsage, SummaryWarning } from '@shared/types.ts'
 import { openPage } from './Settings.tsx'
 import { ageWords, shareOf, tokens, windowWords } from '../shared/quota-words.ts'
+import { CapCell, type CapsText } from './CapCell.tsx'
 import { Ghost, Small } from './ui.tsx'
 
 /** the warnings hidden in this browser session (sessionStorage: gone when the tab closes) */
@@ -137,15 +138,18 @@ function Warnings({ list, go }: { list: SummaryWarning[]; go: (row: string, slot
   )
 }
 
-/** the summary: the warnings, then the providers and their models */
-export default function ModelsSummary({ s, phone, go, extra }: { s: Summary; phone: boolean; go: (row: string, slot: string) => void; extra?: ReactNode }) {
+/** the summary: the warnings, then the providers and their models. `capOpen`: the cap cell open (its id, cap|<pattern>), which a
+ *  warning's Change… opens too */
+export default function ModelsSummary({ s, phone, go, extra, capOpen, onCapOpen }: { s: Summary; phone: boolean; go: (row: string, slot: string) => void; extra?: ReactNode; capOpen: string | null; onCapOpen: (id: string | null) => void }) {
+  const caps: CapsText = s.caps
+  const cap = { caps, open: capOpen, onOpen: onCapOpen }
   return (
     <section aria-label="Summary" className="flex w-full flex-col gap-4 pt-2">
       <h2 className="font-medium">Summary</h2>
       <Warnings list={s.warnings} go={go} />
       {extra}
       {s.backfilled === undefined ? <Small className="text-pretty">Reading the logs once from their start: the numbers grow until it is done.</Small> : null}
-      {s.providers.length ? (phone ? <Cards providers={s.providers} now={s.at} /> : <Table providers={s.providers} now={s.at} />) : <Small className="text-pretty">Nothing configured, run or used yet.</Small>}
+      {s.providers.length ? (phone ? <Cards providers={s.providers} now={s.at} cap={cap} /> : <Table providers={s.providers} now={s.at} cap={cap} />) : <Small className="text-pretty">Nothing configured, run or used yet.</Small>}
       <Small className="text-pretty">
         Usage is read from the logs of this machine's agents, and kept 35 days. Cost is pi's own estimate, not a bill. Quota is each provider's last read, or an estimate, as Quotas says.
       </Small>
@@ -153,8 +157,15 @@ export default function ModelsSummary({ s, phone, go, extra }: { s: Summary; pho
   )
 }
 
+/** what the cap cells share: this machine's and Everywhere's texts, and the one open cell */
+interface CapState {
+  caps: CapsText
+  open: string | null
+  onOpen: (id: string | null) => void
+}
+
 /** the table on a desktop: a provider's row, then its models under it */
-function Table({ providers, now }: { providers: SummaryProvider[]; now: number }) {
+function Table({ providers, now, cap }: { providers: SummaryProvider[]; now: number; cap: CapState }) {
   // the Provider column stays in view when the table is narrower than its content (a phone-sized window): sticky, opaque
   const head = ['Provider', 'Quota', 'Run-outs', 'Used', 'Configured, and now']
   return (
@@ -179,9 +190,9 @@ function Table({ providers, now }: { providers: SummaryProvider[]; now: number }
         <tbody>
           {providers.map((p) => (
             <Fragment key={p.provider}>
-              <Line name={p.name} local={p.local} row={p} quota={p.quota} read={p.quotaRead} now={now} shares={<Shares row={p} />} bold />
+              <Line name={p.name} local={p.local} row={p} quota={p.quota} read={p.quotaRead} now={now} shares={<Shares row={p} />} bold cap={{ ...cap, pattern: p.provider }} />
               {p.models.map((m) => (
-                <Line key={m.key} name={m.label} row={m} now={now} indent />
+                <Line key={m.key} name={m.label} row={m} now={now} indent cap={{ ...cap, pattern: m.key }} />
               ))}
             </Fragment>
           ))}
@@ -215,7 +226,7 @@ function UsedLines({ row }: { row: SummaryRow }) {
 }
 
 /** one table row: a provider or a model, its numbers in the columns */
-function Line({ name, local, row, quota, read, now, shares, bold, indent }: { name: string; local?: boolean; row: SummaryRow; quota?: QuotaFigure; read?: QuotaRead; now: number; shares?: ReactNode; bold?: boolean; indent?: boolean }) {
+function Line({ name, local, row, quota, read, now, shares, bold, indent, cap }: { name: string; local?: boolean; row: SummaryRow; quota?: QuotaFigure; read?: QuotaRead; now: number; shares?: ReactNode; bold?: boolean; indent?: boolean; cap: CapState & { pattern: string } }) {
   const conf = configuredWords(row.configured)
   const runs = runWords(row.runOuts)
   return (
@@ -239,6 +250,9 @@ function Line({ name, local, row, quota, read, now, shares, bold, indent }: { na
       <td className="py-2 align-top" title={conf.title}>
         <span className="block whitespace-nowrap text-fg2">{conf.words}</span>
         <span className="block truncate text-[0.75rem] text-fg3">{nowWords(row.now)}</span>
+        <span className="mt-0.5 block text-[0.75rem]">
+          <CapCell name={name} pattern={cap.pattern} atOnce={row.atOnce} caps={cap.caps} phone={false} open={cap.open === `cap|${cap.pattern}`} onOpen={cap.onOpen} />
+        </span>
       </td>
     </tr>
   )
@@ -319,7 +333,7 @@ export function QuotaView({ quota, read, now }: { quota?: QuotaFigure; read?: Qu
 }
 
 /** the phone: one card per provider, its models under it */
-function Cards({ providers, now }: { providers: SummaryProvider[]; now: number }) {
+function Cards({ providers, now, cap }: { providers: SummaryProvider[]; now: number; cap: CapState }) {
   return (
     <ul className="flex flex-col gap-3">
       {providers.map((p) => {
@@ -348,13 +362,22 @@ function Cards({ providers, now }: { providers: SummaryProvider[]; now: number }
               <Pair k="Last 7 d" v={usageWords(p.usage.d7).main} sub={usageWords(p.usage.d7).sub} />
               <Pair k="Configured" v={conf.words} title={conf.title} />
               <Pair k="Now" v={nowWords(p.now)} />
+              <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3">
+                <dt className="text-fg3">At once</dt>
+                <dd className="min-w-0">
+                  <CapCell name={p.name} pattern={p.provider} atOnce={p.atOnce} caps={cap.caps} phone open={cap.open === `cap|${p.provider}`} onOpen={cap.onOpen} />
+                </dd>
+              </div>
             </dl>
             {p.models.length ? (
               <ul className="flex flex-col gap-1.5 border-t border-line pt-2">
                 {p.models.map((m) => (
-                  <li key={m.key} className="flex items-baseline justify-between gap-3 text-[0.8125rem] phone:text-[0.9375rem]">
-                    <span className="min-w-0 truncate text-fg2">{m.label}</span>
-                    <span className="shrink-0 text-right tabular-nums">{tokens(m.usage.d7.tokens)} in 7 d</span>
+                  <li key={m.key} className="flex flex-col gap-1 text-[0.8125rem] phone:text-[0.9375rem]">
+                    <span className="flex items-baseline justify-between gap-3">
+                      <span className="min-w-0 truncate text-fg2">{m.label}</span>
+                      <span className="shrink-0 text-right tabular-nums">{tokens(m.usage.d7.tokens)} in 7 d</span>
+                    </span>
+                    <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={cap.caps} phone open={cap.open === `cap|${m.key}`} onOpen={cap.onOpen} />
                   </li>
                 ))}
               </ul>

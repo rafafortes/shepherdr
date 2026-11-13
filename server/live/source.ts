@@ -496,7 +496,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const tasks: TaskFact[] = this.engine.tasks.filter((t) => !t.archived).map((t) => ({ status: this.engine.statusOf(t), agent: t.agent, reviewer: t.reviewer }))
     const watch = this.returns.list().map((o) => ({ key: keyOf(o.primary.kind, o.primary.model), back: o.back }))
     const now = Date.now()
-    return modelsSummary({ now, settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch, quota: this.quotas.summary(now) })
+    // what counts toward models.maxAtOnce now, and the entry each task held for a model's cap waits for
+    const runs = this.engine.runsOn()
+    const heldBy = this.engine.heldTasks().filter((t) => t.held?.why === 'model').map((t) => this.engine.blockingCap(t)?.name).filter((x): x is string => !!x)
+    return modelsSummary({ now, settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch, quota: this.quotas.summary(now), runs, heldBy })
   }
 
   /* ---------- unread ---------- */

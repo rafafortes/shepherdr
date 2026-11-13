@@ -9,6 +9,7 @@ import type { MatrixRow, MatrixSlot, ModelsMatrix, ModelsSummary as Summary, Set
 import { act, useSnap } from './kernel.ts'
 import { askWaitingMany } from './apply-waiting.tsx'
 import { Anchored, OnTop } from './anchored.tsx'
+import { Pop } from './cell-pop.tsx'
 import { ProfilesBar } from './Profiles.tsx'
 import { Control } from './Settings.tsx'
 import { Dialog } from './rowmenu.tsx'
@@ -159,34 +160,6 @@ function Refused({ text }: { text: string }) {
   )
 }
 
-/** a cell's popover on a desktop: the editor on its surface, anchored to the cell. A press outside it closes it, but not
- *  one in a dialog (the question about the waiting tasks it causes, say: that one is answered, and the editor waits);
- *  Escape closes it too, unless a choice list inside it took the key first */
-function Pop({ onClose, children }: { onClose: () => void; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const down = (e: PointerEvent) => {
-      const t = e.target as Element
-      if (ref.current?.contains(t) || t.closest?.('[role="alertdialog"]')) return
-      onClose()
-    }
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    addEventListener('pointerdown', down, true)
-    addEventListener('keydown', key)
-    return () => {
-      removeEventListener('pointerdown', down, true)
-      removeEventListener('keydown', key)
-    }
-  }, [onClose])
-  return (
-    <Anchored>
-      <div ref={ref} role="dialog" aria-label="Edit this setting" className="popover text-left">
-        {children}
-      </div>
-    </Anchored>
-  )
-}
-
 export default function ModelsPage({ phone }: { phone: boolean }) {
   const snap = useSnap()
   const [m, setM] = useState<ModelsMatrix | null>(null)
@@ -195,7 +168,8 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
   const [summary, setSummary] = useState<Summary | null>(null)
   // the editor open (its cell's id) and what its last change refused
   const [open, setOpen] = useState<{ id: string; error?: string } | null>(null)
-  // a ⋯ menu open (a column's or a space's), and the bulk dialogs
+  // the summary's cap cell open (cap|<row>, see CapCell), and a ⋯ menu open (a column's or a space's), and the bulk dialogs
+  const [capOpen, setCapOpen] = useState<string | null>(null)
   const [menu, setMenu] = useState<string | null>(null)
   const [bulk, setBulk] = useState<MatrixSlot | null>(null)
   const [copy, setCopy] = useState<MatrixRow | null>(null)
@@ -225,8 +199,10 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
   const toggle = (id: string, next?: { id: string }) => setOpen(open?.id === id ? null : (next ?? { id }))
   /** a warning's Change: the cell's editor opens, and the cell is brought into view first */
   const goTo = (row: string, slot: string) => {
-    const id = `${row}|${slot}`
-    setOpen({ id })
+    // a cap of the summary (a warning's Change…) opens its own cell, under the summary
+    const id = row === 'cap' ? `cap|${slot}` : `${row}|${slot}`
+    if (row === 'cap') setCapOpen(id)
+    else setOpen({ id })
     requestAnimationFrame(() => document.querySelector(`[data-cell="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'center' }))
   }
   /** a cell's change, or its reset: written at its row's place, and asked about the waiting tasks once it is through */
@@ -361,7 +337,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
             </ul>
           </section>
         ))}
-        {summary ? <ModelsSummary s={summary} phone={phone} go={goTo} extra={<QuotaSettings phone={phone} />} /> : null}
+        {summary ? <ModelsSummary s={summary} phone={phone} go={goTo} extra={<QuotaSettings phone={phone} />} capOpen={capOpen} onCapOpen={setCapOpen} /> : null}
         <OnTop>
           {bulk ? <SetForEverySpace m={m} slot={bulk} phone={phone} onClose={() => setBulk(null)} /> : null}
           {copy ? <CopyModels m={m} from={copy} targets={spaces.filter((r) => r.id !== copy.id)} onClose={() => setCopy(null)} /> : null}
@@ -460,7 +436,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
         </table>
       </div>
       <Small className="text-pretty">Strong: set in that row. Faint: inherited, with where it comes from. Each cell's values are written at its row's level.</Small>
-      {summary ? <ModelsSummary s={summary} phone={phone} go={goTo} extra={<QuotaSettings phone={phone} />} /> : null}
+      {summary ? <ModelsSummary s={summary} phone={phone} go={goTo} extra={<QuotaSettings phone={phone} />} capOpen={capOpen} onCapOpen={setCapOpen} /> : null}
       <OnTop>
         {bulk ? <SetForEverySpace m={m} slot={bulk} phone={phone} onClose={() => setBulk(null)} /> : null}
         {copy ? <CopyModels m={m} from={copy} targets={spaces.filter((r) => r.id !== copy.id)} onClose={() => setCopy(null)} /> : null}

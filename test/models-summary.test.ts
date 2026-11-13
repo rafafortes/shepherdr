@@ -261,8 +261,9 @@ describe('the warnings: what the rules raise, with its fix', () => {
     ]
     const shared = warn(modelsSummary(input(s, ledger('warn-shared'), { agents })), 'shared:')
     expect(shared.map((w) => w.id)).toEqual(['shared:spark/q'])
-    expect(shared[0]!.words).toBe('2 agents on Spark now (q): the model is shared, and Shepherdr sets no limit for it yet.')
-    expect(shared[0]!.fix).toBeUndefined()
+    expect(shared[0]!.words).toBe('2 agents on Spark now (q), and no cap holds them: set a cap for it.')
+    expect(shared[0]!.fix).toBe('A cap says how many run at once; the others wait for a free slot.')
+    expect(shared[0]!.go).toEqual({ row: 'cap', slot: 'spark/q' })
     expect(warn(modelsSummary(input(s, ledger('warn-shared-one'), { agents: agents.slice(0, 1) })), 'shared:')).toEqual([])
   })
 

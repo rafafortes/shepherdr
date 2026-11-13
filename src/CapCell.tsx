@@ -1,0 +1,128 @@
+// The most agents at once per provider or per model (models.maxAtOnce), in Settings → Models → Summary: each provider and
+// model row says how many of its agents run now and its cap ("2 of 4 at once", "2 at once · no cap"), and a cell opens an
+// editor that sets or clears that row's entry at this machine or Everywhere. The writes are the setting's own text: the
+// entries of the chosen level, with this one changed, so a machine's value keeps what Everywhere sets for the others.
+import { useState } from 'react'
+import { act } from './kernel.ts'
+import { atOnceWords, formatMaxAtOnce, MAX_CAP, parseMaxAtOnce, type MaxEntry } from '../shared/model-caps.ts'
+import type { SummaryAtOnce } from '../shared/types.ts'
+import { Pop } from './cell-pop.tsx'
+import { Ghost, Primary, Small } from './ui.tsx'
+
+/** the setting these cells write */
+export const CAP_KEY = 'models.maxAtOnce'
+
+/** the setting's own text at each level ('' where a level sets none), and this machine's place a write goes to */
+export interface CapsText {
+  all: string
+  machine: string
+  place: string
+}
+
+/** the entries a level's text holds, none when it is unreadable (the server refused it, so nothing of it is kept) */
+const entriesOf = (text: string): MaxEntry[] => {
+  const p = parseMaxAtOnce(text)
+  return p.ok ? p.entries : []
+}
+
+/** the cell of one row: its words, and the editor under them when it is open (a phone: under the line, the same controls) */
+export { atOnceWords }
+
+export function CapCell({ name, pattern, atOnce, caps, phone, open, onOpen }: { name: string; pattern: string; atOnce: SummaryAtOnce; caps: CapsText; phone: boolean; open: boolean; onOpen: (id: string | null) => void }) {
+  const id = `cap|${pattern}`
+  const w = atOnceWords(atOnce)
+  const editor = <CapEditor name={name} pattern={pattern} caps={caps} phone={phone} onClose={() => onOpen(null)} />
+  return (
+    <span className="relative block min-w-0">
+      <button type="button" data-cell={id} aria-haspopup={phone ? undefined : 'dialog'} aria-expanded={open} aria-label={`${name}: ${w.words}`} title={w.title} onClick={() => onOpen(open ? null : id)} className="press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel">
+        {w.words}
+      </button>
+      {open ? phone ? <div className="pt-1">{editor}</div> : <Pop onClose={() => onOpen(null)}>{editor}</Pop> : null}
+    </span>
+  )
+}
+
+/** the editor of one cap: a number (1 to 200) at this machine or Everywhere, saved, or cleared at that level */
+export function CapEditor({ name, pattern, caps, phone, onClose }: { name: string; pattern: string; caps: CapsText; phone: boolean; onClose: () => void }) {
+  const [scope, setScope] = useState<'machine' | 'all'>('machine')
+  const own = (level: 'all' | 'machine') => entriesOf(caps[level]).find((e) => e.pattern === pattern)?.max
+  const [draft, setDraft] = useState(String(own('machine') ?? own('all') ?? ''))
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  // this machine's text starts from what it reads (Everywhere's, while it sets none of its own), so a change of one entry
+  // keeps the others as they are
+  const base = (level: 'all' | 'machine') => (level === 'all' ? caps.all : caps.machine || caps.all)
+  const here = own(scope)
+  const inherited = scope === 'machine' && here === undefined ? own('all') : undefined
+  const write = async (clear: boolean) => {
+    const next = entriesOf(base(scope)).filter((e) => e.pattern !== pattern)
+    if (!clear) {
+      const n = Number(draft)
+      if (!Number.isInteger(n) || n < 1 || n > MAX_CAP) {
+        setError(`Write a whole number from 1 to ${MAX_CAP}, or clear the cap.`)
+        return
+      }
+      next.push({ pattern, max: n })
+    }
+    // nothing left at this level: its value goes back to what the level above gives, never to "off" (which would hold it)
+    const text = formatMaxAtOnce(next)
+    setBusy(true)
+    setError('')
+    const r = (await act({ type: 'setting', key: CAP_KEY, value: text || null, place: scope === 'all' ? 'all' : caps.place }).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string }
+    setBusy(false)
+    if (r?.ok) onClose()
+    else setError(r?.error ?? "That didn't go through.")
+  }
+  return (
+    <div aria-label={`Most ${name} at once`} className={phone ? 'flex flex-col gap-2 pb-2' : 'flex w-72 flex-col gap-2 text-left'}>
+      <Small className="text-pretty font-medium">Most {name} at once</Small>
+      <fieldset className="flex flex-col gap-1.5">
+        <legend className="sr-only">Where it is set</legend>
+        <label className="flex items-center gap-2">
+          <input type="radio" name={`cap-scope-${pattern}`} checked={scope === 'machine'} onChange={() => setScope('machine')} />
+          This machine
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="radio" name={`cap-scope-${pattern}`} checked={scope === 'all'} onChange={() => setScope('all')} />
+          Everywhere
+        </label>
+      </fieldset>
+      <label className="flex items-center justify-between gap-3">
+        <span className="text-fg2">At once</span>
+        <input
+          type="number"
+          min={1}
+          max={MAX_CAP}
+          step={1}
+          inputMode="numeric"
+          aria-label={`Most ${name} at once, ${scope === 'all' ? 'Everywhere' : 'this machine'}`}
+          placeholder="no cap"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          className="w-24 rounded-row bg-bg px-2 py-1 text-right tabular-nums shadow-[inset_0_0_0_1px_var(--line2)] outline-none focus:shadow-box-focus dark:bg-bubble"
+        />
+      </label>
+      {inherited !== undefined ? <Small className="text-pretty">Everywhere sets {inherited} here. Saving makes this machine's own value.</Small> : null}
+      {error ? (
+        <Small role="status" className="text-pretty text-need-fg!">
+          {error}
+        </Small>
+      ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {here !== undefined ? (
+          <Ghost onClick={() => void write(true)} disabled={busy} className="text-accent">
+            Clear here
+          </Ghost>
+        ) : (
+          <span />
+        )}
+        <div className="flex items-center gap-2">
+          <Ghost onClick={onClose}>Cancel</Ghost>
+          <Primary disabled={busy || draft.trim() === ''} onClick={() => void write(false)}>
+            {busy ? 'Saving…' : 'Save'}
+          </Primary>
+        </div>
+      </div>
+    </div>
+  )
+}
