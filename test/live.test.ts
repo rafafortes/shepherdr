@@ -663,7 +663,7 @@ describe('settings', () => {
     expect(s.set('task.effort', 'extreme').ok).toBe(false)
     expect(s.set('watcher.agent', 'Claude Code').error).toBe('No setting watcher.agent')
     // a reviewer needs a headless run review.sh knows
-    expect(s.set('reviewer.agent', 'Qwen').error).toBe('Pick one of: Codex · Claude Code · pi.')
+    expect(s.set('reviewer.agent', 'Qwen').error).toBe('Pick one of: Codex · Claude Code · pi · OpenCode.')
     // a model or effort level the CLI (and its model) doesn't take, with what it does
     expect(s.set('coordinator.model', 'opus 9').error).toBe('Claude Code has no model opus 9. Pick one of: default · Fable 5.1 · Opus 5.5 · Sonnet 5.5 · Haiku 5.5.')
     expect(s.set('coordinator.model', 'Opus 5.5').ok).toBe(true)
@@ -744,7 +744,7 @@ describe('settings', () => {
     expect(s.reviewerBackup()).toBeUndefined()
     expect(s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note).not.toContain('cannot run at all')
     // a reviewer CLI, or off: one that can be out of allowance is what it is for
-    expect(s.set('reviewer.fallback', 'qwen').error).toBe('Pick one of: off · Codex · Claude Code · pi.')
+    expect(s.set('reviewer.fallback', 'qwen').error).toBe('Pick one of: off · Codex · Claude Code · pi · OpenCode.')
     expect(s.set('reviewer.fallback', 'claude code').ok).toBe(true)
     expect(s.get('reviewer.fallback')).toBe('Claude Code')
     // its model and effort are its own keys: the reviewer's stay what they were
@@ -1015,7 +1015,7 @@ describe('settings', () => {
     // the way back from a backup: its agents go back to the primary once it answers again
     expect(agents.find((r) => r.key === 'backup.watchReturn')).toMatchObject({ label: 'When the primary is back', value: 'go back', options: ['go back', 'tell me', 'off'] })
     // the advisor: off until set, and a question goes to it by itself after two minutes
-    expect(agents.find((r) => r.key === 'advisor.agent')).toMatchObject({ value: 'off', options: ['off', 'Codex', 'Claude Code', 'pi'] })
+    expect(agents.find((r) => r.key === 'advisor.agent')).toMatchObject({ value: 'off', options: ['off', 'Codex', 'Claude Code', 'pi', 'OpenCode'] })
     expect(agents.find((r) => r.key === 'advisor.after')).toMatchObject({ group: 'Advisor', label: 'Answers for you after', value: '2 min' })
     expect(agents.at(-1)).toMatchObject({ key: 'backup.watchReturn', group: 'Back to the primary' })
   })
@@ -1161,7 +1161,7 @@ ${reviewerLineFor(CODEX_WORDS, 'X-1')}
     // a backup reviewer for this one task, its model and effort beside it
     expect(setForTask('reviewer.fallback=pi')).toEqual({ key: 'reviewer.fallback', value: 'pi' })
     expect(setForTask('reviewer.fallbackModel=opus')).toEqual({ key: 'reviewer.fallbackModel', value: 'opus' })
-    expect(setForTask('reviewer.fallback=qwen')).toMatchObject({ error: '--set reviewer.fallback: Pick one of: off · Codex · Claude Code · pi.' })
+    expect(setForTask('reviewer.fallback=qwen')).toMatchObject({ error: '--set reviewer.fallback: Pick one of: off · Codex · Claude Code · pi · OpenCode.' })
     expect(setForTask('merge=whenever')).toMatchObject({ error: expect.stringContaining('Pick one of') })
     expect(setForTask('colour=blue')).toMatchObject({ error: expect.stringContaining('--set takes key=value') })
   })
@@ -1218,13 +1218,14 @@ describe('interactive chat capabilities', () => {
   test('Settings offers runtime-readable kinds and rejects unsupported selections without changing defaults', async () => {
     const { CHAT_KINDS, readerFor } = await import('../server/live/readers/index.ts')
     const { LOG_FINDERS } = await import('../server/live/readers/find.ts')
-    const { KIND, REVIEWERS } = await import('../server/live/settings.ts')
+    const { KIND, REVIEWERS, refuse } = await import('../server/live/settings.ts')
     const settings = new Settings({ everywhere: {}, machine: {}, spaces: {} })
     const legacy = new Settings({ everywhere: { 'task.agent': 'Antigravity' }, machine: {}, spaces: {} })
     expect(legacy.get('task.agent')).toBe('Antigravity')
     for (const key of ['task.agent', 'coordinator.agent', 'task.fallback']) {
       const row = CATALOG.flatMap((s) => s.rows).find((r) => r.key === key)!
       expect(row.options!.filter((v) => v !== 'off').map((v) => KIND[v])).toEqual(CHAT_KINDS)
+      expect(row.options).toContain('OpenCode')
       const before = settings.get(key)
       for (const value of ['Antigravity', 'Gemini', 'Cursor']) {
         expect(settings.set(key, value)).toMatchObject({ ok: false, error: expect.stringContaining('no chat log reader') })
@@ -1236,7 +1237,14 @@ describe('interactive chat capabilities', () => {
       expect(LOG_FINDERS[kind]).toBeFunction()
     }
     expect(settings.set('task.fallback', 'off').ok).toBe(true)
-    expect(REVIEWERS).toEqual(['Codex', 'Claude Code', 'pi'])
+    expect(REVIEWERS).toEqual(['Codex', 'Claude Code', 'pi', 'OpenCode'])
+    // OpenCode's ids are provider/model, with slashes of their own (nvidia/z-ai/glm-5.3-flash): the settings take them
+    expect(refuse('task.model', 'opencode/minimax-m3.1-flash-free')).toBeUndefined()
+    expect(refuse('reviewer.model', 'nvidia/z-ai/glm-5.3-flash')).toBeUndefined()
+    expect(refuse('reviewer.agent', 'OpenCode')).toBeUndefined()
+    expect(refuse('reviewer.fallback', 'opencode')).toBeUndefined()
+    expect(refuse('advisor.agent', 'opencode')).toBeUndefined()
+    expect(refuse('reviewer.agent', 'Antigravity')).toContain('OpenCode')
   })
 
   test('unsupported starts and restarts fail before callbacks or agent state changes', async () => {

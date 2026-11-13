@@ -10,6 +10,7 @@ import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { readJson, writeJson } from '../store.ts'
 import { piHome } from './readers/find.ts'
+import { listModels, type OpencodeModel } from './opencode.ts'
 
 export interface Model {
   /** what the CLI takes: claude-opus-5-5, gpt-6-sol, exe-dev-openai/gpt-4.1@llm */
@@ -39,6 +40,8 @@ export interface CliModels {
 /** every level any CLI takes, lowest first; off and none are the same, lowest is the old name for the lowest level */
 const RANK: Record<string, number> = { off: 0, none: 0, lowest: 1, minimal: 1, low: 2, medium: 3, high: 4, xhigh: 5, max: 6, ultra: 7 }
 export const LEVELS = Object.keys(RANK)
+/** a level's rank, nothing for a level that has none (OpenCode's variants such as thinking or default) */
+const rankOf = (level: string) => (Object.hasOwn(RANK, level) ? RANK[level] : undefined)
 
 const CLAUDE_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
 const PI_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
@@ -58,6 +61,8 @@ export const TABLE: Record<string, CliModels> = {
   },
   // pi reaches many providers' models: only pi itself can list them
   pi: { models: [], efforts: PI_LEVELS },
+  // OpenCode's models come from its providers and their variants: only OpenCode itself can list them
+  opencode: { models: [], efforts: [] },
 }
 
 /** Claude Code's families as its /model menu offers them, newest of each; its aliases (opus, haiku) name these too */
@@ -145,6 +150,14 @@ export function findModel(kind: string, value?: string): Model | undefined {
   )
 }
 
+/** OpenCode's enabled models, and the levels of all of them together: its variants, the ranked ones lowest first, then
+ *  the others in the order OpenCode lists them */
+export function opencodeList(models: OpencodeModel[]): CliModels {
+  const all = [...new Set(models.flatMap((m) => m.efforts))]
+  const ranked = all.filter((l) => rankOf(l) !== undefined).sort((a, b) => rankOf(a)! - rankOf(b)!)
+  return { models, efforts: [...ranked, ...all.filter((l) => rankOf(l) === undefined)] }
+}
+
 /** whether this CLI can say which models it has: else any model id goes */
 export const knowsModels = (kind: string) => !!modelsOf(kind)?.models.length
 
@@ -161,14 +174,16 @@ export function effortsOf(kind: string, model?: string): string[] {
   return findModel(kind, model ?? c.default)?.efforts ?? c.efforts
 }
 
-/** the level nearest to this one among these, a tie going to the lower; nothing for the CLI's own or an unknown word */
+/** the level nearest to this one among these, a tie going to the lower; nothing for the CLI's own or an unknown word.
+ *  A level with no rank is taken only as it is written: the nearest is picked among the ranked ones, and nothing when none is */
 export function nearest(levels: string[], effort?: string): string | undefined {
   const e = effort?.trim().toLowerCase()
   if (!e || e === 'default' || !levels.length) return undefined
   if (levels.includes(e)) return e
-  const r = RANK[e]
-  if (r === undefined) return undefined
-  return levels.reduce((best, l) => (Math.abs(RANK[l] - r) < Math.abs(RANK[best] - r) ? l : best))
+  const r = rankOf(e)
+  const ranked = levels.filter((l) => rankOf(l) !== undefined)
+  if (r === undefined || !ranked.length) return undefined
+  return ranked.reduce((best, l) => (Math.abs(rankOf(l)! - r) < Math.abs(rankOf(best)! - r) ? l : best))
 }
 
 /** an effort as this CLI and model take it: the nearest level it has, or nothing for its own default */
@@ -237,7 +252,8 @@ async function run(cmd: string[]) {
   return `${out}${err}`
 }
 
-async function read(kind: string, from?: string): Promise<CliModels | undefined> {
+export async function read(kind: string, from?: string): Promise<CliModels | undefined> {
+  if (kind === 'opencode') return opencodeList(await listModels())
   if (kind === 'claude' && from) {
     const bin = from.slice(0, from.lastIndexOf('@'))
     const [catalog, help] = await Promise.all([run(['grep', '-aoE', '\\{id:"claude-[a-z0-9-]+",family:"[a-z]+",display_name:"[^"]+"|capabilities:\\[[^]]*\\]|default_effort:"[a-z]+"', bin]), run([bin, '--help'])])

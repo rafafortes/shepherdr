@@ -110,6 +110,9 @@ export function oneShot(h: Harness): string[] | undefined {
       ...(effort ? ['--effort', effort] : []),
     ]
   if (h.kind === 'codex') return ['codex', 'exec', '--sandbox', 'read-only', '--skip-git-repo-check', ...(model ? ['--model', model] : []), ASK]
+  // no flag for a system prompt in `opencode run`: the question alone is the probe; its plan agent is read only
+  if (h.kind === 'opencode')
+    return ['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-probe', ...(model ? ['-m', effort ? `${model}#${effort}` : model] : []), ASK]
   if (h.kind === 'pi')
     return [
       'pi',
