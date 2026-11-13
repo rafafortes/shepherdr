@@ -38,7 +38,7 @@ function addOn(w: ReturnType<typeof world>, p: { name: string }, title: string, 
 }
 
 /** how many of this machine's agents run on a model now (models.maxAtOnce's count) */
-const loadOf = (w: ReturnType<typeof world>, key: string) => w.engine.runsOn().filter((k) => k === key).length
+const loadOf = (w: ReturnType<typeof world>, key: string) => w.engine.runs().filter((r) => r.key === key).length
 
 const startedOf = (w: ReturnType<typeof world>, id: string) => w.started.some((s) => s.key === `${id}/Agent`)
 
@@ -51,8 +51,8 @@ describe('models.maxAtOnce: a model at its cap holds its next task, and the othe
     // the machine has room, its spark models do not: the model is the reason
     const s3 = addOn(w, s1.p, 'S3', SPARK)
     expect(s3.held?.why).toBe('model')
-    expect(w.engine.subOf(s3)).toBe('Waiting for a free slot of spark (2 of 2 at once)')
-    expect(w.posted.some((x) => x.key === `${s3.id}/Agent` && x.id.startsWith('held:') && x.card?.text === 'waiting for a free slot of spark (2 of 2 at once)')).toBe(true)
+    expect(w.engine.subOf(s3)).toBe('Waiting: spark (2 of 2 at once)')
+    expect(w.posted.some((x) => x.key === `${s3.id}/Agent` && x.id.startsWith('held:') && x.card?.text === 'waiting: spark (2 of 2 at once) — every model it may use is full or out')).toBe(true)
     expect(startedOf(w, s3.id)).toBe(false)
     expect(w.engine.room(s3)).toEqual({ why: 'model' })
     // another provider's task starts past it: the machine has room for it (two of three slots)
@@ -79,7 +79,7 @@ describe('models.maxAtOnce: a model at its cap holds its next task, and the othe
     w.agentIs(x.key, 'idle')
     await until(() => s3.held?.why === 'model')
     expect(startedOf(w, s3.id)).toBe(false)
-    expect(w.engine.subOf(s3)).toBe('Waiting for a free slot of spark (2 of 2 at once)')
+    expect(w.engine.subOf(s3)).toBe('Waiting: spark (2 of 2 at once)')
     // a commandcode task added now starts past the spark one
     const c2 = addOn(w, s1.p, 'C2', CODE)
     expect(c2.held).toBeUndefined()
@@ -97,7 +97,7 @@ describe('models.maxAtOnce: a model at its cap holds its next task, and the othe
     const a = await startOn(w, dir, 'free-a', 'A1', SPARK)
     const b = addOn(w, a.p, 'A2', SPARK)
     expect(b.held).toBeUndefined()
-    expect(w.engine.modelCaps(a.t)).toEqual([])
+    expect(w.engine.taskChoice(a.t)).toMatchObject({ index: 0, skipped: [] })
     expect(w.engine.room(b)).toEqual({})
   })
 
@@ -123,11 +123,8 @@ describe('models.maxAtOnce: which entry caps a model, and what counts', () => {
     // spark=2 is full (qwen and the other model): the qwen model's own 3 do not pass the provider's 2
     const q2 = addOn(w, q1.p, 'Q2', SPARK)
     expect(q2.held?.why).toBe('model')
-    expect(w.engine.subOf(q2)).toBe('Waiting for a free slot of spark (2 of 2 at once)')
-    expect(w.engine.modelCaps(q2)).toEqual([
-      { entry: { pattern: SPARK, max: 3 }, name: SPARK, working: 1, max: 3 },
-      { entry: { pattern: 'spark', max: 2 }, name: 'spark', working: 2, max: 2 },
-    ])
+    expect(w.engine.subOf(q2)).toBe('Waiting: spark (2 of 2 at once)')
+    expect(w.engine.taskChoice(q2)).toMatchObject({ wait: [{ name: 'spark', cap: { scope: 'machine', count: 2, max: 2 } }] })
     // one of the two ends: the provider has room, the qwen model its own 3 with room too, so Q2 starts
     await w.engine.done(o1.t.id, 'Nothing to change.')
     w.agentIs(o1.key, 'idle')
@@ -141,8 +138,8 @@ describe('models.maxAtOnce: which entry caps a model, and what counts', () => {
     const q1 = await startOn(w, dir, 'name-q1', 'Q1', SPARK)
     const q2 = addOn(w, q1.p, 'Q2', SPARK)
     expect(q2.held?.why).toBe('model')
-    expect(w.engine.subOf(q2)).toBe(`Waiting for a free slot of ${SPARK} (1 of 1 at once)`)
-    expect(w.posted.some((x) => x.key === `${q2.id}/Agent` && x.card?.text === `waiting for a free slot of ${SPARK} (1 of 1 at once)`)).toBe(true)
+    expect(w.engine.subOf(q2)).toBe(`Waiting: ${SPARK} (1 of 1 at once)`)
+    expect(w.posted.some((x) => x.key === `${q2.id}/Agent` && x.card?.text === `waiting: ${SPARK} (1 of 1 at once) — every model it may use is full or out`)).toBe(true)
   })
 
   test('a model entry is matched by its model key, a provider entry by its provider, and a claude model by its anthropic key', async () => {
@@ -154,7 +151,7 @@ describe('models.maxAtOnce: which entry caps a model, and what counts', () => {
     expect(w.engine.modelOfTask(t1)).toBe('anthropic/claude-opus-5-5')
     const t2 = w.engine.add({ project: p.name, title: 'O2', desc: 'Add o2.txt.', by: 'test', agent: { kind: 'claude', model: 'claude-opus-5-5' } })
     expect(t2.held?.why).toBe('model')
-    expect(w.engine.subOf(t2)).toBe('Waiting for a free slot of anthropic/claude-opus-5-5 (1 of 1 at once)')
+    expect(w.engine.subOf(t2)).toBe('Waiting: anthropic/claude-opus-5-5 (1 of 1 at once)')
     // another claude model is not capped by it
     const t3 = w.engine.add({ project: p.name, title: 'S1', desc: 'Add s1.txt.', by: 'test', agent: { kind: 'claude', model: 'claude-sonnet-5' } })
     expect(t3.held).toBeUndefined()
@@ -171,7 +168,7 @@ describe('models.maxAtOnce: which entry caps a model, and what counts', () => {
     w.agentIs(chat, 'working')
     const t = addOn(w, p, 'Waits', SPARK)
     expect(t.held?.why).toBe('model')
-    expect(w.engine.subOf(t)).toBe('Waiting for a free slot of spark (1 of 1 at once)')
+    expect(w.engine.subOf(t)).toBe('Waiting: spark (1 of 1 at once)')
     // at rest, it is not counted
     w.agentIs(chat, 'idle')
     expect(w.engine.room(t)).toEqual({})
@@ -222,7 +219,7 @@ describe('models.maxAtOnce: which entry caps a model, and what counts', () => {
     const older = addOn(w, a.p, 'Older', SPARK)
     const fix = addOn(w, a.p, 'Fix main', SPARK, true)
     expect(fix.held?.why).toBe('model')
-    expect(w.engine.subOf(fix)).toBe('First in line · Waiting for a free slot of spark (1 of 1 at once)')
+    expect(w.engine.subOf(fix)).toBe('First in line · Waiting: spark (1 of 1 at once)')
     expect(w.engine.heldTasks().map((t) => t.id)).toEqual([fix.id, older.id])
     await w.engine.done(a.t.id, 'Nothing to change.')
     w.agentIs(a.key, 'idle')

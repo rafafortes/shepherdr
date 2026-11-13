@@ -34,7 +34,7 @@ import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
 import { findModel, knowsModels } from '../models.ts'
 import { keyOf } from '../models-summary.ts'
-import { capFor, providerOfKey, type MaxEntry } from '../../../shared/model-caps.ts'
+import { choose, waitWords, type Blocked, type Choice, type Option, type Run } from './choose.ts'
 import { fitHarness, harnessWords, recentChat, sameHarness } from '../restart.ts'
 import * as G from './git.ts'
 import { Worktrees, type HerdrSpaces, type Made } from './worktrees.ts'
@@ -97,7 +97,10 @@ export interface TaskRec {
   /** held by Shepherdr until this machine has room for it (Settings → the machine's limits): why it waits (all its
    *  slots are taken, or the machine is too loaded) and since when. go: the message its agent gets then, and why it
    *  starts (none: it has no agent yet, and starts then on its brief). Anything you write to it lets it go at once */
-  held?: { why: HeldWhy; since: number; go?: string; goWhy?: string; plain?: boolean }
+  held?: { why: HeldWhy; since: number; go?: string; goWhy?: string; plain?: boolean; takeover?: { why: string; step: number; lasting?: boolean } }
+  /** a start, not a cut-off, put it on a backup of its chain: its primary was at its cap (or out), and this is that backup
+   *  (its place in the chain). The way back moves it to its primary once idle and the primary has room (source.ts backFromCap) */
+  onBackup?: { step: number; kind: string; at: number }
   /** shepherdr task stop closed its agent and space; writing to it again clears it */
   stopped?: boolean
   /** the words of a start that never became a turn (start.ts), kept so a restart still knows which trouble a turn, or a
@@ -285,6 +288,20 @@ export function fitStatus(text: string) {
  * The report a task shows: while it works, its minutes left count down from what its agent said; while it waits on
  * you, all of it stays as it was. Nothing once its job is over (Ready, Done, To do, Queued).
  */
+/** what a task started on a backup by the caps is told after its brief: the same work, on the model it runs now */
+const capLine = (on: string) => `Shepherdr started you on ${on}: your own model is at its limit or out, so the first backup with room took the work. The work is the same; carry on with your brief.`
+
+/** the harness a backup starts on: its own model and effort, else the model the task's agent ran on, when its CLI has it */
+export function backupHarness(to: { kind: string; model?: string; effort?: string }, own: Harness): Harness {
+  return { kind: to.kind, model: to.model ?? (own.model ? findModel(to.kind, own.model)?.id : undefined), effort: to.effort ?? own.effort }
+}
+
+/** a capped or out harness in words for a card: `spark (4 of 4 at once)`, `commandcode is out until 17:00` */
+export function capWords(b: Blocked<unknown>, shown = (s: string) => s) {
+  if (b.why === 'out') return `${b.name} is out${b.until ? ` until ${b.until}` : ''}`
+  return `${b.name}${b.cap?.scope === 'space' ? ` in ${shown(b.cap.space ?? '')}` : ''} is at its limit (${b.cap?.count} of ${b.cap?.max} at once)`
+}
+
 export function reportOf(r: Reported | undefined, status: TaskStatus, now = Date.now()): Report | undefined {
   if (!r || (status !== 'work' && status !== 'need')) return undefined
   const spent = ((r.pausedAt ?? now) - r.at) / 60000
@@ -454,15 +471,6 @@ const pathList = (files: string[]) => (files.length > 3 ? `${files.slice(0, 3).j
  *  space's own cap (space.maxTasks, inside the machine's) is full: another space's task may still start */
 export type HeldWhy = 'slots' | 'machine' | 'models' | 'resume' | 'space' | 'model'
 export const HELD = { slots: 'Waiting for a free slot', machine: 'Waiting for the machine', models: 'Waiting: every model ran out', resume: 'Waiting: cut-off tasks go back to work first', space: 'Waiting for a free slot of its space', model: 'Waiting for a free slot of its model' } as const
-
-/** one entry of models.maxAtOnce that caps the model a task starts on: the entry, the name the held line and the card
- *  give it, how many agents of this machine it counts now (the task itself not among them) and the most it allows */
-export interface ModelCap {
-  entry: MaxEntry
-  name: string
-  working: number
-  max: number
-}
 
 /** queued tasks are first looked at once herdr has told which agents are alive: a go sent before would start a second */
 const RECHECK_FIRST = 15_000
@@ -667,6 +675,11 @@ export class Engine extends Emitter<Events> {
   private failedStarts = new Map<string, { at: number; why: string }>()
   /** a CLI is installed here (a test says) */
   installed = (kind: string) => !!Bun.which(kind)
+  /** the provider of a model key is out now (its run-outs, or the return watch's outage: source.ts): a harness out is not
+   *  chosen, the next of its chain is (choose.ts). Unset: nothing is out */
+  outNow?: (key: string) => { until?: string } | undefined
+  /** the headless runs (the advisor's, the reviewer's) that hold a slot while they run: lease, unlease */
+  private leased = new Map<string, Run>()
   /** how loaded this machine is now: over a start limit (health.ts busy), and whether herdr answers; none until first
    *  measured, which holds nothing by load */
   machine?: () => { busy?: 'cpu' | 'memory'; herdr: boolean } | undefined
@@ -1375,7 +1388,7 @@ export class Engine extends Emitter<Events> {
     // a first in line passes neither: its space's cap is as much its slots as the machine's are, nor its model's
     const cap = t ? this.spaceCap(t) : undefined
     if (cap && cap.working >= cap.max) return { why: 'space' }
-    return t && this.blockingCap(t) ? { why: 'model' } : {}
+    return t && 'wait' in this.taskChoice(t) ? { why: 'model' } : {}
   }
 
   /** the model a task's agent runs on, as its usage is kept (keyOf): its live agent's model, else the one it starts on
@@ -1388,36 +1401,86 @@ export class Engine extends Emitter<Events> {
     return keyOf(h.kind, h.model)
   }
 
-  /** the agents of this machine that hold a slot or work now, by model key (models.maxAtOnce counts them): the tasks that
-   *  hold a slot, each on the model it runs, and the coordinators working right now (never held, but they use the
-   *  capacity). Advisor and reviewer runs are not counted; another machine's agents are not seen here at all */
-  runsOn(except?: TaskRec): string[] {
-    const keys: string[] = []
-    for (const t of this.tasks) if (t !== except && this.busy(t)) keys.push(this.modelOfTask(t))
-    for (const [key, r] of Object.entries(this.agents.records)) if (!key.includes('/') && this.agents.status(key) === 'working') keys.push(keyOf(r.kind, r.model))
-    return keys
+  /**
+   * The runs that hold a slot of models.maxAtOnce on this machine now (choose.ts counts them, each under its space): the
+   * tasks that hold a slot, each on the model it runs; the coordinators working right now; and the leases (lease). `except`:
+   * a task's own run, which it does not count against itself while it chooses; `plus`: runs started in the same pass
+   */
+  runs(except?: string, plus: Run[] = []): Run[] {
+    const out: Run[] = []
+    for (const t of this.tasks) if (t.id !== except && this.busy(t)) out.push({ key: this.modelOfTask(t), space: this.nameOf(t) ?? '', role: 'task', id: t.id })
+    for (const [key, r] of Object.entries(this.agents.records)) {
+      if (key.includes('/') || this.agents.status(key) !== 'working') continue
+      out.push({ key: keyOf(r.kind, r.model), space: this.places.space(key)?.name ?? '~', role: 'coordinator', id: key })
+    }
+    return [...out, ...this.leased.values(), ...plus]
   }
 
-  /** the entries of models.maxAtOnce that cap the model a task starts on, each with what it counts now: a model's own
-   *  entry counts that model's agents, a provider's entry every agent of that provider (a server's total, as the DGX Spark
-   *  takes four requests at once in all). Both apply: a model's own entry sets its limit, and the provider's still holds
-   *  its total; nothing when neither is set */
-  modelCaps(t: TaskRec, key = this.modelOfTask(t)): ModelCap[] {
-    const entries = this.settings.maxAtOnce()
-    const runs = this.runsOn(t).map((k) => k.toLowerCase())
-    const provider = providerOfKey(key.toLowerCase())
-    const own = capFor(entries, key)
-    const out: ModelCap[] = []
-    // a model's own entry (its name is the model key) counts its own agents; the provider's counts all of them
-    if (own && own.pattern === key.toLowerCase()) out.push({ entry: own, name: own.pattern, working: runs.filter((k) => k === own.pattern).length, max: own.max })
-    const byProvider = entries.find((e) => e.pattern === provider && !e.pattern.includes('/'))
-    if (byProvider) out.push({ entry: byProvider, name: byProvider.pattern, working: runs.filter((k) => providerOfKey(k) === provider).length, max: byProvider.max })
-    return out
+  /**
+   * A headless run (the advisor's answer, a reviewer's round) holds a slot of models.maxAtOnce while it runs: lease it
+   * before it starts, unlease it when it ends. It counts like a task's run, on its model key and its space, toward the
+   * machine's total and its space's own sub-limit (runs). `key`: the model key it runs on (keyOf).
+   */
+  lease(id: string, role: 'advisor' | 'reviewer', key: string, space: string) {
+    this.leased.set(id, { key, space, role, id })
   }
 
-  /** the entry that holds a task on its model now: the first of its caps that is full (none when it has room) */
-  blockingCap(t: TaskRec, key?: string): ModelCap | undefined {
-    return this.modelCaps(t, key).find((c) => c.working >= c.max)
+  /** the lease a headless run took is over (it ended, or it did not start) */
+  unlease(id: string) {
+    this.leased.delete(id)
+  }
+
+  /** a chain's items as the core reads them: each with its model key, and out when its provider is out now (outNow) */
+  chainOptions<T extends { h: Harness }>(items: T[]): Option<T>[] {
+    return items.map((harness) => {
+      const key = keyOf(harness.h.kind, harness.h.model)
+      const out = this.outNow?.(key)
+      return { harness, key, ...(out ? { out } : {}) }
+    })
+  }
+
+  /** the choice among a role's options for a space, under the caps as they are now (choose.ts). `except`: a task's own run,
+   *  `plus`: the runs a pass has started already */
+  decide<T>(space: string, options: Option<T>[], except?: string, plus: Run[] = []): Choice<T> {
+    return choose<T>({ space, options, runs: this.runs(except, plus), machine: this.settings.maxAtOnce(), own: this.settings.maxAtOnce(space) })
+  }
+
+  /** the backup a task is on, by its place in its chain: 0 on its primary, else the step of its takeover or its start on a
+   *  backup (whichever is the later) */
+  stepOf(t: TaskRec) {
+    return Math.max(t.tookOver ? (t.tookOver.step ?? 1) : 0, t.onBackup?.step ?? 0)
+  }
+
+  /**
+   * A task's chain as it may start now: its own agent (task add --agent, else Settings' task agent) first, then its backups
+   * in order, as its coordinator's --set keeps them (task.fallback… of the task, else its space's, machine's and Everywhere's).
+   * After a cut-off that waits for a slot (held.takeover), only the backups past the place it was cut off.
+   */
+  taskChain(t: TaskRec): { step: number; h: Harness }[] {
+    const space = this.nameOf(t) ?? ''
+    const own = t.agent ?? this.settings.harness('task', space)
+    const chain = [{ step: 0, h: own }]
+    for (const p of this.backupsFor('task', space, t.set)) if (p.to) chain.push({ step: p.n, h: backupHarness(p.to, own) })
+    const after = t.held?.takeover?.step
+    return after === undefined ? chain : chain.filter((x) => x.step > after)
+  }
+
+  /** the harness a task starts on now, the first of its chain with room under the caps and not out; or the wait, each
+   *  harness and why it cannot (choose.ts). Its own run is not held against it */
+  taskChoice(t: TaskRec, plus: Run[] = []): Choice<{ step: number; h: Harness }> {
+    return this.decide(this.nameOf(t) ?? '', this.chainOptions(this.taskChain(t)), t.id, plus)
+  }
+
+  /** the entries a task waits for, by name (a full model or provider, or one that is out): what the summary counts as held */
+  waitingFor(t: TaskRec): string[] {
+    const c = this.taskChoice(t)
+    return 'wait' in c ? c.wait.map((b) => b.name) : []
+  }
+
+  /** a wait in words for a held row and a card: `spark (4 of 4 at once), commandcode (out until 17:00) — every model it may
+   *  use is full or out` */
+  capWaitLine(wait: Blocked<unknown>[]) {
+    return `${waitWords(wait, (s) => this.places.shownName(s))} — every model it may use is full or out`
   }
 
   /** a task's space's own cap on this machine (space.maxTasks), with how many of that space's tasks work now (busy, as
@@ -1430,11 +1493,12 @@ export class Engine extends Emitter<Events> {
     return { space, shown: this.places.shownName(space), max, working: this.tasks.filter((x) => this.places.space(x.project)?.name === space && this.busy(x)).length }
   }
 
-  /** a held task's line in its row: a task held by its space's cap names the space, as it shows */
+  /** a held task's line in its row: a task held by its space's cap names the space, as it shows; one held for its models
+   *  names each harness of its chain and why it cannot start (waitLine) */
   private heldLabel(t: TaskRec) {
     if (t.held!.why === 'model') {
-      const c = this.blockingCap(t)
-      if (c) return `Waiting for a free slot of ${c.name} (${c.working} of ${c.max} at once)`
+      const c = this.taskChoice(t)
+      if ('wait' in c) return `Waiting: ${waitWords(c.wait, (x) => this.places.shownName(x))}`
     }
     const cap = t.held!.why === 'space' ? this.spaceCap(t) : undefined
     return cap ? `Waiting for a free slot of ${cap.shown}` : HELD[t.held!.why]
@@ -1480,14 +1544,14 @@ export class Engine extends Emitter<Events> {
     t.todo = undefined
     const id = `held:${t.id}:${Date.now()}`
     const cap = why === 'space' ? this.spaceCap(t) : undefined
-    const model = why === 'model' ? this.blockingCap(t) : undefined
+    const choice = why === 'model' ? this.taskChoice(t) : undefined
     const words = {
       slots: `waiting for a free slot (${this.slotsWords(l.max)})`,
       machine: 'waiting for the machine: it is busy',
       models: 'waiting: every model of this space ran out, so a start would only be cut off too',
       resume: 'waiting: the tasks that were cut off go back to work first',
       space: `waiting for a free slot of ${cap?.shown ?? 'its space'} (${cap?.working ?? 0} of ${cap?.max ?? 0} of its tasks working)`,
-      model: `waiting for a free slot of ${model?.name ?? 'its model'} (${model?.working ?? 0} of ${model?.max ?? 0} at once)`,
+      model: choice && 'wait' in choice ? `waiting: ${this.capWaitLine(choice.wait)}` : 'waiting for a free slot of its model',
     }[why]
     this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: words } })
     this.save()
@@ -1531,6 +1595,14 @@ export class Engine extends Emitter<Events> {
         if (!t.priority && !this.startsNow(now)) return
         this.lastStart = now
         const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work', space: 'a slot of its space is free', model: 'a slot of its model is free' }[t.held!.why]
+        // a cut-off that waited for a backup with room takes it over now, as cantGoOn would (the caps are read again there)
+        if (t.held!.takeover) {
+          const { why: cut, lasting } = t.held!.takeover
+          t.held = undefined
+          this.save()
+          this.cantGoOn(t.id, cut, lasting).catch(() => undefined)
+          continue
+        }
         if (t.held!.go) this.go(t, t.held!.go, `${t.held!.goWhy ?? why} · ${why}`, t.held!.plain)
         else {
           t.held = undefined
@@ -1832,6 +1904,14 @@ export class Engine extends Emitter<Events> {
     try {
       // a server that may start no agent makes nothing for one either: no worktree, no branch, nothing in herdr
       if (!launchesAgents()) throw refusedLaunch(this.key(t))
+      // the harness it starts on: its own, when it has room under the caps and is not out, else the first backup of its
+      // chain that has (choose.ts). Every one full or out: it is held for a slot, and nothing is made
+      const c = this.taskChoice(t)
+      if ('wait' in c) {
+        this.hold(t, 'model')
+        return
+      }
+      const { step, h } = c.harness
       const p = this.proj(t)
       const branch = branchFor(t)
       // Old records without a snapshot keep the existing fallback; new tasks snapshot at add.
@@ -1843,7 +1923,16 @@ export class Engine extends Emitter<Events> {
       })
       Object.assign(t, { branch, worktree: made.path })
       this.save()
-      await this.launch(t, this.queued(t) ? `${taskFirst(t)}\n\n${queuedLine(this.open(t), 'start', t.id)}` : taskFirst(t), made)
+      // on a backup because its primary was full or out: a card in its chat says so, and the agent is told it too
+      if (step > 0) {
+        t.onBackup = { step, kind: h.kind, at: Date.now() }
+        const card = `cap:${t.id}:${Date.now()}`
+        const why = c.skipped[0]
+        const text = `Started on ${harnessWords(fitHarness(h))}${why ? `: ${capWords(why, (x) => this.places.shownName(x))}` : ''}`
+        this.chats.post(this.key(t), { id: card, card: { id: card, task: t.id, status: 'work', text } })
+      } else delete t.onBackup
+      const first = this.queued(t) ? `${taskFirst(t)}\n\n${queuedLine(this.open(t), 'start', t.id)}` : taskFirst(t)
+      await this.launch(t, step > 0 ? `${first}\n\n${capLine(harnessWords(fitHarness(h)))}` : first, made, step > 0 ? h : undefined)
       this.briefing.add(t.id)
       clearTimeout(this.later.get(`${t.id}:brief`))
       const x = setTimeout(() => {
@@ -2243,7 +2332,8 @@ export class Engine extends Emitter<Events> {
         return hidden(`${taskFirst(t)}\n\n${restartLine({ from: name(from), to: words, back: !!back, ...(await this.soFar(t, key, name(from))) })}`, 'restart')
       }
       await this.launch(t, undefined, undefined, { ...h, model: h.model ?? '', effort: h.effort ?? '' }, first)
-      // a pause or a stop is over: it carries on
+      // a pause or a stop is over: it carries on; and it is no start on a backup by the caps any more
+      t.onBackup = undefined
       t.stopped = undefined
       t.paused = undefined
       t.agent = h
@@ -2296,9 +2386,9 @@ export class Engine extends Emitter<Events> {
     const ran: Harness = rec ? { kind: rec.kind, model: rec.model, effort: rec.effort } : (t.agent ?? this.settings.harness('task', space))
     // what this task keeps for itself (task add --set) first, then its space's settings, its machine's and Everywhere's:
     // the backups after the one it is on now (all of them, while none took over), the first that can go in
-    const at = t.tookOver ? (t.tookOver.step ?? 1) : 0
+    const at = this.stepOf(t)
     const later = this.backupsFor('task', space, t.set).filter((p) => p.n > at)
-    const plan = later.find((p) => p.to)
+    const own = t.agent ?? this.settings.harness('task', space)
     // waits for the human from here: one cut off for good is started again once its provider answers (return.ts). A
     // note that can't be written never changes what happens to the task
     const stuck = () => {
@@ -2311,11 +2401,23 @@ export class Engine extends Emitter<Events> {
     }
     if (!t.worktree) return this.settle(t)
     // each backup goes in once: past the last one, a takeover that keeps failing is the human's, not a loop
-    if (!plan?.to) {
+    const candidates = later.filter((p) => p.to)
+    if (!candidates.length) {
       stuck()
       return this.noBackup(key, later.find((p) => p.why)?.why)
     }
-    const to = plan.to.kind
+    // the first backup with room under the caps and not out (choose.ts); every one full or out: the task waits for a slot,
+    // and release() takes the backup over once one is free (held.takeover)
+    const c = this.decide(space ?? '', this.chainOptions(candidates.map((p) => ({ plan: p, h: backupHarness(p.to!, own) }))), t.id)
+    if ('wait' in c) {
+      this.hold(t, 'model')
+      t.held!.takeover = { why: why.charAt(0).toLowerCase() + why.slice(1), step: at, lasting }
+      this.save()
+      stuck()
+      return this.settle(t)
+    }
+    const plan = c.harness.plan
+    const to = plan.to!.kind
     // only an agent whose session is there has one to keep: one with no record, or whose session is gone, starts fresh,
     // with the brief and the chat
     const same = to === from && !!rec && !rec.fresh && (!!rec.sessionId || rec.logs.length > 0)
@@ -2326,10 +2428,7 @@ export class Engine extends Emitter<Events> {
     try {
       // Settings' Backup model and effort (this task's own first), or else the task's own: its CLI may not take them, in
       // which case it starts on its own default
-      const own = t.agent ?? this.settings.harness('task', space)
-      const model = plan.to.model ?? (own.model ? findModel(to, own.model)?.id : undefined)
-      const effort = plan.to.effort ?? own.effort
-      const h: Harness = { kind: to, model, effort }
+      const h: Harness = backupHarness(plan.to!, own)
       const words = harnessWords(fitHarness(h))
       const first = same
         ? hidden(backupKeptLine({ on: words, why: t.tookOver.why }), 'restart')

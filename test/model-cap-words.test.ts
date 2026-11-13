@@ -30,6 +30,8 @@ describe("a model's cap in words: the row, the card and the replies name the ent
     const p = await src.places.add(dir, 'words-spark')
     const chat = placeId.space(p.name)
     expect(src.settings.set('models.maxAtOnce', 'spark=1', 'machine').ok).toBe(true)
+    // no backup takes the task: its words are about the held row alone (the backups' own start is in engine-model-cap)
+    expect(src.settings.set('task.fallback', 'off', 'machine').ok).toBe(true)
     // one spark agent of this machine is at work
     const busy = src.engine.tasks.push({ id: 'WRD-1', n: 1, project: chat, base: 'main', title: 'Busy', desc: 'Add b.txt.', by: 'test', created: Date.now(), updated: Date.now(), told: 'work', agent: { kind: 'pi', model: SPARK } } as never)
     void busy
@@ -42,12 +44,12 @@ describe("a model's cap in words: the row, the card and the replies name the ent
       const id = add.out.match(/([A-Z]+-\d+)/)![1]
       const t = src.engine.task(id)!
       expect(t.held?.why).toBe('model')
-      expect(src.engine.subOf(t)).toBe('Waiting for a free slot of spark (1 of 1 at once)')
-      expect(add.out).toContain("held: spark's own limit of 1 at once is taken")
-      expect(cards(`${id}/Agent`)).toContain('waiting for a free slot of spark (1 of 1 at once)')
+      expect(src.engine.subOf(t)).toBe('Waiting: spark (1 of 1 at once)')
+      expect(add.out).toContain('held: spark (1 of 1 at once) — every model it may use is full or out')
+      expect(cards(`${id}/Agent`)).toContain('waiting: spark (1 of 1 at once) — every model it may use is full or out')
       // a tell to the held task is held the same way, its reply says why, and its words wait with it
       const tell = await src.cli(['task', 'tell', id, 'Go when you can.'], { chat })
-      expect(tell.out).toContain(`${id} is held: spark's own limit of 1 at once is taken`)
+      expect(tell.out).toContain(`${id} is held: spark (1 of 1 at once) — every model it may use is full or out`)
     } finally {
       src.agents.status = status
       src.settings.set('models.maxAtOnce', null, 'machine')

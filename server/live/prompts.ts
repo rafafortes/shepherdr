@@ -272,15 +272,17 @@ export function backupCardWords(o: { from: string; to: string; words: string; sa
 /** the words a chat's card says its agent went back by itself to its primary model, which answers again (return.ts),
  *  or started again on the model that had cut it off */
 export function wentBackCardWords(words: string, back: BackWhy = 'backup') {
+  if (back === 'room') return `Back on ${words}: its model has room under its cap now`
   return back === 'again' ? `Started again on ${words}: its provider answers again` : `Back on the primary model, which answers again: ${words}`
 }
 
 /** what an agent started again on another CLI is told (a task's after its brief): who ran its role until now, and
  *  what was said and done; a task's commits and changes, none for a coordinator. back: Shepherdr took it back to its
  *  primary model, which answers again, from the backup that ran it (return.ts), not the human */
-export function restartLine(o: { from: string; to: string; chat: string; commits?: string; changes?: string; back?: boolean }) {
+export function restartLine(o: { from: string; to: string; chat: string; commits?: string; changes?: string; back?: boolean; room?: boolean }) {
   const task = o.commits !== undefined
-  const who = o.back ? `Shepherdr moved this ${task ? 'task' : 'chat'} back to its primary model, which answers again: ${o.to}. ${o.from}, its backup,` : `the human restarted this ${task ? 'task' : 'chat'} on ${o.to}. ${o.from}`
+  const why = o.room ? ', which has room under its cap now' : ', which answers again'
+  const who = o.back ? `Shepherdr moved this ${task ? 'task' : 'chat'} back to its primary model${why}: ${o.to}. ${o.from}, its backup,` : `the human restarted this ${task ? 'task' : 'chat'} on ${o.to}. ${o.from}`
   return [
     `Restarted: ${who} ran it until now; you carry on from here, in the same ${task ? 'worktree and branch' : 'folder'}. Look at what is there and go on from it, don't start over.`,
     ...(task ? [`Commits on the branch so far:\n${o.commits || 'none'}`, `Uncommitted changes:\n${o.changes || 'none'}`] : []),
@@ -296,12 +298,13 @@ export function relaunchedLine() {
 
 /** why Shepherdr, not the human, started an agent again (return.ts): back from its backup to the primary model, which
  *  answers again; or again on the model that cut it off, whose provider answers again */
-export type BackWhy = 'backup' | 'again'
+export type BackWhy = 'backup' | 'again' | 'room'
 
 /** what an agent started again on its own CLI is told, its session resumed (a model or an effort changed). back: it was
  *  Shepherdr, once the primary answered again (return.ts), not the human */
 export function resumedLine(on: string, back?: BackWhy) {
   if (back === 'backup') return `The primary model answers again, so Shepherdr moved you back to it from your backup: ${on}, with your session as it was. If you were in the middle of something, carry on where you left off; else reply with only <no-reply>back</no-reply>.`
+  if (back === 'room') return `Your primary model has room under its cap again, so Shepherdr moved you back to it from the backup you started on: ${on}, with your session as it was. If you were in the middle of something, carry on where you left off; else reply with only <no-reply>back</no-reply>.`
   if (back === 'again') return `Your model's provider cut your turn off, and it answers again: Shepherdr started you again on ${on}, with your session as it was. Carry on where you left off; if there is nothing left to do, reply with only <no-reply>back</no-reply>.`
   return `The human restarted you on ${on}, with your session as it was. If you were in the middle of something, carry on where you left off; else reply with only <no-reply>restarted</no-reply>.`
 }

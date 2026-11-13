@@ -24,13 +24,14 @@ import { HELP, one, parseArgs, summaryOpts, type Parsed } from './args.ts'
 import { Automations, type Automation, type Template } from './automations.ts'
 import { Heartbeats, heartbeatFile, Wakes, wakeProblem } from './heartbeat.ts'
 import { eventRules, eventsText, eventWords, matches, nextWords, runWords, timeRule, timeWords, triggerWords, type Happened, type TriggerEvent } from './trigger.ts'
-import { startsWords, whenFrom } from '../../shared/when.ts'
+import { clockWords, startsWords, whenFrom } from '../../shared/when.ts'
 import { Browsers, type BrowserBridge, type BrowserClient } from './browser.ts'
 import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
 import { DISMISSED, dismissKind, dismissWords } from './dismiss.ts'
 import { dictate as dictation } from './dictate.ts'
-import { age, askOf, checkTitle, ended, Engine, fitStatus, retuneLine, reviewRetuneLine, type HeldWhy, type Retune, type TaskRec } from './engine/engine.ts'
+import { age, askOf, backupHarness, capWords, checkTitle, ended, Engine, fitStatus, retuneLine, reviewRetuneLine, type HeldWhy, type Retune, type TaskRec } from './engine/engine.ts'
+import type { Blocked, Run } from './engine/choose.ts'
 import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { listFolders, makeRepo, resolveInHome } from './folders.ts'
 import { sh, validateBase } from './engine/git.ts'
@@ -303,6 +304,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a space whose models all ran out starts no task (each would be cut off too), and its cut-off tasks go back to
     // work before a new one takes a slot
     this.engine.startsWait = (t) => this.startsWait(t)
+    // a provider that is out now is not chosen for a start (engine.chainOptions): the run-outs and the return watch's outage
+    this.engine.outNow = (key) => this.outNow(key)
     // a task the way back takes again shows in line, not as one that needs the human
     this.engine.goesBack = (t) => this.goingBack.get(`${t.id}/Agent`)
     // known at once after a start, not only at the watch's first pass ten minutes on
@@ -497,8 +500,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const watch = this.returns.list().map((o) => ({ key: keyOf(o.primary.kind, o.primary.model), back: o.back }))
     const now = Date.now()
     // what counts toward models.maxAtOnce now, and the entry each task held for a model's cap waits for
-    const runs = this.engine.runsOn()
-    const heldBy = this.engine.heldTasks().filter((t) => t.held?.why === 'model').map((t) => this.engine.blockingCap(t)?.name).filter((x): x is string => !!x)
+    const runs = this.engine.runs().map((r) => r.key)
+    const heldBy = this.engine.heldTasks().filter((t) => t.held?.why === 'model').flatMap((t) => this.engine.waitingFor(t))
     return modelsSummary({ now, settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch, quota: this.quotas.summary(now), runs, heldBy })
   }
 
@@ -1433,7 +1436,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (!c) throw new Error(`No place ${id}`)
     const set = this.settings.harness('coordinator', this.spaceKey(id))
     const rec = this.agents.record(id)
-    const h = o.as ?? (rec ? undefined : set)
+    // a first start (nothing kept, nothing chosen by hand) takes the first harness of its chain with room under the caps
+    const start = !o.as && !rec ? this.coordinatorStart(id, set) : undefined
+    if (start) this.startedByCaps(id, start)
+    const h = o.as ?? (start ? start.h : rec ? undefined : set)
     const spec: Spec = {
       key: id,
       name: c.name,
@@ -1448,6 +1454,105 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       env: agentEnv(id, ROOT),
     }
     return o.restart ? this.agents.restart(spec, o.restart) : this.agents.ensure(spec)
+  }
+
+  /**
+   * A coordinator's first start: the first harness of its chain (its Settings' primary, then its backups in order) with
+   * room under the caps and not out (choose.ts). When none has room, the primary starts anyway: a coordinator never waits,
+   * and its chat says it runs past the cap (startedByCaps). `step`: its place in the chain, 0 on the primary
+   */
+  private coordinatorStart(id: string, set: Harness): { h: Harness; step: number; skipped: Blocked<unknown>[]; past: boolean } {
+    const space = this.spaceKey(id) ?? ''
+    const items = [{ step: 0, h: set }, ...this.engine.backupsFor('coordinator', space || undefined).flatMap((p) => (p.to ? [{ step: p.n, h: backupHarness(p.to, set) }] : []))]
+    const c = this.engine.decide(space, this.engine.chainOptions(items))
+    if ('harness' in c) return { h: c.harness.h, step: c.harness.step, skipped: c.skipped, past: false }
+    return { h: set, step: 0, skipped: c.wait, past: c.wait.some((b) => b.why === 'full') }
+  }
+
+  /** a first start the caps decided: on a backup (its card says why, and it counts as a takeover for its later backups), or
+   *  past the cap on its primary (its card says so) */
+  private startedByCaps(id: string, start: { h: Harness; step: number; skipped: Blocked<unknown>[]; past: boolean }) {
+    const first = start.skipped[0]
+    if (start.step > 0) {
+      this.capStarts.set(id, { step: start.step })
+      this.capNote(id, `Started on ${harnessWords(fitHarness(start.h))}${first ? `: ${capWords(first, (x) => this.places.shownName(x))}` : ''}`)
+    } else if (start.past && first) {
+      this.capNote(id, `Runs past the cap: ${capWords(first, (x) => this.places.shownName(x))}. Every model it may use is full, so it starts on ${harnessWords(fitHarness(start.h))} anyway.`)
+    }
+  }
+
+  /** a card in a chat, for a start the caps decided */
+  private capNote(key: string, text: string) {
+    const id = `cap:${key}:${Date.now()}`
+    this.chats.post(key, { id, card: { id, text } })
+    if (this.watched.includes(key)) this.emit('chat', key)
+  }
+
+  /** the coordinators a first start put on a backup by the caps (place id, and its step in the chain): the way back takes
+   *  them to their primary once idle and the primary has room (backFromCap). In memory: until then they stay where they are */
+  private capStarts = new Map<string, { step: number }>()
+
+  /** whether a model key's provider is out now, and until when: its run-outs (the Summary reads them the same way, for every
+   *  model of the provider) and the return watch's outage that has not seen its primary back yet. The choice skips it */
+  private outNow(key: string): { until?: string } | undefined {
+    const now = Date.now()
+    const provider = providerOf(key)
+    const mine = this.returns.list().filter((o) => providerOf(keyOf(o.primary.kind, o.primary.model)) === provider)
+    const backAt = mine.reduce((a, o) => Math.max(a, o.back ?? 0), 0) || undefined
+    const st = this.usage.outOf(provider, now, backAt)
+    if (!st.out && !mine.some((o) => o.back === undefined)) return undefined
+    return st.out && st.last?.resetAt !== undefined ? { until: clockWords(st.last.resetAt, now, this.settings.zone()) } : {}
+  }
+
+  /** an agent between turns, with nothing of its own still running, no try of its own due and nothing it asks you: the
+   *  condition of the way back to its primary (goBack's, and the cap's) */
+  private idleForBack(key: string) {
+    const st = this.agents.status(key)
+    if ((st !== 'idle' && st !== 'done' && !(st === 'gone' && this.agents.reachable)) || this.agents.background(key)) return false
+    const r = this.retries.get(key)
+    return !((r && !r.over) || this.chats.openQuestion(key) || this.chats.openCard(key) || this.chats.startMenuUp(key))
+  }
+
+  /**
+   * A start the caps put on a backup (engine.onBackup, capStarts) goes back to its primary once its agent is idle and the
+   * primary has room under the caps: the way back's own rule (backup.watchReturn go back; never mid-turn, never a paused
+   * task, never one asking you something), one agent at a time, each taking its room before the next is looked at. A
+   * cut-off is the way back's business (goBack), not this one's.
+   */
+  private async backFromCap() {
+    const extra: Run[] = []
+    for (const t of this.engine.tasks) {
+      if (!t.onBackup || t.held || ended(t) || t.stopped || t.paused || t.archived || !t.worktree) continue
+      const space = this.places.space(t.project)?.name
+      if (space === undefined || returnMode(this.settings.get('backup.watchReturn', space)) !== 'go back' || !this.idleForBack(`${t.id}/Agent`)) continue
+      const primary = t.agent ?? this.settings.harness('task', space)
+      const c = this.engine.decide(space, this.engine.chainOptions([{ h: primary }]), t.id, extra)
+      if ('wait' in c) continue
+      extra.push({ key: keyOf(primary.kind, primary.model), space, role: 'task', id: t.id })
+      try {
+        await this.restart(`${t.id}/Agent`, primary, false, 'room')
+      } catch (e) {
+        console.error(`shepherdr: couldn't move ${t.id} back to its primary: ${(e as Error).message}`)
+      }
+    }
+    for (const id of [...this.capStarts.keys()]) {
+      if (!this.places.coordinator(id) || !this.agents.record(id)) {
+        this.capStarts.delete(id)
+        continue
+      }
+      const space = this.spaceKey(id)
+      if (returnMode(this.settings.get('backup.watchReturn', space || undefined)) !== 'go back' || !this.idleForBack(id)) continue
+      const primary = this.settings.harness('coordinator', space || undefined)
+      const c = this.engine.decide(space ?? '', this.engine.chainOptions([{ h: primary }]), undefined, extra)
+      if ('wait' in c) continue
+      extra.push({ key: keyOf(primary.kind, primary.model), space: space ?? '', role: 'coordinator', id })
+      try {
+        await this.restartCoordinator(id, primary, undefined, 'room')
+        this.capStarts.delete(id)
+      } catch (e) {
+        console.error(`shepherdr: couldn't move ${id} back to its primary: ${(e as Error).message}`)
+      }
+    }
   }
 
   /** a coordinator started again on this CLI, model and effort: the same CLI resumes its session, another takes over
@@ -1469,7 +1574,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (from === h.kind) return hidden(backupKeptLine({ on: words, why: backup }), 'restart')
         return hidden(coordinatorHandOverLine({ from: them, why: backup, tasks: this.openTasks(id), chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
       }
-      return from === h.kind ? hidden(resumedLine(words, back), 'restart') : hidden(restartLine({ from: them, to: words, back: !!back, chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
+      return from === h.kind ? hidden(resumedLine(words, back), 'restart') : hidden(restartLine({ from: them, to: words, back: !!back, room: back === 'room', chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
     }
     await this.coordinator(id, { as: h, restart: first })
     const card = `${backup ? 'takeover' : 'restart'}:${id}:${Date.now()}`
@@ -1790,19 +1895,21 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const from = rec?.kind
     const chain = from ? this.engine.backupsFor('coordinator', this.spaceKey(key)) : []
     const took = this.agents.tookOver(key)
-    // the backups after the one it is on (all of them while none took over): each once, until you restart it yourself,
-    // so a chain that keeps failing waits for the human, never a loop
-    const later = chain.filter((p) => p.n > (took ? (took.step ?? 1) : 0))
-    const plan = later.find((p) => p.to) ?? later[0] ?? {}
+    // the backups after the one it is on (all of them while none took over, and a start the caps put on one counts as
+    // a takeover): each once, until you restart it yourself, so a chain that keeps failing waits for the human, never a loop
+    const at = Math.max(took ? (took.step ?? 1) : 0, this.capStarts.get(key)?.step ?? 0)
+    const later = chain.filter((p) => p.n > at)
+    // the first of them with room under the caps and not out (choose.ts); when every one is full or out, the first anyway: a
+    // coordinator must not stall, and its chat says it runs past the cap
+    const candidates = later.filter((p) => p.to)
+    const chosen = rec && candidates.length ? this.engine.decide(this.spaceKey(key) ?? '', this.engine.chainOptions(candidates.map((p) => ({ plan: p, h: backupHarness(p.to!, { kind: rec.kind, model: rec.model, effort: rec.effort }) }))), key) : undefined
+    const plan = chosen && 'harness' in chosen ? chosen.harness.plan : (candidates[0] ?? later[0] ?? {})
+    if (chosen && 'wait' in chosen && candidates[0]) this.capNote(key, `Its backup goes in past the cap, as none has room: ${capWords(chosen.wait[0]!, (x) => this.places.shownName(x))}.`)
     const backups = chain.flatMap((p) => (p.to ? [p.to] : []))
     if (plan.to && from && rec) {
       const why = r.reason.charAt(0).toLowerCase() + r.reason.slice(1)
       // the coordinators' Model and Effort, or else the model and effort it ran on: a model the backup's CLI lacks is dropped
-      const on: Harness = {
-        kind: plan.to.kind,
-        model: plan.to.model ?? (rec.model ? findModel(plan.to.kind, rec.model)?.id : undefined),
-        effort: plan.to.effort ?? rec.effort,
-      }
+      const on: Harness = backupHarness(plan.to, { kind: rec.kind, model: rec.model, effort: rec.effort })
       // the same mark as before it, with its place in the chain
       const prior = took
       this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now(), step: plan.n })
@@ -1969,6 +2076,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.resumingCapped = cappedResuming
     this.resumingModels = cappedModelsResuming
     this.refreshGoingBack()
+    // a start the caps put on a backup goes back to its primary once that has room (backFromCap)
+    await this.backFromCap()
     // a wait over (its models answer, or its cut-off tasks went back): the queue goes on, or waits on with its reason
     this.engine.release()
   }
@@ -2078,9 +2187,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // the spaces whose own cap (space.maxTasks) is full for their cut-off tasks, and how many more of each may start
     const capped = new Set<string>()
     const spaceLeft = new Map<string, number>()
-    // and the caps of the model they go back to (models.maxAtOnce): the models whose cap is full, and what is left of each
+    // and the caps of the model they go back to (models.maxAtOnce): the models whose cap is full, and the runs this pass made
     const cappedModels = new Set<string>()
-    const modelLeft = new Map<string, number>()
+    const extraRuns: Run[] = []
     for (const c of chats) {
       const st = this.agents.status(c.key)
       // between turns, with nothing of its own still running: what a restart would cut short waits. One whose pane is
@@ -2091,7 +2200,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const r = this.retries.get(c.key)
       if ((r && !r.over) || this.chats.openQuestion(c.key) || this.chats.openCard(c.key) || this.chats.startMenuUp(c.key)) continue
       let cap: { space: string; left: number } | undefined
-      let models: ReturnType<Engine['modelCaps']> = []
+      let back: Run | undefined
       if (c.task) {
         const t = this.engine.task(c.task)
         // a pause is yours to end (a restart would end it)
@@ -2109,13 +2218,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
             continue
           }
         }
-        // the caps of the model it goes back to (models.maxAtOnce): a full one waits for a slot of its own, as a space does
-        models = this.engine.modelCaps(t, keyOf(o.primary.kind, o.primary.model))
-        const full = models.find((m) => (modelLeft.get(m.name) ?? m.max - m.working) <= 0)
-        if (full) {
-          cappedModels.add(full.name)
+        // the caps of the model it goes back to (models.maxAtOnce, choose.ts): a full one waits for a slot of its own, as a
+        // space does, and the runs this pass started count against it
+        const space = this.places.space(t.project)?.name ?? ''
+        // the primary's own outage is the one this pass is taking back: its answer is in, so only the caps count here
+        const to = this.engine.decide(space, [{ harness: o.primary, key: keyOf(o.primary.kind, o.primary.model) }], t.id, extraRuns)
+        if ('wait' in to) {
+          for (const b of to.wait) cappedModels.add(b.name)
           continue
         }
+        back = { key: keyOf(o.primary.kind, o.primary.model), space, role: 'task', id: t.id }
       }
       tried.push(c.key)
       // started again by the way back: never taken in again for the same cut-off or takeover
@@ -2130,7 +2242,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           slots--
           this.engine.noteStart(now)
           if (cap) spaceLeft.set(cap.space, cap.left - 1)
-          for (const m of models) modelLeft.set(m.name, (modelLeft.get(m.name) ?? m.max - m.working) - 1)
+          if (back) extraRuns.push(back)
         }
       } catch (e) {
         console.error(`shepherdr: couldn't start ${c.key} again on its primary model: ${(e as Error).message}`)
@@ -2478,14 +2590,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   private heldWords(why: HeldWhy, t: TaskRec) {
     const cap = this.engine.spaceCap(t)
-    const model = this.engine.blockingCap(t)
+    const choice = this.engine.taskChoice(t)
     return {
       slots: `all ${this.settings.machine().max} slots are taken`,
       machine: 'the machine is busy',
       models: 'every model of its space ran out, so it would only be cut off too, until the primary answers again',
       resume: 'the tasks that were cut off go back to work first',
       space: cap ? `${cap.shown}'s own limit of ${cap.max} tasks is taken` : 'its space is at its own limit',
-      model: model ? `${model.name}'s own limit of ${model.max} at once is taken` : 'its model is at its own limit',
+      model: 'wait' in choice ? this.engine.capWaitLine(choice.wait) : 'its model is at its own limit',
     }[why]
   }
 
