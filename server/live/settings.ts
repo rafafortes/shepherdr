@@ -856,11 +856,8 @@ export class Settings {
   private taskLimit(key: string, l: 'all' | 'machine' | { space: string }): number | null {
     const v = this.pick(key, l).value.trim().toLowerCase()
     const n = Number.parseFloat(v)
-    if (v === 'off') return null
-    if (Number.isFinite(n) && n >= 0) return Math.round(n)
-    // a value no longer readable (never written by the settings) reads as the row's default
-    const d = defaultOf(key)?.trim().toLowerCase()
-    return d === undefined || d === 'off' ? null : Math.round(Number.parseFloat(d))
+    // off is no cap; a value no longer readable (the settings never write one) reads as the row's default, never as 0
+    return v === 'off' ? null : Number.isFinite(n) && n >= 0 ? Math.round(n) : (defaultOf(key)?.trim().toLowerCase() === 'off' ? null : Math.round(Number.parseFloat(defaultOf(key) ?? '0')))
   }
 
   /** how many of one space's tasks may work on this machine at once (space.maxTasks, inside the machine's own limit): the
