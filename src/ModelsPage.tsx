@@ -5,13 +5,14 @@
 // every space…" and a space's "Copy models to…", each confirmed first. The table comes from one read (models-matrix.ts).
 import clsx from 'clsx'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { MatrixRow, MatrixSlot, ModelsMatrix, SettingRow } from '@shared/types.ts'
+import type { MatrixRow, MatrixSlot, ModelsMatrix, ModelsSummary as Summary, SettingRow } from '@shared/types.ts'
 import { act, useSnap } from './kernel.ts'
 import { askWaitingMany } from './apply-waiting.tsx'
 import { Anchored, OnTop } from './anchored.tsx'
 import { ProfilesBar } from './Profiles.tsx'
 import { Control } from './Settings.tsx'
 import { Dialog } from './rowmenu.tsx'
+import ModelsSummary from './ModelsSummary.tsx'
 import { Ghost, Menu, MenuItem, MoreIcon, Primary, Small, ic } from './ui.tsx'
 
 /** a CLI's name when it is off: a backup that doesn't run */
@@ -189,6 +190,8 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
   const snap = useSnap()
   const [m, setM] = useState<ModelsMatrix | null>(null)
   const [failed, setFailed] = useState('')
+  // the summary under the table: read with it (its numbers move as the logs are read and the agents work)
+  const [summary, setSummary] = useState<Summary | null>(null)
   // the editor open (its cell's id) and what its last change refused
   const [open, setOpen] = useState<{ id: string; error?: string } | null>(null)
   // a ⋯ menu open (a column's or a space's), and the bulk dialogs
@@ -205,11 +208,26 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
       live = false
     }
   }, [snap])
+  useEffect(() => {
+    let live = true
+    act({ type: 'models-summary' })
+      .then((r) => live && setSummary(r as Summary))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [snap])
   if (!m) return <p className="px-6 pt-5 text-fg2">{failed || 'Reading every level…'}</p>
   const groups = groupsOf(m)
   const spaces = m.rows.filter((r) => r.kind === 'space')
   const machine = m.rows.find((r) => r.kind === 'machine')!
   const toggle = (id: string, next?: { id: string }) => setOpen(open?.id === id ? null : (next ?? { id }))
+  /** a warning's Change: the cell's editor opens, and the cell is brought into view first */
+  const goTo = (row: string, slot: string) => {
+    const id = `${row}|${slot}`
+    setOpen({ id })
+    requestAnimationFrame(() => document.querySelector(`[data-cell="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'center' }))
+  }
   /** a cell's change, or its reset: written at its row's place, and asked about the waiting tasks once it is through */
   const apply = async (row: MatrixRow, t: Target, writes: Write[]) => {
     const r = await writeAt(row.id, writes)
@@ -303,7 +321,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
                       const t: Target = { slot }
                       return (
                         <li key={slot.id} className="flex flex-col">
-                          <button type="button" aria-expanded={open?.id === idOf(row, t)} onClick={() => toggle(idOf(row, t))} className="press flex min-h-11 w-full items-center justify-between gap-3 text-left">
+                          <button type="button" data-cell={idOf(row, t)} aria-expanded={open?.id === idOf(row, t)} onClick={() => toggle(idOf(row, t))} className="press flex min-h-11 w-full items-center justify-between gap-3 text-left">
                             <span className="shrink-0 text-fg2">{slot.name}</span>
                             <span className={clsx('min-w-0 truncate text-right', cell.set ? 'text-fg' : 'text-fg3')} title={cell.words}>
                               {cell.words}
@@ -342,6 +360,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
             </ul>
           </section>
         ))}
+        {summary ? <ModelsSummary s={summary} phone={phone} go={goTo} /> : null}
         <OnTop>
           {bulk ? <SetForEverySpace m={m} slot={bulk} phone={phone} onClose={() => setBulk(null)} /> : null}
           {copy ? <CopyModels m={m} from={copy} targets={spaces.filter((r) => r.id !== copy.id)} onClose={() => setCopy(null)} /> : null}
@@ -404,7 +423,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
                     const id = idOf(row, t)
                     return (
                       <td key={slot.id} className={clsx('relative py-1.5 pr-3 pl-2 align-top', i === 0 && 'border-l border-line')}>
-                        <button type="button" aria-label={`${row.name} · ${g.title} · ${slot.name}: ${cell.words}`} aria-haspopup="dialog" aria-expanded={open?.id === id} onClick={() => toggle(id)} title={cell.words} className={clsx('press-dim block max-w-64 truncate rounded-row px-1.5 py-0.5 text-left hover:bg-hover aria-expanded:bg-sel', cell.set ? 'font-medium text-fg' : 'text-fg3')}>
+                        <button type="button" data-cell={id} aria-label={`${row.name} · ${g.title} · ${slot.name}: ${cell.words}`} aria-haspopup="dialog" aria-expanded={open?.id === id} onClick={() => toggle(id)} title={cell.words} className={clsx('press-dim block max-w-64 truncate rounded-row px-1.5 py-0.5 text-left hover:bg-hover aria-expanded:bg-sel', cell.set ? 'font-medium text-fg' : 'text-fg3')}>
                           {cell.words}
                         </button>
                         {cell.set || cell.words === OFF ? null : <span className="block truncate px-1.5 text-[0.75rem] text-fg3">{fromWord(m, cell.from)}</span>}
@@ -440,6 +459,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
         </table>
       </div>
       <Small className="text-pretty">Strong: set in that row. Faint: inherited, with where it comes from. Each cell's values are written at its row's level.</Small>
+      {summary ? <ModelsSummary s={summary} phone={phone} go={goTo} /> : null}
       <OnTop>
         {bulk ? <SetForEverySpace m={m} slot={bulk} phone={phone} onClose={() => setBulk(null)} /> : null}
         {copy ? <CopyModels m={m} from={copy} targets={spaces.filter((r) => r.id !== copy.id)} onClose={() => setCopy(null)} /> : null}
