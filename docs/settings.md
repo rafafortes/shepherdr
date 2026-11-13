@@ -219,7 +219,8 @@ It needs OpenCode 2.x.
   never gives a session an id of its own: OpenCode's free models refuse one.
 - **Models shown.** `opencode.models` (Settings → OpenCode, Everywhere or this machine) limits the models the menus offer to
   glob patterns on `provider/model` or on the model alone, comma or space separated, any case: `shepherdr set opencode.models '*-free'`.
-  `all` (the default, or empty) offers every model OpenCode lists. The others stay usable by id.
+  `all` (the default, or empty) offers every model OpenCode lists. The others stay usable by id. A model left out of the menus
+  still shows in Models → Summary and Limits where it has a cap of its own, is a slot's model, runs now or had usage this week; its provider shows with it.
 
 ## Models
 

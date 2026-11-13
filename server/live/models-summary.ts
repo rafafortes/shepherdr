@@ -116,6 +116,9 @@ export interface SummaryInput {
   heldBy?: string[]
   /** providers to show even when nothing else names them (a provider a models.maxAtOnce entry caps, with no agent yet) */
   providers?: string[]
+  /** the models.maxAtOnce patterns (entryPatterns): one that names a model (no glob) lists that model with its cap, even where
+   *  the menus filter it out (opencode.models) and nothing uses it yet */
+  capped?: string[]
 }
 
 export { shareOf }
@@ -295,7 +298,8 @@ export function modelsSummary(f: SummaryInput): ModelsSummary {
   const conf = configuredOf(f.settings, f.spaces)
   const d7 = f.usage.byKey(f.now - WEEK)
   // every provider that has a slot, runs, waits, used something in the week, or ran out in it; and each provider a CLI offers
-  const keys = new Set<string>([...conf.map((c) => c.key), ...f.agents.filter((a) => a.status !== 'gone').map((a) => keyOf(a.kind, a.model)), ...(f.runs ?? []).map((r) => r.key), ...d7.keys(), ...f.usage.runOuts(() => true).filter((r) => r.at >= f.now - WEEK).map((r) => r.key)])
+  const capped = (f.capped ?? []).filter((p) => p.includes('/') && !/[*?]/.test(p))
+  const keys = new Set<string>([...conf.map((c) => c.key), ...f.agents.filter((a) => a.status !== 'gone').map((a) => keyOf(a.kind, a.model)), ...(f.runs ?? []).map((r) => r.key), ...d7.keys(), ...f.usage.runOuts(() => true).filter((r) => r.at >= f.now - WEEK).map((r) => r.key), ...capped])
   const offered = offeredKeys()
   const providers = [...new Set([...[...keys].map(providerOf), ...(f.providers ?? []), ...offered.map(providerOf)])]
   const totalDay = [...f.usage.byKey(f.now - 24 * HOUR).values()].reduce((n, t) => n + t.tokens, 0)
