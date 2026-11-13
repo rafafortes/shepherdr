@@ -173,6 +173,32 @@ describe('a start the caps put on a backup goes back to its primary once it is i
     expect(cards(t.key).some((c) => c.startsWith('Back on pi (') && c.endsWith('): its model has room under its cap now'))).toBe(true)
   })
 
+  test('a task whose way back fails is logged, and it stays on its backup', async () => {
+    src.settings.set('models.maxAtOnce', 'spark=1', 'machine')
+    const p = await space('caps-back-fail')
+    const busy = pushTask(p.p.name, 'pi', SPARK)
+    working.add(busy.key)
+    const t = pushTask(p.p.name, 'codex', undefined, { step: 1, kind: 'codex' })
+    idle.add(t.key)
+    busy.t.stopped = true
+    working.delete(busy.key)
+    const restart = src.agents.restart
+    src.agents.restart = (async () => {
+      throw new Error('herdr is not answering')
+    }) as never
+    const errors: string[] = []
+    const was = console.error
+    console.error = (...a: unknown[]) => void errors.push(a.join(' '))
+    try {
+      await src.watchReturns()
+    } finally {
+      console.error = was
+      src.agents.restart = restart
+    }
+    expect(errors.some((e) => e.includes(`couldn't move ${t.t.id} back to its primary: herdr is not answering`))).toBe(true)
+    expect(t.t.onBackup).toBeDefined()
+  })
+
   test('a task on its backup is left there while it works, and never moved mid-turn', async () => {
     src.settings.set('models.maxAtOnce', 'spark=1', 'machine')
     const p = await space('caps-busy-back')
