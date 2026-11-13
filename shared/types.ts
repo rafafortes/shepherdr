@@ -1208,6 +1208,8 @@ export type Action =
   | { type: 'apply-to-waiting'; key: string; place?: string; dry?: boolean }
   /** Settings → Models: every level's model settings as one table (read only; the writes are the setting action) */
   | { type: 'models-matrix' }
+  /** Settings → Models → Summary: per provider and model, what they run, use and ran out of, and the warnings (read only) */
+  | { type: 'models-summary' }
   /** Settings → Models → profiles: the saved profiles and what the settings match now (read only) */
   | { type: 'profiles' }
   /** save the current settings as a profile: the models, and the limits (Max tasks, Merge train) when limits is set;

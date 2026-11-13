@@ -49,7 +49,10 @@ import { backCard, canProbe, FIRST_WAIT, FRESH, QUIET, returnMode, Returns, type
 import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvice, runAdvisor, type Advice, type AdviceQuestion } from './advisor.ts'
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
-import { carryOn, Retries, type Retry } from './retry.ts'
+import { carryOn, Retries, resetOf, type Cut, type Retry } from './retry.ts'
+import { modelsSummary, keyOf, providerName, roleOfChat, type LiveAgent, type TaskFact } from './models-summary.ts'
+import { UsageFeed } from './usage-feed.ts'
+import { modelKey, providerOf, UsageLedger } from './usage-ledger.ts'
 import { CATALOG, CLI_NAME, CLIS, kindOf, MAX_BACKUPS, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
 import { modelsMatrix } from './models-matrix.ts'
 import { changeWords, Profiles, ProfileStore, previewWords, PROFILES_ON_MAIN, waitingPicks, type Change, type Site } from './profiles.ts'
@@ -118,7 +121,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (key.includes('/')) this.engine.retried(key)
       this.emit('snapshot')
     },
+    runOut: (key, cut, reason) => this.ranOut(key, cut, reason),
   })
+  /** what each model call of Shepherdr's agents used, by the hour, and each provider's run-outs (usage-ledger.ts), read
+   *  from the agents' logs (usage-feed.ts) */
+  usage = new UsageLedger()
+  usageFeed = new UsageFeed(this.usage, () => this.agents.records)
   /** the primary models of the roles whose agents a backup took over: asked now and then whether they answer again
    *  (Settings → Agents → When the primary is back; return.ts) */
   returns = new Returns()
@@ -319,6 +327,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.sayTookOver()
     // watched chats: read new log lines once a second; schedules once a minute
     this.timers.push(setInterval(() => this.pollChats(), 1000))
+    if (process.env.NODE_ENV !== 'test') this.usageFeed.start()
     // a reply in a turn that goes on (or one only background work follows) changes no status: looked for here
     this.timers.push(setInterval(() => Object.keys(this.agents.records).forEach((k) => this.agents.status(k) !== 'gone' && this.fresh(k)), 5000))
     this.timers.push(setInterval(() => this.runSchedules(), 60_000))
@@ -418,6 +427,42 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.agents.stop()
     this.engine.stop()
     this.retries.stop()
+    this.usageFeed.stop()
+    this.usage.stop()
+  }
+
+  /** a provider ran out in a chat's turn (retry.ts): kept in the ledger, and alerted once per run of run-outs, the first
+   *  one after the provider was fine (usage-ledger.ts wasOut) */
+  private ranOut(key: string, cut: Cut, reason: string) {
+    const rec = this.agents.record(key)
+    if (!rec) return
+    const model = keyOf(rec.kind, rec.model)
+    const reset = resetOf(cut.text)
+    const { wasOut, added } = this.usage.runOut({
+      at: cut.at,
+      key: model,
+      chat: key,
+      role: roleOfChat(key),
+      reason,
+      words: cut.text.replace(/\s+/g, ' ').trim().slice(0, 300),
+      ...(reset ? { reset: reset.when, ...(reset.at !== undefined ? { resetAt: reset.at } : {}) } : {}),
+    })
+    this.emit('snapshot')
+    if (!added || wasOut) return
+    const provider = providerOf(model)
+    // the reason says the reset when the provider gave one ("out of credit until 11 Nov, 17:44 GMT-3")
+    const body = `${this.chatName(key)} was cut off: ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.`
+    this.alert({ id: randomUUID(), from: 'Shepherdr', title: clip(`${providerName(provider)} ran out`, TITLE_MAX), body: clip(body, BODY_MAX), go: { place: key }, tag: `runout:${provider}`, ...(key.includes('/') ? { task: true as const } : {}) })
+  }
+
+  /** Settings → Models → Summary: the providers and models, what runs and waits, the usage and run-outs, the warnings */
+  private modelsSummaryNow() {
+    const spaces = this.matrixSpaces()
+    const rows = modelsMatrix(this.settings, { host: HOST, name: NAME }, spaces).rows.map((r) => r.id)
+    const agents: LiveAgent[] = Object.values(this.agents.records).map((r) => ({ key: r.key, kind: r.kind, model: r.model, status: this.agents.status(r.key) }))
+    const tasks: TaskFact[] = this.engine.tasks.filter((t) => !t.archived).map((t) => ({ status: this.engine.statusOf(t), agent: t.agent, reviewer: t.reviewer }))
+    const watch = this.returns.list().map((o) => ({ key: keyOf(o.primary.kind, o.primary.model), back: o.back }))
+    return modelsSummary({ now: Date.now(), settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch })
   }
 
   /* ---------- unread ---------- */
@@ -2702,6 +2747,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       }
       case 'models-matrix':
         return modelsMatrix(this.settings, { host: HOST, name: NAME }, this.matrixSpaces())
+      case 'models-summary':
+        return this.modelsSummaryNow()
       case 'profiles':
         return BOX ? { profiles: [], active: 'Custom', unavailable: PROFILES_ON_MAIN } : this.profiles.view()
       case 'profile-save': {

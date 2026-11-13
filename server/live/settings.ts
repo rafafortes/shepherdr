@@ -368,6 +368,14 @@ export const CATALOG: Section[] = [
     ],
   },
   {
+    // the share of a provider's quota at which Shepherdr warns, once a read of its quota is in (usage-ledger.ts quota,
+    // 4b): a run-out alerts whatever it is set to, once per run of them
+    name: 'Quota',
+    levels: ['all'],
+    about: "The share of a provider's quota at which Shepherdr warns (Settings → Models → Summary), once its quota is read. Off: only a run-out alerts.",
+    rows: [{ label: 'Warn when a provider is at', key: 'quota.alertAt', value: '80%', num: { min: 50, max: 95, unit: '%', off: true } }],
+  },
+  {
     // how many of one space's tasks work at once on this machine, inside the machine's own limit (engine.room): a space
     // that matters more may have more of them running. Off: only the machine's limit. Set at any of the three levels,
     // the most specific one that sets it wins (pick)

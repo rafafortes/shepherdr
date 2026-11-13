@@ -11,6 +11,9 @@ import { placeId } from './places.ts'
 import { type Chain, kindOf, type Level, rolePairs, Settings } from './settings.ts'
 import { HOUR, modelKey, modelOf, providerOf, type RunOut, type RunRole, UsageLedger, type UsageTotals } from './usage-ledger.ts'
 
+/** a provider in words: its own name where it has one, else its id */
+export const providerName = (provider: string) => NAMES[provider] ?? provider
+
 /** the model servers of this operator's own machines: no quota, only shared, so a warning about quota skips them */
 export const LOCAL = new Set(['spark', 'radeon', 'avell', 'dell'])
 
@@ -200,7 +203,7 @@ export function modelsSummary(f: SummaryInput): ModelsSummary {
     const quota: QuotaFigure | undefined = f.usage.quota(provider)
     return {
       provider,
-      name: NAMES[provider] ?? provider,
+      name: providerName(provider),
       local: LOCAL.has(provider),
       share: { ...(totalDay ? { h24: tokens24 / totalDay } : {}), ...(totalWeek ? { d7: tokensWeek / totalWeek } : {}) },
       ...(quota ? { quota } : {}),
