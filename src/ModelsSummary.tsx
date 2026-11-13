@@ -8,13 +8,12 @@ import clsx from 'clsx'
 import { Fragment, useState, type ReactNode } from 'react'
 import type { ModelsSummary as Summary, QuotaFigure, QuotaRead, QuotaWindow, SummaryConfigured, SummaryNow, SummaryProvider, SummaryRow, SummaryRunOuts, SummaryUsage, SummaryWarning } from '@shared/types.ts'
 import { openPage } from './Settings.tsx'
+import { ageWords, shareOf, tokens, windowWords } from '../shared/quota-words.ts'
 import { Ghost, Small } from './ui.tsx'
 
 /** the warnings hidden in this browser session (sessionStorage: gone when the tab closes) */
 const HIDDEN = 'models-summary:hidden'
 
-/** tokens in words: 1.2M, 340k, 980 */
-export const tokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${n}`)
 const percent = (x: number) => `${Math.round(x * 100)}%`
 const when = (at: number) => new Date(at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
@@ -23,7 +22,7 @@ function readHidden(): string[] {
   try {
     return (JSON.parse(sessionStorage.getItem(HIDDEN) ?? '[]') as unknown[]).filter((x): x is string => typeof x === 'string')
   } catch {
-    // coverage-exempt: a browser that keeps no session storage (a private window) shows every warning again
+    // a browser that keeps no session storage (a private window) shows every warning again
     return []
   }
 }
@@ -56,13 +55,6 @@ export function runWords(r: SummaryRunOuts) {
   const last = r.last ? `last ${when(r.last.at)}${r.last.reset ? `, ${r.last.reset}` : ''}` : ''
   const out = r.out ? (r.until !== undefined ? `Out until ${when(r.until)}` : 'Out now') : ''
   return { count, last, out }
-}
-
-/** a moment as an age in words: "just now", "7 min ago", "2 h ago" */
-export function ageWords(at: number, now: number): string {
-  const min = Math.round((now - at) / 60_000)
-  if (min < 1) return 'just now'
-  return min < 60 ? `${min} min ago` : `${Math.round(min / 60)} h ago`
 }
 
 /** the provider's name in the Settings section that reads its quota (Refresh quotas says what it reads) */
@@ -114,7 +106,7 @@ function Warnings({ list, go }: { list: SummaryWarning[]; go: (row: string, slot
     try {
       sessionStorage.setItem(HIDDEN, JSON.stringify(next))
     } catch {
-      // coverage-exempt: a browser that keeps no session storage hides it until the screen is read again
+      // a browser that keeps no session storage hides it until the screen is read again
     }
   }
   return (
@@ -255,13 +247,8 @@ function RunOutWords({ runs }: { runs: ReturnType<typeof runWords> }) {
 /** one window: its name and its share used (or its count against its cap, or what is left), a thin bar, when it refills
  *  (an estimate's window rolls), and an estimate's learned limits: what the window held when the provider ran out */
 function WindowLine({ w, estimate }: { w: QuotaWindow; estimate: boolean }) {
-  const share = w.usedPct ?? (w.used !== undefined && w.cap ? (w.used / w.cap) * 100 : undefined)
-  const main =
-    share !== undefined ? `${Math.round(share)}% used`
-    : w.used !== undefined && w.cap !== undefined ? `${tokens(w.used)} of ${tokens(w.cap)}`
-    : w.used !== undefined ? `${tokens(w.used)} used`
-    : w.left !== undefined ? `${tokens(w.left)} left`
-    : ''
+  const share = shareOf(w)
+  const main = windowWords(w)
   return (
     <div className="flex min-w-44 flex-col gap-0.5">
       <span className="flex items-baseline justify-between gap-2 whitespace-nowrap">

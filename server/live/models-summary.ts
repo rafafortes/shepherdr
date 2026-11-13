@@ -6,6 +6,7 @@
 // it, quotas.ts sets it), or OpenCode Go's estimate built for this look; the warning share and each read's state come in
 // with the input (quota), and a window at or over the share is a warning here.
 import type { MatrixRole, ModelsSummary, QuotaFigure, QuotaRead, QuotaWindow, SummaryConfigured, SummaryModel, SummaryNow, SummaryProvider, SummaryRow, SummaryRunOuts, SummaryUsage, SummaryWarning } from '../../shared/types.ts'
+import { shareOf } from '../../shared/quota-words.ts'
 import type { Harness } from './engine/engine.ts'
 import { findModel, modelsOf } from './models.ts'
 import { placeId } from './places.ts'
@@ -84,6 +85,8 @@ export interface SummaryInput {
   /** the quota figures and reads (quotas.ts); none in a test that has no quota side */
   quota?: QuotaInput
 }
+
+export { shareOf }
 
 /** a moment in words, in this machine's time: "Fri 3:00 PM" */
 export const clock = (at: number) => new Date(at).toLocaleString('en', { weekday: 'short', hour: 'numeric', minute: '2-digit' })
@@ -320,9 +323,6 @@ function warningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): 
 
 /** what is left of a window in words: its share used against 100 (an estimate past its learned limit is over it) */
 export const leftWords = (share: number) => (share > 100 ? 'over its limit' : share === 100 ? 'at its limit' : `${Math.round(100 - share)}% left`)
-
-/** a window's share used, in percent: its own, or its count against its cap (none for a count with no cap) */
-export const shareOf = (w: QuotaWindow): number | undefined => w.usedPct ?? (w.used !== undefined && w.cap ? (w.used / w.cap) * 100 : undefined)
 
 /** the windows that are at or over the warning share and not refilled by `now`: a window that refilled says nothing of now */
 export function overWindows(q: QuotaFigure, at: number, now: number): { w: QuotaWindow; share: number }[] {
