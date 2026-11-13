@@ -867,16 +867,35 @@ export interface ProfileChange {
 export interface ProfileRefusal extends ProfileChange {
   error: string
 }
+/** one schedule of a profile (profile-schedule.ts), as the screen and the command line show it */
+export interface ProfileScheduleRow {
+  id: string
+  /** its rule in words: "Every day at 22:00 (Madrid)" */
+  words: string
+  /** the time and days the editor shows: every day when days is null, else 0 for Monday to 6 for Sunday */
+  form?: { time: string; days: number[] | null }
+  /** also the tasks already created take the profile's task and reviewer settings */
+  waiting: boolean
+  on: boolean
+  /** its next run in words, when it is on: "Today 22:00" */
+  next?: string
+  /** its last run in words: "Applied Today 22:00", "Not applied Tomorrow 8:00" */
+  last?: string
+}
 export interface ProfileSummary {
   name: string
   /** holds Max tasks and Merge train as well as the models */
   limits: boolean
   saved: number
   applied?: number
+  /** its schedules, in the order they were made */
+  schedules?: ProfileScheduleRow[]
 }
 /** the profiles bar: what is saved, what the settings match now, and the undo point an undo restores */
 export interface ProfilesView {
   profiles: ProfileSummary[]
+  /** the next two scheduled applies, in words: "Next: night at 22:00, then day at 08:00" */
+  next?: string
   /** the profile the settings match now (the last one applied first), or Custom */
   active: string
   /** the last apply: its profile, when (the bar says Changed since when the settings no longer match it) */

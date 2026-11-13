@@ -16,6 +16,7 @@ import type { ProfileChange, ProfilePreview, ProfileRefusal, ProfilesView } from
 import { waitingKind, type WaitingKind } from '../../shared/apply-waiting.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import { matrixSlots } from './models-matrix.ts'
+import { nextLine, scheduleRows, type Schedule } from './profile-schedule.ts'
 import { placeId } from './places.ts'
 import { type Level, type Settings } from './settings.ts'
 
@@ -54,6 +55,8 @@ export interface Profile {
   /** each saved space's name, for what it says of a space (by its key) */
   names: Record<string, string>
   values: Values
+  /** when it applies by itself (profile-schedule.ts); a re-save keeps them */
+  schedules?: Schedule[]
 }
 export interface Last {
   name: string
@@ -245,7 +248,8 @@ export class Profiles {
     private written: (changes: Change[]) => void,
   ) {}
 
-  private find(raw: string) {
+  /** the saved profile of a name (any case) */
+  find(raw: string) {
     const name = cleanName(raw)
     return this.store.f.profiles.find((p) => same(p.name, name))
   }
@@ -258,8 +262,18 @@ export class Profiles {
     const lastProfile = last ? f.profiles.find((p) => p.name === last.name) : undefined
     const match = (lastProfile ? [lastProfile, ...f.profiles] : f.profiles).find((p) => planOf(site, p).changes.length === 0)
     const undo = f.undo.at(-1)
+    const zone = site.settings.zone()
+    const now = Date.now()
+    const next = nextLine(f.profiles, zone, now)
     return {
-      profiles: f.profiles.map(({ name, limits, saved, applied }) => ({ name, limits, saved, ...(applied ? { applied } : {}) })),
+      profiles: f.profiles.map(({ name, limits, saved, applied, schedules }) => ({
+        name,
+        limits,
+        saved,
+        ...(applied ? { applied } : {}),
+        ...(schedules?.length ? { schedules: scheduleRows({ schedules }, zone, now) } : {}),
+      })),
+      ...(next ? { next } : {}),
       active: match?.name ?? 'Custom',
       ...(lastProfile && last ? { last: { name: lastProfile.name, at: last.at } } : {}),
       ...(undo ? { undo: { name: undo.name, at: undo.at, label: `Before ${undo.name}, ${clock(undo.at)}` } } : {}),
@@ -282,6 +296,7 @@ export class Profiles {
       saved: Date.now(),
       names: Object.fromEntries(site.spaces.map((sp) => [sp.key, sp.name])),
       values: readValues(site, keysOf(limits)),
+      ...(old?.schedules ? { schedules: old.schedules } : {}),
     }
     f.profiles = old ? f.profiles.map((p) => (p === old ? profile : p)) : [...f.profiles, profile]
     this.store.save()
