@@ -155,7 +155,7 @@ export default function ModelsSummary({ s, phone, go, extra }: { s: Summary; pho
       {s.backfilled === undefined ? <Small className="text-pretty">Reading the logs once from their start: the numbers grow until it is done.</Small> : null}
       {s.providers.length ? (phone ? <Cards providers={s.providers} now={s.at} /> : <Table providers={s.providers} now={s.at} />) : <Small className="text-pretty">Nothing configured, run or used yet.</Small>}
       <Small className="text-pretty">
-        Usage is read from the logs of this machine's agents, and kept 35 days. Cost is pi's own estimate, not a bill. Quota shows once a read of the provider has given it.
+        Usage is read from the logs of this machine's agents, and kept 35 days. Cost is pi's own estimate, not a bill. Quota is each provider's last read, or an estimate, as Quotas says.
       </Small>
     </section>
   )
