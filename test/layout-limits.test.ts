@@ -175,6 +175,26 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
     }
   })
 
+  test('Running now names the tasks that run on a provider and its models, each id a button that opens it', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      const running = page.getByRole('table', { name: 'Providers and models' }).locator('[data-running]').filter({ hasText: /tasks? / }).first()
+      await running.scrollIntoViewIfNeeded()
+      const ids = running.getByRole('button')
+      const n = await ids.count()
+      expect(n).toBeGreaterThan(0)
+      // the count before the ids is how many there are
+      expect(await running.textContent()).toMatch(new RegExp(`^${n} tasks? `))
+      const id = (await ids.first().textContent())!
+      expect(id).toMatch(/^[A-Z]+-\d+$/)
+      await ids.first().click()
+      await page.waitForURL(new RegExp(`[?&]task=${id}(&|$)`), { timeout: 10_000 })
+    } finally {
+      await page.close()
+    }
+  })
+
   test('a provider nothing uses yet is under Other providers, open here: its cap cell sets its cap before it is used, and then it is in use', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
