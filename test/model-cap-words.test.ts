@@ -54,3 +54,18 @@ describe("a model's cap in words: the row, the card and the replies name the ent
     }
   })
 })
+
+describe('models.maxAtOnce from the command line: set, show, unset', () => {
+  test('shepherdr set takes the list at this machine, shows it as kept, refuses a bad entry, and unset takes it back', async () => {
+    const set = await src.cli(['set', 'models.maxAtOnce', 'Spark=4, radeon=1', '--machine'], {})
+    expect(set.code).toBe(0)
+    expect(src.settings.maxAtOnce()).toEqual([{ pattern: 'spark', max: 4 }, { pattern: 'radeon', max: 1 }])
+    expect((await src.cli(['show'], {})).out).toMatch(/^models\.maxAtOnce\s+spark=4, radeon=1\s+\(.+\)$/m)
+    const bad = await src.cli(['set', 'models.maxAtOnce', 'spark=0', '--machine'], {})
+    expect(bad.code).toBe(1)
+    expect(bad.out).toContain('spark needs a whole number from 1 to 200')
+    expect(src.settings.maxAtOnce()).toHaveLength(2)
+    expect((await src.cli(['unset', 'models.maxAtOnce', '--machine'], {})).code).toBe(0)
+    expect(src.settings.maxAtOnce()).toEqual([])
+  })
+})

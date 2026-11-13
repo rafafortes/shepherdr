@@ -55,4 +55,57 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
       await page.close()
     }
   })
+
+  test('a phone card: the cap opens under its line, a value that is no whole number is refused in words, and Save sets it', async () => {
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    try {
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.getByRole('button', { name: 'Models', exact: true }).tap()
+      await settled(page)
+      const s = page.locator('section[aria-label="Summary"]')
+      await s.scrollIntoViewIfNeeded()
+      const card = s.locator('ul > li').filter({ has: page.locator('h4', { hasText: 'Spark (local)' }) })
+      await card.getByRole('button', { name: /^Spark \(local\): .* at once/ }).tap()
+      const editor = card.getByLabel('Most Spark (local) at once, this machine')
+      await editor.fill('0')
+      await card.getByRole('button', { name: 'Save', exact: true }).tap()
+      await card.getByRole('status').filter({ hasText: 'Write a whole number from 1 to 200' }).waitFor()
+      await editor.fill('3')
+      await card.getByRole('button', { name: 'Save', exact: true }).tap()
+      await card.getByRole('button', { name: /^Spark \(local\): 0 of 3 at once/ }).waitFor()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+    } finally {
+      await page.close()
+    }
+  })
+
+  test('a write the server refuses is said in the editor, and the cell keeps what it was', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    const act = world.act.bind(world)
+    world.act = async (a) => (a.type === 'setting' && a.key === 'models.maxAtOnce' ? { ok: false, error: 'models.maxAtOnce is refused by this test' } : act(a))
+    try {
+      const s = await openModels(page)
+      await s.scrollIntoViewIfNeeded()
+      const table = s.getByRole('table', { name: 'Providers and models' })
+      const spark = table.getByRole('row').filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) }).first()
+      // the cell as it reads before (the demo world is shared by this file's tests: an earlier one may have set it)
+      const labels = () => spark.getByRole('button').evaluateAll((b) => b.map((x) => x.getAttribute('aria-label')))
+      const before = await labels()
+      await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).click()
+      const pop = page.getByRole('dialog', { name: 'Edit this setting' })
+      await pop.getByLabel('Most Spark (local) at once, this machine').fill('2')
+      await pop.getByRole('button', { name: 'Save', exact: true }).click()
+      await pop.getByRole('status').filter({ hasText: 'refused by this test' }).waitFor()
+      // nothing was kept: once the editor is closed, the cell reads as it did
+      await pop.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await page.waitForFunction(() => !document.querySelector('[role="dialog"][aria-label="Edit this setting"]'))
+      expect(await labels()).toEqual(before)
+    } finally {
+      world.act = act
+      await page.close()
+    }
+  })
 })
