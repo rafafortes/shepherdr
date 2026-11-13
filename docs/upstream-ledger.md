@@ -333,6 +333,20 @@ a waiting task. So the question after a Settings change, and its two answers, is
 `Start with…`'s own worker change (see [docs/settings.md](settings.md)). Upstream's base-branch rule stays as it is here
 too: a base branch never moves a waiting task.
 
+## Not from upstream, ported our way: OpenCode agents through OpenCode's own API
+
+Upstream never shipped OpenCode as an agent that Shepherdr starts. Three things are on record: herdr-projects 1.2.27
+(the herdr plugin of upstream's author, before Shepherdr) added `crates/core/src/agents/opencode_v2.rs`, which creates
+OpenCode 2 sessions with `opencode api session.create` and opens them with `--session` (its fix #426); the upstream pull
+request [#177](https://github.com/eliasstravik/shepherdr/pull/177), "Add OpenCode as a fourth agent program", was closed
+unmerged on 2026-10-17, and its reviews warn about permissions (the review comments were not re-read for this entry);
+and upstream 3.x starts Claude Code and Codex only (`core/agents.js`, `NAMES`). Upstream's issue #394 and PR #395 (OpenCode
+V2 full-screen launches failing when a model is configured) are closed; their code was not read for this entry.
+
+| Improvement | What it does | Verdict | Why | Risk to our flow | Size |
+| --- | --- | --- | --- | --- | --- |
+| **OpenCode as a fourth agent kind** (herdr-projects 1.2.27's session-first launch, our branch `feat/opencode-agent`) | A task, coordinator or backup can run on OpenCode 2: the session is created through `opencode api --standalone session.create` with its model, variant, folder and ask permissions, the role's instructions go in as its `shepherdr` instruction entry, and the TUI starts with `--standalone --session <id>` (`--auto` unless the access is ask). The chat reads a mirror of the session's final rows (`<home>/opencode/<session id>.jsonl`) from OpenCode's SQLite database, read only | **port** (in progress on `feat/opencode-agent`; not merged) | Upstream's 1.2.27 launch shows the session-first shape works, but it passes instructions in AGENTS.md or `OPENCODE_CONFIG_CONTENT`. Ours puts them in the session, so a resumed agent gets the current text without a file in the worktree, and `--standalone` keeps each agent's shell commands in its pane's process tree, where the `shepherdr` command finds its agent. The chat needs a readable log, so the mirror copies only final rows and never changes a line once written. We never pass our own session id, because OpenCode's free models refuse a custom one. The advisor and the probes run `opencode run --standalone --agent plan`, which leaves a session in OpenCode's history | Shepherdr's `opencode api` calls are one private server each (about 0.4 s), not OpenCode's background service, so a call can't hang another agent's session. An OpenCode release that renames an operation breaks the launch, which is why each call's error names the operation. A session's `shepherdr` entry is replaced on every resume, so a changed prompt reaches the model | L |
+
 ## Ranked: adopt and port, by value to us
 
 Order is the sequence the operator would get the most from; each is one task and one pull request. **SHE-2 merged the

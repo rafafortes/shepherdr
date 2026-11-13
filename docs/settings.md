@@ -143,9 +143,34 @@
   for provisioning and the upgrade steps for already-running agents.
 
 - Interactive task, coordinator and backup chat choices require both runtime log discovery and a chat reader.
-  Settings and Restart offer Claude Code, Codex and pi; other herdr CLIs are refused before a chat launch because
+  Settings and Restart offer Claude Code, Codex, pi and OpenCode; other herdr CLIs are refused before a chat launch because
   their replies cannot be shown. Existing saved choices are kept, but an unsupported choice must be changed before
   launching again. Headless reviewer choices are separate; this does not add or prove support for other reviewers.
+
+## OpenCode
+
+OpenCode is a chat CLI like Claude Code, Codex and pi: Settings and Restart offer it, and its replies show in the chat.
+It needs OpenCode 2.x.
+
+- **Models.** A model id is `provider/model`, as `opencode models` lists it: `opencode/minimax-m3.1-flash-free`,
+  `opencode-go/deepseek-v4.1-flash`, `nvidia/z-ai/glm-5.3-flash` (split at the first slash). Effort is the model's
+  variant; a model with none has no effort.
+- **How it starts.** Shepherdr creates the session first, with `opencode api --standalone session.create`: the model
+  and its variant, the agent's folder and, when the role's access is ask, permissions that ask before an edit, a shell,
+  a web fetch, a folder outside the agent's, or a subagent. It puts the role's instructions in the session as its
+  `shepherdr` instruction entry, then starts the TUI in the agent's herdr pane with `--standalone --session <id>`, and
+  with `--auto` unless the access is ask. A resumed agent keeps its session; a changed model or effort is switched, and
+  changed instructions are put again.
+- **Why `--standalone`.** Each call and the TUI run a private OpenCode server, so the agent's shell commands are children
+  of its pane and its `shepherdr` command is recognised as that agent's. Without it they run under OpenCode's shared
+  background service, outside the pane.
+- **The chat.** OpenCode keeps its sessions in a SQLite database, which Shepherdr opens read only. It copies each
+  session's final rows into `<shepherdr home>/opencode/<session id>.jsonl`, and the chat reads that copy like the other
+  CLIs' logs. A reply still streaming shows once it is complete.
+- **Headless runs.** The advisor and the one-word probes run `opencode run --standalone --agent plan`, which leaves
+  their session in OpenCode's history.
+- **Free models.** OpenCode's free `opencode/*-free` models work, because the agent is OpenCode's own client. Shepherdr
+  never gives a session an id of its own: OpenCode's free models refuse one.
 
 ## Models
 
@@ -457,7 +482,7 @@ nothing to come back to, and is never asked.
   CLI: one line in, one word out, no tools, a hard timeout. Claude Code and pi are asked with their coding assistant's
   prompt and the person's MCP servers and settings left out, and keep no session; pi does load its own extensions, which
   is how a provider one of them adds (a pi package) is asked at all. Codex runs in its read-only sandbox with its own
-  config, and may keep its rollout file. An agent of this machine at work on that very model, with no cut-off of its own
+  config, and may keep its rollout file. OpenCode's headless runs leave their session in its history (see [OpenCode](#opencode)). An agent of this machine at work on that very model, with no cut-off of its own
   and none in that outage for ten minutes (a turn already under way when the provider began refusing may still be
   working a while), is the answer itself, and nothing is asked. One cut-off after another keeps the schedule of the
   first: a night of them never puts the question off. One at a time, and never at boot. It is nobody's turn: no chat line, no herdr pane, no agent's secret, and its own failure is
@@ -477,7 +502,7 @@ nothing to come back to, and is never asked.
   in each space's chat, since each space reviews with its own Settings.
 - **What it never does.** It never writes a setting and never chooses a model: going back is a restart on what Settings
   name. It never asks another machine's models (the record lives in this machine's `returns.json`), never asks a CLI
-  that isn't installed here, never asks one Shepherdr has no silent one-shot for (only Claude Code, Codex and pi have
+  that isn't installed here, never asks one Shepherdr has no silent one-shot for (only Claude Code, Codex, pi and OpenCode have
   one), and it is never part of the takeover's decision.
 
 ## Advisor

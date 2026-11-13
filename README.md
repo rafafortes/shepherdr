@@ -44,7 +44,7 @@ Places, chats, tasks, artifacts, the terminal, the browser, voice, alerts, Autop
 
 ### ⚡ Stop briefing every agent yourself
 
-Write what needs doing to a space's coordinator: it makes it a task or several, each with a brief and a Settings block that says how it is reviewed and merged. Each agent starts on Claude Code, Codex, pi or another CLI herdr can start, in a worktree of its own, at once or as soon as the machine has room. Want more control? Ask for it "for later", "after SHE-12", or "ask me before merging". Turn on [Autopilot](docs/autopilot.md) and the coordinator works on its own between your messages, or add [automations](docs/autopilot.md) that start tasks on a schedule.
+Write what needs doing to a space's coordinator: it makes it a task or several, each with a brief and a Settings block that says how it is reviewed and merged. Each agent starts on Claude Code, Codex, pi, OpenCode or another CLI herdr can start, in a worktree of its own, at once or as soon as the machine has room. Want more control? Ask for it "for later", "after SHE-12", or "ask me before merging". Turn on [Autopilot](docs/autopilot.md) and the coordinator works on its own between your messages, or add [automations](docs/autopilot.md) that start tasks on a schedule.
 
 ### 💬 Know when a task needs an answer
 
@@ -83,7 +83,7 @@ The next herdr start, or the next press of the open key, swaps the running Sheph
 
 ### Do I need to know how to code?
 
-You need to be comfortable in a terminal for the install. After that everything happens in the app: you write to coordinators and answer cards, and Settings holds the few defaults. You'll need macOS or Linux, herdr 0.9 or newer, Git, Tailscale to reach it from your other devices, and an agent CLI herdr can start: Claude Code, Codex, pi or another. Bun comes by itself. `gh` (pull requests), Chrome for the shared browser and an ElevenLabs key for voice are optional. [Get started](docs/get-started.md) covers the prerequisites.
+You need to be comfortable in a terminal for the install. After that everything happens in the app: you write to coordinators and answer cards, and Settings holds the few defaults. You'll need macOS or Linux, herdr 0.9 or newer, Git, Tailscale to reach it from your other devices, and an agent CLI herdr can start: Claude Code, Codex, pi, OpenCode or another. Bun comes by itself. `gh` (pull requests), Chrome for the shared browser and an ElevenLabs key for voice are optional. [Get started](docs/get-started.md) covers the prerequisites.
 
 ### How do I check that Shepherdr is running?
 
