@@ -145,8 +145,10 @@ of this machine's agents (`usage.json` in Shepherdr's home, read from the agents
 - **Run-outs**: how many a provider had in the last 7 days, the last one (its reason, when, and its reset when the provider
   gave one), and whether it is **out right now**: until its known reset, or until its return watch sees the primary back, or
   until a call of it goes through after the run-out. A reset that has passed says nothing of now.
-- **Quota**: each provider's quota windows, once a read of its quota has given them (the read is a later step: until then
-  the cell shows —). A window that has refilled since its read is left out.
+- **Quota**: each provider's quota windows, read as [Quotas](#quotas) says: each window that has not refilled, with its share
+  used and a thin bar, when it refills in this machine's time, where the figure came from and how old it is (read 7 min
+  ago), an estimate's tag, a failed read's reason (the figure stays the last good one), and the hint that asks for a key
+  (Command Code's opens Secrets). A provider with no read and no figure shows —. Refresh quotas sits above the table.
 
 **Warnings** come first, each with what to do in words, and a **Change…** that opens the cell it names (a setting change), or
 **Hide**. Hide keeps it off the list for this browser session only (it is back in a new one). The rules:
@@ -155,6 +157,8 @@ of this machine's agents (`usage.json` in Shepherdr's home, read from the agents
 - every role of a space on **one cloud provider**, with no backup on another (a note; a local server is not warned about, as it has no quota);
 - a backup on the **same model** as its primary on a cloud provider: when the primary runs out, the backup does too (a note);
 - a provider that **ran out twice in 7 days** (a note);
+- a window of a provider **at or over its warning share** (`quota.alertAt`) that has not refilled: what is left, when it
+  refills, and the two cells that use the provider most, the top one under Change… (a note; a risk at 100 %);
 - **several working agents on one local model**: counted, since Shepherdr sets no limit for a local model yet (a note).
 
 **What is an estimate.** The tokens and the calls are what the logs say each model call used. pi's cost is its own catalog
@@ -255,15 +259,53 @@ The rule words are `daily 22:00`, `weekdays 8:00`, `weekends 9:30`, `mon,fri 16:
 number from `shepherdr profile schedules`. With the two above, the card comes at 22:00 each day with the night setup, and
 at 08:00 with the day one, and the bar says which of them is next.
 
-## Quota
+## Quotas
 
-**Warn when a provider is at** (`quota.alertAt`, Everywhere only): the share of a provider's quota at which Shepherdr warns,
-from 50 to 95 %, or off. It is used once a provider's quota is read (see Summary); until then only a run-out alerts. Off:
-only a run-out alerts.
+Settings → Models shows the **Quotas** section above the summary (it is not a page of its own): a switch for each quota read,
+and the share at which Shepherdr warns. Everywhere only. Each read runs on the main machine; a worker shows that it reads
+nothing here.
+
+- **Claude Code** (`quota.claude`, on by default): Claude Code's own `/usage`, in one short `claude -p /usage` run (every
+  ten minutes, and at start). The run is **sealed by bubblewrap** (`bwrap`): the whole disk read-only, a throwaway `/tmp`, so
+  nothing it does can write your settings or your login. Without bubblewrap nothing is read, and the cell says so: install it
+  with `sudo apt install bubblewrap`. A login that ends within the hour is **not read** (a sealed run cannot save a renewed
+  login): the next Claude Code run renews it, and the read waits for that. Only the percentages and the reset times are kept,
+  never the output or the login. Its windows: **5 h** (the current session) and **Week** (the week, all models, or a model's
+  own week when Claude Code gives one). Its reset words are UTC and shown in this machine's time. A Claude Code that is not
+  installed or not signed in says so.
+- **Command Code** (`quota.commandcode`, on by default, read only where its key is): its account's windows and credits. The
+  key is **`COMMANDCODE_API_KEY`**, added in Settings → Secrets (Everywhere). Without it nothing is requested, and the cell says
+  "Add COMMANDCODE_API_KEY in Settings → Secrets to read Command Code's quota", with a button to that page. The key goes to
+  Command Code's API as a bearer token and nowhere else: it is in no reason, figure, alert or log. The read is the account
+  check and the credits, with a 15 s limit for the whole read; a part the API leaves out is left out, never shown as zero.
+  The read follows the MIT package `pi-commandcode-provider` (Copyright (c) 2025 Pat Woz), credited in its code.
+- **OpenCode Go** (`quota.opencodeGo`, on by default): an **estimate only**. OpenCode does not tell its quota, so nothing is
+  read. Shepherdr's own ledger gives the tokens and pi's cost of each window (the last 5 h and the week), and where the ledger
+  holds run-outs, a **learned limit**: what the window before each run-out held when OpenCode Go ran out (the latest three
+  shown, "ran out at ~980k tokens · ≈ $0.42 est. in 5 h on Wed 3:14 PM"). The lowest learned limit is the cap, and the
+  current window's use is a share of it, tagged **estimate**. No run-out yet: the usage alone, with no share. It is worked out
+  on each look and needs no call to anyone.
+- **Refresh quotas** reads each provider that is on, now, at most **once a minute per provider**. Otherwise each read runs every
+  ten minutes by itself.
+- **A failed read keeps the last good figure**, with its age, and says why ("Last read failed 3 min ago: Claude Code is not
+  signed in."). A hint (no bubblewrap, no key) says what to add and is not a failure. A read that stops on its own is said
+  as "The read stopped unexpectedly."
+- **Warn when a provider is at** (`quota.alertAt`, 50 to 95 %, or off, 80 % by default): a window at or over that share
+  alerts **once**, to the home chat, with what is left and when it refills ("Claude Code is at 84%" · "5 h window: 16% left,
+  and it refills Fri 3:00 PM."). It alerts again only after that window has refilled (its refill time has passed or a new
+  window is over the share), or after it fell under the share. The same window is in the summary's warnings. Off: no alert
+  and no warning here; a run-out still alerts.
+- **Local models** (spark, radeon, avell, dell) have no quota: none is read.
+
+The figures and what alerted are kept in `usage.json` in Shepherdr's home, so a restart shows the last figure and does not
+alert twice.
 
 ```sh
-shepherdr set quota.alertAt 80%    # warn at 80 %, the default
-shepherdr set quota.alertAt off    # only a run-out alerts
+shepherdr set quota.claude off          # no Claude Code read (its figure stays as it was)
+shepherdr set quota.commandcode off     # no Command Code read, even with the key
+shepherdr set quota.opencodeGo off      # no OpenCode Go estimate
+shepherdr set quota.alertAt 80%         # warn at 80 %, the default
+shepherdr set quota.alertAt off         # only a run-out alerts
 ```
 
 ## Backup agents

@@ -425,12 +425,23 @@ screens. Taken and turned down, from those:
 
 - **Taken: the window of a plan limit, and that a refilled window says nothing of now** (`3a3ce931`, #553 "plan usage
   limits"): the quota slot is a list of windows with a used share, a count and a refill time, and the summary leaves out a
-  window whose refill is past. Its reads are not here: they are the next step's (the Claude Code reader, `/usage`, and
-  Codex's rate-limit read, in the sealed processes of `c0ee1971`, #561, which that step ports to 2.0's code, not its
-  helpers).
+  window whose refill is past. Its reads came in the next step (see the next bullets).
 - **Turned down: the usage insights add-on** (`181d3568`, SHEP-100): it records screens, features and time on them for the
   person, on their own machines; it is not a count of the model calls, and its architecture (`mods/`, `service/`) is not
   2.0's. Nothing from it is in this line.
 - **Ours: the per-provider ledger** (`usage-ledger.ts`, `usage-feed.ts`): each model call counted once per chat by its own
   id, from the logs of Shepherdr's agents only, with the run-outs (retry.ts: allowance, credit, the 402) and the alert once
   per run of them. See [settings](settings.md#summary).
+- **Ported, the idea of Claude Code's plan-limit read** (`3a3ce931` and `c0ee1971`, #553 and #561, read only; `helper/core-plan-limits.ts`):
+  one `claude -p /usage` process per read, sealed (bubblewrap with the root read-only and a throwaway `/tmp`), niced, 60 s
+  limit, `TZ=UTC` for the reset words; a login near its renewal is not read, since a sealed run cannot save a renewed login.
+  Ported to this code as `server/live/plan-limits.ts`, and without bubblewrap nothing is read. Not ported: Codex's
+  rate-limit read (Codex is not on this host) and upstream's Mac seal (`sandbox-exec`, a Linux desktop here). See
+  [settings](settings.md#quotas).
+- **Ported with attribution, the Command Code account read** (MIT License, Copyright (c) 2025 Pat Woz,
+  `pi-commandcode-provider` `src/quota.ts`, read in its installed package): `whoami` and the credits, with the key from
+  Shepherdr's own Secrets (`COMMANDCODE_API_KEY`), in `server/live/command-code-quota.ts` (the credit's and the windows'
+  reading, the 15 s deadline). The package's usage summary and subscription are not read.
+- **Ours: OpenCode Go's estimate and its learned limit, and the quota scheduler and alerts**: OpenCode has no read of its
+  quota, so the ledger's own tokens and cost per window, and the lowest limit its run-outs show (`quota-estimate.ts`); the
+  reads every ten minutes, Refresh quotas and each window's alert once (`quotas.ts`).
