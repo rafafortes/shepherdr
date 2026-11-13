@@ -834,6 +834,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       let advice: Advice | undefined
       let said = ''
       let wait: Blocked<unknown>[] | undefined
+      // a question that waited says on its card that it is asked now, once, when a run starts
+      let announced = false
       // the advisor, then each of its backups in turn: the first that has room under the caps and is not out (choose.ts) runs
       // the question, held for the run as a lease; one that gives no answer falls to the next that has room; when every one
       // left is full or out, the question waits (retryAdvice). Nothing is run while none has room
@@ -845,7 +847,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         }
         const { n, h } = c.harness
         // a question that waited gets its card told it is asked now, before the run
-        if (before?.state === 'waiting' && !tried.length) this.adviceWait(chat, qid, `The advisor is asking ${advisorWords(h)} now.`)
+        if (before?.state === 'waiting' && !announced) this.adviceWait(chat, qid, `The advisor is asking ${advisorWords(h)} now.`)
+        announced = true
         const lease = `advisor:${chat}|${qid}`
         this.engine.lease(lease, 'advisor', keyOf(h.kind, h.model), x.space)
         let r: { ok: boolean; out: string }

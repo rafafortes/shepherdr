@@ -569,6 +569,9 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
       await src.retryAdvice()
       expect(runs.map((r) => r.kind)).toEqual(['pi', 'codex'])
       expect(src.advices.get(w.key, 'cap:t1')!.state).toBe('sent')
+      // its card said it was asked now, where it had waited (and the answer followed)
+      expect(cards(w.key)).toContain('The advisor is asking Codex now.')
+      expect(cards(w.key).at(-1)).toContain('The advisor answered as you asked')
     } finally {
       capped('off')
       w.done()
