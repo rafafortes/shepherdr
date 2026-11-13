@@ -63,7 +63,8 @@ describe('OpenCode under models.maxAtOnce', () => {
   })
 
   test('a backup on OpenCode is one more harness of a chain: a primary at its cap goes past it to OpenCode, out or full skips it', () => {
-    const cap = parseMaxAtOnce('openai=1, opencode-go=1').entries
+    const capped = parseMaxAtOnce('openai=1, opencode-go=1')
+    const cap = capped.ok ? capped.entries : []
     const options = [
       { harness: 'codex', key: 'openai/gpt-6-sol' },
       { harness: 'opencode', key: GO },

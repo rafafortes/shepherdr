@@ -1135,7 +1135,7 @@ describe('OpenCode as the primary: asked and gone back to like the others', () =
       await s.src.watchReturns(later())
       expect(s.started.map((x) => x.key)).toEqual([])
       // the run ends (its task is done with its slot): the slot is free, and the task goes back on OpenCode
-      running.t.archived = true
+      running.t.archived = Date.now()
       s.src.agents.status = (() => 'idle') as never
       await s.src.watchReturns(later() + 60_000)
       expect(s.started.map((x) => [x.key, x.kind])).toEqual([[waiting.key, 'opencode']])
