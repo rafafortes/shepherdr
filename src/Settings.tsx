@@ -14,6 +14,7 @@ import { PlacesToggle } from './Frame.tsx'
 import { askWaiting } from './apply-waiting.tsx'
 import ModelsPage from './ModelsPage.tsx'
 import LimitsPage from './LimitsPage.tsx'
+import { LimitChoice } from './LimitChoice.tsx'
 import { Stack } from './Stack.tsx'
 import { APPEARANCES, setAppearance, useAppearance, type Appearance } from './theme.ts'
 import {
@@ -721,6 +722,8 @@ export function Control({ row, phone, set, edit }: { row: SettingRow; phone: boo
   const action = row.key in registry.settingActions
   const only = !row.num && !row.text && !action && options.length <= 1 && (options[0] ?? row.value) === row.value
   if (row.fixed || !row.key || only) return <span className="truncate text-fg2">{shown(row.value)}</span>
+  // a limit is three choices (no cap, 0, a number): a radio each, and a number is saved once it is left
+  if (row.num?.limit) return <LimitChoice label={row.label} value={row.value} max={row.num.max} phone={phone} onChange={(v, final) => final && v !== '' && set(v)} />
   if (row.num) return <NumberValue label={row.label} value={row.value} num={row.num} onEdit={edit} onSave={set} />
   if (row.text) return <TextValue label={row.label} value={row.value} onEdit={edit} onSave={set} />
   // an action (alerts: turn them on for this device) is a button, its row's value the words under its label

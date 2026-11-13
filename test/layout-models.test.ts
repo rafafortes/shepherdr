@@ -4,7 +4,7 @@
 // plain columns, and the phone's cards.
 import { describe, expect, test } from 'bun:test'
 import type { Locator, Page } from 'playwright-core'
-import { layout, settled } from './layout.ts'
+import { layout, pickLimit, settled } from './layout.ts'
 
 const { browser, world, url } = await layout()
 
@@ -186,10 +186,11 @@ describe.skipIf(!browser)('Settings → Models on a desktop', () => {
     try {
       await openModels(page)
       await cell(page, 'gtm · Max tasks').click()
-      const box = editor(page).getByRole('textbox', { name: 'Max tasks' })
+      await editor(page).getByRole('radio', { name: 'Limit', exact: true }).check()
+      const box = editor(page).getByRole('textbox', { name: 'Limit, from 1 to 200' })
       await box.fill('500')
       await box.press('Enter')
-      await editor(page).getByRole('status').filter({ hasText: 'Write a number from 1 to 200' }).waitFor()
+      await editor(page).getByRole('status').filter({ hasText: 'Write a number from 0 to 200' }).waitFor()
       expect(vm().pick('space.maxTasks', { space: 'gtm' }).from).not.toBe('space')
       await page.keyboard.press('Escape')
     } finally {
@@ -345,9 +346,7 @@ describe.skipIf(!browser)('Settings → Models on a desktop', () => {
       await cell(page, 'gtm · Max tasks').click()
       const pop = editor(page)
       await pop.waitFor()
-      const box = pop.getByRole('textbox', { name: 'Max tasks' })
-      await box.fill('4')
-      await box.press('Enter')
+      await pickLimit(pop, '4')
       await waitFor(() => vm().pick('space.maxTasks', { space: 'gtm' }).value === '4')
       expect(vm().pick('space.maxTasks', { space: 'gtm' })).toEqual({ value: '4', from: 'space' })
       await page.keyboard.press('Escape')

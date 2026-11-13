@@ -104,6 +104,28 @@ describe('a profile: what it keeps, at every level', () => {
     expect(own(w.s, 'models.maxAtOnce', 'machine')).toBe('radeon=1')
   })
 
+  test('0 round-trips: a machine that blocks a model and a space that blocks one and holds its tasks (0) are saved, applied and undone as 0, not unset', () => {
+    const w = world({ machine: { 'models.maxAtOnce': 'spark=0' }, spaces: { gtm: { 'models.maxAtOnce': 'anthropic=0', 'space.maxTasks': '0' } } })
+    const lim = w.p.save('zero', { limits: true }).profile!
+    expect(lim.values.machine['models.maxAtOnce']).toBe('spark=0')
+    expect(lim.values.spaces.gtm!['models.maxAtOnce']).toBe('anthropic=0')
+    expect(lim.values.spaces.gtm!['space.maxTasks']).toBe('0')
+    // changed since: off (no cap) and a number now; the save's zeros come back on apply, distinct from what is unset
+    w.s.set('models.maxAtOnce', null, 'machine')
+    w.s.set('models.maxAtOnce', 'off', { space: 'gtm' })
+    w.s.set('space.maxTasks', null, { space: 'gtm' })
+    expect(w.p.apply('zero').ok).toBe(true)
+    expect(own(w.s, 'models.maxAtOnce', 'machine')).toBe('spark=0')
+    expect(own(w.s, 'models.maxAtOnce', { space: 'gtm' })).toBe('anthropic=0')
+    expect(own(w.s, 'space.maxTasks', { space: 'gtm' })).toBe('0')
+    expect(own(w.s, 'models.maxAtOnce', { space: 'docs' })).toBeNull()
+    expect(w.s.spaceMax('gtm')).toBe(0)
+    // undo puts back what the apply changed: the values before it, the off and the unset
+    expect(w.p.undo().ok).toBe(true)
+    expect(own(w.s, 'models.maxAtOnce', { space: 'gtm' })).toBe('off')
+    expect(own(w.s, 'space.maxTasks', { space: 'gtm' })).toBeNull()
+  })
+
   test('a profile saved while Settings reads an inherited value keeps the inheritance, not a copy of it', () => {
     const w = world({ everywhere: { 'task.agent': 'pi' } })
     const v = w.p.save('inherit').profile!.values

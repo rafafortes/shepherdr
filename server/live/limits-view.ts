@@ -133,6 +133,8 @@ export function waitingOf(input: LimitsInput): WaitingNow {
   const machine = input.settings.machine('machine')
   if (of('slots').length)
     groups.push({ id: 'slots', title: 'Machine slots are full', limit: `${input.working}${machine.max === null ? '' : ` of ${machine.max}`} working`, tasks: of('slots').map(task) })
+  // 0 is a limit of its own: none starts here, so the group says so rather than naming a busy machine
+  if (of('zero').length) groups.push({ id: 'zero', title: 'This machine is set to 0 tasks', limit: '0 tasks', tasks: of('zero').map(task) })
   if (of('machine').length) groups.push({ id: 'machine', title: 'The machine is too busy', limit: machineReason(input.sample, input.herdr, input.settings), tasks: of('machine').map(task) })
   const spaces = [...new Set(of('space').map((h) => h.space))]
   for (const key of spaces) {
@@ -140,12 +142,18 @@ export function waitingOf(input: LimitsInput): WaitingNow {
     const e = hs[0]!.entry
     groups.push({ id: `space:${key}`, title: `Space cap · ${hs[0]!.spaceName}`, limit: e ? `${e.count} of ${e.max} working` : undefined, tasks: hs.map(task) })
   }
+  for (const key of [...new Set(of('spaceZero').map((h) => h.space))]) {
+    const hs = of('spaceZero').filter((h) => h.space === key)
+    groups.push({ id: `spaceZero:${key}`, title: `Space set to 0 tasks · ${hs[0]!.spaceName}`, limit: '0 tasks', tasks: hs.map(task) })
+  }
   const entries = [...new Set(of('model').map((h) => h.entry?.name ?? 'model'))]
   for (const name of entries) {
     const hs = of('model').filter((h) => (h.entry?.name ?? 'model') === name)
     const e = hs[0]!.entry
     groups.push({ id: `model:${name}`, title: `Model cap · ${name}`, limit: e ? `${e.count} of ${e.max} at once` : undefined, tasks: hs.map(task) })
   }
+  // every model blocked (0 allowed): nothing will free up, so the tasks wait on the limits, not on a slot
+  if (of('blocked').length) groups.push({ id: 'blocked', title: 'Every model blocked (0 allowed)', tasks: of('blocked').map(task) })
   if (of('models').length) groups.push({ id: 'models', title: 'Every model of the space ran out', tasks: of('models').map(task) })
   if (of('resume').length) groups.push({ id: 'resume', title: 'Cut-off tasks go back to work first', tasks: of('resume').map(task) })
   return { held: input.held.length, groups, advisor: input.advisor, reviews: input.reviews }

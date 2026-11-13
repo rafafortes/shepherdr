@@ -3,7 +3,7 @@
 // so in the Tasks list. The demo world keeps the setting and counts its working tasks, as the live source does.
 import { describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
-import { layout, settled } from './layout.ts'
+import { layout, pickLimit, settled } from './layout.ts'
 
 const { browser, world, url } = await layout()
 
@@ -18,7 +18,7 @@ async function openModels(page: Page) {
 }
 
 describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () => {
-  test("a cap set on a provider's row reads as N of M at once, and Clear here takes it back to no cap", async () => {
+  test("a cap set on a provider's row reads as N of M at once, and No cap takes it back", async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
       const s = await openModels(page)
@@ -27,13 +27,16 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
       const spark = table.getByRole('row').filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) }).first()
       await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
-      await pop.getByLabel('Most Spark (local) at once, this machine').fill('4')
+      // the three choices: No cap, Blocked · 0 allowed, and Limit with its number
+      expect(await pop.getByRole('radio', { name: 'No cap', exact: true }).isChecked()).toBe(true)
+      await pickLimit(pop, '4')
       await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
       // the row now names its cap, and what runs on it (none in the demo's world: 0 of 4)
       await spark.getByRole('button', { name: /^Spark \(local\): 0 of 4 at once/ }).waitFor()
       await spark.getByRole('button', { name: /^Spark \(local\): 0 of 4 at once/ }).click()
-      await pop.getByRole('button', { name: 'Clear here', exact: true }).click()
+      await pop.getByRole('radio', { name: 'No cap', exact: true }).check()
+      await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
       await spark.getByRole('button', { name: /^Spark \(local\): 0 at once · no cap/ }).waitFor()
     } finally {
@@ -41,7 +44,7 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
     }
   })
 
-  test("a space's own sub-limit reads under its row, and its line opens the editor on that space: This space, then Clear here", async () => {
+  test("a space's own sub-limit reads under its row, and its line opens the editor on that space: This space, then No cap", async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
       const s = await openModels(page)
@@ -52,7 +55,7 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
       await pop.getByRole('radio', { name: /This space/ }).check()
       await pop.getByLabel('Which space').selectOption('gtm')
-      await pop.getByLabel('Most Spark (local) at once, in gtm').fill('2')
+      await pickLimit(pop, '2')
       await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
       // the line under the row names the space, its count of runs and its cap (none in the demo's world: 0 of 2)
@@ -61,7 +64,8 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
       await line.click()
       expect(await pop.getByRole('radio', { name: /This space/ }).isChecked()).toBe(true)
       expect(await pop.getByLabel('Which space').inputValue()).toBe('gtm')
-      await pop.getByRole('button', { name: 'Clear here', exact: true }).click()
+      await pop.getByRole('radio', { name: 'No cap', exact: true }).check()
+      await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
       await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).waitFor()
       await line.waitFor({ state: 'detached' })
@@ -121,11 +125,11 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
       await s.scrollIntoViewIfNeeded()
       const card = s.locator('ul > li').filter({ has: page.locator('h4', { hasText: 'Spark (local)' }) })
       await card.getByRole('button', { name: /^Spark \(local\): .* at once/ }).tap()
-      const editor = card.getByLabel('Most Spark (local) at once, this machine')
-      await editor.fill('0')
+      // a Limit with no number is refused in words; a number is set
+      await card.getByRole('radio', { name: 'Limit', exact: true }).tap()
       await card.getByRole('button', { name: 'Save', exact: true }).tap()
-      await card.getByRole('status').filter({ hasText: 'Write a whole number from 1 to 200' }).waitFor()
-      await editor.fill('3')
+      await card.getByRole('status').filter({ hasText: 'Choose No cap, Blocked (0), or a whole number from 1 to 200.' }).waitFor()
+      await pickLimit(card, '3')
       await card.getByRole('button', { name: 'Save', exact: true }).tap()
       await card.getByRole('button', { name: /^Spark \(local\): 0 of 3 at once/ }).waitFor()
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
@@ -148,7 +152,7 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
       const before = await labels()
       await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
-      await pop.getByLabel('Most Spark (local) at once, this machine').fill('2')
+      await pickLimit(pop, '2')
       await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.getByRole('status').filter({ hasText: 'refused by this test' }).waitFor()
       // nothing was kept: once the editor is closed, the cell reads as it did

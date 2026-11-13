@@ -4,7 +4,7 @@
 // phone draws one card per section, space and provider. Each test is short, so the browser tests fit on a loaded machine.
 import { afterAll, describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
-import { layout, settled } from './layout.ts'
+import { layout, pickLimit, settled } from './layout.ts'
 import { piOffers } from './pi-offers.ts'
 
 // pi lists nvidia and amd-tokenlab, which nothing in the demo uses: they are the providers under Other providers
@@ -44,8 +44,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await cell.scrollIntoViewIfNeeded()
       await cell.click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
-      await pop.getByRole('textbox', { name: 'Max tasks working at once' }).fill('6')
-      await pop.getByRole('textbox', { name: 'Max tasks working at once' }).press('Enter')
+      await pickLimit(pop, '6')
       await pop.waitFor({ state: 'detached' })
       // the value is this machine's own now: strong, and the live numbers beside it
       const set = page.getByRole('button', { name: /^vm-str · Max tasks working at once: 6, / })
@@ -68,8 +67,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await cell.scrollIntoViewIfNeeded()
       await cell.click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
-      await pop.getByRole('textbox', { name: 'Max tasks of this space working at once' }).fill('3')
-      await pop.getByRole('textbox', { name: 'Max tasks of this space working at once' }).press('Enter')
+      await pickLimit(pop, '3')
       await pop.waitFor({ state: 'detached' })
       await page.getByRole('button', { name: /^gtm · Max tasks: 3, 0 of 3 working · 1 held/ }).waitFor()
     } finally {
@@ -89,7 +87,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await empty.click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
       await pop.getByRole('radio', { name: 'This space' }).check()
-      await pop.getByLabel('Most Spark (local) at once, in gtm').fill('2')
+      await pickLimit(pop, '2')
       await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
       await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^Spark \(local\) in gtm: 0 of 2 at once/ }).waitFor()
@@ -106,13 +104,14 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await spark.scrollIntoViewIfNeeded()
       await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
-      await pop.getByLabel('Most Spark (local) at once, this machine').fill('4')
+      await pickLimit(pop, '4')
       await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
       await spark.getByRole('button', { name: /^Spark \(local\): 0 of 4 at once/ }).waitFor()
       // and the same entry is cleared again, back to no cap
       await spark.getByRole('button', { name: /^Spark \(local\): 0 of 4 at once/ }).click()
-      await pop.getByRole('button', { name: 'Clear here', exact: true }).click()
+      await pop.getByRole('radio', { name: 'No cap', exact: true }).check()
+      await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
       await spark.getByRole('button', { name: /^Spark \(local\): 0 at once · no cap/ }).waitFor()
     } finally {
@@ -131,7 +130,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       expect(await page.getByRole('table', { name: 'Providers and models' }).getByRole('rowheader', { name: /^NVIDIA API/ }).count()).toBe(0)
       await other.getByRole('button', { name: /^NVIDIA API: 0 at once · no cap/ }).click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
-      await pop.getByLabel('Most NVIDIA API at once, this machine').fill('2')
+      await pickLimit(pop, '2')
       await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
       // capped now: it is one of the providers in use, with its cap
@@ -176,8 +175,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await page.getByRole('menuitem', { name: 'Set for every space…', exact: true }).click()
       const dialog = page.getByRole('alertdialog', { name: 'Set Max tasks for every space' })
       await dialog.getByRole('radio', { name: /Everywhere, and reset the spaces/ }).check()
-      await dialog.getByRole('textbox', { name: 'Max tasks of this space working at once' }).fill('5')
-      await dialog.getByRole('textbox', { name: 'Max tasks of this space working at once' }).press('Enter')
+      await pickLimit(dialog, '5')
       await dialog.getByRole('button', { name: 'Set for 2 spaces', exact: true }).click()
       await dialog.waitFor({ state: 'detached' })
       // gtm now reads Everywhere's value, faint, from there
@@ -196,8 +194,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await page.getByRole('button', { name: 'More for Max tasks', exact: true }).click()
       await page.getByRole('menuitem', { name: 'Set for every space…', exact: true }).click()
       const dialog = page.getByRole('alertdialog', { name: 'Set Max tasks for every space' })
-      await dialog.getByRole('textbox', { name: 'Max tasks of this space working at once' }).fill('4')
-      await dialog.getByRole('textbox', { name: 'Max tasks of this space working at once' }).press('Enter')
+      await pickLimit(dialog, '4')
       await dialog.getByRole('button', { name: 'Set for 2 spaces', exact: true }).click()
       await dialog.waitFor({ state: 'detached' })
       await page.getByRole('button', { name: /^gtm · Max tasks: 4, / }).waitFor()
@@ -261,7 +258,7 @@ describe.skipIf(!browser)('Settings → Limits on a phone', () => {
       const space = page.getByRole('region', { name: 'Space gtm' })
       await space.scrollIntoViewIfNeeded()
       await space.getByRole('button', { name: /^gtm · Max tasks: 2, / }).tap()
-      await page.getByRole('textbox', { name: 'Max tasks of this space working at once' }).waitFor()
+      await page.getByRole('textbox', { name: 'Limit, from 1 to 200' }).first().waitFor()
       await page.getByRole('region', { name: 'Providers and models' }).scrollIntoViewIfNeeded()
       await page.getByRole('region', { name: 'Claude Code' }).waitFor()
       // the providers nothing uses yet, open under Other providers: a card each
@@ -282,9 +279,9 @@ describe.skipIf(!browser)('Settings → Limits on a phone', () => {
       const space = page.getByRole('region', { name: 'Space gtm' })
       await space.scrollIntoViewIfNeeded()
       await space.getByRole('button', { name: /^Spark \(local\) in gtm: 0 of 2 at once/ }).tap()
-      await page.getByRole('spinbutton', { name: 'Most Spark (local) at once, in gtm' }).waitFor()
+      await page.getByRole('textbox', { name: 'Limit, from 1 to 200' }).waitFor()
       await page.getByRole('button', { name: 'Cancel', exact: true }).tap()
-      await page.getByRole('spinbutton', { name: 'Most Spark (local) at once, in gtm' }).waitFor({ state: 'detached' })
+      await page.getByRole('textbox', { name: 'Limit, from 1 to 200' }).waitFor({ state: 'detached' })
     } finally {
       await set('models.maxAtOnce', null, 'm:vm-str')
       await set('models.maxAtOnce', null, 'p:vm-str:gtm')

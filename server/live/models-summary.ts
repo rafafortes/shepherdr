@@ -377,8 +377,19 @@ function warningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): 
       const slots = here.filter((c) => c.role === role).sort((a, b) => a.n - b.n)
       const primary = slots.find((c) => c.n === 0)
       const slotId = (n: number) => `${role}.${n}`
+      // a role every model of which is blocked (0 allowed) in this space: nothing of it can start, whatever is free
+      const blocks = slots.map((c) => blockingEntry(f, sp.spaceKey, c.key))
+      if (slots.length && blocks.every(Boolean)) {
+        out.push({
+          id: `blocked:${sp.spaceKey}:${role}`,
+          level: 'risk',
+          words: `${TITLE[role]} in ${sp.space} can never start: every model is blocked.`,
+          fix: `Its models are at 0 allowed: change the blocked one in its cap cell (0 allowed blocks it), or give ${TITLE[role]} a model no limit blocks.`,
+          go: { row: 'cap', slot: blocks[0]!.pattern },
+        })
+      }
       // a role whose every slot sits on a provider that is out now: nothing of it runs but by hand
-      if (slots.length && slots.every((c) => outOf(providerOf(c.key)))) {
+      else if (slots.length && slots.every((c) => outOf(providerOf(c.key)))) {
         out.push({
           id: `out:${sp.spaceKey}:${role}`,
           level: 'risk',
@@ -413,6 +424,17 @@ function warningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): 
       })
     }
   }
+  // a provider or a model blocked (0 allowed) while agents still run on it: they keep running, and nothing new starts on it
+  for (const r of rows) {
+    // what runs on it now (the runs the cap counts, atOnce.now), and the words for it
+    const running = (n: number) => `${n} ${n === 1 ? 'agent still runs' : 'agents still run'}`
+    if (r.atOnce.own?.max === 0 && r.atOnce.now > 0)
+      out.push({ id: `blocked-running:${r.provider}`, level: 'note', words: `${r.name} is blocked (0 allowed), and ${running(r.atOnce.now)} on it: they keep running; nothing new starts on it.`, go: { row: 'cap', slot: r.provider } })
+    for (const m of r.models) {
+      if (m.atOnce.own?.max === 0 && m.atOnce.now > 0)
+        out.push({ id: `blocked-running:${m.key}`, level: 'note', words: `${m.label} is blocked (0 allowed), and ${running(m.atOnce.now)} on it: they keep running; nothing new starts on it.`, go: { row: 'cap', slot: m.key } })
+    }
+  }
   for (const r of rows) {
     if (r.runOuts.count7d >= PATTERN && !r.local) {
       out.push({
@@ -443,6 +465,14 @@ function warningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): 
     }
   }
   return out.sort((a, b) => (a.level === b.level ? 0 : a.level === 'risk' ? -1 : 1))
+}
+
+/** the entry that blocks a model key for a space (0 allowed): the machine's, else the space's own sub-limit (the one the
+ *  engine's choice reads too, choose.ts); none when nothing blocks it */
+export function blockingEntry(f: SummaryInput, spaceKey: string, key: string): MaxEntry | undefined {
+  const pick = f.settings.pick('models.maxAtOnce', { space: spaceKey })
+  const p = pick.from === 'space' ? parseMaxAtOnce(pick.value) : undefined
+  return [...capsOf(f.settings).entries, ...(p?.ok ? p.entries : [])].find((e) => e.max === 0 && covers(e.pattern, key))
 }
 
 /** what is left of a window in words: its share used against 100 (an estimate past its learned limit is over it) */

@@ -1585,7 +1585,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a first start (nothing kept, nothing chosen by hand) takes the first harness of its chain with room under the caps
     const start = !o.as && !rec ? this.coordinatorStart(id, set) : undefined
     // a blocked model (0 allowed) starts nothing, not even by hand: a coordinator whose every model is blocked does not start
-    if (start && 'blocked' in start) return this.refuseBlocked(id, start.blocked)
+    if (start && 'blocked' in start) return this.refuseBlocked(id, start.blocked, (x) => chainWords((x as { h: Harness }).h))
     if (start) this.startedByCaps(id, start)
     const h = o.as ?? (start ? start.h : rec ? undefined : set)
     // a start by hand on a blocked model, or a relaunch of one that is not running, is refused too (an agent that runs keeps
@@ -1593,7 +1593,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const space = this.spaceKey(id) ?? ''
     const key = h ? keyOf(h.kind, h.model) : rec ? keyOf(rec.kind, rec.model) : undefined
     const startsNew = !!o.as || (!start && this.agents.status(id) === 'gone')
-    if (key !== undefined && startsNew && this.engine.blockedKey(space, key)) return this.refuseBlocked(id, this.engine.blockedWait(space, key))
+    if (key !== undefined && startsNew && this.engine.blockedKey(space, key)) return this.refuseBlocked(id, this.engine.blockedWait(space, key), () => (h ? harnessWords(fitHarness(h)) : key))
     const spec: Spec = {
       key: id,
       name: c.name,
@@ -1629,8 +1629,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** a start refused because its model is blocked (0 allowed): the chat gets a card that says why and what to change, and
    *  the start fails with the same words (a coordinator's ensure rejects, as an agent's start does) */
-  private refuseBlocked(id: string, wait: Blocked<unknown>[]): Promise<never> {
-    const shown = wait.length ? ` Blocked: ${waitWords(wait, { shown: (s) => this.places.shownName(s) })}.` : ''
+  private refuseBlocked(id: string, wait: Blocked<unknown>[], words: (h: unknown) => string): Promise<never> {
+    const shown = wait.length ? ` Blocked: ${waitWords(wait, { words, shown: (s) => this.places.shownName(s) })}.` : ''
     const text = `Not started: every model it may use is blocked (0 allowed): change its agent or a limit in Settings → Limits.${shown}`
     this.capNote(id, text)
     return Promise.reject(new Error(text))
@@ -1640,13 +1640,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    *  past the cap on its primary (its card says so) */
   private startedByCaps(id: string, start: { h: Harness; step: number; skipped: Blocked<unknown>[]; past: boolean }) {
     const first = start.skipped[0]
+    // a start on a backup, by the caps, is marked: the way back takes it to its primary once that has room
     if (start.step > 0) {
       this.capStarts.set(id, { step: start.step })
       this.saveCapStarts()
-      this.capNote(id, `Started on ${harnessWords(fitHarness(start.h))}${first ? `: ${capWords(first, (x) => this.places.shownName(x))}` : ''}`)
-    } else if (start.past && first) {
-      this.capNote(id, `Runs past the cap: ${capWords(first, (x) => this.places.shownName(x))}. Every model it may use is full, so it starts on ${harnessWords(fitHarness(start.h))} anyway.`)
     }
+    // every model full or out: it starts on the first one that is not blocked, past the cap, and says so
+    if (start.past && first) this.capNote(id, `Runs past the cap: ${capWords(first, (x) => this.places.shownName(x))}. Every model it may use is full, so it starts on ${harnessWords(fitHarness(start.h))} anyway.`)
+    else if (start.step > 0) this.capNote(id, `Started on ${harnessWords(fitHarness(start.h))}${first ? `: ${capWords(first, (x) => this.places.shownName(x))}` : ''}`)
   }
 
   /** a card in a chat, for a start the caps decided */

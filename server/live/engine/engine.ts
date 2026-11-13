@@ -2010,7 +2010,7 @@ export class Engine extends Emitter<Events> {
       // chain that has (choose.ts). Every one full or out: it is held for a slot, and nothing is made
       const c = this.taskChoice(t)
       if ('wait' in c) {
-        this.hold(t, 'model')
+        this.hold(t, blockedOnly(c) ? 'blocked' : 'model')
         return
       }
       const { step, h } = c.harness

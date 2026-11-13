@@ -279,3 +279,33 @@ describe('the Limits providers that nothing uses yet: listed after the used ones
     })
   })
 })
+
+describe('0 in the waiting groups: blocked, set to 0 tasks, and the rest unchanged', () => {
+  test('a task every model of which is blocked waits in its own group, with the blocked entry named; 0 tasks groups by where they are set', () => {
+    const w = waitingOf(
+      input(settings(), {
+        held: [
+          held({ id: 'Z-1', why: 'zero', words: 'waiting: this machine is set to 0 tasks' }),
+          held({ id: 'Z-2', why: 'spaceZero', space: 'gtm', spaceName: 'gtm', words: 'waiting: gtm is set to 0 tasks' }),
+          held({ id: 'B-1', why: 'blocked', entry: { name: 'spark', count: 0, max: 0 }, words: 'waiting: every model it may use is blocked (0 allowed): change its agent or a limit' }),
+          held({ id: 'F-1', why: 'model', entry: { name: 'radeon', count: 1, max: 1 } }),
+        ],
+      }),
+    )
+    const ids = w.groups.map((g) => g.id)
+    expect(ids).toEqual(['zero', 'spaceZero:gtm', 'model:radeon', 'blocked'])
+    expect(w.groups.find((g) => g.id === 'zero')).toMatchObject({ title: 'This machine is set to 0 tasks', limit: '0 tasks', tasks: [{ id: 'Z-1', space: 'home', words: 'waiting: this machine is set to 0 tasks' }] })
+    expect(w.groups.find((g) => g.id === 'spaceZero:gtm')).toMatchObject({ title: 'Space set to 0 tasks · gtm', limit: '0 tasks', tasks: [{ id: 'Z-2' }] })
+    expect(w.groups.find((g) => g.id === 'blocked')).toMatchObject({ title: 'Every model blocked (0 allowed)', tasks: [{ id: 'B-1' }] })
+    expect(w.held).toBe(4)
+  })
+
+  test('a machine at 0 tasks holds no slot count: its table reads 0 working, and off reads no limit at all', () => {
+    const at0 = limitsView(input(settings({ machine: { 'machine.maxTasks': '0' } }), { working: 0 }))
+    expect(at0.machineTable.rows[1]!.cells['machine.maxTasks']).toMatchObject({ from: 'machine', set: true, row: { value: '0' } })
+    expect(at0.machineTable.rows[1]!.cells['machine.maxTasks']!.now).toBe('0 of 0 working')
+    const off = limitsView(input(settings({ machine: { 'machine.maxTasks': 'off' } }), { working: 2 }))
+    expect(off.machineTable.rows[1]!.cells['machine.maxTasks']).toMatchObject({ row: { value: 'off' } })
+    expect(off.machineTable.rows[1]!.cells['machine.maxTasks']!.now).toBe('2 working')
+  })
+})

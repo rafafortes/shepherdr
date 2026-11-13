@@ -3,7 +3,7 @@
 // + column added stays until it is removed. The desktop table; each test is short (the browser and the world are shared).
 import { describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
-import { layout, settled } from './layout.ts'
+import { layout, pickLimit, settled } from './layout.ts'
 
 const { browser, world, url } = await layout()
 
@@ -75,7 +75,7 @@ describe.skipIf(!browser)('the bulk actions of the sub-limits', () => {
       await page.getByRole('button', { name: 'More for Codex', exact: true }).click()
       await page.getByRole('menuitem', { name: 'Set for every space…' }).click()
       const dialog = page.getByRole('alertdialog', { name: 'Codex at once: every space' })
-      await dialog.getByRole('spinbutton', { name: 'Most Codex at once in each space' }).fill('3')
+      await pickLimit(dialog, '3')
       await dialog.getByRole('button', { name: 'Set for 2 spaces', exact: true }).click()
       await dialog.waitFor({ state: 'detached' })
       await spaces.getByRole('button', { name: /^Codex in gtm: 0 of 3 at once/ }).waitFor()

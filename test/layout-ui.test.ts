@@ -280,7 +280,10 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
       // on or off: a switch
       const machine = await open('Machine')
       expect(await machine.getByRole('switch', { name: 'herdr stops answering' }).getAttribute('aria-checked')).toBe('true')
-      expect(await machine.getByRole('button', { name: 'More: Max tasks working at once' }).count()).toBe(1)
+      // a limit is three choices: No cap, the zero one, and Limit with its number (LimitChoice)
+      expect(await machine.getByRole('radio', { name: 'No cap', exact: true }).count()).toBe(1)
+      expect(await machine.getByRole('radio', { name: '0 · starts none', exact: true }).count()).toBe(1)
+      expect(await machine.getByRole('radio', { name: 'Limit', exact: true }).count()).toBe(1)
       await back(machine)
       const tasks = await open('How tasks work')
       expect(await tasks.getByRole('switch', { name: 'Review' }).getAttribute('aria-checked')).toBe('true')
