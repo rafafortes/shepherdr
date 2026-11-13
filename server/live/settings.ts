@@ -172,7 +172,8 @@ export function fallbackKinds(get: (key: string) => string): string[] {
 }
 
 /** a count or a threshold: any number from min to max (step 1: whole numbers), kept with its unit ("7 days", "80%");
- *  off: it may be off too ("off"), zero: 0 is off */
+ *  off: it may be off too ("off"), zero: 0 is off. A limit (`limit`) is three choices, never one number: no cap (off, which
+ *  is unlimited), blocked (0: none starts, and the number 0 is kept as such), or a limit of 1 to max */
 export interface Num {
   min: number
   max: number
@@ -182,6 +183,7 @@ export interface Num {
   one?: string
   off?: boolean
   zero?: boolean
+  limit?: boolean
 }
 
 type Row = { label: string; key: string; value: string; options?: string[]; ordered?: boolean; ids?: Record<string, string>; text?: boolean; multiline?: boolean; fixed?: boolean; group?: string; sub?: string; num?: Num; hint?: string; warn?: string; chain?: SettingRow['chain'] }
@@ -391,11 +393,11 @@ export const CATALOG: Section[] = [
     name: 'Space',
     about: "How many of a space's tasks work at once on this machine, and how many agents of one model or provider it may run at once. Both work together with the machine's limits (Machine → Max tasks working at once, and Most at once per model or provider at this machine): a task starts only when every one has room. Off: only the machine's limits.",
     rows: [
-      { label: 'Max tasks of this space working at once', key: 'space.maxTasks', value: 'off', num: { min: 1, max: 200, off: true }, hint: "Caps this space's working tasks within the machine's own limit, so a space that matters more can have more of them running than the others. Off: only the machine's limit." },
+      { label: 'Max tasks of this space working at once', key: 'space.maxTasks', value: 'off', num: { min: 0, max: 200, off: true, limit: true }, hint: "Caps this space's working tasks within the machine's own limit, so a space that matters more can have more of them running than the others. 0: the space starts no task (its tasks wait, held). No cap: only the machine's limit." },
       // per provider or per model. Read at two levels, both applied (model-caps.ts, choose.ts): the machine's own value (Machine,
       // or Everywhere) is the machine's total, and a space's own value (pick: its own, else the machine's) is that space's
       // sub-limit inside it. A space's value never replaces the machine's total.
-      { label: 'Most at once per model or provider', key: 'models.maxAtOnce', value: 'off', text: true, hint: `Most agents of one provider or model at once: spark=4 caps every spark model, anthropic/claude-opus-5-5=2 one model (a model's own entry wins). Set at this machine or Everywhere it is the machine's total, for every space together; set for a space, that space's own sub-limit inside it (its own runs only). A task waits for a free slot of its model, and the others start past it. Counts this machine's tasks and coordinators on it; requests from other apps on the same server are not seen. Off: no cap per model.` },
+      { label: 'Most at once per model or provider', key: 'models.maxAtOnce', value: 'off', text: true, hint: `Most agents of one provider or model at once: spark=4 caps every spark model, anthropic/claude-opus-5-5=2 one model (a model's own entry wins). Set at this machine or Everywhere it is the machine's total, for every space together; set for a space, that space's own sub-limit inside it (its own runs only). A task waits for a free slot of its model, and the others start past it. 0 blocks a model: nothing new starts on it, in any role, and a task whose every model is blocked is held until a limit changes. Agents already running on it keep running. Counts this machine's tasks and coordinators on it; requests from other apps on the same server are not seen. No entry: no cap per model (unlimited). Off: no caps at all.` },
     ],
   },
   {
@@ -422,7 +424,7 @@ export const CATALOG: Section[] = [
     levels: ['all', 'machine'],
     about: "When a machine starts more tasks, and when its coordinator hears that it struggles. Set one machine's own to fit its cores and memory.",
     rows: [
-      { group: 'Working tasks', label: 'Max tasks working at once', key: 'machine.maxTasks', value: '10', num: { min: 1, max: 200 } },
+      { group: 'Working tasks', label: 'Max tasks working at once', key: 'machine.maxTasks', value: '10', num: { min: 0, max: 200, off: true, limit: true }, hint: 'Tasks that work on this machine at once. 0: this machine starts no task (they wait, held). No cap: unlimited.' },
       // the 5-minute load: the 1-minute one swings between a tenth and three times the cores within minutes while builds
       // come and go, so it let tasks start in every lull. CPU pressure (Linux PSI) is the share of time some task waited
       // for a CPU: off unless set (health.ts busy)
@@ -828,7 +830,7 @@ export class Settings {
       return Number.isFinite(n) && n > 0 ? n : null
     }
     return {
-      max: Math.max(1, Math.round(num('machine.maxTasks') ?? 10)),
+      max: this.taskLimit('machine.maxTasks', l),
       startLoad: num('machine.startLoad'),
       startPressure: num('machine.startPressure'),
       startEvery: num('machine.startEvery'),
@@ -849,11 +851,22 @@ export class Settings {
     return p.ok ? p.entries : []
   }
 
+  /** a task count limit at a level, as a number: 0 starts none, and off (no cap) is null, unlimited. An unset count is the
+   *  row's default (the number in its row), never none */
+  private taskLimit(key: string, l: 'all' | 'machine' | { space: string }): number | null {
+    const v = this.pick(key, l).value.trim().toLowerCase()
+    const n = Number.parseFloat(v)
+    if (v === 'off') return null
+    if (Number.isFinite(n) && n >= 0) return Math.round(n)
+    // a value no longer readable (never written by the settings) reads as the row's default
+    const d = defaultOf(key)?.trim().toLowerCase()
+    return d === undefined || d === 'off' ? null : Math.round(Number.parseFloat(d))
+  }
+
   /** how many of one space's tasks may work on this machine at once (space.maxTasks, inside the machine's own limit): the
-   *  most specific level that sets it; none: the space has no cap of its own */
+   *  most specific level that sets it. 0: none may start (a real limit, not off); null: the space has no cap of its own (off) */
   spaceMax(space: string): number | null {
-    const n = Number.parseFloat(this.get('space.maxTasks', space))
-    return Number.isFinite(n) && n > 0 ? Math.round(n) : null
+    return this.taskLimit('space.maxTasks', { space })
   }
 
   /** the CLI, model and effort tasks or coordinators start with, or tasks are reviewed by, for a space (none: this
@@ -1118,9 +1131,12 @@ export function machineNote(l: MachineLimits, cores = cpus().length, memGb = Mat
   const load = (x: number | null) => (x === null ? 'off' : `${+(x * cores).toFixed(1)}`)
   const gb = (pct: number | null) => (pct === null ? 'off' : `${Math.round((memGb * pct) / 100)} GB`)
   const now = [
-    l.max !== null || l.startLoad !== null
-      ? `New tasks wait${l.max !== null ? ` while ${l.max} are at work` : ''}${l.max !== null && l.startLoad !== null ? ', or' : ''}${l.startLoad !== null ? ` while the load is over ${load(l.startLoad)}` : ''}${l.startMemory !== null ? ` or over ${gb(l.startMemory)} of memory is in use` : ''}.`
-      : '',
+    // 0 tasks is a limit of its own: none starts here (its own words, not "while 0 are at work")
+    l.max === 0
+      ? 'No task starts on this machine: its Max tasks is 0.'
+      : l.max !== null || l.startLoad !== null
+        ? `New tasks wait${l.max !== null ? ` while ${l.max} are at work` : ''}${l.max !== null && l.startLoad !== null ? ', or' : ''}${l.startLoad !== null ? ` while the load is over ${load(l.startLoad)}` : ''}${l.startMemory !== null ? ` or over ${gb(l.startMemory)} of memory is in use` : ''}.`
+        : '',
     `Its coordinator hears when the load stays over ${load(l.alertLoad)} for 2 minutes, memory passes ${gb(l.alertMemory)}, home or /tmp is over ${l.alertDisk === null ? 'off' : `${l.alertDisk}%`} full${l.alertHerdr ? ', or herdr stops answering' : ''}.`,
   ].filter(Boolean)
   return {

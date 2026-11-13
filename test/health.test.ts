@@ -51,7 +51,12 @@ describe('limits', () => {
     // any number in range, not a fixed list
     expect(s.set('machine.maxTasks', '13').ok).toBe(true)
     expect(s.machine().max).toBe(13)
-    for (const bad of ['0', '2.5', '201', 'lots']) expect(s.set('machine.maxTasks', bad).ok).toBe(false)
+    for (const bad of ['2.5', '201', 'lots', '-1']) expect(s.set('machine.maxTasks', bad).ok).toBe(false)
+    // 0 is a limit of its own (no task starts here), and off is no cap at all
+    expect(s.set('machine.maxTasks', '0').ok).toBe(true)
+    expect(s.machine().max).toBe(0)
+    expect(s.set('machine.maxTasks', 'off').ok).toBe(true)
+    expect(s.machine().max).toBeNull()
     s.set('machine.maxTasks', null)
     expect(s.set('machine.startLoad', '1.15x').ok).toBe(true)
     expect(s.get('machine.startLoad')).toBe('1.15× cores')

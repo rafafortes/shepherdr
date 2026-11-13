@@ -29,9 +29,9 @@ describe('the text of models.maxAtOnce', () => {
     const hint = 'Write provider=number or model=number'
     const bad = [
       ['spark', 'spark is no provider or model'],
-      ['spark=', 'spark needs a whole number from 1 to 200, not "nothing"'],
-      ['spark=0', 'spark needs a whole number from 1 to 200, not "0"'],
-      ['spark=201', 'spark needs a whole number'],
+      ['spark=', 'spark needs a whole number from 0 to 200, not "nothing"'],
+      ['spark=-1', 'spark needs a whole number from 0 to 200, not "-1"'],
+      ['spark=201', 'spark needs a whole number from 0 to 200, not "201"'],
       ['spark=2.5', 'spark needs a whole number'],
       ['spark=four', 'spark needs a whole number'],
       ['spark=2,,radeon=1', 'An entry is empty'],
@@ -129,9 +129,9 @@ describe('models.maxAtOnce in Settings', () => {
 
   test('a refused value is said with its fix and nothing is written', () => {
     const s = fresh()
-    const r = s.set('models.maxAtOnce', 'spark=0', 'all')
+    const r = s.set('models.maxAtOnce', 'spark=201', 'all')
     expect(r.ok).toBe(false)
-    expect(r.error).toContain('spark needs a whole number from 1 to 200')
+    expect(r.error).toContain('spark needs a whole number from 0 to 200')
     expect(s.pick('models.maxAtOnce', 'all').from).toBe('default')
   })
 

@@ -34,7 +34,7 @@ import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
 import { findModel, knowsModels } from '../models.ts'
 import { keyOf } from '../models-summary.ts'
-import { choose, waitShort, waitWords, type Blocked, type Choice, type Option, type Run } from './choose.ts'
+import { allBlocked, blockedOnly, choose, waitShort, waitWords, type Blocked, type Choice, type Option, type Run } from './choose.ts'
 import { chainWords, fitHarness, harnessWords, recentChat, sameHarness } from '../restart.ts'
 import * as G from './git.ts'
 import { Worktrees, type HerdrSpaces, type Made } from './worktrees.ts'
@@ -302,6 +302,7 @@ export function backupHarness(to: { kind: string; model?: string; effort?: strin
 /** a capped or out harness in words for a card: `spark (4 of 4 at once)`, `commandcode is out until 17:00` */
 export function capWords(b: Blocked<unknown>, shown = (s: string) => s) {
   if (b.why === 'out') return `${b.name} is out${b.until ? ` until ${b.until}` : ''}`
+  if (b.why === 'blocked') return `${b.name}${b.cap?.scope === 'space' ? ` in ${shown(b.cap.space ?? '')}` : ''} is blocked (0 allowed)`
   return `${b.name}${b.cap?.scope === 'space' ? ` in ${shown(b.cap.space ?? '')}` : ''} is at its limit (${b.cap?.count} of ${b.cap?.max} at once)`
 }
 
@@ -472,7 +473,7 @@ const pathList = (files: string[]) => (files.length > 3 ? `${files.slice(0, 3).j
 /** why a task waits to start: its slots are taken, the machine is busy, every model of its space ran out (a start
  *  would only be cut off as well), its tasks that were cut off go back to work first (source.ts, return.ts), or its
  *  space's own cap (space.maxTasks, inside the machine's) is full: another space's task may still start */
-export type HeldWhy = 'slots' | 'machine' | 'models' | 'resume' | 'space' | 'model'
+export type HeldWhy = 'slots' | 'machine' | 'models' | 'resume' | 'space' | 'model' | 'blocked' | 'zero' | 'spaceZero'
 /** a reviewer of a task's chain: its step (0: its own reviewer, n: its backup n) and its harness */
 export interface ReviewStep {
   n: number
@@ -490,7 +491,17 @@ export interface Round {
   why?: Blocked<ReviewStep>
 }
 
-export const HELD = { slots: 'Waiting for a free slot', machine: 'Waiting for the machine', models: 'Waiting: every model ran out', resume: 'Waiting: cut-off tasks go back to work first', space: 'Waiting for a free slot of its space', model: 'Waiting for a free slot of its model' } as const
+export const HELD = {
+  slots: 'Waiting for a free slot',
+  machine: 'Waiting for the machine',
+  models: 'Waiting: every model ran out',
+  resume: 'Waiting: cut-off tasks go back to work first',
+  space: 'Waiting for a free slot of its space',
+  model: 'Waiting for a free slot of its model',
+  blocked: 'Blocked: every model it may use is 0 allowed',
+  zero: 'This machine is set to 0 tasks',
+  spaceZero: 'Its space is set to 0 tasks',
+} as const
 
 /** queued tasks are first looked at once herdr has told which agents are alive: a go sent before would start a second */
 const RECHECK_FIRST = 15_000
@@ -1424,6 +1435,8 @@ export class Engine extends Emitter<Events> {
    *  machine is too loaded, its space waits for its models (startsWait), or its space's own cap is full (spaceCap) */
   room(t?: TaskRec): { why?: HeldWhy } {
     const l = this.settings.machine()
+    // 0 is a limit of its own: this machine starts no task (off, no cap, is null and reads none)
+    if (l.max === 0) return { why: 'zero' }
     if (l.max !== null && this.working() >= l.max) return { why: 'slots' }
     const m = this.machine?.()
     // one first in line goes past the machine's load and pressure, and ahead of the cut-off tasks' way back; never past
@@ -1433,8 +1446,11 @@ export class Engine extends Emitter<Events> {
     if (w && !(w === 'resume' && t?.priority)) return { why: w }
     // a first in line passes neither: its space's cap is as much its slots as the machine's are, nor its model's
     const cap = t ? this.spaceCap(t) : undefined
+    if (cap && cap.max === 0) return { why: 'spaceZero' }
     if (cap && cap.working >= cap.max) return { why: 'space' }
-    return t && 'wait' in this.taskChoice(t) ? { why: 'model' } : {}
+    if (!t) return {}
+    const c = this.taskChoice(t)
+    return 'wait' in c ? { why: blockedOnly(c) ? 'blocked' : 'model' } : {}
   }
 
   /** the model a task's agent runs on, as its usage is kept (keyOf): its live agent's model, else the one it starts on
@@ -1491,6 +1507,17 @@ export class Engine extends Emitter<Events> {
     return choose<T>({ space, options, runs: this.runs(except, plus), machine: this.settings.maxAtOnce(), own: this.settings.maxAtOnce(space) })
   }
 
+  /** whether a model key is blocked (0 allowed) for a space now: nothing starts on it, in any role (choose.ts) */
+  blockedKey(space: string, key: string): boolean {
+    return blockedOnly(this.decide<null>(space, [{ harness: null, key }]))
+  }
+
+  /** the entries that block a model key for a space now, in words for a refusal (none when it is not blocked) */
+  blockedWait(space: string, key: string): Blocked<null>[] {
+    const c = this.decide<null>(space, [{ harness: null, key }])
+    return 'wait' in c ? c.wait : []
+  }
+
   /** the backup a task is on, by its place in its chain: 0 on its primary, else the step of its takeover or its start on a
    *  backup (whichever is the later) */
   stepOf(t: TaskRec) {
@@ -1517,7 +1544,8 @@ export class Engine extends Emitter<Events> {
     return this.decide(this.nameOf(t) ?? '', this.chainOptions(this.taskChain(t)), t.id, plus)
   }
 
-  /** the entries a task waits for, by name (a full model or provider, or one that is out): what the summary counts as held */
+  /** the entries a task waits for, by name (a full model or provider, or one that is out): what the summary counts as held
+   *  (a blocked one too, when it is all there is) */
   waitingFor(t: TaskRec): string[] {
     const c = this.taskChoice(t)
     return 'wait' in c ? c.wait.map((b) => b.name) : []
@@ -1547,12 +1575,15 @@ export class Engine extends Emitter<Events> {
   /** a held task's line in its row: a task held by its space's cap names the space, as it shows; one held for its models
    *  names each harness of its chain, short (waitShort), and in full when `full` (the row's title) */
   private heldLabel(t: TaskRec, full = false) {
-    if (t.held!.why === 'model') {
+    if (t.held!.why === 'model' || t.held!.why === 'blocked') {
       const c = this.taskChoice(t)
+      // every model it may use is blocked: nothing will free up, so the row says so (not a wait)
+      if ('wait' in c && blockedOnly(c)) return HELD.blocked
       // the row is one short line (waitShort); its title, and the card, name the whole chain (full)
       if ('wait' in c) return `Waiting: ${full ? this.waitIn(c.wait) : waitShort(c.wait, (x) => this.places.shownName(x))}`
     }
-    const cap = t.held!.why === 'space' ? this.spaceCap(t) : undefined
+    const cap = t.held!.why === 'space' || t.held!.why === 'spaceZero' ? this.spaceCap(t) : undefined
+    if (cap && t.held!.why === 'spaceZero') return `${cap.shown} is set to 0 tasks`
     return cap ? `Waiting for a free slot of ${cap.shown}` : HELD[t.held!.why]
   }
 
@@ -1610,8 +1641,8 @@ export class Engine extends Emitter<Events> {
     t.after = undefined
     t.todo = undefined
     const id = `held:${t.id}:${Date.now()}`
-    const cap = why === 'space' ? this.spaceCap(t) : undefined
-    const choice = why === 'model' ? this.taskChoice(t) : undefined
+    const cap = why === 'space' || why === 'spaceZero' ? this.spaceCap(t) : undefined
+    const choice = why === 'model' || why === 'blocked' ? this.taskChoice(t) : undefined
     const words = {
       slots: `waiting for a free slot (${this.slotsWords(l.max)})`,
       machine: 'waiting for the machine: it is busy',
@@ -1619,6 +1650,9 @@ export class Engine extends Emitter<Events> {
       resume: 'waiting: the tasks that were cut off go back to work first',
       space: `waiting for a free slot of ${cap?.shown ?? 'its space'} (${cap?.working ?? 0} of ${cap?.max ?? 0} of its tasks working)`,
       model: choice && 'wait' in choice ? `waiting: ${this.capWaitLine(choice.wait)}` : 'waiting for a free slot of its model',
+      blocked: 'waiting: every model it may use is blocked (0 allowed): change its agent or a limit',
+      zero: 'waiting: this machine is set to 0 tasks',
+      spaceZero: `waiting: ${cap?.shown ?? 'its space'} is set to 0 tasks`,
     }[why]
     this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: words } })
     this.save()
@@ -1644,7 +1678,7 @@ export class Engine extends Emitter<Events> {
       for (const t of this.heldTasks()) {
         const r = this.room(t)
         // its own space waits for its models, or its cap is full, or its model's: another space's or model's may still start
-        if (r.why === 'models' || r.why === 'resume' || r.why === 'space' || r.why === 'model') {
+        if (r.why === 'models' || r.why === 'resume' || r.why === 'space' || r.why === 'model' || r.why === 'blocked' || r.why === 'spaceZero') {
           if (t.held!.why !== r.why) {
             t.held!.why = r.why
             this.save()
@@ -1662,7 +1696,7 @@ export class Engine extends Emitter<Events> {
         // one first in line doesn't wait for the spacing either
         if (!t.priority && !this.startsNow(now)) return
         this.lastStart = now
-        const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work', space: 'a slot of its space is free', model: 'a slot of its model is free' }[t.held!.why]
+        const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work', space: 'a slot of its space is free', model: 'a slot of its model is free', blocked: 'a limit changed', zero: 'the machine has room', spaceZero: 'its space has room' }[t.held!.why]
         // a cut-off that waited for a backup with room takes it over now, as cantGoOn would (the caps are read again there)
         if (t.held!.takeover) {
           const { why: cut, lasting } = t.held!.takeover
@@ -2478,7 +2512,8 @@ export class Engine extends Emitter<Events> {
     // and release() takes the backup over once one is free (held.takeover)
     const c = this.decide(space ?? '', this.chainOptions(candidates.map((p) => ({ plan: p, h: backupHarness(p.to!, own) }))), t.id)
     if ('wait' in c) {
-      this.hold(t, 'model')
+      // every backup blocked (0 allowed): it never starts until a limit changes; otherwise it waits for a slot
+      this.hold(t, blockedOnly(c) ? 'blocked' : 'model')
       t.held!.takeover = { why: why.charAt(0).toLowerCase() + why.slice(1), step: at, lasting }
       this.save()
       stuck()
@@ -2649,7 +2684,8 @@ export class Engine extends Emitter<Events> {
     try {
       for (;;) {
         const a = this.attemptRound(t)
-        if (!('wait' in a) || !this.atReviewStep(t)) return a
+        // every reviewer blocked: no round is counted and nothing is waited for (reviewWaitWords says so)
+        if (!('wait' in a) || !this.atReviewStep(t) || allBlocked(a.wait)) return a
         const left = deadline - Date.now()
         if (left <= 0) {
           t.reviewWait = { since: Date.now() }
@@ -2737,12 +2773,14 @@ export class Engine extends Emitter<Events> {
 
   /** the answer to a round that was counted: the reviewer and the words to pass, and why it is not the primary */
   reviewWords(id: string, a: Round) {
-    const why = a.why ? ` (${a.why.why === 'out' ? `${chainWords(a.why.harness.h)} is out${a.why.until ? ` until ${a.why.until}` : ''}` : `${chainWords(a.why.harness.h)} is at its limit, ${a.why.cap!.count} of ${a.why.cap!.max} at once`})` : ''
+    const why = a.why ? ` (${a.why.why === 'out' ? `${chainWords(a.why.harness.h)} is out${a.why.until ? ` until ${a.why.until}` : ''}` : a.why.why === 'blocked' ? `${chainWords(a.why.harness.h)} is blocked (0 allowed)` : `${chainWords(a.why.harness.h)} is at its limit, ${a.why.cap!.count} of ${a.why.cap!.max} at once`})` : ''
     return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. Run \`shepherdr review ${id} --done\` when the round's review has finished.`
   }
 
   /** the answer to a round every reviewer of which is full or out: it ends its turn, and is woken with the reviewer */
   reviewWaitWords(id: string, wait: Blocked<ReviewStep>[]) {
+    // every reviewer blocked (0 allowed): nothing will free up, so the round is not counted and nothing is waited for
+    if (allBlocked(wait)) return `No reviewer may run under the limits: every reviewer ${id} may use is blocked (0 allowed). No round is counted, and nothing waits: say in your summary that this review did not run because of the limits, and report without it.`
     return `Every reviewer ${id} may use is full or out: ${this.waitIn(wait)}. End your turn now; Shepherdr wakes you here when one is free, with the reviewer to use.`
   }
 

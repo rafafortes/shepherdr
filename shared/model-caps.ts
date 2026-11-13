@@ -1,7 +1,8 @@
 // The most agents at once per model or per provider (models.maxAtOnce): one text setting, `spark=4, radeon=1`, read by
 // the server (settings, the tasks' gate) and drawn by the Models page. An entry's pattern is a provider (`spark`: every
 // `spark/…` model) or a model key (`spark/qwen3.8-flash-next-mlx4-mtp-tensorfold`, `anthropic/claude-opus-5-5`); a model
-// entry wins over its provider's. Patterns are lowercase, as the model keys are kept.
+// entry wins over its provider's. Patterns are lowercase, as the model keys are kept. A number is 0 to 200: 0 BLOCKS the
+// model, so nothing starts on it (never waits for it either); no entry is no cap (unlimited), and off is no caps at all.
 
 /** the most entries one setting holds: a few providers and the models that need their own limit */
 import type { SummaryAtOnce, SummarySpaceCap } from './types.ts'
@@ -23,11 +24,11 @@ export const providerOfKey = (key: string) => (key.includes('/') ? key.slice(0, 
 const PATTERN = /^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._:@+\-/[\]]*)?$/
 
 /** the setting's words for a bad value, one line for the refusal and the hint */
-export const CAP_HINT = 'Write provider=number or model=number, separated by commas: spark=4, anthropic/claude-opus-5-5=2 (1 to 200 each), or off.'
+export const CAP_HINT = 'Write provider=number or model=number, separated by commas: spark=4, anthropic/claude-opus-5-5=2 (0 to 200 each; 0 blocks it), or off.'
 
 /**
  * The entries a setting's text holds, or why it can't be read. Empty and off are no entries. A pattern is lowercased; a
- * number is whole and from 1 to 200; a pattern given twice is refused, so is an entry past MAX_CAP_ENTRIES.
+ * number is whole and from 0 to 200 (0 blocks the model); a pattern given twice is refused, so is an entry past MAX_CAP_ENTRIES.
  */
 export function parseMaxAtOnce(text: string): { ok: true; entries: MaxEntry[] } | { ok: false; error: string } {
   const raw = text.trim()
@@ -40,7 +41,7 @@ export function parseMaxAtOnce(text: string): { ok: true; entries: MaxEntry[] } 
     const pattern = eq < 0 ? '' : bit.slice(0, eq).trim().toLowerCase()
     const num = eq < 0 ? '' : bit.slice(eq + 1).trim()
     if (!PATTERN.test(pattern)) return { ok: false, error: `${bit.slice(0, eq < 0 ? undefined : eq).trim() || bit} is no provider or model. ${CAP_HINT}` }
-    if (!/^\d+$/.test(num) || Number(num) < 1 || Number(num) > MAX_CAP) return { ok: false, error: `${pattern} needs a whole number from 1 to ${MAX_CAP}, not "${num || 'nothing'}". ${CAP_HINT}` }
+    if (!/^\d+$/.test(num) || Number(num) > MAX_CAP) return { ok: false, error: `${pattern} needs a whole number from 0 to ${MAX_CAP}, not "${num || 'nothing'}". ${CAP_HINT}` }
     if (entries.some((e) => e.pattern === pattern)) return { ok: false, error: `${pattern} is set twice. ${CAP_HINT}` }
     entries.push({ pattern, max: Number(num) })
   }
@@ -75,14 +76,21 @@ export function capFor(entries: MaxEntry[], key: string): MaxEntry | undefined {
   return entries.find((e) => e.pattern === k) ?? entries.find((e) => e.pattern === providerOfKey(k) && !e.pattern.includes('/'))
 }
 
-/** a space's sub-limit under a row, in words: its name, what of its runs count under it now, and its cap (`lyvora-app: 1 of 2 at once`) */
-export const spaceCapWords = (s: SummarySpaceCap) => `${s.name}: ${s.now} of ${s.max} at once`
+/** the words of a blocked cap (0 allowed): the one a row has, or the sub-limit a space sets; what runs on it still runs */
+export const BLOCKED = 'blocked · 0 allowed'
 
-/** a row's cap in words: what runs now, its own cap, or the provider's that holds it, and what waits for it */
-export function atOnceWords(a: SummaryAtOnce): { words: string; title: string } {
+/** a space's sub-limit under a row, in words: its name, what of its runs count under it now, and its cap (`lyvora-app: 1 of 2 at once`);
+ *  blocked (0): `lyvora-app: blocked · 0 allowed` */
+export const spaceCapWords = (s: SummarySpaceCap) => `${s.name}: ${s.max === 0 ? BLOCKED : `${s.now} of ${s.max} at once`}`
+
+/** a row's cap in words: what runs now, its own cap, or the provider's that holds it, and what waits for it. `blocked`: the
+ *  cap is 0, so the row is blocked (BLOCKED) and whatever still runs on it goes on */
+export function atOnceWords(a: SummaryAtOnce): { words: string; title: string; blocked: boolean } {
   const where = (from: 'all' | 'machine') => (from === 'machine' ? 'this machine' : 'Everywhere')
   const held = a.held ? ` · ${a.held} held` : ''
-  if (a.own) return { words: `${a.now} of ${a.own.max} at once${held}`, title: `Its cap: ${a.own.pattern}=${a.own.max}, set ${where(a.own.from)}. Click to change.` }
-  if (a.via) return { words: `${a.now} at once · no cap of its own${held}`, title: `Held by ${a.via.pattern}=${a.via.max}, set ${where(a.via.from)}. Click to set its own.` }
-  return { words: `${a.now} at once · no cap${held}`, title: 'No cap for this row. Click to set one.' }
+  if (a.own?.max === 0) return { words: `${BLOCKED}${a.now ? ` · ${a.now} still running` : ''}${held}`, title: `Blocked: ${a.own.pattern}=0, set ${where(a.own.from)}. Nothing new starts on it; what runs now goes on. Click to change.`, blocked: true }
+  if (a.own) return { words: `${a.now} of ${a.own.max} at once${held}`, title: `Its cap: ${a.own.pattern}=${a.own.max}, set ${where(a.own.from)}. Click to change.`, blocked: false }
+  if (a.via?.max === 0) return { words: `${BLOCKED} (by ${a.via.pattern})${a.now ? ` · ${a.now} still running` : ''}${held}`, title: `Blocked by ${a.via.pattern}=0, set ${where(a.via.from)}. Nothing new starts on it; what runs now goes on. Click to set its own.`, blocked: true }
+  if (a.via) return { words: `${a.now} at once · no cap of its own${held}`, title: `Held by ${a.via.pattern}=${a.via.max}, set ${where(a.via.from)}. Click to set its own.`, blocked: false }
+  return { words: `${a.now} at once · no cap${held}`, title: 'No cap for this row. Click to set one.', blocked: false }
 }
