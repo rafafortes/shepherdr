@@ -83,7 +83,7 @@ export function ProfilesBar({ phone }: { phone: boolean }) {
           <span className="truncate font-medium text-fg">{view.active}</span>
         </div>
         {status ? <Small className="truncate">{status}</Small> : null}
-        {view.next ? <Small className="truncate">{view.next}</Small> : null}
+        {view.next ? <Small className="text-pretty">{view.next}</Small> : null}
       </div>
       <span className="relative inline-flex">
         <Ghost aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
@@ -501,7 +501,7 @@ function ManageDialog({ onClose, onNote }: { onClose: () => void; onNote: (s: st
                   </div>
                 ) : (
                   <div key={s.id} className="flex flex-wrap items-center gap-2 pl-3">
-                    <div className="flex min-w-0 flex-1 flex-col">
+                    <div className="flex min-w-48 flex-1 flex-col">
                       <span className={clsx('text-pretty', s.on ? 'text-fg' : 'text-fg2')}>{scheduleText(s)}</span>
                       <Small className="text-pretty">{[s.on && s.next ? `Next ${s.next}` : '', s.last ?? ''].filter(Boolean).join(' · ')}</Small>
                     </div>
