@@ -27,7 +27,7 @@ export function parseModel(id: string): { providerID: string; id: string } {
   return { providerID: m[1], id: m[2] }
 }
 
-/** runs `opencode api <args>` in cwd and returns the data of its JSON answer */
+/** runs `opencode api <args>` in cwd and returns the data of its JSON answer; undefined when it exits 0 with no output */
 export async function api(args: string[], opts: { cwd: string; timeoutMs?: number }): Promise<any> {
   const timeoutMs = opts.timeoutMs ?? API_TIMEOUT
   const name = `opencode api ${args[0]}`
@@ -50,6 +50,8 @@ export async function api(args: string[], opts: { cwd: string; timeoutMs?: numbe
     throw new Error(`${name} did not answer in ${timeoutMs / 1000} s${late?.err.trim() ? `: ${late.err.trim()}` : ''}`)
   }
   if (r.code !== 0) throw new Error(`${name} exited with ${r.code}: ${r.err.trim() || r.out.trim()}`)
+  // some operations (session.switchModel, the instructions entry put, session.remove) succeed with no body at all
+  if (r.out.trim() === '') return undefined
   let body: any
   try {
     body = JSON.parse(r.out)

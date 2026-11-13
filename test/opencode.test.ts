@@ -237,6 +237,26 @@ describe('opencode api client', () => {
     await expect(api(['x.y'], { cwd: dir })).rejects.toThrow('printed no JSON: plain text')
   })
 
+  test('exit 0 with no output is an answer with no data, not an error', async () => {
+    answer(null, { raw: '' })
+    expect(await api(['x.y'], { cwd: dir })).toBeUndefined()
+    answer(null, { raw: ' \n\t\n' })
+    expect(await api(['x.y'], { cwd: dir })).toBeUndefined()
+  })
+
+  test('exit 0 with no output and a warning on stderr is still no data', async () => {
+    answer(null, { raw: '', err: 'warn: nothing to return\n' })
+    expect(await api(['x.y'], { cwd: dir })).toBeUndefined()
+  })
+
+  test('putInstructions and switchModel resolve when OpenCode prints nothing', async () => {
+    reset()
+    answer(null, { raw: '' })
+    await expect(putInstructions('ses_9', 'be brief', app)).resolves.toBeUndefined()
+    await expect(switchModel('ses_9', 'opencode/minimax-m3.1-flash-free', 'high', app)).resolves.toBeUndefined()
+    expect(calls().map((c) => c.argv[2])).toEqual(['experimental.session.instructions.entry.put', 'session.switchModel'])
+  })
+
   test('an answer that does not come in time is an error', async () => {
     answer(null, { sleep: 5000 })
     await expect(api(['x.y'], { cwd: dir, timeoutMs: 300 })).rejects.toThrow('did not answer in 0.3 s')
