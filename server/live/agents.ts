@@ -12,9 +12,10 @@ import { home, readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
 import { herdr, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
 import { ClaudeSessions, Reviewers, screenBackground, sessionBackground, type Background } from './readers/background.ts'
-import { claudeHome, claudeLogPath, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind } from './readers/find.ts'
+import { claudeHome, claudeLogPath, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind } from './readers/find.ts'
 import { createSession, mirrorSession, opencodeLogPath, putInstructions, switchModel } from './opencode.ts'
-import { effortFor, modelArg } from './models.ts'
+import { agyLogPath, agyModelId, mirrorConversation } from './agy.ts'
+import { agyIds, effortFor, modelArg } from './models.ts'
 import { tag } from './chatlines.ts'
 import { hookSettings, HookLogs, type Said } from './readers/hooks.ts'
 import * as task from './mfs.ts'
@@ -63,6 +64,17 @@ function mirrorOpencode(id: string): string {
   return f
 }
 
+/** an agy conversation's log, its mirror brought up to date once (as mirrorOpencode does; a failure is said, never thrown) */
+function mirrorAgy(id: string): string {
+  const f = agyLogPath(home(), id)
+  try {
+    mirrorConversation(id, f)
+  } catch (e) {
+    console.error(`shepherdr: could not mirror agy conversation ${id}: ${(e as Error).message}`)
+  }
+  return f
+}
+
 /** a Claude Code session, copied into the project folder of the cwd it resumes in (Claude Code looks for it only
  *  there) from wherever it was written on that machine; its log path, or nothing when there is none */
 export function carryClaudeSession(id: string, cwd: string): string | undefined {
@@ -76,7 +88,7 @@ export interface AgentRecord {
   key: string
   /** herdr agent name */
   name: string
-  /** herdr agent kind: claude, codex, pi, opencode */
+  /** herdr agent kind: claude, codex, pi, opencode, agy */
   kind: string
   cwd: string
   /** herdr workspace label it lives in */
@@ -760,7 +772,7 @@ export class Agents extends Emitter<Events> {
       if (!f || !addLog(r, f)) return
       // Claude Code and pi resume by the id in its name, OpenCode by its session id (its mirror is named by it); Codex by
       // its last log
-      if (r.kind === 'opencode') r.sessionId = logName(f).replace(/\.jsonl$/, '')
+      if (r.kind === 'opencode' || r.kind === 'agy') r.sessionId = logName(f).replace(/\.jsonl$/, '')
       else if (r.kind !== 'codex') r.sessionId = f.match(/([0-9a-f-]{36})\.jsonl$/)?.[1] ?? r.sessionId
       this.save()
       this.emit('logs', key)
@@ -774,7 +786,9 @@ export class Agents extends Emitter<Events> {
     const r = this.records[key]
     if (!r) return
     const since = r.started - 5000
-    const f = r.kind === 'claude' ? (r.sessionId ? claudeLogPath(r.cwd, r.sessionId) : findClaudeLog(r.cwd, since)) : r.kind === 'codex' ? findCodexLog(r.cwd, since) : r.kind === 'pi' ? findPiLog(r.cwd, since) : r.kind === 'opencode' ? (r.sessionId ? mirrorOpencode(r.sessionId) : findOpencodeLog(r.cwd, since)) : undefined
+    const f = r.kind === 'claude' ? (r.sessionId ? claudeLogPath(r.cwd, r.sessionId) : findClaudeLog(r.cwd, since)) : r.kind === 'codex' ? findCodexLog(r.cwd, since) : r.kind === 'pi' ? findPiLog(r.cwd, since) : r.kind === 'opencode' ? (r.sessionId ? mirrorOpencode(r.sessionId) : findOpencodeLog(r.cwd, since)) : r.kind === 'agy' ? (r.sessionId ? mirrorAgy(r.sessionId) : findAgyLog(r.cwd, since)) : undefined
+    // agy names its conversation by the log's name: that id is what --conversation resumes
+    if (f && r.kind === 'agy') r.sessionId = logName(f).replace(/\.jsonl$/, '')
     if (f && addLog(r, f)) {
       this.save()
       this.emit('logs', key)
@@ -870,8 +884,8 @@ export class Agents extends Emitter<Events> {
     r.resumed = !!resume
     r.startError = undefined
     delete r.fresh
-    // codex and opencode name their session when they start: OpenCode's id comes from its own API (prepareOpencode)
-    if (!resume) r.sessionId = r.kind === 'codex' || r.kind === 'opencode' ? undefined : randomUUID()
+    // codex, opencode and agy name their session when they start: OpenCode's id comes from its own API (prepareOpencode)
+    if (!resume) r.sessionId = r.kind === 'codex' || r.kind === 'opencode' || r.kind === 'agy' ? undefined : randomUUID()
     // a run of its own: what its hooks record starts over
     if (r.hooks) this.hooks.forget(mirrored(r.hooks))
     r.hooks = undefined
@@ -973,6 +987,16 @@ export class Agents extends Emitter<Events> {
       if (r.access !== 'ask') a.push('--dangerously-bypass-approvals-and-sandbox')
       if (model) a.push('-m', model)
       if (effort) a.push('-c', `model_reasoning_effort="${effort}"`)
+    } else if (r.kind === 'agy') {
+      // agy names its conversation itself: a resume goes back to it by its id (--conversation; never --continue, which takes
+      // the newest one of the whole machine). The model takes its effort in its id (gemini-3.8-flash-low), and --effort
+      // conflicts with that, so it is never passed. Permissions as for Codex.
+      // The worktree is trusted for this session only (--settings): a new worktree is a folder agy has not seen, and it would
+      // stop on its trust screen. Nothing is written to agy's own settings.
+      a.push('--settings', JSON.stringify({ trustedWorkspaces: [r.cwd] }))
+      if (resume && r.sessionId) a.push('--conversation', r.sessionId)
+      if (model) a.push('--model', agyModelId(model, effort, agyIds()))
+      if (r.access !== 'ask') a.push('--dangerously-skip-permissions')
     } else if (r.kind === 'opencode') {
       // --standalone always: its shell commands then run in the pane's own process tree, where helper/route.pl finds
       // this agent. No model flag (the TUI has none): the model and effort live in its session (prepareOpencode)

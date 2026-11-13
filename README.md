@@ -44,7 +44,7 @@ Places, chats, tasks, artifacts, the terminal, the browser, voice, alerts, Autop
 
 ### ⚡ Stop briefing every agent yourself
 
-Write what needs doing to a space's coordinator: it makes it a task or several, each with a brief and a Settings block that says how it is reviewed and merged. Each agent starts on Claude Code, Codex, pi, OpenCode or another CLI herdr can start, in a worktree of its own, at once or as soon as the machine has room. Want more control? Ask for it "for later", "after SHE-12", or "ask me before merging". Turn on [Autopilot](docs/autopilot.md) and the coordinator works on its own between your messages, or add [automations](docs/autopilot.md) that start tasks on a schedule.
+Write what needs doing to a space's coordinator: it makes it a task or several, each with a brief and a Settings block that says how it is reviewed and merged. Each agent starts on Claude Code, Codex, pi, OpenCode, Antigravity or another CLI herdr can start, in a worktree of its own, at once or as soon as the machine has room. Want more control? Ask for it "for later", "after SHE-12", or "ask me before merging". Turn on [Autopilot](docs/autopilot.md) and the coordinator works on its own between your messages, or add [automations](docs/autopilot.md) that start tasks on a schedule.
 
 ### 💬 Know when a task needs an answer
 

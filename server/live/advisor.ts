@@ -6,6 +6,8 @@
 // it is unsure of, stay with the human. Its own primary and backup, as every other role has (settings.ts advisor).
 import { readJson, writeJson } from '../store.ts'
 import { fitHarness, harnessWords, type Harness } from './restart.ts'
+import { agyModelId, headlessOutcome } from './agy.ts'
+import { agyIds } from './models.ts'
 
 /** what the advisor is asked: a choice (a card, or one question of the CLI's own form) or a question in words */
 export interface AdviceQuestion {
@@ -93,6 +95,8 @@ export function adviceArgs(h: Harness, prompt: string): { cmd: string[]; stdin?:
   // OpenCode's plan agent is its read-only one; its answer is the text of its default output
   if (h.kind === 'opencode')
     return { cmd: ['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-advisor', ...(model ? ['-m', effort ? `${model}#${effort}` : model] : []), prompt] }
+  // agy's plan mode is its read-only one; its answer comes as JSON, unwrapped by runAdvisor
+  if (h.kind === 'agy') return { cmd: ['agy', '-p', prompt, ...(model ? ['--model', agyModelId(model, effort, agyIds())] : []), '--output-format', 'json', '--mode', 'plan'] }
   return undefined
 }
 
@@ -130,6 +134,11 @@ export async function runAdvisor(h: Harness, prompt: string, cwd: string, timeou
     const got = await Promise.race([read.catch((e: Error) => ({ failed: e })), gaveUp])
     if (!got) return { ok: false, out: 'timed out' }
     if ('failed' in got) return { ok: false, out: got.failed.message }
+    if (h.kind === 'agy') {
+      if (p.signalCode) return { ok: false, out: 'timed out' }
+      const a = headlessOutcome(got.out, got.code)
+      return { ok: a.ok, out: a.said }
+    }
     return { ok: got.code === 0, out: got.code === 0 ? got.out : `${got.out}${got.err}`.slice(-2000) }
   } finally {
     clearTimeout(timer)

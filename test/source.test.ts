@@ -699,7 +699,7 @@ describe("a task's CLI, model and effort", () => {
     run(REPO, dir)
     const place = placeId.space((await src.places.add(dir, 'reviewer-source')).name)
     for (const [args, says] of <[string[], string][]>[
-      [['--reviewer', 'gemini'], '--reviewer gemini: Pick one of: Codex · Claude Code · pi · OpenCode.'],
+      [['--reviewer', 'gemini'], '--reviewer gemini: Pick one of: Codex · Claude Code · pi · OpenCode · Antigravity.'],
       [['--reviewer-effort', 'extreme'], '--reviewer-effort takes default, low, medium, high, xhigh, max, ultra on Codex'],
       [['--reviewer-model', 'opus'], 'Codex has no such model'],
     ]) {

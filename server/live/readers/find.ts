@@ -4,6 +4,7 @@ import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { home } from '../../store.ts'
+import { conversationLog } from '../agy.ts'
 import { mirrorSession, newestSession, opencodeLogPath } from '../opencode.ts'
 
 const env = (k: string) => process.env[k] || undefined
@@ -171,12 +172,21 @@ export function findOpencodeLog(cwd: string, sinceMs?: number): string | undefin
   return file
 }
 
+/* ---------- Antigravity CLI (agy) ---------- */
+
+/** the newest conversation of this folder in agy's store, mirrored into Shepherdr's home as a log (agy.ts conversationLog);
+ *  changed at or after sinceMs. Never throws: a store that is missing or unreadable leaves no log */
+export function findAgyLog(cwd: string, sinceMs?: number): string | undefined {
+  return conversationLog(trimSlash(cwd), sinceMs)
+}
+
 /** Runtime log discovery, also used to decide which kinds can supply chat. */
 export const LOG_FINDERS: Record<string, (cwd: string, sinceMs?: number) => string | undefined> = {
   claude: findClaudeLog,
   codex: findCodexLog,
   pi: findPiLog,
   opencode: findOpencodeLog,
+  agy: findAgyLog,
 }
 
 /** the newest log of this CLI for this cwd */
@@ -191,5 +201,6 @@ export function logKind(file: string): string | undefined {
   if (under(join(codexHome(), 'sessions'))) return 'codex'
   if (under(join(piHome(), 'sessions'))) return 'pi'
   if (under(join(home(), 'opencode'))) return 'opencode'
+  if (under(join(home(), 'agy'))) return 'agy'
   return undefined
 }

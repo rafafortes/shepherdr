@@ -6,7 +6,8 @@
 // holds. A level a model lacks becomes the nearest it has (nearest), never an error at start.
 // pi lists every model of every provider it has a login for: where its settings name the models it cycles through
 // (enabledModels), the menus offer only those, and the rest stay usable by id (others). OpenCode's list is scoped the
-// same way by this machine's opencode.models (setOpencodeScope, set by settings.ts).
+// same way by this machine's opencode.models (setOpencodeScope, set by settings.ts). Antigravity (agy) lists its models
+// with the effort in each id (gemini-3.8-flash-low): they are grouped into their base model, whose efforts those are.
 import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { readJson, writeJson } from '../store.ts'
@@ -64,7 +65,17 @@ export const TABLE: Record<string, CliModels> = {
   pi: { models: [], efforts: PI_LEVELS },
   // OpenCode's models come from its providers and their variants: only OpenCode itself can list them
   opencode: { models: [], efforts: [] },
+  // agy's models too: `agy models` lists them (with their efforts in their ids)
+  agy: { models: [], efforts: [] },
 }
+
+/** the effort levels agy puts at the end of a model id (gemini-3.8-flash-low), lowest first */
+export const AGY_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+const AGY_SUFFIX = new RegExp(`-(${AGY_EFFORTS.join('|')})$`)
+/** an agy model id without its effort: gemini-3.8-flash-low is gemini-3.8-flash (an id with no effort is its own base) */
+export const agyBaseId = (id: string) => id.replace(AGY_SUFFIX, '')
+/** the ids agy takes for one model: each effort its own (base-effort), or the model's id when it has no effort */
+export const agyFullIds = (m: Model) => (m.efforts.length ? m.efforts.map((e) => `${m.id}-${e}`) : [m.id])
 
 /** Claude Code's families as its /model menu offers them, newest of each; its aliases (opus, haiku) name these too */
 const FAMILIES = ['fable', 'opus', 'sonnet', 'haiku']
@@ -186,7 +197,9 @@ export function findModel(kind: string, value?: string): Model | undefined {
     all.find((m) => m.id.toLowerCase() === v || m.label.toLowerCase() === v) ??
     (kind === 'claude' ? c.models.find((m) => m.id.startsWith(`claude-${v}-`) || m.id === `claude-${v}`) : undefined) ??
     // pi: a model without its provider
-    (kind === 'pi' ? all.find((m) => m.id.toLowerCase().endsWith(`/${v}`)) : undefined)
+    (kind === 'pi' ? all.find((m) => m.id.toLowerCase().endsWith(`/${v}`)) : undefined) ??
+    // agy: a full id (gemini-3.8-flash-low) is its base model, with that effort
+    (kind === 'agy' ? c.models.find((m) => agyFullIds(m).includes(v)) : undefined)
   )
 }
 
@@ -201,9 +214,14 @@ export function opencodeList(models: OpencodeModel[], def?: string): CliModels {
 /** whether this CLI can say which models it has: else any model id goes */
 export const knowsModels = (kind: string) => !!modelsOf(kind)?.models.length
 
+/** agy's full model ids, as its list has them (each effort its own): what --model takes */
+export const agyIds = (): string[] => (modelsOf('agy')?.models ?? []).flatMap(agyFullIds)
+
 /** the model as the CLI takes it: its id, or what was written when the CLI can't tell */
 export function modelArg(kind: string, value?: string): string | undefined {
   if (!value || value === 'default') return undefined
+  // agy takes its effort in the id: a full id stands as it is
+  if (kind === 'agy' && agyIds().includes(value)) return value
   return findModel(kind, value)?.id ?? value
 }
 
@@ -284,9 +302,9 @@ function claudeBinary() {
   }
 }
 
-async function run(cmd: string[]) {
+async function run(cmd: string[], limitMs = 20_000) {
   const p = Bun.spawn(cmd, { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' })
-  const t = setTimeout(() => p.kill(), 20_000)
+  const t = setTimeout(() => p.kill(), limitMs)
   const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()])
   clearTimeout(t)
   return `${out}${err}`
@@ -297,6 +315,7 @@ export async function read(kind: string, from?: string): Promise<CliModels | und
     const models = await listModels()
     return opencodeList(models, await defaultModel())
   }
+  if (kind === 'agy') return readAgy()
   if (kind === 'claude' && from) {
     const bin = from.slice(0, from.lastIndexOf('@'))
     const [catalog, help] = await Promise.all([run(['grep', '-aoE', '\\{id:"claude-[a-z0-9-]+",family:"[a-z]+",display_name:"[^"]+"|capabilities:\\[[^]]*\\]|default_effort:"[a-z]+"', bin]), run([bin, '--help'])])
@@ -367,6 +386,30 @@ export function parseCodex(json: string): CliModels | undefined {
   const efforts = [...new Set(models.flatMap((m) => m.efforts))].sort((a, b) => RANK[a] - RANK[b])
   return { models, others: ok.filter((m) => m.visibility === 'hide').map(model), efforts }
 }
+
+/** `agy models`: the models it lists, its own list of `<id>\t<label>` lines after a "Fetching" line (a run that fails or
+ *  times out says nothing). An id with an effort suffix is grouped into its base model; the label loses its "(Effort)" part */
+export function parseAgy(out: string): CliModels | undefined {
+  const groups = new Map<string, Model>()
+  for (const line of out.split('\n')) {
+    const tab = line.indexOf('\t')
+    const id = line.slice(0, tab).trim()
+    if (tab < 0 || !id) continue
+    const base = agyBaseId(id)
+    const effort = base === id ? undefined : id.slice(base.length + 1)
+    const label = line.slice(tab + 1).trim().replace(/\s*\((low|medium|high|xhigh|max)\)$/i, '')
+    const g = groups.get(base) ?? { id: base, label, efforts: [] }
+    if (effort && !g.efforts.includes(effort)) g.efforts.push(effort)
+    groups.set(base, g)
+  }
+  if (!groups.size) return undefined
+  const models = [...groups.values()].map((m) => ({ ...m, efforts: [...m.efforts].sort((a, b) => AGY_EFFORTS.indexOf(a) - AGY_EFFORTS.indexOf(b)) }))
+  const efforts = AGY_EFFORTS.filter((e) => models.some((m) => m.efforts.includes(e)))
+  return { models, efforts }
+}
+
+/** agy's model list as its own `agy models` says it: nothing when it fails or runs past limitMs */
+export const readAgy = (limitMs = 20_000) => run(['agy', 'models'], limitMs).then(parseAgy)
 
 /** `pi --list-models`: a table of provider, model, …, thinking (yes or no); the levels from its --help */
 export function parsePi(list: string, help: string): CliModels | undefined {

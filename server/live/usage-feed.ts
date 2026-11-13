@@ -38,8 +38,8 @@ export class UsageFeed {
           behind = true
           continue
         }
-        // OpenCode's log is a copy its reader makes of the session (LogTail.refresh): a copy that does not exist yet is made by the read
-        if (!existsSync(f) && logKind(f) !== 'opencode') continue
+        // OpenCode's and agy's logs are copies their readers make of the session (LogTail.refresh): a copy that does not exist yet is made by the read
+        if (!existsSync(f) && !['opencode', 'agy'].includes(logKind(f) ?? '')) continue
         let t = this.tails.get(f)
         if (!t) {
           // each by its own CLI's reader: a backup agent's logs follow the first one's (as Chats reads them)
