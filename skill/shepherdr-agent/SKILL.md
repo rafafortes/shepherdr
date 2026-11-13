@@ -50,24 +50,27 @@ build, check and review the work is your own judgment.
    the background shows Needs you). A card they dismiss is their answer too: they declined to give one, so decide it
    with your best judgment and say what you assumed — a dismissed plan is not approved, so don't carry it out. Decide
    the rest yourself and list those decisions in the facts.
-3. **Review**, unless Review is off or the brief says none: fresh eyes that didn't write the change (a subagent, or
-   a headless `codex exec`, `claude -p` or `pi -p` as the Reviewer setting suggests). Run a headless one in the
-   foreground, its stdin closed (or it waits on stdin forever) and under a timeout, with your shell's timeout at its
-   most: `timeout 540 codex exec -s read-only -o <out> "<prompt>" < /dev/null`. Never in the background, and never end
-   your turn while a review runs. Timed out or failed: one subagent review instead. Give it the authoritative command from your launch prompt and `SHEPHERDR_CHAT=<task-id>/Reviewer` (never an inherited other task), the brief, the diff and the
-   repo's rules, never your own reasoning; ask for what this change
-   broke, left undone or added beyond the brief, each with proof and tagged critical (breaks or loses users' work),
-   major (a user would hit it, or it proves a claim false), minor (rarely hit) or trivial (style). Fix every finding at
-   or above Must fix, then review again; stop once a round has none at or above it, or after Review rounds. Never agree
-   with a finding just to end the loop: one you judge wrong goes in the facts with why. Findings below the bar go in
-   the facts, unfixed; an open choice no experiment can settle goes to the human as a card. Count each round before it
-   starts, `shepherdr review <id>`: at most Review rounds, and past them it refuses. Out of rounds with your final
-   commit unreviewed: say why in your chat and end your turn; only your coordinator adds a round (`shepherdr task
-   review-more <id>`), which arrives in your chat as one more to run. Where your Reviewer line names a backup reviewer
-   (or several, in turn: each where the one before it cannot run either), it is for a reviewer that cannot run at all —
-   out of allowance, signed out, its model is gone — and for nothing else: it is that same round, launched the same way with `SHEPHERDR_CHAT=<task-id>/Reviewer` and counted with
-   `shepherdr review <id>` like any other, never a second opinion on findings an earlier reviewer made, and you say in
-   your summary that you reviewed with it.
+3. **Review**, unless Review is off or the brief says none: fresh eyes that didn't write the change (a subagent, or a
+   headless `codex exec`, `claude -p` or `pi -p` as the Reviewer line names). Each round, ask `shepherdr review <id>`
+   which reviewer to use: it counts the round, holds that reviewer for it, and answers with the reviewer and the words to
+   pass (the primary, or the backup your Reviewer line names when the primary is full or out, with why). When every
+   reviewer is full or out it waits up to 90 seconds, then tells you to end your turn: Shepherdr wakes you with the
+   reviewer to use, and that round is counted only then. Run that reviewer in the foreground, its stdin closed (or it waits on stdin forever) and under a
+   timeout, with your shell's timeout at its most: `timeout 540 codex exec -s read-only -o <out> "<prompt>" < /dev/null`.
+   Never in the background, and never end your turn while a review runs. Timed out or failed: one subagent review instead,
+   the same round. Give the reviewer the authoritative command from your launch prompt and `SHEPHERDR_CHAT=<task-id>/Reviewer`
+   (never an inherited other task), the brief, the diff and the repo's rules, never your own reasoning; ask for what this
+   change broke, left undone or added beyond the brief, each with proof and tagged critical (breaks or loses users' work),
+   major (a user would hit it, or it proves a claim false), minor (rarely hit) or trivial (style). When the round's review
+   has finished, run `shepherdr review <id> --done`: it frees the reviewer and counts nothing. Fix every finding at or above
+   Must fix, then review again; stop once a round has none at or above it, or after Review rounds. Never agree with a
+   finding just to end the loop: one you judge wrong goes in the facts with why. Findings below the bar go in the facts,
+   unfixed; an open choice no experiment can settle goes to the human as a card. Out of Review rounds with your final commit
+   unreviewed: `shepherdr review <id>` refuses; say why in your chat and end your turn. Only your coordinator adds a round
+   (`shepherdr task review-more <id>`), which arrives in your chat as one more to run. Where the reviewer your round names
+   cannot run at all (out of allowance, signed out, its model is gone), review that same round with the backup your Reviewer
+   line names, launched the same way with `SHEPHERDR_CHAT=<task-id>/Reviewer`, and say in your summary that you did: it is
+   not a second opinion on findings an earlier reviewer made, and it is not counted again.
 4. **Proof.** One artifact, `shepherdr artifact new <file> --title "<id>: Proof"`: what changed in one to three plain
    lines, each proof with a one-line caption, and a "Not proven" list. Every proof is real and from this branch now;
    never staged, and a mocked test is no proof of what users see. A bug fix first reproduces the bug: the same repro

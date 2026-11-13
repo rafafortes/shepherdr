@@ -20,7 +20,8 @@
   `--reviewer-effort`. Tap the task and you are in its agent's chat, where it asks, shows
   artifacts and tells you when it is done; the task's brief shows exactly what its agent got.
 - Review rounds are a limit, so no agent reviews for ever, and raising it is its coordinator's alone: its agent counts each round
-  (`shepherdr review <id>`) and stops at the brief's Review rounds. A task that has used them all with its final
+  (`shepherdr review <id>`) and stops at the brief's Review rounds. The same command picks the round's reviewer by the caps
+  (the backup reviewer below): the round's reviewer holds a slot of the caps until `shepherdr review <id> --done`. A task that has used them all with its final
   commit still unreviewed says so in its chat; its coordinator gives it exactly one more with `shepherdr task
   review-more <id>`, once, only once they are all used, and its agent is woken with the round to run. `task show`
   records it.
@@ -179,9 +180,15 @@
   Settings → How tasks work → Reviewer → Backups → Backup (`reviewer.fallback`, off until set, with
   `reviewer.fallbackModel` and `reviewer.fallbackEffort`) makes the brief's Reviewer line name it: "If that reviewer
   cannot run at all (out of allowance, signed out, its model is gone), review with … instead for that round only, and
-  say in your summary that you did; every round asks that reviewer first again." The task's agent runs it as it runs the reviewer, as `<task-id>/Reviewer`, and counts that round like
-  any other (`shepherdr review <id>`); nothing else about a review changes, and it is never a second opinion after
-  findings. Set Everywhere, for a machine, for a space or by its coordinator for one task (`task add --set
+  say in your summary that you did." Every round asks `shepherdr review <id>` which reviewer to use first, and the caps
+  decide it: the primary when it has room and is not out, else the first backup that has (its answer says why, e.g. "Codex
+  is at its limit, 4 of 4 at once"). The task's agent runs it as it runs the reviewer, as `<task-id>/Reviewer`, and counts
+  that round like any other; nothing else about a review changes, and it is never a second opinion after findings. When every
+  reviewer is full or out, the command waits up to 90 seconds, then tells the agent to end its turn; a round is counted only
+  once a reviewer frees, and the agent is woken with the reviewer to use. Its reviewer holds a slot from the count until
+  `shepherdr review <id> --done`, the task's report, stop or end, or 45 minutes after the round was counted (or after its
+  agent's turn ended without `--done`). A restart of Shepherdr keeps no such slot (it is in memory, as the advisor's are): the
+  agent's next `shepherdr review` counts and leases a new one, and a round that waited for a reviewer still waits for it. Set Everywhere, for a machine, for a space or by its coordinator for one task (`task add --set
   reviewer.fallback=pi`), the most specific winning; with none set, or with Review off, the line reads exactly as it
   always has.
   Shepherdr does not nudge an agent towards that backup, because it has no exact way to see a reviewer fail: the only
@@ -189,8 +196,8 @@
   `error` event, and `checkCut` needs the agent's record), and a reviewer is no such agent — headless, it is a shell
   the task's agent runs, whose log `activity.ts` reads for steps and turns only, and a subagent is background work of
   it. A nudge would rest on a guess, and a wrong one would send an agent to its backup reviewer over a normal finding.
-  The brief's words are the trigger, and they are the way back too: every round asks the primary reviewer first
-  again, so a reviewer goes back by itself as soon as its primary answers (a task already running keeps the reviewer
+  The brief's words are the trigger, and they are the way back too: every round asks `shepherdr review` first again, so a
+  reviewer goes back by itself as soon as its primary answers (a task already running keeps the reviewer
   its own brief named); with **tell me** (below), Shepherdr also asks the primary reviewer whether it answers
   again while a backup reviewer is set, and says so ([settings](settings.md#when-the-primary-is-back)).
 - **Going back.** Once the primary answers again, each agent still on a backup, and each one cut off for good on the
@@ -269,7 +276,7 @@
   brief's Settings block asks for (Settings → How tasks work → Review, Reviewer, Must fix and Review rounds, and the
   backup reviewer for a reviewer that cannot run at all; the agent runs
   it however it sees fit, a subagent or a
-  headless CLI, and counts each round with `shepherdr review <id>`, at most Review rounds), what the change broke, left
+  headless CLI, and asks `shepherdr review <id>` for each round, which counts it, at most Review rounds, and names its reviewer), what the change broke, left
   undone or added beyond the brief; only the choices no experiment can
   settle as cards for you, and your yes before anything irreversible; the proof in one small artifact; ready with a facts line; then merge or ask. How to
   build and check the work is the agent's own judgment: Shepherdr only gives it the brief, your defaults and the house

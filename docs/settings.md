@@ -106,8 +106,9 @@
     machine's own limit counts them), each on the model its agent runs (its live agent's model, else the model it starts
     on), this machine's coordinators that are working on a model right now, and the advisor's headless runs while each one
     runs (a slot of the model it runs on, held for the whole run and given back when it ends, even on a failure). A merge
-    waiting in line or in its gate holds no slot, so it counts nothing. **Not counted yet:** the reviewers' headless runs,
-    and any request that comes from outside Shepherdr (another app or a script on the same server): Shepherdr cannot see
+    waiting in line or in its gate holds no slot, so it counts nothing. A round's reviewer counts while the round runs: a
+    lease from `shepherdr review <id>` until `shepherdr review <id> --done` (see [tasks](tasks.md)). **Not counted yet:**
+    any request that comes from outside Shepherdr (another app or a script on the same server): Shepherdr cannot see
     those, so a server that serves them too needs a lower cap than its own work alone would.
   - **Where a task starts.** A task starts on the first harness of its chain that is not out and has room under every entry
     that covers it: its own agent first, then its backups in the order its coordinator's `--set` keeps them (Settings'
