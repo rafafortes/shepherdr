@@ -124,7 +124,9 @@
     in memory: a restart of Shepherdr leaves it where it is until it is restarted).
   - **Where it is read.** Models → Summary shows each provider and model row as `2 of 4 at once` (its cap, set here),
     `2 at once · no cap`, or `1 at once · no cap of its own` (the provider's entry holds it); its cell sets the cap at this
-    machine or Everywhere, and Clear here takes it back to the level above. The line `shepherdr show` prints it as kept.
+    machine, Everywhere, or This space (a list of the spaces). A space that sets its own sub-limit for the row shows it
+    under the row as a line of its own: `lyvora-app: 1 of 2 at once`, the runs of that space it counts, and the line opens
+    the editor at that space (Clear here takes that space's value back). The line `shepherdr show` prints it as kept.
   - **From the command.** `shepherdr set models.maxAtOnce "spark=4, radeon=1" --machine` (or Everywhere without `--machine`).
     `shepherdr set models.maxAtOnce off --machine` gives this machine no cap at all, whatever Everywhere says, and
     `shepherdr unset models.maxAtOnce --machine` takes this machine's value away, back to Everywhere's. Profiles hold it
