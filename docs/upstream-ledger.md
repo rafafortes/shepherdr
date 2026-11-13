@@ -291,6 +291,16 @@ tasks on one gate run. Upstream's only merge queue is GitHub's own (SHEP-160 on 
 a merge made here never reaches. So the train is ours: `merge.train`, for merges made here only; see
 [docs/tasks.md](tasks.md).
 
+## Not from upstream: a models table over every space, built here
+
+Checked 2026-11-13 against upstream `main` (`ebb17d58`, 3.x line) and `v2.0` (fetched that day): `git grep` for a models
+or settings overview across spaces, `git log -i --grep` for model, matrix and overview, and the public issues and pull
+requests (`gh issue list` and `gh pr list` with "models settings matrix" and "model settings overview"). Nothing does
+it. Upstream's model picker (SHEP-30, `ecde86a1`, ported in [#29](https://github.com/rafafortes/shepherdr/pull/29)) picks
+one row's model; its Settings are one level at a time. So the table of every level's CLI, model and effort, with its
+backups, and its bulk "set for every space" and "copy to" actions, is ours: `models-matrix.ts` and `ModelsPage.tsx`,
+Settings → Models. See [settings](settings.md#models).
+
 ## Not from upstream: a Settings change applied to the tasks already waiting, built here
 
 Checked 2026-11-12 against upstream `main` (`ef3be074`, 3.1.32 line) and `v2.0` (`ebb17d58`): code, history, issues and

@@ -98,6 +98,36 @@
   their replies cannot be shown. Existing saved choices are kept, but an unsupported choice must be changed before
   launching again. Headless reviewer choices are separate; this does not add or prove support for other reviewers.
 
+## Models
+
+Settings → How Shepherdr runs → **Models** (after Agents) shows every level's agent settings in one table, so a space's
+models can be seen and changed next to the others. Rows: **Everywhere**, this machine, and each of its spaces (the home
+space only when it sets one of these keys itself: its settings are then in Settings → Agents, and it gets its row here).
+Columns, per role: **Tasks**, **Coordinators**, **Reviewer** and **Advisor**, each with its **Primary** and its backups
+(**Backup 1**, and the next as far as any row has one), a **+** that adds the next backup of that row (on the CLI of the one
+before it, as Agents' Add a backup does), and at the end **Max tasks** (`space.maxTasks`) and **Merge train**
+(`merge.train`).
+
+- **A cell** reads in words what its slot runs on: `pi · opencode-go/deepseek-v4.1-flash · high`, `Codex`, `off`. A value
+  the row sets is strong; one it inherits is faint, with where it comes from (Everywhere, this machine, or default). A
+  long model id is cut short on screen, with the whole id in its tooltip.
+- **A cell's popover** (a phone: the same controls under its line) holds the CLI, Model and Effort of the slot, and for
+  Max tasks and Merge train their one control. A change writes the same keys Settings writes (`task.agent`,
+  `task.model`, `task.effort`, `task.fallback2…`, …) at **that row's level**, so a change in a space's row is that
+  space's own. **Reset to inherited** removes the keys the row sets. A CLI change also resets a model or effort the new
+  CLI lacks, to default, so it is never refused for what the screen moved itself. A change of a task or reviewer key
+  asks **Apply to the tasks already created?** when a waiting task would change, as Settings does.
+- **Set for every space…** (a column's ⋯): one slot's CLI, model and effort for every space. Either **each space's own**
+  (written at each space, replacing its value), or **Everywhere, and reset the spaces** (Everywhere gets the value, and
+  this machine and each space lose their own, so every space reads Everywhere's). It closes once written, and the
+  waiting-tasks question comes after it, once for all the spaces it reaches.
+- **Copy this space's models to…** (a space's ⋯): every slot of the four roles, with its backups, written at the level
+  of each chosen space, where the space doesn't already set the same value. Max tasks and Merge train are not copied.
+- Everything here is the same settings as in Agents, How tasks work and Space: nothing new is stored, and a value a
+  table writes is the value Settings shows for that level. The table reads every level at once (`models-matrix`, a
+  read action; the summary phase reads the same table).
+- Only this machine's levels are shown. Another machine's models are on that machine's Settings page.
+
 ## Backup agents
 
 Settings → Agents shows each role's backups under the role's own rows, in a Backups sub-block (indented, under its
