@@ -7,6 +7,7 @@
 import type { LimitCell, LimitColumn, LimitKnown, LimitProvider, LimitRow, LimitSpaceRow, LimitTable, LimitsView, MatrixRole, ModelsMatrix, ModelsSummary, SettingRow, WaitingGroup, WaitingNow, WaitingTask } from '../../shared/types.ts'
 import { capFor, parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
 import { busy, memPct, type Sample } from './health.ts'
+import { placeId } from './places.ts'
 import { covers } from './engine/choose.ts'
 import type { HeldWhy } from './engine/engine.ts'
 import { capsOf, keyOf, providerName, type RunOn } from './models-summary.ts'
@@ -150,6 +151,9 @@ export function waitingOf(input: LimitsInput): WaitingNow {
   return { held: input.held.length, groups, advisor: input.advisor, reviews: input.reviews }
 }
 
+/** home's key: its settings are the `~` level (places.ts HOME_KEY) */
+const HOME = '~'
+
 /** the patterns the models.maxAtOnce entries name, in the order they are first set: this machine's (Everywhere's while it
  *  sets none), then each space's own (the spaces by key) */
 export function entryPatterns(s: Settings, spaceKeys: string[]): string[] {
@@ -209,24 +213,25 @@ function spacesOf(input: LimitsInput): LimitsView['spaces'] {
     }),
   )
   const cols: LimitColumn[] = SPACE_KEYS.map((key) => ({ key, ...titleOf(key) }))
-  const rows: LimitSpaceRow[] = matrix.rows
-    .filter((r) => r.kind === 'space')
-    .map((r) => {
-      const key = r.id.split(':')[2]!
-      const working = input.workingIn[key] ?? 0
-      const held = input.held.filter((h) => h.space === key).length
-      const maxTasks = s.spaceMax(key)
-      const cells: Record<string, LimitCell> = {
-        'space.maxTasks': {
-          ...cellOf(input, 'space.maxTasks', { space: key }, r.id, false),
-          now: `${working}${maxTasks === null ? '' : ` of ${maxTasks}`} working${held ? ` · ${held} held` : ''}`,
-        },
-        'merge.train': cellOf(input, 'merge.train', { space: key }, r.id, false),
-      }
-      const caps = Object.fromEntries(
-        own(key).map((e) => [e.pattern, { max: e.max, now: runs.filter((x) => x.space === key && covers(e.pattern, x.key)).length }]),
-      )
-      return { id: r.id, name: r.name, kind: 'space' as const, key, working, held, cells, caps }
+  // the spaces of this machine as the Models table lists them, and home too when it sets one of these keys itself
+  const listed = matrix.rows.filter((r) => r.kind === 'space').map((r) => ({ id: r.id, name: r.name, key: r.id.split(':')[2]! }))
+  const homeSets = [...SPACE_KEYS, 'models.maxAtOnce'].some((k) => s.pick(k, { space: HOME }).from === 'space')
+  if (homeSets && !listed.some((x) => x.key === HOME)) listed.unshift({ id: placeId.home(input.host), name: 'home', key: HOME })
+  const rows: LimitSpaceRow[] = listed.map(({ id, name, key }) => {
+    const working = input.workingIn[key] ?? 0
+    const held = input.held.filter((h) => h.space === key).length
+    const maxTasks = s.spaceMax(key)
+    const cells: Record<string, LimitCell> = {
+      'space.maxTasks': {
+        ...cellOf(input, 'space.maxTasks', { space: key }, id, false),
+        now: `${working}${maxTasks === null ? '' : ` of ${maxTasks}`} working${held ? ` · ${held} held` : ''}`,
+      },
+      'merge.train': cellOf(input, 'merge.train', { space: key }, id, false),
+    }
+    const caps = Object.fromEntries(
+      own(key).map((e) => [e.pattern, { max: e.max, now: runs.filter((x) => x.space === key && covers(e.pattern, x.key)).length }]),
+    )
+    return { id, name, kind: 'space' as const, key, working, held, cells, caps }
     })
   return { columns: cols, rows, patterns, totals }
 }

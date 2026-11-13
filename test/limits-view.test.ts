@@ -117,6 +117,15 @@ describe('the spaces: Max tasks and Merge train, and one sub-limit per provider 
     expect(view.spaces.totals.spark).toEqual({ pattern: 'spark', max: 4 })
   })
 
+  test("home has a row only when it sets one of these keys itself: its own sub-limit makes one, with its runs counted", () => {
+    const quiet = limitsView(input(settings({ spaces: { gtm: { 'space.maxTasks': '2' } } })))
+    expect(quiet.spaces.rows.map((r) => r.key)).toEqual(['gtm'])
+    const home = limitsView(input(settings({ spaces: { '~': { 'models.maxAtOnce': 'spark=1' } } }), { runs: [{ key: SPARK, space: '~', role: 'task' }] }))
+    expect(home.spaces.rows.map((r) => [r.key, r.name, r.id])).toEqual([['~', 'home', `p:${HOST}:~`], ['gtm', 'gtm', `p:${HOST}:gtm`]])
+    expect(home.spaces.rows[0]!.caps).toEqual({ spark: { max: 1, now: 1 } })
+    expect(home.spaces.patterns).toEqual(['spark'])
+  })
+
   test('entryPatterns: the machine (Everywhere while it sets none) then each space, each pattern once', () => {
     const s = settings({ everywhere: { 'models.maxAtOnce': 'radeon=1' }, spaces: { gtm: { 'models.maxAtOnce': `${SPARK}=2, radeon=1` } } })
     expect(entryPatterns(s, ['gtm', '~'])).toEqual(['radeon', SPARK])
