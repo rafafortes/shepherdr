@@ -149,6 +149,32 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
     }
   })
 
+  test("a provider set below its model's own limit lowers that model to it, and the editor says so before saving", async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    const Q = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
+    try {
+      await openLimits(page)
+      await world.act({ type: 'setting', key: 'models.maxAtOnce', value: `${Q}=3`, place: 'm:vm-str' } as never)
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      await page.getByRole('region', { name: 'Settings' }).getByRole('button', { name: 'Limits', exact: true }).click()
+      const table = page.getByRole('table', { name: 'Providers and models' })
+      const spark = table.getByRole('row').filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) }).first()
+      await spark.scrollIntoViewIfNeeded()
+      await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).click()
+      const pop = page.getByRole('dialog', { name: 'Edit this setting' })
+      await pickLimit(pop, '2')
+      await pop.getByText(`Saving lowers ${Q} from 3 to 2 (spark allows 2 at once).`).waitFor()
+      await pop.getByRole('button', { name: 'Save', exact: true }).click()
+      await pop.waitFor({ state: 'detached' })
+      // the model's own limit is the provider's now
+      await table.getByRole('button', { name: /: 0 of 2 at once$/ }).nth(1).waitFor()
+      expect(((await world.act({ type: 'limits-view' } as never)) as { caps: { machine: string } }).caps.machine).toBe(`${Q}=2, spark=2`)
+    } finally {
+      await page.close()
+    }
+  })
+
   test('a provider nothing uses yet is under Other providers, open here: its cap cell sets its cap before it is used, and then it is in use', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {

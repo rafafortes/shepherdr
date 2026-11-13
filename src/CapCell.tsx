@@ -6,7 +6,7 @@
 // what Everywhere sets for the others.
 import { useState } from 'react'
 import { act } from './kernel.ts'
-import { atOnceWords, levelText, MAX_CAP, parseMaxAtOnce, spaceCapWords, withEntry, type MaxEntry } from '../shared/model-caps.ts'
+import { atOnceWords, fitToProviders, levelText, loweredWords, MAX_CAP, parseMaxAtOnce, spaceCapWords, withEntry, type MaxEntry } from '../shared/model-caps.ts'
 import type { SummaryAtOnce, SummarySpaceText } from '../shared/types.ts'
 import { Pop } from './cell-pop.tsx'
 import { Ghost, Primary, Small } from './ui.tsx'
@@ -98,6 +98,11 @@ export function CapEditor({ name, pattern, caps, phone, space, onClose }: { name
   const here = own(scope)
   const inherited = scope === 'machine' && here === undefined ? own('all') : scope === 'space' && here === undefined ? (own('machine') ?? own('all')) : undefined
   const above = scope === 'space' ? 'This machine' : 'Everywhere'
+  // what the save would lower: a model's own limit above its provider's at this level goes down to it (the server does the
+  // same), said before it is saved
+  const n = Number(draft)
+  const valid = draft === 'off' || (draft !== '' && Number.isInteger(n) && n >= 0 && n <= MAX_CAP)
+  const lowered = valid ? fitToProviders(entriesOf(withEntry(base(scope), pattern, draft === 'off' ? undefined : n))).lowered : []
   const write = async () => {
     // no cap: the entry is taken out of this level (what the level above gives shows, or none); blocked: 0; a number: that
     let max: number | undefined
@@ -150,6 +155,11 @@ export function CapEditor({ name, pattern, caps, phone, space, onClose }: { name
       </fieldset>
       <LimitChoice label={`Most ${name} at once, ${scope === 'all' ? 'Everywhere' : scope === 'space' ? `in ${shown?.name ?? 'this space'}` : 'this machine'}`} value={draft} max={MAX_CAP} zero={BLOCKED_CHOICE} phone={phone} onChange={(v) => setDraft(v)} />
       {inherited !== undefined ? <Small className="text-pretty">{above} sets {inherited} here. Saving makes this {scope === 'space' ? 'space' : 'machine'}'s own value.</Small> : null}
+      {lowered.length ? (
+        <Small data-lowered className="text-pretty">
+          Saving lowers {loweredWords(lowered)}.
+        </Small>
+      ) : null}
       {error ? (
         <Small role="status" className="text-pretty text-need-fg!">
           {error}

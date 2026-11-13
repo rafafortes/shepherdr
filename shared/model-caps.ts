@@ -70,6 +70,34 @@ export function formatMaxAtOnce(entries: MaxEntry[]): string {
   return entries.map((e) => `${e.pattern}=${e.max}`).join(', ')
 }
 
+/** a model's own limit lowered to its provider's: the model, the number it had, and the one it has now */
+export interface Lowered {
+  pattern: string
+  from: number
+  to: number
+}
+
+/**
+ * The entries of one level with each model's own limit no higher than its provider's limit at that level (the provider's
+ * total holds every model of it, so a model's own number above it would never be reached and only misleads). A provider
+ * that is blocked (0) or has no entry lowers nothing: blocking is a choice of its own, and unblocking it gives each model
+ * back the number it had. The entries keep their order; `lowered` names each one that changed.
+ */
+export function fitToProviders(entries: MaxEntry[]): { entries: MaxEntry[]; lowered: Lowered[] } {
+  const lowered: Lowered[] = []
+  const fitted = entries.map((e) => {
+    if (!e.pattern.includes('/')) return e
+    const provider = entries.find((p) => p.pattern === providerOfKey(e.pattern) && !p.pattern.includes('/'))
+    if (!provider || provider.max === 0 || e.max <= provider.max) return e
+    lowered.push({ pattern: e.pattern, from: e.max, to: provider.max })
+    return { pattern: e.pattern, max: provider.max }
+  })
+  return { entries: fitted, lowered }
+}
+
+/** the models a write lowers to their provider's limit, in words: `spark/qwen… from 3 to 2 (spark allows 2 at once)` */
+export const loweredWords = (lowered: Lowered[]) => lowered.map((l) => `${l.pattern} from ${l.from} to ${l.to} (${providerOfKey(l.pattern)} allows ${l.to} at once)`).join(', ')
+
 /** the entry that caps a model key: its own model entry when there is one, else its provider's; none when neither */
 export function capFor(entries: MaxEntry[], key: string): MaxEntry | undefined {
   const k = key.toLowerCase()

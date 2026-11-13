@@ -16,7 +16,7 @@ import { settingsBlock, settingsLines, SEVERITIES, type Reviewer, type Said, typ
 import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf, scopeOpencodeText, scopePatterns } from './models.ts'
 import { picksOf, rememberModel } from './model-picks.ts'
 import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
-import { formatMaxAtOnce, parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
+import { fitToProviders, formatMaxAtOnce, loweredWords, parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
 import { eventRules, eventsText, eventWords, nextWords, OWN_ZONE, timeRule, timeWords, validZone, type EventRule } from './trigger.ts'
 
 /** every agent kind herdr can start (interactive chat requires runtime log discovery and a reader) */
@@ -649,9 +649,11 @@ export class Settings {
   }
 
   /** set (or with null, unset) a value at a level (Everywhere when none); refused values say why */
-  set(key: string, value: string | null, l: Level = 'all'): { ok: boolean; error?: string } {
+  set(key: string, value: string | null, l: Level = 'all'): { ok: boolean; error?: string; note?: string } {
     if (!KEYS.includes(key)) return { ok: false, error: `No setting ${key}` }
     if (!levelsOf(key).includes(kindOfLevel(l))) return { ok: false, error: levelsOf(key).includes('machine') ? `${key} is set Everywhere or for one machine, not a space.` : `${key} is set Everywhere only.` }
+    /** what the human is told of a value kept otherwise than written (a model's limit lowered to its provider's) */
+    let note: string | undefined
     if (value !== null) {
       const chat = key === 'task.agent' || key === 'coordinator.agent' || (isFallback(key) && value.trim().toLowerCase() !== 'off')
       const err = refuse(key, value) ?? (chat ? chatProblem(kindOf(value) ?? value) : undefined) ?? this.unfit(key, value, l)
@@ -663,8 +665,11 @@ export class Settings {
       else if (key === 'heartbeat.on') value = eventsText(eventRules(value))
       else if (key === 'time.zone') value = value.trim()
       else if (key === 'models.maxAtOnce') {
+        // a model's own limit above its provider's at this level is lowered to it (fitToProviders), and the note says so
         const cap = parseMaxAtOnce(value)
-        value = cap.ok ? formatMaxAtOnce(cap.entries) || 'off' : value
+        const fit = fitToProviders(cap.ok ? cap.entries : [])
+        if (fit.lowered.length) note = `Lowered to fit their provider: ${loweredWords(fit.lowered)}.`
+        value = cap.ok ? formatMaxAtOnce(fit.entries) || 'off' : value
       }
       // a CLI is kept by its name, however it was written
       else if (isBackupCli(key) && value.trim().toLowerCase() === 'off') value = 'off'
@@ -691,7 +696,7 @@ export class Settings {
         if (kind && picked) rememberModel(kind, picked.id)
       }
     }
-    return { ok: true }
+    return note ? { ok: true, note } : { ok: true }
   }
 
   /** the picks a role's model rows lead with: this machine's, or none for a world of its own (the demo's) */

@@ -4370,6 +4370,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const named = one(p, 'space')
         const pr = named ? (this.places.find(named)?.id === placeId.home() ? '~' : this.projectFor(p, ctx).name) : undefined
         const level: Level = pr ? { space: pr } : p.flags.has('machine') ? 'machine' : 'all'
+        // what the setting kept otherwise than written, said after its value
+        let note: string | undefined
         if (level === 'all' && BOX) {
           // the main machine keeps Everywhere: it sets it there, and this machine takes it at once
           const r = await mainCli([a0, a1, ...(value === null ? [] : [value])])
@@ -4378,6 +4380,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         } else {
           const r = this.settings.set(a1, value, level)
           if (!r.ok) throw new Error(r.error)
+          note = r.note
         }
         this.settingChanged(a1)
         const applied = waiting ? this.applyWaiting(a1, level) : undefined
@@ -4386,7 +4389,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const where = pr ? `${this.places.nameOf(pr === '~' ? placeId.home() : placeId.space(pr)) ?? named}'s` : level === 'machine' ? `${NAME}'s` : "Everywhere's"
         const now = this.settings.get(a1, pr)
         // a trigger in words too, to tell the human
-        return `${a0 === 'unset' ? `${a1}: ${where} own is unset; it is ${now} now.` : `${a1} = ${now} (${where})`}${this.settings.words(a1, now).replace(/^\n\s*/, '\nIn words: ')}${a1.endsWith('.instructions') ? '\nUsed at the next start or restart; running agents are unchanged. Reviewer changes need a new or restarted task agent.' : ''}${appliedWords ? `\n${appliedWords}` : ''}`
+        return `${a0 === 'unset' ? `${a1}: ${where} own is unset; it is ${now} now.` : `${a1} = ${now} (${where})`}${this.settings.words(a1, now).replace(/^\n\s*/, '\nIn words: ')}${a1.endsWith('.instructions') ? '\nUsed at the next start or restart; running agents are unchanged. Reviewer changes need a new or restarted task agent.' : ''}${note ? `\n${note}` : ''}${appliedWords ? `\n${appliedWords}` : ''}`
       }
       case 'automation': {
         const op = a1 ?? 'list'
