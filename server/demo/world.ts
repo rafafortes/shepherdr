@@ -22,6 +22,11 @@ const DEFAULT_WAYS = { review: defaultOf('brief.review') !== 'off', mustFix: def
 const DEFAULT_REVIEWER = { kind: kindOf(defaultOf('reviewer.agent')!)! }
 import { excerpt } from '../live/chatlines.ts'
 import { findModel, TABLE } from '../live/models.ts'
+import { modelsMatrix } from '../live/models-matrix.ts'
+import { modelsSummary, type LiveAgent, type TaskFact } from '../live/models-summary.ts'
+import { demoQuota, demoUsage } from './usage.ts'
+import { ProfileSchedules } from '../live/profile-schedule.ts'
+import { Profiles, ProfileStore, type Site } from '../live/profiles.ts'
 import { Browsers } from '../live/browser.ts'
 import { shortUrl } from '../../shared/browser.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, setOrder, sortPlaces, type PlaceOrder, type SectionDefs } from '../../shared/order.ts'
@@ -73,6 +78,29 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   /** the places whose Run now woke its coordinator a moment ago */
   waking: Record<string, boolean> = {}
   pluginsOff: string[] = []
+  /** Settings → Models → profiles: kept in memory, as the demo's settings are (profiles.ts) */
+  private profileStore = new ProfileStore(true)
+  /** Settings → Models → Summary: a week of usage, in memory (usage.ts) */
+  private usage = demoUsage()
+  profiles = new Profiles(this.profileStore, () => this.profileSite(), () => {
+    this.sections = D.settings(this.stores, this.checklists, this.pluginsOff)
+    this.emit('snapshot')
+  })
+  /** the profiles' schedules, as the live one keeps them; the demo runs one only when a test ticks it (no clock of its own) */
+  profileSchedules = new ProfileSchedules(this.profileStore, this.profiles, {
+    zone: () => this.stores[D.DEMO_HOST]!.zone(),
+    main: () => true,
+    retune: () => ['The demo does not move waiting tasks.'],
+    report: (text) => {
+      // the home space's chat, as the live one puts it: a card there (the demo sends no alert)
+      const home = this.places.find((p) => p.home && p.machine === D.DEMO_HOST)?.chat
+      if (home) {
+        ;(this.chats[home]?.messages ?? []).push(cardMessage({ id: `profile-schedule-${Date.now()}`, text }, Date.now()))
+        this.emit('chat', home)
+      }
+      this.emit('snapshot')
+    },
+  })
   bases: Record<string, string> = Object.fromEntries(this.places.filter((p) => p.level === 2 && !p.id.endsWith(':~')).map((p) => [p.id, 'main']))
   sections = D.settings(this.stores)
   /** agents' secrets, in memory only */
@@ -496,6 +524,17 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     return this.browsers.attach(task, out)
   }
 
+
+  /** this machine's levels, as the live one reads them: its Everywhere, machine and spaces (home included) */
+  private matrixSpaces() {
+    return this.places.filter((p) => p.machine === D.DEMO_HOST).map((p) => ({ key: p.id.split(':')[2]!, name: p.name }))
+  }
+
+  /** what a profile reads and writes: this machine's settings (the demo's own store) and its spaces */
+  private profileSite(): Site {
+    return { settings: this.stores[D.DEMO_HOST], machine: { host: D.DEMO_HOST, name: D.DEMO_HOST }, spaces: this.matrixSpaces() }
+  }
+
   async act(a: Action): Promise<unknown> {
     switch (a.type) {
       case 'send': {
@@ -715,6 +754,50 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         this.sections = D.settings(this.stores, this.checklists, this.pluginsOff)
         this.emit('snapshot')
         return { ok: true }
+      }
+      case 'models-matrix':
+        // this machine's levels, as the live one reads them: its Everywhere, machine and spaces
+        return modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, this.matrixSpaces())
+      case 'models-summary': {
+        // the working tasks are the live agents; the waiting ones start (or are reviewed) on their CLI's own default model
+        const spaces = this.matrixSpaces()
+        const rows = modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, spaces).rows.map((r) => r.id)
+        const agents: LiveAgent[] = this.tasks.filter((t) => t.status === 'work').map((t) => ({ key: `${t.id}/Agent`, kind: kindOf(t.agent?.cli ?? 'Claude Code') ?? 'claude', status: 'working' }))
+        const tasks: TaskFact[] = this.tasks.map((t) => ({ status: t.status, ...(t.agent ? { agent: { kind: kindOf(t.agent.cli) ?? 'claude' } } : {}) }))
+        const now = Date.now()
+        return modelsSummary({ now, settings: this.stores[D.DEMO_HOST], host: D.DEMO_HOST, spaces, rows, usage: this.usage, agents, tasks, watch: [], quota: demoQuota(this.usage, now) })
+      }
+      case 'quota-refresh':
+        // the demo reads no quota: its figures are fictional, and no CLI or API is called from it
+        return { ok: false, error: 'The demo reads no quota: its figures are made up.' }
+      case 'profiles':
+        return this.profiles.view()
+      case 'profile-save': {
+        const r = this.profiles.save(a.name, { limits: a.limits, force: a.force })
+        if (r.ok) this.emit('snapshot')
+        return r
+      }
+      case 'profile-preview':
+        return this.profiles.preview(a.name)
+      case 'profile-apply':
+        return this.profiles.apply(a.name)
+      case 'profile-undo':
+        return this.profiles.undo()
+      case 'profile-rename':
+      case 'profile-delete': {
+        const r = a.type === 'profile-rename' ? this.profiles.rename(a.name, a.to) : this.profiles.remove(a.name)
+        if (r.ok) this.emit('snapshot')
+        return r
+      }
+      case 'profile-schedule': {
+        const r = a.id ? this.profileSchedules.edit(a.name, a.id, { rule: a.rule, waiting: a.waiting, on: a.on }) : this.profileSchedules.add(a.name, a.rule ?? '', { waiting: a.waiting, on: a.on })
+        if (r.ok) this.emit('snapshot')
+        return r
+      }
+      case 'profile-schedule-remove': {
+        const r = this.profileSchedules.remove(a.name, a.id)
+        if (r.ok) this.emit('snapshot')
+        return r
       }
       case 'apply-to-waiting': {
         // as the live one, for this machine's spaces: the waiting tasks of the place (or of each space that doesn't set

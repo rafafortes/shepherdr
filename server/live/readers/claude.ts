@@ -317,7 +317,9 @@ export class ClaudeReader implements Reader {
         const u = m.usage
         if (u && typeof u === 'object') {
           const tokens = (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.output_tokens ?? 0)
-          if (tokens) out.push({ kind: 'usage', id: `usage-${id}`, at: t, tokens })
+          // a synthetic reply (a CLI's own notice, not a model's call) has no model
+          const model = typeof m.model === 'string' && !m.model.startsWith('<') ? m.model : undefined
+          if (tokens) out.push({ kind: 'usage', id: `usage-${id}`, at: t, tokens, ...(model ? { model } : {}) })
         }
         this.steps(l, s, out, t, file, offset)
         for (const b of blocks) {

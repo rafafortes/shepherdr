@@ -788,6 +788,247 @@ export interface SettingSection {
   secrets?: { name: string; at: number }[]
 }
 
+/** Settings → Models: every level's model settings in one table (models-matrix.ts). A slot is one agent of a role: its
+ *  primary, or one of its backups (n: 0 is the primary, 1 is Backup 1), with the three keys that set its CLI, model and
+ *  effort */
+export type MatrixRole = 'task' | 'coordinator' | 'reviewer' | 'advisor'
+export interface MatrixSlot {
+  id: string
+  role: MatrixRole
+  /** the role's group heading: Tasks, Coordinators, Reviewer, Advisor */
+  title: string
+  /** Primary, Backup 1 … Backup 5 */
+  name: string
+  n: number
+  cli: string
+  model: string
+  effort: string
+  /** the CLI choices the slot offers, as its Settings row does (off first for a backup) */
+  clis: string[]
+}
+/** a key's value as its row reads it, and where that comes from: this row's own level (set), a level above it, or
+ *  Shepherdr's default. A model shows its label, a CLI its name; follows: the key a backup's model or effort reads
+ *  while it is at default (the tasks' backup's) */
+export interface MatrixValue {
+  value: string
+  from: 'all' | 'machine' | 'space' | 'default'
+  set: boolean
+  follows?: string
+}
+/** one slot in one row: what it runs on in words ("pi · opencode-go/deepseek-v4.1-flash · high", "off"), whether any of
+ *  its three keys is set in this row, and where its CLI comes from */
+export interface MatrixCell {
+  words: string
+  set: boolean
+  from: MatrixValue['from']
+}
+export interface MatrixRow {
+  /** the level's place id: all, m:<machine>, p:<machine>:<space> (the setting action's place) */
+  id: string
+  name: string
+  kind: 'all' | 'machine' | 'space'
+  /** every key the row reads (the slots' three keys, and the plain columns') */
+  values: Record<string, MatrixValue>
+  cells: Record<string, MatrixCell>
+}
+/** what one CLI takes: its models in the order the picks put them first, with the efforts each model takes */
+export interface MatrixCatalog {
+  /** false where the CLI can't list its models: any id goes */
+  known: boolean
+  models: { label: string; id: string; efforts: string[] }[]
+  /** the levels its own default model takes */
+  efforts: string[]
+}
+export interface ModelsMatrix {
+  machine: { id: string; name: string }
+  slots: MatrixSlot[]
+  /** the plain columns after the roles: a key of its own, its title, and what it takes (a choice or a number) */
+  plain: { key: string; title: string; options?: string[]; num?: SettingRow['num'] }[]
+  rows: MatrixRow[]
+  /** by the CLI's name (Codex, Claude Code, pi): what each one takes */
+  catalog: Record<string, MatrixCatalog>
+}
+
+/** one window of a provider's quota, as a read of its own gives it (4b): used as a share or a count, against a cap, and
+ *  when it refills. A window refilled since its read says nothing of now */
+export interface QuotaWindow {
+  name: string
+  usedPct?: number
+  used?: number
+  cap?: number
+  resetAt?: number
+  /** what is left of a count that has no cap (Command Code's credits) */
+  left?: number
+  /** an estimate's usage in the window: pi's cost estimate, when its logs gave one */
+  cost?: number
+  /** an estimate's learned limit: what the window held when the provider ran out, the latest few, newest first */
+  learned?: { at: number; tokens: number; cost?: number }[]
+}
+/** a provider's quota figure: its windows, where the read came from and when, and whether the numbers are an estimate */
+export interface QuotaFigure {
+  windows: QuotaWindow[]
+  source: string
+  at: number
+  estimate?: boolean
+}
+
+/** a provider's quota read as the summary shows it (quotas.ts): its switch, why nothing is read (a hint: a key to add,
+ *  bubblewrap to install), and how its last try went (the figure stays the last good one) */
+export interface QuotaRead {
+  on: boolean
+  hint?: string
+  failed?: string
+  /** when it was last tried (ms) */
+  tried?: number
+}
+
+/** Settings → Models → Summary (models-summary.ts): where the work runs, per provider and per model. Usage is read from
+ *  the logs of Shepherdr's agents on this machine (usage-ledger.ts); the rest is the table's configured values and what
+ *  runs and waits now */
+export interface SummaryUsage {
+  tokens: number
+  calls: number
+  /** pi's own cost estimate, in dollars, when its logs gave one: an estimate, never a bill */
+  cost?: number
+}
+export interface SummaryWindows<T> {
+  h5: T
+  h24: T
+  d7: T
+}
+/** the role slots that point at a provider or model: primaries and backups, by role and by space (its name, ~ for home) */
+export interface SummaryConfigured {
+  primary: number
+  backup: number
+  roles: Partial<Record<MatrixRole, number>>
+  spaces: Record<string, number>
+}
+/** what runs and waits on it now: live agents by role, and the waiting tasks that start on it or are reviewed by it */
+export interface SummaryNow {
+  agents: number
+  working: number
+  roles: Partial<Record<'task' | 'coordinator' | 'reviewer', number>>
+  starts: number
+  reviews: number
+}
+export interface SummaryRunOuts {
+  count7d: number
+  last?: { at: number; reason: string; reset?: string; resetAt?: number; chat: string; role: string; model: string }
+  /** out right now: until its known reset, or until its return watch says the primary is back, or until a call goes through */
+  out: boolean
+  until?: number
+}
+/** one row of the summary: a provider, or one of its models */
+export interface SummaryRow {
+  configured: SummaryConfigured
+  now: SummaryNow
+  usage: SummaryWindows<SummaryUsage>
+  runOuts: SummaryRunOuts
+}
+export interface SummaryModel extends SummaryRow {
+  /** the model key (provider/model) and the model's name in words */
+  key: string
+  label: string
+}
+export interface SummaryProvider extends SummaryRow {
+  provider: string
+  /** the provider in words (Claude Code, Codex, OpenCode Go, or its own name) */
+  name: string
+  /** one of this machine's own models (spark, radeon, avell, dell): no quota, shared */
+  local: boolean
+  /** its share of all tokens in the last 24 h and in the last 7 d (none when nothing was used) */
+  share: { h24?: number; d7?: number }
+  quota?: QuotaFigure
+  /** the provider's quota read as quotas.ts has it (none for a provider with no read of its own) */
+  quotaRead?: QuotaRead
+  models: SummaryModel[]
+}
+/** a rule-based warning about the settings or the providers, with its fix in words; go opens the cell that changes it
+ *  (a row's place and a slot's id, as the table names them) */
+export interface SummaryWarning {
+  id: string
+  level: 'risk' | 'note'
+  words: string
+  fix?: string
+  go?: { row: string; slot: string }
+}
+export interface ModelsSummary {
+  at: number
+  /** when the logs were read once from their start (the backfill); none while it runs */
+  backfilled?: number
+  providers: SummaryProvider[]
+  warnings: SummaryWarning[]
+}
+
+/** Settings → Models → profiles (server/live/profiles.ts): one setting a profile changes, as the preview and the answer
+ *  name it */
+export interface ProfileChange {
+  /** the level's place id: all (Everywhere), m:<host> (this machine) or p:<host>:<space> */
+  place: string
+  /** the level in words: Everywhere, this machine's name, or the space's name */
+  where: string
+  key: string
+  /** the setting in words: "Tasks · Primary · Agent", "Max tasks" */
+  label: string
+  /** its value now, and the one the profile gives (null: not set at that level) */
+  now: string | null
+  then: string | null
+}
+/** a change a profile would make that the setting refuses, with why */
+export interface ProfileRefusal extends ProfileChange {
+  error: string
+}
+/** one schedule of a profile (profile-schedule.ts), as the screen and the command line show it */
+export interface ProfileScheduleRow {
+  id: string
+  /** its rule in words: "Every day at 22:00 (Madrid)" */
+  words: string
+  /** the time and days the editor shows: every day when days is null, else 0 for Monday to 6 for Sunday */
+  form?: { time: string; days: number[] | null }
+  /** also the tasks already created take the profile's task and reviewer settings */
+  waiting: boolean
+  on: boolean
+  /** its next run in words, when it is on: "Today 22:00" */
+  next?: string
+  /** its last run in words: "Applied Today 22:00", "Not applied Tomorrow 8:00" */
+  last?: string
+}
+export interface ProfileSummary {
+  name: string
+  /** holds Max tasks and Merge train as well as the models */
+  limits: boolean
+  saved: number
+  applied?: number
+  /** its schedules, in the order they were made */
+  schedules?: ProfileScheduleRow[]
+}
+/** the profiles bar: what is saved, what the settings match now, and the undo point an undo restores */
+export interface ProfilesView {
+  profiles: ProfileSummary[]
+  /** the next two scheduled applies, in words: "Next: night at 22:00, then day at 08:00" */
+  next?: string
+  /** the profile the settings match now (the last one applied first), or Custom */
+  active: string
+  /** the last apply: its profile, when (the bar says Changed since when the settings no longer match it) */
+  last?: { name: string; at: number }
+  /** the undo point the next undo restores, with its words: Before night, 13 Nov, 01:05 */
+  undo?: { name: string; at: number; label: string }
+  /** why profiles are not kept here: a worker keeps none, the main machine does */
+  unavailable?: string
+}
+/** what applying a profile would change, and what would hold it back (a refused setting: then nothing is applied) */
+export interface ProfilePreview {
+  ok: boolean
+  error?: string
+  name?: string
+  changes: ProfileChange[]
+  refused: ProfileRefusal[]
+  /** saved spaces that are no longer spaces: their values are skipped */
+  skipped: string[]
+  /** spaces added since the save: applying leaves them as they are */
+  added: string[]
+}
+
 export interface Alert {
   id: string
   from: string
@@ -983,6 +1224,29 @@ export type Action =
    *  for Everywhere): the waiting tasks it reaches take what Settings name for their space, as Start with… gives each
    *  (engine retuneWaiting). dry: the counts only, for the question asked first. Running tasks keep their agent */
   | { type: 'apply-to-waiting'; key: string; place?: string; dry?: boolean }
+  /** Settings → Models: every level's model settings as one table (read only; the writes are the setting action) */
+  | { type: 'models-matrix' }
+  /** Settings → Models → Summary: per provider and model, what they run, use and ran out of, and the warnings (read only) */
+  | { type: 'models-summary' }
+  /** Settings → Models → Quotas: read each quota now, at most once a minute per provider (quotas.ts refresh) */
+  | { type: 'quota-refresh' }
+  /** Settings → Models → profiles: the saved profiles and what the settings match now (read only) */
+  | { type: 'profiles' }
+  /** save the current settings as a profile: the models, and the limits (Max tasks, Merge train) when limits is set;
+   *  a name that is saved already is replaced only with force (the screen asks first) */
+  | { type: 'profile-save'; name: string; limits?: boolean; force?: boolean }
+  /** what applying a profile would change now (read only) */
+  | { type: 'profile-preview'; name: string }
+  /** apply a profile: all of it or none (a refused setting stops it); an undo point is kept first */
+  | { type: 'profile-apply'; name: string }
+  /** put back what the last apply changed, where it still reads as the apply left it */
+  | { type: 'profile-undo' }
+  /** a profile's schedule: a new one (no id: its rule as words or a time rule, waiting tasks and on or off), or a change
+   *  of one (its id: any of those); the main machine only */
+  | { type: 'profile-schedule'; name: string; id?: string; rule?: string; waiting?: boolean; on?: boolean }
+  | { type: 'profile-schedule-remove'; name: string; id: string }
+  | { type: 'profile-rename'; name: string; to: string }
+  | { type: 'profile-delete'; name: string }
   /** archive a task (on: true; its agent stops first) or bring it back; chat is its agent's key (ID/Agent) */
   | { type: 'archive'; chat: string; on: boolean }
   /** pin a task to the top of its lists (on: true) or unpin it */

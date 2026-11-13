@@ -8,7 +8,7 @@ import { tmp } from './tmp.ts'
 
 process.env.SHEPHERDR_HOME = tmp('retry')
 const { readerFor } = await import('../server/live/readers/index.ts')
-const { carryOn, providerError, Retries } = await import('../server/live/retry.ts')
+const { carryOn, providerError, resetOf, Retries, runOutOf, WAITS } = await import('../server/live/retry.ts')
 
 const ending = (name: string) => {
   const cli = name.split('-')[0]
@@ -45,6 +45,31 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(providerError('Login expired · Please run /login', 'authentication_failed')).toEqual({ passing: false, reason: 'Signed out' })
     // anything not recognised is not waited out
     expect(providerError('Something odd happened')).toEqual({ passing: false, reason: 'Provider error' })
+  })
+
+  test('a spent prepaid balance (402, Insufficient account funds) is out of credit, not a refusal', () => {
+    expect(providerError('402 Insufficient account funds', '', 402)).toEqual({ passing: false, reason: 'Out of credit' })
+    expect(providerError('Insufficient balance, top up to continue')).toEqual({ passing: false, reason: 'Out of credit' })
+    expect(providerError('Your credit balance is too low', '', 400)).toEqual({ passing: false, reason: 'Out of credit' })
+    // a plan's allowance and a refused request keep their own reasons
+    expect(providerError("You've hit your limit · resets 5pm", '', 429).reason).toBe('Out of allowance until 5pm')
+    expect(providerError('bad request', 'invalid_request', 400).reason).toBe('Provider refused it')
+  })
+
+  test('a reset given as an ISO time is shown in this machine\'s time, with its zone name', () => {
+    const iso = '2026-11-11T20:44:33Z'
+    const shown = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }).format(new Date(iso))
+    expect(providerError(`Command Code: out of credit, resets at ${iso}`, '', 402)).toEqual({ passing: false, reason: `Out of credit until ${shown}` })
+    expect(resetOf(`Limit reached. resets at ${iso}.`)).toEqual({ when: shown, at: Date.parse(iso) })
+    // with milliseconds and an offset
+    expect(resetOf('resets 2026-11-11T17:44:33.250-03:00')?.at).toBe(Date.parse('2026-11-11T17:44:33.250-03:00'))
+    // what is not an ISO time stays as the provider wrote it
+    expect(resetOf('resets 5pm (Europe/Oslo)')).toEqual({ when: '5pm' })
+    expect(resetOf('try again at 5:00 PM')).toEqual({ when: '5:00 PM' })
+    expect(resetOf('nothing about a time')).toBeUndefined()
+    expect(runOutOf('Out of credit until 5pm')).toBe(true)
+    expect(runOutOf('Out of allowance')).toBe(true)
+    expect(runOutOf('Provider refused it')).toBe(false)
   })
 })
 
@@ -105,5 +130,15 @@ describe('waits and tries', () => {
     const w = world()
     w.r.seen('C', cut('e1', "You've hit your session limit · resets 5pm", 429))
     expect(w.over).toEqual([{ key: 'C', reason: 'Out of allowance until 5pm' }])
+  })
+
+  test('a run-out is told once, with the cut it came from; a refusal is not one', () => {
+    const runs: { key: string; id: string; reason: string }[] = []
+    const r = new Retries({ nudge: () => undefined, over: () => undefined, changed: () => undefined, runOut: (key, c, reason) => runs.push({ key, id: c.id, reason }) }, WAITS)
+    r.seen('D', cut('e1', 'Insufficient account funds', 402))
+    r.seen('D', cut('e1', 'Insufficient account funds', 402))
+    r.seen('E', cut('e2', 'bad request', 400))
+    expect(runs).toEqual([{ key: 'D', id: 'e1', reason: 'Out of credit' }])
+    r.stop()
   })
 })

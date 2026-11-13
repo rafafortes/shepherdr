@@ -42,6 +42,7 @@ process.env.SHEPHERDR_BOX = JSON.stringify({ label: 'faraway', target: 'faraway.
 
 const { LiveSource } = await import('../server/live/source.ts')
 const { placeId } = await import('../server/live/places.ts')
+const { PROFILES_ON_MAIN } = await import('../server/live/profiles.ts')
 
 const src = new LiveSource()
 afterAll(() => src.stop())
@@ -192,5 +193,22 @@ describe('a worker for another machine', () => {
     } finally {
       src.chat = chat
     }
+  })
+
+  test('profiles are kept on the main machine: a worker reads none and writes none', async () => {
+    expect(await src.act({ type: 'profiles' })).toEqual({ profiles: [], active: 'Custom', unavailable: PROFILES_ON_MAIN })
+    for (const a of [
+      { type: 'profile-save', name: 'x' },
+      { type: 'profile-preview', name: 'x' },
+      { type: 'profile-apply', name: 'x' },
+      { type: 'profile-undo' },
+      { type: 'profile-rename', name: 'x', to: 'y' },
+      { type: 'profile-delete', name: 'x' },
+      { type: 'profile-schedule', name: 'x', rule: 'daily 22:00' },
+      { type: 'profile-schedule-remove', name: 'x', id: 'x' },
+    ] as const) expect(await src.act(a as never)).toEqual({ ok: false, error: PROFILES_ON_MAIN })
+    // a worker's scheduler applies nothing, even when a rule is due
+    ;(src as unknown as { profileSchedules: { tick(now: number): void } }).profileSchedules.tick(Date.now() + 10 * 86_400_000)
+    expect(await src.cli(['profile', 'list'], {})).toEqual({ out: `${PROFILES_ON_MAIN}\n`, code: 1 })
   })
 })

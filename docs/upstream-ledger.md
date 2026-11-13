@@ -291,6 +291,36 @@ tasks on one gate run. Upstream's only merge queue is GitHub's own (SHEP-160 on 
 a merge made here never reaches. So the train is ours: `merge.train`, for merges made here only; see
 [docs/tasks.md](tasks.md).
 
+## Not from upstream: a models table over every space, built here
+
+Checked 2026-11-13 against upstream `main` (`ebb17d58`, 3.x line) and `v2.0` (fetched that day): `git grep` for a models
+or settings overview across spaces, `git log -i --grep` for model, matrix and overview, and the public issues and pull
+requests (`gh issue list` and `gh pr list` with "models settings matrix" and "model settings overview"). Nothing does
+it. Upstream's model picker (SHEP-30, `ecde86a1`, ported in [#29](https://github.com/rafafortes/shepherdr/pull/29)) picks
+one row's model; its Settings are one level at a time. So the table of every level's CLI, model and effort, with its
+backups, and its bulk "set for every space" and "copy to" actions, is ours: `models-matrix.ts` and `ModelsPage.tsx`,
+Settings → Models. See [settings](settings.md#models).
+
+## Not from upstream: named settings profiles, built here
+
+Checked 2026-11-13 against upstream `main` (3.x line) and `v2.0` (fetched that day): `git grep` for profile, preset and
+snapshot in both lines' code, `git log -i --grep` for profile and preset, and the public issues and pull requests (`gh issue
+list` and `gh pr list` with "settings profile preset"). The one hit is upstream's agent profiles (3.x, `f92ab4aa`, #51, and
+`5a817ed2`, #78): named launch setups a task picks by name (its CLI, its permissions, which owner runs it), not a snapshot of
+Settings at each level. Upstream's Autopilot presets are trigger shortcuts. So a profile, a named copy of every level's
+models and the limits, applied in one step with a preview, all-or-nothing writes and undo, is ours: `profiles.ts`, the
+profiles bar on Settings → Models, and `shepherdr profile`. See [settings](settings.md#profiles).
+
+## Not from upstream: scheduled profiles, built here
+
+Checked 2026-11-13 against upstream `main` (3.x line) and `v2.0` (fetched that day): `git grep` for schedul, profile and
+switch in both lines' code, `git log -i --grep` for profile, schedul and switch, and the public issues (`gh issue list`
+with "profile" and "schedule settings"). Nothing switches a settings snapshot by the clock: upstream's schedules are
+tasks and automations (`b5bd88da`, `efce7768`), and its agent profiles (`f92ab4aa`, #51) are launch setups picked by name.
+So a profile that applies itself on a rule, with the waiting tasks on or off and a note in the home chat, is ours:
+`profile-schedule.ts` and the schedules in Manage profiles. Its rules are the time rules automations use (`trigger.ts`).
+See [settings](settings.md#schedules).
+
 ## Not from upstream: a Settings change applied to the tasks already waiting, built here
 
 Checked 2026-11-12 against upstream `main` (`ef3be074`, 3.1.32 line) and `v2.0` (`ebb17d58`): code, history, issues and
@@ -384,3 +414,34 @@ whole v2.0 line**, so most of this list is in; what is left is what upstream nev
 32. **[done, PR #36](https://github.com/rafafortes/shepherdr/pull/36) [3.1.15–3.1.28] A repo's tasks follow a renamed or moved folder** (`6dfedbd8`, part of SHEP-141; S–M) — a space is
     found again by its repo's own id, so renaming `~/www/misc/...` stops needing a symlink (`lyvora-app` and its
     `polylog` link); risk: it must never land on a copy that shares a `.git`, and a task's worktree stays where it is.
+
+## Not from upstream: the Models summary, its warnings and the usage ledger, built here
+
+Checked 2026-11-13 against upstream `main` (3.x line) and `v2.0` (fetched that day): `git grep` for run-out, "out of
+allowance", 402, credit, usage ledger and per-model usage in both lines' code, `git log -i` for usage, quota and limit,
+and the public issues with "usage limit quota" (`gh issue list`, none matched). Upstream counts no model's calls per
+provider and remembers no run-out; what it has is plan limits, and an insights add-on that counts how the person uses the
+screens. Taken and turned down, from those:
+
+- **Taken: the window of a plan limit, and that a refilled window says nothing of now** (`3a3ce931`, #553 "plan usage
+  limits"): the quota slot is a list of windows with a used share, a count and a refill time, and the summary leaves out a
+  window whose refill is past. Its reads came in the next step (see the next bullets).
+- **Turned down: the usage insights add-on** (`181d3568`, SHEP-100): it records screens, features and time on them for the
+  person, on their own machines; it is not a count of the model calls, and its architecture (`mods/`, `service/`) is not
+  2.0's. Nothing from it is in this line.
+- **Ours: the per-provider ledger** (`usage-ledger.ts`, `usage-feed.ts`): each model call counted once per chat by its own
+  id, from the logs of Shepherdr's agents only, with the run-outs (retry.ts: allowance, credit, the 402) and the alert once
+  per run of them. See [settings](settings.md#summary).
+- **Ported, the idea of Claude Code's plan-limit read** (`3a3ce931` and `c0ee1971`, #553 and #561, read only; `helper/core-plan-limits.ts`):
+  one `claude -p /usage` process per read, sealed (bubblewrap with the root read-only and a throwaway `/tmp`), niced, 60 s
+  limit, `TZ=UTC` for the reset words; a login near its renewal is not read, since a sealed run cannot save a renewed login.
+  Ported to this code as `server/live/plan-limits.ts`, and without bubblewrap nothing is read. Not ported: Codex's
+  rate-limit read (Codex is not on this host) and upstream's Mac seal (`sandbox-exec`, a Linux desktop here). See
+  [settings](settings.md#quotas).
+- **Ported with attribution, the Command Code account read** (MIT License, Copyright (c) 2025 Pat Woz,
+  `pi-commandcode-provider` `src/quota.ts`, read in its installed package): `whoami` and the credits, with the key from
+  Shepherdr's own Secrets (`COMMANDCODE_API_KEY`), in `server/live/command-code-quota.ts` (the credit's and the windows'
+  reading, the 15 s deadline). The package's usage summary and subscription are not read.
+- **Ours: OpenCode Go's estimate and its learned limit, and the quota scheduler and alerts**: OpenCode has no read of its
+  quota, so the ledger's own tokens and cost per window, and the lowest limit its run-outs show (`quota-estimate.ts`); the
+  reads every ten minutes, Refresh quotas and each window's alert once (`quotas.ts`).

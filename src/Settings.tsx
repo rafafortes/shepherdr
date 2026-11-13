@@ -8,10 +8,11 @@
 import clsx from 'clsx'
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentType, type FC, type ReactNode } from 'react'
 import { machineName, type Place, type SettingRow, type SettingSection, type Snapshot } from '@shared/types.ts'
-import { act, registry, setUI, useSnap, useUI, type UI } from './kernel.ts'
+import { act, getState, registry, setUI, useSnap, useUI, type UI } from './kernel.ts'
 import { usePluginErrors } from './guard.tsx'
 import { PlacesToggle } from './Frame.tsx'
 import { askWaiting } from './apply-waiting.tsx'
+import ModelsPage from './ModelsPage.tsx'
 import { Stack } from './Stack.tsx'
 import { APPEARANCES, setAppearance, useAppearance, type Appearance } from './theme.ts'
 import {
@@ -528,9 +529,24 @@ interface Page extends SettingSection {
   device?: boolean
   Icon?: ComponentType<{ className?: string }>
   View?: FC<{ phone: boolean }>
+  /** the page reads every level at once (Models): it has no level of its own to edit or pick */
+  matrix?: boolean
 }
 
+/** the Settings section the Models page draws its quota rows from (server settings.ts QUOTAS): not a page of its own */
+export const QUOTAS = 'Quotas'
+
 const APPEARANCE: Page = { name: 'Appearance', device: true, about: 'How Shepherdr looks on this device. Your other devices keep their own.', rows: [] }
+
+/** Settings → Models: every level's agent settings in one table (ModelsPage.tsx); it reads all levels at once, so it has
+ *  no level of its own */
+const MODELS: Page = {
+  name: 'Models',
+  about: "Every level's agent settings in one table: each space's tasks, coordinator, reviewer and advisor, with their backups, and this machine's and Everywhere's. Click a cell to change it; a value set in that row is drawn strong, one it inherits faint with where it comes from.",
+  rows: [],
+  matrix: true,
+  View: ModelsPage,
+}
 
 const LOOKS: Record<Appearance, { label: string; hint?: string }> = {
   system: { label: 'System', hint: "Light or dark, as this device's own setting is" },
@@ -555,6 +571,7 @@ const ICONS: Record<string, ComponentType<{ className?: string }>> = {
   Appearance: AppearanceIcon,
   Plugins: PluginIcon,
   Machines: MachineIcon,
+  Models: ModelIcon,
   Secrets: KeyIcon,
 }
 
@@ -610,17 +627,32 @@ function groupsOf(sections: SettingSection[], ui: UI): { name: string; pages: Pa
     about: 'All: every new coordinator message, question and alert. Needs me: questions and alerts. Off: none, and the space stays quiet. Task alerts reach you either way. Spaces can override the delivery rule here or from their sidebar menu. Device delivery below applies Everywhere.',
     rows: [...x.rows.map((r) => ({ ...r, group: 'Delivery rules' })), ...(delivery?.rows.filter((r) => !r.key.startsWith('voice.')).map((r) => ({ ...r, group: 'Devices · Everywhere' })) ?? [])],
   } : x)
-  const globals = sections.filter((x) => x.global).map((x): Page => x === delivery ? {
+  const globals = sections.filter((x) => x.global && x.name !== QUOTAS).map((x): Page => x === delivery ? {
     ...x, name: 'Voice', rows: x.rows.filter((r) => r.key.startsWith('voice.')),
   } : x)
   const own = registry.settingsPages.filter((x) => x.when(ui)).map(({ name, about, Icon, View }): Page => ({ name, about, Icon, View, device: true, rows: [] }))
+  // the Models table comes right after Agents, the settings it is the one table of
+  const running = scoped.filter((x) => !x.told)
+  const agents = running.findIndex((x) => x.name === 'Agents')
+  const runs = agents < 0 ? [...running, MODELS] : [...running.slice(0, agents + 1), MODELS, ...running.slice(agents + 1)]
   return [
     { name: 'What agents are told', pages: scoped.filter((x) => x.told) },
     // what is one for all (alerts and voice) runs Shepherdr too, whatever level is picked: its page says so
-    { name: 'How Shepherdr runs', pages: [...scoped.filter((x) => !x.told), ...globals] },
+    { name: 'How Shepherdr runs', pages: [...runs, ...globals] },
     { name: 'This device', pages: [APPEARANCE, ...own] },
     { name: 'About', pages: sections.filter((x) => !x.level && !x.global) },
   ].filter((g) => g.pages.length)
+}
+
+/** opens a page of Settings at a level (Secrets at Everywhere, say) from elsewhere on the screen. A level change changes the
+ *  list of pages, and Settings keeps the page it showed by name, so the level goes first and the page is set once the list
+ *  has settled (the next frame) */
+export function openPage(name: string, level: string) {
+  const sections = getState().snap?.settings ?? []
+  const ui = getState().ui
+  const at = (n: string) => Math.max(0, sectionOf(n, sections, { ...ui, settings: { section: 0, level } }))
+  setUI({ settings: { section: ui.settings?.section ?? 0, level } })
+  requestAnimationFrame(() => setUI({ settings: { section: at(name), level } }))
 }
 
 /** where a page sits in the list of them (for ui.settings.section), or -1 where it doesn't show */
@@ -673,7 +705,7 @@ function AppearancePick({ phone }: { phone: boolean }) {
 /** a row's control, by what its value is: on or off a switch, two or three short words segments, a number a stepper,
  *  free words a box, a list a menu; one with no other choice, or only shown,
  *  its words */
-function Control({ row, phone, set, edit }: { row: SettingRow; phone: boolean; set: (value: string) => void; edit: () => void }) {
+export function Control({ row, phone, set, edit }: { row: SettingRow; phone: boolean; set: (value: string) => void; edit: () => void }) {
   const options = row.options ?? []
   const action = row.key in registry.settingActions
   const only = !row.num && !row.text && !action && options.length <= 1 && (options[0] ?? row.value) === row.value
@@ -886,8 +918,8 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
     </dl>
   )
   return (
-    <div className={clsx('flex w-full flex-col', phone ? 'gap-6 px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+--spacing(8))]' : 'max-w-[720px] gap-6 px-6 pt-5 pb-8')}>
-      <div className={clsx('flex flex-col gap-1', phone && 'px-4')}>
+    <div className={clsx('flex w-full flex-col', phone ? 'gap-6 px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+--spacing(8))]' : page.matrix ? 'gap-4 pt-5 pb-0' : 'max-w-[720px] gap-6 px-6 pt-5 pb-8')}>
+      <div className={clsx('flex flex-col gap-1', phone ? 'px-4' : page.matrix && 'max-w-[720px] px-6')}>
         {phone ? null : <h2 className="text-[0.9375rem] font-semibold">{page.name}</h2>}
         {page.about ? <p className={clsx('text-pretty text-fg2', phone ? 'text-[0.9375rem]' : 'text-[0.8125rem]')}>{page.about}</p> : null}
         {hint ? <p className={clsx('text-pretty text-fg3', phone ? 'text-[0.9375rem]' : 'text-[0.8125rem]')}>{hint}</p> : null}
@@ -1129,7 +1161,7 @@ export default function Settings() {
   const body = <>
     <div className={clsx('flex min-w-0 flex-wrap items-center gap-2 border-b border-line px-6 py-3', phone && 'px-4')}>
       <span className="text-fg2">Editing:</span>
-      {page.device ? <span>This device</span> : page.global || !page.level ? <span>Everywhere</span> : levelPick(phone ? 'phone' : 'content') ?? <span>{name(level)}</span>}
+      {page.device ? <span>This device</span> : page.matrix ? <span>Every level</span> : page.global || !page.level ? <span>Everywhere</span> : levelPick(phone ? 'phone' : 'content') ?? <span>{name(level)}</span>}
     </div>
     <PageBody key={`${page.level ?? ''}|${page.name}`} page={page} phone={phone} set={set} refused={(key) => refused[at(key)]} clear={clear} hint={page.rows.some((r) => r.key === 'space.base') ? 'This repository’s branch for new tasks.' : page.level && !page.global && page.name !== 'Task IDs' ? levelHint(page.level, snap) : undefined} /></>
 

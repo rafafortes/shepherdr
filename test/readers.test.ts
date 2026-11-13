@@ -565,16 +565,42 @@ describe('token usage', () => {
     expect(u).toHaveLength(1)
     expect(u[0]).toMatchObject({ id: 'usage-msg_U', tokens: 122 })
   })
-  test('Codex: each model call from its token count', () => {
+  test('Claude Code: the model it ran on; a synthetic notice names none', () => {
+    const line = (model: string) => ({ type: 'assistant', sessionId: 's1', uuid: `x-${model}`, timestamp: '2026-10-25T10:00:00.000Z', message: { id: `msg_${model}`, model, role: 'assistant', content: [{ type: 'text', text: 'Hi' }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 1 } } })
+    const ev = parse('claude', [line('claude-opus-5-5'), line('<synthetic>')])
+    const u = ev.filter((e) => e.kind === 'usage')
+    expect(u.map((e) => e.kind === 'usage' && e.model)).toEqual(['claude-opus-5-5', undefined])
+  })
+  test('Codex: each model call from its token count, on the model its turn runs', () => {
     const ev = parse('codex', [
-      { timestamp: '2026-10-25T10:00:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { total_tokens: 300 }, total_token_usage: { total_tokens: 300 } } } },
+      { timestamp: '2026-10-25T10:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-6-sol' } },
+      { timestamp: '2026-10-25T10:00:00.500Z', type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { total_tokens: 300 }, total_token_usage: { total_tokens: 300 } } } },
       { timestamp: '2026-10-25T10:00:01.000Z', type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { total_tokens: 200 }, total_token_usage: { total_tokens: 500 } } } },
     ])
     expect(ev.filter((e) => e.kind === 'usage').reduce((n, e) => n + (e.kind === 'usage' ? e.tokens : 0), 0)).toBe(500)
+    expect(ev.filter((e) => e.kind === 'usage').map((e) => e.kind === 'usage' && e.model)).toEqual(['gpt-6-sol', 'gpt-6-sol'])
   })
-  test('pi: each reply from its usage', () => {
-    const ev = parse('pi', [{ type: 'message', id: 'm1', timestamp: '2026-10-25T10:00:00.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'Hi' }], stopReason: 'stop', usage: { totalTokens: 42 } } }])
-    expect(ev.find((e) => e.kind === 'usage')).toMatchObject({ tokens: 42 })
+  test('Codex: a call before any turn names no model, and two files of one chat never share an id', () => {
+    const line = { timestamp: '2026-10-25T10:00:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { total_tokens: 9 } } } }
+    const a = readerFor('codex')!.parse([{ text: JSON.stringify(line), offset: 0 }], '/logs/rollout-a.jsonl')
+    const b = readerFor('codex')!.parse([{ text: JSON.stringify(line), offset: 0 }], '/logs/rollout-b.jsonl')
+    expect(a[0]).not.toHaveProperty('model')
+    expect(a[0]!.id).not.toBe(b[0]!.id)
+  })
+  test('pi: each reply from its usage, on its model with the provider in front, and pi\'s cost estimate', () => {
+    const ev = parse('pi', [{ type: 'message', id: 'm1', timestamp: '2026-10-25T10:00:00.000Z', message: { role: 'assistant', provider: 'opencode-go', model: 'deepseek-v4.1-flash', content: [{ type: 'text', text: 'Hi' }], stopReason: 'stop', usage: { totalTokens: 42, cost: { total: 0.0021 } } } }])
+    expect(ev.find((e) => e.kind === 'usage')).toMatchObject({ tokens: 42, model: 'opencode-go/deepseek-v4.1-flash', cost: 0.0021 })
+  })
+  test('pi: a provider whose model id already has it in front is not named twice, and no cost is no cost', () => {
+    const ev = parse('pi', [
+      { type: 'message', id: 'm2', timestamp: '2026-10-25T10:00:00.000Z', message: { role: 'assistant', provider: 'commandcode', model: 'commandcode/x', content: [], stopReason: 'stop', usage: { totalTokens: 5 } } },
+      { type: 'message', id: 'm3', timestamp: '2026-10-25T10:00:01.000Z', message: { role: 'assistant', provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash', content: [], stopReason: 'stop', usage: { totalTokens: 6, cost: { total: -1 } } } },
+    ])
+    const u = ev.filter((e) => e.kind === 'usage')
+    expect(u[0]).toMatchObject({ model: 'commandcode/x' })
+    expect(u[0]).not.toHaveProperty('cost')
+    expect(u[1]).toMatchObject({ model: 'commandcode/deepseek/deepseek-v4.1-flash' })
+    expect(u[1]).not.toHaveProperty('cost')
   })
 })
 

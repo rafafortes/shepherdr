@@ -98,6 +98,218 @@
   their replies cannot be shown. Existing saved choices are kept, but an unsupported choice must be changed before
   launching again. Headless reviewer choices are separate; this does not add or prove support for other reviewers.
 
+## Models
+
+Settings → How Shepherdr runs → **Models** (after Agents) shows every level's agent settings in one table, so a space's
+models can be seen and changed next to the others. Rows: **Everywhere**, this machine, and each of its spaces (the home
+space only when it sets one of these keys itself: its settings are then in Settings → Agents, and it gets its row here).
+Columns, per role: **Tasks**, **Coordinators**, **Reviewer** and **Advisor**, each with its **Primary** and its backups
+(**Backup 1**, and the next as far as any row has one), a **+** that adds the next backup of that row (on the CLI of the one
+before it, as Agents' Add a backup does), and at the end **Max tasks** (`space.maxTasks`) and **Merge train**
+(`merge.train`).
+
+- **A cell** reads in words what its slot runs on: `pi · opencode-go/deepseek-v4.1-flash · high`, `Codex`, `off`. A value
+  the row sets is strong; one it inherits is faint, with where it comes from (Everywhere, this machine, or default). A
+  long model id is cut short on screen, with the whole id in its tooltip.
+- **A cell's popover** (a phone: the same controls under its line) holds the CLI, Model and Effort of the slot, and for
+  Max tasks and Merge train their one control. A change writes the same keys Settings writes (`task.agent`,
+  `task.model`, `task.effort`, `task.fallback2…`, …) at **that row's level**, so a change in a space's row is that
+  space's own. **Reset to inherited** removes the keys the row sets. A CLI change also resets a model or effort the new
+  CLI lacks, to default, so it is never refused for what the screen moved itself. A change of a task or reviewer key
+  asks **Apply to the tasks already created?** when a waiting task would change, as Settings does.
+- **Set for every space…** (a column's ⋯): one slot's CLI, model and effort for every space. Either **each space's own**
+  (written at each space, replacing its value), or **Everywhere, and reset the spaces** (Everywhere gets the value, and
+  this machine and each space lose their own, so every space reads Everywhere's). It closes once written, and the
+  waiting-tasks question comes after it, once for all the spaces it reaches.
+- **Copy this space's models to…** (a space's ⋯): every slot of the four roles, with its backups, written at the level
+  of each chosen space, where the space doesn't already set the same value. Max tasks and Merge train are not copied.
+- Everything here is the same settings as in Agents, How tasks work and Space: nothing new is stored, and a value a
+  table writes is the value Settings shows for that level. The table reads every level at once (`models-matrix`, a
+  read action; the summary phase reads the same table).
+- Only this machine's levels are shown. Another machine's models are on that machine's Settings page.
+
+### Summary
+
+Under the table (on a phone, under the cards) is the **Summary**: where the work runs, per provider and per model, and what
+the providers have been doing. Its table reads Provider, Quota, Run-outs, Used, Configured and now, left to right, and fits
+a 1280 to 1440 px window without sideways scroll (the Provider column stays in view if it must scroll). It is read from the same settings as the table, plus what runs and waits now and the usage
+of this machine's agents (`usage.json` in Shepherdr's home, read from the agents' logs, never from another session folder).
+
+- **Per provider**: a row with its share of the tokens in the last 24 h and 7 d (a thin bar each), its **models** under it
+  (`models-summary`, a read action). A provider is `opencode-go`, `commandcode`, `spark`… (pi's model ids carry it), `anthropic`
+  for Claude Code and `openai` for Codex. A local server (spark, radeon, avell, dell) has no quota: it is marked local.
+- **Configured, and now**: how many role slots point at it, as primaries or backups (its roles, and its spaces, in the
+  tooltip), and what runs on it now: live agents (working ones counted apart), tasks waiting to start on it, and tasks
+  waiting to be reviewed by it.
+- **Used**: the tokens and calls of the last 5 h, 24 h and 7 d, one line each ("5 h 237k · 12": tokens, then calls; the
+  full words and pi's estimated cost are in the line's tooltip). The windows are whole hours: the hour a window starts in
+  counts whole, so "5 h" is 5 to 6 hours.
+- **Run-outs**: how many a provider had in the last 7 days, the last one (its reason, when, and its reset when the provider
+  gave one), and whether it is **out right now**: until its known reset, or until its return watch sees the primary back, or
+  until a call of it goes through after the run-out. A reset that has passed says nothing of now.
+- **Quota**: each provider's quota windows, read as [Quotas](#quotas) says: each window that has not refilled, with its share
+  used and a thin bar, when it refills in this machine's time, where the figure came from and how old it is (read 7 min
+  ago), an estimate's tag, a failed read's reason (the figure stays the last good one), and the hint that asks for a key
+  (Command Code's opens Secrets). A provider with no read and no figure shows —. Refresh quotas sits above the table.
+
+**Warnings** come first, each with what to do in words, and a **Change…** that opens the cell it names (a setting change), or
+**Hide**. Hide keeps it off the list for this browser session only (it is back in a new one). The rules:
+
+- a role whose **primary and every backup** sit on providers that are out right now (a risk);
+- every role of a space on **one cloud provider**, with no backup on another (a note; a local server is not warned about, as it has no quota);
+- a backup on the **same model** as its primary on a cloud provider: when the primary runs out, the backup does too (a note);
+- a provider that **ran out twice in 7 days** (a note);
+- a window of a provider **at or over its warning share** (`quota.alertAt`) that has not refilled: what is left, when it
+  refills, and the two cells that use the provider most, the top one under Change… (a note; a risk at 100 %);
+- **several working agents on one local model**: counted, since Shepherdr sets no limit for a local model yet (a note).
+
+**What is an estimate.** The tokens and the calls are what the logs say each model call used. pi's cost is its own catalog
+estimate for each call, shown as "≈ $… estimate": it is never a bill, and a provider whose logs carry no cost shows none.
+
+**What is kept, and for how long.** Each call is counted once, however often its log is read (a resumed session copies the
+calls before it into its new file, and those are not counted again). The first read after the update reads every log of
+Shepherdr's agents from its start (the backfill, once: until it is done the summary says so). Calls are kept 35 days, run-outs
+60 days. A run-out alert, below, is the only thing that is sent.
+
+**Run-outs and alerts.** A turn a provider cut off because its allowance or its credit is used up (a "usage limit", a "resets
+…" time, or a 402 "Insufficient account funds") is a **run-out**: it is kept with its time and model, and the agent's
+backup takes over as before. The first one of a provider that was fine before alerts you once: the title says "OpenCode Go
+ran out", the body names the chat it cut off and the reason; the others while it is still out do not. A reset the provider gives as an
+ISO time is shown in this machine's time, with its zone name.
+
+### Profiles
+
+A **profile** is a named snapshot of the models of this machine's levels: Everywhere, this machine and each space (the home
+space too), every role's CLI, model and effort, backups included. Saved with limits, it also holds Max tasks and Merge
+train. Each key keeps its own value at each level, and **not set here** where a level sets nothing, so applying a profile
+restores exactly what was saved. Nothing else is copied: the rest of Settings is left as it is.
+
+The bar above the table names the profile in force: the one the settings match, or **Custom** once they match none. Its
+menu applies a profile, saves the current settings as a new one, undoes the last apply, and renames or deletes profiles
+(Manage profiles). `profiles.json` in Shepherdr's home keeps them (not in any repository); a worker keeps none, the main
+machine does.
+
+- **Apply** shows what it would change first, level by level (`Tasks · Primary · Agent: pi → Codex`, `not set → 4`), what
+  would hold it back, and what it leaves out. It writes the difference through the same check as Settings, **all of it or
+  nothing**: a value a level refuses (a model its CLI no longer has, say) stops the whole apply, nothing is written, and the
+  preview says which. A half-applied profile would be a night with a day's CLI, so it is never written. Re-save the profile
+  to fix it.
+- **A space added since the save** is left as it is; **a space removed** is skipped, and the preview names it.
+- **Waiting tasks.** When a task or reviewer setting changes, the question **Apply to the tasks already created?** follows
+  once, for the spaces it reaches (as for a change in a table cell). On the command line, `--apply-waiting` answers it; without
+  it the line says how many would change.
+- **Undo.** Before each apply, the values it changes are kept as an undo point (the last five). **Undo last apply** puts
+  them back, where they still read as the apply left them: a setting changed since is left as it is, and the undo says so.
+- **Save over a name** asks first. A name is one line, at most 40 characters, not `Custom`.
+
+For example, a night setup for the local model, and a day setup for the cloud ones:
+
+```sh
+shepherdr profile save day                  # by day: the cloud models, backups on
+# tonight, in Settings → Models or with shepherdr set: tasks on the local Spark model, no backups, a lower cap
+shepherdr profile save night --limits       # the models and Max tasks / Merge train
+shepherdr profile apply night --apply-waiting
+# in the morning
+shepherdr profile apply day --apply-waiting
+shepherdr profile list                      # which one is in force, and the undo point
+shepherdr profile preview night             # what applying it would change now
+```
+
+`shepherdr profile show <name>` says what a profile sets, at each level; `rename <name> <new-name>` (quote a name with spaces)
+and `delete <name>` keep the list tidy; `undo` does what the screen's undo does.
+
+#### Schedules
+
+A profile can apply itself at a time: a **schedule** is a rule (every day at 22:00, on weekdays at 8:00, on some days) and
+the profile it applies. Each profile may have several. The rules are the ones Autopilot's heartbeat and automations use: a
+time rule in the time zone Settings sets (time.zone), written as an RRULE or as "once 2026-11-20 9:00". Shepherdr keeps them
+on the profile, in `profiles.json`.
+
+- **Manage profiles** (the bar's menu) lists each profile's schedules in words, with its next and last run: **Change**
+  (days, time, waiting tasks, on), **Turn off** or **Turn on**, **Remove** (asked first), and **Add a schedule…**. The bar
+  says what comes next under the profile in force: "Next: night at 22:00, then day at 08:00".
+- **Also the waiting tasks** (off by default). Off: the apply changes the settings, and only new tasks take them. On: the
+  tasks already created that have not started (queued, To do, scheduled) take the profile's task and reviewer settings
+  when the schedule applies, exactly as the apply-to-waiting question would make them, without asking.
+- **It applies like a manual apply.** The same all-or-nothing check, the same undo point (Undo last apply puts it back), and
+  the same skipped and added spaces. A refused setting stops it, and nothing is written.
+- **Where it runs.** On the main machine only: a worker keeps no profiles and applies none. Shepherdr checks every minute.
+- **Where the note goes.** Each run leaves a card in the home space's chat: "Applied night, due Today 22:00: 3 settings
+  changed. Undo last apply puts them back." A refused apply also sends one alert, "night was not applied", so it is seen
+  without opening the chat: one per refused run, never one every minute.
+- **A time it was off for.** When Shepherdr starts, a rule that came due while it was off applies its latest due time, once,
+  and the card says it was due while Shepherdr was not running. Earlier times it missed are not applied, nor applied
+  one by one: a burst of profiles after a night off is never what the schedule meant. The one left out is named in the card.
+- **Two rules at the same time.** When two are due in the same minute, the one defined later wins (a new rule counts as
+  defined when it was made, or when its rule or its on switch last changed). The other is left out, and the card says so.
+  Shepherdr does not refuse overlapping rules when they are saved: two profiles at 22:00 are a mistake the card points out.
+- **A refused apply is not retried in a loop.** It is reported once, with what was refused, and its next due time tries
+  again. A rule switched off, or one switched on again, is not caught up: it counts from when it came back.
+
+For example, the night and day setups from above, switched by the clock:
+
+```sh
+shepherdr profile schedule night "daily 22:00" --waiting   # tonight's setup at 22:00, the waiting tasks too
+shepherdr profile schedule day "daily 8:00" --waiting      # the cloud models again at 08:00
+shepherdr profile schedules                                # both, numbered, with their next runs
+shepherdr profile schedule-off night 1                     # one is kept, not applied
+shepherdr profile unschedule day 1                         # removed; the profile stays
+```
+
+The rule words are `daily 22:00`, `weekdays 8:00`, `weekends 9:30`, `mon,fri 16:00`, `once 2026-11-20 9:00`, or an RRULE
+(`FREQ=DAILY;BYHOUR=22;BYMINUTE=0`). A profile with one schedule takes `schedule-off night` with no number; with more, the
+number from `shepherdr profile schedules`. With the two above, the card comes at 22:00 each day with the night setup, and
+at 08:00 with the day one, and the bar says which of them is next.
+
+## Quotas
+
+Settings → Models shows the **Quotas** section above the summary (it is not a page of its own): a switch for each quota read,
+and the share at which Shepherdr warns. Everywhere only. Each read runs on the main machine; a worker shows that it reads
+nothing here.
+
+- **Claude Code** (`quota.claude`, on by default): Claude Code's own `/usage`, in one short `claude -p /usage` run (every
+  ten minutes, and at start). The run is **sealed by bubblewrap** (`bwrap`): the whole disk read-only, a throwaway `/tmp`, so
+  nothing it does can write your settings or your login. Without bubblewrap nothing is read, and the cell says so: install it
+  with `sudo apt install bubblewrap`. A login that ends within the hour is **not read** (a sealed run cannot save a renewed
+  login): the next Claude Code run renews it, and the read waits for that. Only the percentages and the reset times are kept,
+  never the output or the login. Its windows: **5 h** (the current session) and **Week** (the week, all models, or a model's
+  own week when Claude Code gives one). Its reset words are UTC and shown in this machine's time. A Claude Code that is not
+  installed or not signed in says so.
+- **Command Code** (`quota.commandcode`, on by default, read only where its key is): its account's windows and credits. The
+  key is **`COMMANDCODE_API_KEY`**, added in Settings → Secrets (Everywhere). Without it nothing is requested, and the cell says
+  "Add COMMANDCODE_API_KEY in Settings → Secrets to read Command Code's quota", with a button to that page. The key goes to
+  Command Code's API as a bearer token and nowhere else: it is in no reason, figure, alert or log. The read is the account
+  check and the credits, with a 15 s limit for the whole read; a part the API leaves out is left out, never shown as zero.
+  The read follows the MIT package `pi-commandcode-provider` (Copyright (c) 2025 Pat Woz), credited in its code.
+- **OpenCode Go** (`quota.opencodeGo`, on by default): an **estimate only**. OpenCode does not tell its quota, so nothing is
+  read. Shepherdr's own ledger gives the tokens and pi's cost of each window (the last 5 h and the week), and where the ledger
+  holds run-outs, a **learned limit**: what the window before each run-out held when OpenCode Go ran out (the latest three
+  shown, "ran out at ~980k tokens · ≈ $0.42 est. in 5 h on Wed 3:14 PM"). The lowest learned limit is the cap, and the
+  current window's use is a share of it, tagged **estimate**. No run-out yet: the usage alone, with no share. It is worked out
+  on each look and needs no call to anyone.
+- **Refresh quotas** reads each provider that is on, now, at most **once a minute per provider**. Otherwise each read runs every
+  ten minutes by itself.
+- **A failed read keeps the last good figure**, with its age, and says why ("Last read failed 3 min ago: Claude Code is not
+  signed in."). A hint (no bubblewrap, no key) says what to add and is not a failure. A read that stops on its own is said
+  as "The read stopped unexpectedly."
+- **Warn when a provider is at** (`quota.alertAt`, 50 to 95 %, or off, 80 % by default): a window at or over that share
+  alerts **once**, to the home chat, with what is left and when it refills ("Claude Code is at 84%" · "5 h window: 16% left,
+  and it refills Fri 3:00 PM."). It alerts again only after that window has refilled (its refill time has passed or a new
+  window is over the share), or after it fell under the share. The same window is in the summary's warnings. Off: no alert
+  and no warning here; a run-out still alerts.
+- **Local models** (spark, radeon, avell, dell) have no quota: none is read.
+
+The figures and what alerted are kept in `usage.json` in Shepherdr's home, so a restart shows the last figure and does not
+alert twice.
+
+```sh
+shepherdr set quota.claude off          # no Claude Code read (its figure stays as it was)
+shepherdr set quota.commandcode off     # no Command Code read, even with the key
+shepherdr set quota.opencodeGo off      # no OpenCode Go estimate
+shepherdr set quota.alertAt 80%         # warn at 80 %, the default
+shepherdr set quota.alertAt off         # only a run-out alerts
+```
+
 ## Backup agents
 
 Settings → Agents shows each role's backups under the role's own rows, in a Backups sub-block (indented, under its

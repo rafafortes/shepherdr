@@ -126,6 +126,8 @@ const PAIRS: Record<PairName, Pair> = {
 export const chainNames = (c: Chain): PairName[] => [FIRST_BACKUP[c], ...EXTRA.map((n) => `${c}${n}` as ExtraName)]
 /** a chain's pairs with their keys, Backup 1 first */
 export const chainPairs = (c: Chain) => chainNames(c).map((name) => ({ name, ...PAIRS[name] }))
+/** a role's pairs as the Settings matrix has them: its primary first, then its backups, Backup 1 first */
+export const rolePairs = (c: Chain) => [{ name: c as PairName, ...PAIRS[c] }, ...chainPairs(c)]
 const chainKeys = (c: Chain) => chainNames(c).map((n) => PAIRS[n].cli)
 /** the backup reviewers' CLI keys: off, or one of the CLIs Shepherdr runs headless */
 const REVIEWER_BACKUP_KEYS = chainKeys('reviewer')
@@ -236,6 +238,8 @@ const agentRows = (group: string, role: string, cli: string[], model: string, ef
 ]
 
 /** the Settings page of Autopilot's heartbeat */
+/** the Settings section of the quota reads and the warning share: drawn on Settings → Models, not as a page */
+export const QUOTAS = 'Quotas'
 export const AUTOPILOT = 'Autopilot'
 
 /** settings from before review was on or off and waiting for GitHub's checks a way to merge: as they are now */
@@ -363,6 +367,20 @@ export const CATALOG: Section[] = [
       // idle, tell me only says so in their chats. A probe is one tiny request of one CLI, never beside work on that model.
       // It applies to every backup above, so it sits under a group of its own, named for what it does
       { group: 'Back to the primary', label: 'When the primary is back', key: 'backup.watchReturn', value: 'go back', options: ['go back', 'tell me', 'off'], hint: 'Applies to every backup above. Asks the primary model now and then whether it answers again. Go back: each agent still on a backup starts again on it once idle, never mid-turn. Tell me: only says so in their chats. Off: never asks.' },
+    ],
+  },
+  {
+    // the quota reads (plan-limits.ts, command-code-quota.ts, quota-estimate.ts, quotas.ts) and the share at which Shepherdr
+    // warns (quota.alertAt, 4b). Not a page of its own: the Models page draws these rows above its summary (QuotaSettings).
+    // Everywhere only. A run-out alerts whatever the warning share is set to
+    name: QUOTAS,
+    levels: ['all'],
+    about: "What Shepherdr reads of each provider's quota, and when it warns. Shown on Settings → Models, above the summary.",
+    rows: [
+      { label: 'Claude Code', key: 'quota.claude', value: 'on', options: ['on', 'off'], hint: "Claude Code's own /usage, read in a sealed run that changes nothing (needs bubblewrap). Off: no read." },
+      { label: 'Command Code', key: 'quota.commandcode', value: 'on', options: ['on', 'off'], hint: 'Command Code\'s own account API, with the key COMMANDCODE_API_KEY from Secrets. Off, or no key: no read.' },
+      { label: 'OpenCode Go (estimate)', key: 'quota.opencodeGo', value: 'on', options: ['on', 'off'], hint: "Not read from OpenCode: an estimate from Shepherdr's own ledger, with the lowest limit its run-outs show. Off: no estimate." },
+      { label: 'Warn when a provider is at', key: 'quota.alertAt', value: '80%', num: { min: 50, max: 95, unit: '%', off: true }, hint: 'Once a window of a provider reaches this share of its quota, one alert; again once it has refilled. Off: only a run-out alerts.' },
     ],
   },
   {
@@ -499,6 +517,9 @@ export function agentRow(r: Row, get: (key: string) => string, picksOfKind: (kin
 
 const ROWS = CATALOG.flatMap((s) => s.rows)
 const KEYS = ROWS.map((r) => r.key)
+
+/** the choices a setting offers, as its row of Settings has them (undefined for a free value or an unknown key) */
+export const optionsOf = (key: string): string[] | undefined => ROWS.find((r) => r.key === key)?.options
 
 export function defaultOf(key: string) {
   return ROWS.find((r) => r.key === key)?.value
@@ -641,8 +662,13 @@ export class Settings {
   }
 
   /** the picks a role's model rows lead with: this machine's, or none for a world of its own (the demo's) */
-  private picksAt(kind: string) {
+  picksAt(kind: string) {
     return this.seed ? NO_PICKS : picksOf(kind)
+  }
+
+  /** a copy of every level's values, to try writes on (a dry run, profiles.ts): it never reaches this one or the file */
+  copy(): Settings {
+    return new Settings(structuredClone(this.d))
   }
 
   /** the Everywhere level, as the main machine hands it to the others */

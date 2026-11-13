@@ -2,6 +2,7 @@
 // reads response_item messages (user and assistant), the request_user_input tools, event_msg turn starts and ends, and
 // its steps: each item it logs once over (event_msg item_completed: a command, a patch, a tool), and while one runs the
 // call that runs it. Its subagents start and end there too (SubAgentActivity); their own steps are in their own log.
+import { basename } from 'node:path'
 import { words } from '../../../shared/activity.ts'
 import { codexCall, codexItem } from './steps.ts'
 import type { CliQuestionItem, LogEvent, Reader } from './types.ts'
@@ -30,6 +31,8 @@ interface FileState {
   calls: Set<string>
   /** it logs its items once over: a call only stands in for them while it runs */
   items: boolean
+  /** the model its turns run on (turn_context): what each call's usage is of */
+  model?: string
 }
 
 const parseLine = (text: string): Json => {
@@ -112,6 +115,7 @@ export class CodexReader implements Reader {
 
       if (l.type === 'turn_context') {
         const effort = p.effort ?? p.reasoning_effort ?? p.collaboration_mode?.settings?.reasoning_effort
+        if (typeof p.model === 'string' && p.model !== 'default') s.model = p.model
         out.push({ kind: 'runtime', file, replace: true, id: `runtime-${offset}`, at: t, runtime: {
           source: 'session', at: t,
           ...(typeof p.model === 'string' && p.model !== 'default' ? { model: p.model } : {}),
@@ -173,7 +177,8 @@ export class CodexReader implements Reader {
         out.push({ kind: 'step', id: String(it.id ?? `i${offset}`), at: typeof p.started_at_ms === 'number' ? p.started_at_ms : end, step, ...said, end, out: { file, offset } })
       } else if (l.type === 'event_msg' && p.type === 'token_count') {
         const tokens = p.info?.last_token_usage?.total_tokens
-        if (typeof tokens === 'number' && tokens > 0) out.push({ kind: 'usage', id: `usage-${offset}`, at: t, tokens })
+        // the id names the file too: a session's offsets alone repeat across the files of one chat
+        if (typeof tokens === 'number' && tokens > 0) out.push({ kind: 'usage', id: `usage-${basename(file)}-${offset}`, at: t, tokens, ...(s.model ? { model: s.model } : {}) })
       } else if (l.type === 'event_msg' && p.type === 'task_started') {
         out.push({ kind: 'turn-start', id: `start-${p.turn_id ?? offset}`, at: t })
       } else if (l.type === 'event_msg' && (p.type === 'task_complete' || p.type === 'turn_aborted')) {

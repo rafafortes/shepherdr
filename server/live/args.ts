@@ -8,7 +8,7 @@ export interface Parsed {
   flags: Set<string>
 }
 
-const FLAGS = new Set(['ordinary', 'other', 'multi', 'json', 'project-coordinator', 'off', 'help', 'force', 'archived', 'machine', 'later', 'save', 'all', 'yes', 'priority', 'apply-waiting'])
+const FLAGS = new Set(['ordinary', 'other', 'multi', 'json', 'project-coordinator', 'off', 'help', 'force', 'archived', 'machine', 'later', 'save', 'all', 'yes', 'priority', 'apply-waiting', 'limits'])
 
 export function parseArgs(args: string[]): Parsed {
   const words: string[] = []
@@ -259,6 +259,33 @@ Settings and automations
                                                  voice) as they are where it runs (its space, else this machine),
                                                  each with where it comes from, and the lines every brief ends with
   shepherdr models [CLI]                         each CLI's models and the effort levels each takes, as the CLI says
+  shepherdr profile list                         the saved profiles (named settings of this machine, see Models), which one is in
+                                                 force, and the undo point
+  shepherdr profile save <name> [--limits] [--force]
+                                                 keeps the current models (every role's CLI, model and effort, backups
+                                                 included) of Everywhere, this machine and each space as a profile; --limits
+                                                 keeps Max tasks and Merge train too; a saved name is replaced with --force
+  shepherdr profile show <name>                  what a profile sets, at each level (what it doesn't set is left out)
+  shepherdr profile preview <name>               what applying it would change now, and what would hold it back
+  shepherdr profile apply <name> [--apply-waiting]
+                                                 writes the difference, all of it or nothing (a refused setting stops it, and
+                                                 says why); an undo point is kept first. A space added since the save is left
+                                                 as it is; a space removed is skipped. --apply-waiting also moves the waiting
+                                                 tasks its task or reviewer settings reach (as shepherdr set --apply-waiting)
+  shepherdr profile undo [--apply-waiting]       puts back what the last apply changed, where it still reads as the apply left
+                                                 it; the last five apply points are kept
+  shepherdr profile rename <name> <new-name>     (quote a name with spaces)
+  shepherdr profile delete <name>                the saved values go; the undo points that name it stay until used
+  shepherdr profile schedule <name> "<rule>" [--waiting]
+                                                 applies the profile when the rule comes due, in the time zone of Settings:
+                                                 "daily 22:00", "weekdays 8:00", "mon,fri 16:00", "once 2026-11-20 9:00", or an
+                                                 RRULE. --waiting also moves the waiting tasks its task and reviewer settings
+                                                 reach, as --apply-waiting does. Only this machine runs schedules; one that
+                                                 came due while Shepherdr was off applies its latest due time, once, on start
+  shepherdr profile schedules                    each profile's schedules, numbered, with their next and last runs
+  shepherdr profile schedule-on <name> [<n>]     switch a schedule on or off (<n> from profile schedules; needed when a profile
+  shepherdr profile schedule-off <name> [<n>]    has more than one)
+  shepherdr profile unschedule <name> [<n>]      removes a schedule; the profile stays
   shepherdr set <key> <value> [--machine | --space NAME] [--apply-waiting]
   shepherdr unset <key> [--machine | --space NAME]
                                                  defaults are set Everywhere (none), for this machine (--machine)
