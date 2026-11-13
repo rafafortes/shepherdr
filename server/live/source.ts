@@ -72,6 +72,10 @@ import { Monitor, meters, procLines, summary, topProcs, type HealthEvent, type K
 import { has, PLUGIN_KEY, pluginSection, setPluginOn } from '../plugins.ts'
 import { TOOK_OVER, type TookOver } from '../../scripts/take-over.ts'
 
+/** a coordinator that waits for room under the caps (source.ts capWaits): its start, or its takeover after the cut-off `r`
+ *  on the model `on` */
+type CapWait = { kind: 'start'; at: number } | { kind: 'takeover'; at: number; on: string; r: Retry }
+
 /** a start that never became a turn, in one line for the chat and the task: which CLI, and the reason it stopped on */
 const startWords = (kind: string | undefined, why: string) => `${kind ? (CLI_NAME[kind] ?? kind) : 'Its agent'} couldn't start: ${why}`
 
@@ -1588,14 +1592,20 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const start = !o.as && !rec ? this.coordinatorStart(id, set) : undefined
     // a blocked model (0 allowed) starts nothing, not even by hand: a coordinator whose every model is blocked does not start
     if (start && 'blocked' in start) return this.refuseBlocked(id, start.blocked, (x) => chainWords((x as { h: Harness }).h))
+    // every model of its chain full or out: it waits for room, and starts once one has it (coordinatorsWaiting)
+    if (start && 'full' in start) return this.refuseFull(id, start.full, (x) => chainWords((x as { h: Harness }).h), true)
     if (start) this.startedByCaps(id, start)
     const h = o.as ?? (start ? start.h : rec ? undefined : set)
-    // a start by hand on a blocked model, or a relaunch of one that is not running, is refused too (an agent that runs keeps
-    // running: ensure returns it as it is)
+    // a start by hand, a takeover, or a relaunch of one that is not running, on a model that is blocked or full is refused
+    // too (an agent that runs keeps running: ensure returns it as it is, and adds no run)
     const space = this.spaceKey(id) ?? ''
     const key = h ? keyOf(h.kind, h.model) : rec ? keyOf(rec.kind, rec.model) : undefined
     const startsNew = !!o.as || (!start && this.agents.status(id) === 'gone')
-    if (key !== undefined && startsNew && this.engine.blockedKey(space, key)) return this.refuseBlocked(id, this.engine.blockedWait(space, key), () => (h ? harnessWords(fitHarness(h)) : key))
+    const hold = key !== undefined && startsNew ? this.engine.capHold(space, key, id) : undefined
+    const named = () => (h ? harnessWords(fitHarness(h)) : key!)
+    if (hold && allBlocked(hold)) return this.refuseBlocked(id, hold, named)
+    // full: one started by hand (or taken over) hears why; one started again by itself waits for room
+    if (hold) return this.refuseFull(id, hold, named, !o.as)
     const spec: Spec = {
       key: id,
       name: c.name,
@@ -1609,24 +1619,27 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       system: coordinatorPrompt({ role: this.roleOf(id), name: c.label, path: c.path, machine: NAME, chat: id }, this.places.mode(id)) + '\n\n' + privatePrompt(this.settings.instructions('coordinator', this.spaceKey(id))),
       env: agentEnv(id, ROOT),
     }
-    return o.restart ? this.agents.restart(spec, o.restart) : this.agents.ensure(spec)
+    const go = o.restart ? this.agents.restart(spec, o.restart) : this.agents.ensure(spec)
+    // a new run counts on its model from now on, before the agent shows it at work there (engine.runs)
+    if (key === undefined || !(startsNew || start)) return go
+    this.engine.claim(id, { key, space, role: 'coordinator', id })
+    return go.finally(() => this.engine.unclaim(id))
   }
 
   /**
    * A coordinator's first start: the first harness of its chain (its Settings' primary, then its backups in order) with
-   * room under the caps and not out (choose.ts). When none has room, the primary starts anyway: a coordinator never waits,
-   * and its chat says it runs past the cap (startedByCaps). `step`: its place in the chain, 0 on the primary
+   * room under the caps and not out (choose.ts). When none has room it does not start: it waits for one, as a task does,
+   * and starts once one has room (coordinatorsWaiting). `step`: its place in the chain, 0 on the primary
    */
-  private coordinatorStart(id: string, set: Harness): { h: Harness; step: number; skipped: Blocked<unknown>[]; past: boolean } | { blocked: Blocked<unknown>[] } {
+  private coordinatorStart(id: string, set: Harness): { h: Harness; step: number; skipped: Blocked<unknown>[] } | { blocked: Blocked<unknown>[] } | { full: Blocked<unknown>[] } {
     const space = this.spaceKey(id) ?? ''
     const items = [{ step: 0, h: set }, ...this.engine.backupsFor('coordinator', space || undefined).flatMap((p) => (p.to ? [{ step: p.n, h: backupHarness(p.to, set) }] : []))]
-    const c = this.engine.decide(space, this.engine.chainOptions(items))
-    if ('harness' in c) return { h: c.harness.h, step: c.harness.step, skipped: c.skipped, past: false }
+    const c = this.engine.decide(space, this.engine.chainOptions(items), id)
+    if ('harness' in c) return { h: c.harness.h, step: c.harness.step, skipped: c.skipped }
     // every model blocked (0 allowed): none starts, and the chat says why
     if (blockedOnly(c)) return { blocked: c.wait }
-    // every one left is full or out: the first that is not blocked starts anyway (a coordinator never waits)
-    const first = items.find((i) => !this.engine.blockedKey(space, keyOf(i.h.kind, i.h.model)))!
-    return { h: first.h, step: first.step, skipped: c.wait, past: c.wait.some((b) => b.why === 'full') }
+    // every one left is full or out: it waits for room, never past a cap or onto a provider that is out
+    return { full: c.wait }
   }
 
   /** a start refused because its model is blocked (0 allowed): the chat gets a card that says why and what to change, and
@@ -1638,18 +1651,25 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return Promise.reject(new Error(text))
   }
 
-  /** a first start the caps decided: on a backup (its card says why, and it counts as a takeover for its later backups), or
-   *  past the cap on its primary (its card says so) */
-  private startedByCaps(id: string, start: { h: Harness; step: number; skipped: Blocked<unknown>[]; past: boolean }) {
+  /** a start refused because every model it may use is full or out: the chat gets a card that says which, and the start
+   *  fails with the same words. `waits`: it waits for room and starts once one has it (coordinatorsWaiting), with one card
+   *  for the whole wait; else (a start by hand) it is only refused */
+  private refuseFull(id: string, wait: Blocked<unknown>[], words: (h: unknown) => string, waits: boolean): Promise<never> {
+    const shown = waitWords(wait, { words, shown: (s) => this.places.shownName(s) })
+    const text = waits ? `Not started yet: every model it may use is full or out: ${shown}. It starts once one has room.` : this.engine.capRefusal('Not started', wait as Blocked<null>[])
+    if (!waits || !this.capWaits.has(id)) this.capNote(id, text)
+    if (waits) this.waitForRoom(id, { kind: 'start', at: Date.now() })
+    return Promise.reject(new Error(text))
+  }
+
+  /** a first start the caps put on a backup: its card says why, and it counts as a takeover for its later backups */
+  private startedByCaps(id: string, start: { h: Harness; step: number; skipped: Blocked<unknown>[] }) {
     const first = start.skipped[0]
+    if (start.step <= 0) return
     // a start on a backup, by the caps, is marked: the way back takes it to its primary once that has room
-    if (start.step > 0) {
-      this.capStarts.set(id, { step: start.step })
-      this.saveCapStarts()
-    }
-    // every model full or out: it starts on the first one that is not blocked, past the cap, and says so
-    if (start.past && first) this.capNote(id, `Runs past the cap: ${capWords(first, (x) => this.places.shownName(x))}. Every model it may use is full, so it starts on ${harnessWords(fitHarness(start.h))} anyway.`)
-    else if (start.step > 0) this.capNote(id, `Started on ${harnessWords(fitHarness(start.h))}${first ? `: ${capWords(first, (x) => this.places.shownName(x))}` : ''}`)
+    this.capStarts.set(id, { step: start.step })
+    this.saveCapStarts()
+    this.capNote(id, `Started on ${harnessWords(fitHarness(start.h))}${first ? `: ${capWords(first, (x) => this.places.shownName(x))}` : ''}`)
   }
 
   /** a card in a chat, for a start the caps decided */
@@ -1667,6 +1687,58 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** the caps' marks as the file keeps them (capStarts) */
   private saveCapStarts() {
     writeJson('cap-starts.json', Object.fromEntries(this.capStarts))
+  }
+
+  /** the coordinators that wait for room under the caps (place id → why): a start whose every model is full or out, or a
+   *  takeover whose every backup is (`on`: the model it was cut off on; `r`: that cut-off). The way back's pass starts each,
+   *  or takes it over, once one has room (coordinatorsWaiting). Kept in cap-waits.json, so a restart of Shepherdr keeps them */
+  private capWaits = new Map<string, CapWait>(Object.entries(readJson<Record<string, CapWait>>('cap-waits.json', {})))
+
+  /** a coordinator waits for room from now (capWaits) */
+  private waitForRoom(id: string, w: CapWait) {
+    this.capWaits.set(id, w)
+    writeJson('cap-waits.json', Object.fromEntries(this.capWaits))
+  }
+
+  /** a coordinator's wait for room is over (it started, it took over, or something else moved it) */
+  private dropWait(id: string) {
+    if (this.capWaits.delete(id)) writeJson('cap-waits.json', Object.fromEntries(this.capWaits))
+  }
+
+  /**
+   * Each coordinator that waits for room (capWaits) starts, or takes its backup over, once one has room: a start once the
+   * first of its chain with room is there (or, kept from before, once its own model has room), with what was written to it
+   * meanwhile; a takeover the way a cut-off takes one (coordinatorCantGoOn). A wait is over once its place is gone, its
+   * coordinator is at work again, or it runs on another model than the one it was cut off on (restarted by hand, or the
+   * way back took it to its primary).
+   */
+  private async coordinatorsWaiting() {
+    for (const [id, w] of [...this.capWaits]) {
+      const rec = this.agents.record(id)
+      const st = this.agents.status(id)
+      const moved = w.kind === 'takeover' ? !rec || keyOf(rec.kind, rec.model) !== w.on : !!rec && st !== 'gone'
+      if (!this.places.coordinator(id) || st === 'working' || moved) {
+        this.dropWait(id)
+        continue
+      }
+      const space = this.spaceKey(id) ?? ''
+      if (w.kind === 'takeover') {
+        const c = this.coordinatorBackup(id)
+        if (!c.chosen || 'wait' in c.chosen) continue
+        this.dropWait(id)
+        await this.coordinatorCantGoOn(id, w.r).catch((e) => console.error(`shepherdr: ${id}'s backup couldn't take over: ${(e as Error).message}`))
+        continue
+      }
+      const room = rec ? !this.engine.capHold(space, keyOf(rec.kind, rec.model), id) : !('full' in this.coordinatorStart(id, this.settings.harness('coordinator', space || undefined)))
+      if (!room) continue
+      this.dropWait(id)
+      try {
+        await this.coordinator(id)
+        void this.agents.deliver(id)
+      } catch (e) {
+        console.error(`shepherdr: couldn't start ${id}'s agent: ${(e as Error).message}`)
+      }
+    }
   }
 
   /** whether a model key's provider is out now, and until when: its run-outs (the Summary reads them the same way, for every
@@ -1756,6 +1828,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       return from === h.kind ? hidden(resumedLine(words, back), 'restart') : hidden(restartLine({ from: them, to: words, back: !!back, room: back === 'room', chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
     }
     await this.coordinator(id, { as: h, restart: first })
+    // it runs again: whatever it waited for under the caps is over
+    this.dropWait(id)
     const card = `${backup ? 'takeover' : 'restart'}:${id}:${Date.now()}`
     const text = backup ? backupCardWords({ from: them, to: CLI_NAME[h.kind] ?? h.kind, words, same: from === h.kind, why: backup }) : back ? wentBackCardWords(words, back) : `Restarted on ${words}`
     this.chats.post(id, { id: card, card: { id: card, restart: true, text } })
@@ -1853,6 +1927,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (x.t && ended(x.t)) throw new Error(`${x.t.id} is Done already: it has no agent to restart.`)
     if (x.t && !x.t.worktree) throw new Error(`${x.t.id} hasn't started yet: it starts on what its brief says.`)
     if (!this.engine.installed(h.kind)) throw new Error(`${CLI_NAME[h.kind] ?? h.kind} isn't installed on this machine.`)
+    // a model full or blocked under the caps is refused before anything is saved or stopped (its own run aside)
+    const hold = this.engine.capHold(x.space ?? '', keyOf(h.kind, h.model), x.t ? x.t.id : key)
+    if (hold) throw new Error(this.engine.capRefusal('Not restarted', hold))
     if (save) {
       const at = x.space ? { space: x.space } : ('machine' as const)
       for (const [k, v] of [['agent', CLI_NAME[h.kind] ?? h.kind], ['model', h.model ?? 'default'], ['effort', h.effort ?? 'default']])
@@ -1915,13 +1992,38 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       }
       const why = await this.agents.wrong(key)
       if (why === null) continue
-      if (!why) this.revivals.fine(key, now)
+      if (!why) {
+        this.revivals.fine(key, now)
+        this.reviveHeld.delete(key)
+      } else if (this.reviveWaits(key)) this.revivals.skip(key)
       else {
+        this.reviveHeld.delete(key)
         const go = this.revivals.seen(key, now)
         if (go === 'go') void this.relaunch(key, why)
         else if (go === 'give-up') this.gaveUp(key, why)
       }
     }
+  }
+
+  /** the stopped agents that wait for room on their model before they are started again (reviveWaits): one card each */
+  private reviveHeld = new Set<string>()
+
+  /**
+   * An agent that stopped, whose model is full now: it is started again once a slot is free, and the wait counts no try
+   * (revive), so it is never given up for it. Its chat says so once. A blocked model is tried as before (refused, so the
+   * human hears it); an agent that runs (one on outdated settings) frees its own run as it starts again.
+   */
+  private reviveWaits(key: string) {
+    const r = this.agents.record(key)!
+    const t = key.includes('/') ? this.engine.task(key.split('/')[0]) : undefined
+    const space = t ? (this.places.space(t.project)?.name ?? '') : (this.spaceKey(key) ?? '')
+    const hold = this.engine.capHold(space, keyOf(r.kind, r.model), t ? t.id : key)
+    if (!hold || allBlocked(hold)) return false
+    if (!this.reviveHeld.has(key)) {
+      this.reviveHeld.add(key)
+      this.capNote(key, `Its agent stopped, and starts again once its model has room: ${this.engine.capHoldWords(hold)}.`)
+    }
+    return true
   }
 
   /**
@@ -2072,25 +2174,18 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   private async coordinatorCantGoOn(key: string, r: Retry) {
     const rec = this.agents.record(key)
     const from = rec?.kind
-    const chain = from ? this.engine.backupsFor('coordinator', this.spaceKey(key)) : []
     const took = this.agents.tookOver(key)
-    // the backups after the one it is on (all of them while none took over, and a start the caps put on one counts as
-    // a takeover): each once, until you restart it yourself, so a chain that keeps failing waits for the human, never a loop
-    const at = Math.max(took ? (took.step ?? 1) : 0, this.capStarts.get(key)?.step ?? 0)
-    const later = chain.filter((p) => p.n > at)
-    // the first of them with room under the caps and not out (choose.ts); when every one is full or out, the first anyway: a
-    // coordinator must not stall, and its chat says it runs past the cap
-    const candidates = later.filter((p) => p.to)
-    const sp = this.spaceKey(key) ?? ''
-    const onBackup = (p: BackupPlan) => backupHarness(p.to!, { kind: rec?.kind ?? '', model: rec?.model, effort: rec?.effort })
-    // a backup on a model that is blocked (0 allowed) is never started, not even past the cap: those are left out
-    const free = candidates.filter((p) => !this.engine.blockedKey(sp, keyOf(onBackup(p).kind, onBackup(p).model)))
-    // the first of them with room under the caps and not out (choose.ts); when every one is full or out, the first free one
-    // anyway: a coordinator must not stall, and its chat says it runs past the cap
-    const chosen = rec && free.length ? this.engine.decide(sp, this.engine.chainOptions(free.map((p) => ({ plan: p, h: onBackup(p) }))), key) : undefined
-    const plan = chosen && 'harness' in chosen ? chosen.harness.plan : (free[0] ?? later.find((p) => !p.to) ?? {})
-    if (chosen && 'wait' in chosen && free[0]) this.capNote(key, `Its backup goes in past the cap, as none has room: ${capWords(chosen.wait[0]!, (x) => this.places.shownName(x))}.`)
+    const { chain, later, candidates, free, chosen } = this.coordinatorBackup(key)
     const backups = chain.flatMap((p) => (p.to ? [p.to] : []))
+    // every backup it may take is full or out: it waits for one with room, never past a cap or onto a provider that is out,
+    // and takes it over once one has room (coordinatorsWaiting); the way back may take it to its primary first
+    if (rec && chosen && 'wait' in chosen) {
+      const shown = waitWords(chosen.wait, { words: (x) => chainWords(x.h), shown: (s) => this.places.shownName(s) })
+      this.waitForRoom(key, { kind: 'takeover', at: Date.now(), on: keyOf(rec.kind, rec.model), r })
+      this.coordinatorStuck(key, r, backups)
+      return this.cutOff(key, r, `its backup waits for room: ${shown}; it takes over once one has room`)
+    }
+    const plan: Partial<BackupPlan> = chosen && 'harness' in chosen ? chosen.harness.plan : (later.find((p) => !p.to) ?? {})
     if (plan.to && from && rec) {
       const why = r.reason.charAt(0).toLowerCase() + r.reason.slice(1)
       // the coordinators' Model and Effort, or else the model and effort it ran on: a model the backup's CLI lacks is dropped
@@ -2121,6 +2216,27 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const also = took ? `its backup agent (${CLI_NAME[took.to] ?? took.to}) already went in once${chain.length > 1 ? ', the last of its backups' : ''}` : candidates.length && !free.length ? 'no backup agent took over: every backup is blocked (0 allowed)' : plan.why ? `no backup agent took over: ${plan.why}` : undefined
     this.coordinatorStuck(key, r, backups)
     this.cutOff(key, r, also)
+  }
+
+  /**
+   * The backups a coordinator cut off now may take, and the one it would: the backups after the one it is on (all of them
+   * while none took over, and a start the caps put on one counts as a takeover), each once until you restart it yourself, so
+   * a chain that keeps failing waits for the human, never a loop; of those, the ones not blocked (0 allowed: never started);
+   * and the first of them with room under the caps and not out (choose.ts), or the wait when none has (none chosen while it
+   * has no agent, or no backup is left)
+   */
+  private coordinatorBackup(key: string) {
+    const rec = this.agents.record(key)
+    const chain = rec ? this.engine.backupsFor('coordinator', this.spaceKey(key)) : []
+    const took = this.agents.tookOver(key)
+    const at = Math.max(took ? (took.step ?? 1) : 0, this.capStarts.get(key)?.step ?? 0)
+    const later = chain.filter((p) => p.n > at)
+    const candidates = later.filter((p) => p.to)
+    const sp = this.spaceKey(key) ?? ''
+    const onBackup = (p: BackupPlan) => backupHarness(p.to!, { kind: rec?.kind ?? '', model: rec?.model, effort: rec?.effort })
+    const free = candidates.filter((p) => !this.engine.blockedKey(sp, keyOf(onBackup(p).kind, onBackup(p).model)))
+    const chosen = rec && free.length ? this.engine.decide(sp, this.engine.chainOptions(free.map((p) => ({ plan: p, h: onBackup(p) }))), key) : undefined
+    return { chain, later, candidates, free, chosen }
   }
 
   /** a coordinator cut off for good waits for the human: started again once its provider answers (return.ts) */
@@ -2263,6 +2379,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.refreshGoingBack()
     // a start the caps put on a backup goes back to its primary once that has room (backFromCap)
     await this.backFromCap()
+    // a coordinator that waits for room starts, or takes its backup over, once one has room
+    await this.coordinatorsWaiting()
     // a wait over (its models answer, or its cut-off tasks went back): the queue goes on, or waits on with its reason
     this.engine.release()
   }
@@ -2414,6 +2532,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           continue
         }
         back = { key: keyOf(o.primary.kind, o.primary.model), space, role: 'task', id: t.id }
+      } else if (this.engine.capHold(this.spaceKey(c.key) ?? '', keyOf(o.primary.kind, o.primary.model), c.key)) {
+        // a coordinator goes back only while its primary has room and is not blocked: else it waits for a later pass, as a
+        // task does (never tried, so never given up for that)
+        continue
       }
       tried.push(c.key)
       // started again by the way back: never taken in again for the same cut-off or takeover

@@ -113,7 +113,7 @@
       it is held with `every model it may use is blocked (0 allowed): change its agent or a limit`, its row reads `Blocked: every
       model it may use is 0 allowed`, and it starts only once a limit changes (Settings are read again at each look and at each
       change). Full ones and blocked ones together: it waits for the full ones only.
-    - **Coordinators.** A blocked model is never used, not even past a full cap. A coordinator whose every model is blocked does
+    - **Coordinators.** A blocked model is never used, not even while the others are full. A coordinator whose every model is blocked does
       not start: its chat gets the card `Not started: every model it may use is blocked (0 allowed): change its agent or a limit
       in Settings → Limits.`, and a relaunch or a start by hand on a blocked model is refused the same way. A takeover skips the
       blocked backups; with every backup blocked it does not take over.
@@ -137,9 +137,12 @@
     mix. A first in line passes neither.
   - **What counts.** The agents of this machine that hold a slot now (its working, starting or waiting-on-you tasks, as the
     machine's own limit counts them), each on the model its agent runs (its live agent's model, else the model it starts
-    on), this machine's coordinators that are working on a model right now, and the advisor's headless runs while each one
+    on); every task's agent at work right now, whatever its task's step (one that reported and was given more to do, one
+    rebasing its merge, one queued after another), until its task is done; this machine's coordinators that are working on
+    a model right now; a start or a switch on its way, on the model it goes to, from the moment it is chosen (so two
+    starts, or two cut-offs, a moment apart never both take the last slot); and the advisor's headless runs while each one
     runs (a slot of the model it runs on, held for the whole run and given back when it ends, even on a failure). A merge
-    waiting in line or in its gate holds no slot, so it counts nothing. A round's reviewer counts while the round runs: a
+    waiting in line or in its gate holds no slot, so it counts nothing (its agent waits on Shepherdr, not on its model). A round's reviewer counts while the round runs: a
     lease from `shepherdr review <id>` until `shepherdr review <id> --done` (see [tasks](tasks.md)). **Not counted yet:**
     any request that comes from outside Shepherdr (another app or a script on the same server): Shepherdr cannot see
     those, so a server that serves them too needs a lower cap than its own work alone would.
@@ -151,11 +154,24 @@
     back), it goes back to its primary, as the way back does. Every harness full or out: the task is held, its row naming
     the chain (its row, short: `Waiting: spark 1/1 · openai out`; the row's title and its card name each harness in words, `Codex (default)`, `pi · spark/…`), and release starts it on the first that frees.
     A cut-off task's takeover skips the full backups, and waits for one with room the same way.
-  - **Coordinators are never held.** A coordinator's first start takes the first harness of its chain with room. When every
-    one is full or out it starts on its primary anyway, and its chat says it runs past the cap. A coordinator's backup takeover
-    takes the first backup with room, or the first one past the cap (its chat says so). Working coordinators count toward
-    the caps while they work. A coordinator a cap started on a backup goes back to its primary the same way as a task (kept
-    in memory: a restart of Shepherdr leaves it where it is until it is restarted).
+  - **Coordinators wait like tasks.** A coordinator's first start takes the first harness of its chain with room. When every
+    one is full or out it does not start, never past a cap and never on a provider that is out: its chat says `Not started
+    yet: every model it may use is full or out: … It starts once one has room.` (one card for the whole wait), what is
+    written to it meanwhile waits, and the way back's pass (every minute) starts it on the first of its chain with room. A
+    coordinator's backup takeover takes the first backup with room; when every one is full or out it waits the same way
+    (the cut-off card says `Its backup waits for room: …; it takes over once one has room`), and the pass takes the backup
+    over once one has room, unless its primary answered first and the way back took it there, or you restarted it. Those
+    waits are kept in `~/.shepherdr/cap-waits.json`, so a restart of Shepherdr keeps them. Working coordinators count toward
+    the caps while they work. A coordinator a cap started on a backup goes back to its primary the same way as a task.
+  - **Restarts and relaunches.** Every new run of an agent obeys the caps, not only a first start: a restart by hand
+    (⋯ → Restart agent…, `shepherdr restart`, `restart --all`) onto a full or blocked model is refused before anything is
+    saved or stopped (`Not restarted: spark is at its limit (4 of 4 at once): wait for a free slot, or pick another
+    model.`), its own run aside (a restart on the model it already runs frees its own slot first). An agent that stopped is
+    started again (the revive loop) once its model has room, the wait counting none of its tries; its chat says so once. One
+    that is gone and gets a message is not started on a full model: what was written waits for it. The way back takes an
+    agent to its primary only while the primary has room, a coordinator as a task, and leaves it for a later pass otherwise.
+    A task whose agent is there already (a queued one's go, an answer) is judged on the model its agent runs, not its
+    chain's first.
   - **Where it is read.** Models → Summary shows each provider and model row as `2 of 4 at once` (its cap, set here),
     `2 at once · no cap`, `1 at once · no cap of its own` (the provider's entry holds it), or `blocked · 0 allowed` (0); its
     cell sets the cap at this machine, Everywhere, or This space (a list of the spaces), with the three choices above. A space

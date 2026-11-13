@@ -99,19 +99,22 @@ describe('a coordinator never starts on a blocked model', () => {
     expect(cards(id).at(-1)).toContain('(blocked · 0 allowed)')
   })
 
-  test('a blocked model is never used past a full cap either: the backup that runs past the cap is the free one', async () => {
-    // the primary is blocked, the backup is full (one codex run of this machine): the coordinator starts on that backup past
-    // its cap, as a coordinator must not stall, and never on the blocked primary
+  test('a blocked model is never used, not even while the free one is full: the coordinator waits for the free one', async () => {
+    // the primary is blocked, the backup is full (one codex run of this machine): the coordinator does not start, never on
+    // the blocked primary and never past the backup's cap; it waits for room on the backup
     src.settings.set('models.maxAtOnce', `${PI}=0, ${CODEX}=1`, 'machine')
     const busy = await space('blk-coord-busy')
     src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'codex', logs: [], started: Date.now() } as never
     working.add(busy.id)
     const { id } = await space('blk-coord-past')
     await startCoordinator(id)
+    expect(starts.some((s) => s.key === id)).toBe(false)
+    expect(cards(id)).toContain('Not started yet: every model it may use is full or out: Codex (default) (1 of 1 at once). It starts once one has room.')
+    // the backup frees: the way back's pass starts it there, never on the blocked primary, and marks the start on a backup
+    working.delete(busy.id)
+    await src.watchReturns()
     expect(starts.at(-1)).toMatchObject({ key: id, kind: 'codex' })
     expect(starts.some((s) => s.key === id && s.kind === 'pi')).toBe(false)
-    expect(cards(id).some((c) => c.startsWith(`Runs past the cap: ${CODEX} is at its limit (1 of 1 at once)`))).toBe(true)
-    // and the start on the backup is marked, so the way back can take it to its primary later
     expect(readJsonCap(id)).toEqual({ step: 1 })
   })
 
