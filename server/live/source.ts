@@ -1,5 +1,6 @@
 import { taskIdsSection } from './task-ids.ts'
 import { coordinatorRequestIds } from '../../shared/attention.ts'
+import { providerOfKey } from '../../shared/model-caps.ts'
 // The live source: herdr is the truth for agents and their states; the CLIs' own logs are the chats; Shepherdr keeps
 // only what herdr can't tell it (spaces, tasks, modes, cards, settings). Assembled from the base plugins' parts.
 import { execSync } from 'node:child_process'
@@ -1896,6 +1897,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const resuming = new Set<string>()
     /** the spaces whose cut-off tasks wait for a slot of their own cap (space.maxTasks): only their new tasks wait too */
     const cappedResuming = new Set<string>()
+    /** the models (or providers) whose own cap (models.maxAtOnce) holds cut-off tasks: no new task on them takes one first */
+    const cappedModelsResuming = new Set<string>()
     for (const o of this.returns.list()) {
       if (o.back) continue
       const mode = returnMode(this.settings.get('backup.watchReturn', o.space || undefined))
@@ -1941,10 +1944,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         alerted.add(o.role)
         continue
       }
-      const { moved, waiting, capped } = await this.goBack(o, to.chats, now)
+      const { moved, waiting, capped, cappedModels } = await this.goBack(o, to.chats, now)
       // the tasks that wait for a slot go back before any new one takes a slot on this machine (startsWait)
       if (o.role === 'task' && waiting) resuming.add(o.space)
       if (o.role === 'task') for (const space of capped) cappedResuming.add(space)
+      if (o.role === 'task') for (const name of cappedModels) cappedModelsResuming.add(name)
       if (!moved.length) continue
       // one alert per return: the chats that follow on later passes go back quietly, their cards only
       const first = !o.went
@@ -1960,6 +1964,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     this.resuming = resuming
     this.resumingCapped = cappedResuming
+    this.resumingModels = cappedModelsResuming
     this.refreshGoingBack()
     // a wait over (its models answer, or its cut-off tasks went back): the queue goes on, or waits on with its reason
     this.engine.release()
@@ -2052,6 +2057,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   private resuming = new Set<string>()
   /** the spaces whose cut-off tasks wait for a slot of their own cap: no new task of those spaces takes one before them */
   private resumingCapped = new Set<string>()
+  /** the models and providers whose cap (models.maxAtOnce) holds cut-off tasks that wait to go back to work */
+  private resumingModels = new Set<string>()
 
   /**
    * Each chat still on a backup, or cut off for good, whose agent is idle now starts again on its primary, which answers
@@ -2068,6 +2075,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // the spaces whose own cap (space.maxTasks) is full for their cut-off tasks, and how many more of each may start
     const capped = new Set<string>()
     const spaceLeft = new Map<string, number>()
+    // and the caps of the model they go back to (models.maxAtOnce): the models whose cap is full, and what is left of each
+    const cappedModels = new Set<string>()
+    const modelLeft = new Map<string, number>()
     for (const c of chats) {
       const st = this.agents.status(c.key)
       // between turns, with nothing of its own still running: what a restart would cut short waits. One whose pane is
@@ -2078,6 +2088,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const r = this.retries.get(c.key)
       if ((r && !r.over) || this.chats.openQuestion(c.key) || this.chats.openCard(c.key) || this.chats.startMenuUp(c.key)) continue
       let cap: { space: string; left: number } | undefined
+      let models: ReturnType<Engine['modelCaps']> = []
       if (c.task) {
         const t = this.engine.task(c.task)
         // a pause is yours to end (a restart would end it)
@@ -2095,6 +2106,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
             continue
           }
         }
+        // the caps of the model it goes back to (models.maxAtOnce): a full one waits for a slot of its own, as a space does
+        models = this.engine.modelCaps(t, keyOf(o.primary.kind, o.primary.model))
+        const full = models.find((m) => (modelLeft.get(m.name) ?? m.max - m.working) <= 0)
+        if (full) {
+          cappedModels.add(full.name)
+          continue
+        }
       }
       tried.push(c.key)
       // started again by the way back: never taken in again for the same cut-off or takeover
@@ -2109,13 +2127,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           slots--
           this.engine.noteStart(now)
           if (cap) spaceLeft.set(cap.space, cap.left - 1)
+          for (const m of models) modelLeft.set(m.name, (modelLeft.get(m.name) ?? m.max - m.working) - 1)
         }
       } catch (e) {
         console.error(`shepherdr: couldn't start ${c.key} again on its primary model: ${(e as Error).message}`)
       }
     }
     this.returns.moved(o.role, o.space, tried)
-    return { moved, waiting, capped }
+    return { moved, waiting, capped, cappedModels }
   }
 
   /** an agent of this machine works on that model now (whatever its effort), and nothing cut it off: it answers */
@@ -2135,6 +2154,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const space = this.places.space(t.project)?.name
     if (space === undefined) return undefined
     if (this.resumingCapped.has(space)) return 'resume'
+    // a model or provider whose cap (models.maxAtOnce) holds cut-off tasks: its new tasks wait for them too
+    const key = this.engine.modelOfTask(t).toLowerCase()
+    if (this.resumingModels.has(key) || this.resumingModels.has(providerOfKey(key))) return 'resume'
     const o = this.returns.get('task', space)
     if (!o || o.back || returnMode(this.settings.get('backup.watchReturn', space)) === 'off') return undefined
     return o.allOut && !o.ok ? 'models' : undefined
@@ -2453,12 +2475,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   private heldWords(why: HeldWhy, t: TaskRec) {
     const cap = this.engine.spaceCap(t)
+    const model = this.engine.blockingCap(t)
     return {
       slots: `all ${this.settings.machine().max} slots are taken`,
       machine: 'the machine is busy',
       models: 'every model of its space ran out, so it would only be cut off too, until the primary answers again',
       resume: 'the tasks that were cut off go back to work first',
       space: cap ? `${cap.shown}'s own limit of ${cap.max} tasks is taken` : 'its space is at its own limit',
+      model: model ? `${model.name}'s own limit of ${model.max} at once is taken` : 'its model is at its own limit',
     }[why]
   }
 
@@ -4342,7 +4366,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const on = [CLI_NAME[t.agent!.kind] ?? t.agent!.kind, t.agent!.model, t.agent!.effort && `${t.agent!.effort} effort`].filter(Boolean).join(', ')
       if (t.after?.length) return `Added ${t.id}: ${t.title}, queued after ${t.after.join(', ')}. It has no agent, worktree or herdr space while it waits: once ${t.after.length === 1 ? 'that task is' : 'they are all'} done and the machine has room, its agent (${on}) starts on the brief. A message to it (shepherdr task tell ${t.id} …) starts its agent sooner, still queued.`
       if (p.flags.has('later')) return `Added ${t.id}: ${t.title}, for later. Its agent (${on}) reads the brief now and waits for a go (shepherdr task tell ${t.id} "go").`
-      if (t.held) return `Added ${t.id}: ${t.title}, held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : t.held.why === 'space' ? this.heldWords('space', t) : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and its agent (${on}) starts by itself when there's room, oldest first.`
+      if (t.held) return `Added ${t.id}: ${t.title}, held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : t.held.why === 'space' || t.held.why === 'model' ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and its agent (${on}) starts by itself when there's room, oldest first.`
       return `Added ${t.id}: ${t.title}. Its agent (${on}) starts on the brief now.${after.length ? ' What it would wait for is done already.' : ''}`
     }
     if (sub === 'list' || !sub) {
@@ -4430,7 +4454,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           return `${t.id} waits for ${r.queued.join(', ')} once its time comes (${starts}).`
         }
         if (r.queued.length) return `${t.id} is queued after ${r.queued.join(', ')}. ${ctx.chat === `${t.id}/Agent` ? 'Stop at a clean point, reply in one line and end your turn: Shepherdr tells you to go.' : 'Its agent is told to wait; Shepherdr tells it to go once they are done.'}`
-        if (r.went) return t.held ? `${t.id} waits for no task now, but is held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : t.held.why === 'space' ? this.heldWords('space', t) : 'the machine is busy'} (${this.workingLine()}). Its agent gets the go when there's room.` : `${t.id} waits for nothing more: its agent is told to go.`
+        if (r.went) return t.held ? `${t.id} waits for no task now, but is held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : t.held.why === 'space' || t.held.why === 'model' ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). Its agent gets the go when there's room.` : `${t.id} waits for nothing more: its agent is told to go.`
         return none ? `${t.id} was not queued.` : `${t.id} isn't queued: what it would wait for is done already.`
       }
       case 'stop': {

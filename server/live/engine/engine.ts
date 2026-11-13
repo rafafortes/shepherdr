@@ -33,6 +33,8 @@ import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
 import { findModel, knowsModels } from '../models.ts'
+import { keyOf } from '../models-summary.ts'
+import { capFor, providerOfKey, type MaxEntry } from '../../../shared/model-caps.ts'
 import { fitHarness, harnessWords, recentChat, sameHarness } from '../restart.ts'
 import * as G from './git.ts'
 import { Worktrees, type HerdrSpaces, type Made } from './worktrees.ts'
@@ -447,12 +449,20 @@ const trainLog = (line: string) => console.error(`shepherdr: ${line}`)
 /** up to three paths, then how many more: `a.md, b.md, c.md and 2 more` */
 const pathList = (files: string[]) => (files.length > 3 ? `${files.slice(0, 3).join(', ')} and ${files.length - 3} more` : files.join(', '))
 
-/** the line a held task shows */
 /** why a task waits to start: its slots are taken, the machine is busy, every model of its space ran out (a start
  *  would only be cut off as well), its tasks that were cut off go back to work first (source.ts, return.ts), or its
  *  space's own cap (space.maxTasks, inside the machine's) is full: another space's task may still start */
-export type HeldWhy = 'slots' | 'machine' | 'models' | 'resume' | 'space'
-export const HELD = { slots: 'Waiting for a free slot', machine: 'Waiting for the machine', models: 'Waiting: every model ran out', resume: 'Waiting: cut-off tasks go back to work first', space: 'Waiting for a free slot of its space' } as const
+export type HeldWhy = 'slots' | 'machine' | 'models' | 'resume' | 'space' | 'model'
+export const HELD = { slots: 'Waiting for a free slot', machine: 'Waiting for the machine', models: 'Waiting: every model ran out', resume: 'Waiting: cut-off tasks go back to work first', space: 'Waiting for a free slot of its space', model: 'Waiting for a free slot of its model' } as const
+
+/** one entry of models.maxAtOnce that caps the model a task starts on: the entry, the name the held line and the card
+ *  give it, how many agents of this machine it counts now (the task itself not among them) and the most it allows */
+export interface ModelCap {
+  entry: MaxEntry
+  name: string
+  working: number
+  max: number
+}
 
 /** queued tasks are first looked at once herdr has told which agents are alive: a go sent before would start a second */
 const RECHECK_FIRST = 15_000
@@ -1362,9 +1372,52 @@ export class Engine extends Emitter<Events> {
     if (m && (!m.herdr || (m.busy && !t?.priority))) return { why: 'machine' }
     const w = t ? this.startsWait?.(t) : undefined
     if (w && !(w === 'resume' && t?.priority)) return { why: w }
-    // a first in line passes neither: its space's cap is as much its slots as the machine's are
+    // a first in line passes neither: its space's cap is as much its slots as the machine's are, nor its model's
     const cap = t ? this.spaceCap(t) : undefined
-    return cap && cap.working >= cap.max ? { why: 'space' } : {}
+    if (cap && cap.working >= cap.max) return { why: 'space' }
+    return t && this.blockingCap(t) ? { why: 'model' } : {}
+  }
+
+  /** the model a task's agent runs on, as its usage is kept (keyOf): its live agent's model, else the one it starts on
+   *  (its own agent, or Settings' task agent) */
+  modelOfTask(t: TaskRec): string {
+    const key = this.key(t)
+    const rec = this.agents.record(key)
+    if (rec && this.agents.status(key) !== 'gone') return keyOf(rec.kind, rec.model)
+    const h = t.agent ?? this.settings.harness('task', this.nameOf(t))
+    return keyOf(h.kind, h.model)
+  }
+
+  /** the agents of this machine that hold a slot or work now, by model key (models.maxAtOnce counts them): the tasks that
+   *  hold a slot, each on the model it runs, and the coordinators working right now (never held, but they use the
+   *  capacity). Advisor and reviewer runs are not counted; another machine's agents are not seen here at all */
+  runsOn(except?: TaskRec): string[] {
+    const keys: string[] = []
+    for (const t of this.tasks) if (t !== except && this.busy(t)) keys.push(this.modelOfTask(t))
+    for (const [key, r] of Object.entries(this.agents.records)) if (!key.includes('/') && this.agents.status(key) === 'working') keys.push(keyOf(r.kind, r.model))
+    return keys
+  }
+
+  /** the entries of models.maxAtOnce that cap the model a task starts on, each with what it counts now: a model's own
+   *  entry counts that model's agents, a provider's entry every agent of that provider (a server's total, as the DGX Spark
+   *  takes four requests at once in all). Both apply: a model's own entry sets its limit, and the provider's still holds
+   *  its total; nothing when neither is set */
+  modelCaps(t: TaskRec, key = this.modelOfTask(t)): ModelCap[] {
+    const entries = this.settings.maxAtOnce()
+    const runs = this.runsOn(t).map((k) => k.toLowerCase())
+    const provider = providerOfKey(key.toLowerCase())
+    const own = capFor(entries, key)
+    const out: ModelCap[] = []
+    // a model's own entry (its name is the model key) counts its own agents; the provider's counts all of them
+    if (own && own.pattern === key.toLowerCase()) out.push({ entry: own, name: own.pattern, working: runs.filter((k) => k === own.pattern).length, max: own.max })
+    const byProvider = entries.find((e) => e.pattern === provider && !e.pattern.includes('/'))
+    if (byProvider) out.push({ entry: byProvider, name: byProvider.pattern, working: runs.filter((k) => providerOfKey(k) === provider).length, max: byProvider.max })
+    return out
+  }
+
+  /** the entry that holds a task on its model now: the first of its caps that is full (none when it has room) */
+  blockingCap(t: TaskRec, key?: string): ModelCap | undefined {
+    return this.modelCaps(t, key).find((c) => c.working >= c.max)
   }
 
   /** a task's space's own cap on this machine (space.maxTasks), with how many of that space's tasks work now (busy, as
@@ -1379,6 +1432,10 @@ export class Engine extends Emitter<Events> {
 
   /** a held task's line in its row: a task held by its space's cap names the space, as it shows */
   private heldLabel(t: TaskRec) {
+    if (t.held!.why === 'model') {
+      const c = this.blockingCap(t)
+      if (c) return `Waiting for a free slot of ${c.name} (${c.working} of ${c.max} at once)`
+    }
     const cap = t.held!.why === 'space' ? this.spaceCap(t) : undefined
     return cap ? `Waiting for a free slot of ${cap.shown}` : HELD[t.held!.why]
   }
@@ -1423,12 +1480,14 @@ export class Engine extends Emitter<Events> {
     t.todo = undefined
     const id = `held:${t.id}:${Date.now()}`
     const cap = why === 'space' ? this.spaceCap(t) : undefined
+    const model = why === 'model' ? this.blockingCap(t) : undefined
     const words = {
       slots: `waiting for a free slot (${this.slotsWords(l.max)})`,
       machine: 'waiting for the machine: it is busy',
       models: 'waiting: every model of this space ran out, so a start would only be cut off too',
       resume: 'waiting: the tasks that were cut off go back to work first',
       space: `waiting for a free slot of ${cap?.shown ?? 'its space'} (${cap?.working ?? 0} of ${cap?.max ?? 0} of its tasks working)`,
+      model: `waiting for a free slot of ${model?.name ?? 'its model'} (${model?.working ?? 0} of ${model?.max ?? 0} at once)`,
     }[why]
     this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: words } })
     this.save()
@@ -1452,8 +1511,8 @@ export class Engine extends Emitter<Events> {
     try {
       for (const t of this.heldTasks()) {
         const r = this.room(t)
-        // its own space waits for its models, or its cap is full: another space's may still start
-        if (r.why === 'models' || r.why === 'resume' || r.why === 'space') {
+        // its own space waits for its models, or its cap is full, or its model's: another space's or model's may still start
+        if (r.why === 'models' || r.why === 'resume' || r.why === 'space' || r.why === 'model') {
           if (t.held!.why !== r.why) {
             t.held!.why = r.why
             this.save()
@@ -1471,7 +1530,7 @@ export class Engine extends Emitter<Events> {
         // one first in line doesn't wait for the spacing either
         if (!t.priority && !this.startsNow(now)) return
         this.lastStart = now
-        const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work', space: 'a slot of its space is free' }[t.held!.why]
+        const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work', space: 'a slot of its space is free', model: 'a slot of its model is free' }[t.held!.why]
         if (t.held!.go) this.go(t, t.held!.go, `${t.held!.goWhy ?? why} · ${why}`, t.held!.plain)
         else {
           t.held = undefined
