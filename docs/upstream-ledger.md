@@ -301,6 +301,16 @@ one row's model; its Settings are one level at a time. So the table of every lev
 backups, and its bulk "set for every space" and "copy to" actions, is ours: `models-matrix.ts` and `ModelsPage.tsx`,
 Settings → Models. See [settings](settings.md#models).
 
+## Not from upstream: named settings profiles, built here
+
+Checked 2026-11-13 against upstream `main` (3.x line) and `v2.0` (fetched that day): `git grep` for profile, preset and
+snapshot in both lines' code, `git log -i --grep` for profile and preset, and the public issues and pull requests (`gh issue
+list` and `gh pr list` with "settings profile preset"). The one hit is upstream's agent profiles (3.x, `f92ab4aa`, #51, and
+`5a817ed2`, #78): named launch setups a task picks by name (its CLI, its permissions, which owner runs it), not a snapshot of
+Settings at each level. Upstream's Autopilot presets are trigger shortcuts. So a profile, a named copy of every level's
+models and the limits, applied in one step with a preview, all-or-nothing writes and undo, is ours: `profiles.ts`, the
+profiles bar on Settings → Models, and `shepherdr profile`. See [settings](settings.md#profiles).
+
 ## Not from upstream: a Settings change applied to the tasks already waiting, built here
 
 Checked 2026-11-12 against upstream `main` (`ef3be074`, 3.1.32 line) and `v2.0` (`ebb17d58`): code, history, issues and

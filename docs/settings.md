@@ -128,6 +128,47 @@ before it, as Agents' Add a backup does), and at the end **Max tasks** (`space.m
   read action; the summary phase reads the same table).
 - Only this machine's levels are shown. Another machine's models are on that machine's Settings page.
 
+### Profiles
+
+A **profile** is a named snapshot of the models of this machine's levels: Everywhere, this machine and each space (the home
+space too), every role's CLI, model and effort, backups included. Saved with limits, it also holds Max tasks and Merge
+train. Each key keeps its own value at each level, and **not set here** where a level sets nothing, so applying a profile
+restores exactly what was saved. Nothing else is copied: the rest of Settings is left as it is.
+
+The bar above the table names the profile in force: the one the settings match, or **Custom** once they match none. Its
+menu applies a profile, saves the current settings as a new one, undoes the last apply, and renames or deletes profiles
+(Manage profiles). `profiles.json` in Shepherdr's home keeps them (not in any repository); a worker keeps none, the main
+machine does.
+
+- **Apply** shows what it would change first, level by level (`Tasks · Primary · Agent: pi → Codex`, `not set → 4`), what
+  would hold it back, and what it leaves out. It writes the difference through the same check as Settings, **all of it or
+  nothing**: a value a level refuses (a model its CLI no longer has, say) stops the whole apply, nothing is written, and the
+  preview says which. A half-applied profile would be a night with a day's CLI, so it is never written. Re-save the profile
+  to fix it.
+- **A space added since the save** is left as it is; **a space removed** is skipped, and the preview names it.
+- **Waiting tasks.** When a task or reviewer setting changes, the question **Apply to the tasks already created?** follows
+  once, for the spaces it reaches (as for a change in a table cell). On the command line, `--apply-waiting` answers it; without
+  it the line says how many would change.
+- **Undo.** Before each apply, the values it changes are kept as an undo point (the last five). **Undo last apply** puts
+  them back, where they still read as the apply left them: a setting changed since is left as it is, and the undo says so.
+- **Save over a name** asks first. A name is one line, at most 40 characters, not `Custom`.
+
+For example, a night setup for the local model, and a day setup for the cloud ones:
+
+```sh
+shepherdr profile save day                  # by day: the cloud models, backups on
+# tonight, in Settings → Models or with shepherdr set: tasks on the local Spark model, no backups, a lower cap
+shepherdr profile save night --limits       # the models and Max tasks / Merge train
+shepherdr profile apply night --apply-waiting
+# in the morning
+shepherdr profile apply day --apply-waiting
+shepherdr profile list                      # which one is in force, and the undo point
+shepherdr profile preview night             # what applying it would change now
+```
+
+`shepherdr profile show <name>` says what a profile sets, at each level; `rename <name> <new-name>` (quote a name with spaces)
+and `delete <name>` keep the list tidy; `undo` does what the screen's undo does.
+
 ## Backup agents
 
 Settings → Agents shows each role's backups under the role's own rows, in a Backups sub-block (indented, under its
