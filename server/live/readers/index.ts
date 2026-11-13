@@ -2,7 +2,9 @@
 // last one.
 import { closeSync, openSync, readSync, statSync } from 'node:fs'
 import { basename } from 'node:path'
+import { mirrorConversation } from '../agy.ts'
 import { mirrorSession } from '../opencode.ts'
+import { AgyReader } from './agy.ts'
 import { ClaudeReader } from './claude.ts'
 import { CodexReader } from './codex.ts'
 import { OpencodeReader } from './opencode.ts'
@@ -10,13 +12,14 @@ import { PiReader } from './pi.ts'
 import { LOG_FINDERS } from './find.ts'
 import type { LogEvent, Reader } from './types.ts'
 
-export { ClaudeReader, CodexReader, OpencodeReader, PiReader }
+export { AgyReader, ClaudeReader, CodexReader, OpencodeReader, PiReader }
 
 const READERS: Record<string, () => Reader> = {
   claude: () => new ClaudeReader(),
   codex: () => new CodexReader(),
   pi: () => new PiReader(),
   opencode: () => new OpencodeReader(),
+  agy: () => new AgyReader(),
 }
 
 /** Kinds with both runtime log discovery and a transcript reader. */
@@ -138,12 +141,13 @@ export class LogTail {
     return this.read()
   }
 
-  /** OpenCode's log is a copy of its session (opencode.ts mirrorSession): copied again before each read, so the rows
-   *  OpenCode wrote since are read too. A failure never breaks the read */
+  /** OpenCode's and agy's logs are copies of their conversations (opencode.ts mirrorSession, agy.ts mirrorConversation):
+   *  copied again before each read, so the steps written since are read too. A failure never breaks the read */
   private refresh() {
-    if (this.reader.cli !== 'opencode') return
+    const id = basename(this.file, '.jsonl')
     try {
-      mirrorSession(basename(this.file, '.jsonl'), this.file)
+      if (this.reader.cli === 'opencode') mirrorSession(id, this.file)
+      else if (this.reader.cli === 'agy') mirrorConversation(id, this.file)
     } catch {}
   }
 

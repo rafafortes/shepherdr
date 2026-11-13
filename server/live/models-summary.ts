@@ -32,7 +32,7 @@ export const titled = (id: string) =>
 /** the model keys each CLI's own list offers on this machine: pi's (scoped by its enabledModels), OpenCode's, and the
  *  catalogs of Claude Code (anthropic) and Codex (openai). A provider that nothing uses yet is listed from these */
 function offeredKeys(): string[] {
-  return ['claude', 'codex', 'pi', 'opencode'].flatMap((kind) => (modelsOf(kind)?.models ?? []).map((m) => keyOf(kind, m.id)))
+  return ['claude', 'codex', 'pi', 'opencode', 'agy'].flatMap((kind) => (modelsOf(kind)?.models ?? []).map((m) => keyOf(kind, m.id)))
 }
 
 /** the model servers with no quota, only shared, so a warning about quota skips them: the operator's own machines, and
@@ -56,6 +56,7 @@ const NAMES: Record<string, string> = {
   dell: 'Dell (local)',
   lmstudio: 'LM Studio (local)',
   ollama: 'Ollama (local)',
+  agy: 'Antigravity',
 }
 
 const TITLE: Record<MatrixRole, string> = { task: 'Tasks', coordinator: 'Coordinators', reviewer: 'Reviewer', advisor: 'Advisor' }
@@ -138,7 +139,7 @@ export function labelOf(key: string): string {
   const model = modelOf(key)
   // a CLI's own default model is not named in its log: the provider's name says which one it is
   if (model === 'unknown') return provider === 'opencode' ? 'OpenCode default' : `${providerName(provider)} default`
-  const kind = provider === 'anthropic' ? 'claude' : provider === 'openai' ? 'codex' : 'pi'
+  const kind = provider === 'anthropic' ? 'claude' : provider === 'openai' ? 'codex' : provider === 'agy' ? 'agy' : 'pi'
   // pi's own list names its models with the provider in front (and OpenCode's do too): under the provider's row, that part
   // is said already. A model Claude Code or Codex names is the CLI's own word; pi's, and OpenCode's, come from their lists
   const label = (kind === 'pi' ? findModel('opencode', key)?.label : undefined) ?? findModel(kind, model)?.label ?? (model || key)

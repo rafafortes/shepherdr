@@ -20,12 +20,16 @@ describe('route.pl: which executables are agent CLIs', () => {
     expect(agentExecutable('pi')).toBe(true)
     expect(agentExecutable('/home/u/.opencode/bin/opencode')).toBe(true)
     expect(agentExecutable('opencode')).toBe(true)
+    expect(agentExecutable('/home/u/.local/bin/agy')).toBe(true)
+    expect(agentExecutable('agy')).toBe(true)
   })
 
   test('other programs are not, and an OpenCode-named path inside another name is not', () => {
     expect(agentExecutable('/usr/bin/bash')).toBe(false)
     expect(agentExecutable('/usr/bin/opencode-helper')).toBe(false)
     expect(agentExecutable('/home/u/opencode/bin/tool')).toBe(false)
+    expect(agentExecutable('/home/u/agy/bin/tool')).toBe(false)
+    expect(agentExecutable('/usr/bin/agy-helper')).toBe(false)
   })
 
   test('npm entry points still count by their package or file name', () => {

@@ -4340,7 +4340,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'profile':
         return this.profileCommand(a1, rest, p)
       case 'models': {
-        const kinds = a1 ? [kindOf(a1)] : ['claude', 'codex', 'pi', 'opencode']
+        const kinds = a1 ? [kindOf(a1)] : ['claude', 'codex', 'pi', 'opencode', 'agy']
         if (!kinds[0]) throw new Error(`No CLI called ${a1}; herdr starts ${CLIS.join(', ')}`)
         return kinds
           .map((k) => {
@@ -5076,7 +5076,7 @@ function fit(p: Parsed, flag: '' | 'reviewer-', kind: string, model?: string): {
   const e = one(p, `${flag}effort`)?.trim().toLowerCase()
   const name = CLI_NAME[kind] ?? kind
   const c = modelsOf(kind)
-  if (((m && m !== 'default') || (e && e !== 'default')) && !c) throw new Error(`Shepherdr passes a model and effort to Claude Code, Codex, pi and OpenCode only; ${name} runs on its own`)
+  if (((m && m !== 'default') || (e && e !== 'default')) && !c) throw new Error(`Shepherdr passes a model and effort to Claude Code, Codex, pi, OpenCode and Antigravity only; ${name} runs on its own`)
   if (m !== undefined && refuse(`task.model`, m)) throw new Error(`--${flag}model ${m}: ${refuse('task.model', m)}`)
   const found = m && m !== 'default' ? findModel(kind, m) : undefined
   if (m && m !== 'default' && knowsModels(kind) && !found) throw new Error(`--${flag}model ${m}: ${name} has no such model. It takes ${c!.models.map((x) => x.id).join(', ')}, or default`)

@@ -40,6 +40,9 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(ending('codex-unauthorized')).toEqual({ passing: false, reason: 'Signed out' })
     expect(ending('codex-model-not-supported')).toEqual({ passing: false, reason: 'Model not available' })
     expect(ending('pi-unknown-provider').passing).toBe(false)
+    // agy's words for a model it does not have: lasting, and the model is the one not available
+    expect(ending('agy-invalid-model-made')).toEqual({ passing: false, reason: 'Model not available' })
+    expect(providerError('gemini-9 is not recognized as a known model')).toEqual({ passing: false, reason: 'Model not available' })
     expect(providerError('Your input exceeds the context window of this model.', 'context_window_exceeded').reason).toBe('Context window full')
     expect(providerError("You've hit your limit · resets 5pm (Europe/Oslo)").reason).toBe('Out of allowance until 5pm')
     expect(providerError('Login expired · Please run /login', 'authentication_failed')).toEqual({ passing: false, reason: 'Signed out' })

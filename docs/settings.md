@@ -199,7 +199,7 @@
   for provisioning and the upgrade steps for already-running agents.
 
 - Interactive task, coordinator and backup chat choices require both runtime log discovery and a chat reader.
-  Settings and Restart offer Claude Code, Codex, pi and OpenCode; other herdr CLIs are refused before a chat launch because
+  Settings and Restart offer Claude Code, Codex, pi, OpenCode and Antigravity; other herdr CLIs are refused before a chat launch because
   their replies cannot be shown. Existing saved choices are kept, but an unsupported choice must be changed before
   launching again. Headless reviewer choices are separate; this does not add or prove support for other reviewers.
 
@@ -244,6 +244,33 @@ It needs OpenCode 2.x.
   `all` (the default, or empty) offers every model OpenCode lists. The others stay usable by id. A model left out of the menus
   still shows in Models → Summary and Limits where it has a cap of its own, is a slot's model, runs now or had usage this week; its provider shows with it.
 
+## Antigravity
+
+Antigravity (`agy`, read against version 1.5.8) is a chat CLI like the others: Settings and Restart offer
+it, and its replies show in the chat. Shepherdr starts it in the agent's herdr pane and reads its conversation store read only.
+
+- **Models and efforts.** `agy models` lists each model with its effort in the id (`gemini-3.8-flash-low`, `claude-opus-5-5-high`).
+  The menus show each base model once (`Gemini 3.8 Flash`) with the efforts its ids have, lowest first; a model with no
+  effort in its id has none. The run takes the full id (`--model gemini-3.8-flash-high`) and never `--effort`, which conflicts
+  with it. A model with no effort set takes its medium variant, else its lowest. Its usage counts under `agy/<base model>`
+  (the same model at any effort is one row). A session with no model says "Antigravity default" in the summary.
+- **How it starts.** `agy` in the agent's folder with its model, and `--dangerously-skip-permissions` unless the role's access
+  is ask (then agy asks itself). The folder is trusted for that session only, through `--settings` (never written to agy's
+  own settings): a new worktree is a folder agy has not seen, and it would otherwise stop on agy's trust screen. The role's instructions travel as the agent's first hidden message. A resumed agent goes
+  back with `--conversation <id>`: never `--continue`, which takes the newest conversation of the whole machine.
+- **The chat.** Each conversation is a database of its own under agy's store (`~/.gemini/antigravity-cli`, read only: nothing is
+  written there). Shepherdr finds the newest conversation of the folder in its summaries and copies the final steps into
+  `<shepherdr home>/agy/<conversation id>.jsonl`, which the chat reads: the human's and the agent's words, each tool call
+  (a shell command with its output), the model and the tokens of each reply, and the errors. A step still running is read
+  once it is over.
+- **Headless runs.** The probe and the advisor run `agy -p <prompt> --model <id> --output-format json --mode plan`, the probe
+  in `<shepherdr home>/agy/headless/`, the advisor in the folder of its work. The answer is JSON (`status`, `response`,
+  `error`): SUCCESS with exit 0 is an answer, anything else is a failed run and its error is said. Their conversations are
+  listed in `<shepherdr home>/agy/headless.json` (the last 200), so the chat never takes one for an agent's.
+- **Not known yet.** The words of an error that cuts a turn off are known only for an invalid model ("invalid model selection",
+  "is not recognized as a known model": a model it does not have, which is not waited out). Other provider errors go through
+  the same word lists as the other CLIs. Its approval prompts are not read from the log: they show on the pane's screen.
+
 ## Models
 
 Settings → How Shepherdr runs → **Models** (after Agents) shows every level's agent settings in one table, so a space's
@@ -285,8 +312,8 @@ of this machine's agents (`usage.json` in Shepherdr's home, read from the agents
 
 - **Per provider**: a row with its share of the tokens in the last 24 h and 7 d (a thin bar each), its **models** under it
   (`models-summary`, a read action). A provider is `opencode-go`, `commandcode`, `spark`… (pi's model ids carry it), `anthropic`
-  for Claude Code and `openai` for Codex; OpenCode's are `opencode` (Zen, free models), `nvidia` and its local servers (see
-  [OpenCode](#opencode)). A local server (spark, radeon, avell, dell, lmstudio, ollama) has no quota: it is marked local.
+  for Claude Code, `openai` for Codex and `agy` for Antigravity (see [Antigravity](#antigravity)); OpenCode's are `opencode`
+  (Zen, free models), `nvidia` and its local servers (see [OpenCode](#opencode)). A local server (spark, radeon, avell, dell, lmstudio, ollama) has no quota: it is marked local.
   Each provider is named as the table names it (`nvidia` is "NVIDIA API", `amd-tokenlab` "AMD TokenLab"; an id with no name
   of its own is title-cased, see [OpenCode](#opencode)).
 - **Every provider a CLI offers.** The table lists each provider that any CLI offers on this machine, read from each CLI's
@@ -644,7 +671,7 @@ nothing to come back to, and is never asked.
   in each space's chat, since each space reviews with its own Settings.
 - **What it never does.** It never writes a setting and never chooses a model: going back is a restart on what Settings
   name. It never asks another machine's models (the record lives in this machine's `returns.json`), never asks a CLI
-  that isn't installed here, never asks one Shepherdr has no silent one-shot for (only Claude Code, Codex, pi and OpenCode have
+  that isn't installed here, never asks one Shepherdr has no silent one-shot for (only Claude Code, Codex, pi, OpenCode and Antigravity have
   one), and it is never part of the takeover's decision.
 
 ## Advisor

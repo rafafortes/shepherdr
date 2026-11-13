@@ -94,14 +94,14 @@ describe.skipIf(!browser)('chat agent choices', () => {
         await settings.getByRole('heading', { name: group, exact: true }).locator('..').getByRole('button', { name: /^Agent:/ }).click()
         const choices = await page.getByRole('menuitemradio').allTextContents()
         // the one it is on leads the list
-        expect(choices.map((v) => v.trim())).toEqual(['Claude Code', 'Codex', 'Pi', 'OpenCode'])
+        expect(choices.map((v) => v.trim())).toEqual(['Claude Code', 'Codex', 'Pi', 'OpenCode', 'Antigravity'])
         await page.keyboard.press('Escape')
       }
       // each role's backup CLI: the tasks' backs up unless set, the coordinators' is off
       const backups = settings.getByRole('group', { name: 'Backups', exact: true })
       for (const [i, choices] of [
-        [0, ['Codex', 'Off', 'Claude Code', 'Pi', 'OpenCode']],
-        [1, ['Off', 'Claude Code', 'Codex', 'Pi', 'OpenCode']],
+        [0, ['Codex', 'Off', 'Claude Code', 'Pi', 'OpenCode', 'Antigravity']],
+        [1, ['Off', 'Claude Code', 'Codex', 'Pi', 'OpenCode', 'Antigravity']],
       ] as const) {
         await backups.nth(i).getByRole('button', { name: /^Backup: / }).click()
         expect((await page.getByRole('menuitemradio').allTextContents()).map((v) => v.trim())).toEqual([...choices])

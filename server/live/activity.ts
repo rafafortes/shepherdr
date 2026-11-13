@@ -201,6 +201,8 @@ export function outputAt(where: OutputAt, id: string): string | undefined {
   } catch {
     return undefined
   }
+  // agy: the output of a tool call the mirror (agy.ts) wrote on its line
+  if (l?.kind === 'tool') return typeof l.output === 'string' ? l.output : undefined
   // Claude Code: the result of that tool call
   const blocks: Json[] = Array.isArray(l?.message?.content) ? l.message.content : []
   const r = blocks.find((b) => b?.type === 'tool_result' && b.tool_use_id === id)
@@ -310,7 +312,7 @@ function headlessLog(h: Headless, own: string[]): string | undefined {
 
 /** what it is in a few words: "codex exec: Review this change…" */
 function headlessTitle(argv: string[]): string {
-  const at = argv.findIndex((a) => /(^|\/)(codex|claude|pi)(\.(js|mjs|cjs))?$/.test(a))
+  const at = argv.findIndex((a) => /(^|\/)(codex|claude|pi|agy)(\.(js|mjs|cjs))?$/.test(a))
   const cli = (argv[at] ?? 'agent').split('/').at(-1)!.replace(/\.(js|mjs|cjs)$/, '')
   const how = cli === 'codex' ? 'exec' : '-p'
   // its prompt: its longest word that is no flag

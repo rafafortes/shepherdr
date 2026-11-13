@@ -102,8 +102,8 @@ describe('visible launch settings and supported restart choices', () => {
 })
 
 test('restart offers readable chat kinds, including when the current agent has no reader', () => {
-  const info = restartInfo({ role: 'task', on: { kind: 'agy' }, want: { kind: 'codex' }, kinds: ['agy', 'gemini', 'cursor', 'claude', 'codex', 'pi'], working: false })
-  expect(info.on.kind).toBe('agy')
-  expect(info.clis.map((c) => c.kind)).toEqual(['claude', 'codex', 'pi'])
-  expect(harnessProblem({ kind: 'agy' })).toContain('Headless review support is separate')
+  const info = restartInfo({ role: 'task', on: { kind: 'cursor' }, want: { kind: 'codex' }, kinds: ['cursor', 'gemini', 'agy', 'claude', 'codex', 'pi'], working: false })
+  expect(info.on.kind).toBe('cursor')
+  expect(info.clis.map((c) => c.kind)).toEqual(['agy', 'claude', 'codex', 'pi'])
+  expect(harnessProblem({ kind: 'cursor' })).toContain('Headless review support is separate')
 })

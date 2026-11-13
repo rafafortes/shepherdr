@@ -162,7 +162,7 @@ export function commandSay(cmd: string): Said {
     case 'ps': case 'pgrep': return said('run', 'Look at what runs')
     case 'jq': return said('run', 'Read some JSON')
     case 'make': return said('run', `Run make${sub ? ` ${sub}` : ''}`)
-    case 'codex': case 'claude': case 'pi': case 'opencode': return said('agent', 'Ask another agent')
+    case 'codex': case 'claude': case 'pi': case 'opencode': case 'agy': return said('agent', 'Ask another agent')
     case 'bun': case 'npm': case 'pnpm': case 'yarn': case 'npx': case 'bunx': {
       if (['install', 'i', 'add', 'ci'].includes(sub)) return said('run', 'Install packages')
       if (sub === 'run') return said('run', /build/.test(args[1] ?? '') ? 'Build it' : `Run ${args[1] ?? 'a script'}`)
@@ -179,7 +179,7 @@ export function commandSay(cmd: string): Said {
 
 /** a command step: the agent's own description where it gave one ("List the open tasks"), else commandSay. A test run
  *  stays one either way, so its outcome shows. */
-function runStep(cmd: unknown, description?: unknown): Said {
+export function runStep(cmd: unknown, description?: unknown): Said {
   const c = commandSay(String(cmd ?? ''))
   const d = short(description, 120)
   if (!d) return c

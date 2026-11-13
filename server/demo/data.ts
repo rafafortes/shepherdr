@@ -237,7 +237,8 @@ export function tasks(): Task[] {
       age: '9d',
       archived: Date.now() - 9 * 86_400_000,
       state: 'Archived · 9d ago',
-      agent: agent('GTM-9', 'Claude Code', 'done', '9d', 'Retry failed enrichments'),
+      // Antigravity's agent (the demo shows one of each CLI): done, so it is not running
+      agent: agent('GTM-9', 'Antigravity', 'done', '9d', 'Retry failed enrichments'),
     },
     {
       id: 'GTM-11',

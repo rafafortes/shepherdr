@@ -365,6 +365,12 @@ types (`provider.quota`, `provider.auth`…) are ours, read from OpenCode's bina
 | --- | --- | --- | --- | --- | --- |
 | **OpenCode as a fourth agent kind** (herdr-projects 1.2.27's session-first launch, our branch `feat/opencode-agent`) | A task, coordinator or backup can run on OpenCode 2: the session is created through `opencode api --standalone session.create` with its model, variant, folder and ask permissions, the role's instructions go in as its `shepherdr` instruction entry, and the TUI starts with `--standalone --session <id>` (`--auto` unless the access is ask). The chat reads a mirror of the session's final rows (`<home>/opencode/<session id>.jsonl`) from OpenCode's SQLite database, read only | **port** (in progress on `feat/opencode-agent`; not merged) | Upstream's 1.2.27 launch shows the session-first shape works, but it passes instructions in AGENTS.md or `OPENCODE_CONFIG_CONTENT`. Ours puts them in the session, so a resumed agent gets the current text without a file in the worktree, and `--standalone` keeps each agent's shell commands in its pane's process tree, where the `shepherdr` command finds its agent. The chat needs a readable log, so the mirror copies only final rows and never changes a line once written. We never pass our own session id, because OpenCode's free models refuse a custom one. The advisor and the probes run `opencode run --standalone --agent plan`, which leaves a session in OpenCode's history | Shepherdr's `opencode api` calls are one private server each (about 0.4 s), not OpenCode's background service, so a call can't hang another agent's session. An OpenCode release that renames an operation breaks the launch, which is why each call's error names the operation. A session's `shepherdr` entry is replaced on every resume, so a changed prompt reaches the model | L |
 
+## Not from upstream: Antigravity agents (agy)
+
+Upstream: nothing for this. Neither line starts Antigravity: both list `agy` only as a CLI whose replies they cannot show.
+Ours reads its conversation store read only (`<agy home>/conversations/<id>.db`) and runs its headless calls as JSON
+(`agy -p … --output-format json --mode plan`); see [Antigravity](settings.md#antigravity) in the settings page.
+
 ## Ranked: adopt and port, by value to us
 
 Order is the sequence the operator would get the most from; each is one task and one pull request. **SHE-2 merged the

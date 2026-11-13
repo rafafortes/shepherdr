@@ -10,6 +10,7 @@
 // across a chat's files, and a per-file position alone would count them twice; a per-chat set of the ids inside the
 // window does not, and a restart re-reads nothing it has counted. The ids go back as far as the usage does.
 import { home, readJson, writeJson } from '../store.ts'
+import { agyBaseId } from './models.ts'
 import type { QuotaFigure } from '../../shared/types.ts'
 
 export const HOUR = 3_600_000
@@ -79,6 +80,8 @@ export function modelKey(cli: string, model?: string): string {
   const name = model && model !== 'default' ? model : 'unknown'
   // pi and OpenCode name their models with the provider in front (opencode/minimax-m3.1-flash-free)
   if (cli === 'pi' || cli === 'opencode') return name.includes('/') ? name : `${cli}/${name}`
+  // agy's effort is in its model id (gemini-3.8-flash-low): the key is the model without it, as the menus offer it
+  if (cli === 'agy') return `agy/${agyBaseId(name)}`
   return `${PROVIDER_OF[cli] ?? cli}/${name}`
 }
 

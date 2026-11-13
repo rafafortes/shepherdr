@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os'
 import { readJson, writeJson } from '../store.ts'
 import { fitHarness, harnessWords, type Harness } from './restart.ts'
 import { CLI_NAME } from './settings.ts'
+import { agyHeadlessDir, agyModelId, headlessOutcome } from './agy.ts'
+import { agyIds } from './models.ts'
 
 /** the roles a backup takes over from: a task's agent, a space's coordinator, the reviewer a brief names (whose backup
  *  is the backup reviewer, reviewer.fallback) */
@@ -113,6 +115,8 @@ export function oneShot(h: Harness): string[] | undefined {
   // no flag for a system prompt in `opencode run`: the question alone is the probe; its plan agent is read only
   if (h.kind === 'opencode')
     return ['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-probe', ...(model ? ['-m', effort ? `${model}#${effort}` : model] : []), ASK]
+  // agy's headless run is read only (plan mode) and answers in JSON: its status says whether the provider answered
+  if (h.kind === 'agy') return ['agy', '-p', ASK, ...(model ? ['--model', agyModelId(model, effort, agyIds())] : []), '--output-format', 'json', '--mode', 'plan']
   if (h.kind === 'pi')
     return [
       'pi',
@@ -156,7 +160,7 @@ export async function probeHarness(h: Harness, timeoutMs = PROBE_TIMEOUT): Promi
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(?:SHEPHERDR_|HERDR_)/.test(k))) as Record<string, string>
   const start = () =>
     Bun.spawn(cmd, {
-      cwd: tmpdir(),
+      cwd: h.kind === 'agy' ? agyHeadlessDir() : tmpdir(),
       // Claude Code takes its prompt on stdin (its tool list is a variadic argument), the others as the last word
       stdin: cmd[0] === 'claude' ? Buffer.from(ASK) : 'ignore',
       stdout: 'pipe',
@@ -184,6 +188,12 @@ export async function probeHarness(h: Harness, timeoutMs = PROBE_TIMEOUT): Promi
     const got = await Promise.race([read.catch((e: Error) => ({ failed: e })), gaveUp])
     if (!got) return { ok: false, said: 'timed out' }
     if ('failed' in got) return { ok: false, said: got.failed.message }
+    if (h.kind === 'agy') {
+      // killed at its limit: no answer to read, and that is the timeout
+      if (p.signalCode) return { ok: false, said: 'timed out' }
+      const a = headlessOutcome(got.out, got.code)
+      return { ok: a.ok, said: a.said.replace(/\s+/g, ' ').trim().slice(0, 200) }
+    }
     return { ok: got.code === 0, said: `${got.out}${got.err}`.replace(/\s+/g, ' ').trim().slice(0, 200) }
   } finally {
     clearTimeout(timer)
