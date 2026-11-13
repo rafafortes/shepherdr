@@ -23,7 +23,7 @@ function fresh(caps = 'off') {
 const noBackup = (w: ReturnType<typeof world>) => expect(w.settings.set('task.fallback', 'off', 'machine').ok).toBe(true)
 
 /** the kind an agent was started on, by its key (the last start of it) */
-const kindOf = (w: ReturnType<typeof world>, key: string) => [...w.started].reverse().find((s) => s.key === key)?.kind
+const kindOf = (w: ReturnType<typeof world>, key: string) => ([...w.started].reverse().find((s) => s.key === key) as { kind?: string } | undefined)?.kind
 const startedOn = (w: ReturnType<typeof world>, id: string) => w.started.some((s) => s.key === `${id}/Agent`)
 
 /** a task on a pi model (its own agent) that is started at once and reads its brief */
