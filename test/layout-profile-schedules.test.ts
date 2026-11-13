@@ -3,7 +3,7 @@
 // same dialog, the editor says what it will write, and the bar's Next line names the two soonest runs.
 import { describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
-import { layout, settled } from './layout.ts'
+import { layout, settled, until } from './layout.ts'
 
 const { browser, world, url } = await layout()
 
@@ -29,14 +29,26 @@ async function reset() {
   world.emit('snapshot')
 }
 
+/** the profiles of the demo as the tests start: night and day saved, the schedules given (seeded through the server,
+ *  so a test that is about one step does not click through the steps before it), then the Models page on a desktop */
+async function start(schedules: { name: string; rule: string; waiting?: boolean }[] = []) {
+  await reset()
+  await world.act({ type: 'profile-save', name: 'night' })
+  await world.act({ type: 'profile-save', name: 'day' })
+  for (const s of schedules) await world.act({ type: 'profile-schedule', name: s.name, rule: s.rule, waiting: s.waiting })
+  const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+  await openModels(page)
+  return page
+}
+/** the schedules of night, as the server has them now */
+async function nightSchedules() {
+  return ((await world.act({ type: 'profiles' })) as { profiles: { name: string; schedules?: unknown[] }[] }).profiles.find((p) => p.name === 'night')!.schedules!
+}
+
 describe.skipIf(!browser)('Settings → Models: schedules of a profile on a desktop', () => {
-  test('add a schedule with its days, time and waiting tasks; change it, switch it off and on, and remove it; the bar names the next runs', async () => {
-    await reset()
-    await world.act({ type: 'profile-save', name: 'night' })
-    await world.act({ type: 'profile-save', name: 'day' })
-    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+  test('add a schedule with its days, time and waiting tasks: every day, weekdays, some days', async () => {
+    const page = await start()
     try {
-      await openModels(page)
       const dlg = await manage(page)
       // a new one: every day at 22:00, the waiting tasks too
       await dlg.getByRole('button', { name: 'Add a schedule…' }).first().click()
@@ -71,10 +83,20 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a desk
       await some.getByRole('button', { name: 'Fri', exact: true }).click()
       await some.getByRole('button', { name: 'Save', exact: true }).click()
       await dlg.getByText('Mon, Fri at 16:30', { exact: false }).first().waitFor()
-      expect(((await world.act({ type: 'profiles' })) as { profiles: { name: string; schedules?: unknown[] }[] }).profiles.find((p) => p.name === 'night')!.schedules!.length).toBe(3)
-      // the day profile has none yet; a change of the first one: 21:30, and the waiting tasks off
-      const first = dlg.getByRole('button', { name: 'Change', exact: true }).first()
-      await first.click()
+      expect((await nightSchedules()).length).toBe(3)
+      await dlg.getByRole('button', { name: 'Done', exact: true }).click()
+      await dlg.waitFor({ state: 'detached' })
+    } finally {
+      await reset()
+      await page.close()
+    }
+  })
+
+  test('change an existing schedule: its time to 21:30, the waiting tasks off', async () => {
+    const page = await start([{ name: 'night', rule: 'daily 22:00', waiting: true }])
+    try {
+      const dlg = await manage(page)
+      await dlg.getByRole('button', { name: 'Change', exact: true }).first().click()
       const change = dlg.getByRole('form', { name: 'Change a schedule of night' })
       expect(await change.getByLabel('At', { exact: true }).inputValue()).toBe('22:00')
       await change.getByLabel('At', { exact: true }).fill('21:30')
@@ -82,18 +104,64 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a desk
       await change.getByRole('button', { name: 'Save', exact: true }).click()
       await change.waitFor({ state: 'detached' })
       await dlg.getByText('Every day at 21:30 (', { exact: false }).first().waitFor()
-      // switched off, then on
+      expect(await dlg.textContent()).not.toContain('also the waiting tasks')
+      await dlg.getByRole('button', { name: 'Done', exact: true }).click()
+      await dlg.waitFor({ state: 'detached' })
+    } finally {
+      await reset()
+      await page.close()
+    }
+  })
+
+  test('switch a schedule off and on: off, the bar drops its next run; on, it is back', async () => {
+    const page = await start([{ name: 'night', rule: 'daily 21:30' }])
+    try {
+      const dlg = await manage(page)
+      await bar(page).getByText(/^Next: night at 21:30/).waitFor()
       await dlg.getByRole('button', { name: 'Turn off', exact: true }).first().click()
       await dlg.getByText(/Every day at 21:30 \(.+\) · off/).waitFor()
-      expect(await bar(page).textContent()).not.toMatch(/Next: night at 21:30/)
+      expect(await until(() => bar(page).textContent(), (t) => !/Next: night at 21:30/.test(t ?? ''))).not.toMatch(/Next: night at 21:30/)
       await dlg.getByRole('button', { name: 'Turn on', exact: true }).first().click()
       await dlg.getByText(/Every day at 21:30 \(.+\)$/).first().waitFor()
-      // removed: asked first, then gone
+      await bar(page).getByText(/^Next: night at 21:30/).waitFor()
+      await dlg.getByRole('button', { name: 'Done', exact: true }).click()
+      await dlg.waitFor({ state: 'detached' })
+    } finally {
+      await reset()
+      await page.close()
+    }
+  })
+
+  test('remove a schedule: asked first, then gone', async () => {
+    const page = await start([
+      { name: 'night', rule: 'daily 21:30' },
+      { name: 'night', rule: 'weekdays 8:00' },
+      { name: 'night', rule: 'mon,fri 16:30' },
+    ])
+    try {
+      const dlg = await manage(page)
+      expect((await nightSchedules()).length).toBe(3)
       await dlg.getByRole('button', { name: 'Remove', exact: true }).first().click()
       await dlg.getByText(/^Remove Every day at 21:30/).waitFor()
       await dlg.getByRole('group', { name: 'Remove this schedule?' }).getByRole('button', { name: 'Remove', exact: true }).click()
       await dlg.getByText(/Every day at 21:30 \(.+\)/).waitFor({ state: 'detached' })
-      expect(((await world.act({ type: 'profiles' })) as { profiles: { name: string; schedules?: unknown[] }[] }).profiles.find((p) => p.name === 'night')!.schedules!.length).toBe(2)
+      expect((await nightSchedules()).length).toBe(2)
+      await dlg.getByRole('button', { name: 'Done', exact: true }).click()
+      await dlg.waitFor({ state: 'detached' })
+    } finally {
+      await reset()
+      await page.close()
+    }
+  })
+
+  test('the bar names the next runs: the soonest of the profile\'s schedules, and the dialog says when it is due', async () => {
+    const page = await start([{ name: 'night', rule: 'daily 22:00' }])
+    try {
+      await bar(page).getByText(/^Next: night at 22:00/).waitFor()
+      expect(await bar(page).textContent()).toMatch(/Next: night at 22:00/)
+      const dlg = await manage(page)
+      await dlg.getByText(/Every day at 22:00 \(/).waitFor()
+      expect(await dlg.textContent()).toMatch(/Next (Today|Tomorrow) 22:00/)
       await dlg.getByRole('button', { name: 'Done', exact: true }).click()
       await dlg.waitFor({ state: 'detached' })
     } finally {
