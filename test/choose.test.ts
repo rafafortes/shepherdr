@@ -73,7 +73,8 @@ describe('the cap-aware choice: the two scopes', () => {
   test('a space sub-limit full while the machine has room: that harness waits, and the space says so', () => {
     const c = pick([opt('primary', SPARK), opt('b1', CODE)], { machine: [e('spark', 4)], own: [e('spark', 1)], runs: [run(SPARK, 'app')] })
     expect(c).toMatchObject({ harness: 'b1', index: 1, skipped: [{ harness: 'primary', why: 'full', name: 'spark', cap: { scope: 'space', count: 1, max: 1 } }] })
-    expect(waitWords(c.skipped as never, (s) => `${s}!`)).toBe('spark in app! (1 of 1 at once)')
+    if (!('skipped' in c)) throw new Error('expected a choice')
+    expect(waitWords(c.skipped, (s) => `${s}!`)).toBe('spark in app! (1 of 1 at once)')
   })
 
   test("a space's sub-limit counts only its own runs: another space's runs leave it room", () => {
