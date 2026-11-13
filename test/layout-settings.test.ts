@@ -1,6 +1,7 @@
 // Notifications and the content's scope picker: UI regression coverage for SHE-263.
 import { describe, expect, test } from 'bun:test'
 import { layout, settled } from './layout.ts'
+import { CODEX_WORDS, reviewerLineFor } from './reviewer-line.ts'
 
 const { browser, world, url } = await layout()
 
@@ -490,7 +491,8 @@ describe.skipIf(!browser)("a reviewer saved, and the tasks already waiting", () 
   const desc = (id: string) => world.tasks.find((t) => t.id === id)!.desc ?? ''
   /** the Reviewer line of a demo task's brief */
   const reviewerLine = (id: string) => desc(id).split('\n').find((l) => l.startsWith('- Reviewer: '))
-  const PLAIN = '- Reviewer: a headless Codex or a Codex subagent (its default model and effort).'
+  // the Reviewer line as the brief has it: its words, then the ask (shepherdr review <id>, then --done) for each id
+  const plain = (id: string) => reviewerLineFor(CODEX_WORDS, id)
 
   test("a space's reviewer model asks how many waiting tasks take it: Apply rewrites their brief, Only new tasks leaves them, and an advisor change asks nothing", async () => {
     const tasks = structuredClone(world.tasks)
@@ -516,10 +518,10 @@ describe.skipIf(!browser)("a reviewer saved, and the tasks already waiting", () 
       expect(text).toContain('when their turn comes.')
       expect(text).toContain('Running tasks keep their reviewer.')
       expect(text).not.toContain('start on')
-      expect(reviewerLine('HP-203')).toBe(PLAIN)
+      expect(reviewerLine('HP-203')).toBe(plain('HP-203'))
       await ask.getByRole('button', { name: 'Only new tasks', exact: true }).click()
       await ask.waitFor({ state: 'detached' })
-      expect(reviewerLine('HP-203')).toBe(PLAIN)
+      expect(reviewerLine('HP-203')).toBe(plain('HP-203'))
       expect(world.stores['vm-str'].get('reviewer.model', 'herdr-projects')).toBe('GPT-6-Sol')
       // the next change asks again, and Apply rewrites both waiting briefs, the words above their blocks unchanged
       await reviewer.getByRole('button', { name: /^Model: / }).click()
@@ -529,11 +531,12 @@ describe.skipIf(!browser)("a reviewer saved, and the tasks already waiting", () 
       await ask.getByText('Reviewer applied to 2 waiting tasks.', { exact: true }).waitFor()
       expect(await ask.getByRole('button', { name: 'Done', exact: true }).count()).toBe(1)
       // the picker writes the model as it lists it or by its id: either names the same model
-      expect(reviewerLine('HP-203')).toMatch(/model gpt-6-astra, its default effort\). \(this space's setting\)$|model GPT-6-Astra, its default effort\). \(this space's setting\)$/)
-      expect(reviewerLine('HP-204')).toBe(reviewerLine('HP-203'))
+      expect(reviewerLine('HP-203')).toMatch(/model gpt-6-astra, its default effort\)\. Each round.*run `shepherdr review HP-203 --done`\. \(this space's setting\)$|model GPT-6-Astra, its default effort\)\. Each round.*run `shepherdr review HP-203 --done`\. \(this space's setting\)$/)
+      // the same words for each task, and its own id in the ask
+      expect(reviewerLine('HP-204')).toBe(reviewerLine('HP-203')!.replaceAll('HP-203', 'HP-204'))
       // only the Reviewer line of each brief moved
-      expect(desc('HP-203')).toBe(tasks.find((t) => t.id === 'HP-203')!.desc!.replace(PLAIN, reviewerLine('HP-203')!))
-      expect(reviewerLine('HP-202')).toBe(PLAIN)
+      expect(desc('HP-203')).toBe(tasks.find((t) => t.id === 'HP-203')!.desc!.replace(plain('HP-203'), reviewerLine('HP-203')!))
+      expect(reviewerLine('HP-202')).toBe(plain('HP-202'))
       await ask.getByRole('button', { name: 'Done', exact: true }).click()
       await ask.waitFor({ state: 'detached' })
 
