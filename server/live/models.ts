@@ -5,7 +5,8 @@
 // model added to its models.json, a login), or every few hours; until then, or where a CLI can't tell, the table below
 // holds. A level a model lacks becomes the nearest it has (nearest), never an error at start.
 // pi lists every model of every provider it has a login for: where its settings name the models it cycles through
-// (enabledModels), the menus offer only those, and the rest stay usable by id (others).
+// (enabledModels), the menus offer only those, and the rest stay usable by id (others). OpenCode's list is scoped the
+// same way by this machine's opencode.models (setOpencodeScope, set by settings.ts).
 import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { readJson, writeJson } from '../store.ts'
@@ -80,16 +81,35 @@ export function modelsOf(kind: string): CliModels | undefined {
   if (!TEST) ask(kind)
   const c = cache[kind]
   const got = c?.models.length || (c && !TABLE[kind].models.length) ? c : TABLE[kind]
-  if (kind !== 'pi') return got
-  // scoping runs a glob per pattern over every model, and one snapshot asks for pi's models thousands of times (each
-  // place's restart hint): kept while neither the list nor pi's enabledModels change
-  const patterns = piEnabled()
-  if (piScoped.from !== got || piScoped.patterns !== patterns) piScoped = { from: got, patterns, out: scopePi(withProvider(got), patterns) }
-  return piScoped.out
+  // scoping runs a glob per pattern over every model, and one snapshot asks for these models thousands of times (each
+  // place's restart hint): kept while neither the list nor its patterns change
+  const patterns = kind === 'pi' ? piEnabled() : kind === 'opencode' ? opencodeScope : undefined
+  if (!patterns && kind !== 'pi') return got
+  const s = scoped[kind]
+  if (s?.from !== got || s.patterns !== patterns) scoped[kind] = { from: got, patterns, out: kind === 'pi' ? scopePi(withProvider(got), patterns) : scopeModels(got, patterns) }
+  return scoped[kind].out
 }
 
-/** pi's list as its enabledModels last scoped it, and what it was scoped from */
-let piScoped: { from?: CliModels; patterns?: string[]; out?: CliModels } = {}
+/** each CLI's list as its patterns last scoped it, and what it was scoped from */
+const scoped: Record<string, { from?: CliModels; patterns?: string[]; out?: CliModels }> = {}
+
+/** the OpenCode models the menus offer (opencode.models, set by settings.ts): none offers every model OpenCode lists */
+let opencodeScope: string[] | undefined
+
+/** settings.ts hands in this machine's opencode.models, parsed (scopePatterns); undefined: every model */
+export function setOpencodeScope(patterns: string[] | undefined) {
+  opencodeScope = patterns
+}
+
+/** the patterns of a list written as text (opencode.models): commas or spaces between them, any case; `all` or empty is
+ *  every model (undefined). Throws on a pattern that is no model id or glob. */
+export function scopePatterns(text: string): string[] | undefined {
+  const list = text.split(/[\s,]+/).filter(Boolean).map((p) => p.toLowerCase())
+  if (!list.length || (list.length === 1 && list[0] === 'all')) return undefined
+  if (list.includes('all')) throw new Error('Write all on its own, or the patterns without it.')
+  for (const p of list) if (!/^[a-z0-9._\-/*?]+$/.test(p)) throw new Error(`${p} is not a model pattern: use letters, digits, . - _ / and the wildcards * ?`)
+  return list
+}
 
 /** pi's models named with their provider, as parsePi names them now: a list read before it did named most without */
 const bare = (m: Model) => m.label === m.id.slice(m.id.indexOf('/') + 1)
@@ -116,16 +136,25 @@ export function piEnabled(): string[] | undefined {
   return enabled.patterns
 }
 
-/** pi's models as its enabledModels scope them, in that order: a pattern is a glob on provider/model or on the model
- *  alone, any case, with an optional :level after it (pi's own --models format). The others stay findable by id;
- *  none matching leaves the list as it was. */
+/** pi's models as its enabledModels scope them: a pattern is a glob on provider/model or on the model alone, any case,
+ *  with an optional :level after it (pi's own --models format, the level is dropped here). */
 export function scopePi(c: CliModels, patterns?: string[]): CliModels {
+  return scopeModels(
+    c,
+    patterns?.map((p) => {
+      const colon = p.lastIndexOf(':')
+      return colon > 0 && p.slice(colon + 1).trim().toLowerCase() in RANK ? p.slice(0, colon) : p
+    }),
+  )
+}
+
+/** the models a list of patterns keeps, in that order: a glob on provider/model or on the model alone, any case. The
+ *  others stay findable by id (others); none matching leaves the list as it was. */
+export function scopeModels(c: CliModels, patterns?: string[]): CliModels {
   if (!patterns?.length || !c.models.length) return c
   const picked: Model[] = []
   for (const p of patterns) {
-    const colon = p.lastIndexOf(':')
-    const bare = (colon > 0 && p.slice(colon + 1).trim().toLowerCase() in RANK ? p.slice(0, colon) : p).trim().toLowerCase()
-    const glob = new Bun.Glob(bare)
+    const glob = new Bun.Glob(p.trim().toLowerCase())
     for (const m of c.models) {
       const id = m.id.toLowerCase()
       if (!picked.includes(m) && (glob.match(id) || glob.match(id.slice(id.indexOf('/') + 1)))) picked.push(m)

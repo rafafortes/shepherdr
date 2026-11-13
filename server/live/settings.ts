@@ -13,7 +13,7 @@ import type { SettingRow, SettingSection, TriggerRow } from '../../shared/types.
 import { home, readJson, writeJson } from '../store.ts'
 import type { SetBy } from '../../shared/brief.ts'
 import { settingsBlock, settingsLines, SEVERITIES, type Reviewer, type Said, type Ways } from './prompts.ts'
-import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf } from './models.ts'
+import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf, scopePatterns, setOpencodeScope } from './models.ts'
 import { picksOf, rememberModel } from './model-picks.ts'
 import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
 import { formatMaxAtOnce, parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
@@ -371,6 +371,16 @@ export const CATALOG: Section[] = [
     ],
   },
   {
+    // OpenCode's models the menus offer (models.ts scopeModels): this machine's OpenCode, so a machine's own or Everywhere
+    // (the value reaches models.ts through Settings.scopeOpencode). The others stay usable by id
+    name: 'OpenCode',
+    levels: ['all', 'machine'],
+    about: "The OpenCode models the menus offer. OpenCode lists every model it has, and this machine's OpenCode may be set to a few of them.",
+    rows: [
+      { label: 'Models shown', key: 'opencode.models', value: 'all', text: true, hint: "Glob patterns on provider/model or on the model alone, any case, comma or space separated: *-free, or opencode/*-free, opencode-go/longcat-*. all (or empty): every model OpenCode lists. The others stay usable by id." },
+    ],
+  },
+  {
     // the quota reads (plan-limits.ts, command-code-quota.ts, quota-estimate.ts, quotas.ts) and the share at which Shepherdr
     // warns (quota.alertAt, 4b). Not a page of its own: the Models page draws these rows above its summary (QuotaSettings).
     // Everywhere only. A run-out alerts whatever the warning share is set to
@@ -572,6 +582,7 @@ export class Settings {
       this.d = { everywhere: keep(raw.everywhere), machine: keep(raw.machine), spaces: Object.fromEntries(Object.entries(spaces).map(([k, v]) => [k, keep(v)])) }
       // settings no longer kept (Autopilot's old limits and wake picks) leave the file too
       if (JSON.stringify(this.d) !== JSON.stringify(raw)) this.save()
+      this.scopeOpencode()
       return
     }
     // settings.json once held one level, set Everywhere (and before that scopes, many task settings and one CLI for
@@ -590,10 +601,18 @@ export class Settings {
       machine: Object.fromEntries(Object.entries(old).filter(([k]) => mine(k))),
       spaces: {},
     }
+    this.scopeOpencode()
   }
 
   private save() {
     if (!this.seed) writeJson('settings.json', this.d, this.dir)
+  }
+
+  /** this machine's OpenCode models (opencode.models) reach models.ts here, at each load and change: models.ts can't
+   *  import this file. A seeded world (the demo's, a dry run's copy) keeps its own and never sets the live one */
+  private scopeOpencode() {
+    if (this.seed) return
+    setOpencodeScope(scopePatterns(this.pick('opencode.models', 'machine').value))
   }
 
   /** the values set at one level */
@@ -654,6 +673,7 @@ export class Settings {
     else at[key] = value
     if (typeof l === 'object' && !Object.keys(at).length) delete this.d.spaces[l.space]
     this.save()
+    if (key === 'opencode.models') this.scopeOpencode()
     // a model chosen here is one of the human's picks: first among the recent ones in every model list (a world of its
     // own, the demo's, keeps its picks to itself)
     const own = pairOfKey(key)
@@ -694,6 +714,7 @@ export class Settings {
     if (JSON.stringify(next) === JSON.stringify(this.d.everywhere)) return false
     this.d.everywhere = next
     this.save()
+    this.scopeOpencode()
     return true
   }
 
@@ -1161,6 +1182,13 @@ export function refuse(key: string, value: string): string | undefined {
   if (key === 'models.maxAtOnce') {
     const p = parseMaxAtOnce(value)
     if (!p.ok) return p.error
+  }
+  if (key === 'opencode.models') {
+    try {
+      scopePatterns(value)
+    } catch (e) {
+      return (e as Error).message
+    }
   }
   if (key === 'time.zone' && !validZone(value.trim())) return `${value} is no time zone: write one like Europe/Stockholm.`
   const options = ROWS.find((r) => r.key === key)?.options
