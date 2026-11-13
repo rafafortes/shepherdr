@@ -276,3 +276,62 @@ describe('the warnings: what the rules raise, with its fix', () => {
     expect(levels.includes('note')).toBe(true)
   })
 })
+
+describe('the quota side: a provider shows its figure and its read, and a window at the share is a warning', () => {
+  const at = NOW + 2 * HOUR
+  /** a figure of one window, as a read gave it */
+  const fig = (windows: { name: string; usedPct?: number; used?: number; cap?: number; resetAt?: number; left?: number }[], extra: { estimate?: boolean } = {}) => ({ windows, source: 'a read', at: NOW, ...extra })
+  // Claude Code runs the gtm space's tasks and coordinators only: that space's two slots are the cells the warning names
+  const claudeHome = settings({ everywhere: { 'task.agent': 'pi', 'task.model': GO, 'coordinator.agent': 'pi' }, spaces: { gtm: { 'task.agent': 'Claude Code', 'task.model': 'default', 'coordinator.agent': 'Claude Code' } } })
+
+  test('the figure set for this look wins over the ledger; a read gives its state; no quota side, no read', () => {
+    const u = ledger('quota-side')
+    u.setQuota('anthropic', fig([{ name: '5 h', usedPct: 12 }]))
+    const sum = modelsSummary(input(claudeHome, u, { quota: { figures: { anthropic: fig([{ name: '5 h', usedPct: 40, resetAt: at }]) }, reads: { anthropic: { on: true, tried: NOW, failed: 'not signed in' } } } }))
+    expect(provider(sum, 'anthropic').quota).toMatchObject({ windows: [{ name: '5 h', usedPct: 40 }] })
+    expect(provider(sum, 'anthropic').quotaRead).toEqual({ on: true, tried: NOW, failed: 'not signed in' })
+    const bare = modelsSummary(input(claudeHome, u))
+    expect(provider(bare, 'anthropic').quota).toMatchObject({ windows: [{ name: '5 h', usedPct: 12 }] })
+    expect(provider(bare, 'anthropic').quotaRead).toBeUndefined()
+  })
+
+  test('a window at the share is a note, with what is left, when it refills, and the cells that use the provider most', () => {
+    const u = ledger('quota-warn')
+    const sum = modelsSummary(input(claudeHome, u, { quota: { figures: { anthropic: fig([{ name: '5 h', usedPct: 85, resetAt: at }, { name: 'Week', usedPct: 41, resetAt: at + 24 * HOUR }]) }, reads: {}, alertAt: 80 } }))
+    const w = warn(sum, 'quota:')
+    expect(w).toHaveLength(1)
+    expect(w[0]).toMatchObject({ id: 'quota:anthropic', level: 'note' })
+    expect(w[0]!.words).toMatch(/^Claude Code: 5 h is at 85%: 15% left, refills .+\.$/)
+    // the gtm space's task and coordinator slots are Claude Code's: the busiest cell opens its primary
+    expect(w[0]!.fix).toMatch(/^Most of its slots are Tasks in gtm \(1 slot\) and Coordinators in gtm \(1 slot\)\./)
+    expect(w[0]!.go).toEqual({ row: placeId.space('gtm', HOST), slot: 'task.0' })
+  })
+
+  test('the share is reached at 100% as a risk; a window that refilled says nothing of now; a count has its share too', () => {
+    const u = ledger('quota-risk')
+    const risk = modelsSummary(input(claudeHome, u, { quota: { figures: { anthropic: fig([{ name: '5 h', usedPct: 100, resetAt: at }]) }, reads: {}, alertAt: 80 } }))
+    expect(warn(risk, 'quota:')[0]).toMatchObject({ level: 'risk' })
+    const refilled = modelsSummary(input(claudeHome, u, { quota: { figures: { anthropic: fig([{ name: '5 h', usedPct: 99, resetAt: NOW - HOUR }]) }, reads: {}, alertAt: 80 } }))
+    expect(warn(refilled, 'quota:')).toEqual([])
+    const count = modelsSummary(input(claudeHome, u, { quota: { figures: { anthropic: fig([{ name: 'Team', used: 90, cap: 100 }]) }, reads: {}, alertAt: 80 } }))
+    expect(warn(count, 'quota:')[0]!.words).toMatch(/^Claude Code: Team is at 90%: 10% left\.$/)
+    // a window with no cap has no share, and a share off warns about nothing
+    const left = modelsSummary(input(claudeHome, u, { quota: { figures: { anthropic: fig([{ name: 'Credits', left: 5 }]) }, reads: {}, alertAt: 80 } }))
+    expect(warn(left, 'quota:')).toEqual([])
+    const off = modelsSummary(input(claudeHome, u, { quota: { figures: { anthropic: fig([{ name: '5 h', usedPct: 99, resetAt: at }]) }, reads: {} } }))
+    expect(warn(off, 'quota:')).toEqual([])
+  })
+
+  test('a provider with no slot in any space has no cell to point at: its words and its fix still say what to do; a local server is not warned', () => {
+    const u = ledger('quota-noslot')
+    u.count('T-1/Agent', 'opencode-go/deepseek-v4.1-flash', { id: 'q1', at: NOW - HOUR, tokens: 100 }, NOW)
+    const got = modelsSummary(input(settings(), u, { quota: { figures: { 'opencode-go': fig([{ name: '5 h', usedPct: 90, resetAt: at }], { estimate: true }) }, reads: {}, alertAt: 80 } }))
+    const w = warn(got, 'quota:')
+    expect(w).toHaveLength(1)
+    expect(w[0]!.words).toMatch(/^OpenCode Go: 5 h is at 90%/)
+    expect(w[0]!.go).toBeUndefined()
+    expect(w[0]!.fix).toBe('Give its roles a backup on another provider, or let the window refill before the work does.')
+    const local = modelsSummary(input(settings({ everywhere: { 'task.agent': 'pi', 'task.model': 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold' } }), u, { quota: { figures: { spark: fig([{ name: '5 h', usedPct: 99, resetAt: at }]) }, reads: {}, alertAt: 80 } }))
+    expect(warn(local, 'quota:')).toEqual([])
+  })
+})

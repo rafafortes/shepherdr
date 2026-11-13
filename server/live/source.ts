@@ -494,7 +494,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const agents: LiveAgent[] = Object.values(this.agents.records).map((r) => ({ key: r.key, kind: r.kind, model: r.model, status: this.agents.status(r.key) }))
     const tasks: TaskFact[] = this.engine.tasks.filter((t) => !t.archived).map((t) => ({ status: this.engine.statusOf(t), agent: t.agent, reviewer: t.reviewer }))
     const watch = this.returns.list().map((o) => ({ key: keyOf(o.primary.kind, o.primary.model), back: o.back }))
-    return modelsSummary({ now: Date.now(), settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch })
+    const now = Date.now()
+    return modelsSummary({ now, settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch, quota: this.quotas.summary(now) })
   }
 
   /* ---------- unread ---------- */

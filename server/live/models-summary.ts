@@ -2,9 +2,10 @@
 // numbers come from the same settings the table reads (its slots, read at each space's own level, so a backup that
 // inherits counts where it runs); what runs and waits now comes from the agents and the tasks as the live source has
 // them; the usage and the run-outs from the ledger (usage-ledger.ts). Nothing is stored here: a read of the state, with
-// `now` as a parameter so a test gives it the clock it needs. The quota figure of each provider is what the ledger
-// holds (4b sets it); a provider without one shows none.
-import type { MatrixRole, ModelsSummary, QuotaFigure, SummaryConfigured, SummaryModel, SummaryNow, SummaryProvider, SummaryRow, SummaryRunOuts, SummaryUsage, SummaryWarning } from '../../shared/types.ts'
+// `now` as a parameter so a test gives it the clock it needs. A provider's quota is its last good read (the ledger holds
+// it, quotas.ts sets it), or OpenCode Go's estimate built for this look; the warning share and each read's state come in
+// with the input (quota), and a window at or over the share is a warning here.
+import type { MatrixRole, ModelsSummary, QuotaFigure, QuotaRead, QuotaWindow, SummaryConfigured, SummaryModel, SummaryNow, SummaryProvider, SummaryRow, SummaryRunOuts, SummaryUsage, SummaryWarning } from '../../shared/types.ts'
 import type { Harness } from './engine/engine.ts'
 import { findModel, modelsOf } from './models.ts'
 import { placeId } from './places.ts'
@@ -58,6 +59,14 @@ export interface TaskFact {
   reviewer?: Harness
 }
 
+/** the quota side of the summary (quotas.ts): the figures built for this look, each read's state, and the warning share */
+export interface QuotaInput {
+  figures: Record<string, QuotaFigure>
+  reads: Record<string, QuotaRead>
+  /** the share of a window at which it warns, in percent; none when off */
+  alertAt?: number
+}
+
 export interface SummaryInput {
   now: number
   settings: Settings
@@ -72,7 +81,12 @@ export interface SummaryInput {
   tasks: TaskFact[]
   /** the outages the return watch has open (no back yet) or has seen answer (back: when), by the primary's model key */
   watch: { key: string; back?: number }[]
+  /** the quota figures and reads (quotas.ts); none in a test that has no quota side */
+  quota?: QuotaInput
 }
+
+/** a moment in words, in this machine's time: "Fri 3:00 PM" */
+export const clock = (at: number) => new Date(at).toLocaleString('en', { weekday: 'short', hour: 'numeric', minute: '2-digit' })
 
 /** a model key's model in words: its name in the CLI's own list, or its id */
 export function labelOf(key: string): string {
@@ -204,19 +218,21 @@ export function modelsSummary(f: SummaryInput): ModelsSummary {
     const day = f.usage.byKey(f.now - 24 * HOUR)
     const tokens24 = keysOf(day, (k) => providerOf(k) === provider).reduce((n, t) => n + t.tokens, 0)
     const tokensWeek = keysOf(d7, (k) => providerOf(k) === provider).reduce((n, t) => n + t.tokens, 0)
-    const quota: QuotaFigure | undefined = f.usage.quota(provider)
+    const quota: QuotaFigure | undefined = f.quota?.figures[provider] ?? f.usage.quota(provider)
+    const quotaRead = f.quota?.reads[provider]
     return {
       provider,
       name: providerName(provider),
       local: LOCAL.has(provider),
       share: { ...(totalDay ? { h24: tokens24 / totalDay } : {}), ...(totalWeek ? { d7: tokensWeek / totalWeek } : {}) },
       ...(quota ? { quota } : {}),
+      ...(quotaRead ? { quotaRead } : {}),
       ...row,
       models: list,
     }
   })
   rows.sort((a, b) => b.usage.d7.tokens - a.usage.d7.tokens || a.name.localeCompare(b.name))
-  const warnings = warningsOf(f, conf, rows)
+  const warnings = [...warningsOf(f, conf, rows), ...quotaWarningsOf(f, conf, rows)]
   return { at: f.now, ...(f.usage.backfilled !== undefined ? { backfilled: f.usage.backfilled } : {}), providers: rows, warnings }
 }
 
@@ -300,4 +316,51 @@ function warningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): 
     }
   }
   return out.sort((a, b) => (a.level === b.level ? 0 : a.level === 'risk' ? -1 : 1))
+}
+
+/** a window's share used, in percent: its own, or its count against its cap (none for a count with no cap) */
+export const shareOf = (w: QuotaWindow): number | undefined => w.usedPct ?? (w.used !== undefined && w.cap ? (w.used / w.cap) * 100 : undefined)
+
+/** the windows that are at or over the warning share and not refilled by `now`: a window that refilled says nothing of now */
+export function overWindows(q: QuotaFigure, at: number, now: number): { w: QuotaWindow; share: number }[] {
+  return q.windows.flatMap((w) => {
+    const share = shareOf(w)
+    return share !== undefined && share >= at && (w.resetAt === undefined || w.resetAt > now) ? [{ w, share }] : []
+  })
+}
+
+/** the quota warnings: a provider's window at or over quota.alertAt, what is left and when it refills, and the cells that
+ *  use it most (the configured slots of this provider, by role and space). Local servers have no quota: not warned about */
+function quotaWarningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): SummaryWarning[] {
+  const at = f.quota?.alertAt
+  if (at === undefined) return []
+  const rowIdOf = (spaceKey: string) => (f.rows.includes(placeId.space(spaceKey, f.host)) ? placeId.space(spaceKey, f.host) : placeId.machine(f.host))
+  const out: SummaryWarning[] = []
+  for (const r of rows) {
+    if (r.local || !r.quota) continue
+    const over = overWindows(r.quota, at, f.now)
+    if (!over.length) continue
+    const words = over.map(({ w, share }) => `${w.name} is at ${Math.round(share)}%: ${Math.max(0, Math.round(100 - share))}% left${w.resetAt !== undefined ? `, refills ${clock(w.resetAt)}` : ''}`).join('; ')
+    // the cells that use it most: the configured slots of this provider, counted by role and space, the top two
+    const cells = new Map<string, { role: MatrixRole; spaceKey: string; space: string; n: number }>()
+    for (const c of conf.filter((x) => providerOf(x.key) === r.provider)) {
+      const k = `${c.spaceKey}|${c.role}`
+      const cell = cells.get(k) ?? { role: c.role, spaceKey: c.spaceKey, space: c.space, n: 0 }
+      cell.n++
+      cells.set(k, cell)
+    }
+    const top = [...cells.values()].sort((a, b) => b.n - a.n || a.space.localeCompare(b.space)).slice(0, 2)
+    const using = top.map((c) => `${TITLE[c.role]} in ${c.space} (${c.n} ${c.n === 1 ? 'slot' : 'slots'})`).join(' and ')
+    const warning: SummaryWarning = {
+      id: `quota:${r.provider}`,
+      level: over.some((x) => x.share >= 100) ? 'risk' : 'note',
+      words: `${r.name}: ${words}.`,
+      fix: top.length
+        ? `Most of its slots are ${using}. Give one of them a backup on another provider, or let the window refill before the work does.`
+        : 'Give its roles a backup on another provider, or let the window refill before the work does.',
+      ...(top[0] ? { go: { row: rowIdOf(top[0].spaceKey), slot: `${top[0].role}.0` } } : {}),
+    }
+    out.push(warning)
+  }
+  return out
 }

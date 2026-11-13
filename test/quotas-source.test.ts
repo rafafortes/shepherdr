@@ -118,3 +118,23 @@ describe('the warning share reaches the alerts', () => {
     expect(src.settings.set('quota.alertAt', 'off', 'all')).toEqual({ ok: true })
   })
 })
+
+describe('the summary carries each read as it stands', () => {
+  test('a provider with a figure shows it with its read; a window at quota.alertAt is a warning; the key is in none of it', async () => {
+    src.vault = vaultWith({ [SECRET]: KEY })
+    src.commandFetch = commandFetch().fetchImpl
+    // a provider the summary knows (it ran a call this week), so its row carries the read
+    src.usage.count('T-7/Agent', 'anthropic/claude-opus-5-5', { id: 'sum-claude', at: NOW - HOUR, tokens: 500 }, NOW)
+    expect(src.settings.set('quota.alertAt', '80%', 'all')).toEqual({ ok: true })
+    src.claudeRead = claude(91)
+    src.quotas.refresh(NOW + 400_000)
+    await src.quotas.settled()
+    type Sum = { providers: { provider: string; quota?: { windows: { usedPct?: number }[] }; quotaRead?: { on: boolean; tried?: number } }[]; warnings: { id: string; words: string }[] }
+    const sum = (await src.act({ type: 'models-summary' })) as Sum
+    const row = sum.providers.find((p) => p.provider === 'anthropic')!
+    expect(row.quota?.windows[0]).toMatchObject({ usedPct: 91 })
+    expect(row.quotaRead).toMatchObject({ on: true, tried: NOW + 400_000 })
+    expect(sum.warnings.find((w) => w.id === 'quota:anthropic')?.words).toMatch(/^Claude Code: 5 h is at 91%: 9% left, refills /)
+    expect(JSON.stringify(sum)).not.toContain(KEY)
+  })
+})

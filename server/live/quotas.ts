@@ -4,11 +4,11 @@
 // why; a read that gives a hint (no bubblewrap, no key) says what to add and fails nothing. Each window at or over the
 // warning share (quota.alertAt) alerts once, and again only once it has refilled or a new window came, or after it was
 // under the share.
-import { providerName } from './models-summary.ts'
+import { clock, providerName, shareOf, type QuotaInput } from './models-summary.ts'
 import { opencodeEstimate, OPENCODE } from './quota-estimate.ts'
 import type { Reading } from './plan-limits.ts'
 import type { UsageLedger } from './usage-ledger.ts'
-import type { QuotaFigure, QuotaRead, QuotaWindow } from '../../shared/types.ts'
+import type { QuotaFigure, QuotaRead } from '../../shared/types.ts'
 
 /** how often each read runs by itself, and how soon one may run again on demand */
 export const EVERY = 10 * 60_000
@@ -42,17 +42,11 @@ interface Seen {
   reading?: boolean
 }
 
-/** a window's share used, in percent: its own, or its count against its cap */
-const shareOf = (w: QuotaWindow): number | undefined => w.usedPct ?? (w.used !== undefined && w.cap ? (w.used / w.cap) * 100 : undefined)
-
 /** quota.alertAt as a share in percent, or none when it is off */
 export const alertShare = (value: string): number | undefined => {
   const n = Number.parseFloat(value)
   return value.trim().toLowerCase() === 'off' || !Number.isFinite(n) ? undefined : n
 }
-
-/** a moment in words, in this machine's time */
-const clock = (at: number) => new Date(at).toLocaleString('en', { weekday: 'short', hour: 'numeric', minute: '2-digit' })
 
 export class Quotas {
   private seen = new Map<string, Seen>()
@@ -70,6 +64,18 @@ export class Quotas {
   figure(provider: string, now = Date.now()): QuotaFigure | undefined {
     if (provider === OPENCODE) return this.d.on(SWITCH[OPENCODE]!) ? opencodeEstimate(this.d.usage, now) : undefined
     return this.d.usage.quota(provider)
+  }
+
+  /** what the summary shows (models-summary.ts): each provider's read as it stands, OpenCode Go's estimate built now, and
+   *  the warning share (none when it is off) */
+  summary(now = Date.now()): QuotaInput {
+    const est = this.figure(OPENCODE, now)
+    const share = this.d.alertAt()
+    return {
+      figures: est ? { [OPENCODE]: est } : {},
+      reads: Object.fromEntries(Object.keys(SWITCH).map((p) => [p, this.status(p)])),
+      ...(share !== undefined ? { alertAt: share } : {}),
+    }
   }
 
   /** what the screen says of a provider's read: its switch, why it reads nothing, and how its last try went */

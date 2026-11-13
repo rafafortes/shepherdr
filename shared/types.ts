@@ -939,6 +939,8 @@ export interface SummaryProvider extends SummaryRow {
   /** its share of all tokens in the last 24 h and in the last 7 d (none when nothing was used) */
   share: { h24?: number; d7?: number }
   quota?: QuotaFigure
+  /** the provider's quota read as quotas.ts has it (none for a provider with no read of its own) */
+  quotaRead?: QuotaRead
   models: SummaryModel[]
 }
 /** a rule-based warning about the settings or the providers, with its fix in words; go opens the cell that changes it
