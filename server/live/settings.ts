@@ -612,7 +612,14 @@ export class Settings {
    *  import this file. A seeded world (the demo's, a dry run's copy) keeps its own and never sets the live one */
   private scopeOpencode() {
     if (this.seed) return
-    setOpencodeScope(scopePatterns(this.pick('opencode.models', 'machine').value))
+    try {
+      setOpencodeScope(scopePatterns(this.pick('opencode.models', 'machine').value))
+    } catch (e) {
+      // coverage-exempt: keep() and refuse() drop such a value on load, set and adopt, so no test reaches this line
+      // a value no load, set or adopt keeps (keep() and refuse() drop it first): the server still starts, with every model
+      console.error(`shepherdr: opencode.models ignored: ${(e as Error).message}`)
+      setOpencodeScope(undefined)
+    }
   }
 
   /** the values set at one level */

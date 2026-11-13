@@ -70,4 +70,25 @@ describe('the OpenCode models setting (opencode.models)', () => {
       writeJson('settings.json', {})
     }
   })
+
+  test('a junk value in the file never stops Settings from loading: the file is read with it dropped, every model stays listed', () => {
+    setModels('opencode', list)
+    const errors: unknown[] = []
+    const was = console.error
+    console.error = (...a: unknown[]) => errors.push(a)
+    try {
+      // the new format and the old one-level one: both drop a value refuse() does not take (keep())
+      writeJson('settings.json', { everywhere: { 'opencode.models': 'all, *-free' }, machine: { 'opencode.models': 'x$' } })
+      expect(new Settings().get('opencode.models')).toBe('all')
+      expect(ids().length).toBe(3)
+      writeJson('settings.json', { all: { 'opencode.models': 'x:high' } })
+      expect(new Settings().get('opencode.models')).toBe('all')
+      expect(ids().length).toBe(3)
+      expect(errors).toEqual([])
+    } finally {
+      console.error = was
+      setModels('opencode', undefined)
+      writeJson('settings.json', {})
+    }
+  })
 })
