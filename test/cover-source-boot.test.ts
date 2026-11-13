@@ -12,11 +12,11 @@ const home = tmp('cover-boot')
 process.env.SHEPHERDR_HOME = home
 process.env.HERDR_SOCKET_PATH = join(home, 'no-herdr.sock')
 delete process.env.SHEPHERDR_MAIN
-// No CLI of this machine runs here: herdr (asked which agents it starts) and agent-browser (asked its version) are
-// stand-ins that answer nothing. Bun looks a command up in the PATH this process started with unless it is given an
+// No CLI of this machine runs here: herdr (asked which agents it starts), agent-browser (asked its version) and claude (the
+// quota read at start, which must never run the human's own Claude Code) are stand-ins that answer nothing. Bun looks a command up in the PATH this process started with unless it is given an
 // environment, so each command this process starts is given this one.
 const standIns = tmp('cover-boot-bin')
-for (const n of ['herdr', 'agent-browser']) writeFileSync(join(standIns, n), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+for (const n of ['herdr', 'agent-browser', 'claude']) writeFileSync(join(standIns, n), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
 process.env.PATH = `${standIns}:${process.env.PATH}`
 process.env.SHEPHERDR_AGENT_BROWSER = join(standIns, 'agent-browser')
 {

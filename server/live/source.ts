@@ -51,6 +51,9 @@ import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, resetOf, type Cut, type Retry } from './retry.ts'
 import { modelsSummary, keyOf, providerName, roleOfChat, type LiveAgent, type TaskFact } from './models-summary.ts'
+import { readClaude, type Reading } from './plan-limits.ts'
+import { readCommandCode as readCommandCodeQuota, SECRET as COMMANDCODE_KEY } from './command-code-quota.ts'
+import { alertShare, Quotas } from './quotas.ts'
 import { UsageFeed } from './usage-feed.ts'
 import { modelKey, providerOf, UsageLedger } from './usage-ledger.ts'
 import { CATALOG, CLI_NAME, CLIS, kindOf, MAX_BACKUPS, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
@@ -127,6 +130,20 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    *  from the agents' logs (usage-feed.ts) */
   usage = new UsageLedger()
   usageFeed = new UsageFeed(this.usage, () => this.agents.records)
+  /** Settings → Models → Quotas (quotas.ts): Claude Code's /usage, Command Code's account (its key from Secrets), and the
+   *  alerts of every window at the warning share. A test puts its own Claude read and Command Code's fetch here, so no
+   *  real CLI or API is called from one */
+  claudeRead: (now: () => number) => Promise<Reading> = (now) => readClaude(now)
+  commandFetch: typeof fetch = fetch
+  quotas = new Quotas({
+    usage: this.usage,
+    readers: { anthropic: () => this.claudeRead(Date.now), commandcode: () => this.readCommandCode() },
+    on: (key) => this.settings.get(key) !== 'off',
+    alertAt: () => alertShare(this.settings.get('quota.alertAt')),
+    alert: (provider, window, title, body) => this.alert({ id: randomUUID(), from: 'Shepherdr', title: clip(title, TITLE_MAX), body: clip(body, BODY_MAX), go: { place: placeId.home() }, tag: `quota:${provider}:${window}` }),
+    emit: () => this.emit('snapshot'),
+    main: !BOX,
+  })
   /** the primary models of the roles whose agents a backup took over: asked now and then whether they answer again
    *  (Settings → Agents → When the primary is back; return.ts) */
   returns = new Returns()
@@ -331,6 +348,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a reply in a turn that goes on (or one only background work follows) changes no status: looked for here
     this.timers.push(setInterval(() => Object.keys(this.agents.records).forEach((k) => this.agents.status(k) !== 'gone' && this.fresh(k)), 5000))
     this.timers.push(setInterval(() => this.runSchedules(), 60_000))
+    // the quota reads: each minute looks for the reads that are due (each every ten minutes), the first one at once
+    if (process.env.NODE_ENV !== 'test') {
+      void this.quotas.tick()
+      this.timers.push(setInterval(() => void this.quotas.tick(), 60_000))
+    }
     // a profile's schedule that came due while Shepherdr was off: the latest one applies now (profile-schedule.ts)
     this.profileSchedules.tick()
     // whether a primary that ran out answers again: never at boot, the first look ten minutes after this machine
@@ -453,6 +475,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // the reason says the reset when the provider gave one ("out of credit until 11 Nov, 17:44 GMT-3")
     const body = `${this.chatName(key)} was cut off: ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.`
     this.alert({ id: randomUUID(), from: 'Shepherdr', title: clip(`${providerName(provider)} ran out`, TITLE_MAX), body: clip(body, BODY_MAX), go: { place: key }, tag: `runout:${provider}`, ...(key.includes('/') ? { task: true as const } : {}) })
+  }
+
+  /** Command Code's read: its key from Shepherdr's Secrets, the Everywhere level (the main machine's vault), never logged */
+  private async readCommandCode(): Promise<Reading> {
+    try {
+      const key = this.vault.pick([COMMANDCODE_KEY], ['all']).found[COMMANDCODE_KEY]?.value
+      return await readCommandCodeQuota(key, Date.now, { fetch: this.commandFetch })
+    } catch (e) {
+      return { reason: (e as Error).message }
+    }
   }
 
   /** Settings → Models → Summary: the providers and models, what runs and waits, the usage and run-outs, the warnings */
@@ -2749,6 +2781,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return modelsMatrix(this.settings, { host: HOST, name: NAME }, this.matrixSpaces())
       case 'models-summary':
         return this.modelsSummaryNow()
+      case 'quota-refresh':
+        return this.quotas.refresh()
       case 'profiles':
         return BOX ? { profiles: [], active: 'Custom', unavailable: PROFILES_ON_MAIN } : this.profiles.view()
       case 'profile-save': {

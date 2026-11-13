@@ -872,6 +872,16 @@ export interface QuotaFigure {
   estimate?: boolean
 }
 
+/** a provider's quota read as the summary shows it (quotas.ts): its switch, why nothing is read (a hint: a key to add,
+ *  bubblewrap to install), and how its last try went (the figure stays the last good one) */
+export interface QuotaRead {
+  on: boolean
+  hint?: string
+  failed?: string
+  /** when it was last tried (ms) */
+  tried?: number
+}
+
 /** Settings → Models → Summary (models-summary.ts): where the work runs, per provider and per model. Usage is read from
  *  the logs of Shepherdr's agents on this machine (usage-ledger.ts); the rest is the table's configured values and what
  *  runs and waits now */
@@ -1216,6 +1226,8 @@ export type Action =
   | { type: 'models-matrix' }
   /** Settings → Models → Summary: per provider and model, what they run, use and ran out of, and the warnings (read only) */
   | { type: 'models-summary' }
+  /** Settings → Models → Quotas: read each quota now, at most once a minute per provider (quotas.ts refresh) */
+  | { type: 'quota-refresh' }
   /** Settings → Models → profiles: the saved profiles and what the settings match now (read only) */
   | { type: 'profiles' }
   /** save the current settings as a profile: the models, and the limits (Max tasks, Merge train) when limits is set;

@@ -60,13 +60,15 @@ interface Stored {
   seen: Record<string, Record<string, number>>
   runOuts: RunOut[]
   quotas: Record<string, QuotaFigure>
+  /** each quota window that alerted and has not been under its share since: the moment it alerted for (0: none) */
+  alerts: Record<string, number>
   /** per log file: its inode and the offset of the first line not read (usage-feed.ts) */
   files: Record<string, { ino: number; offset: number }>
   /** when the first read of every log of Shepherdr's agents was done: the backfill, done once */
   backfilled?: number
 }
 
-const fresh = (): Stored => ({ usage: {}, seen: {}, runOuts: [], quotas: {}, files: {} })
+const fresh = (): Stored => ({ usage: {}, seen: {}, runOuts: [], quotas: {}, alerts: {}, files: {} })
 
 /** the CLI's provider: Claude Code's models are Anthropic's (the Claude subscription), Codex's are OpenAI's */
 const PROVIDER_OF: Record<string, string> = { claude: 'anthropic', 'claude-code': 'anthropic', codex: 'openai' }
@@ -107,7 +109,7 @@ export class UsageLedger {
     private memory = false,
   ) {
     this.data = memory ? fresh() : readJson<Stored>('usage.json', fresh(), dir)
-    for (const k of ['usage', 'seen', 'quotas', 'files'] as const) this.data[k] ??= {}
+    for (const k of ['usage', 'seen', 'quotas', 'alerts', 'files'] as const) this.data[k] ??= {}
     this.data.runOuts ??= []
     this.prune(Date.now())
   }
@@ -214,6 +216,18 @@ export class UsageLedger {
   setQuota(provider: string, q: QuotaFigure | undefined) {
     if (q) this.data.quotas[provider] = q
     else delete this.data.quotas[provider]
+    this.save()
+  }
+
+  /** a quota window's alert state: the moment it alerted for (0 for a window with none), or none while it is armed */
+  alerted(key: string): number | undefined {
+    return this.data.alerts[key]
+  }
+
+  /** sets (or with none, re-arms) a quota window's alert state (quotas.ts) */
+  setAlerted(key: string, at: number | undefined) {
+    if (at === undefined) delete this.data.alerts[key]
+    else this.data.alerts[key] = at
     this.save()
   }
 
