@@ -11,7 +11,7 @@ import { askWaitingMany } from './apply-waiting.tsx'
 import { Anchored, OnTop } from './anchored.tsx'
 import { Pop } from './cell-pop.tsx'
 import { ProfilesBar } from './Profiles.tsx'
-import { Control } from './Settings.tsx'
+import { Control, openPage } from './Settings.tsx'
 import { Dialog } from './rowmenu.tsx'
 import ModelsSummary from './ModelsSummary.tsx'
 import QuotaSettings from './QuotaSettings.tsx'
@@ -126,7 +126,7 @@ async function writeAt(place: string, writes: Write[]): Promise<{ keys: string[]
 
 /** an editor: the controls of one cell, a reset to what the level above gives (when a key is set here), what went wrong,
  *  and what else it offers under them */
-function Editor({ phone, title, controls, reset, error, onSet, onReset, footer }: { phone: boolean; title?: string; controls: SettingRow[]; reset: boolean; error?: string; onSet: (key: string, value: string) => void; onReset: () => void; footer?: ReactNode }) {
+export function Editor({ phone, title, controls, reset, error, onSet, onReset, footer }: { phone: boolean; title?: string; controls: SettingRow[]; reset: boolean; error?: string; onSet: (key: string, value: string) => void; onReset: () => void; footer?: ReactNode }) {
   return (
     <div className={clsx('flex flex-col gap-2', phone ? 'px-4 pt-1 pb-3' : 'w-72')}>
       {title ? <Small className="text-pretty font-medium">{title}</Small> : null}
@@ -152,7 +152,7 @@ function Editor({ phone, title, controls, reset, error, onSet, onReset, footer }
 }
 
 /** what a change refused, under the controls it came from: said once, as a status a screen reader hears */
-function Refused({ text }: { text: string }) {
+export function Refused({ text }: { text: string }) {
   return (
     <Small role="status" className="text-pretty text-need-fg!">
       {text}
@@ -280,6 +280,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
     return (
       <div className="flex flex-col gap-5 px-4 pb-6">
         <ProfilesBar phone={phone} />
+        <LimitsLink />
         {m.rows.map((row) => (
           <section key={row.id} aria-label={row.name} className="rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble">
             <div className="flex items-center gap-2 px-4 pt-3 pb-1">
@@ -349,6 +350,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
   return (
     <div className="flex w-full flex-col gap-3 px-6 pt-5 pb-8">
       <ProfilesBar phone={phone} />
+      <LimitsLink />
       {/* the table scrolls in its own box, both ways: its header rows and the Level column stay in view */}
       <div className="max-h-[min(70vh,44rem)] max-w-full overflow-auto overscroll-contain">
         <table aria-label="Models by level" className="w-max border-separate border-spacing-0 text-[0.8125rem]">
@@ -442,6 +444,19 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
         {copy ? <CopyModels m={m} from={copy} targets={spaces.filter((r) => r.id !== copy.id)} onClose={() => setCopy(null)} /> : null}
       </OnTop>
     </div>
+  )
+}
+
+/** the way to Settings → Limits: every limit of the machine, its spaces and its providers in one place (its own page) */
+function LimitsLink() {
+  return (
+    <Small className="text-pretty">
+      The caps on every space, provider and model, and what waits for them, are in{' '}
+      <button type="button" onClick={() => openPage('Limits', 'all')} className="press-dim rounded-row font-medium text-accent hover:underline">
+        Limits
+      </button>
+      .
+    </Small>
   )
 }
 
