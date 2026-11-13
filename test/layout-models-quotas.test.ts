@@ -36,6 +36,25 @@ describe.skipIf(!browser)('Settings → Models → Quotas on a desktop', () => {
     }
   })
 
+  test('a share Settings refuses says why under its row, and a valid one clears it', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openModels(page)
+      const rows = page.locator('section[aria-label="Quotas"]')
+      await rows.scrollIntoViewIfNeeded()
+      const box = rows.getByRole('textbox', { name: /^Warn when a provider is at/ })
+      await box.fill('40')
+      await box.press('Enter')
+      await rows.getByText(/^Write a number from 50 to 95/).waitFor()
+      await box.fill('80')
+      await box.press('Enter')
+      await rows.getByText(/^Write a number from 50 to 95/).waitFor({ state: 'detached' })
+      expect(await rows.getByRole('status').count()).toBe(0)
+    } finally {
+      await page.close()
+    }
+  })
+
   test('a switch writes its setting, Everywhere: off stays off after a reload', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
@@ -73,6 +92,8 @@ describe.skipIf(!browser)('the Quota column of the Summary on a desktop', () => 
       expect(await table.getByRole('img', { name: '5 h: 62% used' }).count()).toBe(1)
       expect(await table.getByText(/^refills /).count()).toBeGreaterThan(0)
       expect(await table.getByText("from Claude Code's /usage, read 7 min ago").count()).toBe(1)
+      // its last try failed two minutes ago: the reason, and the figure it keeps, with its own age
+      expect(await table.getByText(/^Last read failed 2 min ago: Claude Code took longer than a minute to answer\. The figure is from 7 min ago\.$/).count()).toBe(1)
       // the refilled window of the demo is left out
       expect(await table.getByText('Last month').count()).toBe(0)
       // OpenCode Go's figure is an estimate: each window is tagged, and its source says where it comes from

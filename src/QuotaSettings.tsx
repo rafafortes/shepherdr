@@ -38,7 +38,8 @@ export default function QuotaSettings({ phone }: { phone: boolean }) {
               ) : null}
             </dt>
             <dd className="flex min-w-0 justify-end">
-              <Control row={row} phone={phone} set={(v) => void set(row, v)} edit={() => undefined} />
+              {/* editing a row takes its refusal away, as Settings does */}
+              <Control row={row} phone={phone} set={(v) => void set(row, v)} edit={() => setRefused((x) => (x[row.key] ? { ...x, [row.key]: '' } : x))} />
             </dd>
           </div>
         ))}

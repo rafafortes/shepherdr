@@ -58,7 +58,8 @@ export function demoQuota(usage: UsageLedger, now = Date.now()): QuotaInput {
   return {
     figures: est ? { [OPENCODE]: est } : {},
     reads: {
-      anthropic: { on: true, tried: now - 7 * 60_000 },
+      // Claude Code's last try failed two minutes ago; its figure is the one read seven minutes ago, kept
+      anthropic: { on: true, tried: now - 2 * 60_000, failed: 'Claude Code took longer than a minute to answer.' },
       commandcode: { on: true, tried: now - 7 * 60_000, hint: "Add COMMANDCODE_API_KEY in Settings → Secrets to read Command Code's quota." },
       [OPENCODE]: { on: true },
     },

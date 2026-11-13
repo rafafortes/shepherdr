@@ -95,6 +95,35 @@ describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => 
   })
 })
 
+describe.skipIf(!browser)('a browser that keeps no session storage for the hidden warnings', () => {
+  test('the warnings still show, and Hide holds for this page only (the storage refuses both ways)', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      // the one key the hidden warnings use refuses to be read or written; every other key works as before
+      await page.addInitScript(() => {
+        const get = Storage.prototype.getItem
+        const set = Storage.prototype.setItem
+        Storage.prototype.getItem = function (key: string) {
+          if (key === 'models-summary:hidden') throw new Error('storage denied')
+          return get.call(this, key)
+        }
+        Storage.prototype.setItem = function (key: string, value: string) {
+          if (key === 'models-summary:hidden') throw new Error('storage denied')
+          return set.call(this, key, value)
+        }
+      })
+      const s = await openModels(page)
+      await s.scrollIntoViewIfNeeded()
+      const shown = await warnings(page).count()
+      expect(shown).toBeGreaterThan(0)
+      await warnings(page).first().getByRole('button', { name: /^Hide for this session/ }).click()
+      expect(await warnings(page).count()).toBe(shown - 1)
+    } finally {
+      await page.close()
+    }
+  })
+})
+
 describe.skipIf(!browser)('Settings → Models → Summary on a phone', () => {
   test('one card per provider with its models under it; the warnings with their buttons under their words; nothing wider than the screen', async () => {
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
