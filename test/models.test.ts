@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test'
 import { chmodSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { effortFor, effortsOf, findModel, helpLevels, knowsModels, modelArg, modelsOf, nearest, opencodeList, parseClaude, parseCodex, parsePi, piEnabled, piFrom, read, scopeModels, scopePatterns, scopePi, setModels, setOpencodeScope, stillHolds } from '../server/live/models.ts'
+import { effortFor, effortsOf, findModel, helpLevels, knowsModels, modelArg, modelsOf, nearest, opencodeList, parseClaude, parseCodex, parsePi, piEnabled, piFrom, read, scopeModels, scopeOpencodeText, scopePatterns, scopePi, setModels, setOpencodeScope, stillHolds } from '../server/live/models.ts'
 import { tmp } from './tmp.ts'
 
 describe('reading what each CLI takes', () => {
@@ -291,6 +291,25 @@ describe("OpenCode's models scoped by opencode.models", () => {
       setOpencodeScope(undefined)
       expect(modelsOf('opencode')!.models.length).toBe(c.models.length)
     } finally {
+      setOpencodeScope(undefined)
+      setModels('opencode', undefined)
+    }
+  })
+
+  test('a junk opencode.models text is logged once and lists every model, never stops the server', () => {
+    setModels('opencode', { ...c, efforts: [] })
+    const logged: unknown[][] = []
+    const was = console.error
+    console.error = (...a: unknown[]) => logged.push(a)
+    try {
+      scopeOpencodeText('*-free, a:b')
+      expect(logged).toEqual([['shepherdr: opencode.models ignored: a:b is not a model pattern: use letters, digits, . - _ / and the wildcards * ?']])
+      expect(modelsOf('opencode')!.models.length).toBe(c.models.length)
+      scopeOpencodeText('*-free')
+      expect(logged.length).toBe(1)
+      expect(modelsOf('opencode')!.models.length).toBe(2)
+    } finally {
+      console.error = was
       setOpencodeScope(undefined)
       setModels('opencode', undefined)
     }

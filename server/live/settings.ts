@@ -13,7 +13,7 @@ import type { SettingRow, SettingSection, TriggerRow } from '../../shared/types.
 import { home, readJson, writeJson } from '../store.ts'
 import type { SetBy } from '../../shared/brief.ts'
 import { settingsBlock, settingsLines, SEVERITIES, type Reviewer, type Said, type Ways } from './prompts.ts'
-import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf, scopePatterns, setOpencodeScope } from './models.ts'
+import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf, scopeOpencodeText, scopePatterns } from './models.ts'
 import { picksOf, rememberModel } from './model-picks.ts'
 import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
 import { formatMaxAtOnce, parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
@@ -612,14 +612,7 @@ export class Settings {
    *  import this file. A seeded world (the demo's, a dry run's copy) keeps its own and never sets the live one */
   private scopeOpencode() {
     if (this.seed) return
-    try {
-      setOpencodeScope(scopePatterns(this.pick('opencode.models', 'machine').value))
-    } catch (e) {
-      // coverage-exempt: keep() and refuse() drop such a value on load, set and adopt, so no test reaches this line
-      // a value no load, set or adopt keeps (keep() and refuse() drop it first): the server still starts, with every model
-      console.error(`shepherdr: opencode.models ignored: ${(e as Error).message}`)
-      setOpencodeScope(undefined)
-    }
+    scopeOpencodeText(this.pick('opencode.models', 'machine').value)
   }
 
   /** the values set at one level */

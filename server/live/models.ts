@@ -101,6 +101,17 @@ export function setOpencodeScope(patterns: string[] | undefined) {
   opencodeScope = patterns
 }
 
+/** this machine's opencode.models as text, handed in by settings.ts: a value nothing keeps (a pattern error) is logged
+ *  once and every model listed, so it never stops the server */
+export function scopeOpencodeText(text: string) {
+  try {
+    setOpencodeScope(scopePatterns(text))
+  } catch (e) {
+    console.error(`shepherdr: opencode.models ignored: ${(e as Error).message}`)
+    setOpencodeScope(undefined)
+  }
+}
+
 /** the patterns of a list written as text (opencode.models): commas or spaces between them, any case; `all` or empty is
  *  every model (undefined). Throws on a pattern that is no model id or glob. */
 export function scopePatterns(text: string): string[] | undefined {
