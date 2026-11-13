@@ -13,6 +13,7 @@ import { usePluginErrors } from './guard.tsx'
 import { PlacesToggle } from './Frame.tsx'
 import { askWaiting } from './apply-waiting.tsx'
 import ModelsPage from './ModelsPage.tsx'
+import LimitsPage from './LimitsPage.tsx'
 import { Stack } from './Stack.tsx'
 import { APPEARANCES, setAppearance, useAppearance, type Appearance } from './theme.ts'
 import {
@@ -548,6 +549,15 @@ const MODELS: Page = {
   View: ModelsPage,
 }
 
+/** Settings → Limits: every limit of this machine in one place (LimitsPage.tsx), beside Models; the same settings */
+const LIMITS: Page = {
+  name: 'Limits',
+  about: 'Every limit of this machine in one place: its tasks at once and when it waits, each space\'s Max tasks, Merge train and sub-limit per provider or model, each provider\'s cap and what waits now. Click a value to change it, at its level. The numbers beside a value are read now.',
+  rows: [],
+  matrix: true,
+  View: LimitsPage,
+}
+
 const LOOKS: Record<Appearance, { label: string; hint?: string }> = {
   system: { label: 'System', hint: "Light or dark, as this device's own setting is" },
   light: { label: 'Light' },
@@ -572,6 +582,7 @@ const ICONS: Record<string, ComponentType<{ className?: string }>> = {
   Plugins: PluginIcon,
   Machines: MachineIcon,
   Models: ModelIcon,
+  Limits: PlanIcon,
   Secrets: KeyIcon,
 }
 
@@ -634,7 +645,7 @@ function groupsOf(sections: SettingSection[], ui: UI): { name: string; pages: Pa
   // the Models table comes right after Agents, the settings it is the one table of
   const running = scoped.filter((x) => !x.told)
   const agents = running.findIndex((x) => x.name === 'Agents')
-  const runs = agents < 0 ? [...running, MODELS] : [...running.slice(0, agents + 1), MODELS, ...running.slice(agents + 1)]
+  const runs = agents < 0 ? [...running, MODELS, LIMITS] : [...running.slice(0, agents + 1), MODELS, LIMITS, ...running.slice(agents + 1)]
   return [
     { name: 'What agents are told', pages: scoped.filter((x) => x.told) },
     // what is one for all (alerts and voice) runs Shepherdr too, whatever level is picked: its page says so

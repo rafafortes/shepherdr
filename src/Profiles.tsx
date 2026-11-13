@@ -43,7 +43,7 @@ function Refused({ text }: { text: string }) {
 /** the dialogs of the bar, one at a time */
 type Open = { kind: 'preview'; name: string } | { kind: 'save' } | { kind: 'undo' } | { kind: 'manage' } | null
 
-export function ProfilesBar({ phone }: { phone: boolean }) {
+export function ProfilesBar({ phone, limits = false }: { phone: boolean; limits?: boolean }) {
   const snap = useSnap()
   const [view, setView] = useState<ProfilesView | null>(null)
   const [menu, setMenu] = useState(false)
@@ -117,7 +117,7 @@ export function ProfilesBar({ phone }: { phone: boolean }) {
       {note ? <Small role="status" className="w-full text-pretty">{note}</Small> : null}
       <OnTop>
         {open?.kind === 'preview' ? <PreviewDialog name={open.name} onClose={close} onNote={setNote} /> : null}
-        {open?.kind === 'save' ? <SaveDialog onClose={close} onNote={setNote} /> : null}
+        {open?.kind === 'save' ? <SaveDialog onClose={close} onNote={setNote} limits={limits} /> : null}
         {open?.kind === 'undo' && undo ? <UndoDialog name={undo.name} label={undo.label} onClose={close} onNote={setNote} /> : null}
         {open?.kind === 'manage' ? <ManageDialog onClose={close} onNote={setNote} /> : null}
       </OnTop>
@@ -209,9 +209,9 @@ function PreviewDialog({ name, onClose, onNote }: { name: string; onClose: () =>
 }
 
 /** Save current as…: the models, and the limits when asked. A name that is saved already asks first, and replaces it */
-function SaveDialog({ onClose, onNote }: { onClose: () => void; onNote: (s: string) => void }) {
+function SaveDialog({ onClose, onNote, limits: withLimits }: { onClose: () => void; onNote: (s: string) => void; limits: boolean }) {
   const [name, setName] = useState('')
-  const [limits, setLimits] = useState(false)
+  const [limits, setLimits] = useState(withLimits)
   const [taken, setTaken] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
