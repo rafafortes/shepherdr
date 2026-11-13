@@ -718,6 +718,9 @@ export class Engine extends Emitter<Events> {
   outNow?: (key: string) => { until?: string } | undefined
   /** the headless runs (the advisor's, the reviewer's) that hold a slot while they run: lease, unlease */
   private leased = new Map<string, Run>()
+  /** the starts and switches on their way (a chat's key → the run it goes to): counted on the model they go to from the
+   *  moment it is chosen, before its agent shows it, so two starts in a row never both take the last slot (claim) */
+  private claims = new Map<string, Run>()
   /** the rounds running now: when each was counted, and since when its agent's turn has not been working */
   private reviewing = new Map<string, { since: number; idle?: number }>()
   /** tasks whose `shepherdr review` is waiting for a reviewer now (retryReviews leaves them to it) */
@@ -1465,17 +1468,62 @@ export class Engine extends Emitter<Events> {
 
   /**
    * The runs that hold a slot of models.maxAtOnce on this machine now (choose.ts counts them, each under its space): the
-   * tasks that hold a slot, each on the model it runs; the coordinators working right now; and the leases (lease). `except`:
-   * a task's own run, which it does not count against itself while it chooses; `plus`: runs started in the same pass
+   * starts and switches on their way (claim), on the model they go to; the tasks that hold a slot, each on the model it
+   * runs; every agent at work right now, a task's whatever its step (merging, reported, queued) and a coordinator's; and the
+   * leases (lease). Each chat counts once. `except`: the chat that is choosing (a task's id, or a coordinator's key), which
+   * does not count against itself; `plus`: runs started in the same pass
    */
   runs(except?: string, plus: Run[] = []): Run[] {
-    const out: Run[] = []
-    for (const t of this.tasks) if (t.id !== except && this.busy(t)) out.push({ key: this.modelOfTask(t), space: this.nameOf(t) ?? '', role: 'task', id: t.id })
-    for (const [key, r] of Object.entries(this.agents.records)) {
-      if (key.includes('/') || this.agents.status(key) !== 'working') continue
-      out.push({ key: keyOf(r.kind, r.model), space: this.places.space(key)?.name ?? '~', role: 'coordinator', id: key })
+    const out = new Map<string, Run>()
+    const mine = (chat: string, id?: string) => except !== undefined && (chat === except || id === except)
+    for (const [chat, r] of this.claims) if (!mine(chat, r.id)) out.set(chat, r)
+    for (const t of this.tasks) {
+      const chat = this.key(t)
+      if (!out.has(chat) && !mine(chat, t.id) && this.busy(t)) out.set(chat, { key: this.modelOfTask(t), space: this.nameOf(t) ?? '', role: 'task', id: t.id })
     }
-    return [...out, ...this.leased.values(), ...plus]
+    for (const [chat, r] of Object.entries(this.agents.records)) {
+      if (out.has(chat) || this.agents.status(chat) !== 'working') continue
+      // a task's agent at work counts on its model at any step of its task (rebasing its merge, reported, queued), but not
+      // while it only waits on Shepherdr (in line for its merge, or in its gate: its command runs, not its model), nor once
+      // the task is done or archived (its agent is being closed); a chat of no task of this machine's is none
+      const t = chat.includes('/') ? this.task(chat.split('/')[0]) : undefined
+      if (chat.includes('/') && (!t || this.key(t) !== chat || ended(t) || t.archived || t.landing?.step === 'queue' || t.landing?.step === 'gate')) continue
+      if (mine(chat, t?.id)) continue
+      out.set(chat, t ? { key: keyOf(r.kind, r.model), space: this.nameOf(t) ?? '', role: 'task', id: t.id } : { key: keyOf(r.kind, r.model), space: this.places.space(chat)?.name ?? '~', role: 'coordinator', id: chat })
+    }
+    return [...out.values(), ...this.leased.values(), ...plus]
+  }
+
+  /** a start or a switch is on its way to a model: its run counts there from now (runs), until unclaim once its agent is
+   *  there (or it did not start). `chat`: its chat's key (a task's ID/Agent, a coordinator's place id) */
+  claim(chat: string, run: Run) {
+    this.claims.set(chat, run)
+  }
+
+  /** the start or switch claimed for a chat is over */
+  unclaim(chat: string) {
+    this.claims.delete(chat)
+  }
+
+  /** what keeps one more agent of a space off a model now under the caps: its entries that are blocked (0 allowed) or full,
+   *  or none when it has room. Out is not looked at: this is for a start on a model already chosen (a restart by hand, a
+   *  relaunch, the way back), whose provider is the chooser's to judge. `except`: the chat that starts, not counted against
+   *  itself (a task's id, or a coordinator's key) */
+  capHold(space: string, key: string, except?: string): Blocked<null>[] | undefined {
+    const c = this.decide<null>(space, [{ harness: null, key }], except)
+    return 'wait' in c ? c.wait : undefined
+  }
+
+  /** a cap that keeps an agent off its model, in words for a refusal or a card: `spark is at its limit (4 of 4 at once)`,
+   *  or that it is blocked (0 allowed) */
+  capHoldWords(hold: Blocked<null>[]): string {
+    return hold.map((b) => capWords(b as Blocked<unknown>, (x) => this.places.shownName(x))).join('; ')
+  }
+
+  /** a new run the caps refuse, in words: what holds its model, and what to do (`Not started: spark is at its limit (4 of 4
+   *  at once): wait for a free slot, or pick another model.`) */
+  capRefusal(verb: 'Not started' | 'Not restarted', hold: Blocked<null>[]): string {
+    return `${verb}: ${this.capHoldWords(hold)}: ${allBlocked(hold) ? 'change its agent or a limit in Settings → Limits' : 'wait for a free slot, or pick another model'}.`
   }
 
   /**
@@ -1512,12 +1560,6 @@ export class Engine extends Emitter<Events> {
     return blockedOnly(this.decide<null>(space, [{ harness: null, key }]))
   }
 
-  /** the entries that block a model key for a space now, in words for a refusal (none when it is not blocked) */
-  blockedWait(space: string, key: string): Blocked<null>[] {
-    const c = this.decide<null>(space, [{ harness: null, key }])
-    return 'wait' in c ? c.wait : []
-  }
-
   /** the backup a task is on, by its place in its chain: 0 on its primary, else the step of its takeover or its start on a
    *  backup (whichever is the later) */
   stepOf(t: TaskRec) {
@@ -1531,6 +1573,11 @@ export class Engine extends Emitter<Events> {
    */
   taskChain(t: TaskRec): { step: number; h: Harness }[] {
     const space = this.nameOf(t) ?? ''
+    // one whose agent is there already goes on where it runs (a go, an answer: it resumes, no choice is made), or on the
+    // worker you started it on (startNow's switch); a takeover that waits still chooses among its backups below
+    const rec = t.worktree && !t.held?.takeover ? this.agents.record(this.key(t)) : undefined
+    if (t.switchTo && rec) return [{ step: 0, h: t.switchTo }]
+    if (rec) return [{ step: this.stepOf(t), h: { kind: rec.kind, model: rec.model, effort: rec.effort } }]
     const own = t.agent ?? this.settings.harness('task', space)
     const chain = [{ step: 0, h: own }]
     for (const p of this.backupsFor('task', space, t.set)) if (p.to) chain.push({ step: p.n, h: backupHarness(p.to, own) })
@@ -2014,6 +2061,8 @@ export class Engine extends Emitter<Events> {
         return
       }
       const { step, h } = c.harness
+      // its run counts on the model chosen from now on, before its agent shows it there (runs)
+      this.claim(this.key(t), { key: keyOf(h.kind, h.model), space: this.nameOf(t) ?? '', role: 'task', id: t.id })
       const p = this.proj(t)
       const branch = branchFor(t)
       // Old records without a snapshot keep the existing fallback; new tasks snapshot at add.
@@ -2049,6 +2098,7 @@ export class Engine extends Emitter<Events> {
       throw e
     } finally {
       this.starting.delete(t.id)
+      this.unclaim(this.key(t))
       this.begun(t)
       this.settle(t)
     }
@@ -2063,6 +2113,10 @@ export class Engine extends Emitter<Events> {
     if (!launchesAgents()) throw refusedLaunch(this.key(t))
     const key = this.key(t)
     const rec = this.agents.record(key)
+    // a new run (a start, a restart, an agent that is gone started again) on a model that is full or blocked is refused
+    // before anything is made: an agent that runs is only found again, and adds no run
+    const hold = this.launchHold(t, as)
+    if (hold) throw new Error(this.capRefusal('Not started', hold))
     const p = this.proj(t)
     const home = { repo: p.path, name: p.name }
     if (!made && !ended(t) && !existsSync(t.worktree!) && this.agents.status(key) === 'gone') {
@@ -2352,13 +2406,28 @@ export class Engine extends Emitter<Events> {
     return this.freshen(t).catch(() => undefined)
   }
 
+  /** what keeps a task's agent from a new run now (caps: full or blocked), its own run aside: on `as` when given (a
+   *  restart, a backup), else on what it runs (its record), else on what it starts on. None while its agent runs (it is
+   *  only found again) */
+  launchHold(t: TaskRec, as?: Harness): Blocked<null>[] | undefined {
+    const key = this.key(t)
+    if (!as && this.agents.status(key) !== 'gone') return undefined
+    const rec = this.agents.record(key)
+    const on = as ?? (rec ? { kind: rec.kind, model: rec.model } : (t.agent ?? this.settings.harness('task', this.nameOf(t))))
+    return this.capHold(this.nameOf(t) ?? '', keyOf(on.kind, on.model), t.id)
+  }
+
   /**
    * Writing to a task whose agent stopped starts it again, with its memory. `fresh`: its session is gone (start.ts), so
-   * it starts on a new one and is told its brief again: all it remembers of the work is the branch and the chat.
+   * it starts on a new one and is told its brief again: all it remembers of the work is the branch and the chat. Its
+   * model full or blocked: it is not started now and the start is no failed one (the revive loop tries it again once
+   * there is room; what was written waits for it)
    */
   resume(id: string, fresh = false) {
     const t = this.task(id)
     if (!t?.worktree) return Promise.resolve(null)
+    const hold = this.launchHold(t)
+    if (hold) return Promise.reject(new Error(this.capRefusal('Not started', hold)))
     const first = fresh ? `${taskFirst(t)}\n\n${freshLine()}` : undefined
     return this.launch(t, first).catch((e) => {
       // it never got going: the human hears why, in the chat and on the task, and nothing starts it again meanwhile
@@ -2419,10 +2488,14 @@ export class Engine extends Emitter<Events> {
     if (!this.installed(to.kind)) throw new Error(`${CLI_NAME[to.kind] ?? to.kind} isn't installed on this machine.`)
     const key = this.key(t)
     const h = fitHarness(to)
+    // a model full or blocked under the caps is refused before anything stops (its own run is not counted against it)
+    const hold = this.launchHold(t, h)
+    if (hold) throw new Error(this.capRefusal('Not restarted', hold))
     const from = this.agents.record(key)?.kind ?? t.agent?.kind ?? ''
     const name = (k: string) => CLI_NAME[k] ?? k
     const words = harnessWords(h)
     this.handing.add(t.id)
+    this.claim(key, { key: keyOf(h.kind, h.model), space: this.nameOf(t) ?? '', role: 'task', id: t.id })
     try {
       // what it is told, read once its turn has stopped: what it did meanwhile counts
       const first = async () => {
@@ -2447,6 +2520,7 @@ export class Engine extends Emitter<Events> {
       this.chats.post(key, { id: card, card: { id: card, restart: true, text: back ? wentBackCardWords(words, back) : `Restarted on ${words}` } })
     } finally {
       this.handing.delete(t.id)
+      this.unclaim(key)
       this.save()
       this.settle(t)
     }
@@ -2527,11 +2601,12 @@ export class Engine extends Emitter<Events> {
     const name = (k: string) => CLI_NAME[k] ?? k
     this.handing.add(t.id)
     t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now(), step: plan.n }
+    // Settings' Backup model and effort (this task's own first), or else the task's own: its CLI may not take them, in
+    // which case it starts on its own default. Its run counts there from now on: another cut-off a moment later sees it
+    const h: Harness = backupHarness(plan.to!, own)
+    this.claim(key, { key: keyOf(h.kind, h.model), space: space ?? '', role: 'task', id: t.id })
     this.settle(t)
     try {
-      // Settings' Backup model and effort (this task's own first), or else the task's own: its CLI may not take them, in
-      // which case it starts on its own default
-      const h: Harness = backupHarness(plan.to!, own)
       const words = harnessWords(fitHarness(h))
       const first = same
         ? hidden(backupKeptLine({ on: words, why: t.tookOver.why }), 'restart')
@@ -2556,6 +2631,7 @@ export class Engine extends Emitter<Events> {
       stuck()
     } finally {
       this.handing.delete(t.id)
+      this.unclaim(key)
       this.settle(t)
     }
   }

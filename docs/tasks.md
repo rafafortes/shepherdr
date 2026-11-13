@@ -182,7 +182,8 @@
   card in the space says — with the chat so far and its open tasks, its tasks going on as they are, and on the
   coordinators' Model and Effort where they are set, else on the model and effort it ran on. Once, until you start it
   again yourself (⋯ → Restart agent, or `shepherdr restart`); off, a backup already gone in, or one unable to go in, the
-  space's chat says so and you are alerted.
+  space's chat says so and you are alerted. A backup that is at its limit or out is never taken past it: the coordinator
+  waits, and takes the first one with room over once it has room (see [Most agents at once](settings.md#models)).
 - A reviewer has a backup of its own, and it is words in the brief rather than an agent Shepherdr runs: a reviewer is
   the task's own agent reviewing, so a reviewer that is out of allowance would leave that agent stuck at the review.
   Settings → How tasks work → Reviewer → Backups → Backup (`reviewer.fallback`, off until set, with

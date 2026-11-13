@@ -172,7 +172,9 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
                                                  the space's Settings too. A working agent is interrupted first. The
                                                  same CLI resumes its session; another takes over with the chat so
                                                  far (a task's: its brief, commits and changes too). Its worktree,
-                                                 branch and waiting messages stay; a coordinator's tasks go on
+                                                 branch and waiting messages stay; a coordinator's tasks go on.
+                                                 A model at its limit or blocked (Settings → Limits) is
+                                                 refused before anything stops, with the reason
   shepherdr restart --all                        every coordinator of this machine's spaces whose Settings now say other
                                                  than what its agent runs on, one per space, exactly as a restart
                                                  above (a working one interrupted first); the ones already on it

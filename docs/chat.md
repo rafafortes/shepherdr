@@ -55,7 +55,9 @@ Every agent, coordinator or task agent, gets the same chat.
 - Changing Settings never restarts a running agent: it goes on the CLI, model and effort it started with, and the
   restart sheet opens with what it runs on beside what Settings say now. A restart is one you run: its ⋯ (Restart
   agent…) or `shepherdr restart <space|task id>` — the same CLI resumes its session, another takes the chat over with
-  the chat so far, a working agent's turn is interrupted first, and a card in the chat says what it is on.
+  the chat so far, a working agent's turn is interrupted first, and a card in the chat says what it is on. A model at its
+  limit or blocked under [Most agents at once](settings.md#models) is refused before anything stops or is saved, with
+  the reason.
 - One setting changed for every space is still one action. This machine's ⋯ in the places list carries the count —
   Restart 3 coordinators, and it is there only while some coordinator's Settings moved — and runs it, its answer in the
   row itself (the count, and the spaces that failed by name); `shepherdr restart --all` does the same from a terminal:
