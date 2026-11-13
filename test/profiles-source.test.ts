@@ -2,13 +2,14 @@
 // on a real space of this machine, with waiting tasks held (herdr is not there) for --apply-waiting.
 import { afterAll, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
+import type { ProfileStore } from '../server/live/profiles.ts'
 import { tmp } from './tmp.ts'
 
 const { LiveSource } = await import('../server/live/source.ts')
 const { placeId } = await import('../server/live/places.ts')
 const { fakeHerdr } = await import('./fake-herdr.ts')
 const { Worktrees } = await import('../server/live/engine/worktrees.ts')
-const { ProfileStore, MODEL_KEYS } = await import('../server/live/profiles.ts')
+const { MODEL_KEYS } = await import('../server/live/profiles.ts')
 
 const src = new LiveSource()
 // herdr makes task worktrees: a stand-in on real git, and no terminal for their agents (no herdr is there)
