@@ -1321,6 +1321,14 @@ describe('a chain of backups in Settings', () => {
     expect('error' in setForTask('task.fallback9=codex')).toBe(true)
   })
 
+  test('a reviewer of OpenCode is named in words with its article', async () => {
+    const { reviewerWords } = await import('../server/live/prompts.ts')
+    expect(reviewerWords({ kind: 'opencode', model: 'opencode/minimax-m3.1-flash-free', effort: 'high' })).toBe(
+      'a headless OpenCode or an OpenCode subagent (model opencode/minimax-m3.1-flash-free, high effort)',
+    )
+    expect(reviewerWords({ kind: 'codex' })).toBe('a headless Codex or a Codex subagent (its default model and effort)')
+  })
+
   test("the brief's Reviewer line: one backup reads as it always has; a chain, each in turn", () => {
     const r = { kind: 'claude' }
     expect(reviewerLine(r, undefined, 'X-1')).toBe(reviewerLine(r, [], 'X-1'))

@@ -77,7 +77,8 @@ const PROVIDER_OF: Record<string, string> = { claude: 'anthropic', 'claude-code'
  *  a model the logs don't name is "unknown" */
 export function modelKey(cli: string, model?: string): string {
   const name = model && model !== 'default' ? model : 'unknown'
-  if (cli === 'pi') return name.includes('/') ? name : `pi/${name}`
+  // pi and OpenCode name their models with the provider in front (opencode/minimax-m3.1-flash-free)
+  if (cli === 'pi' || cli === 'opencode') return name.includes('/') ? name : `${cli}/${name}`
   return `${PROVIDER_OF[cli] ?? cli}/${name}`
 }
 

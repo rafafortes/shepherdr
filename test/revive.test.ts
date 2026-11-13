@@ -20,6 +20,15 @@ describe('what is wrong with a pane', () => {
     expect(paneWrong('claude', running(['claude', '--resume', 'abc']), want)).toBe('stale')
   })
 
+  test('OpenCode runs with its own flags and none of Shepherdr\'s files: not stale, not wrong', () => {
+    const argv = ['/home/u/.opencode/bin/opencode', '--standalone', '--session', 'ses_x', '--auto']
+    expect(paneWrong('opencode', running(argv), {})).toBeUndefined()
+    expect(paneWrong('opencode', running(argv), { '--session': 'ses_x' })).toBeUndefined()
+    expect(paneWrong('opencode', running(argv), { '--session': 'ses_y' })).toBe('stale')
+    // a shell at its prompt is still exited
+    expect(paneWrong('opencode', { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [] }, {})).toBe('exited')
+  })
+
   test('pi rewrites its process title, so an argv of just "pi" (plus padding) is not stale', () => {
     const piWant = { '--append-system-prompt': '/h/.shepherdr/helper/prompts/shep-x.md' }
     expect(paneWrong('pi', running(['pi']), piWant)).toBeUndefined()

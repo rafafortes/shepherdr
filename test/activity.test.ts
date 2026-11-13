@@ -39,6 +39,7 @@ describe('words', () => {
     expect(t('python3 -c "print(123)"').title).toBe('Ran a script')
     expect(t('cat README.md | rg "bun test"').title).toBe('Read README.md')
     expect(commandSay('gh pr checks 48')).toMatchObject({ step: 'web', title: 'Checked the pull request’s checks' })
+    expect(commandSay('opencode run --standalone "Review this"')).toMatchObject({ step: 'agent', title: 'Asked another agent' })
   })
   test('other tools in words: edits count their lines, searches quote, subagents say what they do', () => {
     expect(claudeStep('Edit', { file_path: '/w/src/a.ts', old_string: 'a\nb', new_string: 'a\nc\nd' })).toMatchObject({ step: 'edit', title: 'Edited a.ts', target: 'a.ts', added: 2, removed: 1, detail: '/w/src/a.ts' })

@@ -23,6 +23,11 @@ describe('the provider and the model of a call', () => {
     expect(modelKey('claude', undefined)).toBe('anthropic/unknown')
     expect(modelKey('claude', 'default')).toBe('anthropic/unknown')
     expect(modelKey('someother', 'x')).toBe('someother/x')
+    // OpenCode's models keep their provider, slashes and all; a bare one gets the CLI's name in front
+    expect(modelKey('opencode', 'opencode/minimax-m3.1-flash-free')).toBe('opencode/minimax-m3.1-flash-free')
+    expect(modelKey('opencode', 'nvidia/z-ai/glm-5.3-flash')).toBe('nvidia/z-ai/glm-5.3-flash')
+    expect(modelKey('opencode', 'bare')).toBe('opencode/bare')
+    expect(modelKey('opencode', undefined)).toBe('opencode/unknown')
     expect(providerOf('commandcode/deepseek/deepseek-v4.1-flash')).toBe('commandcode')
     expect(providerOf('spark/qwen3.8-flash-next-mlx4-mtp-tensorfold')).toBe('spark')
     expect(modelOf('commandcode/deepseek/deepseek-v4.1-flash')).toBe('deepseek/deepseek-v4.1-flash')
