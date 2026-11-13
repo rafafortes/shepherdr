@@ -51,6 +51,7 @@ import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
 import { CATALOG, CLI_NAME, CLIS, kindOf, MAX_BACKUPS, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
+import { modelsMatrix } from './models-matrix.ts'
 import { startVoice } from './voice.ts'
 import { SECRET_NAME, secretPages, Vault } from './secrets.ts'
 import { diffFiles, diffPatch, listFiles, pullRequest, readFile } from './worktree.ts'
@@ -2647,6 +2648,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const r = this.settings.set(a.key, a.value, pr ? { space: pr } : a.place?.startsWith('m:') ? 'machine' : 'all')
         if (r.ok) this.settingChanged(a.key)
         return r
+      }
+      case 'models-matrix': {
+        // this machine's levels: Everywhere, the machine and its spaces, each shown by the name the sidebar gives it
+        const shown = new Map(this.placeList().map((p) => [p.id, p.name]))
+        const spaces = ['~', ...this.places.spaces.map((p) => p.name)].map((key) => ({ key, name: shown.get(key === '~' ? placeId.home() : placeId.space(key)) ?? key }))
+        return modelsMatrix(this.settings, { host: HOST, name: NAME }, spaces)
       }
       case 'apply-to-waiting': {
         // a task agent's or a reviewer's Setting changed at a level: the tasks that wait for it take what it names now

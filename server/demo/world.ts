@@ -22,6 +22,7 @@ const DEFAULT_WAYS = { review: defaultOf('brief.review') !== 'off', mustFix: def
 const DEFAULT_REVIEWER = { kind: kindOf(defaultOf('reviewer.agent')!)! }
 import { excerpt } from '../live/chatlines.ts'
 import { findModel, TABLE } from '../live/models.ts'
+import { modelsMatrix } from '../live/models-matrix.ts'
 import { Browsers } from '../live/browser.ts'
 import { shortUrl } from '../../shared/browser.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, setOrder, sortPlaces, type PlaceOrder, type SectionDefs } from '../../shared/order.ts'
@@ -715,6 +716,11 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         this.sections = D.settings(this.stores, this.checklists, this.pluginsOff)
         this.emit('snapshot')
         return { ok: true }
+      }
+      case 'models-matrix': {
+        // this machine's levels, as the live one reads them: its Everywhere, machine and spaces
+        const spaces = this.places.filter((p) => p.machine === D.DEMO_HOST).map((p) => ({ key: p.id.split(':')[2]!, name: p.name }))
+        return modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, spaces)
       }
       case 'apply-to-waiting': {
         // as the live one, for this machine's spaces: the waiting tasks of the place (or of each space that doesn't set

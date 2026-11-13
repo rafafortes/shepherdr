@@ -3261,3 +3261,27 @@ describe('a renamed space: every message that names it reads the name it shows, 
     }
   })
 })
+
+describe('Settings → Models: the table of this machine, read and written by the live source', () => {
+  test('models-matrix lists Everywhere, this machine and its spaces, and a write at a space shows in its row', async () => {
+    const dir = tmp('models-repo')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'models-src')
+    const place = placeId.space(p.name)
+    const m = (await src.act({ type: 'models-matrix' })) as import('../shared/types.ts').ModelsMatrix
+    expect(m.machine).toEqual({ id: placeId.machine(), name: NAME })
+    expect(m.rows.map((r) => r.id)).toEqual(['all', placeId.machine(), place])
+    expect(m.rows[2]!.name).toBe(p.name)
+    expect(m.rows[2]!.values['space.maxTasks']).toEqual({ value: 'off', from: 'default', set: false })
+    expect(await src.act({ type: 'setting', key: 'space.maxTasks', value: '5', place })).toEqual({ ok: true })
+    const after = (await src.act({ type: 'models-matrix' })) as import('../shared/types.ts').ModelsMatrix
+    expect(after.rows[2]!.values['space.maxTasks']).toEqual({ value: '5', from: 'space', set: true })
+    expect(after.rows[1]!.values['space.maxTasks']).toEqual({ value: 'off', from: 'default', set: false })
+    // a cell's keys go to the level of the row they are in: an agent's CLI at the space, not Everywhere
+    expect(await src.act({ type: 'setting', key: 'task.agent', value: 'pi', place })).toEqual({ ok: true })
+    const cli = (await src.act({ type: 'models-matrix' })) as import('../shared/types.ts').ModelsMatrix
+    expect(cli.rows[2]!.values['task.agent']).toEqual({ value: 'pi', from: 'space', set: true })
+    expect(cli.rows[0]!.values['task.agent']!.value).not.toBe('pi')
+    expect(await src.act({ type: 'setting', key: 'space.maxTasks', value: null, place })).toEqual({ ok: true })
+  })
+})

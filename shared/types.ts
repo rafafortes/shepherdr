@@ -788,6 +788,66 @@ export interface SettingSection {
   secrets?: { name: string; at: number }[]
 }
 
+/** Settings → Models: every level's model settings in one table (models-matrix.ts). A slot is one agent of a role: its
+ *  primary, or one of its backups (n: 0 is the primary, 1 is Backup 1), with the three keys that set its CLI, model and
+ *  effort */
+export type MatrixRole = 'task' | 'coordinator' | 'reviewer' | 'advisor'
+export interface MatrixSlot {
+  id: string
+  role: MatrixRole
+  /** the role's group heading: Tasks, Coordinators, Reviewer, Advisor */
+  title: string
+  /** Primary, Backup 1 … Backup 5 */
+  name: string
+  n: number
+  cli: string
+  model: string
+  effort: string
+  /** the CLI choices the slot offers, as its Settings row does (off first for a backup) */
+  clis: string[]
+}
+/** a key's value as its row reads it, and where that comes from: this row's own level (set), a level above it, or
+ *  Shepherdr's default. A model shows its label, a CLI its name; follows: the key a backup's model or effort reads
+ *  while it is at default (the tasks' backup's) */
+export interface MatrixValue {
+  value: string
+  from: 'all' | 'machine' | 'space' | 'default'
+  set: boolean
+  follows?: string
+}
+/** one slot in one row: what it runs on in words ("pi · opencode-go/deepseek-v4.1-flash · high", "off"), whether any of
+ *  its three keys is set in this row, and where its CLI comes from */
+export interface MatrixCell {
+  words: string
+  set: boolean
+  from: MatrixValue['from']
+}
+export interface MatrixRow {
+  /** the level's place id: all, m:<machine>, p:<machine>:<space> (the setting action's place) */
+  id: string
+  name: string
+  kind: 'all' | 'machine' | 'space'
+  /** every key the row reads (the slots' three keys, and the plain columns') */
+  values: Record<string, MatrixValue>
+  cells: Record<string, MatrixCell>
+}
+/** what one CLI takes: its models in the order the picks put them first, with the efforts each model takes */
+export interface MatrixCatalog {
+  /** false where the CLI can't list its models: any id goes */
+  known: boolean
+  models: { label: string; id: string; efforts: string[] }[]
+  /** the levels its own default model takes */
+  efforts: string[]
+}
+export interface ModelsMatrix {
+  machine: { id: string; name: string }
+  slots: MatrixSlot[]
+  /** the plain columns after the roles: a key of its own and its title */
+  plain: { key: string; title: string }[]
+  rows: MatrixRow[]
+  catalog: Record<string, MatrixCatalog>
+}
+
 export interface Alert {
   id: string
   from: string
@@ -983,6 +1043,8 @@ export type Action =
    *  for Everywhere): the waiting tasks it reaches take what Settings name for their space, as Start with… gives each
    *  (engine retuneWaiting). dry: the counts only, for the question asked first. Running tasks keep their agent */
   | { type: 'apply-to-waiting'; key: string; place?: string; dry?: boolean }
+  /** Settings → Models: every level's model settings as one table (read only; the writes are the setting action) */
+  | { type: 'models-matrix' }
   /** archive a task (on: true; its agent stops first) or bring it back; chat is its agent's key (ID/Agent) */
   | { type: 'archive'; chat: string; on: boolean }
   /** pin a task to the top of its lists (on: true) or unpin it */

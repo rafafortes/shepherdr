@@ -126,6 +126,8 @@ const PAIRS: Record<PairName, Pair> = {
 export const chainNames = (c: Chain): PairName[] => [FIRST_BACKUP[c], ...EXTRA.map((n) => `${c}${n}` as ExtraName)]
 /** a chain's pairs with their keys, Backup 1 first */
 export const chainPairs = (c: Chain) => chainNames(c).map((name) => ({ name, ...PAIRS[name] }))
+/** a role's pairs as the Settings matrix has them: its primary first, then its backups, Backup 1 first */
+export const rolePairs = (c: Chain) => [{ name: c as PairName, ...PAIRS[c] }, ...chainPairs(c)]
 const chainKeys = (c: Chain) => chainNames(c).map((n) => PAIRS[n].cli)
 /** the backup reviewers' CLI keys: off, or one of the CLIs Shepherdr runs headless */
 const REVIEWER_BACKUP_KEYS = chainKeys('reviewer')
@@ -500,6 +502,9 @@ export function agentRow(r: Row, get: (key: string) => string, picksOfKind: (kin
 const ROWS = CATALOG.flatMap((s) => s.rows)
 const KEYS = ROWS.map((r) => r.key)
 
+/** the choices a setting offers, as its row of Settings has them (undefined for a free value or an unknown key) */
+export const optionsOf = (key: string): string[] | undefined => ROWS.find((r) => r.key === key)?.options
+
 export function defaultOf(key: string) {
   return ROWS.find((r) => r.key === key)?.value
 }
@@ -641,7 +646,7 @@ export class Settings {
   }
 
   /** the picks a role's model rows lead with: this machine's, or none for a world of its own (the demo's) */
-  private picksAt(kind: string) {
+  picksAt(kind: string) {
     return this.seed ? NO_PICKS : picksOf(kind)
   }
 
