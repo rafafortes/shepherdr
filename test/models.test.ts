@@ -192,20 +192,25 @@ describe('OpenCode: its own models and variants', () => {
       { id: 'z-ai/glm-5.3-flash', providerID: 'nvidia', name: 'GLM 5.3 Flash', variants: [{ id: 'default' }, { id: 'low' }], enabled: true },
       { id: 'old', providerID: 'opencode', name: 'Old', variants: [{ id: 'max' }], enabled: false },
     ]
-    // a stand-in for `opencode api --standalone model.list`: prints the answer and nothing else
+    // a stand-in for `opencode api --standalone model.list` (and model.default): prints the answer and nothing else
     writeFileSync(bin, `#!/bin/sh
-printf '%s' '${JSON.stringify({ data })}'
+case "$*" in
+  *model.default*) printf '%s' '${JSON.stringify({ data: data[0] })}' ;;
+  *) printf '%s' '${JSON.stringify({ data })}' ;;
+esac
 `)
     chmodSync(bin, 0o755)
     const saved = process.env.SHEPHERDR_OPENCODE_BIN
     process.env.SHEPHERDR_OPENCODE_BIN = bin
     try {
+      // the models are named as the CLI takes them, provider first (as pi names its own), grouped by provider
       expect(await read('opencode')).toEqual({
         models: [
-          { id: 'opencode/minimax-m3.1-flash-free', label: 'MiniMax M3.1 Flash', efforts: ['high', 'thinking', 'none'] },
-          { id: 'nvidia/z-ai/glm-5.3-flash', label: 'GLM 5.3 Flash', efforts: ['default', 'low'] },
+          { id: 'nvidia/z-ai/glm-5.3-flash', label: 'nvidia/z-ai/glm-5.3-flash', efforts: ['default', 'low'] },
+          { id: 'opencode/minimax-m3.1-flash-free', label: 'opencode/minimax-m3.1-flash-free', efforts: ['high', 'thinking', 'none'] },
         ],
-        efforts: ['none', 'low', 'high', 'thinking', 'default'],
+        efforts: ['none', 'low', 'high', 'default', 'thinking'],
+        default: 'opencode/minimax-m3.1-flash-free',
       })
     } finally {
       if (saved === undefined) delete process.env.SHEPHERDR_OPENCODE_BIN

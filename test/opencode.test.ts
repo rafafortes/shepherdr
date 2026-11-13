@@ -5,7 +5,7 @@ import { Database } from 'bun:sqlite'
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { api, createSession, listModels, mirrorSession, opencodeDb, opencodeLogPath, parseModel, putInstructions, switchModel } from '../server/live/opencode.ts'
+import { api, createSession, defaultModel, listModels, mirrorSession, opencodeDb, opencodeLogPath, parseModel, putInstructions, switchModel } from '../server/live/opencode.ts'
 import { tmp } from './tmp.ts'
 
 let dir = ''
@@ -341,11 +341,25 @@ describe('opencode api client', () => {
       { id: 'old', providerID: 'opencode', name: 'Old', variants: [], enabled: false },
       { id: 'z-ai/glm-5.3-flash', providerID: 'nvidia', name: 'GLM 5.3 Flash' },
     ])
+    // named with the provider in front, as `opencode run -m` takes them, and grouped by provider (nvidia before opencode)
     expect(await listModels(app)).toEqual([
-      { id: 'opencode/minimax-m3.1-flash-free', label: 'MiniMax M3.1 Flash', efforts: ['high', 'none'] },
-      { id: 'nvidia/z-ai/glm-5.3-flash', label: 'GLM 5.3 Flash', efforts: [] },
+      { id: 'nvidia/z-ai/glm-5.3-flash', label: 'nvidia/z-ai/glm-5.3-flash', efforts: [] },
+      { id: 'opencode/minimax-m3.1-flash-free', label: 'opencode/minimax-m3.1-flash-free', efforts: ['high', 'none'] },
     ])
     expect(calls()[0].argv).toEqual(['api', '--standalone', 'model.list'])
+  })
+
+  test("defaultModel is OpenCode's own default, as providerID/modelID; nothing when it has none or cannot say", async () => {
+    reset()
+    answer({ providerID: 'opencode-go', id: 'deepseek-v4.1-flash', variants: [] })
+    expect(await defaultModel(app)).toBe('opencode-go/deepseek-v4.1-flash')
+    expect(calls()[0].argv).toEqual(['api', '--standalone', 'model.default'])
+    answer(undefined, { raw: '' })
+    expect(await defaultModel(app)).toBeUndefined()
+    answer({ nope: true })
+    expect(await defaultModel(app)).toBeUndefined()
+    answer(undefined, { code: 1, err: 'no default' })
+    expect(await defaultModel(app)).toBeUndefined()
   })
 
   test('listModels without a folder runs in the temp folder, and refuses an answer that is not a list', async () => {

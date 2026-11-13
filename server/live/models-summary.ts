@@ -18,20 +18,26 @@ import { HOUR, modelKey, modelOf, providerOf, type RunOut, type RunRole, UsageLe
 /** a provider in words: its own name where it has one, else its id */
 export const providerName = (provider: string) => NAMES[provider] ?? provider
 
-/** the model servers of this operator's own machines: no quota, only shared, so a warning about quota skips them */
-export const LOCAL = new Set(['spark', 'radeon', 'avell', 'dell'])
+/** the model servers with no quota, only shared, so a warning about quota skips them: the operator's own machines, and
+ *  the local servers OpenCode has a provider for (LM Studio and Ollama on this machine, 127.0.0.1) */
+export const LOCAL = new Set(['spark', 'radeon', 'avell', 'dell', 'lmstudio', 'ollama'])
 
-/** a provider in words, where it has a name of its own (the others show their id) */
+/** a provider in words, where it has a name of its own (the others show their id): the providers OpenCode adds too
+ *  (opencode is its Zen models, nvidia its NVIDIA endpoints, lmstudio and ollama its local servers) */
 const NAMES: Record<string, string> = {
   anthropic: 'Claude Code',
   openai: 'Codex',
   'opencode-go': 'OpenCode Go',
+  opencode: 'OpenCode Zen (free)',
+  nvidia: 'NVIDIA API',
   commandcode: 'Command Code',
   openrouter: 'OpenRouter',
   spark: 'Spark (local)',
   radeon: 'Radeon (local)',
   avell: 'Avell (local)',
   dell: 'Dell (local)',
+  lmstudio: 'LM Studio (local)',
+  ollama: 'Ollama (local)',
 }
 
 const TITLE: Record<MatrixRole, string> = { task: 'Tasks', coordinator: 'Coordinators', reviewer: 'Reviewer', advisor: 'Advisor' }
@@ -110,10 +116,11 @@ export function labelOf(key: string): string {
   const provider = providerOf(key)
   const model = modelOf(key)
   // a CLI's own default model is not named in its log: the provider's name says which one it is
-  if (model === 'unknown') return `${providerName(provider)} default`
+  if (model === 'unknown') return provider === 'opencode' ? 'OpenCode default' : `${providerName(provider)} default`
   const kind = provider === 'anthropic' ? 'claude' : provider === 'openai' ? 'codex' : 'pi'
-  // pi's own list names its models with the provider in front: under the provider's row, that part is said already
-  const label = findModel(kind, model)?.label ?? (model || key)
+  // pi's own list names its models with the provider in front (and OpenCode's do too): under the provider's row, that part
+  // is said already. A model Claude Code or Codex names is the CLI's own word; pi's, and OpenCode's, come from their lists
+  const label = (kind === 'pi' ? findModel('opencode', key)?.label : undefined) ?? findModel(kind, model)?.label ?? (model || key)
   return label.startsWith(`${provider}/`) ? label.slice(provider.length + 1) : label
 }
 

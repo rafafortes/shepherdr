@@ -4912,7 +4912,7 @@ function fit(p: Parsed, flag: '' | 'reviewer-', kind: string, model?: string): {
   const e = one(p, `${flag}effort`)?.trim().toLowerCase()
   const name = CLI_NAME[kind] ?? kind
   const c = modelsOf(kind)
-  if (((m && m !== 'default') || (e && e !== 'default')) && !c) throw new Error(`Shepherdr passes a model and effort to Claude Code, Codex and pi only; ${name} runs on its own`)
+  if (((m && m !== 'default') || (e && e !== 'default')) && !c) throw new Error(`Shepherdr passes a model and effort to Claude Code, Codex, pi and OpenCode only; ${name} runs on its own`)
   if (m !== undefined && refuse(`task.model`, m)) throw new Error(`--${flag}model ${m}: ${refuse('task.model', m)}`)
   const found = m && m !== 'default' ? findModel(kind, m) : undefined
   if (m && m !== 'default' && knowsModels(kind) && !found) throw new Error(`--${flag}model ${m}: ${name} has no such model. It takes ${c!.models.map((x) => x.id).join(', ')}, or default`)

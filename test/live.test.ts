@@ -1324,8 +1324,9 @@ describe('a chain of backups in Settings', () => {
   test('a reviewer of OpenCode is named in words with its article', async () => {
     const { reviewerWords } = await import('../server/live/prompts.ts')
     expect(reviewerWords({ kind: 'opencode', model: 'opencode/minimax-m3.1-flash-free', effort: 'high' })).toBe(
-      'a headless OpenCode or an OpenCode subagent (model opencode/minimax-m3.1-flash-free, high effort)',
+      'a headless OpenCode run (opencode run --standalone --agent plan …) or an OpenCode subagent (model opencode/minimax-m3.1-flash-free, high effort)',
     )
+    expect(reviewerWords({ kind: 'opencode' })).toBe('a headless OpenCode run (opencode run --standalone --agent plan …) or an OpenCode subagent (its default model and effort)')
     expect(reviewerWords({ kind: 'codex' })).toBe('a headless Codex or a Codex subagent (its default model and effort)')
   })
 
