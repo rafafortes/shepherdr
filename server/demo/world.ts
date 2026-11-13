@@ -739,8 +739,11 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         return modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, this.matrixSpaces())
       case 'profiles':
         return this.profiles.view()
-      case 'profile-save':
-        return this.profiles.save(a.name, { limits: a.limits, force: a.force })
+      case 'profile-save': {
+        const r = this.profiles.save(a.name, { limits: a.limits, force: a.force })
+        if (r.ok) this.emit('snapshot')
+        return r
+      }
       case 'profile-preview':
         return this.profiles.preview(a.name)
       case 'profile-apply':
@@ -748,9 +751,11 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       case 'profile-undo':
         return this.profiles.undo()
       case 'profile-rename':
-        return this.profiles.rename(a.name, a.to)
-      case 'profile-delete':
-        return this.profiles.remove(a.name)
+      case 'profile-delete': {
+        const r = a.type === 'profile-rename' ? this.profiles.rename(a.name, a.to) : this.profiles.remove(a.name)
+        if (r.ok) this.emit('snapshot')
+        return r
+      }
       case 'apply-to-waiting': {
         // as the live one, for this machine's spaces: the waiting tasks of the place (or of each space that doesn't set
         // the key itself) take what its Settings name now. A task agent's key: the CLI, which a demo task has one of, so

@@ -1291,6 +1291,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** a profile wrote these settings: each key's follow-up, as the setting action gives it */
   private profilesWritten(changes: Change[]) {
     for (const key of new Set(changes.map((c) => c.key))) this.settingChanged(key)
+    this.emit('snapshot')
   }
 
   /** a task agent's or a reviewer's Setting changed at a level (Everywhere, this machine, or a space): the waiting tasks
@@ -2673,9 +2674,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return modelsMatrix(this.settings, { host: HOST, name: NAME }, this.matrixSpaces())
       case 'profiles':
         return BOX ? { profiles: [], active: 'Custom', unavailable: PROFILES_ON_MAIN } : this.profiles.view()
-      case 'profile-save':
+      case 'profile-save': {
         if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
-        return this.profiles.save(a.name, { limits: a.limits, force: a.force })
+        const r = this.profiles.save(a.name, { limits: a.limits, force: a.force })
+        if (r.ok) this.emit('snapshot')
+        return r
+      }
       case 'profile-preview':
         if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
         return this.profiles.preview(a.name)
@@ -2686,11 +2690,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
         return this.profiles.undo()
       case 'profile-rename':
+      case 'profile-delete': {
         if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
-        return this.profiles.rename(a.name, a.to)
-      case 'profile-delete':
-        if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
-        return this.profiles.remove(a.name)
+        const r = a.type === 'profile-rename' ? this.profiles.rename(a.name, a.to) : this.profiles.remove(a.name)
+        if (r.ok) this.emit('snapshot')
+        return r
+      }
       case 'apply-to-waiting': {
         // a task agent's or a reviewer's Setting changed at a level: the tasks that wait for it take what it names now
         // (the dialog after the change asks first, with dry: true, which only counts)
@@ -3464,6 +3469,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (!name) throw new Error(usage)
         const r = this.profiles.save(name, { limits: p.flags.has('limits'), force: p.flags.has('force') })
         if (!r.ok) throw new Error(r.exists ? `${r.error} Add --force to replace it.` : r.error)
+        this.emit('snapshot')
         return `Saved ${r.profile!.name}: ${r.profile!.limits ? 'the models and the limits' : 'the models'} of Everywhere, this machine and ${this.matrixSpaces().length} spaces (home included).`
       }
       case 'show':
@@ -3505,12 +3511,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (!from || !to.length) throw new Error('shepherdr profile rename <name> <new-name> (quote a name with spaces)')
         const r = this.profiles.rename(from, to.join(' '))
         if (!r.ok) throw new Error(r.error)
+        this.emit('snapshot')
         return `${from} is called ${to.join(' ')} now.`
       }
       case 'delete': {
         if (!name) throw new Error(usage)
         const r = this.profiles.remove(name)
         if (!r.ok) throw new Error(r.error)
+        this.emit('snapshot')
         return `Deleted ${name}. Its undo points stay until they are used.`
       }
       default:

@@ -4,11 +4,12 @@
 // writes the same setting keys at that row's level, through the setting action. The bulk actions: a column's "Set for
 // every space…" and a space's "Copy models to…", each confirmed first. The table comes from one read (models-matrix.ts).
 import clsx from 'clsx'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { MatrixRow, MatrixSlot, ModelsMatrix, SettingRow } from '@shared/types.ts'
 import { act, useSnap } from './kernel.ts'
 import { askWaitingMany } from './apply-waiting.tsx'
+import { Anchored } from './anchored.tsx'
+import { ProfilesBar } from './Profiles.tsx'
 import { Control } from './Settings.tsx'
 import { Dialog } from './rowmenu.tsx'
 import { Ghost, Menu, MenuItem, MoreIcon, Primary, Small, ic } from './ui.tsx'
@@ -156,42 +157,6 @@ function Refused({ text }: { text: string }) {
   )
 }
 
-/** a surface on a desktop, fixed on the screen beside its anchor (the element it sits in: a cell, a header's button):
- *  below it, above where it would run off the bottom, aligned to its left (or right) edge. It is drawn at the top of the
- *  page (a portal), so no sticky cell or the table's scroll paints over or clips it, and it follows the anchor as the page
- *  or the table scrolls */
-function Anchored({ end = false, children }: { end?: boolean; children: ReactNode }) {
-  const marker = useRef<HTMLSpanElement>(null)
-  const ref = useRef<HTMLDivElement>(null)
-  const [at, setAt] = useState<{ top: number; left: number } | null>(null)
-  useLayoutEffect(() => {
-    const place = () => {
-      const anchor = marker.current?.parentElement?.getBoundingClientRect()
-      const box = ref.current?.getBoundingClientRect()
-      if (!anchor || !box) return
-      const top = anchor.bottom + 4 + box.height > innerHeight ? Math.max(8, anchor.top - box.height - 4) : anchor.bottom + 4
-      const left = end ? anchor.right - box.width : anchor.left
-      setAt({ top, left: Math.min(Math.max(8, left), innerWidth - box.width - 8) })
-    }
-    place()
-    // a scroll moves the anchor: the surface moves with it (a scroll inside it is its own, and leaves it where it is)
-    const scrolled = (e: Event) => !ref.current?.contains(e.target as Node) && place()
-    addEventListener('scroll', scrolled, true)
-    return () => removeEventListener('scroll', scrolled, true)
-  }, [end])
-  return (
-    <>
-      <span ref={marker} hidden />
-      {createPortal(
-        <div ref={ref} style={at ?? { visibility: 'hidden' }} className="fixed z-40">
-          {children}
-        </div>,
-        document.body,
-      )}
-    </>
-  )
-}
-
 /** a cell's popover on a desktop: the editor on its surface, anchored to the cell. A press outside it closes it, but not
  *  one in a dialog (the question about the waiting tasks it causes, say: that one is answered, and the editor waits);
  *  Escape closes it too, unless a choice list inside it took the key first */
@@ -319,6 +284,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
   if (phone) {
     return (
       <div className="flex flex-col gap-5 px-4 pb-6">
+        <ProfilesBar phone={phone} />
         {m.rows.map((row) => (
           <section key={row.id} aria-label={row.name} className="rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble">
             <div className="flex items-center gap-2 px-4 pt-3 pb-1">
@@ -384,6 +350,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
 
   return (
     <div className="flex w-full flex-col gap-3 px-6 pt-5 pb-8">
+      <ProfilesBar phone={phone} />
       {/* the table scrolls in its own box, both ways: its header rows and the Level column stay in view */}
       <div className="max-h-[min(70vh,44rem)] max-w-full overflow-auto overscroll-contain">
         <table aria-label="Models by level" className="w-max border-separate border-spacing-0 text-[0.8125rem]">
