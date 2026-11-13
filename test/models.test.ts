@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test'
 import { chmodSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { effortFor, effortsOf, findModel, helpLevels, knowsModels, modelsOf, nearest, opencodeList, parseClaude, parseCodex, parsePi, piEnabled, piFrom, read, scopePi, setModels, stillHolds } from '../server/live/models.ts'
+import { effortFor, effortsOf, findModel, helpLevels, knowsModels, modelArg, modelsOf, nearest, opencodeList, parseClaude, parseCodex, parsePi, piEnabled, piFrom, read, scopeModels, scopeOpencodeText, scopePatterns, scopePi, setModels, setOpencodeScope, stillHolds } from '../server/live/models.ts'
 import { tmp } from './tmp.ts'
 
 describe('reading what each CLI takes', () => {
@@ -240,5 +240,78 @@ printf '%s' '${JSON.stringify({ data })}'
     expect(stillHolds('opencode', c, undefined, now + 3_600_000)).toBe(true)
     expect(stillHolds('opencode', c, undefined, now + 7 * 3_600_000)).toBe(false)
     expect(stillHolds('opencode', c, 'anything', now)).toBe(true)
+  })
+})
+
+describe("OpenCode's models scoped by opencode.models", () => {
+  const m = (id: string) => ({ id, label: id, efforts: [] })
+  const c = { models: ['opencode/minimax-m3.1-flash-free', 'opencode/zen-paid', 'opencode-go/longcat-2.5-free', 'opencode-go/deepseek-v4', 'nvidia/z-ai/glm-5.3-flash'].map(m), efforts: [] }
+
+  test('scopeModels keeps the patterns matches in their order, the rest by id; all, empty and no match keep the list', () => {
+    const s = scopeModels(c, ['*-free'])
+    expect(s.models.map((x) => x.id)).toEqual(['opencode/minimax-m3.1-flash-free', 'opencode-go/longcat-2.5-free'])
+    expect(s.others!.map((x) => x.id)).toEqual(['opencode/zen-paid', 'opencode-go/deepseek-v4', 'nvidia/z-ai/glm-5.3-flash'])
+    // a pattern on provider/model, and the order of the patterns
+    expect(scopeModels(c, ['opencode-go/*', 'OPENCODE/*-FREE']).models.map((x) => x.id)).toEqual(['opencode-go/longcat-2.5-free', 'opencode-go/deepseek-v4', 'opencode/minimax-m3.1-flash-free'])
+    // a nvidia model is found by its model alone (a `*` does not cross the slash of its own vendor)
+    expect(scopeModels(c, ['z-ai/glm-*']).models.map((x) => x.id)).toEqual(['nvidia/z-ai/glm-5.3-flash'])
+    expect(scopeModels(c, undefined)).toBe(c)
+    expect(scopeModels(c, [])).toBe(c)
+    expect(scopeModels(c, ['nothing/here'])).toBe(c)
+  })
+
+  test('scopePatterns reads the text: commas or spaces, any case; all or empty is every model; junk is refused', () => {
+    expect(scopePatterns('*-free')).toEqual(['*-free'])
+    expect(scopePatterns(' opencode/*-free ,  OpenCode-Go/longcat-* ')).toEqual(['opencode/*-free', 'opencode-go/longcat-*'])
+    expect(scopePatterns('a b,c')).toEqual(['a', 'b', 'c'])
+    expect(scopePatterns('all')).toBeUndefined()
+    expect(scopePatterns(' ')).toBeUndefined()
+    expect(() => scopePatterns('all, *-free')).toThrow('Write all on its own')
+    expect(() => scopePatterns('x:high')).toThrow('not a model pattern')
+    expect(() => scopePatterns('a$b')).toThrow('not a model pattern')
+  })
+
+  test("modelsOf('opencode') follows setOpencodeScope, kept while the list and the patterns hold; the others stay found by id", () => {
+    setModels('opencode', { ...c, efforts: [] })
+    try {
+      expect(modelsOf('opencode')!.models.map((x) => x.id)).toEqual(c.models.map((x) => x.id))
+      setOpencodeScope(scopePatterns('*-free'))
+      const first = modelsOf('opencode')!
+      expect(first.models.map((x) => x.id)).toEqual(['opencode/minimax-m3.1-flash-free', 'opencode-go/longcat-2.5-free'])
+      // asked again with nothing changed: the very same list
+      expect(modelsOf('opencode')).toBe(first)
+      // typed by id, the model outside the menus is still found, and its efforts too
+      expect(findModel('opencode', 'opencode-go/deepseek-v4')?.id).toBe('opencode-go/deepseek-v4')
+      expect(modelArg('opencode', 'opencode/zen-paid')).toBe('opencode/zen-paid')
+      expect(effortsOf('opencode', 'opencode/zen-paid')).toEqual([])
+      // no pattern matching: every model again
+      setOpencodeScope(scopePatterns('nothing/*'))
+      expect(modelsOf('opencode')!.models.length).toBe(c.models.length)
+      // all: every model
+      setOpencodeScope(undefined)
+      expect(modelsOf('opencode')!.models.length).toBe(c.models.length)
+    } finally {
+      setOpencodeScope(undefined)
+      setModels('opencode', undefined)
+    }
+  })
+
+  test('a junk opencode.models text is logged once and lists every model, never stops the server', () => {
+    setModels('opencode', { ...c, efforts: [] })
+    const logged: unknown[][] = []
+    const was = console.error
+    console.error = (...a: unknown[]) => logged.push(a)
+    try {
+      scopeOpencodeText('*-free, a:b')
+      expect(logged).toEqual([['shepherdr: opencode.models ignored: a:b is not a model pattern: use letters, digits, . - _ / and the wildcards * ?']])
+      expect(modelsOf('opencode')!.models.length).toBe(c.models.length)
+      scopeOpencodeText('*-free')
+      expect(logged.length).toBe(1)
+      expect(modelsOf('opencode')!.models.length).toBe(2)
+    } finally {
+      console.error = was
+      setOpencodeScope(undefined)
+      setModels('opencode', undefined)
+    }
   })
 })
