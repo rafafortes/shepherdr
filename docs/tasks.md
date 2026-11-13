@@ -105,6 +105,11 @@
     passed over like a held space's: the tasks on other models start in the same pass, and its held tasks start in turn as
     the model frees up. A first in line does not pass it. What counts toward a model, and what does not, is in
     [settings](settings.md).
+  - **Its chain.** A task whose primary is at its cap starts on its first backup with room, not held (`Started on Codex: spark
+    is at its limit (1 of 1 at once)` in its chat). Held only when every harness of its chain is full or out, and its row names
+    each one: `Waiting: spark (1 of 1 at once), openai (out until 17:00)`; its card and replies say it in full, ending
+    `every model it may use is full or out`. A cut-off task's takeover skips the full backups the same way and, with none with
+    room, waits (`Waiting: …`) until one frees. Its way back to the primary is in [settings](settings.md) (the caps and the chain).
 - A space may have a **merge gate** (Settings → How tasks work → Merge gate, `merge.gate`, off by default; a task's own
   `--set merge.gate=…` wins): a command run in the task's worktree after its rebase and before it goes into main here
   (not through a pull request), with `SHEPHERDR_TASK` and `SHEPHERDR_BASE` set. Exit 0 lets it in, and the last line it

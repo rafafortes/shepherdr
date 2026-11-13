@@ -88,8 +88,13 @@
   per pattern: `spark=4, radeon=1` caps every model of `spark` at 4 and every model of `radeon` at 1, and
   `anthropic/claude-opus-5-5=2` caps one model (a provider is the part of a model's key before its slash: `spark`
   for `spark/qwen3.8-flash-next-mlx4-mtp-tensorfold`, `anthropic` for Claude Code's models, `openai` for Codex's). The
-  DGX Spark takes four requests at once, so `spark=4` is the cap that keeps Shepherdr from sending it a fifth. It is set
-  at this machine or Everywhere, never a space: the capacity is the machine's or the server's. Its text is checked when
+  DGX Spark takes four requests at once, so `spark=4` is the cap that keeps Shepherdr from sending it a fifth. It has
+  **two scopes, both applied** (Settings → Space, next to Max tasks of this space working at once; Everywhere, this machine,
+  or one space). The machine's total is the value at this machine or Everywhere: it counts every space's runs together.
+  A space's value is its **sub-limit**: its own runs only, inside the machine's total, and it never replaces the total
+  (a space with no value of its own reads the machine's, the same entries). `spark=4` at the machine and `spark=2` for
+  `lyvora-app` means the Spark takes at most four in all, and lyvora-app at most two of them. Off for a space is no
+  sub-limit of its own; the total still holds for it. Its text is checked when
   it is set: a pattern is a provider or a model key in lowercase, a number from 1 to 200 is needed, a pattern may not
   repeat, and at most 20 entries (a refusal says which). Values are kept as written, lowercased.
   - **What it holds.** A task whose agent would run on a capped model waits as Queued, held for a free slot of it (`Waiting
@@ -103,6 +108,19 @@
     holds no slot, so it counts nothing. **Not counted:** the advisor's and the reviewers' headless runs, and any request
     that comes from outside Shepherdr (another app or a script on the same server): Shepherdr cannot see those, so a
     server that serves them too needs a lower cap than its own work alone would.
+  - **Where a task starts.** A task starts on the first harness of its chain that is not out and has room under every entry
+    that covers it: its own agent first, then its backups in the order its coordinator's `--set` keeps them (Settings'
+    `task.fallback…` otherwise). A primary at its cap starts the task on Backup 1 (a card in its chat: `Started on Codex:
+    spark is at its limit (1 of 1 at once)`), and the agent is told it runs on a backup with the same brief. Once started,
+    it stays on that backup while it works; when it goes idle and its primary has room (and backup.watchReturn is go
+    back), it goes back to its primary, as the way back does. Every harness full or out: the task is held, its row naming
+    the chain (`Waiting: spark (1 of 1 at once), openai (out until 17:00)`), and release starts it on the first that frees.
+    A cut-off task's takeover skips the full backups, and waits for one with room the same way.
+  - **Coordinators are never held.** A coordinator's first start takes the first harness of its chain with room. When every
+    one is full or out it starts on its primary anyway, and its chat says it runs past the cap. A coordinator's backup takeover
+    takes the first backup with room, or the first one past the cap (its chat says so). Working coordinators count toward
+    the caps while they work. A coordinator a cap started on a backup goes back to its primary the same way as a task (kept
+    in memory: a restart of Shepherdr leaves it where it is until it is restarted).
   - **Where it is read.** Models → Summary shows each provider and model row as `2 of 4 at once` (its cap, set here),
     `2 at once · no cap`, or `1 at once · no cap of its own` (the provider's entry holds it); its cell sets the cap at this
     machine or Everywhere, and Clear here takes it back to the level above. The line `shepherdr show` prints it as kept.
