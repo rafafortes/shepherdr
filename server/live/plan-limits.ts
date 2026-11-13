@@ -92,8 +92,13 @@ export interface Host {
 
 /** the real machine: a process is killed at its time limit, a file is read as text */
 export const HOST: Host = {
-  home: process.env.HOME ?? '',
-  env: process.env,
+  // read at each use, so a test (or a run of the server under another home) gets the home it set
+  get home() {
+    return process.env.HOME ?? ''
+  },
+  get env() {
+    return process.env
+  },
   which: (name) => Bun.which(name),
   exists: (path) => existsSync(path),
   read: (path) => (existsSync(path) ? readFileSync(path, 'utf8') : null),

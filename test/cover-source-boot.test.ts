@@ -11,6 +11,9 @@ import { tmp } from './tmp.ts'
 const home = tmp('cover-boot')
 process.env.SHEPHERDR_HOME = home
 process.env.HERDR_SOCKET_PATH = join(home, 'no-herdr.sock')
+// the quota read at start looks at the home's Claude Code folder: a test's own, never the human's (it finds none here)
+process.env.HOME = join(home, 'user-home')
+delete process.env.CLAUDE_CONFIG_DIR
 delete process.env.SHEPHERDR_MAIN
 // No CLI of this machine runs here: herdr (asked which agents it starts), agent-browser (asked its version) and claude (the
 // quota read at start, which must never run the human's own Claude Code) are stand-ins that answer nothing. Bun looks a command up in the PATH this process started with unless it is given an
