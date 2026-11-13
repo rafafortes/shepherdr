@@ -72,10 +72,11 @@
   the head included; off by default) lets the first merges in line go in together on one gate run, each as its own
   commit. It needs a gate set and works only for merges made here, not through a GitHub pull request. Off means one at
   a time. What each row does is in [tasks](tasks.md).
-- **Max tasks of this space working at once** (`space.maxTasks`, the Space section; off by default, or 1 to 200) caps how
-  many of one space's tasks work on this machine at once. It works together with the machine's own limit (Machine → Max
+- **Max tasks of this space working at once** (`space.maxTasks`, the Space section; No cap by default, or 0 to 200) caps how
+  many of one space's tasks work on this machine at once. **0 starts none**: every task of that space is held, as `<space> is
+  set to 0 tasks`, and another space's tasks start as before. No cap is not 0: it is unlimited within the machine's limit. It works together with the machine's own limit (Machine → Max
   tasks working at once, `machine.maxTasks`): a task starts only when the machine has a free slot and its space is under
-  its cap, so the caps never add up past the machine's limit. Off means only the machine's limit. Set it Everywhere, for
+  its cap, so the caps never add up past the machine's limit. No cap means only the machine's limit. Set it Everywhere, for
   a machine or for a space; the most specific one set wins, as for the rest. For example, a machine at 9 tasks at once
   with `lyvora-app` at 6 and `product-intel` at 2 (`shepherdr set machine.maxTasks 9 --machine`, `shepherdr set
   space.maxTasks 6 --space lyvora-app`, `shepherdr set space.maxTasks 2 --space product-intel`): lyvora-app may have 6 of
@@ -84,7 +85,7 @@
   tasks start past it; a first in line does not pass the cap either, and the way back honours it too. What waits and
   why is in [tasks](tasks.md) and [machines](machines.md).
 - **Most agents at once per provider or per model** (`models.maxAtOnce`, the Machine section, under Max tasks working at
-  once; off by default) caps how many of this machine's agents run on one provider or one model. It is a text, one entry
+  once; no entry by default, which is no cap) caps how many of this machine's agents run on one provider or one model. It is a text, one entry
   per pattern: `spark=4, radeon=1` caps every model of `spark` at 4 and every model of `radeon` at 1, and
   `anthropic/claude-opus-5-5=2` caps one model (a provider is the part of a model's key before its slash: `spark`
   for `spark/qwen3.8-flash-next-mlx4-mtp-tensorfold`, `anthropic` for Claude Code's models, `openai` for Codex's). The
@@ -95,8 +96,40 @@
   (a space with no value of its own reads the machine's, the same entries). `spark=4` at the machine and `spark=2` for
   `lyvora-app` means the Spark takes at most four in all, and lyvora-app at most two of them. Off for a space is no
   sub-limit of its own; the total still holds for it. Its text is checked when
-  it is set: a pattern is a provider or a model key in lowercase, a number from 1 to 200 is needed, a pattern may not
+  it is set: a pattern is a provider or a model key in lowercase, a number from 0 to 200 is needed, a pattern may not
   repeat, and at most 20 entries (a refusal says which). Values are kept as written, lowercased.
+  - **The three choices, for every limit.** Each limit editor (Settings' Machine and Space rows, the Limits cells and bulk
+    dialogs, a model's cap cell in Models → Summary) offers three separate choices, never one number that stands for two:
+    **No cap** (unlimited: no entry, or `off` for a task count; the cell reads `no cap`, faint), **Blocked · 0 allowed** (`0`;
+    for a task count **0 · starts none**; the cell reads `blocked · 0 allowed` in the warning colour), and **Limit** with its
+    number from 1 to 200 (the number is saved when you leave it). Choosing No cap at a level takes that level's own entry out:
+    the level above's value then applies, or none where nothing sets it. The profiles keep 0 as a value of its own, distinct
+    from unset (`shepherdr profile save` and apply round-trip it).
+  - **What 0 means, by role.** Blocked (0) is a model that **nothing starts on**, in any role, and it is never waited for:
+    a blocked model does not come back by waiting, only when its limit changes. Running agents on it keep running (they are
+    never stopped), and only the new starts avoid it. A model's entry at a space blocks it for that space only; at the
+    machine (or Everywhere) it blocks it for every space.
+    - **Tasks.** A task starts on the first model of its chain that is not blocked and has room. Every model it may use blocked:
+      it is held with `every model it may use is blocked (0 allowed): change its agent or a limit`, its row reads `Blocked: every
+      model it may use is 0 allowed`, and it starts only once a limit changes (Settings are read again at each look and at each
+      change). Full ones and blocked ones together: it waits for the full ones only.
+    - **Coordinators.** A blocked model is never used, not even past a full cap. A coordinator whose every model is blocked does
+      not start: its chat gets the card `Not started: every model it may use is blocked (0 allowed): change its agent or a limit
+      in Settings → Limits.`, and a relaunch or a start by hand on a blocked model is refused the same way. A takeover skips the
+      blocked backups; with every backup blocked it does not take over.
+    - **The advisor.** Its blocked models are skipped. With every model blocked the question is not sent to the advisor, and its
+      card says `The advisor is blocked by the limits: every model it may use is blocked (0 allowed): change its agent or a limit
+      in Settings → Limits.`
+    - **Reviews.** A blocked reviewer is skipped for its backup. With every reviewer blocked the round is not counted and nothing
+      waits: the answer says `No reviewer may run under the limits: every reviewer <task> may use is blocked (0 allowed).` and the
+      agent says so in its summary and reports without that review (see [the agent's skill](../skill/shepherdr-agent/SKILL.md)).
+    - **The way back.** A cut-off or cap-started agent is never moved back to a blocked primary: it stays on its backup until
+      the primary is not blocked and has room.
+  - **Machine and space task counts.** `machine.maxTasks` and `space.maxTasks` at 0 start no task on the machine, or in the
+    space: the held line says `this machine is set to 0 tasks` or `<space> is set to 0 tasks`. Off is no cap of its own.
+  - **Warnings** (Models → Summary). A role every model of which is blocked in a space: `Tasks in <space> can never start: every
+    model is blocked.`, with a Change… to the blocked cell. A provider or a model blocked while agents still run on it is a note:
+    they keep running, and nothing new starts on it.
   - **What it holds.** A task whose agent would run on a capped model waits as Queued, held for a free slot of it (`Waiting
     for a free slot of spark (4 of 4 at once)`), and the other tasks start past it; the held ones start in turn as the
     model frees up. A model's own entry sets its limit, and the provider's entry still holds the provider's total: with
@@ -124,10 +157,11 @@
     the caps while they work. A coordinator a cap started on a backup goes back to its primary the same way as a task (kept
     in memory: a restart of Shepherdr leaves it where it is until it is restarted).
   - **Where it is read.** Models → Summary shows each provider and model row as `2 of 4 at once` (its cap, set here),
-    `2 at once · no cap`, or `1 at once · no cap of its own` (the provider's entry holds it); its cell sets the cap at this
-    machine, Everywhere, or This space (a list of the spaces). A space that sets its own sub-limit for the row shows it
-    under the row as a line of its own: `lyvora-app: 1 of 2 at once`, the runs of that space it counts, and the line opens
-    the editor at that space (Clear here takes that space's value back). The line `shepherdr show` prints it as kept.
+    `2 at once · no cap`, `1 at once · no cap of its own` (the provider's entry holds it), or `blocked · 0 allowed` (0); its
+    cell sets the cap at this machine, Everywhere, or This space (a list of the spaces), with the three choices above. A space
+    that sets its own sub-limit for the row shows it under the row as a line of its own: `lyvora-app: 1 of 2 at once`, the runs of
+    that space it counts, or `lyvora-app: blocked · 0 allowed`; the line opens the editor at that space (No cap takes that
+    space's value back). The line `shepherdr show` prints it as kept.
   - **From the command.** `shepherdr set models.maxAtOnce "spark=4, radeon=1" --machine` (or Everywhere without `--machine`).
     `shepherdr set models.maxAtOnce off --machine` gives this machine no cap at all, whatever Everywhere says, and
     `shepherdr unset models.maxAtOnce --machine` takes this machine's value away, back to Everywhere's. Profiles hold it
@@ -371,8 +405,10 @@ each space's, and each provider's and model's, with the live numbers beside them
 settings Settings writes, at the same level: nothing new is stored, and a cell's value is the one Settings shows for its
 row. The profiles bar sits above it (a profile saved from here includes the limits by default).
 
+- **Every limit has three choices**: No cap, Blocked (0) or Limit: N (see [Most agents at once](#models)); a task count's 0 reads
+  `0 · starts none`, and a blocked model's cell `blocked · 0 allowed`, in the warning colour.
 - **Machine** (rows: Everywhere, this machine). The columns are **Max tasks working at once** (`machine.maxTasks`; beside
-  it, `now 7 of 9 working, 2 wait on you`), **Wait while CPU load is over** (`machine.startLoad`; now, the 5-minute load
+  it, `now 7 of 9 working, 2 wait on you`; 0 starts no task here), **Wait while CPU load is over** (`machine.startLoad`; now, the 5-minute load
   against the cores), **Wait while CPU pressure is over** (`machine.startPressure`; now, the pressure), **Wait while memory is
   over** (`machine.startMemory`; now, the memory in use), and **Start one task at most every** (`machine.startEvery`). **Merge
   train** (`merge.train`) is a column here only when Everywhere sets one; the spaces read it otherwise. Under the table,
@@ -394,9 +430,9 @@ row. The profiles bar sits above it (a profile saved from here includes the limi
   under it). Beside it: **running now** by role (tasks, coordinators, the advisor, reviewers), **held**, **out now** (until
   when), and the **quota**, read only (the details are in Models). A local server is marked local.
 - **Waiting now** (at the top, read only). The held tasks grouped by what holds them, each group with its count and its limit
-  now: **machine slots**, the **machine's** load, pressure or memory (or herdr that does not answer), each **space's cap**,
-  each **model's cap** (with the chain it waits on), **every model of a space out**, and the **cut-off tasks** that go back to
-  work first. Then the questions waiting for the advisor and the review rounds waiting for a reviewer. A task's id opens it.
+  now: **machine slots**, **this machine set to 0 tasks**, the **machine's** load, pressure or memory (or herdr that does not
+  answer), each **space's cap** (and each **space set to 0 tasks**), each **model's cap** (with the chain it waits on), **every
+  model blocked (0 allowed)**, **every model of a space out**, and the **cut-off tasks** that go back to work first. Then the questions waiting for the advisor and the review rounds waiting for a reviewer. A task's id opens it.
 - **Bulk.** A column's ⋯ → **Set for every space…**: for Max tasks and Merge train, each space's own value, or **Everywhere,
   and reset the spaces** (each space and this machine lose their own, so every space reads Everywhere's); for a provider's or
   model's column, the same number as each space's sub-limit, the other entries kept. A provider's ⋯ → **Clear every space's
