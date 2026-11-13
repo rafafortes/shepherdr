@@ -12,6 +12,8 @@ const MODELS: { key: string; tokens: number; cost?: number; busy: number; chat: 
   { key: 'openai/gpt-6-sol', tokens: 26_000, busy: 1, chat: 'LV-3/Agent' },
   { key: 'opencode-go/deepseek-v4.1-flash', tokens: 15_000, cost: 0.0009, busy: 2, chat: 'HP-202/Agent' },
   { key: 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold', tokens: 22_000, busy: 2, chat: 'GTM-16/Agent' },
+  // OpenCode's free Zen models: a provider of its own with no quota, its row says so
+  { key: 'opencode/minimax-m3.1-flash-free', tokens: 12_000, busy: 1, chat: 'HP-204/Agent' },
   // Command Code's account has no quota read yet (no key in Secrets): its row shows the hint that asks for one
   { key: 'commandcode/deepseek/deepseek-v4.1-flash', tokens: 9_000, busy: 1, chat: 'HP-203/Agent' },
 ]
