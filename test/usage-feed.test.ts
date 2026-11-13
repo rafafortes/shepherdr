@@ -88,6 +88,21 @@ describe('the feed reads the logs of the records it is given, once each', () => 
     expect(ledger.backfilled).toBe(1)
   })
 
+  test('a pass that spends its bytes on one log leaves the other logs to the next pass', () => {
+    const dir = tmp('feed-budget')
+    const a = join(dir, 'A-1.jsonl')
+    const b = join(dir, 'B-1.jsonl')
+    writeFileSync(a, reply('x1', 1, 10))
+    writeFileSync(b, reply('y1', 1, 20))
+    const ledger = new UsageLedger(dir, true)
+    const feed = new UsageFeed(ledger, () => ({ ...rec('A-1/Agent', [a]), ...rec('B-1/Agent', [b]) }))
+    // one byte of budget: the first log takes the pass, and the second waits for the next
+    expect(feed.pass(NOW, 1)).toBe(true)
+    expect(ledger.byKey(NOW - 24 * HOUR).get('opencode-go/deepseek-v4.1-flash')!.tokens).toBe(10)
+    expect(feed.pass(NOW)).toBe(false)
+    expect(ledger.byKey(NOW - 24 * HOUR).get('opencode-go/deepseek-v4.1-flash')!.tokens).toBe(30)
+  })
+
   test('only the logs of the records are read: another session folder is never scanned', () => {
     const dir = tmp('feed-only')
     const mine = join(dir, 'mine.jsonl')
