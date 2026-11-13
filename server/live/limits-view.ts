@@ -10,7 +10,7 @@ import { busy, memPct, type Sample } from './health.ts'
 import { placeId } from './places.ts'
 import { covers } from './engine/choose.ts'
 import type { HeldWhy } from './engine/engine.ts'
-import { capsOf, keyOf, providerName, type RunOn } from './models-summary.ts'
+import { capsOf, keyOf, labelOf, providerName, type RunOn } from './models-summary.ts'
 import { CATALOG, kindOf, type Level, Settings } from './settings.ts'
 import { providerOf } from './usage-ledger.ts'
 
@@ -166,6 +166,10 @@ export function entryPatterns(s: Settings, spaceKeys: string[]): string[] {
   return [...new Set([...machine, ...spaces])]
 }
 
+/** a model in words for the + column and the column headers: its provider's name, then the model as its row names it
+ *  ("NVIDIA API · mistralai/mistral-large-4-1t-a52b"), so two providers' same-named models tell apart */
+const modelName = (key: string) => `${providerName(providerOf(key))} · ${labelOf(key)}`
+
 /** the + column's choices: every provider the summary shows, every model it lists, and the models each CLI's own list
  *  has (the Models page's catalog), each once, lowercase as the entries are */
 export function knownOf(matrix: ModelsMatrix, summary: ModelsSummary): LimitKnown[] {
@@ -175,14 +179,14 @@ export function knownOf(matrix: ModelsMatrix, summary: ModelsSummary): LimitKnow
     if (!out.has(k)) out.set(k, { pattern: k, name, kind })
   }
   for (const p of summary.providers) add(p.provider, p.name, 'provider')
-  for (const p of summary.providers) for (const m of p.models) add(m.key, m.label, 'model')
+  for (const p of summary.providers) for (const m of p.models) add(m.key, modelName(m.key), 'model')
   for (const [cli, cat] of Object.entries(matrix.catalog)) {
     const kind = kindOf(cli)
     if (!kind) continue
     for (const m of cat.models) {
       const key = keyOf(kind, m.id)
       add(providerOf(key), providerName(providerOf(key)), 'provider')
-      add(key, m.label, 'model')
+      add(key, modelName(key), 'model')
     }
   }
   return [...out.values()]

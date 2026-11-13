@@ -62,11 +62,13 @@ describe('OpenCode: its default model is the key of a model the CLI does not nam
 })
 
 describe('OpenCode: the names of its providers and models', () => {
-  test('the providers OpenCode adds have their names; a provider with none shows its id', () => {
+  test('the providers OpenCode adds have their names; a provider with none gets its id in words', () => {
     expect(providerName('opencode')).toBe('OpenCode Zen (free)')
     expect(providerName('nvidia')).toBe('NVIDIA API')
     expect(providerName('opencode-go')).toBe('OpenCode Go')
-    expect(providerName('someone-new')).toBe('someone-new')
+    // no name in the map: its words capitalised, the acronyms upper-cased
+    expect(providerName('someone-new')).toBe('Someone New')
+    expect(providerName('amd-tokenlab')).toBe('AMD TokenLab')
   })
 
   test("OpenCode's local servers are local: no quota is warned about for them; a cloud provider is not", () => {

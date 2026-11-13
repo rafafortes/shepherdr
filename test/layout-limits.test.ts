@@ -78,7 +78,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
     try {
       await openLimits(page)
       await page.getByRole('button', { name: '+ column', exact: true }).click()
-      await page.getByRole('menuitem', { name: /^Spark \(local\)/ }).click()
+      await page.getByRole('menuitem', { name: /^Spark \(local\) provider$/ }).click()
       // the new column, with each space's sub-limit empty: the machine's total applies there, or none
       const empty = page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^Spark \(local\) in gtm: no sub-limit$/ })
       await empty.scrollIntoViewIfNeeded()
@@ -199,7 +199,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       })
       await openLimits(page)
       await page.getByRole('button', { name: '+ column', exact: true }).click()
-      await page.getByRole('menuitem', { name: /^Spark \(local\)/ }).click()
+      await page.getByRole('menuitem', { name: /^Spark \(local\) provider$/ }).click()
       await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^Spark \(local\) in gtm: no sub-limit$/ }).waitFor()
     } finally {
       await page.close()

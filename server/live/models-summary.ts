@@ -15,8 +15,25 @@ import { placeId } from './places.ts'
 import { type Chain, kindOf, type Level, rolePairs, Settings } from './settings.ts'
 import { HOUR, modelKey, modelOf, providerOf, type RunOut, type RunRole, UsageLedger, type UsageTotals } from './usage-ledger.ts'
 
-/** a provider in words: its own name where it has one, else its id */
-export const providerName = (provider: string) => NAMES[provider] ?? provider
+/** a provider in words: its own name where the map below has one, else its id title-cased (see titled) */
+export const providerName = (provider: string) => (Object.hasOwn(NAMES, provider) ? NAMES[provider]! : titled(provider))
+
+/** the words an id's fallback name upper-cases: a provider's own acronyms (amd-tokenlab is "AMD Tokenlab") */
+const ACRONYMS = new Set(['AI', 'AMD', 'API', 'GPU', 'LLM', 'NVIDIA'])
+/** an id in words, for a provider that has no name in the map: its words split on - and _, each capitalised, the
+ *  acronyms above upper-cased ("nvidia-cloud_api" is "NVIDIA Cloud API") */
+export const titled = (id: string) =>
+  id
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((w) => (ACRONYMS.has(w.toUpperCase()) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ')
+
+/** the model keys each CLI's own list offers on this machine: pi's (scoped by its enabledModels), OpenCode's, and the
+ *  catalogs of Claude Code (anthropic) and Codex (openai). A provider that nothing uses yet is listed from these */
+function offeredKeys(): string[] {
+  return ['claude', 'codex', 'pi', 'opencode'].flatMap((kind) => (modelsOf(kind)?.models ?? []).map((m) => keyOf(kind, m.id)))
+}
 
 /** the model servers with no quota, only shared, so a warning about quota skips them: the operator's own machines, and
  *  the local servers OpenCode has a provider for (LM Studio and Ollama on this machine, 127.0.0.1) */
@@ -30,6 +47,7 @@ const NAMES: Record<string, string> = {
   'opencode-go': 'OpenCode Go',
   opencode: 'OpenCode Zen (free)',
   nvidia: 'NVIDIA API',
+  'amd-tokenlab': 'AMD TokenLab',
   commandcode: 'Command Code',
   openrouter: 'OpenRouter',
   spark: 'Spark (local)',
@@ -209,6 +227,20 @@ function rowOf(f: SummaryInput, matches: (k: string) => boolean, conf: ConfRec[]
   return { configured: c, now: n, usage: { h5: usage.h5, h24: usage.h24, d7: usage.d7 }, runOuts, atOnce }
 }
 
+/** whether a row has anything in use: a slot, an agent or a task that waits on it, a run in the week, a run-out in the
+ *  week or out now, or a cap of its own or a space's sub-limit. A provider's cap is its own row's, so a model under it
+ *  is not in use by it (a model's `via` entry does not count) */
+const inUse = (r: SummaryRow) =>
+  r.configured.primary + r.configured.backup > 0 ||
+  r.now.agents + r.now.starts + r.now.reviews > 0 ||
+  r.usage.d7.calls > 0 ||
+  r.runOuts.count7d > 0 ||
+  r.runOuts.out ||
+  r.atOnce.now > 0 ||
+  r.atOnce.held > 0 ||
+  r.atOnce.own !== undefined ||
+  (r.atOnce.spaces?.length ?? 0) > 0
+
 /** the cap of a row, as models.maxAtOnce sets it at this machine or Everywhere (this machine's text when it sets one,
  *  else Everywhere's): the entries, and the level the one that holds the row came from */
 export function capsOf(s: Settings): { entries: MaxEntry[]; from: 'all' | 'machine' } {
@@ -223,10 +255,11 @@ export function capsOf(s: Settings): { entries: MaxEntry[]; from: 'all' | 'machi
 function atOnceOf(f: SummaryInput, provider: string, model?: string): SummaryAtOnce {
   const { entries, from } = capsOf(f.settings)
   const runs = f.runs ?? []
-  const key = model ?? provider
+  // a cap's pattern is lowercase (parseMaxAtOnce), as the engine matches a key: a model id with capitals is capped by its lowercase
+  const key = (model ?? provider).toLowerCase()
   const counted = model === undefined ? runs.filter((r) => providerOf(r.key) === provider) : runs.filter((r) => r.key === model)
   const own = entries.find((e) => e.pattern === key)
-  const via = model !== undefined ? entries.find((e) => e.pattern === provider && !e.pattern.includes('/')) : undefined
+  const via = model !== undefined ? entries.find((e) => e.pattern === providerOf(key) && !e.pattern.includes('/')) : undefined
   const held = (f.heldBy ?? []).filter((p) => p === key).length
   // a space's own text sets its sub-limits: the entry for this row, counting the runs of that space it covers
   const spaces = f.spaces.flatMap((sp): SummarySpaceCap[] => {
@@ -261,20 +294,31 @@ const keysOf = (byKey: Map<string, UsageTotals>, matches: (k: string) => boolean
 export function modelsSummary(f: SummaryInput): ModelsSummary {
   const conf = configuredOf(f.settings, f.spaces)
   const d7 = f.usage.byKey(f.now - WEEK)
-  // every provider that has a slot, runs, waits, used something in the week, or ran out in it
+  // every provider that has a slot, runs, waits, used something in the week, or ran out in it; and each provider a CLI offers
   const keys = new Set<string>([...conf.map((c) => c.key), ...f.agents.filter((a) => a.status !== 'gone').map((a) => keyOf(a.kind, a.model)), ...(f.runs ?? []).map((r) => r.key), ...d7.keys(), ...f.usage.runOuts(() => true).filter((r) => r.at >= f.now - WEEK).map((r) => r.key)])
-  const providers = [...new Set([...[...keys].map(providerOf), ...(f.providers ?? [])])]
+  const offered = offeredKeys()
+  const providers = [...new Set([...[...keys].map(providerOf), ...(f.providers ?? []), ...offered.map(providerOf)])]
   const totalDay = [...f.usage.byKey(f.now - 24 * HOUR).values()].reduce((n, t) => n + t.tokens, 0)
   const totalWeek = [...d7.values()].reduce((n, t) => n + t.tokens, 0)
 
   const rows: SummaryProvider[] = providers.map((provider) => {
-    const models = [...keys].filter((k) => providerOf(k) === provider).sort()
+    const named = [...keys].filter((k) => providerOf(k) === provider).sort()
     const row = rowOf(f, (k) => providerOf(k) === provider, conf, f.watch, provider)
-    const list: SummaryModel[] = models.map((key) => ({
-      key,
-      label: labelOf(key),
-      ...rowOf(f, (k) => k === key, conf, f.watch, provider, key),
-    }))
+    const listed = (ks: string[]): SummaryModel[] =>
+      ks.map((key) => ({
+        key,
+        label: labelOf(key),
+        ...rowOf(f, (k) => k === key, conf, f.watch, provider, key),
+      }))
+    // the models a row lists: those in use, and each model its CLI offers. A provider nothing uses, or one with a cap of its
+    // own, lists every model its CLI offers (with no numbers where none ran): the cap cell of each model is there to set
+    // before it is used. A cap on an offered model alone puts its provider in use
+    const all = listed([...new Set([...offered.filter((k) => providerOf(k) === provider), ...named])])
+    const idle = !inUse(row) && !all.some(inUse)
+    const whole = idle || row.atOnce.own !== undefined
+    // the whole list keeps its CLI's own order (the models in use that it does not list come last); the rest are the models
+    // in use, by key, as they always were
+    const list = whole ? all : all.filter((m) => named.includes(m.key) || inUse(m)).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     const day = f.usage.byKey(f.now - 24 * HOUR)
     const tokens24 = keysOf(day, (k) => providerOf(k) === provider).reduce((n, t) => n + t.tokens, 0)
     const tokensWeek = keysOf(d7, (k) => providerOf(k) === provider).reduce((n, t) => n + t.tokens, 0)
@@ -288,10 +332,12 @@ export function modelsSummary(f: SummaryInput): ModelsSummary {
       ...(quota ? { quota } : {}),
       ...(quotaRead ? { quotaRead } : {}),
       ...row,
+      idle,
       models: list,
     }
   })
-  rows.sort((a, b) => b.usage.d7.tokens - a.usage.d7.tokens || a.name.localeCompare(b.name))
+  // the providers in use first, by the week's tokens; then those nothing uses, by name
+  rows.sort((a, b) => Number(a.idle) - Number(b.idle) || b.usage.d7.tokens - a.usage.d7.tokens || a.name.localeCompare(b.name))
   const warnings = [...warningsOf(f, conf, rows), ...quotaWarningsOf(f, conf, rows)]
   return { at: f.now, ...(f.usage.backfilled !== undefined ? { backfilled: f.usage.backfilled } : {}), providers: rows, warnings, caps: capsTextOf(f) }
 }

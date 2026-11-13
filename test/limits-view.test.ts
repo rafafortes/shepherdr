@@ -8,6 +8,7 @@ import { modelsMatrix } from '../server/live/models-matrix.ts'
 import { entryPatterns, knownOf, limitsView, machineColumns, machineReason, waitingOf, type HeldFact, type LimitsInput } from '../server/live/limits-view.ts'
 import { Settings } from '../server/live/settings.ts'
 import { UsageLedger } from '../server/live/usage-ledger.ts'
+import { piOffers } from './pi-offers.ts'
 import { tmp } from './tmp.ts'
 
 const NOW = Date.now()
@@ -232,5 +233,49 @@ describe('the demo world reads the same view (its own tasks, its fixtures for wh
     expect(after.machineTable.rows[1]!.cells['machine.maxTasks']).toMatchObject({ from: 'machine', row: { value: '7' } })
     // the summary the demo shows still reads (the Models page and the Limits page share its inputs)
     expect(((await w.act({ type: 'models-summary' })) as { providers: unknown[] }).providers.length).toBeGreaterThan(0)
+  })
+})
+
+describe('the Limits providers that nothing uses yet: listed after the used ones, named, with their models and a cap of their own', () => {
+  const NV = 'nvidia/mistralai/mistral-large-4-1t-a52b'
+  const AMD = 'amd-tokenlab/Qwen3.8-27B'
+  /** the catalog of the two providers, for each test's span */
+  const withPi = (fn: () => void) => {
+    const restore = piOffers()
+    try {
+      fn()
+    } finally {
+      restore()
+    }
+  }
+
+  test('the providers table lists them after the used ones; the + column adds the provider or the model, each named as its row says', () => {
+    withPi(() => {
+      const view = limitsView(input(settings()))
+      const nv = view.providers.find((p) => p.provider === 'nvidia')!
+      expect(nv).toMatchObject({ name: 'NVIDIA API', idle: true, atOnce: { now: 0, held: 0 } })
+      expect(nv.models.map((m) => [m.key, m.label])).toEqual([[NV, 'mistralai/mistral-large-4-1t-a52b']])
+      expect(view.providers.find((p) => p.provider === 'amd-tokenlab')).toMatchObject({ name: 'AMD TokenLab', idle: true })
+      // the used ones first: Claude Code runs the default roles here
+      const flags = view.providers.map((p) => p.idle)
+      expect(flags).toEqual([...flags].sort((a, b) => Number(a) - Number(b)))
+      expect(view.providers[0]!.idle).toBe(false)
+      // the + column: a provider by its name, a model with its provider in front, each once and in lowercase
+      expect(view.known.find((k) => k.pattern === 'nvidia')).toEqual({ pattern: 'nvidia', name: 'NVIDIA API', kind: 'provider' })
+      expect(view.known.find((k) => k.pattern === NV.toLowerCase())).toEqual({ pattern: NV.toLowerCase(), name: 'NVIDIA API · mistralai/mistral-large-4-1t-a52b', kind: 'model' })
+      expect(view.known.find((k) => k.pattern === 'amd-tokenlab/qwen3.8-27b')?.name).toBe('AMD TokenLab · Qwen3.8-27B')
+    })
+  })
+
+  test('a cap set on a provider nothing uses yet is written and read back: the row is in use from then on', () => {
+    withPi(() => {
+      const view = limitsView(input(settings({ machine: { 'models.maxAtOnce': 'nvidia=2' } })))
+      const nv = view.providers.find((p) => p.provider === 'nvidia')!
+      expect(nv).toMatchObject({ idle: false, atOnce: { own: { pattern: 'nvidia', max: 2, from: 'machine' } } })
+      // in use, it is above the idle ones
+      expect(view.providers.findIndex((p) => p.provider === 'nvidia')).toBeLessThan(view.providers.findIndex((p) => p.provider === 'amd-tokenlab'))
+      // the + column still offers it: a pattern is added once, from the summary or the list
+      expect(view.known.filter((k) => k.pattern === 'nvidia')).toHaveLength(1)
+    })
   })
 })

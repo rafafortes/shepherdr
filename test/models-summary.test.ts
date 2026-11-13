@@ -2,8 +2,11 @@
 // and run-outs per provider and per model, the quota slot a read fills (4b), and each warning the rules raise, with the
 // cases that must stay silent (a local server, a backup on another provider, a single run-out).
 import { describe, expect, test } from 'bun:test'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { placeId } from '../server/live/places.ts'
-import { configuredOf, keyOf, labelOf, LOCAL, modelsSummary, roleOfChat, type LiveAgent, type SummaryInput, type TaskFact } from '../server/live/models-summary.ts'
+import { configuredOf, keyOf, labelOf, LOCAL, modelsSummary, providerName, roleOfChat, titled, type LiveAgent, type SummaryInput, type TaskFact } from '../server/live/models-summary.ts'
+import { opencodeList, setModels, type CliModels } from '../server/live/models.ts'
 import { Settings } from '../server/live/settings.ts'
 import { HOUR, UsageLedger, type RunOut } from '../server/live/usage-ledger.ts'
 import { tmp } from './tmp.ts'
@@ -337,5 +340,127 @@ describe('the quota side: a provider shows its figure and its read, and a window
     expect(w[0]!.fix).toBe('Give its roles a backup on another provider, or let the window refill before the work does.')
     const local = modelsSummary(input(settings({ everywhere: { 'task.agent': 'pi', 'task.model': 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold' } }), u, { quota: { figures: { spark: fig([{ name: '5 h', usedPct: 99, resetAt: at }]) }, reads: {}, alertAt: 80 } }))
     expect(warn(local, 'quota:')).toEqual([])
+  })
+})
+
+describe('the providers a CLI offers, nothing uses yet: listed under Other providers, with their models', () => {
+  const NV = 'nvidia/mistralai/mistral-large-4-1t-a52b'
+  const AMD = 'amd-tokenlab/Qwen3.8-27B'
+  /** pi's list as pi gives it: the models of the test, two of which its enabledModels names (the test's own folder); the
+   *  task model is one it lists too, so the roles it runs on are known (not pi's default) */
+  const PI: CliModels = { models: [NV, AMD, 'spark/qwen3', GO].map((id) => ({ id, label: id, efforts: [] })), efforts: ['off', 'low'] }
+  /** pi's catalog with its enabledModels (none: every model it lists), its folder the test's own, for the test's span */
+  function withPi(enabled: string[] | undefined, fn: () => void) {
+    const dir = tmp('pi-offers')
+    if (enabled) writeFileSync(join(dir, 'settings.json'), JSON.stringify({ enabledModels: enabled }))
+    const was = process.env.PI_CODING_AGENT_DIR
+    process.env.PI_CODING_AGENT_DIR = dir
+    setModels('pi', PI)
+    try {
+      fn()
+    } finally {
+      setModels('pi', undefined)
+      if (was === undefined) delete process.env.PI_CODING_AGENT_DIR
+      else process.env.PI_CODING_AGENT_DIR = was
+    }
+  }
+  // every role runs on pi's OpenCode Go model, with no backup: that provider is the one in use, and the others are not
+  const roles = { 'task.agent': 'pi', 'task.model': GO, 'task.fallback': 'off', 'coordinator.agent': 'pi', 'coordinator.model': GO, 'reviewer.agent': 'pi', 'reviewer.model': GO }
+  const used = settings({ everywhere: roles })
+  /** the same roles, with the machine's own or a space's caps */
+  const capped = (machine: Record<string, string>, spaces: Record<string, Record<string, string>> = {}) => settings({ everywhere: roles, machine, spaces })
+
+  test("pi's enabled models are offered: nvidia and amd-tokenlab are idle, named, with their models and no numbers", () => {
+    withPi([NV, AMD], () => {
+      const sum = modelsSummary(input(used, ledger('offer-idle')))
+      const nv = provider(sum, 'nvidia')
+      expect(nv).toMatchObject({ name: 'NVIDIA API', idle: true, local: false, configured: { primary: 0, backup: 0, roles: {}, spaces: {} }, now: { agents: 0 }, runOuts: { count7d: 0, out: false }, usage: { h24: { tokens: 0, calls: 0 }, d7: { tokens: 0, calls: 0 } } })
+      // its models are the ones pi lists, named as the rows name them (the provider in front is already said)
+      expect(nv.models.map((m) => [m.key, m.label])).toEqual([[NV, 'mistralai/mistral-large-4-1t-a52b']])
+      expect(nv.models[0]!.configured.primary).toBe(0)
+      expect(provider(sum, 'amd-tokenlab')).toMatchObject({ name: 'AMD TokenLab', idle: true, models: [{ key: AMD, label: 'Qwen3.8-27B' }] })
+      // the used provider lists the models in use only: the offered ones it has no run of stay off its list
+      expect(provider(sum, 'opencode-go').models.map((m) => m.key)).toEqual([GO])
+      // what pi's enabledModels leaves out is not offered
+      expect(sum.providers.map((p) => p.provider)).not.toContain('spark')
+      // the providers in use come first, the idle ones after, by name
+      expect(sum.providers.filter((p) => !p.idle).map((p) => p.provider)).toEqual(['opencode-go'])
+      // by the name the row shows: AMD TokenLab, Claude Code, Codex, NVIDIA API
+      expect(sum.providers.map((p) => p.provider).slice(1)).toEqual(['amd-tokenlab', 'anthropic', 'openai', 'nvidia'])
+    })
+  })
+
+  test('with no enabledModels, every model pi lists is offered, a local one too (local, no quota)', () => {
+    withPi(undefined, () => {
+      const sum = modelsSummary(input(used, ledger('offer-all')))
+      expect(provider(sum, 'spark')).toMatchObject({ name: 'Spark (local)', local: true, idle: true, models: [{ key: 'spark/qwen3', label: 'qwen3' }] })
+      expect(provider(sum, 'nvidia').idle).toBe(true)
+    })
+  })
+
+  test("an idle Claude Code and Codex list their own catalogs under anthropic and openai, their models' names as Settings has them", () => {
+    const sum = modelsSummary(input(used, ledger('offer-claude')))
+    expect(provider(sum, 'anthropic')).toMatchObject({ name: 'Claude Code', idle: true })
+    expect(provider(sum, 'anthropic').models.map((m) => m.label)).toEqual(['Fable 5.1', 'Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5'])
+    expect(provider(sum, 'openai')).toMatchObject({ name: 'Codex', idle: true })
+    expect(provider(sum, 'openai').models.map((m) => m.key)).toContain('openai/gpt-6-sol')
+  })
+
+  test("OpenCode's providers are named as the map names them, its Zen models listed while nothing uses them", () => {
+    setModels('opencode', opencodeList([{ id: 'opencode/minimax-m3.1-flash-free', label: 'opencode/minimax-m3.1-flash-free', efforts: [] }], undefined))
+    try {
+      const sum = modelsSummary(input(used, ledger('offer-zen')))
+      expect(provider(sum, 'opencode')).toMatchObject({ name: 'OpenCode Zen (free)', idle: true, models: [{ key: 'opencode/minimax-m3.1-flash-free', label: 'minimax-m3.1-flash-free' }] })
+    } finally {
+      setModels('opencode', undefined)
+    }
+  })
+
+  test('a cap set on an idle provider, or on one of its models, puts it in use: its row carries the cap and it moves up', () => {
+    withPi([NV, AMD], () => {
+      const sum = modelsSummary(input(capped({ 'models.maxAtOnce': 'nvidia=2' }), ledger('offer-cap')))
+      const nv = provider(sum, 'nvidia')
+      expect(nv).toMatchObject({ idle: false, atOnce: { now: 0, held: 0, own: { pattern: 'nvidia', max: 2, from: 'machine' } } })
+      // capped, it still lists every model its CLI offers: the cap is set where its models are, and they stay there
+      expect(nv.models.map((m) => m.key)).toEqual([NV])
+      // in use now, it sits with the providers in use, before the idle ones
+      expect(sum.providers.findIndex((p) => p.provider === 'nvidia')).toBeLessThan(sum.providers.findIndex((p) => p.provider === 'amd-tokenlab'))
+      // a model's cap on an idle provider makes that model, and so its provider, in use
+      const model = modelsSummary(input(capped({ 'models.maxAtOnce': `${AMD}=1` }), ledger('offer-cap-model')))
+      // the cap is written in lowercase, as the text keeps it: the model's row still finds it
+      expect(provider(model, 'amd-tokenlab')).toMatchObject({ idle: false, models: [{ key: AMD, atOnce: { own: { pattern: 'amd-tokenlab/qwen3.8-27b', max: 1 } } }] })
+      // a space's own sub-limit is a cap too
+      const spaced = modelsSummary(input(capped({}, { gtm: { 'models.maxAtOnce': 'nvidia=1' } }), ledger('offer-cap-space')))
+      expect(provider(spaced, 'nvidia')).toMatchObject({ idle: false, atOnce: { spaces: [{ key: 'gtm', max: 1, now: 0 }] } })
+    })
+  })
+
+  test("a provider in use by its slot lists the model in use; with a cap of its own it lists every model its CLI offers", () => {
+    // Claude Code runs the task agent on its Opus only: anthropic is in use, and its list is that one model
+    const claude = { 'task.agent': 'Claude Code', 'task.model': 'Opus 5.5', 'task.fallback': 'off', 'coordinator.agent': 'pi', 'coordinator.model': GO, 'reviewer.agent': 'pi', 'reviewer.model': GO }
+    const plain = modelsSummary(input(settings({ everywhere: claude }), ledger('offer-used')))
+    expect(provider(plain, 'anthropic')).toMatchObject({ idle: false })
+    expect(provider(plain, 'anthropic').models.map((m) => m.key)).toEqual([`anthropic/${CLAUDE}`])
+    // its own cap: the row lists the four models Claude Code offers, the cap cell of each among them
+    const capped = modelsSummary(input(settings({ everywhere: claude, machine: { 'models.maxAtOnce': 'anthropic=2' } }), ledger('offer-used-cap')))
+    expect(provider(capped, 'anthropic')).toMatchObject({ idle: false, atOnce: { own: { pattern: 'anthropic', max: 2 } } })
+    expect(provider(capped, 'anthropic').models.map((m) => m.label)).toEqual(['Fable 5.1', 'Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5'])
+  })
+
+  test('a provider with no name in the map gets its id in words, and the acronyms of its name stay upper-cased', () => {
+    expect(titled('acme-lab')).toBe('Acme Lab')
+    expect(titled('some_new-ai_api')).toBe('Some New AI API')
+    expect(titled('amd-tokenlab')).toBe('AMD Tokenlab')
+    expect(titled('--nvidia--cloud')).toBe('NVIDIA Cloud')
+    expect(titled('')).toBe('')
+    expect(providerName('amd-tokenlab')).toBe('AMD TokenLab')
+    expect(providerName('acme-lab')).toBe('Acme Lab')
+    // the map names what it names; an id the map has none for is its words, not "constructor" or "toString" in words
+    expect(providerName('constructor')).toBe('Constructor')
+    withPi([`acme-lab/model-x`], () => {
+      setModels('pi', { models: [{ id: 'acme-lab/model-x', label: 'acme-lab/model-x', efforts: [] }], efforts: [] })
+      const sum = modelsSummary(input(used, ledger('offer-fallback')))
+      expect(provider(sum, 'acme-lab')).toMatchObject({ name: 'Acme Lab', idle: true })
+    })
   })
 })

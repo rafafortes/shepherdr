@@ -964,6 +964,9 @@ export interface SummaryProvider extends SummaryRow {
   name: string
   /** one of this machine's own models (spark, radeon, avell, dell): no quota, shared */
   local: boolean
+  /** nothing uses it yet: no slot, agent, run, run-out in the week, or cap. Such a provider is listed under Other providers,
+   *  with the models its CLI offers and no numbers */
+  idle: boolean
   /** its share of all tokens in the last 24 h and in the last 7 d (none when nothing was used) */
   share: { h24?: number; d7?: number }
   quota?: QuotaFigure
