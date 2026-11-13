@@ -100,6 +100,12 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     expect(t.reviews).toBe(1)
   })
 
+  test('a primary out with no day given says only that it is out', async () => {
+    const t = task({ 'reviewer.fallback': 'pi' })
+    src.engine.outNow = (key) => (key.startsWith('openai/') ? {} : undefined)
+    expect((await review(t)).out).toContain(`(${CODEX} is out). Run`)
+  })
+
   test('every reviewer full or out: the command waits up to its deadline, then says to end the turn, and the round is not counted yet', async () => {
     src.engine.reviewDeadline = 60
     const t = task({ 'reviewer.fallback': 'pi' })
@@ -232,6 +238,35 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     src.engine.retryReviews()
     expect(sent).toEqual([])
     expect(t.reviews).toBeUndefined()
+  })
+
+  test('a waiting round whose rounds are all used meanwhile is dropped, not counted, and a task that ended loses its wait at the next look', async () => {
+    src.engine.reviewDeadline = 60
+    const t = task({ 'reviewer.fallback': 'pi' })
+    expect(src.settings.set('models.maxAtOnce', 'openai=1, pi=1', 'machine').ok).toBe(true)
+    hold('advisor:a', 'openai/gpt-5.5')
+    hold('advisor:b', 'pi/spark/qwen')
+    await review(t)
+    expect(t.reviewWait).toBeDefined()
+    // its rounds are used up by other means: nothing is counted for the wait
+    t.reviews = 3
+    src.engine.unlease('advisor:a')
+    src.engine.retryReviews()
+    expect(t.reviewWait).toBeUndefined()
+    expect(sent).toEqual([])
+    expect(t.reviews).toBe(3)
+    // a task that waits and then ends (merged) loses its wait at the release look, as its review ends
+    const u = task({ 'reviewer.fallback': 'pi' })
+    hold('advisor:c', 'openai/gpt-5.5')
+    hold('advisor:d', 'pi/spark/qwen')
+    await review(u)
+    expect(u.reviewWait).toBeDefined()
+    u.merged = true
+    src.engine.release()
+    expect(u.reviewWait).toBeUndefined()
+    src.engine.unlease('advisor:c')
+    src.engine.retryReviews()
+    expect(sent).toEqual([])
   })
 
   test('the task ends (merged, or closed): its review ends at once', async () => {
