@@ -58,3 +58,11 @@ describe('the space limit on tasks working at once (space.maxTasks)', () => {
     expect(row('p:host:api')).toMatchObject({ value: '4', from: 'Everywhere' })
   })
 })
+
+describe('a task count that cannot be read: the row’s default, never a silent 0', () => {
+  test('an unreadable space.maxTasks reads as off (no cap), and an unreadable machine.maxTasks as its default of 10', () => {
+    const s = new Settings({ everywhere: {}, machine: { 'space.maxTasks': 'lots', 'machine.maxTasks': 'lots' }, spaces: {} })
+    expect(s.spaceMax('web')).toBeNull()
+    expect(s.machine().max).toBe(10)
+  })
+})
