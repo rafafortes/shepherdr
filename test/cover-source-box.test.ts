@@ -204,7 +204,11 @@ describe('a worker for another machine', () => {
       { type: 'profile-undo' },
       { type: 'profile-rename', name: 'x', to: 'y' },
       { type: 'profile-delete', name: 'x' },
+      { type: 'profile-schedule', name: 'x', rule: 'daily 22:00' },
+      { type: 'profile-schedule-remove', name: 'x', id: 'x' },
     ] as const) expect(await src.act(a as never)).toEqual({ ok: false, error: PROFILES_ON_MAIN })
+    // a worker's scheduler applies nothing, even when a rule is due
+    ;(src as unknown as { profileSchedules: { tick(now: number): void } }).profileSchedules.tick(Date.now() + 10 * 86_400_000)
     expect(await src.cli(['profile', 'list'], {})).toEqual({ out: `${PROFILES_ON_MAIN}\n`, code: 1 })
   })
 })

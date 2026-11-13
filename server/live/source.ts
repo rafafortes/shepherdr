@@ -53,6 +53,7 @@ import { carryOn, Retries, type Retry } from './retry.ts'
 import { CATALOG, CLI_NAME, CLIS, kindOf, MAX_BACKUPS, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
 import { modelsMatrix } from './models-matrix.ts'
 import { changeWords, Profiles, ProfileStore, previewWords, PROFILES_ON_MAIN, waitingPicks, type Change, type Site } from './profiles.ts'
+import { ProfileSchedules } from './profile-schedule.ts'
 import { startVoice } from './voice.ts'
 import { SECRET_NAME, secretPages, Vault } from './secrets.ts'
 import { diffFiles, diffPatch, listFiles, pullRequest, readFile } from './worktree.ts'
@@ -171,7 +172,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** a worker's copy of its machine's agent logs, as they grow */
   mirror = BOX ? new Mirror(BOX) : null
   /** Settings → Models → profiles (profiles.ts): this machine's named settings, kept in profiles.json */
-  profiles = new Profiles(new ProfileStore(), () => this.profileSite(), (changes) => this.profilesWritten(changes))
+  private profileStore = new ProfileStore()
+  profiles = new Profiles(this.profileStore, () => this.profileSite(), (changes) => this.profilesWritten(changes))
+  /** the profiles' schedules (profile-schedule.ts): applied when due, on the main machine only */
+  profileSchedules = new ProfileSchedules(this.profileStore, this.profiles, {
+    zone: () => this.settings.zone(),
+    main: () => !BOX,
+    retune: (changes) => this.profileRetune(changes),
+    report: (text, failed, name) => this.profileReport(text, failed, name),
+  })
   /** each task's shared browser */
   browsers = has('browser')
     ? new Browsers({
@@ -313,6 +322,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a reply in a turn that goes on (or one only background work follows) changes no status: looked for here
     this.timers.push(setInterval(() => Object.keys(this.agents.records).forEach((k) => this.agents.status(k) !== 'gone' && this.fresh(k)), 5000))
     this.timers.push(setInterval(() => this.runSchedules(), 60_000))
+    // a profile's schedule that came due while Shepherdr was off: the latest one applies now (profile-schedule.ts)
+    this.profileSchedules.tick()
     // whether a primary that ran out answers again: never at boot, the first look ten minutes after this machine
     // started, and every minute after that; never beside work on the model it asks (watchReturns)
     if (process.env.NODE_ENV !== 'test')
@@ -1291,6 +1302,24 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** a profile wrote these settings: each key's follow-up, as the setting action gives it */
   private profilesWritten(changes: Change[]) {
     for (const key of new Set(changes.map((c) => c.key))) this.settingChanged(key)
+    this.emit('snapshot')
+  }
+
+  /** what a profile's change does to the waiting tasks it reaches: they take what Settings name now (the apply-waiting
+   *  question, without asking); in words, one line per kind and place */
+  private profileRetune(changes: Change[]): string[] {
+    const picks = waitingPicks(changes)
+    return [...new Set(picks.map(({ kind, change }) => (kind === 'reviewer' ? reviewRetuneLine : retuneLine)(this.applyWaiting(change.key, change.at))))]
+  }
+
+  /** a scheduled profile's line for the human: a card in the home space's chat, and an alert too when it was not applied,
+   *  so a refused apply is seen once and not only in the chat */
+  private profileReport(text: string, failed: boolean, name: string) {
+    const home = placeId.home()
+    const id = `profile-schedule:${randomUUID().slice(0, 8)}`
+    this.chats.post(home, { id, card: { id, text } })
+    if (this.watched.includes(home)) this.emit('chat', home)
+    if (failed) this.alert({ id: randomUUID(), from: 'Shepherdr', title: clip(`${name} was not applied`, TITLE_MAX), body: clip(text, BODY_MAX), go: { place: home, focus: id }, tag: `profile-schedule:${name}` })
     this.emit('snapshot')
   }
 
@@ -2470,6 +2499,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   private runSchedules() {
     for (const a of this.automations.dueNow(this.settings.zone())) this.fire(a, true)
+    this.profileSchedules.tick()
   }
 
   /** an automation runs (timed: on its time rule): a new task from its template, with a fresh agent of its own */
@@ -2693,6 +2723,19 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'profile-delete': {
         if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
         const r = a.type === 'profile-rename' ? this.profiles.rename(a.name, a.to) : this.profiles.remove(a.name)
+        if (r.ok) this.emit('snapshot')
+        return r
+      }
+      case 'profile-schedule': {
+        // a new schedule (no id), or a change of one: its rule, waiting tasks, on or off
+        if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
+        const r = a.id ? this.profileSchedules.edit(a.name, a.id, { rule: a.rule, waiting: a.waiting, on: a.on }) : this.profileSchedules.add(a.name, a.rule ?? '', { waiting: a.waiting, on: a.on })
+        if (r.ok) this.emit('snapshot')
+        return r
+      }
+      case 'profile-schedule-remove': {
+        if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
+        const r = this.profileSchedules.remove(a.name, a.id)
         if (r.ok) this.emit('snapshot')
         return r
       }
@@ -3450,7 +3493,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   private profileWaitingWords(changes: Change[], move: boolean): string[] {
     const picks = waitingPicks(changes)
     if (!picks.length) return []
-    if (move) return [...new Set(picks.map(({ kind, change }) => (kind === 'reviewer' ? reviewRetuneLine : retuneLine)(this.applyWaiting(change.key, change.at))))]
+    if (move) return this.profileRetune(changes)
     const n = picks.reduce((k, { change }) => k + this.applyWaiting(change.key, change.at, true).changed, 0)
     return n ? [`${n} waiting ${n === 1 ? 'task' : 'tasks'} would change with it: add --apply-waiting to move ${n === 1 ? 'it' : 'them'} too.`] : []
   }

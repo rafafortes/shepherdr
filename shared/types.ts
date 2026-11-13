@@ -1126,6 +1126,10 @@ export type Action =
   | { type: 'profile-apply'; name: string }
   /** put back what the last apply changed, where it still reads as the apply left it */
   | { type: 'profile-undo' }
+  /** a profile's schedule: a new one (no id: its rule as words or a time rule, waiting tasks and on or off), or a change
+   *  of one (its id: any of those); the main machine only */
+  | { type: 'profile-schedule'; name: string; id?: string; rule?: string; waiting?: boolean; on?: boolean }
+  | { type: 'profile-schedule-remove'; name: string; id: string }
   | { type: 'profile-rename'; name: string; to: string }
   | { type: 'profile-delete'; name: string }
   /** archive a task (on: true; its agent stops first) or bring it back; chat is its agent's key (ID/Agent) */

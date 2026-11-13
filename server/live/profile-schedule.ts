@@ -119,8 +119,8 @@ export function scheduleWords(s: Pick<Schedule, 'when' | 'waiting' | 'on'>, zone
   return [timeWords(s.when, zone, now), s.waiting ? 'also the waiting tasks' : '', s.on ? '' : 'off'].filter(Boolean).join(' · ')
 }
 
-/** the store and the profiles, as the scheduler needs them from the caller: the zone, whether this machine keeps and
- *  applies profiles, what a waiting-tasks change moved (in words), and where a line for the human goes */
+/** what the scheduler asks of its caller: the zone the rules are read in, whether this machine keeps and applies profiles,
+ *  what a change moves among the waiting tasks (in words, as the command line says it), and where a line for the human goes */
 export interface ScheduleEnv {
   zone(): string
   main(): boolean

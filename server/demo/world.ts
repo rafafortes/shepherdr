@@ -23,6 +23,7 @@ const DEFAULT_REVIEWER = { kind: kindOf(defaultOf('reviewer.agent')!)! }
 import { excerpt } from '../live/chatlines.ts'
 import { findModel, TABLE } from '../live/models.ts'
 import { modelsMatrix } from '../live/models-matrix.ts'
+import { ProfileSchedules } from '../live/profile-schedule.ts'
 import { Profiles, ProfileStore, type Site } from '../live/profiles.ts'
 import { Browsers } from '../live/browser.ts'
 import { shortUrl } from '../../shared/browser.ts'
@@ -76,9 +77,25 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   waking: Record<string, boolean> = {}
   pluginsOff: string[] = []
   /** Settings → Models → profiles: kept in memory, as the demo's settings are (profiles.ts) */
-  profiles = new Profiles(new ProfileStore(true), () => this.profileSite(), () => {
+  private profileStore = new ProfileStore(true)
+  profiles = new Profiles(this.profileStore, () => this.profileSite(), () => {
     this.sections = D.settings(this.stores, this.checklists, this.pluginsOff)
     this.emit('snapshot')
+  })
+  /** the profiles' schedules, as the live one keeps them; the demo runs one only when a test ticks it (no clock of its own) */
+  profileSchedules = new ProfileSchedules(this.profileStore, this.profiles, {
+    zone: () => this.stores[D.DEMO_HOST]!.zone(),
+    main: () => true,
+    retune: () => ['The demo does not move waiting tasks.'],
+    report: (text) => {
+      // the home space's chat, as the live one puts it: a card there (the demo sends no alert)
+      const home = this.places.find((p) => p.home && p.machine === D.DEMO_HOST)?.chat
+      if (home) {
+        ;(this.chats[home]?.messages ?? []).push(cardMessage({ id: `profile-schedule-${Date.now()}`, text }, Date.now()))
+        this.emit('chat', home)
+      }
+      this.emit('snapshot')
+    },
   })
   bases: Record<string, string> = Object.fromEntries(this.places.filter((p) => p.level === 2 && !p.id.endsWith(':~')).map((p) => [p.id, 'main']))
   sections = D.settings(this.stores)
@@ -753,6 +770,16 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       case 'profile-rename':
       case 'profile-delete': {
         const r = a.type === 'profile-rename' ? this.profiles.rename(a.name, a.to) : this.profiles.remove(a.name)
+        if (r.ok) this.emit('snapshot')
+        return r
+      }
+      case 'profile-schedule': {
+        const r = a.id ? this.profileSchedules.edit(a.name, a.id, { rule: a.rule, waiting: a.waiting, on: a.on }) : this.profileSchedules.add(a.name, a.rule ?? '', { waiting: a.waiting, on: a.on })
+        if (r.ok) this.emit('snapshot')
+        return r
+      }
+      case 'profile-schedule-remove': {
+        const r = this.profileSchedules.remove(a.name, a.id)
         if (r.ok) this.emit('snapshot')
         return r
       }
