@@ -136,11 +136,7 @@ function Editor({ phone, title, controls, reset, error, onSet, onReset, footer }
           </div>
         ))}
       </dl>
-      {error ? (
-        <Small role="status" className="text-pretty text-need-fg!">
-          {error}
-        </Small>
-      ) : null}
+      {error ? <Refused text={error} /> : null}
       {reset || footer ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           {reset ? <Ghost onClick={onReset} className="text-accent">Reset to inherited</Ghost> : <span />}
@@ -148,6 +144,15 @@ function Editor({ phone, title, controls, reset, error, onSet, onReset, footer }
         </div>
       ) : null}
     </div>
+  )
+}
+
+/** what a change refused, under the controls it came from: said once, as a status a screen reader hears */
+function Refused({ text }: { text: string }) {
+  return (
+    <Small role="status" className="text-pretty text-need-fg!">
+      {text}
+    </Small>
   )
 }
 
@@ -499,15 +504,20 @@ function SetForEverySpace({ m, slot, phone, onClose }: { m: ModelsMatrix; slot: 
   const [mode, setMode] = useState<'each' | 'all'>('each')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // what was written, asked about once the dialog is closed (one question, not one over the other)
+  const asked = useRef<{ key: string; place: string }[]>([])
+  const close = () => {
+    if (asked.current.length) void askWaitingMany(asked.current)
+    onClose()
+  }
   const set = (key: string, value: string) => setDraft((d) => withValues(d, writesOf(m, d, t, key, value)))
   const writes = keysOf(t).map((k): Write => [k, draft.values[k]!.value])
   const run = async () => {
     setBusy(true)
     setError('')
-    const asked: { key: string; place: string }[] = []
     const failed: string[] = []
     const through = (place: string, r: { keys: string[]; error?: string }, name: string) => {
-      asked.push(...r.keys.map((key) => ({ key, place })))
+      asked.current.push(...r.keys.map((key) => ({ key, place })))
       if (r.error) failed.push(`${name}: ${r.error}`)
     }
     if (mode === 'each') {
@@ -519,11 +529,9 @@ function SetForEverySpace({ m, slot, phone, onClose }: { m: ModelsMatrix; slot: 
         if (resets.length) through('all', await writeAt(r.id, resets), r.name)
       }
     }
-    // what went through is asked about the waiting tasks now, and the dialog closes: the question follows it
-    if (asked.length) void askWaitingMany(asked)
     setBusy(false)
     if (failed.length) setError(failed.join(' '))
-    else onClose()
+    else close()
   }
   const ask = mode === 'each'
     ? `Each of the ${spaces.length} spaces gets this value at its own level, replacing what it sets there. Spaces that inherit it now set it themselves.`
@@ -531,7 +539,7 @@ function SetForEverySpace({ m, slot, phone, onClose }: { m: ModelsMatrix; slot: 
   return (
     <Dialog
       title={`Set ${slot.title} · ${slot.name} for every space`}
-      onCancel={onClose}
+      onCancel={close}
       buttons={
         <Primary autoFocus disabled={busy || !spaces.length} onClick={run}>
           {busy ? 'Setting…' : `Set for ${spaces.length} ${spaces.length === 1 ? 'space' : 'spaces'}`}
@@ -552,11 +560,7 @@ function SetForEverySpace({ m, slot, phone, onClose }: { m: ModelsMatrix; slot: 
           </label>
         </fieldset>
         <Small className="text-pretty">{ask}</Small>
-        {error ? (
-          <Small role="status" className="text-pretty text-need-fg!">
-            {error}
-          </Small>
-        ) : null}
+        {error ? <Refused text={error} /> : null}
       </div>
     </Dialog>
   )
@@ -568,28 +572,31 @@ function CopyModels({ m, from, targets, onClose }: { m: ModelsMatrix; from: Matr
   const [picked, setPicked] = useState<string[]>(targets.map((r) => r.id))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const asked = useRef<{ key: string; place: string }[]>([])
+  const close = () => {
+    if (asked.current.length) void askWaitingMany(asked.current)
+    onClose()
+  }
   const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
   const run = async () => {
     setBusy(true)
     setError('')
-    const asked: { key: string; place: string }[] = []
     const failed: string[] = []
     for (const r of targets.filter((x) => picked.includes(x.id))) {
       // what the source reads, slot by slot (the primary first), skipping what the target already sets the same way
       const writes = m.slots.flatMap((slot) => keysOf({ slot })).map((k): Write => [k, from.values[k]!.value]).filter(([k, v]) => !(r.values[k]!.set && r.values[k]!.value === v))
       const res = await writeAt(r.id, writes)
-      asked.push(...res.keys.map((key) => ({ key, place: r.id })))
+      asked.current.push(...res.keys.map((key) => ({ key, place: r.id })))
       if (res.error) failed.push(`${r.name}: ${res.error}`)
     }
-    if (asked.length) void askWaitingMany(asked)
     setBusy(false)
     if (failed.length) setError(failed.join(' '))
-    else onClose()
+    else close()
   }
   return (
     <Dialog
       title={`Copy ${from.name}'s models to…`}
-      onCancel={onClose}
+      onCancel={close}
       buttons={
         <Primary autoFocus disabled={busy || !picked.length} onClick={run}>
           {busy ? 'Copying…' : `Copy to ${picked.length} ${picked.length === 1 ? 'space' : 'spaces'}`}
@@ -612,11 +619,7 @@ function CopyModels({ m, from, targets, onClose }: { m: ModelsMatrix; from: Matr
         ) : (
           <p className="text-fg2">This is the only space. Add another, then copy to it.</p>
         )}
-        {error ? (
-          <Small role="status" className="text-pretty text-need-fg!">
-            {error}
-          </Small>
-        ) : null}
+        {error ? <Refused text={error} /> : null}
       </div>
     </Dialog>
   )

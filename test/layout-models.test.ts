@@ -44,10 +44,11 @@ const pick = (key: string, space?: string) => vm().pick(key, space ? { space } :
 /** the demo's Settings and tasks back as this file found them */
 async function reset() {
   const store = world.stores['vm-str']
+  const chain = ['reviewer.fallback', 'reviewer.fallback2', 'reviewer.fallback3', 'reviewer.fallback4', 'reviewer.fallback5']
   for (const space of ['gtm', 'herdr-projects']) {
-    for (const k of ['task.agent', 'task.model', 'task.effort', 'space.maxTasks', 'merge.train', 'task.fallback2', 'task.fallback2Model', 'task.fallback2Effort']) store.set(k, null, { space })
+    for (const k of ['task.agent', 'task.model', 'task.effort', 'space.maxTasks', 'merge.train', 'task.fallback2', 'task.fallback2Model', 'task.fallback2Effort', ...chain]) store.set(k, null, { space })
   }
-  for (const k of ['task.agent', 'task.model', 'task.effort', 'task.fallback2', 'task.fallback2Model', 'task.fallback2Effort', 'space.maxTasks']) store.set(k, null, 'all')
+  for (const k of ['task.agent', 'task.model', 'task.effort', 'task.fallback2', 'task.fallback2Model', 'task.fallback2Effort', 'space.maxTasks', ...chain]) store.set(k, null, 'all')
   // the demo's own: gtm runs Codex
   store.set('task.agent', 'Codex', { space: 'gtm' })
   world.sections = (await import('../server/demo/data.ts')).settings(world.stores)
@@ -146,6 +147,107 @@ describe.skipIf(!browser)('Settings → Models on a desktop', () => {
       expect(await askedWaiting(page).count()).toBe(0)
     } finally {
       world.tasks = tasks
+      await reset()
+      await page.close()
+    }
+  })
+
+  test('a CLI change takes a model the new CLI lacks back to default; an effort change is written at the row', async () => {
+    await reset()
+    vm().set('task.agent', 'Claude Code', { space: 'gtm' })
+    vm().set('task.model', 'Opus 5.5', { space: 'gtm' })
+    world.sections = (await import('../server/demo/data.ts')).settings(world.stores)
+    world.emit('snapshot')
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openModels(page)
+      await cell(page, 'gtm · Tasks · Primary').click()
+      const pop = editor(page)
+      await pop.getByRole('button', { name: 'Agent: Claude Code', exact: true }).click()
+      await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).click()
+      // Opus 5.5 is no Codex model: the model goes back to default with the CLI, in the same change
+      await waitFor(() => vm().get('task.model', 'gtm') === 'default')
+      expect(vm().get('task.agent', 'gtm')).toBe('Codex')
+      await answerOnlyNew(page)
+      // the effort it inherits from this machine is high
+      await pop.getByRole('button', { name: 'Effort: High', exact: true }).click()
+      await page.getByRole('menuitemradio', { name: 'Low', exact: true }).click()
+      await waitFor(() => vm().get('task.effort', 'gtm') === 'low')
+      await answerOnlyNew(page)
+    } finally {
+      await reset()
+      await page.close()
+    }
+  })
+
+  test('a value refused is said in its popover, and nothing is written', async () => {
+    await reset()
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openModels(page)
+      await cell(page, 'gtm · Max tasks').click()
+      const box = editor(page).getByRole('textbox', { name: 'Max tasks' })
+      await box.fill('500')
+      await box.press('Enter')
+      await editor(page).getByRole('status').filter({ hasText: 'Write a number from 1 to 200' }).waitFor()
+      expect(vm().pick('space.maxTasks', { space: 'gtm' }).from).not.toBe('space')
+      await page.keyboard.press('Escape')
+    } finally {
+      await reset()
+      await page.close()
+    }
+  })
+
+  test('a column whose backups are full: the row that is full shows a dash, and the column goes once every row is full', async () => {
+    await reset()
+    const store = world.stores['vm-str']
+    for (const k of ['reviewer.fallback', 'reviewer.fallback2', 'reviewer.fallback3', 'reviewer.fallback4']) store.set(k, 'Codex', 'all')
+    store.set('reviewer.fallback5', 'Codex', { space: 'gtm' })
+    world.sections = (await import('../server/demo/data.ts')).settings(world.stores)
+    world.emit('snapshot')
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      const settings = await openModels(page)
+      const table = settings.getByRole('table', { name: 'Models by level', exact: true })
+      // gtm has all five backups: its "+" is a dash; the others still have one to add
+      expect(await table.locator('tbody tr').nth(2).locator('td').filter({ hasText: '—' }).count()).toBe(1)
+      expect(await page.getByRole('button', { name: 'Add Backup 5 to herdr-projects' }).count()).toBe(1)
+      // every row full: the column goes
+      store.set('reviewer.fallback5', 'Codex', 'all')
+      world.sections = (await import('../server/demo/data.ts')).settings(world.stores)
+      world.emit('snapshot')
+      await page.getByRole('button', { name: 'Add Backup 5 to herdr-projects' }).waitFor({ state: 'detached' })
+      expect(await table.locator('thead tr').nth(1).locator('th', { hasText: '+' }).count()).toBe(3)
+    } finally {
+      await reset()
+      await page.close()
+    }
+  })
+
+  test('a bulk set that is refused stays open and says why, in every space it failed in', async () => {
+    await reset()
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      const settings = await openModels(page)
+      await settings.getByRole('button', { name: 'More for Tasks · Primary' }).click()
+      await page.getByRole('menuitem', { name: 'Set for every space…', exact: true }).click()
+      const dlg = page.getByRole('alertdialog', { name: 'Set Tasks · Primary for every space' })
+      await dlg.getByRole('button', { name: 'Agent: Claude Code', exact: true }).click()
+      await page.getByRole('menuitemradio', { name: 'Pi', exact: true }).click()
+      // pi lists no models: the model is a box, and a model id can't carry a "!"
+      const model = dlg.getByRole('textbox', { name: 'Model', exact: true })
+      await model.fill('bad!')
+      await model.press('Enter')
+      await dlg.getByRole('button', { name: 'Set for 2 spaces', exact: true }).click()
+      await dlg.getByRole('status').filter({ hasText: 'Write a model id' }).waitFor()
+      expect(await dlg.textContent()).toContain('gtm: Write a model id')
+      expect(await dlg.textContent()).toContain('herdr-projects: Write a model id')
+      expect(vm().pick('task.model', { space: 'gtm' }).from).not.toBe('space')
+      // Cancel closes it; the question about the one change that went through follows it
+      await dlg.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await dlg.waitFor({ state: 'detached' })
+      await answerOnlyNew(page)
+    } finally {
       await reset()
       await page.close()
     }
