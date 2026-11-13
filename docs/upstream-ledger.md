@@ -354,7 +354,11 @@ OpenCode 2 sessions with `opencode api session.create` and opens them with `--se
 request [#177](https://github.com/eliasstravik/shepherdr/pull/177), "Add OpenCode as a fourth agent program", was closed
 unmerged on 2026-10-17, and its reviews warn about permissions (the review comments were not re-read for this entry);
 and upstream 3.x starts Claude Code and Codex only (`core/agents.js`, `NAMES`). Upstream's issue #394 and PR #395 (OpenCode
-V2 full-screen launches failing when a model is configured) are closed; their code was not read for this entry.
+V2 full-screen launches failing when a model is configured) are closed: upstream passes the model to the full-screen TUI with
+`-m`, which OpenCode 2 rejects. Ours passes no model to the TUI at all (the model lives in the session, set with
+`session.create` and `session.switchModel`), so there is nothing to take. Upstream 3.x's usage and limits code has no OpenCode
+part either: its `provider.py` classifies the same words as our `retry.ts` and no OpenCode error type, so OpenCode's own error
+types (`provider.quota`, `provider.auth`…) are ours, read from OpenCode's binary and its message rows.
 
 | Improvement | What it does | Verdict | Why | Risk to our flow | Size |
 | --- | --- | --- | --- | --- | --- |

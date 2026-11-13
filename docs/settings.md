@@ -152,9 +152,20 @@
 OpenCode is a chat CLI like Claude Code, Codex and pi: Settings and Restart offer it, and its replies show in the chat.
 It needs OpenCode 2.x.
 
-- **Models.** A model id is `provider/model`, as `opencode models` lists it: `opencode/minimax-m3.1-flash-free`,
-  `opencode-go/deepseek-v4.1-flash`, `nvidia/z-ai/glm-5.3-flash` (split at the first slash). Effort is the model's
-  variant; a model with none has no effort.
+- **Models.** A model id is `provider/model`, as `opencode models` lists it and `opencode run -m` takes it: `opencode/minimax-m3.1-flash-free`,
+  `opencode-go/deepseek-v4.1-flash`, `nvidia/z-ai/glm-5.3-flash` (split at the first slash). The menus list them grouped by
+  provider, each named that way, as pi's are. Effort is the model's variant, in OpenCode's own words (`high`, `thinking`,
+  `none`…), each for the models that have it; a model with none has no effort. A session with no model starts on OpenCode's
+  own default (`opencode api model.default`), and that is the model it counts under.
+- **Providers.** A call counts under its provider, as pi's do. `opencode-go` is the Go plan: a call of it made from pi and
+  one made from OpenCode are one plan, one estimate ([Quotas](#quotas)). `opencode` is OpenCode Zen, whose free models
+  have no quota (its row says so: "OpenCode Zen (free)"). `nvidia` is NVIDIA's API ("NVIDIA API"). `lmstudio` and `ollama` are
+  local servers OpenCode has built in: local, like the Spark, with no quota. Another provider OpenCode adds shows its id
+  until it has a name here.
+- **Its errors.** OpenCode's own error types are read as they are: `provider.quota` is out of allowance (a plan's, or a
+  free model's "usage limit"), unless the provider says it is a rate limit, which waits like one; `provider.auth` is signed
+  out; `provider.rate-limit`, a timeout or a dropped connection wait and try again; `provider.no-route` is a model it does
+  not have. A stop you make in its TUI (Esc, "Step interrupted") is not a cut-off: the task stays on its agent.
 - **How it starts.** Shepherdr creates the session first, with `opencode api --standalone session.create`: the model
   and its variant, the agent's folder and, when the role's access is ask, permissions that ask before an edit, a shell,
   a web fetch, a folder outside the agent's, or a subagent. It puts the role's instructions in the session as its
@@ -213,7 +224,8 @@ of this machine's agents (`usage.json` in Shepherdr's home, read from the agents
 
 - **Per provider**: a row with its share of the tokens in the last 24 h and 7 d (a thin bar each), its **models** under it
   (`models-summary`, a read action). A provider is `opencode-go`, `commandcode`, `spark`… (pi's model ids carry it), `anthropic`
-  for Claude Code and `openai` for Codex. A local server (spark, radeon, avell, dell) has no quota: it is marked local.
+  for Claude Code and `openai` for Codex; OpenCode's are `opencode` (Zen, free models), `nvidia` and its local servers (see
+  [OpenCode](#opencode)). A local server (spark, radeon, avell, dell, lmstudio, ollama) has no quota: it is marked local.
 - **Configured, and now**: how many role slots point at it, as primaries or backups (its roles, and its spaces, in the
   tooltip), and what runs on it now: live agents (working ones counted apart), tasks waiting to start on it, and tasks
   waiting to be reviewed by it.
@@ -252,7 +264,8 @@ Shepherdr's agents from its start (the backfill, once: until it is done the summ
 …" time, or a 402 "Insufficient account funds") is a **run-out**: it is kept with its time and model, and the agent's
 backup takes over as before. The first one of a provider that was fine before alerts you once: the title says "OpenCode Go
 ran out", the body names the chat it cut off and the reason; the others while it is still out do not. A reset the provider gives as an
-ISO time is shown in this machine's time, with its zone name.
+ISO time is shown in this machine's time, with its zone name. OpenCode's own run-outs are the same: its "Go usage limit
+exceeded" or "Free usage limit reached" (a `provider.quota` error) and a provider's "Insufficient balance".
 
 ### Profiles
 
@@ -359,7 +372,8 @@ row. The profiles bar sits above it (a profile saved from here includes the limi
   until its ⋯ removes it. A cell is the space's **sub-limit** for that provider or model: its own entry, with its own runs
   counted now (`1 of 2 at once`). A cell with no entry of its own says `machine's total applies (4 at once)`, or `no
   sub-limit` when the machine sets none. A sub-limit sits inside the machine's total: it never raises it.
-- **Providers and models**. Each provider with a cap, an agent, a run or usage, with its models under it. **Max at once** is the
+- **Providers and models**. Each provider with a cap, an agent, a run or usage, with its models under it (OpenCode's providers
+  too: `opencode-go`, the free `opencode` Zen models, `nvidia`, a local `ollama`, each as its own row). **Max at once** is the
   machine's total for the row (the cap of [Most agents at once](#models), set at this machine or Everywhere; its sub-limits show
   under it). Beside it: **running now** by role (tasks, coordinators, the advisor, reviewers), **held**, **out now** (until
   when), and the **quota**, read only (the details are in Models). A local server is marked local.
@@ -404,7 +418,8 @@ nothing here.
   check and the credits, with a 15 s limit for the whole read; a part the API leaves out is left out, never shown as zero.
   The read follows the MIT package `pi-commandcode-provider` (Copyright (c) 2025 Pat Woz), credited in its code.
 - **OpenCode Go** (`quota.opencodeGo`, on by default): an **estimate only**. OpenCode does not tell its quota, so nothing is
-  read. Shepherdr's own ledger gives the tokens and pi's cost of each window (the last 5 h and the week), and where the ledger
+  read. Shepherdr's own ledger gives the tokens and pi's cost of each window (the last 5 h and the week), counting every call of
+  `opencode-go` made from pi or from OpenCode (one plan, one number; OpenCode Zen's calls are not in it), and where the ledger
   holds run-outs, a **learned limit**: what the window before each run-out held when OpenCode Go ran out (the latest three
   shown, "ran out at ~980k tokens · ≈ $0.42 est. in 5 h on Wed 3:14 PM"). The lowest learned limit is the cap, and the
   current window's use is a share of it, tagged **estimate**. No run-out yet: the usage alone, with no share. It is worked out
@@ -419,7 +434,8 @@ nothing here.
   and it refills Fri 3:00 PM."). It alerts again only after that window has refilled (its refill time has passed or a new
   window is over the share), or after it fell under the share. The same window is in the summary's warnings. Off: no alert
   and no warning here; a run-out still alerts.
-- **Local models** (spark, radeon, avell, dell) have no quota: none is read.
+- **Local models** (spark, radeon, avell, dell, and OpenCode's lmstudio and ollama) have no quota: none is read. OpenCode Zen
+  (free) has none either: its row shows its usage and no quota.
 
 The figures and what alerted are kept in `usage.json` in Shepherdr's home, so a restart shows the last figure and does not
 alert twice.

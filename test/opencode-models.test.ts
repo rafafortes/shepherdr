@@ -9,6 +9,7 @@ import { modelKey, HOUR, UsageLedger } from '../server/live/usage-ledger.ts'
 import { Settings } from '../server/live/settings.ts'
 import { placeId } from '../server/live/places.ts'
 import { sameHarness } from '../server/live/restart.ts'
+import { Profiles, ProfileStore } from '../server/live/profiles.ts'
 import { tmp } from './tmp.ts'
 
 const NOW = Date.now()
@@ -168,6 +169,35 @@ describe('OpenCode: its model and variant are kept, compared and written like th
       expect(sameHarness({ kind: 'opencode', model: GO }, { kind: 'opencode', model: ZEN })).toBe(false)
       // the same model and variant on Claude Code or pi is another CLI
       expect(sameHarness({ kind: 'opencode', model: GO }, { kind: 'pi', model: GO })).toBe(false)
+    } finally {
+      setModels('opencode', undefined)
+    }
+  })
+})
+
+describe('OpenCode values in a profile round-trip: saved as written, applied and undone as they were', () => {
+  test('a profile of OpenCode models and variants restores exactly what was saved', () => {
+    setModels('opencode', listed(GO))
+    try {
+      const s = new Settings({ everywhere: { 'task.agent': 'OpenCode', 'task.model': GO, 'task.effort': 'high' }, machine: {}, spaces: { gtm: { 'reviewer.agent': 'OpenCode', 'reviewer.model': THINK, 'reviewer.effort': 'thinking' } } })
+      const spaces = [{ key: 'gtm', name: 'gtm' }, { key: '~', name: 'home' }]
+      const p = new Profiles(new ProfileStore(true), () => ({ settings: s, machine: { host: 'box', name: 'box' }, spaces }), () => undefined)
+      expect(p.save('opencode-day')).toMatchObject({ ok: true })
+      // the day moves on: another model and variant everywhere, then the profile is applied back
+      expect(s.set('task.model', ZEN).ok).toBe(true)
+      expect(s.set('task.effort', 'default').ok).toBe(true)
+      expect(s.set('reviewer.model', NV, { space: 'gtm' }).ok).toBe(true)
+      const r = p.apply('opencode-day')
+      expect(r).toMatchObject({ ok: true, refused: [] })
+      expect(s.get('task.agent')).toBe('OpenCode')
+      expect(s.get('task.model')).toBe(GO)
+      expect(s.get('task.effort')).toBe('high')
+      expect(s.get('reviewer.model', 'gtm')).toBe(THINK)
+      expect(s.get('reviewer.effort', 'gtm')).toBe('thinking')
+      // and undone: the values before the apply are back
+      expect(p.undo()).toMatchObject({ ok: true })
+      expect(s.get('task.model')).toBe(ZEN)
+      expect(s.get('reviewer.model', 'gtm')).toBe(NV)
     } finally {
       setModels('opencode', undefined)
     }
