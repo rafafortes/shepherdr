@@ -80,6 +80,16 @@ export function roleWords(byRole: LimitProvider['byRole']): string {
 }
 
 /** a provider's quota in one short line: each window's share used, why there is none, or a dash (models have none) */
+/** a provider's quota for the desktop table: one short line per window ("5 h 62%", "Week 41%"), an estimate on its own line, or why there is none */
+export function quotaLines(quota?: LimitProvider['quota'], read?: LimitProvider['quotaRead']): string[] {
+  const lines = (quota?.windows ?? []).flatMap((w) => {
+    const share = shareOf(w)
+    return share === undefined ? [] : [`${w.name} ${Math.round(share)}%`]
+  })
+  if (lines.length) return quota?.estimate ? [...lines, 'estimate'] : lines
+  return [read?.failed ? 'read failed' : read?.hint ? 'no read' : '—']
+}
+
 export function quotaWords(quota?: LimitProvider['quota'], read?: LimitProvider['quotaRead']): string {
   const parts = (quota?.windows ?? []).flatMap((w) => {
     const share = shareOf(w)
@@ -200,6 +210,7 @@ export function LimitValue({ title, cell, machine, phone }: { title: string; cel
         aria-haspopup={phone ? undefined : 'dialog'}
         aria-expanded={open}
         aria-label={`${title}: ${words}${cell.now ? `, ${cell.now}` : ''}`}
+        title={`${words}${cell.now ? `, ${cell.now}` : ''}`}
         onClick={() => (open ? close() : setOpen(true))}
         className={clsx('press-dim block max-w-full rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel', cell.set ? 'font-medium text-fg' : 'text-fg3')}
       >
@@ -239,8 +250,22 @@ function SpaceCapCell({ name, pattern, space, caps, total, phone, openId, onOpen
   )
 }
 
-/** the machine's table (Everywhere and this machine, or the alerts): a column per limit, a row per level. A desktop keeps the
- *  first column and the header in view; a phone draws a card per level, a line per limit */
+/** a machine column's header on the desktop, short; its full wording is the header's title (the phone cards keep the full title) */
+const SHORT_HEAD: Record<string, string> = {
+  'machine.maxTasks': 'Max tasks',
+  'machine.startLoad': 'CPU load',
+  'machine.startPressure': 'CPU pressure',
+  'machine.startMemory': 'Memory',
+  'machine.startEvery': 'Start spacing',
+  'machine.alertLoad': 'CPU load',
+  'machine.alertMemory': 'Memory',
+  'machine.alertDisk': 'Disk',
+  'machine.alertHerdr': 'herdr',
+}
+
+/** the machine's table (Everywhere and this machine, or the alerts): a column per limit, a row per level. A desktop fits the
+ *  Settings width (fixed columns, long words cut with their full text as a title) and keeps the first column and the header
+ *  in view; a phone draws a card per level, a line per limit */
 function MachineTable({ table, label, machine, phone }: { table: LimitTable; label: string; machine: string; phone: boolean }) {
   if (phone)
     return (
@@ -262,15 +287,21 @@ function MachineTable({ table, label, machine, phone }: { table: LimitTable; lab
     )
   return (
     <div className="max-w-full overflow-auto overscroll-contain">
-      <table aria-label={label} className="w-max border-separate border-spacing-0 text-[0.8125rem]">
+      <table aria-label={label} className="w-full table-fixed border-separate border-spacing-0 text-[0.8125rem]">
+        <colgroup>
+          <col style={{ width: '16%' }} />
+          {table.columns.map((c) => (
+            <col key={c.key} style={{ width: `${84 / table.columns.length}%` }} />
+          ))}
+        </colgroup>
         <thead>
           <tr>
-            <th scope="col" className="sticky top-0 left-0 z-20 min-w-40 bg-bg pr-4 pb-2 text-left align-bottom font-medium text-fg3">
+            <th scope="col" className="sticky top-0 left-0 z-20 bg-bg pr-4 pb-2 text-left align-bottom font-medium text-fg3">
               Level
             </th>
             {table.columns.map((c: LimitColumn) => (
-              <th key={c.key} scope="col" title={c.hint} className="sticky top-0 z-10 bg-bg px-2 pb-2 text-left align-bottom font-medium whitespace-nowrap text-fg3">
-                {c.title}
+              <th key={c.key} scope="col" title={c.hint ? `${c.title}. ${c.hint}` : c.title} className="sticky top-0 z-10 bg-bg px-2 pb-2 text-left align-bottom font-medium text-fg3">
+                {SHORT_HEAD[c.key] ?? c.title}
               </th>
             ))}
           </tr>
@@ -278,7 +309,7 @@ function MachineTable({ table, label, machine, phone }: { table: LimitTable; lab
         <tbody>
           {table.rows.map((row: LimitRow) => (
             <tr key={row.id}>
-              <th scope="row" className={clsx('sticky left-0 z-10 bg-bg pr-4 py-1.5 text-left', row.kind === 'all' ? 'font-normal text-fg2' : 'font-medium')}>
+              <th scope="row" title={row.name} className={clsx('sticky left-0 z-10 truncate bg-bg pr-4 py-1.5 text-left', row.kind === 'all' ? 'font-normal text-fg2' : 'font-medium')}>
                 {row.name}
               </th>
               {table.columns.map((c) => (
@@ -561,14 +592,22 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
           </div>
         ) : (
           <div className="max-h-[min(70vh,44rem)] max-w-full overflow-auto overscroll-contain">
-            <table aria-label="Providers and models" className="w-max border-separate border-spacing-0 text-[0.8125rem]">
+            <table aria-label="Providers and models" className="w-full table-fixed border-separate border-spacing-0 text-[0.8125rem]">
+              <colgroup>
+                <col className="w-[24%]" />
+                <col className="w-[20%]" />
+                <col className="w-[16%]" />
+                <col className="w-[7%]" />
+                <col className="w-[14%]" />
+                <col className="w-[19%]" />
+              </colgroup>
               <thead>
                 <tr>
-                  <th scope="col" className="sticky top-0 left-0 z-30 min-w-52 bg-bg pr-4 pb-2 text-left align-bottom font-medium text-fg3">
+                  <th scope="col" className="sticky top-0 left-0 z-30 bg-bg pr-4 pb-2 text-left align-bottom font-medium text-fg3">
                     Provider · model
                   </th>
                   {['Max at once', 'Running now', 'Held', 'Out now', 'Quota'].map((t) => (
-                    <th key={t} scope="col" className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium whitespace-nowrap text-fg3">
+                    <th key={t} scope="col" className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium text-fg3">
                       {t}
                     </th>
                   ))}
@@ -650,18 +689,24 @@ function ProviderRows({ p, v, capOpen, setCapOpen, menu, setMenu, hasSubs, onCle
           ) : null}
         </span>
       </td>
-      <td className="py-1.5 pr-3 align-top whitespace-nowrap text-fg2 tabular-nums">{roleWords(byRole)}</td>
+      <td className="py-1.5 pr-3 align-top text-fg2 tabular-nums">{roleWords(byRole)}</td>
       <td className="py-1.5 pr-3 align-top text-fg2 tabular-nums">{held || '—'}</td>
-      <td className="py-1.5 pr-3 align-top whitespace-nowrap text-fg2">{outWords(runOuts)}</td>
-      <td className="py-1.5 pr-3 align-top text-fg2 tabular-nums">{read || quota ? quotaWords(quota, read) : '—'}</td>
+      <td className="py-1.5 pr-3 align-top text-fg2">{outWords(runOuts)}</td>
+      <td className="py-1.5 pr-3 align-top text-fg2 tabular-nums">
+        {read || quota ? quotaLines(quota, read).map((l) => (
+          <span key={l} className="block">
+            {l}
+          </span>
+        )) : '—'}
+      </td>
     </>
   )
   return (
     <>
       <tr>
         <th scope="row" className="sticky left-0 z-10 bg-bg pr-4 py-1.5 text-left align-top font-normal">
-          <span className="flex max-w-60 items-center gap-1.5">
-            <span className="truncate font-medium text-fg">{p.name}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate font-medium text-fg" title={p.name}>{p.name}</span>
             {p.local ? <span className="shrink-0 text-[0.75rem] text-fg3">local</span> : null}
           </span>
         </th>
@@ -670,7 +715,7 @@ function ProviderRows({ p, v, capOpen, setCapOpen, menu, setMenu, hasSubs, onCle
       {p.models.map((m) => (
         <tr key={m.key}>
           <th scope="row" className="sticky left-0 z-10 bg-bg py-1 pr-4 pl-6 text-left align-top font-normal">
-            <span className="block max-w-56 truncate text-fg2">{m.label}</span>
+            <span className="block truncate text-fg2" title={m.label}>{m.label}</span>
           </th>
           {cells(m.label, m.key, m.atOnce, m.byRole, m.runOuts, m.atOnce.held)}
         </tr>

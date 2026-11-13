@@ -205,6 +205,26 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await page.close()
     }
   })
+
+  test('the Providers and the Machine tables fit the Settings width at 1440 px: no horizontal scroll, their columns in view', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      for (const name of ['Providers and models', 'Machine limits']) {
+        const table = page.getByRole('table', { name, exact: true })
+        await table.waitFor()
+        // the table's own box is its scroll box's width, and the box never scrolls sideways
+        const fit = await table.evaluate((t) => {
+          const box = t.parentElement!
+          return { scroll: box.scrollWidth - box.clientWidth, width: t.getBoundingClientRect().width - box.clientWidth }
+        })
+        expect(fit.scroll).toBe(0)
+        expect(fit.width).toBeLessThanOrEqual(1)
+      }
+    } finally {
+      await page.close()
+    }
+  })
 })
 
 describe.skipIf(!browser)('Settings → Limits on a phone', () => {
