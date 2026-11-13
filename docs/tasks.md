@@ -98,6 +98,13 @@
   passed over: a task of another space with room starts past it in the same pass, and the space's held tasks start in
   turn (first in line, then oldest) as its own tasks end and free a slot. The machine's limit still comes first, so a
   space's cap never lets more tasks work than the machine has slots.
+  - **A model's cap.** A task whose agent would run on a model at its most-at-once cap (`models.maxAtOnce`, one provider
+    such as `spark`, or one model key) reads `Waiting for a free slot of spark (4 of 4 at once)`, naming the entry that is
+    full. The order of the reasons is the machine's slots, the machine's load, the space's own models and cut-off tasks,
+    the space's cap, then the model's: the row names the first one that holds the task. A task held for its model is
+    passed over like a held space's: the tasks on other models start in the same pass, and its held tasks start in turn as
+    the model frees up. A first in line does not pass it. What counts toward a model, and what does not, is in
+    [settings](settings.md).
 - A space may have a **merge gate** (Settings → How tasks work → Merge gate, `merge.gate`, off by default; a task's own
   `--set merge.gate=…` wins): a command run in the task's worktree after its rebase and before it goes into main here
   (not through a pull request), with `SHEPHERDR_TASK` and `SHEPHERDR_BASE` set. Exit 0 lets it in, and the last line it

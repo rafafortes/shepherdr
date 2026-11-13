@@ -8,7 +8,7 @@
   or default for the CLI's own; effort: default, lowest, low, medium, high, xhigh or max, each CLI taking it its own
   way, and in words on screen — Extra high for xhigh) and the backup agents that take over when a task's or a
   coordinator's agent can't go on, whether one of those is told when its primary answers again, when Done tasks archive
-  themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits and each space's cap on its working tasks, the idle browser, dictation, Notifications
+  themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, each space's cap on its working tasks and the most agents at once per provider or model, the idle browser, dictation, Notifications
   and Voice. Notifications gathers scoped delivery rules and device enrolment; device delivery is Everywhere. Space menus still offer Notify. Its
   defaults are set Everywhere, for a machine or for a space (`shepherdr set <key> <value> [--machine | --space NAME]`, from any machine);
   the most specific one set wins. Editing above the content names the scope; its searchable hierarchy handles many machines and spaces. Values set here are highlighted, with their inherited value, source and Reset beside them. And, kept on each device, its Appearance: System (the device's own light
@@ -83,6 +83,33 @@
   than 9 in all. A held task of a space at its cap reads `Waiting for a free slot of <space>` and the other spaces'
   tasks start past it; a first in line does not pass the cap either, and the way back honours it too. What waits and
   why is in [tasks](tasks.md) and [machines](machines.md).
+- **Most agents at once per provider or per model** (`models.maxAtOnce`, the Machine section, under Max tasks working at
+  once; off by default) caps how many of this machine's agents run on one provider or one model. It is a text, one entry
+  per pattern: `spark=4, radeon=1` caps every model of `spark` at 4 and every model of `radeon` at 1, and
+  `anthropic/claude-opus-5-5=2` caps one model (a provider is the part of a model's key before its slash: `spark`
+  for `spark/qwen3.8-flash-next-mlx4-mtp-tensorfold`, `anthropic` for Claude Code's models, `openai` for Codex's). The
+  DGX Spark takes four requests at once, so `spark=4` is the cap that keeps Shepherdr from sending it a fifth. It is set
+  at this machine or Everywhere, never a space: the capacity is the machine's or the server's. Its text is checked when
+  it is set: a pattern is a provider or a model key in lowercase, a number from 1 to 200 is needed, a pattern may not
+  repeat, and at most 20 entries (a refusal says which). Values are kept as written, lowercased.
+  - **What it holds.** A task whose agent would run on a capped model waits as Queued, held for a free slot of it (`Waiting
+    for a free slot of spark (4 of 4 at once)`), and the other tasks start past it; the held ones start in turn as the
+    model frees up. A model's own entry sets its limit, and the provider's entry still holds the provider's total: with
+    `spark=4` and `spark/qwen…=2`, the qwen model has at most 2 of its own, and the Spark at most 4 in all, whatever the
+    mix. A first in line passes neither.
+  - **What counts.** The agents of this machine that hold a slot now (its working, starting or waiting-on-you tasks, as the
+    machine's own limit counts them), each on the model its agent runs (its live agent's model, else the model it starts
+    on), and this machine's coordinators that are working on a model right now. A merge waiting in line or in its gate
+    holds no slot, so it counts nothing. **Not counted:** the advisor's and the reviewers' headless runs, and any request
+    that comes from outside Shepherdr (another app or a script on the same server): Shepherdr cannot see those, so a
+    server that serves them too needs a lower cap than its own work alone would.
+  - **Where it is read.** Models → Summary shows each provider and model row as `2 of 4 at once` (its cap, set here),
+    `2 at once · no cap`, or `1 at once · no cap of its own` (the provider's entry holds it); its cell sets the cap at this
+    machine or Everywhere, and Clear here takes it back to the level above. The line `shepherdr show` prints it as kept.
+  - **From the command.** `shepherdr set models.maxAtOnce "spark=4, radeon=1" --machine` (or Everywhere without `--machine`).
+    `shepherdr set models.maxAtOnce off --machine` gives this machine no cap at all, whatever Everywhere says, and
+    `shepherdr unset models.maxAtOnce --machine` takes this machine's value away, back to Everywhere's. Profiles hold it
+    with the limits.
 - Secrets (How Shepherdr runs) holds the keys, tokens and passwords agents use, by name: add, replace and remove them
   in masked boxes, Everywhere, for a machine or for a space; the most specific one wins. An agent that needs one asks
   with `shepherdr secret ask NAME --why "…"`: its chat shows a masked box, and the agent is told by name once it is
@@ -161,7 +188,8 @@ of this machine's agents (`usage.json` in Shepherdr's home, read from the agents
 - a provider that **ran out twice in 7 days** (a note);
 - a window of a provider **at or over its warning share** (`quota.alertAt`) that has not refilled: what is left, when it
   refills, and the two cells that use the provider most, the top one under Change… (a note; a risk at 100 %);
-- **several working agents on one local model**: counted, since Shepherdr sets no limit for a local model yet (a note).
+- **several working agents on one local model with no cap**: counted, and a note asks for a cap (`models.maxAtOnce`; Change… opens
+  its cell). At its cap, a note says which tasks wait for the model (or its provider), and how many run there now.
 
 **What is an estimate.** The tokens and the calls are what the logs say each model call used. pi's cost is its own catalog
 estimate for each call, shown as "≈ $… estimate": it is never a bill, and a provider whose logs carry no cost shows none.
@@ -180,7 +208,7 @@ ISO time is shown in this machine's time, with its zone name.
 ### Profiles
 
 A **profile** is a named snapshot of the models of this machine's levels: Everywhere, this machine and each space (the home
-space too), every role's CLI, model and effort, backups included. Saved with limits, it also holds Max tasks and Merge
+space too), every role's CLI, model and effort, backups included. Saved with limits, it also holds Max tasks, the most at once per model (this machine's or Everywhere's) and Merge
 train. Each key keeps its own value at each level, and **not set here** where a level sets nothing, so applying a profile
 restores exactly what was saved. Nothing else is copied: the rest of Settings is left as it is.
 
@@ -207,7 +235,7 @@ For example, a night setup for the local model, and a day setup for the cloud on
 ```sh
 shepherdr profile save day                  # by day: the cloud models, backups on
 # tonight, in Settings → Models or with shepherdr set: tasks on the local Spark model, no backups, a lower cap
-shepherdr profile save night --limits       # the models and Max tasks / Merge train
+shepherdr profile save night --limits       # the models and Max tasks / the most at once per model / Merge train
 shepherdr profile apply night --apply-waiting
 # in the morning
 shepherdr profile apply day --apply-waiting
