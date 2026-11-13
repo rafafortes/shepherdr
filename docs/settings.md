@@ -105,6 +105,12 @@
     number from 1 to 200 (the number is saved when you leave it). Choosing No cap at a level takes that level's own entry out:
     the level above's value then applies, or none where nothing sets it. The profiles keep 0 as a value of its own, distinct
     from unset (`shepherdr profile save` and apply round-trip it).
+  - **A model never above its provider.** A provider's limit holds every model of it, so a model's own limit above its
+    provider's at the same level would never be reached. Saving keeps them fitted, whichever changed: a provider set to 2
+    lowers its models' own 3 to 2, and a model set to 5 under a provider of 2 is saved as 2. The cap editor says it before
+    you save (`Saving lowers spark/qwen… from 3 to 2 (spark allows 2 at once).`), and `shepherdr set` after the value. A
+    provider that is blocked (0) lowers nothing: its models keep their own numbers for when it is unblocked. A space's
+    sub-limit is its own level, and is not changed by the machine's.
   - **What 0 means, by role.** Blocked (0) is a model that **nothing starts on**, in any role, and it is never waited for:
     a blocked model does not come back by waiting, only when its limit changes. Running agents on it keep running (they are
     never stopped), and only the new starts avoid it. A model's entry at a space blocks it for that space only; at the

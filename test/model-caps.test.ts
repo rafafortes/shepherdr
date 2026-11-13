@@ -2,7 +2,7 @@
 // (shared/model-caps.ts), kept at the machine's level or Everywhere (never a space's), and the entry that caps a model is
 // its own model entry, else its provider's (capFor).
 import { describe, expect, test } from 'bun:test'
-import { capFor, formatMaxAtOnce, levelText, MAX_CAP_ENTRIES, parseMaxAtOnce, providerOfKey, withEntry } from '../shared/model-caps.ts'
+import { capFor, fitToProviders, formatMaxAtOnce, levelText, loweredWords, MAX_CAP_ENTRIES, parseMaxAtOnce, providerOfKey, withEntry } from '../shared/model-caps.ts'
 import { Settings } from '../server/live/settings.ts'
 
 const fresh = () => new Settings({ everywhere: {}, machine: {}, spaces: {} })
@@ -172,3 +172,30 @@ describe('0 is a cap of its own: blocked, distinct from no entry (no cap) and fr
 })
 
 const SPARK_KEY = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
+
+describe("a model's own limit never passes its provider's", () => {
+  const Q = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
+
+  test('fitToProviders lowers a model above its provider to it, in place; a blocked provider, or none, lowers nothing', () => {
+    expect(fitToProviders([{ pattern: Q, max: 3 }, { pattern: 'spark', max: 2 }, { pattern: 'radeon/x', max: 5 }])).toEqual({
+      entries: [{ pattern: Q, max: 2 }, { pattern: 'spark', max: 2 }, { pattern: 'radeon/x', max: 5 }],
+      lowered: [{ pattern: Q, from: 3, to: 2 }],
+    })
+    // at or under its provider, or blocked itself: as it is
+    expect(fitToProviders([{ pattern: 'spark', max: 2 }, { pattern: Q, max: 2 }, { pattern: 'spark/other', max: 0 }]).lowered).toEqual([])
+    // a blocked provider blocks them all anyway: their own numbers stay, for when it is unblocked
+    expect(fitToProviders([{ pattern: 'spark', max: 0 }, { pattern: Q, max: 3 }]).lowered).toEqual([])
+    expect(loweredWords([{ pattern: Q, from: 3, to: 2 }])).toBe(`${Q} from 3 to 2 (spark allows 2 at once)`)
+  })
+
+  test('saving the setting keeps it fitted and says what it lowered, whichever entry changed', () => {
+    const s = fresh()
+    expect(s.set('models.maxAtOnce', `${Q}=3`, 'machine')).toEqual({ ok: true })
+    // the provider set lower: its model comes down with it
+    expect(s.set('models.maxAtOnce', withEntry(`${Q}=3`, 'spark', 2), 'machine')).toEqual({ ok: true, note: `Lowered to fit their provider: ${Q} from 3 to 2 (spark allows 2 at once).` })
+    expect(s.pick('models.maxAtOnce', 'machine').value).toBe(`${Q}=2, spark=2`)
+    // a model set above its provider is kept at the provider's number
+    expect(s.set('models.maxAtOnce', withEntry(`${Q}=2, spark=2`, Q, 5), 'machine').note).toContain('from 5 to 2')
+    expect(s.maxAtOnce()).toEqual([{ pattern: 'spark', max: 2 }, { pattern: Q, max: 2 }])
+  })
+})

@@ -477,3 +477,15 @@ describe('a restart by hand, and the way back, never put a coordinator on a full
     }
   })
 })
+
+describe("shepherdr set models.maxAtOnce says what it fitted to the provider's limit", () => {
+  test("a model above its provider's limit is saved at the provider's number, and the answer says so", async () => {
+    const r = await src.cli(['set', 'models.maxAtOnce', `spark=2, ${SPARK}=3`, '--machine'], {})
+    expect(r.code).toBe(0)
+    expect(r.out).toContain(`models.maxAtOnce = spark=2, ${SPARK}=2`)
+    expect(r.out).toContain(`Lowered to fit their provider: ${SPARK} from 3 to 2 (spark allows 2 at once).`)
+    // nothing to fit: no such line
+    const plain = await src.cli(['set', 'models.maxAtOnce', 'spark=2', '--machine'], {})
+    expect(plain.out).not.toContain('Lowered')
+  })
+})
