@@ -2,10 +2,12 @@
 // a button into the cell that changes it where a setting does; Hide keeps it away for this browser session), then where
 // the work runs per provider and per model: what is configured and what runs and waits now, the tokens and calls of the
 // last 5 h, 24 h and 7 d (pi's cost is an estimate), the run-outs and whether it is out now, the share of the tokens of
-// a day and of a week, and the quota a read of the provider gave (—: none read yet). A phone shows one card per provider.
+// a day and of a week, and the quota: each window with its bar, when it refills, where its figure came from and how old it
+// is, a failed read's reason, and the hint that asks for a key (QuotaView). A phone shows one card per provider.
 import clsx from 'clsx'
 import { Fragment, useState, type ReactNode } from 'react'
-import type { ModelsSummary as Summary, QuotaFigure, SummaryConfigured, SummaryNow, SummaryProvider, SummaryRow, SummaryRunOuts, SummaryUsage, SummaryWarning } from '@shared/types.ts'
+import type { ModelsSummary as Summary, QuotaFigure, QuotaRead, QuotaWindow, SummaryConfigured, SummaryNow, SummaryProvider, SummaryRow, SummaryRunOuts, SummaryUsage, SummaryWarning } from '@shared/types.ts'
+import { openPage } from './Settings.tsx'
 import { Ghost, Small } from './ui.tsx'
 
 /** the warnings hidden in this browser session (sessionStorage: gone when the tab closes) */
@@ -56,17 +58,19 @@ export function runWords(r: SummaryRunOuts) {
   return { count, last, out }
 }
 
-/** a quota figure in words: each window's share used or count against its cap, and an estimate's word; — when none. A
- *  window that has refilled since its read (its reset is past) says nothing of now, so it is left out (as upstream's
- *  plan limits leave out a refilled window) */
-export function quotaWords(q: QuotaFigure | undefined, now: number): string {
-  if (!q) return '—'
-  const parts = q.windows.filter((w) => w.resetAt === undefined || w.resetAt > now).map((w) => {
-    const used = w.usedPct !== undefined ? `${Math.round(w.usedPct)}% used` : w.used !== undefined && w.cap !== undefined ? `${tokens(w.used)} of ${tokens(w.cap)}` : w.used !== undefined ? `${tokens(w.used)} used` : ''
-    return [w.name, used].filter(Boolean).join(' ')
-  })
-  return [...parts, q.estimate ? 'estimate' : ''].filter(Boolean).join(' · ') || '—'
+/** a moment as an age in words: "just now", "7 min ago", "2 h ago" */
+export function ageWords(at: number, now: number): string {
+  const min = Math.round((now - at) / 60_000)
+  if (min < 1) return 'just now'
+  return min < 60 ? `${min} min ago` : `${Math.round(min / 60)} h ago`
 }
+
+/** the provider's name in the Settings section that reads its quota (Refresh quotas says what it reads) */
+const READING: Record<string, string> = { anthropic: 'Claude Code', commandcode: 'Command Code' }
+export const readingWords = (started: string[]) => `Reading ${started.map((p) => READING[p] ?? p).join(' and ')}…`
+
+/** Settings → Secrets (Everywhere's page): where a quota's key is added, opened from the hint that asks for it */
+const openSecrets = () => openPage('Secrets', 'all')
 
 /** a window's usage in words: its tokens, then its calls and pi's cost as an estimate (sub) */
 function usageWords(u: SummaryUsage) {
@@ -175,7 +179,7 @@ function Table({ providers, now }: { providers: SummaryProvider[]; now: number }
         <tbody>
           {providers.map((p) => (
             <Fragment key={p.provider}>
-              <Line name={p.name} local={p.local} row={p} quota={p.quota} now={now} shares={<Shares row={p} />} bold />
+              <Line name={p.name} local={p.local} row={p} quota={p.quota} read={p.quotaRead} now={now} shares={<Shares row={p} />} bold />
               {p.models.map((m) => (
                 <Line key={m.key} name={m.label} row={m} now={now} indent />
               ))}
@@ -209,7 +213,7 @@ function UsedLines({ row }: { row: SummaryRow }) {
 }
 
 /** one table row: a provider or a model, its numbers in the columns */
-function Line({ name, local, row, quota, now, shares, bold, indent }: { name: string; local?: boolean; row: SummaryRow; quota?: QuotaFigure; now: number; shares?: ReactNode; bold?: boolean; indent?: boolean }) {
+function Line({ name, local, row, quota, read, now, shares, bold, indent }: { name: string; local?: boolean; row: SummaryRow; quota?: QuotaFigure; read?: QuotaRead; now: number; shares?: ReactNode; bold?: boolean; indent?: boolean }) {
   const conf = configuredWords(row.configured)
   const runs = runWords(row.runOuts)
   return (
@@ -232,7 +236,7 @@ function Line({ name, local, row, quota, now, shares, bold, indent }: { name: st
         <RunOutWords runs={runs} />
       </td>
       <td className="py-2 align-top text-fg2">
-        <QuotaCell quota={quota} now={now} />
+        <QuotaView quota={quota} read={read} now={now} />
       </td>
     </tr>
   )
@@ -248,9 +252,73 @@ function RunOutWords({ runs }: { runs: ReturnType<typeof runWords> }) {
   )
 }
 
-/** a provider's quota: its windows when a read gave them, a dash until then (4b fills it) */
-function QuotaCell({ quota, now }: { quota?: QuotaFigure; now: number }) {
-  return <span className={clsx(!quota && 'text-fg3')}>{quotaWords(quota, now)}</span>
+/** one window: its name and its share used (or its count against its cap, or what is left), a thin bar, when it refills
+ *  (an estimate's window rolls), and an estimate's learned limits: what the window held when the provider ran out */
+function WindowLine({ w, estimate }: { w: QuotaWindow; estimate: boolean }) {
+  const share = w.usedPct ?? (w.used !== undefined && w.cap ? (w.used / w.cap) * 100 : undefined)
+  const main =
+    share !== undefined ? `${Math.round(share)}% used`
+    : w.used !== undefined && w.cap !== undefined ? `${tokens(w.used)} of ${tokens(w.cap)}`
+    : w.used !== undefined ? `${tokens(w.used)} used`
+    : w.left !== undefined ? `${tokens(w.left)} left`
+    : ''
+  return (
+    <div className="flex min-w-44 flex-col gap-0.5">
+      <span className="flex items-baseline justify-between gap-2 whitespace-nowrap">
+        <span className="flex items-center gap-1.5 text-fg">
+          {w.name}
+          {estimate ? <span className="rounded-full bg-line2 px-1.5 text-[0.6875rem] leading-4 text-fg2">estimate</span> : null}
+        </span>
+        <span className="tabular-nums text-fg">{main}</span>
+      </span>
+      {share !== undefined ? (
+        <span role="img" aria-label={`${w.name}: ${Math.round(share)}% used`} className="relative block h-1.5 w-full overflow-hidden rounded-full bg-line2">
+          <span className={clsx('absolute inset-y-0 left-0 rounded-full', share >= 100 ? 'bg-need' : 'bg-accent')} style={{ width: `${Math.min(100, Math.max(1, Math.round(share)))}%` }} />
+        </span>
+      ) : null}
+      {w.resetAt !== undefined ? <span className="text-[0.75rem] text-fg3">refills {when(w.resetAt)}</span> : estimate ? <span className="text-[0.75rem] text-fg3">rolling: drains as calls leave the window</span> : null}
+      {w.learned?.slice(0, 3).map((l) => (
+        <span key={l.at} className="text-[0.75rem] text-fg3 tabular-nums">
+          ran out at ~{tokens(l.tokens)} tokens{l.cost !== undefined ? ` · ≈ $${l.cost.toFixed(2)} est.` : ''} in {w.name} on {when(l.at)}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/** a provider's quota: each window that has not refilled, where the figure came from and how old it is, a failed read's
+ *  reason (the figure stays the last good one), and a hint with a way to Secrets where the key is what it asks for. A
+ *  switch that is off says so; a provider with no read and no figure shows a dash */
+export function QuotaView({ quota, read, now }: { quota?: QuotaFigure; read?: QuotaRead; now: number }) {
+  const off = read !== undefined && !read.on
+  if (!quota && !read?.failed && !read?.hint) return <span className="text-fg3">{off ? 'Off' : '—'}</span>
+  const windows = (quota?.windows ?? []).filter((w) => w.resetAt === undefined || w.resetAt > now)
+  const source = quota ? (quota.estimate ? quota.source : `${quota.source}, read ${ageWords(quota.at, now)}`) : ''
+  return (
+    <div className="flex min-w-44 flex-col gap-2">
+      {windows.map((w) => (
+        <WindowLine key={w.name} w={w} estimate={!!quota?.estimate} />
+      ))}
+      {source ? <span className="text-[0.75rem] text-fg3">{source}</span> : null}
+      {read?.failed ? (
+        <span className="text-[0.75rem] text-pretty text-need-fg">
+          Last read failed {ageWords(read.tried ?? now, now)}: {read.failed}
+          {quota ? ` The figure is from ${ageWords(quota.at, now)}.` : ''}
+        </span>
+      ) : null}
+      {read?.hint ? (
+        <span className="text-[0.75rem] text-pretty text-fg2">
+          {read.hint}
+          {/Secrets/.test(read.hint) ? (
+            <Ghost onClick={openSecrets} className="ml-1.5 text-accent">
+              Open Secrets
+            </Ghost>
+          ) : null}
+        </span>
+      ) : null}
+      {off ? <span className="text-[0.75rem] text-fg3">Read is off: its switch is under Quotas.</span> : null}
+    </div>
+  )
 }
 
 /** the phone: one card per provider, its models under it */
@@ -277,7 +345,12 @@ function Cards({ providers, now }: { providers: SummaryProvider[]; now: number }
               <Pair k="Last 24 h" v={usageWords(p.usage.h24).main} sub={usageWords(p.usage.h24).sub} />
               <Pair k="Last 7 d" v={usageWords(p.usage.d7).main} sub={usageWords(p.usage.d7).sub} />
               <Pair k="Run-outs" v={runs.count} sub={[runs.last, runs.out].filter(Boolean).join(' · ')} need={!!runs.out} />
-              <Pair k="Quota" v={quotaWords(p.quota, now)} muted={!p.quota} />
+              <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3">
+                <dt className="text-fg3">Quota</dt>
+                <dd className="min-w-0">
+                  <QuotaView quota={p.quota} read={p.quotaRead} now={now} />
+                </dd>
+              </div>
             </dl>
             {p.models.length ? (
               <ul className="flex flex-col gap-1.5 border-t border-line pt-2">

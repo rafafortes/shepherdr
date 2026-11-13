@@ -24,7 +24,7 @@ import { excerpt } from '../live/chatlines.ts'
 import { findModel, TABLE } from '../live/models.ts'
 import { modelsMatrix } from '../live/models-matrix.ts'
 import { modelsSummary, type LiveAgent, type TaskFact } from '../live/models-summary.ts'
-import { demoUsage } from './usage.ts'
+import { demoQuota, demoUsage } from './usage.ts'
 import { ProfileSchedules } from '../live/profile-schedule.ts'
 import { Profiles, ProfileStore, type Site } from '../live/profiles.ts'
 import { Browsers } from '../live/browser.ts'
@@ -764,8 +764,12 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const rows = modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, spaces).rows.map((r) => r.id)
         const agents: LiveAgent[] = this.tasks.filter((t) => t.status === 'work').map((t) => ({ key: `${t.id}/Agent`, kind: kindOf(t.agent?.cli ?? 'Claude Code') ?? 'claude', status: 'working' }))
         const tasks: TaskFact[] = this.tasks.map((t) => ({ status: t.status, ...(t.agent ? { agent: { kind: kindOf(t.agent.cli) ?? 'claude' } } : {}) }))
-        return modelsSummary({ now: Date.now(), settings: this.stores[D.DEMO_HOST], host: D.DEMO_HOST, spaces, rows, usage: this.usage, agents, tasks, watch: [] })
+        const now = Date.now()
+        return modelsSummary({ now, settings: this.stores[D.DEMO_HOST], host: D.DEMO_HOST, spaces, rows, usage: this.usage, agents, tasks, watch: [], quota: demoQuota(this.usage, now) })
       }
+      case 'quota-refresh':
+        // the demo reads no quota: its figures are fictional, and no CLI or API is called from it
+        return { ok: false, error: 'The demo reads no quota: its figures are made up.' }
       case 'profiles':
         return this.profiles.view()
       case 'profile-save': {

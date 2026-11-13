@@ -55,3 +55,86 @@ describe.skipIf(!browser)('Settings → Models → Quotas on a desktop', () => {
     }
   })
 })
+
+/** the Summary's table on a desktop, with the Models page open */
+async function summaryTable(page: Page) {
+  await openModels(page)
+  const s = page.locator('section[aria-label="Summary"]')
+  await s.scrollIntoViewIfNeeded()
+  return s.getByRole('table', { name: 'Providers and models' })
+}
+
+describe.skipIf(!browser)('the Quota column of the Summary on a desktop', () => {
+  test('each window with its share as a bar, its refill, where its figure came from and how old it is; an estimate says so', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      const table = await summaryTable(page)
+      // Claude Code's read: its 5 h window at 62%, a bar of it, when it refills, and the source with its age
+      expect(await table.getByRole('img', { name: '5 h: 62% used' }).count()).toBe(1)
+      expect(await table.getByText(/^refills /).count()).toBeGreaterThan(0)
+      expect(await table.getByText("from Claude Code's /usage, read 7 min ago").count()).toBe(1)
+      // the refilled window of the demo is left out
+      expect(await table.getByText('Last month').count()).toBe(0)
+      // OpenCode Go's figure is an estimate: each window is tagged, and its source says where it comes from
+      expect(await table.getByText('estimate', { exact: true }).count()).toBeGreaterThanOrEqual(2)
+      expect(await table.getByText("estimate from Shepherdr's ledger").count()).toBe(1)
+      expect(await table.getByText(/^ran out at ~\d+k? tokens/).count()).toBeGreaterThan(0)
+    } finally {
+      await page.close()
+    }
+  })
+
+  test("a provider whose key is not in Secrets says what to add, and Open Secrets opens that page", async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      const table = await summaryTable(page)
+      const hint = table.getByText("Add COMMANDCODE_API_KEY in Settings → Secrets to read Command Code's quota.")
+      await hint.waitFor()
+      await hint.locator('..').getByRole('button', { name: 'Open Secrets', exact: true }).click()
+      // the Secrets page of Everywhere: its names and its add button, and no Models table any more
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.getByRole('button', { name: 'Add a secret', exact: true }).waitFor()
+      expect(await settings.getByText('Editing:').locator('..').getByText('Everywhere', { exact: true }).count()).toBe(1)
+      expect(await page.getByRole('table', { name: 'Providers and models' }).count()).toBe(0)
+    } finally {
+      await page.close()
+    }
+  })
+
+  test('Refresh quotas says what it did: the demo reads no quota, and says so', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openModels(page)
+      const quotas = page.locator('section[aria-label="Quotas"]')
+      await quotas.scrollIntoViewIfNeeded()
+      await quotas.getByRole('button', { name: 'Refresh quotas', exact: true }).click()
+      await quotas.getByRole('status').filter({ hasText: 'The demo reads no quota' }).waitFor()
+      expect(await quotas.getByRole('status').textContent()).toBe('The demo reads no quota: its figures are made up.')
+    } finally {
+      await page.close()
+    }
+  })
+})
+
+describe.skipIf(!browser)('the Quota of a provider on a phone', () => {
+  test('its card has the windows with their bars and the source, and the hint with Open Secrets; nothing wider than the screen', async () => {
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    try {
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      await page.getByRole('region', { name: 'Settings' }).getByRole('button', { name: 'Models', exact: true }).tap()
+      await settled(page)
+      const s = page.locator('section[aria-label="Summary"]')
+      await s.scrollIntoViewIfNeeded()
+      const card = s.locator('li').filter({ has: page.locator('h4', { hasText: 'Claude Code' }) })
+      expect(await card.getByRole('img', { name: '5 h: 62% used' }).count()).toBe(1)
+      expect(await card.getByText("from Claude Code's /usage, read 7 min ago").count()).toBe(1)
+      const cc = s.locator('li').filter({ has: page.locator('h4', { hasText: 'Command Code' }) })
+      await cc.getByRole('button', { name: 'Open Secrets', exact: true }).waitFor()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+    } finally {
+      await page.close()
+    }
+  })
+})

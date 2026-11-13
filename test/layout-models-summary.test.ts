@@ -42,7 +42,7 @@ describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => 
       expect(await table.getByText(/^Out until /).count()).toBeGreaterThan(0)
       // the quota slot is there: the windows a read gave, the refilled one left out; — where none was read
       expect(await table.getByRole('columnheader', { name: 'Quota' }).count()).toBe(1)
-      expect(await table.getByText(/^5 h 62% used/).count()).toBe(1)
+      expect(await table.getByRole('img', { name: '5 h: 62% used' }).count()).toBe(1)
       expect(await table.getByText(/Last month/).count()).toBe(0)
       expect(await table.getByText('—').count()).toBeGreaterThan(0)
     } finally {

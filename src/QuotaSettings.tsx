@@ -5,12 +5,19 @@ import { useState } from 'react'
 import type { SettingRow } from '@shared/types.ts'
 import { act, useSnap } from './kernel.ts'
 import { Control, QUOTAS, rowLook } from './Settings.tsx'
-import { Small } from './ui.tsx'
+import { readingWords } from './ModelsSummary.tsx'
+import { Ghost, Small } from './ui.tsx'
 
 export default function QuotaSettings({ phone }: { phone: boolean }) {
   const snap = useSnap()
   const rows = snap?.settings.find((x) => x.name === QUOTAS)?.rows ?? []
   const [refused, setRefused] = useState<Record<string, string>>({})
+  // Refresh quotas: what started, or why nothing did (each provider at most once a minute); the reads land on the summary
+  const [note, setNote] = useState('')
+  const refresh = async () => {
+    const r = (await act({ type: 'quota-refresh' }).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; started?: string[]; error?: string }
+    setNote(r?.ok ? readingWords(r.started ?? []) : (r?.error ?? "That didn't go through."))
+  }
   const set = async (row: SettingRow, value: string) => {
     const r = (await act({ type: 'setting', key: row.key, value, place: 'all' }).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string }
     setRefused((x) => ({ ...x, [row.key]: r?.ok === false ? (r.error ?? "That didn't go through.") : '' }))
@@ -36,6 +43,16 @@ export default function QuotaSettings({ phone }: { phone: boolean }) {
           </div>
         ))}
       </dl>
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+        <Ghost onClick={() => void refresh()} className="text-accent">
+          Refresh quotas
+        </Ghost>
+        {note ? (
+          <Small role="status" className="text-pretty">
+            {note}
+          </Small>
+        ) : null}
+      </div>
     </section>
   )
 }

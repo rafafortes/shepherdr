@@ -8,7 +8,7 @@
 import clsx from 'clsx'
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentType, type FC, type ReactNode } from 'react'
 import { machineName, type Place, type SettingRow, type SettingSection, type Snapshot } from '@shared/types.ts'
-import { act, registry, setUI, useSnap, useUI, type UI } from './kernel.ts'
+import { act, getState, registry, setUI, useSnap, useUI, type UI } from './kernel.ts'
 import { usePluginErrors } from './guard.tsx'
 import { PlacesToggle } from './Frame.tsx'
 import { askWaiting } from './apply-waiting.tsx'
@@ -642,6 +642,17 @@ function groupsOf(sections: SettingSection[], ui: UI): { name: string; pages: Pa
     { name: 'This device', pages: [APPEARANCE, ...own] },
     { name: 'About', pages: sections.filter((x) => !x.level && !x.global) },
   ].filter((g) => g.pages.length)
+}
+
+/** opens a page of Settings at a level (Secrets at Everywhere, say) from elsewhere on the screen. A level change changes the
+ *  list of pages, and Settings keeps the page it showed by name, so the level goes first and the page is set once the list
+ *  has settled (the next frame) */
+export function openPage(name: string, level: string) {
+  const sections = getState().snap?.settings ?? []
+  const ui = getState().ui
+  const at = (n: string) => Math.max(0, sectionOf(n, sections, { ...ui, settings: { section: 0, level } }))
+  setUI({ settings: { section: ui.settings?.section ?? 0, level } })
+  requestAnimationFrame(() => setUI({ settings: { section: at(name), level } }))
 }
 
 /** where a page sits in the list of them (for ui.settings.section), or -1 where it doesn't show */

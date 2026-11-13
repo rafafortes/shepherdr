@@ -2,6 +2,8 @@
 // Settings → Models → Summary shows a believable week. Deterministic (no random numbers): each hour's calls follow the
 // hour of the day, and the run-outs are at fixed times back from now. Kept in memory, as the demo's settings are.
 import { HOUR, UsageLedger } from '../live/usage-ledger.ts'
+import { opencodeEstimate, OPENCODE } from '../live/quota-estimate.ts'
+import type { QuotaInput } from '../live/models-summary.ts'
 
 /** per model key: tokens per call, its cost estimate per call (pi's), and how many calls in a working hour */
 const MODELS: { key: string; tokens: number; cost?: number; busy: number; chat: string }[] = [
@@ -10,6 +12,8 @@ const MODELS: { key: string; tokens: number; cost?: number; busy: number; chat: 
   { key: 'openai/gpt-6-sol', tokens: 26_000, busy: 1, chat: 'LV-3/Agent' },
   { key: 'opencode-go/deepseek-v4.1-flash', tokens: 15_000, cost: 0.0009, busy: 2, chat: 'HP-202/Agent' },
   { key: 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold', tokens: 22_000, busy: 2, chat: 'GTM-16/Agent' },
+  // Command Code's account has no quota read yet (no key in Secrets): its row shows the hint that asks for one
+  { key: 'commandcode/deepseek/deepseek-v4.1-flash', tokens: 9_000, busy: 1, chat: 'HP-203/Agent' },
 ]
 
 /** the demo's ledger: the week before `now`, hour by hour, and the run-outs of the week */
@@ -27,20 +31,37 @@ export function demoUsage(now = Date.now()): UsageLedger {
       }
     })
   }
+  // OpenCode Go's calls before its run-outs, whatever the hour the demo is looked at: the learned limit reads from them
+  for (const h of [2.5, 4, 6]) l.count('HP-202/Agent', 'opencode-go/deepseek-v4.1-flash', { id: `demo-opencode-before-${h}`, at: now - h * HOUR, tokens: 15_000, cost: 0.0009 }, now)
   // OpenCode Go ran out twice this week: the second time, now, until a reset three hours on (out now)
   l.runOut({ at: now - 50 * HOUR, key: 'opencode-go/deepseek-v4.1-flash', chat: 'HP-202/Agent', role: 'task', reason: 'Out of allowance until 6pm', words: 'You have hit your usage limit · resets 6pm', reset: '6pm', resetAt: now - 40 * HOUR }, now)
   l.runOut({ at: now - 2 * HOUR, key: 'opencode-go/deepseek-v4.1-flash', chat: 'HP-202/Agent', role: 'task', reason: 'Out of allowance until 5pm', words: 'You have hit your usage limit · resets 5pm', reset: '5pm', resetAt: now + 3 * HOUR }, now)
   // the demo's week was read already: no backfill notice. Claude Code's plan limits, as a read of its own would give them
-  // (fictional, as the rest of the demo): one window refilled since, which says nothing of now
+  // (fictional, as the rest of the demo, read seven minutes ago): one window refilled since, which says nothing of now
   l.setQuota('anthropic', {
     windows: [
       { name: '5 h', usedPct: 62, resetAt: now + 2 * HOUR },
       { name: 'Week', usedPct: 41, resetAt: now + 3 * 24 * HOUR },
       { name: 'Last month', usedPct: 10, resetAt: now - HOUR },
     ],
-    source: 'demo',
-    at: now,
+    source: "from Claude Code's /usage",
+    at: now - 7 * 60_000,
   })
   l.markBackfilled(now)
   return l
+}
+
+/** the demo's quota side (quotas.ts's summary): OpenCode Go's estimate from the demo ledger, and each read as it stands: Claude
+ *  Code's read seven minutes ago, Command Code with no key yet (its hint asks for one), the warning share at its default */
+export function demoQuota(usage: UsageLedger, now = Date.now()): QuotaInput {
+  const est = opencodeEstimate(usage, now)
+  return {
+    figures: est ? { [OPENCODE]: est } : {},
+    reads: {
+      anthropic: { on: true, tried: now - 7 * 60_000 },
+      commandcode: { on: true, tried: now - 7 * 60_000, hint: "Add COMMANDCODE_API_KEY in Settings → Secrets to read Command Code's quota." },
+      [OPENCODE]: { on: true },
+    },
+    alertAt: 80,
+  }
 }
