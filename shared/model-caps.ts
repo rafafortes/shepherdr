@@ -4,10 +4,11 @@
 // entry wins over its provider's. Patterns are lowercase, as the model keys are kept. A number is 0 to 200: 0 BLOCKS the
 // model, so nothing starts on it (never waits for it either); no entry is no cap (unlimited), and off is no caps at all.
 
-/** the most entries one setting holds: a few providers and the models that need their own limit */
 import type { SummaryAtOnce, SummarySpaceCap } from './types.ts'
 
-export const MAX_CAP_ENTRIES = 20
+/** the most entries one setting holds: every provider and model of the CLIs (five of them, each with many models) can
+ *  have its own limit; the bound only keeps a runaway text out */
+export const MAX_CAP_ENTRIES = 200
 /** the highest number an entry may hold */
 export const MAX_CAP = 200
 
