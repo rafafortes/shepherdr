@@ -52,6 +52,7 @@ import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, type Retry } from './retry.ts'
 import { CATALOG, CLI_NAME, CLIS, kindOf, MAX_BACKUPS, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
 import { modelsMatrix } from './models-matrix.ts'
+import { changeWords, Profiles, ProfileStore, previewWords, PROFILES_ON_MAIN, waitingPicks, type Change, type Site } from './profiles.ts'
 import { startVoice } from './voice.ts'
 import { SECRET_NAME, secretPages, Vault } from './secrets.ts'
 import { diffFiles, diffPatch, listFiles, pullRequest, readFile } from './worktree.ts'
@@ -169,6 +170,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   peers: Machines | null = BOX ? null : new Machines(process.env.NODE_ENV === 'test' ? null : undefined)
   /** a worker's copy of its machine's agent logs, as they grow */
   mirror = BOX ? new Mirror(BOX) : null
+  /** Settings → Models → profiles (profiles.ts): this machine's named settings, kept in profiles.json */
+  profiles = new Profiles(new ProfileStore(), () => this.profileSite(), (changes) => this.profilesWritten(changes))
   /** each task's shared browser */
   browsers = has('browser')
     ? new Browsers({
@@ -1271,6 +1274,23 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // an agent's CLI, model or effort: the restart hint of the chats open now
     if (/^(task|coordinator)\.(agent|model|effort)$/.test(key)) for (const k of this.watched) this.emit('chat', k)
     this.emit('snapshot')
+  }
+
+  /** this machine's levels for the Models table and the profiles: the home space (~) and each space, by the name the
+   *  sidebar gives it */
+  private matrixSpaces(): { key: string; name: string }[] {
+    const shown = new Map(this.placeList().map((p) => [p.id, p.name]))
+    return ['~', ...this.places.spaces.map((p) => p.name)].map((key) => ({ key, name: shown.get(key === '~' ? placeId.home() : placeId.space(key)) ?? key }))
+  }
+
+  /** what a profile reads and writes: this machine's settings and its spaces */
+  private profileSite(): Site {
+    return { settings: this.settings, machine: { host: HOST, name: NAME }, spaces: this.matrixSpaces() }
+  }
+
+  /** a profile wrote these settings: each key's follow-up, as the setting action gives it */
+  private profilesWritten(changes: Change[]) {
+    for (const key of new Set(changes.map((c) => c.key))) this.settingChanged(key)
   }
 
   /** a task agent's or a reviewer's Setting changed at a level (Everywhere, this machine, or a space): the waiting tasks
@@ -2649,12 +2669,28 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (r.ok) this.settingChanged(a.key)
         return r
       }
-      case 'models-matrix': {
-        // this machine's levels: Everywhere, the machine and its spaces, each shown by the name the sidebar gives it
-        const shown = new Map(this.placeList().map((p) => [p.id, p.name]))
-        const spaces = ['~', ...this.places.spaces.map((p) => p.name)].map((key) => ({ key, name: shown.get(key === '~' ? placeId.home() : placeId.space(key)) ?? key }))
-        return modelsMatrix(this.settings, { host: HOST, name: NAME }, spaces)
-      }
+      case 'models-matrix':
+        return modelsMatrix(this.settings, { host: HOST, name: NAME }, this.matrixSpaces())
+      case 'profiles':
+        return BOX ? { profiles: [], active: 'Custom', unavailable: PROFILES_ON_MAIN } : this.profiles.view()
+      case 'profile-save':
+        if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
+        return this.profiles.save(a.name, { limits: a.limits, force: a.force })
+      case 'profile-preview':
+        if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
+        return this.profiles.preview(a.name)
+      case 'profile-apply':
+        if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
+        return this.profiles.apply(a.name)
+      case 'profile-undo':
+        if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
+        return this.profiles.undo()
+      case 'profile-rename':
+        if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
+        return this.profiles.rename(a.name, a.to)
+      case 'profile-delete':
+        if (BOX) return { ok: false, error: PROFILES_ON_MAIN }
+        return this.profiles.remove(a.name)
       case 'apply-to-waiting': {
         // a task agent's or a reviewer's Setting changed at a level: the tasks that wait for it take what it names now
         // (the dialog after the change asks first, with dry: true, which only counts)
@@ -3404,6 +3440,84 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return `Noted: ${t.id} shows "${r.msg}"${cut}, ${r.progress}% done${r.left !== undefined ? `, about ${r.left} min left` : ''}.`
   }
 
+  /** what a profile's change does to the waiting tasks it reaches: counted, or moved with --apply-waiting (the question on
+   *  the screen asks the same, once per kind and place) */
+  private profileWaitingWords(changes: Change[], move: boolean): string[] {
+    const picks = waitingPicks(changes)
+    if (!picks.length) return []
+    if (move) return [...new Set(picks.map(({ kind, change }) => (kind === 'reviewer' ? reviewRetuneLine : retuneLine)(this.applyWaiting(change.key, change.at))))]
+    const n = picks.reduce((k, { change }) => k + this.applyWaiting(change.key, change.at, true).changed, 0)
+    return n ? [`${n} waiting ${n === 1 ? 'task' : 'tasks'} would change with it: add --apply-waiting to move ${n === 1 ? 'it' : 'them'} too.`] : []
+  }
+
+  /** shepherdr profile list | save | show | preview | apply | undo | rename | delete: named settings of this machine (profiles.ts) */
+  private profileCommand(op: string | undefined, rest: string[], p: Parsed): string {
+    if (BOX) throw new Error(PROFILES_ON_MAIN)
+    const name = rest.join(' ')
+    const usage = 'shepherdr profile list | save <name> [--limits] [--force] | show <name> | preview <name> | apply <name> [--apply-waiting] | undo [--apply-waiting] | rename <name> <new-name> | delete <name>'
+    const refusals = (r: { error?: string; refused: { where: string; label: string; error: string }[] }) => [r.error, ...r.refused.map((x) => `  ${x.where} · ${x.label}: ${x.error}`)].join('\n')
+    switch (op) {
+      case undefined:
+      case 'list':
+        return this.profiles.list()
+      case 'save': {
+        if (!name) throw new Error(usage)
+        const r = this.profiles.save(name, { limits: p.flags.has('limits'), force: p.flags.has('force') })
+        if (!r.ok) throw new Error(r.exists ? `${r.error} Add --force to replace it.` : r.error)
+        return `Saved ${r.profile!.name}: ${r.profile!.limits ? 'the models and the limits' : 'the models'} of Everywhere, this machine and ${this.matrixSpaces().length} spaces (home included).`
+      }
+      case 'show':
+        if (!name) throw new Error(usage)
+        return this.profiles.show(name)
+      case 'preview': {
+        if (!name) throw new Error(usage)
+        const r = this.profiles.preview(name)
+        if (!r.ok) throw new Error(r.error)
+        return previewWords(r)
+      }
+      case 'apply': {
+        if (!name) throw new Error(usage)
+        const r = this.profiles.apply(name)
+        if (!r.ok) throw new Error(refusals(r))
+        const n = r.changes.length
+        return [
+          n ? `Applied ${r.name}: ${n} ${n === 1 ? 'setting' : 'settings'} changed.` : `${r.name} is in force already: the settings read as it says.`,
+          ...changeWords(r.changes),
+          ...(r.skipped.length ? [`Skipped, no longer a space: ${r.skipped.join(', ')}.`] : []),
+          ...(r.added.length ? [`Left as they are, added since the save: ${r.added.join(', ')}.`] : []),
+          ...(n ? ['shepherdr profile undo puts back what this changed.'] : []),
+          ...this.profileWaitingWords(r.changes, p.flags.has('apply-waiting')),
+        ].join('\n')
+      }
+      case 'undo': {
+        const r = this.profiles.undo()
+        if (!r.ok) throw new Error(refusals(r))
+        const n = r.changes.length
+        return [
+          `Undone: ${r.name}'s apply put back ${n} ${n === 1 ? 'setting' : 'settings'}.`,
+          ...changeWords(r.changes),
+          ...(r.kept.length ? [`Left as they are, changed since: ${r.kept.join(', ')}.`] : []),
+          ...this.profileWaitingWords(r.changes, p.flags.has('apply-waiting')),
+        ].join('\n')
+      }
+      case 'rename': {
+        const [from, ...to] = rest
+        if (!from || !to.length) throw new Error('shepherdr profile rename <name> <new-name> (quote a name with spaces)')
+        const r = this.profiles.rename(from, to.join(' '))
+        if (!r.ok) throw new Error(r.error)
+        return `${from} is called ${to.join(' ')} now.`
+      }
+      case 'delete': {
+        if (!name) throw new Error(usage)
+        const r = this.profiles.remove(name)
+        if (!r.ok) throw new Error(r.error)
+        return `Deleted ${name}. Its undo points stay until they are used.`
+      }
+      default:
+        throw new Error(usage)
+    }
+  }
+
   private async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string }): Promise<string> {
     const [a0, a1, ...rest] = p.words
     if (!a0 || a0 === 'help' || p.flags.has('help')) return HELP
@@ -3567,6 +3681,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const folder = repo ? `\nFolder: ${this.places.folderLine(repo)}${repo.repoId ? ` (found again by its repo's id ${shortId(repo.repoId)} if its folder is renamed or moved)` : ''}` : ''
         return `${head}${repo ? `${folder}\nBase branch: ${repo.base} (new tasks; per-task override: --base <branch>)` : ''}\n${this.settings.lines(pr, NAME)}${beat}${now}\n\nEvery new task's brief${pr ? ` in ${this.places.shownName(pr)}` : ''} ends with:\n${block}\n\nFor one task, set any of these with task add: --set review.rounds=1 --set merge="ask me first" (--set agent=codex, model, effort, reviewer, reviewer.model, reviewer.effort, reviewer.fallback, reviewer.fallbackModel, reviewer.fallbackEffort, task.fallback, coordinator.fallback, backup.model, backup.effort too, and a chain's 2nd to 5th backups by their own keys: task.fallback2, task.fallback2Model, task.fallback2Effort, reviewer.fallback2…), or say so in its brief, which wins.`
       }
+      case 'profile':
+        return this.profileCommand(a1, rest, p)
       case 'models': {
         const kinds = a1 ? [kindOf(a1)] : ['claude', 'codex', 'pi']
         if (!kinds[0]) throw new Error(`No CLI called ${a1}; herdr starts ${CLIS.join(', ')}`)

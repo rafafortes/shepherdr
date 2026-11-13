@@ -849,6 +849,56 @@ export interface ModelsMatrix {
   catalog: Record<string, MatrixCatalog>
 }
 
+/** Settings → Models → profiles (server/live/profiles.ts): one setting a profile changes, as the preview and the answer
+ *  name it */
+export interface ProfileChange {
+  /** the level's place id: all (Everywhere), m:<host> (this machine) or p:<host>:<space> */
+  place: string
+  /** the level in words: Everywhere, this machine's name, or the space's name */
+  where: string
+  key: string
+  /** the setting in words: "Tasks · Primary · Agent", "Max tasks" */
+  label: string
+  /** its value now, and the one the profile gives (null: not set at that level) */
+  now: string | null
+  then: string | null
+}
+/** a change a profile would make that the setting refuses, with why */
+export interface ProfileRefusal extends ProfileChange {
+  error: string
+}
+export interface ProfileSummary {
+  name: string
+  /** holds Max tasks and Merge train as well as the models */
+  limits: boolean
+  saved: number
+  applied?: number
+}
+/** the profiles bar: what is saved, what the settings match now, and the undo point an undo restores */
+export interface ProfilesView {
+  profiles: ProfileSummary[]
+  /** the profile the settings match now (the last one applied first), or Custom */
+  active: string
+  /** the last apply: its profile, when (the bar says Changed since when the settings no longer match it) */
+  last?: { name: string; at: number }
+  /** the undo point the next undo restores, with its words: Before night, 13 Nov, 01:05 */
+  undo?: { name: string; at: number; label: string }
+  /** why profiles are not kept here: a worker keeps none, the main machine does */
+  unavailable?: string
+}
+/** what applying a profile would change, and what would hold it back (a refused setting: then nothing is applied) */
+export interface ProfilePreview {
+  ok: boolean
+  error?: string
+  name?: string
+  changes: ProfileChange[]
+  refused: ProfileRefusal[]
+  /** saved spaces that are no longer spaces: their values are skipped */
+  skipped: string[]
+  /** spaces added since the save: applying leaves them as they are */
+  added: string[]
+}
+
 export interface Alert {
   id: string
   from: string
@@ -1046,6 +1096,19 @@ export type Action =
   | { type: 'apply-to-waiting'; key: string; place?: string; dry?: boolean }
   /** Settings → Models: every level's model settings as one table (read only; the writes are the setting action) */
   | { type: 'models-matrix' }
+  /** Settings → Models → profiles: the saved profiles and what the settings match now (read only) */
+  | { type: 'profiles' }
+  /** save the current settings as a profile: the models, and the limits (Max tasks, Merge train) when limits is set;
+   *  a name that is saved already is replaced only with force (the screen asks first) */
+  | { type: 'profile-save'; name: string; limits?: boolean; force?: boolean }
+  /** what applying a profile would change now (read only) */
+  | { type: 'profile-preview'; name: string }
+  /** apply a profile: all of it or none (a refused setting stops it); an undo point is kept first */
+  | { type: 'profile-apply'; name: string }
+  /** put back what the last apply changed, where it still reads as the apply left it */
+  | { type: 'profile-undo' }
+  | { type: 'profile-rename'; name: string; to: string }
+  | { type: 'profile-delete'; name: string }
   /** archive a task (on: true; its agent stops first) or bring it back; chat is its agent's key (ID/Agent) */
   | { type: 'archive'; chat: string; on: boolean }
   /** pin a task to the top of its lists (on: true) or unpin it */

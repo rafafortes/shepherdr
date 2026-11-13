@@ -23,6 +23,7 @@ const DEFAULT_REVIEWER = { kind: kindOf(defaultOf('reviewer.agent')!)! }
 import { excerpt } from '../live/chatlines.ts'
 import { findModel, TABLE } from '../live/models.ts'
 import { modelsMatrix } from '../live/models-matrix.ts'
+import { Profiles, ProfileStore, type Site } from '../live/profiles.ts'
 import { Browsers } from '../live/browser.ts'
 import { shortUrl } from '../../shared/browser.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, setOrder, sortPlaces, type PlaceOrder, type SectionDefs } from '../../shared/order.ts'
@@ -74,6 +75,11 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   /** the places whose Run now woke its coordinator a moment ago */
   waking: Record<string, boolean> = {}
   pluginsOff: string[] = []
+  /** Settings → Models → profiles: kept in memory, as the demo's settings are (profiles.ts) */
+  profiles = new Profiles(new ProfileStore(true), () => this.profileSite(), () => {
+    this.sections = D.settings(this.stores, this.checklists, this.pluginsOff)
+    this.emit('snapshot')
+  })
   bases: Record<string, string> = Object.fromEntries(this.places.filter((p) => p.level === 2 && !p.id.endsWith(':~')).map((p) => [p.id, 'main']))
   sections = D.settings(this.stores)
   /** agents' secrets, in memory only */
@@ -497,6 +503,17 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     return this.browsers.attach(task, out)
   }
 
+
+  /** this machine's levels, as the live one reads them: its Everywhere, machine and spaces (home included) */
+  private matrixSpaces() {
+    return this.places.filter((p) => p.machine === D.DEMO_HOST).map((p) => ({ key: p.id.split(':')[2]!, name: p.name }))
+  }
+
+  /** what a profile reads and writes: this machine's settings (the demo's own store) and its spaces */
+  private profileSite(): Site {
+    return { settings: this.stores[D.DEMO_HOST], machine: { host: D.DEMO_HOST, name: D.DEMO_HOST }, spaces: this.matrixSpaces() }
+  }
+
   async act(a: Action): Promise<unknown> {
     switch (a.type) {
       case 'send': {
@@ -717,11 +734,23 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         this.emit('snapshot')
         return { ok: true }
       }
-      case 'models-matrix': {
+      case 'models-matrix':
         // this machine's levels, as the live one reads them: its Everywhere, machine and spaces
-        const spaces = this.places.filter((p) => p.machine === D.DEMO_HOST).map((p) => ({ key: p.id.split(':')[2]!, name: p.name }))
-        return modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, spaces)
-      }
+        return modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, this.matrixSpaces())
+      case 'profiles':
+        return this.profiles.view()
+      case 'profile-save':
+        return this.profiles.save(a.name, { limits: a.limits, force: a.force })
+      case 'profile-preview':
+        return this.profiles.preview(a.name)
+      case 'profile-apply':
+        return this.profiles.apply(a.name)
+      case 'profile-undo':
+        return this.profiles.undo()
+      case 'profile-rename':
+        return this.profiles.rename(a.name, a.to)
+      case 'profile-delete':
+        return this.profiles.remove(a.name)
       case 'apply-to-waiting': {
         // as the live one, for this machine's spaces: the waiting tasks of the place (or of each space that doesn't set
         // the key itself) take what its Settings name now. A task agent's key: the CLI, which a demo task has one of, so
