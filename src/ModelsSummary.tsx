@@ -142,11 +142,12 @@ function Warnings({ list, go }: { list: SummaryWarning[]; go: (row: string, slot
 }
 
 /** the summary: the warnings, then the providers and their models */
-export default function ModelsSummary({ s, phone, go }: { s: Summary; phone: boolean; go: (row: string, slot: string) => void }) {
+export default function ModelsSummary({ s, phone, go, extra }: { s: Summary; phone: boolean; go: (row: string, slot: string) => void; extra?: ReactNode }) {
   return (
     <section aria-label="Summary" className="flex w-full flex-col gap-4 pt-2">
       <h2 className="font-medium">Summary</h2>
       <Warnings list={s.warnings} go={go} />
+      {extra}
       {s.backfilled === undefined ? <Small className="text-pretty">Reading the logs once from their start: the numbers grow until it is done.</Small> : null}
       {s.providers.length ? (phone ? <Cards providers={s.providers} now={s.at} /> : <Table providers={s.providers} now={s.at} />) : <Small className="text-pretty">Nothing configured, run or used yet.</Small>}
       <Small className="text-pretty">

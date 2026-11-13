@@ -533,6 +533,9 @@ interface Page extends SettingSection {
   matrix?: boolean
 }
 
+/** the Settings section the Models page draws its quota rows from (server settings.ts QUOTAS): not a page of its own */
+export const QUOTAS = 'Quotas'
+
 const APPEARANCE: Page = { name: 'Appearance', device: true, about: 'How Shepherdr looks on this device. Your other devices keep their own.', rows: [] }
 
 /** Settings → Models: every level's agent settings in one table (ModelsPage.tsx); it reads all levels at once, so it has
@@ -624,7 +627,7 @@ function groupsOf(sections: SettingSection[], ui: UI): { name: string; pages: Pa
     about: 'All: every new coordinator message, question and alert. Needs me: questions and alerts. Off: none, and the space stays quiet. Task alerts reach you either way. Spaces can override the delivery rule here or from their sidebar menu. Device delivery below applies Everywhere.',
     rows: [...x.rows.map((r) => ({ ...r, group: 'Delivery rules' })), ...(delivery?.rows.filter((r) => !r.key.startsWith('voice.')).map((r) => ({ ...r, group: 'Devices · Everywhere' })) ?? [])],
   } : x)
-  const globals = sections.filter((x) => x.global).map((x): Page => x === delivery ? {
+  const globals = sections.filter((x) => x.global && x.name !== QUOTAS).map((x): Page => x === delivery ? {
     ...x, name: 'Voice', rows: x.rows.filter((r) => r.key.startsWith('voice.')),
   } : x)
   const own = registry.settingsPages.filter((x) => x.when(ui)).map(({ name, about, Icon, View }): Page => ({ name, about, Icon, View, device: true, rows: [] }))

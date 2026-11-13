@@ -238,6 +238,8 @@ const agentRows = (group: string, role: string, cli: string[], model: string, ef
 ]
 
 /** the Settings page of Autopilot's heartbeat */
+/** the Settings section of the quota reads and the warning share: drawn on Settings → Models, not as a page */
+export const QUOTAS = 'Quotas'
 export const AUTOPILOT = 'Autopilot'
 
 /** settings from before review was on or off and waiting for GitHub's checks a way to merge: as they are now */
@@ -368,12 +370,18 @@ export const CATALOG: Section[] = [
     ],
   },
   {
-    // the share of a provider's quota at which Shepherdr warns, once a read of its quota is in (usage-ledger.ts quota,
-    // 4b): a run-out alerts whatever it is set to, once per run of them
-    name: 'Quota',
+    // the quota reads (plan-limits.ts, command-code-quota.ts, quota-estimate.ts, quotas.ts) and the share at which Shepherdr
+    // warns (quota.alertAt, 4b). Not a page of its own: the Models page draws these rows above its summary (QuotaSettings).
+    // Everywhere only. A run-out alerts whatever the warning share is set to
+    name: QUOTAS,
     levels: ['all'],
-    about: "The share of a provider's quota at which Shepherdr warns (Settings → Models → Summary), once its quota is read. Off: only a run-out alerts.",
-    rows: [{ label: 'Warn when a provider is at', key: 'quota.alertAt', value: '80%', num: { min: 50, max: 95, unit: '%', off: true } }],
+    about: "What Shepherdr reads of each provider's quota, and when it warns. Shown on Settings → Models, above the summary.",
+    rows: [
+      { label: 'Claude Code', key: 'quota.claude', value: 'on', options: ['on', 'off'], hint: "Claude Code's own /usage, read in a sealed run that changes nothing (needs bubblewrap). Off: no read." },
+      { label: 'Command Code', key: 'quota.commandcode', value: 'on', options: ['on', 'off'], hint: 'Command Code\'s own account API, with the key COMMANDCODE_API_KEY from Secrets. Off, or no key: no read.' },
+      { label: 'OpenCode Go (estimate)', key: 'quota.opencodeGo', value: 'on', options: ['on', 'off'], hint: "Not read from OpenCode: an estimate from Shepherdr's own ledger, with the lowest limit its run-outs show. Off: no estimate." },
+      { label: 'Warn when a provider is at', key: 'quota.alertAt', value: '80%', num: { min: 50, max: 95, unit: '%', off: true }, hint: 'Once a window of a provider reaches this share of its quota, one alert; again once it has refilled. Off: only a run-out alerts.' },
+    ],
   },
   {
     // how many of one space's tasks work at once on this machine, inside the machine's own limit (engine.room): a space

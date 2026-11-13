@@ -13,6 +13,7 @@ import { ProfilesBar } from './Profiles.tsx'
 import { Control } from './Settings.tsx'
 import { Dialog } from './rowmenu.tsx'
 import ModelsSummary from './ModelsSummary.tsx'
+import QuotaSettings from './QuotaSettings.tsx'
 import { Ghost, Menu, MenuItem, MoreIcon, Primary, Small, ic } from './ui.tsx'
 
 /** a CLI's name when it is off: a backup that doesn't run */
@@ -360,7 +361,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
             </ul>
           </section>
         ))}
-        {summary ? <ModelsSummary s={summary} phone={phone} go={goTo} /> : null}
+        {summary ? <ModelsSummary s={summary} phone={phone} go={goTo} extra={<QuotaSettings phone={phone} />} /> : null}
         <OnTop>
           {bulk ? <SetForEverySpace m={m} slot={bulk} phone={phone} onClose={() => setBulk(null)} /> : null}
           {copy ? <CopyModels m={m} from={copy} targets={spaces.filter((r) => r.id !== copy.id)} onClose={() => setCopy(null)} /> : null}
@@ -459,7 +460,7 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
         </table>
       </div>
       <Small className="text-pretty">Strong: set in that row. Faint: inherited, with where it comes from. Each cell's values are written at its row's level.</Small>
-      {summary ? <ModelsSummary s={summary} phone={phone} go={goTo} /> : null}
+      {summary ? <ModelsSummary s={summary} phone={phone} go={goTo} extra={<QuotaSettings phone={phone} />} /> : null}
       <OnTop>
         {bulk ? <SetForEverySpace m={m} slot={bulk} phone={phone} onClose={() => setBulk(null)} /> : null}
         {copy ? <CopyModels m={m} from={copy} targets={spaces.filter((r) => r.id !== copy.id)} onClose={() => setCopy(null)} /> : null}
