@@ -69,12 +69,29 @@ describe('the text of models.maxAtOnce', () => {
 })
 
 describe('models.maxAtOnce in Settings', () => {
-  test('its row sits in the Machine section at Everywhere and this machine, and never at a space', () => {
+  test('its row sits in the Space section, at Everywhere, this machine and each space: the machine total and a space sub-limit', () => {
     const s = fresh()
-    const section = (level: string) => s.sections([], [], null, 'host', ['web']).find((x) => x.level === level && x.name === 'Machine')
-    for (const level of ['all', 'm:host']) expect(section(level)?.rows.find((r) => r.key === 'models.maxAtOnce')).toMatchObject({ label: 'Max at once per model or provider', value: 'off', text: true })
-    expect(section('p:host:web')).toBeUndefined()
-    expect(s.set('models.maxAtOnce', 'spark=4', { space: 'web' }).ok).toBe(false)
+    const section = (level: string) => s.sections([], [], null, 'host', ['web']).find((x) => x.level === level && x.name === 'Space')
+    for (const level of ['all', 'm:host', 'p:host:web']) expect(section(level)?.rows.find((r) => r.key === 'models.maxAtOnce')).toMatchObject({ label: 'Most at once per model or provider', value: 'off', text: true })
+    expect(s.set('models.maxAtOnce', 'spark=4', { space: 'web' }).ok).toBe(true)
+  })
+
+  test("a space's own value is its sub-limit: the machine's total is read at the machine, and neither replaces the other", () => {
+    const s = fresh()
+    expect(s.set('models.maxAtOnce', 'spark=4', 'machine').ok).toBe(true)
+    // a space without its own value reads the machine's (the same entries: the total holds for it)
+    expect(s.maxAtOnce('web')).toEqual([{ pattern: 'spark', max: 4 }])
+    expect(s.set('models.maxAtOnce', 'spark=2', { space: 'web' }).ok).toBe(true)
+    expect(s.maxAtOnce('web')).toEqual([{ pattern: 'spark', max: 2 }])
+    expect(s.maxAtOnce()).toEqual([{ pattern: 'spark', max: 4 }])
+    expect(s.maxAtOnce('api')).toEqual([{ pattern: 'spark', max: 4 }])
+    // off at the space: no sub-limit of its own, and the machine's total still holds for it
+    expect(s.set('models.maxAtOnce', 'off', { space: 'web' }).ok).toBe(true)
+    expect(s.maxAtOnce('web')).toEqual([])
+    expect(s.maxAtOnce()).toEqual([{ pattern: 'spark', max: 4 }])
+    // a reset takes the space's own value away, back to the machine's
+    expect(s.set('models.maxAtOnce', null, { space: 'web' }).ok).toBe(true)
+    expect(s.maxAtOnce('web')).toEqual([{ pattern: 'spark', max: 4 }])
   })
 
   test('is set and read at Everywhere or this machine; the most specific wins; off clears it', () => {

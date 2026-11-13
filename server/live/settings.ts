@@ -389,8 +389,14 @@ export const CATALOG: Section[] = [
     // that matters more may have more of them running. Off: only the machine's limit. Set at any of the three levels,
     // the most specific one that sets it wins (pick)
     name: 'Space',
-    about: "How many of a space's tasks work at once on this machine. It works together with the machine's limit (Machine → Max tasks working at once): a task starts only when both have room. Off: only the machine's limit.",
-    rows: [{ label: 'Max tasks of this space working at once', key: 'space.maxTasks', value: 'off', num: { min: 1, max: 200, off: true }, hint: "Caps this space's working tasks within the machine's own limit, so a space that matters more can have more of them running than the others. Off: only the machine's limit." }],
+    about: "How many of a space's tasks work at once on this machine, and how many agents of one model or provider it may run at once. Both work together with the machine's limits (Machine → Max tasks working at once, and Most at once per model or provider at this machine): a task starts only when every one has room. Off: only the machine's limits.",
+    rows: [
+      { label: 'Max tasks of this space working at once', key: 'space.maxTasks', value: 'off', num: { min: 1, max: 200, off: true }, hint: "Caps this space's working tasks within the machine's own limit, so a space that matters more can have more of them running than the others. Off: only the machine's limit." },
+      // per provider or per model. Read at two levels, both applied (model-caps.ts, choose.ts): the machine's own value (Machine,
+      // or Everywhere) is the machine's total, and a space's own value (pick: its own, else the machine's) is that space's
+      // sub-limit inside it. A space's value never replaces the machine's total.
+      { label: 'Most at once per model or provider', key: 'models.maxAtOnce', value: 'off', text: true, hint: `Most agents of one provider or model at once: spark=4 caps every spark model, anthropic/claude-opus-5-5=2 one model (a model's own entry wins). Set at this machine or Everywhere it is the machine's total, for every space together; set for a space, that space's own sub-limit inside it (its own runs only). A task waits for a free slot of its model, and the others start past it. Counts this machine's tasks and coordinators on it; requests from other apps on the same server are not seen. Off: no cap per model.` },
+    ],
   },
   {
     // Done tasks put themselves in their place's Archived view this long after they finished (engine.autoArchive)
@@ -417,9 +423,6 @@ export const CATALOG: Section[] = [
     about: "When a machine starts more tasks, and when its coordinator hears that it struggles. Set one machine's own to fit its cores and memory.",
     rows: [
       { group: 'Working tasks', label: 'Max tasks working at once', key: 'machine.maxTasks', value: '10', num: { min: 1, max: 200 } },
-      // per provider or per model, inside the machine's limit (engine.room): a local server's own capacity, say. Kept here
-      // and not per space: the capacity is the machine's or the server's (model-caps.ts, engine.ts modelCapOf)
-      { group: 'Working tasks', label: 'Max at once per model or provider', key: 'models.maxAtOnce', value: 'off', text: true, hint: `Most agents of one provider or model at once on this machine, inside Max tasks working at once: spark=4 caps every spark model, anthropic/claude-opus-5-5=2 one model (a model's own entry wins). A task waits for a free slot of its model, and the others start past it. Counts this machine's tasks and coordinators on it; requests from other apps on the same server are not seen. Off: no cap per model.` },
       // the 5-minute load: the 1-minute one swings between a tenth and three times the cores within minutes while builds
       // come and go, so it let tasks start in every lull. CPU pressure (Linux PSI) is the share of time some task waited
       // for a CPU: off unless set (health.ts busy)
@@ -836,10 +839,12 @@ export class Settings {
     }
   }
 
-  /** the most agents at once per provider or per model on this machine (models.maxAtOnce, this machine's or Everywhere's),
-   *  as entries; none while it is off (model-caps.ts) */
-  maxAtOnce(): MaxEntry[] {
-    const p = parseMaxAtOnce(this.get('models.maxAtOnce'))
+  /** the most agents at once per provider or per model (models.maxAtOnce), as entries; none while it is off (model-caps.ts).
+   *  Without a space: the machine's total, read at this machine (its own, else Everywhere's). With one: that space's
+   *  sub-limit, its own value or else the machine's; the caller applies both (choose.ts), so a space's value never
+   *  replaces the machine's total */
+  maxAtOnce(space?: string): MaxEntry[] {
+    const p = parseMaxAtOnce(this.pick('models.maxAtOnce', space ? { space } : 'machine').value)
     return p.ok ? p.entries : []
   }
 
