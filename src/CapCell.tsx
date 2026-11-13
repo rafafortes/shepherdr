@@ -36,7 +36,9 @@ export const capId = (pattern: string, space?: string) => (space === undefined ?
  *  phone: under the line, the same controls) */
 export { atOnceWords }
 
-export function CapCell({ name, pattern, atOnce, caps, phone, openId, onOpen }: { name: string; pattern: string; atOnce: SummaryAtOnce; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void }) {
+export function CapCell({ name, pattern: raw, atOnce, caps, phone, openId, onOpen }: { name: string; pattern: string; atOnce: SummaryAtOnce; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void }) {
+  // a cap's pattern is lowercase, as its text holds it: a model id with capitals (Qwen3.8-27B) is capped by its lowercase
+  const pattern = raw.toLowerCase()
   const id = capId(pattern)
   const w = atOnceWords(atOnce)
   const open = openId === id

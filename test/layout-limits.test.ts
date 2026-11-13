@@ -2,10 +2,14 @@
 // a space's Max tasks is its own, a column of a provider or model is a space's sub-limit (added with + column), a provider's
 // machine total is its cap, Waiting now lists what holds the tasks, a column's Set for every space… writes each space, and a
 // phone draws one card per section, space and provider. Each test is short, so the browser tests fit on a loaded machine.
-import { describe, expect, test } from 'bun:test'
+import { afterAll, describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
 import { layout, settled } from './layout.ts'
+import { piOffers } from './pi-offers.ts'
 
+// pi lists nvidia and amd-tokenlab, which nothing in the demo uses: they are the providers under Other providers
+const restorePi = piOffers()
+afterAll(restorePi)
 const { browser, world, url } = await layout()
 
 /** the file's tests share one world and one browser: each starts from the demo's own limits, with no column of this browser's */
@@ -111,6 +115,27 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await pop.getByRole('button', { name: 'Clear here', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
       await spark.getByRole('button', { name: /^Spark \(local\): 0 at once · no cap/ }).waitFor()
+    } finally {
+      await page.close()
+    }
+  })
+
+  test('a provider nothing uses yet is under Other providers, open here: its cap cell sets its cap before it is used, and then it is in use', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      const other = page.getByRole('table', { name: 'Other providers' })
+      await other.scrollIntoViewIfNeeded()
+      // open by default, and NVIDIA API is in it, not in the table of the providers in use
+      await other.getByRole('rowheader', { name: /^NVIDIA API/ }).waitFor()
+      expect(await page.getByRole('table', { name: 'Providers and models' }).getByRole('rowheader', { name: /^NVIDIA API/ }).count()).toBe(0)
+      await other.getByRole('button', { name: /^NVIDIA API: 0 at once · no cap/ }).click()
+      const pop = page.getByRole('dialog', { name: 'Edit this setting' })
+      await pop.getByLabel('Most NVIDIA API at once, this machine').fill('2')
+      await pop.getByRole('button', { name: 'Save', exact: true }).click()
+      await pop.waitFor({ state: 'detached' })
+      // capped now: it is one of the providers in use, with its cap
+      await page.getByRole('table', { name: 'Providers and models' }).getByRole('button', { name: /^NVIDIA API: 0 of 2 at once/ }).waitFor()
     } finally {
       await page.close()
     }
@@ -239,6 +264,8 @@ describe.skipIf(!browser)('Settings → Limits on a phone', () => {
       await page.getByRole('textbox', { name: 'Max tasks of this space working at once' }).waitFor()
       await page.getByRole('region', { name: 'Providers and models' }).scrollIntoViewIfNeeded()
       await page.getByRole('region', { name: 'Claude Code' }).waitFor()
+      // the providers nothing uses yet, open under Other providers: a card each
+      await page.getByRole('region', { name: 'NVIDIA API' }).waitFor()
     } finally {
       await page.close()
     }

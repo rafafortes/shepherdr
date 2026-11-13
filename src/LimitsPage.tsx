@@ -1,8 +1,10 @@
 // Settings → Limits: every limit of this machine in one place, as a spreadsheet. Rows are Everywhere and this machine (the
 // machine's start limits and its alerts), each of its spaces (Max tasks, Merge train, and the sub-limit of each provider or
 // model), and each provider with its models under it (the cap, what runs by role, what is held, whether it is out, and
-// its quota). Beside them, what waits now and why. Every cell writes the setting it shows, at its row's level, through the
-// setting action (limits-view.ts reads them): nothing new is stored, and the profiles bar above holds them with the models.
+// its quota). A provider nothing uses yet (every provider a CLI offers, with no cap, run or usage) is under Other providers,
+// open, so its cap can be set before it is used. Beside them, what waits now and why. Every cell writes the setting it
+// shows, at its row's level, through the setting action (limits-view.ts reads them): nothing new is stored, and the
+// profiles bar above holds them with the models.
 // The desktop tables keep their first column and header in view; a phone shows one card per section, space and provider,
 // with the same editors. Bulk actions are confirmed first (a column's Set for every space…, a provider's Clear every
 // space's sub-limit).
@@ -17,6 +19,7 @@ import { Anchored, OnTop } from './anchored.tsx'
 import { CAP_KEY, CapCell, CapEditor } from './CapCell.tsx'
 import { Pop } from './cell-pop.tsx'
 import { Editor, Refused } from './ModelsPage.tsx'
+import { OtherProviders } from './ModelsSummary.tsx'
 import { ProfilesBar } from './Profiles.tsx'
 import { openPage, shown } from './Settings.tsx'
 import { Dialog } from './rowmenu.tsx'
@@ -396,6 +399,59 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
   )
   const spaceRows = v.spaces.rows
   const machineTotal = (p: string) => v.spaces.totals[p]?.max
+  // the providers in use, then those nothing uses yet (Other providers): a phone's card per provider, a desktop's grid
+  const used = v.providers.filter((p) => !p.idle)
+  const idle = v.providers.filter((p) => p.idle)
+  const providerCards = (list: LimitProvider[]) =>
+    list.map((p) => (
+      <section key={p.provider} aria-label={p.name} className="rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble">
+        <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+          <h3 className="min-w-0 flex-1 truncate font-medium">{p.name}</h3>
+          {p.local ? <Small>local</Small> : null}
+        </div>
+        <div className="flex flex-col gap-1 px-4 pb-2">
+          <Small className="text-fg2">Max at once</Small>
+          <CapCell name={p.name} pattern={p.provider} atOnce={p.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
+          <ProviderFacts byRole={p.byRole} held={p.atOnce.held} runOuts={p.runOuts} quota={p.quota} read={p.quotaRead} />
+        </div>
+        {p.models.map((m) => (
+          <div key={m.key} className="flex flex-col gap-1 border-t border-line px-4 py-2">
+            <span className="truncate text-fg2">{m.label}</span>
+            <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
+            <ProviderFacts byRole={m.byRole} held={m.atOnce.held} runOuts={m.runOuts} />
+          </div>
+        ))}
+      </section>
+    ))
+  const providerGrid = (label: string, list: LimitProvider[]) => (
+    <table aria-label={label} className="w-full table-fixed border-separate border-spacing-0 text-[0.8125rem]">
+      <colgroup>
+        <col className="w-[24%]" />
+        <col className="w-[20%]" />
+        <col className="w-[16%]" />
+        <col className="w-[7%]" />
+        <col className="w-[14%]" />
+        <col className="w-[19%]" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col" className="sticky top-0 left-0 z-30 bg-bg pr-4 pb-2 text-left align-bottom font-medium text-fg3">
+            Provider · model
+          </th>
+          {['Max at once', 'Running now', 'Held', 'Out now', 'Quota'].map((t) => (
+            <th key={t} scope="col" className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium text-fg3">
+              {t}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {list.map((p) => (
+          <ProviderRows key={p.provider} p={p} v={v} capOpen={capOpen} setCapOpen={setCapOpen} menu={menu} setMenu={setMenu} hasSubs={hasSubs(p.provider)} onClear={() => setBulk({ kind: 'clear', pattern: p.provider, name: p.name })} />
+        ))}
+      </tbody>
+    </table>
+  )
 
   return (
     <div className={clsx('flex w-full flex-col gap-5', phone ? 'px-4 pb-6' : 'px-6 pt-5 pb-8')}>
@@ -560,7 +616,7 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
         <div className="flex flex-col">
           <h2 className="font-medium">Providers and models</h2>
           <Small className="text-pretty">
-            Every provider with a cap, an agent, a run or usage, and its models under it. Max at once is the machine's total for the row, set at this machine or Everywhere (the sub-limits of the spaces show under it). The quota and the run-outs are read from each provider; the details are in{' '}
+            Every provider with a cap, an agent, a run or usage, and its models under it; the others a CLI offers are under Other providers, where a cap can be set before they are used. Max at once is the machine's total for the row, set at this machine or Everywhere (the sub-limits of the spaces show under it). The quota and the run-outs are read from each provider; the details are in{' '}
             <button type="button" onClick={() => openPage('Models', 'all')} className="press-dim rounded-row font-medium text-accent hover:underline">
               Models
             </button>
@@ -569,56 +625,17 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
         </div>
         {phone ? (
           <div className="flex flex-col gap-3">
-            {v.providers.map((p) => (
-              <section key={p.provider} aria-label={p.name} className="rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble">
-                <div className="flex items-center gap-2 px-4 pt-3 pb-1">
-                  <h3 className="min-w-0 flex-1 truncate font-medium">{p.name}</h3>
-                  {p.local ? <Small>local</Small> : null}
-                </div>
-                <div className="flex flex-col gap-1 px-4 pb-2">
-                  <Small className="text-fg2">Max at once</Small>
-                  <CapCell name={p.name} pattern={p.provider} atOnce={p.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
-                  <ProviderFacts byRole={p.byRole} held={p.atOnce.held} runOuts={p.runOuts} quota={p.quota} read={p.quotaRead} />
-                </div>
-                {p.models.map((m) => (
-                  <div key={m.key} className="flex flex-col gap-1 border-t border-line px-4 py-2">
-                    <span className="truncate text-fg2">{m.label}</span>
-                    <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
-                    <ProviderFacts byRole={m.byRole} held={m.atOnce.held} runOuts={m.runOuts} />
-                  </div>
-                ))}
-              </section>
-            ))}
+            {providerCards(used)}
+            {idle.length ? (
+              <OtherProviders count={idle.length} open>
+                <div className="flex flex-col gap-3">{providerCards(idle)}</div>
+              </OtherProviders>
+            ) : null}
           </div>
         ) : (
           <div className="max-h-[min(70vh,44rem)] max-w-full overflow-auto overscroll-contain">
-            <table aria-label="Providers and models" className="w-full table-fixed border-separate border-spacing-0 text-[0.8125rem]">
-              <colgroup>
-                <col className="w-[24%]" />
-                <col className="w-[20%]" />
-                <col className="w-[16%]" />
-                <col className="w-[7%]" />
-                <col className="w-[14%]" />
-                <col className="w-[19%]" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th scope="col" className="sticky top-0 left-0 z-30 bg-bg pr-4 pb-2 text-left align-bottom font-medium text-fg3">
-                    Provider · model
-                  </th>
-                  {['Max at once', 'Running now', 'Held', 'Out now', 'Quota'].map((t) => (
-                    <th key={t} scope="col" className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium text-fg3">
-                      {t}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {v.providers.map((p) => (
-                  <ProviderRows key={p.provider} p={p} v={v} capOpen={capOpen} setCapOpen={setCapOpen} menu={menu} setMenu={setMenu} hasSubs={hasSubs(p.provider)} onClear={() => setBulk({ kind: 'clear', pattern: p.provider, name: p.name })} />
-                ))}
-              </tbody>
-            </table>
+            {providerGrid('Providers and models', used)}
+            {idle.length ? <OtherProviders count={idle.length} open>{providerGrid('Other providers', idle)}</OtherProviders> : null}
           </div>
         )}
         <Small className="text-pretty">Local servers (spark, radeon, avell, dell) have no quota. A cap counts this machine's agents only: a request from another app on the same server is not seen.</Small>
@@ -715,7 +732,7 @@ function ProviderRows({ p, v, capOpen, setCapOpen, menu, setMenu, hasSubs, onCle
       {p.models.map((m) => (
         <tr key={m.key}>
           <th scope="row" className="sticky left-0 z-10 bg-bg py-1 pr-4 pl-6 text-left align-top font-normal">
-            <span className="block truncate text-fg2" title={m.label}>{m.label}</span>
+            <span className="block truncate text-fg2" title={m.key}>{m.label}</span>
           </th>
           {cells(m.label, m.key, m.atOnce, m.byRole, m.runOuts, m.atOnce.held)}
         </tr>

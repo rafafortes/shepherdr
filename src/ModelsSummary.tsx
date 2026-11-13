@@ -50,9 +50,10 @@ export function nowWords(n: SummaryNow): string {
   return parts.join(' · ') || '—'
 }
 
-/** the run-outs of a row, in words: how many in the week, the last one, and whether it is out now */
-export function runWords(r: SummaryRunOuts) {
-  const count = r.count7d ? plural(r.count7d, 'run-out in 7 d', 'run-outs in 7 d') : 'none in 7 d'
+/** the run-outs of a row, in words: how many in the week, the last one, and whether it is out now (an idle row, with
+ *  nothing in use, says a dash for the count) */
+export function runWords(r: SummaryRunOuts, idle = false) {
+  const count = r.count7d ? plural(r.count7d, 'run-out in 7 d', 'run-outs in 7 d') : idle ? '—' : 'none in 7 d'
   const last = r.last ? `last ${when(r.last.at)}${r.last.reset ? `, ${r.last.reset}` : ''}` : ''
   const out = r.out ? (r.until !== undefined ? `Out until ${when(r.until)}` : 'Out now') : ''
   return { count, last, out }
@@ -164,41 +165,66 @@ interface CapState {
   onOpen: (id: string | null) => void
 }
 
-/** the table on a desktop: a provider's row, then its models under it */
+/** the providers nothing uses yet (no slot, agent, run, run-out in the week, or cap): a group under the table, its models
+ *  and their cap cells in it, with no numbers. Closed on the summary; open where the caps are set (Limits) */
+export function OtherProviders({ count, open, children }: { count: number; open: boolean; children: ReactNode }) {
+  return (
+    <details open={open} className="flex flex-col gap-2 pt-3">
+      <summary className="cursor-pointer text-fg2 select-none">Other providers ({count})</summary>
+      {children}
+    </details>
+  )
+}
+
+/** the table on a desktop: a provider's row, then its models under it; the providers nothing uses yet under Other providers */
 function Table({ providers, now, cap }: { providers: SummaryProvider[]; now: number; cap: CapState }) {
-  // the Provider column stays in view when the table is narrower than its content (a phone-sized window): sticky, opaque
-  const head = ['Provider', 'Quota', 'Run-outs', 'Used', 'Configured, and now']
+  const used = providers.filter((p) => !p.idle)
+  const idle = providers.filter((p) => p.idle)
   return (
     <div className="max-w-full overflow-x-auto overscroll-contain">
-      <table aria-label="Providers and models" className="w-full table-fixed border-separate border-spacing-0 text-[0.8125rem]">
-        <colgroup>
-          <col className="w-[22%]" />
-          <col className="w-[30%]" />
-          <col className="w-[13%]" />
-          <col className="w-[16%]" />
-          <col className="w-[19%]" />
-        </colgroup>
-        <thead>
-          <tr>
-            {head.map((h) => (
-              <th key={h} scope="col" className={clsx('pr-4 pb-2 text-left font-medium text-fg3', h === 'Provider' && 'sticky left-0 z-[1] bg-bg dark:bg-bubble')}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {providers.map((p) => (
-            <Fragment key={p.provider}>
-              <Line name={p.name} local={p.local} row={p} quota={p.quota} read={p.quotaRead} now={now} shares={<Shares row={p} />} bold cap={{ ...cap, pattern: p.provider }} />
-              {p.models.map((m) => (
-                <Line key={m.key} name={m.label} row={m} now={now} indent cap={{ ...cap, pattern: m.key }} />
-              ))}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
+      <Grid label="Providers and models" providers={used} now={now} cap={cap} />
+      {idle.length ? (
+        <OtherProviders count={idle.length} open={false}>
+          <Grid label="Other providers" providers={idle} now={now} cap={cap} idle />
+        </OtherProviders>
+      ) : null}
     </div>
+  )
+}
+
+/** one table of providers and their models: the Provider column stays in view when the table is narrower than its content
+ *  (a phone-sized window): sticky, opaque */
+function Grid({ label, providers, now, cap, idle }: { label: string; providers: SummaryProvider[]; now: number; cap: CapState; idle?: boolean }) {
+  const head = ['Provider', 'Quota', 'Run-outs', 'Used', 'Configured, and now']
+  return (
+    <table aria-label={label} className="w-full table-fixed border-separate border-spacing-0 text-[0.8125rem]">
+      <colgroup>
+        <col className="w-[22%]" />
+        <col className="w-[30%]" />
+        <col className="w-[13%]" />
+        <col className="w-[16%]" />
+        <col className="w-[19%]" />
+      </colgroup>
+      <thead>
+        <tr>
+          {head.map((h) => (
+            <th key={h} scope="col" className={clsx('pr-4 pb-2 text-left font-medium text-fg3', h === 'Provider' && 'sticky left-0 z-[1] bg-bg dark:bg-bubble')}>
+              {h}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {providers.map((p) => (
+          <Fragment key={p.provider}>
+            <Line name={p.name} local={p.local} row={p} quota={p.quota} read={p.quotaRead} now={now} shares={<Shares row={p} />} bold cap={{ ...cap, pattern: p.provider }} idle={idle} />
+            {p.models.map((m) => (
+              <Line key={m.key} name={m.label} title={m.key} row={m} now={now} indent cap={{ ...cap, pattern: m.key }} idle={idle} />
+            ))}
+          </Fragment>
+        ))}
+      </tbody>
+    </table>
   )
 }
 
@@ -226,13 +252,13 @@ function UsedLines({ row }: { row: SummaryRow }) {
 }
 
 /** one table row: a provider or a model, its numbers in the columns */
-function Line({ name, local, row, quota, read, now, shares, bold, indent, cap }: { name: string; local?: boolean; row: SummaryRow; quota?: QuotaFigure; read?: QuotaRead; now: number; shares?: ReactNode; bold?: boolean; indent?: boolean; cap: CapState & { pattern: string } }) {
+function Line({ name, title, local, row, quota, read, now, shares, bold, indent, cap, idle }: { name: string; title?: string; local?: boolean; row: SummaryRow; quota?: QuotaFigure; read?: QuotaRead; now: number; shares?: ReactNode; bold?: boolean; indent?: boolean; cap: CapState & { pattern: string }; idle?: boolean }) {
   const conf = configuredWords(row.configured)
-  const runs = runWords(row.runOuts)
+  const runs = runWords(row.runOuts, idle)
   return (
     <tr className={clsx(bold && 'border-t border-line')}>
       <th scope="row" className={clsx('sticky left-0 z-[1] bg-bg py-2 pr-4 text-left align-top font-normal dark:bg-bubble', indent && 'pl-5')}>
-        <span className={clsx('block truncate', bold ? 'font-medium' : 'text-fg2')} title={name}>
+        <span className={clsx('block truncate', bold ? 'font-medium' : 'text-fg2')} title={title ?? name}>
           {name}
           {local ? <span className="ml-1.5 text-fg3">local</span> : null}
         </span>
@@ -332,13 +358,28 @@ export function QuotaView({ quota, read, now }: { quota?: QuotaFigure; read?: Qu
   )
 }
 
-/** the phone: one card per provider, its models under it */
+/** the phone: one card per provider, its models under it; the providers nothing uses yet under Other providers */
 function Cards({ providers, now, cap }: { providers: SummaryProvider[]; now: number; cap: CapState }) {
+  const used = providers.filter((p) => !p.idle)
+  const idle = providers.filter((p) => p.idle)
+  return (
+    <>
+      <CardList providers={used} now={now} cap={cap} />
+      {idle.length ? (
+        <OtherProviders count={idle.length} open={false}>
+          <CardList providers={idle} now={now} cap={cap} idle />
+        </OtherProviders>
+      ) : null}
+    </>
+  )
+}
+
+function CardList({ providers, now, cap, idle }: { providers: SummaryProvider[]; now: number; cap: CapState; idle?: boolean }) {
   return (
     <ul className="flex flex-col gap-3">
       {providers.map((p) => {
         const conf = configuredWords(p.configured)
-        const runs = runWords(p.runOuts)
+        const runs = runWords(p.runOuts, idle)
         return (
           <li key={p.provider} className="flex flex-col gap-2 rounded-box bg-bg px-4 py-3 shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble">
             <div className="flex items-baseline justify-between gap-3">
@@ -375,7 +416,7 @@ function Cards({ providers, now, cap }: { providers: SummaryProvider[]; now: num
                   <li key={m.key} className="flex flex-col gap-1 text-[0.8125rem] phone:text-[0.9375rem]">
                     <span className="flex items-baseline justify-between gap-3">
                       <span className="min-w-0 truncate text-fg2">{m.label}</span>
-                      <span className="shrink-0 text-right tabular-nums">{tokens(m.usage.d7.tokens)} in 7 d</span>
+                      <span className="shrink-0 text-right tabular-nums">{idle ? '—' : `${tokens(m.usage.d7.tokens)} in 7 d`}</span>
                     </span>
                     <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={cap.caps} phone openId={cap.open} onOpen={cap.onOpen} />
                   </li>
