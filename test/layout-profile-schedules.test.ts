@@ -82,7 +82,8 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a desk
       await some.getByRole('button', { name: 'Mon', exact: true }).click()
       await some.getByRole('button', { name: 'Fri', exact: true }).click()
       await some.getByRole('button', { name: 'Save', exact: true }).click()
-      await dlg.getByText('Mon, Fri at 16:30', { exact: false }).first().waitFor()
+      // the list says the days in words ("Monday and Friday"); "Mon, Fri" is the add form's own preview, gone once it closes
+      await dlg.getByText('Monday and Friday at 16:30', { exact: false }).first().waitFor()
       expect((await nightSchedules()).length).toBe(3)
       await dlg.getByRole('button', { name: 'Done', exact: true }).click()
       await dlg.waitFor({ state: 'detached' })
