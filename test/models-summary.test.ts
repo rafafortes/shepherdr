@@ -66,6 +66,10 @@ describe('what is configured, read at each space', () => {
     expect(roleOfChat('p:box:gtm')).toBe('coordinator')
     expect(labelOf(`anthropic/${CLAUDE}`)).toBe('Opus 5.5')
     expect(labelOf('spark/qwen3')).toBe('qwen3')
+    // pi's own list names its models with the provider in front: the row under the provider says that already
+    expect(labelOf('opencode-go/deepseek-v4.1-flash')).toBe('deepseek-v4.1-flash')
+    // a CLI's default model is not named in its log: the provider says which one
+    expect(labelOf('openai/unknown')).toBe('Codex default')
     expect(LOCAL.has('spark')).toBe(true)
   })
 })

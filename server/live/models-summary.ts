@@ -78,8 +78,12 @@ export interface SummaryInput {
 export function labelOf(key: string): string {
   const provider = providerOf(key)
   const model = modelOf(key)
+  // a CLI's own default model is not named in its log: the provider's name says which one it is
+  if (model === 'unknown') return `${providerName(provider)} default`
   const kind = provider === 'anthropic' ? 'claude' : provider === 'openai' ? 'codex' : 'pi'
-  return findModel(kind, model)?.label ?? (model || key)
+  // pi's own list names its models with the provider in front: under the provider's row, that part is said already
+  const label = findModel(kind, model)?.label ?? (model || key)
+  return label.startsWith(`${provider}/`) ? label.slice(provider.length + 1) : label
 }
 
 /** a CLI's value (Settings' words, or a harness's model) as the model key it runs: the CLI's default model where it says
