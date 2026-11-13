@@ -917,7 +917,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const t = this.task(a.chat.split('/')[0])
         const on = kindOf(c?.cli ?? '') ?? 'claude'
         const want = c?.restart ? (kindOf(c.restart.want) ?? on) : on
-        return { ok: true, info: { role: a.chat.includes('/') ? 'task' : 'coordinator', space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name, on: c?.agent ?? { kind: on }, onWords: harnessWords(c?.agent ?? { kind: on }), want: { kind: want }, clis: restartClis(['claude', 'codex', 'pi'], (kind) => picksIn(this.picks, kind)), working: t?.status === 'work' } }
+        return { ok: true, info: { role: a.chat.includes('/') ? 'task' : 'coordinator', space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name, on: c?.agent ?? { kind: on }, onWords: harnessWords(c?.agent ?? { kind: on }), want: { kind: want }, clis: restartClis(['claude', 'codex', 'pi', 'opencode'], (kind) => picksIn(this.picks, kind)), working: t?.status === 'work' } }
       }
       case 'model-pin': {
         const kind = kindOf(a.kind)

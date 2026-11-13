@@ -10,7 +10,7 @@ import { busy, memPct, type Sample } from './health.ts'
 import { placeId } from './places.ts'
 import { covers } from './engine/choose.ts'
 import type { HeldWhy } from './engine/engine.ts'
-import { capsOf, keyOf, providerName, type RunOn } from './models-summary.ts'
+import { capsOf, keyOf, labelOf, providerName, type RunOn } from './models-summary.ts'
 import { CATALOG, kindOf, type Level, Settings } from './settings.ts'
 import { providerOf } from './usage-ledger.ts'
 
@@ -133,6 +133,8 @@ export function waitingOf(input: LimitsInput): WaitingNow {
   const machine = input.settings.machine('machine')
   if (of('slots').length)
     groups.push({ id: 'slots', title: 'Machine slots are full', limit: `${input.working}${machine.max === null ? '' : ` of ${machine.max}`} working`, tasks: of('slots').map(task) })
+  // 0 is a limit of its own: none starts here, so the group says so rather than naming a busy machine
+  if (of('zero').length) groups.push({ id: 'zero', title: 'This machine is set to 0 tasks', limit: '0 tasks', tasks: of('zero').map(task) })
   if (of('machine').length) groups.push({ id: 'machine', title: 'The machine is too busy', limit: machineReason(input.sample, input.herdr, input.settings), tasks: of('machine').map(task) })
   const spaces = [...new Set(of('space').map((h) => h.space))]
   for (const key of spaces) {
@@ -140,12 +142,18 @@ export function waitingOf(input: LimitsInput): WaitingNow {
     const e = hs[0]!.entry
     groups.push({ id: `space:${key}`, title: `Space cap · ${hs[0]!.spaceName}`, limit: e ? `${e.count} of ${e.max} working` : undefined, tasks: hs.map(task) })
   }
+  for (const key of [...new Set(of('spaceZero').map((h) => h.space))]) {
+    const hs = of('spaceZero').filter((h) => h.space === key)
+    groups.push({ id: `spaceZero:${key}`, title: `Space set to 0 tasks · ${hs[0]!.spaceName}`, limit: '0 tasks', tasks: hs.map(task) })
+  }
   const entries = [...new Set(of('model').map((h) => h.entry?.name ?? 'model'))]
   for (const name of entries) {
     const hs = of('model').filter((h) => (h.entry?.name ?? 'model') === name)
     const e = hs[0]!.entry
     groups.push({ id: `model:${name}`, title: `Model cap · ${name}`, limit: e ? `${e.count} of ${e.max} at once` : undefined, tasks: hs.map(task) })
   }
+  // every model blocked (0 allowed): nothing will free up, so the tasks wait on the limits, not on a slot
+  if (of('blocked').length) groups.push({ id: 'blocked', title: 'Every model blocked (0 allowed)', tasks: of('blocked').map(task) })
   if (of('models').length) groups.push({ id: 'models', title: 'Every model of the space ran out', tasks: of('models').map(task) })
   if (of('resume').length) groups.push({ id: 'resume', title: 'Cut-off tasks go back to work first', tasks: of('resume').map(task) })
   return { held: input.held.length, groups, advisor: input.advisor, reviews: input.reviews }
@@ -166,6 +174,10 @@ export function entryPatterns(s: Settings, spaceKeys: string[]): string[] {
   return [...new Set([...machine, ...spaces])]
 }
 
+/** a model in words for the + column and the column headers: its provider's name, then the model as its row names it
+ *  ("NVIDIA API · mistralai/mistral-large-4-1t-a52b"), so two providers' same-named models tell apart */
+const modelName = (key: string) => `${providerName(providerOf(key))} · ${labelOf(key)}`
+
 /** the + column's choices: every provider the summary shows, every model it lists, and the models each CLI's own list
  *  has (the Models page's catalog), each once, lowercase as the entries are */
 export function knownOf(matrix: ModelsMatrix, summary: ModelsSummary): LimitKnown[] {
@@ -175,14 +187,14 @@ export function knownOf(matrix: ModelsMatrix, summary: ModelsSummary): LimitKnow
     if (!out.has(k)) out.set(k, { pattern: k, name, kind })
   }
   for (const p of summary.providers) add(p.provider, p.name, 'provider')
-  for (const p of summary.providers) for (const m of p.models) add(m.key, m.label, 'model')
+  for (const p of summary.providers) for (const m of p.models) add(m.key, modelName(m.key), 'model')
   for (const [cli, cat] of Object.entries(matrix.catalog)) {
     const kind = kindOf(cli)
     if (!kind) continue
     for (const m of cat.models) {
       const key = keyOf(kind, m.id)
       add(providerOf(key), providerName(providerOf(key)), 'provider')
-      add(key, m.label, 'model')
+      add(key, modelName(key), 'model')
     }
   }
   return [...out.values()]

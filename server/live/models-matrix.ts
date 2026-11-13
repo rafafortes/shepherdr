@@ -20,7 +20,7 @@ const ROLES: { role: MatrixRole; title: string; chain: Chain }[] = [
 
 /** the plain columns after the roles: one key each, its title on screen */
 export const PLAIN_COLUMNS: ModelsMatrix['plain'] = [
-  { key: 'space.maxTasks', title: 'Max tasks', num: { min: 1, max: 200, off: true } },
+  { key: 'space.maxTasks', title: 'Max tasks', num: { min: 0, max: 200, off: true, limit: true } },
   { key: 'merge.train', title: 'Merge train', options: optionsOf('merge.train') },
 ]
 

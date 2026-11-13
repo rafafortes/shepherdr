@@ -1,10 +1,21 @@
 // OpenCode's mirrored log (server/live/opencode.ts mirrorSession): one JSONL line per final row of its session,
 // {id, type, seq, time, data}. The chat reads the user's and the agent's text, the model, the tokens and cost of each
 // reply, where a session and a turn start and end, and the errors; system rows (Shepherdr's own instructions) stay out.
+// An error is OpenCode's own `{type, message, status}` (provider.quota, provider.auth, provider.rate-limit…): its type and
+// status go with the message, so retry.ts reads them as it reads Claude Code's and Codex's codes.
 import { basename } from 'node:path'
 import type { LogEvent, Reader } from './types.ts'
 
 type Json = any
+
+/** OpenCode's error of a row, as the error event keeps it: its words, its type as the code, its HTTP status; nothing for a
+ *  user's abort (Esc in its TUI, "Step interrupted"), which is not a provider's cut-off */
+export function errorOf(error: Json, fallback: string): { text: string; code?: string; status?: number } | undefined {
+  if (error?.type === 'aborted') return undefined
+  const code = typeof error?.type === 'string' ? error.type : undefined
+  const status = typeof error?.status === 'number' ? error.status : undefined
+  return { text: String(error?.message ?? error ?? fallback), ...(code ? { code } : {}), ...(status !== undefined ? { status } : {}) }
+}
 
 const parseLine = (text: string): Json => {
   try {
@@ -22,15 +33,19 @@ export class OpencodeReader implements Reader {
   private open = new Set<string>()
   /** files whose last turn ended: a reply that comes next (OpenCode retrying an error) starts a turn of its own */
   private ended = new Set<string>()
+  /** files whose last reply failed: OpenCode then writes the same failure again as an idle row, which is not a second error */
+  private failed = new Set<string>()
 
   reset(file: string) {
     this.sessions.delete(file)
     this.open.delete(file)
     this.ended.delete(file)
+    this.failed.delete(file)
   }
 
   private start(out: LogEvent[], file: string, id: string, at: number) {
     this.ended.delete(file)
+    this.failed.delete(file)
     this.open.add(file)
     out.push({ kind: 'turn-start', id: `start-${id}`, at })
   }
@@ -76,12 +91,17 @@ export class OpencodeReader implements Reader {
         const cost = typeof d.cost === 'number' && d.cost >= 0 ? d.cost : undefined
         if (tokens > 0) out.push({ kind: 'usage', id: `usage-${id}`, at, tokens, ...(model ? { model } : {}), ...(cost !== undefined ? { cost } : {}) })
         if (d.finish === 'error' || d.finish === 'content-filter') {
-          out.push({ kind: 'error', id: `error-${id}`, at, text: String(d.error?.message ?? d.error ?? d.finish) })
+          const e = errorOf(d.error, d.finish)
+          if (e) out.push({ kind: 'error', id: `error-${id}`, at, ...e })
+          this.failed.add(file)
         }
         // tool-calls means the agent goes on; stop, length, aborted, error and content-filter all end the turn
         if (d.finish !== 'tool-calls') this.end(out, file, id, at)
       } else if (l.type === 'idle' && d.outcome === 'failed') {
-        out.push({ kind: 'error', id: `error-${id}`, at, text: String(d.error?.message ?? d.error ?? 'the turn failed') })
+        // the failure of the reply before it, written again: its error is out already
+        const e = this.failed.has(file) ? undefined : errorOf(d.error, 'the turn failed')
+        if (e) out.push({ kind: 'error', id: `error-${id}`, at, ...e })
+        this.failed.delete(file)
         // a turn still under way ends with the failure
         if (this.open.has(file)) this.end(out, file, id, at)
       }

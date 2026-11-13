@@ -35,8 +35,16 @@ const CODE_PASSING: Record<string, string> = {
   response_too_many_failed_attempts: 'Connection dropped',
   internal_server_error: 'Provider server error',
   server_error: 'Provider server error',
+  // OpenCode's own error types (its provider errors, as its message rows keep them)
+  'provider.rate-limit': 'Rate limited',
+  'provider.transport': 'Connection dropped',
+  'provider.timeout': 'Connection dropped',
+  'provider.internal': 'Provider server error',
+  'provider.invalid-output': 'Provider answer cut short',
 }
-const CODE_LASTING = ['unauthorized', 'bad_request', 'context_window_exceeded', 'usage_limit_exceeded', 'sandbox_error', 'authentication_failed', 'billing_error', 'invalid_request', 'model_not_found', 'max_output_tokens']
+const CODE_LASTING = ['unauthorized', 'bad_request', 'context_window_exceeded', 'usage_limit_exceeded', 'sandbox_error', 'authentication_failed', 'billing_error', 'invalid_request', 'model_not_found', 'max_output_tokens', 'provider.auth', 'provider.no-route', 'provider.content-filter', 'provider.invalid-request', 'provider.unsupported-operation', 'content-filter']
+/** a rate limit in words, which OpenCode also types as its quota error (provider.quota) when the provider says so */
+const WORDS_RATE = /rate.?limit|too many requests/i
 const WORDS_AUTH = /\b(?:status|error|HTTP)\b[^\n]{0,12}\b40[13]\b|\b401 Unauthorized\b|please run \/login|login expired|not logged in|oauth token/i
 const WORDS_ALLOWANCE = /usage limit|(?<!rate.?)limit reached|hit your [\w ]*limit|\bquota\b|billing|credit balance|payment/i
 /** a prepaid balance that ran out: the provider says so with 402 Payment Required, or in these words */
@@ -85,11 +93,12 @@ export const runOutOf = (reason: string) => /^Out of (?:allowance|credit)/.test(
 export function providerError(words: string, code = '', status = 0): ProviderError {
   const c = code.toLowerCase()
   const said = WORDS_PASSING.find(([re]) => re.test(words))?.[1]
-  if (c === 'unauthorized' || c === 'authentication_failed' || status === 401 || status === 403 || WORDS_AUTH.test(words)) return { passing: false, reason: 'Signed out' }
+  if (c === 'unauthorized' || c === 'authentication_failed' || c === 'provider.auth' || status === 401 || status === 403 || WORDS_AUTH.test(words)) return { passing: false, reason: 'Signed out' }
   // a prepaid balance that is spent (402, or its words) is out of credit; a plan's allowance is out of allowance
   if (status === 402 || WORDS_CREDIT.test(words)) return { passing: false, reason: `Out of credit${until(words)}` }
-  if (c === 'usage_limit_exceeded' || c === 'billing_error' || WORDS_ALLOWANCE.test(words)) return { passing: false, reason: `Out of allowance${until(words)}` }
-  if (CODE_LASTING.includes(c) || (status >= 400 && status < 500 && status !== 408 && status !== 429) || WORDS_LASTING.test(words)) return { passing: false, reason: c === 'context_window_exceeded' || /context (?:window|length)|too long/i.test(words) ? 'Context window full' : c === 'model_not_found' || /model/i.test(words) ? 'Model not available' : 'Provider refused it' }
+  // OpenCode's quota error is its plan's or its free models' allowance, unless the provider says it is a rate limit
+  if (c === 'usage_limit_exceeded' || c === 'billing_error' || (c === 'provider.quota' && !WORDS_RATE.test(words)) || WORDS_ALLOWANCE.test(words)) return { passing: false, reason: `Out of allowance${until(words)}` }
+  if (CODE_LASTING.includes(c) || (status >= 400 && status < 500 && status !== 408 && status !== 429) || WORDS_LASTING.test(words)) return { passing: false, reason: c === 'context_window_exceeded' || /context (?:window|length)|too long/i.test(words) ? 'Context window full' : c === 'model_not_found' || c === 'provider.no-route' || /model/i.test(words) ? 'Model not available' : 'Provider refused it' }
   if (CODE_PASSING[c]) return { passing: true, reason: said ?? CODE_PASSING[c] }
   if (status === 429 || c === 'rate_limit') return { passing: true, reason: 'Rate limited' }
   if (status === 408 || status >= 500) return { passing: true, reason: said ?? (status === 529 ? 'Provider overloaded' : 'Provider server error') }

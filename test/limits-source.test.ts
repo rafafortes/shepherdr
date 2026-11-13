@@ -52,7 +52,7 @@ describe('the Limits action', () => {
     expect(after.machineTable.rows[1]!.cells['machine.maxTasks']).toMatchObject({ from: 'machine', set: true, row: { value: '6' } })
     expect(after.machineTable.rows[0]!.cells['machine.maxTasks']).toMatchObject({ from: 'default', set: false })
     // and a refused value is refused in words, with nothing written
-    const refused = (await src.act({ type: 'setting', key: 'machine.maxTasks', value: '0', place: here })) as { ok: boolean; error?: string }
+    const refused = (await src.act({ type: 'setting', key: 'machine.maxTasks', value: '201', place: here })) as { ok: boolean; error?: string }
     expect(refused.ok).toBe(false)
     expect(refused.error).toBeTruthy()
     // a space's own sub-limit is written at the space, and its line shows in the Spaces table

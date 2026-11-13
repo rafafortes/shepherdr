@@ -1,10 +1,14 @@
 // Settings → Models → Summary, on the screen: the providers and their models with what each was configured as, ran and
 // used (the share bars), the run-out that is out now with its time; a warning's Change opens the cell it names; Hide keeps
 // a warning away for the browser session only; and the phone's cards, nothing wider than the screen.
-import { describe, expect, test } from 'bun:test'
+import { afterAll, describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
 import { layout, settled } from './layout.ts'
+import { piOffers } from './pi-offers.ts'
 
+// pi lists nvidia and amd-tokenlab, which nothing in the demo uses: they are the providers under Other providers
+const restorePi = piOffers()
+afterAll(restorePi)
 const { browser, world, url } = await layout()
 
 /** the Models page on a desktop, opened from Settings */
@@ -46,6 +50,27 @@ describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => 
       expect(await table.getByRole('img', { name: '5 h: 62% used' }).count()).toBe(1)
       expect(await table.getByText(/Last month/).count()).toBe(0)
       expect(await table.getByText('—').count()).toBeGreaterThan(0)
+    } finally {
+      await page.close()
+    }
+  })
+
+  test('the providers nothing uses yet are under Other providers, closed: their models under them with the full id as a title, and dashes for the numbers', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      const s = await openModels(page)
+      await s.scrollIntoViewIfNeeded()
+      const group = s.locator('details').filter({ hasText: /^Other providers \(\d+\)/ })
+      expect(await group.evaluate((el) => (el as HTMLDetailsElement).open)).toBe(false)
+      await group.locator('summary').click()
+      const idle = s.getByRole('table', { name: 'Other providers' })
+      await idle.getByRole('rowheader', { name: /^NVIDIA API/ }).waitFor()
+      // its model names its provider in its title, and shows the id without it; nothing ran, so no "none in 7 d" but a dash
+      expect(await idle.locator('span[title="nvidia/mistralai/mistral-large-4-1t-a52b"]').textContent()).toBe('mistralai/mistral-large-4-1t-a52b')
+      expect(await idle.getByText('none in 7 d').count()).toBe(0)
+      expect(await idle.getByText('—').count()).toBeGreaterThan(0)
+      // a provider in use is not among them
+      expect(await idle.getByRole('rowheader', { name: /^OpenCode Go/ }).count()).toBe(0)
     } finally {
       await page.close()
     }
@@ -162,6 +187,9 @@ describe.skipIf(!browser)('Settings → Models → Summary on a phone', () => {
       const cards = s.locator('ul > li').filter({ has: page.locator('h4') })
       expect(await s.locator('h4').allTextContents()).toEqual(expect.arrayContaining(['Claude Code', 'OpenCode Go']))
       expect(await cards.count()).toBeGreaterThanOrEqual(3)
+      // the providers nothing uses yet are under Other providers, closed: opened, NVIDIA API's card is there
+      await s.locator('summary', { hasText: /^Other providers \(\d+\)$/ }).tap()
+      await s.locator('h4', { hasText: 'NVIDIA API' }).waitFor()
       // a warning's Change is under its words on a phone, and it opens the cell's editor under its line
       await warnings(page).first().getByRole('button', { name: 'Change…', exact: true }).tap()
       await page.getByText(/· Tasks · Backup \d/).first().waitFor()

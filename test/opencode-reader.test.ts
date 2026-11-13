@@ -110,6 +110,28 @@ describe('opencode reader', () => {
     expect(parse([row('i3', 'idle', { time: { created: 5 }, outcome: 'succeeded' })])).toEqual([{ ...SESSION, at: 5 }])
   })
 
+  test("OpenCode's error keeps its type as the code and its HTTP status, and a failed reply's repeat is not a second error", () => {
+    const quota = { type: 'provider.quota', message: 'Go usage limit exceeded', status: 429 }
+    expect(parse([turn('e4', { finish: 'error', error: quota, content: [] })])).toContainEqual({ kind: 'error', id: 'error-e4', at: 10, text: 'Go usage limit exceeded', code: 'provider.quota', status: 429 })
+    // OpenCode writes the failure of a reply again as the idle row after it: one error, and the turn ends once
+    const ev = parse([row('u14', 'user', { text: 'go' }), turn('e5', { finish: 'error', error: quota, content: [] }), row('i6', 'idle', { time: { created: 30 }, outcome: 'failed', error: quota })])
+    expect(ev.filter((e) => e.kind === 'error').map((e) => e.id)).toEqual(['error-e5'])
+    expect(turns(ev)).toEqual(['turn-start:start-u14', 'turn-end:turn-e5'])
+    // a reply that went through after that failed one is a turn of its own, and its own failure counts again
+    const again = parse([turn('e6', { finish: 'error', error: quota, content: [] }), row('u15', 'user', { text: 'retry' }), turn('e7', { finish: 'error', error: quota, content: [] })])
+    expect(again.filter((e) => e.kind === 'error').map((e) => e.id)).toEqual(['error-e6', 'error-e7'])
+  })
+
+  test('a user abort (Esc in the TUI, "Step interrupted") is no provider cut-off: its turn ends, no error', () => {
+    const ev = parse([row('u16', 'user', { text: 'stop' }), turn('a14', { finish: 'error', error: { type: 'aborted', message: 'Step interrupted' }, content: [] }), row('i7', 'idle', { outcome: 'failed', error: { type: 'aborted', message: 'Aborted' } })])
+    expect(ev.some((e) => e.kind === 'error')).toBe(false)
+    expect(turns(ev)).toEqual(['turn-start:start-u16', 'turn-end:turn-a14'])
+  })
+
+  test('an idle failure with no reply before it is an error with its type', () => {
+    expect(parse([row('i8', 'idle', { time: { created: 40 }, outcome: 'failed', error: { type: 'provider.no-route', message: 'Model unavailable: opencode/x' } })])[1]).toEqual({ kind: 'error', id: 'error-i8', at: 40, text: 'Model unavailable: opencode/x', code: 'provider.no-route' })
+  })
+
   test('a failed idle row ends a turn that is still open, after its error', () => {
     const ev = parse([
       row('u10', 'user', { text: 'do it' }),

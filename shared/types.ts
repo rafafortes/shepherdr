@@ -746,8 +746,9 @@ export interface SettingRow {
   /** each value's id, which a search finds it by where the value is its model's name (a model list) */
   ids?: Record<string, string>
   /** a number from min to max (step: what it goes up by, 1 when none), with its unit (plural, and one: singular);
-   *  off: it may be left empty for off, zero: 0 is off */
-  num?: { min: number; max: number; step?: number; unit?: string; one?: string; off?: boolean; zero?: boolean }
+   *  off: it may be left empty for off, zero: 0 is off. limit: a limit, with three choices (no cap = off, blocked = 0 starts
+   *  none, Limit: a number from 1 to max) */
+  num?: { min: number; max: number; step?: number; unit?: string; one?: string; off?: boolean; zero?: boolean; limit?: boolean }
   /** the small heading it sits under (Tasks, Coordinators) */
   group?: string
   /** the sub-block of its group it sits in (Backups): drawn indented under its own small heading, the rows after it
@@ -964,6 +965,9 @@ export interface SummaryProvider extends SummaryRow {
   name: string
   /** one of this machine's own models (spark, radeon, avell, dell): no quota, shared */
   local: boolean
+  /** nothing uses it yet: no slot, agent, run, run-out in the week, or cap. Such a provider is listed under Other providers,
+   *  with the models its CLI offers and no numbers */
+  idle: boolean
   /** its share of all tokens in the last 24 h and in the last 7 d (none when nothing was used) */
   share: { h24?: number; d7?: number }
   quota?: QuotaFigure

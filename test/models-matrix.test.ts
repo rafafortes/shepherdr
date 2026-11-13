@@ -43,7 +43,7 @@ describe('the models matrix: slots and rows', () => {
       [`p:${HOST}:docs`, 'Docs site', 'space'],
     ])
     expect(m.plain).toEqual([
-      { key: 'space.maxTasks', title: 'Max tasks', num: { min: 1, max: 200, off: true } },
+      { key: 'space.maxTasks', title: 'Max tasks', num: { min: 0, max: 200, off: true, limit: true } },
       { key: 'merge.train', title: 'Merge train', options: ['off', '2', '3', '4', '5'] },
     ])
     // the home space sets one of them: its row comes, named as the sidebar names it

@@ -38,7 +38,7 @@ build, and let tasks start in each lull), CPU pressure over its limit (off until
 `machine.startPressure`, a share such as 20%) or memory over 80%; its coordinator is told
 when the load stays over 1.5× the cores for 2 minutes, memory or a disk is over 90%, or herdr stops answering.
 - **Room for tasks** (Shepherdr enforces it): a task added, or told to go (a queued task's go, or a coordinator's
-  `task tell` to one that waits), waits as Queued, `Waiting for a free slot` or `Waiting for the machine` (or `Waiting for
+  `task tell` to one that waits), waits as Queued, `Waiting for a free slot` or `Waiting for the machine` (or `This machine is set to 0 tasks`, when Max tasks is 0; `Waiting for
   a free slot of <space>` once that space's own cap, Settings → Space, is full), with no agent started yet, and starts by itself once there's room, oldest first, one at a time: Start one task at most every
   (`machine.startEvery`, 2 min; 0 for as many at once as there's room for) spaces out the starts Shepherdr makes by
   itself, held tasks and the way back's, so each one's load shows in the averages before the next. A task you or a

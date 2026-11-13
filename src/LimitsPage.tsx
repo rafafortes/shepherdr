@@ -1,22 +1,26 @@
 // Settings → Limits: every limit of this machine in one place, as a spreadsheet. Rows are Everywhere and this machine (the
 // machine's start limits and its alerts), each of its spaces (Max tasks, Merge train, and the sub-limit of each provider or
 // model), and each provider with its models under it (the cap, what runs by role, what is held, whether it is out, and
-// its quota). Beside them, what waits now and why. Every cell writes the setting it shows, at its row's level, through the
-// setting action (limits-view.ts reads them): nothing new is stored, and the profiles bar above holds them with the models.
+// its quota). A provider nothing uses yet (every provider a CLI offers, with no cap, run or usage) is under Other providers,
+// open, so its cap can be set before it is used. Beside them, what waits now and why. Every cell writes the setting it
+// shows, at its row's level, through the setting action (limits-view.ts reads them): nothing new is stored, and the
+// profiles bar above holds them with the models.
 // The desktop tables keep their first column and header in view; a phone shows one card per section, space and provider,
 // with the same editors. Bulk actions are confirmed first (a column's Set for every space…, a provider's Clear every
 // space's sub-limit).
 import clsx from 'clsx'
 import { useEffect, useState, type ReactNode } from 'react'
-import { parseMaxAtOnce, withEntry, type MaxEntry } from '@shared/model-caps.ts'
+import { BLOCKED as BLOCKED_WORDS, parseMaxAtOnce, withEntry, type MaxEntry } from '@shared/model-caps.ts'
 import { shareOf } from '@shared/quota-words.ts'
 import type { LimitCell, LimitColumn, LimitKnown, LimitProvider, LimitRow, LimitSpaceRow, LimitTable, LimitsView, SettingRow, WaitingNow } from '@shared/types.ts'
 import { act, openTask, useSnap } from './kernel.ts'
 import { askWaitingMany } from './apply-waiting.tsx'
 import { Anchored, OnTop } from './anchored.tsx'
 import { CAP_KEY, CapCell, CapEditor } from './CapCell.tsx'
+import { LimitChoice, limitValue, limitWords } from './LimitChoice.tsx'
 import { Pop } from './cell-pop.tsx'
 import { Editor, Refused } from './ModelsPage.tsx'
+import { OtherProviders } from './ModelsSummary.tsx'
 import { ProfilesBar } from './Profiles.tsx'
 import { openPage, shown } from './Settings.tsx'
 import { Dialog } from './rowmenu.tsx'
@@ -187,7 +191,9 @@ export function LimitValue({ title, cell, machine, phone }: { title: string; cel
     if (r.ok) setOpen(false)
     setError(r.error ?? '')
   }
-  const words = shown(cell.row.value)
+  // a limit is three choices in words too: no cap (faint), 0 (blocked, in the warning color), or its number
+  const lim = cell.row.num?.limit ? limitWords(cell.row.value) : undefined
+  const words = lim ? lim.words : shown(cell.row.value)
   const editor = (
     <Editor
       phone={phone}
@@ -212,7 +218,7 @@ export function LimitValue({ title, cell, machine, phone }: { title: string; cel
         aria-label={`${title}: ${words}${cell.now ? `, ${cell.now}` : ''}`}
         title={`${words}${cell.now ? `, ${cell.now}` : ''}`}
         onClick={() => (open ? close() : setOpen(true))}
-        className={clsx('press-dim block max-w-full rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel', cell.set ? 'font-medium text-fg' : 'text-fg3')}
+        className={clsx('press-dim block max-w-full rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel', lim?.tone === 'zero' ? 'font-medium text-need-fg' : lim?.tone === 'none' || !cell.set ? 'text-fg3' : 'font-medium text-fg')}
       >
         <span className="block truncate">{words}</span>
         {cell.now ? <span className="block truncate text-[0.75rem] font-normal text-fg3">{cell.now}</span> : null}
@@ -230,7 +236,7 @@ function SpaceCapCell({ name, pattern, space, caps, total, phone, openId, onOpen
   const id = `space-cap|${pattern}|${space.key}`
   const mine = space.caps[pattern]
   const open = openId === id
-  const words = mine ? `${mine.now} of ${mine.max} at once` : total ? `machine's total applies (${total} at once)` : 'no sub-limit'
+  const words = mine ? (mine.max === 0 ? BLOCKED_WORDS : `${mine.now} of ${mine.max} at once`) : total ? `machine's total applies (${total} at once)` : 'no sub-limit'
   const editor = <CapEditor name={name} pattern={pattern} caps={caps} phone={phone} space={space.key} onClose={() => onOpen(null)} />
   return (
     <span className="relative block min-w-0">
@@ -241,7 +247,7 @@ function SpaceCapCell({ name, pattern, space, caps, total, phone, openId, onOpen
         aria-expanded={open}
         aria-label={`${name} in ${space.name}: ${words}`}
         onClick={() => onOpen(open ? null : id)}
-        className={clsx('press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel', mine ? 'font-medium text-fg' : 'text-fg3')}
+        className={clsx('press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel', mine?.max === 0 ? 'font-medium text-need-fg' : mine ? 'font-medium text-fg' : 'text-fg3')}
       >
         {words}
       </button>
@@ -396,6 +402,59 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
   )
   const spaceRows = v.spaces.rows
   const machineTotal = (p: string) => v.spaces.totals[p]?.max
+  // the providers in use, then those nothing uses yet (Other providers): a phone's card per provider, a desktop's grid
+  const used = v.providers.filter((p) => !p.idle)
+  const idle = v.providers.filter((p) => p.idle)
+  const providerCards = (list: LimitProvider[]) =>
+    list.map((p) => (
+      <section key={p.provider} aria-label={p.name} className="rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble">
+        <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+          <h3 className="min-w-0 flex-1 truncate font-medium">{p.name}</h3>
+          {p.local ? <Small>local</Small> : null}
+        </div>
+        <div className="flex flex-col gap-1 px-4 pb-2">
+          <Small className="text-fg2">Max at once</Small>
+          <CapCell name={p.name} pattern={p.provider} atOnce={p.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
+          <ProviderFacts byRole={p.byRole} held={p.atOnce.held} runOuts={p.runOuts} quota={p.quota} read={p.quotaRead} />
+        </div>
+        {p.models.map((m) => (
+          <div key={m.key} className="flex flex-col gap-1 border-t border-line px-4 py-2">
+            <span className="truncate text-fg2">{m.label}</span>
+            <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
+            <ProviderFacts byRole={m.byRole} held={m.atOnce.held} runOuts={m.runOuts} />
+          </div>
+        ))}
+      </section>
+    ))
+  const providerGrid = (label: string, list: LimitProvider[]) => (
+    <table aria-label={label} className="w-full table-fixed border-separate border-spacing-0 text-[0.8125rem]">
+      <colgroup>
+        <col className="w-[24%]" />
+        <col className="w-[20%]" />
+        <col className="w-[16%]" />
+        <col className="w-[7%]" />
+        <col className="w-[14%]" />
+        <col className="w-[19%]" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col" className="sticky top-0 left-0 z-30 bg-bg pr-4 pb-2 text-left align-bottom font-medium text-fg3">
+            Provider · model
+          </th>
+          {['Max at once', 'Running now', 'Held', 'Out now', 'Quota'].map((t) => (
+            <th key={t} scope="col" className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium text-fg3">
+              {t}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {list.map((p) => (
+          <ProviderRows key={p.provider} p={p} v={v} capOpen={capOpen} setCapOpen={setCapOpen} menu={menu} setMenu={setMenu} hasSubs={hasSubs(p.provider)} onClear={() => setBulk({ kind: 'clear', pattern: p.provider, name: p.name })} />
+        ))}
+      </tbody>
+    </table>
+  )
 
   return (
     <div className={clsx('flex w-full flex-col gap-5', phone ? 'px-4 pb-6' : 'px-6 pt-5 pb-8')}>
@@ -460,7 +519,7 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
                   <th scope="col" className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium whitespace-nowrap text-fg3">
                     <span className="inline-flex items-center gap-1">
                       Max tasks
-                      <More id="col:space.maxTasks" label="More for Max tasks" menu={menu} setMenu={setMenu} items={spaceColumn('space.maxTasks', 'Max tasks', { label: 'Max tasks of this space working at once', key: 'space.maxTasks', value: 'off', num: { min: 1, max: 200, off: true } })} />
+                      <More id="col:space.maxTasks" label="More for Max tasks" menu={menu} setMenu={setMenu} items={spaceColumn('space.maxTasks', 'Max tasks', { label: 'Max tasks of this space working at once', key: 'space.maxTasks', value: 'off', num: { min: 0, max: 200, off: true, limit: true } })} />
                     </span>
                   </th>
                   <th scope="col" className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium whitespace-nowrap text-fg3">
@@ -560,7 +619,7 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
         <div className="flex flex-col">
           <h2 className="font-medium">Providers and models</h2>
           <Small className="text-pretty">
-            Every provider with a cap, an agent, a run or usage, and its models under it. Max at once is the machine's total for the row, set at this machine or Everywhere (the sub-limits of the spaces show under it). The quota and the run-outs are read from each provider; the details are in{' '}
+            Every provider with a cap, an agent, a run or usage, and its models under it; the others a CLI offers are under Other providers, where a cap can be set before they are used. Max at once is the machine's total for the row, set at this machine or Everywhere (the sub-limits of the spaces show under it). The quota and the run-outs are read from each provider; the details are in{' '}
             <button type="button" onClick={() => openPage('Models', 'all')} className="press-dim rounded-row font-medium text-accent hover:underline">
               Models
             </button>
@@ -569,56 +628,17 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
         </div>
         {phone ? (
           <div className="flex flex-col gap-3">
-            {v.providers.map((p) => (
-              <section key={p.provider} aria-label={p.name} className="rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble">
-                <div className="flex items-center gap-2 px-4 pt-3 pb-1">
-                  <h3 className="min-w-0 flex-1 truncate font-medium">{p.name}</h3>
-                  {p.local ? <Small>local</Small> : null}
-                </div>
-                <div className="flex flex-col gap-1 px-4 pb-2">
-                  <Small className="text-fg2">Max at once</Small>
-                  <CapCell name={p.name} pattern={p.provider} atOnce={p.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
-                  <ProviderFacts byRole={p.byRole} held={p.atOnce.held} runOuts={p.runOuts} quota={p.quota} read={p.quotaRead} />
-                </div>
-                {p.models.map((m) => (
-                  <div key={m.key} className="flex flex-col gap-1 border-t border-line px-4 py-2">
-                    <span className="truncate text-fg2">{m.label}</span>
-                    <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
-                    <ProviderFacts byRole={m.byRole} held={m.atOnce.held} runOuts={m.runOuts} />
-                  </div>
-                ))}
-              </section>
-            ))}
+            {providerCards(used)}
+            {idle.length ? (
+              <OtherProviders count={idle.length} open>
+                <div className="flex flex-col gap-3">{providerCards(idle)}</div>
+              </OtherProviders>
+            ) : null}
           </div>
         ) : (
           <div className="max-h-[min(70vh,44rem)] max-w-full overflow-auto overscroll-contain">
-            <table aria-label="Providers and models" className="w-full table-fixed border-separate border-spacing-0 text-[0.8125rem]">
-              <colgroup>
-                <col className="w-[24%]" />
-                <col className="w-[20%]" />
-                <col className="w-[16%]" />
-                <col className="w-[7%]" />
-                <col className="w-[14%]" />
-                <col className="w-[19%]" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th scope="col" className="sticky top-0 left-0 z-30 bg-bg pr-4 pb-2 text-left align-bottom font-medium text-fg3">
-                    Provider · model
-                  </th>
-                  {['Max at once', 'Running now', 'Held', 'Out now', 'Quota'].map((t) => (
-                    <th key={t} scope="col" className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium text-fg3">
-                      {t}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {v.providers.map((p) => (
-                  <ProviderRows key={p.provider} p={p} v={v} capOpen={capOpen} setCapOpen={setCapOpen} menu={menu} setMenu={setMenu} hasSubs={hasSubs(p.provider)} onClear={() => setBulk({ kind: 'clear', pattern: p.provider, name: p.name })} />
-                ))}
-              </tbody>
-            </table>
+            {providerGrid('Providers and models', used)}
+            {idle.length ? <OtherProviders count={idle.length} open>{providerGrid('Other providers', idle)}</OtherProviders> : null}
           </div>
         )}
         <Small className="text-pretty">Local servers (spark, radeon, avell, dell) have no quota. A cap counts this machine's agents only: a request from another app on the same server is not seen.</Small>
@@ -715,7 +735,7 @@ function ProviderRows({ p, v, capOpen, setCapOpen, menu, setMenu, hasSubs, onCle
       {p.models.map((m) => (
         <tr key={m.key}>
           <th scope="row" className="sticky left-0 z-10 bg-bg py-1 pr-4 pl-6 text-left align-top font-normal">
-            <span className="block truncate text-fg2" title={m.label}>{m.label}</span>
+            <span className="block truncate text-fg2" title={m.key}>{m.label}</span>
           </th>
           {cells(m.label, m.key, m.atOnce, m.byRole, m.runOuts, m.atOnce.held)}
         </tr>
@@ -782,17 +802,18 @@ function SetForSpaces({ bulk, rows, caps, phone, onClose }: { bulk: Extract<Bulk
 /** Set for every space…, for one provider's or model's sub-limit: the same number at each space, inside the machine's total;
  *  the spaces' other entries stay as they are */
 function SetPatternForSpaces({ pattern, name, spaces, onClose }: { pattern: string; name: string; spaces: Caps['spaces']; onClose: () => void }) {
-  const [n, setN] = useState('')
+  // the three choices (LimitChoice): no cap takes the entry out of each space, blocked (0) or a number sets it
+  const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const value = Number(n)
-  const ok = n.trim() !== '' && Number.isInteger(value) && value >= 1 && value <= 200
+  const ok = draft !== '' && (draft === 'off' || limitValue('limit', draft, 200) !== '' || draft === '0')
   const run = async () => {
     setBusy(true)
     setError('')
     const failed: string[] = []
+    const max = draft === 'off' ? undefined : Number(draft)
     for (const s of spaces) {
-      const r = await write(s.place, CAP_KEY, withEntry(s.text, pattern, value) || null)
+      const r = await write(s.place, CAP_KEY, withEntry(s.text, pattern, max) || null)
       if (!r.ok) failed.push(`${s.name}: ${r.error}`)
     }
     setBusy(false)
@@ -810,22 +831,8 @@ function SetPatternForSpaces({ pattern, name, spaces, onClose }: { pattern: stri
       }
     >
       <div className="flex flex-col gap-3">
-        <label className="flex items-center justify-between gap-3">
-          <span className="text-fg2">At once in each space</span>
-          <input
-            type="number"
-            min={1}
-            max={200}
-            step={1}
-            inputMode="numeric"
-            aria-label={`Most ${name} at once in each space`}
-            placeholder="a number"
-            value={n}
-            onChange={(e) => setN(e.target.value)}
-            className="w-24 rounded-row bg-bg px-2 py-1 text-right tabular-nums shadow-[inset_0_0_0_1px_var(--line2)] outline-none focus:shadow-box-focus dark:bg-bubble"
-          />
-        </label>
-        <Small className="text-pretty">Each space's sub-limit for {name} becomes this number, inside the machine's total. Its other entries stay as they are.</Small>
+        <LimitChoice label={`Most ${name} at once in each space`} value={draft} max={200} zero="Blocked · 0 allowed" onChange={(v) => setDraft(v)} />
+        <Small className="text-pretty">Each space's sub-limit for {name} becomes this choice: no cap takes its own out, blocked (0) starts none of {name} there, a number caps it inside the machine's total. Its other entries stay as they are.</Small>
         {error ? <Refused text={error} /> : null}
       </div>
     </Dialog>

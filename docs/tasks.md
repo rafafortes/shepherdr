@@ -95,7 +95,11 @@
 - **Held for room.** A task waits for room as Queued, with no agent yet, and its row says why: `Waiting for a free slot`
   (the machine's slots are all taken), `Waiting for the machine` (its load, pressure or memory, or a herdr that doesn't
   answer), `Waiting for a free slot of <space>` (that space's own cap, Settings → Space, `space.maxTasks`, is full),
-  `Waiting: every model ran out`, or `Waiting: cut-off tasks go back to work first`. A task held for its space's cap is
+  `Waiting: every model ran out`, or `Waiting: cut-off tasks go back to work first`. Three more, for a limit set to 0 (see
+  [settings](settings.md)): `This machine is set to 0 tasks` (`machine.maxTasks` 0: this machine starts no
+  task), `<space> is set to 0 tasks` (`space.maxTasks` 0 for that space), and `Blocked: every model it may use is 0 allowed`
+  (every model of the task's chain is blocked by a `models.maxAtOnce` 0: it starts once a limit changes, never by waiting).
+  A task held for its space's cap is
   passed over: a task of another space with room starts past it in the same pass, and the space's held tasks start in
   turn (first in line, then oldest) as its own tasks end and free a slot. The machine's limit still comes first, so a
   space's cap never lets more tasks work than the machine has slots.
@@ -106,6 +110,10 @@
     passed over like a held space's: the tasks on other models start in the same pass, and its held tasks start in turn as
     the model frees up. A first in line does not pass it. What counts toward a model, and what does not, is in
     [settings](settings.md).
+  - **A blocked model.** A model at 0 (`models.maxAtOnce`, `spark=0`) is blocked: nothing starts on it. A task whose chain has
+    another model with room starts there (`Started on Codex: spark is blocked (0 allowed)` in its chat). A task whose every model
+    is blocked is held with `waiting: every model it may use is blocked (0 allowed): change its agent or a limit`, and it is not
+    waited for: release starts it only once a limit changes. A task whose chain has full models as well waits for those only.
   - **Its chain.** A task whose primary is at its cap starts on its first backup with room, not held (`Started on Codex: spark
     is at its limit (1 of 1 at once)` in its chat). Held only when every harness of its chain is full or out, and its row names
     each one, short: `Waiting: spark 1/1 · openai out` (its row's title, and its card and replies, say it in full: `Codex (default) (out until 17:00)`), ending

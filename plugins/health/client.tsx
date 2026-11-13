@@ -81,7 +81,8 @@ function Details({ m, h, onClose }: { m: Machine; h: MachineHealth; onClose: () 
   useDismiss(ref, onClose)
   const ui = useUI((u) => u)
   const page = settingsPageOf(snap.settings, m.machine, ui)
-  const tasks = `${h.working}${h.max ? ` of ${h.max}` : ''} working${h.waiting ? `, ${h.waiting} of them waiting on you` : ''}${h.held ? ` · ${h.held} waiting` : ''}`
+  // 0 is a limit of its own (no task starts here): "of 0", not no limit
+  const tasks = `${h.working}${h.max !== undefined ? ` of ${h.max}` : ''} working${h.waiting ? `, ${h.waiting} of them waiting on you` : ''}${h.held ? ` · ${h.held} waiting` : ''}`
   return (
     <div
       ref={ref}

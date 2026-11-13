@@ -1,0 +1,2 @@
+{"id":"msg_u2","type":"user","seq":1,"time":1000,"data":{"text":"Review the diff.","time":{"created":1000}}}
+{"id":"msg_i2","type":"idle","seq":2,"time":1500,"data":{"time":{"created":1500},"outcome":"failed","error":{"type":"provider.no-route","message":"Model unavailable: opencode-go/no-such-model"}}}

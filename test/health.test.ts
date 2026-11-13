@@ -51,7 +51,12 @@ describe('limits', () => {
     // any number in range, not a fixed list
     expect(s.set('machine.maxTasks', '13').ok).toBe(true)
     expect(s.machine().max).toBe(13)
-    for (const bad of ['0', '2.5', '201', 'lots']) expect(s.set('machine.maxTasks', bad).ok).toBe(false)
+    for (const bad of ['2.5', '201', 'lots', '-1']) expect(s.set('machine.maxTasks', bad).ok).toBe(false)
+    // 0 is a limit of its own (no task starts here), and off is no cap at all
+    expect(s.set('machine.maxTasks', '0').ok).toBe(true)
+    expect(s.machine().max).toBe(0)
+    expect(s.set('machine.maxTasks', 'off').ok).toBe(true)
+    expect(s.machine().max).toBeNull()
     s.set('machine.maxTasks', null)
     expect(s.set('machine.startLoad', '1.15x').ok).toBe(true)
     expect(s.get('machine.startLoad')).toBe('1.15× cores')
@@ -181,4 +186,11 @@ test("each machine's note gives the limits in its own numbers", () => {
   expect(n.noteTitle).toBe('Why these defaults')
   expect(n.note).toStartWith('This machine has 16 cores and 31 GB of memory. New tasks wait while 10 are at work, or while the load is over 16 or over 25 GB of memory is in use.')
   expect(n.note).toContain('load stays over 24 for 2 minutes, memory passes 28 GB')
+})
+
+test("the note under a machine's limits says what 0 and no cap mean for its tasks", () => {
+  const base = limits()
+  expect(machineNote({ ...base, max: 0 }, 4, 8).note).toContain('No task starts on this machine: its Max tasks is 0.')
+  expect(machineNote({ ...base, max: null, startLoad: null }, 4, 8).note).not.toContain('New tasks wait')
+  expect(machineNote({ ...base, max: null }, 4, 8).note).toContain('New tasks wait while the load is over')
 })

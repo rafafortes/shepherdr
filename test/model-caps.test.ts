@@ -29,9 +29,9 @@ describe('the text of models.maxAtOnce', () => {
     const hint = 'Write provider=number or model=number'
     const bad = [
       ['spark', 'spark is no provider or model'],
-      ['spark=', 'spark needs a whole number from 1 to 200, not "nothing"'],
-      ['spark=0', 'spark needs a whole number from 1 to 200, not "0"'],
-      ['spark=201', 'spark needs a whole number'],
+      ['spark=', 'spark needs a whole number from 0 to 200, not "nothing"'],
+      ['spark=-1', 'spark needs a whole number from 0 to 200, not "-1"'],
+      ['spark=201', 'spark needs a whole number from 0 to 200, not "201"'],
       ['spark=2.5', 'spark needs a whole number'],
       ['spark=four', 'spark needs a whole number'],
       ['spark=2,,radeon=1', 'An entry is empty'],
@@ -129,9 +129,9 @@ describe('models.maxAtOnce in Settings', () => {
 
   test('a refused value is said with its fix and nothing is written', () => {
     const s = fresh()
-    const r = s.set('models.maxAtOnce', 'spark=0', 'all')
+    const r = s.set('models.maxAtOnce', 'spark=201', 'all')
     expect(r.ok).toBe(false)
-    expect(r.error).toContain('spark needs a whole number from 1 to 200')
+    expect(r.error).toContain('spark needs a whole number from 0 to 200')
     expect(s.pick('models.maxAtOnce', 'all').from).toBe('default')
   })
 
@@ -141,3 +141,34 @@ describe('models.maxAtOnce in Settings', () => {
     expect(s.lines(undefined, 'host')).toContain('models.maxAtOnce           spark=4  (host)')
   })
 })
+
+describe('0 is a cap of its own: blocked, distinct from no entry (no cap) and from off', () => {
+  test('0 parses as an entry; 0 to 200 are the numbers, and no entry or off is no cap', () => {
+    expect(parseMaxAtOnce('spark=0')).toEqual({ ok: true, entries: [{ pattern: 'spark', max: 0 }] })
+    expect(parseMaxAtOnce('spark=0, radeon=200')).toEqual({ ok: true, entries: [{ pattern: 'spark', max: 0 }, { pattern: 'radeon', max: 200 }] })
+    expect(parseMaxAtOnce('radeon=2')).toEqual({ ok: true, entries: [{ pattern: 'radeon', max: 2 }] })
+    // no entry for a model: nothing caps it at all
+    expect(capFor([], SPARK_KEY)).toBeUndefined()
+    expect(capFor([{ pattern: 'spark', max: 0 }], SPARK_KEY)).toEqual({ pattern: 'spark', max: 0 })
+    expect(formatMaxAtOnce([{ pattern: 'spark', max: 0 }, { pattern: 'radeon', max: 1 }])).toBe('spark=0, radeon=1')
+  })
+
+  test('a 0 is kept through a write, and clearing an entry takes the 0 out (no entry is no cap)', () => {
+    const blocked = withEntry('', 'spark', 0)
+    expect(blocked).toBe('spark=0')
+    expect(withEntry(blocked, 'radeon', 3)).toBe('spark=0, radeon=3')
+    expect(withEntry('spark=0, radeon=3', 'spark')).toBe('radeon=3')
+    expect(withEntry('spark=0', 'spark')).toBe('')
+  })
+
+  test('the setting keeps a 0 as it is written, and off stays off, not 0', () => {
+    const s = fresh()
+    expect(s.set('models.maxAtOnce', 'Spark=0', 'all')).toEqual({ ok: true })
+    expect(s.maxAtOnce()).toEqual([{ pattern: 'spark', max: 0 }])
+    expect(s.set('models.maxAtOnce', 'off', 'all')).toEqual({ ok: true })
+    expect(s.maxAtOnce()).toEqual([])
+    expect(s.get('models.maxAtOnce')).toBe('off')
+  })
+})
+
+const SPARK_KEY = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'

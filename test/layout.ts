@@ -51,6 +51,15 @@ export async function still(loc: Locator, ms = 300) {
     await Bun.sleep(ms)
   }
 }
+/** a limit's three choices (LimitChoice): the Limit radio, then its number (a whole number from 1 to max) */
+export async function pickLimit(scope: Locator, n: string, max = 200) {
+  await scope.getByRole('radio', { name: 'Limit', exact: true }).check()
+  const box = scope.getByRole('textbox', { name: `Limit, from 1 to ${max}` })
+  await box.fill(n)
+  // left (Enter): a Settings row saves the number, a draft keeps it
+  await box.press('Enter')
+}
+
 export const pills = (id: string) => `[data-msg="${id}"] button[aria-pressed][data-keep-box]`
 export type Box = { left: number; right: number; top: number; bottom: number }
 

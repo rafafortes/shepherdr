@@ -72,10 +72,11 @@
   the head included; off by default) lets the first merges in line go in together on one gate run, each as its own
   commit. It needs a gate set and works only for merges made here, not through a GitHub pull request. Off means one at
   a time. What each row does is in [tasks](tasks.md).
-- **Max tasks of this space working at once** (`space.maxTasks`, the Space section; off by default, or 1 to 200) caps how
-  many of one space's tasks work on this machine at once. It works together with the machine's own limit (Machine → Max
+- **Max tasks of this space working at once** (`space.maxTasks`, the Space section; No cap by default, or 0 to 200) caps how
+  many of one space's tasks work on this machine at once. **0 starts none**: every task of that space is held, as `<space> is
+  set to 0 tasks`, and another space's tasks start as before. No cap is not 0: it is unlimited within the machine's limit. It works together with the machine's own limit (Machine → Max
   tasks working at once, `machine.maxTasks`): a task starts only when the machine has a free slot and its space is under
-  its cap, so the caps never add up past the machine's limit. Off means only the machine's limit. Set it Everywhere, for
+  its cap, so the caps never add up past the machine's limit. No cap means only the machine's limit. Set it Everywhere, for
   a machine or for a space; the most specific one set wins, as for the rest. For example, a machine at 9 tasks at once
   with `lyvora-app` at 6 and `product-intel` at 2 (`shepherdr set machine.maxTasks 9 --machine`, `shepherdr set
   space.maxTasks 6 --space lyvora-app`, `shepherdr set space.maxTasks 2 --space product-intel`): lyvora-app may have 6 of
@@ -84,7 +85,7 @@
   tasks start past it; a first in line does not pass the cap either, and the way back honours it too. What waits and
   why is in [tasks](tasks.md) and [machines](machines.md).
 - **Most agents at once per provider or per model** (`models.maxAtOnce`, the Machine section, under Max tasks working at
-  once; off by default) caps how many of this machine's agents run on one provider or one model. It is a text, one entry
+  once; no entry by default, which is no cap) caps how many of this machine's agents run on one provider or one model. It is a text, one entry
   per pattern: `spark=4, radeon=1` caps every model of `spark` at 4 and every model of `radeon` at 1, and
   `anthropic/claude-opus-5-5=2` caps one model (a provider is the part of a model's key before its slash: `spark`
   for `spark/qwen3.8-flash-next-mlx4-mtp-tensorfold`, `anthropic` for Claude Code's models, `openai` for Codex's). The
@@ -95,8 +96,40 @@
   (a space with no value of its own reads the machine's, the same entries). `spark=4` at the machine and `spark=2` for
   `lyvora-app` means the Spark takes at most four in all, and lyvora-app at most two of them. Off for a space is no
   sub-limit of its own; the total still holds for it. Its text is checked when
-  it is set: a pattern is a provider or a model key in lowercase, a number from 1 to 200 is needed, a pattern may not
+  it is set: a pattern is a provider or a model key in lowercase, a number from 0 to 200 is needed, a pattern may not
   repeat, and at most 20 entries (a refusal says which). Values are kept as written, lowercased.
+  - **The three choices, for every limit.** Each limit editor (Settings' Machine and Space rows, the Limits cells and bulk
+    dialogs, a model's cap cell in Models → Summary) offers three separate choices, never one number that stands for two:
+    **No cap** (unlimited: no entry, or `off` for a task count; the cell reads `no cap`, faint), **Blocked · 0 allowed** (`0`;
+    for a task count **0 · starts none**; the cell reads `blocked · 0 allowed` in the warning colour), and **Limit** with its
+    number from 1 to 200 (the number is saved when you leave it). Choosing No cap at a level takes that level's own entry out:
+    the level above's value then applies, or none where nothing sets it. The profiles keep 0 as a value of its own, distinct
+    from unset (`shepherdr profile save` and apply round-trip it).
+  - **What 0 means, by role.** Blocked (0) is a model that **nothing starts on**, in any role, and it is never waited for:
+    a blocked model does not come back by waiting, only when its limit changes. Running agents on it keep running (they are
+    never stopped), and only the new starts avoid it. A model's entry at a space blocks it for that space only; at the
+    machine (or Everywhere) it blocks it for every space.
+    - **Tasks.** A task starts on the first model of its chain that is not blocked and has room. Every model it may use blocked:
+      it is held with `every model it may use is blocked (0 allowed): change its agent or a limit`, its row reads `Blocked: every
+      model it may use is 0 allowed`, and it starts only once a limit changes (Settings are read again at each look and at each
+      change). Full ones and blocked ones together: it waits for the full ones only.
+    - **Coordinators.** A blocked model is never used, not even past a full cap. A coordinator whose every model is blocked does
+      not start: its chat gets the card `Not started: every model it may use is blocked (0 allowed): change its agent or a limit
+      in Settings → Limits.`, and a relaunch or a start by hand on a blocked model is refused the same way. A takeover skips the
+      blocked backups; with every backup blocked it does not take over.
+    - **The advisor.** Its blocked models are skipped. With every model blocked the question is not sent to the advisor, and its
+      card says `The advisor is blocked by the limits: every model it may use is blocked (0 allowed): change its agent or a limit
+      in Settings → Limits.`
+    - **Reviews.** A blocked reviewer is skipped for its backup. With every reviewer blocked the round is not counted and nothing
+      waits: the answer says `No reviewer may run under the limits: every reviewer <task> may use is blocked (0 allowed).` and the
+      agent says so in its summary and reports without that review (see [the agent's skill](../skill/shepherdr-agent/SKILL.md)).
+    - **The way back.** A cut-off or cap-started agent is never moved back to a blocked primary: it stays on its backup until
+      the primary is not blocked and has room.
+  - **Machine and space task counts.** `machine.maxTasks` and `space.maxTasks` at 0 start no task on the machine, or in the
+    space: the held line says `this machine is set to 0 tasks` or `<space> is set to 0 tasks`. Off is no cap of its own.
+  - **Warnings** (Models → Summary). A role every model of which is blocked in a space: `Tasks in <space> can never start: every
+    model is blocked.`, with a Change… to the blocked cell. A provider or a model blocked while agents still run on it is a note:
+    they keep running, and nothing new starts on it.
   - **What it holds.** A task whose agent would run on a capped model waits as Queued, held for a free slot of it (`Waiting
     for a free slot of spark (4 of 4 at once)`), and the other tasks start past it; the held ones start in turn as the
     model frees up. A model's own entry sets its limit, and the provider's entry still holds the provider's total: with
@@ -124,10 +157,11 @@
     the caps while they work. A coordinator a cap started on a backup goes back to its primary the same way as a task (kept
     in memory: a restart of Shepherdr leaves it where it is until it is restarted).
   - **Where it is read.** Models → Summary shows each provider and model row as `2 of 4 at once` (its cap, set here),
-    `2 at once · no cap`, or `1 at once · no cap of its own` (the provider's entry holds it); its cell sets the cap at this
-    machine, Everywhere, or This space (a list of the spaces). A space that sets its own sub-limit for the row shows it
-    under the row as a line of its own: `lyvora-app: 1 of 2 at once`, the runs of that space it counts, and the line opens
-    the editor at that space (Clear here takes that space's value back). The line `shepherdr show` prints it as kept.
+    `2 at once · no cap`, `1 at once · no cap of its own` (the provider's entry holds it), or `blocked · 0 allowed` (0); its
+    cell sets the cap at this machine, Everywhere, or This space (a list of the spaces), with the three choices above. A space
+    that sets its own sub-limit for the row shows it under the row as a line of its own: `lyvora-app: 1 of 2 at once`, the runs of
+    that space it counts, or `lyvora-app: blocked · 0 allowed`; the line opens the editor at that space (No cap takes that
+    space's value back). The line `shepherdr show` prints it as kept.
   - **From the command.** `shepherdr set models.maxAtOnce "spark=4, radeon=1" --machine` (or Everywhere without `--machine`).
     `shepherdr set models.maxAtOnce off --machine` gives this machine no cap at all, whatever Everywhere says, and
     `shepherdr unset models.maxAtOnce --machine` takes this machine's value away, back to Everywhere's. Profiles hold it
@@ -152,9 +186,21 @@
 OpenCode is a chat CLI like Claude Code, Codex and pi: Settings and Restart offer it, and its replies show in the chat.
 It needs OpenCode 2.x.
 
-- **Models.** A model id is `provider/model`, as `opencode models` lists it: `opencode/minimax-m3.1-flash-free`,
-  `opencode-go/deepseek-v4.1-flash`, `nvidia/z-ai/glm-5.3-flash` (split at the first slash). Effort is the model's
-  variant; a model with none has no effort.
+- **Models.** A model id is `provider/model`, as `opencode models` lists it and `opencode run -m` takes it: `opencode/minimax-m3.1-flash-free`,
+  `opencode-go/deepseek-v4.1-flash`, `nvidia/z-ai/glm-5.3-flash` (split at the first slash). The menus list them grouped by
+  provider, each named that way, as pi's are. Effort is the model's variant, in OpenCode's own words (`high`, `thinking`,
+  `none`…), each for the models that have it; a model with none has no effort. A session with no model starts on OpenCode's
+  own default (`opencode api model.default`), and that is the model it counts under.
+- **Providers.** A call counts under its provider, as pi's do. `opencode-go` is the Go plan: a call of it made from pi and
+  one made from OpenCode are one plan, one estimate ([Quotas](#quotas)). `opencode` is OpenCode Zen, whose free models
+  have no quota (its row says so: "OpenCode Zen (free)"). `nvidia` is NVIDIA's API ("NVIDIA API"). `lmstudio` and `ollama` are
+  local servers OpenCode has built in: local, like the Spark, with no quota. Another provider OpenCode adds shows its id in
+  words until it has a name here (`amd-tokenlab` is "AMD TokenLab" and has one; an id with no name is title-cased, with the
+  acronyms AI, AMD, API, GPU, LLM and NVIDIA in capitals).
+- **Its errors.** OpenCode's own error types are read as they are: `provider.quota` is out of allowance (a plan's, or a
+  free model's "usage limit"), unless the provider says it is a rate limit, which waits like one; `provider.auth` is signed
+  out; `provider.rate-limit`, a timeout or a dropped connection wait and try again; `provider.no-route` is a model it does
+  not have. A stop you make in its TUI (Esc, "Step interrupted") is not a cut-off: the task stays on its agent.
 - **How it starts.** Shepherdr creates the session first, with `opencode api --standalone session.create`: the model
   and its variant, the agent's folder and, when the role's access is ask, permissions that ask before an edit, a shell,
   a web fetch, a folder outside the agent's, or a subagent. It puts the role's instructions in the session as its
@@ -173,7 +219,8 @@ It needs OpenCode 2.x.
   never gives a session an id of its own: OpenCode's free models refuse one.
 - **Models shown.** `opencode.models` (Settings → OpenCode, Everywhere or this machine) limits the models the menus offer to
   glob patterns on `provider/model` or on the model alone, comma or space separated, any case: `shepherdr set opencode.models '*-free'`.
-  `all` (the default, or empty) offers every model OpenCode lists. The others stay usable by id.
+  `all` (the default, or empty) offers every model OpenCode lists. The others stay usable by id. A model left out of the menus
+  still shows in Models → Summary and Limits where it has a cap of its own, is a slot's model, runs now or had usage this week; its provider shows with it.
 
 ## Models
 
@@ -216,7 +263,20 @@ of this machine's agents (`usage.json` in Shepherdr's home, read from the agents
 
 - **Per provider**: a row with its share of the tokens in the last 24 h and 7 d (a thin bar each), its **models** under it
   (`models-summary`, a read action). A provider is `opencode-go`, `commandcode`, `spark`… (pi's model ids carry it), `anthropic`
-  for Claude Code and `openai` for Codex. A local server (spark, radeon, avell, dell) has no quota: it is marked local.
+  for Claude Code and `openai` for Codex; OpenCode's are `opencode` (Zen, free models), `nvidia` and its local servers (see
+  [OpenCode](#opencode)). A local server (spark, radeon, avell, dell, lmstudio, ollama) has no quota: it is marked local.
+  Each provider is named as the table names it (`nvidia` is "NVIDIA API", `amd-tokenlab` "AMD TokenLab"; an id with no name
+  of its own is title-cased, see [OpenCode](#opencode)).
+- **Every provider a CLI offers.** The table lists each provider that any CLI offers on this machine, read from each CLI's
+  own list: pi's models (the ones its `enabledModels` names, see below), OpenCode's models, Claude Code's models (its
+  `anthropic`) and Codex's (its `openai`). A provider in use (a slot, an agent, a task waiting on it, a run or a run-out in
+  the last 7 days, or a cap) comes first, by its week's tokens. The others are under **Other providers (N)**, closed here: each
+  with its models (the ones its CLI lists) and dashes for the numbers, so nothing is shown as used that is not. Each one has
+  its cap cell too (as on Limits, below), so a cap can be set before the provider is used.
+- **Which models a list offers.** pi's list holds every model of every provider it has a login for; Shepherdr offers the ones
+  its `enabledModels` (in pi's settings) names, in the order those patterns name them. To offer more of a provider's models,
+  name them there, or with a glob: `nvidia/**` offers every NVIDIA model (in this reading a single `*` stops at the `/` inside
+  an id, so `nvidia/*` does not reach `nvidia/mistralai/…`). OpenCode's list is what `opencode` has enabled.
 - **Configured, and now**: how many role slots point at it, as primaries or backups (its roles, and its spaces, in the
   tooltip), and what runs on it now: live agents (working ones counted apart), tasks waiting to start on it, and tasks
   waiting to be reviewed by it.
@@ -255,7 +315,8 @@ Shepherdr's agents from its start (the backfill, once: until it is done the summ
 …" time, or a 402 "Insufficient account funds") is a **run-out**: it is kept with its time and model, and the agent's
 backup takes over as before. The first one of a provider that was fine before alerts you once: the title says "OpenCode Go
 ran out", the body names the chat it cut off and the reason; the others while it is still out do not. A reset the provider gives as an
-ISO time is shown in this machine's time, with its zone name.
+ISO time is shown in this machine's time, with its zone name. OpenCode's own run-outs are the same: its "Go usage limit
+exceeded" or "Free usage limit reached" (a `provider.quota` error) and a provider's "Insufficient balance".
 
 ### Profiles
 
@@ -348,8 +409,10 @@ each space's, and each provider's and model's, with the live numbers beside them
 settings Settings writes, at the same level: nothing new is stored, and a cell's value is the one Settings shows for its
 row. The profiles bar sits above it (a profile saved from here includes the limits by default).
 
+- **Every limit has three choices**: No cap, Blocked (0) or Limit: N (see [Most agents at once](#models)); a task count's 0 reads
+  `0 · starts none`, and a blocked model's cell `blocked · 0 allowed`, in the warning colour.
 - **Machine** (rows: Everywhere, this machine). The columns are **Max tasks working at once** (`machine.maxTasks`; beside
-  it, `now 7 of 9 working, 2 wait on you`), **Wait while CPU load is over** (`machine.startLoad`; now, the 5-minute load
+  it, `now 7 of 9 working, 2 wait on you`; 0 starts no task here), **Wait while CPU load is over** (`machine.startLoad`; now, the 5-minute load
   against the cores), **Wait while CPU pressure is over** (`machine.startPressure`; now, the pressure), **Wait while memory is
   over** (`machine.startMemory`; now, the memory in use), and **Start one task at most every** (`machine.startEvery`). **Merge
   train** (`merge.train`) is a column here only when Everywhere sets one; the spaces read it otherwise. Under the table,
@@ -362,14 +425,18 @@ row. The profiles bar sits above it (a profile saved from here includes the limi
   until its ⋯ removes it. A cell is the space's **sub-limit** for that provider or model: its own entry, with its own runs
   counted now (`1 of 2 at once`). A cell with no entry of its own says `machine's total applies (4 at once)`, or `no
   sub-limit` when the machine sets none. A sub-limit sits inside the machine's total: it never raises it.
-- **Providers and models**. Each provider with a cap, an agent, a run or usage, with its models under it. **Max at once** is the
+- **Providers and models**. Each provider with a cap, an agent, a run or usage, with its models under it (OpenCode's providers
+  too: `opencode-go`, the free `opencode` Zen models, `nvidia`, a local `ollama`, each as its own row). **Other providers (N)**,
+  open here, lists every other provider a CLI offers on this machine (the same list as the Models summary, see
+  [Summary](#summary)): `NVIDIA API`, `AMD TokenLab` and the rest, each with its models and the cap cell of its own, so a cap is
+  set before the provider is used; once it has one, it moves up with the providers in use. **Max at once** is the
   machine's total for the row (the cap of [Most agents at once](#models), set at this machine or Everywhere; its sub-limits show
   under it). Beside it: **running now** by role (tasks, coordinators, the advisor, reviewers), **held**, **out now** (until
   when), and the **quota**, read only (the details are in Models). A local server is marked local.
 - **Waiting now** (at the top, read only). The held tasks grouped by what holds them, each group with its count and its limit
-  now: **machine slots**, the **machine's** load, pressure or memory (or herdr that does not answer), each **space's cap**,
-  each **model's cap** (with the chain it waits on), **every model of a space out**, and the **cut-off tasks** that go back to
-  work first. Then the questions waiting for the advisor and the review rounds waiting for a reviewer. A task's id opens it.
+  now: **machine slots**, **this machine set to 0 tasks**, the **machine's** load, pressure or memory (or herdr that does not
+  answer), each **space's cap** (and each **space set to 0 tasks**), each **model's cap** (with the chain it waits on), **every
+  model blocked (0 allowed)**, **every model of a space out**, and the **cut-off tasks** that go back to work first. Then the questions waiting for the advisor and the review rounds waiting for a reviewer. A task's id opens it.
 - **Bulk.** A column's ⋯ → **Set for every space…**: for Max tasks and Merge train, each space's own value, or **Everywhere,
   and reset the spaces** (each space and this machine lose their own, so every space reads Everywhere's); for a provider's or
   model's column, the same number as each space's sub-limit, the other entries kept. A provider's ⋯ → **Clear every space's
@@ -407,7 +474,8 @@ nothing here.
   check and the credits, with a 15 s limit for the whole read; a part the API leaves out is left out, never shown as zero.
   The read follows the MIT package `pi-commandcode-provider` (Copyright (c) 2025 Pat Woz), credited in its code.
 - **OpenCode Go** (`quota.opencodeGo`, on by default): an **estimate only**. OpenCode does not tell its quota, so nothing is
-  read. Shepherdr's own ledger gives the tokens and pi's cost of each window (the last 5 h and the week), and where the ledger
+  read. Shepherdr's own ledger gives the tokens and pi's cost of each window (the last 5 h and the week), counting every call of
+  `opencode-go` made from pi or from OpenCode (one plan, one number; OpenCode Zen's calls are not in it), and where the ledger
   holds run-outs, a **learned limit**: what the window before each run-out held when OpenCode Go ran out (the latest three
   shown, "ran out at ~980k tokens · ≈ $0.42 est. in 5 h on Wed 3:14 PM"). The lowest learned limit is the cap, and the
   current window's use is a share of it, tagged **estimate**. No run-out yet: the usage alone, with no share. It is worked out
@@ -422,7 +490,8 @@ nothing here.
   and it refills Fri 3:00 PM."). It alerts again only after that window has refilled (its refill time has passed or a new
   window is over the share), or after it fell under the share. The same window is in the summary's warnings. Off: no alert
   and no warning here; a run-out still alerts.
-- **Local models** (spark, radeon, avell, dell) have no quota: none is read.
+- **Local models** (spark, radeon, avell, dell, and OpenCode's lmstudio and ollama) have no quota: none is read. OpenCode Zen
+  (free) has none either: its row shows its usage and no quota.
 
 The figures and what alerted are kept in `usage.json` in Shepherdr's home, so a restart shows the last figure and does not
 alert twice.

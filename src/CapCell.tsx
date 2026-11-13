@@ -10,6 +10,10 @@ import { atOnceWords, levelText, MAX_CAP, parseMaxAtOnce, spaceCapWords, withEnt
 import type { SummaryAtOnce, SummarySpaceText } from '../shared/types.ts'
 import { Pop } from './cell-pop.tsx'
 import { Ghost, Primary, Small } from './ui.tsx'
+import { LimitChoice } from './LimitChoice.tsx'
+
+/** a blocked cap's choice in words: the cap editor and the limit cells say it the same way */
+const BLOCKED_CHOICE = 'Blocked · 0 allowed'
 
 /** the setting these cells write */
 export const CAP_KEY = 'models.maxAtOnce'
@@ -36,14 +40,16 @@ export const capId = (pattern: string, space?: string) => (space === undefined ?
  *  phone: under the line, the same controls) */
 export { atOnceWords }
 
-export function CapCell({ name, pattern, atOnce, caps, phone, openId, onOpen }: { name: string; pattern: string; atOnce: SummaryAtOnce; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void }) {
+export function CapCell({ name, pattern: raw, atOnce, caps, phone, openId, onOpen }: { name: string; pattern: string; atOnce: SummaryAtOnce; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void }) {
+  // a cap's pattern is lowercase, as its text holds it: a model id with capitals (Qwen3.8-27B) is capped by its lowercase
+  const pattern = raw.toLowerCase()
   const id = capId(pattern)
   const w = atOnceWords(atOnce)
   const open = openId === id
   const editor = <CapEditor name={name} pattern={pattern} caps={caps} phone={phone} onClose={() => onOpen(null)} />
   return (
     <span className="relative block min-w-0">
-      <button type="button" data-cell={id} aria-haspopup={phone ? undefined : 'dialog'} aria-expanded={open} aria-label={`${name}: ${w.words}`} title={w.title} onClick={() => onOpen(open ? null : id)} className="press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel">
+      <button type="button" data-cell={id} data-blocked={w.blocked || undefined} aria-haspopup={phone ? undefined : 'dialog'} aria-expanded={open} aria-label={`${name}: ${w.words}`} title={w.title} onClick={() => onOpen(open ? null : id)} className={`press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel${w.blocked ? ' font-medium text-need-fg' : ''}`}>
         {w.words}
       </button>
       {open ? phone ? <div className="pt-1">{editor}</div> : <Pop onClose={() => onOpen(null)}>{editor}</Pop> : null}
@@ -62,7 +68,7 @@ function SpaceCap({ name, pattern, space, caps, phone, openId, onOpen }: { name:
   const editor = <CapEditor name={name} pattern={pattern} caps={caps} phone={phone} space={space.key} onClose={() => onOpen(null)} />
   return (
     <span className="relative mt-0.5 block min-w-0">
-      <button type="button" data-cell={id} aria-haspopup={phone ? undefined : 'dialog'} aria-expanded={open} aria-label={`${name} in ${words}`} title={`Set by ${space.name}: ${pattern}=${space.max}. Click to change it.`} onClick={() => onOpen(open ? null : id)} className="press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 pl-3 text-left text-fg2 tabular-nums hover:bg-hover aria-expanded:bg-sel">
+      <button type="button" data-cell={id} data-blocked={space.max === 0 || undefined} aria-haspopup={phone ? undefined : 'dialog'} aria-expanded={open} aria-label={`${name} in ${words}`} title={`Set by ${space.name}: ${pattern}=${space.max}. Click to change it.`} onClick={() => onOpen(open ? null : id)} className={`press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 pl-3 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel${space.max === 0 ? ' font-medium text-need-fg' : ' text-fg2'}`}>
         {words}
       </button>
       {open ? phone ? <div className="pt-1">{editor}</div> : <Pop onClose={() => onOpen(null)}>{editor}</Pop> : null}
@@ -70,8 +76,8 @@ function SpaceCap({ name, pattern, space, caps, phone, openId, onOpen }: { name:
   )
 }
 
-/** the editor of one cap: a number (1 to 200) at this machine, Everywhere, or one space (`space`: the one it opens for,
- *  else the first space), saved, or cleared at that level */
+/** the editor of one cap: its three choices (no cap = its entry taken out at the level, blocked = 0, or a number from 1 to 200) at
+ *  this machine, Everywhere, or one space (`space`: the one it opens for, else the first space), saved at that level */
 export function CapEditor({ name, pattern, caps, phone, space, onClose }: { name: string; pattern: string; caps: CapsText; phone: boolean; space?: string; onClose: () => void }) {
   const spaces = caps.spaces
   const [scope, setScope] = useState<'machine' | 'all' | 'space'>(space === undefined ? 'machine' : 'space')
@@ -79,7 +85,11 @@ export function CapEditor({ name, pattern, caps, phone, space, onClose }: { name
   const shown = spaces.find((s) => s.key === spaceKey)
   const textOf = (level: 'all' | 'machine' | 'space') => (level === 'all' ? caps.all : level === 'machine' ? caps.machine : (shown?.text ?? ''))
   const own = (level: 'all' | 'machine' | 'space') => entriesOf(textOf(level)).find((e) => e.pattern === pattern)?.max
-  const [draft, setDraft] = useState(String(own(scope) ?? (scope === 'space' ? undefined : own('all')) ?? ''))
+  // the draft is the value the three choices give: 'off' (no cap), '0' (blocked), a number, or '' (a Limit with no number yet)
+  const [draft, setDraft] = useState(() => {
+    const max = own(scope) ?? (scope === 'space' ? undefined : own('all'))
+    return max === undefined ? 'off' : String(max)
+  })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   // a write starts from the level's OWN entries (levelText): this machine's from Everywhere's while it sets none, a space's
@@ -88,12 +98,13 @@ export function CapEditor({ name, pattern, caps, phone, space, onClose }: { name
   const here = own(scope)
   const inherited = scope === 'machine' && here === undefined ? own('all') : scope === 'space' && here === undefined ? (own('machine') ?? own('all')) : undefined
   const above = scope === 'space' ? 'This machine' : 'Everywhere'
-  const write = async (clear: boolean) => {
+  const write = async () => {
+    // no cap: the entry is taken out of this level (what the level above gives shows, or none); blocked: 0; a number: that
     let max: number | undefined
-    if (!clear) {
+    if (draft !== 'off') {
       const n = Number(draft)
-      if (!Number.isInteger(n) || n < 1 || n > MAX_CAP) {
-        setError(`Write a whole number from 1 to ${MAX_CAP}, or clear the cap.`)
+      if (draft === '' || !Number.isInteger(n) || n < 0 || n > MAX_CAP) {
+        setError(`Choose No cap, Blocked (0), or a whole number from 1 to ${MAX_CAP}.`)
         return
       }
       max = n
@@ -137,41 +148,18 @@ export function CapEditor({ name, pattern, caps, phone, space, onClose }: { name
           </label>
         ) : null}
       </fieldset>
-      <label className="flex items-center justify-between gap-3">
-        <span className="text-fg2">At once</span>
-        <input
-          type="number"
-          min={1}
-          max={MAX_CAP}
-          step={1}
-          inputMode="numeric"
-          aria-label={`Most ${name} at once, ${scope === 'all' ? 'Everywhere' : scope === 'space' ? `in ${shown?.name ?? 'this space'}` : 'this machine'}`}
-          placeholder="no cap"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          className="w-24 rounded-row bg-bg px-2 py-1 text-right tabular-nums shadow-[inset_0_0_0_1px_var(--line2)] outline-none focus:shadow-box-focus dark:bg-bubble"
-        />
-      </label>
+      <LimitChoice label={`Most ${name} at once, ${scope === 'all' ? 'Everywhere' : scope === 'space' ? `in ${shown?.name ?? 'this space'}` : 'this machine'}`} value={draft} max={MAX_CAP} zero={BLOCKED_CHOICE} phone={phone} onChange={(v) => setDraft(v)} />
       {inherited !== undefined ? <Small className="text-pretty">{above} sets {inherited} here. Saving makes this {scope === 'space' ? 'space' : 'machine'}'s own value.</Small> : null}
       {error ? (
         <Small role="status" className="text-pretty text-need-fg!">
           {error}
         </Small>
       ) : null}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {here !== undefined ? (
-          <Ghost onClick={() => void write(true)} disabled={busy} className="text-accent">
-            Clear here
-          </Ghost>
-        ) : (
-          <span />
-        )}
-        <div className="flex items-center gap-2">
-          <Ghost onClick={onClose}>Cancel</Ghost>
-          <Primary disabled={busy || draft.trim() === '' || (scope === 'space' && !shown)} onClick={() => void write(false)}>
-            {busy ? 'Saving…' : 'Save'}
-          </Primary>
-        </div>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Ghost onClick={onClose}>Cancel</Ghost>
+        <Primary disabled={busy || (scope === 'space' && !shown)} onClick={() => void write()}>
+          {busy ? 'Saving…' : 'Save'}
+        </Primary>
       </div>
     </div>
   )

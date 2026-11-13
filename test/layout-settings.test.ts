@@ -373,7 +373,8 @@ describe.skipIf(!browser)('a task agent saved, and the tasks already waiting', (
       expect(cli('HP-203')).toBe('Claude Code')
       await ask.getByRole('button', { name: 'Only new tasks', exact: true }).click()
       await ask.waitFor({ state: 'detached' })
-      expect([cli('HP-203'), cli('HP-204'), cli('HP-202')]).toEqual(['Claude Code', 'Claude Code', 'Codex'])
+      // Only new tasks: the waiting ones keep what they were started with (HP-204 is OpenCode's demo task)
+      expect([cli('HP-203'), cli('HP-204'), cli('HP-202')]).toEqual(['Claude Code', 'OpenCode', 'Codex'])
       expect(world.stores['vm-str'].get('task.agent', 'herdr-projects')).toBe('pi')
       // the next change asks again, and Apply moves both
       await agent.click()

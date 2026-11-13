@@ -48,7 +48,9 @@ const REVIEWER_NAME: Record<string, string> = { claude: 'Claude Code', codex: 'C
 export function reviewerWords(r: Reviewer) {
   const name = REVIEWER_NAME[r.kind] ?? r.kind
   const article = /^[aeiou]/i.test(name) ? 'an' : 'a'
-  const who = `a headless ${name} or ${article} ${name} subagent`
+  // OpenCode's headless run is its own command (the plan agent is its read-only one, as the advisor's run is)
+  const headless = r.kind === 'opencode' ? `a headless OpenCode run (opencode run --standalone --agent plan …)` : `a headless ${name}`
+  const who = `${headless} or ${article} ${name} subagent`
   if (!r.model && !r.effort) return `${who} (its default model and effort)`
   return `${who} (${[r.model ? `model ${r.model}` : 'its default model', r.effort ? `${r.effort} effort` : 'its default effort'].join(', ')})`
 }

@@ -10,7 +10,7 @@ import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { BODY_MAX, clip, lastReply, openCards, taskAlert, TITLE_MAX } from '../../shared/alerts.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, sortPlaces } from '../../shared/order.ts'
-import { asEmoji, doneNewestFirst, modeCard, NAME_MAX, nameProblem, slugify, STATUS_MAX, type Action, type ActivityAnswer, type ActivityAsk, type AddSpace, type Alert, type Artifact, type CardAsk, type Chat, type RestartInfo, type Peer, type Question, type Folders, type LimitsView, type Machine, type Need, type Place, type Section, type Snapshot, type Task, type TaskStatus, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
+import { asEmoji, doneNewestFirst, modeCard, NAME_MAX, nameProblem, slugify, STATUS_MAX, type Action, type ActivityAnswer, type ActivityAsk, type AddSpace, type Alert, type Artifact, type CardAsk, type Chat, type RestartInfo, type Peer, type Question, type Folders, type LimitsView, type Machine, type ModelsSummary, type Need, type Place, type Section, type Snapshot, type Task, type TaskStatus, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
 import { Emitter, type Overview, type Source, type SourceEvents } from '../source.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
 import { ROOT } from '../root.ts'
@@ -30,8 +30,8 @@ import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
 import { DISMISSED, dismissKind, dismissWords } from './dismiss.ts'
 import { dictate as dictation } from './dictate.ts'
-import { age, askOf, backupHarness, capWords, checkTitle, ended, Engine, fitStatus, retuneLine, reviewRetuneLine, type HeldWhy, type Retune, type TaskRec } from './engine/engine.ts'
-import { waitWords, type Blocked, type Run } from './engine/choose.ts'
+import { age, askOf, backupHarness, capWords, checkTitle, ended, Engine, fitStatus, retuneLine, reviewRetuneLine, type BackupPlan, type HeldWhy, type Retune, type TaskRec } from './engine/engine.ts'
+import { allBlocked, blockedOnly, waitWords, type Blocked, type Run } from './engine/choose.ts'
 import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { listFolders, makeRepo, resolveInHome } from './folders.ts'
 import { sh, validateBase } from './engine/git.ts'
@@ -496,15 +496,18 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
   }
 
-  /** Settings → Models → Summary: the providers and models, what runs and waits, the usage and run-outs, the warnings */
-  private modelsSummaryNow() {
-    return modelsSummary(this.summaryInput())
+  /** Settings → Models → Summary and Settings → Limits: the providers and models, what runs and waits, the usage and
+   *  run-outs, the warnings. Both read it from the same inputs: a provider or model a cap entry names shows even with no
+   *  agent or usage yet, and a capped model shows even where opencode.models filters it out of the menus */
+  private summaryNow(): ModelsSummary {
+    const patterns = entryPatterns(this.settings, this.matrixSpaces().map((x) => x.key))
+    return modelsSummary(this.summaryInput(patterns.map(providerOf), patterns))
   }
 
   /** the inputs the summary (models-summary.ts) and the Limits page read, built once so the two agree: this machine's
    *  table, what runs and waits now, the usage, the return watch and the quotas. `providers`: providers that show even with
    *  nothing else (a provider a cap entry names) */
-  private summaryInput(providers: string[] = []): SummaryInput {
+  private summaryInput(providers: string[] = [], capped: string[] = []): SummaryInput {
     const spaces = this.matrixSpaces()
     const rows = modelsMatrix(this.settings, { host: HOST, name: NAME }, spaces).rows.map((r) => r.id)
     const agents: LiveAgent[] = Object.values(this.agents.records).map((r) => ({ key: r.key, kind: r.kind, model: r.model, status: this.agents.status(r.key) }))
@@ -513,8 +516,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const now = Date.now()
     // what counts toward models.maxAtOnce now, and the entry each task held for a model's cap waits for
     const runs = this.engine.runs().map((r) => ({ key: r.key, space: r.space }))
-    const heldBy = this.engine.heldTasks().filter((t) => t.held?.why === 'model').flatMap((t) => this.engine.waitingFor(t))
-    return { now, settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch, quota: this.quotas.summary(now), runs, heldBy, providers }
+    const heldBy = this.engine.heldTasks().filter((t) => t.held?.why === 'model' || t.held?.why === 'blocked').flatMap((t) => this.engine.waitingFor(t))
+    return { now, settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch, quota: this.quotas.summary(now), runs, heldBy, providers, capped }
   }
 
   /** Settings → Limits (limits-view.ts): every limit of this machine at its levels with the numbers now, the spaces' and the
@@ -523,16 +526,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const now = Date.now()
     const spaces = this.matrixSpaces()
     const matrix = modelsMatrix(this.settings, { host: HOST, name: NAME }, spaces)
-    // a provider that a cap entry names shows even with no agent or usage yet
-    const summary = modelsSummary(this.summaryInput(entryPatterns(this.settings, spaces.map((x) => x.key)).map(providerOf)))
+    const summary = this.summaryNow()
     const runs = this.engine.runs()
     const workingIn = Object.fromEntries(spaces.map((x) => [x.key, this.engine.workingIn(x.key)]))
     const held = this.engine.heldTasks().map((t): HeldFact => {
       const key = this.places.space(t.project)?.name ?? '~'
       const why = t.held!.why
-      const c = why === 'model' ? this.engine.taskChoice(t) : undefined
-      const full = c && 'wait' in c ? c.wait.find((b) => b.why === 'full' && b.cap) : undefined
-      const cap = why === 'space' ? this.engine.spaceCap(t) : undefined
+      const c = why === 'model' || why === 'blocked' ? this.engine.taskChoice(t) : undefined
+      const full = c && 'wait' in c ? c.wait.find((b) => b.why !== 'out' && b.cap) : undefined
+      const cap = why === 'space' || why === 'spaceZero' ? this.engine.spaceCap(t) : undefined
       return {
         id: t.id,
         space: key,
@@ -936,7 +938,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (!advice && wait) {
         // none of the harnesses left has room now: the question waits, and its card says which are full or out
         this.advices.set({ ...rec, state: 'waiting', tried })
-        this.adviceWait(chat, qid, `The advisor waits: ${waitWords(wait, { words: (x) => chainWords(x.h), shown: (s) => this.places.shownName(s) })}`)
+        // every harness of its chain blocked (0 allowed): the question is not asked, and its card says the limits block it
+        if (allBlocked(wait)) this.adviceWait(chat, qid, `The advisor is blocked by the limits: every model it may use is blocked (0 allowed): change its agent or a limit in Settings → Limits.`)
+        else this.adviceWait(chat, qid, `The advisor waits: ${waitWords(wait, { words: (x) => chainWords(x.h), shown: (s) => this.places.shownName(s) })}`)
         return { ok: true }
       }
       if (!advice) {
@@ -1509,7 +1513,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** what a changed default sets going: Done tasks archived on time, held ones started where there is room */
   private settingChanged(key: string) {
     if (key === 'tasks.archiveAfter') this.engine.autoArchive()
-    if (key.startsWith('machine.')) this.engine.release()
+    // a limit that changed may free a held task (or hold one): the held ones are looked at again
+    if (key.startsWith('machine.') || key === 'models.maxAtOnce' || key === 'space.maxTasks') this.engine.release()
     // an agent's CLI, model or effort: the restart hint of the chats open now
     if (/^(task|coordinator)\.(agent|model|effort)$/.test(key)) for (const k of this.watched) this.emit('chat', k)
     this.emit('snapshot')
@@ -1581,8 +1586,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const rec = this.agents.record(id)
     // a first start (nothing kept, nothing chosen by hand) takes the first harness of its chain with room under the caps
     const start = !o.as && !rec ? this.coordinatorStart(id, set) : undefined
+    // a blocked model (0 allowed) starts nothing, not even by hand: a coordinator whose every model is blocked does not start
+    if (start && 'blocked' in start) return this.refuseBlocked(id, start.blocked, (x) => chainWords((x as { h: Harness }).h))
     if (start) this.startedByCaps(id, start)
     const h = o.as ?? (start ? start.h : rec ? undefined : set)
+    // a start by hand on a blocked model, or a relaunch of one that is not running, is refused too (an agent that runs keeps
+    // running: ensure returns it as it is)
+    const space = this.spaceKey(id) ?? ''
+    const key = h ? keyOf(h.kind, h.model) : rec ? keyOf(rec.kind, rec.model) : undefined
+    const startsNew = !!o.as || (!start && this.agents.status(id) === 'gone')
+    if (key !== undefined && startsNew && this.engine.blockedKey(space, key)) return this.refuseBlocked(id, this.engine.blockedWait(space, key), () => (h ? harnessWords(fitHarness(h)) : key))
     const spec: Spec = {
       key: id,
       name: c.name,
@@ -1604,25 +1617,39 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * room under the caps and not out (choose.ts). When none has room, the primary starts anyway: a coordinator never waits,
    * and its chat says it runs past the cap (startedByCaps). `step`: its place in the chain, 0 on the primary
    */
-  private coordinatorStart(id: string, set: Harness): { h: Harness; step: number; skipped: Blocked<unknown>[]; past: boolean } {
+  private coordinatorStart(id: string, set: Harness): { h: Harness; step: number; skipped: Blocked<unknown>[]; past: boolean } | { blocked: Blocked<unknown>[] } {
     const space = this.spaceKey(id) ?? ''
     const items = [{ step: 0, h: set }, ...this.engine.backupsFor('coordinator', space || undefined).flatMap((p) => (p.to ? [{ step: p.n, h: backupHarness(p.to, set) }] : []))]
     const c = this.engine.decide(space, this.engine.chainOptions(items))
     if ('harness' in c) return { h: c.harness.h, step: c.harness.step, skipped: c.skipped, past: false }
-    return { h: set, step: 0, skipped: c.wait, past: c.wait.some((b) => b.why === 'full') }
+    // every model blocked (0 allowed): none starts, and the chat says why
+    if (blockedOnly(c)) return { blocked: c.wait }
+    // every one left is full or out: the first that is not blocked starts anyway (a coordinator never waits)
+    const first = items.find((i) => !this.engine.blockedKey(space, keyOf(i.h.kind, i.h.model)))!
+    return { h: first.h, step: first.step, skipped: c.wait, past: c.wait.some((b) => b.why === 'full') }
+  }
+
+  /** a start refused because its model is blocked (0 allowed): the chat gets a card that says why and what to change, and
+   *  the start fails with the same words (a coordinator's ensure rejects, as an agent's start does) */
+  private refuseBlocked(id: string, wait: Blocked<unknown>[], words: (h: unknown) => string): Promise<never> {
+    const shown = wait.length ? ` Blocked: ${waitWords(wait, { words, shown: (s) => this.places.shownName(s) })}.` : ''
+    const text = `Not started: every model it may use is blocked (0 allowed): change its agent or a limit in Settings → Limits.${shown}`
+    this.capNote(id, text)
+    return Promise.reject(new Error(text))
   }
 
   /** a first start the caps decided: on a backup (its card says why, and it counts as a takeover for its later backups), or
    *  past the cap on its primary (its card says so) */
   private startedByCaps(id: string, start: { h: Harness; step: number; skipped: Blocked<unknown>[]; past: boolean }) {
     const first = start.skipped[0]
+    // a start on a backup, by the caps, is marked: the way back takes it to its primary once that has room
     if (start.step > 0) {
       this.capStarts.set(id, { step: start.step })
       this.saveCapStarts()
-      this.capNote(id, `Started on ${harnessWords(fitHarness(start.h))}${first ? `: ${capWords(first, (x) => this.places.shownName(x))}` : ''}`)
-    } else if (start.past && first) {
-      this.capNote(id, `Runs past the cap: ${capWords(first, (x) => this.places.shownName(x))}. Every model it may use is full, so it starts on ${harnessWords(fitHarness(start.h))} anyway.`)
     }
+    // every model full or out: it starts on the first one that is not blocked, past the cap, and says so
+    if (start.past && first) this.capNote(id, `Runs past the cap: ${capWords(first, (x) => this.places.shownName(x))}. Every model it may use is full, so it starts on ${harnessWords(fitHarness(start.h))} anyway.`)
+    else if (start.step > 0) this.capNote(id, `Started on ${harnessWords(fitHarness(start.h))}${first ? `: ${capWords(first, (x) => this.places.shownName(x))}` : ''}`)
   }
 
   /** a card in a chat, for a start the caps decided */
@@ -2054,9 +2081,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // the first of them with room under the caps and not out (choose.ts); when every one is full or out, the first anyway: a
     // coordinator must not stall, and its chat says it runs past the cap
     const candidates = later.filter((p) => p.to)
-    const chosen = rec && candidates.length ? this.engine.decide(this.spaceKey(key) ?? '', this.engine.chainOptions(candidates.map((p) => ({ plan: p, h: backupHarness(p.to!, { kind: rec.kind, model: rec.model, effort: rec.effort }) }))), key) : undefined
-    const plan = chosen && 'harness' in chosen ? chosen.harness.plan : (candidates[0] ?? later[0] ?? {})
-    if (chosen && 'wait' in chosen && candidates[0]) this.capNote(key, `Its backup goes in past the cap, as none has room: ${capWords(chosen.wait[0]!, (x) => this.places.shownName(x))}.`)
+    const sp = this.spaceKey(key) ?? ''
+    const onBackup = (p: BackupPlan) => backupHarness(p.to!, { kind: rec?.kind ?? '', model: rec?.model, effort: rec?.effort })
+    // a backup on a model that is blocked (0 allowed) is never started, not even past the cap: those are left out
+    const free = candidates.filter((p) => !this.engine.blockedKey(sp, keyOf(onBackup(p).kind, onBackup(p).model)))
+    // the first of them with room under the caps and not out (choose.ts); when every one is full or out, the first free one
+    // anyway: a coordinator must not stall, and its chat says it runs past the cap
+    const chosen = rec && free.length ? this.engine.decide(sp, this.engine.chainOptions(free.map((p) => ({ plan: p, h: onBackup(p) }))), key) : undefined
+    const plan = chosen && 'harness' in chosen ? chosen.harness.plan : (free[0] ?? later.find((p) => !p.to) ?? {})
+    if (chosen && 'wait' in chosen && free[0]) this.capNote(key, `Its backup goes in past the cap, as none has room: ${capWords(chosen.wait[0]!, (x) => this.places.shownName(x))}.`)
     const backups = chain.flatMap((p) => (p.to ? [p.to] : []))
     if (plan.to && from && rec) {
       const why = r.reason.charAt(0).toLowerCase() + r.reason.slice(1)
@@ -2085,7 +2118,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return this.cutOff(key, r, `its backup, ${CLI_NAME[plan.to.kind] ?? plan.to.kind}, couldn't start: ${(e as Error).message}`)
       }
     }
-    const also = took ? `its backup agent (${CLI_NAME[took.to] ?? took.to}) already went in once${chain.length > 1 ? ', the last of its backups' : ''}` : plan.why ? `no backup agent took over: ${plan.why}` : undefined
+    const also = took ? `its backup agent (${CLI_NAME[took.to] ?? took.to}) already went in once${chain.length > 1 ? ', the last of its backups' : ''}` : candidates.length && !free.length ? 'no backup agent took over: every backup is blocked (0 allowed)' : plan.why ? `no backup agent took over: ${plan.why}` : undefined
     this.coordinatorStuck(key, r, backups)
     this.cutOff(key, r, also)
   }
@@ -2376,7 +2409,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // the primary's own outage is the one this pass is taking back: its answer is in, so only the caps count here
         const to = this.engine.decide(space, [{ harness: o.primary, key: keyOf(o.primary.kind, o.primary.model) }], t.id, extraRuns)
         if ('wait' in to) {
-          for (const b of to.wait) cappedModels.add(b.name)
+          // a blocked primary (0 allowed) takes nothing back, and it is not a cap that a start waits on (startsWait)
+          for (const b of to.wait) if (b.why !== 'blocked') cappedModels.add(b.name)
           continue
         }
         back = { key: keyOf(o.primary.kind, o.primary.model), space, role: 'task', id: t.id }
@@ -2750,6 +2784,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       resume: 'the tasks that were cut off go back to work first',
       space: cap ? `${cap.shown}'s own limit of ${cap.max} tasks is taken` : 'its space is at its own limit',
       model: 'wait' in choice ? this.engine.capWaitLine(choice.wait) : 'its model is at its own limit',
+      blocked: 'every model it may use is blocked (0 allowed): change its agent or a limit',
+      zero: 'this machine is set to 0 tasks',
+      spaceZero: `${cap?.shown ?? 'its space'} is set to 0 tasks`,
     }[why]
   }
 
@@ -3072,7 +3109,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'models-matrix':
         return modelsMatrix(this.settings, { host: HOST, name: NAME }, this.matrixSpaces())
       case 'models-summary':
-        return this.modelsSummaryNow()
+        return this.summaryNow()
       case 'limits-view':
         return this.limitsNow()
       case 'quota-refresh':
@@ -4637,7 +4674,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const on = [CLI_NAME[t.agent!.kind] ?? t.agent!.kind, t.agent!.model, t.agent!.effort && `${t.agent!.effort} effort`].filter(Boolean).join(', ')
       if (t.after?.length) return `Added ${t.id}: ${t.title}, queued after ${t.after.join(', ')}. It has no agent, worktree or herdr space while it waits: once ${t.after.length === 1 ? 'that task is' : 'they are all'} done and the machine has room, its agent (${on}) starts on the brief. A message to it (shepherdr task tell ${t.id} …) starts its agent sooner, still queued.`
       if (p.flags.has('later')) return `Added ${t.id}: ${t.title}, for later. Its agent (${on}) reads the brief now and waits for a go (shepherdr task tell ${t.id} "go").`
-      if (t.held) return `Added ${t.id}: ${t.title}, held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : t.held.why === 'space' || t.held.why === 'model' ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and its agent (${on}) starts by itself when there's room, oldest first.`
+      if (t.held) return `Added ${t.id}: ${t.title}, held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : HELD_NAMED.has(t.held.why) ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and its agent (${on}) starts by itself when there's room, oldest first.`
       return `Added ${t.id}: ${t.title}. Its agent (${on}) starts on the brief now.${after.length ? ' What it would wait for is done already.' : ''}`
     }
     if (sub === 'list' || !sub) {
@@ -4725,7 +4762,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           return `${t.id} waits for ${r.queued.join(', ')} once its time comes (${starts}).`
         }
         if (r.queued.length) return `${t.id} is queued after ${r.queued.join(', ')}. ${ctx.chat === `${t.id}/Agent` ? 'Stop at a clean point, reply in one line and end your turn: Shepherdr tells you to go.' : 'Its agent is told to wait; Shepherdr tells it to go once they are done.'}`
-        if (r.went) return t.held ? `${t.id} waits for no task now, but is held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : t.held.why === 'space' || t.held.why === 'model' ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). Its agent gets the go when there's room.` : `${t.id} waits for nothing more: its agent is told to go.`
+        if (r.went) return t.held ? `${t.id} waits for no task now, but is held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : HELD_NAMED.has(t.held.why) ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). Its agent gets the go when there's room.` : `${t.id} waits for nothing more: its agent is told to go.`
         return none ? `${t.id} was not queued.` : `${t.id} isn't queued: what it would wait for is done already.`
       }
       case 'stop': {
@@ -4839,6 +4876,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
 /** how long one line of another space's news may be for the main machine's home space */
 const OVERVIEW_MAX = 240
+/** the held reasons whose words name their own limit (heldWords), in a task's add and tell replies */
+const HELD_NAMED = new Set<HeldWhy>(['space', 'model', 'blocked', 'zero', 'spaceZero'])
 
 /** how a coordinator answers news the human sees as a card: the card is never the chat's last word */
 const REPLY_AFTER_CARD =
@@ -4912,7 +4951,7 @@ function fit(p: Parsed, flag: '' | 'reviewer-', kind: string, model?: string): {
   const e = one(p, `${flag}effort`)?.trim().toLowerCase()
   const name = CLI_NAME[kind] ?? kind
   const c = modelsOf(kind)
-  if (((m && m !== 'default') || (e && e !== 'default')) && !c) throw new Error(`Shepherdr passes a model and effort to Claude Code, Codex and pi only; ${name} runs on its own`)
+  if (((m && m !== 'default') || (e && e !== 'default')) && !c) throw new Error(`Shepherdr passes a model and effort to Claude Code, Codex, pi and OpenCode only; ${name} runs on its own`)
   if (m !== undefined && refuse(`task.model`, m)) throw new Error(`--${flag}model ${m}: ${refuse('task.model', m)}`)
   const found = m && m !== 'default' ? findModel(kind, m) : undefined
   if (m && m !== 'default' && knowsModels(kind) && !found) throw new Error(`--${flag}model ${m}: ${name} has no such model. It takes ${c!.models.map((x) => x.id).join(', ')}, or default`)

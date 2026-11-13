@@ -11,7 +11,7 @@ import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { readJson, writeJson } from '../store.ts'
 import { piHome } from './readers/find.ts'
-import { listModels, type OpencodeModel } from './opencode.ts'
+import { defaultModel, listModels, type OpencodeModel } from './opencode.ts'
 
 export interface Model {
   /** what the CLI takes: claude-opus-5-5, gpt-6-sol, exe-dev-openai/gpt-4.1@llm */
@@ -191,11 +191,11 @@ export function findModel(kind: string, value?: string): Model | undefined {
 }
 
 /** OpenCode's enabled models, and the levels of all of them together: its variants, the ranked ones lowest first, then
- *  the others in the order OpenCode lists them */
-export function opencodeList(models: OpencodeModel[]): CliModels {
+ *  the others in the order OpenCode lists them. `def`: the model it starts on by itself, when it says */
+export function opencodeList(models: OpencodeModel[], def?: string): CliModels {
   const all = [...new Set(models.flatMap((m) => m.efforts))]
   const ranked = all.filter((l) => rankOf(l) !== undefined).sort((a, b) => rankOf(a)! - rankOf(b)!)
-  return { models, efforts: [...ranked, ...all.filter((l) => rankOf(l) === undefined)] }
+  return { models, efforts: [...ranked, ...all.filter((l) => rankOf(l) === undefined)], ...(def ? { default: def } : {}) }
 }
 
 /** whether this CLI can say which models it has: else any model id goes */
@@ -293,7 +293,10 @@ async function run(cmd: string[]) {
 }
 
 export async function read(kind: string, from?: string): Promise<CliModels | undefined> {
-  if (kind === 'opencode') return opencodeList(await listModels())
+  if (kind === 'opencode') {
+    const models = await listModels()
+    return opencodeList(models, await defaultModel())
+  }
   if (kind === 'claude' && from) {
     const bin = from.slice(0, from.lastIndexOf('@'))
     const [catalog, help] = await Promise.all([run(['grep', '-aoE', '\\{id:"claude-[a-z0-9-]+",family:"[a-z]+",display_name:"[^"]+"|capabilities:\\[[^]]*\\]|default_effort:"[a-z]+"', bin]), run([bin, '--help'])])

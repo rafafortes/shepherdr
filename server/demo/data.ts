@@ -203,7 +203,8 @@ export function tasks(): Task[] {
       place: HP,
       sub: '',
       age: '1d',
-      agent: agent('HP-204', 'Claude Code', 'todo', '1d', ''),
+      // OpenCode's agent (the demo shows one of each CLI): to do, so it is not running and the counts stay as they are
+      agent: agent('HP-204', 'OpenCode', 'todo', '1d', ''),
       desc: "Pages rendered in chat stay light in dark mode. Give them the app’s dark colours when the screen is dark, without changing how they look in light mode. Don't start yet, wait for a go. Then plan first and wait for my yes.",
       state: 'To do · added 1d ago',
       created: 'yesterday 17:05 by herdr-projects (you asked in chat)',
@@ -477,7 +478,7 @@ export function chats(): Record<string, Chat> {
           question: { id: 'f3', ordinary: true, title: 'Where should Pinned live?', kind: 'Form', choices: [{ label: 'A filter on the filter row' }, { label: 'Its own tab' }], to: 'HP-201 agent' },
         }),
       ]),
-      c('HP-204/Agent', 'Claude Code', [
+      c('HP-204/Agent', 'OpenCode', [
         m({ who: 'you', text: 'Dark mode for rendered pages\n\n' + (tasks().find((t) => t.id === 'HP-204')?.desc ?? '') }),
         m({ who: 'agent', text: 'Got it: dark pages, plan first. I’ll wait for your go.' }),
       ]),

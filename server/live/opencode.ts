@@ -20,6 +20,9 @@ export function opencodeDb(): string {
   return env('SHEPHERDR_OPENCODE_DB') ?? join(env('XDG_DATA_HOME') ?? join(homedir(), '.local', 'share'), 'opencode', 'opencode.db')
 }
 
+/** a model id's provider: the part before its first slash */
+const providerOf = (id: string) => id.slice(0, id.indexOf('/'))
+
 /** a Shepherdr model id, providerID/modelID, split at the first '/': nvidia/z-ai/glm-5.3-flash is nvidia + z-ai/glm-5.3-flash */
 export function parseModel(id: string): { providerID: string; id: string } {
   const m = /^([^/]+)\/(.+)$/.exec(id)
@@ -87,24 +90,34 @@ export async function switchModel(sessionId: string, model: string, effort: stri
 }
 
 export interface OpencodeModel {
-  /** providerID/modelID, as Shepherdr keeps it */
+  /** providerID/modelID, as Shepherdr keeps it and `opencode run -m` takes it */
   id: string
+  /** what the screen says: the same id (pi names its models with their provider in front too) */
   label: string
   /** the variants OpenCode offers, as efforts (may be empty, or not ordinal) */
   efforts: string[]
 }
 
-/** the models OpenCode has enabled */
+/** the models OpenCode has enabled, grouped by provider (a stable sort: each provider keeps OpenCode's order) */
 export async function listModels(cwd: string = tmpdir()): Promise<OpencodeModel[]> {
   const data = await api(['model.list'], { cwd })
   if (!Array.isArray(data)) throw new Error('opencode model.list gave no model list')
   return data
-    .filter((m) => m?.enabled !== false)
+    .filter((m) => m?.enabled !== false && typeof m?.providerID === 'string' && typeof m?.id === 'string')
     .map((m) => ({
       id: `${m.providerID}/${m.id}`,
-      label: m.name,
+      label: `${m.providerID}/${m.id}`,
       efforts: Array.isArray(m.variants) ? m.variants.map((v: { id: string }) => v.id) : [],
     }))
+    .map((m, i) => ({ m, i, provider: providerOf(m.id) }))
+    .sort((a, b) => (a.provider < b.provider ? -1 : a.provider > b.provider ? 1 : a.i - b.i))
+    .map(({ m }) => m)
+}
+
+/** OpenCode's default model (its config's, or its first it finds), as providerID/modelID; nothing when it has none */
+export async function defaultModel(cwd: string = tmpdir()): Promise<string | undefined> {
+  const m = await api(['model.default'], { cwd }).catch(() => undefined)
+  return typeof m?.providerID === 'string' && typeof m?.id === 'string' ? `${m.providerID}/${m.id}` : undefined
 }
 
 /** the last line's seq of a JSONL file, read backwards from its end; undefined when it has no line */

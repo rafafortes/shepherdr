@@ -55,7 +55,10 @@ build, check and review the work is your own judgment.
    which reviewer to use: it counts the round, holds that reviewer for it, and answers with the reviewer and the words to
    pass (the primary, or the backup your Reviewer line names when the primary is full or out, with why). When every
    reviewer is full or out it waits up to 90 seconds, then tells you to end your turn: Shepherdr wakes you with the
-   reviewer to use, and that round is counted only then. Run that reviewer in the foreground, its stdin closed (or it waits on stdin forever) and under a
+   reviewer to use, and that round is counted only then. When every reviewer is blocked (0 allowed in Settings → Limits),
+   nothing waits and no round is counted: the answer says `No reviewer may run under the limits: every reviewer <id> may use
+   is blocked (0 allowed).` Then run no review at all: say in your summary that this review did not run because of the
+   limits, and report without it. Run that reviewer in the foreground, its stdin closed (or it waits on stdin forever) and under a
    timeout, with your shell's timeout at its most: `timeout 540 codex exec -s read-only -o <out> "<prompt>" < /dev/null`.
    Never in the background, and never end your turn while a review runs. Timed out or failed: one subagent review instead,
    the same round. Give the reviewer the authoritative command from your launch prompt and `SHEPHERDR_CHAT=<task-id>/Reviewer`
