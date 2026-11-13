@@ -23,6 +23,8 @@ const DEFAULT_REVIEWER = { kind: kindOf(defaultOf('reviewer.agent')!)! }
 import { excerpt } from '../live/chatlines.ts'
 import { findModel, TABLE } from '../live/models.ts'
 import { modelsMatrix } from '../live/models-matrix.ts'
+import { modelsSummary, type LiveAgent, type TaskFact } from '../live/models-summary.ts'
+import { demoUsage } from './usage.ts'
 import { ProfileSchedules } from '../live/profile-schedule.ts'
 import { Profiles, ProfileStore, type Site } from '../live/profiles.ts'
 import { Browsers } from '../live/browser.ts'
@@ -78,6 +80,8 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   pluginsOff: string[] = []
   /** Settings → Models → profiles: kept in memory, as the demo's settings are (profiles.ts) */
   private profileStore = new ProfileStore(true)
+  /** Settings → Models → Summary: a week of usage, in memory (usage.ts) */
+  private usage = demoUsage()
   profiles = new Profiles(this.profileStore, () => this.profileSite(), () => {
     this.sections = D.settings(this.stores, this.checklists, this.pluginsOff)
     this.emit('snapshot')
@@ -754,6 +758,14 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       case 'models-matrix':
         // this machine's levels, as the live one reads them: its Everywhere, machine and spaces
         return modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, this.matrixSpaces())
+      case 'models-summary': {
+        // the working tasks are the live agents; the waiting ones start (or are reviewed) on their CLI's own default model
+        const spaces = this.matrixSpaces()
+        const rows = modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, spaces).rows.map((r) => r.id)
+        const agents: LiveAgent[] = this.tasks.filter((t) => t.status === 'work').map((t) => ({ key: `${t.id}/Agent`, kind: kindOf(t.agent?.cli ?? 'Claude Code') ?? 'claude', status: 'working' }))
+        const tasks: TaskFact[] = this.tasks.map((t) => ({ status: t.status, ...(t.agent ? { agent: { kind: kindOf(t.agent.cli) ?? 'claude' } } : {}) }))
+        return modelsSummary({ now: Date.now(), settings: this.stores[D.DEMO_HOST], host: D.DEMO_HOST, spaces, rows, usage: this.usage, agents, tasks, watch: [] })
+      }
       case 'profiles':
         return this.profiles.view()
       case 'profile-save': {
