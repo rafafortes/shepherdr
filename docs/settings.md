@@ -201,6 +201,8 @@ before it, as Agents' Add a backup does), and at the end **Max tasks** (`space.m
   table writes is the value Settings shows for that level. The table reads every level at once (`models-matrix`, a
   read action; the summary phase reads the same table).
 - Only this machine's levels are shown. Another machine's models are on that machine's Settings page.
+- The caps and limits of every space, provider and model (Max tasks, the sub-limits, what waits and why) are on Settings →
+  Limits, the page beside this one: see [Limits](#limits).
 
 ### Summary
 
@@ -335,6 +337,51 @@ The rule words are `daily 22:00`, `weekdays 8:00`, `weekends 9:30`, `mon,fri 16:
 (`FREQ=DAILY;BYHOUR=22;BYMINUTE=0`). A profile with one schedule takes `schedule-off night` with no number; with more, the
 number from `shepherdr profile schedules`. With the two above, the card comes at 22:00 each day with the night setup, and
 at 08:00 with the day one, and the bar says which of them is next.
+
+## Limits
+
+Settings → How Shepherdr runs → **Limits** (after Models) puts every limit of this machine in one place: the machine's own,
+each space's, and each provider's and model's, with the live numbers beside them and what waits now. It writes the same
+settings Settings writes, at the same level: nothing new is stored, and a cell's value is the one Settings shows for its
+row. The profiles bar sits above it (a profile saved from here includes the limits by default).
+
+- **Machine** (rows: Everywhere, this machine). The columns are **Max tasks working at once** (`machine.maxTasks`; beside
+  it, `now 7 of 9 working, 2 wait on you`), **Wait while CPU load is over** (`machine.startLoad`; now, the 5-minute load
+  against the cores), **Wait while CPU pressure is over** (`machine.startPressure`; now, the pressure), **Wait while memory is
+  over** (`machine.startMemory`; now, the memory in use), and **Start one task at most every** (`machine.startEvery`). **Merge
+  train** (`merge.train`) is a column here only when Everywhere sets one; the spaces read it otherwise. Under the table,
+  **Alerts** (collapsed) holds the four thresholds the coordinator is told by (`machine.alertLoad`, `alertMemory`,
+  `alertDisk`, `alertHerdr`), each with its number now: they only tell, as above.
+- **Spaces** (one row per space of this machine; home only when it sets one of these keys itself). **Max tasks** of the space
+  (`space.maxTasks`; `2 of 3 working · 1 held`) and **Merge train** (`merge.train`). Then one column per provider or model
+  that a `models.maxAtOnce` entry names at any level (`models.maxAtOnce` is in [Most agents at once](#models), above); **+
+  column** adds one from the providers and models Shepherdr knows. A column added with no entry yet stays in this browser
+  until its ⋯ removes it. A cell is the space's **sub-limit** for that provider or model: its own entry, with its own runs
+  counted now (`1 of 2 at once`). A cell with no entry of its own says `machine's total applies (4 at once)`, or `no
+  sub-limit` when the machine sets none. A sub-limit sits inside the machine's total: it never raises it.
+- **Providers and models**. Each provider with a cap, an agent, a run or usage, with its models under it. **Max at once** is the
+  machine's total for the row (the cap of [Most agents at once](#models), set at this machine or Everywhere; its sub-limits show
+  under it). Beside it: **running now** by role (tasks, coordinators, the advisor, reviewers), **held**, **out now** (until
+  when), and the **quota**, read only (the details are in Models). A local server is marked local.
+- **Waiting now** (at the top, read only). The held tasks grouped by what holds them, each group with its count and its limit
+  now: **machine slots**, the **machine's** load, pressure or memory (or herdr that does not answer), each **space's cap**,
+  each **model's cap** (with the chain it waits on), **every model of a space out**, and the **cut-off tasks** that go back to
+  work first. Then the questions waiting for the advisor and the review rounds waiting for a reviewer. A task's id opens it.
+- **Bulk.** A column's ⋯ → **Set for every space…**: for Max tasks and Merge train, each space's own value, or **Everywhere,
+  and reset the spaces** (each space and this machine lose their own, so every space reads Everywhere's); for a provider's or
+  model's column, the same number as each space's sub-limit, the other entries kept. A provider's ⋯ → **Clear every space's
+  sub-limit**. Both ask first and write one space after another; a refusal stops them, and the spaces written before it stay.
+- **Phones** draw one card per section, per space and per provider, with the same editors under each line.
+
+**The order in which the limits hold a task** (the row names the first one that holds it): the machine's slots
+(`machine.maxTasks`); the machine's load, pressure and memory, and whether herdr answers; the space's own models out and its
+cut-off tasks that go back first; the space's cap (`space.maxTasks`); the model's cap (`models.maxAtOnce`: the machine's total,
+then the space's sub-limit). A first in line passes the load and the spacing but never the slots, the caps or a herdr that does
+not answer, as [tasks](tasks.md) says.
+
+**What is not seen.** A cap counts this machine's own agents and coordinators only (the runs of [Most agents at once](#models),
+above): a request from another app or script on the same server is not counted, so a server that serves them too needs a lower
+cap. Another machine's tasks are not in this machine's caps, and its numbers are on its own Settings.
 
 ## Quotas
 

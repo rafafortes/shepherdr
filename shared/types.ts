@@ -991,6 +991,112 @@ export interface ModelsSummary {
   caps: { all: string; machine: string; place: string; spaces: SummarySpaceText[] }
 }
 
+/** Settings → Limits (limits-view.ts): every limit this machine holds, at each level it is set, with the numbers now. A
+ *  cell is one setting in one row (Everywhere, this machine, or a space): its control as Settings draws it (`row`, with
+ *  the value its level reads), where that value comes from, and the live number beside it. Its writes are the setting
+ *  action at `place` */
+export interface LimitCell {
+  key: string
+  /** the place its write goes to: all (Everywhere), m:<host> (this machine), p:<host>:<space> (a space) */
+  place: string
+  /** the control: its label and kind as Settings has them, the value its level reads */
+  row: SettingRow
+  from: MatrixValue['from']
+  /** set at this level itself (strong), else inherited (faint, with where from) */
+  set: boolean
+  /** the live numbers beside the value, in words ("7 of 9 working", "load 0.4× cores now") */
+  now?: string
+}
+export interface LimitColumn {
+  key: string
+  title: string
+  hint?: string
+}
+/** one level's row of a limits table: Everywhere, this machine, or a space, with a cell per column */
+export interface LimitRow {
+  id: string
+  name: string
+  kind: 'all' | 'machine' | 'space'
+  cells: Record<string, LimitCell>
+}
+export interface LimitTable {
+  columns: LimitColumn[]
+  rows: LimitRow[]
+}
+/** one space's sub-limit under a model or provider column: its own entry, and how many of its runs count under it now */
+export interface LimitSpaceCap {
+  max: number
+  now: number
+}
+/** a space's row of the Spaces table: its key (the settings' name for it), its tasks working and held now, and its
+ *  sub-limits by column (the patterns the columns name) */
+export interface LimitSpaceRow extends LimitRow {
+  key: string
+  working: number
+  held: number
+  caps: Record<string, LimitSpaceCap>
+}
+/** the Spaces table: its columns (Max tasks, Merge train), and then one column per pattern a models.maxAtOnce entry names */
+export interface LimitSpaces extends LimitTable {
+  rows: LimitSpaceRow[]
+  patterns: string[]
+  /** the machine's total that covers each pattern (its own entry, or its provider's), when one is set: what a space's
+   *  sub-limit sits inside */
+  totals: Record<string, { pattern: string; max: number }>
+}
+/** what runs now by role on a provider or a model (the runs that count toward models.maxAtOnce) */
+export interface LimitByRole {
+  byRole: Partial<Record<MatrixRole, number>>
+}
+/** a provider of the Providers table: the summary's row (quota, run-outs, its cap), with what runs by role and its models */
+export interface LimitProvider extends Omit<SummaryProvider, 'models'> {
+  byRole: LimitByRole['byRole']
+  models: (SummaryModel & LimitByRole)[]
+}
+/** a task that waits now, by its id and space (its key, shown as its name), and its line as its row says it */
+export interface WaitingTask {
+  id: string
+  space: string
+  words: string
+}
+/** one group of the Waiting now list: what holds the tasks in it, its limit now, and the tasks */
+export interface WaitingGroup {
+  id: string
+  title: string
+  limit?: string
+  tasks: WaitingTask[]
+}
+/** what holds work now (limits-view.ts): the held tasks grouped by what holds them, the advisor's questions and the reviews
+ *  that wait for a reviewer */
+export interface WaitingNow {
+  held: number
+  groups: WaitingGroup[]
+  advisor: { chat: string; task?: string; words: string }[]
+  reviews: { task: string; space: string; words: string }[]
+}
+/** a pattern the + column can add: a provider, or a model key, with its words */
+export interface LimitKnown {
+  pattern: string
+  name: string
+  kind: 'provider' | 'model'
+}
+export interface LimitsView {
+  at: number
+  machine: { id: string; name: string; herdr: boolean }
+  /** Machine: Everywhere and this machine, the limits to start tasks by (and Merge train when Everywhere sets it) */
+  machineTable: LimitTable
+  /** Machine, the second group: when this machine's coordinator is told (alerts) */
+  alerts: LimitTable
+  spaces: LimitSpaces
+  /** every provider with an entry, an agent, a run or usage, with its models under it */
+  providers: LimitProvider[]
+  /** models.maxAtOnce as each level holds it, and the places its writes go to (the summary's cap editors use it) */
+  caps: ModelsSummary['caps']
+  /** what the + column can add */
+  known: LimitKnown[]
+  waiting: WaitingNow
+}
+
 /** Settings → Models → profiles (server/live/profiles.ts): one setting a profile changes, as the preview and the answer
  *  name it */
 export interface ProfileChange {
@@ -1259,6 +1365,8 @@ export type Action =
   | { type: 'models-matrix' }
   /** Settings → Models → Summary: per provider and model, what they run, use and ran out of, and the warnings (read only) */
   | { type: 'models-summary' }
+  /** Settings → Limits: every limit of this machine at each level, the spaces' and the providers' caps, what waits and why (read only) */
+  | { type: 'limits-view' }
   /** Settings → Models → Quotas: read each quota now, at most once a minute per provider (quotas.ts refresh) */
   | { type: 'quota-refresh' }
   /** Settings → Models → profiles: the saved profiles and what the settings match now (read only) */

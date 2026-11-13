@@ -4,6 +4,8 @@ import { apart, type Artifact, type Automation, type Chat, type Machine, type Ma
 import { firstChecklist } from '../live/heartbeat.ts'
 import { nextWords, timeRule, timeWords } from '../live/trigger.ts'
 import { Settings } from '../live/settings.ts'
+import type { HeldFact } from '../live/limits-view.ts'
+import type { Sample } from '../live/health.ts'
 import { pluginCatalog, pluginsPage } from '../plugins.ts'
 import type { PluginEntry } from '../../scripts/build-plugins.ts'
 import { demoJobs, demoTurn } from './activity.ts'
@@ -542,6 +544,26 @@ export function chats(): Record<string, Chat> {
   )
 }
 
+/** the health sample the demo's machine shows (HEALTH, vm-str: 17.9 on 16 cores, 58% of memory), as the Limits page reads it */
+export function demoSample(): Sample {
+  return { at: Date.now(), cores: 16, load: 17.9, load5: 17.9, memTotal: 31 * 2 ** 30, memUsed: 18 * 2 ** 30, disks: [{ path: '~', pct: 64, freeGb: 90, dev: 1 }], gpus: [] }
+}
+
+/** what holds the demo's tasks for Settings → Limits' Waiting now: a fiction like the rest of the demo, in the shape the
+ *  live engine holds them. A space's group reads its settings (gtm's cap) and its working tasks */
+export function heldFor(s: Settings, workingIn: Record<string, number>): { held: HeldFact[]; advisor: { chat: string; task?: string; words: string }[]; reviews: { task: string; space: string; words: string }[] } {
+  const cap = s.spaceMax('gtm')
+  const held: HeldFact[] = [
+    { id: 'HP-204', space: 'herdr-projects', spaceName: 'herdr-projects', why: 'machine', words: 'Waiting for the machine' },
+    ...(cap === null ? [] : [{ id: 'GTM-17', space: 'gtm', spaceName: 'gtm', why: 'space' as const, words: 'Waiting for a free slot of gtm', entry: { name: 'gtm', count: workingIn.gtm ?? 0, max: cap } }]),
+  ]
+  return {
+    held,
+    advisor: [{ chat: 'HP-201/Agent', task: 'HP-201', words: "HP-201's agent asks: Keep Pinned as a filter, or a tab?" }],
+    reviews: [{ task: 'GTM-15', space: 'gtm', words: 'Waits for a reviewer: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (4 of 4 at once)' }],
+  }
+}
+
 /** Replies the demo agents give once a question is answered. */
 export const REPLIES: Record<string, string> = {
   f1: 'On it. Rerunning CI on main now.',
@@ -557,7 +579,7 @@ export const REPLIES: Record<string, string> = {
  *  one's Everywhere is the other's too */
 export function settingStores() {
   return {
-    'vm-str': new Settings({ everywhere: { 'time.zone': DEMO_ZONE }, machine: { 'task.effort': 'high' }, spaces: { gtm: { 'task.agent': 'Codex' } } }),
+    'vm-str': new Settings({ everywhere: { 'time.zone': DEMO_ZONE }, machine: { 'task.effort': 'high' }, spaces: { gtm: { 'task.agent': 'Codex', 'space.maxTasks': '2' } } }),
     mac: new Settings({ everywhere: { 'time.zone': DEMO_ZONE }, machine: { 'machine.maxTasks': '3' }, spaces: {} }),
   }
 }

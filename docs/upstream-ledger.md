@@ -293,6 +293,19 @@ tasks on one gate run. Upstream's only merge queue is GitHub's own (SHEP-160 on 
 a merge made here never reaches. So the train is ours: `merge.train`, for merges made here only; see
 [docs/tasks.md](tasks.md).
 
+## Not from upstream: a limits page over every space, provider and model, built here
+
+Checked 2026-11-13 against upstream `main` (3.x line) and `v2.0` (fetched that day): `git grep` for a limits or capacity
+overview (`limits`, `capacity`, `held`, `running` across the screens and the server), `git log -i` for limits and capacity,
+and the public issues and pull requests (`gh issue list` and `gh pr list` for "limits overview", "limits page capacity",
+"concurrency limits per provider"): nothing shows the machine's limits, each space's and each provider's caps, and what
+waits for them in one place. Upstream's `web/plugins/limits` is the plan-usage sheet (its quota windows), not a capacity
+page. Upstream's per-task time and token limits (`limit.time`, `limit.tokens`, commit `e54ed1bf`, #119) are a budget for one
+task: `upstream/main` no longer has them and `v2.0` keeps only a test that names them, so there is nothing to port.
+
+So the page is ours: Settings → Limits (`src/LimitsPage.tsx`, `server/live/limits-view.ts`), over the settings
+`machine.*`, `space.maxTasks`, `merge.train` and `models.maxAtOnce` that already exist; [docs/settings.md](settings.md), Limits.
+
 ## Not from upstream: a models table over every space, built here
 
 Checked 2026-11-13 against upstream `main` (`ebb17d58`, 3.x line) and `v2.0` (fetched that day): `git grep` for a models

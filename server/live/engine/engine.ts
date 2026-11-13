@@ -1403,6 +1403,11 @@ export class Engine extends Emitter<Events> {
     return this.tasks.filter((t) => this.busy(t)).length
   }
 
+  /** of the machine's working tasks, how many belong to one space (its key, as its settings name it) */
+  workingIn(space: string) {
+    return this.tasks.filter((t) => this.nameOf(t) === space && this.busy(t)).length
+  }
+
   /** of those, how many wait on you */
   waitingOnYou() {
     return this.tasks.filter((t) => this.busy(t) && this.statusOf(t) === 'need').length
@@ -1575,6 +1580,21 @@ export class Engine extends Emitter<Events> {
     if (r.why) return 0
     const l = this.settings.machine()
     return l.max === null ? Infinity : Math.max(0, l.max - this.working())
+  }
+
+  /** a held task's line in words, the whole chain named (the Limits page's list of what waits) */
+  holdLine(t: TaskRec) {
+    return this.heldLabel(t, true)
+  }
+
+  /** the reviews that wait for a reviewer now: each task, its space and each reviewer that is full or out, in words (none
+   *  where none waits) */
+  reviewWaits(): { id: string; space: string; words: string }[] {
+    return this.tasks.flatMap((t) => {
+      if (!t.reviewWait || !this.atReviewStep(t)) return []
+      const c = this.reviewChoice(t)
+      return 'wait' in c ? [{ id: t.id, space: this.nameOf(t) ?? '', words: this.waitIn(c.wait) }] : []
+    })
   }
 
   /** tasks held now, oldest first */
