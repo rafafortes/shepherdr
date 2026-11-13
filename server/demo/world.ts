@@ -23,7 +23,7 @@ const DEFAULT_REVIEWER = { kind: kindOf(defaultOf('reviewer.agent')!)! }
 import { excerpt } from '../live/chatlines.ts'
 import { findModel, TABLE } from '../live/models.ts'
 import { modelsMatrix } from '../live/models-matrix.ts'
-import { modelsSummary, type LiveAgent, type TaskFact } from '../live/models-summary.ts'
+import { keyOf, modelsSummary, type LiveAgent, type TaskFact } from '../live/models-summary.ts'
 import { demoQuota, demoUsage } from './usage.ts'
 import { ProfileSchedules } from '../live/profile-schedule.ts'
 import { Profiles, ProfileStore, type Site } from '../live/profiles.ts'
@@ -765,7 +765,9 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const agents: LiveAgent[] = this.tasks.filter((t) => t.status === 'work').map((t) => ({ key: `${t.id}/Agent`, kind: kindOf(t.agent?.cli ?? 'Claude Code') ?? 'claude', status: 'working' }))
         const tasks: TaskFact[] = this.tasks.map((t) => ({ status: t.status, ...(t.agent ? { agent: { kind: kindOf(t.agent.cli) ?? 'claude' } } : {}) }))
         const now = Date.now()
-        return modelsSummary({ now, settings: this.stores[D.DEMO_HOST], host: D.DEMO_HOST, spaces, rows, usage: this.usage, agents, tasks, watch: [], quota: demoQuota(this.usage, now) })
+        // what counts toward models.maxAtOnce: the working tasks, each on its model (the live source's runsOn)
+        const runs = agents.map((a) => ({ key: keyOf(a.kind, a.model), space: '~' }))
+        return modelsSummary({ now, settings: this.stores[D.DEMO_HOST], host: D.DEMO_HOST, spaces, rows, usage: this.usage, agents, tasks, watch: [], quota: demoQuota(this.usage, now), runs })
       }
       case 'quota-refresh':
         // the demo reads no quota: its figures are fictional, and no CLI or API is called from it
@@ -829,7 +831,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
                 continue
               }
               const before = t.desc ?? ''
-              const desc = rebriefReviewer(before, { reviewer: on, fallback: store.reviewerBackups(name), review: store.ways(name).review, by: store.setBy(name).reviewer })
+              const desc = rebriefReviewer(before, { id: t.id, reviewer: on, fallback: store.reviewerBackups(name), review: store.ways(name).review, by: store.setBy(name).reviewer })
               if (desc === before) out.same++
               else {
                 changed++

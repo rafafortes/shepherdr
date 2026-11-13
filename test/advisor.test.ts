@@ -14,6 +14,8 @@ delete process.env.SHEPHERDR_MAIN
 const { LiveSource } = await import('../server/live/source.ts')
 const { placeId } = await import('../server/live/places.ts')
 const { adviceArgs, advisorPrompt, parseAdvice } = await import('../server/live/advisor.ts')
+const { keyOf } = await import('../server/live/models-summary.ts')
+const { providerOfKey: providerOf } = await import('../shared/model-caps.ts')
 
 const src = new LiveSource()
 afterAll(() => src.stop())
@@ -407,6 +409,234 @@ describe('by itself, once a question waited', () => {
       await src.watchAdvice(Date.now() + 3_600_000)
       expect(runs).toEqual([])
     } finally {
+      w.done()
+    }
+  })
+})
+
+describe('the advisor on the caps: a harness with room, a run held as a lease, and a question that waits', () => {
+  const OPENCODE = 'opencode-go/deepseek-v4.1-flash'
+  const CODEX = keyOf('codex')
+  /** what the advisor's runs counted toward the caps while each one ran (the lease is held for the whole run) */
+  let heldAt: string[][] = []
+  beforeEach(() => {
+    heldAt = []
+    // a test that failed may leave its lease held: none carries over to the next
+    ;(src.engine as unknown as { leased: Map<string, unknown> }).leased.clear()
+    src.runAdvisor = (async (h: { kind: string; model?: string }, prompt: string, cwd: string) => {
+      heldAt.push(src.engine.runs().filter((r) => r.role === 'advisor').map((r) => r.key))
+      runs.push({ kind: h.kind, model: h.model, prompt, cwd })
+      return replies.shift() ?? { ok: false, out: 'nothing to say' }
+    }) as never
+  })
+  /** the machine's cap for the models of a test (off after it) */
+  const capped = (text: string) => expect(src.settings.set('models.maxAtOnce', text, 'machine').ok).toBe(true)
+  /** a run that holds a slot of a model, as another run would (a lease is what a headless run takes) */
+  const occupy = (id: string, key: string, space: string) => src.engine.lease(id, 'advisor', key, space)
+  const free = (id: string) => src.engine.unlease(id)
+
+  test('the primary has room: it runs the question, held as a lease for the run, and the lease ends with the answer', async () => {
+    const w = await world('adv-cap-room')
+    try {
+      capped(`${OPENCODE}=1`)
+      card(w.key, 'cap:r1', 'Which store?', ['SQLite', 'Postgres'])
+      replies = [json({ decide: 'advisor', choice: 1, why: 'Small.', sure: true })]
+      expect(await src.advise(w.key, 'cap:r1')).toEqual({ ok: true })
+      expect(heldAt).toEqual([[OPENCODE]])
+      expect(src.engine.runs().filter((r) => r.role === 'advisor')).toEqual([])
+      expect(src.advices.get(w.key, 'cap:r1')!.state).toBe('sent')
+    } finally {
+      capped('off')
+      w.done()
+    }
+  })
+
+  test('the primary is full: its backup runs the question, and the run is held as a lease while it runs', async () => {
+    const w = await world('adv-cap-backup')
+    try {
+      capped(`${OPENCODE}=1`)
+      occupy('busy-primary', OPENCODE, w.p.name)
+      card(w.key, 'cap:b1', 'Which?', ['A', 'B'])
+      replies = [json({ decide: 'advisor', choice: 2, why: 'B fits.', sure: true })]
+      await src.advise(w.key, 'cap:b1')
+      expect(runs.map((r) => r.kind)).toEqual(['codex'])
+      // the busy primary's lease counts, and the backup's run is held while it runs
+      expect(heldAt).toEqual([[OPENCODE, CODEX]])
+      expect(to(w.key)[0]).toContain('from="The advisor"')
+      expect(cards(w.key).at(-1)).toContain('(Codex')
+      expect(src.engine.runs().filter((r) => r.role === 'advisor').map((r) => r.id)).toEqual(['busy-primary'])
+      free('busy-primary')
+    } finally {
+      capped('off')
+      w.done()
+    }
+  })
+
+  test('every harness full: nothing runs, the question waits, and its card names each one that is full', async () => {
+    const w = await world('adv-cap-wait')
+    try {
+      capped(`${OPENCODE}=1, ${CODEX}=1`)
+      occupy('busy-a', OPENCODE, w.p.name)
+      occupy('busy-b', CODEX, w.p.name)
+      card(w.key, 'cap:w1', 'Which store?', ['SQLite', 'Postgres'])
+      expect(await src.advise(w.key, 'cap:w1')).toEqual({ ok: true })
+      expect(runs).toEqual([])
+      expect(src.advices.get(w.key, 'cap:w1')!.state).toBe('waiting')
+      expect(cards(w.key).at(-1)).toBe(`The advisor waits: pi · ${OPENCODE} (1 of 1 at once), Codex (default) (1 of 1 at once)`)
+      // on the task's card, in its space's chat too
+      expect(src.chats.chat(w.coord).messages.findLast((m) => m.card?.aside)?.card?.text).toContain('The advisor waits:')
+      // one card per question: asked again while it still waits, its card is updated, not repeated
+      await src.advise(w.key, 'cap:w1')
+      expect(cards(w.key).filter((c) => c.startsWith('The advisor waits'))).toHaveLength(1)
+      expect(runs).toEqual([])
+      free('busy-a')
+      free('busy-b')
+    } finally {
+      capped('off')
+      w.done()
+    }
+  })
+
+  test('a slot frees: the waiting question is asked then, once, and answered by the advisor as it would have been', async () => {
+    const w = await world('adv-cap-retry')
+    try {
+      capped(`${OPENCODE}=1`)
+      occupy('busy-r', OPENCODE, w.p.name)
+      src.settings.set('advisor.fallback', 'off', { space: w.p.name })
+      card(w.key, 'cap:f1', 'Which store?', ['SQLite', 'Postgres'])
+      await src.advise(w.key, 'cap:f1', true)
+      expect(runs).toEqual([])
+      expect(src.advices.get(w.key, 'cap:f1')).toMatchObject({ state: 'waiting', auto: true })
+      // nothing frees, nothing runs
+      await src.retryAdvice()
+      expect(runs).toEqual([])
+      // the slot frees: asked now, by itself, once
+      free('busy-r')
+      replies = [json({ decide: 'advisor', choice: 1, why: 'Simple.', sure: true })]
+      await src.retryAdvice()
+      expect(runs.map((r) => r.kind)).toEqual(['pi'])
+      expect(to(w.key)[0]).toContain('from="The advisor"')
+      expect(cards(w.key).at(-1)).toContain('The advisor answered for you, as you didn')
+      expect(src.advices.get(w.key, 'cap:f1')!.state).toBe('sent')
+      await src.retryAdvice()
+      expect(runs).toHaveLength(1)
+    } finally {
+      capped('off')
+      src.settings.set('advisor.fallback', 'Codex', { space: w.p.name })
+      w.done()
+    }
+  })
+
+  test('a question answered by the human while it waits is never answered by the advisor', async () => {
+    const w = await world('adv-cap-answered')
+    try {
+      capped(`${OPENCODE}=1, ${CODEX}=1`)
+      occupy('busy-x', OPENCODE, w.p.name)
+      occupy('busy-y', CODEX, w.p.name)
+      card(w.key, 'cap:x2', 'Which queue?', ['Redis', 'SQS'])
+      await src.advise(w.key, 'cap:x2')
+      expect(src.advices.get(w.key, 'cap:x2')!.state).toBe('waiting')
+      // the human answers it, and the slots free: nothing is asked, the record is closed as the human's
+      expect(await src.act({ type: 'answer', chat: w.key, question: 'cap:x2', choice: 0 })).toEqual({ ok: true })
+      free('busy-x')
+      free('busy-y')
+      replies = [json({ decide: 'advisor', choice: 2, why: 'SQS.', sure: true })]
+      await src.retryAdvice()
+      expect(runs).toEqual([])
+      expect(src.advices.get(w.key, 'cap:x2')!.state).toBe('human')
+      expect(src.chats.log(w.key).answers['cap:x2']).toBe(0)
+    } finally {
+      capped('off')
+      w.done()
+    }
+  })
+
+  test('a harness that gave no answer is not run again when the question waits; the one left with room answers it', async () => {
+    const w = await world('adv-cap-tried')
+    try {
+      capped(`${CODEX}=1`)
+      occupy('busy-t', CODEX, w.p.name)
+      card(w.key, 'cap:t1', 'Which?', ['A', 'B'])
+      // the primary answers nothing; the backup is full: the question waits, with the primary tried
+      replies = [{ ok: false, out: 'Not logged in' }]
+      await src.advise(w.key, 'cap:t1')
+      expect(runs.map((r) => r.kind)).toEqual(['pi'])
+      expect(src.advices.get(w.key, 'cap:t1')).toMatchObject({ state: 'waiting', tried: [0] })
+      expect(cards(w.key).at(-1)).toBe('The advisor waits: Codex (default) (1 of 1 at once)')
+      // the slot frees: only the backup runs, the primary is not asked again
+      free('busy-t')
+      replies = [json({ decide: 'advisor', choice: 1, why: 'A.', sure: true })]
+      await src.retryAdvice()
+      expect(runs.map((r) => r.kind)).toEqual(['pi', 'codex'])
+      expect(src.advices.get(w.key, 'cap:t1')!.state).toBe('sent')
+      // its card said it was asked now, where it had waited (and the answer followed)
+      expect(cards(w.key)).toContain('The advisor is asking Codex now.')
+      expect(cards(w.key).at(-1)).toContain('The advisor answered as you asked')
+    } finally {
+      capped('off')
+      w.done()
+    }
+  })
+
+  test('a question whose harnesses all gave no answer, or are no longer set, is not waiting any more: it failed', async () => {
+    const w = await world('adv-cap-spent')
+    try {
+      capped(`${CODEX}=1`)
+      occupy('busy-s', CODEX, w.p.name)
+      card(w.key, 'cap:s1', 'Which?', ['A', 'B'])
+      replies = [{ ok: false, out: 'Not logged in' }]
+      await src.advise(w.key, 'cap:s1')
+      expect(src.advices.get(w.key, 'cap:s1')).toMatchObject({ state: 'waiting', tried: [0] })
+      // the backup is taken out of the settings while it waits: nothing is left to ask, so it is not asked again
+      src.settings.set('advisor.fallback', 'off', { space: w.p.name })
+      free('busy-s')
+      await src.retryAdvice()
+      expect(runs.map((r) => r.kind)).toEqual(['pi'])
+      expect(src.advices.get(w.key, 'cap:s1')!.state).toBe('failed')
+    } finally {
+      capped('off')
+      src.settings.set('advisor.fallback', 'Codex', { space: w.p.name })
+      w.done()
+    }
+  })
+
+  test('a slot that frees while an advisor run goes on asks nothing beside it: one run at a time', async () => {
+    const w = await world('adv-cap-one')
+    try {
+      capped(`${OPENCODE}=1`)
+      card(w.key, 'cap:o1', 'Which?', ['A', 'B'])
+      card(w.key, 'cap:o2', 'Which cache?', ['Memory', 'Disk'])
+      src.runAdvisor = (async (h: { kind: string; model?: string }, prompt: string, cwd: string) => {
+        runs.push({ kind: h.kind, model: h.model, prompt, cwd })
+        // another question's room comes in during this run: it is not asked until this one is through
+        await src.retryAdvice()
+        return json({ decide: 'advisor', choice: 1, why: 'A.', sure: true })
+      }) as never
+      await src.advise(w.key, 'cap:o1')
+      expect(runs).toHaveLength(1)
+      expect(src.advices.get(w.key, 'cap:o1')!.state).toBe('sent')
+    } finally {
+      capped('off')
+      w.done()
+    }
+  })
+
+  test('a run that throws gives its lease back, and the next harness of the chain answers', async () => {
+    const w = await world('adv-cap-throw')
+    try {
+      capped(`${OPENCODE}=1`)
+      src.runAdvisor = (async (h: { kind: string; model?: string }, prompt: string, cwd: string) => {
+        runs.push({ kind: h.kind, model: h.model, prompt, cwd })
+        if (h.kind === 'pi') throw new Error('spawn exploded')
+        return json({ decide: 'advisor', choice: 1, why: 'A.', sure: true })
+      }) as never
+      card(w.key, 'cap:e1', 'Which?', ['A', 'B'])
+      await src.advise(w.key, 'cap:e1')
+      expect(runs.map((r) => r.kind)).toEqual(['pi', 'codex'])
+      expect(src.engine.runs().filter((r) => r.role === 'advisor')).toEqual([])
+      expect(src.advices.get(w.key, 'cap:e1')!.state).toBe('sent')
+    } finally {
+      capped('off')
       w.done()
     }
   })

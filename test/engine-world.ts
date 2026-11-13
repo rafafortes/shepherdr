@@ -56,7 +56,7 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
   const started: { key: string; first?: string; cwd: string; system?: string; pane?: string }[] = []
   const status: Record<string, string> = {}
   const sent: { key: string; text: string }[] = []
-  const records: Record<string, { kind: string; started: number; finished?: boolean; sessionId?: string; logs: string[] }> = {}
+  const records: Record<string, { kind: string; model?: string; started: number; finished?: boolean; sessionId?: string; logs: string[] }> = {}
   const panes: Record<string, string> = {}
   const outbox: string[] = []
   /** work an agent started in the background that still runs: a subagent, or shells */
@@ -66,7 +66,9 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
   const routed: Record<string, boolean> = {}
   const agents = {
     routed: (key: string) => routed[key] ?? false,
-    ensure: async (s: { key: string; first?: string; cwd: string; kind: string; pane?: () => Promise<string> }) => {
+    // every agent this world has started, by key (the real registry's records: a coordinator's model counts, models.maxAtOnce)
+    records,
+    ensure: async (s: { key: string; first?: string; cwd: string; kind: string; model?: string; pane?: () => Promise<string> }) => {
       const pane = await s.pane?.()
       if (pane) {
         panes[s.key] = pane
@@ -74,7 +76,7 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
       }
       started.push({ ...s, pane })
       // a real start keeps the session its CLI was handed, which its own CLI resumes (agents.ts launch)
-      records[s.key] = { kind: s.kind, started: Date.now(), sessionId: `${s.key}-session`, logs: [`/tmp/${s.key}.jsonl`] }
+      records[s.key] = { kind: s.kind, ...(s.model && s.model !== 'default' ? { model: s.model } : {}), started: Date.now(), sessionId: `${s.key}-session`, logs: [`/tmp/${s.key}.jsonl`] } as (typeof records)[string]
       status[s.key] = o.boot ?? 'working'
       if (o.boot) outbox.push(s.key)
       return null

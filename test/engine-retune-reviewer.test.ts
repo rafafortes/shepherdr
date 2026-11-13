@@ -7,6 +7,7 @@ import { placeId, repo, until, world } from './engine-world.ts'
 import { reviewRetuneLine, type Retune } from '../server/live/engine/engine.ts'
 import { briefReview, rebriefReviewer, reviewerChangedLine, reviewerLine, splitBrief } from '../server/live/prompts.ts'
 import { OLD_HEADS, SETTINGS_HEAD } from '../shared/brief.ts'
+import { ASK, CODEX_WORDS, PI_WORDS, reviewerLineFor } from './reviewer-line.ts'
 
 /** a world where one task at a time runs on this machine: the rest wait for a slot */
 function fresh() {
@@ -19,9 +20,8 @@ function fresh() {
 const reviewerOf = (desc: string) => desc.split('\n').find((l) => l.startsWith('- Reviewer: '))!
 
 /** the Reviewer line as this world's Settings name it for a space's reviewer (Codex by default here) */
-const CODEX_LINE = '- Reviewer: a headless Codex or a Codex subagent (its default model and effort).'
-const PI_LINE = "- Reviewer: a headless pi or a pi subagent (its default model and effort). (this space's setting)"
-const CODEX_PLAIN = '- Reviewer: a headless Codex or a Codex subagent (its default model and effort).'
+const codexLine = (id: string, mark = '') => reviewerLineFor(CODEX_WORDS, id, '', mark)
+const piLine = (id: string, mark = "(this space's setting)") => reviewerLineFor(PI_WORDS, id, '', mark)
 
 describe('Settings reviewer changed: the waiting tasks read it in their brief', () => {
   test('a waiting task: its Reviewer line is written again, the human’s words above the block stay byte for byte', async () => {
@@ -32,7 +32,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     const q = w.engine.add({ project: p.name, title: 'Waits', desc: 'Add b.txt.\n\nKeep it small.', by: 'test' })
     expect(w.engine.statusOf(q)).toBe('queued')
     const before = q.desc
-    expect(reviewerOf(before)).toBe(CODEX_LINE)
+    expect(reviewerOf(before)).toBe(codexLine(q.id))
 
     expect(w.settings.set('reviewer.agent', 'pi', { space: p.name }).ok).toBe(true)
     const dry = w.engine.retuneReviewers({ space: p.name }, true)
@@ -43,7 +43,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     expect(w.engine.retuneReviewers({ space: p.name })).toEqual(dry)
     expect(q.reviewer).toMatchObject({ kind: 'pi' })
     // exactly the Reviewer line changed: the words above the block, and the block's other lines, are the same bytes
-    expect(q.desc).toBe(before.replace(CODEX_LINE, PI_LINE))
+    expect(q.desc).toBe(before.replace(codexLine(q.id), piLine(q.id)))
     expect(q.desc.startsWith('Add b.txt.\n\nKeep it small.\n\nSettings: (from shepherdr show;')).toBe(true)
     // it was never started, and nothing was sent to it: its brief is what it reads at its turn
     expect(w.started.some((s) => s.key === `${q.id}/Agent`)).toBe(false)
@@ -67,7 +67,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     const r = w.engine.retuneReviewers({ space: p.name })
     expect(r).toMatchObject({ changed: 1, spaces: [{ name: p.name, changed: 1 }] })
     expect(reviewerOf(q.desc)).toBe(
-      '- Reviewer: a headless Codex or a Codex subagent (its default model and effort). If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (its default model and effort) instead for that round only, and say in your summary that you did; every round asks that reviewer first again. (this space\'s setting)',
+      reviewerLineFor(CODEX_WORDS, q.id, 'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (its default model and effort) instead for that round only, and say in your summary that you did.', "(this space's setting)"),
     )
     // the backup's model is a line of the same block too, read where it is set
     expect(w.settings.set('reviewer.fallbackModel', 'claude-sonnet-5-5', { space: p.name }).ok).toBe(true)
@@ -77,7 +77,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     // (no reviewer.agent of this space's own in this test, so the line carries no mark)
     expect(w.settings.set('reviewer.fallback', 'off', { space: p.name }).ok).toBe(true)
     expect(w.engine.retuneReviewers({ space: p.name })).toMatchObject({ changed: 1 })
-    expect(reviewerOf(q.desc)).toBe(CODEX_PLAIN)
+    expect(reviewerOf(q.desc)).toBe(codexLine(q.id))
   })
 
   test('a backup reviewer is not in the line while Review is off in the brief, and comes back with it on', async () => {
@@ -91,7 +91,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     expect(w.settings.set('reviewer.fallback', 'claude', { space: p.name }).ok).toBe(true)
     w.engine.retuneReviewers({ space: p.name })
     expect(reviewerOf(q.desc)).not.toContain('review with')
-    expect(q.desc).toContain(`${CODEX_PLAIN}\n`)
+    expect(q.desc).toContain(`${codexLine(q.id)}\n`)
   })
 
   test('running, asking, archived and done tasks keep their reviewer and their brief', async () => {
@@ -131,7 +131,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     expect(r).toMatchObject({ changed: 1, spaces: [{ name: plain.name, on: { kind: 'pi' }, changed: 1 }] })
     w.engine.retuneReviewers({ key: 'reviewer.agent' })
     expect(moved.reviewer).toMatchObject({ kind: 'pi' })
-    expect(reviewerOf(moved.desc)).toBe("- Reviewer: a headless pi or a pi subagent (its default model and effort). (your setting for every machine)")
+    expect(reviewerOf(moved.desc)).toBe(piLine(moved.id, '(your setting for every machine)'))
     expect([kept.reviewer, kept.desc]).toEqual([{ kind: 'codex' }, keptBefore])
   })
 
@@ -140,12 +140,12 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     const p = await w.places.add(repo(), 'rv-pinned')
     const pinned = w.engine.add({ project: p.name, title: 'Chosen', desc: 'Add a.txt.', by: 'test', reviewer: { kind: 'codex' } })
     expect(pinned.reviewerChosen).toBe(true)
-    expect(reviewerOf(pinned.desc)).toBe('- Reviewer: a headless Codex or a Codex subagent (its default model and effort). (set by coordinator for this task)')
+    expect(reviewerOf(pinned.desc)).toBe(codexLine(pinned.id, '(set by coordinator for this task)'))
     expect(w.settings.set('reviewer.agent', 'pi', { space: p.name }).ok).toBe(true)
     expect(w.engine.retuneReviewers({ space: p.name })).toMatchObject({ changed: 1, pinned: 1, same: 0 })
     expect(pinned.reviewer).toMatchObject({ kind: 'pi' })
     expect(pinned.reviewerChosen).toBeUndefined()
-    expect(reviewerOf(pinned.desc)).toBe(PI_LINE)
+    expect(reviewerOf(pinned.desc)).toBe(piLine(pinned.id))
   })
 
   test('a scheduled task builds its brief at its time from Settings: it follows, and a reviewer task add gave it goes', async () => {
@@ -185,7 +185,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     expect(w.engine.retuneReviewers({ space: p.name })).toMatchObject({ changed: 1, spaces: [{ name: p.name, changed: 1 }] })
     // nothing reaches its agent now, and nothing starts it
     expect([w.sent.length, w.started.length]).toEqual([sentBefore, startedBefore])
-    expect(t.reviewerNote).toBe(reviewerChangedLine(reviewerLine({ kind: 'pi' })))
+    expect(t.reviewerNote).toBe(reviewerChangedLine(reviewerLine({ kind: 'pi' }, undefined, t.id)))
     expect(t.reviewerNote).toContain('Your reviewer changed while you waited')
     expect(w.posted.some((x) => x.key === `${t.id}/Agent` && x.card?.text === 'Reviewed by pi: its agent is told at its go')).toBe(true)
     expect(w.engine.statusOf(t)).toBe('todo')
@@ -195,7 +195,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     await until(() => w.sent.some((s) => s.key === `${t.id}/Agent` && s.text.includes('Your reviewer changed')))
     const go = w.sent.filter((s) => s.key === `${t.id}/Agent`).at(-1)!.text
     expect(go).toContain('Go: you were started now')
-    expect(go).toContain(reviewerChangedLine(reviewerLine({ kind: 'pi' })))
+    expect(go).toContain(reviewerChangedLine(reviewerLine({ kind: 'pi' }, undefined, t.id)))
     expect(t.reviewerNote).toBeUndefined()
   })
 
@@ -212,7 +212,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     await w.engine.tell(t.id, 'Please go ahead.')
     const said = w.sent.filter((s) => s.key === `${t.id}/Agent`).at(-1)!.text
     expect(said.startsWith('Please go ahead.')).toBe(true)
-    expect(said).toContain(reviewerChangedLine(reviewerLine({ kind: 'pi' })))
+    expect(said).toContain(reviewerChangedLine(reviewerLine({ kind: 'pi' }, undefined, t.id)))
     expect(t.reviewerNote).toBeUndefined()
     // a message starts it: from here it is at work, so the next change waits for a To do again
     expect(w.engine.statusOf(t)).toBe('work')
@@ -228,11 +228,11 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     w.engine.todo(t.id)
     expect(w.settings.set('reviewer.agent', 'pi', { space: p.name }).ok).toBe(true)
     expect(w.engine.retuneReviewers({ space: p.name })).toMatchObject({ changed: 1 })
-    expect(t.reviewerNote).toBe(reviewerChangedLine(reviewerLine({ kind: 'pi' })))
+    expect(t.reviewerNote).toBe(reviewerChangedLine(reviewerLine({ kind: 'pi' }, undefined, t.id)))
     // the same CLI reads its brief from its session: it is told the new line in its restart message
     await w.engine.restart(t.id, { kind: 'claude' })
     const again = w.started.filter((s) => s.key === `${t.id}/Agent`).at(-1)!
-    expect(again.first).toContain(reviewerChangedLine(reviewerLine({ kind: 'pi' })))
+    expect(again.first).toContain(reviewerChangedLine(reviewerLine({ kind: 'pi' }, undefined, t.id)))
     expect(t.reviewerNote).toBeUndefined()
 
     // a change again, then a restart on another CLI: its brief (read as it is now) has the line, so no note is owed
@@ -242,7 +242,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     expect(t.reviewerNote).toBeDefined()
     await w.engine.restart(t.id, { kind: 'pi' })
     const moved = w.started.filter((s) => s.key === `${t.id}/Agent`).at(-1)!
-    expect(moved.first).toContain(CODEX_PLAIN)
+    expect(moved.first).toContain(codexLine(t.id))
     expect(moved.first).not.toContain('Your reviewer changed')
     expect(t.reviewerNote).toBeUndefined()
   })
@@ -258,7 +258,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     expect(w.engine.retuneReviewers({ space: p.name })).toMatchObject({ changed: 1 })
     expect(held.reviewerNote).toBeUndefined()
     expect(w.sent.some((s) => s.key === `${held.id}/Agent`)).toBe(false)
-    expect(reviewerOf(held.desc)).toBe(PI_LINE)
+    expect(reviewerOf(held.desc)).toBe(piLine(held.id))
   })
 
   test('a task queued after another with no agent yet: its brief only, and its go is the start', async () => {
@@ -272,16 +272,16 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     expect(w.settings.set('reviewer.agent', 'pi', { space: p.name }).ok).toBe(true)
     expect(w.engine.retuneReviewers({ space: p.name })).toMatchObject({ changed: 1, running: 1 })
     expect(after.reviewerNote).toBeUndefined()
-    expect(reviewerOf(after.desc)).toBe(PI_LINE)
+    expect(reviewerOf(after.desc)).toBe(piLine(after.id))
   })
 })
 
 describe('the brief helpers', () => {
-  const brief = 'Add a.txt.\n\nSettings: (from shepherdr show; where the brief above says otherwise, it wins)\n- Review: on. Have your change reviewed by fresh eyes before it merges.\n- Reviewer: a headless Codex or a Codex subagent (its default model and effort).\n- Merge: on its own.'
+  const brief = `Add a.txt.\n\nSettings: (from shepherdr show; where the brief above says otherwise, it wins)\n- Review: on. Have your change reviewed by fresh eyes before it merges.\n${codexLine('HB-1')}\n- Merge: on its own.`
 
   test('a Reviewer line is found by its label, in the block only, and the rest comes back as it is', () => {
-    const r = { reviewer: { kind: 'pi' }, review: true }
-    expect(rebriefReviewer(brief, r)).toBe(brief.replace('a headless Codex or a Codex subagent (its default model and effort).', 'a headless pi or a pi subagent (its default model and effort).'))
+    const r = { id: 'HB-1', reviewer: { kind: 'pi' }, review: true }
+    expect(rebriefReviewer(brief, r)).toBe(brief.replace(codexLine('HB-1'), piLine('HB-1', '')))
     // no block: the words come back as they are
     expect(rebriefReviewer('Just words: - Reviewer: nothing here.', r)).toBe('Just words: - Reviewer: nothing here.')
     // a block with no Reviewer line: nothing to say, nothing changed
@@ -298,10 +298,11 @@ describe('the brief helpers', () => {
 
   test('the line says the backup reviewers only where the block has Review on', () => {
     const fallback = [{ kind: 'claude' }]
-    const on = rebriefReviewer(brief, { reviewer: { kind: 'pi' }, fallback, review: false })
-    expect(on).toContain('a headless pi or a pi subagent (its default model and effort). If that reviewer cannot run at all')
-    const off = rebriefReviewer(brief.replace('- Review: on.', '- Review: off.'), { reviewer: { kind: 'pi' }, fallback, review: true })
-    expect(off).toContain('- Reviewer: a headless pi or a pi subagent (its default model and effort).\n')
+    const on = rebriefReviewer(brief, { id: 'HB-1', reviewer: { kind: 'pi' }, fallback, review: false })
+    expect(on).toContain('a headless pi or a pi subagent (its default model and effort). Each round, run `shepherdr review HB-1` first')
+    expect(on).toContain('If that reviewer cannot run at all')
+    const off = rebriefReviewer(brief.replace('- Review: on.', '- Review: off.'), { id: 'HB-1', reviewer: { kind: 'pi' }, fallback, review: true })
+    expect(off).toContain(`${piLine('HB-1', '')}\n`)
     expect(briefReview(off)).toBe(false)
     expect(briefReview('no block')).toBeUndefined()
   })

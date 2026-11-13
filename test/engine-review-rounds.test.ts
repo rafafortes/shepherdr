@@ -18,9 +18,9 @@ describe('review rounds a coordinator may add', () => {
     const t = await twoRounds(w, 'granted')
     // the rounds its brief said, and each one its agent starts is counted
     expect(t.rounds).toBe(2)
-    expect(w.engine.reviewRound(t.id)).toEqual({ round: 1, rounds: 2 })
-    expect(w.engine.reviewRound(t.id)).toEqual({ round: 2, rounds: 2 })
-    expect(() => w.engine.reviewRound(t.id)).toThrow(`All 2 of ${t.id}'s review rounds are used`)
+    expect(await w.engine.reviewRound(t.id)).toMatchObject({ round: 1, rounds: 2 })
+    expect(await w.engine.reviewRound(t.id)).toMatchObject({ round: 2, rounds: 2 })
+    await expect(w.engine.reviewRound(t.id)).rejects.toThrow(`All 2 of ${t.id}'s review rounds are used`)
 
     const r = await w.engine.reviewMore(t.id, t.project)
     expect(r).toEqual({ rounds: 3 })
@@ -31,19 +31,19 @@ describe('review rounds a coordinator may add', () => {
     expect(w.sent.at(-1)!.text).toContain('one review round: 3 in all')
     expect(w.posted.at(-1)!.card!.text).toContain('one review round')
     // the added round is the last: counted, then all of them are used again
-    expect(w.engine.reviewRound(t.id)).toEqual({ round: 3, rounds: 3 })
-    expect(() => w.engine.reviewRound(t.id)).toThrow(`All 3 of ${t.id}'s review rounds are used`)
+    expect(await w.engine.reviewRound(t.id)).toMatchObject({ round: 3, rounds: 3 })
+    await expect(w.engine.reviewRound(t.id)).rejects.toThrow(`All 3 of ${t.id}'s review rounds are used`)
   })
 
   test('refused a second time, before or after the round it added is used', async () => {
     const w = world()
     const t = await twoRounds(w, 'granted-once')
-    w.engine.reviewRound(t.id)
-    w.engine.reviewRound(t.id)
+    await w.engine.reviewRound(t.id)
+    await w.engine.reviewRound(t.id)
     await w.engine.reviewMore(t.id, t.project)
     // one, ever: asked again while its added round is still unused, and after it is used and they are all gone again
     await expect(w.engine.reviewMore(t.id, t.project)).rejects.toThrow('already added its one more review round')
-    expect(w.engine.reviewRound(t.id)).toEqual({ round: 3, rounds: 3 })
+    expect(await w.engine.reviewRound(t.id)).toMatchObject({ round: 3, rounds: 3 })
     await expect(w.engine.reviewMore(t.id, t.project)).rejects.toThrow('already added its one more review round')
     expect(t.reviewsAdded).toBe(1)
     expect(w.engine.roundsOf(t)).toBe(3)
@@ -53,7 +53,7 @@ describe('review rounds a coordinator may add', () => {
     const w = world()
     const t = await twoRounds(w, 'before-they-are-used')
     await expect(w.engine.reviewMore(t.id, t.project)).rejects.toThrow(`has used 0 of 2 review rounds; it takes one more only once they are all used (its agent counts each round: shepherdr review ${t.id})`)
-    w.engine.reviewRound(t.id)
+    await w.engine.reviewRound(t.id)
     await expect(w.engine.reviewMore(t.id, t.project)).rejects.toThrow(`has used 1 of 2 review rounds`)
     expect(t.reviewsAdded).toBeUndefined()
     expect(w.engine.roundsOf(t)).toBe(2)
@@ -62,8 +62,8 @@ describe('review rounds a coordinator may add', () => {
   test("refused from the task's own agent, its reviewer, or another space's coordinator", async () => {
     const w = world()
     const t = await twoRounds(w, 'not-from-the-worker')
-    w.engine.reviewRound(t.id)
-    w.engine.reviewRound(t.id)
+    await w.engine.reviewRound(t.id)
+    await w.engine.reviewRound(t.id)
     for (const from of [`${t.id}/Agent`, `${t.id}/Reviewer`]) await expect(w.engine.reviewMore(t.id, from)).rejects.toThrow('never its own agent')
     await expect(w.engine.reviewMore(t.id, 'p:elsewhere:other')).rejects.toThrow(`Only ${w.places.nameOf(t.project)}'s coordinator`)
     expect(t.reviewsAdded).toBeUndefined()
@@ -76,8 +76,8 @@ describe('review rounds a coordinator may add', () => {
   test('a task that is done needs no more review', async () => {
     const w = world()
     const t = await twoRounds(w, 'already-done')
-    w.engine.reviewRound(t.id)
-    w.engine.reviewRound(t.id)
+    await w.engine.reviewRound(t.id)
+    await w.engine.reviewRound(t.id)
     t.merged = true
     await expect(w.engine.reviewMore(t.id, t.project)).rejects.toThrow('needs no more review')
   })

@@ -8,7 +8,7 @@
   or default for the CLI's own; effort: default, lowest, low, medium, high, xhigh or max, each CLI taking it its own
   way, and in words on screen — Extra high for xhigh) and the backup agents that take over when a task's or a
   coordinator's agent can't go on, whether one of those is told when its primary answers again, when Done tasks archive
-  themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits and each space's cap on its working tasks, the idle browser, dictation, Notifications
+  themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, each space's cap on its working tasks and the most agents at once per provider or model, the idle browser, dictation, Notifications
   and Voice. Notifications gathers scoped delivery rules and device enrolment; device delivery is Everywhere. Space menus still offer Notify. Its
   defaults are set Everywhere, for a machine or for a space (`shepherdr set <key> <value> [--machine | --space NAME]`, from any machine);
   the most specific one set wins. Editing above the content names the scope; its searchable hierarchy handles many machines and spaces. Values set here are highlighted, with their inherited value, source and Reset beside them. And, kept on each device, its Appearance: System (the device's own light
@@ -83,6 +83,55 @@
   than 9 in all. A held task of a space at its cap reads `Waiting for a free slot of <space>` and the other spaces'
   tasks start past it; a first in line does not pass the cap either, and the way back honours it too. What waits and
   why is in [tasks](tasks.md) and [machines](machines.md).
+- **Most agents at once per provider or per model** (`models.maxAtOnce`, the Machine section, under Max tasks working at
+  once; off by default) caps how many of this machine's agents run on one provider or one model. It is a text, one entry
+  per pattern: `spark=4, radeon=1` caps every model of `spark` at 4 and every model of `radeon` at 1, and
+  `anthropic/claude-opus-5-5=2` caps one model (a provider is the part of a model's key before its slash: `spark`
+  for `spark/qwen3.8-flash-next-mlx4-mtp-tensorfold`, `anthropic` for Claude Code's models, `openai` for Codex's). The
+  DGX Spark takes four requests at once, so `spark=4` is the cap that keeps Shepherdr from sending it a fifth. It has
+  **two scopes, both applied** (Settings → Space, next to Max tasks of this space working at once; Everywhere, this machine,
+  or one space). The machine's total is the value at this machine or Everywhere: it counts every space's runs together.
+  A space's value is its **sub-limit**: its own runs only, inside the machine's total, and it never replaces the total
+  (a space with no value of its own reads the machine's, the same entries). `spark=4` at the machine and `spark=2` for
+  `lyvora-app` means the Spark takes at most four in all, and lyvora-app at most two of them. Off for a space is no
+  sub-limit of its own; the total still holds for it. Its text is checked when
+  it is set: a pattern is a provider or a model key in lowercase, a number from 1 to 200 is needed, a pattern may not
+  repeat, and at most 20 entries (a refusal says which). Values are kept as written, lowercased.
+  - **What it holds.** A task whose agent would run on a capped model waits as Queued, held for a free slot of it (`Waiting
+    for a free slot of spark (4 of 4 at once)`), and the other tasks start past it; the held ones start in turn as the
+    model frees up. A model's own entry sets its limit, and the provider's entry still holds the provider's total: with
+    `spark=4` and `spark/qwen…=2`, the qwen model has at most 2 of its own, and the Spark at most 4 in all, whatever the
+    mix. A first in line passes neither.
+  - **What counts.** The agents of this machine that hold a slot now (its working, starting or waiting-on-you tasks, as the
+    machine's own limit counts them), each on the model its agent runs (its live agent's model, else the model it starts
+    on), this machine's coordinators that are working on a model right now, and the advisor's headless runs while each one
+    runs (a slot of the model it runs on, held for the whole run and given back when it ends, even on a failure). A merge
+    waiting in line or in its gate holds no slot, so it counts nothing. A round's reviewer counts while the round runs: a
+    lease from `shepherdr review <id>` until `shepherdr review <id> --done` (see [tasks](tasks.md)). **Not counted yet:**
+    any request that comes from outside Shepherdr (another app or a script on the same server): Shepherdr cannot see
+    those, so a server that serves them too needs a lower cap than its own work alone would.
+  - **Where a task starts.** A task starts on the first harness of its chain that is not out and has room under every entry
+    that covers it: its own agent first, then its backups in the order its coordinator's `--set` keeps them (Settings'
+    `task.fallback…` otherwise). A primary at its cap starts the task on Backup 1 (a card in its chat: `Started on Codex:
+    spark is at its limit (1 of 1 at once)`), and the agent is told it runs on a backup with the same brief. Once started,
+    it stays on that backup while it works; when it goes idle and its primary has room (and backup.watchReturn is go
+    back), it goes back to its primary, as the way back does. Every harness full or out: the task is held, its row naming
+    the chain (its row, short: `Waiting: spark 1/1 · openai out`; the row's title and its card name each harness in words, `Codex (default)`, `pi · spark/…`), and release starts it on the first that frees.
+    A cut-off task's takeover skips the full backups, and waits for one with room the same way.
+  - **Coordinators are never held.** A coordinator's first start takes the first harness of its chain with room. When every
+    one is full or out it starts on its primary anyway, and its chat says it runs past the cap. A coordinator's backup takeover
+    takes the first backup with room, or the first one past the cap (its chat says so). Working coordinators count toward
+    the caps while they work. A coordinator a cap started on a backup goes back to its primary the same way as a task (kept
+    in memory: a restart of Shepherdr leaves it where it is until it is restarted).
+  - **Where it is read.** Models → Summary shows each provider and model row as `2 of 4 at once` (its cap, set here),
+    `2 at once · no cap`, or `1 at once · no cap of its own` (the provider's entry holds it); its cell sets the cap at this
+    machine, Everywhere, or This space (a list of the spaces). A space that sets its own sub-limit for the row shows it
+    under the row as a line of its own: `lyvora-app: 1 of 2 at once`, the runs of that space it counts, and the line opens
+    the editor at that space (Clear here takes that space's value back). The line `shepherdr show` prints it as kept.
+  - **From the command.** `shepherdr set models.maxAtOnce "spark=4, radeon=1" --machine` (or Everywhere without `--machine`).
+    `shepherdr set models.maxAtOnce off --machine` gives this machine no cap at all, whatever Everywhere says, and
+    `shepherdr unset models.maxAtOnce --machine` takes this machine's value away, back to Everywhere's. Profiles hold it
+    with the limits.
 - Secrets (How Shepherdr runs) holds the keys, tokens and passwords agents use, by name: add, replace and remove them
   in masked boxes, Everywhere, for a machine or for a space; the most specific one wins. An agent that needs one asks
   with `shepherdr secret ask NAME --why "…"`: its chat shows a masked box, and the agent is told by name once it is
@@ -161,7 +210,8 @@ of this machine's agents (`usage.json` in Shepherdr's home, read from the agents
 - a provider that **ran out twice in 7 days** (a note);
 - a window of a provider **at or over its warning share** (`quota.alertAt`) that has not refilled: what is left, when it
   refills, and the two cells that use the provider most, the top one under Change… (a note; a risk at 100 %);
-- **several working agents on one local model**: counted, since Shepherdr sets no limit for a local model yet (a note).
+- **several working agents on one local model with no cap**: counted, and a note asks for a cap (`models.maxAtOnce`; Change… opens
+  its cell). At its cap, a note says which tasks wait for the model (or its provider), and how many run there now.
 
 **What is an estimate.** The tokens and the calls are what the logs say each model call used. pi's cost is its own catalog
 estimate for each call, shown as "≈ $… estimate": it is never a bill, and a provider whose logs carry no cost shows none.
@@ -180,7 +230,7 @@ ISO time is shown in this machine's time, with its zone name.
 ### Profiles
 
 A **profile** is a named snapshot of the models of this machine's levels: Everywhere, this machine and each space (the home
-space too), every role's CLI, model and effort, backups included. Saved with limits, it also holds Max tasks and Merge
+space too), every role's CLI, model and effort, backups included. Saved with limits, it also holds Max tasks, the most at once per model (this machine's or Everywhere's) and Merge
 train. Each key keeps its own value at each level, and **not set here** where a level sets nothing, so applying a profile
 restores exactly what was saved. Nothing else is copied: the rest of Settings is left as it is.
 
@@ -207,7 +257,7 @@ For example, a night setup for the local model, and a day setup for the cloud on
 ```sh
 shepherdr profile save day                  # by day: the cloud models, backups on
 # tonight, in Settings → Models or with shepherdr set: tasks on the local Spark model, no backups, a lower cap
-shepherdr profile save night --limits       # the models and Max tasks / Merge train
+shepherdr profile save night --limits       # the models and Max tasks / the most at once per model / Merge train
 shepherdr profile apply night --apply-waiting
 # in the morning
 shepherdr profile apply day --apply-waiting
@@ -454,6 +504,15 @@ the question about the tasks already created never comes up for it (`shepherdr s
   is not sure of, and anything that would decide a permission, deleting or losing work, force-pushing, changing
   Settings, secrets or credentials, merging past "ask me first", spending money or a paid plan, or what touches a live
   site or other people.
+- **Caps.** The advisor's runs count toward models.maxAtOnce like a task's: the first harness of its chain (its primary,
+  then its backups in order) with room under the caps and not out runs the question, and holds a slot of its model for
+  the run. A run that gives no answer falls to the next harness that has room, each harness once for that question. When
+  every harness left is full or out, nothing runs: the question **waits**, and its card names each one that is full or
+  out, in words (`The advisor waits: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (4 of 4 at once), Codex (default) (out until 17:00)`).
+  It is asked again by itself as soon as a harness has room (looked at with every health look, and when an advisor run
+  ends), and the human's Ask the advisor asks it again at once. A question answered meanwhile is never answered by the
+  advisor: it is closed as yours. The wait is not a time limit: the advisor's own timing (Answers for you after) decided
+  when it was first asked, and the wait goes on from there.
 - **How it runs.** One headless run per question, read only: Claude Code with Read, Grep and Glob only, pi with its
   read, grep, find and ls tools, Codex in its read-only sandbox; no MCP servers, no session kept, no agent's secret,
   in the task's worktree (a coordinator's folder for its own questions), for at most eight minutes. It reads the

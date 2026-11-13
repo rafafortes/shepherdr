@@ -2,6 +2,7 @@
 // A place's mode switches from the + menu of its coordinator's chat.
 import { describe, expect, test } from 'bun:test'
 import { DemoWorld } from '../server/demo/world.ts'
+import { CODEX_WORDS, reviewerLineFor } from './reviewer-line.ts'
 
 /** the demo agent answers a moment later: wait for it, up to 5s */
 const until = async (f: () => boolean) => {
@@ -196,7 +197,7 @@ describe('a reviewer changed in Settings, and the demo tasks waiting for it', ()
     // a dry run changes nothing
     expect(task('HP-203').desc).toBe(queued)
     expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place })).toMatchObject({ ok: true, changed: 1 })
-    expect(task('HP-203').desc).toBe(queued.replace('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).', '- Reviewer: a headless Codex or a Codex subagent (model gpt-6-sol, its default effort). (this space\'s setting)'))
+    expect(task('HP-203').desc).toBe(queued.replace(reviewerLineFor(CODEX_WORDS, 'HP-203'), reviewerLineFor('a headless Codex or a Codex subagent (model gpt-6-sol, its default effort).', 'HP-203', '', "(this space's setting)")))
     expect(task('HP-202').desc).toBe(running)
     // the next answer finds it the same
     expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place, dry: true })).toMatchObject({ changed: 0, same: 1, follow: 1, running: 2 })

@@ -43,6 +43,13 @@ export function harnessWords(h: Harness) {
   return bits.length ? `${name(h.kind)} (${bits.join(', ')})` : name(h.kind)
 }
 
+/** a harness as a chain lists it, in words: `Codex (default)`, `pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold`; a model
+ *  key (openai/unknown for Codex's default) is never shown */
+export function chainWords(h: Harness) {
+  const m = modelOf(h)
+  return m ? `${name(h.kind)} · ${findModel(h.kind, m)?.label ?? m}` : `${name(h.kind)} (default)`
+}
+
 /**
  * What a chat's hint says, by the first thing that differs: its agent runs on `on`, Settings now say `want`. Nothing
  * while they agree, or while Settings say what they said when it last started on them (`set`): a pick of its own (task

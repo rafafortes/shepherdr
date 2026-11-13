@@ -28,12 +28,14 @@ import { launchesAgents, refusedLaunch } from '../launch-policy.ts'
 import { fromAgentLine } from '../chatlines.ts'
 import type { Chats } from '../chats.ts'
 import { HOST, placeId, type Places, type Space } from '../places.ts'
-import { type BaseMoved, baseMovedCard, baseMovedLine, privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, wentBackCardWords, restartLine, type BackWhy, resumedLine, settingsBlock, prNewsLine, queuedLine, rebriefReviewer, briefReview, reviewerChangedLine, reviewerLine, splitBrief, taskFirst, taskPrompt } from '../prompts.ts'
+import { type BaseMoved, baseMovedCard, baseMovedLine, privatePrompt, freshLine, goLine, handOverLine, backupKeptLine, backupCardWords, wentBackCardWords, restartLine, type BackWhy, resumedLine, settingsBlock, prNewsLine, queuedLine, rebriefReviewer, briefReview, reviewerChangedLine, reviewerLine, splitBrief, taskFirst, taskPrompt, reviewerWords } from '../prompts.ts'
 import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
 import { findModel, knowsModels } from '../models.ts'
-import { fitHarness, harnessWords, recentChat, sameHarness } from '../restart.ts'
+import { keyOf } from '../models-summary.ts'
+import { choose, waitShort, waitWords, type Blocked, type Choice, type Option, type Run } from './choose.ts'
+import { chainWords, fitHarness, harnessWords, recentChat, sameHarness } from '../restart.ts'
 import * as G from './git.ts'
 import { Worktrees, type HerdrSpaces, type Made } from './worktrees.ts'
 
@@ -95,7 +97,10 @@ export interface TaskRec {
   /** held by Shepherdr until this machine has room for it (Settings → the machine's limits): why it waits (all its
    *  slots are taken, or the machine is too loaded) and since when. go: the message its agent gets then, and why it
    *  starts (none: it has no agent yet, and starts then on its brief). Anything you write to it lets it go at once */
-  held?: { why: HeldWhy; since: number; go?: string; goWhy?: string; plain?: boolean }
+  held?: { why: HeldWhy; since: number; go?: string; goWhy?: string; plain?: boolean; takeover?: { why: string; step: number; lasting?: boolean } }
+  /** a start, not a cut-off, put it on a backup of its chain: its primary was at its cap (or out), and this is that backup
+   *  (its place in the chain). The way back moves it to its primary once idle and the primary has room (source.ts backFromCap) */
+  onBackup?: { step: number; kind: string; at: number }
   /** shepherdr task stop closed its agent and space; writing to it again clears it */
   stopped?: boolean
   /** the words of a start that never became a turn (start.ts), kept so a restart still knows which trouble a turn, or a
@@ -138,6 +143,9 @@ export interface TaskRec {
   rounds?: number
   /** review rounds its agent has counted (shepherdr review): what the brief's at most so many are kept by */
   reviews?: number
+  /** its agent asked for a round while every reviewer of its chain was full or out, and was told to end its turn: the
+   *  round is counted and its reviewer named once one is free (retryReviews); cleared when its step is over */
+  reviewWait?: { since: number }
   /** rounds its coordinator added past those (shepherdr task review-more): one at most, and never by its own agent */
   reviewsAdded?: number
   /** what its agent last said of its own progress (shepherdr status): kept while it works or waits on you */
@@ -283,6 +291,20 @@ export function fitStatus(text: string) {
  * The report a task shows: while it works, its minutes left count down from what its agent said; while it waits on
  * you, all of it stays as it was. Nothing once its job is over (Ready, Done, To do, Queued).
  */
+/** what a task started on a backup by the caps is told after its brief: the same work, on the model it runs now */
+const capLine = (on: string) => `Shepherdr started you on ${on}: your own model is at its limit or out, so the first backup with room took the work. The work is the same; carry on with your brief.`
+
+/** the harness a backup starts on: its own model and effort, else the model the task's agent ran on, when its CLI has it */
+export function backupHarness(to: { kind: string; model?: string; effort?: string }, own: Harness): Harness {
+  return { kind: to.kind, model: to.model ?? (own.model ? findModel(to.kind, own.model)?.id : undefined), effort: to.effort ?? own.effort }
+}
+
+/** a capped or out harness in words for a card: `spark (4 of 4 at once)`, `commandcode is out until 17:00` */
+export function capWords(b: Blocked<unknown>, shown = (s: string) => s) {
+  if (b.why === 'out') return `${b.name} is out${b.until ? ` until ${b.until}` : ''}`
+  return `${b.name}${b.cap?.scope === 'space' ? ` in ${shown(b.cap.space ?? '')}` : ''} is at its limit (${b.cap?.count} of ${b.cap?.max} at once)`
+}
+
 export function reportOf(r: Reported | undefined, status: TaskStatus, now = Date.now()): Report | undefined {
   if (!r || (status !== 'work' && status !== 'need')) return undefined
   const spent = ((r.pausedAt ?? now) - r.at) / 60000
@@ -447,12 +469,28 @@ const trainLog = (line: string) => console.error(`shepherdr: ${line}`)
 /** up to three paths, then how many more: `a.md, b.md, c.md and 2 more` */
 const pathList = (files: string[]) => (files.length > 3 ? `${files.slice(0, 3).join(', ')} and ${files.length - 3} more` : files.join(', '))
 
-/** the line a held task shows */
 /** why a task waits to start: its slots are taken, the machine is busy, every model of its space ran out (a start
  *  would only be cut off as well), its tasks that were cut off go back to work first (source.ts, return.ts), or its
  *  space's own cap (space.maxTasks, inside the machine's) is full: another space's task may still start */
-export type HeldWhy = 'slots' | 'machine' | 'models' | 'resume' | 'space'
-export const HELD = { slots: 'Waiting for a free slot', machine: 'Waiting for the machine', models: 'Waiting: every model ran out', resume: 'Waiting: cut-off tasks go back to work first', space: 'Waiting for a free slot of its space' } as const
+export type HeldWhy = 'slots' | 'machine' | 'models' | 'resume' | 'space' | 'model'
+/** a reviewer of a task's chain: its step (0: its own reviewer, n: its backup n) and its harness */
+export interface ReviewStep {
+  n: number
+  h: Harness
+}
+
+/** a round the agent counted, and the reviewer it runs with (leased until --done): `why` is the primary's block, when the
+ *  round runs on a backup */
+export interface Round {
+  round: number
+  rounds: number
+  reviewer: Harness
+  n: number
+  key: string
+  why?: Blocked<ReviewStep>
+}
+
+export const HELD = { slots: 'Waiting for a free slot', machine: 'Waiting for the machine', models: 'Waiting: every model ran out', resume: 'Waiting: cut-off tasks go back to work first', space: 'Waiting for a free slot of its space', model: 'Waiting for a free slot of its model' } as const
 
 /** queued tasks are first looked at once herdr has told which agents are alive: a go sent before would start a second */
 const RECHECK_FIRST = 15_000
@@ -490,6 +528,13 @@ const CHECKS_SHOW = 90_000
  *  moves a command to the background. The shepherdr command itself gives up a little later (server/cli.ts, the
  *  helper's shepherdr) */
 export const MERGE_DEADLINE = 90_000
+/** how long `shepherdr review` waits for a free reviewer before it asks its agent to end its turn (as the merge waits) */
+export const REVIEW_DEADLINE = 90_000
+/** how often that wait looks for a free reviewer */
+const REVIEW_POLL = 2_000
+/** how long a round's reviewer may hold its slot: 45 minutes from the round's count (the headless reviews the brief allows
+ *  run minutes: the skill's timeout is 9), and as long after its agent's turn ended without `shepherdr review --done` */
+export const REVIEW_TIMEOUT = 45 * 60_000
 
 /** done tasks' pull requests are looked at for news (failed checks, comments) this long after starting, then this often */
 const WATCH_FIRST = 30_000
@@ -657,6 +702,20 @@ export class Engine extends Emitter<Events> {
   private failedStarts = new Map<string, { at: number; why: string }>()
   /** a CLI is installed here (a test says) */
   installed = (kind: string) => !!Bun.which(kind)
+  /** the provider of a model key is out now (its run-outs, or the return watch's outage: source.ts): a harness out is not
+   *  chosen, the next of its chain is (choose.ts). Unset: nothing is out */
+  outNow?: (key: string) => { until?: string } | undefined
+  /** the headless runs (the advisor's, the reviewer's) that hold a slot while they run: lease, unlease */
+  private leased = new Map<string, Run>()
+  /** the rounds running now: when each was counted, and since when its agent's turn has not been working */
+  private reviewing = new Map<string, { since: number; idle?: number }>()
+  /** tasks whose `shepherdr review` is waiting for a reviewer now (retryReviews leaves them to it) */
+  private reviewLive = new Set<string>()
+  /** how long `shepherdr review` waits for a free reviewer (tests shorten it), how often it looks, and how long a round
+   *  holds its reviewer (REVIEW_TIMEOUT) */
+  reviewDeadline = REVIEW_DEADLINE
+  reviewPoll = REVIEW_POLL
+  reviewTimeout = REVIEW_TIMEOUT
   /** how loaded this machine is now: over a start limit (health.ts busy), and whether herdr answers; none until first
    *  measured, which holds nothing by load */
   machine?: () => { busy?: 'cpu' | 'memory'; herdr: boolean } | undefined
@@ -841,7 +900,7 @@ export class Engine extends Emitter<Events> {
    * the second line of a list row: what the status is about, in one short standard line, never the brief. While it
    * works, its agent's own status line (shepherdr status) takes its place on screen and in the CLI (source.ts).
    */
-  subOf(t: TaskRec, status = this.statusOf(t)): string {
+  subOf(t: TaskRec, status = this.statusOf(t), full = false): string {
     const key = this.key(t)
     const s = (() => {
       // a few words, never the summary: that is in its chat's card
@@ -855,7 +914,7 @@ export class Engine extends Emitter<Events> {
       if (t.trouble) return fitStatus(`Went wrong: ${t.trouble}`)
       // a To do row is its title alone
       if (status === 'todo') return ''
-      if (status === 'queued') return this.holding(t) ? `${t.priority ? 'First in line · ' : ''}${this.heldLabel(t)}` : this.waitLine(t)
+      if (status === 'queued') return this.holding(t) ? `${t.priority ? 'First in line · ' : ''}${this.heldLabel(t, full)}` : this.waitLine(t)
       if (status === 'need' && this.queued(t) && this.agents.status(key) !== 'blocked') return fitStatus(this.halts(t).join(' · '))
       if (status === 'need') return this.reasonOf(key) ?? NEED.reply
       // why its last merge stopped, while its agent is on it: a conflict to rebase by hand, or the gate's refusal
@@ -872,7 +931,8 @@ export class Engine extends Emitter<Events> {
       if (r?.due) return `${r.reason} · retry in ${inMins(r.due)}`
       return 'Working'
     })()
-    return s.length > 90 ? `${s.slice(0, 89).trimEnd()}…` : s
+    // the title of a cut-short row keeps the whole line (full); a row's line is kept to 90 characters
+    return s.length > 90 && !full ? `${s.slice(0, 89).trimEnd()}…` : s
   }
 
   /**
@@ -904,6 +964,7 @@ export class Engine extends Emitter<Events> {
 
   /** settle one task, then the tasks queued after others: what it did may be what one of them waits for */
   private settle(t: TaskRec) {
+    if (!this.atReviewStep(t)) this.endReview(t.id)
     this.settleOne(t)
     this.recheck()
     // what it did may free room for a held one
@@ -984,6 +1045,8 @@ export class Engine extends Emitter<Events> {
     const rec = this.agents.record(key)
     const cli = CLI_NAME[rec?.kind ?? t.agent?.kind ?? ''] ?? this.settings.get('task.agent', this.nameOf(t))
     const sub = this.subOf(t, status)
+    // a row's line may be cut short: its title names what the line says in full (a held task's whole chain)
+    const longSub = this.subOf(t, status, true)
     const doneAt = status === 'done' ? (t.doneAt ?? t.updated) : undefined
     return {
       id: t.id,
@@ -991,6 +1054,7 @@ export class Engine extends Emitter<Events> {
       status,
       place: t.project,
       sub,
+      ...(longSub !== sub ? { subTitle: longSub } : {}),
       age: age(t.archived ?? doneAt ?? (status === 'todo' || status === 'scheduled' ? t.created : t.updated)),
       doneAt,
       branch: t.branch,
@@ -1362,9 +1426,107 @@ export class Engine extends Emitter<Events> {
     if (m && (!m.herdr || (m.busy && !t?.priority))) return { why: 'machine' }
     const w = t ? this.startsWait?.(t) : undefined
     if (w && !(w === 'resume' && t?.priority)) return { why: w }
-    // a first in line passes neither: its space's cap is as much its slots as the machine's are
+    // a first in line passes neither: its space's cap is as much its slots as the machine's are, nor its model's
     const cap = t ? this.spaceCap(t) : undefined
-    return cap && cap.working >= cap.max ? { why: 'space' } : {}
+    if (cap && cap.working >= cap.max) return { why: 'space' }
+    return t && 'wait' in this.taskChoice(t) ? { why: 'model' } : {}
+  }
+
+  /** the model a task's agent runs on, as its usage is kept (keyOf): its live agent's model, else the one it starts on
+   *  (its own agent, or Settings' task agent) */
+  modelOfTask(t: TaskRec): string {
+    const key = this.key(t)
+    const rec = this.agents.record(key)
+    if (rec && this.agents.status(key) !== 'gone') return keyOf(rec.kind, rec.model)
+    const h = t.agent ?? this.settings.harness('task', this.nameOf(t))
+    return keyOf(h.kind, h.model)
+  }
+
+  /**
+   * The runs that hold a slot of models.maxAtOnce on this machine now (choose.ts counts them, each under its space): the
+   * tasks that hold a slot, each on the model it runs; the coordinators working right now; and the leases (lease). `except`:
+   * a task's own run, which it does not count against itself while it chooses; `plus`: runs started in the same pass
+   */
+  runs(except?: string, plus: Run[] = []): Run[] {
+    const out: Run[] = []
+    for (const t of this.tasks) if (t.id !== except && this.busy(t)) out.push({ key: this.modelOfTask(t), space: this.nameOf(t) ?? '', role: 'task', id: t.id })
+    for (const [key, r] of Object.entries(this.agents.records)) {
+      if (key.includes('/') || this.agents.status(key) !== 'working') continue
+      out.push({ key: keyOf(r.kind, r.model), space: this.places.space(key)?.name ?? '~', role: 'coordinator', id: key })
+    }
+    return [...out, ...this.leased.values(), ...plus]
+  }
+
+  /**
+   * A headless run (the advisor's answer, a reviewer's round) holds a slot of models.maxAtOnce while it runs: lease it
+   * before it starts, unlease it when it ends. It counts like a task's run, on its model key and its space, toward the
+   * machine's total and its space's own sub-limit (runs). `key`: the model key it runs on (keyOf).
+   */
+  lease(id: string, role: 'advisor' | 'reviewer', key: string, space: string) {
+    this.leased.set(id, { key, space, role, id })
+  }
+
+  /** the lease a headless run took is over (it ended, or it did not start) */
+  unlease(id: string) {
+    this.leased.delete(id)
+  }
+
+  /** a chain's items as the core reads them: each with its model key, and out when its provider is out now (outNow) */
+  chainOptions<T extends { h: Harness }>(items: T[]): Option<T>[] {
+    return items.map((harness) => {
+      const key = keyOf(harness.h.kind, harness.h.model)
+      const out = this.outNow?.(key)
+      return { harness, key, ...(out ? { out } : {}) }
+    })
+  }
+
+  /** the choice among a role's options for a space, under the caps as they are now (choose.ts). `except`: a task's own run,
+   *  `plus`: the runs a pass has started already */
+  decide<T>(space: string, options: Option<T>[], except?: string, plus: Run[] = []): Choice<T> {
+    return choose<T>({ space, options, runs: this.runs(except, plus), machine: this.settings.maxAtOnce(), own: this.settings.maxAtOnce(space) })
+  }
+
+  /** the backup a task is on, by its place in its chain: 0 on its primary, else the step of its takeover or its start on a
+   *  backup (whichever is the later) */
+  stepOf(t: TaskRec) {
+    return Math.max(t.tookOver ? (t.tookOver.step ?? 1) : 0, t.onBackup?.step ?? 0)
+  }
+
+  /**
+   * A task's chain as it may start now: its own agent (task add --agent, else Settings' task agent) first, then its backups
+   * in order, as its coordinator's --set keeps them (task.fallback… of the task, else its space's, machine's and Everywhere's).
+   * After a cut-off that waits for a slot (held.takeover), only the backups past the place it was cut off.
+   */
+  taskChain(t: TaskRec): { step: number; h: Harness }[] {
+    const space = this.nameOf(t) ?? ''
+    const own = t.agent ?? this.settings.harness('task', space)
+    const chain = [{ step: 0, h: own }]
+    for (const p of this.backupsFor('task', space, t.set)) if (p.to) chain.push({ step: p.n, h: backupHarness(p.to, own) })
+    const after = t.held?.takeover?.step
+    return after === undefined ? chain : chain.filter((x) => x.step > after)
+  }
+
+  /** the harness a task starts on now, the first of its chain with room under the caps and not out; or the wait, each
+   *  harness and why it cannot (choose.ts). Its own run is not held against it */
+  taskChoice(t: TaskRec, plus: Run[] = []): Choice<{ step: number; h: Harness }> {
+    return this.decide(this.nameOf(t) ?? '', this.chainOptions(this.taskChain(t)), t.id, plus)
+  }
+
+  /** the entries a task waits for, by name (a full model or provider, or one that is out): what the summary counts as held */
+  waitingFor(t: TaskRec): string[] {
+    const c = this.taskChoice(t)
+    return 'wait' in c ? c.wait.map((b) => b.name) : []
+  }
+
+  /** a wait in words for a card: `Codex (default) (4 of 4 at once), pi · spark/… (out until 17:00) — every model it may
+   *  use is full or out` */
+  capWaitLine(wait: Blocked<{ step: number; h: Harness }>[]) {
+    return `${this.waitIn(wait)} — every model it may use is full or out`
+  }
+
+  /** a chain's wait in words, each harness as its chain names it (chainWords), the spaces as they show */
+  private waitIn(wait: Blocked<{ h: Harness }>[]) {
+    return waitWords(wait, { words: (x) => chainWords(x.h), shown: (s) => this.places.shownName(s) })
   }
 
   /** a task's space's own cap on this machine (space.maxTasks), with how many of that space's tasks work now (busy, as
@@ -1377,8 +1539,14 @@ export class Engine extends Emitter<Events> {
     return { space, shown: this.places.shownName(space), max, working: this.tasks.filter((x) => this.places.space(x.project)?.name === space && this.busy(x)).length }
   }
 
-  /** a held task's line in its row: a task held by its space's cap names the space, as it shows */
-  private heldLabel(t: TaskRec) {
+  /** a held task's line in its row: a task held by its space's cap names the space, as it shows; one held for its models
+   *  names each harness of its chain, short (waitShort), and in full when `full` (the row's title) */
+  private heldLabel(t: TaskRec, full = false) {
+    if (t.held!.why === 'model') {
+      const c = this.taskChoice(t)
+      // the row is one short line (waitShort); its title, and the card, name the whole chain (full)
+      if ('wait' in c) return `Waiting: ${full ? this.waitIn(c.wait) : waitShort(c.wait, (x) => this.places.shownName(x))}`
+    }
     const cap = t.held!.why === 'space' ? this.spaceCap(t) : undefined
     return cap ? `Waiting for a free slot of ${cap.shown}` : HELD[t.held!.why]
   }
@@ -1423,12 +1591,14 @@ export class Engine extends Emitter<Events> {
     t.todo = undefined
     const id = `held:${t.id}:${Date.now()}`
     const cap = why === 'space' ? this.spaceCap(t) : undefined
+    const choice = why === 'model' ? this.taskChoice(t) : undefined
     const words = {
       slots: `waiting for a free slot (${this.slotsWords(l.max)})`,
       machine: 'waiting for the machine: it is busy',
       models: 'waiting: every model of this space ran out, so a start would only be cut off too',
       resume: 'waiting: the tasks that were cut off go back to work first',
       space: `waiting for a free slot of ${cap?.shown ?? 'its space'} (${cap?.working ?? 0} of ${cap?.max ?? 0} of its tasks working)`,
+      model: choice && 'wait' in choice ? `waiting: ${this.capWaitLine(choice.wait)}` : 'waiting for a free slot of its model',
     }[why]
     this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: words } })
     this.save()
@@ -1447,13 +1617,14 @@ export class Engine extends Emitter<Events> {
    * default): the load averages take minutes to show what a task adds. Called on each health sample and status change.
    */
   release(now = Date.now()) {
+    this.sweepReviews(now)
     if (this.releasing) return
     this.releasing = true
     try {
       for (const t of this.heldTasks()) {
         const r = this.room(t)
-        // its own space waits for its models, or its cap is full: another space's may still start
-        if (r.why === 'models' || r.why === 'resume' || r.why === 'space') {
+        // its own space waits for its models, or its cap is full, or its model's: another space's or model's may still start
+        if (r.why === 'models' || r.why === 'resume' || r.why === 'space' || r.why === 'model') {
           if (t.held!.why !== r.why) {
             t.held!.why = r.why
             this.save()
@@ -1471,7 +1642,15 @@ export class Engine extends Emitter<Events> {
         // one first in line doesn't wait for the spacing either
         if (!t.priority && !this.startsNow(now)) return
         this.lastStart = now
-        const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work', space: 'a slot of its space is free' }[t.held!.why]
+        const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work', space: 'a slot of its space is free', model: 'a slot of its model is free' }[t.held!.why]
+        // a cut-off that waited for a backup with room takes it over now, as cantGoOn would (the caps are read again there)
+        if (t.held!.takeover) {
+          const { why: cut, lasting } = t.held!.takeover
+          t.held = undefined
+          this.save()
+          this.cantGoOn(t.id, cut, lasting).catch(() => undefined)
+          continue
+        }
         if (t.held!.go) this.go(t, t.held!.go, `${t.held!.goWhy ?? why} · ${why}`, t.held!.plain)
         else {
           t.held = undefined
@@ -1773,6 +1952,14 @@ export class Engine extends Emitter<Events> {
     try {
       // a server that may start no agent makes nothing for one either: no worktree, no branch, nothing in herdr
       if (!launchesAgents()) throw refusedLaunch(this.key(t))
+      // the harness it starts on: its own, when it has room under the caps and is not out, else the first backup of its
+      // chain that has (choose.ts). Every one full or out: it is held for a slot, and nothing is made
+      const c = this.taskChoice(t)
+      if ('wait' in c) {
+        this.hold(t, 'model')
+        return
+      }
+      const { step, h } = c.harness
       const p = this.proj(t)
       const branch = branchFor(t)
       // Old records without a snapshot keep the existing fallback; new tasks snapshot at add.
@@ -1784,7 +1971,16 @@ export class Engine extends Emitter<Events> {
       })
       Object.assign(t, { branch, worktree: made.path })
       this.save()
-      await this.launch(t, this.queued(t) ? `${taskFirst(t)}\n\n${queuedLine(this.open(t), 'start', t.id)}` : taskFirst(t), made)
+      // on a backup because its primary was full or out: a card in its chat says so, and the agent is told it too
+      if (step > 0) {
+        t.onBackup = { step, kind: h.kind, at: Date.now() }
+        const card = `cap:${t.id}:${Date.now()}`
+        const why = c.skipped[0]
+        const text = `Started on ${harnessWords(fitHarness(h))}${why ? `: ${capWords(why, (x) => this.places.shownName(x))}` : ''}`
+        this.chats.post(this.key(t), { id: card, card: { id: card, task: t.id, status: 'work', text } })
+      } else delete t.onBackup
+      const first = this.queued(t) ? `${taskFirst(t)}\n\n${queuedLine(this.open(t), 'start', t.id)}` : taskFirst(t)
+      await this.launch(t, step > 0 ? `${first}\n\n${capLine(harnessWords(fitHarness(h)))}` : first, made, step > 0 ? h : undefined)
       this.briefing.add(t.id)
       clearTimeout(this.later.get(`${t.id}:brief`))
       const x = setTimeout(() => {
@@ -2017,14 +2213,14 @@ export class Engine extends Emitter<Events> {
       } else {
         const fallback = this.settings.reviewerBackups(space, t.set)
         const review = this.settings.ways(space, t.set).review
-        const desc = rebriefReviewer(t.desc, { reviewer: on, fallback, review, by: this.settings.setBy(space, t.set).reviewer })
+        const desc = rebriefReviewer(t.desc, { id: t.id, reviewer: on, fallback, review, by: this.settings.setBy(space, t.set).reviewer })
         if ((!t.reviewer || sameHarness(t.reviewer, on)) && desc === t.desc && !t.reviewerChosen) {
           out.same++
           continue
         }
         pinned = !!t.reviewerChosen
         changed = () => {
-          const line = reviewerLine(on, (briefReview(desc) ?? review) ? fallback : undefined)
+          const line = reviewerLine(on, (briefReview(desc) ?? review) ? fallback : undefined, t.id)
           t.reviewer = on
           t.desc = desc
           t.reviewerChosen = undefined
@@ -2184,7 +2380,8 @@ export class Engine extends Emitter<Events> {
         return hidden(`${taskFirst(t)}\n\n${restartLine({ from: name(from), to: words, back: !!back, ...(await this.soFar(t, key, name(from))) })}`, 'restart')
       }
       await this.launch(t, undefined, undefined, { ...h, model: h.model ?? '', effort: h.effort ?? '' }, first)
-      // a pause or a stop is over: it carries on
+      // a pause or a stop is over: it carries on; and it is no start on a backup by the caps any more
+      t.onBackup = undefined
       t.stopped = undefined
       t.paused = undefined
       t.agent = h
@@ -2237,9 +2434,9 @@ export class Engine extends Emitter<Events> {
     const ran: Harness = rec ? { kind: rec.kind, model: rec.model, effort: rec.effort } : (t.agent ?? this.settings.harness('task', space))
     // what this task keeps for itself (task add --set) first, then its space's settings, its machine's and Everywhere's:
     // the backups after the one it is on now (all of them, while none took over), the first that can go in
-    const at = t.tookOver ? (t.tookOver.step ?? 1) : 0
+    const at = this.stepOf(t)
     const later = this.backupsFor('task', space, t.set).filter((p) => p.n > at)
-    const plan = later.find((p) => p.to)
+    const own = t.agent ?? this.settings.harness('task', space)
     // waits for the human from here: one cut off for good is started again once its provider answers (return.ts). A
     // note that can't be written never changes what happens to the task
     const stuck = () => {
@@ -2252,11 +2449,23 @@ export class Engine extends Emitter<Events> {
     }
     if (!t.worktree) return this.settle(t)
     // each backup goes in once: past the last one, a takeover that keeps failing is the human's, not a loop
-    if (!plan?.to) {
+    const candidates = later.filter((p) => p.to)
+    if (!candidates.length) {
       stuck()
       return this.noBackup(key, later.find((p) => p.why)?.why)
     }
-    const to = plan.to.kind
+    // the first backup with room under the caps and not out (choose.ts); every one full or out: the task waits for a slot,
+    // and release() takes the backup over once one is free (held.takeover)
+    const c = this.decide(space ?? '', this.chainOptions(candidates.map((p) => ({ plan: p, h: backupHarness(p.to!, own) }))), t.id)
+    if ('wait' in c) {
+      this.hold(t, 'model')
+      t.held!.takeover = { why: why.charAt(0).toLowerCase() + why.slice(1), step: at, lasting }
+      this.save()
+      stuck()
+      return this.settle(t)
+    }
+    const plan = c.harness.plan
+    const to = plan.to!.kind
     // only an agent whose session is there has one to keep: one with no record, or whose session is gone, starts fresh,
     // with the brief and the chat
     const same = to === from && !!rec && !rec.fresh && (!!rec.sessionId || rec.logs.length > 0)
@@ -2267,10 +2476,7 @@ export class Engine extends Emitter<Events> {
     try {
       // Settings' Backup model and effort (this task's own first), or else the task's own: its CLI may not take them, in
       // which case it starts on its own default
-      const own = t.agent ?? this.settings.harness('task', space)
-      const model = plan.to.model ?? (own.model ? findModel(to, own.model)?.id : undefined)
-      const effort = plan.to.effort ?? own.effort
-      const h: Harness = { kind: to, model, effort }
+      const h: Harness = backupHarness(plan.to!, own)
       const words = harnessWords(fitHarness(h))
       const first = same
         ? hidden(backupKeptLine({ on: words, why: t.tookOver.why }), 'restart')
@@ -2407,16 +2613,142 @@ export class Engine extends Emitter<Events> {
   }
 
   /**
-   * Its own agent counts the review round it starts (shepherdr review): no round goes by uncounted, so one that has
-   * used them all is refused and asks its coordinator instead of reviewing on its own for ever.
+   * `shepherdr review <id>`: the round is counted and its reviewer chosen by the caps, from the task's reviewer chain (its
+   * own reviewer, then its backups in turn: choose.ts). Its reviewer is leased for the round, until `shepherdr review
+   * --done` (reviewDone) or the end of the task's step (endReview). When every reviewer of the chain is full or out, the
+   * round waits, up to reviewDeadline (as shepherdr merge does), for one to free; then it is not counted yet: the
+   * answer says so, and retryReviews counts it and names the reviewer once one is free.
    */
-  reviewRound(id: string) {
+  async reviewRound(id: string): Promise<Round | { wait: Blocked<ReviewStep>[] }> {
     const t = this.req(id)
     if (ended(t)) throw new Error(`${t.id} is Done already: it has no review to run`)
     if (this.reviewsLeft(t) <= 0) throw new Error(this.roundsUsed(t))
+    const deadline = Date.now() + this.reviewDeadline
+    // retryReviews leaves a round alone while this call waits for it
+    this.reviewLive.add(t.id)
+    try {
+      for (;;) {
+        const a = this.attemptRound(t)
+        if (!('wait' in a) || !this.atReviewStep(t)) return a
+        const left = deadline - Date.now()
+        if (left <= 0) {
+          t.reviewWait = { since: Date.now() }
+          this.save()
+          return a
+        }
+        await Bun.sleep(Math.min(this.reviewPoll, left))
+        if (!this.atReviewStep(t)) return a
+      }
+    } finally {
+      this.reviewLive.delete(t.id)
+    }
+  }
+
+  /** one try at a round: the first reviewer of its chain with room under the caps and not out is leased and the round
+   *  counted, or the wait names each reviewer that cannot run (choose.ts). A round that replaces an unreleased one ends it */
+  private attemptRound(t: TaskRec): Round | { wait: Blocked<ReviewStep>[] } {
+    this.endReview(t.id)
+    const c = this.reviewChoice(t)
+    if ('wait' in c) return { wait: c.wait }
+    const { n, h } = c.harness
+    const key = keyOf(h.kind, h.model)
     t.reviews = (t.reviews ?? 0) + 1
+    t.reviewWait = undefined
     this.save()
-    return { round: t.reviews, rounds: this.roundsOf(t) }
+    this.lease(`review:${t.id}`, 'reviewer', key, this.nameOf(t) ?? '')
+    this.reviewing.set(t.id, { since: Date.now() })
+    const why = n > 0 ? c.skipped.find((b) => b.harness.n === 0) : undefined
+    return { round: t.reviews, rounds: this.roundsOf(t), reviewer: h, n, key, ...(why ? { why } : {}) }
+  }
+
+  /** the reviewers a task's rounds may use, in order: its own (task add's reviewer, else Settings'), then its backups in
+   *  turn (the task's --set, else its space's and the machine's: reviewerBackups) */
+  reviewChain(t: TaskRec): ReviewStep[] {
+    const space = this.nameOf(t) ?? ''
+    const own = t.reviewer ?? this.settings.harness('reviewer', space)
+    return [{ n: 0, h: own }, ...this.settings.reviewerBackups(space, t.set).map((h, i) => ({ n: i + 1, h }))]
+  }
+
+  /** the reviewer a round would run with now, under the caps and out (choose.ts); the task's own run is the one asking, so
+   *  it is not held against its reviewer */
+  private reviewChoice(t: TaskRec): Choice<ReviewStep> {
+    return this.decide(this.nameOf(t) ?? '', this.chainOptions(this.reviewChain(t)), t.id)
+  }
+
+  /** whether a task is still at the step its review belongs to: not ended, reported, stopped or archived */
+  private atReviewStep(t: TaskRec) {
+    return !ended(t) && !t.reported && !t.stopped && !t.archived
+  }
+
+  /** `shepherdr review <id> --done`: the round's review has finished, so its reviewer is free again (no round is counted).
+   *  A round that waits for a reviewer is counted when one frees, as before */
+  reviewDone(id: string): boolean {
+    const t = this.req(id)
+    const had = this.reviewing.has(t.id)
+    this.endReview(t.id)
+    if (had) this.retryReviews()
+    return had
+  }
+
+  /** the lease of a task's review ends: its reviewer is free (the round is over, or its step is) */
+  private endReview(id: string) {
+    this.reviewing.delete(id)
+    this.unlease(`review:${id}`)
+  }
+
+  /**
+   * A round that waited for a reviewer is counted, and its reviewer named, as soon as one of its chain is free: looked at with
+   * every health look (as the advisor's questions are). Its agent is woken with the answer in a message. Never a task that
+   * is past its step (reported, stopped, ended, archived), and never one whose command is still waiting for the reviewer.
+   */
+  retryReviews(): void {
+    for (const t of this.tasks) {
+      if (!t.reviewWait || this.reviewLive.has(t.id)) continue
+      if (!this.atReviewStep(t) || this.reviewsLeft(t) <= 0) {
+        t.reviewWait = undefined
+        this.save()
+        continue
+      }
+      const a = this.attemptRound(t)
+      if ('wait' in a) continue
+      void this.sendBack(t, hidden(`A reviewer is free now. ${this.reviewWords(t.id, a)}`, 'review', { task: t.id }))
+    }
+  }
+
+  /** the answer to a round that was counted: the reviewer and the words to pass, and why it is not the primary */
+  reviewWords(id: string, a: Round) {
+    const why = a.why ? ` (${a.why.why === 'out' ? `${chainWords(a.why.harness.h)} is out${a.why.until ? ` until ${a.why.until}` : ''}` : `${chainWords(a.why.harness.h)} is at its limit, ${a.why.cap!.count} of ${a.why.cap!.max} at once`})` : ''
+    return `Round ${a.round} of ${a.rounds} counted for ${id}. Review with ${reviewerWords(a.reviewer)} this round${why}. Run \`shepherdr review ${id} --done\` when the round's review has finished.`
+  }
+
+  /** the answer to a round every reviewer of which is full or out: it ends its turn, and is woken with the reviewer */
+  reviewWaitWords(id: string, wait: Blocked<ReviewStep>[]) {
+    return `Every reviewer ${id} may use is full or out: ${this.waitIn(wait)}. End your turn now; Shepherdr wakes you here when one is free, with the reviewer to use.`
+  }
+
+  /**
+   * What holds a reviewer while its round runs ends: its task reported, stopped, ended or archived (the sweep of release,
+   * and reviewDone, endReview where they happen), REVIEW_TIMEOUT passed since the round was counted, or its agent's turn
+   * ended and REVIEW_TIMEOUT passed without `--done`. Each wait for a reviewer ends with its step as well. A restart keeps
+   * no lease (it is in memory, as the advisor's and the other runs' are): a round the restart cut off is over, and the
+   * agent's next `shepherdr review` counts and leases a new one.
+   */
+  private sweepReviews(now: number) {
+    for (const [id, r] of [...this.reviewing]) {
+      const t = this.task(id)
+      if (!t || !this.atReviewStep(t) || now - r.since >= this.reviewTimeout) {
+        this.endReview(id)
+        continue
+      }
+      if (this.agents.status(this.key(t)) === 'working') r.idle = undefined
+      else if (r.idle === undefined) r.idle = now
+      else if (now - r.idle >= this.reviewTimeout) this.endReview(id)
+    }
+    for (const t of this.tasks) {
+      if (!t.reviewWait || this.atReviewStep(t)) continue
+      t.reviewWait = undefined
+      this.save()
+    }
   }
 
   /** what a task out of review rounds is told: the rounds are a limit, so only its coordinator raises it */
@@ -2466,6 +2798,8 @@ export class Engine extends Emitter<Events> {
   async done(id: string, summary: string, facts?: string): Promise<{ state: 'ready' | 'closed' | 'merged' | 'ended'; note?: string }> {
     const t = this.req(id)
     if (ended(t)) return { state: 'ended' }
+    // reported: its review is over, and its reviewer is free
+    this.endReview(t.id)
     if (summary) t.said = summary
     if (facts) t.facts = facts
     t.reported = true
@@ -3624,6 +3958,7 @@ export class Engine extends Emitter<Events> {
   async stopTask(id: string): Promise<string[]> {
     const t = this.req(id)
     t.stopped = true
+    this.endReview(t.id)
     // To do, as task pause leaves it: its agent is closed, and writing to it is how it starts again. A start that failed
     // is no longer what it waits on (writing tries it again, and says so if it fails again); a time it waited for is
     // dropped too, so it does not start by itself while it is stopped

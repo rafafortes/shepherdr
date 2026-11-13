@@ -59,8 +59,9 @@ How to do the work inside a task is its agent's judgment, not yours.
    it with its Settings block, the defaults in `shepherdr show`; write only what the human wants different. For one
    task, change a line with `--set` (`--set review.rounds=1 --set merge="ask me first"`, `--set agent=codex`,
    `--set reviewer=claude`, `--set reviewer.fallback=pi`): the block then says the coordinator set it. Plain words in the brief win over the block
-   too. A review is only words in the brief; its agent decides how to do it and counts each round (`shepherdr review
-   <id>`), so a task that has used them all asks you for one more (step 4).
+   too. A review is only words in the brief; its agent decides how to do it, and asks `shepherdr review
+   <id>` for each round: that counts the round and names the reviewer the caps leave for it, so a task that has used them all
+   asks you for one more (step 4).
 2. **First in line**: a fix of a red main or a red merge gate goes ahead of everything else: add it with `--priority`
    (or `shepherdr task priority <id>` on one there already). It then starts at the next free slot, past the machine's
    load and pressure, but never past its space's own cap (Settings → Space, when one is set); it still waits for what it is `--after`. Only the human starts one now (`shepherdr task start`).

@@ -1,5 +1,6 @@
 import { taskIdsSection } from './task-ids.ts'
 import { coordinatorRequestIds } from '../../shared/attention.ts'
+import { providerOfKey } from '../../shared/model-caps.ts'
 // The live source: herdr is the truth for agents and their states; the CLIs' own logs are the chats; Shepherdr keeps
 // only what herdr can't tell it (spaces, tasks, modes, cards, settings). Assembled from the base plugins' parts.
 import { execSync } from 'node:child_process'
@@ -23,13 +24,14 @@ import { HELP, one, parseArgs, summaryOpts, type Parsed } from './args.ts'
 import { Automations, type Automation, type Template } from './automations.ts'
 import { Heartbeats, heartbeatFile, Wakes, wakeProblem } from './heartbeat.ts'
 import { eventRules, eventsText, eventWords, matches, nextWords, runWords, timeRule, timeWords, triggerWords, type Happened, type TriggerEvent } from './trigger.ts'
-import { startsWords, whenFrom } from '../../shared/when.ts'
+import { clockWords, startsWords, whenFrom } from '../../shared/when.ts'
 import { Browsers, type BrowserBridge, type BrowserClient } from './browser.ts'
 import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
 import { DISMISSED, dismissKind, dismissWords } from './dismiss.ts'
 import { dictate as dictation } from './dictate.ts'
-import { age, askOf, checkTitle, ended, Engine, fitStatus, retuneLine, reviewRetuneLine, type HeldWhy, type Retune, type TaskRec } from './engine/engine.ts'
+import { age, askOf, backupHarness, capWords, checkTitle, ended, Engine, fitStatus, retuneLine, reviewRetuneLine, type HeldWhy, type Retune, type TaskRec } from './engine/engine.ts'
+import { waitWords, type Blocked, type Run } from './engine/choose.ts'
 import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { listFolders, makeRepo, resolveInHome } from './folders.ts'
 import { sh, validateBase } from './engine/git.ts'
@@ -44,9 +46,9 @@ import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
 import { privatePrompt, coordinatorPrompt, backupCardWords, wentBackCardWords, type BackWhy, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
-import { fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
+import { chainWords, fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
 import { backCard, canProbe, FIRST_WAIT, FRESH, QUIET, returnMode, Returns, type Outage, type Probe } from './return.ts'
-import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvice, runAdvisor, type Advice, type AdviceQuestion } from './advisor.ts'
+import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvice, runAdvisor, type Advice, type AdviceQuestion, type AdviceRec } from './advisor.ts'
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, resetOf, type Cut, type Retry } from './retry.ts'
@@ -302,6 +304,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a space whose models all ran out starts no task (each would be cut off too), and its cut-off tasks go back to
     // work before a new one takes a slot
     this.engine.startsWait = (t) => this.startsWait(t)
+    // a provider that is out now is not chosen for a start (engine.chainOptions): the run-outs and the return watch's outage
+    this.engine.outNow = (key) => this.outNow(key)
     // a task the way back takes again shows in line, not as one that needs the human
     this.engine.goesBack = (t) => this.goingBack.get(`${t.id}/Agent`)
     // known at once after a start, not only at the watch's first pass ten minutes on
@@ -416,6 +420,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       void this.sweepBrowsers().catch(() => undefined)
     }
     this.engine.release(now)
+    // a question the advisor waits to answer goes on once a harness of its chain has room (the same look as the caps), and
+    // so does a task's review round that waits for a reviewer
+    void this.retryAdvice().catch(() => undefined)
+    this.engine.retryReviews()
     if (this.health.last?.at !== at) this.emit('snapshot')
   }
 
@@ -495,7 +503,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const tasks: TaskFact[] = this.engine.tasks.filter((t) => !t.archived).map((t) => ({ status: this.engine.statusOf(t), agent: t.agent, reviewer: t.reviewer }))
     const watch = this.returns.list().map((o) => ({ key: keyOf(o.primary.kind, o.primary.model), back: o.back }))
     const now = Date.now()
-    return modelsSummary({ now, settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch, quota: this.quotas.summary(now) })
+    // what counts toward models.maxAtOnce now, and the entry each task held for a model's cap waits for
+    const runs = this.engine.runs().map((r) => ({ key: r.key, space: r.space }))
+    const heldBy = this.engine.heldTasks().filter((t) => t.held?.why === 'model').flatMap((t) => this.engine.waitingFor(t))
+    return modelsSummary({ now, settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch, quota: this.quotas.summary(now), runs, heldBy })
   }
 
   /* ---------- unread ---------- */
@@ -782,7 +793,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         qid = `words:${said.id}`
       }
       const had = this.advices.get(n.chat, qid)
-      if (had && had.state !== 'failed') continue
+      // a failed one is asked again by hand; a waiting one goes on as soon as a harness of its chain has room (retryAdvice)
+      if (had && had.state !== 'failed' && had.state !== 'waiting') continue
       out.push({ need: n, qid, q, space, cwd, asker, brief })
     }
     return out
@@ -813,27 +825,60 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (!x) return { ok: false, error: this.advices.get(chat, qid) ? 'The advisor was asked about this already.' : 'This question no longer waits, or no advisor is set for its space.' }
     if (this.advising) return { ok: false, error: 'The advisor is answering another question; try again in a moment.' }
     this.advising = true
-    const rec = { chat, question: qid, at: Date.now(), state: 'asking' as const, ...(auto ? { auto } : {}) }
+    const before = this.advices.get(chat, qid)
+    // a question that waited keeps the harnesses that gave no answer: they are not run again for it
+    const tried = before?.state === 'waiting' ? [...(before.tried ?? [])] : []
+    const rec: AdviceRec = { chat, question: qid, at: Date.now(), state: 'asking', ...(auto ? { auto } : {}), ...(tried.length ? { tried } : {}) }
     this.advices.set(rec)
     this.emit('chat', chat)
     try {
       const prompt = advisorPrompt({ question: x.q, asker: x.asker, brief: x.brief, chat: recentChat(this.chats.chat(chat).messages, x.asker), folder: x.cwd, human: this.user, note: note?.trim() || undefined })
       let advice: Advice | undefined
       let said = ''
-      // the advisor, then each of its backups in turn
-      for (let n = 0; n <= MAX_BACKUPS; n++) {
-        const h = this.settings.advisor(x.space, n)
-        if (!h || !canAdvise(h.kind) || !this.engine.installed(h.kind)) continue
-        const r = await this.runAdvisor(h, prompt, x.cwd)
+      let wait: Blocked<{ n: number; h: Harness }>[] | undefined
+      // a question that waited says on its card that it is asked now, once, when a run starts
+      let announced = false
+      // the advisor, then each of its backups in turn: the first that has room under the caps and is not out (choose.ts) runs
+      // the question, held for the run as a lease; one that gives no answer falls to the next that has room; when every one
+      // left is full or out, the question waits (retryAdvice). Nothing is run while none has room
+      for (let left = this.adviceChain(x.space).filter((c) => !tried.includes(c.n)); left.length; ) {
+        const c = this.engine.decide(x.space, this.engine.chainOptions(left))
+        if ('wait' in c) {
+          wait = c.wait
+          break
+        }
+        const { n, h } = c.harness
+        // a question that waited gets its card told it is asked now, before the run
+        if (before?.state === 'waiting' && !announced) this.adviceWait(chat, qid, `The advisor is asking ${advisorWords(h)} now.`)
+        announced = true
+        const lease = `advisor:${chat}|${qid}`
+        this.engine.lease(lease, 'advisor', keyOf(h.kind, h.model), x.space)
+        let r: { ok: boolean; out: string }
+        try {
+          r = await this.runAdvisor(h, prompt, x.cwd)
+        } catch (e) {
+          r = { ok: false, out: (e as Error).message }
+        } finally {
+          this.engine.unlease(lease)
+        }
         const parsed = r.ok ? parseAdvice(r.out, x.q) : undefined
         if (parsed) {
           advice = { ...parsed, by: advisorWords(h) }
           break
         }
+        tried.push(n)
+        this.advices.set({ ...rec, tried })
         said = r.out.replace(/\s+/g, ' ').trim().slice(-200)
         // what it said whole, for the day it needs explaining: the log keeps only its end
         const kept = this.keepAdvisorOutput(chat, r.out)
         console.error(`shepherdr: the advisor (${advisorWords(h)}) gave no answer for ${chat}: ${said || 'nothing it said made sense'}${kept ? ` (whole: ${kept})` : ''}`)
+        left = left.filter((o) => o.n !== n)
+      }
+      if (!advice && wait) {
+        // none of the harnesses left has room now: the question waits, and its card says which are full or out
+        this.advices.set({ ...rec, state: 'waiting', tried })
+        this.adviceWait(chat, qid, `The advisor waits: ${waitWords(wait, { words: (x) => chainWords(x.h), shown: (s) => this.places.shownName(s) })}`)
+        return { ok: true }
       }
       if (!advice) {
         this.advices.set({ ...rec, state: 'failed' })
@@ -881,7 +926,53 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       this.advising = false
       this.emit('chat', chat)
       this.emit('snapshot')
+      // a run that ended frees its slot: a question that waits for one goes on now
+      void this.retryAdvice().catch(() => undefined)
     }
+  }
+
+  /** the advisor's chain as it may run now: its primary (0), then its backups in order (n), each one that is set and whose
+   *  CLI runs headless here (canAdvise) and is installed */
+  private adviceChain(space: string): { n: number; h: Harness }[] {
+    const out: { n: number; h: Harness }[] = []
+    for (let n = 0; n <= MAX_BACKUPS; n++) {
+      const h = this.settings.advisor(space, n)
+      if (h && canAdvise(h.kind) && this.engine.installed(h.kind)) out.push({ n, h })
+    }
+    return out
+  }
+
+  /**
+   * The questions that wait for a harness with room (advise: `waiting`) are asked again as soon as one of their chain has
+   * room: looked at with every health look (the caps are read there) and after each advisor run ends. One run at a time
+   * (advise). A question no longer open was answered meanwhile: it is never answered now, its record is closed as the
+   * human's. Nothing is started while every harness left is still full or out.
+   */
+  async retryAdvice(): Promise<void> {
+    if (this.advising) return
+    for (const r of this.advices.waiting()) {
+      const x = this.advisable(r.chat).find((y) => y.qid === r.question)
+      if (!x) {
+        this.advices.set({ ...r, state: 'human' })
+        this.emit('chat', r.chat)
+        continue
+      }
+      const left = this.adviceChain(x.space).filter((c) => !(r.tried ?? []).includes(c.n))
+      if (!left.length) {
+        this.advices.set({ ...r, state: 'failed' })
+        continue
+      }
+      if ('harness' in this.engine.decide(x.space, this.engine.chainOptions(left))) {
+        await this.advise(r.chat, r.question, r.auto ?? false).catch(() => undefined)
+        return
+      }
+    }
+  }
+
+  /** the card that says an advisor question waits (or is asked now): one per question, updated in place, in its chat and,
+   *  for a task's question, in its space's chat too (adviceCard) */
+  private adviceWait(chat: string, qid: string, text: string) {
+    this.adviceCard(chat, text, `advice-wait:${qid}`)
   }
 
   /** the advisor's answer goes to the agent as the human's would: the card's pick, the CLI's keys, or its words */
@@ -911,11 +1002,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** a short note from the advisor in the chat its question is in, and in the space's chat for a task's (where its
    *  needs-you card shows the question too): beside the question, which still waits wherever it shows */
-  private adviceCard(chat: string, text: string) {
+  private adviceCard(chat: string, text: string, card?: string) {
     const at = Date.now()
     const t = chat.includes('/') ? this.engine.task(chat.split('/')[0]) : undefined
     for (const key of [chat, ...(t ? [t.project] : [])]) {
-      const id = `advice-note:${at}:${key === chat ? 'chat' : 'space'}`
+      const id = `${card ?? `advice-note:${at}`}:${key === chat ? 'chat' : 'space'}`
       // in the space's chat its task's id leads it, as a link to the task
       this.chats.post(key, { id, card: { id, aside: true, text, ...(t && key !== chat ? { task: t.id } : {}) } })
       this.emit('chat', key)
@@ -1429,7 +1520,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (!c) throw new Error(`No place ${id}`)
     const set = this.settings.harness('coordinator', this.spaceKey(id))
     const rec = this.agents.record(id)
-    const h = o.as ?? (rec ? undefined : set)
+    // a first start (nothing kept, nothing chosen by hand) takes the first harness of its chain with room under the caps
+    const start = !o.as && !rec ? this.coordinatorStart(id, set) : undefined
+    if (start) this.startedByCaps(id, start)
+    const h = o.as ?? (start ? start.h : rec ? undefined : set)
     const spec: Spec = {
       key: id,
       name: c.name,
@@ -1444,6 +1538,114 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       env: agentEnv(id, ROOT),
     }
     return o.restart ? this.agents.restart(spec, o.restart) : this.agents.ensure(spec)
+  }
+
+  /**
+   * A coordinator's first start: the first harness of its chain (its Settings' primary, then its backups in order) with
+   * room under the caps and not out (choose.ts). When none has room, the primary starts anyway: a coordinator never waits,
+   * and its chat says it runs past the cap (startedByCaps). `step`: its place in the chain, 0 on the primary
+   */
+  private coordinatorStart(id: string, set: Harness): { h: Harness; step: number; skipped: Blocked<unknown>[]; past: boolean } {
+    const space = this.spaceKey(id) ?? ''
+    const items = [{ step: 0, h: set }, ...this.engine.backupsFor('coordinator', space || undefined).flatMap((p) => (p.to ? [{ step: p.n, h: backupHarness(p.to, set) }] : []))]
+    const c = this.engine.decide(space, this.engine.chainOptions(items))
+    if ('harness' in c) return { h: c.harness.h, step: c.harness.step, skipped: c.skipped, past: false }
+    return { h: set, step: 0, skipped: c.wait, past: c.wait.some((b) => b.why === 'full') }
+  }
+
+  /** a first start the caps decided: on a backup (its card says why, and it counts as a takeover for its later backups), or
+   *  past the cap on its primary (its card says so) */
+  private startedByCaps(id: string, start: { h: Harness; step: number; skipped: Blocked<unknown>[]; past: boolean }) {
+    const first = start.skipped[0]
+    if (start.step > 0) {
+      this.capStarts.set(id, { step: start.step })
+      this.saveCapStarts()
+      this.capNote(id, `Started on ${harnessWords(fitHarness(start.h))}${first ? `: ${capWords(first, (x) => this.places.shownName(x))}` : ''}`)
+    } else if (start.past && first) {
+      this.capNote(id, `Runs past the cap: ${capWords(first, (x) => this.places.shownName(x))}. Every model it may use is full, so it starts on ${harnessWords(fitHarness(start.h))} anyway.`)
+    }
+  }
+
+  /** a card in a chat, for a start the caps decided */
+  private capNote(key: string, text: string) {
+    const id = `cap:${key}:${Date.now()}`
+    this.chats.post(key, { id, card: { id, text } })
+    if (this.watched.includes(key)) this.emit('chat', key)
+  }
+
+  /** the coordinators a first start put on a backup by the caps (place id, and its step in the chain): the way back takes
+   *  them to their primary once idle and the primary has room (backFromCap). Kept in cap-starts.json, so a restart of
+   *  Shepherdr still knows which one is on a backup because of a cap */
+  private capStarts = new Map<string, { step: number }>(Object.entries(readJson<Record<string, { step: number }>>('cap-starts.json', {})))
+
+  /** the caps' marks as the file keeps them (capStarts) */
+  private saveCapStarts() {
+    writeJson('cap-starts.json', Object.fromEntries(this.capStarts))
+  }
+
+  /** whether a model key's provider is out now, and until when: its run-outs (the Summary reads them the same way, for every
+   *  model of the provider) and the return watch's outage that has not seen its primary back yet. The choice skips it */
+  private outNow(key: string): { until?: string } | undefined {
+    const now = Date.now()
+    const provider = providerOf(key)
+    const mine = this.returns.list().filter((o) => providerOf(keyOf(o.primary.kind, o.primary.model)) === provider)
+    const backAt = mine.reduce((a, o) => Math.max(a, o.back ?? 0), 0) || undefined
+    const st = this.usage.outOf(provider, now, backAt)
+    if (!st.out && !mine.some((o) => o.back === undefined)) return undefined
+    return st.out && st.last?.resetAt !== undefined ? { until: clockWords(st.last.resetAt, now, this.settings.zone()) } : {}
+  }
+
+  /** an agent between turns, with nothing of its own still running, no try of its own due and nothing it asks you: the
+   *  condition of the way back to its primary (goBack's, and the cap's) */
+  private idleForBack(key: string) {
+    const st = this.agents.status(key)
+    if ((st !== 'idle' && st !== 'done' && !(st === 'gone' && this.agents.reachable)) || this.agents.background(key)) return false
+    const r = this.retries.get(key)
+    return !((r && !r.over) || this.chats.openQuestion(key) || this.chats.openCard(key) || this.chats.startMenuUp(key))
+  }
+
+  /**
+   * A start the caps put on a backup (engine.onBackup, capStarts) goes back to its primary once its agent is idle and the
+   * primary has room under the caps: the way back's own rule (backup.watchReturn go back; never mid-turn, never a paused
+   * task, never one asking you something), one agent at a time, each taking its room before the next is looked at. A
+   * cut-off is the way back's business (goBack), not this one's.
+   */
+  private async backFromCap() {
+    const extra: Run[] = []
+    for (const t of this.engine.tasks) {
+      if (!t.onBackup || t.held || ended(t) || t.stopped || t.paused || t.archived || !t.worktree) continue
+      const space = this.places.space(t.project)?.name
+      if (space === undefined || returnMode(this.settings.get('backup.watchReturn', space)) !== 'go back' || !this.idleForBack(`${t.id}/Agent`)) continue
+      const primary = t.agent ?? this.settings.harness('task', space)
+      const c = this.engine.decide(space, this.engine.chainOptions([{ h: primary }]), t.id, extra)
+      if ('wait' in c) continue
+      extra.push({ key: keyOf(primary.kind, primary.model), space, role: 'task', id: t.id })
+      try {
+        await this.restart(`${t.id}/Agent`, primary, false, 'room')
+      } catch (e) {
+        console.error(`shepherdr: couldn't move ${t.id} back to its primary: ${(e as Error).message}`)
+      }
+    }
+    for (const id of [...this.capStarts.keys()]) {
+      if (!this.places.coordinator(id) || !this.agents.record(id)) {
+        this.capStarts.delete(id)
+        this.saveCapStarts()
+        continue
+      }
+      const space = this.spaceKey(id)
+      if (returnMode(this.settings.get('backup.watchReturn', space || undefined)) !== 'go back' || !this.idleForBack(id)) continue
+      const primary = this.settings.harness('coordinator', space || undefined)
+      const c = this.engine.decide(space ?? '', this.engine.chainOptions([{ h: primary }]), undefined, extra)
+      if ('wait' in c) continue
+      extra.push({ key: keyOf(primary.kind, primary.model), space: space ?? '', role: 'coordinator', id })
+      try {
+        await this.restartCoordinator(id, primary, undefined, 'room')
+        this.capStarts.delete(id)
+        this.saveCapStarts()
+      } catch (e) {
+        console.error(`shepherdr: couldn't move ${id} back to its primary: ${(e as Error).message}`)
+      }
+    }
   }
 
   /** a coordinator started again on this CLI, model and effort: the same CLI resumes its session, another takes over
@@ -1465,7 +1667,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (from === h.kind) return hidden(backupKeptLine({ on: words, why: backup }), 'restart')
         return hidden(coordinatorHandOverLine({ from: them, why: backup, tasks: this.openTasks(id), chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
       }
-      return from === h.kind ? hidden(resumedLine(words, back), 'restart') : hidden(restartLine({ from: them, to: words, back: !!back, chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
+      return from === h.kind ? hidden(resumedLine(words, back), 'restart') : hidden(restartLine({ from: them, to: words, back: !!back, room: back === 'room', chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
     }
     await this.coordinator(id, { as: h, restart: first })
     const card = `${backup ? 'takeover' : 'restart'}:${id}:${Date.now()}`
@@ -1786,19 +1988,21 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const from = rec?.kind
     const chain = from ? this.engine.backupsFor('coordinator', this.spaceKey(key)) : []
     const took = this.agents.tookOver(key)
-    // the backups after the one it is on (all of them while none took over): each once, until you restart it yourself,
-    // so a chain that keeps failing waits for the human, never a loop
-    const later = chain.filter((p) => p.n > (took ? (took.step ?? 1) : 0))
-    const plan = later.find((p) => p.to) ?? later[0] ?? {}
+    // the backups after the one it is on (all of them while none took over, and a start the caps put on one counts as
+    // a takeover): each once, until you restart it yourself, so a chain that keeps failing waits for the human, never a loop
+    const at = Math.max(took ? (took.step ?? 1) : 0, this.capStarts.get(key)?.step ?? 0)
+    const later = chain.filter((p) => p.n > at)
+    // the first of them with room under the caps and not out (choose.ts); when every one is full or out, the first anyway: a
+    // coordinator must not stall, and its chat says it runs past the cap
+    const candidates = later.filter((p) => p.to)
+    const chosen = rec && candidates.length ? this.engine.decide(this.spaceKey(key) ?? '', this.engine.chainOptions(candidates.map((p) => ({ plan: p, h: backupHarness(p.to!, { kind: rec.kind, model: rec.model, effort: rec.effort }) }))), key) : undefined
+    const plan = chosen && 'harness' in chosen ? chosen.harness.plan : (candidates[0] ?? later[0] ?? {})
+    if (chosen && 'wait' in chosen && candidates[0]) this.capNote(key, `Its backup goes in past the cap, as none has room: ${capWords(chosen.wait[0]!, (x) => this.places.shownName(x))}.`)
     const backups = chain.flatMap((p) => (p.to ? [p.to] : []))
     if (plan.to && from && rec) {
       const why = r.reason.charAt(0).toLowerCase() + r.reason.slice(1)
       // the coordinators' Model and Effort, or else the model and effort it ran on: a model the backup's CLI lacks is dropped
-      const on: Harness = {
-        kind: plan.to.kind,
-        model: plan.to.model ?? (rec.model ? findModel(plan.to.kind, rec.model)?.id : undefined),
-        effort: plan.to.effort ?? rec.effort,
-      }
+      const on: Harness = backupHarness(plan.to, { kind: rec.kind, model: rec.model, effort: rec.effort })
       // the same mark as before it, with its place in the chain
       const prior = took
       this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now(), step: plan.n })
@@ -1896,6 +2100,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const resuming = new Set<string>()
     /** the spaces whose cut-off tasks wait for a slot of their own cap (space.maxTasks): only their new tasks wait too */
     const cappedResuming = new Set<string>()
+    /** the models (or providers) whose own cap (models.maxAtOnce) holds cut-off tasks: no new task on them takes one first */
+    const cappedModelsResuming = new Set<string>()
     for (const o of this.returns.list()) {
       if (o.back) continue
       const mode = returnMode(this.settings.get('backup.watchReturn', o.space || undefined))
@@ -1941,10 +2147,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         alerted.add(o.role)
         continue
       }
-      const { moved, waiting, capped } = await this.goBack(o, to.chats, now)
+      const { moved, waiting, capped, cappedModels } = await this.goBack(o, to.chats, now)
       // the tasks that wait for a slot go back before any new one takes a slot on this machine (startsWait)
       if (o.role === 'task' && waiting) resuming.add(o.space)
       if (o.role === 'task') for (const space of capped) cappedResuming.add(space)
+      if (o.role === 'task') for (const name of cappedModels) cappedModelsResuming.add(name)
       if (!moved.length) continue
       // one alert per return: the chats that follow on later passes go back quietly, their cards only
       const first = !o.went
@@ -1960,7 +2167,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     this.resuming = resuming
     this.resumingCapped = cappedResuming
+    this.resumingModels = cappedModelsResuming
     this.refreshGoingBack()
+    // a start the caps put on a backup goes back to its primary once that has room (backFromCap)
+    await this.backFromCap()
     // a wait over (its models answer, or its cut-off tasks went back): the queue goes on, or waits on with its reason
     this.engine.release()
   }
@@ -2052,6 +2262,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   private resuming = new Set<string>()
   /** the spaces whose cut-off tasks wait for a slot of their own cap: no new task of those spaces takes one before them */
   private resumingCapped = new Set<string>()
+  /** the models and providers whose cap (models.maxAtOnce) holds cut-off tasks that wait to go back to work */
+  private resumingModels = new Set<string>()
 
   /**
    * Each chat still on a backup, or cut off for good, whose agent is idle now starts again on its primary, which answers
@@ -2068,6 +2280,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // the spaces whose own cap (space.maxTasks) is full for their cut-off tasks, and how many more of each may start
     const capped = new Set<string>()
     const spaceLeft = new Map<string, number>()
+    // and the caps of the model they go back to (models.maxAtOnce): the models whose cap is full, and the runs this pass made
+    const cappedModels = new Set<string>()
+    const extraRuns: Run[] = []
     for (const c of chats) {
       const st = this.agents.status(c.key)
       // between turns, with nothing of its own still running: what a restart would cut short waits. One whose pane is
@@ -2078,6 +2293,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const r = this.retries.get(c.key)
       if ((r && !r.over) || this.chats.openQuestion(c.key) || this.chats.openCard(c.key) || this.chats.startMenuUp(c.key)) continue
       let cap: { space: string; left: number } | undefined
+      let back: Run | undefined
       if (c.task) {
         const t = this.engine.task(c.task)
         // a pause is yours to end (a restart would end it)
@@ -2095,6 +2311,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
             continue
           }
         }
+        // the caps of the model it goes back to (models.maxAtOnce, choose.ts): a full one waits for a slot of its own, as a
+        // space does, and the runs this pass started count against it
+        const space = this.places.space(t.project)?.name ?? ''
+        // the primary's own outage is the one this pass is taking back: its answer is in, so only the caps count here
+        const to = this.engine.decide(space, [{ harness: o.primary, key: keyOf(o.primary.kind, o.primary.model) }], t.id, extraRuns)
+        if ('wait' in to) {
+          for (const b of to.wait) cappedModels.add(b.name)
+          continue
+        }
+        back = { key: keyOf(o.primary.kind, o.primary.model), space, role: 'task', id: t.id }
       }
       tried.push(c.key)
       // started again by the way back: never taken in again for the same cut-off or takeover
@@ -2109,13 +2335,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           slots--
           this.engine.noteStart(now)
           if (cap) spaceLeft.set(cap.space, cap.left - 1)
+          if (back) extraRuns.push(back)
         }
       } catch (e) {
         console.error(`shepherdr: couldn't start ${c.key} again on its primary model: ${(e as Error).message}`)
       }
     }
     this.returns.moved(o.role, o.space, tried)
-    return { moved, waiting, capped }
+    return { moved, waiting, capped, cappedModels }
   }
 
   /** an agent of this machine works on that model now (whatever its effort), and nothing cut it off: it answers */
@@ -2135,6 +2362,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const space = this.places.space(t.project)?.name
     if (space === undefined) return undefined
     if (this.resumingCapped.has(space)) return 'resume'
+    // a model or provider whose cap (models.maxAtOnce) holds cut-off tasks: its new tasks wait for them too
+    const key = this.engine.modelOfTask(t).toLowerCase()
+    if (this.resumingModels.has(key) || this.resumingModels.has(providerOfKey(key))) return 'resume'
     const o = this.returns.get('task', space)
     if (!o || o.back || returnMode(this.settings.get('backup.watchReturn', space)) === 'off') return undefined
     return o.allOut && !o.ok ? 'models' : undefined
@@ -2453,12 +2683,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   private heldWords(why: HeldWhy, t: TaskRec) {
     const cap = this.engine.spaceCap(t)
+    const choice = this.engine.taskChoice(t)
     return {
       slots: `all ${this.settings.machine().max} slots are taken`,
       machine: 'the machine is busy',
       models: 'every model of its space ran out, so it would only be cut off too, until the primary answers again',
       resume: 'the tasks that were cut off go back to work first',
       space: cap ? `${cap.shown}'s own limit of ${cap.max} tasks is taken` : 'its space is at its own limit',
+      model: 'wait' in choice ? this.engine.capWaitLine(choice.wait) : 'its model is at its own limit',
     }[why]
   }
 
@@ -3786,13 +4018,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return this.taskCommand(a1, rest, p, ctx)
       case 'restart':
         return this.restartCommand(a1, p, ctx)
-      // a task's own agent counts each review round it starts, so its brief's at most so many are kept by
+      // a task's own agent counts each review round it starts, and is told which reviewer the caps leave it for that round
+      // (engine.reviewRound); --done when the round's review has finished
       case 'review': {
         const t = this.engine.task(a1 ?? '')
         if (!t) throw new Error(`No task ${a1 ?? ''}; shepherdr review <id>`)
         if (ctx.chat !== `${t.id}/Agent`) throw new Error(`${t.id}'s own agent counts its review rounds, not ${ctx.chat ? 'this chat' : 'you at the command'}; a coordinator adds one with shepherdr task review-more ${t.id}`)
-        const { round, rounds } = this.engine.reviewRound(t.id)
-        return `Round ${round} of ${rounds} counted for ${t.id}: review its final commit before you report ready.`
+        if (p.flags.has('done')) return this.engine.reviewDone(t.id) ? `Review of ${t.id} is done: its reviewer is free again.` : `No review of ${t.id} is running: nothing to release.`
+        const r = await this.engine.reviewRound(t.id)
+        return 'wait' in r ? this.engine.reviewWaitWords(t.id, r.wait) : this.engine.reviewWords(t.id, r)
       }
       // done is ready's old name, still taken
       case 'ready':
@@ -4342,7 +4576,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const on = [CLI_NAME[t.agent!.kind] ?? t.agent!.kind, t.agent!.model, t.agent!.effort && `${t.agent!.effort} effort`].filter(Boolean).join(', ')
       if (t.after?.length) return `Added ${t.id}: ${t.title}, queued after ${t.after.join(', ')}. It has no agent, worktree or herdr space while it waits: once ${t.after.length === 1 ? 'that task is' : 'they are all'} done and the machine has room, its agent (${on}) starts on the brief. A message to it (shepherdr task tell ${t.id} …) starts its agent sooner, still queued.`
       if (p.flags.has('later')) return `Added ${t.id}: ${t.title}, for later. Its agent (${on}) reads the brief now and waits for a go (shepherdr task tell ${t.id} "go").`
-      if (t.held) return `Added ${t.id}: ${t.title}, held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : t.held.why === 'space' ? this.heldWords('space', t) : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and its agent (${on}) starts by itself when there's room, oldest first.`
+      if (t.held) return `Added ${t.id}: ${t.title}, held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : t.held.why === 'space' || t.held.why === 'model' ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and its agent (${on}) starts by itself when there's room, oldest first.`
       return `Added ${t.id}: ${t.title}. Its agent (${on}) starts on the brief now.${after.length ? ' What it would wait for is done already.' : ''}`
     }
     if (sub === 'list' || !sub) {
@@ -4430,7 +4664,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           return `${t.id} waits for ${r.queued.join(', ')} once its time comes (${starts}).`
         }
         if (r.queued.length) return `${t.id} is queued after ${r.queued.join(', ')}. ${ctx.chat === `${t.id}/Agent` ? 'Stop at a clean point, reply in one line and end your turn: Shepherdr tells you to go.' : 'Its agent is told to wait; Shepherdr tells it to go once they are done.'}`
-        if (r.went) return t.held ? `${t.id} waits for no task now, but is held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : t.held.why === 'space' ? this.heldWords('space', t) : 'the machine is busy'} (${this.workingLine()}). Its agent gets the go when there's room.` : `${t.id} waits for nothing more: its agent is told to go.`
+        if (r.went) return t.held ? `${t.id} waits for no task now, but is held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : t.held.why === 'space' || t.held.why === 'model' ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). Its agent gets the go when there's room.` : `${t.id} waits for nothing more: its agent is told to go.`
         return none ? `${t.id} was not queued.` : `${t.id} isn't queued: what it would wait for is done already.`
       }
       case 'stop': {

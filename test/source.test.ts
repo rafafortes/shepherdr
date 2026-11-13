@@ -4,6 +4,7 @@ import { execSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmp } from './tmp.ts'
+import { CODEX_WORDS, PI_WORDS, reviewerLineFor } from './reviewer-line.ts'
 
 process.env.SHEPHERDR_HOME = tmp('source')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock')
@@ -542,14 +543,14 @@ describe("Settings reviewer changed: the waiting tasks' reviewer, from the scree
       const a = idOf((await src.cli(['task', 'add', 'Waits', '--desc', 'x'], { chat: place })).out)
       const b = idOf((await src.cli(['task', 'add', 'Waits too', '--desc', 'y'], { chat: place })).out)
       const codex = src.engine.task(a)!.desc
-      expect(codex).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).')
+      expect(codex).toContain(reviewerLineFor(CODEX_WORDS, a))
       expect(await src.act({ type: 'setting', key: 'reviewer.agent', value: 'pi', place })).toEqual({ ok: true })
       // the question first: what would change, and nothing does
       expect(await src.act({ type: 'apply-to-waiting', key: 'reviewer.agent', place, dry: true })).toMatchObject({ ok: true, changed: 2, same: 0, running: 0, kept: [], spaces: [{ name: p.name, words: 'pi', changed: 2 }] })
       expect(src.engine.task(a)!.desc).toBe(codex)
       // yes: the Reviewer line of each brief says pi, and nothing else of it moves
       expect(await src.act({ type: 'apply-to-waiting', key: 'reviewer.agent', place })).toMatchObject({ ok: true, changed: 2 })
-      expect(src.engine.task(a)!.desc).toBe(codex.replace('a headless Codex or a Codex subagent (its default model and effort).', "a headless pi or a pi subagent (its default model and effort). (this space's setting)"))
+      expect(src.engine.task(a)!.desc).toBe(codex.replace(reviewerLineFor(CODEX_WORDS, a), reviewerLineFor(PI_WORDS, a, '', "(this space's setting)")))
       expect([src.engine.task(a)!.reviewer?.kind, src.engine.task(b)!.reviewer?.kind]).toEqual(['pi', 'pi'])
       expect(await src.act({ type: 'apply-to-waiting', key: 'reviewer.agent', place, dry: true })).toMatchObject({ changed: 0, same: 2 })
       // a backup reviewer's key goes through the same action, and the chain's keys too
@@ -709,14 +710,14 @@ describe("a task's CLI, model and effort", () => {
     const id = (out: string) => out.match(/([A-Z]+-\d+)/)![1]
     const plain = src.engine.task(id((await src.cli(['task', 'add', 'Plain review', '--desc', 'x'], { chat: place })).out))!
     expect(plain.reviewer).toEqual({ kind: 'codex', model: undefined, effort: undefined })
-    expect(plain.desc).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).\n')
+    expect(plain.desc).toContain(`${reviewerLineFor(CODEX_WORDS, plain.id)}\n`)
     src.settings.set('reviewer.model', 'gpt-6-sol')
     const own = src.engine.task(id((await src.cli(['task', 'add', 'Claude review', '--desc', 'x', '--reviewer', 'claude', '--reviewer-effort', 'High'], { chat: place })).out))!
     // another CLI drops Settings' model, which names one of Codex's
     expect(own.reviewer).toEqual({ kind: 'claude', model: undefined, effort: 'high' })
-    expect(own.desc).toContain('- Reviewer: a headless Claude Code or a Claude Code subagent (its default model, high effort). (set by coordinator for this task)')
+    expect(own.desc).toContain(reviewerLineFor('a headless Claude Code or a Claude Code subagent (its default model, high effort).', own.id, '', '(set by coordinator for this task)'))
     const codex = src.engine.task(id((await src.cli(['task', 'add', 'Codex review', '--desc', 'x', '--reviewer-effort', 'low'], { chat: place })).out))!
-    expect(codex.desc).toContain('- Reviewer: a headless Codex or a Codex subagent (model gpt-6-sol, low effort). (set by coordinator for this task)')
+    expect(codex.desc).toContain(reviewerLineFor('a headless Codex or a Codex subagent (model gpt-6-sol, low effort).', codex.id, '', '(set by coordinator for this task)'))
     src.settings.set('reviewer.model', null)
   })
   test('task add --set changes a line of its Settings block for that task alone, marked as set by its coordinator', async () => {
@@ -733,7 +734,7 @@ describe("a task's CLI, model and effort", () => {
     expect(t.reviewer?.kind).toBe('claude')
     expect(t.desc).toContain('- Review rounds: 1. One round, no review again. (set by coordinator for this task)')
     expect(t.desc).toContain("- Merge: after GitHub checks. Merge it yourself once it works and GitHub's checks pass (shepherdr checks " + t.id)
-    expect(t.desc).toContain('- Reviewer: a headless Claude Code or a Claude Code subagent (its default model and effort). (set by coordinator for this task)')
+    expect(t.desc).toContain(reviewerLineFor('a headless Claude Code or a Claude Code subagent (its default model and effort).', t.id, '', '(set by coordinator for this task)'))
     // the rest stays Settings', unmarked
     expect(t.desc).toContain('- Must fix: major. Findings are tagged critical/major/minor/trivial; fix critical and major.\n')
   })
@@ -764,7 +765,7 @@ describe("a task's CLI, model and effort", () => {
     expect(out).toMatch(/^coordinator\.fallback\s+off\s+\(default\)$/m)
     expect(out).toMatch(/^coordinator\.fallbackModel\s+default\s+\(default\)$/m)
     expect(out).toMatch(/^coordinator\.fallbackEffort\s+default\s+\(default\)$/m)
-    expect(out).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).')
+    expect(out).toContain(reviewerLineFor(CODEX_WORDS, '<id>'))
     expect(out).not.toContain('cannot run at all')
     expect(out).toContain('What agents are told (')
     expect(out).toContain('How Shepherdr runs:')

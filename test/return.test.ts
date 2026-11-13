@@ -1057,3 +1057,34 @@ describe('what is never asked', () => {
     }
   })
 })
+
+describe('the way back honours a model’s cap (models.maxAtOnce)', () => {
+  test('cut-off tasks go back to a model one slot at a time: the second waits for its slot, and a new task on that provider waits behind it', async () => {
+    const s = await nightWorld('night-model-cap', 4)
+    try {
+      // the primary is Claude Code: one of its models at once on this machine
+      expect(s.src.settings.set('models.maxAtOnce', 'anthropic=1', 'all').ok).toBe(true)
+      const a = s.cutOff('codex')
+      const b = s.cutOff('codex')
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'provider refused it', at: Date.now() - FIRST_WAIT * 2 }, { allOut: true })
+      await s.src.watchReturns(later())
+      // the first goes back; the second waits for the slot the first takes
+      expect(s.started.map((x) => x.key)).toEqual([a.key])
+      // a new task on the same provider waits behind the cut-off one, as a space's new tasks do
+      const next = task(s.p.name, 'claude')
+      expect(s.src.engine.room(next.t)).toEqual({ why: 'resume' })
+      // a's turn is at work on Claude Code now: the provider is full, b keeps waiting
+      const status = s.src.agents.status
+      s.src.agents.status = ((k: string) => (k === a.key ? 'working' : status(k))) as never
+      await s.src.watchReturns(later() + 60_000)
+      expect(s.started.map((x) => x.key)).toEqual([a.key])
+      // a's turn is over: its slot is free, and b goes back
+      s.src.agents.status = status
+      await s.src.watchReturns(later() + 120_000)
+      expect(s.started.map((x) => x.key)).toEqual([a.key, b.key])
+    } finally {
+      s.src.settings.set('models.maxAtOnce', null, 'all')
+      s.done()
+    }
+  })
+})

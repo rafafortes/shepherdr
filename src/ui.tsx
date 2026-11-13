@@ -493,7 +493,8 @@ export const rowReport = (t: Task) => (t.status === 'work' ? t.report : undefine
 export function taskLine(t: Task, where?: string[]): ReactNode {
   const w = rowReport(t)
   // a task waiting for its time counts down as you read it, rather than a line that ages
-  const line = w ? <ReportLine w={w} /> : t.status === 'scheduled' && t.scheduled ? <ScheduledLine t={t} /> : t.sub
+  // a line cut short (a held task's chain) keeps its whole words in its title
+  const line = w ? <ReportLine w={w} /> : t.status === 'scheduled' && t.scheduled ? <ScheduledLine t={t} /> : t.subTitle ? <span title={t.subTitle}>{t.sub}</span> : t.sub
   // where it is leads, or else its pull request's number, small: the link itself is in its chat's header
   const parts = [...(where?.length ? where : t.pr ? [`PR #${t.pr.number}`] : []), ...(t.base ? [`→ ${t.base}`] : [])]
   const lead = parts.length ? (

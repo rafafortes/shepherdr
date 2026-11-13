@@ -26,8 +26,8 @@ export const UNDO_KEEP = 5
 export const NAME_MAX = 40
 /** the keys of the models: every role's CLI, model and effort, its primary and backups (the columns of the Models page) */
 export const MODEL_KEYS = matrixSlots().flatMap((x) => [x.cli, x.model, x.effort])
-/** the limits a profile may hold as well: Max tasks and Merge train */
-export const LIMIT_KEYS = ['space.maxTasks', 'merge.train']
+/** the limits a profile may hold as well: Max tasks, the most at once per model (this machine's, models.maxAtOnce) and Merge train */
+export const LIMIT_KEYS = ['space.maxTasks', 'models.maxAtOnce', 'merge.train']
 /** the keys a profile holds: the models, and the limits when it holds them */
 export const keysOf = (limits: boolean) => (limits ? [...MODEL_KEYS, ...LIMIT_KEYS] : MODEL_KEYS)
 
@@ -35,6 +35,7 @@ export const keysOf = (limits: boolean) => (limits ? [...MODEL_KEYS, ...LIMIT_KE
 const LABELS: Record<string, string> = {
   ...Object.fromEntries(matrixSlots().flatMap((x) => [[x.cli, `${x.title} · ${x.name} · Agent`], [x.model, `${x.title} · ${x.name} · Model`], [x.effort, `${x.title} · ${x.name} · Effort`]])),
   'space.maxTasks': 'Max tasks',
+  'models.maxAtOnce': 'Max at once per model',
   'merge.train': 'Merge train',
 }
 export const labelOf = (key: string) => LABELS[key] ?? key

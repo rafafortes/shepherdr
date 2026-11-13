@@ -16,6 +16,7 @@ import { settingsBlock, settingsLines, SEVERITIES, type Reviewer, type Said, typ
 import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf } from './models.ts'
 import { picksOf, rememberModel } from './model-picks.ts'
 import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
+import { formatMaxAtOnce, parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
 import { eventRules, eventsText, eventWords, nextWords, OWN_ZONE, timeRule, timeWords, validZone, type EventRule } from './trigger.ts'
 
 /** every agent kind herdr can start (interactive chat requires runtime log discovery and a reader) */
@@ -388,8 +389,14 @@ export const CATALOG: Section[] = [
     // that matters more may have more of them running. Off: only the machine's limit. Set at any of the three levels,
     // the most specific one that sets it wins (pick)
     name: 'Space',
-    about: "How many of a space's tasks work at once on this machine. It works together with the machine's limit (Machine → Max tasks working at once): a task starts only when both have room. Off: only the machine's limit.",
-    rows: [{ label: 'Max tasks of this space working at once', key: 'space.maxTasks', value: 'off', num: { min: 1, max: 200, off: true }, hint: "Caps this space's working tasks within the machine's own limit, so a space that matters more can have more of them running than the others. Off: only the machine's limit." }],
+    about: "How many of a space's tasks work at once on this machine, and how many agents of one model or provider it may run at once. Both work together with the machine's limits (Machine → Max tasks working at once, and Most at once per model or provider at this machine): a task starts only when every one has room. Off: only the machine's limits.",
+    rows: [
+      { label: 'Max tasks of this space working at once', key: 'space.maxTasks', value: 'off', num: { min: 1, max: 200, off: true }, hint: "Caps this space's working tasks within the machine's own limit, so a space that matters more can have more of them running than the others. Off: only the machine's limit." },
+      // per provider or per model. Read at two levels, both applied (model-caps.ts, choose.ts): the machine's own value (Machine,
+      // or Everywhere) is the machine's total, and a space's own value (pick: its own, else the machine's) is that space's
+      // sub-limit inside it. A space's value never replaces the machine's total.
+      { label: 'Most at once per model or provider', key: 'models.maxAtOnce', value: 'off', text: true, hint: `Most agents of one provider or model at once: spark=4 caps every spark model, anthropic/claude-opus-5-5=2 one model (a model's own entry wins). Set at this machine or Everywhere it is the machine's total, for every space together; set for a space, that space's own sub-limit inside it (its own runs only). A task waits for a free slot of its model, and the others start past it. Counts this machine's tasks and coordinators on it; requests from other apps on the same server are not seen. Off: no cap per model.` },
+    ],
   },
   {
     // Done tasks put themselves in their place's Archived view this long after they finished (engine.autoArchive)
@@ -634,6 +641,10 @@ export class Settings {
       else if (key === 'heartbeat.when') value = timeRule(value)
       else if (key === 'heartbeat.on') value = eventsText(eventRules(value))
       else if (key === 'time.zone') value = value.trim()
+      else if (key === 'models.maxAtOnce') {
+        const cap = parseMaxAtOnce(value)
+        value = cap.ok ? formatMaxAtOnce(cap.entries) || 'off' : value
+      }
       // a CLI is kept by its name, however it was written
       else if (isBackupCli(key) && value.trim().toLowerCase() === 'off') value = 'off'
       else if (key.endsWith('.agent') || isBackupCli(key)) value = CLI_NAME[kindOf(value)!]
@@ -826,6 +837,15 @@ export class Settings {
       alertDisk: num('machine.alertDisk'),
       alertHerdr: get('machine.alertHerdr') !== 'off',
     }
+  }
+
+  /** the most agents at once per provider or per model (models.maxAtOnce), as entries; none while it is off (model-caps.ts).
+   *  Without a space: the machine's total, read at this machine (its own, else Everywhere's). With one: that space's
+   *  sub-limit, its own value or else the machine's; the caller applies both (choose.ts), so a space's value never
+   *  replaces the machine's total */
+  maxAtOnce(space?: string): MaxEntry[] {
+    const p = parseMaxAtOnce(this.pick('models.maxAtOnce', space ? { space } : 'machine').value)
+    return p.ok ? p.entries : []
   }
 
   /** how many of one space's tasks may work on this machine at once (space.maxTasks, inside the machine's own limit): the
@@ -1137,6 +1157,10 @@ export function refuse(key: string, value: string): string | undefined {
     } catch (e) {
       return (e as Error).message
     }
+  }
+  if (key === 'models.maxAtOnce') {
+    const p = parseMaxAtOnce(value)
+    if (!p.ok) return p.error
   }
   if (key === 'time.zone' && !validZone(value.trim())) return `${value} is no time zone: write one like Europe/Stockholm.`
   const options = ROWS.find((r) => r.key === key)?.options

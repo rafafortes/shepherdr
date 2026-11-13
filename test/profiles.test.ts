@@ -65,6 +65,45 @@ describe('a profile: what it keeps, at every level', () => {
     expect(models.values.all).not.toHaveProperty('merge.train')
   })
 
+  test('the limits a profile holds include the most at once per model, this machine’s or Everywhere’s, and never a space’s', () => {
+    expect(LIMIT_KEYS).toContain('models.maxAtOnce')
+    const w = world({ everywhere: { 'models.maxAtOnce': 'spark=4' }, machine: { 'models.maxAtOnce': 'radeon=1' } })
+    const lim = w.p.save('lim', { limits: true }).profile!
+    expect(lim.values.all['models.maxAtOnce']).toBe('spark=4')
+    expect(lim.values.machine['models.maxAtOnce']).toBe('radeon=1')
+    expect(lim.values.spaces.gtm!['models.maxAtOnce']).toBeNull()
+    // the models alone hold none of it
+    expect(w.p.save('models').profile!.values.machine).not.toHaveProperty('models.maxAtOnce')
+    // applied, the value comes back as saved
+    w.s.set('models.maxAtOnce', 'off', 'machine')
+    const plan = planOf(w.site(), lim)
+    expect(plan.changes).toContainEqual(expect.objectContaining({ key: 'models.maxAtOnce', at: 'machine', now: 'off', then: 'radeon=1' }))
+  })
+
+  test("a space's own sub-limit (models.maxAtOnce at a space) round-trips: saved, applied, and undone", () => {
+    const w = world({ machine: { 'models.maxAtOnce': 'spark=4' }, spaces: { gtm: { 'models.maxAtOnce': 'anthropic=2' } } })
+    const lim = w.p.save('sub', { limits: true }).profile!
+    expect(lim.values.spaces.gtm!['models.maxAtOnce']).toBe('anthropic=2')
+    expect(lim.values.spaces.docs!['models.maxAtOnce']).toBeNull()
+    // the space's sub-limit changed since, and the machine's total too: the plan names both, each as it reads now
+    w.s.set('models.maxAtOnce', 'off', { space: 'gtm' })
+    w.s.set('models.maxAtOnce', 'radeon=1', 'machine')
+    expect(planOf(w.site(), lim).changes.filter((c) => c.key === 'models.maxAtOnce').map((c) => [c.at, c.now, c.then])).toEqual([
+      ['machine', 'radeon=1', 'spark=4'],
+      [{ space: 'gtm' }, 'off', 'anthropic=2'],
+    ])
+    // applied: both come back as saved, and the space's own value is its own again (not the machine's)
+    const r = w.p.apply('sub')
+    expect(r.ok).toBe(true)
+    expect(own(w.s, 'models.maxAtOnce', { space: 'gtm' })).toBe('anthropic=2')
+    expect(own(w.s, 'models.maxAtOnce', 'machine')).toBe('spark=4')
+    expect(own(w.s, 'models.maxAtOnce', { space: 'docs' })).toBeNull()
+    // undo puts the space's and the machine's values back as they were before the apply
+    expect(w.p.undo().ok).toBe(true)
+    expect(own(w.s, 'models.maxAtOnce', { space: 'gtm' })).toBe('off')
+    expect(own(w.s, 'models.maxAtOnce', 'machine')).toBe('radeon=1')
+  })
+
   test('a profile saved while Settings reads an inherited value keeps the inheritance, not a copy of it', () => {
     const w = world({ everywhere: { 'task.agent': 'pi' } })
     const v = w.p.save('inherit').profile!.values
