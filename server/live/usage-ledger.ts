@@ -10,6 +10,7 @@
 // across a chat's files, and a per-file position alone would count them twice; a per-chat set of the ids inside the
 // window does not, and a restart re-reads nothing it has counted. The ids go back as far as the usage does.
 import { home, readJson, writeJson } from '../store.ts'
+import type { QuotaFigure } from '../../shared/types.ts'
 
 export const HOUR = 3_600_000
 /** how far back usage and the ids that dedupe it are kept: a call older than this is not counted at all */
@@ -45,25 +46,6 @@ export interface RunOut {
   /** when it resets, as the words show it (ISO times in local time), and when, for an ISO time */
   reset?: string
   resetAt?: number
-}
-
-/** one window of a provider's quota (4b's figure; the summary shows what it is given): used as a share or a count,
- *  against a cap, and when it refills */
-export interface QuotaWindow {
-  name: string
-  usedPct?: number
-  used?: number
-  cap?: number
-  resetAt?: number
-}
-
-/** a provider's quota as a read of its own says it: its windows, where the read came from and when, and whether the
- *  numbers are an estimate (pi's catalog cost, say) */
-export interface QuotaFigure {
-  windows: QuotaWindow[]
-  source: string
-  at: number
-  estimate?: boolean
 }
 
 export interface UsageTotals {

@@ -849,6 +849,99 @@ export interface ModelsMatrix {
   catalog: Record<string, MatrixCatalog>
 }
 
+/** one window of a provider's quota, as a read of its own gives it (4b): used as a share or a count, against a cap, and
+ *  when it refills. A window refilled since its read says nothing of now */
+export interface QuotaWindow {
+  name: string
+  usedPct?: number
+  used?: number
+  cap?: number
+  resetAt?: number
+}
+/** a provider's quota figure: its windows, where the read came from and when, and whether the numbers are an estimate */
+export interface QuotaFigure {
+  windows: QuotaWindow[]
+  source: string
+  at: number
+  estimate?: boolean
+}
+
+/** Settings → Models → Summary (models-summary.ts): where the work runs, per provider and per model. Usage is read from
+ *  the logs of Shepherdr's agents on this machine (usage-ledger.ts); the rest is the table's configured values and what
+ *  runs and waits now */
+export interface SummaryUsage {
+  tokens: number
+  calls: number
+  /** pi's own cost estimate, in dollars, when its logs gave one: an estimate, never a bill */
+  cost?: number
+}
+export interface SummaryWindows<T> {
+  h5: T
+  h24: T
+  d7: T
+}
+/** the role slots that point at a provider or model: primaries and backups, by role and by space (its name, ~ for home) */
+export interface SummaryConfigured {
+  primary: number
+  backup: number
+  roles: Partial<Record<MatrixRole, number>>
+  spaces: Record<string, number>
+}
+/** what runs and waits on it now: live agents by role, and the waiting tasks that start on it or are reviewed by it */
+export interface SummaryNow {
+  agents: number
+  working: number
+  roles: Partial<Record<'task' | 'coordinator' | 'reviewer', number>>
+  starts: number
+  reviews: number
+}
+export interface SummaryRunOuts {
+  count7d: number
+  last?: { at: number; reason: string; reset?: string; resetAt?: number; chat: string; role: string; model: string }
+  /** out right now: until its known reset, or until its return watch says the primary is back, or until a call goes through */
+  out: boolean
+  until?: number
+}
+/** one row of the summary: a provider, or one of its models */
+export interface SummaryRow {
+  configured: SummaryConfigured
+  now: SummaryNow
+  usage: SummaryWindows<SummaryUsage>
+  runOuts: SummaryRunOuts
+}
+export interface SummaryModel extends SummaryRow {
+  /** the model key (provider/model) and the model's name in words */
+  key: string
+  label: string
+}
+export interface SummaryProvider extends SummaryRow {
+  provider: string
+  /** the provider in words (Claude Code, Codex, OpenCode Go, or its own name) */
+  name: string
+  /** one of this machine's own models (spark, radeon, avell, dell): no quota, shared */
+  local: boolean
+  /** its share of all tokens in the last 24 h and in the last 7 d (none when nothing was used) */
+  share: { h24?: number; d7?: number }
+  quota?: QuotaFigure
+  models: SummaryModel[]
+}
+/** a rule-based warning about the settings or the providers, with its fix in words; go opens the cell that changes it
+ *  (a row's place and a slot's id, as the table names them) */
+export interface SummaryWarning {
+  id: string
+  level: 'risk' | 'note'
+  words: string
+  fix?: string
+  go?: { row: string; slot: string }
+}
+export interface ModelsSummary {
+  at: number
+  /** when the logs were read once from their start (the backfill); none while it runs */
+  backfilled?: number
+  providers: SummaryProvider[]
+  warnings: SummaryWarning[]
+}
+
 /** Settings → Models → profiles (server/live/profiles.ts): one setting a profile changes, as the preview and the answer
  *  name it */
 export interface ProfileChange {
