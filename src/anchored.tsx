@@ -38,3 +38,9 @@ export function Anchored({ end = false, children }: { end?: boolean; children: R
     </>
   )
 }
+
+/** drawn at the top of the page (a portal to the body): a dialog of Settings → Models shades the table's sticky cells too,
+ *  which a dialog inside the table's stacking context could not */
+export function OnTop({ children }: { children: ReactNode }) {
+  return createPortal(children, document.body)
+}

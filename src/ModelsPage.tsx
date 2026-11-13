@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { MatrixRow, MatrixSlot, ModelsMatrix, SettingRow } from '@shared/types.ts'
 import { act, useSnap } from './kernel.ts'
 import { askWaitingMany } from './apply-waiting.tsx'
-import { Anchored } from './anchored.tsx'
+import { Anchored, OnTop } from './anchored.tsx'
 import { ProfilesBar } from './Profiles.tsx'
 import { Control } from './Settings.tsx'
 import { Dialog } from './rowmenu.tsx'
@@ -342,8 +342,10 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
             </ul>
           </section>
         ))}
-        {bulk ? <SetForEverySpace m={m} slot={bulk} phone={phone} onClose={() => setBulk(null)} /> : null}
-        {copy ? <CopyModels m={m} from={copy} targets={spaces.filter((r) => r.id !== copy.id)} onClose={() => setCopy(null)} /> : null}
+        <OnTop>
+          {bulk ? <SetForEverySpace m={m} slot={bulk} phone={phone} onClose={() => setBulk(null)} /> : null}
+          {copy ? <CopyModels m={m} from={copy} targets={spaces.filter((r) => r.id !== copy.id)} onClose={() => setCopy(null)} /> : null}
+        </OnTop>
       </div>
     )
   }
@@ -438,8 +440,10 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
         </table>
       </div>
       <Small className="text-pretty">Strong: set in that row. Faint: inherited, with where it comes from. Each cell's values are written at its row's level.</Small>
-      {bulk ? <SetForEverySpace m={m} slot={bulk} phone={phone} onClose={() => setBulk(null)} /> : null}
-      {copy ? <CopyModels m={m} from={copy} targets={spaces.filter((r) => r.id !== copy.id)} onClose={() => setCopy(null)} /> : null}
+      <OnTop>
+        {bulk ? <SetForEverySpace m={m} slot={bulk} phone={phone} onClose={() => setBulk(null)} /> : null}
+        {copy ? <CopyModels m={m} from={copy} targets={spaces.filter((r) => r.id !== copy.id)} onClose={() => setCopy(null)} /> : null}
+      </OnTop>
     </div>
   )
 }

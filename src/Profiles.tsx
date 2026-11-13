@@ -8,7 +8,7 @@ import { waitingKind } from '@shared/apply-waiting.ts'
 import type { ProfileChange, ProfilePreview, ProfileRefusal, ProfileSummary, ProfilesView } from '@shared/types.ts'
 import { act, useSnap } from './kernel.ts'
 import { askWaitingMany } from './apply-waiting.tsx'
-import { Anchored } from './anchored.tsx'
+import { Anchored, OnTop } from './anchored.tsx'
 import { Dialog } from './rowmenu.tsx'
 import { Ghost, Menu, MenuItem, MenuLabel, MenuSeparator, Primary, Small, field } from './ui.tsx'
 
@@ -114,10 +114,12 @@ export function ProfilesBar({ phone }: { phone: boolean }) {
         ) : null}
       </span>
       {note ? <Small role="status" className="w-full text-pretty">{note}</Small> : null}
-      {open?.kind === 'preview' ? <PreviewDialog name={open.name} onClose={close} onNote={setNote} /> : null}
-      {open?.kind === 'save' ? <SaveDialog onClose={close} onNote={setNote} /> : null}
-      {open?.kind === 'undo' && undo ? <UndoDialog name={undo.name} label={undo.label} onClose={close} onNote={setNote} /> : null}
-      {open?.kind === 'manage' ? <ManageDialog onClose={close} onNote={setNote} /> : null}
+      <OnTop>
+        {open?.kind === 'preview' ? <PreviewDialog name={open.name} onClose={close} onNote={setNote} /> : null}
+        {open?.kind === 'save' ? <SaveDialog onClose={close} onNote={setNote} /> : null}
+        {open?.kind === 'undo' && undo ? <UndoDialog name={undo.name} label={undo.label} onClose={close} onNote={setNote} /> : null}
+        {open?.kind === 'manage' ? <ManageDialog onClose={close} onNote={setNote} /> : null}
+      </OnTop>
     </section>
   )
 }
