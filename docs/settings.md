@@ -40,13 +40,17 @@
 - **The reviewer of the tasks already created** (`reviewer.agent`, `reviewer.model`, `reviewer.effort`, and the backup reviewers'
   keys, `reviewer.fallback…`). A task's reviewer is written into its brief when it is added, in the Reviewer line of its Settings
   block, so the same question follows a change of Settings' reviewer. Right after you save one, Settings asks **Apply to the
-  tasks already created?** when a waiting task would change, with what it would do: "2 waiting tasks of lyvora-site (queued, To do,
-  scheduled) are reviewed by pi (opencode-go/…) when their turn comes. Running tasks keep their reviewer." **Apply to 2 tasks**
-  rewrites the Reviewer line of each waiting task's brief (the words above the block, and its other lines, stay as they are), so the
-  task is reviewed by the new reviewer, and its backups too, when its turn comes. **Only new tasks** changes nothing.
-  - **Which tasks, and which spaces.** The same as for the task agent above: queued, To do and scheduled tasks change; running,
-    asking, ready, merging, done and archived ones keep their reviewer. A space's own setting for the key that changed is kept
-    when the change is Everywhere or this machine's, and the dialog says which spaces keep theirs.
+  tasks already created?** when a task would change, with what it would do: "2 waiting tasks of lyvora-site (queued, To do,
+  scheduled) are reviewed by pi (opencode-go/…) when their turn comes. 1 started task of lyvora-site (working, waiting on you,
+  ready) is reviewed by pi (opencode-go/…) from its next review round." **Apply to 3 tasks** rewrites the Reviewer line of each
+  one's brief (the words above the block, and its other lines, stay as they are), so a waiting task is reviewed by the new
+  reviewer, and its backups too, when its turn comes, and a started one from its next round. **Only new tasks** changes nothing.
+  - **Which tasks, and which spaces.** Every task that is not done: queued, To do and scheduled ones, and the started ones —
+    working, asking, ready, merging — too (since 2026-11-14; until then they kept the reviewer of their brief). Nothing is sent
+    to a started task's agent: its next `shepherdr review` names the reviewer that round runs with, and a round already counted
+    ends on the one it had. Done and archived tasks keep theirs. A space's own setting for the key that changed is kept when the
+    change is Everywhere or this machine's, and the dialog says which spaces keep theirs. A task agent's change still reaches
+    only the waiting tasks: a started one goes on with the agent it has, until you restart it.
   - **A task whose agent already has its brief.** A To do task, or a held one that had started before, is not started by the change.
     Its agent reads its brief once, so the new Reviewer line reaches it with its go, or with the first message written to it, or
     on a restart: "Your reviewer changed while you waited; your brief's Settings block now says: …". Until then its chat says

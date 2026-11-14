@@ -253,8 +253,10 @@ export interface Retune {
   follow: number
   /** of the changed, those task add's flags chose (not Settings) */
   pinned: number
-  /** tasks of the scope already started (working, asking, ready, merging): they keep their agent */
+  /** tasks of the scope already started (working, asking, ready, merging): they keep their agent (a task agent's change) */
   running: number
+  /** started tasks whose reviewer changed to what Settings name (a reviewer's change): their next round runs on it */
+  started: number
   /** spaces whose own setting keeps its agent (machine scope only), with waiting tasks */
   kept: string[]
   /** the spaces whose waiting tasks changed, with the worker they take and how many */
@@ -353,12 +355,15 @@ export function reviewRetuneLine(r: Retune) {
   const reviewed = r.spaces.length === 1
     ? `${n(r.changed, 'waiting task')} in ${r.spaces[0].name} ${r.changed === 1 ? 'is' : 'are'} reviewed by ${harnessWords(fitHarness(r.spaces[0].on))} when ${r.changed === 1 ? 'its' : 'their'} turn comes`
     : `${n(r.changed, 'waiting task')} in ${r.spaces.length} spaces ${r.changed === 1 ? 'is' : 'are'} reviewed by what Settings name for each (${by.join('; ')})`
+  const from = r.spaces.length === 1
+    ? `${n(r.started, 'started task')} in ${r.spaces[0].name} ${r.started === 1 ? 'is' : 'are'} reviewed by ${harnessWords(fitHarness(r.spaces[0].on))} from ${r.started === 1 ? 'its' : 'their'} next review round`
+    : `${n(r.started, 'started task')} ${r.started === 1 ? 'is' : 'are'} reviewed by what Settings name for its space from ${r.started === 1 ? 'its' : 'their'} next review round`
   const bits = [
-    r.changed ? reviewed : 'no waiting task changes',
+    r.changed ? reviewed : r.started ? '' : 'no task changes',
+    r.started ? from : '',
     r.pinned ? `${r.pinned} of them had a reviewer of its own from task add, and changes too` : '',
     r.same ? `${r.same} already on it` : '',
     r.follow ? `${r.follow} take${r.follow === 1 ? 's' : ''} Settings' reviewer at ${r.follow === 1 ? 'its' : 'their'} turn anyway` : '',
-    r.running ? `${n(r.running, 'running task')} ${r.running === 1 ? 'keeps its' : 'keep their'} reviewer` : '',
     r.kept.length ? `${r.kept.join(', ')} keep${r.kept.length === 1 ? 's' : ''} its own setting` : '',
   ]
   return `${bits.filter(Boolean).join('; ')}.`
@@ -2243,7 +2248,7 @@ export class Engine extends Emitter<Events> {
    * their agent, and so does one already on it. `dry`: count only, change nothing.
    */
   retuneWaiting(scope: { space: string } | { key: string }, dry = false): Retune {
-    const out: Retune = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [], spaces: [] }
+    const out: Retune = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, started: 0, kept: [], spaces: [] }
     const want = 'space' in scope ? this.addedNameOf(scope.space) : undefined
     const plan: { t: TaskRec; on: Harness }[] = []
     const perSpace = new Map<string, { on: Harness; changed: number }>()
@@ -2287,23 +2292,26 @@ export class Engine extends Emitter<Events> {
   }
 
   /**
-   * Settings' reviewer changed (reviewer.agent, reviewer.model, reviewer.effort, and the backup reviewers' keys): the
-   * waiting tasks it reaches take what Settings now name for their space, as a task added now would. Their brief's
-   * Settings block says it: its Reviewer line is written again (rebriefReviewer), the words above it untouched. Scope as
-   * retuneWaiting: a space's own setting for the key it changes is kept. A task whose agent has its brief already cannot
-   * read a changed block, so its agent hears the new Reviewer line with its go (takeNote), and nothing is sent now. A
-   * scheduled task builds its brief at its time, so it follows Settings unless task add gave it a reviewer of its own
-   * (that goes). A reviewer task add chose (reviewerChosen) is changed too, and counted apart. `dry`: count only.
+   * Settings' reviewer changed (reviewer.agent, reviewer.model, reviewer.effort, and the backup reviewers' keys): every task
+   * it reaches that is not done takes what Settings now name for its space, as a task added now would — the waiting ones
+   * and the started ones alike (working, asking, ready, merging: the operator's rule, 2026-11-14). Their brief's Settings
+   * block says it: its Reviewer line is written again (rebriefReviewer), the words above it untouched. Scope as
+   * retuneWaiting: a space's own setting for the key it changes is kept. A waiting task whose agent has its brief already
+   * cannot read a changed block, so its agent hears the new Reviewer line with its go (takeNote), and nothing is sent now.
+   * A started one is sent nothing either: its next round (shepherdr review) names the reviewer it runs with, and a round
+   * already counted ends on the one it had. A scheduled task builds its brief at its time, so it follows Settings unless
+   * task add gave it a reviewer of its own (that goes). A reviewer task add chose (reviewerChosen) is changed too, and
+   * counted apart. Done and archived tasks keep theirs. `dry`: count only.
    */
   retuneReviewers(scope: { space: string } | { key: string }, dry = false): Retune {
-    const out: Retune = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [], spaces: [] }
+    const out: Retune = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, started: 0, kept: [], spaces: [] }
     const want = 'space' in scope ? this.addedNameOf(scope.space) : undefined
     const plan: (() => void)[] = []
     const perSpace = new Map<string, { on: Harness; changed: number }>()
-    const told = (t: TaskRec, on: Harness) => {
+    const told = (t: TaskRec, on: Harness, waiting: boolean) => {
       const words = `Reviewed by ${harnessWords(fitHarness(on))}`
       const id = `reviewer:${t.id}:${Date.now()}`
-      const text = this.hasBrief(t) ? `${words}: its agent is told at its go` : `${words} when its turn comes`
+      const text = !waiting ? `${words} from its next review round` : this.hasBrief(t) ? `${words}: its agent is told at its go` : `${words} when its turn comes`
       this.chats.post(this.key(t), { id, card: { id, task: t.id, text } })
     }
     for (const t of this.tasks) {
@@ -2311,11 +2319,7 @@ export class Engine extends Emitter<Events> {
       if (t.archived || ended(t) || !space || ('space' in scope && space !== want)) continue
       const waiting = WAITING.includes(this.statusOf(t))
       if (!('space' in scope) && this.settings.pick(scope.key, { space }).from === 'space') {
-        if (waiting && !out.kept.includes(space)) out.kept.push(space)
-        continue
-      }
-      if (!waiting) {
-        out.running++
+        if (!out.kept.includes(space)) out.kept.push(space)
         continue
       }
       const on = this.settings.harness('reviewer', space)
@@ -2335,7 +2339,7 @@ export class Engine extends Emitter<Events> {
         pinned = true
         changed = () => {
           t.scheduled!.reviewer = undefined
-          told(t, on)
+          told(t, on, true)
         }
       } else {
         const fallback = this.settings.reviewerBackups(space, t.set)
@@ -2351,11 +2355,13 @@ export class Engine extends Emitter<Events> {
           t.reviewer = on
           t.desc = desc
           t.reviewerChosen = undefined
-          if (this.hasBrief(t)) t.reviewerNote = reviewerChangedLine(line)
-          told(t, on)
+          // a waiting agent with its brief hears it at its go; a started one, from its next round's answer
+          if (waiting && this.hasBrief(t)) t.reviewerNote = reviewerChangedLine(line)
+          told(t, on, waiting)
         }
       }
-      out.changed++
+      if (waiting) out.changed++
+      else out.started++
       if (pinned) out.pinned++
       const s = perSpace.get(space) ?? { on, changed: 0 }
       s.changed++

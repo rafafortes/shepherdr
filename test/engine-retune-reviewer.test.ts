@@ -1,7 +1,8 @@
 // Settings' reviewer changed (reviewer.agent, reviewer.model, reviewer.effort and the backup reviewers' keys): the
 // waiting tasks read it in their brief's Settings block, as a task added now would. The block's Reviewer line is written
 // again, the words above it stay byte for byte; a task whose agent already has its brief hears the new line with its
-// go (or with the first message that reaches it), and is not started early. Running tasks keep their reviewer.
+// go (or with the first message that reaches it), and is not started early. A started task (working, asking, ready,
+// merging) takes it too, from its next review round, each CLI alike; done and archived ones keep theirs.
 import { describe, expect, test } from 'bun:test'
 import { placeId, repo, until, world } from './engine-world.ts'
 import { reviewRetuneLine, type Retune } from '../server/live/engine/engine.ts'
@@ -36,9 +37,10 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
 
     expect(w.settings.set('reviewer.agent', 'pi', { space: p.name }).ok).toBe(true)
     const dry = w.engine.retuneReviewers({ space: p.name }, true)
-    expect(dry).toEqual({ changed: 1, same: 0, follow: 0, pinned: 0, running: 1, kept: [], spaces: [{ name: p.name, on: { kind: 'pi' }, changed: 1 }] })
+    // the one at work takes it too, from its next round
+    expect(dry).toEqual({ changed: 1, same: 0, follow: 0, pinned: 0, running: 0, started: 1, kept: [], spaces: [{ name: p.name, on: { kind: 'pi' }, changed: 2 }] })
     // a dry run changes nothing
-    expect([q.reviewer?.kind, q.desc]).toEqual(['codex', before])
+    expect([q.reviewer?.kind, q.desc, first.reviewer?.kind]).toEqual(['codex', before, 'codex'])
 
     expect(w.engine.retuneReviewers({ space: p.name })).toEqual(dry)
     expect(q.reviewer).toMatchObject({ kind: 'pi' })
@@ -51,10 +53,13 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     expect(q.reviewerNote).toBeUndefined()
     // the card in its chat says who reviews it now
     expect(w.posted.some((x) => x.key === `${q.id}/Agent` && x.card?.text === 'Reviewed by pi when its turn comes')).toBe(true)
-    // the running one keeps its reviewer and its brief
-    expect(first.reviewer).toMatchObject({ kind: 'codex' })
-    // a second run finds it on pi already
-    expect(w.engine.retuneReviewers({ space: p.name })).toMatchObject({ changed: 0, same: 1, running: 1 })
+    // the running one takes it too: its brief's line, and its next round; nothing is sent to it now
+    expect(first.reviewer).toMatchObject({ kind: 'pi' })
+    expect(reviewerOf(first.desc)).toBe(piLine(first.id))
+    expect(first.reviewerNote).toBeUndefined()
+    expect(w.posted.some((x) => x.key === `${first.id}/Agent` && x.card?.text === 'Reviewed by pi from its next review round')).toBe(true)
+    // a second run finds both on pi already
+    expect(w.engine.retuneReviewers({ space: p.name })).toMatchObject({ changed: 0, same: 2, started: 0 })
   })
 
   test('the backup reviewers are lines of the same block: one set, the Reviewer line says it, and off takes it out again', async () => {
@@ -65,7 +70,9 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     const q = w.engine.add({ project: p.name, title: 'Waits', desc: 'Add b.txt.', by: 'test' })
     expect(w.settings.set('reviewer.fallback', 'claude', { space: p.name }).ok).toBe(true)
     const r = w.engine.retuneReviewers({ space: p.name })
-    expect(r).toMatchObject({ changed: 1, spaces: [{ name: p.name, changed: 1 }] })
+    // the one at work takes the backup's line too
+    expect(r).toMatchObject({ changed: 1, started: 1, spaces: [{ name: p.name, changed: 2 }] })
+    expect(reviewerOf(first.desc)).toContain('review with a headless Claude Code or a Claude Code subagent')
     expect(reviewerOf(q.desc)).toBe(
       reviewerLineFor(CODEX_WORDS, q.id, 'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (its default model and effort) instead for that round only, and say in your summary that you did.', "(this space's setting)"),
     )
@@ -94,7 +101,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     expect(q.desc).toContain(`${codexLine(q.id)}\n`)
   })
 
-  test('running, asking, archived and done tasks keep their reviewer and their brief', async () => {
+  test('running and asking tasks take it from their next round, nothing sent to them; archived and done ones keep theirs', async () => {
     const w = fresh()
     const p = await w.places.add(repo(), 'rv-running')
     expect(w.settings.set('machine.maxTasks', '10').ok).toBe(true)
@@ -108,11 +115,15 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     archived.archived = Date.now()
     const done = w.engine.add({ project: p.name, title: 'Done', desc: 'Add e.txt.', by: 'test' })
     done.merged = true
-    const before = [work.desc, asking.desc, archived.desc, done.desc]
+    const before = [archived.desc, done.desc]
+    const sent = w.sent.length
     expect(w.settings.set('reviewer.agent', 'pi', { space: p.name }).ok).toBe(true)
-    expect(w.engine.retuneReviewers({ space: p.name })).toEqual({ changed: 0, same: 0, follow: 0, pinned: 0, running: 2, kept: [], spaces: [] })
-    expect([work.desc, asking.desc, archived.desc, done.desc]).toEqual(before)
-    expect(work.reviewer).toMatchObject({ kind: 'codex' })
+    expect(w.engine.retuneReviewers({ space: p.name })).toEqual({ changed: 0, same: 0, follow: 0, pinned: 0, running: 0, started: 2, kept: [], spaces: [{ name: p.name, on: { kind: 'pi' }, changed: 2 }] })
+    expect([archived.desc, done.desc]).toEqual(before)
+    expect([work.reviewer?.kind, asking.reviewer?.kind, archived.reviewer?.kind, done.reviewer?.kind]).toEqual(['pi', 'pi', 'codex', 'codex'])
+    expect([reviewerOf(work.desc), reviewerOf(asking.desc)]).toEqual([piLine(work.id), piLine(asking.id)])
+    expect(w.sent.length).toBe(sent)
+    expect([work.reviewerNote, asking.reviewerNote]).toEqual([undefined, undefined])
   })
 
   test('a space that sets the key itself keeps it when the change is Everywhere or this machine', async () => {
@@ -270,10 +281,32 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     const after = w.engine.add({ project: p.name, title: 'After', desc: 'Add b.txt.', by: 'test', after: [first.id] })
     expect(w.engine.statusOf(after)).toBe('queued')
     expect(w.settings.set('reviewer.agent', 'pi', { space: p.name }).ok).toBe(true)
-    expect(w.engine.retuneReviewers({ space: p.name })).toMatchObject({ changed: 1, running: 1 })
+    expect(w.engine.retuneReviewers({ space: p.name })).toMatchObject({ changed: 1, started: 1 })
     expect(after.reviewerNote).toBeUndefined()
     expect(reviewerOf(after.desc)).toBe(piLine(after.id))
   })
+})
+
+describe("every CLI as the reviewer: a task already at work reviews with the new one from its next round", () => {
+  for (const kind of ['claude', 'codex', 'pi', 'opencode', 'agy'])
+    test(`a change to ${kind}: the round counted after it runs on ${kind}; the round counted before ends on the one it had`, async () => {
+      const w = fresh()
+      w.engine.installed = () => true
+      const p = await w.places.add(repo(), `rv-cli-${kind}`)
+      // its first reviewer: another CLI than the one it changes to
+      const from = kind === 'codex' ? 'pi' : 'codex'
+      expect(w.settings.set('reviewer.agent', from, { space: p.name }).ok).toBe(true)
+      const t = w.engine.add({ project: p.name, title: 'At work', desc: 'Add a.txt.', by: 'test', set: { 'review.rounds': '3' } })
+      await until(() => w.started.some((s) => s.key === `${t.id}/Agent`))
+      expect(w.engine.statusOf(t)).toBe('work')
+      const before = await w.engine.reviewRound(t.id)
+      expect(before).toMatchObject({ round: 1, reviewer: { kind: from } })
+      expect(w.settings.set('reviewer.agent', kind, { space: p.name }).ok).toBe(true)
+      expect(w.engine.retuneReviewers({ space: p.name })).toMatchObject({ changed: 0, started: 1 })
+      expect(t.reviewer).toMatchObject({ kind })
+      const after = await w.engine.reviewRound(t.id)
+      expect(after).toMatchObject({ round: 2, reviewer: { kind } })
+    })
 })
 
 describe('the brief helpers', () => {
@@ -308,15 +341,18 @@ describe('the brief helpers', () => {
   })
 
   test('the reviewer words in a line: one space, several, and nothing changed', () => {
-    const base: Retune = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [], spaces: [] }
-    expect(reviewRetuneLine({ ...base, changed: 2, same: 1, pinned: 1, running: 1, follow: 1, kept: ['lyvora-app'], spaces: [{ name: 'lyvora-site', on: { kind: 'pi', model: 'opencode-go/deepseek' }, changed: 2 }] })).toBe(
-      '2 waiting tasks in lyvora-site are reviewed by pi (opencode-go/deepseek) when their turn comes; 1 of them had a reviewer of its own from task add, and changes too; 1 already on it; 1 takes Settings\' reviewer at its turn anyway; 1 running task keeps its reviewer; lyvora-app keeps its own setting.',
+    const base: Retune = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, started: 0, kept: [], spaces: [] }
+    expect(reviewRetuneLine({ ...base, changed: 2, same: 1, pinned: 1, started: 1, follow: 1, kept: ['lyvora-app'], spaces: [{ name: 'lyvora-site', on: { kind: 'pi', model: 'opencode-go/deepseek' }, changed: 3 }] })).toBe(
+      '2 waiting tasks in lyvora-site are reviewed by pi (opencode-go/deepseek) when their turn comes; 1 started task in lyvora-site is reviewed by pi (opencode-go/deepseek) from its next review round; 1 of them had a reviewer of its own from task add, and changes too; 1 already on it; 1 takes Settings\' reviewer at its turn anyway; lyvora-app keeps its own setting.',
+    )
+    expect(reviewRetuneLine({ ...base, started: 2, spaces: [{ name: 'a', on: { kind: 'pi' }, changed: 1 }, { name: 'b', on: { kind: 'codex' }, changed: 1 }] })).toBe(
+      '2 started tasks are reviewed by what Settings name for its space from their next review round.',
     )
     expect(reviewRetuneLine({ ...base, changed: 3, spaces: [{ name: 'a', on: { kind: 'pi' }, changed: 1 }, { name: 'b', on: { kind: 'codex' }, changed: 2 }] })).toBe(
       '3 waiting tasks in 2 spaces are reviewed by what Settings name for each (a by pi; b by Codex).',
     )
     expect(reviewRetuneLine({ ...base, changed: 1, spaces: [{ name: 'a', on: { kind: 'pi' }, changed: 1 }] })).toBe('1 waiting task in a is reviewed by pi when its turn comes.')
-    expect(reviewRetuneLine({ ...base, same: 2, follow: 2, running: 2 })).toBe('no waiting task changes; 2 already on it; 2 take Settings\' reviewer at their turn anyway; 2 running tasks keep their reviewer.')
+    expect(reviewRetuneLine({ ...base, same: 2, follow: 2 })).toBe('no task changes; 2 already on it; 2 take Settings\' reviewer at their turn anyway.')
   })
 })
 
@@ -335,16 +371,16 @@ describe('a renamed space: the reviewer answer names it as it shows, and a scope
     expect([w.engine.statusOf(waits), w.engine.statusOf(kept)]).toEqual(['queued', 'queued'])
     expect(w.settings.set('reviewer.agent', 'pi', 'all').ok).toBe(true)
 
-    const everywhere: Retune = { changed: 1, same: 0, follow: 0, pinned: 0, running: 1, kept: ['lyvora-app'], spaces: [{ name: 'lyvora-site', on: { kind: 'pi' }, changed: 1 }] }
+    const everywhere: Retune = { changed: 1, same: 0, follow: 0, pinned: 0, running: 0, started: 1, kept: ['lyvora-app'], spaces: [{ name: 'lyvora-site', on: { kind: 'pi' }, changed: 2 }] }
     expect(w.engine.retuneReviewers({ key: 'reviewer.agent' }, true)).toEqual(everywhere)
     for (const scope of [plain.name, 'lyvora-site', placeId.space(plain.name)]) {
       expect(w.engine.retuneReviewers({ space: scope }, true)).toEqual({ ...everywhere, kept: [] })
     }
-    expect(w.engine.retuneReviewers({ space: 'nowhere' }, true)).toEqual({ changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [], spaces: [] })
+    expect(w.engine.retuneReviewers({ space: 'nowhere' }, true)).toEqual({ changed: 0, same: 0, follow: 0, pinned: 0, running: 0, started: 0, kept: [], spaces: [] })
 
     expect(w.engine.retuneReviewers({ key: 'reviewer.agent' })).toEqual(everywhere)
     expect(waits.reviewer).toMatchObject({ kind: 'pi' })
     expect(kept.reviewer).toMatchObject({ kind: 'codex' })
-    expect(reviewRetuneLine(everywhere)).toBe('1 waiting task in lyvora-site is reviewed by pi when its turn comes; 1 running task keeps its reviewer; lyvora-app keeps its own setting.')
+    expect(reviewRetuneLine(everywhere)).toBe('1 waiting task in lyvora-site is reviewed by pi when its turn comes; 1 started task in lyvora-site is reviewed by pi from its next review round; lyvora-app keeps its own setting.')
   })
 })

@@ -878,18 +878,21 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         if (bySpace && !spaces.length) return { ok: false, error: 'No such space.' }
         const store = this.stores[D.DEMO_HOST]
         const WAITING = ['queued', 'todo', 'scheduled']
-        const out = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [] as string[], spaces: [] as { name: string; words: string; changed: number }[] }
+        const out = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, started: 0, kept: [] as string[], spaces: [] as { name: string; words: string; changed: number }[] }
         for (const p of spaces) {
           const name = p.id.split(':')[2]!
           const tasks = this.tasks.filter((t) => t.place === p.id && !t.archived && t.status !== 'done')
           if (!bySpace && store.pick(a.key, { space: name }).from === 'space') {
-            if (tasks.some((t) => WAITING.includes(t.status))) out.kept.push(p.name)
+            if (tasks.some((t) => kind === 'reviewer' || WAITING.includes(t.status))) out.kept.push(p.name)
             continue
           }
           const on = kind === 'reviewer' ? store.harness('reviewer', name) : store.harness('task', name)
           let changed = 0
+          const startedBefore = out.started
           for (const t of tasks) {
-            if (!WAITING.includes(t.status)) out.running++
+            const waiting = WAITING.includes(t.status)
+            // a reviewer reaches the started tasks too (their next round), an agent only the waiting ones
+            if (!waiting && kind !== 'reviewer') out.running++
             else if (kind === 'reviewer') {
               // a scheduled demo task has no brief yet: it follows Settings at its time
               if (t.status === 'scheduled') {
@@ -900,7 +903,8 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
               const desc = rebriefReviewer(before, { id: t.id, reviewer: on, fallback: store.reviewerBackups(name), review: store.ways(name).review, by: store.setBy(name).reviewer })
               if (desc === before) out.same++
               else {
-                changed++
+                if (waiting) changed++
+                else out.started++
                 if (!a.dry) t.desc = desc
               }
             } else if (!t.agent) out.follow++
@@ -910,10 +914,11 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
               if (!a.dry) t.agent = { ...t.agent, cli: CLI_NAME[on.kind] }
             }
           }
-          if (changed) out.spaces.push({ name: p.name, words: harnessWords(on), changed })
+          const started = out.started - startedBefore
+          if (changed || started) out.spaces.push({ name: p.name, words: harnessWords(on), changed: changed + started })
           out.changed += changed
         }
-        if (!a.dry && out.changed) this.emit('snapshot')
+        if (!a.dry && (out.changed || out.started)) this.emit('snapshot')
         return { ok: true, ...out }
       }
       case 'archive': {

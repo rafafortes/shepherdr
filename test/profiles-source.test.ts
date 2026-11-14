@@ -201,7 +201,8 @@ describe('shepherdr profile: the command, verb by verb', () => {
       expect(await src.act({ type: 'setting', key: 'reviewer.agent', value: 'pi', place })).toEqual({ ok: true })
       const out = await src.cli(['profile', 'apply', 'rev-codex', '--apply-waiting'], { chat: place })
       expect(out.code).toBe(0)
-      expect(out.out).toMatch(/waiting task/)
+      // the reviewer's line for the tasks: the one task is on Codex already (it took Settings' reviewer when added)
+      expect(out.out).toContain('no task changes; 1 already on it.')
       expect(out.out).not.toContain('Tasks · Primary · Agent:')
       expect(await src.act({ type: 'setting', key: 'reviewer.agent', value: null, place })).toEqual({ ok: true })
     } finally {
