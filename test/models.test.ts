@@ -2,7 +2,8 @@
 import { describe, expect, test } from 'bun:test'
 import { chmodSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { effortFor, effortsOf, findModel, helpLevels, knowsModels, modelArg, modelsOf, nearest, opencodeList, parseClaude, parseCodex, parsePi, piEnabled, piFrom, read, scopeModels, scopeOpencodeText, scopePatterns, scopePi, setModels, setOpencodeScope, stillHolds } from '../server/live/models.ts'
+import { agyFrom, claudeFrom, codexFrom, effortFor, effortsOf, findModel, helpLevels, installOf, knowsModels, modelArg, modelsOf, nearest, opencodeFrom, opencodeList, parseClaude, parseCodex, parsePi, piEnabled, piFrom, read, scopeModels, scopeOpencodeText, scopePatterns, scopePi, setModels, setOpencodeScope, stillHolds } from '../server/live/models.ts'
+import { opencodeConfigDir, opencodeDataDir } from '../server/live/opencode.ts'
 import { tmp } from './tmp.ts'
 
 describe('reading what each CLI takes', () => {
@@ -97,12 +98,12 @@ describe('reading what each CLI takes', () => {
       else process.env.PI_CODING_AGENT_DIR = was
     }
   })
-  test("pi's list is asked again as soon as its models.json or its logins change, and every few hours anyway", () => {
+  test("pi's list is asked again as soon as its models.json, its logins or its settings change, and every few hours anyway", () => {
     const dir = tmp('pi-from')
     const models = join(dir, 'models.json')
     // no files yet: a pi with nothing of its own
     const none = piFrom(dir)
-    expect(none).toBe('models.json@0 auth.json@0')
+    expect(none).toBe('models.json@0 auth.json@0 settings.json@0')
     writeFileSync(models, '{"providers":{}}')
     utimesSync(models, new Date(), new Date(1_800_000_000_000))
     const one = piFrom(dir)
@@ -116,18 +117,113 @@ describe('reading what each CLI takes', () => {
     // a new login
     writeFileSync(join(dir, 'auth.json'), '{}')
     expect(piFrom(dir)).not.toBe(two)
+    // a model added to its enabledModels: OpenRouter's models are listed only once named there
+    const login = piFrom(dir)
+    writeFileSync(join(dir, 'settings.json'), '{"enabledModels":["openrouter/thinkingmachines/inkling-2-small:free"]}')
+    expect(piFrom(dir)).not.toBe(login)
     const kept = { models: [{ id: 'spark/qwen', label: 'spark/qwen', efforts: [] }], efforts: [], from: two, at: 1_000 }
     expect(stillHolds('pi', kept, two, 2_000)).toBe(true)
     expect(stillHolds('pi', kept, piFrom(dir), 2_000)).toBe(false)
     // one kept before pi's files were looked at holds nothing: it is asked again once
     expect(stillHolds('pi', { ...kept, from: undefined }, two, 2_000)).toBe(false)
     expect(stillHolds('pi', kept, two, 1_000 + 6 * 3_600_000)).toBe(false)
-    // claude by its install alone; another CLI by the hours alone; none kept holds nothing
+    // claude by its install alone; none kept holds nothing
     expect(stillHolds('claude', { ...kept, from: 'bin@1' }, 'bin@1', 1e15)).toBe(true)
     expect(stillHolds('claude', { ...kept, from: 'bin@1' }, 'bin@2', 2_000)).toBe(false)
-    expect(stillHolds('codex', kept, undefined, 2_000)).toBe(true)
-    expect(stillHolds('codex', kept, undefined, 1_000 + 6 * 3_600_000)).toBe(false)
     expect(stillHolds('pi', undefined, two)).toBe(false)
+  })
+  test("Codex's list is asked again as soon as its config or its install changes, and every few hours anyway", () => {
+    const dir = tmp('codex-from')
+    const config = join(dir, 'config.toml')
+    const none = codexFrom(dir, '@0')
+    expect(none).toBe('config.toml@0 @0')
+    // a config written (a model provider or a profile added)
+    writeFileSync(config, 'model = "gpt-6"')
+    utimesSync(config, new Date(), new Date(1_800_000_000_000))
+    const one = codexFrom(dir, '@0')
+    expect(one).not.toBe(none)
+    expect(codexFrom(dir, '@0')).toBe(one)
+    utimesSync(config, new Date(), new Date(1_800_000_060_000))
+    const two = codexFrom(dir, '@0')
+    expect(two).not.toBe(one)
+    // a new install
+    const newer = codexFrom(dir, '/opt/codex@5')
+    expect(newer).not.toBe(two)
+    const kept = { models: [{ id: 'gpt-6', label: 'gpt-6', efforts: [] }], efforts: [], from: two, at: 1_000 }
+    expect(stillHolds('codex', kept, two, 2_000)).toBe(true)
+    expect(stillHolds('codex', kept, newer, 2_000)).toBe(false)
+    expect(stillHolds('codex', { ...kept, from: undefined }, two, 2_000)).toBe(false)
+    expect(stillHolds('codex', kept, two, 1_000 + 6 * 3_600_000)).toBe(false)
+  })
+  test("OpenCode's list is asked again as soon as its config, its logins or its install changes, and every few hours anyway", () => {
+    const config = tmp('opencode-config')
+    const data = tmp('opencode-data')
+    const none = opencodeFrom(config, data, '@0')
+    expect(none).toBe('opencode.json@0 opencode.jsonc@0 auth.json@0 @0')
+    // a provider added to its config
+    writeFileSync(join(config, 'opencode.jsonc'), '{}')
+    utimesSync(join(config, 'opencode.jsonc'), new Date(), new Date(1_800_000_000_000))
+    const one = opencodeFrom(config, data, '@0')
+    expect(one).not.toBe(none)
+    expect(opencodeFrom(config, data, '@0')).toBe(one)
+    utimesSync(join(config, 'opencode.jsonc'), new Date(), new Date(1_800_000_060_000))
+    const two = opencodeFrom(config, data, '@0')
+    expect(two).not.toBe(one)
+    // a new login
+    writeFileSync(join(data, 'auth.json'), '{}')
+    const login = opencodeFrom(config, data, '@0')
+    expect(login).not.toBe(two)
+    // a new install
+    const newer = opencodeFrom(config, data, '/opt/opencode@5')
+    expect(newer).not.toBe(login)
+    const kept = { models: [{ id: 'nvidia/z-ai/glm', label: 'glm', efforts: [] }], efforts: [], from: login, at: 1_000 }
+    expect(stillHolds('opencode', kept, login, 2_000)).toBe(true)
+    expect(stillHolds('opencode', kept, newer, 2_000)).toBe(false)
+    expect(stillHolds('opencode', kept, login, 1_000 + 6 * 3_600_000)).toBe(false)
+  })
+  test("Antigravity's list is asked again as soon as its settings or its install change, and every few hours anyway", () => {
+    const dir = tmp('agy-from')
+    const settings = join(dir, 'settings.json')
+    const none = agyFrom(dir, '@0')
+    expect(none).toBe('settings.json@0 @0')
+    // a custom model added to its settings
+    writeFileSync(settings, '{"customModels":[]}')
+    utimesSync(settings, new Date(), new Date(1_800_000_000_000))
+    const one = agyFrom(dir, '@0')
+    expect(one).not.toBe(none)
+    expect(agyFrom(dir, '@0')).toBe(one)
+    utimesSync(settings, new Date(), new Date(1_800_000_060_000))
+    const two = agyFrom(dir, '@0')
+    expect(two).not.toBe(one)
+    // a new install
+    const newer = agyFrom(dir, '/opt/agy@5')
+    expect(newer).not.toBe(two)
+    const kept = { models: [{ id: 'gemini-3.8-flash', label: 'gemini', efforts: [] }], efforts: [], from: two, at: 1_000 }
+    expect(stillHolds('agy', kept, two, 2_000)).toBe(true)
+    expect(stillHolds('agy', kept, newer, 2_000)).toBe(false)
+    expect(stillHolds('agy', { ...kept, from: undefined }, two, 2_000)).toBe(false)
+    expect(stillHolds('agy', kept, two, 1_000 + 6 * 3_600_000)).toBe(false)
+  })
+  test("an install is its path and when it changed (@0 when there is none); claude's is undefined when there is none", () => {
+    expect(installOf('sh')).toMatch(/^\/.+@[\d.]+$/)
+    expect(installOf('shepherdr-no-such-cli')).toBe('@0')
+    expect(claudeFrom('@0')).toBeUndefined()
+    expect(claudeFrom('/opt/claude@5')).toBe('/opt/claude@5')
+  })
+  test("OpenCode's folders follow XDG_CONFIG_HOME and XDG_DATA_HOME, or ~/.config and ~/.local/share", () => {
+    const was = [process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME]
+    try {
+      process.env.XDG_CONFIG_HOME = tmp('xdg-config')
+      process.env.XDG_DATA_HOME = tmp('xdg-data')
+      expect(opencodeConfigDir()).toBe(join(process.env.XDG_CONFIG_HOME, 'opencode'))
+      expect(opencodeDataDir()).toBe(join(process.env.XDG_DATA_HOME, 'opencode'))
+    } finally {
+      if (was[0] === undefined) delete process.env.XDG_CONFIG_HOME
+      else process.env.XDG_CONFIG_HOME = was[0]
+      if (was[1] === undefined) delete process.env.XDG_DATA_HOME
+      else process.env.XDG_DATA_HOME = was[1]
+    }
+    expect(opencodeConfigDir()).toMatch(/[/\\]opencode$/)
   })
 
   test("pi's scoped list is kept while neither its list nor its enabledModels change", () => {
@@ -244,7 +340,8 @@ esac
     const c = { ...opencodeList([{ id: 'opencode/m', label: 'M', efforts: ['high'] }]), at: now }
     expect(stillHolds('opencode', c, undefined, now + 3_600_000)).toBe(true)
     expect(stillHolds('opencode', c, undefined, now + 7 * 3_600_000)).toBe(false)
-    expect(stillHolds('opencode', c, 'anything', now)).toBe(true)
+    // a list kept before its files were looked at holds nothing: asked again once
+    expect(stillHolds('opencode', c, 'anything', now)).toBe(false)
   })
 })
 

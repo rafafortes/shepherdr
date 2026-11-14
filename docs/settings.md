@@ -325,7 +325,12 @@ of this machine's agents (`usage.json` in Shepherdr's home, read from the agents
 - **Which models a list offers.** pi's list holds every model of every provider it has a login for; Shepherdr offers the ones
   its `enabledModels` (in pi's settings) names, in the order those patterns name them. To offer more of a provider's models,
   name them there, or with a glob: `nvidia/**` offers every NVIDIA model (in this reading a single `*` stops at the `/` inside
-  an id, so `nvidia/*` does not reach `nvidia/mistralai/…`). OpenCode's list is what `opencode` has enabled.
+  an id, so `nvidia/*` does not reach `nvidia/mistralai/…`). A provider with a catalog of its own (OpenRouter) is listed by
+  pi only for the models `enabledModels` names, so a model named there shows in the menus within a minute. Each CLI's
+  list is asked again as soon as the files it is made from change, and every 6 hours anyway: pi's models.json, auth.json
+  and settings.json; Codex's config.toml; OpenCode's opencode.json and opencode.jsonc (config folder) and auth.json (data
+  folder); Antigravity's settings.json; and each CLI's install (its path and when it changed). Claude Code's list is asked
+  again when its install changes. OpenCode's list is what `opencode` has enabled.
 - **Configured, and now**: how many role slots point at it, as primaries or backups (its roles, and its spaces, in the
   tooltip), and what runs on it now: live agents (working ones counted apart), tasks waiting to start on it, and tasks
   waiting to be reviewed by it.
