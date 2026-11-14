@@ -153,6 +153,10 @@ export interface TaskRec {
   report?: Reported
   /** its backup agent took over once its agent couldn't go on (retry.ts): from which CLI, to which, and why */
   tookOver?: { from: string; to: string; why: string; at: number; step?: number }
+  /** a takeover on its way (cantGoOn): why its agent couldn't go on, whether that lasts, and its takeover before this one.
+   *  Kept until the backup is up or the takeover failed: a restart of Shepherdr in between finds it, and takes it again
+   *  (resumeTakeovers) */
+  handover?: { why: string; lasting: boolean; prior?: TaskRec['tookOver']; at: number }
   /** why its last merge stopped, in words its row shows until the next one starts: the gate's refusal with its last
    *  line ("Refused by the gate: …") */
   mergeStop?: string
@@ -785,6 +789,7 @@ export class Engine extends Emitter<Events> {
       this.armDue()
       this.resumeQueue()
       this.resumeMerges()
+      this.resumeTakeovers()
     }, RECHECK_FIRST)
     recheck.unref?.()
     this.sweeps.push(recheck)
@@ -2558,6 +2563,22 @@ export class Engine extends Emitter<Events> {
   }
 
   /**
+   * After a start: a takeover a restart of Shepherdr cut short (its handover still kept: the backup never came up) is taken
+   * again, from where it stood before it (its takeover before), with the same reason, so the next backup of its chain with
+   * room goes in as it would have. Never one of a task that is done, archived or stopped since.
+   */
+  resumeTakeovers() {
+    for (const t of this.tasks.filter((x) => x.handover)) {
+      const h = t.handover!
+      t.handover = undefined
+      t.tookOver = h.prior
+      this.save()
+      if (ended(t) || t.archived || t.stopped) continue
+      void this.cantGoOn(t.id, h.why, h.lasting).catch(() => undefined)
+    }
+  }
+
+  /**
    * Its agent can't go on (retry.ts): out of allowance, signed out, or its provider still down after the last try. The
    * next backup of its chain (Settings' task.fallback on backup.model and backup.effort, then the 2nd to the 5th, of its
    * space) takes over, each once: the same CLI starts again and resumes its own session, so nothing is lost; another CLI
@@ -2613,7 +2634,10 @@ export class Engine extends Emitter<Events> {
     const same = to === from && !!rec && !rec.fresh && (!!rec.sessionId || rec.logs.length > 0)
     const name = (k: string) => CLI_NAME[k] ?? k
     this.handing.add(t.id)
+    // on its way from here: a restart before the backup is up takes it again (resumeTakeovers)
+    t.handover = { why, lasting, ...(t.tookOver ? { prior: t.tookOver } : {}), at: Date.now() }
     t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now(), step: plan.n }
+    this.save()
     // Settings' Backup model and effort (this task's own first), or else the task's own: its CLI may not take them, in
     // which case it starts on its own default. Its run counts there from now on: another cut-off a moment later sees it
     const h: Harness = backupHarness(plan.to!, own)
@@ -2626,6 +2650,9 @@ export class Engine extends Emitter<Events> {
         : `${taskFirst(t)}\n\n${handOverLine({ from: name(from), why: t.tookOver.why, ...(await this.soFar(t, key, name(from))) })}`
       await this.agents.finish(key)
       await this.launch(t, first, undefined, h)
+      // the backup is up: no restart takes this takeover again
+      t.handover = undefined
+      this.save()
       const card = `takeover:${t.id}:${t.tookOver.at}`
       const text = backupCardWords({ from: name(from), to: name(to), words, same, why: t.tookOver.why })
       this.chats.post(key, { id: card, card: { id: card, text } })
@@ -2641,6 +2668,7 @@ export class Engine extends Emitter<Events> {
       // the backup didn't start: it went wrong, and a later hand-over may try again
       t.trouble = troubleOf(e)
       t.tookOver = undefined
+      t.handover = undefined
       stuck()
     } finally {
       this.handing.delete(t.id)
