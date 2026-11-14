@@ -113,10 +113,17 @@ export function spawnOn(b: BoxInfo, argv: string[], o: { extra?: string[]; stdin
 const credentialFile = (chat: string) =>
   BOX ? join(helperDir(BOX.home), 'credentials', secretFileId(chat)) : join(resolve(home(), 'helper', 'credentials'), secretFileId(chat))
 
+/** whether Shepherdr tells your alert command what an agent waits on you for (Settings → Alert command, wait-alerts.ts):
+ *  the live source says, for each chat */
+let notifies: (chat: string) => boolean = () => false
+export const notifiesWith = (f: (chat: string) => boolean) => void (notifies = f)
+
 /** who an agent is to the shepherdr command, and where that command is: here Shepherdr's own bin and server; on
- *  another machine the helper's bin first on its own PATH (its command finds the way back by itself) */
+ *  another machine the helper's bin first on its own PATH (its command finds the way back by itself). SHEPHERDR_NOTIFIES=1
+ *  while Shepherdr tells your alert command what it waits on you for, so that its CLI's own notifier (a hook of yours)
+ *  can stand aside and you are not told twice */
 export function agentEnv(chat: string, root: string): Record<string, string> {
-  const credential = { SHEPHERDR_SECRET_FILE: credentialFile(chat) }
+  const credential = { SHEPHERDR_SECRET_FILE: credentialFile(chat), ...(notifies(chat) ? { SHEPHERDR_NOTIFIES: '1' } : {}) }
   if (BOX) return { ...credential, SHEPHERDR_CHAT: chat, SHEPHERDR_URL: '', SHEPHERDR_COMMAND: join(helperDir(BOX.home), 'bin', 'shepherdr'), SHEPHERDR_MACHINE: BOX.label, PATH: BOX.path }
   // The listening live server owns these agents, never an inherited CLI target (which may be a demo).
   return { ...credential, SHEPHERDR_CHAT: chat, SHEPHERDR_COMMAND: join(root, 'bin', 'shepherdr'), SHEPHERDR_URL: `http://127.0.0.1:${readJson<{ port?: number }>('server.json', {}).port ?? process.env.SHEPHERDR_PORT ?? 7787}`, PATH: `${join(root, 'bin')}:${process.env.PATH ?? ''}` }

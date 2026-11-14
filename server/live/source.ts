@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
-import { BODY_MAX, clip, lastReply, openCards, taskAlert, TITLE_MAX } from '../../shared/alerts.ts'
+import { askText, BODY_MAX, clip, lastReply, NOTIFY_KEY, openCards, taskAlert, TITLE_MAX } from '../../shared/alerts.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, sortPlaces } from '../../shared/order.ts'
 import { asEmoji, doneNewestFirst, modeCard, NAME_MAX, nameProblem, slugify, STATUS_MAX, type Action, type ActivityAnswer, type ActivityAsk, type AddSpace, type Alert, type Artifact, type CardAsk, type Chat, type RestartInfo, type Peer, type Question, type Folders, type LimitsView, type Machine, type ModelsSummary, type Need, type Place, type Section, type Snapshot, type Task, type TaskStatus, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
 import { Emitter, type Overview, type Source, type SourceEvents } from '../source.ts'
@@ -37,7 +37,8 @@ import { listFolders, makeRepo, resolveInHome } from './folders.ts'
 import { sh, validateBase } from './engine/git.ts'
 import { Artifacts, browserChecker, type ArtifactRec, type Checker } from './artifacts.ts'
 import { Machines } from './machines.ts'
-import { agentEnv, BOX, boxHome } from './box.ts'
+import { agentEnv, BOX, boxHome, notifiesWith } from './box.ts'
+import { WaitAlerts, type Wait } from './wait-alerts.ts'
 import { ATTACH_MAX, fileType, isMedia, isVideo } from '../../shared/files.ts'
 import { smaller, type Small } from './media.ts'
 import { Mirror } from './mirror.ts'
@@ -161,6 +162,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   advices = new Advices()
   /** one advisor run at a time, the human's own first */
   private advising = false
+  /** what your alert command was told of what waits on you (wait-alerts.ts) */
+  waitAlerts = new WaitAlerts()
   /** run one advisor (a test puts its own here) */
   runAdvisor: typeof runAdvisor = runAdvisor
   /** this machine's load, memory, disks and herdr, sampled every 30 seconds; its coordinator hears when one is past
@@ -318,6 +321,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (process.env.NODE_ENV !== 'test') setTimeout(() => this.refreshGoingBack(), 0)
     // a coordinator's takeover a restart cut short is taken again once herdr has told which agents are alive (as tasks')
     if (process.env.NODE_ENV !== 'test') setTimeout(() => this.resumeHandovers(), 15_000).unref?.()
+    // Shepherdr's agents start knowing whether your alert command is told what they wait on you for: their CLI's own
+    // notifier (a hook of yours) may stand aside (box.ts agentEnv)
+    notifiesWith(() => !!this.settings.alertCommand())
+    // what waits on you, told by your alert command too (wait-alerts.ts): a look every few seconds
+    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.tellWaits(), WAIT_LOOK))
     this.artifacts.migratePages(
       (chat) => (chat.includes('/') ? (this.engine.task(chat.split('/')[0])?.project ?? placeId.home()) : chat),
       (chat, id) => this.chats.repostPage(chat, id),
@@ -834,6 +842,29 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * other reasons (a provider's cut-off, a start that went wrong, a login). Only where an advisor is set for its space,
    * and not asked about already.
    */
+  /** your alert command's look (wait-alerts.ts): every wait of Needs you on this machine, a coordinator's left out where its
+   *  Notify is Off (a task's never), each in words when it is told */
+  tellWaits(now = Date.now()) {
+    const command = this.settings.alertCommand()
+    const advisable = new Map(command ? this.advisable().map((x) => [`${x.need.chat}:${x.need.id}`, x]) : [])
+    const waits: Wait[] = this.needs()
+      .filter((n) => n.task || this.settings.get(NOTIFY_KEY, this.spaceKey(n.chat)) !== 'Off')
+      .map((n) => ({ key: `${n.chat}:${n.id}`, words: () => this.waitWords(n, advisable.get(`${n.chat}:${n.id}`), now) }))
+    this.waitAlerts.look(waits, { command, after: this.settings.alertAfter() }, now)
+  }
+
+  /** a wait in words for your alert command: what asks and what (its question, plan, menu or words), its space and task,
+   *  and when the advisor answers for you if you don't */
+  private waitWords(n: Need, advisor: { space: string; q: AdviceQuestion } | undefined, now: number): { title: string; body: string } {
+    const t = n.task ? this.engine.task(n.task) : undefined
+    const space = t ? (this.places.space(t.project)?.name ?? t.project) : (this.spaceKey(n.chat) ?? n.chat)
+    const place = space === '~' ? 'home' : this.places.shownName(space)
+    const asked = n.question ? askText(t?.id ?? `${place}'s coordinator`, n.question) : { title: `${t?.id ?? `${place}'s coordinator`} · Needs you`, body: n.text ?? '' }
+    const after = advisor && !advisor.q.plan ? this.settings.advisorAfter(advisor.space) : null
+    const advice = after === null ? '' : `If you don't answer, the advisor answers for you at ${clockWords(n.at + after, now, this.settings.zone())}.`
+    return { title: `Shepherdr · ${asked.title}`, body: [t ? `${place} · ${t.id}: ${t.title}` : `${place} · its coordinator`, asked.body, advice].filter(Boolean).join('\n') }
+  }
+
   private advisable(only?: string): { need: Need; qid: string; q: AdviceQuestion; space: string; cwd: string; asker: string; brief?: string }[] {
     const out: ReturnType<LiveSource['advisable']> = []
     for (const n of this.needs(only)) {
@@ -5042,6 +5073,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
 /** how long one line of another space's news may be for the main machine's home space */
 const OVERVIEW_MAX = 240
+/** how often what waits on you is looked at for your alert command (tellWaits): a wait is told at most this long late */
+const WAIT_LOOK = 5_000
 /** the held reasons whose words name their own limit (heldWords), in a task's add and tell replies */
 const HELD_NAMED = new Set<HeldWhy>(['space', 'model', 'blocked', 'zero', 'spaceZero'])
 
