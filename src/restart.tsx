@@ -119,8 +119,9 @@ function Sheet({ chat, name, current, start }: Opening) {
       .then((r: { ok?: boolean; error?: string; info?: RestartInfo; waiting?: boolean }) => {
         if (!r.info) return setError(r.waiting ? 'Its machine is out of reach: restart it once it is back.' : r.error || 'It could not be restarted.')
         setInfo(r.info)
-        // started now: what this task would run on (its own, else Settings'); a restart: what Settings say, or what it runs on
-        const pick = current || start ? r.info.on : r.info.want
+        // started now or later: the worker its go starts it on (Start with…'s pick, kept); a restart: what Settings say, or
+        // what it runs on
+        const pick = start ? (r.info.starts ?? r.info.on) : current ? r.info.on : r.info.want
         setKind(pick.kind)
         setModel(pick.model ?? '')
         setEffort(pick.effort ?? '')

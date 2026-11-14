@@ -231,6 +231,38 @@ describe.skipIf(!browser)('restarting an agent', () => {
     }
   }, 30_000)
 
+  test('Start with…: Save keeps the pick, and the sheet opened again shows it, not what its agent runs on now', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:herdr-projects')}`)
+      const row = page.locator('section[aria-label="Tasks"] li', { hasText: 'HP-203' })
+      const open = async () => {
+        await row.hover()
+        await row.getByRole('button', { name: 'More for this task' }).click()
+        await page.getByRole('menuitem', { name: 'Start with…' }).click()
+        const sheet = page.getByRole('alertdialog', { name: 'Start HP-203 with?' })
+        await sheet.locator('[data-restart]').waitFor()
+        return sheet
+      }
+      const sheet = await open()
+      await sheet.getByRole('button', { name: /^Agent: / }).click()
+      await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).click()
+      await sheet.getByRole('button', { name: /^Model: / }).click()
+      await page.getByRole('menuitemradio', { name: 'GPT-6-Sol', exact: true }).click()
+      await sheet.getByRole('button', { name: 'Save', exact: true }).click()
+      await sheet.waitFor({ state: 'detached' })
+      expect(world.workers.get('HP-203')).toMatchObject({ kind: 'codex', model: 'gpt-6-sol' })
+      // opened again: the pick, as it was saved
+      const again = await open()
+      expect(await again.getByRole('button', { name: 'Agent: Codex', exact: true }).count()).toBe(1)
+      expect(await again.getByRole('button', { name: 'Model: GPT-6-Sol', exact: true }).count()).toBe(1)
+      await page.keyboard.press('Escape')
+    } finally {
+      world.workers.delete('HP-203')
+      await page.close()
+    }
+  }, 30_000)
+
   test('each CLI and model shows its room under Settings → Limits: a full or blocked one marked, its line below, a restart there refused', async () => {
     const set = (value: string | null) => world.act({ type: 'setting', key: 'models.maxAtOnce', value, place: 'm:vm-str' } as never)
     // HP-202 works on Codex: Codex's one slot is taken; Claude Code has 2, its Sonnet blocked

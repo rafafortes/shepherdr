@@ -3400,7 +3400,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         try {
           const x = this.restartable(a.chat)
           const info = restartInfo({ role: x.role, space: x.space, on: x.on, onKnown: !!this.agents.record(a.chat), want: x.want, kinds: Object.keys(CLI_NAME).filter(this.engine.installed), working: this.agents.status(a.chat) === 'working' })
-          return { ok: true, info: { ...info, clis: withRooms(info.clis, this.roomInput(x.space ?? '', x.t ? x.t.id : a.chat)) } }
+          // a task that waits to start: what its go starts it on (engine.ts taskChain), Start with…'s pick among them
+          const starts = x.t && ['queued', 'todo', 'scheduled'].includes(this.engine.statusOf(x.t)) ? this.engine.taskChain(x.t)[0]?.h : undefined
+          return { ok: true, info: { ...info, ...(starts ? { starts: fitHarness(starts) } : {}), clis: withRooms(info.clis, this.roomInput(x.space ?? '', x.t ? x.t.id : a.chat)) } }
         } catch (e) {
           return { ok: false, error: (e as Error).message }
         }
