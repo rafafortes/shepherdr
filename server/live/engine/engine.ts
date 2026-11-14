@@ -1305,7 +1305,8 @@ export class Engine extends Emitter<Events> {
     // its base), then the go
     const to = t.switchTo
     t.switchTo = undefined
-    if (to && t.worktree && existsSync(t.worktree)) void this.restart(t.id, to).then(() => send(), () => send())
+    // (a worktree a stop put away is made again by its launch)
+    if (to && t.worktree) void this.restart(t.id, to).then(() => send(), () => send())
     else if (t.worktree && existsSync(t.worktree) && this.agents.status(key) !== 'gone') void this.freshen(t).then((moved) => send(moved), () => send())
     else void send()
     this.settleOne(t)
@@ -2188,10 +2189,11 @@ export class Engine extends Emitter<Events> {
     if (on) t.agent = on
     Object.assign(t, { priority: true as const, after: undefined, todo: undefined, stopped: undefined, paused: undefined, held: undefined })
     const rec = this.agents.record(this.key(t))
-    // its agent's record is on another worker, waiting in its worktree or gone from it: the go restarts it on yours, or its
+    // its agent's record is on another worker, waiting in its worktree or gone from it (its worktree too, put away by a
+    // stop: the restart makes it again, as launch does): the go restarts it on yours, or its
     // start would resume the record's (taskChain) and wait for that one's room. Start now with no worker keeps the one
     // Start with… picked before: its turn comes now, on it
-    if (on) t.switchTo = t.worktree && existsSync(t.worktree) && rec && !sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, on) ? on : undefined
+    if (on) t.switchTo = t.worktree && rec && !sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, on) ? on : undefined
     const why = `you started it now${on ? ` on ${harnessWords(fitHarness(on))}` : ''}${was.length ? `; it no longer waits for ${was.join(', ')}` : ''}`
     const goText = was.length ? goLine(was, [], true) : 'Go: you were started now, start the work.'
     const r = this.room(t)
@@ -2222,7 +2224,7 @@ export class Engine extends Emitter<Events> {
     if (t.scheduled) t.scheduled.agent = on
     const rec = this.agents.record(this.key(t))
     // as startNow: its agent's record on another worker, there or gone, is restarted on this one at its go
-    t.switchTo = t.worktree && existsSync(t.worktree) && rec && !sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, on) ? on : undefined
+    t.switchTo = t.worktree && rec && !sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, on) ? on : undefined
     const id2 = `worker:${t.id}:${Date.now()}`
     this.chats.post(this.key(t), { id: id2, card: { id: id2, task: t.id, text: `Starts on ${harnessWords(fitHarness(on))} when its turn comes` } })
     this.save()
