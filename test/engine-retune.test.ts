@@ -41,6 +41,7 @@ describe('Settings changed: the waiting tasks take it', () => {
       follow: 1,
       pinned: 1,
       running: 1,
+      started: 0,
       kept: [],
       spaces: [{ name: p.name, on: { kind: 'pi' }, changed: 4 }],
     })
@@ -105,13 +106,13 @@ describe('Settings changed: the waiting tasks take it', () => {
     const { w, startedOf } = fresh()
     const a = await started(w, repo(), 'retune-none', 'At work', 'Add a.txt.')
     w.brief(a.key)
-    expect(w.engine.retuneWaiting({ space: a.p.name }, true)).toEqual({ changed: 0, same: 0, follow: 0, pinned: 0, running: 1, kept: [], spaces: [] })
+    expect(w.engine.retuneWaiting({ space: a.p.name }, true)).toEqual({ changed: 0, same: 0, follow: 0, pinned: 0, running: 1, started: 0, kept: [], spaces: [] })
     expect(startedOf(a.t.id)).toBe(true)
   })
 })
 
 describe('the answer in words', () => {
-  const base: Retune = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [], spaces: [] }
+  const base: Retune = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, started: 0, kept: [], spaces: [] }
 
   test('one space, with what stays as it is', () => {
     expect(
@@ -146,7 +147,7 @@ describe('a renamed space: the answer names it as it shows, and a scope by eithe
     expect(w.settings.set('task.agent', 'pi', 'all').ok).toBe(true)
 
     // Everywhere: the space with its own agent keeps it, under its shown name; the other one takes pi
-    const everywhere: Retune = { changed: 1, same: 0, follow: 0, pinned: 0, running: 1, kept: ['lyvora-app'], spaces: [{ name: 'lyvora-site', on: { kind: 'pi' }, changed: 1 }] }
+    const everywhere: Retune = { changed: 1, same: 0, follow: 0, pinned: 0, running: 1, started: 0, kept: ['lyvora-app'], spaces: [{ name: 'lyvora-site', on: { kind: 'pi' }, changed: 1 }] }
     expect(w.engine.retuneWaiting({ key: 'task.agent' }, true)).toEqual(everywhere)
     // a scope names the space by the name it was added under, the name it shows, or its place id: the same tasks
     for (const scope of [plain.name, 'lyvora-site', placeId.space(plain.name)]) {
@@ -155,7 +156,7 @@ describe('a renamed space: the answer names it as it shows, and a scope by eithe
     // the space with its own agent, scoped by either name: its target is its own agent, so its task is already on it
     for (const scope of [own.name, 'lyvora-app']) expect(w.engine.retuneWaiting({ space: scope }, true)).toMatchObject({ changed: 0, same: 1, spaces: [] })
     // a name no space of this machine has changes nothing
-    expect(w.engine.retuneWaiting({ space: 'nowhere' }, true)).toEqual({ changed: 0, same: 0, follow: 0, pinned: 0, running: 0, kept: [], spaces: [] })
+    expect(w.engine.retuneWaiting({ space: 'nowhere' }, true)).toEqual({ changed: 0, same: 0, follow: 0, pinned: 0, running: 0, started: 0, kept: [], spaces: [] })
 
     // the apply, by Everywhere: the words name the shown spaces
     expect(w.engine.retuneWaiting({ key: 'task.agent' })).toEqual(everywhere)

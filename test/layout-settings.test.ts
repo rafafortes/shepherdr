@@ -544,10 +544,13 @@ describe.skipIf(!browser)("a reviewer saved, and the tasks already waiting", () 
       await ask.waitFor()
       expect(await ask.getByRole('heading', { name: 'Apply to the tasks already created?' }).count()).toBe(1)
       const text = (await ask.textContent()) ?? ''
-      // this space's two waiting tasks (HP-203 queued, HP-204 To do) are reviewed by the new one; HP-202 is at work
+      // this space's two waiting tasks (HP-203 queued, HP-204 To do) are reviewed by the new one when their turn comes,
+      // and its two started ones (HP-202 at work, HP-201 waiting on you) from their next round
       expect(text).toContain('2 waiting tasks of herdr-projects (queued, To do, scheduled) are reviewed by Codex (GPT-6-Sol')
       expect(text).toContain('when their turn comes.')
-      expect(text).toContain('Running tasks keep their reviewer.')
+      expect(text).toContain('2 started tasks of herdr-projects (working, waiting on you, ready) are reviewed by Codex (GPT-6-Sol')
+      expect(text).toContain('from their next review round.')
+      expect(text).not.toContain('keep their reviewer')
       expect(text).not.toContain('start on')
       expect(reviewerLine('HP-203')).toBe(plain('HP-203'))
       await ask.getByRole('button', { name: 'Only new tasks', exact: true }).click()
@@ -557,9 +560,9 @@ describe.skipIf(!browser)("a reviewer saved, and the tasks already waiting", () 
       // the next change asks again, and Apply rewrites both waiting briefs, the words above their blocks unchanged
       await reviewer.getByRole('button', { name: /^Model: / }).click()
       await page.getByRole('menuitemradio', { name: 'GPT-6-Astra', exact: true }).click()
-      await ask.getByRole('button', { name: 'Apply to 2 tasks', exact: true }).waitFor()
-      await ask.getByRole('button', { name: 'Apply to 2 tasks', exact: true }).click()
-      await ask.getByText('Reviewer applied to 2 waiting tasks.', { exact: true }).waitFor()
+      await ask.getByRole('button', { name: 'Apply to 4 tasks', exact: true }).waitFor()
+      await ask.getByRole('button', { name: 'Apply to 4 tasks', exact: true }).click()
+      await ask.getByText('Reviewer applied to 2 waiting tasks and 2 started tasks.', { exact: true }).waitFor()
       expect(await ask.getByRole('button', { name: 'Done', exact: true }).count()).toBe(1)
       // the picker writes the model as it lists it or by its id: either names the same model
       expect(reviewerLine('HP-203')).toMatch(/model gpt-6-astra, its default effort\)\. Each round.*run `shepherdr review HP-203 --done`\. \(this space's setting\)$|model GPT-6-Astra, its default effort\)\. Each round.*run `shepherdr review HP-203 --done`\. \(this space's setting\)$/)
@@ -567,7 +570,8 @@ describe.skipIf(!browser)("a reviewer saved, and the tasks already waiting", () 
       expect(reviewerLine('HP-204')).toBe(reviewerLine('HP-203')!.replaceAll('HP-203', 'HP-204'))
       // only the Reviewer line of each brief moved
       expect(desc('HP-203')).toBe(tasks.find((t) => t.id === 'HP-203')!.desc!.replace(plain('HP-203'), reviewerLine('HP-203')!))
-      expect(reviewerLine('HP-202')).toBe(plain('HP-202'))
+      // the one at work takes it too
+      expect(reviewerLine('HP-202')).toBe(reviewerLine('HP-203')!.replaceAll('HP-203', 'HP-202'))
       await ask.getByRole('button', { name: 'Done', exact: true }).click()
       await ask.waitFor({ state: 'detached' })
 

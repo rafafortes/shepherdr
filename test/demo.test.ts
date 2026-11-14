@@ -182,7 +182,7 @@ describe("a row's menu", () => {
 })
 
 describe('a reviewer changed in Settings, and the demo tasks waiting for it', () => {
-  test("the question counts a waiting brief as changed, a scheduled one as following Settings, a running one as kept; Apply rewrites only the waiting Reviewer lines", async () => {
+  test("the question counts a waiting brief as changed, a scheduled one as following Settings, a started one apart; Apply rewrites the Reviewer lines of both", async () => {
     const w = new DemoWorld()
     const place = 'p:vm-str:herdr-projects'
     const task = (id: string) => w.tasks.find((t) => t.id === id)!
@@ -192,15 +192,16 @@ describe('a reviewer changed in Settings, and the demo tasks waiting for it', ()
     const running = task('HP-202').desc!
     w.stores['vm-str'].set('reviewer.model', 'GPT-6-Sol', { space: 'herdr-projects' })
     const dry = await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place, dry: true })
-    // HP-201 and HP-202 are at work or waiting on you: both keep their reviewer
-    expect(dry).toMatchObject({ ok: true, changed: 1, follow: 1, running: 2, same: 0, kept: [], spaces: [{ name: 'herdr-projects', words: 'Codex (GPT-6-Sol)', changed: 1 }] })
+    // HP-201 and HP-202 are waiting on you or at work: both take it too, from their next round, counted apart
+    expect(dry).toMatchObject({ ok: true, changed: 1, follow: 1, running: 0, started: 2, same: 0, kept: [], spaces: [{ name: 'herdr-projects', words: 'Codex (GPT-6-Sol)', changed: 3 }] })
     // a dry run changes nothing
     expect(task('HP-203').desc).toBe(queued)
-    expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place })).toMatchObject({ ok: true, changed: 1 })
+    expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place })).toMatchObject({ ok: true, changed: 1, started: 2 })
     expect(task('HP-203').desc).toBe(queued.replace(reviewerLineFor(CODEX_WORDS, 'HP-203'), reviewerLineFor('a headless Codex or a Codex subagent (model gpt-6-sol, its default effort).', 'HP-203', '', "(this space's setting)")))
-    expect(task('HP-202').desc).toBe(running)
-    // the next answer finds it the same
-    expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place, dry: true })).toMatchObject({ changed: 0, same: 1, follow: 1, running: 2 })
+    expect(task('HP-202').desc).not.toBe(running)
+    expect(task('HP-202').desc).toContain('a headless Codex or a Codex subagent (model gpt-6-sol, its default effort).')
+    // the next answer finds them the same
+    expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place, dry: true })).toMatchObject({ changed: 0, same: 3, follow: 1, running: 0, started: 0 })
     // an advisor's key is refused: it applies at once already
     expect(await w.act({ type: 'apply-to-waiting', key: 'advisor.agent', place, dry: true })).toMatchObject({ ok: false })
     expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.instructions', place, dry: true })).toMatchObject({ ok: false })
@@ -213,7 +214,7 @@ describe('a reviewer changed in Settings, and the demo tasks waiting for it', ()
     w.tasks.find((t) => t.id === 'HP-204')!.status = 'scheduled'
     expect(await w.act({ type: 'rename', id: place, name: 'hp-shown' })).toMatchObject({ ok: true })
     w.stores['vm-str'].set('reviewer.model', 'GPT-6-Sol', { space: 'herdr-projects' })
-    expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place, dry: true })).toMatchObject({ ok: true, changed: 1, follow: 1, running: 2, spaces: [{ name: 'hp-shown', words: 'Codex (GPT-6-Sol)', changed: 1 }] })
+    expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place, dry: true })).toMatchObject({ ok: true, changed: 1, follow: 1, started: 2, spaces: [{ name: 'hp-shown', words: 'Codex (GPT-6-Sol)', changed: 3 }] })
     // the place id is what the dialog sends, and the same space answers
     expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place: 'p:vm-str:herdr-projects', dry: true })).toMatchObject({ changed: 1 })
   })

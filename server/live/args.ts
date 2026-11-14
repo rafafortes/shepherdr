@@ -303,8 +303,9 @@ Settings and automations
                                                  key): the waiting tasks it reaches (of that space; else of each space
                                                  of this machine that doesn't set it itself) start on what Settings
                                                  name now, as Start with… gives each (a reviewer: their brief names
-                                                 it, and each one's agent hears it at its go); running tasks keep
-                                                 theirs. advisor.* is refused: it applies at once already
+                                                 it, and each one's agent hears it at its go; started tasks take a
+                                                 reviewer too, from their next round); running tasks keep their
+                                                 agent. advisor.* is refused: it applies at once already
   shepherdr automation add "<name>" --task "<title>" [--brief "<brief>"] [--when "<time rule>"] [--on "<events>"]
                          [--agent CLI] [--model ID] [--effort LEVEL] [--space NAME]
                                                  each run adds that task to the space, with a fresh agent; it runs on

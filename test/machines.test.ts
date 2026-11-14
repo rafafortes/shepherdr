@@ -94,6 +94,33 @@ describe('the helper', () => {
     again.stop()
   })
 
+  test("the mirror's own failures are passed over: a copy not here yet, a start that fails, a pipe that takes nothing, a piece that can't be written", async () => {
+    const here = tmp('copy')
+    // a copy whose folder is a file: no piece of it can be written here
+    writeFileSync(join(here, 'blocked'), 'a file')
+    const copy = (f: string) => join(here, f)
+    let tries = 0
+    const fails = new Mirror({} as BoxInfo, () => {
+      tries++
+      throw new Error('ssh is not there')
+    }, copy)
+    // following a file with no copy here yet: nothing of it is kept, it is sent whole once the mirror runs
+    fails.follow([], ['/there/not-yet.jsonl'])
+    fails.start()
+    expect(tries).toBe(1)
+    // the start that failed is tried again later, never at once; a stop ends that
+    fails.stop()
+    // a mirror whose pipe takes nothing: what it is told is dropped, and it is told everything at its next start
+    const proc = { stdin: { write: () => { throw new Error('closed') }, flush: () => undefined }, stdout: new ReadableStream<Uint8Array>(), exited: new Promise<number>(() => undefined), kill: () => undefined }
+    const deaf = new Mirror({} as BoxInfo, () => proc, copy)
+    deaf.start()
+    expect(() => deaf.follow([], ['/there/more.jsonl'])).not.toThrow()
+    // a piece whose copy can't be written: passed over, its next piece or start brings it
+    expect(() => (deaf as unknown as { put(f: string, o: number, d: Buffer): void }).put('blocked/log.jsonl', 0, Buffer.from('x'))).not.toThrow()
+    expect(existsSync(join(here, 'blocked', 'log.jsonl'))).toBe(false)
+    deaf.stop()
+  })
+
   test.if(perl)('health.pl says the cores, load, memory and disks', () => {
     const r = spawnSync('perl', [join(root, 'helper', 'health.pl')], { encoding: 'utf8' })
     const j = JSON.parse(r.stdout)

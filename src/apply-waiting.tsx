@@ -1,7 +1,7 @@
 // After a change of a task's agent (task.agent, task.model, task.effort) or of its reviewer in Settings (reviewer.*):
-// "Apply to the tasks already created?". It asks only when a waiting task would change (a dry run first, so nothing
-// moves until yes), and "Only new tasks" leaves them as they are. Running tasks keep their agent and reviewer whichever
-// answer. The advisor's keys never ask: they apply at once already.
+// "Apply to the tasks already created?". It asks only when a task would change (a dry run first, so nothing moves until
+// yes), and "Only new tasks" leaves them as they are. A new reviewer reaches the started tasks too (from their next review
+// round); running tasks keep their agent whichever answer. The advisor's keys never ask: they apply at once already.
 import { useState, useSyncExternalStore } from 'react'
 import { waitingKind, type WaitingKind } from '@shared/apply-waiting.ts'
 import { act } from './kernel.ts'
@@ -18,8 +18,10 @@ export interface Waiting {
   follow: number
   /** of the changed, those a task add gave a worker (or a reviewer) of their own */
   pinned: number
-  /** tasks already started, which keep their agent (their reviewer) */
+  /** tasks already started, which keep their agent */
   running: number
+  /** started tasks (working, asking, ready, merging) that take the new reviewer from their next review round */
+  started: number
   /** spaces of this machine that keep their own setting */
   kept: string[]
   /** the spaces whose waiting tasks change, with the worker (reviewer) they take in words */
@@ -64,9 +66,10 @@ export async function askWaitingMany(changes: { key: string; place?: string }[])
   }
   for (const [kind, list] of picks) {
     const replies = await Promise.all(list.map((p) => act({ type: 'apply-to-waiting', key: p.key, place: p.place, dry: true }).catch(() => null)))
-    const hit = list.filter((_, i) => (replies[i] as (Waiting & { ok?: boolean }) | null)?.ok && (replies[i] as Waiting).changed)
+    const moves = (r: unknown): r is Waiting & { ok?: boolean } => !!(r as (Waiting & { ok?: boolean }) | null)?.ok && !!((r as Waiting).changed || (r as Waiting).started)
+    const hit = list.filter((_, i) => moves(replies[i]))
     if (!hit.length) continue
-    const waiting = sumWaiting(replies.filter((r): r is Waiting & { ok?: boolean } => !!r?.ok && !!r.changed))
+    const waiting = sumWaiting(replies.filter(moves))
     const ask: Ask = { kind, picks: hit, waiting }
     if (asking) queued.push(ask)
     else asking = ask
@@ -76,13 +79,14 @@ export async function askWaitingMany(changes: { key: string; place?: string }[])
 
 /** the counts of several answers, added up */
 export function sumWaiting(rs: Partial<Waiting>[]): Waiting {
-  const total = (k: 'changed' | 'same' | 'follow' | 'pinned' | 'running') => rs.reduce((n, r) => n + (r[k] ?? 0), 0)
+  const total = (k: 'changed' | 'same' | 'follow' | 'pinned' | 'running' | 'started') => rs.reduce((n, r) => n + (r[k] ?? 0), 0)
   return {
     changed: total('changed'),
     same: total('same'),
     follow: total('follow'),
     pinned: total('pinned'),
     running: total('running'),
+    started: total('started'),
     kept: [...new Set(rs.flatMap((r) => r.kept ?? []))],
     spaces: rs.flatMap((r) => r.spaces ?? []),
   }
@@ -91,10 +95,11 @@ export function sumWaiting(rs: Partial<Waiting>[]): Waiting {
 /** the question, while one is asked */
 export function ApplyWaitingSheet() {
   const a = useSyncExternalStore(subscribe, () => asking)
-  return a ? <Question key={`${a.kind}|${a.picks.map((p) => `${p.place ?? ''}`).join(',')}|${a.waiting.changed}`} ask={a} /> : null
+  return a ? <Question key={`${a.kind}|${a.picks.map((p) => `${p.place ?? ''}`).join(',')}|${a.waiting.changed}|${a.waiting.started}`} ask={a} /> : null
 }
 
 const tasks = (n: number) => `${n} waiting ${n === 1 ? 'task' : 'tasks'}`
+const startedTasks = (n: number) => `${n} started ${n === 1 ? 'task' : 'tasks'}`
 
 /** the sentences the question says, from what the change would do: for a task agent, the CLI a waiting task starts on;
  *  for the reviewer, the one its brief names */
@@ -102,13 +107,23 @@ export function waitingWords(w: Waiting, kind: WaitingKind = 'agent') {
   const n = w.changed
   const reviewer = kind === 'reviewer'
   const [verb, by] = reviewer ? [n === 1 ? 'is reviewed' : 'are reviewed', 'by'] : [n === 1 ? 'starts' : 'start', 'on']
-  const start =
-    w.spaces.length === 1
+  const one = w.spaces.length === 1
+  const each = `: ${w.spaces.map((s) => `${s.name} ${by} ${s.words}`).join('; ')}`
+  const start = !n
+    ? ''
+    : one
       ? `${tasks(n)} of ${w.spaces[0].name} (queued, To do, scheduled) ${verb} ${by} ${w.spaces[0].words} when ${n === 1 ? 'its' : 'their'} turn comes.`
-      : `${tasks(n)} in ${w.spaces.length} spaces (queued, To do, scheduled) ${verb} ${by} what Settings name for each one when ${n === 1 ? 'its' : 'their'} turn comes: ${w.spaces.map((s) => `${s.name} ${by} ${s.words}`).join('; ')}.`
+      : `${tasks(n)} in ${w.spaces.length} spaces (queued, To do, scheduled) ${verb} ${by} what Settings name for each one when ${n === 1 ? 'its' : 'their'} turn comes${each}.`
+  // a reviewer reaches the started tasks too: their next round runs on it
+  const m = w.started ?? 0
+  const started = !m
+    ? ''
+    : one
+      ? `${startedTasks(m)} of ${w.spaces[0].name} (working, waiting on you, ready) ${m === 1 ? 'is' : 'are'} reviewed by ${w.spaces[0].words} from ${m === 1 ? 'its' : 'their'} next review round.`
+      : `${startedTasks(m)} (working, waiting on you, ready) ${m === 1 ? 'is' : 'are'} reviewed by what Settings name for ${m === 1 ? 'its' : 'their'} space from ${m === 1 ? 'its' : 'their'} next review round${n ? '' : each}.`
   return [
     start,
-    reviewer ? 'Running tasks keep their reviewer.' : 'Running tasks keep their agent.',
+    reviewer ? started : 'Running tasks keep their agent.',
     w.pinned ? `${w.pinned} of them ${w.pinned === 1 ? 'was' : 'were'} given ${w.pinned === 1 ? 'its' : 'their'} own ${reviewer ? 'reviewer' : 'worker'} when added, and ${w.pinned === 1 ? 'changes' : 'change'} too.` : '',
     w.kept.length ? `${w.kept.join(', ')} ${w.kept.length === 1 ? 'keeps' : 'keep'} its own setting.` : '',
   ].filter(Boolean)
@@ -123,8 +138,9 @@ function doneWords(r: Partial<Waiting>, kind: WaitingKind) {
   const followed = reviewer
     ? `${follow} ${follow === 1 ? 'takes' : 'take'} Settings' reviewer at ${follow === 1 ? 'its' : 'their'} turn anyway.`
     : `${follow} start${follow === 1 ? 's' : ''} on Settings at ${follow === 1 ? 'its' : 'their'} turn anyway.`
+  const started = r.started ?? 0
   return [
-    reviewer ? `Reviewer applied to ${tasks(changed)}.` : `Applied to ${tasks(changed)}.`,
+    reviewer ? `Reviewer applied to ${[changed ? tasks(changed) : '', started ? startedTasks(started) : ''].filter(Boolean).join(' and ') || tasks(0)}.` : `Applied to ${tasks(changed)}.`,
     same ? `${same} ${same === 1 ? 'was' : 'were'} already on it.` : '',
     follow ? followed : '',
   ]
@@ -136,7 +152,8 @@ function Question({ ask }: { ask: Ask }) {
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState<string | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
-  const n = ask.waiting.changed
+  // the tasks a yes changes: the waiting ones, and for a reviewer the started ones too
+  const n = ask.waiting.changed + (ask.waiting.started ?? 0)
   const kind = ask.kind
   // the next question waiting behind this one, if any, takes its place
   const close = () => {
