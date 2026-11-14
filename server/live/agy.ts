@@ -4,7 +4,7 @@
 // copied into a JSONL file that the chat reads like any other CLI log. The steps' payloads are protobuf blobs with no
 // schema, so this file also holds a small wire-format decoder (ported from the reference decoder of the study).
 import { Database } from 'bun:sqlite'
-import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { home, readJson, writeJson } from '../store.ts'
@@ -217,7 +217,23 @@ export function headlessOutcome(out: string, code: number): { ok: boolean; said:
 
 /* ---------- mirror ---------- */
 
-/** the idx of a JSONL file's last line, read backwards from its end; undefined when it has no line */
+/** the mirror's format, its first line: a mirror without it was written by an older Shepherdr, which read some steps
+ *  otherwise (a provider's cut-off, step 17, as nothing), and is rebuilt once, whole (mirrorConversation) */
+export const MIRROR_HEAD = JSON.stringify({ mirror: 2 })
+
+/** whether a mirror is of the current format: its first line is MIRROR_HEAD */
+function current(file: string): boolean {
+  const fd = openSync(file, 'r')
+  try {
+    const buf = Buffer.alloc(MIRROR_HEAD.length + 1)
+    const got = readSync(fd, buf, 0, buf.length, 0)
+    return buf.subarray(0, got).toString('utf8') === `${MIRROR_HEAD}\n`
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/** the idx of a JSONL file's last line, read backwards from its end; undefined when it has no line (or only its head) */
 function lastIdx(file: string): number | undefined {
   if (!existsSync(file)) return undefined
   const fd = openSync(file, 'r')
@@ -234,7 +250,7 @@ function lastIdx(file: string): number | undefined {
       const nl = body.lastIndexOf('\n')
       if (nl !== -1 || start === 0) {
         const last = body.slice(nl + 1)
-        if (!last) return undefined
+        if (!last || last === MIRROR_HEAD) return undefined
         const idx = Number(parseLine(last)?.idx)
         if (!Number.isInteger(idx)) throw new Error(`${file} ends in a line that is no mirrored step: ${last.slice(0, 200)}`)
         return idx
@@ -279,6 +295,14 @@ export interface AgyLine {
   model?: string
   tokensIn?: number
   tokensOut?: number
+  /** a provider's HTTP status for an error (429 for a quota), where the step has one */
+  status?: number
+}
+
+/** a provider's error step (type 17): its full text, else its short one, and its HTTP status where it has one */
+function providerErrorOf(p: Uint8Array): { text: string; status?: number } {
+  const status = field(p, '24.3.7')
+  return { text: text(field(p, '24.3.2')) ?? text(field(p, '24.3.1')) ?? 'the step failed', ...(typeof status === 'number' ? { status } : {}) }
 }
 
 /** a step's mirror line: what the chat reads of it (see AgyLine); gen is the generation row of a model response */
@@ -298,6 +322,8 @@ function lineOf(s: { idx: number; step_type: number; step_payload: Uint8Array | 
       return { ...base, kind: 'tool', tool: text(field(p, '5.4.2')), args: text(field(p, '5.4.3')), output: text(field(p, '140.2.1')) }
     case 101:
       return { ...base, kind: 'notice', text: text(field(p, '114.4.4')) }
+    case 17:
+      return { ...base, kind: 'error', ...providerErrorOf(p) }
     default:
       return { ...base, kind: 'other' }
   }
@@ -324,13 +350,15 @@ function parseLine(text: string): Record<string, unknown> | undefined {
 
 /**
  * Copies the conversation's final steps that outFile does not have yet (idx above its last line's) as JSONL lines, in
- * idx order, stopping at the first step still running. Returns the number of lines appended; 0 and nothing created when
- * there is no database.
+ * idx order, stopping at the first step still running, after the format's head (MIRROR_HEAD) in a new file. A mirror of
+ * an older format is written again whole, as a new file that replaces it (the chat then reads it from its start). Returns
+ * the number of step lines written; 0 and nothing created when there is no database.
  */
 export function mirrorConversation(id: string, outFile: string): number {
   const db = agyDb(id)
   if (!existsSync(db)) return 0
-  const after = lastIdx(outFile) ?? -1
+  const anew = !existsSync(outFile) || !current(outFile)
+  const after = anew ? -1 : (lastIdx(outFile) ?? -1)
   const handle = new Database(db, { readonly: true })
   let lines: string[]
   try {
@@ -349,10 +377,13 @@ export function mirrorConversation(id: string, outFile: string): number {
   } finally {
     handle.close()
   }
-  if (lines.length) {
-    mkdirSync(dirname(outFile), { recursive: true })
-    appendFileSync(outFile, lines.join('\n') + '\n')
-  }
+  mkdirSync(dirname(outFile), { recursive: true })
+  if (anew) {
+    // whole, under a name of its own, then in place of the old one: a reader never sees half of it
+    const tmp = `${outFile}.tmp`
+    writeFileSync(tmp, [MIRROR_HEAD, ...lines].join('\n') + '\n')
+    renameSync(tmp, outFile)
+  } else if (lines.length) appendFileSync(outFile, lines.join('\n') + '\n')
   return lines.length
 }
 

@@ -11,7 +11,7 @@ import { Emitter } from '../source.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
 import { herdr, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
-import { ClaudeSessions, Reviewers, screenBackground, sessionBackground, type Background } from './readers/background.ts'
+import { agyScreenBackground, ClaudeSessions, Reviewers, screenBackground, sessionBackground, type Background } from './readers/background.ts'
 import { claudeHome, claudeLogPath, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind } from './readers/find.ts'
 import { createSession, mirrorSession, opencodeLogPath, putInstructions, switchModel } from './opencode.ts'
 import { agyLogPath, agyModelId, mirrorConversation } from './agy.ts'
@@ -646,6 +646,8 @@ export class Agents extends Emitter<Events> {
   private ranOn(key: string): Background | undefined {
     const r = this.records[key]
     const st = this.status(key)
+    // agy has no hooks or session file: its screen says what its turn left running
+    if (r?.kind === 'agy') return st === 'idle' || st === 'done' ? this.screens.get(key) : undefined
     if (r?.kind !== 'claude' || st === 'working' || st === 'blocked' || st === 'gone') return undefined
     const file = this.sessions.status(r.sessionId, r.cwd)
     // its hooks said what still ran as its turn ended; its session file is newer once that work is gone, or once a
@@ -655,19 +657,27 @@ export class Agents extends Emitter<Events> {
     return file === undefined ? this.screens.get(key) : sessionBackground(file)
   }
 
+  /** what the pane's screen says still runs in the background, for an idle or done agent that has no other way to say it:
+   *  a Claude Code with no session file, and any agy agent (none while it works) */
+  private async screenWork(key: string): Promise<Background | undefined> {
+    const r = this.records[key]
+    const st = this.status(key)
+    const pane = this.info(key)?.pane_id
+    if (!pane || (st !== 'idle' && st !== 'done')) return undefined
+    if (r?.kind === 'agy') return agyScreenBackground(await herdr.visible(pane).catch(() => ''))
+    if (r?.kind === 'claude' && !this.said(key) && this.sessions.status(r.sessionId, r.cwd) === undefined) return screenBackground(await herdr.visible(pane).catch(() => ''))
+    return undefined
+  }
+
   /** what still runs in the background, read again: from the screen where there is no session file. A change is told
    *  as a status change, since the agent may have woken, said a word and stopped again in between herdr's looks. */
   private async readBackground() {
     for (const key of this.byName.values()) {
       if (this.stopped) return
-      const r = this.records[key]
       const st = this.status(key)
-      const pane = this.info(key)?.pane_id
-      if (r?.kind === 'claude' && pane && (st === 'idle' || st === 'done') && !this.said(key) && this.sessions.status(r.sessionId, r.cwd) === undefined) {
-        const seen = screenBackground(await herdr.visible(pane).catch(() => ''))
-        if (seen) this.screens.set(key, seen)
-        else this.screens.delete(key)
-      } else this.screens.delete(key)
+      const seen = await this.screenWork(key)
+      if (seen) this.screens.set(key, seen)
+      else this.screens.delete(key)
       // counted from when it was first seen after its turn ended: a turn that woke and ended again in between herdr's
       // looks, which its hooks tell, starts the count again
       const what = this.stillRuns(key)

@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { headlessJob } from '../server/live/activity.ts'
-import { agyLogPath } from '../server/live/agy.ts'
+import { agyLogPath, MIRROR_HEAD } from '../server/live/agy.ts'
 import { hidden, type AgentRecord, type Spec } from '../server/live/agents.ts'
 import { makeConversation, makeSummaries, userPayload } from './agy-fixture.ts'
 import { tmp } from './tmp.ts'
@@ -147,7 +147,7 @@ describe('reading an agy agent\'s log', () => {
     const err = spyOn(console, 'error').mockImplementation(() => undefined)
     // a mirror whose last line is no JSON: the copy cannot go on from it
     mkdirSync(join(home(), 'agy'), { recursive: true })
-    writeFileSync(agyLogPath(home(), 'conv-bad'), '{"idx":0}\nnot json\n')
+    writeFileSync(agyLogPath(home(), 'conv-bad'), `${MIRROR_HEAD}\n{"idx":0}\nnot json\n`)
     const h = harness()
     try {
       h.a.adopt('AGY-2/Agent', { name: 'shep-agy-bad', cwd: join(dir, 'bad') } as never, 'agy', 'test')
