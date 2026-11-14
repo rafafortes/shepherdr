@@ -1,0 +1,2 @@
+{"idx":3,"at":1700000000000,"kind":"user","text":"Write the summary"}
+{"idx":4,"at":1700000001000,"kind":"error","text":"RESOURCE_EXHAUSTED (code 429): Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 158h59m47s.","status":429}

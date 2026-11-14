@@ -262,14 +262,18 @@ it, and its replies show in the chat. Shepherdr starts it in the agent's herdr p
   written there). Shepherdr finds the newest conversation of the folder in its summaries and copies the final steps into
   `<shepherdr home>/agy/<conversation id>.jsonl`, which the chat reads: the human's and the agent's words, each tool call
   (a shell command with its output), the model and the tokens of each reply, and the errors. A step still running is read
-  once it is over.
+  once it is over. A provider's error step (its quota, a rate limit) is read as a cut-off with its HTTP status, so the
+  retries, the waits and the backup agent apply as for the other CLIs.
+- **Background commands.** agy runs long shell commands in the background and its turn can end while they run. Their
+  count in the footer ("· 2 task(s)") or their rows below the input box count as work while they run, as Claude Code's
+  shells do; once they are gone the task needs you again. Its approval prompts are not read from the log: they show on
+  the pane's screen.
 - **Headless runs.** The probe and the advisor run `agy -p <prompt> --model <id> --output-format json --mode plan`, the probe
   in `<shepherdr home>/agy/headless/`, the advisor in the folder of its work. The answer is JSON (`status`, `response`,
   `error`): SUCCESS with exit 0 is an answer, anything else is a failed run and its error is said. Their conversations are
   listed in `<shepherdr home>/agy/headless.json` (the last 200), so the chat never takes one for an agent's.
-- **Not known yet.** The words of an error that cuts a turn off are known only for an invalid model ("invalid model selection",
-  "is not recognized as a known model": a model it does not have, which is not waited out). Other provider errors go through
-  the same word lists as the other CLIs. Its approval prompts are not read from the log: they show on the pane's screen.
+- **Errors.** An error step's words go through the same word lists as the other CLIs: an invalid model ("invalid model
+  selection", "is not recognized as a known model") is a model it does not have, which is not waited out.
 
 ## Models
 

@@ -76,6 +76,14 @@ describe('agy reader: turns and words', () => {
     expect(parse([{ idx: 8, at: 141, kind: 'error' }]).find((e) => e.kind === 'error')).toMatchObject({ text: 'the step failed' })
   })
 
+  test('an error with its provider\'s HTTP status keeps it, and still ends the turn', () => {
+    const ev = parse([{ idx: 9, at: 150, kind: 'error', text: 'RESOURCE_EXHAUSTED (code 429)', status: 429 }])
+    expect(ev.slice(1)).toEqual([
+      { kind: 'error', id: 'error-9', at: 150, text: 'RESOURCE_EXHAUSTED (code 429)', status: 429 },
+      { kind: 'turn-end', id: 'turn-9', at: 150 },
+    ])
+  })
+
   test('notices and steps of other kinds stay out; lines that are no mirrored step are skipped', () => {
     const ev = parse([{ idx: 3, at: 1, kind: 'notice', text: 'All stopped' }, { idx: 4, at: 2, kind: 'other' }, { at: 3, kind: 'user', text: 'no index' }])
     expect(brief(ev)).toEqual([])

@@ -1,5 +1,5 @@
 // The Antigravity CLI (agy) log reader, on the mirrored lines of server/live/agy.ts: one JSON line per final step of its
-// conversation, {idx, at, kind, text?, tool?, args?, output?, model?, tokensIn?, tokensOut?}. The chat reads the human's
+// conversation, {idx, at, kind, text?, tool?, args?, output?, model?, tokensIn?, tokensOut?, status?}. The chat reads the human's
 // and the agent's text, the model and the tokens of each model response, its shell commands and other tool calls (each
 // one a step, over once it is logged), and the errors. The CLI's own notices and the steps of unknown kinds stay out.
 import { basename } from 'node:path'
@@ -83,7 +83,7 @@ export class AgyReader implements Reader {
       case 'tool':
         return this.tool(out, file, l, id, offset, at)
       case 'error':
-        return this.error(out, file, id, at, l.text)
+        return this.error(out, file, id, at, l.text, l.status)
     }
   }
 
@@ -123,9 +123,9 @@ export class AgyReader implements Reader {
     })
   }
 
-  /** the model's provider cut the reply off: the error, and the turn ends with it */
-  private error(out: LogEvent[], file: string, id: string, at: number, text: unknown) {
-    out.push({ kind: 'error', id: `error-${id}`, at, text: String(text ?? 'the step failed') })
+  /** the model's provider cut the reply off: the error with its HTTP status where it has one, and the turn ends with it */
+  private error(out: LogEvent[], file: string, id: string, at: number, text: unknown, status: unknown) {
+    out.push({ kind: 'error', id: `error-${id}`, at, text: String(text ?? 'the step failed'), ...(typeof status === 'number' ? { status } : {}) })
     this.end(out, file, id, at)
   }
 }

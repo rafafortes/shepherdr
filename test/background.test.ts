@@ -9,7 +9,7 @@ import { tmp } from './tmp.ts'
 process.env.SHEPHERDR_HOME = tmp('bg')
 process.env.CLAUDE_CONFIG_DIR = tmp('bg-claude')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'herdr.sock')
-const { ClaudeSessions, Reviewers, headless, screenBackground, sessionBackground } = await import('../server/live/readers/background.ts')
+const { agyScreenBackground, ClaudeSessions, Reviewers, headless, screenBackground, sessionBackground } = await import('../server/live/readers/background.ts')
 const { Agents } = await import('../server/live/agents.ts')
 const { writeJson } = await import('../server/store.ts')
 const { record } = await import('../server/live/readers/hooks.ts')
@@ -58,6 +58,41 @@ const NOTHING = screen(
   [],
   '❯ Yes, build it',
 )
+
+/** agy's screen: its input box between two rules, its footer below, and its rows of background commands below that */
+const AGY_RULE = '─'.repeat(78)
+const agyScreen = (rows: string[], footer: string) => ['', AGY_RULE, '>', AGY_RULE, ...rows, footer].join('\n')
+const AGY_FOOT = '? for shortcuts                                         Gemini 4 Hydrogen · high'
+const AGY_TASKS = '? for shortcuts                                         Gemini 4 Hydrogen · high · 2 task(s) · /tasks'
+const AGY_ROWS = [
+  '  ● [06:57:43] SHEPHERDR_CHAT="WEB-108/Agent" /home/…/bin/shepherdr review WEB-108 running',
+  '  ● [06:57:31] git add CLAUDE.md && git commit --amend --no-edit && … running',
+]
+/** the agent's turn ended, and a test run of its own runs in the background (its row cut at the screen's width) */
+const AGY_RUNNING = agyScreen([AGY_ROWS[0], AGY_ROWS[1].replace(' running', '')], AGY_TASKS)
+const AGY_IDLE = agyScreen([], AGY_FOOT)
+/** as agy draws it live: the rows between the input box and another rule above the footer */
+const AGY_LIVE = ['', AGY_RULE, '>', AGY_RULE, ...AGY_ROWS, AGY_RULE, AGY_FOOT].join('\n')
+
+describe("agy's screen", () => {
+  test('background commands: a task count in its footer, or a row of one below its input box', () => {
+    expect(agyScreenBackground(AGY_RUNNING)).toBe('shells')
+    // the live layout, its footer without a count: the rows between the box and the footer's rule still count
+    expect(agyScreenBackground(AGY_LIVE)).toBe('shells')
+    // a screen whose box has no rule above its prompt line has no input box to read rows under
+    expect(agyScreenBackground(['', '>', AGY_RULE, AGY_RULE, ...AGY_ROWS, AGY_FOOT].join('\n'))).toBeUndefined()
+    expect(agyScreenBackground(agyScreen([], AGY_TASKS))).toBe('shells')
+    expect(agyScreenBackground(agyScreen([AGY_ROWS[1]], AGY_FOOT))).toBe('shells')
+  })
+
+  test('nothing in the background: a plain footer, a count of 0, a row above the input box, or no input box at all', () => {
+    expect(agyScreenBackground(AGY_IDLE)).toBeUndefined()
+    expect(agyScreenBackground(agyScreen([], AGY_FOOT.replace('high', 'high · 0 task(s)')))).toBeUndefined()
+    expect(agyScreenBackground(['', AGY_ROWS[0], AGY_RULE, '>', AGY_RULE, AGY_FOOT].join('\n'))).toBeUndefined()
+    expect(agyScreenBackground([...AGY_ROWS, AGY_TASKS].join('\n'))).toBeUndefined()
+    expect(agyScreenBackground('')).toBeUndefined()
+  })
+})
 
 describe("Claude Code's screen", () => {
   test('a subagent still running is background work, with or without shells of its own', () => {
@@ -121,7 +156,7 @@ describe("Claude Code's session file", () => {
 
 describe('an agent whose turn ended', () => {
   // herdr, standing in: two Claude Code agents whose turns ended; the second has no session file, only its screen
-  const screens: Record<string, string> = { p1: NOTHING, p2: REVIEWER }
+  const screens: Record<string, string> = { p1: NOTHING, p2: REVIEWER, p3: AGY_IDLE }
   const server = createServer((c) => {
     let buf = ''
     c.on('data', (d) => {
@@ -130,9 +165,9 @@ describe('an agent whose turn ended', () => {
       if (i < 0) return
       const { id, method, params } = JSON.parse(buf.slice(0, i))
       buf = buf.slice(i + 1)
-      const agent = (name: string, pane_id: string) => ({ agent: 'claude', agent_status: 'done', name, pane_id, tab_id: 't', workspace_id: 'w', cwd: null, interactive_ready: true })
+      const agent = (name: string, pane_id: string, kind = 'claude') => ({ agent: kind, agent_status: 'done', name, pane_id, tab_id: 't', workspace_id: 'w', cwd: null, interactive_ready: true })
       const result =
-        method === 'agent.list' ? { agents: [agent('shep-t-1', 'p1'), agent('shep-t-2', 'p2')] } : method === 'pane.read' ? { read: { text: screens[params.pane_id] ?? '' } } : {}
+        method === 'agent.list' ? { agents: [agent('shep-t-1', 'p1'), agent('shep-t-2', 'p2'), agent('shep-t-3', 'p3', 'agy')] } : method === 'pane.read' ? { read: { text: screens[params.pane_id] ?? '' } } : {}
       c.end(`${JSON.stringify({ id, result })}\n`)
     })
   }).listen(process.env.HERDR_SOCKET_PATH)
@@ -142,7 +177,11 @@ describe('an agent whose turn ended', () => {
   mkdirSync(sessions, { recursive: true })
   const session = (status: string) => writeFileSync(join(sessions, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 's1', cwd: '/w/1', kind: 'interactive', status, updatedAt: Date.now() }))
   const rec = (key: string, name: string, cwd: string, sessionId: string) => ({ key, name, kind: 'claude', cwd, workspace: 'w', logs: [], sessionId, started: 0 })
-  writeJson('agents.json', { 'T-1/Agent': rec('T-1/Agent', 'shep-t-1', '/w/1', 's1'), 'T-2/Agent': rec('T-2/Agent', 'shep-t-2', '/w/2', 's2') })
+  writeJson('agents.json', {
+    'T-1/Agent': rec('T-1/Agent', 'shep-t-1', '/w/1', 's1'),
+    'T-2/Agent': rec('T-2/Agent', 'shep-t-2', '/w/2', 's2'),
+    'T-3/Agent': { key: 'T-3/Agent', name: 'shep-t-3', kind: 'agy', cwd: '/w/3', workspace: 'w', logs: [], started: 0 },
+  })
 
   test('its session file says what still runs, else its screen; a change is told as a status change', async () => {
     session('busy')
@@ -164,6 +203,23 @@ describe('an agent whose turn ended', () => {
     expect(a.background('T-1/Agent')).toBeUndefined()
     expect(a.background('T-2/Agent')).toBeUndefined()
     expect(told.sort()).toEqual(['T-1/Agent', 'T-2/Agent'])
+    a.stop()
+  })
+
+  test("agy: the background commands on its screen keep it at work, as Claude Code's shells do; once they are gone it needs you", async () => {
+    screens.p3 = AGY_RUNNING
+    const a = new Agents()
+    const told: string[] = []
+    a.on('status', (key) => told.push(key))
+    await a.refresh()
+    await until(() => a.background('T-3/Agent') === 'shells')
+    expect(told).toContain('T-3/Agent')
+    // its commands ended: its screen is plain again, and it is told
+    told.length = 0
+    screens.p3 = AGY_IDLE
+    await a.refresh()
+    await until(() => told.includes('T-3/Agent'))
+    expect(a.background('T-3/Agent')).toBeUndefined()
     a.stop()
   })
 
@@ -221,6 +277,8 @@ describe('an agent whose turn ended', () => {
     b.shellsFor = 0
     await b.refresh()
     expect(b.background('T-1/Agent')).toBe('agents')
+    // the pass reads the agy agent's screen too, a pane read: the next refresh is skipped while it is in progress
+    await until(() => !(b as any).readingBackground)
     // and once the session file says only shells again, they keep it at work only so long
     session('shell')
     b.sessions = new ClaudeSessions()

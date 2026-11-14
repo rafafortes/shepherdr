@@ -4,7 +4,8 @@
 // agent runs, "shell" while only shells or monitors do, "idle" once nothing does. Its screen says so too, and is read
 // when there is no session file: "✻ Waiting for 1 background agent to finish", "✻ … · done 10:04 PM · 1 shell, 1 monitor
 // still running", the footer's "· 2 shells ·" and a row per subagent below it. Codex keeps background terminals but is
-// never woken by them, and pi has none: their turn's end waits on you.
+// never woken by them, and pi has none: their turn's end waits on you. Antigravity (agy) runs its long commands in the
+// background too, and its screen shows them below the input box (agyScreenBackground).
 // A shell that ends (a test run, a review) wakes it, however long it takes; one that serves or watches (a dev server it
 // left for you to look at) never does. Its hooks name each shell's command, which tells them apart (hooks.ts).
 // A shell that runs a headless reviewer of another CLI (codex exec, claude -p: a task agent's own reviewer) wakes it like a
@@ -36,6 +37,24 @@ export function screenBackground(screen: string): Background | undefined {
   if (/Waiting for \d+ background agents? to finish/.test(above) || rows.some((r) => /^\s*[◯○●◉]\s+(?!main\s*$)\S/.test(r))) return 'agents'
   if (/·.*\bstill running\s*$/.test(above) || /(^|·)\s*\d+ (shells?|monitors?)\b/.test(footer)) return 'shells'
   return undefined
+}
+
+/** a row of agy's background commands below its input box: "● [06:57:43] <command> running" */
+const AGY_ROW = /^\s*● \[\d{2}:\d{2}:\d{2}\] /
+
+/** the screen of an agy whose turn ended, as background work: its footer's task count, or its rows of background commands
+ *  below the input box, which agy draws between the box and another rule above the footer (the footer then reads
+ *  "· 2 task(s)"; with none, its footer has no count and there are no rows). A row above the box is the chat's own */
+export function agyScreenBackground(screen: string): Background | undefined {
+  const lines = screen.split('\n').map((l) => l.trimEnd())
+  const rules = lines.flatMap((l, i) => (RULE.test(l) ? [i] : []))
+  if (rules.length < 2) return undefined
+  const footer = lines.filter((l) => l.trim()).at(-1) ?? ''
+  const tasks = /·\s*(\d+) task\(s\)/.exec(footer)
+  if (tasks && Number(tasks[1]) >= 1) return 'shells'
+  // the input box: the last prompt line ("> …") with a rule right above it
+  const box = lines.findLastIndex((l, i) => /^\s*>/.test(l) && RULE.test(lines[i - 1] ?? ''))
+  return box >= 0 && lines.slice(box + 1).some((l) => AGY_ROW.test(l)) ? 'shells' : undefined
 }
 
 interface SessionFile {

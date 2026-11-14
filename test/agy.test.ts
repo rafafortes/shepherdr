@@ -3,9 +3,9 @@
 // Every database is a fixture built here (agy-fixture.ts); SHEPHERDR_AGY_HOME points at a folder of the test's own.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { agyLogPath, agyModelId, field, fields, mirrorConversation, newestConversation, stepTime, summaryTime, text } from '../server/live/agy.ts'
+import { agyLogPath, agyModelId, field, fields, MIRROR_HEAD, mirrorConversation, newestConversation, stepTime, summaryTime, text } from '../server/live/agy.ts'
 import { findAgyLog, LOG_FINDERS, logKind } from '../server/live/readers/find.ts'
 import { CHAT_KINDS, chatProblem, LogTail, readerFor } from '../server/live/readers/index.ts'
 import { home, writeJson } from '../server/store.ts'
@@ -199,7 +199,8 @@ const GENS = [
 ]
 
 /** the JSON lines of a mirror file, parsed */
-const lines = (file: string) => readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+/** a mirror's step lines (its first line is the format's head) */
+const lines = (file: string) => readFileSync(file, 'utf8').trim().split('\n').filter((l) => l !== MIRROR_HEAD).map((l) => JSON.parse(l))
 
 /** adds a step to a conversation database, as agy would while the turn runs */
 function addStep(id: string, row: StepRow) {
@@ -273,17 +274,37 @@ describe('the mirror of a conversation', () => {
     expect(existsSync(file)).toBe(false)
   })
 
-  test('an empty mirror file is read from the first step; a last line that is not JSON, or no step, throws', () => {
+  test('an empty mirror file, or one with its head alone, is read from the first step; a last line that is not JSON, or no step, throws', () => {
     const dir = folder('empty')
     const empty = join(dir, 'conv-a.jsonl')
     writeFileSync(empty, '')
     expect(mirrorConversation('conv-a', empty)).toBe(7)
+    expect(readFileSync(empty, 'utf8').split('\n')[0]).toBe(MIRROR_HEAD)
+    const headOnly = join(dir, 'head.jsonl')
+    writeFileSync(headOnly, `${MIRROR_HEAD}\n`)
+    expect(mirrorConversation('conv-a', headOnly)).toBe(7)
     const broken = join(dir, 'broken.jsonl')
-    writeFileSync(broken, '{"idx":0}\nnot json\n')
+    writeFileSync(broken, `${MIRROR_HEAD}\n{"idx":0}\nnot json\n`)
     expect(() => mirrorConversation('conv-a', broken)).toThrow('ends in a line that is no mirrored step')
     const nostep = join(dir, 'nostep.jsonl')
-    writeFileSync(nostep, '{"kind":"user"}\n')
+    writeFileSync(nostep, `${MIRROR_HEAD}\n{"kind":"user"}\n`)
     expect(() => mirrorConversation('conv-a', nostep)).toThrow('ends in a line that is no mirrored step')
+  })
+
+  test('a mirror an older Shepherdr wrote (no head; a cut-off read as nothing) is written again whole, as a new file', () => {
+    const dir = folder('old')
+    const file = join(dir, 'conv-a.jsonl')
+    // the old format: every step as it read them then, a provider's cut-off among them as kind other
+    writeFileSync(file, '{"idx":0,"at":0,"kind":"user","text":"old"}\n{"idx":1,"at":0,"kind":"other"}\n')
+    const was = statSync(file).ino
+    expect(mirrorConversation('conv-a', file)).toBe(7)
+    expect(readFileSync(file, 'utf8').split('\n')[0]).toBe(MIRROR_HEAD)
+    expect(lines(file).map((l) => l.idx)).toEqual([0, 1, 2, 3, 4, 5, 6])
+    // a new file: the chat's reader starts it over from its first line
+    expect(statSync(file).ino).not.toBe(was)
+    expect(existsSync(`${file}.tmp`)).toBe(false)
+    // and then it goes on as any mirror: nothing new, nothing written
+    expect(mirrorConversation('conv-a', file)).toBe(0)
   })
 
   test('a step whose payload or error is malformed keeps what it can: no text, no time, "the step failed"', () => {
@@ -298,6 +319,22 @@ describe('the mirror of a conversation', () => {
       { idx: 0, at: 0, kind: 'user' },
       { idx: 1, at: 0, kind: 'error', text: 'the step failed' },
       { idx: 2, at: 0, kind: 'tool' },
+    ])
+  })
+
+  test('a provider error (step type 17) is an error line with its text and HTTP status; its short text alone, or none, still is one', () => {
+    const quota = pb({ ...stepAt(104), '24.3.1': 'Individual quota reached.', '24.3.2': 'RESOURCE_EXHAUSTED (code 429): Individual quota reached.', '24.3.7': 429 })
+    makeConversation(join(convs, 'conv-q.db'), [
+      { idx: 0, step_type: 17, payload: quota },
+      { idx: 1, step_type: 17, payload: pb({ ...stepAt(105), '24.3.1': 'Out of credit.' }) },
+      { idx: 2, step_type: 17, payload: pb({ ...stepAt(106) }) },
+    ])
+    const file = join(folder('quota'), 'conv-q.jsonl')
+    expect(mirrorConversation('conv-q', file)).toBe(3)
+    expect(lines(file)).toEqual([
+      { idx: 0, at: 104_000, kind: 'error', text: 'RESOURCE_EXHAUSTED (code 429): Individual quota reached.', status: 429 },
+      { idx: 1, at: 105_000, kind: 'error', text: 'Out of credit.' },
+      { idx: 2, at: 106_000, kind: 'error', text: 'the step failed' },
     ])
   })
 
@@ -349,7 +386,7 @@ describe('agy in the finder and the chat reader', () => {
 
   test('a mirror that cannot be read does not throw from the finder: its log is still named', () => {
     const path = agyLogPath(home(), 'conv-f')
-    writeFileSync(path, '{"idx":0}\nnot json\n')
+    writeFileSync(path, `${MIRROR_HEAD}\n{"idx":0}\nnot json\n`)
     expect(findAgyLog('/w/agy-app')).toBe(path)
     rmSync(path)
   })

@@ -42,6 +42,8 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(ending('pi-unknown-provider').passing).toBe(false)
     // agy's words for a model it does not have: lasting, and the model is the one not available
     expect(ending('agy-invalid-model-made')).toEqual({ passing: false, reason: 'Model not available' })
+    // its provider's quota (429, RESOURCE_EXHAUSTED): out of allowance, with the reset its words give
+    expect(ending('agy-quota-made')).toEqual({ passing: false, reason: 'Out of allowance until in 158h59m47s' })
     expect(providerError('gemini-9 is not recognized as a known model')).toEqual({ passing: false, reason: 'Model not available' })
     expect(providerError('Your input exceeds the context window of this model.', 'context_window_exceeded').reason).toBe('Context window full')
     expect(providerError("You've hit your limit · resets 5pm (Europe/Oslo)").reason).toBe('Out of allowance until 5pm')
