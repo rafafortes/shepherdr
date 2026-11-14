@@ -198,6 +198,17 @@ export interface TaskAgent {
   running?: boolean
   age: string
   note: string
+  /** what its agent runs on now, while its process is up: the provider (spark) and its name (Spark (local)), the model
+   *  (as the CLI names it; default when the CLI picks) and the effort it started with */
+  run?: TaskRun
+}
+
+/** what a task's agent runs on now (TaskAgent.run): its row's line under the status, and that line's title in full */
+export interface TaskRun {
+  provider: string
+  providerName: string
+  model: string
+  effort?: string
 }
 
 export interface Task {

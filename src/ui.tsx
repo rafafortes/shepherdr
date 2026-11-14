@@ -434,13 +434,14 @@ export function etaShort(eta: number) {
  * the row's whole width. Anything else is the dot alone; frozen while it waits on you, the % it stopped at stays in its
  * pie (still working) or, on the needs-you mark, for screen readers: its line says what it asks.
  */
-export function TaskDot({ s, w }: { s: Status; w?: Report }) {
+export function TaskDot({ s, w, under }: { s: Status; w?: Report; under?: boolean }) {
   const dot = <Dot s={s} p={w?.progress} frozen={w?.paused ? w : undefined} />
   if (s !== 'work' || !w || w.paused || w.eta === undefined) return dot
   return (
     <span className="mt-[3px] flex w-3.5 shrink-0 flex-col items-center self-stretch phone:mt-1 phone:w-4">
       {dot}
-      <span aria-hidden className="mt-auto text-[0.625rem]/4 font-semibold whitespace-nowrap text-work tabular-nums phone:text-[0.6875rem]/5">
+      {/* beside the status line: with a line under it (what the agent runs on, RowText's more), one line higher */}
+      <span aria-hidden className={clsx('mt-auto text-[0.625rem]/4 font-semibold whitespace-nowrap text-work tabular-nums phone:text-[0.6875rem]/5', under && 'mb-[17px] phone:mb-[21px]')}>
         {etaShort(w.eta)}
       </span>
       <span className="sr-only">{`, about ${minutesLeft(w.eta).replace(/^~/, '')} left`}</span>
@@ -477,6 +478,27 @@ export function ReportLine({ w, head = false, wrap = false }: { w: Report; head?
     <span className={clsx('flex min-w-0 items-center gap-1', w.paused && 'text-fg3')}>
       <span className="truncate">{w.msg}</span>
       {tail ? <span className="shrink-0">{tail}</span> : null}
+    </span>
+  )
+}
+
+/** the statuses whose row says what its agent runs on: at work, merging, or waiting on you with its agent there */
+const RUNNING: Status[] = ['work', 'merging', 'need']
+
+/** what a running task's agent runs on, for its row's line under the status: its CLI, provider and model
+ *  (`pi · spark · qwen3.8-flash-next…`); a screen reader hears the whole of it, with the provider's name and the effort
+ *  (no title: nothing in the lists pops up a tooltip). Nothing for a task whose agent is not up or that does not run now */
+export function runLine(t: Task): ReactNode {
+  const r = t.agent?.run
+  if (!r || t.archived || !RUNNING.includes(t.status)) return null
+  // a provider named as its CLI (Codex, Claude Code) is said once
+  const full = `Runs on ${t.agent!.cli}${r.providerName !== t.agent!.cli ? ` · ${r.providerName}` : ''} · ${r.model}${r.effort ? ` (${r.effort})` : ''}`
+  return (
+    <span data-run>
+      <span aria-hidden>
+        {t.agent!.cli} · {r.provider} · {r.model}
+      </span>
+      <span className="sr-only">{full}</span>
     </span>
   )
 }
@@ -930,11 +952,12 @@ export function List({ className, children }: { className?: string; children: Re
 }
 
 /** Row text: one line, cut short; an optional second line */
-export function RowText({ children, sub, className }: { children: ReactNode; sub?: ReactNode; className?: string }) {
+export function RowText({ children, sub, more, className }: { children: ReactNode; sub?: ReactNode; more?: ReactNode; className?: string }) {
   return (
     <span className={clsx('min-w-0 flex-1 truncate', className)}>
       {children}
       {sub ? <span className="mt-px block truncate text-xs/4 font-normal text-fg2 phone:text-sm/5">{sub}</span> : null}
+      {more ? <span className="mt-px block truncate text-xs/4 font-normal text-fg3 phone:text-sm/5">{more}</span> : null}
     </span>
   )
 }

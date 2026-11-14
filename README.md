@@ -36,7 +36,7 @@ Keep your attention on decisions. Shepherdr starts, follows and puts away the ta
 
 ### 📈 See every task at a glance
 
-Each space's chat is in the middle and its tasks on the right, by what they need: `Needs you`, `Ready`, `Merging`, `Working`, `Scheduled`, `Queued`, `To do` and `Done`. A working task's dot fills like a pie with its % done and its minutes left, and its second line says what it is doing (`Fixing the two failing tests`). The sidebar groups your [spaces](docs/spaces.md) by machine, with Pinned and sections of your own, and marks the ones that wait on you. On a desktop, [split view](docs/chat.md) puts up to three chats, task lists or artifacts side by side.
+Each space's chat is in the middle and its tasks on the right, by what they need: `Needs you`, `Ready`, `Merging`, `Working`, `Scheduled`, `Queued`, `To do` and `Done`. A working task's dot fills like a pie with its % done and its minutes left, its second line says what it is doing (`Fixing the two failing tests`), and a third, fainter one what its agent runs on (`pi · spark · qwen3.8-flash-next…`). The sidebar groups your [spaces](docs/spaces.md) by machine, with Pinned and sections of your own, and marks the ones that wait on you. On a desktop, [split view](docs/chat.md) puts up to three chats, task lists or artifacts side by side.
 
 ### 🧩 Make it yours: everything is a plugin
 

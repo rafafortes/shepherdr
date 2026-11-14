@@ -13,7 +13,7 @@ import { trustWorktree } from '../trust.ts'
 import { existsSync, statSync } from '../mfs.ts'
 import { agentEnv, BOX } from '../box.ts'
 import { join } from 'node:path'
-import { STATUS_MAX, TITLE_MAX, type Question, type Report, type Task, type TaskStatus, type UpdateCard } from '../../../shared/types.ts'
+import { STATUS_MAX, TITLE_MAX, type Question, type Report, type Task, type TaskRun, type TaskStatus, type UpdateCard } from '../../../shared/types.ts'
 import { clockWords, startsLine } from '../../../shared/when.ts'
 import { Emitter } from '../../source.ts'
 import { spawn } from 'node:child_process'
@@ -33,7 +33,7 @@ import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
 import { findModel, knowsModels } from '../models.ts'
-import { keyOf } from '../models-summary.ts'
+import { keyOf, providerName } from '../models-summary.ts'
 import { allBlocked, blockedOnly, choose, waitShort, waitWords, type Blocked, type Choice, type Option, type Run } from './choose.ts'
 import { chainWords, fitHarness, harnessWords, recentChat, sameHarness } from '../restart.ts'
 import * as G from './git.ts'
@@ -1053,6 +1053,17 @@ export class Engine extends Emitter<Events> {
 
   /* ---------- the view the screen draws ---------- */
 
+  /** what a task's agent runs on now, while its process is up: its provider, model and effort as its record keeps them
+   *  (keyOf: kind/model, the model "default" while its CLI picks it); nothing while it has no agent up */
+  private runOf(key: string): { run?: TaskRun } {
+    const rec = this.agents.record(key)
+    if (!rec || this.agents.status(key) === 'gone') return {}
+    const model = keyOf(rec.kind, rec.model)
+    const provider = model.slice(0, model.indexOf('/'))
+    const id = model.slice(provider.length + 1)
+    return { run: { provider, providerName: providerName(provider), model: id === 'unknown' ? 'default' : id, ...(rec.effort ? { effort: rec.effort } : {}) } }
+  }
+
   view(t: TaskRec): Task {
     const status = this.statusOf(t)
     const key = this.key(t)
@@ -1075,7 +1086,7 @@ export class Engine extends Emitter<Events> {
       base: t.base,
       pr: t.pr,
       plan: t.plan,
-      agent: rec || t.worktree ? { chat: key, role: 'Agent', cli, status, age: age(rec?.started ?? t.updated), note: sub, running: !t.stopped && this.agents.status(key) !== 'gone' } : undefined,
+      agent: rec || t.worktree ? { chat: key, role: 'Agent', cli, status, age: age(rec?.started ?? t.updated), note: sub, running: !t.stopped && this.agents.status(key) !== 'gone', ...this.runOf(key) } : undefined,
       desc: t.desc || 'No brief yet.',
       said: t.said,
       facts: t.facts,

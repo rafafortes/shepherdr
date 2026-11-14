@@ -6,6 +6,39 @@ import { layout, settled } from './layout.ts'
 
 const { browser, world, server, url } = await layout({ everything: true })
 
+describe.skipIf(!browser)('a running task says what its agent runs on, on a line of its own', () => {
+  for (const [name, viewport] of [
+    ['phone', { width: 390, height: 844 }],
+    ['desktop', { width: 1600, height: 900 }],
+  ] as const)
+    test(`CLI · provider · model under the status line, faint; a screen reader hears it whole with the effort (${name})`, async () => {
+      const page = await browser!.newPage({ viewport, hasTouch: name === 'phone' })
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=vm-str/home&tab=tasks`)
+      const working = page.getByRole('button', { name: /HP-202 Voice/ })
+      await working.waitFor()
+      const run = working.locator('[data-run]')
+      const shown = (x: import('playwright-core').Locator) => x.locator('[aria-hidden]').textContent()
+      const heard = (x: import('playwright-core').Locator) => x.locator('.sr-only').textContent()
+      expect(await shown(run)).toBe('Codex · openai · gpt-6-sol')
+      // a screen reader hears all of it, the effort too, and a provider named as its CLI once; no title pops up
+      expect(await heard(run)).toBe('Runs on Codex · gpt-6-sol (high)')
+      expect(await run.locator('[title]').count()).toBe(0)
+      // under the status line, and quieter than it
+      const line = working.getByText('Tracing why mute ends the call', { exact: true })
+      const [l, r] = [(await line.boundingBox())!, (await run.locator('[aria-hidden]').boundingBox())!]
+      expect(r.y).toBeGreaterThanOrEqual(l.y + l.height - 1)
+      const color = (x: import('playwright-core').Locator) => x.evaluate((e) => getComputedStyle(e).color)
+      expect(await color(run.locator('[aria-hidden]'))).not.toBe(await color(line))
+      // waiting on you with its agent there, or merging: the same line, the provider's own name in its title
+      const pi = page.getByRole('button', { name: /LV-3 Upload/ }).locator('[data-run]')
+      expect(await heard(pi)).toBe('Runs on pi · Spark (local) · qwen3.8-flash-next-mlx4-mtp-tensorfold (high)')
+      expect(await shown(page.getByRole('button', { name: /GTM-18 Rate/ }).locator('[data-run]'))).toBe('Claude Code · anthropic · claude-opus-5-5')
+      // ready, queued, to do or with no agent up: none
+      for (const id of [/GTM-15 Fix/, /HP-203 Release/, /GTM-16 Docs/]) expect(await page.getByRole('button', { name: id }).locator('[data-run]').count()).toBe(0)
+      await page.close()
+    }, 30_000)
+})
+
 describe.skipIf(!browser)("the agent's status line, % done and minutes left", () => {
   for (const [name, viewport] of [
     ['phone', { width: 390, height: 844 }],

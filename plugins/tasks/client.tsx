@@ -73,6 +73,7 @@ import {
   Row,
   rowClass,
   RowText,
+  runLine,
   SplitIcon,
   StopIcon,
   taskLine,
@@ -87,7 +88,8 @@ import { and, Dialog, RowMenu, RowMenuButton, useRowMenu, type RowMenuState } fr
 import { RestartItem, StartNowItems } from '@client/restart.tsx'
 
 /**
- * A task, with one line under its title (taskLine). Working, its pie fills with the % done its agent reported and the minutes
+ * A task, with one line under its title (taskLine), and while its agent runs a second, faint one: what it runs on
+ * (runLine: CLI · provider · model). Working, its pie fills with the % done its agent reported and the minutes
  * left sit small under it. Every row shows its age (how long it has been as it is) at its end, like the rows around it;
  * waiting on you, its frozen status line stays in its chat's header.
  */
@@ -96,6 +98,8 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
   const sel = useUI((u) => u.task === t.id || (panesHere(u)[u.split.pane]?.kind === 'task' && panesHere(u)[u.split.pane].id === t.id))
   const kb = useUI((u) => u.kb && !u.task && u.cur === ix)
   const sub = taskLine(t, where)
+  // running: what its agent runs on, a line of its own under the status
+  const run = runLine(t)
   // archived: a quiet ring, or a done task's check; the status it was put away with stays in its chat
   const dot = t.archived ? (t.status === 'done' ? 'done' : 'idle') : t.status
   const menu = useRowMenu()
@@ -112,16 +116,16 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
         className={clsx(
           // where nothing hovers its ⋯ always shows, so the words keep clear of it, past the age
           'flex min-h-[inherit] min-w-0 flex-1 cursor-pointer gap-2 rounded-[inherit] px-2 text-left outline-none focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] phone:px-3 [@media(hover:none)]:pr-9!',
-          sub ? 'items-start py-1.5 [&>.dot]:mt-[3px] phone:[&>.dot]:mt-1' : 'items-center',
+          sub || run ? 'items-start py-1.5 [&>.dot]:mt-[3px] phone:[&>.dot]:mt-1' : 'items-center',
         )}
       >
-        <TaskDot s={dot} w={t.archived ? undefined : t.report} />
-        <RowText sub={sub}>
+        <TaskDot s={dot} w={t.archived ? undefined : t.report} under={!!run} />
+        <RowText sub={sub} more={run}>
           <span className="text-fg3">{t.id}</span> {t.name}
         </RowText>
         <Meta className={shy}>{t.age}</Meta>
       </button>
-      <RowMenuButton menu={menu} always label="More for this task" className={clsx('absolute right-1 z-1 phone:right-1.5', sub ? 'top-1.5 phone:top-2.5' : 'top-1/2 -translate-y-1/2')} />
+      <RowMenuButton menu={menu} always label="More for this task" className={clsx('absolute right-1 z-1 phone:right-1.5', sub || run ? 'top-1.5 phone:top-2.5' : 'top-1/2 -translate-y-1/2')} />
       {menu.open ? <TaskMenu t={t} menu={menu} /> : null}
     </li>
   )
