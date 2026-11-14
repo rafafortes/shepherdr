@@ -1,9 +1,10 @@
 // What each CLI's models and effort levels really are, so the + menu, Settings and task add offer only what it takes.
 // Each CLI is asked itself where it can tell: Claude Code's own model catalog in its install (which models it knows
 // and which take xhigh and max) and its --help, `codex debug models`, `pi --list-models` and pi's --help. What they
-// said is kept in cli-models.json and asked again by version (claude), as soon as pi's own files change (a provider or
-// model added to its models.json, a login), or every few hours; until then, or where a CLI can't tell, the table below
-// holds. A level a model lacks becomes the nearest it has (nearest), never an error at start.
+// said is kept in cli-models.json. Each CLI's list is asked again as soon as the files it is made from change (claude:
+// its install; pi, Codex, OpenCode and Antigravity: their own config and logins, and their install; see the xxxFrom
+// functions below), and every 6 hours anyway; until then, or where a CLI can't tell, the table below holds. A level a
+// model lacks becomes the nearest it has (nearest), never an error at start.
 // pi lists every model of every provider it has a login for: where its settings name the models it cycles through
 // (enabledModels), the menus offer only those, and the rest stay usable by id (others). OpenCode's list is scoped the
 // same way by this machine's opencode.models (setOpencodeScope, set by settings.ts). Antigravity (agy) lists its models
@@ -11,8 +12,9 @@
 import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { readJson, writeJson } from '../store.ts'
-import { piHome } from './readers/find.ts'
-import { defaultModel, listModels, type OpencodeModel } from './opencode.ts'
+import { codexHome, piHome } from './readers/find.ts'
+import { agyHome } from './agy.ts'
+import { defaultModel, listModels, opencodeConfigDir, opencodeDataDir, type OpencodeModel } from './opencode.ts'
 
 export interface Model {
   /** what the CLI takes: claude-opus-5-5, gpt-6-sol, exe-dev-openai/gpt-4.1@llm */
@@ -254,7 +256,7 @@ function ask(kind: string) {
   if (Date.now() - (looked.get(kind) ?? 0) < 60_000) return
   looked.set(kind, Date.now())
   const c = cache[kind]
-  const from = kind === 'claude' ? claudeBinary() : kind === 'pi' ? piFrom() : undefined
+  const from = fromOf[kind]?.()
   if (stillHolds(kind, c, from)) return
   if (asking.has(kind)) return
   asking.add(kind)
@@ -268,38 +270,77 @@ function ask(kind: string) {
     .finally(() => asking.delete(kind))
 }
 
-/**
- * What pi's list is made from: its providers and their models (models.json) and its logins (auth.json), by when each
- * last changed. Only looked at, never read: a model added there is in the menus within a minute, not hours later. (A new
- * version of pi itself waits for STALE: npm keeps the same paths and dates across versions.)
- */
-export function piFrom(dir = piHome()) {
-  const at = (f: string) => {
-    try {
-      return statSync(join(dir, f)).mtimeMs
-    } catch {
-      return 0
-    }
-  }
-  return `models.json@${at('models.json')} auth.json@${at('auth.json')}`
+/** when each named file of a folder last changed, as `<name>@<mtime>` (0 when there is none): only looked at, never read */
+function filesOf(dir: string, names: string[]) {
+  return names
+    .map((f) => {
+      try {
+        return `${f}@${statSync(join(dir, f)).mtimeMs}`
+      } catch {
+        return `${f}@0`
+      }
+    })
+    .join(' ')
 }
 
-/** whether a list kept from before still holds: claude's while its install is the same one; pi's while its files are
- *  as they were, for STALE at most; another CLI's for STALE */
+/** the install a CLI runs, by its path and when it changed (`@0` when there is none): a new version is read again */
+export function installOf(cmd: string) {
+  const found = Bun.which(cmd)
+  if (!found) return '@0'
+  try {
+    const p = realpathSync(found)
+    return `${p}@${statSync(p).mtimeMs}`
+  } catch {
+    return '@0'
+  }
+}
+
+/**
+ * What pi's list is made from: its providers and their models (models.json), its logins (auth.json) and its settings
+ * (settings.json: a provider with a catalog of its own, as OpenRouter's, lists only the models its enabledModels names),
+ * by when each last changed. Only looked at, never read: a model added there is in the menus within a minute, not hours
+ * later. (A new version of pi itself waits for STALE: npm keeps the same paths and dates across versions.)
+ */
+export function piFrom(dir = piHome()) {
+  return filesOf(dir, ['models.json', 'auth.json', 'settings.json'])
+}
+
+/** What Codex's list is made from: its config (config.toml: model providers and profiles) and its install */
+export function codexFrom(dir = codexHome(), install = installOf('codex')) {
+  return `${filesOf(dir, ['config.toml'])} ${install}`
+}
+
+/** What OpenCode's list is made from: its config (opencode.json and opencode.jsonc: providers, enabled and disabled
+ *  ones), its logins (auth.json in its data folder) and its install */
+export function opencodeFrom(config = opencodeConfigDir(), data = opencodeDataDir(), install = installOf('opencode')) {
+  return `${filesOf(config, ['opencode.json', 'opencode.jsonc'])} ${filesOf(data, ['auth.json'])} ${install}`
+}
+
+/** What Antigravity's list is made from: its settings (custom models in settings) and its install */
+export function agyFrom(dir = agyHome(), install = installOf('agy')) {
+  return `${filesOf(dir, ['settings.json'])} ${install}`
+}
+
+/** Claude Code's install, by its path and when it changed: undefined when there is none */
+export function claudeFrom(install = installOf('claude')) {
+  return install === '@0' ? undefined : install
+}
+
+/** what each CLI's list is made from, as the files it reads say now */
+const fromOf: Record<string, (() => string | undefined) | undefined> = {
+  claude: claudeFrom,
+  pi: piFrom,
+  codex: codexFrom,
+  opencode: opencodeFrom,
+  agy: agyFrom,
+}
+
+/** whether a list kept from before still holds: claude's while its install is the same one; every other CLI's while
+ *  what its list is made from is as it was, for STALE at most. A list kept before that was recorded holds nothing */
 export function stillHolds(kind: string, c: CliModels | undefined, from: string | undefined, now = Date.now()) {
   if (!c) return false
   if (kind === 'claude') return c.from === from
-  return (kind !== 'pi' || c.from === from) && now - (c.at ?? 0) < STALE
-}
-
-/** the Claude Code install that runs, by its path and when it changed: a new version is read again */
-function claudeBinary() {
-  try {
-    const p = realpathSync(Bun.which('claude') ?? '')
-    return `${p}@${statSync(p).mtimeMs}`
-  } catch {
-    return undefined
-  }
+  return c.from === from && now - (c.at ?? 0) < STALE
 }
 
 async function run(cmd: string[], limitMs = 20_000) {

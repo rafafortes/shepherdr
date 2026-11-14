@@ -15,9 +15,15 @@ const env = (k: string) => process.env[k] || undefined
 /** the OpenCode binary: SHEPHERDR_OPENCODE_BIN says another (tests point it at a fake script) */
 const opencodeBin = () => env('SHEPHERDR_OPENCODE_BIN') ?? 'opencode'
 
+/** OpenCode's config folder (opencode.json, opencode.jsonc) */
+export const opencodeConfigDir = () => join(env('XDG_CONFIG_HOME') ?? join(homedir(), '.config'), 'opencode')
+
+/** OpenCode's data folder (its database, its logins in auth.json) */
+export const opencodeDataDir = () => join(env('XDG_DATA_HOME') ?? join(homedir(), '.local', 'share'), 'opencode')
+
 /** OpenCode's database: SHEPHERDR_OPENCODE_DB says another (tests point it at a fixture) */
 export function opencodeDb(): string {
-  return env('SHEPHERDR_OPENCODE_DB') ?? join(env('XDG_DATA_HOME') ?? join(homedir(), '.local', 'share'), 'opencode', 'opencode.db')
+  return env('SHEPHERDR_OPENCODE_DB') ?? join(opencodeDataDir(), 'opencode.db')
 }
 
 /** a model id's provider: the part before its first slash */
