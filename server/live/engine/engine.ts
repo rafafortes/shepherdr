@@ -15,7 +15,6 @@ import { agentEnv, BOX } from '../box.ts'
 import { join } from 'node:path'
 import { STATUS_MAX, TITLE_MAX, type Question, type Report, type Task, type TaskRun, type TaskStatus, type UpdateCard } from '../../../shared/types.ts'
 import { clockWords, startsLine } from '../../../shared/when.ts'
-import { patternWords } from '../../../shared/harness.ts'
 import { Emitter } from '../../source.ts'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -35,7 +34,7 @@ import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
 import { findModel, knowsModels } from '../models.ts'
 import { keyOf, providerName } from '../models-summary.ts'
-import { allBlocked, blockedOnly, choose, waitShort, waitWords, type Blocked, type Choice, type Option, type Run } from './choose.ts'
+import { allBlocked, blockedOnly, capWords, choose, waitShort, waitWords, type Blocked, type Choice, type Option, type Run } from './choose.ts'
 import { chainWords, fitHarness, harnessWords, recentChat, sameHarness } from '../restart.ts'
 import * as G from './git.ts'
 import { Worktrees, type HerdrSpaces, type Made } from './worktrees.ts'
@@ -304,13 +303,8 @@ export function backupHarness(to: { kind: string; model?: string; effort?: strin
   return { kind: to.kind, model: to.model ?? (own.model ? findModel(to.kind, own.model)?.id : undefined), effort: to.effort ?? own.effort }
 }
 
-/** a capped or out harness in words for a card: `pi · spark (4 of 4 at once)`, `pi · commandcode is out until 17:00` */
-export function capWords(b: Blocked<unknown>, shown = (s: string) => s) {
-  const name = patternWords(b.name)
-  if (b.why === 'out') return `${name} is out${b.until ? ` until ${b.until}` : ''}`
-  if (b.why === 'blocked') return `${name}${b.cap?.scope === 'space' ? ` in ${shown(b.cap.space ?? '')}` : ''} is blocked (0 allowed)`
-  return `${name}${b.cap?.scope === 'space' ? ` in ${shown(b.cap.space ?? '')}` : ''} is at its limit (${b.cap?.count} of ${b.cap?.max} at once)`
-}
+// a capped or out harness in words (choose.ts), kept here for the modules that read it from the engine
+export { capWords }
 
 export function reportOf(r: Reported | undefined, status: TaskStatus, now = Date.now()): Report | undefined {
   if (!r || (status !== 'work' && status !== 'need')) return undefined

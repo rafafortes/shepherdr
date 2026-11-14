@@ -47,6 +47,7 @@ import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
 import { privatePrompt, coordinatorPrompt, backupCardWords, wentBackCardWords, type BackWhy, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
 import { chainWords, fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
+import { withRooms, type RoomInput } from './rooms.ts'
 import { backCard, canProbe, FIRST_WAIT, FRESH, QUIET, returnMode, Returns, type Outage, type Probe } from './return.ts'
 import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvice, runAdvisor, type Advice, type AdviceQuestion, type AdviceRec } from './advisor.ts'
 import { Revivals, type Wrong } from './revive.ts'
@@ -1863,6 +1864,23 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return { t, role, space, want, on, set: r?.set }
   }
 
+  /** what the restart sheet's rooms are read from (rooms.ts): the runs now without the chat's own (`except`: a task's id or
+   *  a coordinator's key), the limits at this machine and at its space, what is out, and the providers' quotas */
+  private roomInput(space: string, except: string): RoomInput {
+    const quotas = new Map(this.summaryNow().providers.map((p) => [p.provider, p.quota]))
+    const alertAt = this.quotas.summary().alertAt
+    return {
+      space,
+      runs: this.engine.runs(except),
+      machine: this.settings.maxAtOnce(),
+      own: this.settings.maxAtOnce(space),
+      out: (key) => this.engine.outNow?.(key),
+      quota: (provider) => quotas.get(provider),
+      ...(alertAt !== undefined ? { alertAt } : {}),
+      shown: (x) => this.places.shownName(x),
+    }
+  }
+
   /** the calm hint a chat shows once Settings for its role say other than what its agent runs on */
   private restartHintOf(key: string) {
     try {
@@ -3350,7 +3368,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'restart-info': {
         try {
           const x = this.restartable(a.chat)
-          return { ok: true, info: restartInfo({ role: x.role, space: x.space, on: x.on, onKnown: !!this.agents.record(a.chat), want: x.want, kinds: Object.keys(CLI_NAME).filter(this.engine.installed), working: this.agents.status(a.chat) === 'working' }) }
+          const info = restartInfo({ role: x.role, space: x.space, on: x.on, onKnown: !!this.agents.record(a.chat), want: x.want, kinds: Object.keys(CLI_NAME).filter(this.engine.installed), working: this.agents.status(a.chat) === 'working' })
+          return { ok: true, info: { ...info, clis: withRooms(info.clis, this.roomInput(x.space ?? '', x.t ? x.t.id : a.chat)) } }
         } catch (e) {
           return { ok: false, error: (e as Error).message }
         }

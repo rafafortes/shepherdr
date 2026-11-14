@@ -109,6 +109,29 @@ export function choose<H>(input: ChooseInput<H>): Choice<H> {
   return { wait: waitable.length ? waitable : skipped }
 }
 
+/** the entry that leaves a model key the least room now (a machine's or a space's own; the machine's first on a tie), with
+ *  how many of its runs count under it: what a list of models shows beside one that has room. None when no entry above 0
+ *  covers it (it has no limit) */
+export function roomLeft<H>(input: ChooseInput<H>, key: string): { scope: 'machine' | 'space'; count: number; max: number; pattern: string } | undefined {
+  let best: { scope: 'machine' | 'space'; count: number; max: number; pattern: string } | undefined
+  for (const [scope, list] of [['machine', input.machine], ['space', input.own]] as const)
+    for (const e of list) {
+      if (e.max === 0 || !covers(e.pattern, key)) continue
+      const count = input.runs.filter((r) => covers(e.pattern, r.key) && (scope === 'machine' || r.space === input.space)).length
+      if (!best || e.max - count < best.max - best.count) best = { scope, count, max: e.max, pattern: e.pattern }
+    }
+  return best
+}
+
+/** a capped or out harness in words for a card: `pi · spark is at its limit (4 of 4 at once)`, `pi · commandcode is out
+ *  until 17:00`; `shown` names a space the way it shows (a space's own sub-limit says so) */
+export function capWords(b: Blocked<unknown>, shown = (s: string) => s) {
+  const name = patternWords(b.name)
+  if (b.why === 'out') return `${name} is out${b.until ? ` until ${b.until}` : ''}`
+  if (b.why === 'blocked') return `${name}${b.cap?.scope === 'space' ? ` in ${shown(b.cap.space ?? '')}` : ''} is blocked (0 allowed)`
+  return `${name}${b.cap?.scope === 'space' ? ` in ${shown(b.cap.space ?? '')}` : ''} is at its limit (${b.cap?.count} of ${b.cap?.max} at once)`
+}
+
 /** whether a choice found nothing to start on and nothing that can free up: every option of the chain is blocked (0
  *  allowed), so it never starts until a limit changes (the wait holds the blocked ones only) */
 export const blockedOnly = <H>(c: Choice<H>): boolean => 'wait' in c && allBlocked(c.wait)
