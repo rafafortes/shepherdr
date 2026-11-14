@@ -363,6 +363,26 @@ describe('Queued after other tasks', () => {
     expect(w.engine.task(id(3))!.going).toBeUndefined()
   })
 
+  for (const kind of ['claude', 'codex', 'pi', 'opencode', 'agy'])
+    test(`after a restart, a go given since (${kind}) is not sent again while its agent comes up`, async () => {
+      const w = world()
+      w.engine.installed = () => true
+      expect(w.settings.set('task.agent', kind).ok).toBe(true)
+      const a = await started(w, repo(), `go-once-${kind}`, 'Once', 'Add o.txt.')
+      w.brief(a.key)
+      w.engine.todo(a.t.id)
+      w.agentIs(a.key, 'idle')
+      // the human starts it a few seconds after Shepherdr came up: its go is sent, its agent not at work yet
+      await w.engine.startNow(a.t.id)
+      const goes = () => w.sent.filter((x) => x.key === a.key && x.text.includes('<go>')).length
+      await until(() => goes() === 1)
+      expect(a.t.going).toBeDefined()
+      // the first check after the start comes now: that go is this run's own, never sent again
+      w.engine.resumeQueue()
+      await Bun.sleep(50)
+      expect(goes()).toBe(1)
+    })
+
   test("another machine's task: named with its machine first, done when that machine says so", async () => {
     const w = world()
     const dir = repo()

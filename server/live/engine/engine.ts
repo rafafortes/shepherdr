@@ -1239,10 +1239,13 @@ export class Engine extends Emitter<Events> {
   }
 
   /**
-   * After a start: a go that never reached its agent (a restart cut it off) is sent again; then the queue is checked.
+   * After a start: a go that never reached its agent (a restart cut it off) is sent again; then the queue is checked. Only a
+   * go from before this start: one given since (its task written to in this run, or starting or handed over now) is on its
+   * way already, its agent perhaps still coming up, and sent again it would go in twice.
    */
   resumeQueue() {
-    for (const t of this.tasks.filter((t) => t.going && !ended(t) && !t.stopped && this.agents.status(this.key(t)) !== 'working'))
+    const since = (t: TaskRec) => this.wrote.has(t.id) || this.starting.has(t.id) || this.handing.has(t.id)
+    for (const t of this.tasks.filter((t) => t.going && !since(t) && !ended(t) && !t.stopped && this.agents.status(this.key(t)) !== 'working'))
       this.agents.send(this.key(t), hidden(t.going!, 'go'), { ensure: this.starter(t) }).catch(() => undefined)
     this.recheck()
   }
