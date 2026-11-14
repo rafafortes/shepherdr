@@ -57,7 +57,11 @@ Every agent, coordinator or task agent, gets the same chat.
   agent…) or `shepherdr restart <space|task id>` — the same CLI resumes its session, another takes the chat over with
   the chat so far, a working agent's turn is interrupted first, and a card in the chat says what it is on. A model at its
   limit or blocked under [Most agents at once](settings.md#models) is refused before anything stops or is saved, with
-  the reason.
+  the reason. The sheet shows it before you pick: each CLI and model in its lists says its room under Settings → Limits
+  for this chat's space (`1 of 2`, `2 running`, faint and marked `Full 2 of 2`, `Blocked` or `Out until 17:00`, and a
+  quota window past its warning share, `5 h 92%`), counting what runs now but not this chat's own run, and the one picked
+  has a line below with what holds it or how much room it has, the tasks that run there and its provider's quota; on a
+  full or blocked one, Restart stays off.
 - One setting changed for every space is still one action. This machine's ⋯ in the places list carries the count —
   Restart 3 coordinators, and it is there only while some coordinator's Settings moved — and runs it, its answer in the
   row itself (the count, and the spaces that failed by name); `shepherdr restart --all` does the same from a terminal:

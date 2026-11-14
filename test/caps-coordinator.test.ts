@@ -554,3 +554,26 @@ describe("a coordinator's takeover that a restart cut short is taken again (resu
     expect(src.agents.records['T-1/Agent']?.handover).toBeDefined()
   })
 })
+
+describe("the restart sheet's rooms (restart-info): each model's room under the limits, the chat's own run not counted", () => {
+  type Info = { info: { clis: { kind: string; room?: { state: string; short: string; words: string }; models?: { id: string; room?: { state: string } }[] }[] } }
+  test('a model full with another chat says so and who holds it; the chat that runs there itself is not counted', async () => {
+    const { id: a } = await space('rooms-a')
+    const { id: b } = await space('rooms-b')
+    src.settings.set('models.maxAtOnce', 'codex=1, claude/claude-opus-5-5=0', 'machine')
+    // b's coordinator runs on Codex, working: it holds Codex's one slot
+    src.agents.records[b] = { key: b, name: 'b', kind: 'codex', logs: [], started: Date.now() } as never
+    working.add(b)
+    const forA = ((await src.act({ type: 'restart-info', chat: a })) as Info).info.clis
+    const codex = forA.find((c) => c.kind === 'codex')!
+    expect(codex.room).toMatchObject({ state: 'full', short: 'Full 1 of 1' })
+    expect(codex.room!.words).toBe('Codex is at its limit (1 of 1 at once): 1 coordinator.')
+    // a model entry at 0 blocks that model of Claude Code's, its others have room
+    const claude = forA.find((c) => c.kind === 'claude')!
+    expect(claude.models?.find((m) => m.id === 'claude-opus-5-5')?.room?.state).toBe('blocked')
+    expect(claude.models?.find((m) => m.id === 'claude-sonnet-5-5')?.room?.state).toBe('room')
+    // for b itself, its own run does not hold it: Codex has room
+    const forB = ((await src.act({ type: 'restart-info', chat: b })) as Info).info.clis
+    expect(forB.find((c) => c.kind === 'codex')!.room).toMatchObject({ state: 'room', short: '0 of 1' })
+  })
+})

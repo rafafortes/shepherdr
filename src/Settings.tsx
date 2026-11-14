@@ -62,6 +62,13 @@ import {
 export const shown = (v: string) => (v === 'xhigh' ? 'Extra high' : /^[a-z][a-z ,]*$/.test(v) ? v.charAt(0).toUpperCase() + v.slice(1) : v)
 
 /** a setting's value and the menu of its choices; plain, as a phone's grouped rows have it (the value and ⌃⌄, no box) */
+/** a few words at the end of a choice's row (Pick's note) */
+export interface Note {
+  words: string
+  off?: boolean
+  warn?: boolean
+}
+
 export function Pick({
   value,
   options,
@@ -75,6 +82,7 @@ export function Pick({
   ordered,
   section,
   pin,
+  note,
   left,
   className,
 }: {
@@ -98,6 +106,9 @@ export function Pick({
   /** pin a choice to the top of the list, or unpin it: a mark on its row (a model's); skip: a choice with none (the
    *  CLI's own default, which is no model) */
   pin?: { pinned: string[]; toggle: (v: string) => void; skip?: (v: string) => boolean }
+  /** a few words at the end of a choice's row (a model's room under the limits: "1 of 2", "Full 2 of 2"); off: the choice
+   *  can't take one more now (its words and its name faint and marked); warn: a mark without fainting it */
+  note?: (v: string) => Note | undefined
   /** its menu opens from its left edge */
   left?: boolean
   className?: string
@@ -156,6 +167,7 @@ export function Pick({
           ordered={ordered}
           section={section}
           pin={pin}
+          note={note}
           searchable={searchable}
           left={left}
           up={up}
@@ -203,6 +215,7 @@ function Choices({
   ordered,
   section,
   pin,
+  note,
   searchable,
   left,
 }: {
@@ -219,6 +232,7 @@ function Choices({
   ordered?: boolean
   section?: (v: string) => string | undefined
   pin?: { pinned: string[]; toggle: (v: string) => void; skip?: (v: string) => boolean }
+  note?: (v: string) => Note | undefined
   searchable: boolean
   left?: boolean
 }) {
@@ -276,6 +290,7 @@ function Choices({
         {rows.length ? null : <p className="px-2 py-2 text-fg3">No match.</p>}
         {rows.map((o) => {
           const at = depth?.(o)
+          const n = note?.(o)
           const head = section?.(o)
           const starts = !!head && head !== group
           group = head ?? group
@@ -286,13 +301,17 @@ function Choices({
                 <MenuItem
                   role="menuitemradio"
                   aria-checked={o === value}
-                  aria-label={at && at.name !== show(o) ? show(o) : undefined}
+                  // named by its words alone: a note is told as its description
+                  aria-label={(at && at.name !== show(o)) || n?.words ? show(o) : undefined}
+                  aria-description={n?.words || undefined}
                   icon={o === value ? <CheckIcon className={ic} /> : null}
+                  hint={n?.words ? <span data-note={n.off ? 'off' : n.warn ? 'warn' : 'on'} className={clsx('tabular-nums', (n.off || n.warn) && 'text-need-fg')}>{n.words}</span> : undefined}
                   onClick={() => onPick(o)}
-                  className={pin ? 'pr-10' : undefined}
+                  // the pin's room at the row's end, wider where it is (a phone's own padding would cover it otherwise)
+                  className={pin ? 'pr-10 coarse:pr-12 phone:pr-12' : undefined}
                 >
                   {/* a tree's rows step in under the one they belong to, as the sidebar's */}
-                  <span style={at ? { paddingLeft: `${at.depth}rem` } : undefined} className={clsx(icon && 'flex min-w-0 items-center gap-2')}>
+                  <span style={at ? { paddingLeft: `${at.depth}rem` } : undefined} className={clsx(icon && 'flex min-w-0 items-center gap-2', n?.off && 'text-fg3')}>
                     {icon?.(o)}
                     <span className="truncate">{at ? at.name : show(o)}</span>
                   </span>

@@ -497,3 +497,9 @@ Upstream's 3.x brings an agent back in its herdr-core terminal after a crash or 
 the terminal), and its takeover runs from a stateless tick, so a restart halfway is not its problem. Ours runs inside the
 server: a task or coordinator keeps its takeover as on its way until the backup is up, and the next start takes it again
 (`engine.ts` resumeTakeovers, `source.ts` resumeHandovers). The idea does not port (herdr-core). See [settings](settings.md).
+
+## Not from upstream: each model's room in the restart and start sheets, built here
+
+Upstream has no per-model limits (models.maxAtOnce is ours), so its model picker shows no room. Ours shows, beside each CLI
+and model of the restart, Start now with… and Start with… sheets, whether one more agent fits under Settings → Limits for
+that chat (the engine's own choice, `server/live/rooms.ts`), and the quota of its provider. See [chat](chat.md).

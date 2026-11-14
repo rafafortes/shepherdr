@@ -13,6 +13,8 @@ import { rebriefReviewer, settingsBlock } from '../live/prompts.ts'
 import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { CLI_NAME, repositorySection, defaultOf, kindOf } from '../live/settings.ts'
 import { harnessProblem, harnessWords, restartAllWords, restartClis, type RestartAllRow } from '../live/restart.ts'
+import { withRooms, type RoomInput } from '../live/rooms.ts'
+import { clockWords } from '../../shared/when.ts'
 import { picksIn, pickKey, withPin, withRecent, type Picks } from '../../shared/picks.ts'
 import { nextWords } from '../live/trigger.ts'
 import { pilotLine } from '../live/heartbeat.ts'
@@ -543,6 +545,26 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     return modelsSummary({ now, settings: this.stores[D.DEMO_HOST], host: D.DEMO_HOST, spaces, rows, usage: this.usage, agents, tasks, watch: [], quota: demoQuota(this.usage, now), runs: this.runsNow(), providers })
   }
 
+  /** what the restart sheet's rooms are read from (rooms.ts), as the live source has it: the demo's runs without the chat's
+   *  own, its limits, its run-outs and its quota figures */
+  private roomInput(space: string, except: string): RoomInput {
+    const s = this.stores[D.DEMO_HOST]
+    const now = Date.now()
+    const quotas = new Map(this.summaryNow(entryPatterns(s, this.matrixSpaces().map((x) => x.key)).map(providerOf)).providers.map((p) => [p.provider, p.quota]))
+    return {
+      space,
+      runs: this.runsNow().filter((r) => r.id !== except),
+      machine: s.maxAtOnce(),
+      own: s.maxAtOnce(space),
+      out: (key) => {
+        const st = this.usage.outOf(providerOf(key), now)
+        return st.out ? (st.last?.resetAt !== undefined ? { until: clockWords(st.last.resetAt, now, s.zone()) } : {}) : undefined
+      },
+      quota: (provider) => quotas.get(provider),
+      alertAt: demoQuota(this.usage, now).alertAt,
+    }
+  }
+
   /** what counts toward models.maxAtOnce now: each working task, on the model its CLI runs, in its space */
   private runsNow() {
     return this.tasks
@@ -918,7 +940,10 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const t = this.task(a.chat.split('/')[0])
         const on = kindOf(c?.cli ?? '') ?? 'claude'
         const want = c?.restart ? (kindOf(c.restart.want) ?? on) : on
-        return { ok: true, info: { role: a.chat.includes('/') ? 'task' : 'coordinator', space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name, on: c?.agent ?? { kind: on }, onWords: harnessWords(c?.agent ?? { kind: on }), want: { kind: want }, clis: restartClis(['claude', 'codex', 'pi', 'opencode'], (kind) => picksIn(this.picks, kind)), working: t?.status === 'work' } }
+        const clis = restartClis(['claude', 'codex', 'pi', 'opencode', 'agy'], (kind) => picksIn(this.picks, kind))
+        // its space's key, as the demo's runs name it (p:<machine>:<space>)
+        const space = (t?.place ?? a.chat).split(':')[2] ?? '~'
+        return { ok: true, info: { role: a.chat.includes('/') ? 'task' : 'coordinator', space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name, on: c?.agent ?? { kind: on }, onWords: harnessWords(c?.agent ?? { kind: on }), want: { kind: want }, clis: withRooms(clis, this.roomInput(space, t?.id ?? a.chat)), working: t?.status === 'work' } }
       }
       case 'model-pin': {
         const kind = kindOf(a.kind)

@@ -230,4 +230,85 @@ describe.skipIf(!browser)('restarting an agent', () => {
       await page.close()
     }
   }, 30_000)
+
+  test('each CLI and model shows its room under Settings → Limits: a full or blocked one marked, its line below, a restart there refused', async () => {
+    const set = (value: string | null) => world.act({ type: 'setting', key: 'models.maxAtOnce', value, place: 'm:vm-str' } as never)
+    // HP-202 works on Codex: Codex's one slot is taken; Claude Code has 2, its Sonnet blocked
+    await set('codex=1, claude=2, claude/claude-sonnet-5-5=0')
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
+      const row = page.locator('section[aria-label="Tasks"] li', { hasText: 'GTM-17' })
+      await row.hover()
+      await row.getByRole('button', { name: 'More for this task' }).click()
+      await page.getByRole('menuitem', { name: 'Restart agent…' }).click()
+      const sheet = page.getByRole('alertdialog', { name: 'Restart GTM-17 agent?' })
+      await sheet.locator('[data-restart]').waitFor()
+      await sheet.getByRole('button', { name: /^Agent: / }).click()
+      // named by its name alone, its room told as its description and drawn at the row's end
+      const codex = page.getByRole('menuitemradio', { name: 'Codex', exact: true })
+      expect(await codex.getAttribute('aria-description')).toBe('Full 1 of 1')
+      expect(await codex.locator('[data-note]').getAttribute('data-note')).toBe('off')
+      expect(await page.getByRole('menuitemradio', { name: 'Claude Code', exact: true }).locator('[data-note]').textContent()).toBe('0 of 2')
+      await codex.click()
+      const line = sheet.locator('[data-room]')
+      expect(await line.getAttribute('data-room')).toBe('full')
+      expect(await line.textContent()).toBe('Codex is at its limit (1 of 1 at once): HP-202. It can’t restart on it until a slot frees up: pick one with room.')
+      expect(await sheet.getByRole('button', { name: 'Restart', exact: true }).isDisabled()).toBe(true)
+      // Claude Code's models: the blocked one marked
+      await sheet.getByRole('button', { name: /^Agent: / }).click()
+      await page.getByRole('menuitemradio', { name: 'Claude Code', exact: true }).click()
+      await sheet.getByRole('button', { name: /^Model: / }).click()
+      const sonnet = page.getByRole('menuitemradio', { name: /^Sonnet/ })
+      expect(await sonnet.locator('[data-note]').textContent()).toBe('Blocked')
+      await sonnet.click()
+      expect(await line.textContent()).toMatch(/^Claude\/claude-sonnet-5-5 is blocked \(0 allowed\)\. It can’t restart on it: pick another model, or change the limit in Settings → Limits\. Quota: 5 h \d+%/)
+      expect(await sheet.getByRole('button', { name: 'Restart', exact: true }).isDisabled()).toBe(true)
+      // one with room: its count, and it restarts
+      await sheet.getByRole('button', { name: /^Model: / }).click()
+      await page.getByRole('menuitemradio', { name: /^Opus/ }).click()
+      expect(await line.getAttribute('data-room')).toBe('room')
+      expect(await line.textContent()).toMatch(/^Claude: 0 of 2 at once now; 2 more fit\. Quota: /)
+      expect(await sheet.getByRole('button', { name: 'Restart', exact: true }).isDisabled()).toBe(false)
+      await page.keyboard.press('Escape')
+      await sheet.waitFor({ state: 'detached' })
+      // a start now on a full one is offered: it takes a backup with room, or waits first in line
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:herdr-projects')}`)
+      const waiting = page.locator('section[aria-label="Tasks"] li', { hasText: 'HP-203' })
+      await waiting.hover()
+      await waiting.getByRole('button', { name: 'More for this task' }).click()
+      await page.getByRole('menuitem', { name: 'Start now with…' }).click()
+      const now = page.getByRole('alertdialog', { name: 'Start HP-203 now?' })
+      await now.locator('[data-restart]').waitFor()
+      await now.getByRole('button', { name: /^Agent: / }).click()
+      await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).click()
+      expect(await now.locator('[data-room]').textContent()).toContain('It starts on a backup with room, or waits first in line for a free slot.')
+      expect(await now.getByRole('button', { name: 'Start now', exact: true }).isDisabled()).toBe(false)
+    } finally {
+      await set(null)
+      await page.close()
+    }
+  }, 30_000)
+
+  test("on a phone a model's room sits before its pin, never under it", async () => {
+    await world.act({ type: 'setting', key: 'models.maxAtOnce', value: 'claude/claude-sonnet-5-5=0', place: 'm:vm-str' } as never)
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+    try {
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}&task=GTM-17`)
+      await page.locator('[data-composer]:visible').last().waitFor()
+      await page.locator('[data-composer]:visible button[aria-label="Attach files and more"]').last().click()
+      await page.locator('[data-agent-controls]:visible').last().getByRole('menuitem').first().click()
+      const sheet = page.getByRole('alertdialog')
+      await sheet.locator('[data-restart]').waitFor()
+      await sheet.getByRole('button', { name: /^Agent: / }).click()
+      await page.getByRole('menuitemradio', { name: 'Claude Code', exact: true }).click()
+      await sheet.getByRole('button', { name: /^Model: / }).click()
+      const note = (await page.getByRole('menuitemradio', { name: /^Sonnet/ }).locator('[data-note]').boundingBox())!
+      const pin = (await page.getByRole('menuitemcheckbox', { name: /^(Pin|Unpin) Sonnet/ }).boundingBox())!
+      expect(note.x + note.width).toBeLessThanOrEqual(pin.x)
+    } finally {
+      await world.act({ type: 'setting', key: 'models.maxAtOnce', value: null, place: 'm:vm-str' } as never)
+      await page.close()
+    }
+  }, 30_000)
 })

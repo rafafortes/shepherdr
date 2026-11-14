@@ -679,11 +679,31 @@ export interface RestartHint {
   want: string
 }
 
+/** whether one more agent fits on a model now, for the chat the restart sheet is for (its space's limits, its own run not
+ *  counted), under Settings → Limits (server/live/rooms.ts) */
+export interface RestartRoom {
+  /** room: it can start now; full: an entry is at its limit (it waits for a free slot); blocked: an entry is 0, nothing
+   *  starts on it; out: its provider is out now */
+  state: 'room' | 'full' | 'blocked' | 'out'
+  /** a few words for its row in a list: "1 of 2", "2 running", "Full 2 of 2", "Blocked", "Out until 17:00", with a quota
+   *  window past its warning share ("5 h 92%"); empty when there is nothing to say (no limit, nothing runs) */
+  short: string
+  /** a quota window of its provider is at or past its warning share (quota.alertAt) */
+  warn?: boolean
+  /** the line under the pickers: what holds it or how much room it has, and what runs on it; empty when no limit applies
+   *  and its provider has no quota read (its row says what runs) */
+  words: string
+  /** its provider's quota, each window's share used ("5 h 48% · Week 34%", "(estimate)" after an estimate's) */
+  quota?: string
+}
+
 /** a CLI the restart sheet offers; models and efforts where Shepherdr passes them (none: it runs on its own) */
 export interface RestartCli {
   kind: string
   name: string
-  models?: { id: string; label: string; efforts: string[]; defaultEffort?: string }[]
+  /** its own default model's room (what Default starts on) */
+  room?: RestartRoom
+  models?: { id: string; label: string; efforts: string[]; defaultEffort?: string; room?: RestartRoom }[]
   /** the levels its own default model takes */
   efforts?: string[]
   defaultModel?: string

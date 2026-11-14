@@ -1,11 +1,11 @@
 // Restart picks for either chat role, used once or saved for its space. Opened from the + or ⋯ menu.
 import clsx from 'clsx'
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
-import type { Place, RestartCli, RestartInfo } from '@shared/types.ts'
+import type { Place, RestartCli, RestartInfo, RestartRoom } from '@shared/types.ts'
 import { NO_PICKS, orderByPicks, type Picks } from '@shared/picks.ts'
 import { act, setUI, taskOf, useSnap, useStore } from './kernel.ts'
 import { Dialog } from './rowmenu.tsx'
-import { Pick, shown, Switch, TextValue } from './Settings.tsx'
+import { Pick, shown, Switch, TextValue, type Note } from './Settings.tsx'
 import { EffortIcon, ic, MenuItem, ModelIcon, ModeIcon, PlayIcon, Primary, RestartIcon, UpDownIcon } from './ui.tsx'
 
 /* ---------- the sheet ---------- */
@@ -91,6 +91,19 @@ const DEFAULT = 'default'
 const modelsOf = (c?: RestartCli) => c?.models ?? []
 const levelsOf = (c: RestartCli | undefined, model?: string) => (model ? modelsOf(c).find((m) => m.id === model)?.efforts : undefined) ?? c?.efforts ?? []
 
+/** a model's room under Settings → Limits as its row in a list says it: faint and marked when one more can't start there */
+const noteOf = (r?: RestartRoom): Note | undefined => (r?.short ? { words: r.short, ...(r.state !== 'room' ? { off: true } : {}), ...(r.warn ? { warn: true } : {}) } : undefined)
+
+/** what the pick does when its model has no room now, by what the sheet does: a restart is refused while it is full or
+ *  blocked (the server's own check); a start now takes the first backup with room, or waits first in line; a start later
+ *  meets the limits again when its turn comes */
+function roomNext(r: RestartRoom, start?: 'now' | 'later'): string {
+  if (r.state === 'room') return ''
+  if (start === 'later') return r.state === 'blocked' ? ' It never starts on it while it is blocked: its backups may.' : ' When its turn comes, the limits decide again.'
+  if (start) return r.state === 'blocked' ? ' It starts on a backup with room, never on this one.' : r.state === 'out' ? ' It starts on a backup with room, or waits until its provider is back.' : ' It starts on a backup with room, or waits first in line for a free slot.'
+  return r.state === 'out' ? ' It may stop again at once.' : r.state === 'blocked' ? ' It can’t restart on it: pick another model, or change the limit in Settings → Limits.' : ' It can’t restart on it until a slot frees up: pick one with room.'
+}
+
 function Sheet({ chat, name, current, start }: Opening) {
   const [info, setInfo] = useState<RestartInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -116,6 +129,10 @@ function Sheet({ chat, name, current, start }: Opening) {
       .catch((e: Error) => setError(e.message))
   }, [chat, current])
   const cli = info?.clis.find((c) => c.kind === kind)
+  // the room of what is picked now: its model's, or its CLI's own default's
+  const room = model ? cli?.models?.find((m) => m.id === model)?.room : cli?.room
+  // a restart where the limits hold it is refused: never offered
+  const held = !start && (room?.state === 'full' || room?.state === 'blocked')
   const levels = levelsOf(cli, model)
   const unavailable = !!(model && cli?.models?.length && !cli.models.some((m) => m.id === model))
   const pickKind = (k: string) => {
@@ -166,7 +183,7 @@ function Sheet({ chat, name, current, start }: Opening) {
       title={start === 'later' ? `Start ${name} with?` : start ? `Start ${name} now?` : task ? `Restart ${name} agent?` : 'Restart coordinator?'}
       onCancel={close}
       buttons={
-        <Primary autoFocus disabled={!info || busy || unavailable} onClick={go}>
+        <Primary autoFocus disabled={!info || busy || unavailable || held} onClick={go}>
           {start === 'later' ? (busy ? 'Saving…' : 'Save') : start ? (busy ? 'Starting…' : 'Start now') : busy ? 'Restarting…' : 'Restart'}
         </Primary>
       }
@@ -175,7 +192,7 @@ function Sheet({ chat, name, current, start }: Opening) {
         <div data-restart className="flex flex-col gap-4">
           <div className="flex flex-col gap-2.5 text-fg">
             <Line label="Agent">
-              <Pick label="Agent" value={cli?.name ?? kind} options={info.clis.map((c) => c.name)} onPick={(n) => pickKind(info.clis.find((c) => c.name === n)!.kind)} />
+              <Pick label="Agent" value={cli?.name ?? kind} options={info.clis.map((c) => c.name)} note={(n) => noteOf(info.clis.find((c) => c.name === n)?.room)} onPick={(n) => pickKind(info.clis.find((c) => c.name === n)!.kind)} />
             </Line>
             <Line label="Model">
               {cli?.models ? (
@@ -188,6 +205,8 @@ function Sheet({ chat, name, current, start }: Opening) {
                     // found by its name or its id: a provider's prefix is not in the name
                     match={(l) => `${l} ${cli.models?.find((m) => m.label === l)?.id ?? ''}`}
                     section={heading}
+                    // each one's room under Settings → Limits now; Default's is its CLI's own default model's
+                    note={(l) => noteOf(l === DEFAULT ? cli.room : cli.models?.find((m) => m.label === l)?.room)}
                     // only a model takes a pin: Default is the CLI's own choice
                     pin={{ pinned: ordered.filter((m) => pickedHere.pinned.includes(m.id)).map((m) => m.label), toggle: pin, skip: (l) => !cli.models?.some((m) => m.label === l) }}
                     onPick={(l) => pickModel(cli.models!.find((m) => m.label === l)?.id ?? '')}
@@ -203,6 +222,13 @@ function Sheet({ chat, name, current, start }: Opening) {
               </Line>
             ) : <Line label="Effort"><span className="text-fg3">Default</span></Line>}
             {unavailable ? <p className="text-need-fg">{model} is unavailable. Choose Default or an available model before restarting.</p> : null}
+            {room?.words ? (
+              <p data-room={room.state} className={clsx('text-sm', room.state === 'room' && !room.warn ? 'text-fg3' : 'text-need-fg')}>
+                {room.words}
+                {roomNext(room, start)}
+                {room.quota ? ` Quota: ${room.quota}.` : null}
+              </p>
+            ) : null}
             {!start && (changed || save) ? (
               <Line label={saveWords(info)}>
                 <Switch label={saveWords(info)} on={save} onChange={setSave} />
