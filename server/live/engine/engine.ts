@@ -170,8 +170,8 @@ export interface TaskRec {
   /** first in line (start now, or a coordinator's priority mark for a fix of a red main): it goes ahead of the other
    *  held tasks and past the machine's load, pressure and spacing, never past its slots (room, release) */
   priority?: true
-  /** started now on a worker of the human's choosing while its agent waited in its worktree: its go restarts it on
-   *  this first (go) */
+  /** started now (or Start with…) on a worker of the human's choosing while its agent's record, waiting in its worktree
+   *  or gone from it, was on another: its go restarts it on this first (go), and its start is judged on it (taskChain) */
   switchTo?: Harness
   /** coordinators were told it stalled: its last sign of life then (`life`), and the report (by its time) it ran far
    *  past (`over`); each is told once, until it shows life again or reports anew */
@@ -2187,9 +2187,11 @@ export class Engine extends Emitter<Events> {
     const was = this.queued(t) ? t.after! : []
     if (on) t.agent = on
     Object.assign(t, { priority: true as const, after: undefined, todo: undefined, stopped: undefined, paused: undefined, held: undefined })
-    const live = !!t.worktree && existsSync(t.worktree) && this.agents.status(this.key(t)) !== 'gone'
     const rec = this.agents.record(this.key(t))
-    t.switchTo = on && live && rec && !sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, on) ? on : undefined
+    // its agent's record is on another worker, waiting in its worktree or gone from it: the go restarts it on yours, or its
+    // start would resume the record's (taskChain) and wait for that one's room. Start now with no worker keeps the one
+    // Start with… picked before: its turn comes now, on it
+    if (on) t.switchTo = t.worktree && existsSync(t.worktree) && rec && !sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, on) ? on : undefined
     const why = `you started it now${on ? ` on ${harnessWords(fitHarness(on))}` : ''}${was.length ? `; it no longer waits for ${was.join(', ')}` : ''}`
     const goText = was.length ? goLine(was, [], true) : 'Go: you were started now, start the work.'
     const r = this.room(t)
@@ -2219,8 +2221,8 @@ export class Engine extends Emitter<Events> {
     t.chosen = undefined
     if (t.scheduled) t.scheduled.agent = on
     const rec = this.agents.record(this.key(t))
-    const live = !!t.worktree && existsSync(t.worktree) && this.agents.status(this.key(t)) !== 'gone'
-    t.switchTo = live && rec && !sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, on) ? on : undefined
+    // as startNow: its agent's record on another worker, there or gone, is restarted on this one at its go
+    t.switchTo = t.worktree && existsSync(t.worktree) && rec && !sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, on) ? on : undefined
     const id2 = `worker:${t.id}:${Date.now()}`
     this.chats.post(this.key(t), { id: id2, card: { id: id2, task: t.id, text: `Starts on ${harnessWords(fitHarness(on))} when its turn comes` } })
     this.save()

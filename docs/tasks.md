@@ -89,7 +89,9 @@
   **Start now with…** picks its worker too, the CLI, model and effort for this task's agent alone (the task's own
   `--agent`, never Settings': its reviewer and backups stay as Settings say), as for one you want on the DGX Spark while
   the others run on a plan. **Start with…** picks its worker and nothing more: it stays in line as it is and starts on
-  that worker when its turn comes. Both sheets show each CLI's and model's room under Settings → Limits, as the restart
+  that worker when its turn comes. Either way the worker you pick wins over the one its agent last ran on, whether that
+  agent still waits in its worktree or is gone from it: it starts again on yours (a new session on another CLI), and only
+  your worker's limits count, never the old one's. A plain Start now after Start with… keeps the worker picked. Both sheets show each CLI's and model's room under Settings → Limits, as the restart
   sheet does ([chat](chat.md)): one that is full, blocked or out can still be picked, and the line below says what then
   happens (a start now takes the first backup with room, or waits first in line). Settings' task agent, model or effort changed in Settings can go to the waiting tasks
   the same way, when you answer yes to its question (or `shepherdr set … --apply-waiting`), and so can the reviewer: a
