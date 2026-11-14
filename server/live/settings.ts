@@ -138,6 +138,8 @@ const ADVISOR_CLI_KEYS = ['advisor.agent', ...chainKeys('advisor')]
 const isBackupCli = (key: string) => isFallback(key) || REVIEWER_BACKUP_KEYS.includes(key) || ADVISOR_CLI_KEYS.includes(key)
 /** how long a question waits for the human before it goes to the advisor by itself (advisor.after) */
 export const ADVISOR_AFTER = ['off', '1 min', '2 min', '5 min', '10 min', '30 min']
+/** how long a wait stays open before the alert command is told of it (alerts.after) */
+export const ALERT_AFTER = ['10 s', '30 s', '1 min', '2 min', '5 min']
 
 /** the key a backup pair key is read from while it is at default: the coordinators' backup has its own model and effort,
  *  and follows the tasks' pair until the human sets one, so every configuration in use keeps its meaning */
@@ -477,6 +479,18 @@ export const CATALOG: Section[] = [
     name: 'Notify',
     about: "Which alerts a place's coordinator chat sends you. All: every new message too. Needs me: its questions and alerts. Off: none, and its row stays quiet. Tasks alert you either way. A place can set its own from its menu in the sidebar.",
     rows: [{ label: 'Notify', key: NOTIFY_KEY, value: NOTIFY_DEFAULT, options: [...NOTIFY] }],
+  },
+  {
+    // what waits on you, told by a command of yours too (wait-alerts.ts): your own notifier, a Telegram bot or a desktop
+    // notification. Each wait once, after the delay; one answered sooner runs nothing
+    name: 'Alert command',
+    levels: ['all', 'machine'],
+    about:
+      "A command of yours told what waits for you here: each question, plan, choice, permission or task that needs you, once it has waited this long without an answer; one answered sooner runs nothing. It runs through sh as <command> <title> <message> <key> (a key of its own for each wait), so ~ and words of your own work. A coordinator whose Notify is Off is left out; tasks are told either way. While it is set, Shepherdr's agents start with SHEPHERDR_NOTIFIES=1, so a notifier of their CLI's own can stand aside. Off: none.",
+    rows: [
+      { label: 'Alert command', key: 'alerts.command', value: 'off', text: true },
+      { label: 'Tell it after', key: 'alerts.after', value: '10 s', options: [...ALERT_AFTER] },
+    ],
   },
   {
     // the zone every time rule's times are in: Autopilot's heartbeats and automations
@@ -973,6 +987,18 @@ export class Settings {
     const pair = name ? PAIRS[name] : PAIRS.advisor
     const kind = kindOf(this.pick(pair.cli, l).value)
     return kind ? { kind, ...this.modelIn(pair, kind, l) } : undefined
+  }
+
+  /** the command told what waits on you (alerts.command); nothing while it is off */
+  alertCommand(): string | undefined {
+    const v = this.get('alerts.command').trim()
+    return v && v.toLowerCase() !== 'off' ? v : undefined
+  }
+
+  /** how long a wait stays open before the alert command is told of it (alerts.after), in ms */
+  alertAfter(): number {
+    const m = /^(\d+) (s|min)$/.exec(this.get('alerts.after'))
+    return m ? Number(m[1]) * (m[2] === 'min' ? 60_000 : 1000) : 10_000
   }
 
   /** how long a question waits for the human before it goes to the advisor by itself, for a space; null: never */

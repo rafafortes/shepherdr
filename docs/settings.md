@@ -744,6 +744,31 @@ the question about the tasks already created never comes up for it (`shepherdr s
   question and its options, the brief, the chat so far and the repository, and ends with one line of JSON: its pick or
   words, why, and whether it is sure. One question at a time, each once (`advice.json` keeps what it was asked).
 
+## Alert command
+
+Shepherdr pushes its alerts to the installed web app (Notify). **Alert command** (`alerts.command`, Everywhere or for a
+machine; off unless set) also tells a command of yours what waits for you on that machine: your own notifier, a
+Telegram bot or a desktop notification. Each wait of Needs you — a question, a plan, a choice, a permission or another
+screen of a CLI's own, a task that needs you — that is still open **Tell it after** (`alerts.after`: 10 s unless set;
+30 s, 1, 2 or 5 min) after Shepherdr first saw it runs the command once; one answered sooner runs nothing, and one that
+opens again is a new wait. It is the same for an agent of every CLI — Claude Code, Codex, pi, OpenCode and Antigravity:
+what it asks through Shepherdr, its CLI's own questions and screens as Shepherdr reads them, and a task that waits on you
+with no card — so a CLI with no notifier of its own (OpenCode, Antigravity) is told of as well.
+
+- **How it runs.** Through `sh`, as `<command> <title> <message> <key>`, so `~` and words of your own work
+  (`shepherdr set alerts.command '~/.local/bin/notify-operator' --machine`). The title says who asks and what
+  (`Shepherdr · POL-12 · Which store for the outbox?`, `… · Plan to approve`, `… · Needs you`); the message's first line
+  is its space and task (`lyvora-app · POL-12: Pick a store`, or `lyvora-app · its coordinator`), then its options or
+  what it waits with, and, when the advisor would answer it by itself, when (`If you don't answer, the advisor answers
+  for you at 14:32.`). The key is its own for each wait. Shepherdr never waits for the command; one that fails says so in
+  its log.
+- **What is told.** A coordinator's waits are left out where its space's Notify is Off; a task's are told either way, as
+  its pushes are. What was told is kept (`~/.shepherdr/wait-alerts.json`), so a restart of Shepherdr tells nothing
+  twice; while the command is off, what waits counts as told, so turning it on tells what comes next, never a backlog.
+- **Your CLIs' own notifiers.** While it is set, every agent Shepherdr starts, of every CLI, has `SHEPHERDR_NOTIFIES=1`
+  in its environment, so a notifier of your own that runs inside the CLI (a Claude Code hook, a pi extension) can stand
+  aside for Shepherdr's agents and you are told once. An agent started before it was set has it from its next start.
+
 ## Dictation
 
 Talk to type (the microphone beside the message box) records in the browser with `MediaRecorder`, sends the

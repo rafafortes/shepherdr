@@ -503,3 +503,11 @@ server: a task or coordinator keeps its takeover as on its way until the backup 
 Upstream has no per-model limits (models.maxAtOnce is ours), so its model picker shows no room. Ours shows, beside each CLI
 and model of the restart, Start now with… and Start with… sheets, whether one more agent fits under Settings → Limits for
 that chat (the engine's own choice, `server/live/rooms.ts`), and the quota of its provider. See [chat](chat.md).
+
+## Not from upstream: an alert command of your own for what waits on you, built here
+
+Upstream sends its alerts through its own push only ("no second transport", its scoped `shepherdr alert` of 2026-10-30,
+`30340637`). Ours also runs a command you set (Settings → Alert command, `server/live/wait-alerts.ts`) for each wait of
+Needs you still open after a delay, and marks its agents' environment (`SHEPHERDR_NOTIFIES=1`) so a notifier inside
+their CLI can stand aside. See [settings](settings.md#alert-command).
+
