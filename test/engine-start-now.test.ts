@@ -178,3 +178,68 @@ describe('started with a worker of your choosing, in its turn', () => {
   })
 })
 
+
+describe("started with a worker of your choosing while its agent's record, gone from its worktree, is on another", () => {
+  // every CLI, from one to the next: the record's model is blocked under the limits (as WEB-126's Qwen was full), and the
+  // pick is another CLI or another model of the same one
+  const PAIRS: { from: { kind: string; model: string }; block: string; to: { kind: string; model?: string } }[] = [
+    { from: { kind: 'pi', model: 'amd-tokenlab/Qwen3.8-27B' }, block: 'pi.amd-tokenlab', to: { kind: 'pi', model: 'openrouter/thinkingmachines/inkling-2-small:free' } },
+    { from: { kind: 'claude', model: 'claude-opus-5-5' }, block: 'claude', to: { kind: 'codex' } },
+    { from: { kind: 'codex', model: 'gpt-6-sol' }, block: 'codex', to: { kind: 'opencode', model: 'opencode-go/deepseek-v4.1-flash' } },
+    { from: { kind: 'opencode', model: 'opencode-go/deepseek-v4.1-flash' }, block: 'opencode.opencode-go', to: { kind: 'agy', model: 'gemini-4-argon' } },
+    { from: { kind: 'agy', model: 'gemini-4-argon' }, block: 'agy', to: { kind: 'claude', model: 'claude-sonnet-5-5' } },
+  ]
+  for (const x of PAIRS)
+    test(`Start now with ${x.to.kind}${x.to.model ? ` (${x.to.model})` : ''} over a gone ${x.from.kind} agent: it starts on the pick, never waits for the record's model`, async () => {
+      const { w } = fresh()
+      w.engine.installed = () => true
+      const a = await started(w, repo(), `gone-${x.from.kind}`, 'Gone', 'Add g.txt.')
+      w.brief(a.key)
+      // its agent ran on the record's model, then went: the task waits for its go, the record kept
+      w.records[a.key] = { ...w.records[a.key]!, kind: x.from.kind, model: x.from.model }
+      w.engine.todo(a.t.id)
+      await w.agents.finish(a.key)
+      expect(w.settings.set('models.maxAtOnce', `${x.block}=0`).ok).toBe(true)
+      const starts = w.started.filter((s) => s.key === a.key).length
+      expect(await w.engine.startNow(a.t.id, x.to)).toEqual({})
+      await until(() => w.started.filter((s) => s.key === a.key).length > starts)
+      expect(w.started.filter((s) => s.key === a.key).at(-1)).toMatchObject({ kind: x.to.kind })
+      expect(w.records[a.key]).toMatchObject({ kind: x.to.kind, ...(x.to.model ? { model: x.to.model } : {}) })
+      expect(a.t.held).toBeUndefined()
+      await until(() => w.sent.some((s) => s.key === a.key && s.text.includes('Go: you were started now')))
+      // the switch is spent, and the caps no longer put it on a backup
+      expect([a.t.switchTo, a.t.onBackup]).toEqual([undefined, undefined])
+    })
+
+  test('Start with… over a gone agent on another worker: its turn starts it on the pick', async () => {
+    const { w, startedOf } = fresh({ 'machine.maxTasks': '1' })
+    w.engine.installed = () => true
+    const a = await started(w, repo(), 'gone-later', 'Gone', 'Add g.txt.')
+    w.brief(a.key)
+    w.engine.todo(a.t.id)
+    w.records[a.key] = { ...w.records[a.key]!, kind: 'pi', model: 'amd-tokenlab/Qwen3.8-27B' }
+    await w.agents.finish(a.key)
+    const b = await started(w, repo(), 'gone-later-busy', 'At work', 'Add b.txt.')
+    w.brief(b.key)
+    w.engine.setWorker(a.t.id, { kind: 'codex' })
+    expect(a.t.switchTo).toEqual({ kind: 'codex' })
+    const starts = w.started.filter((s) => s.key === a.key).length
+    await w.engine.startNow(a.t.id)
+    await w.engine.done(b.t.id, 'Nothing to change.')
+    w.agentIs(b.key, 'idle')
+    await until(() => w.started.filter((s) => s.key === a.key).length > starts)
+    expect(w.started.filter((s) => s.key === a.key).at(-1)).toMatchObject({ kind: 'codex' })
+    expect(startedOf(a.t.id)).toBe(true)
+  })
+
+  test('a pick the same as its record: no switch, it resumes there', async () => {
+    const { w } = fresh()
+    const a = await started(w, repo(), 'gone-same', 'Gone', 'Add g.txt.')
+    w.brief(a.key)
+    w.engine.todo(a.t.id)
+    const rec = w.records[a.key]!
+    await w.agents.finish(a.key)
+    w.engine.setWorker(a.t.id, { kind: rec.kind, ...(rec.model ? { model: rec.model } : {}) })
+    expect(a.t.switchTo).toBeUndefined()
+  })
+})
