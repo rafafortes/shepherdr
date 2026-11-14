@@ -3,6 +3,8 @@
 // machine's load, pressure and spacing, never past its slots. Started now, it no longer waits for the tasks it was queued
 // after, and may run on a worker picked for it alone. On a real git repo (engine-world.ts).
 import { describe, expect, test } from 'bun:test'
+import { execSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { repo, started, until, world } from './engine-world.ts'
 
 /** a world with its machine's limits as given; `busy` stands for its load or pressure past their start limit */
@@ -190,15 +192,21 @@ describe("started with a worker of your choosing while its agent's record, gone 
     { from: { kind: 'agy', model: 'gemini-4-argon' }, block: 'agy', to: { kind: 'claude', model: 'claude-sonnet-5-5' } },
   ]
   for (const x of PAIRS)
-    test(`Start now with ${x.to.kind}${x.to.model ? ` (${x.to.model})` : ''} over a gone ${x.from.kind} agent: it starts on the pick, never waits for the record's model`, async () => {
+    for (const away of [false, true])
+    test(`Start now with ${x.to.kind}${x.to.model ? ` (${x.to.model})` : ''} over a gone ${x.from.kind} agent${away ? ', its worktree put away' : ''}: it starts on the pick, never waits for the record's model`, async () => {
       const { w } = fresh()
       w.engine.installed = () => true
-      const a = await started(w, repo(), `gone-${x.from.kind}`, 'Gone', 'Add g.txt.')
+      const dir = repo()
+      const a = await started(w, dir, `gone-${x.from.kind}-${away}`, 'Gone', 'Add g.txt.')
       w.brief(a.key)
       // its agent ran on the record's model, then went: the task waits for its go, the record kept
       w.records[a.key] = { ...w.records[a.key]!, kind: x.from.kind, model: x.from.model }
       w.engine.todo(a.t.id)
       await w.agents.finish(a.key)
+      // as WEB-126's: a stop with no work put its worktree away, with its branch; the restart makes both again from its base
+      const path = a.t.worktree!
+      if (away) execSync(`git worktree remove --force ${path} && git branch -D ${a.t.branch}`, { cwd: dir })
+      expect(existsSync(path)).toBe(!away)
       expect(w.settings.set('models.maxAtOnce', `${x.block}=0`).ok).toBe(true)
       const starts = w.started.filter((s) => s.key === a.key).length
       expect(await w.engine.startNow(a.t.id, x.to)).toEqual({})
@@ -207,8 +215,10 @@ describe("started with a worker of your choosing while its agent's record, gone 
       expect(w.records[a.key]).toMatchObject({ kind: x.to.kind, ...(x.to.model ? { model: x.to.model } : {}) })
       expect(a.t.held).toBeUndefined()
       await until(() => w.sent.some((s) => s.key === a.key && s.text.includes('Go: you were started now')))
-      // the switch is spent, and the caps no longer put it on a backup
+      // the switch is spent, the caps no longer put it on a backup, and its worktree is there again
       expect([a.t.switchTo, a.t.onBackup]).toEqual([undefined, undefined])
+      expect(existsSync(path)).toBe(true)
+      expect(execSync(`git branch --list ${a.t.branch}`, { cwd: dir }).toString()).toContain(a.t.branch!)
     })
 
   test('Start with… over a gone agent on another worker: its turn starts it on the pick', async () => {
