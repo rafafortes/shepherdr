@@ -1,6 +1,7 @@
 // Notifications and the content's scope picker: UI regression coverage for SHE-263.
 import { describe, expect, test } from 'bun:test'
 import { layout, settled } from './layout.ts'
+import { until } from './engine-world.ts'
 import { CODEX_WORDS, reviewerLineFor } from './reviewer-line.ts'
 
 const { browser, world, url } = await layout()
@@ -42,6 +43,35 @@ describe.skipIf(!browser)('notification settings', () => {
     } finally {
       world.stores['vm-str'].set('notify', null, { space: '~' })
       world.sections = before
+      world.emit('snapshot')
+      await page.close()
+    }
+  })
+
+  test("the alert command is on Notifications at any level, written for the machine (or Everywhere), never a page of its own", async () => {
+    const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } })
+    const store = world.stores['vm-str']
+    try {
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      expect(await settings.getByRole('button', { name: 'Alert command', exact: true }).count()).toBe(0)
+      await settings.getByRole('button', { name: 'Notifications', exact: true }).click()
+      // opened from a space: its machine's command, under its own heading
+      await settings.getByText('Alert command · its machine', { exact: true }).waitFor()
+      const box = settings.getByRole('textbox', { name: 'Alert command' })
+      await box.fill('~/.local/bin/notify-operator')
+      await box.press('Enter')
+      await until(() => store.get('alerts.command') === '~/.local/bin/notify-operator')
+      expect(store.get('alerts.command', '~')).toBe('~/.local/bin/notify-operator')
+      expect(await settings.getByRole('button', { name: /^Tell it after: 10 s/ }).count()).toBe(1)
+      // at Everywhere it is Everywhere's own
+      await settings.getByRole('button', { name: /^Editing:/ }).click()
+      await page.getByRole('menuitemradio', { name: 'Everywhere', exact: true }).click()
+      await settings.getByText('Alert command · Everywhere', { exact: true }).waitFor()
+      expect(await settings.getByRole('button', { name: 'Alert command', exact: true }).count()).toBe(0)
+    } finally {
+      store.set('alerts.command', null, 'machine')
       world.emit('snapshot')
       await page.close()
     }

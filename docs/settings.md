@@ -746,8 +746,9 @@ the question about the tasks already created never comes up for it (`shepherdr s
 
 ## Alert command
 
-Shepherdr pushes its alerts to the installed web app (Notify). **Alert command** (`alerts.command`, Everywhere or for a
-machine; off unless set) also tells a command of yours what waits for you on that machine: your own notifier, a
+Shepherdr pushes its alerts to the installed web app (Notify). Settings → Notifications → **Alert command**
+(`alerts.command`, Everywhere or for a machine; off unless set; at a space's level the page shows its machine's, under
+"Alert command · its machine", and writes there) also tells a command of yours what waits for you on that machine: your own notifier, a
 Telegram bot or a desktop notification. Each wait of Needs you — a question, a plan, a choice, a permission or another
 screen of a CLI's own, a task that needs you — that is still open **Tell it after** (`alerts.after`: 10 s unless set;
 30 s, 1, 2 or 5 min) after Shepherdr first saw it runs the command once; one answered sooner runs nothing, and one that

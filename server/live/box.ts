@@ -113,7 +113,7 @@ export function spawnOn(b: BoxInfo, argv: string[], o: { extra?: string[]; stdin
 const credentialFile = (chat: string) =>
   BOX ? join(helperDir(BOX.home), 'credentials', secretFileId(chat)) : join(resolve(home(), 'helper', 'credentials'), secretFileId(chat))
 
-/** whether Shepherdr tells your alert command what an agent waits on you for (Settings → Alert command, wait-alerts.ts):
+/** whether Shepherdr tells your alert command what an agent waits on you for (Settings → Notifications → Alert command, wait-alerts.ts):
  *  the live source says, for each chat */
 let notifies: (chat: string) => boolean = () => false
 export const notifiesWith = (f: (chat: string) => boolean) => void (notifies = f)

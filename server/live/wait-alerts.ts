@@ -1,4 +1,4 @@
-// What waits on you, told by a command of yours too (Settings → Alert command, alerts.command): your own notifier, a
+// What waits on you, told by a command of yours too (Settings → Notifications → Alert command, alerts.command): your own notifier, a
 // Telegram bot or a desktop notification. Each wait of Needs you (a question, a plan, a choice, a permission, a start's
 // screen, a task that waits on you) that is still open alerts.after after it was first seen runs the command once, as
 // `<command> <title> <message> <key>`; one answered sooner runs nothing, and one that opens again is a new wait. What

@@ -488,7 +488,7 @@ export const CATALOG: Section[] = [
     about:
       "A command of yours told what waits for you here: each question, plan, choice, permission or task that needs you, once it has waited this long without an answer; one answered sooner runs nothing. It runs through sh as <command> <title> <message> <key> (a key of its own for each wait), so ~ and words of your own work. A coordinator whose Notify is Off is left out; tasks are told either way. While it is set, Shepherdr's agents start with SHEPHERDR_NOTIFIES=1, so a notifier of their CLI's own can stand aside. Off: none.",
     rows: [
-      { label: 'Alert command', key: 'alerts.command', value: 'off', text: true },
+      { label: 'Alert command', key: 'alerts.command', value: 'off', text: true, hint: 'A command of yours told what waits for you: each question, plan, choice, permission or task that needs you, of an agent of any CLI, once it has waited the time below; one answered sooner runs nothing. It runs through sh as <command> <title> <message> <key>. Off: none.' },
       { label: 'Tell it after', key: 'alerts.after', value: '10 s', options: [...ALERT_AFTER] },
     ],
   },
