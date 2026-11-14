@@ -609,7 +609,10 @@ you set it in Settings; one a backup's CLI lacks where it goes in, such as one s
 the other role's backup can take while the coordinators' pair follows it, is not used there, so that backup doesn't go in
 and its chat says why (and its Model row says so too). Effort it lacks becomes the nearest it takes. Only a backup that
 changed the CLI is a takeover; the same CLI again keeps the session it had. A task's backup goes in once (a start that
-fails leaves a later one to try again); a coordinator's once, until you start it again yourself.
+fails leaves a later one to try again); a coordinator's once, until you start it again yourself. A takeover that a restart
+of Shepherdr cuts short (an update while the backup was starting) is taken again once the new Shepherdr is up, about 15
+seconds after it starts: for the same cut-off, from the same place in its chain of backups (the caps choose again), unless the task was stopped or ended meanwhile, or the
+coordinator's space is gone.
 
 A backup on the CLI the agent already runs starts that CLI again on the Backup model and effort and resumes its own
 session, so nothing is lost; another CLI takes the work over — a task's with its brief, its branch and the chat so far, a

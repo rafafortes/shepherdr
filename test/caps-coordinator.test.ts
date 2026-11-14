@@ -489,3 +489,68 @@ describe("shepherdr set models.maxAtOnce says what it fitted to the provider's l
     expect(plain.out).not.toContain('Lowered')
   })
 })
+
+describe("a coordinator's takeover that a restart cut short is taken again (resumeHandovers)", () => {
+  const cut = { cut: 'h1', tries: 1, reason: 'Out of allowance until 5pm', words: 'out', over: true, lasting: true }
+  const side = () => src as unknown as { coordinatorCantGoOn(key: string, r: unknown): Promise<void>; resumeHandovers(): void }
+
+  test('its handover is kept while the backup starts, and cleared once it is up or it failed', async () => {
+    const { id } = await space('handover-coord')
+    src.agents.records[id] = { key: id, name: 'h', kind: 'pi', logs: [], started: Date.now() } as never
+    const restart = src.agents.restart
+    let during: unknown
+    src.agents.restart = (async (spec: { key: string; kind: string }, before?: () => Promise<string | void>) => {
+      during = src.agents.records[id]?.handover
+      return restart(spec as never, before)
+    }) as never
+    try {
+      await side().coordinatorCantGoOn(id, cut)
+    } finally {
+      src.agents.restart = restart
+    }
+    expect(during).toMatchObject({ r: { reason: 'Out of allowance until 5pm' } })
+    expect(src.agents.records[id]?.handover).toBeUndefined()
+    expect(starts.at(-1)).toMatchObject({ key: id, kind: 'codex' })
+    // a backup that does not start clears it too
+    const { id: id2 } = await space('handover-coord-fail')
+    src.agents.records[id2] = { key: id2, name: 'h2', kind: 'pi', logs: [], started: Date.now() } as never
+    src.agents.restart = (async () => {
+      throw new Error('herdr is not answering')
+    }) as never
+    try {
+      await side().coordinatorCantGoOn(id2, { ...cut, cut: 'h2' })
+    } finally {
+      src.agents.restart = restart
+    }
+    expect(src.agents.records[id2]?.handover).toBeUndefined()
+    expect(src.agents.records[id2]?.tookOver).toBeUndefined()
+  })
+
+  test('a restart finds it: the takeover before comes back and the backup goes in; a gone place or a task is left', async () => {
+    const { id } = await space('resume-coord')
+    // as a restart leaves it: marked as taken over, its handover kept, the agent still the one cut off
+    src.agents.records[id] = { key: id, name: 'r', kind: 'pi', logs: [], started: Date.now(), tookOver: { from: 'pi', to: 'codex', why: 'out', at: Date.now(), step: 1 }, handover: { r: cut, at: Date.now() } } as never
+    src.agents.records['p:gone:nowhere'] = { key: 'p:gone:nowhere', name: 'g', kind: 'pi', logs: [], started: Date.now(), handover: { r: cut, at: Date.now() } } as never
+    src.agents.records['T-1/Agent'] = { key: 'T-1/Agent', name: 't', kind: 'pi', logs: [], started: Date.now(), handover: { r: cut, at: Date.now() } } as never
+    // as the real launch (agents.ts): the record it had stays, with its marks, and takes the new CLI
+    const restart = src.agents.restart
+    src.agents.restart = (async (spec: { key: string; kind: string; model?: string }, before?: () => Promise<string | void>) => {
+      const old = src.agents.records[spec.key]
+      await restart(spec as never, before)
+      if (old) src.agents.records[spec.key] = Object.assign(old, { kind: spec.kind, model: spec.model })
+      return null
+    }) as never
+    try {
+      side().resumeHandovers()
+      await until(() => starts.some((x) => x.key === id && x.kind === 'codex'))
+    } finally {
+      src.agents.restart = restart
+    }
+    expect(src.agents.records[id]?.handover).toBeUndefined()
+    expect(src.agents.records[id]?.tookOver).toMatchObject({ to: 'codex', step: 1 })
+    expect(src.agents.records['p:gone:nowhere']?.handover).toBeUndefined()
+    expect(starts.some((x) => x.key === 'p:gone:nowhere')).toBe(false)
+    // a task's agent keeps its handover in its task (engine.ts resumeTakeovers), not here
+    expect(src.agents.records['T-1/Agent']?.handover).toBeDefined()
+  })
+})

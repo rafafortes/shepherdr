@@ -315,6 +315,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.engine.goesBack = (t) => this.goingBack.get(`${t.id}/Agent`)
     // known at once after a start, not only at the watch's first pass ten minutes on
     if (process.env.NODE_ENV !== 'test') setTimeout(() => this.refreshGoingBack(), 0)
+    // a coordinator's takeover a restart cut short is taken again once herdr has told which agents are alive (as tasks')
+    if (process.env.NODE_ENV !== 'test') setTimeout(() => this.resumeHandovers(), 15_000).unref?.()
     this.artifacts.migratePages(
       (chat) => (chat.includes('/') ? (this.engine.task(chat.split('/')[0])?.project ?? placeId.home()) : chat),
       (chat, id) => this.chats.repostPage(chat, id),
@@ -2195,8 +2197,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // the same mark as before it, with its place in the chain
       const prior = took
       this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now(), step: plan.n })
+      // on its way from here: a restart of Shepherdr before the backup is up takes it again (resumeHandovers)
+      this.agents.markHandover(key, { r, ...(prior ? { prior } : {}), at: Date.now() })
       try {
         await this.restartCoordinator(key, on, why)
+        this.agents.markHandover(key, undefined)
         // a lasting one: the primary it ran out of is what the watch asks about later (return.ts), and only while it ran
         // what Settings name. A note that can't be written must never undo the takeover that just went in
         const space = this.spaceKey(key) ?? ''
@@ -2211,6 +2216,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       } catch (e) {
         // it didn't start: the human hears why, and a later hand-over may try again
         this.agents.markTookOver(key, prior)
+        this.agents.markHandover(key, undefined)
         this.coordinatorStuck(key, r, backups)
         return this.cutOff(key, r, `its backup, ${CLI_NAME[plan.to.kind] ?? plan.to.kind}, couldn't start: ${(e as Error).message}`)
       }
@@ -2239,6 +2245,20 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const free = candidates.filter((p) => !this.engine.blockedKey(sp, keyOf(onBackup(p).kind, onBackup(p).model)))
     const chosen = rec && free.length ? this.engine.decide(sp, this.engine.chainOptions(free.map((p) => ({ plan: p, h: onBackup(p) }))), key) : undefined
     return { chain, later, candidates, free, chosen }
+  }
+
+  /**
+   * After a start: a coordinator's takeover that a restart of Shepherdr cut short (its handover still kept: the backup never
+   * came up) is taken again from where it stood before it, for the same cut-off, as tasks' are (engine.ts resumeTakeovers)
+   */
+  resumeHandovers() {
+    for (const [key, rec] of Object.entries(this.agents.records)) {
+      const h = rec.handover
+      if (!h || key.includes('/')) continue
+      this.agents.markTookOver(key, h.prior)
+      this.agents.markHandover(key, undefined)
+      if (this.places.coordinator(key)) void this.coordinatorCantGoOn(key, h.r as Retry).catch(() => undefined)
+    }
   }
 
   /** a coordinator cut off for good waits for the human: started again once its provider answers (return.ts) */

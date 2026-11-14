@@ -128,6 +128,9 @@ export interface AgentRecord {
   /** a backup agent went in once, where the agent it backs up can't go on (source.ts cannotGoOn): another one waits for
    *  the human, so a backup that keeps failing never loops. A task's own record keeps the same mark (TaskRec.tookOver) */
   tookOver?: { from: string; to: string; why: string; at: number; step?: number }
+  /** a coordinator's takeover on its way (source.ts coordinatorCantGoOn): the cut-off it answers and its takeover before
+   *  this one. Kept until the backup is up or it failed: a restart of Shepherdr in between takes it again */
+  handover?: { r: { cut: string; tries: number; reason: string; words: string; over?: boolean; lasting?: boolean }; prior?: AgentRecord['tookOver']; at: number }
 }
 
 export interface OutItem {
@@ -355,6 +358,14 @@ export class Agents extends Emitter<Events> {
   }
 
   /** mark this chat's agent as backed up once: another backup waits for the human */
+  /** a coordinator's takeover is on its way (handover), or over (undefined) */
+  markHandover(key: string, handover: AgentRecord['handover']) {
+    const r = this.records[key]
+    if (!r || (r.handover === undefined && handover === undefined)) return
+    r.handover = handover
+    this.save()
+  }
+
   markTookOver(key: string, tookOver: AgentRecord['tookOver']) {
     const r = this.records[key]
     if (!r || JSON.stringify(r.tookOver ?? null) === JSON.stringify(tookOver ?? null)) return

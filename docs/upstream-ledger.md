@@ -490,3 +490,10 @@ screens. Taken and turned down, from those:
 
 Upstream has no per-harness providers: its model keys are `provider/model`, so Claude Code's subscription and pi's Anthropic
 API share one key. Nothing to take. See [settings](settings.md).
+
+## Not from upstream: a takeover a restart cut short is taken again, built here
+
+Upstream's 3.x brings an agent back in its herdr-core terminal after a crash or a reboot (SHEP-30, `revive.py`, labels on
+the terminal), and its takeover runs from a stateless tick, so a restart halfway is not its problem. Ours runs inside the
+server: a task or coordinator keeps its takeover as on its way until the backup is up, and the next start takes it again
+(`engine.ts` resumeTakeovers, `source.ts` resumeHandovers). The idea does not port (herdr-core). See [settings](settings.md).
