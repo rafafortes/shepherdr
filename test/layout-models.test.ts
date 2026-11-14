@@ -369,7 +369,7 @@ describe.skipIf(!browser)('Settings → Models on a phone', () => {
       await settings.getByRole('button', { name: 'Models', exact: true }).tap()
       await settled(page)
       // one card per level: the page's own section and the cards are told apart by their rows' headings
-      const cards = page.locator('section[aria-label]:has(> div > h3)')
+      const cards = page.locator('section[aria-label]:not([aria-label="Summary"]):has(> div > h3)')
       expect(await cards.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).toEqual(['Everywhere', 'vm-str', 'gtm', 'herdr-projects'])
       const gtm = page.locator('section[aria-label="gtm"]')
       expect(await gtm.getByRole('heading', { level: 4 }).allTextContents()).toEqual(['Tasks', 'Coordinators', 'Reviewer', 'Advisor'])

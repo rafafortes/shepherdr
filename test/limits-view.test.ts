@@ -18,6 +18,8 @@ const SPACES = [
   { key: 'gtm', name: 'gtm' },
 ]
 const SPARK = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
+/** the key pi's model runs under: pi and its provider in front of the id */
+const KEY = `pi.${SPARK}`
 const settings = (seed: Partial<{ everywhere: Record<string, string>; machine: Record<string, string>; spaces: Record<string, Record<string, string>> }> = {}) => new Settings({ everywhere: {}, machine: {}, spaces: {}, ...seed })
 const ledger = (name: string) => new UsageLedger(tmp(name), true)
 /** a 4-core machine at 6 on its 5-minute load (over its 1× cores start limit), 85% of its memory in use */
@@ -89,9 +91,9 @@ describe('the spaces: Max tasks and Merge train, and one sub-limit per provider 
       spaces: { gtm: { 'space.maxTasks': '2', 'models.maxAtOnce': `${SPARK}=1`, 'merge.train': '3' } },
     })
     const runs = [
-      { key: SPARK, space: 'gtm', role: 'task' as const },
-      { key: SPARK, space: '~', role: 'coordinator' as const },
-      { key: 'anthropic/claude-opus-5-5', space: 'gtm', role: 'task' as const },
+      { key: KEY, space: 'gtm', role: 'task' as const },
+      { key: KEY, space: '~', role: 'coordinator' as const },
+      { key: 'claude/claude-opus-5-5', space: 'gtm', role: 'task' as const },
     ]
     const view = limitsView(input(s, { runs, workingIn: { gtm: 2, '~': 1 }, held: [held({ id: 'GTM-9', why: 'space', space: 'gtm', spaceName: 'gtm' }), held({ id: 'GTM-10', why: 'slots', space: 'gtm', spaceName: 'gtm' })] }))
     // home has no own value: no row for it (its settings are not in Settings → Limits); gtm has one
@@ -100,12 +102,12 @@ describe('the spaces: Max tasks and Merge train, and one sub-limit per provider 
     expect(gtm.cells['space.maxTasks']).toMatchObject({ place: 'p:box:gtm', from: 'space', set: true, row: { value: '2' }, now: '2 of 2 working · 2 held' })
     expect(gtm.cells['merge.train']).toMatchObject({ from: 'space', row: { value: '3' } })
     // the patterns: the machine's entries, then each space's own, each once
-    expect(view.spaces.patterns).toEqual(['spark', SPARK])
+    expect(view.spaces.patterns).toEqual(['pi.spark', KEY])
     // the machine's spark total covers the model's column too: its own entry is the one that caps it
-    expect(view.spaces.totals).toEqual({ spark: { pattern: 'spark', max: 4 }, [SPARK]: { pattern: 'spark', max: 4 } })
+    expect(view.spaces.totals).toEqual({ 'pi.spark': { pattern: 'pi.spark', max: 4 }, [KEY]: { pattern: 'pi.spark', max: 4 } })
     // the sub-limit of gtm for the model: its own entry, and its own runs now (the Spark run of gtm, and no other space's)
-    expect(gtm.caps[SPARK]).toEqual({ max: 1, now: 1 })
-    expect(gtm.caps.spark).toBeUndefined()
+    expect(gtm.caps[KEY]).toEqual({ max: 1, now: 1 })
+    expect(gtm.caps['pi.spark']).toBeUndefined()
   })
 
   test('a space with no value of its own still shows its tasks; a machine total with no space entry shows as its total', () => {
@@ -114,50 +116,50 @@ describe('the spaces: Max tasks and Merge train, and one sub-limit per provider 
     expect(view.spaces.rows.map((r) => r.key)).toEqual(['gtm'])
     expect(view.spaces.rows[0]!.cells['space.maxTasks']).toMatchObject({ from: 'default', set: false, now: '0 working' })
     expect(view.spaces.rows[0]!.caps).toEqual({})
-    expect(view.spaces.patterns).toEqual(['spark'])
-    expect(view.spaces.totals.spark).toEqual({ pattern: 'spark', max: 4 })
+    expect(view.spaces.patterns).toEqual(['pi.spark'])
+    expect(view.spaces.totals['pi.spark']).toEqual({ pattern: 'pi.spark', max: 4 })
   })
 
   test("home has a row only when it sets one of these keys itself: its own sub-limit makes one, with its runs counted", () => {
     const quiet = limitsView(input(settings({ spaces: { gtm: { 'space.maxTasks': '2' } } })))
     expect(quiet.spaces.rows.map((r) => r.key)).toEqual(['gtm'])
-    const home = limitsView(input(settings({ spaces: { '~': { 'models.maxAtOnce': 'spark=1' } } }), { runs: [{ key: SPARK, space: '~', role: 'task' }] }))
+    const home = limitsView(input(settings({ spaces: { '~': { 'models.maxAtOnce': 'spark=1' } } }), { runs: [{ key: KEY, space: '~', role: 'task' }] }))
     expect(home.spaces.rows.map((r) => [r.key, r.name, r.id])).toEqual([['~', 'home', `p:${HOST}:~`], ['gtm', 'gtm', `p:${HOST}:gtm`]])
-    expect(home.spaces.rows[0]!.caps).toEqual({ spark: { max: 1, now: 1 } })
-    expect(home.spaces.patterns).toEqual(['spark'])
+    expect(home.spaces.rows[0]!.caps).toEqual({ 'pi.spark': { max: 1, now: 1 } })
+    expect(home.spaces.patterns).toEqual(['pi.spark'])
   })
 
   test('entryPatterns: the machine (Everywhere while it sets none) then each space, each pattern once', () => {
     const s = settings({ everywhere: { 'models.maxAtOnce': 'radeon=1' }, spaces: { gtm: { 'models.maxAtOnce': `${SPARK}=2, radeon=1` } } })
-    expect(entryPatterns(s, ['gtm', '~'])).toEqual(['radeon', SPARK])
+    expect(entryPatterns(s, ['gtm', '~'])).toEqual(['pi.radeon', KEY])
     expect(entryPatterns(settings(), ['gtm'])).toEqual([])
   })
 })
 
 describe('the providers: every provider with an entry, an agent, a run or usage, each with its models and what runs by role', () => {
   test('a provider with an entry and nothing else shows; runs count by role on the provider and on its model', () => {
-    const s = settings({ machine: { 'models.maxAtOnce': 'avell=1' } })
-    const summary = modelsSummary({ now: NOW, settings: s, host: HOST, spaces: SPACES, rows: [], usage: new UsageLedger(tmp('lv-prov'), true), agents: [], tasks: [], watch: [], runs: [], providers: ['avell'] } as SummaryInput)
-    const view = limitsView(input(s, { summary, runs: [{ key: SPARK, space: '~', role: 'task' }, { key: SPARK, space: 'gtm', role: 'advisor' }, { key: 'spark/other', space: '~', role: 'reviewer' }] }))
+    const s = settings({ machine: { 'models.maxAtOnce': 'pi.avell=1' } })
+    const summary = modelsSummary({ now: NOW, settings: s, host: HOST, spaces: SPACES, rows: [], usage: new UsageLedger(tmp('lv-prov'), true), agents: [], tasks: [], watch: [], runs: [], providers: ['pi.avell'] } as SummaryInput)
+    const view = limitsView(input(s, { summary, runs: [{ key: KEY, space: '~', role: 'task' }, { key: KEY, space: 'gtm', role: 'advisor' }, { key: 'pi.spark/other', space: '~', role: 'reviewer' }] }))
     // the provider with an entry shows, with the configured ones of the defaults beside it (the summary's own rows)
-    expect(view.providers.map((p) => p.provider)).toContain('avell')
-    expect(view.providers.find((p) => p.provider === 'avell')).toMatchObject({ name: 'Avell (local)', local: true, atOnce: { own: { pattern: 'avell', max: 1, from: 'machine' } } })
-    const spark = limitsView(input(s, { runs: [{ key: SPARK, space: '~', role: 'task' }, { key: SPARK, space: 'gtm', role: 'advisor' }, { key: 'spark/other', space: '~', role: 'reviewer' }] })).providers.find((p) => p.provider === 'spark')
+    expect(view.providers.map((p) => p.provider)).toContain('pi.avell')
+    expect(view.providers.find((p) => p.provider === 'pi.avell')).toMatchObject({ name: 'Avell (local)', local: true, atOnce: { own: { pattern: 'pi.avell', max: 1, from: 'machine' } } })
+    const spark = limitsView(input(s, { runs: [{ key: KEY, space: '~', role: 'task' }, { key: KEY, space: 'gtm', role: 'advisor' }, { key: 'pi.spark/other', space: '~', role: 'reviewer' }] })).providers.find((p) => p.provider === 'pi.spark')
     expect(spark!.byRole).toEqual({ task: 1, advisor: 1, reviewer: 1 })
-    expect(spark!.models.find((m) => m.key === SPARK)!.byRole).toEqual({ task: 1, advisor: 1 })
+    expect(spark!.models.find((m) => m.key === KEY)!.byRole).toEqual({ task: 1, advisor: 1 })
   })
 
   test('the tasks running on a provider or a model are named by id, in their order; a row with no task names none', () => {
     const runs = [
-      { key: SPARK, space: 'gtm', role: 'task' as const, id: 'POL-314' },
-      { key: 'spark/other', space: 'gtm', role: 'task' as const, id: 'POL-9' },
-      { key: SPARK, space: 'gtm', role: 'task' as const, id: 'POL-313' },
-      { key: SPARK, space: '~', role: 'coordinator' as const },
+      { key: KEY, space: 'gtm', role: 'task' as const, id: 'POL-314' },
+      { key: 'pi.spark/other', space: 'gtm', role: 'task' as const, id: 'POL-9' },
+      { key: KEY, space: 'gtm', role: 'task' as const, id: 'POL-313' },
+      { key: KEY, space: '~', role: 'coordinator' as const },
     ]
-    const spark = limitsView(input(settings(), { runs })).providers.find((p) => p.provider === 'spark')!
+    const spark = limitsView(input(settings(), { runs })).providers.find((p) => p.provider === 'pi.spark')!
     expect(spark).toMatchObject({ byRole: { task: 3, coordinator: 1 }, tasks: ['POL-9', 'POL-313', 'POL-314'] })
-    expect(spark.models.find((m) => m.key === SPARK)).toMatchObject({ byRole: { task: 2, coordinator: 1 }, tasks: ['POL-313', 'POL-314'] })
-    const none = limitsView(input(settings(), { runs: [{ key: SPARK, space: '~', role: 'coordinator' }] })).providers.find((p) => p.provider === 'spark')!
+    expect(spark.models.find((m) => m.key === KEY)).toMatchObject({ byRole: { task: 2, coordinator: 1 }, tasks: ['POL-313', 'POL-314'] })
+    const none = limitsView(input(settings(), { runs: [{ key: KEY, space: '~', role: 'coordinator' }] })).providers.find((p) => p.provider === 'pi.spark')!
     expect(none.tasks).toBeUndefined()
   })
 
@@ -166,8 +168,8 @@ describe('the providers: every provider with an entry, an agent, a run or usage,
     const keys = view.known.map((k) => k.pattern)
     expect(new Set(keys).size).toBe(keys.length)
     expect(keys.every((k) => k === k.toLowerCase())).toBe(true)
-    expect(view.known.find((k) => k.pattern === 'anthropic')).toMatchObject({ kind: 'provider', name: 'Claude Code' })
-    expect(keys).toContain('anthropic/claude-opus-5-5')
+    expect(view.known.find((k) => k.pattern === 'claude')).toMatchObject({ kind: 'provider', name: 'Claude Code' })
+    expect(keys).toContain('claude/claude-opus-5-5')
   })
 })
 
@@ -183,8 +185,8 @@ describe('what waits now: the held tasks grouped by what holds them, in the page
           held({ id: 'A-2', why: 'space', space: 'gtm', spaceName: 'gtm', entry: { name: 'gtm', count: 2, max: 2 } }),
           held({ id: 'A-3', why: 'slots', words: 'waits for a slot' }),
           held({ id: 'A-4', why: 'machine', words: 'waits for the machine' }),
-          held({ id: 'A-5', why: 'model', words: 'waits: spark 4/4', entry: { name: SPARK, count: 4, max: 4 } }),
-          held({ id: 'A-6', why: 'model', words: 'waits: spark 4/4', entry: { name: SPARK, count: 4, max: 4 } }),
+          held({ id: 'A-5', why: 'model', words: 'waits: pi.spark 4/4', entry: { name: SPARK, count: 4, max: 4 } }),
+          held({ id: 'A-6', why: 'model', words: 'waits: pi.spark 4/4', entry: { name: SPARK, count: 4, max: 4 } }),
           held({ id: 'A-7', why: 'models', words: 'every model ran out' }),
           held({ id: 'A-8', why: 'space', space: 'gtm', spaceName: 'gtm', entry: { name: 'gtm', count: 2, max: 2 } }),
         ],
@@ -223,7 +225,7 @@ describe('the Limits view as a whole', () => {
     const s = settings({ machine: { 'models.maxAtOnce': 'spark=4' }, spaces: { gtm: { 'space.maxTasks': '2' } } })
     const view = limitsView(input(s, { held: [held({ id: 'C-1', why: 'slots' })], working: 10, sample }))
     expect(Object.keys(view).sort()).toEqual(['alerts', 'at', 'caps', 'known', 'machine', 'machineTable', 'providers', 'spaces', 'waiting'].sort())
-    expect(view.caps.machine).toBe('spark=4')
+    expect(view.caps.machine).toBe('pi.spark=4')
     expect(view.caps.spaces.map((x) => x.key)).toEqual(['~', 'gtm'])
     expect(view.waiting.groups.map((g) => g.id)).toEqual(['slots'])
   })
@@ -266,30 +268,30 @@ describe('the Limits providers that nothing uses yet: listed after the used ones
   test('the providers table lists them after the used ones; the + column adds the provider or the model, each named as its row says', () => {
     withPi(() => {
       const view = limitsView(input(settings()))
-      const nv = view.providers.find((p) => p.provider === 'nvidia')!
+      const nv = view.providers.find((p) => p.provider === 'pi.nvidia')!
       expect(nv).toMatchObject({ name: 'NVIDIA API', idle: true, atOnce: { now: 0, held: 0 } })
-      expect(nv.models.map((m) => [m.key, m.label])).toEqual([[NV, 'mistralai/mistral-large-4-1t-a52b']])
-      expect(view.providers.find((p) => p.provider === 'amd-tokenlab')).toMatchObject({ name: 'AMD TokenLab', idle: true })
+      expect(nv.models.map((m) => [m.key, m.label])).toEqual([[`pi.${NV}`, 'mistralai/mistral-large-4-1t-a52b']])
+      expect(view.providers.find((p) => p.provider === 'pi.amd-tokenlab')).toMatchObject({ name: 'AMD TokenLab', idle: true })
       // the used ones first: Claude Code runs the default roles here
       const flags = view.providers.map((p) => p.idle)
       expect(flags).toEqual([...flags].sort((a, b) => Number(a) - Number(b)))
       expect(view.providers[0]!.idle).toBe(false)
       // the + column: a provider by its name, a model with its provider in front, each once and in lowercase
-      expect(view.known.find((k) => k.pattern === 'nvidia')).toEqual({ pattern: 'nvidia', name: 'NVIDIA API', kind: 'provider' })
-      expect(view.known.find((k) => k.pattern === NV.toLowerCase())).toEqual({ pattern: NV.toLowerCase(), name: 'NVIDIA API · mistralai/mistral-large-4-1t-a52b', kind: 'model' })
-      expect(view.known.find((k) => k.pattern === 'amd-tokenlab/qwen3.8-27b')?.name).toBe('AMD TokenLab · Qwen3.8-27B')
+      expect(view.known.find((k) => k.pattern === 'pi.nvidia')).toEqual({ pattern: 'pi.nvidia', name: 'pi · NVIDIA API', kind: 'provider' })
+      expect(view.known.find((k) => k.pattern === `pi.${NV}`)).toEqual({ pattern: `pi.${NV}`, name: 'pi · NVIDIA API · mistralai/mistral-large-4-1t-a52b', kind: 'model' })
+      expect(view.known.find((k) => k.pattern === 'pi.amd-tokenlab/qwen3.8-27b')?.name).toBe('pi · AMD TokenLab · Qwen3.8-27B')
     })
   })
 
   test('a cap set on a provider nothing uses yet is written and read back: the row is in use from then on', () => {
     withPi(() => {
       const view = limitsView(input(settings({ machine: { 'models.maxAtOnce': 'nvidia=2' } })))
-      const nv = view.providers.find((p) => p.provider === 'nvidia')!
-      expect(nv).toMatchObject({ idle: false, atOnce: { own: { pattern: 'nvidia', max: 2, from: 'machine' } } })
+      const nv = view.providers.find((p) => p.provider === 'pi.nvidia')!
+      expect(nv).toMatchObject({ idle: false, atOnce: { own: { pattern: 'pi.nvidia', max: 2, from: 'machine' } } })
       // in use, it is above the idle ones
-      expect(view.providers.findIndex((p) => p.provider === 'nvidia')).toBeLessThan(view.providers.findIndex((p) => p.provider === 'amd-tokenlab'))
+      expect(view.providers.findIndex((p) => p.provider === 'pi.nvidia')).toBeLessThan(view.providers.findIndex((p) => p.provider === 'pi.amd-tokenlab'))
       // the + column still offers it: a pattern is added once, from the summary or the list
-      expect(view.known.filter((k) => k.pattern === 'nvidia')).toHaveLength(1)
+      expect(view.known.filter((k) => k.pattern === 'pi.nvidia')).toHaveLength(1)
     })
   })
 })

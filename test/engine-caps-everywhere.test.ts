@@ -6,6 +6,8 @@ import { describe, expect, test } from 'bun:test'
 import { repo, until, world } from './engine-world.ts'
 
 const SPARK = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
+/** the key pi's model runs under */
+const KEY = `pi.${SPARK}`
 
 /** a fresh world: its spacing off, the CLIs all installed (so the backups are real), and models.maxAtOnce as given */
 function fresh(caps = 'off') {
@@ -46,7 +48,7 @@ describe('two cut-offs at once share the backups as the caps say', () => {
     expect(kindOf(w, b.key)).toBe('pi')
     expect(b.t.held?.why).toBe('model')
     expect(b.t.held?.takeover).toMatchObject({ why: 'out of allowance', step: 0 })
-    expect(w.engine.runs().filter((r) => r.key.startsWith('openai/'))).toHaveLength(1)
+    expect(w.engine.runs().filter((r) => r.key.startsWith('codex/'))).toHaveLength(1)
     // the first one ends: the backup frees, and the second takes it over from release
     await w.engine.done(a.t.id, 'Nothing to change.')
     w.agentIs(a.key, 'idle')
@@ -57,12 +59,12 @@ describe('two cut-offs at once share the backups as the caps say', () => {
 
   test("a claim counts its run on the model it goes to until it is over, and a chat's own claim is not held against it", () => {
     const w = fresh('spark=1')
-    w.engine.claim('X-1/Agent', { key: SPARK, space: 'x', role: 'task', id: 'X-1' })
-    expect(w.engine.capHold('x', SPARK)).toMatchObject([{ why: 'full', name: 'spark' }])
-    expect(w.engine.capHold('x', SPARK, 'X-1')).toBeUndefined()
-    expect(w.engine.capHold('x', SPARK, 'X-1/Agent')).toBeUndefined()
+    w.engine.claim('X-1/Agent', { key: KEY, space: 'x', role: 'task', id: 'X-1' })
+    expect(w.engine.capHold('x', KEY)).toMatchObject([{ why: 'full', name: 'pi.spark' }])
+    expect(w.engine.capHold('x', KEY, 'X-1')).toBeUndefined()
+    expect(w.engine.capHold('x', KEY, 'X-1/Agent')).toBeUndefined()
     w.engine.unclaim('X-1/Agent')
-    expect(w.engine.capHold('x', SPARK)).toBeUndefined()
+    expect(w.engine.capHold('x', KEY)).toBeUndefined()
   })
 })
 
@@ -73,7 +75,7 @@ describe('a restart, a relaunch and a resume obey the caps', () => {
     const a = await running(w, dir, 'restart-a', 'A1')
     const b = await running(w, dir, 'restart-b', 'B1', 'openai/gpt-5.5')
     const err = await w.engine.restart(b.t.id, { kind: 'pi', model: SPARK }).catch((e: Error) => e)
-    expect((err as Error).message).toBe('Not restarted: spark is at its limit (1 of 1 at once): wait for a free slot, or pick another model.')
+    expect((err as Error).message).toBe('Not restarted: pi · spark is at its limit (1 of 1 at once): wait for a free slot, or pick another model.')
     expect(w.stopped).not.toContain(b.key)
     expect(startsOf(w, b.key)).toBe(1)
     // the spark task restarted on spark again: it frees its own slot first, so it may
@@ -82,7 +84,7 @@ describe('a restart, a relaunch and a resume obey the caps', () => {
     // and a blocked model says what to change instead
     expect(w.settings.set('models.maxAtOnce', 'spark=0', 'all').ok).toBe(true)
     const blocked = await w.engine.restart(b.t.id, { kind: 'pi', model: SPARK }).catch((e: Error) => e)
-    expect((blocked as Error).message).toBe('Not restarted: spark is blocked (0 allowed): change its agent or a limit in Settings → Limits.')
+    expect((blocked as Error).message).toBe('Not restarted: pi · spark is blocked (0 allowed): change its agent or a limit in Settings → Limits.')
   })
 
   test('an agent that is gone is not started again on a full model: no failed start, and it starts once there is room', async () => {
@@ -94,7 +96,7 @@ describe('a restart, a relaunch and a resume obey the caps', () => {
     w.records[b.key] = { ...w.records[b.key], kind: 'pi', model: SPARK } as never
     w.agentIs(b.key, 'gone')
     const err = await w.engine.resume(b.t.id).catch((e: Error) => e)
-    expect((err as Error).message).toBe('Not started: spark is at its limit (1 of 1 at once): wait for a free slot, or pick another model.')
+    expect((err as Error).message).toBe('Not started: pi · spark is at its limit (1 of 1 at once): wait for a free slot, or pick another model.')
     expect(startsOf(w, b.key)).toBe(1)
     expect(b.t.trouble).toBeUndefined()
     expect(w.engine.startFailedAt(b.key)).toBeUndefined()
@@ -148,16 +150,16 @@ describe('an agent at work counts on its model at any step of its task', () => {
     expect(w.engine.statusOf(a.t)).toBe('work')
     w.agentIs(a.key, 'idle')
     expect(w.engine.statusOf(a.t)).toBe('ready')
-    expect(w.engine.runs().filter((r) => r.key === SPARK)).toHaveLength(0)
+    expect(w.engine.runs().filter((r) => r.key === KEY)).toHaveLength(0)
     // told to fix something after it reported: its agent works again, on spark
     w.agentIs(a.key, 'working')
     ;(a.t as { landing?: unknown }).landing = { step: 'rebase', at: Date.now() }
-    expect(w.engine.runs().filter((r) => r.key === SPARK)).toHaveLength(1)
+    expect(w.engine.runs().filter((r) => r.key === KEY)).toHaveLength(1)
     ;(a.t as { landing?: unknown }).landing = { step: 'queue', at: Date.now(), behind: 'X-1' }
-    expect(w.engine.runs().filter((r) => r.key === SPARK)).toHaveLength(0)
+    expect(w.engine.runs().filter((r) => r.key === KEY)).toHaveLength(0)
     ;(a.t as { landing?: unknown }).landing = undefined
     a.t.merged = true
-    expect(w.engine.runs().filter((r) => r.key === SPARK)).toHaveLength(0)
+    expect(w.engine.runs().filter((r) => r.key === KEY)).toHaveLength(0)
   })
 
   test("a chat of no task of this machine's, or not its task's own, counts nothing", () => {

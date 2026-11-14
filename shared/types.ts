@@ -972,10 +972,13 @@ export interface SummaryModel extends SummaryRow {
 }
 export interface SummaryProvider extends SummaryRow {
   provider: string
-  /** the provider in words (Claude Code, Codex, OpenCode Go, or its own name) */
+  /** the provider in words (Claude Code, Codex, Anthropic API, OpenCode Go, or its own name) */
   name: string
   /** one of this machine's own models (spark, radeon, avell, dell): no quota, shared */
   local: boolean
+  /** the CLI the provider's models run in (claude, codex, pi, opencode, agy), and its name in words: the screens group by it */
+  harness: string
+  harnessName: string
   /** nothing uses it yet: no slot, agent, run, run-out in the week, or cap. Such a provider is listed under Other providers,
    *  with the models its CLI offers and no numbers */
   idle: boolean

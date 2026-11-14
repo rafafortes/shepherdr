@@ -52,7 +52,7 @@ import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvi
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { carryOn, Retries, resetOf, type Cut, type Retry } from './retry.ts'
-import { modelsSummary, keyOf, providerName, roleOfChat, type LiveAgent, type SummaryInput, type TaskFact } from './models-summary.ts'
+import { modelsSummary, keyOf, patternName, providerWords, roleOfChat, type LiveAgent, type SummaryInput, type TaskFact } from './models-summary.ts'
 import { entryPatterns, knownOf, limitsView, type HeldFact } from './limits-view.ts'
 import { readClaude, type Reading } from './plan-limits.ts'
 import { readCommandCode as readCommandCodeQuota, SECRET as COMMANDCODE_KEY } from './command-code-quota.ts'
@@ -144,7 +144,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   commandFetch: typeof fetch = fetch
   quotas = new Quotas({
     usage: this.usage,
-    readers: { anthropic: () => this.claudeRead(Date.now), commandcode: () => this.readCommandCode() },
+    readers: { claude: () => this.claudeRead(Date.now), 'pi.commandcode': () => this.readCommandCode() },
     on: (key) => this.settings.get(key) !== 'off',
     alertAt: () => alertShare(this.settings.get('quota.alertAt')),
     alert: (provider, window, title, body) => this.alert({ id: randomUUID(), from: 'Shepherdr', title: clip(title, TITLE_MAX), body: clip(body, BODY_MAX), go: { place: placeId.home() }, tag: `quota:${provider}:${window}` }),
@@ -353,6 +353,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.sayTookOver()
     // watched chats: read new log lines once a second; schedules once a minute
     this.timers.push(setInterval(() => this.pollChats(), 1000))
+    // a ledger from before the harness keys: its run-outs take the keys of their chats' CLIs (usage-ledger.ts), then the feed reads on
+    this.usage.migrateRunOuts((chat) => this.agents.records[chat]?.kind)
     if (process.env.NODE_ENV !== 'test') this.usageFeed.start()
     // a reply in a turn that goes on (or one only background work follows) changes no status: looked for here
     this.timers.push(setInterval(() => Object.keys(this.agents.records).forEach((k) => this.agents.status(k) !== 'gone' && this.fresh(k)), 5000))
@@ -487,7 +489,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const provider = providerOf(model)
     // the reason says the reset when the provider gave one ("out of credit until 11 Nov, 17:44 GMT-3")
     const body = `${this.chatName(key)} was cut off: ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.`
-    this.alert({ id: randomUUID(), from: 'Shepherdr', title: clip(`${providerName(provider)} ran out`, TITLE_MAX), body: clip(body, BODY_MAX), go: { place: key }, tag: `runout:${provider}`, ...(key.includes('/') ? { task: true as const } : {}) })
+    this.alert({ id: randomUUID(), from: 'Shepherdr', title: clip(`${providerWords(provider)} ran out`, TITLE_MAX), body: clip(body, BODY_MAX), go: { place: key }, tag: `runout:${provider}`, ...(key.includes('/') ? { task: true as const } : {}) })
   }
 
   /** Command Code's read: its key from Shepherdr's Secrets, the Everywhere level (the main machine's vault), never logged */
@@ -546,7 +548,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         why,
         words: this.engine.holdLine(t),
         ...(t.priority ? { priority: true } : {}),
-        ...(full?.cap ? { entry: { name: full.name, count: full.cap.count, max: full.cap.max } } : cap ? { entry: { name: cap.shown, count: cap.working, max: cap.max } } : {}),
+        ...(full?.cap ? { entry: { name: patternName(full.name), count: full.cap.count, max: full.cap.max } } : cap ? { entry: { name: cap.shown, count: cap.working, max: cap.max } } : {}),
       }
     })
     const advisor = this.advices.waiting().flatMap((r) => {

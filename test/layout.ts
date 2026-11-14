@@ -60,6 +60,18 @@ export async function pickLimit(scope: Locator, n: string, max = 200) {
   await box.press('Enter')
 }
 
+/** a table's rows in order, each by its name: a harness's heading row as `[name]`, a provider or a model as its name (a
+ *  table's first header cell is its row's name, its own text first) */
+export const rowLabels = (table: Locator) =>
+  table.locator('tbody > tr').evaluateAll((rows) =>
+    rows.map((tr) => {
+      const th = tr.querySelector('th')!
+      return th.querySelector('span')?.firstChild?.textContent ?? `[${th.textContent}]`
+    }),
+  )
+/** the place of `label` among the rows, or -1 */
+export const at = (labels: string[], label: string) => labels.indexOf(label)
+
 export const pills = (id: string) => `[data-msg="${id}"] button[aria-pressed][data-keep-box]`
 export type Box = { left: number; right: number; top: number; bottom: number }
 

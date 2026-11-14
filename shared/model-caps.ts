@@ -1,10 +1,12 @@
-// The most agents at once per model or per provider (models.maxAtOnce): one text setting, `spark=4, radeon=1`, read by
-// the server (settings, the tasks' gate) and drawn by the Models page. An entry's pattern is a provider (`spark`: every
-// `spark/…` model) or a model key (`spark/qwen3.8-flash-next-mlx4-mtp-tensorfold`, `anthropic/claude-opus-5-5`); a model
+// The most agents at once per model or per provider (models.maxAtOnce): one text setting, `pi.spark=4, pi.radeon=1`, read by
+// the server (settings, the tasks' gate) and drawn by the Models page. An entry's pattern is a provider (`pi.spark`: every
+// `pi.spark/…` model; `claude`: every Claude Code model) or a model key (`pi.spark/qwen3.8-flash-next-mlx4-mtp-tensorfold`,
+// `claude/claude-opus-5-5`), and the old names (`spark`, `anthropic/…`) are written in that form (toHarnessPatterns); a model
 // entry wins over its provider's. Patterns are lowercase, as the model keys are kept. A number is 0 to 200: 0 BLOCKS the
 // model, so nothing starts on it (never waits for it either); no entry is no cap (unlimited), and off is no caps at all.
 
 import type { SummaryAtOnce, SummarySpaceCap } from './types.ts'
+import { patternWords } from './harness.ts'
 
 /** the most entries one setting holds: every provider and model of the CLIs (five of them, each with many models) can
  *  have its own limit; the bound only keeps a runaway text out */
@@ -25,7 +27,7 @@ export const providerOfKey = (key: string) => (key.includes('/') ? key.slice(0, 
 const PATTERN = /^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._:@+\-/[\]]*)?$/
 
 /** the setting's words for a bad value, one line for the refusal and the hint */
-export const CAP_HINT = 'Write provider=number or model=number, separated by commas: spark=4, anthropic/claude-opus-5-5=2 (0 to 200 each; 0 blocks it), or off.'
+export const CAP_HINT = 'Write provider=number or model=number, separated by commas: pi.spark=4, claude/claude-opus-5-5=2 (0 to 200 each; 0 blocks it), or off.'
 
 /**
  * The entries a setting's text holds, or why it can't be read. Empty and off are no entries. A pattern is lowercased; a
@@ -96,8 +98,8 @@ export function fitToProviders(entries: MaxEntry[]): { entries: MaxEntry[]; lowe
   return { entries: fitted, lowered }
 }
 
-/** the models a write lowers to their provider's limit, in words: `spark/qwen… from 3 to 2 (spark allows 2 at once)` */
-export const loweredWords = (lowered: Lowered[]) => lowered.map((l) => `${l.pattern} from ${l.from} to ${l.to} (${providerOfKey(l.pattern)} allows ${l.to} at once)`).join(', ')
+/** the models a write lowers to their provider's limit, in words: `pi · spark/qwen… from 3 to 2 (pi · spark allows 2 at once)` */
+export const loweredWords = (lowered: Lowered[]) => lowered.map((l) => `${patternWords(l.pattern)} from ${l.from} to ${l.to} (${patternWords(providerOfKey(l.pattern))} allows ${l.to} at once)`).join(', ')
 
 /** the entry that caps a model key: its own model entry when there is one, else its provider's; none when neither */
 export function capFor(entries: MaxEntry[], key: string): MaxEntry | undefined {
@@ -117,9 +119,55 @@ export const spaceCapWords = (s: SummarySpaceCap) => `${s.name}: ${s.max === 0 ?
 export function atOnceWords(a: SummaryAtOnce): { words: string; title: string; blocked: boolean } {
   const where = (from: 'all' | 'machine') => (from === 'machine' ? 'this machine' : 'Everywhere')
   const held = a.held ? ` · ${a.held} held` : ''
-  if (a.own?.max === 0) return { words: `${BLOCKED}${a.now ? ` · ${a.now} still running` : ''}${held}`, title: `Blocked: ${a.own.pattern}=0, set ${where(a.own.from)}. Nothing new starts on it; what runs now goes on. Click to change.`, blocked: true }
-  if (a.own) return { words: `${a.now} of ${a.own.max} at once${held}`, title: `Its cap: ${a.own.pattern}=${a.own.max}, set ${where(a.own.from)}. Click to change.`, blocked: false }
-  if (a.via?.max === 0) return { words: `${BLOCKED} (by ${a.via.pattern})${a.now ? ` · ${a.now} still running` : ''}${held}`, title: `Blocked by ${a.via.pattern}=0, set ${where(a.via.from)}. Nothing new starts on it; what runs now goes on. Click to set its own.`, blocked: true }
-  if (a.via) return { words: `${a.now} at once · no cap of its own${held}`, title: `Held by ${a.via.pattern}=${a.via.max}, set ${where(a.via.from)}. Click to set its own.`, blocked: false }
+  if (a.own?.max === 0) return { words: `${BLOCKED}${a.now ? ` · ${a.now} still running` : ''}${held}`, title: `Blocked: ${patternWords(a.own.pattern)}=0, set ${where(a.own.from)}. Nothing new starts on it; what runs now goes on. Click to change.`, blocked: true }
+  if (a.own) return { words: `${a.now} of ${a.own.max} at once${held}`, title: `Its cap: ${patternWords(a.own.pattern)}=${a.own.max}, set ${where(a.own.from)}. Click to change.`, blocked: false }
+  if (a.via?.max === 0) return { words: `${BLOCKED} (by ${a.via.pattern})${a.now ? ` · ${a.now} still running` : ''}${held}`, title: `Blocked by ${patternWords(a.via.pattern)}=0, set ${where(a.via.from)}. Nothing new starts on it; what runs now goes on. Click to set its own.`, blocked: true }
+  if (a.via) return { words: `${a.now} at once · no cap of its own${held}`, title: `Held by ${patternWords(a.via.pattern)}=${a.via.max}, set ${where(a.via.from)}. Click to set its own.`, blocked: false }
   return { words: `${a.now} at once · no cap${held}`, title: 'No cap for this row. Click to set one.', blocked: false }
+}
+
+/** the names that are already the new form: the single-account CLIs (claude, codex, agy), and pi's own rows for a model with no
+ *  provider part (pi/unknown), which no old setting ever named */
+const SINGLE_ACCOUNT = ['claude', 'codex', 'agy', 'pi']
+
+/** whether a pattern is in the harness form (`pi.spark`, `claude/claude-opus-5-5`) or names a single-account CLI */
+export const isHarnessPattern = (pattern: string) => {
+  const provider = providerOfKey(pattern)
+  return provider.includes('.') || SINGLE_ACCOUNT.includes(provider)
+}
+
+/** the harness·provider patterns an old provider name (`anthropic`, `openai`, `opencode`, `spark`) stands for: its single-account
+ *  CLI when it has one, and each of pi and OpenCode whose model list (offers) has a model of that provider; with neither, pi's */
+export function harnessTargets(provider: string, offers: (provider: string) => string[]): string[] {
+  const out: string[] = []
+  if (provider === 'anthropic') out.push('claude')
+  if (provider === 'openai') out.push('codex')
+  if (provider === 'opencode') out.push('opencode.opencode')
+  for (const harness of offers(provider)) out.push(`${harness}.${provider}`)
+  return [...new Set(out.length ? out : [`pi.${provider}`])]
+}
+
+/**
+ * The entries of a setting's text with each old provider name (`anthropic=2`, `spark=4`, `anthropic/claude-opus-5-5=2`) written
+ * in the harness form it stands for (harnessTargets), the same max each. A pattern already in the harness form stays as it is,
+ * and wins over a converted one of the same name; an entry no target is free for is dropped (it was given twice).
+ */
+export function toHarnessPatterns(entries: MaxEntry[], offers: (provider: string) => string[] = () => []): MaxEntry[] {
+  const taken = new Set(entries.filter((e) => isHarnessPattern(e.pattern)).map((e) => e.pattern))
+  const out: MaxEntry[] = []
+  for (const e of entries) {
+    if (isHarnessPattern(e.pattern)) {
+      out.push(e)
+      continue
+    }
+    const slash = e.pattern.indexOf('/')
+    const model = slash < 0 ? '' : e.pattern.slice(slash)
+    for (const target of harnessTargets(providerOfKey(e.pattern), offers)) {
+      const pattern = `${target}${model}`
+      if (taken.has(pattern)) continue
+      taken.add(pattern)
+      out.push({ pattern, max: e.max })
+    }
+  }
+  return out
 }

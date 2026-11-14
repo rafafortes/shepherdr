@@ -10,8 +10,8 @@ const { browser, world, url } = await layout()
 /** the Limits page on a desktop, with the machine's total for Spark set and two sub-limits of the spaces under it */
 async function openWithSparkCaps(page: Page) {
   const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
-  await set('models.maxAtOnce', 'spark=4', 'm:vm-str')
-  await set('models.maxAtOnce', 'spark=2', 'p:vm-str:gtm')
+  await set('models.maxAtOnce', 'pi.spark=4', 'm:vm-str')
+  await set('models.maxAtOnce', 'pi.spark=2', 'p:vm-str:gtm')
   await page.goto(url())
   await page.evaluate(() => localStorage.removeItem('limits:columns'))
   await page.goto(url())
@@ -32,15 +32,15 @@ describe.skipIf(!browser)('the bulk actions of the sub-limits', () => {
       await openWithSparkCaps(page)
       const spaces = page.getByRole('table', { name: 'Spaces' })
       // the column is there because an entry names it; gtm's own is 2 (1 of its runs is none now), herdr has none of its own
-      await spaces.getByRole('button', { name: /^Spark \(local\) in gtm: 0 of 2 at once/ }).waitFor()
-      await spaces.getByRole('button', { name: /^Spark \(local\) in herdr-projects: no sub-limit|^Spark \(local\) in herdr-projects: machine's total applies/ }).waitFor()
+      await spaces.getByRole('button', { name: /^pi · Spark \(local\) in gtm: 0 of 2 at once/ }).waitFor()
+      await spaces.getByRole('button', { name: /^pi · Spark \(local\) in herdr-projects: no sub-limit|^pi · Spark \(local\) in herdr-projects: machine's total applies/ }).waitFor()
       // the provider's row: its ⋯ asks before it clears the two spaces' entries
       await page.getByRole('table', { name: 'Providers and models' }).getByRole('button', { name: 'More for Spark (local)', exact: true }).click()
       await page.getByRole('menuitem', { name: "Clear every space's sub-limit" }).click()
-      const dialog = page.getByRole('alertdialog', { name: "Clear Spark (local)'s sub-limit in every space" })
+      const dialog = page.getByRole('alertdialog', { name: "Clear pi · Spark (local)'s sub-limit in every space" })
       await dialog.getByRole('button', { name: 'Clear in 1 space', exact: true }).click()
       await dialog.waitFor({ state: 'detached' })
-      await spaces.getByRole('button', { name: /^Spark \(local\) in gtm: machine's total applies \(4 at once\)/ }).waitFor()
+      await spaces.getByRole('button', { name: /^pi · Spark \(local\) in gtm: machine's total applies \(4 at once\)/ }).waitFor()
     } finally {
       await restore()
       await page.close()
@@ -51,11 +51,11 @@ describe.skipIf(!browser)('the bulk actions of the sub-limits', () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
       await openWithSparkCaps(page)
-      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: 'More for Spark (local)', exact: true }).click()
+      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: 'More for pi · Spark (local)', exact: true }).click()
       await page.getByRole('menuitem', { name: "Clear every space's sub-limit" }).click()
-      await page.getByRole('alertdialog', { name: "Clear Spark (local)'s sub-limit in every space" }).getByRole('button', { name: 'Clear in 1 space', exact: true }).click()
-      await page.getByRole('alertdialog', { name: "Clear Spark (local)'s sub-limit in every space" }).waitFor({ state: 'detached' })
-      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^Spark \(local\) in gtm: machine's total applies/ }).waitFor()
+      await page.getByRole('alertdialog', { name: "Clear pi · Spark (local)'s sub-limit in every space" }).getByRole('button', { name: 'Clear in 1 space', exact: true }).click()
+      await page.getByRole('alertdialog', { name: "Clear pi · Spark (local)'s sub-limit in every space" }).waitFor({ state: 'detached' })
+      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^pi · Spark \(local\) in gtm: machine's total applies/ }).waitFor()
     } finally {
       await restore()
       await page.close()

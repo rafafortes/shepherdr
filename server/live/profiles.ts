@@ -18,7 +18,7 @@ import { home, readJson, writeJson } from '../store.ts'
 import { matrixSlots } from './models-matrix.ts'
 import { nextLine, scheduleRows, type Schedule } from './profile-schedule.ts'
 import { placeId } from './places.ts'
-import { type Level, type Settings } from './settings.ts'
+import { CAPS_FORMAT, fitCaps, type Level, type Settings } from './settings.ts'
 
 /** the most undo points kept: an undo steps back through them, the newest first */
 export const UNDO_KEEP = 5
@@ -75,6 +75,8 @@ export interface ProfileFile {
   profiles: Profile[]
   last?: Last | undefined
   undo: Undo[]
+  /** the format of the profiles' models.maxAtOnce words (CAPS_FORMAT); none for a file written before it */
+  capsFormat?: number
 }
 /** what a profile is read against: this machine's settings, its spaces (the home one as ~) with their names */
 export interface Site {
@@ -109,7 +111,25 @@ export class ProfileStore {
   constructor(memory = false) {
     this.dir = memory ? null : home()
     const raw = this.dir ? readJson<Partial<ProfileFile>>('profiles.json', {}, this.dir) : {}
-    this.f = { profiles: Array.isArray(raw.profiles) ? raw.profiles : [], last: raw.last, undo: Array.isArray(raw.undo) ? raw.undo : [] }
+    this.f = { profiles: Array.isArray(raw.profiles) ? raw.profiles : [], last: raw.last, undo: Array.isArray(raw.undo) ? raw.undo : [], ...(raw.capsFormat ? { capsFormat: raw.capsFormat } : {}) }
+    if (this.dir && raw.capsFormat !== CAPS_FORMAT) this.convertCaps()
+  }
+
+  /** a file from before the harness keys: each saved profile's models.maxAtOnce text is written the way it is kept now (fitCaps),
+   *  each change logged, and the file marked so this runs once */
+  private convertCaps() {
+    for (const p of this.f.profiles) {
+      for (const rec of [p.values?.all, p.values?.machine, ...Object.values(p.values?.spaces ?? {})]) {
+        const text = rec?.['models.maxAtOnce']
+        if (typeof text !== 'string') continue
+        const fit = fitCaps(text).text
+        if (fit === text) continue
+        console.error(`shepherdr: profile ${p.name}: models.maxAtOnce "${text}" is kept as "${fit}"`)
+        rec['models.maxAtOnce'] = fit
+      }
+    }
+    this.f.capsFormat = CAPS_FORMAT
+    this.save()
   }
 
   save() {

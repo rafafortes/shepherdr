@@ -6,9 +6,10 @@
 // Two scopes count, and both must have room. The machine's entries (models.maxAtOnce as this machine has it) count every
 // run on this machine. The space's entries (the same setting read at that space: its own value, else the machine's) count
 // the runs of that space only, so a space's sub-limit sits inside the machine's total and can never raise it. Each scope
-// has a model entry (`anthropic/claude-opus-5-5=2`) and a provider entry (`spark=4`), and a model's runs count toward both
+// has a model entry (`claude/claude-opus-5-5=2`) and a provider entry (`pi.spark=4`), and a model's runs count toward both
 // of its entries; a model entry wins nothing, it adds its own limit.
 import { BLOCKED, providerOfKey, type MaxEntry } from '../../../shared/model-caps.ts'
+import { patternWords } from '../../../shared/harness.ts'
 
 /** a role that runs an agent on this machine: a task's, a coordinator's, and the headless runs (leases) of the advisor and
  *  the reviewer, which hold a slot while they run */
@@ -137,10 +138,10 @@ export function waitWords<H>(wait: Blocked<H>[], o: { words?: (h: H) => string; 
  *  the title of the row (waitWords) */
 export function waitShort<H>(wait: Blocked<H>[], shown: (space: string) => string = (s) => s): string {
   // a model's own entry names the model (its provider is the row's); a provider's entry names the provider
-  const name = (b: Blocked<H>) => (b.name.includes('/') ? b.name.slice(b.name.indexOf('/') + 1) : b.name)
+  const name = (b: Blocked<H>) => (b.name.includes('/') ? b.name.slice(b.name.indexOf('/') + 1) : patternWords(b.name))
   return wait
     .map((b) => {
-      if (b.why === 'out') return `${providerOfKey(b.name)} out`
+      if (b.why === 'out') return `${patternWords(providerOfKey(b.name))} out`
       const c = b.cap!
       if (b.why === 'blocked') return `${name(b)} blocked${c.scope === 'space' ? ` in ${shown(c.space!)}` : ''}`
       return `${name(b)} ${c.count}/${c.max}${c.scope === 'space' ? ` in ${shown(c.space!)}` : ''}`

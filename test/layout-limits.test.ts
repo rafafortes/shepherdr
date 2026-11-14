@@ -3,8 +3,8 @@
 // machine total is its cap, Waiting now lists what holds the tasks, a column's Set for every space… writes each space, and a
 // phone draws one card per section, space and provider. Each test is short, so the browser tests fit on a loaded machine.
 import { afterAll, describe, expect, test } from 'bun:test'
-import type { Page } from 'playwright-core'
-import { layout, pickLimit, settled } from './layout.ts'
+import type { Locator, Page } from 'playwright-core'
+import { at, layout, pickLimit, rowLabels, settled } from './layout.ts'
 import { piOffers } from './pi-offers.ts'
 
 // pi lists nvidia and amd-tokenlab, which nothing in the demo uses: they are the providers under Other providers
@@ -23,6 +23,9 @@ async function fresh(page: Page) {
   await page.goto(url())
   await page.evaluate(() => localStorage.removeItem('limits:columns'))
 }
+
+/** whether the second element comes after the first in the page */
+const follows = (first: Locator, second: Locator) => second.elementHandle().then((h) => first.evaluate((el, other) => (el.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0, h))
 
 /** the Limits page on a desktop, opened from Settings → How Shepherdr runs */
 async function openLimits(page: Page, phone = false) {
@@ -75,6 +78,53 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
     }
   })
 
+  test('providers are grouped under their harness: Claude Code and Codex as their own rows, pi and OpenCode with a heading each and their providers under it, OpenCode Go under both', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      const table = page.getByRole('table', { name: 'Providers and models' })
+      await table.scrollIntoViewIfNeeded()
+      const labels = await rowLabels(table)
+      // the order: the single-account CLIs, then pi, then OpenCode; each heading row is in brackets
+      expect(at(labels, 'Claude Code')).toBeGreaterThanOrEqual(0)
+      expect(at(labels, '[pi]')).toBeGreaterThan(at(labels, 'Claude Code'))
+      expect(at(labels, 'Spark (local)')).toBeGreaterThan(at(labels, '[pi]'))
+      expect(at(labels, '[OpenCode]')).toBeGreaterThan(at(labels, 'Spark (local)'))
+      expect(labels.indexOf('OpenCode Go')).toBeLessThan(at(labels, '[OpenCode]'))
+      expect(labels.lastIndexOf('OpenCode Go')).toBeGreaterThan(at(labels, '[OpenCode]'))
+      // OpenCode Go is a row under each of its two harnesses, each with its own cap and usage
+      expect(labels.filter((l) => l === 'OpenCode Go')).toHaveLength(2)
+      expect(labels.filter((l) => l === '[pi]' || l === '[OpenCode]')).toHaveLength(2)
+    } finally {
+      await page.close()
+    }
+  })
+
+  test('Anthropic API under pi and Claude Code are separate rows, each with its own cap, and the cap editor names the harness', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      await world.act({ type: 'setting', key: 'models.maxAtOnce', value: 'claude=3, pi.anthropic=2', place: 'm:vm-str' } as never)
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      await page.getByRole('region', { name: 'Settings' }).getByRole('button', { name: 'Limits', exact: true }).click()
+      const table = page.getByRole('table', { name: 'Providers and models' })
+      await table.scrollIntoViewIfNeeded()
+      const labels = await rowLabels(table)
+      expect(at(labels, 'Anthropic API')).toBeGreaterThan(at(labels, '[pi]'))
+      expect(at(labels, 'Claude Code')).toBeLessThan(at(labels, '[pi]'))
+      // two caps, one per row: the subscription's own, and pi's Anthropic API
+      await table.getByRole('button', { name: /^Anthropic API: \d+ of 2 at once/ }).waitFor()
+      await table.getByRole('button', { name: /^Claude Code: \d+ of 3 at once/ }).waitFor()
+      // the editor of the pi row says which harness it is set in
+      await table.getByRole('button', { name: /^Anthropic API: \d+ of 2 at once/ }).click()
+      await page.getByRole('dialog', { name: 'Edit this setting' }).getByText('Most pi · Anthropic API at once', { exact: true }).waitFor()
+    } finally {
+      await world.act({ type: 'setting', key: 'models.maxAtOnce', value: null, place: 'm:vm-str' } as never)
+      await page.close()
+    }
+  })
+
   test("a limit's three choices: this machine's Max tasks at 0 starts no task, reads 0 · starts none in the warning colour, and No cap takes it back", async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
@@ -110,9 +160,11 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
     try {
       await openLimits(page)
       await page.getByRole('button', { name: '+ column', exact: true }).click()
-      await page.getByRole('menuitem', { name: /^Spark \(local\) provider$/ }).click()
+      await page.getByRole('menuitem', { name: /^pi · Spark \(local\) provider$/ }).click()
+      // the column's header names the provider outside its group, like the + column's menu did
+      await page.getByText('pi · Spark (local) at once', { exact: true }).waitFor()
       // the new column, with each space's sub-limit empty: the machine's total applies there, or none
-      const empty = page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^Spark \(local\) in gtm: no sub-limit$/ })
+      const empty = page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^pi · Spark \(local\) in gtm: no sub-limit$/ })
       await empty.scrollIntoViewIfNeeded()
       await empty.click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
@@ -120,7 +172,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await pickLimit(pop, '2')
       await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
-      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^Spark \(local\) in gtm: 0 of 2 at once/ }).waitFor()
+      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^pi · Spark \(local\) in gtm: 0 of 2 at once/ }).waitFor()
     } finally {
       await page.close()
     }
@@ -151,7 +203,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
 
   test("a provider set below its model's own limit lowers that model to it, and the editor says so before saving", async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
-    const Q = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
+    const Q = 'pi.spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
     try {
       await openLimits(page)
       await world.act({ type: 'setting', key: 'models.maxAtOnce', value: `${Q}=3`, place: 'm:vm-str' } as never)
@@ -164,12 +216,12 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
       await pickLimit(pop, '2')
-      await pop.getByText(`Saving lowers ${Q} from 3 to 2 (spark allows 2 at once).`).waitFor()
+      await pop.getByText('Saving lowers pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold from 3 to 2 (pi · spark allows 2 at once).').waitFor()
       await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
       // the model's own limit is the provider's now
       await table.getByRole('button', { name: /: 0 of 2 at once$/ }).nth(1).waitFor()
-      expect(((await world.act({ type: 'limits-view' } as never)) as { caps: { machine: string } }).caps.machine).toBe(`${Q}=2, spark=2`)
+      expect(((await world.act({ type: 'limits-view' } as never)) as { caps: { machine: string } }).caps.machine).toBe(`${Q}=2, pi.spark=2`)
     } finally {
       await page.close()
     }
@@ -297,8 +349,8 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       })
       await openLimits(page)
       await page.getByRole('button', { name: '+ column', exact: true }).click()
-      await page.getByRole('menuitem', { name: /^Spark \(local\) provider$/ }).click()
-      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^Spark \(local\) in gtm: no sub-limit$/ }).waitFor()
+      await page.getByRole('menuitem', { name: /^pi · Spark \(local\) provider$/ }).click()
+      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^pi · Spark \(local\) in gtm: no sub-limit$/ }).waitFor()
     } finally {
       await page.close()
     }
@@ -344,17 +396,33 @@ describe.skipIf(!browser)('Settings → Limits on a phone', () => {
     }
   })
 
+  test('on a phone each harness heading comes before its provider cards: pi, then its Spark card, then OpenCode', async () => {
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    try {
+      await openLimits(page, true)
+      const pi = page.getByRole('heading', { name: 'pi', exact: true }).first()
+      const spark = page.getByRole('region', { name: 'Spark (local)' })
+      const opencode = page.getByRole('heading', { name: 'OpenCode', exact: true })
+      await pi.scrollIntoViewIfNeeded()
+      await spark.waitFor()
+      expect(await follows(pi, spark)).toBe(true)
+      expect(await follows(spark, opencode)).toBe(true)
+    } finally {
+      await page.close()
+    }
+  })
+
   test("a space's sub-limit line on a phone opens its editor under it, with the number of its runs now", async () => {
     const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     try {
       await openLimits(page, true)
       // set after the page opened (opening starts from the demo's own limits): the page reads again on the change
-      await set('models.maxAtOnce', 'spark=4', 'm:vm-str')
-      await set('models.maxAtOnce', 'spark=2', 'p:vm-str:gtm')
+      await set('models.maxAtOnce', 'pi.spark=4', 'm:vm-str')
+      await set('models.maxAtOnce', 'pi.spark=2', 'p:vm-str:gtm')
       const space = page.getByRole('region', { name: 'Space gtm' })
       await space.scrollIntoViewIfNeeded()
-      await space.getByRole('button', { name: /^Spark \(local\) in gtm: 0 of 2 at once/ }).tap()
+      await space.getByRole('button', { name: /^pi · Spark \(local\) in gtm: 0 of 2 at once/ }).tap()
       await page.getByRole('textbox', { name: 'Limit, from 1 to 200' }).waitFor()
       await page.getByRole('button', { name: 'Cancel', exact: true }).tap()
       await page.getByRole('textbox', { name: 'Limit, from 1 to 200' }).waitFor({ state: 'detached' })

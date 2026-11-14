@@ -2,8 +2,8 @@
 // used (the share bars), the run-out that is out now with its time; a warning's Change opens the cell it names; Hide keeps
 // a warning away for the browser session only; and the phone's cards, nothing wider than the screen.
 import { afterAll, describe, expect, test } from 'bun:test'
-import type { Page } from 'playwright-core'
-import { layout, settled } from './layout.ts'
+import type { Locator, Page } from 'playwright-core'
+import { at, layout, rowLabels, settled } from './layout.ts'
 import { piOffers } from './pi-offers.ts'
 
 // pi lists nvidia and amd-tokenlab, which nothing in the demo uses: they are the providers under Other providers
@@ -20,12 +20,50 @@ async function openModels(page: Page) {
   await settled(page)
   return page.locator('section[aria-label="Summary"]')
 }
+/** whether the second element comes after the first in the page */
+const follows = (first: Locator, second: Locator) => second.elementHandle().then((h) => first.evaluate((el, other) => (el.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0, h))
 /** the warnings still shown */
 const warnings = (page: Page) => page.locator('section[aria-label="Warnings"] li')
 /** the open cell editor */
 const editor = (page: Page) => page.getByRole('dialog', { name: 'Edit this setting' })
 
 describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => {
+  test('providers are grouped under their harness: Claude Code and Codex as rows, pi and OpenCode with a heading each, OpenCode Go under both', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      const s = await openModels(page)
+      await s.scrollIntoViewIfNeeded()
+      const labels = await rowLabels(s.getByRole('table', { name: 'Providers and models' }))
+      expect(at(labels, 'Claude Code')).toBeLessThan(at(labels, 'Codex'))
+      expect(at(labels, 'Codex')).toBeLessThan(at(labels, '[pi]'))
+      expect(at(labels, '[pi]')).toBeLessThan(at(labels, 'Spark (local)'))
+      expect(at(labels, 'Spark (local)')).toBeLessThan(at(labels, '[OpenCode]'))
+      expect(at(labels, '[OpenCode]')).toBeLessThan(labels.lastIndexOf('OpenCode Go'))
+      // OpenCode Go's plan is two rows, one under each harness, each with its own usage
+      expect(labels.filter((l) => l === 'OpenCode Go')).toHaveLength(2)
+    } finally {
+      await page.close()
+    }
+  })
+
+  test('Anthropic API under pi and Claude Code are separate rows, each with the cap set for it', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await world.act({ type: 'setting', key: 'models.maxAtOnce', value: 'claude=3, pi.anthropic=2', place: 'm:vm-str' } as never)
+      const s = await openModels(page)
+      await s.scrollIntoViewIfNeeded()
+      const table = s.getByRole('table', { name: 'Providers and models' })
+      const labels = await rowLabels(table)
+      expect(at(labels, 'Claude Code')).toBeLessThan(at(labels, '[pi]'))
+      expect(at(labels, 'Anthropic API')).toBeGreaterThan(at(labels, '[pi]'))
+      await table.getByRole('button', { name: /^Anthropic API: \d+ of 2 at once/ }).waitFor()
+      await table.getByRole('button', { name: /^Claude Code: \d+ of 3 at once/ }).waitFor()
+    } finally {
+      await world.act({ type: 'setting', key: 'models.maxAtOnce', value: null, place: 'm:vm-str' } as never)
+      await page.close()
+    }
+  })
+
   test('each provider with its models: what is configured and running, the share of the tokens, the usage of each window, the run-out out now with its time', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
@@ -66,7 +104,7 @@ describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => 
       const idle = s.getByRole('table', { name: 'Other providers' })
       await idle.getByRole('rowheader', { name: /^NVIDIA API/ }).waitFor()
       // its model names its provider in its title, and shows the id without it; nothing ran, so no "none in 7 d" but a dash
-      expect(await idle.locator('span[title="nvidia/mistralai/mistral-large-4-1t-a52b"]').textContent()).toBe('mistralai/mistral-large-4-1t-a52b')
+      expect(await idle.locator('span[title="pi.nvidia/mistralai/mistral-large-4-1t-a52b"]').textContent()).toBe('mistralai/mistral-large-4-1t-a52b')
       expect(await idle.getByText('none in 7 d').count()).toBe(0)
       expect(await idle.getByText('—').count()).toBeGreaterThan(0)
       // a provider in use is not among them
@@ -110,6 +148,20 @@ describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => 
       await pop.waitFor()
       expect(await pop.textContent()).toMatch(/· Tasks · Backup \d/)
       expect(await pop.getByRole('button', { name: /^(Agent|Backup): / }).count()).toBe(1)
+    } finally {
+      await page.close()
+    }
+  })
+
+  test("OpenCode Go's plan, which pi and OpenCode both run, is warned about once, naming both harnesses", async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      const s = await openModels(page)
+      await s.scrollIntoViewIfNeeded()
+      // its figure is on both of its rows: one warning for the plan, not one for each row
+      const plan = warnings(page).filter({ hasText: /OpenCode Go( \(|:).*is at \d+%/ })
+      expect(await plan.count()).toBe(1)
+      expect(await plan.first().textContent()).toContain('OpenCode Go (pi and OpenCode): ')
     } finally {
       await page.close()
     }
@@ -173,6 +225,27 @@ describe.skipIf(!browser)('a browser that keeps no session storage for the hidde
 })
 
 describe.skipIf(!browser)('Settings → Models → Summary on a phone', () => {
+  test('each harness heading comes before its provider cards: pi, then Spark (local), then OpenCode', async () => {
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    try {
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      await page.getByRole('region', { name: 'Settings' }).getByRole('button', { name: 'Models', exact: true }).tap()
+      await settled(page)
+      const s = page.locator('section[aria-label="Summary"]')
+      await s.scrollIntoViewIfNeeded()
+      const pi = s.getByRole('heading', { name: 'pi', exact: true }).first()
+      const spark = s.getByRole('heading', { name: /^Spark \(local\)/ })
+      const opencode = s.getByRole('heading', { name: 'OpenCode', exact: true })
+      await spark.waitFor()
+      expect(await follows(pi, spark)).toBe(true)
+      expect(await follows(spark, opencode)).toBe(true)
+    } finally {
+      await page.close()
+    }
+  })
+
   test('one card per provider with its models under it; the warnings with their buttons under their words; nothing wider than the screen', async () => {
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     try {

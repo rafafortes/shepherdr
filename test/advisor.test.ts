@@ -420,6 +420,8 @@ describe('by itself, once a question waited', () => {
 
 describe('the advisor on the caps: a harness with room, a run held as a lease, and a question that waits', () => {
   const OPENCODE = 'opencode-go/deepseek-v4.1-flash'
+  /** the key pi's model runs under: pi and its provider in front of the id */
+  const KEYO = `pi.${OPENCODE}`
   const CODEX = keyOf('codex')
   /** what the advisor's runs counted toward the caps while each one ran (the lease is held for the whole run) */
   let heldAt: string[][] = []
@@ -442,11 +444,11 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
   test('the primary has room: it runs the question, held as a lease for the run, and the lease ends with the answer', async () => {
     const w = await world('adv-cap-room')
     try {
-      capped(`${OPENCODE}=1`)
+      capped(`${KEYO}=1`)
       card(w.key, 'cap:r1', 'Which store?', ['SQLite', 'Postgres'])
       replies = [json({ decide: 'advisor', choice: 1, why: 'Small.', sure: true })]
       expect(await src.advise(w.key, 'cap:r1')).toEqual({ ok: true })
-      expect(heldAt).toEqual([[OPENCODE]])
+      expect(heldAt).toEqual([[KEYO]])
       expect(src.engine.runs().filter((r) => r.role === 'advisor')).toEqual([])
       expect(src.advices.get(w.key, 'cap:r1')!.state).toBe('sent')
     } finally {
@@ -458,14 +460,14 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
   test('the primary is full: its backup runs the question, and the run is held as a lease while it runs', async () => {
     const w = await world('adv-cap-backup')
     try {
-      capped(`${OPENCODE}=1`)
-      occupy('busy-primary', OPENCODE, w.p.name)
+      capped(`${KEYO}=1`)
+      occupy('busy-primary', KEYO, w.p.name)
       card(w.key, 'cap:b1', 'Which?', ['A', 'B'])
       replies = [json({ decide: 'advisor', choice: 2, why: 'B fits.', sure: true })]
       await src.advise(w.key, 'cap:b1')
       expect(runs.map((r) => r.kind)).toEqual(['codex'])
       // the busy primary's lease counts, and the backup's run is held while it runs
-      expect(heldAt).toEqual([[OPENCODE, CODEX]])
+      expect(heldAt).toEqual([[KEYO, CODEX]])
       expect(to(w.key)[0]).toContain('from="The advisor"')
       expect(cards(w.key).at(-1)).toContain('(Codex')
       expect(src.engine.runs().filter((r) => r.role === 'advisor').map((r) => r.id)).toEqual(['busy-primary'])
@@ -479,8 +481,8 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
   test('every harness full: nothing runs, the question waits, and its card names each one that is full', async () => {
     const w = await world('adv-cap-wait')
     try {
-      capped(`${OPENCODE}=1, ${CODEX}=1`)
-      occupy('busy-a', OPENCODE, w.p.name)
+      capped(`${KEYO}=1, ${CODEX}=1`)
+      occupy('busy-a', KEYO, w.p.name)
       occupy('busy-b', CODEX, w.p.name)
       card(w.key, 'cap:w1', 'Which store?', ['SQLite', 'Postgres'])
       expect(await src.advise(w.key, 'cap:w1')).toEqual({ ok: true })
@@ -507,8 +509,8 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
   test('a slot frees: the waiting question is asked then, once, and answered by the advisor as it would have been', async () => {
     const w = await world('adv-cap-retry')
     try {
-      capped(`${OPENCODE}=1`)
-      occupy('busy-r', OPENCODE, w.p.name)
+      capped(`${KEYO}=1`)
+      occupy('busy-r', KEYO, w.p.name)
       src.settings.set('advisor.fallback', 'off', { space: w.p.name })
       card(w.key, 'cap:f1', 'Which store?', ['SQLite', 'Postgres'])
       await src.advise(w.key, 'cap:f1', true)
@@ -537,8 +539,8 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
   test('a question answered by the human while it waits is never answered by the advisor', async () => {
     const w = await world('adv-cap-answered')
     try {
-      capped(`${OPENCODE}=1, ${CODEX}=1`)
-      occupy('busy-x', OPENCODE, w.p.name)
+      capped(`${KEYO}=1, ${CODEX}=1`)
+      occupy('busy-x', KEYO, w.p.name)
       occupy('busy-y', CODEX, w.p.name)
       card(w.key, 'cap:x2', 'Which queue?', ['Redis', 'SQS'])
       await src.advise(w.key, 'cap:x2')
@@ -610,7 +612,7 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
   test('a slot that frees while an advisor run goes on asks nothing beside it: one run at a time', async () => {
     const w = await world('adv-cap-one')
     try {
-      capped(`${OPENCODE}=1`)
+      capped(`${KEYO}=1`)
       card(w.key, 'cap:o1', 'Which?', ['A', 'B'])
       card(w.key, 'cap:o2', 'Which cache?', ['Memory', 'Disk'])
       src.runAdvisor = (async (h: { kind: string; model?: string }, prompt: string, cwd: string) => {
@@ -631,7 +633,7 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
   test('a run that throws gives its lease back, and the next harness of the chain answers', async () => {
     const w = await world('adv-cap-throw')
     try {
-      capped(`${OPENCODE}=1`)
+      capped(`${KEYO}=1`)
       src.runAdvisor = (async (h: { kind: string; model?: string }, prompt: string, cwd: string) => {
         runs.push({ kind: h.kind, model: h.model, prompt, cwd })
         if (h.kind === 'pi') throw new Error('spawn exploded')

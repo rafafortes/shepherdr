@@ -96,9 +96,10 @@ describe.skipIf(!browser)('the Quota column of the Summary on a desktop', () => 
       expect(await table.getByText(/^Last read failed 2 min ago: Claude Code took longer than a minute to answer\. The figure is from 7 min ago\.$/).count()).toBe(1)
       // the refilled window of the demo is left out
       expect(await table.getByText('Last month').count()).toBe(0)
-      // OpenCode Go's figure is an estimate: each window is tagged, and its source says where it comes from
+      // OpenCode Go's figure is an estimate: each window is tagged, and its source says where it comes from. It is the same on
+      // both of its rows (pi's and OpenCode's), each with its own calls, so the source is named twice
       expect(await table.getByText('estimate', { exact: true }).count()).toBeGreaterThanOrEqual(2)
-      expect(await table.getByText("estimate from Shepherdr's ledger").count()).toBe(1)
+      expect(await table.getByText("estimate from Shepherdr's ledger").count()).toBe(2)
       expect(await table.getByText(/^ran out at ~\d+k? tokens/).count()).toBeGreaterThan(0)
     } finally {
       await page.close()

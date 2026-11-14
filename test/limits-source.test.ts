@@ -31,8 +31,8 @@ describe('the Limits action', () => {
 
   test('a review round that waits for a reviewer is listed with the reviewers that are full, and its task opens from there', async () => {
     // the default reviewer is Codex: its one slot is taken by another run, so the round of this task waits for it
-    expect(src.settings.set('models.maxAtOnce', 'openai=1', 'machine').ok).toBe(true)
-    src.engine.lease('busy-review', 'reviewer', 'openai/gpt-6-sol', '~')
+    expect(src.settings.set('models.maxAtOnce', 'codex=1', 'machine').ok).toBe(true)
+    src.engine.lease('busy-review', 'reviewer', 'codex/gpt-6-sol', '~')
     src.engine.tasks.push({ id: 'LIM-2', n: 2, project: 'nowhere', title: 'Reviewed', desc: '', by: 'test', created: Date.now(), updated: Date.now(), reviewWait: { since: Date.now() } } as never)
     try {
       const v = (await src.act({ type: 'limits-view' })) as View
@@ -56,13 +56,13 @@ describe('the Limits action', () => {
     expect(refused.ok).toBe(false)
     expect(refused.error).toBeTruthy()
     // a space's own sub-limit is written at the space, and its line shows in the Spaces table
-    expect(await src.act({ type: 'setting', key: 'models.maxAtOnce', value: 'spark=3', place: here })).toMatchObject({ ok: true })
+    expect(await src.act({ type: 'setting', key: 'models.maxAtOnce', value: 'pi.spark=3', place: here })).toMatchObject({ ok: true })
     const capped = (await src.act({ type: 'limits-view' })) as View
-    expect(capped.spaces.patterns).toContain('spark')
-    expect(capped.caps.machine).toBe('spark=3')
-    expect(capped.spaces.totals.spark).toEqual({ pattern: 'spark', max: 3 })
+    expect(capped.spaces.patterns).toContain('pi.spark')
+    expect(capped.caps.machine).toBe('pi.spark=3')
+    expect(capped.spaces.totals['pi.spark']).toEqual({ pattern: 'pi.spark', max: 3 })
     expect(await src.act({ type: 'setting', key: 'models.maxAtOnce', value: null, place: here })).toMatchObject({ ok: true })
-    expect(((await src.act({ type: 'limits-view' })) as View).spaces.patterns).not.toContain('spark')
+    expect(((await src.act({ type: 'limits-view' })) as View).spaces.patterns).not.toContain('pi.spark')
     await src.act({ type: 'setting', key: 'machine.maxTasks', value: null, place: here })
   })
 })

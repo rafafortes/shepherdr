@@ -1,6 +1,6 @@
 // Settings → Models → profiles, the module's side: a profile saves the models (and the limits, when it holds them) at every
 // level of this machine, applies the difference all or nothing, keeps undo points, and says what it does in words.
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { agoWords, changeWords, cleanName, keysOf, LIMIT_KEYS, MODEL_KEYS, nameProblem, Profiles, ProfileStore, previewWords, planOf, UNDO_KEEP, waitingPicks, type Change, type Site } from '../server/live/profiles.ts'
@@ -69,54 +69,54 @@ describe('a profile: what it keeps, at every level', () => {
     expect(LIMIT_KEYS).toContain('models.maxAtOnce')
     const w = world({ everywhere: { 'models.maxAtOnce': 'spark=4' }, machine: { 'models.maxAtOnce': 'radeon=1' } })
     const lim = w.p.save('lim', { limits: true }).profile!
-    expect(lim.values.all['models.maxAtOnce']).toBe('spark=4')
-    expect(lim.values.machine['models.maxAtOnce']).toBe('radeon=1')
+    expect(lim.values.all['models.maxAtOnce']).toBe('pi.spark=4')
+    expect(lim.values.machine['models.maxAtOnce']).toBe('pi.radeon=1')
     expect(lim.values.spaces.gtm!['models.maxAtOnce']).toBeNull()
     // the models alone hold none of it
     expect(w.p.save('models').profile!.values.machine).not.toHaveProperty('models.maxAtOnce')
     // applied, the value comes back as saved
     w.s.set('models.maxAtOnce', 'off', 'machine')
     const plan = planOf(w.site(), lim)
-    expect(plan.changes).toContainEqual(expect.objectContaining({ key: 'models.maxAtOnce', at: 'machine', now: 'off', then: 'radeon=1' }))
+    expect(plan.changes).toContainEqual(expect.objectContaining({ key: 'models.maxAtOnce', at: 'machine', now: 'off', then: 'pi.radeon=1' }))
   })
 
   test("a space's own sub-limit (models.maxAtOnce at a space) round-trips: saved, applied, and undone", () => {
     const w = world({ machine: { 'models.maxAtOnce': 'spark=4' }, spaces: { gtm: { 'models.maxAtOnce': 'anthropic=2' } } })
     const lim = w.p.save('sub', { limits: true }).profile!
-    expect(lim.values.spaces.gtm!['models.maxAtOnce']).toBe('anthropic=2')
+    expect(lim.values.spaces.gtm!['models.maxAtOnce']).toBe('claude=2')
     expect(lim.values.spaces.docs!['models.maxAtOnce']).toBeNull()
     // the space's sub-limit changed since, and the machine's total too: the plan names both, each as it reads now
     w.s.set('models.maxAtOnce', 'off', { space: 'gtm' })
-    w.s.set('models.maxAtOnce', 'radeon=1', 'machine')
+    w.s.set('models.maxAtOnce', 'pi.radeon=1', 'machine')
     expect(planOf(w.site(), lim).changes.filter((c) => c.key === 'models.maxAtOnce').map((c) => [c.at, c.now, c.then])).toEqual([
-      ['machine', 'radeon=1', 'spark=4'],
-      [{ space: 'gtm' }, 'off', 'anthropic=2'],
+      ['machine', 'pi.radeon=1', 'pi.spark=4'],
+      [{ space: 'gtm' }, 'off', 'claude=2'],
     ])
     // applied: both come back as saved, and the space's own value is its own again (not the machine's)
     const r = w.p.apply('sub')
     expect(r.ok).toBe(true)
-    expect(own(w.s, 'models.maxAtOnce', { space: 'gtm' })).toBe('anthropic=2')
-    expect(own(w.s, 'models.maxAtOnce', 'machine')).toBe('spark=4')
+    expect(own(w.s, 'models.maxAtOnce', { space: 'gtm' })).toBe('claude=2')
+    expect(own(w.s, 'models.maxAtOnce', 'machine')).toBe('pi.spark=4')
     expect(own(w.s, 'models.maxAtOnce', { space: 'docs' })).toBeNull()
     // undo puts the space's and the machine's values back as they were before the apply
     expect(w.p.undo().ok).toBe(true)
     expect(own(w.s, 'models.maxAtOnce', { space: 'gtm' })).toBe('off')
-    expect(own(w.s, 'models.maxAtOnce', 'machine')).toBe('radeon=1')
+    expect(own(w.s, 'models.maxAtOnce', 'machine')).toBe('pi.radeon=1')
   })
 
   test('0 round-trips: a machine that blocks a model and a space that blocks one and holds its tasks (0) are saved, applied and undone as 0, not unset', () => {
     const w = world({ machine: { 'models.maxAtOnce': 'spark=0' }, spaces: { gtm: { 'models.maxAtOnce': 'anthropic=0', 'space.maxTasks': '0' } } })
     const lim = w.p.save('zero', { limits: true }).profile!
-    expect(lim.values.machine['models.maxAtOnce']).toBe('spark=0')
-    expect(lim.values.spaces.gtm!['models.maxAtOnce']).toBe('anthropic=0')
+    expect(lim.values.machine['models.maxAtOnce']).toBe('pi.spark=0')
+    expect(lim.values.spaces.gtm!['models.maxAtOnce']).toBe('claude=0')
     expect(lim.values.spaces.gtm!['space.maxTasks']).toBe('0')
     // changed since: off (no cap) and a number now; the save's zeros come back on apply, distinct from what is unset
     w.s.set('models.maxAtOnce', null, 'machine')
     w.s.set('models.maxAtOnce', 'off', { space: 'gtm' })
     w.s.set('space.maxTasks', null, { space: 'gtm' })
     expect(w.p.apply('zero').ok).toBe(true)
-    expect(own(w.s, 'models.maxAtOnce', 'machine')).toBe('spark=0')
-    expect(own(w.s, 'models.maxAtOnce', { space: 'gtm' })).toBe('anthropic=0')
+    expect(own(w.s, 'models.maxAtOnce', 'machine')).toBe('pi.spark=0')
+    expect(own(w.s, 'models.maxAtOnce', { space: 'gtm' })).toBe('claude=0')
     expect(own(w.s, 'space.maxTasks', { space: 'gtm' })).toBe('0')
     expect(own(w.s, 'models.maxAtOnce', { space: 'docs' })).toBeNull()
     expect(w.s.spaceMax('gtm')).toBe(0)
@@ -524,8 +524,33 @@ describe('the file: profiles.json in the home, and what a damaged one reads as',
   test('a damaged profiles.json reads as none, not as a failure', () => {
     writeFileSync(join(home(), 'profiles.json'), '{"profiles": "nope", "undo": 3')
     const store = new ProfileStore()
-    expect(store.f).toEqual({ profiles: [], last: undefined, undo: [] })
+    expect(store.f).toEqual({ profiles: [], last: undefined, undo: [], capsFormat: 2 })
     writeFileSync(join(home(), 'profiles.json'), JSON.stringify({ profiles: 'x', undo: 'y' }))
     expect(new ProfileStore().f.profiles).toEqual([])
+  })
+})
+
+describe('a profiles.json from before the harness keys: converted once', () => {
+  test('its saved models.maxAtOnce texts are written in the harness form, each change logged, and the file marked so it runs once', () => {
+    const file = join(home(), 'profiles.json')
+    writeFileSync(file, JSON.stringify({ profiles: [{ name: 'sub', limits: true, saved: 1, names: {}, values: { all: { 'models.maxAtOnce': 'spark=4' }, machine: { 'models.maxAtOnce': null }, spaces: { gtm: { 'models.maxAtOnce': 'anthropic=2' } } } }], undo: [] }))
+    const errors = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const store = new ProfileStore()
+      expect(store.f.profiles[0]!.values.all['models.maxAtOnce']).toBe('pi.spark=4')
+      expect(store.f.profiles[0]!.values.spaces.gtm!['models.maxAtOnce']).toBe('claude=2')
+      expect(store.f.profiles[0]!.values.machine['models.maxAtOnce']).toBeNull()
+      expect(errors.mock.calls.map((c) => String(c[0]))).toEqual([
+        'shepherdr: profile sub: models.maxAtOnce "spark=4" is kept as "pi.spark=4"',
+        'shepherdr: profile sub: models.maxAtOnce "anthropic=2" is kept as "claude=2"',
+      ])
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ capsFormat: 2, profiles: [{ values: { all: { 'models.maxAtOnce': 'pi.spark=4' } } }] })
+      // a second start reads the saved words and logs nothing
+      errors.mockClear()
+      expect(new ProfileStore().f.profiles[0]!.values.all['models.maxAtOnce']).toBe('pi.spark=4')
+      expect(errors).not.toHaveBeenCalled()
+    } finally {
+      errors.mockRestore()
+    }
   })
 })

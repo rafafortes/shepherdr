@@ -88,12 +88,24 @@ let cache: Record<string, CliModels> = TEST ? {} : readJson('cli-models.json', {
 const asking = new Set<string>()
 const looked = new Map<string, number>()
 
-/** what this CLI takes; nothing for a CLI Shepherdr passes no model or effort to */
-export function modelsOf(kind: string): CliModels | undefined {
+/** what this CLI takes, as it was read (or the table's), before any scope; nothing for a CLI Shepherdr passes no model to */
+export function rawOf(kind: string): CliModels | undefined {
   if (!TABLE[kind]) return undefined
   if (!TEST) ask(kind)
   const c = cache[kind]
-  const got = c?.models.length || (c && !TABLE[kind].models.length) ? c : TABLE[kind]
+  return c?.models.length || (c && !TABLE[kind].models.length) ? c : TABLE[kind]
+}
+
+/** the harnesses whose own list has a model of this provider (pi, opencode): where a provider's models are offered at all */
+export function offers(provider: string): string[] {
+  const p = `${provider.toLowerCase()}/`
+  return ['pi', 'opencode'].filter((kind) => (rawOf(kind)?.models ?? []).some((m) => m.id.toLowerCase().startsWith(p)))
+}
+
+/** what this CLI takes; nothing for a CLI Shepherdr passes no model or effort to */
+export function modelsOf(kind: string): CliModels | undefined {
+  const got = rawOf(kind)
+  if (!got) return undefined
   // scoping runs a glob per pattern over every model, and one snapshot asks for these models thousands of times (each
   // place's restart hint): kept while neither the list nor its patterns change
   const patterns = kind === 'pi' ? piEnabled() : kind === 'opencode' ? opencodeScope : undefined

@@ -6,7 +6,10 @@
 import { HOUR, providerOf, type RunOut, type UsageLedger, type UsageTotals } from './usage-ledger.ts'
 import type { QuotaFigure, QuotaWindow } from '../../shared/types.ts'
 
-export const OPENCODE = 'opencode-go'
+/** the estimate's alert and its one provider: OpenCode's own row (pi's row of the same plan shows the same figure) */
+export const OPENCODE = 'opencode.opencode-go'
+/** the rows the estimate is shown on: pi's and OpenCode's, both of OpenCode Go's plan, so both count the same calls */
+export const OPENCODE_ROWS = ['pi.opencode-go', 'opencode.opencode-go']
 const WEEK = 7 * 24 * HOUR
 /** the windows the estimate shows: a 5 h one and a week */
 const WINDOWS = [
@@ -16,7 +19,7 @@ const WINDOWS = [
 /** the latest run-outs a window shows its learned limit from */
 const LEARNED = 3
 
-const isOpenCode = (key: string) => providerOf(key) === OPENCODE
+const isOpenCode = (key: string) => OPENCODE_ROWS.includes(providerOf(key))
 
 /** the estimate of OpenCode Go's windows at `now`, or none when the ledger holds no call of it in the week and no run-out */
 export function opencodeEstimate(usage: UsageLedger, now: number): QuotaFigure | undefined {

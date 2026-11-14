@@ -51,13 +51,13 @@ describe('Refresh quotas, the action', () => {
     src.commandFetch = f.fetchImpl
     src.vault = vaultWith({ [SECRET]: KEY })
     const got = alerts()
-    expect(await src.act({ type: 'quota-refresh' })).toEqual({ ok: true, started: ['anthropic', 'commandcode'] })
+    expect(await src.act({ type: 'quota-refresh' })).toEqual({ ok: true, started: ['claude', 'pi.commandcode'] })
     await src.quotas.settled()
-    expect(src.usage.quota('anthropic')?.windows).toEqual([{ name: '5 h', usedPct: 62, resetAt: NOW + 2 * HOUR }])
-    expect(src.usage.quota('commandcode')?.windows).toEqual([{ name: 'Week', used: 1, cap: 4, usedPct: 25 }])
+    expect(src.usage.quota('claude')?.windows).toEqual([{ name: '5 h', usedPct: 62, resetAt: NOW + 2 * HOUR }])
+    expect(src.usage.quota('pi.commandcode')?.windows).toEqual([{ name: 'Week', used: 1, cap: 4, usedPct: 25 }])
     expect(f.asked).toEqual([`/alpha/whoami Bearer ${KEY}`, `/alpha/billing/credits Bearer ${KEY}`])
     // the key is in no status, no figure and no alert
-    expect(JSON.stringify([src.quotas.status('commandcode'), src.quotas.status('anthropic'), src.usage.quota('commandcode'), got])).not.toContain(KEY)
+    expect(JSON.stringify([src.quotas.status('pi.commandcode'), src.quotas.status('claude'), src.usage.quota('pi.commandcode'), got])).not.toContain(KEY)
     expect(got).toEqual([])
   })
 
@@ -69,7 +69,7 @@ describe('Refresh quotas, the action', () => {
     // a minute on: the refresh is allowed again
     src.quotas.refresh(NOW + 61_000)
     await src.quotas.settled()
-    expect(src.quotas.status('commandcode').hint).toBe("Add COMMANDCODE_API_KEY in Settings → Secrets to read Command Code's quota.")
+    expect(src.quotas.status('pi.commandcode').hint).toBe("Add COMMANDCODE_API_KEY in Settings → Secrets to read Command Code's quota.")
     expect(f.asked).toEqual([])
   })
 
@@ -81,7 +81,7 @@ describe('Refresh quotas, the action', () => {
     src.commandFetch = f.fetchImpl
     src.quotas.refresh(NOW + 122_000)
     await src.quotas.settled()
-    expect(src.quotas.status('commandcode').failed).toMatch(/^Secrets can't be read from .*vault\.json/)
+    expect(src.quotas.status('pi.commandcode').failed).toMatch(/^Secrets can't be read from .*vault\.json/)
     expect(f.asked).toEqual([])
   })
 
@@ -96,7 +96,7 @@ describe('Refresh quotas, the action', () => {
     expect(src.settings.set('quota.commandcode', 'off', 'all')).toEqual({ ok: true })
     expect(await src.act({ type: 'quota-refresh' })).toEqual({ ok: false, error: 'Every quota read is off: switch one on in Settings → Models → Quotas first.' })
     expect(seen).toEqual([])
-    expect(src.quotas.status('anthropic').on).toBe(false)
+    expect(src.quotas.status('claude').on).toBe(false)
     expect(src.settings.set('quota.claude', 'on', 'all')).toEqual({ ok: true })
     expect(src.settings.set('quota.commandcode', 'on', 'all')).toEqual({ ok: true })
   })
@@ -110,7 +110,7 @@ describe('the warning share reaches the alerts', () => {
     src.quotas.refresh(NOW + 183_000)
     await src.quotas.settled()
     expect(got).toHaveLength(1)
-    expect(got[0]).toMatchObject({ title: 'Claude Code is at 75%', body: expect.stringMatching(/^5 h window: 25% left, and it refills /), from: 'Shepherdr', tag: 'quota:anthropic:5 h', go: { place: placeId.home() } })
+    expect(got[0]).toMatchObject({ title: 'Claude Code is at 75%', body: expect.stringMatching(/^5 h window: 25% left, and it refills /), from: 'Shepherdr', tag: 'quota:claude:5 h', go: { place: placeId.home() } })
     src.claudeRead = claude(76)
     src.quotas.refresh(NOW + 244_000)
     await src.quotas.settled()
@@ -124,17 +124,17 @@ describe('the summary carries each read as it stands', () => {
     src.vault = vaultWith({ [SECRET]: KEY })
     src.commandFetch = commandFetch().fetchImpl
     // a provider the summary knows (it ran a call this week), so its row carries the read
-    src.usage.count('T-7/Agent', 'anthropic/claude-opus-5-5', { id: 'sum-claude', at: NOW - HOUR, tokens: 500 }, NOW)
+    src.usage.count('T-7/Agent', 'claude/claude-opus-5-5', { id: 'sum-claude', at: NOW - HOUR, tokens: 500 }, NOW)
     expect(src.settings.set('quota.alertAt', '80%', 'all')).toEqual({ ok: true })
     src.claudeRead = claude(91)
     src.quotas.refresh(NOW + 400_000)
     await src.quotas.settled()
     type Sum = { providers: { provider: string; quota?: { windows: { usedPct?: number }[] }; quotaRead?: { on: boolean; tried?: number } }[]; warnings: { id: string; words: string }[] }
     const sum = (await src.act({ type: 'models-summary' })) as Sum
-    const row = sum.providers.find((p) => p.provider === 'anthropic')!
+    const row = sum.providers.find((p) => p.provider === 'claude')!
     expect(row.quota?.windows[0]).toMatchObject({ usedPct: 91 })
     expect(row.quotaRead).toMatchObject({ on: true, tried: NOW + 400_000 })
-    expect(sum.warnings.find((w) => w.id === 'quota:anthropic')?.words).toMatch(/^Claude Code: 5 h is at 91%: 9% left, refills /)
+    expect(sum.warnings.find((w) => w.id === 'quota:claude')?.words).toMatch(/^Claude Code: 5 h is at 91%: 9% left, refills /)
     expect(JSON.stringify(sum)).not.toContain(KEY)
   })
 })

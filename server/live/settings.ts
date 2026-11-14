@@ -13,10 +13,10 @@ import type { SettingRow, SettingSection, TriggerRow } from '../../shared/types.
 import { home, readJson, writeJson } from '../store.ts'
 import type { SetBy } from '../../shared/brief.ts'
 import { settingsBlock, settingsLines, SEVERITIES, type Reviewer, type Said, type Ways } from './prompts.ts'
-import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf, scopeOpencodeText, scopePatterns } from './models.ts'
+import { effortFor, effortsOf, findModel, knowsModels, LEVELS, modelsOf, offers, scopeOpencodeText, scopePatterns } from './models.ts'
 import { picksOf, rememberModel } from './model-picks.ts'
 import { NO_PICKS, orderByPicks } from '../../shared/picks.ts'
-import { fitToProviders, formatMaxAtOnce, loweredWords, parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
+import { fitToProviders, formatMaxAtOnce, loweredWords, parseMaxAtOnce, toHarnessPatterns, type Lowered, type MaxEntry } from '../../shared/model-caps.ts'
 import { eventRules, eventsText, eventWords, nextWords, OWN_ZONE, timeRule, timeWords, validZone, type EventRule } from './trigger.ts'
 
 /** every agent kind herdr can start (interactive chat requires runtime log discovery and a reader) */
@@ -260,7 +260,22 @@ function upgrade(v: Values): Values {
   if (out['brief.waitChecks'] === 'on' && out['brief.merge'] !== 'ask me first') out['brief.merge'] = 'after GitHub checks'
   // when the primary is back: on was its only other value before going back by itself came, and it meant tell me
   if (out['backup.watchReturn'] === 'on') out['backup.watchReturn'] = 'tell me'
+  if (out['models.maxAtOnce'] !== undefined) out['models.maxAtOnce'] = fitCaps(out['models.maxAtOnce']).text
   return out
+}
+
+/** the format of models.maxAtOnce's words: 2 is the harness keys (pi.spark=2, claude/claude-opus-5-5=1); a file with none is 1 */
+export const CAPS_FORMAT = 2
+
+/** models.maxAtOnce as it is kept: old provider names in the harness form (toHarnessPatterns, with the lists models.ts has),
+ *  and a model's own limit fitted to its provider's (fitToProviders). `converted`: the words changed; `lowered`: the limits
+ *  lowered. Text that can't be read is kept as written */
+export function fitCaps(text: string): { text: string; converted: boolean; lowered: Lowered[] } {
+  const cap = parseMaxAtOnce(text)
+  if (!cap.ok) return { text, converted: false, lowered: [] }
+  const harness = toHarnessPatterns(cap.entries, offers)
+  const fit = fitToProviders(harness)
+  return { text: formatMaxAtOnce(fit.entries) || 'off', converted: formatMaxAtOnce(harness) !== formatMaxAtOnce(cap.entries), lowered: fit.lowered }
 }
 
 /** values kept under their old words: read as today's */
@@ -407,7 +422,7 @@ export const CATALOG: Section[] = [
       // per provider or per model. Read at two levels, both applied (model-caps.ts, choose.ts): the machine's own value (Machine,
       // or Everywhere) is the machine's total, and a space's own value (pick: its own, else the machine's) is that space's
       // sub-limit inside it. A space's value never replaces the machine's total.
-      { label: 'Most at once per model or provider', key: 'models.maxAtOnce', value: 'off', text: true, hint: `Most agents of one provider or model at once: spark=4 caps every spark model, anthropic/claude-opus-5-5=2 one model (a model's own entry wins). Set at this machine or Everywhere it is the machine's total, for every space together; set for a space, that space's own sub-limit inside it (its own runs only). A task waits for a free slot of its model, and the others start past it. 0 blocks a model: nothing new starts on it, in any role, and a task whose every model is blocked is held until a limit changes. Agents already running on it keep running. Counts this machine's tasks and coordinators on it; requests from other apps on the same server are not seen. No entry: no cap per model (unlimited). Off: no caps at all.` },
+      { label: 'Most at once per model or provider', key: 'models.maxAtOnce', value: 'off', text: true, hint: `Most agents of one provider or model at once: pi.spark=4 caps every model of pi's spark provider, claude/claude-opus-5-5=2 one model (a model's own entry wins). Set at this machine or Everywhere it is the machine's total, for every space together; set for a space, that space's own sub-limit inside it (its own runs only). A task waits for a free slot of its model, and the others start past it. 0 blocks a model: nothing new starts on it, in any role, and a task whose every model is blocked is held until a limit changes. Agents already running on it keep running. Counts this machine's tasks and coordinators on it; requests from other apps on the same server are not seen. No entry: no cap per model (unlimited). Off: no caps at all.` },
     ],
   },
   {
@@ -565,6 +580,8 @@ export interface Stored {
   everywhere: Values
   machine: Values
   spaces: Record<string, Values>
+  /** the format of models.maxAtOnce's words (CAPS_FORMAT); none for a file written before it */
+  capsFormat?: number
 }
 
 /** the defaults you set, at their levels */
@@ -582,6 +599,7 @@ export class Settings {
       const spaces = (raw.spaces ?? raw.projects ?? {}) as Record<string, unknown>
       heartbeats([raw.everywhere as Values, (raw.machine ?? {}) as Values], Object.values(spaces) as Values[])
       this.d = { everywhere: keep(raw.everywhere), machine: keep(raw.machine), spaces: Object.fromEntries(Object.entries(spaces).map(([k, v]) => [k, keep(v)])) }
+      this.convertCaps(raw, [['everywhere', raw.everywhere], ['machine', raw.machine], ...Object.entries(spaces).map(([k, v]) => [`space ${k}`, v] as [string, unknown])])
       // settings no longer kept (Autopilot's old limits and wake picks) leave the file too
       if (JSON.stringify(this.d) !== JSON.stringify(raw)) this.save()
       this.scopeOpencode()
@@ -603,7 +621,22 @@ export class Settings {
       machine: Object.fromEntries(Object.entries(old).filter(([k]) => mine(k))),
       spaces: {},
     }
+    this.convertCaps(raw, [['everywhere', all]])
     this.scopeOpencode()
+  }
+
+  /** a file from before the harness keys (no capsFormat): each models.maxAtOnce text it holds that is written another way now is
+   *  logged, and the file is marked (saved with its next write, as the constructor saves a changed file) so this runs once */
+  private convertCaps(raw: Record<string, unknown>, levels: [string, unknown][]) {
+    if (raw.capsFormat === CAPS_FORMAT) return
+    this.d.capsFormat = CAPS_FORMAT
+    if (this.seed) return
+    for (const [name, v] of levels) {
+      const text = (v as Values | undefined)?.['models.maxAtOnce']
+      if (typeof text !== 'string') continue
+      const fit = fitCaps(text)
+      if (fit.converted || fit.lowered.length) console.error(`shepherdr: models.maxAtOnce at ${name} "${text}" is kept as "${fit.text}"`)
+    }
   }
 
   private save() {
@@ -665,11 +698,12 @@ export class Settings {
       else if (key === 'heartbeat.on') value = eventsText(eventRules(value))
       else if (key === 'time.zone') value = value.trim()
       else if (key === 'models.maxAtOnce') {
-        // a model's own limit above its provider's at this level is lowered to it (fitToProviders), and the note says so
-        const cap = parseMaxAtOnce(value)
-        const fit = fitToProviders(cap.ok ? cap.entries : [])
-        if (fit.lowered.length) note = `Lowered to fit their provider: ${loweredWords(fit.lowered)}.`
-        value = cap.ok ? formatMaxAtOnce(fit.entries) || 'off' : value
+        // old provider names are written in the harness form, and a model's own limit above its provider's is lowered to it:
+        // the note says what was kept instead
+        const fit = fitCaps(value)
+        const words = [fit.converted ? `Kept as ${fit.text}.` : '', fit.lowered.length ? `Lowered to fit their provider: ${loweredWords(fit.lowered)}.` : ''].filter(Boolean)
+        if (words.length) note = words.join(' ')
+        value = fit.text
       }
       // a CLI is kept by its name, however it was written
       else if (isBackupCli(key) && value.trim().toLowerCase() === 'off') value = 'off'

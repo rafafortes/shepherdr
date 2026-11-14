@@ -9,7 +9,7 @@
 // with the same editors. Bulk actions are confirmed first (a column's Set for every space…, a provider's Clear every
 // space's sub-limit).
 import clsx from 'clsx'
-import { useEffect, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { BLOCKED as BLOCKED_WORDS, parseMaxAtOnce, withEntry, type MaxEntry } from '@shared/model-caps.ts'
 import { shareOf } from '@shared/quota-words.ts'
 import type { LimitCell, LimitColumn, LimitKnown, LimitProvider, LimitRow, LimitSpaceRow, LimitTable, LimitsView, SettingRow, WaitingNow } from '@shared/types.ts'
@@ -20,7 +20,8 @@ import { CAP_KEY, CapCell, CapEditor } from './CapCell.tsx'
 import { LimitChoice, limitValue, limitWords } from './LimitChoice.tsx'
 import { Pop } from './cell-pop.tsx'
 import { Editor, Refused } from './ModelsPage.tsx'
-import { OtherProviders } from './ModelsSummary.tsx'
+import { HarnessRow, OtherProviders } from './ModelsSummary.tsx'
+import { harnessGroups, inHarness } from '../shared/harness.ts'
 import { ProfilesBar } from './Profiles.tsx'
 import { openPage, shown } from './Settings.tsx'
 import { Dialog } from './rowmenu.tsx'
@@ -426,27 +427,34 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
   // the providers in use, then those nothing uses yet (Other providers): a phone's card per provider, a desktop's grid
   const used = v.providers.filter((p) => !p.idle)
   const idle = v.providers.filter((p) => p.idle)
+  // a phone's cards, under a heading for each harness that runs several providers
   const providerCards = (list: LimitProvider[]) =>
-    list.map((p) => (
-      <section key={p.provider} aria-label={p.name} className="rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble">
-        <div className="flex items-center gap-2 px-4 pt-3 pb-1">
-          <h3 className="min-w-0 flex-1 truncate font-medium">{p.name}</h3>
-          {p.local ? <Small>local</Small> : null}
-        </div>
-        <div className="flex flex-col gap-1 px-4 pb-2">
-          <Small className="text-fg2">Max at once</Small>
-          <CapCell name={p.name} pattern={p.provider} atOnce={p.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
-          <ProviderFacts byRole={p.byRole} tasks={p.tasks} held={p.atOnce.held} runOuts={p.runOuts} quota={p.quota} read={p.quotaRead} />
-        </div>
-        {p.models.map((m) => (
-          <div key={m.key} className="flex flex-col gap-1 border-t border-line px-4 py-2">
-            <span className="truncate text-fg2">{m.label}</span>
-            <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
-            <ProviderFacts byRole={m.byRole} tasks={m.tasks} held={m.atOnce.held} runOuts={m.runOuts} />
-          </div>
+    harnessGroups(list).map((g) => (
+      <Fragment key={g.harness}>
+        {g.single ? null : <h3 className="px-1 font-medium text-fg2">{g.name}</h3>}
+        {g.list.map((p) => (
+          <section key={p.provider} aria-label={p.name} className="rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble">
+            <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+              <h3 className="min-w-0 flex-1 truncate font-medium">{p.name}</h3>
+              {p.local ? <Small>local</Small> : null}
+            </div>
+            <div className="flex flex-col gap-1 px-4 pb-2">
+              <Small className="text-fg2">Max at once</Small>
+              <CapCell name={p.name} harness={p.harnessName} pattern={p.provider} atOnce={p.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
+              <ProviderFacts byRole={p.byRole} tasks={p.tasks} held={p.atOnce.held} runOuts={p.runOuts} quota={p.quota} read={p.quotaRead} />
+            </div>
+            {p.models.map((m) => (
+              <div key={m.key} className="flex flex-col gap-1 border-t border-line px-4 py-2">
+                <span className="truncate text-fg2">{m.label}</span>
+                <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
+                <ProviderFacts byRole={m.byRole} tasks={m.tasks} held={m.atOnce.held} runOuts={m.runOuts} />
+              </div>
+            ))}
+          </section>
         ))}
-      </section>
+      </Fragment>
     ))
+  // the desktop table: a heading row for each harness that runs several providers, its providers and their models under it
   const providerGrid = (label: string, list: LimitProvider[]) => (
     <table aria-label={label} className="w-full table-fixed border-separate border-spacing-0 text-[0.8125rem]">
       <colgroup>
@@ -470,8 +478,13 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
         </tr>
       </thead>
       <tbody>
-        {list.map((p) => (
-          <ProviderRows key={p.provider} p={p} v={v} capOpen={capOpen} setCapOpen={setCapOpen} menu={menu} setMenu={setMenu} hasSubs={hasSubs(p.provider)} onClear={() => setBulk({ kind: 'clear', pattern: p.provider, name: p.name })} />
+        {harnessGroups(list).map((g) => (
+          <Fragment key={g.harness}>
+            {g.single ? null : <HarnessRow name={g.name} cols={6} />}
+            {g.list.map((p) => (
+              <ProviderRows key={p.provider} p={p} v={v} nested={!g.single} capOpen={capOpen} setCapOpen={setCapOpen} menu={menu} setMenu={setMenu} hasSubs={hasSubs(p.provider)} onClear={() => setBulk({ kind: 'clear', pattern: p.provider, name: inHarness(p.harnessName, p.name) })} />
+            ))}
+          </Fragment>
         ))}
       </tbody>
     </table>
@@ -704,13 +717,13 @@ function ProviderFacts({ byRole, tasks, held, runOuts, quota, read }: { byRole: 
 
 /** a provider's row and its models' rows, as the desktop table draws them: the cap (its row's ⋯ clears the spaces' sub-limits),
  *  what runs by role, what is held, whether it is out, and its quota (a provider's only; a details link to Models) */
-function ProviderRows({ p, v, capOpen, setCapOpen, menu, setMenu, hasSubs, onClear }: { p: LimitProvider; v: LimitsView; capOpen: string | null; setCapOpen: (id: string | null) => void; menu: string | null; setMenu: (m: string | null) => void; hasSubs: boolean; onClear: () => void }) {
-  const cells = (name: string, pattern: string, atOnce: LimitProvider['atOnce'], byRole: LimitProvider['byRole'], tasks: string[] | undefined, runOuts: LimitProvider['runOuts'], held: number, quota?: LimitProvider['quota'], read?: LimitProvider['quotaRead'], clear?: boolean) => (
+function ProviderRows({ p, v, nested, capOpen, setCapOpen, menu, setMenu, hasSubs, onClear }: { p: LimitProvider; v: LimitsView; nested: boolean; capOpen: string | null; setCapOpen: (id: string | null) => void; menu: string | null; setMenu: (m: string | null) => void; hasSubs: boolean; onClear: () => void }) {
+  const cells = (name: string, pattern: string, atOnce: LimitProvider['atOnce'], byRole: LimitProvider['byRole'], tasks: string[] | undefined, runOuts: LimitProvider['runOuts'], held: number, quota?: LimitProvider['quota'], read?: LimitProvider['quotaRead'], clear?: boolean, harness?: string) => (
     <>
       <td className="relative py-1.5 pr-3 align-top">
         <span className="flex items-start gap-1">
           <span className="min-w-0 flex-1">
-            <CapCell name={name} pattern={pattern} atOnce={atOnce} caps={v.caps} phone={false} openId={capOpen} onOpen={setCapOpen} />
+            <CapCell name={name} harness={harness} pattern={pattern} atOnce={atOnce} caps={v.caps} phone={false} openId={capOpen} onOpen={setCapOpen} />
           </span>
           {clear ? (
             <More
@@ -749,17 +762,17 @@ function ProviderRows({ p, v, capOpen, setCapOpen, menu, setMenu, hasSubs, onCle
   return (
     <>
       <tr>
-        <th scope="row" className="sticky left-0 z-10 bg-bg pr-4 py-1.5 text-left align-top font-normal">
+        <th scope="row" className={clsx('sticky left-0 z-10 bg-bg pr-4 py-1.5 text-left align-top font-normal', nested && 'pl-5')}>
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate font-medium text-fg" title={p.name}>{p.name}</span>
             {p.local ? <span className="shrink-0 text-[0.75rem] text-fg3">local</span> : null}
           </span>
         </th>
-        {cells(p.name, p.provider, p.atOnce, p.byRole, p.tasks, p.runOuts, p.atOnce.held, p.quota, p.quotaRead, hasSubs)}
+        {cells(p.name, p.provider, p.atOnce, p.byRole, p.tasks, p.runOuts, p.atOnce.held, p.quota, p.quotaRead, hasSubs, p.harnessName)}
       </tr>
       {p.models.map((m) => (
         <tr key={m.key}>
-          <th scope="row" className="sticky left-0 z-10 bg-bg py-1 pr-4 pl-6 text-left align-top font-normal">
+          <th scope="row" className={clsx('sticky left-0 z-10 bg-bg py-1 pr-4 text-left align-top font-normal', nested ? 'pl-10' : 'pl-6')}>
             <span className="block truncate text-fg2" title={m.key}>{m.label}</span>
           </th>
           {cells(m.label, m.key, m.atOnce, m.byRole, m.tasks, m.runOuts, m.atOnce.held)}

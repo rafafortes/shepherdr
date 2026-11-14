@@ -775,6 +775,7 @@ describe('settings', () => {
     const s = new Settings()
     // the old interval and quiet hours are a time rule now: every 45 minutes; in gtm, Everywhere's 45 outside 22:00-07:00
     expect(readJson('settings.json', {})).toEqual({
+      capsFormat: 2,
       everywhere: { 'heartbeat.when': T.timeRule('FREQ=MINUTELY;INTERVAL=45') },
       machine: {},
       spaces: { gtm: { 'heartbeat.when': T.timeRule('FREQ=MINUTELY;INTERVAL=45;BYHOUR=7,8,9,10,11,12,13,14,15,16,17,18,19,20,21') } },
@@ -790,7 +791,7 @@ describe('settings', () => {
     // Autopilot's old limits and wake picks are dropped; its heartbeat stays, as a time rule
     expect(s.get('heartbeat.when')).toBe(T.timeRule('FREQ=MINUTELY;INTERVAL=45'))
     s.set('heartbeat.when', null)
-    expect(readJson('settings.json', {})).toEqual({ everywhere: { 'task.agent': 'Codex', 'coordinator.agent': 'Codex' }, machine: {}, spaces: {} })
+    expect(readJson('settings.json', {})).toEqual({ everywhere: { 'task.agent': 'Codex', 'coordinator.agent': 'Codex' }, machine: {}, spaces: {}, capsFormat: 2 })
     // the Watcher's settings, from before agents reported their own progress, are dropped
     writeJson('settings.json', { agent: 'pi', 'watcher.agent': 'Claude Code', 'watcher.effort': 'lowest' })
     s = new Settings()
@@ -835,7 +836,7 @@ describe('settings', () => {
     // a machine's capacity has no project level; alerts and voice are one for all
     expect(s.set('machine.maxTasks', '2', { space: 'web' }).ok).toBe(false)
     expect(s.set('voice.service', 'ElevenLabs', 'machine').ok).toBe(false)
-    expect(readJson<Record<string, unknown>>('settings.json', {})).toEqual({ everywhere: { 'brief.review': 'off' }, machine: { 'machine.maxTasks': '8', 'task.agent': 'Codex' }, spaces: { web: { 'task.agent': 'pi', 'brief.review': 'on' } } })
+    expect(readJson<Record<string, unknown>>('settings.json', {})).toEqual({ capsFormat: 2, everywhere: { 'brief.review': 'off' }, machine: { 'machine.maxTasks': '8', 'task.agent': 'Codex' }, spaces: { web: { 'task.agent': 'pi', 'brief.review': 'on' } } })
     // the screen's rows say where an inherited value comes from, and what a reset goes back to
     const rows = (level: string, name: string) => s.sections([], [], null, 'vm', ['web']).find((x) => x.level === level && x.name === name)!.rows
     const agent = (level: string) => rows(level, 'Agents').find((r) => r.key === 'task.agent')!

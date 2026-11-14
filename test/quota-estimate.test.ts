@@ -24,7 +24,7 @@ function runOut(l: UsageLedger, ago: number, key = MODEL): RunOut {
 describe('no ledger, no estimate', () => {
   test('with no call of OpenCode Go in the week and no run-out there is no figure at all', () => {
     const l = ledger('estimate-empty')
-    call(l, 200, 900, undefined, 'anthropic/claude-opus-5-5')
+    call(l, 200, 900, undefined, 'claude/claude-opus-5-5')
     expect(opencodeEstimate(l, NOW)).toBeUndefined()
   })
 })
@@ -104,7 +104,7 @@ describe('with run-outs: the window before each one is a learned limit, and the 
   test('a run-out of another provider is none of this estimate', () => {
     const l = ledger('estimate-other')
     call(l, 1.5, 4000)
-    runOut(l, 2.5, 'anthropic/claude-opus-5-5')
+    runOut(l, 2.5, 'claude/claude-opus-5-5')
     const got = opencodeEstimate(l, NOW)!
     expect(got.windows[0]).toEqual({ name: '5 h', used: 4000 })
   })

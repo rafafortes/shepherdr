@@ -55,7 +55,14 @@ export interface UsageTotals {
   cost?: number
 }
 
+/** usage.json's format: 2 is the harness keys (pi.spark/…, claude/…); a file with no version is 1 */
+export const VERSION = 2
+/** a quota or alert key from before the harness keys, and its name now */
+const RENAMED_PROVIDERS: Record<string, string> = { anthropic: 'claude', commandcode: 'pi.commandcode', 'opencode-go': 'opencode.opencode-go' }
+
 interface Stored {
+  /** the format (VERSION); none for a file written before it existed */
+  version?: number
   usage: Record<string, Record<string, Bucket>>
   /** per chat: each counted call id, with its hour */
   seen: Record<string, Record<string, number>>
@@ -69,21 +76,54 @@ interface Stored {
   backfilled?: number
 }
 
-const fresh = (): Stored => ({ usage: {}, seen: {}, runOuts: [], quotas: {}, alerts: {}, files: {} })
+const fresh = (): Stored => ({ version: VERSION, usage: {}, seen: {}, runOuts: [], quotas: {}, alerts: {}, files: {} })
 
-/** the CLI's provider: Claude Code's models are Anthropic's (the Claude subscription), Codex's are OpenAI's */
-const PROVIDER_OF: Record<string, string> = { claude: 'anthropic', 'claude-code': 'anthropic', codex: 'openai' }
+/** an alert key (`provider|window`) with its provider renamed, when the provider has a new name */
+const renamedAlert = (key: string) => {
+  const bar = key.indexOf('|')
+  const name = bar < 0 ? undefined : RENAMED_PROVIDERS[key.slice(0, bar)]
+  return name ? `${name}${key.slice(bar)}` : key
+}
 
-/** a model's key, provider/model: pi's model ids carry their provider already (spark/qwen3.8-…, commandcode/deepseek/…);
- *  a model the logs don't name is "unknown" */
+/** a CLI's name in a key where the log names it another way (Claude Code's reader is claude-code) */
+const CLI_ALIAS: Record<string, string> = { 'claude-code': 'claude' }
+/** the harnesses that run several providers' models: their keys are harness.provider/model (pi.spark/qwen…) */
+const MULTI_PROVIDER = ['pi', 'opencode']
+
+/** a model's key, provider/model. A single-account CLI is its own provider (claude/claude-opus-5-5, codex/…, agy/…); pi and
+ *  OpenCode name their providers in their model ids (pi.spark/qwen…, opencode.opencode/minimax…), so their key is the
+ *  harness and a dot in front of that id, and a model with no provider part is harness/name (pi/unknown). Any other CLI is
+ *  cli/name. A model the logs don't name is "unknown" */
 export function modelKey(cli: string, model?: string): string {
   const name = model && model !== 'default' ? model : 'unknown'
-  // pi and OpenCode name their models with the provider in front (opencode/minimax-m3.1-flash-free)
-  if (cli === 'pi' || cli === 'opencode') return name.includes('/') ? name : `${cli}/${name}`
+  const harness = CLI_ALIAS[cli] ?? cli
+  if (MULTI_PROVIDER.includes(harness)) return name.includes('/') ? `${harness}.${name}` : `${harness}/${name}`
   // agy's effort is in its model id (gemini-3.8-flash-low): the key is the model without it, as the menus offer it
-  if (cli === 'agy') return `agy/${agyBaseId(name)}`
-  return `${PROVIDER_OF[cli] ?? cli}/${name}`
+  if (harness === 'agy') return `agy/${agyBaseId(name)}`
+  return `${harness}/${name}`
 }
+
+/**
+ * A key from before the harness prefix, in the harness form. Its own provider says the harness where it can: agy's keys and
+ * pi's default (pi/…) were in that form already, `opencode/…` was OpenCode's own Zen models (its default too), `anthropic/…`
+ * Claude Code's and `openai/…` Codex's, unless the chat ran pi or OpenCode (their own Anthropic or OpenAI keys); any other
+ * provider was pi's or OpenCode's: the chat's, when it is one of the two, else pi's. `kind` is the chat's CLI now, which may
+ * not be the one it ran then: it only decides what the key leaves open (a chat moved from OpenCode to pi keeps its Zen key)
+ */
+export function rekey(old: string, kind?: string): string {
+  const provider = providerOf(old)
+  if (provider.includes('.') || ['claude', 'codex', 'agy', 'pi'].includes(provider)) return old
+  if (provider === 'opencode') return modelKey('opencode', old === 'opencode/unknown' ? 'unknown' : old)
+  const multi = kind && MULTI_PROVIDER.includes(kind) ? kind : undefined
+  if (provider === 'anthropic' || provider === 'openai') return multi ? `${multi}.${old}` : modelKey(provider === 'anthropic' ? 'claude' : 'codex', modelOf(old))
+  return `${multi ?? 'pi'}.${old}`
+}
+
+/** a key's harness: the part before the first "." (pi in pi.spark/…), or its single-account CLI (claude in claude/…) */
+export const harnessOf = (provider: string) => (provider.includes('.') ? provider.slice(0, provider.indexOf('.')) : provider)
+
+/** a provider's part after its harness (spark in pi.spark), or the whole provider for a single-account CLI */
+export const providerPart = (provider: string) => (provider.includes('.') ? provider.slice(provider.indexOf('.') + 1) : provider)
 
 /** a model key's provider: the prefix before the first "/" */
 export const providerOf = (key: string) => (key.includes('/') ? key.slice(0, key.indexOf('/')) : key)
@@ -115,7 +155,30 @@ export class UsageLedger {
     this.data = memory ? fresh() : readJson<Stored>('usage.json', fresh(), dir)
     for (const k of ['usage', 'seen', 'quotas', 'alerts', 'files'] as const) this.data[k] ??= {}
     this.data.runOuts ??= []
+    this.migrate()
     this.prune(Date.now())
+  }
+
+  /** a file from before the harness keys (no version, or 1): its counts and log positions are emptied, so the feed reads every
+   *  log again, its quotas and alerts take the new names, and its run-outs wait for migrateRunOuts (which makes it version 2) */
+  private migrate() {
+    if ((this.data.version ?? 1) >= VERSION) return
+    this.data.usage = {}
+    this.data.seen = {}
+    this.data.files = {}
+    delete this.data.backfilled
+    this.data.quotas = Object.fromEntries(Object.entries(this.data.quotas).map(([k, q]) => [RENAMED_PROVIDERS[k] ?? k, q]))
+    this.data.alerts = Object.fromEntries(Object.entries(this.data.alerts).map(([k, at]) => [renamedAlert(k), at]))
+    this.save()
+  }
+
+  /** the run-outs of a file from before the harness keys, re-keyed as the CLI of their chat writes them (kindOfChat: the chat's
+   *  agent kind now, from its record: rekey says when it decides). Then the file is version 2 */
+  migrateRunOuts(kindOfChat: (chat: string) => string | undefined) {
+    if ((this.data.version ?? 1) >= VERSION) return
+    this.data.runOuts = this.data.runOuts.map((r) => ({ ...r, key: rekey(r.key, kindOfChat(r.chat)) }))
+    this.data.version = VERSION
+    this.save()
   }
 
   /** counts one model call of a chat, once: false when it was counted already, or is older than the window */

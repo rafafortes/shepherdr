@@ -21,7 +21,7 @@ async function started(model?: string, effort?: string) {
 describe('a task says what its agent runs on', () => {
   test('its provider (and its name), its model and its effort, while its agent is up', async () => {
     const { w, t } = await started(SPARK, 'high')
-    expect(w.engine.view(t).agent?.run).toEqual({ provider: 'spark', providerName: 'Spark (local)', model: 'qwen3.8-flash-next-mlx4-mtp-tensorfold', effort: 'high' })
+    expect(w.engine.view(t).agent?.run).toEqual({ provider: 'pi.spark', providerName: 'Spark (local)', model: 'qwen3.8-flash-next-mlx4-mtp-tensorfold', effort: 'high' })
   })
 
   test("a CLI that picks its own model says default, and no effort when none was set", async () => {

@@ -298,7 +298,7 @@ Settings and automations
                                                  unset drops that level's own, so the level above it counts again.
                                                  Counts and limits take any number in their range.
                                                  models.maxAtOnce is a list, provider=N or model=N, comma-separated:
-                                                 "spark=4, anthropic/claude-opus-5-5=2" (this machine or Everywhere).
+                                                 "pi.spark=4, claude/claude-opus-5-5=2" (this machine or Everywhere).
                                                  --apply-waiting (task.agent, task.model, task.effort, or a reviewer.*
                                                  key): the waiting tasks it reaches (of that space; else of each space
                                                  of this machine that doesn't set it itself) start on what Settings

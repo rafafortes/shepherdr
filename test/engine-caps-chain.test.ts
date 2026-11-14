@@ -6,6 +6,8 @@ import { describe, expect, test } from 'bun:test'
 import { repo, until, world } from './engine-world.ts'
 
 const SPARK = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
+/** the key pi's model runs under */
+const KEY = `pi.${SPARK}`
 
 /** a fresh world: its spacing off, the CLIs all installed (so the backups are real), and models.maxAtOnce as given */
 function fresh(caps = 'off') {
@@ -27,9 +29,9 @@ const kindOf = (w: ReturnType<typeof world>, key: string) => ([...w.started].rev
 const startedOn = (w: ReturnType<typeof world>, id: string) => w.started.some((s) => s.key === `${id}/Agent`)
 
 /** a task on a pi model (its own agent) that is started at once and reads its brief */
-async function running(w: ReturnType<typeof world>, dir: string, name: string, title: string, model = SPARK, set?: Record<string, string>) {
+async function running(w: ReturnType<typeof world>, dir: string, name: string, title: string, model = SPARK, set?: Record<string, string>, kind = 'pi') {
   const p = await w.places.add(dir, name)
-  const t = w.engine.add({ project: p.name, title, desc: `Add ${title}.txt.`, by: 'test', agent: { kind: 'pi', model }, ...(set ? { set } : {}) })
+  const t = w.engine.add({ project: p.name, title, desc: `Add ${title}.txt.`, by: 'test', agent: { kind, model }, ...(set ? { set } : {}) })
   await until(() => w.started.some((s) => s.key === `${t.id}/Agent`))
   w.records[`${t.id}/Agent`] = { ...w.records[`${t.id}/Agent`], model } as never
   w.brief(`${t.id}/Agent`)
@@ -37,8 +39,8 @@ async function running(w: ReturnType<typeof world>, dir: string, name: string, t
 }
 
 /** a task added on a pi model: it starts or is held as the caps say */
-const add = (w: ReturnType<typeof world>, p: { name: string }, title: string, model = SPARK, set?: Record<string, string>) =>
-  w.engine.add({ project: p.name, title, desc: `Add ${title}.txt.`, by: 'test', agent: { kind: 'pi', model }, ...(set ? { set } : {}) })
+const add = (w: ReturnType<typeof world>, p: { name: string }, title: string, model = SPARK, set?: Record<string, string>, kind = 'pi') =>
+  w.engine.add({ project: p.name, title, desc: `Add ${title}.txt.`, by: 'test', agent: { kind, model }, ...(set ? { set } : {}) })
 
 const cards = (w: ReturnType<typeof world>, key: string) => w.posted.filter((x) => x.key === key && x.card).map((x) => x.card!.text)
 
@@ -52,11 +54,11 @@ describe('the caps and the backup chain: a task starts on the first backup with 
     expect(kindOf(w, `${s2.id}/Agent`)).toBe('codex')
     expect(s2.held).toBeUndefined()
     expect(s2.onBackup).toEqual({ step: 1, kind: 'codex', at: expect.any(Number) })
-    expect(cards(w, `${s2.id}/Agent`)).toContain('Started on Codex: spark is at its limit (1 of 1 at once)')
+    expect(cards(w, `${s2.id}/Agent`)).toContain('Started on Codex: pi · spark is at its limit (1 of 1 at once)')
     // the agent is told it runs on a backup, with the same brief
     expect(w.started.find((s) => s.key === `${s2.id}/Agent`)?.first).toContain('Shepherdr started you on')
     // the primary's model still runs one task: the count is the backup's own
-    expect(w.engine.runs().filter((r) => r.key === SPARK)).toHaveLength(1)
+    expect(w.engine.runs().filter((r) => r.key === KEY)).toHaveLength(1)
     expect(s1.t.onBackup).toBeUndefined()
   })
 
@@ -70,24 +72,24 @@ describe('the caps and the backup chain: a task starts on the first backup with 
   })
 
   test('the primary and Backup 1 are full: Backup 2 starts (the chain as the task keeps it)', async () => {
-    const w = fresh('spark=1, openai=1')
+    const w = fresh('pi.spark=1, codex=1')
     const dir = repo()
     const p = await w.places.add(dir, 'chain-two')
     await running(w, dir, 'chain-two-a', 'A1')
     // a pi run on an OpenAI model fills openai=1: Backup 1 (Codex, the default) is full too
-    await running(w, dir, 'chain-two-x', 'X1', 'openai/gpt-5.5')
+    await running(w, dir, 'chain-two-x', 'X1', 'gpt-5.5', undefined, 'codex')
     const c1 = add(w, p, 'C1', SPARK, { 'task.fallback': 'Codex', 'task.fallback2': 'pi' })
     await until(() => startedOn(w, c1.id))
     expect(kindOf(w, `${c1.id}/Agent`)).toBe('pi')
     expect(c1.onBackup?.step).toBe(2)
-    expect(cards(w, `${c1.id}/Agent`)).toContain('Started on pi: spark is at its limit (1 of 1 at once)')
+    expect(cards(w, `${c1.id}/Agent`)).toContain('Started on pi: pi · spark is at its limit (1 of 1 at once)')
   })
 
   test("a task's own --set chain: the backups it keeps, in its order, are tried in that order", async () => {
-    const w = fresh('spark=1, openai=1')
+    const w = fresh('pi.spark=1, codex=1')
     const dir = repo()
     await running(w, dir, 'set-busy', 'Busy')
-    await running(w, dir, 'set-x', 'X1', 'openai/gpt-5.5')
+    await running(w, dir, 'set-x', 'X1', 'gpt-5.5', undefined, 'codex')
     const p = await w.places.add(dir, 'set-chain')
     // the task's own backups: Codex then pi (the Settings default of Backup 1 is Codex too, but the task keeps pi first)
     const t = add(w, p, 'Chain', SPARK, { 'task.fallback': 'pi', 'task.fallback2': 'Codex' })
@@ -100,7 +102,7 @@ describe('the caps and the backup chain: a task starts on the first backup with 
 
 describe('the caps and the backup chain: held with the chain named, and started when one frees', () => {
   test('every model full or out: held, the row and card name each harness; the first to free starts it', async () => {
-    const w = fresh('spark=1, openai=1')
+    const w = fresh('pi.spark=1, codex=1')
     const dir = repo()
     const s1 = await running(w, dir, 'held-s1', 'S1')
     const s2 = add(w, s1.p, 'S2')
@@ -108,14 +110,14 @@ describe('the caps and the backup chain: held with the chain named, and started 
     expect(kindOf(w, `${s2.id}/Agent`)).toBe('codex')
     const s3 = add(w, s1.p, 'S3')
     expect(s3.held?.why).toBe('model')
-    expect(w.engine.subOf(s3)).toBe('Waiting: spark 1/1 · openai 1/1')
+    expect(w.engine.subOf(s3)).toBe('Waiting: pi · spark 1/1 · codex 1/1')
     // the row is one short line; its title names the whole chain, in words
-    expect(w.engine.view(s3).sub).toBe('Waiting: spark 1/1 · openai 1/1')
+    expect(w.engine.view(s3).sub).toBe('Waiting: pi · spark 1/1 · codex 1/1')
     expect(w.engine.view(s3).subTitle).toBe('Waiting: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (1 of 1 at once), Codex (default) (1 of 1 at once)')
     expect(w.engine.view(s1.t).subTitle).toBeUndefined()
     expect(cards(w, `${s3.id}/Agent`)).toContain('waiting: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (1 of 1 at once), Codex (default) (1 of 1 at once) — every model it may use is full or out')
     expect(startedOn(w, s3.id)).toBe(false)
-    expect(w.engine.waitingFor(s3)).toEqual(['spark', 'openai'])
+    expect(w.engine.waitingFor(s3)).toEqual(['pi.spark', 'codex'])
     // a start that finds the wait (as one a pass races) holds the task again, and starts nothing
     await (w.engine as unknown as { startTask(t: unknown): Promise<void> }).startTask(s3)
     expect(s3.held?.why).toBe('model')
@@ -130,12 +132,12 @@ describe('the caps and the backup chain: held with the chain named, and started 
 
   test('a backup out of quota is named as out in the wait, with its time', async () => {
     const w = fresh('spark=1')
-    w.engine.outNow = (key) => (key.startsWith('openai') ? { until: '17:00' } : undefined)
+    w.engine.outNow = (key) => (key.startsWith('codex') ? { until: '17:00' } : undefined)
     const dir = repo()
     const s1 = await running(w, dir, 'out-s1', 'S1')
     const s2 = add(w, s1.p, 'S2')
     expect(s2.held?.why).toBe('model')
-    expect(w.engine.subOf(s2)).toBe('Waiting: spark 1/1 · openai out')
+    expect(w.engine.subOf(s2)).toBe('Waiting: pi · spark 1/1 · codex out')
     // the out backup is never the one a start goes in on, and the wait says so
     expect(w.engine.taskChoice(s2)).toMatchObject({ wait: [{ why: 'full' }, { why: 'out', until: '17:00' }] })
     w.engine.outNow = () => undefined
@@ -146,13 +148,13 @@ describe('the caps and the backup chain: held with the chain named, and started 
 
   test('an out primary: the task starts on Backup 1 at once, its card says the primary is out', async () => {
     const w = fresh('off')
-    w.engine.outNow = (key) => (key === SPARK ? { until: '18:00' } : undefined)
+    w.engine.outNow = (key) => (key === KEY ? { until: '18:00' } : undefined)
     const dir = repo()
     const p = await w.places.add(dir, 'out-primary')
     const t = add(w, p, 'P1')
     await until(() => startedOn(w, t.id))
     expect(kindOf(w, `${t.id}/Agent`)).toBe('codex')
-    expect(cards(w, `${t.id}/Agent`)).toContain('Started on Codex: spark is out until 18:00')
+    expect(cards(w, `${t.id}/Agent`)).toContain('Started on Codex: pi · spark is out until 18:00')
   })
 
   test('a lease of the advisor or the reviewer counts toward the caps like a run, and unleases', async () => {
@@ -160,10 +162,10 @@ describe('the caps and the backup chain: held with the chain named, and started 
     noBackup(w)
     const dir = repo()
     const p = await w.places.add(dir, 'lease-space')
-    w.engine.lease('advisor-1', 'advisor', SPARK, p.name)
+    w.engine.lease('advisor-1', 'advisor', KEY, p.name)
     const t = add(w, p, 'L1')
     expect(t.held?.why).toBe('model')
-    expect(w.engine.subOf(t)).toBe('Waiting: spark 1/1')
+    expect(w.engine.subOf(t)).toBe('Waiting: pi · spark 1/1')
     w.engine.unlease('advisor-1')
     w.engine.release()
     await until(() => startedOn(w, t.id))
@@ -173,10 +175,10 @@ describe('the caps and the backup chain: held with the chain named, and started 
 
 describe('the caps and a cut-off: the takeover skips the full backups, and waits for one with room', () => {
   test('Backup 1 is full: the takeover goes to Backup 2', async () => {
-    const w = fresh('openai=1')
+    const w = fresh('codex=1')
     const dir = repo()
     const s1 = await running(w, dir, 'take-s1', 'S1', SPARK, { 'task.fallback2': 'pi' })
-    const busy = add(w, s1.p, 'Busy', 'openai/gpt-5.5')
+    const busy = add(w, s1.p, 'Busy', 'gpt-5.5', undefined, 'codex')
     await until(() => startedOn(w, busy.id))
     await w.engine.cantGoOn(s1.t.id, 'out of allowance', false)
     expect(kindOf(w, s1.key)).toBe('pi')
@@ -184,10 +186,10 @@ describe('the caps and a cut-off: the takeover skips the full backups, and waits
   })
 
   test('no backup has room: the cut-off task is held, and takes over the first backup that frees', async () => {
-    const w = fresh('openai=1')
+    const w = fresh('codex=1')
     const dir = repo()
     const s1 = await running(w, dir, 'wait-s1', 'S1')
-    const busy = add(w, s1.p, 'Busy', 'openai/gpt-5.5')
+    const busy = add(w, s1.p, 'Busy', 'gpt-5.5', undefined, 'codex')
     await until(() => startedOn(w, busy.id))
     await w.engine.cantGoOn(s1.t.id, 'out of allowance', false)
     expect(s1.t.held?.why).toBe('model')
@@ -211,7 +213,7 @@ describe("a space's own sub-limit sits inside the machine's total", () => {
     expect(w.settings.set('models.maxAtOnce', 'spark=1', { space: a.p.name }).ok).toBe(true)
     const a2 = add(w, a.p, 'A2')
     expect(a2.held?.why).toBe('model')
-    expect(w.engine.subOf(a2)).toBe(`Waiting: spark 1/1 in ${a.p.name}`)
+    expect(w.engine.subOf(a2)).toBe(`Waiting: pi · spark 1/1 in ${a.p.name}`)
     // another space: its own sub-limit has room, and the machine's total has room
     const b = await w.places.add(repo(), 'sub-b')
     const b1 = add(w, b, 'B1')
@@ -228,7 +230,7 @@ describe("a space's own sub-limit sits inside the machine's total", () => {
     const b = await w.places.add(repo(), 'total-b')
     const b1 = add(w, b, 'B1')
     expect(b1.held?.why).toBe('model')
-    expect(w.engine.subOf(b1)).toBe('Waiting: spark 1/1')
+    expect(w.engine.subOf(b1)).toBe('Waiting: pi · spark 1/1')
     expect(a.t.id).toBeTruthy()
   })
 })
