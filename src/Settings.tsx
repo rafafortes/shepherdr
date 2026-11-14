@@ -554,6 +554,9 @@ interface Page extends SettingSection {
   matrix?: boolean
 }
 
+/** the Settings section of the alert command (server settings.ts): its rows show on the Notifications page */
+const ALERT_COMMAND = 'Alert command'
+
 /** the Settings section the Models page draws its quota rows from (server settings.ts QUOTAS): not a page of its own */
 export const QUOTAS = 'Quotas'
 
@@ -652,11 +655,22 @@ function groupsOf(sections: SettingSection[], ui: UI): { name: string; pages: Pa
   const level = levelOf(sections, ui)
   // Present one delivery page without changing stored keys or the server/plugin section contract.
   const delivery = sections.find((x) => x.global && x.name === 'Alerts and voice')
-  const scoped = sections.filter((x) => x.level === level && !x.global).map((x): Page => x.name === 'Notify' ? {
+  // the alert command is set Everywhere or for a machine: Notifications shows, at any level, the one that level reads
+  // (a space's is its machine's) and writes there, so it is found where alerts are, never on a page of its own
+  const commandLevel = level === 'all' ? 'all' : `m:${level.split(':')[1]}`
+  const command = sections.find((x) => x.name === ALERT_COMMAND && x.level === commandLevel)
+  const scoped = sections.filter((x) => x.level === level && !x.global && x.name !== ALERT_COMMAND).map((x): Page => x.name === 'Notify' ? {
     ...x, name: 'Notifications',
-    targets: Object.fromEntries((delivery?.rows.filter((r) => !r.key.startsWith('voice.')) ?? []).map((r) => [r.key, delivery!.level ?? 'all'])),
-    about: 'All: every new coordinator message, question and alert. Needs me: questions and alerts. Off: none, and the space stays quiet. Task alerts reach you either way. Spaces can override the delivery rule here or from their sidebar menu. Device delivery below applies Everywhere.',
-    rows: [...x.rows.map((r) => ({ ...r, group: 'Delivery rules' })), ...(delivery?.rows.filter((r) => !r.key.startsWith('voice.')).map((r) => ({ ...r, group: 'Devices · Everywhere' })) ?? [])],
+    targets: Object.fromEntries([
+      ...(delivery?.rows.filter((r) => !r.key.startsWith('voice.')) ?? []).map((r) => [r.key, delivery!.level ?? 'all']),
+      ...(command?.rows ?? []).map((r) => [r.key, commandLevel]),
+    ]),
+    about: `All: every new coordinator message, question and alert. Needs me: questions and alerts. Off: none, and the space stays quiet. Task alerts reach you either way. Spaces can override the delivery rule here or from their sidebar menu. Device delivery below applies Everywhere.${command ? ` The alert command runs a command of yours (a Telegram notifier, say) for what waits on you, ${commandLevel === 'all' ? 'Everywhere' : 'on this machine'}.` : ''}`,
+    rows: [
+      ...x.rows.map((r) => ({ ...r, group: 'Delivery rules' })),
+      ...(command?.rows.map((r) => ({ ...r, group: commandLevel === 'all' ? 'Alert command · Everywhere' : level === commandLevel ? 'Alert command' : 'Alert command · its machine' })) ?? []),
+      ...(delivery?.rows.filter((r) => !r.key.startsWith('voice.')).map((r) => ({ ...r, group: 'Devices · Everywhere' })) ?? []),
+    ],
   } : x)
   const globals = sections.filter((x) => x.global && x.name !== QUOTAS).map((x): Page => x === delivery ? {
     ...x, name: 'Voice', rows: x.rows.filter((r) => r.key.startsWith('voice.')),
@@ -690,7 +704,7 @@ export function openPage(name: string, level: string) {
 export const sectionOf = (name: string, sections: SettingSection[], ui: UI) =>
   groupsOf(sections, ui)
     .flatMap((g) => g.pages)
-    .findIndex((p) => p.name === ({ Notify: 'Notifications', 'Alerts and voice': 'Voice' }[name] ?? name))
+    .findIndex((p) => p.name === ({ Notify: 'Notifications', [ALERT_COMMAND]: 'Notifications', 'Alerts and voice': 'Voice' }[name] ?? name))
 
 /** a machine's own Machine page (to open Settings on it): its section and level */
 export function settingsPageOf(sections: SettingSection[], machine: string, ui: UI) {

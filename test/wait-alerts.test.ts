@@ -1,4 +1,4 @@
-// Your alert command (Settings → Alert command, server/live/wait-alerts.ts): each wait of Needs you still open after the
+// Your alert command (Settings → Notifications → Alert command, server/live/wait-alerts.ts): each wait of Needs you still open after the
 // delay runs it once, as `<command> <title> <message> <key>`; one answered sooner runs nothing; a restart tells nothing
 // twice; while it is off every wait counts as told. And Shepherdr's agents, of every CLI, start with SHEPHERDR_NOTIFIES=1
 // while it is set (box.ts agentEnv), so a notifier of their CLI's own can stand aside.

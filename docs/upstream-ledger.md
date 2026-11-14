@@ -507,7 +507,7 @@ that chat (the engine's own choice, `server/live/rooms.ts`), and the quota of it
 ## Not from upstream: an alert command of your own for what waits on you, built here
 
 Upstream sends its alerts through its own push only ("no second transport", its scoped `shepherdr alert` of 2026-10-30,
-`30340637`). Ours also runs a command you set (Settings → Alert command, `server/live/wait-alerts.ts`) for each wait of
+`30340637`). Ours also runs a command you set (Settings → Notifications → Alert command, `server/live/wait-alerts.ts`) for each wait of
 Needs you still open after a delay, and marks its agents' environment (`SHEPHERDR_NOTIFIES=1`) so a notifier inside
 their CLI can stand aside. See [settings](settings.md#alert-command).
 
