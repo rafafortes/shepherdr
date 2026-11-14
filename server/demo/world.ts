@@ -77,6 +77,8 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   asks: Record<string, string> = { ...D.ASKS }
   /** each machine's defaults at their levels, as live */
   stores = D.settingStores()
+  /** the worker each waiting task starts on, as Start with… picked it (by task id) */
+  workers = new Map<string, { kind: string; model?: string; effort?: string }>()
   /** each place's HEARTBEAT.md as edited here */
   checklists: Record<string, string> = {}
   /** the places whose Run now woke its coordinator a moment ago */
@@ -948,7 +950,23 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const clis = restartClis(['claude', 'codex', 'pi', 'opencode', 'agy'], (kind) => picksIn(this.picks, kind))
         // its space's key, as the demo's runs name it (p:<machine>:<space>)
         const space = (t?.place ?? a.chat).split(':')[2] ?? '~'
-        return { ok: true, info: { role: a.chat.includes('/') ? 'task' : 'coordinator', space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name, on: c?.agent ?? { kind: on }, onWords: harnessWords(c?.agent ?? { kind: on }), want: { kind: want }, clis: withRooms(clis, this.roomInput(space, t?.id ?? a.chat)), working: t?.status === 'work' } }
+        // a task that waits to start: Start with…'s pick, else what its chat's agent runs on (as the live one's go)
+        const starts = t && ['queued', 'todo', 'scheduled'].includes(t.status) ? (this.workers.get(t.id) ?? c?.agent ?? { kind: on }) : undefined
+        return { ok: true, info: { role: a.chat.includes('/') ? 'task' : 'coordinator', space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name, on: c?.agent ?? { kind: on }, onWords: harnessWords(c?.agent ?? { kind: on }), want: { kind: want }, ...(starts ? { starts } : {}), clis: withRooms(clis, this.roomInput(space, t?.id ?? a.chat)), working: t?.status === 'work' } }
+      }
+      case 'start-with': {
+        // Start with…: the worker a waiting task starts on, for it alone; it stays in line (as the live one's setWorker)
+        const t = this.task(a.chat.split('/')[0])
+        if (!t) return { ok: false, error: 'No such task.' }
+        if (!['queued', 'todo', 'scheduled'].includes(t.status)) return { ok: false, error: `${t.id} isn't waiting to start: Restart agent… changes what it runs on` }
+        const kind = kindOf(a.kind)
+        if (!kind) return { ok: false, error: `No CLI called ${a.kind}.` }
+        const on = { kind, ...(a.model ? { model: a.model } : {}), ...(a.effort ? { effort: a.effort } : {}) }
+        const problem = harnessProblem(on)
+        if (problem) return { ok: false, error: problem }
+        this.workers.set(t.id, on)
+        this.emit('snapshot')
+        return { ok: true }
       }
       case 'model-pin': {
         const kind = kindOf(a.kind)

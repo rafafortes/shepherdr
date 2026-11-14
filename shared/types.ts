@@ -735,6 +735,9 @@ export interface RestartInfo {
   onKnown?: boolean
   onWords: string
   want: { kind: string; model?: string; effort?: string }
+  /** a task that waits to start (queued, To do, scheduled): the worker its go starts it on — Start with…'s pick, else what
+   *  its agent waits on in its worktree, else its own or Settings' — what Start now with… and Start with… open on */
+  starts?: { kind: string; model?: string; effort?: string }
   clis: RestartCli[]
   /** its agent is mid-turn: a restart interrupts it first */
   working: boolean
