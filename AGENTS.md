@@ -30,6 +30,13 @@ The operator's fork, used on their desktop since 2026-11-04 (herdr installs the 
   answers the same problem, so port the idea to 2.0's code when it fits what we keep (above). Say what you found in
   your summary and `--facts`: the upstream commit or issue and what it does, ported or not fit because of what, or
   "upstream: nothing for this"; an upstream improvement taken or turned down gets its line in the ledger.
+- **Every harness, with its tests (the operator's rule, 2026-11-14).** A fix or an improvement to how Shepherdr works
+  with an agent CLI — how it starts and resumes it, reads its chat, its status (working, waiting on you, work left
+  running in the background), its provider errors and cut-offs, its models and their lists, limits, usage, headless runs
+  — is made for every chat CLI Shepherdr supports (Claude Code, Codex, pi, OpenCode and Antigravity), in the same change,
+  and each CLI gets tests of its own for it: a fix seen on one CLI is a question to ask of all of them. Where a CLI has no
+  such thing (it cannot leave work running after its turn, say), the change says so for that CLI, with what you checked
+  (its help, its log, its screen), in your summary and `--facts`. A coordinator's brief for such a fix names every CLI.
 - **Releases.** A tag `v2.0.<n>` on `herdr-tui`, only with the operator's yes (as below); `package.json` and
   `herdr-plugin.toml` carry the same version. The desktop moves to it with
   `herdr plugin install rafafortes/shepherdr --ref <tag> --yes`, then the plugin's start action swaps the running
