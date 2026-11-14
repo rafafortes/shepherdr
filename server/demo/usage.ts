@@ -1,21 +1,24 @@
 // The demo's usage: a week of model calls for the providers the demo's settings and chats use, and a run-out or two, so
 // Settings → Models → Summary shows a believable week. Deterministic (no random numbers): each hour's calls follow the
-// hour of the day, and the run-outs are at fixed times back from now. Kept in memory, as the demo's settings are.
+// hour of the day, and the run-outs are at fixed times back from now. Kept in memory, as the demo's settings are. A key
+// is its harness and provider: OpenCode Go is counted twice, under pi and under OpenCode, as its own row in each.
 import { HOUR, UsageLedger } from '../live/usage-ledger.ts'
-import { opencodeEstimate, OPENCODE } from '../live/quota-estimate.ts'
+import { opencodeEstimate, OPENCODE_ROWS } from '../live/quota-estimate.ts'
 import type { QuotaInput } from '../live/models-summary.ts'
 
 /** per model key: tokens per call, its cost estimate per call (pi's), and how many calls in a working hour */
 const MODELS: { key: string; tokens: number; cost?: number; busy: number; chat: string }[] = [
-  { key: 'anthropic/claude-opus-5-5', tokens: 42_000, busy: 3, chat: 'GTM-15/Agent' },
-  { key: 'anthropic/claude-haiku-5-5', tokens: 18_000, busy: 1, chat: 'HP-201/Reviewer' },
-  { key: 'openai/gpt-6-sol', tokens: 26_000, busy: 1, chat: 'LV-3/Agent' },
-  { key: 'opencode-go/deepseek-v4.1-flash', tokens: 15_000, cost: 0.0009, busy: 2, chat: 'HP-202/Agent' },
-  { key: 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold', tokens: 22_000, busy: 2, chat: 'GTM-16/Agent' },
+  { key: 'claude/claude-opus-5-5', tokens: 42_000, busy: 3, chat: 'GTM-15/Agent' },
+  { key: 'claude/claude-haiku-5-5', tokens: 18_000, busy: 1, chat: 'HP-201/Reviewer' },
+  { key: 'codex/gpt-6-sol', tokens: 26_000, busy: 1, chat: 'HP-202/Agent' },
+  // OpenCode Go's plan, used from pi and from OpenCode: two rows, each with its own calls
+  { key: 'pi.opencode-go/deepseek-v4.1-flash', tokens: 15_000, cost: 0.0009, busy: 2, chat: 'LV-3/Agent' },
+  { key: 'opencode.opencode-go/deepseek-v4.1-flash', tokens: 11_000, cost: 0.0007, busy: 1, chat: 'HP-204/Agent' },
+  { key: 'pi.spark/qwen3.8-flash-next-mlx4-mtp-tensorfold', tokens: 22_000, busy: 2, chat: 'GTM-16/Agent' },
   // OpenCode's free Zen models: a provider of its own with no quota, its row says so
-  { key: 'opencode/minimax-m3.1-flash-free', tokens: 12_000, busy: 1, chat: 'HP-204/Agent' },
+  { key: 'opencode.opencode/minimax-m3.1-flash-free', tokens: 12_000, busy: 1, chat: 'HP-204/Agent' },
   // Command Code's account has no quota read yet (no key in Secrets): its row shows the hint that asks for one
-  { key: 'commandcode/deepseek/deepseek-v4.1-flash', tokens: 9_000, busy: 1, chat: 'HP-203/Agent' },
+  { key: 'pi.commandcode/deepseek/deepseek-v4.1-flash', tokens: 9_000, busy: 1, chat: 'HP-203/Agent' },
 ]
 
 /** the demo's ledger: the week before `now`, hour by hour, and the run-outs of the week */
@@ -33,14 +36,14 @@ export function demoUsage(now = Date.now()): UsageLedger {
       }
     })
   }
-  // OpenCode Go's calls before its run-outs, whatever the hour the demo is looked at: the learned limit reads from them
-  for (const h of [2.5, 4, 6]) l.count('HP-202/Agent', 'opencode-go/deepseek-v4.1-flash', { id: `demo-opencode-before-${h}`, at: now - h * HOUR, tokens: 15_000, cost: 0.0009 }, now)
-  // OpenCode Go ran out twice this week: the second time, now, until a reset three hours on (out now)
-  l.runOut({ at: now - 50 * HOUR, key: 'opencode-go/deepseek-v4.1-flash', chat: 'HP-202/Agent', role: 'task', reason: 'Out of allowance until 6pm', words: 'You have hit your usage limit · resets 6pm', reset: '6pm', resetAt: now - 40 * HOUR }, now)
-  l.runOut({ at: now - 2 * HOUR, key: 'opencode-go/deepseek-v4.1-flash', chat: 'HP-202/Agent', role: 'task', reason: 'Out of allowance until 5pm', words: 'You have hit your usage limit · resets 5pm', reset: '5pm', resetAt: now + 3 * HOUR }, now)
+  // OpenCode Go's calls under pi before its run-outs, whatever the hour the demo is looked at: the learned limit reads from them
+  for (const h of [2.5, 4, 6]) l.count('LV-3/Agent', 'pi.opencode-go/deepseek-v4.1-flash', { id: `demo-opencode-before-${h}`, at: now - h * HOUR, tokens: 15_000, cost: 0.0009 }, now)
+  // OpenCode Go ran out twice this week under pi: the second time, now, until a reset three hours on (out now)
+  l.runOut({ at: now - 50 * HOUR, key: 'pi.opencode-go/deepseek-v4.1-flash', chat: 'LV-3/Agent', role: 'task', reason: 'Out of allowance until 6pm', words: 'You have hit your usage limit · resets 6pm', reset: '6pm', resetAt: now - 40 * HOUR }, now)
+  l.runOut({ at: now - 2 * HOUR, key: 'pi.opencode-go/deepseek-v4.1-flash', chat: 'LV-3/Agent', role: 'task', reason: 'Out of allowance until 5pm', words: 'You have hit your usage limit · resets 5pm', reset: '5pm', resetAt: now + 3 * HOUR }, now)
   // the demo's week was read already: no backfill notice. Claude Code's plan limits, as a read of its own would give them
   // (fictional, as the rest of the demo, read seven minutes ago): one window refilled since, which says nothing of now
-  l.setQuota('anthropic', {
+  l.setQuota('claude', {
     windows: [
       { name: '5 h', usedPct: 62, resetAt: now + 2 * HOUR },
       { name: 'Week', usedPct: 41, resetAt: now + 3 * 24 * HOUR },
@@ -53,17 +56,18 @@ export function demoUsage(now = Date.now()): UsageLedger {
   return l
 }
 
-/** the demo's quota side (quotas.ts's summary): OpenCode Go's estimate from the demo ledger, and each read as it stands: Claude
- *  Code's read seven minutes ago, Command Code with no key yet (its hint asks for one), the warning share at its default */
+/** the demo's quota side (quotas.ts's summary): OpenCode Go's estimate from the demo ledger on both of its rows, and each read
+ *  as it stands: Claude Code's read seven minutes ago, Command Code with no key yet (its hint asks for one), the warning share
+ *  at its default */
 export function demoQuota(usage: UsageLedger, now = Date.now()): QuotaInput {
   const est = opencodeEstimate(usage, now)
   return {
-    figures: est ? { [OPENCODE]: est } : {},
+    figures: est ? Object.fromEntries(OPENCODE_ROWS.map((p) => [p, est])) : {},
     reads: {
       // Claude Code's last try failed two minutes ago; its figure is the one read seven minutes ago, kept
-      anthropic: { on: true, tried: now - 2 * 60_000, failed: 'Claude Code took longer than a minute to answer.' },
-      commandcode: { on: true, tried: now - 7 * 60_000, hint: "Add COMMANDCODE_API_KEY in Settings → Secrets to read Command Code's quota." },
-      [OPENCODE]: { on: true },
+      claude: { on: true, tried: now - 2 * 60_000, failed: 'Claude Code took longer than a minute to answer.' },
+      'pi.commandcode': { on: true, tried: now - 7 * 60_000, hint: "Add COMMANDCODE_API_KEY in Settings → Secrets to read Command Code's quota." },
+      ...Object.fromEntries(OPENCODE_ROWS.map((p) => [p, { on: true }])),
     },
     alertAt: 80,
   }

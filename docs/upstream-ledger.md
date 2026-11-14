@@ -485,3 +485,8 @@ screens. Taken and turned down, from those:
 - **Ours: OpenCode Go's estimate and its learned limit, and the quota scheduler and alerts**: OpenCode has no read of its
   quota, so the ledger's own tokens and cost per window, and the lowest limit its run-outs show (`quota-estimate.ts`); the
   reads every ten minutes, Refresh quotas and each window's alert once (`quotas.ts`).
+
+## Not from upstream: the provider keys by harness, built here
+
+Upstream has no per-harness providers: its model keys are `provider/model`, so Claude Code's subscription and pi's Anthropic
+API share one key. Nothing to take. See [settings](settings.md).

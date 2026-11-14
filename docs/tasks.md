@@ -104,19 +104,19 @@
   turn (first in line, then oldest) as its own tasks end and free a slot. The machine's limit still comes first, so a
   space's cap never lets more tasks work than the machine has slots.
   - **A model's cap.** A task whose agent would run on a model at its most-at-once cap (`models.maxAtOnce`, one provider
-    such as `spark`, or one model key) reads `Waiting for a free slot of spark (4 of 4 at once)`, naming the entry that is
+    such as `pi.spark`, or one model key) reads `Waiting for a free slot of pi · spark (4 of 4 at once)`, naming the entry that is
     full. The order of the reasons is the machine's slots, the machine's load, the space's own models and cut-off tasks,
     the space's cap, then the model's: the row names the first one that holds the task. A task held for its model is
     passed over like a held space's: the tasks on other models start in the same pass, and its held tasks start in turn as
     the model frees up. A first in line does not pass it. What counts toward a model, and what does not, is in
     [settings](settings.md).
-  - **A blocked model.** A model at 0 (`models.maxAtOnce`, `spark=0`) is blocked: nothing starts on it. A task whose chain has
-    another model with room starts there (`Started on Codex: spark is blocked (0 allowed)` in its chat). A task whose every model
+  - **A blocked model.** A model at 0 (`models.maxAtOnce`, `pi.spark=0`) is blocked: nothing starts on it. A task whose chain has
+    another model with room starts there (`Started on Codex: pi · spark is blocked (0 allowed)` in its chat). A task whose every model
     is blocked is held with `waiting: every model it may use is blocked (0 allowed): change its agent or a limit`, and it is not
     waited for: release starts it only once a limit changes. A task whose chain has full models as well waits for those only.
-  - **Its chain.** A task whose primary is at its cap starts on its first backup with room, not held (`Started on Codex: spark
+  - **Its chain.** A task whose primary is at its cap starts on its first backup with room, not held (`Started on Codex: pi · spark
     is at its limit (1 of 1 at once)` in its chat). Held only when every harness of its chain is full or out, and its row names
-    each one, short: `Waiting: spark 1/1 · openai out` (its row's title, and its card and replies, say it in full: `Codex (default) (out until 17:00)`), ending
+    each one, short: `Waiting: pi · spark 1/1 · codex out` (its row's title, and its card and replies, say it in full: `Codex (default) (out until 17:00)`), ending
     `every model it may use is full or out`. A cut-off task's takeover skips the full backups the same way and, with none with
     room, waits (`Waiting: …`) until one frees. Its way back to the primary is in [settings](settings.md) (the caps and the chain).
 - A space may have a **merge gate** (Settings → How tasks work → Merge gate, `merge.gate`, off by default; a task's own
@@ -333,7 +333,7 @@
   the % done and the minutes left sit small under it in the same orange (`6m`, `<1m`); its row's second line says
   what it does in at most 40 characters, so the title and that line each keep the row's whole width. A third, fainter
   line says what its agent runs on, while it works, merges or waits on you with its agent there: its CLI, provider and
-  model (`pi · spark · qwen3.8-flash-next…`, `Codex · openai · gpt-6-sol`), cut short when it is long (no tooltip: a
+  model (`pi · Spark (local) · qwen3.8-flash-next…`, `Codex · gpt-6-sol`), cut short when it is long (no tooltip: a
   screen reader hears it in full, with the provider's name and the effort, `Runs on pi · Spark (local) ·
   qwen3.8-flash-next-mlx4-mtp-tensorfold (high)`), and the minutes left stay level with the second line. Its chat header
   says the same with the minutes at the end (`Fixing the two failing tests · ~6 min`). Coordinators report no

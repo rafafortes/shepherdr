@@ -14,7 +14,7 @@ import { home } from '../server/store.ts'
 import { tmp } from './tmp.ts'
 
 const NOW = Date.now()
-const GO = 'opencode-go/deepseek-v4.1-flash'
+const GO = 'opencode.opencode-go/deepseek-v4.1-flash'
 
 /** an OpenCode database with the rows of one session (id, type, seq, data); the session is its own per test, so a log
  *  copy from another test never stands in for it. OpenCode's database is the one SHEPHERDR_OPENCODE_DB names */
@@ -78,7 +78,7 @@ describe("OpenCode's agents count their calls in the usage ledger", () => {
     ])
     d.close()
     feed.pass(NOW)
-    expect(ledger.byKey(NOW - 24 * HOUR).get('opencode/minimax-m3.1-flash-free')).toEqual({ tokens: 40, calls: 1, cost: 0 })
+    expect(ledger.byKey(NOW - 24 * HOUR).get('opencode.opencode/minimax-m3.1-flash-free')).toEqual({ tokens: 40, calls: 1, cost: 0 })
     expect(ledger.byKey(NOW - 24 * HOUR).get(GO)!.calls).toBe(1)
   })
 

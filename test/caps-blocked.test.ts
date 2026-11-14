@@ -4,6 +4,7 @@
 // model is blocked is not asked, and its card says the limits block it. A real LiveSource with its agents' starts and
 // status stubbed (no herdr, no CLI run), as caps-coordinator.test.ts does.
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
+import { providerOf } from '../server/live/usage-ledger.ts'
 import { execSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
@@ -81,7 +82,7 @@ const startCoordinator = (id: string) => (src as unknown as { coordinator(id: st
 
 describe('a coordinator never starts on a blocked model', () => {
   test('its primary is blocked: it starts on its backup, and its card says why', async () => {
-    src.settings.set('models.maxAtOnce', 'pi=0', 'machine')
+    src.settings.set('models.maxAtOnce', `${providerOf(PI)}=0`, 'machine')
     const { id } = await space('blk-coord-backup')
     await startCoordinator(id)
     expect(starts.at(-1)).toMatchObject({ key: id, kind: 'codex' })

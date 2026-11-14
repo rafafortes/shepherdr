@@ -809,7 +809,8 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         // this machine's levels, as the live one reads them: its Everywhere, machine and spaces
         return modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, this.matrixSpaces())
       case 'models-summary':
-        return this.summaryNow()
+        // the same inputs as the live one: a provider a cap entry names shows even with nothing else
+        return this.summaryNow(entryPatterns(this.stores[D.DEMO_HOST], this.matrixSpaces().map((x) => x.key)).map(providerOf))
       case 'limits-view':
         return this.limitsNow()
       case 'quota-refresh':

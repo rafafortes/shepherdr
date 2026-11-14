@@ -52,7 +52,7 @@ describe("a model's cap in words: the row, the card and the replies name the ent
       const id = add.out.match(/([A-Z]+-\d+)/)![1]
       const t = src.engine.task(id)!
       expect(t.held?.why).toBe('model')
-      expect(src.engine.subOf(t)).toBe('Waiting: spark 1/1')
+      expect(src.engine.subOf(t)).toBe('Waiting: pi · spark 1/1')
       expect(add.out).toContain('held: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (1 of 1 at once) — every model it may use is full or out')
       expect(cards(`${id}/Agent`)).toContain('waiting: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (1 of 1 at once) — every model it may use is full or out')
       // a tell to the held task is held the same way, its reply says why, and its words wait with it
@@ -69,8 +69,8 @@ describe('models.maxAtOnce from the command line: set, show, unset', () => {
   test('shepherdr set takes the list at this machine, shows it as kept, refuses a bad entry, and unset takes it back', async () => {
     const set = await src.cli(['set', 'models.maxAtOnce', 'Spark=4, radeon=1', '--machine'], {})
     expect(set.code).toBe(0)
-    expect(src.settings.maxAtOnce()).toEqual([{ pattern: 'spark', max: 4 }, { pattern: 'radeon', max: 1 }])
-    expect((await src.cli(['show'], {})).out).toMatch(/^models\.maxAtOnce\s+spark=4, radeon=1\s+\(.+\)$/m)
+    expect(src.settings.maxAtOnce()).toEqual([{ pattern: 'pi.spark', max: 4 }, { pattern: 'pi.radeon', max: 1 }])
+    expect((await src.cli(['show'], {})).out).toMatch(/^models\.maxAtOnce\s+pi\.spark=4, pi\.radeon=1\s+\(.+\)$/m)
     const bad = await src.cli(['set', 'models.maxAtOnce', 'spark=201', '--machine'], {})
     expect(bad.code).toBe(1)
     expect(bad.out).toContain('spark needs a whole number from 0 to 200')

@@ -18,6 +18,9 @@ afterAll(() => src.stop())
 const MODEL = 'opencode-go/deepseek-v4.1-flash'
 /** each test's own model, so one test's outage is not another's */
 const MODEL2 = 'commandcode/deepseek/deepseek-v4.1-flash'
+/** the keys pi's models run under: pi and the provider in front of the model id */
+const KEY = `pi.${MODEL}`
+const KEY2 = `pi.${MODEL2}`
 /** a pi agent's record on the model, with its log (a file of the test's own) */
 function agent(key: string, logs: string[] = [], model = MODEL) {
   src.agents.records[key] = { key, name: `shep-${key.replace(/\W+/g, '-')}`, kind: 'pi', model, cwd: process.env.SHEPHERDR_HOME!, workspace: 'w', logs, started: Date.now() } as never
@@ -40,16 +43,16 @@ describe('a provider run-out in a chat', () => {
     // a 402 with an ISO reset, a few hours ahead: out of credit until it, and the reset shown in this machine's time
     const reset = new Date(Date.now() + 3 * HOUR).toISOString().replace(/\.\d+Z$/, 'Z')
     src.retries.seen('T-901/Agent', cut('e1', `Insufficient account funds. resets at ${reset}`, 402))
-    const runs = src.usage.runOuts((k) => k === MODEL)
+    const runs = src.usage.runOuts((k) => k === KEY)
     expect(runs).toHaveLength(1)
     expect(runs[0]).toMatchObject({ chat: 'T-901/Agent', role: 'task', reason: expect.stringMatching(/^Out of credit until /) })
     expect(runs[0]!.resetAt).toBe(Date.parse(reset))
     expect(got).toHaveLength(1)
-    expect(got[0]).toMatchObject({ title: 'OpenCode Go ran out', tag: 'runout:opencode-go', go: { place: 'T-901/Agent' }, task: true })
+    expect(got[0]).toMatchObject({ title: 'pi · OpenCode Go ran out', tag: 'runout:pi.opencode-go', go: { place: 'T-901/Agent' }, task: true })
     expect(got[0]!.body).toMatch(/^T-901 agent was cut off: out of credit until .+\.$/)
     // another cut-off turn while it is still out: recorded, not alerted again
     src.retries.seen('T-901/Agent', cut('e2', 'Insufficient account funds', 402, 50_000))
-    expect(src.usage.runOuts((k) => k === MODEL)).toHaveLength(2)
+    expect(src.usage.runOuts((k) => k === KEY)).toHaveLength(2)
     expect(got).toHaveLength(1)
   })
 
@@ -59,10 +62,10 @@ describe('a provider run-out in a chat', () => {
     src.retries.seen('T-902/Agent', cut('f1', "You've hit your limit · resets 5pm", 429))
     expect(got).toHaveLength(1)
     // the provider answers again (a call of it, counted in an hour after the run-out)
-    src.usage.count('T-902/Agent', MODEL2, { id: 'answer-1', at: Date.now() + HOUR, tokens: 12 }, Date.now() + 2 * HOUR)
+    src.usage.count('T-902/Agent', KEY2, { id: 'answer-1', at: Date.now() + HOUR, tokens: 12 }, Date.now() + 2 * HOUR)
     src.retries.seen('T-902/Agent', cut('f2', "You've hit your limit · resets 5pm", 429, 30_000))
     expect(got).toHaveLength(2)
-    expect(got[1]!.title).toBe('Command Code ran out')
+    expect(got[1]!.title).toBe('pi · Command Code ran out')
   })
 
   test('a refusal is not a run-out: no ledger entry, no alert', () => {
@@ -90,7 +93,7 @@ describe('the summary action', () => {
     agent('T-905/Agent', [log])
     type Sum = { at: number; providers: { provider: string; usage: { h24: { tokens: number; calls: number; cost?: number } }; runOuts: { out: boolean; count7d: number } }[]; warnings: unknown[] }
     const read = async () => (await src.act({ type: 'models-summary' })) as Sum
-    const go = (s: Sum) => s.providers.find((p) => p.provider === 'opencode-go')!
+    const go = (s: Sum) => s.providers.find((p) => p.provider === 'pi.opencode-go')!
     const before = go(await read()).usage.h24
     // the feed reads the record's log, twice: the reply is counted once
     src.usageFeed.pass()

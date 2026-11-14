@@ -10,13 +10,28 @@ import { shareOf } from '../../shared/quota-words.ts'
 import { parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
 import type { Harness } from './engine/engine.ts'
 import { covers } from './engine/choose.ts'
+import { harnessGroups, inHarness } from '../../shared/harness.ts'
 import { findModel, modelsOf } from './models.ts'
 import { placeId } from './places.ts'
 import { type Chain, kindOf, type Level, rolePairs, Settings } from './settings.ts'
-import { HOUR, modelKey, modelOf, providerOf, type RunOut, type RunRole, UsageLedger, type UsageTotals } from './usage-ledger.ts'
+import { HOUR, harnessOf, modelKey, modelOf, providerOf, providerPart, type RunOut, type RunRole, UsageLedger, type UsageTotals } from './usage-ledger.ts'
 
-/** a provider in words: its own name where the map below has one, else its id title-cased (see titled) */
-export const providerName = (provider: string) => (Object.hasOwn(NAMES, provider) ? NAMES[provider]! : titled(provider))
+/** a provider in words: a single-account CLI's is its harness's name; a pi or OpenCode provider's is its own name where the
+ *  map below has one, else its id title-cased (see titled) */
+export const providerName = (provider: string) => (provider.includes('.') ? (Object.hasOwn(NAMES, providerPart(provider)) ? NAMES[providerPart(provider)]! : titled(providerPart(provider))) : harnessName(provider))
+
+/** a CLI (harness) in words: Claude Code, Codex and Antigravity are single-account; pi and OpenCode run several providers */
+export const harnessName = (harness: string) => (Object.hasOwn(HARNESS_NAMES, harness) ? HARNESS_NAMES[harness]! : titled(harness))
+
+/** a provider named outside its harness's group: "pi · Spark (local)", "Claude Code" for the single-account CLI (inHarness) */
+export const providerWords = (provider: string) => inHarness(harnessName(harnessOf(provider)), providerName(provider))
+/** a model key named outside its group: its provider's words, then the model's ("pi · Spark (local) · qwen…") */
+export const keyWords = (key: string) => `${providerWords(providerOf(key))} · ${labelOf(key)}`
+/** a pattern that names a provider or a model key, in words (providerWords, keyWords) */
+export const patternName = (pattern: string) => (pattern.includes('/') ? keyWords(pattern) : providerWords(pattern))
+
+/** whether a provider is one of this machine's own model servers (by its part after the harness) */
+export const isLocal = (provider: string) => LOCAL.has(providerPart(provider))
 
 /** the words an id's fallback name upper-cases: a provider's own acronyms (amd-tokenlab is "AMD Tokenlab") */
 const ACRONYMS = new Set(['AI', 'AMD', 'API', 'GPU', 'LLM', 'NVIDIA'])
@@ -30,7 +45,7 @@ export const titled = (id: string) =>
     .join(' ')
 
 /** the model keys each CLI's own list offers on this machine: pi's (scoped by its enabledModels), OpenCode's, and the
- *  catalogs of Claude Code (anthropic) and Codex (openai). A provider that nothing uses yet is listed from these */
+ *  catalogs of Claude Code and Codex. A provider that nothing uses yet is listed from these */
 function offeredKeys(): string[] {
   return ['claude', 'codex', 'pi', 'opencode', 'agy'].flatMap((kind) => (modelsOf(kind)?.models ?? []).map((m) => keyOf(kind, m.id)))
 }
@@ -39,11 +54,14 @@ function offeredKeys(): string[] {
  *  the local servers OpenCode has a provider for (LM Studio and Ollama on this machine, 127.0.0.1) */
 export const LOCAL = new Set(['spark', 'radeon', 'avell', 'dell', 'lmstudio', 'ollama'])
 
-/** a provider in words, where it has a name of its own (the others show their id): the providers OpenCode adds too
- *  (opencode is its Zen models, nvidia its NVIDIA endpoints, lmstudio and ollama its local servers) */
+/** a CLI in words, for the CLIs that run one account's models (claude, codex, agy) and the two that run several (pi, OpenCode) */
+const HARNESS_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', agy: 'Antigravity', pi: 'pi', opencode: 'OpenCode' }
+
+/** a pi or OpenCode provider in words, by its part after the harness (the others show their id): OpenCode's Zen models are
+ *  opencode, its NVIDIA endpoints nvidia, and lmstudio and ollama its local servers */
 const NAMES: Record<string, string> = {
-  anthropic: 'Claude Code',
-  openai: 'Codex',
+  anthropic: 'Anthropic API',
+  openai: 'OpenAI API',
   'opencode-go': 'OpenCode Go',
   opencode: 'OpenCode Zen (free)',
   nvidia: 'NVIDIA API',
@@ -56,7 +74,6 @@ const NAMES: Record<string, string> = {
   dell: 'Dell (local)',
   lmstudio: 'LM Studio (local)',
   ollama: 'Ollama (local)',
-  agy: 'Antigravity',
 }
 
 const TITLE: Record<MatrixRole, string> = { task: 'Tasks', coordinator: 'Coordinators', reviewer: 'Reviewer', advisor: 'Advisor' }
@@ -136,14 +153,18 @@ export const clock = (at: number) => new Date(at).toLocaleString('en', { weekday
 /** a model key's model in words: its name in the CLI's own list, or its id */
 export function labelOf(key: string): string {
   const provider = providerOf(key)
+  const harness = harnessOf(provider)
+  const part = providerPart(provider)
   const model = modelOf(key)
-  // a CLI's own default model is not named in its log: the provider's name says which one it is
-  if (model === 'unknown') return provider === 'opencode' ? 'OpenCode default' : `${providerName(provider)} default`
-  const kind = provider === 'anthropic' ? 'claude' : provider === 'openai' ? 'codex' : provider === 'agy' ? 'agy' : 'pi'
-  // pi's own list names its models with the provider in front (and OpenCode's do too): under the provider's row, that part
-  // is said already. A model Claude Code or Codex names is the CLI's own word; pi's, and OpenCode's, come from their lists
-  const label = (kind === 'pi' ? findModel('opencode', key)?.label : undefined) ?? findModel(kind, model)?.label ?? (model || key)
-  return label.startsWith(`${provider}/`) ? label.slice(provider.length + 1) : label
+  // a CLI's own default model is not named in its log: the harness's name says which one it is
+  if (model === 'unknown') return `${harnessName(harness)} default`
+  // pi's and OpenCode's own lists name their models with the provider in front: under the provider's row, that part is said
+  // already. A model Claude Code, Codex or agy names is the CLI's own word
+  const multi = harness === 'pi' || harness === 'opencode'
+  const full = `${part}/${model}`
+  const listed = multi ? (findModel('opencode', full)?.label ?? findModel('pi', full)?.label) : findModel(harness, model)?.label
+  const label = listed ?? (model || key)
+  return label.startsWith(`${part}/`) ? label.slice(part.length + 1) : label
 }
 
 /** a CLI's value (Settings' words, or a harness's model) as the model key it runs: the CLI's default model where it says
@@ -332,7 +353,9 @@ export function modelsSummary(f: SummaryInput): ModelsSummary {
     return {
       provider,
       name: providerName(provider),
-      local: LOCAL.has(provider),
+      harness: harnessOf(provider),
+      harnessName: harnessName(harnessOf(provider)),
+      local: isLocal(provider),
       share: { ...(totalDay ? { h24: tokens24 / totalDay } : {}), ...(totalWeek ? { d7: tokensWeek / totalWeek } : {}) },
       ...(quota ? { quota } : {}),
       ...(quotaRead ? { quotaRead } : {}),
@@ -405,7 +428,7 @@ function warningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): 
       }
       // a backup that is the primary's model on a cloud provider: it runs out with the primary
       if (primary) {
-        for (const b of slots.filter((c) => c.n > 0 && c.key === primary.key && !LOCAL.has(providerOf(c.key)))) {
+        for (const b of slots.filter((c) => c.n > 0 && c.key === primary.key && !isLocal(providerOf(c.key)))) {
           out.push({
             id: `same:${sp.spaceKey}:${role}:${b.n}`,
             level: 'note',
@@ -419,7 +442,7 @@ function warningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): 
     // every role that runs runs on one cloud provider, and no backup of any role is elsewhere
     const active = roles.filter((r) => here.some((c) => c.role === r && c.n === 0))
     const providersHere = [...new Set(here.map((c) => providerOf(c.key)))]
-    if (active.length >= 2 && providersHere.length === 1 && !LOCAL.has(providersHere[0]!)) {
+    if (active.length >= 2 && providersHere.length === 1 && !isLocal(providersHere[0]!)) {
       out.push({
         id: `single:${sp.spaceKey}`,
         level: 'note',
@@ -434,7 +457,7 @@ function warningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): 
     // what runs on it now (the runs the cap counts, atOnce.now), and the words for it
     const running = (n: number) => `${n} ${n === 1 ? 'agent still runs' : 'agents still run'}`
     if (r.atOnce.own?.max === 0 && r.atOnce.now > 0)
-      out.push({ id: `blocked-running:${r.provider}`, level: 'note', words: `${r.name} is blocked (0 allowed), and ${running(r.atOnce.now)} on it: they keep running; nothing new starts on it.`, go: { row: 'cap', slot: r.provider } })
+      out.push({ id: `blocked-running:${r.provider}`, level: 'note', words: `${providerWords(r.provider)} is blocked (0 allowed), and ${running(r.atOnce.now)} on it: they keep running; nothing new starts on it.`, go: { row: 'cap', slot: r.provider } })
     for (const m of r.models) {
       if (m.atOnce.own?.max === 0 && m.atOnce.now > 0)
         out.push({ id: `blocked-running:${m.key}`, level: 'note', words: `${m.label} is blocked (0 allowed), and ${running(m.atOnce.now)} on it: they keep running; nothing new starts on it.`, go: { row: 'cap', slot: m.key } })
@@ -445,7 +468,7 @@ function warningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): 
       out.push({
         id: `runouts:${r.provider}`,
         level: 'note',
-        words: `${r.name} ran out ${r.runOuts.count7d} times in the last 7 days; the last was ${r.runOuts.last ? r.runOuts.last.reason.toLowerCase() : 'not recorded'}.`,
+        words: `${providerWords(r.provider)} ran out ${r.runOuts.count7d} times in the last 7 days; the last was ${r.runOuts.last ? r.runOuts.last.reason.toLowerCase() : 'not recorded'}.`,
         fix: 'Spread the work over other providers with backups, or check the plan it runs on.',
       })
     }
@@ -491,21 +514,35 @@ export function overWindows(q: QuotaFigure, at: number, now: number): { w: Quota
   })
 }
 
+/** the rows grouped by the figure they carry: OpenCode Go's estimate is one object on both of its rows, so it is one group */
+export function sharedQuotaRows(rows: SummaryProvider[]): { figure: QuotaFigure; rows: SummaryProvider[] }[] {
+  const groups = new Map<QuotaFigure, SummaryProvider[]>()
+  for (const r of rows) if (!r.local && r.quota) groups.set(r.quota, [...(groups.get(r.quota) ?? []), r])
+  return [...groups].map(([figure, list]) => ({ figure, rows: list }))
+}
+
+/** a list in words: "a", "a and b", "a, b and c" */
+export const andWords = (list: string[]) => (list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list.join(''))
+
 /** the quota warnings: a provider's window at or over quota.alertAt, what is left and when it refills, and the cells that
- *  use it most (the configured slots of this provider, by role and space). Local servers have no quota: not warned about */
+ *  use it most (the configured slots of its providers, by role and space). One warning per figure: a plan shared by
+ *  two harnesses names both. Local servers have no quota: not warned about */
 function quotaWarningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): SummaryWarning[] {
   const at = f.quota?.alertAt
   if (at === undefined) return []
   const rowIdOf = (spaceKey: string) => (f.rows.includes(placeId.space(spaceKey, f.host)) ? placeId.space(spaceKey, f.host) : placeId.machine(f.host))
   const out: SummaryWarning[] = []
-  for (const r of rows) {
-    if (r.local || !r.quota) continue
-    const over = overWindows(r.quota, at, f.now)
+  for (const { figure, rows: group } of sharedQuotaRows(rows)) {
+    const over = overWindows(figure, at, f.now)
     if (!over.length) continue
+    // the rows in the screens' harness order, so the words name them the same way whatever the usage order is
+    const ordered = harnessGroups(group).flatMap((g) => g.list)
+    const providers = ordered.map((r) => r.provider)
+    const name = ordered.length > 1 ? `${ordered[0]!.name} (${andWords(ordered.map((r) => r.harnessName))})` : ordered[0]!.name
     const words = over.map(({ w, share }) => `${w.name} is at ${Math.round(share)}%: ${leftWords(share)}${w.resetAt !== undefined ? `, refills ${clock(w.resetAt)}` : ''}`).join('; ')
-    // the cells that use it most: the configured slots of this provider, counted by role and space, the top two
+    // the cells that use it most: the configured slots of these providers, counted by role and space, the top two
     const cells = new Map<string, { role: MatrixRole; spaceKey: string; space: string; n: number }>()
-    for (const c of conf.filter((x) => providerOf(x.key) === r.provider)) {
+    for (const c of conf.filter((x) => providers.includes(providerOf(x.key)))) {
       const k = `${c.spaceKey}|${c.role}`
       const cell = cells.get(k) ?? { role: c.role, spaceKey: c.spaceKey, space: c.space, n: 0 }
       cell.n++
@@ -514,9 +551,9 @@ function quotaWarningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider
     const top = [...cells.values()].sort((a, b) => b.n - a.n || a.space.localeCompare(b.space)).slice(0, 2)
     const using = top.map((c) => `${TITLE[c.role]} in ${c.space} (${c.n} ${c.n === 1 ? 'slot' : 'slots'})`).join(' and ')
     const warning: SummaryWarning = {
-      id: `quota:${r.provider}`,
+      id: `quota:${[...providers].sort().join('+')}`,
       level: over.some((x) => x.share >= 100) ? 'risk' : 'note',
-      words: `${r.name}: ${words}.`,
+      words: `${name}: ${words}.`,
       fix: top.length
         ? `Most of its slots are ${using}. Give one of them a backup on another provider, or let the window refill before the work does.`
         : 'Give its roles a backup on another provider, or let the window refill before the work does.',

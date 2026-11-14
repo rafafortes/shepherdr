@@ -18,6 +18,8 @@ const ZEN = 'opencode/minimax-m3.1-flash-free'
 const NV = 'nvidia/z-ai/glm-5.3-flash'
 /** a model whose variants are OpenCode's own words (not the levels Shepherdr ranks) */
 const THINK = 'opencode-go/mimo-v2.6-flash'
+/** the key OpenCode's model id runs under: its harness and provider in front of the id */
+const KEY = (id: string) => modelKey('opencode', id)
 
 /** OpenCode's list as its models are kept, with the model it starts on */
 const listed = (def?: string) =>
@@ -35,11 +37,11 @@ describe('OpenCode: its default model is the key of a model the CLI does not nam
   test("a task or coordinator with OpenCode's own default counts on the model it starts on, not on a provider's unknown", () => {
     setModels('opencode', listed(GO))
     try {
-      expect(keyOf('opencode')).toBe(GO)
-      expect(keyOf('opencode', 'default')).toBe(GO)
+      expect(keyOf('opencode')).toBe(KEY(GO))
+      expect(keyOf('opencode', 'default')).toBe(KEY(GO))
       // a model it lists is kept as it is: its key is its provider's
-      expect(keyOf('opencode', NV)).toBe(NV)
-      expect(keyOf('opencode', ZEN)).toBe(ZEN)
+      expect(keyOf('opencode', NV)).toBe(KEY(NV))
+      expect(keyOf('opencode', ZEN)).toBe(KEY(ZEN))
     } finally {
       setModels('opencode', undefined)
     }
@@ -56,25 +58,25 @@ describe('OpenCode: its default model is the key of a model the CLI does not nam
   })
 
   test('a model keeps its provider as OpenCode writes it: the usage of a call is the key of its model, slashes and all', () => {
-    expect(modelKey('opencode', NV)).toBe(NV)
-    expect(modelKey('opencode', 'opencode-go/deepseek-v4.1-flash')).toBe(modelKey('pi', GO))
+    expect(modelKey('opencode', NV)).toBe(KEY(NV))
+    expect(modelKey('opencode', 'opencode-go/deepseek-v4.1-flash')).toBe(KEY(GO))
   })
 })
 
 describe('OpenCode: the names of its providers and models', () => {
   test('the providers OpenCode adds have their names; a provider with none gets its id in words', () => {
-    expect(providerName('opencode')).toBe('OpenCode Zen (free)')
-    expect(providerName('nvidia')).toBe('NVIDIA API')
-    expect(providerName('opencode-go')).toBe('OpenCode Go')
+    expect(providerName('opencode.opencode')).toBe('OpenCode Zen (free)')
+    expect(providerName('opencode.nvidia')).toBe('NVIDIA API')
+    expect(providerName('opencode.opencode-go')).toBe('OpenCode Go')
     // no name in the map: its words capitalised, the acronyms upper-cased
     expect(providerName('someone-new')).toBe('Someone New')
-    expect(providerName('amd-tokenlab')).toBe('AMD TokenLab')
+    expect(providerName('pi.amd-tokenlab')).toBe('AMD TokenLab')
   })
 
   test("OpenCode's local servers are local: no quota is warned about for them; a cloud provider is not", () => {
     expect(LOCAL.has('lmstudio')).toBe(true)
     expect(LOCAL.has('ollama')).toBe(true)
-    expect(providerName('ollama')).toBe('Ollama (local)')
+    expect(providerName('opencode.ollama')).toBe('Ollama (local)')
     expect(LOCAL.has('nvidia')).toBe(false)
     expect(LOCAL.has('opencode')).toBe(false)
   })
@@ -82,12 +84,12 @@ describe('OpenCode: the names of its providers and models', () => {
   test("a model OpenCode lists is named as its list says, under its provider's row; one it does not list keeps its id", () => {
     setModels('opencode', listed(GO))
     try {
-      expect(labelOf(GO)).toBe('deepseek-v4.1-flash')
-      expect(labelOf(ZEN)).toBe('minimax-m3.1-flash-free')
+      expect(labelOf(KEY(GO))).toBe('deepseek-v4.1-flash')
+      expect(labelOf(KEY(ZEN))).toBe('minimax-m3.1-flash-free')
       // not in OpenCode's list (nor pi's): its own id, under its provider
-      expect(labelOf('nvidia/z-ai/glm-9')).toBe('z-ai/glm-9')
+      expect(labelOf(KEY('nvidia/z-ai/glm-9'))).toBe('z-ai/glm-9')
       // Claude Code's and Codex's words are their own, whatever OpenCode lists under their names
-      expect(labelOf('anthropic/claude-opus-5-5')).toBe('Opus 5.5')
+      expect(labelOf('claude/claude-opus-5-5')).toBe('Opus 5.5')
     } finally {
       setModels('opencode', undefined)
     }
@@ -127,11 +129,11 @@ describe('OpenCode Go: the calls of both CLIs are one plan', () => {
         watch: [],
       }
       const sum = modelsSummary(input)
-      const zen = sum.providers.find((p) => p.provider === 'opencode')!
+      const zen = sum.providers.find((p) => p.provider === 'opencode.opencode')!
       expect(zen).toMatchObject({ name: 'OpenCode Zen (free)', local: false })
       expect(zen.models.map((m) => m.label)).toEqual(['minimax-m3.1-flash-free'])
       expect(zen.quota).toBeUndefined()
-      expect(sum.providers.find((p) => p.provider === 'nvidia')).toMatchObject({ name: 'NVIDIA API' })
+      expect(sum.providers.find((p) => p.provider === 'opencode.nvidia')).toMatchObject({ name: 'NVIDIA API' })
     } finally {
       setModels('opencode', undefined)
     }

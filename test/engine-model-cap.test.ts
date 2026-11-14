@@ -51,7 +51,7 @@ describe('models.maxAtOnce: a model at its cap holds its next task, and the othe
     // the machine has room, its spark models do not: the model is the reason
     const s3 = addOn(w, s1.p, 'S3', SPARK)
     expect(s3.held?.why).toBe('model')
-    expect(w.engine.subOf(s3)).toBe('Waiting: spark 2/2')
+    expect(w.engine.subOf(s3)).toBe('Waiting: pi · spark 2/2')
     expect(w.posted.some((x) => x.key === `${s3.id}/Agent` && x.id.startsWith('held:') && x.card?.text === 'waiting: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (2 of 2 at once) — every model it may use is full or out')).toBe(true)
     expect(startedOf(w, s3.id)).toBe(false)
     expect(w.engine.room(s3)).toEqual({ why: 'model' })
@@ -79,7 +79,7 @@ describe('models.maxAtOnce: a model at its cap holds its next task, and the othe
     w.agentIs(x.key, 'idle')
     await until(() => s3.held?.why === 'model')
     expect(startedOf(w, s3.id)).toBe(false)
-    expect(w.engine.subOf(s3)).toBe('Waiting: spark 2/2')
+    expect(w.engine.subOf(s3)).toBe('Waiting: pi · spark 2/2')
     // a commandcode task added now starts past the spark one
     const c2 = addOn(w, s1.p, 'C2', CODE)
     expect(c2.held).toBeUndefined()
@@ -123,8 +123,8 @@ describe('models.maxAtOnce: which entry caps a model, and what counts', () => {
     // spark=2 is full (qwen and the other model): the qwen model's own 3 do not pass the provider's 2
     const q2 = addOn(w, q1.p, 'Q2', SPARK)
     expect(q2.held?.why).toBe('model')
-    expect(w.engine.subOf(q2)).toBe('Waiting: spark 2/2')
-    expect(w.engine.taskChoice(q2)).toMatchObject({ wait: [{ name: 'spark', cap: { scope: 'machine', count: 2, max: 2 } }] })
+    expect(w.engine.subOf(q2)).toBe('Waiting: pi · spark 2/2')
+    expect(w.engine.taskChoice(q2)).toMatchObject({ wait: [{ name: 'pi.spark', cap: { scope: 'machine', count: 2, max: 2 } }] })
     // one of the two ends: the provider has room, the qwen model its own 3 with room too, so Q2 starts
     await w.engine.done(o1.t.id, 'Nothing to change.')
     w.agentIs(o1.key, 'idle')
@@ -148,7 +148,7 @@ describe('models.maxAtOnce: which entry caps a model, and what counts', () => {
     const p = await w.places.add(dir, 'claude-cap')
     const t1 = w.engine.add({ project: p.name, title: 'O1', desc: 'Add o1.txt.', by: 'test', agent: { kind: 'claude', model: 'claude-opus-5-5' } })
     await until(() => w.started.some((s) => s.key === `${t1.id}/Agent`))
-    expect(w.engine.modelOfTask(t1)).toBe('anthropic/claude-opus-5-5')
+    expect(w.engine.modelOfTask(t1)).toBe('claude/claude-opus-5-5')
     const t2 = w.engine.add({ project: p.name, title: 'O2', desc: 'Add o2.txt.', by: 'test', agent: { kind: 'claude', model: 'claude-opus-5-5' } })
     expect(t2.held?.why).toBe('model')
     expect(w.engine.subOf(t2)).toBe('Waiting: claude-opus-5-5 1/1')
@@ -161,14 +161,14 @@ describe('models.maxAtOnce: which entry caps a model, and what counts', () => {
     const w = fresh({ 'machine.maxTasks': '10' }, 'spark=1')
     const dir = repo()
     const p = await w.places.add(dir, 'coord-cap')
-    // a coordinator of this machine, working on spark: the one slot of spark is its
+    // a coordinator of this machine, working on pi.spark: the one slot of spark is its
     const chat = placeId.space(p.name)
     w.records[chat] = { kind: 'pi', started: Date.now(), logs: [] }
     modelOf(w, chat, SPARK)
     w.agentIs(chat, 'working')
     const t = addOn(w, p, 'Waits', SPARK)
     expect(t.held?.why).toBe('model')
-    expect(w.engine.subOf(t)).toBe('Waiting: spark 1/1')
+    expect(w.engine.subOf(t)).toBe('Waiting: pi · spark 1/1')
     // at rest, it is not counted
     w.agentIs(chat, 'idle')
     expect(w.engine.room(t)).toEqual({})
@@ -183,7 +183,7 @@ describe('models.maxAtOnce: which entry caps a model, and what counts', () => {
     const w = fresh({ 'machine.maxTasks': '10' }, 'spark=1')
     const dir = repo()
     const a = await startOn(w, dir, 'merge-a', 'A1', SPARK)
-    expect(loadOf(w, SPARK)).toBe(1)
+    expect(loadOf(w, `pi.${SPARK}`)).toBe(1)
     // in line for its merge: it holds nothing, so the next one may start
     ;(a.t as { landing?: unknown }).landing = { step: 'queue', at: Date.now(), behind: 'X-1' }
     expect(loadOf(w, SPARK)).toBe(0)
@@ -193,7 +193,7 @@ describe('models.maxAtOnce: which entry caps a model, and what counts', () => {
     w.chat.question = true
     w.agentIs(a.key, 'working')
     expect(w.engine.statusOf(a.t)).toBe('need')
-    expect(loadOf(w, SPARK)).toBe(2)
+    expect(loadOf(w, `pi.${SPARK}`)).toBe(2)
     w.chat.question = false
   })
 
@@ -203,12 +203,12 @@ describe('models.maxAtOnce: which entry caps a model, and what counts', () => {
     const a = await startOn(w, dir, 'live-a', 'A1', SPARK)
     // its live agent reports another model (it was switched): the live one is what it runs on
     modelOf(w, a.key, 'radeon/other-model')
-    expect(w.engine.modelOfTask(a.t)).toBe('radeon/other-model')
-    expect(loadOf(w, 'radeon/other-model')).toBe(1)
+    expect(w.engine.modelOfTask(a.t)).toBe('pi.radeon/other-model')
+    expect(loadOf(w, 'pi.radeon/other-model')).toBe(1)
     expect(loadOf(w, SPARK)).toBe(0)
     // an agent that is gone counts on what the task starts on
     w.agentIs(a.key, 'gone')
-    expect(w.engine.modelOfTask(a.t)).toBe(SPARK)
+    expect(w.engine.modelOfTask(a.t)).toBe(`pi.${SPARK}`)
     expect(loadOf(w, SPARK)).toBe(0)
   })
 
@@ -219,7 +219,7 @@ describe('models.maxAtOnce: which entry caps a model, and what counts', () => {
     const older = addOn(w, a.p, 'Older', SPARK)
     const fix = addOn(w, a.p, 'Fix main', SPARK, true)
     expect(fix.held?.why).toBe('model')
-    expect(w.engine.subOf(fix)).toBe('First in line · Waiting: spark 1/1')
+    expect(w.engine.subOf(fix)).toBe('First in line · Waiting: pi · spark 1/1')
     expect(w.engine.heldTasks().map((t) => t.id)).toEqual([fix.id, older.id])
     await w.engine.done(a.t.id, 'Nothing to change.')
     w.agentIs(a.key, 'idle')

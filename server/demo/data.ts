@@ -114,7 +114,7 @@ export function tasks(): Task[] {
       age: '4m',
       branch: 'work/18-webhook-rate-limit',
       pr: { number: 49, url: 'https://github.com/eliasstravik/gtm/pull/49' },
-      agent: agent('GTM-18', 'Claude Code', 'merging', '4m', 'Checks running · ~3m', on('anthropic', 'Claude Code', 'claude-opus-5-5', 'high')),
+      agent: agent('GTM-18', 'Claude Code', 'merging', '4m', 'Checks running · ~3m', on('claude', 'Claude Code', 'claude-opus-5-5', 'high')),
       said: 'The webhook takes at most 20 calls a minute per sender; more get a 429 with Retry-After.',
     },
     {
@@ -184,7 +184,7 @@ export function tasks(): Task[] {
       place: HP,
       sub: 'Reading the call helper',
       age: '8m',
-      agent: agent('HP-202', 'Codex', 'work', '8m', 'Reading the call helper', on('openai', 'Codex', 'gpt-6-sol', 'high')),
+      agent: agent('HP-202', 'Codex', 'work', '8m', 'Reading the call helper', on('codex', 'Codex', 'gpt-6-sol', 'high')),
       report: { msg: 'Tracing why mute ends the call', progress: 40, eta: 12 },
     },
     {
@@ -220,7 +220,7 @@ export function tasks(): Task[] {
       place: LV,
       sub: 'Question for you',
       age: '21m',
-      agent: agent('LV-3', 'pi', 'need', '21m', 'Question for you', on('spark', 'Spark (local)', 'qwen3.8-flash-next-mlx4-mtp-tensorfold', 'high')),
+      agent: agent('LV-3', 'pi', 'need', '21m', 'Question for you', on('pi.spark', 'Spark (local)', 'qwen3.8-flash-next-mlx4-mtp-tensorfold', 'high')),
     },
     {
       id: 'LV-4',
@@ -566,7 +566,7 @@ export function heldFor(s: Settings, workingIn: Record<string, number>): { held:
   return {
     held,
     advisor: [{ chat: 'HP-201/Agent', task: 'HP-201', words: "HP-201's agent asks: Keep Pinned as a filter, or a tab?" }],
-    reviews: [{ task: 'GTM-15', space: 'gtm', words: 'Waits for a reviewer: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (4 of 4 at once)' }],
+    reviews: [{ task: 'GTM-15', space: 'gtm', words: 'Waits for a reviewer: pi · Spark (local) (4 of 4 at once)' }],
   }
 }
 

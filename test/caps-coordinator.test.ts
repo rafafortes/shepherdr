@@ -87,18 +87,18 @@ const startCoordinator = (id: string) => (src as unknown as { coordinator(id: st
 describe('a coordinator starts on the caps: the first harness with room, or it waits for one', () => {
   test('its primary is full: its first start is on its backup, with a card that says why', async () => {
     // a pi coordinator of another space is working on the provider pi (its key is pi/unknown): the cap is full
-    src.settings.set('models.maxAtOnce', 'pi=1', 'machine')
+    src.settings.set('models.maxAtOnce', 'pi/unknown=1', 'machine')
     const busy = await space('caps-busy')
     src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'pi', logs: [], started: Date.now() } as never
     working.add(busy.id)
     const { id } = await space('caps-first')
     await startCoordinator(id)
     expect(starts.at(-1)).toMatchObject({ key: id, kind: 'codex' })
-    expect(cards(id)).toContain('Started on Codex: pi is at its limit (1 of 1 at once)')
+    expect(cards(id)).toContain('Started on Codex: pi/unknown is at its limit (1 of 1 at once)')
   })
 
   test('every harness full: it does not start, its chat says it waits, and the way back starts it once one has room', async () => {
-    src.settings.set('models.maxAtOnce', 'pi=1, openai=1', 'machine')
+    src.settings.set('models.maxAtOnce', 'pi/unknown=1, codex=1', 'machine')
     const busy = await space('caps-busy-2')
     src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'pi', logs: [], started: Date.now() } as never
     working.add(busy.id)
@@ -124,7 +124,7 @@ describe('a coordinator starts on the caps: the first harness with room, or it w
   })
 
   test('a wait whose start fails is logged, and a wait over by itself (its place gone, or its coordinator running) is dropped', async () => {
-    src.settings.set('models.maxAtOnce', 'pi=1, openai=0', 'machine')
+    src.settings.set('models.maxAtOnce', 'pi/unknown=1, codex=0', 'machine')
     const busy = await space('caps-wfail-busy')
     src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'pi', logs: [], started: Date.now() } as never
     working.add(busy.id)
@@ -159,7 +159,7 @@ describe('a coordinator starts on the caps: the first harness with room, or it w
   })
 
   test('a start by hand on a full model is refused with a card, and nothing waits; one on a model with room starts with no card', async () => {
-    src.settings.set('models.maxAtOnce', 'pi=1', 'machine')
+    src.settings.set('models.maxAtOnce', 'pi/unknown=1', 'machine')
     const busy = await space('caps-busy-4')
     src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'pi', logs: [], started: Date.now() } as never
     working.add(busy.id)
@@ -167,9 +167,9 @@ describe('a coordinator starts on the caps: the first harness with room, or it w
     src.agents.records[id] = { key: id, name: 'manual', kind: 'codex', logs: [], started: Date.now() } as never
     const as = (kind: string) => (src as unknown as { coordinator(id: string, o: { as: { kind: string } }): Promise<unknown> }).coordinator(id, { as: { kind } }).catch((e: Error) => e)
     const err = await as('pi')
-    expect((err as Error).message).toBe('Not started: pi is at its limit (1 of 1 at once): wait for a free slot, or pick another model.')
+    expect((err as Error).message).toBe('Not started: pi/unknown is at its limit (1 of 1 at once): wait for a free slot, or pick another model.')
     expect(starts.some((x) => x.key === id)).toBe(false)
-    expect(cards(id)).toContain('Not started: pi is at its limit (1 of 1 at once): wait for a free slot, or pick another model.')
+    expect(cards(id)).toContain('Not started: pi/unknown is at its limit (1 of 1 at once): wait for a free slot, or pick another model.')
     expect((src as unknown as { capWaits: Map<string, unknown> }).capWaits.has(id)).toBe(false)
     await as('codex')
     expect(starts.at(-1)).toMatchObject({ key: id, kind: 'codex' })
@@ -177,7 +177,7 @@ describe('a coordinator starts on the caps: the first harness with room, or it w
   })
 
   test('a relaunch of a stopped coordinator on a full model waits, without a try counted, and goes once its model has room', async () => {
-    src.settings.set('models.maxAtOnce', 'pi=1', 'machine')
+    src.settings.set('models.maxAtOnce', 'pi/unknown=1', 'machine')
     const busy = await space('caps-revive-busy')
     src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'pi', logs: [], started: Date.now() } as never
     working.add(busy.id)
@@ -196,7 +196,7 @@ describe('a coordinator starts on the caps: the first harness with room, or it w
       await s.revive()
       await s.revive()
       expect(starts.some((x) => x.key === id)).toBe(false)
-      const held = 'Its agent stopped, and starts again once its model has room: pi is at its limit (1 of 1 at once).'
+      const held = 'Its agent stopped, and starts again once its model has room: pi/unknown is at its limit (1 of 1 at once).'
       expect(cards(id).filter((c) => c === held)).toHaveLength(1)
       // the busy one ends: the next look starts it again on its own model (no try was spent waiting)
       working.delete(busy.id)
@@ -214,7 +214,7 @@ describe("a coordinator's takeover: the first backup with room, or it waits for 
   const cantGoOn = (id: string, cut = 'c1') => (src as unknown as { coordinatorCantGoOn(key: string, r: unknown): Promise<void> }).coordinatorCantGoOn(id, { cut, tries: 1, reason: 'Out of allowance until 5pm', words: 'out', over: true, lasting: true })
 
   test('its backup is full: no takeover past the cap; the cut-off card says it waits, and it takes over once the backup has room', async () => {
-    src.settings.set('models.maxAtOnce', 'openai=1', 'machine')
+    src.settings.set('models.maxAtOnce', 'codex=1', 'machine')
     const busy = await space('caps-take-busy')
     src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'codex', logs: [], started: Date.now() } as never
     working.add(busy.id)
@@ -241,7 +241,7 @@ describe("a coordinator's takeover: the first backup with room, or it waits for 
     src.agents.records[id] = { key: id, name: 'out', kind: 'pi', logs: [], started: Date.now() } as never
     const s = src as unknown as { engine: { outNow?: (key: string) => { until?: string } | undefined } }
     const was = s.engine.outNow
-    s.engine.outNow = (key: string) => (key.startsWith('openai/') ? { until: 'Today 21:00' } : undefined)
+    s.engine.outNow = (key: string) => (key.startsWith('codex/') ? { until: 'Today 21:00' } : undefined)
     try {
       await cantGoOn(id)
       expect(starts.some((x) => x.key === id)).toBe(false)
@@ -253,7 +253,7 @@ describe("a coordinator's takeover: the first backup with room, or it waits for 
   })
 
   test('a wait for a takeover is over once the coordinator runs on another model (restarted by hand), or is at work again', async () => {
-    src.settings.set('models.maxAtOnce', 'openai=1', 'machine')
+    src.settings.set('models.maxAtOnce', 'codex=1', 'machine')
     const busy = await space('caps-take-moved-busy')
     src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'codex', logs: [], started: Date.now() } as never
     working.add(busy.id)
@@ -353,7 +353,7 @@ describe('a start the caps put on a backup goes back to its primary once it is i
 
 describe("a coordinator a cap started on a backup goes back too, and a way back that fails is logged", () => {
   test('its primary has room again and it is idle: it goes back to the primary; a stale mark of a gone place is dropped', async () => {
-    src.settings.set('models.maxAtOnce', 'pi=1', 'machine')
+    src.settings.set('models.maxAtOnce', 'pi/unknown=1', 'machine')
     const busy = await space('caps-cback-busy')
     src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'pi', logs: [], started: Date.now() } as never
     working.add(busy.id)
@@ -376,7 +376,7 @@ describe("a coordinator a cap started on a backup goes back too, and a way back 
   })
 
   test('a coordinator a cap put on its backup is still on it after a restart, and its way back still applies', async () => {
-    src.settings.set('models.maxAtOnce', 'pi=1', 'machine')
+    src.settings.set('models.maxAtOnce', 'pi/unknown=1', 'machine')
     const busy = await space('caps-restart-busy')
     src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'pi', logs: [], started: Date.now() } as never
     working.add(busy.id)
@@ -406,7 +406,7 @@ describe("a coordinator a cap started on a backup goes back too, and a way back 
   })
 
   test('a way back that fails is logged and the agent stays where it is', async () => {
-    src.settings.set('models.maxAtOnce', 'pi=1', 'machine')
+    src.settings.set('models.maxAtOnce', 'pi/unknown=1', 'machine')
     const busy = await space('caps-fail-busy')
     src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'pi', logs: [], started: Date.now() } as never
     working.add(busy.id)
@@ -436,7 +436,7 @@ describe("a coordinator a cap started on a backup goes back too, and a way back 
 
 describe('a restart by hand, and the way back, never put a coordinator on a full model', () => {
   test('shepherdr restart onto a full model is refused before anything is saved or stopped', async () => {
-    src.settings.set('models.maxAtOnce', 'pi=1', 'machine')
+    src.settings.set('models.maxAtOnce', 'pi/unknown=1', 'machine')
     const busy = await space('caps-hand-busy')
     src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'pi', logs: [], started: Date.now() } as never
     working.add(busy.id)
@@ -446,7 +446,7 @@ describe('a restart by hand, and the way back, never put a coordinator on a full
     src.settings.set('coordinator.agent', 'Codex', { space: p.name })
     const restart = (src as unknown as { restart(key: string, to: { kind?: string }, save?: boolean): Promise<string> }).restart.bind(src)
     const err = await restart(id, { kind: 'pi' }, true).catch((e: Error) => e)
-    expect((err as Error).message).toBe('Not restarted: pi is at its limit (1 of 1 at once): wait for a free slot, or pick another model.')
+    expect((err as Error).message).toBe('Not restarted: pi/unknown is at its limit (1 of 1 at once): wait for a free slot, or pick another model.')
     // nothing saved, nothing started
     expect(src.settings.pick('coordinator.agent', { space: p.name }).value).toBe('Codex')
     expect(starts.some((x) => x.key === id)).toBe(false)
@@ -454,7 +454,7 @@ describe('a restart by hand, and the way back, never put a coordinator on a full
   })
 
   test('the way back takes a coordinator to its primary only while the primary has room: full, it waits for a later pass', async () => {
-    src.settings.set('models.maxAtOnce', 'pi=1', 'machine')
+    src.settings.set('models.maxAtOnce', 'pi/unknown=1', 'machine')
     const busy = await space('caps-wayback-busy')
     src.agents.records[busy.id] = { key: busy.id, name: 'busy', kind: 'pi', logs: [], started: Date.now() } as never
     working.add(busy.id)
@@ -482,8 +482,8 @@ describe("shepherdr set models.maxAtOnce says what it fitted to the provider's l
   test("a model above its provider's limit is saved at the provider's number, and the answer says so", async () => {
     const r = await src.cli(['set', 'models.maxAtOnce', `spark=2, ${SPARK}=3`, '--machine'], {})
     expect(r.code).toBe(0)
-    expect(r.out).toContain(`models.maxAtOnce = spark=2, ${SPARK}=2`)
-    expect(r.out).toContain(`Lowered to fit their provider: ${SPARK} from 3 to 2 (spark allows 2 at once).`)
+    expect(r.out).toContain(`models.maxAtOnce = pi.spark=2, pi.${SPARK}=2`)
+    expect(r.out).toContain(`Lowered to fit their provider: pi · ${SPARK} from 3 to 2 (pi · spark allows 2 at once).`)
     // nothing to fit: no such line
     const plain = await src.cli(['set', 'models.maxAtOnce', 'spark=2', '--machine'], {})
     expect(plain.out).not.toContain('Lowered')

@@ -19,7 +19,7 @@ describe.skipIf(!browser)('a running task says what its agent runs on, on a line
       const run = working.locator('[data-run]')
       const shown = (x: import('playwright-core').Locator) => x.locator('[aria-hidden]').textContent()
       const heard = (x: import('playwright-core').Locator) => x.locator('.sr-only').textContent()
-      expect(await shown(run)).toBe('Codex · openai · gpt-6-sol')
+      expect(await shown(run)).toBe('Codex · gpt-6-sol')
       // a screen reader hears all of it, the effort too, and a provider named as its CLI once; no title pops up
       expect(await heard(run)).toBe('Runs on Codex · gpt-6-sol (high)')
       expect(await run.locator('[title]').count()).toBe(0)
@@ -32,7 +32,7 @@ describe.skipIf(!browser)('a running task says what its agent runs on, on a line
       // waiting on you with its agent there, or merging: the same line, the provider's own name in its title
       const pi = page.getByRole('button', { name: /LV-3 Upload/ }).locator('[data-run]')
       expect(await heard(pi)).toBe('Runs on pi · Spark (local) · qwen3.8-flash-next-mlx4-mtp-tensorfold (high)')
-      expect(await shown(page.getByRole('button', { name: /GTM-18 Rate/ }).locator('[data-run]'))).toBe('Claude Code · anthropic · claude-opus-5-5')
+      expect(await shown(page.getByRole('button', { name: /GTM-18 Rate/ }).locator('[data-run]'))).toBe('Claude Code · claude-opus-5-5')
       // ready, queued, to do or with no agent up: none
       for (const id of [/GTM-15 Fix/, /HP-203 Release/, /GTM-16 Docs/]) expect(await page.getByRole('button', { name: id }).locator('[data-run]').count()).toBe(0)
       await page.close()

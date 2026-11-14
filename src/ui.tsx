@@ -486,17 +486,19 @@ export function ReportLine({ w, head = false, wrap = false }: { w: Report; head?
 const RUNNING: Status[] = ['work', 'merging', 'need']
 
 /** what a running task's agent runs on, for its row's line under the status: its CLI, provider and model
- *  (`pi · spark · qwen3.8-flash-next…`); a screen reader hears the whole of it, with the provider's name and the effort
+ *  (`pi · spark · qwen3.8-flash-next…`, `Codex · gpt-6-sol`); a screen reader hears the whole of it, with the provider's name and the effort
  *  (no title: nothing in the lists pops up a tooltip). Nothing for a task whose agent is not up or that does not run now */
 export function runLine(t: Task): ReactNode {
   const r = t.agent?.run
   if (!r || t.archived || !RUNNING.includes(t.status)) return null
   // a provider named as its CLI (Codex, Claude Code) is said once
   const full = `Runs on ${t.agent!.cli}${r.providerName !== t.agent!.cli ? ` · ${r.providerName}` : ''} · ${r.model}${r.effort ? ` (${r.effort})` : ''}`
+  // the line shows the provider part of a pi or OpenCode provider (pi.spark: spark); a single-account CLI's is its own name
+  const part = r.provider.includes('.') ? r.provider.slice(r.provider.indexOf('.') + 1) : undefined
   return (
     <span data-run>
       <span aria-hidden>
-        {t.agent!.cli} · {r.provider} · {r.model}
+        {[t.agent!.cli, part, r.model].filter(Boolean).join(' · ')}
       </span>
       <span className="sr-only">{full}</span>
     </span>

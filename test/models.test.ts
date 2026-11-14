@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test'
 import { chmodSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { agyFrom, claudeFrom, codexFrom, effortFor, effortsOf, findModel, helpLevels, installOf, knowsModels, modelArg, modelsOf, nearest, opencodeFrom, opencodeList, parseClaude, parseCodex, parsePi, piEnabled, piFrom, read, scopeModels, scopeOpencodeText, scopePatterns, scopePi, setModels, setOpencodeScope, stillHolds } from '../server/live/models.ts'
+import { offers, agyFrom, claudeFrom, codexFrom, effortFor, effortsOf, findModel, helpLevels, installOf, knowsModels, modelArg, modelsOf, nearest, opencodeFrom, opencodeList, parseClaude, parseCodex, parsePi, piEnabled, piFrom, read, scopeModels, scopeOpencodeText, scopePatterns, scopePi, setModels, setOpencodeScope, stillHolds } from '../server/live/models.ts'
 import { opencodeConfigDir, opencodeDataDir } from '../server/live/opencode.ts'
 import { tmp } from './tmp.ts'
 
@@ -413,6 +413,22 @@ describe("OpenCode's models scoped by opencode.models", () => {
     } finally {
       console.error = was
       setOpencodeScope(undefined)
+      setModels('opencode', undefined)
+    }
+  })
+})
+
+describe('which harnesses offer a provider', () => {
+  test('offers: pi and OpenCode, by their own lists (not scoped), those with a model of the provider', () => {
+    setModels('pi', { models: [{ id: 'spark/qwen3', label: 'qwen3', efforts: [] }, { id: 'anthropic/claude-opus-5-5', label: 'x', efforts: [] }], efforts: [] })
+    setModels('opencode', { models: [{ id: 'opencode/minimax-m3', label: 'm', efforts: [] }, { id: 'anthropic/claude-haiku-5-5', label: 'h', efforts: [] }], efforts: [] })
+    try {
+      expect(offers('spark')).toEqual(['pi'])
+      expect(offers('anthropic')).toEqual(['pi', 'opencode'])
+      expect(offers('opencode')).toEqual(['opencode'])
+      expect(offers('openai')).toEqual([])
+    } finally {
+      setModels('pi', undefined)
       setModels('opencode', undefined)
     }
   })

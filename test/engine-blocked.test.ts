@@ -30,9 +30,9 @@ const startedOn = (w: ReturnType<typeof world>, id: string) => w.started.some((s
 const cards = (w: ReturnType<typeof world>, key: string) => w.posted.filter((x) => x.key === key && x.card).map((x) => x.card!.text)
 
 /** a task on a pi model (its own agent): started at once when it can be, and its brief read */
-async function running(w: ReturnType<typeof world>, dir: string, name: string, title: string, model = SPARK) {
+async function running(w: ReturnType<typeof world>, dir: string, name: string, title: string, model = SPARK, kind = 'pi') {
   const p = await w.places.add(dir, name)
-  const t = w.engine.add({ project: p.name, title, desc: `Add ${title}.txt.`, by: 'test', agent: { kind: 'pi', model } })
+  const t = w.engine.add({ project: p.name, title, desc: `Add ${title}.txt.`, by: 'test', agent: { kind, model } })
   await until(() => w.started.some((s) => s.key === `${t.id}/Agent`))
   w.records[`${t.id}/Agent`] = { ...w.records[`${t.id}/Agent`], model } as never
   w.brief(`${t.id}/Agent`)
@@ -52,14 +52,14 @@ describe('0 blocks a model: a task starts on the first backup that is not blocke
     await until(() => startedOn(w, s.id))
     expect(kindOf(w, `${s.id}/Agent`)).toBe('codex')
     expect(s.onBackup).toEqual({ step: 1, kind: 'codex', at: expect.any(Number) })
-    expect(cards(w, `${s.id}/Agent`)).toContain('Started on Codex: spark is blocked (0 allowed)')
+    expect(cards(w, `${s.id}/Agent`)).toContain('Started on Codex: pi · spark is blocked (0 allowed)')
     expect(s.held).toBeUndefined()
   })
 
   test('its primary is blocked and its backup is full: it waits for the backup, not as blocked', async () => {
     const w = fresh('spark=0, openai=1')
     const dir = repo()
-    const busy = await running(w, dir, 'blk-busy', 'Busy', 'openai/gpt-5.5')
+    const busy = await running(w, dir, 'blk-busy', 'Busy', 'gpt-5.5', 'codex')
     void busy
     const s = add(w, await w.places.add(dir, 'blk-full'), 'S2')
     expect(s.held?.why).toBe('model')
@@ -79,7 +79,7 @@ describe('0 blocks a model: a task whose every model is blocked is held, and not
     expect(cards(w, `${s.id}/Agent`)).toContain(ALL_BLOCKED)
     expect(w.engine.holdLine(s)).toBe('Blocked: every model it may use is 0 allowed')
     expect(w.engine.room(s)).toEqual({ why: 'blocked' })
-    expect(w.engine.waitingFor(s)).toEqual(['spark'])
+    expect(w.engine.waitingFor(s)).toEqual(['pi.spark'])
     expect(startedOn(w, s.id)).toBe(false)
   })
 
@@ -117,12 +117,12 @@ describe('0 blocks a model: a task whose every model is blocked is held, and not
     // the backup is full (one codex run of this machine), the primary is blocked: the task waits for that backup
     const w = fresh('spark=0, openai=1')
     const dir = repo()
-    await running(w, dir, 'blk-mixed-busy', 'Busy', 'openai/gpt-5.5')
+    await running(w, dir, 'blk-mixed-busy', 'Busy', 'gpt-5.5', 'codex')
     noBackup(w)
     expect(w.settings.set('task.fallback', 'Codex', 'machine').ok).toBe(true)
     const s = add(w, await w.places.add(dir, 'blk-mixed'), 'S3')
     expect(s.held?.why).toBe('model')
-    expect(w.engine.waitingFor(s)).toEqual(['openai'])
+    expect(w.engine.waitingFor(s)).toEqual(['codex'])
   })
 })
 
@@ -193,7 +193,7 @@ describe('running agents are never stopped by a block', () => {
     w.engine.release()
     expect(w.stopped).toEqual([])
     expect(w.started.length).toBe(before)
-    expect(w.engine.runs().some((r) => r.id === s1.t.id && r.key === SPARK)).toBe(true)
+    expect(w.engine.runs().some((r) => r.id === s1.t.id && r.key === `pi.${SPARK}`)).toBe(true)
     // and the next one, on the same model, is held
     const s2 = add(w, s1.p, 'R2')
     expect(s2.held?.why).toBe('blocked')
@@ -229,7 +229,7 @@ describe('a review round whose reviewer is blocked goes to the backup reviewer, 
     const r = await w.engine.reviewRound(s.t.id)
     expect('wait' in r).toBe(false)
     if ('wait' in r) throw new Error('expected a round')
-    expect(r).toMatchObject({ round: 1, n: 1, why: { why: 'blocked', name: 'openai' } })
+    expect(r).toMatchObject({ round: 1, n: 1, why: { why: 'blocked', name: 'codex' } })
     expect(w.engine.reviewWords(s.t.id, r)).toContain('(Codex (default) is blocked (0 allowed))')
     expect(s.t.reviews).toBe(1)
     w.engine.reviewDone(s.t.id)

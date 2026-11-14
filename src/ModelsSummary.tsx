@@ -9,6 +9,7 @@ import { Fragment, useState, type ReactNode } from 'react'
 import type { ModelsSummary as Summary, QuotaFigure, QuotaRead, QuotaWindow, SummaryConfigured, SummaryNow, SummaryProvider, SummaryRow, SummaryRunOuts, SummaryUsage, SummaryWarning } from '@shared/types.ts'
 import { openPage } from './Settings.tsx'
 import { ageWords, shareOf, tokens, windowWords } from '../shared/quota-words.ts'
+import { harnessGroups, inHarness } from '../shared/harness.ts'
 import { CapCell, type CapsText } from './CapCell.tsx'
 import { Ghost, Small } from './ui.tsx'
 
@@ -60,7 +61,7 @@ export function runWords(r: SummaryRunOuts, idle = false) {
 }
 
 /** the provider's name in the Settings section that reads its quota (Refresh quotas says what it reads) */
-const READING: Record<string, string> = { anthropic: 'Claude Code', commandcode: 'Command Code' }
+const READING: Record<string, string> = { claude: 'Claude Code', 'pi.commandcode': inHarness('pi', 'Command Code') }
 export const readingWords = (started: string[]) => `Reading ${started.map((p) => READING[p] ?? p).join(' and ')}…`
 
 /** Settings → Secrets (Everywhere's page): where a quota's key is added, opened from the hint that asks for it */
@@ -215,11 +216,16 @@ function Grid({ label, providers, now, cap, idle }: { label: string; providers: 
         </tr>
       </thead>
       <tbody>
-        {providers.map((p) => (
-          <Fragment key={p.provider}>
-            <Line name={p.name} local={p.local} row={p} quota={p.quota} read={p.quotaRead} now={now} shares={<Shares row={p} />} bold cap={{ ...cap, pattern: p.provider }} idle={idle} />
-            {p.models.map((m) => (
-              <Line key={m.key} name={m.label} title={m.key} row={m} now={now} indent cap={{ ...cap, pattern: m.key }} idle={idle} />
+        {harnessGroups(providers).map((g) => (
+          <Fragment key={g.harness}>
+            {g.single ? null : <HarnessRow name={g.name} cols={5} />}
+            {g.list.map((p) => (
+              <Fragment key={p.provider}>
+                <Line name={p.name} harness={p.harnessName} local={p.local} row={p} quota={p.quota} read={p.quotaRead} now={now} shares={<Shares row={p} />} bold depth={g.single ? 0 : 1} cap={{ ...cap, pattern: p.provider }} idle={idle} />
+                {p.models.map((m) => (
+                  <Line key={m.key} name={m.label} title={m.key} row={m} now={now} depth={g.single ? 1 : 2} cap={{ ...cap, pattern: m.key }} idle={idle} />
+                ))}
+              </Fragment>
             ))}
           </Fragment>
         ))}
@@ -251,13 +257,28 @@ function UsedLines({ row }: { row: SummaryRow }) {
   )
 }
 
-/** one table row: a provider or a model, its numbers in the columns */
-function Line({ name, title, local, row, quota, read, now, shares, bold, indent, cap, idle }: { name: string; title?: string; local?: boolean; row: SummaryRow; quota?: QuotaFigure; read?: QuotaRead; now: number; shares?: ReactNode; bold?: boolean; indent?: boolean; cap: CapState & { pattern: string }; idle?: boolean }) {
+/** the left indent of a row's name by its depth under the harness headings: 0 (a single-account CLI's provider, its own row), 1 (a
+ *  provider under a heading, or a model of a single-account CLI), 2 (a model under a heading) */
+const INDENT = ['', 'pl-5', 'pl-10']
+
+/** a harness's heading row in a table: its name, across the table's columns */
+export function HarnessRow({ name, cols }: { name: string; cols: number }) {
+  return (
+    <tr>
+      <th scope="row" colSpan={cols} className="sticky left-0 z-[1] bg-bg pt-3 pb-1 text-left font-medium text-fg2 dark:bg-bubble">
+        {name}
+      </th>
+    </tr>
+  )
+}
+
+/** one table row: a provider or a model, its numbers in the columns (`harness`: the provider's harness, for its cap's editor) */
+function Line({ name, harness, title, local, row, quota, read, now, shares, bold, depth = 0, cap, idle }: { name: string; harness?: string; title?: string; local?: boolean; row: SummaryRow; quota?: QuotaFigure; read?: QuotaRead; now: number; shares?: ReactNode; bold?: boolean; depth?: number; cap: CapState & { pattern: string }; idle?: boolean }) {
   const conf = configuredWords(row.configured)
   const runs = runWords(row.runOuts, idle)
   return (
     <tr className={clsx(bold && 'border-t border-line')}>
-      <th scope="row" className={clsx('sticky left-0 z-[1] bg-bg py-2 pr-4 text-left align-top font-normal dark:bg-bubble', indent && 'pl-5')}>
+      <th scope="row" className={clsx('sticky left-0 z-[1] bg-bg py-2 pr-4 text-left align-top font-normal dark:bg-bubble', INDENT[depth])}>
         <span className={clsx('block truncate', bold ? 'font-medium' : 'text-fg2')} title={title ?? name}>
           {name}
           {local ? <span className="ml-1.5 text-fg3">local</span> : null}
@@ -277,7 +298,7 @@ function Line({ name, title, local, row, quota, read, now, shares, bold, indent,
         <span className="block whitespace-nowrap text-fg2">{conf.words}</span>
         <span className="block truncate text-[0.75rem] text-fg3">{nowWords(row.now)}</span>
         <span className="mt-0.5 block text-[0.75rem]">
-          <CapCell name={name} pattern={cap.pattern} atOnce={row.atOnce} caps={cap.caps} phone={false} openId={cap.open} onOpen={cap.onOpen} />
+          <CapCell name={name} harness={harness} pattern={cap.pattern} atOnce={row.atOnce} caps={cap.caps} phone={false} openId={cap.open} onOpen={cap.onOpen} />
         </span>
       </td>
     </tr>
@@ -374,59 +395,72 @@ function Cards({ providers, now, cap }: { providers: SummaryProvider[]; now: num
   )
 }
 
+/** the phone's cards, under a heading for each harness that runs several providers (a single-account CLI's card is its own) */
 function CardList({ providers, now, cap, idle }: { providers: SummaryProvider[]; now: number; cap: CapState; idle?: boolean }) {
   return (
-    <ul className="flex flex-col gap-3">
-      {providers.map((p) => {
-        const conf = configuredWords(p.configured)
-        const runs = runWords(p.runOuts, idle)
-        return (
-          <li key={p.provider} className="flex flex-col gap-2 rounded-box bg-bg px-4 py-3 shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble">
-            <div className="flex items-baseline justify-between gap-3">
-              <h4 className="min-w-0 truncate font-medium">
-                {p.name}
-                {p.local ? <span className="ml-1.5 font-normal text-fg3">local</span> : null}
-              </h4>
-              {p.share.h24 !== undefined ? <Small>{percent(p.share.h24)} of today's tokens</Small> : null}
-            </div>
-            <Shares row={p} />
-            <dl className="flex flex-col gap-1.5 text-[0.8125rem] phone:text-[0.9375rem]">
-              <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3">
-                <dt className="text-fg3">Quota</dt>
-                <dd className="min-w-0">
-                  <QuotaView quota={p.quota} read={p.quotaRead} now={now} />
-                </dd>
-              </div>
-              <Pair k="Run-outs" v={runs.count} sub={[runs.last, runs.out].filter(Boolean).join(' · ')} need={!!runs.out} />
-              <Pair k="Last 5 h" v={usageWords(p.usage.h5).main} sub={usageWords(p.usage.h5).sub} />
-              <Pair k="Last 24 h" v={usageWords(p.usage.h24).main} sub={usageWords(p.usage.h24).sub} />
-              <Pair k="Last 7 d" v={usageWords(p.usage.d7).main} sub={usageWords(p.usage.d7).sub} />
-              <Pair k="Configured" v={conf.words} title={conf.title} />
-              <Pair k="Now" v={nowWords(p.now)} />
-              <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3">
-                <dt className="text-fg3">At once</dt>
-                <dd className="min-w-0">
-                  <CapCell name={p.name} pattern={p.provider} atOnce={p.atOnce} caps={cap.caps} phone openId={cap.open} onOpen={cap.onOpen} />
-                </dd>
-              </div>
-            </dl>
-            {p.models.length ? (
-              <ul className="flex flex-col gap-1.5 border-t border-line pt-2">
-                {p.models.map((m) => (
-                  <li key={m.key} className="flex flex-col gap-1 text-[0.8125rem] phone:text-[0.9375rem]">
-                    <span className="flex items-baseline justify-between gap-3">
-                      <span className="min-w-0 truncate text-fg2">{m.label}</span>
-                      <span className="shrink-0 text-right tabular-nums">{idle ? '—' : `${tokens(m.usage.d7.tokens)} in 7 d`}</span>
-                    </span>
-                    <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={cap.caps} phone openId={cap.open} onOpen={cap.onOpen} />
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </li>
-        )
-      })}
-    </ul>
+    <div className="flex flex-col gap-3">
+      {harnessGroups(providers).map((g) => (
+        <Fragment key={g.harness}>
+          {g.single ? null : <h3 className="px-1 font-medium text-fg2">{g.name}</h3>}
+          <ul className="flex flex-col gap-3">
+            {g.list.map((p) => (
+              <Card key={p.provider} p={p} now={now} cap={cap} idle={idle} />
+            ))}
+          </ul>
+        </Fragment>
+      ))}
+    </div>
+  )
+}
+
+/** one provider's card on the phone: its numbers, its cap, and its models under it */
+function Card({ p, now, cap, idle }: { p: SummaryProvider; now: number; cap: CapState; idle?: boolean }) {
+  const conf = configuredWords(p.configured)
+  const runs = runWords(p.runOuts, idle)
+  return (
+    <li className="flex flex-col gap-2 rounded-box bg-bg px-4 py-3 shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble">
+      <div className="flex items-baseline justify-between gap-3">
+        <h4 className="min-w-0 truncate font-medium">
+          {p.name}
+          {p.local ? <span className="ml-1.5 font-normal text-fg3">local</span> : null}
+        </h4>
+        {p.share.h24 !== undefined ? <Small>{percent(p.share.h24)} of today's tokens</Small> : null}
+      </div>
+      <Shares row={p} />
+      <dl className="flex flex-col gap-1.5 text-[0.8125rem] phone:text-[0.9375rem]">
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3">
+          <dt className="text-fg3">Quota</dt>
+          <dd className="min-w-0">
+            <QuotaView quota={p.quota} read={p.quotaRead} now={now} />
+          </dd>
+        </div>
+        <Pair k="Run-outs" v={runs.count} sub={[runs.last, runs.out].filter(Boolean).join(' · ')} need={!!runs.out} />
+        <Pair k="Last 5 h" v={usageWords(p.usage.h5).main} sub={usageWords(p.usage.h5).sub} />
+        <Pair k="Last 24 h" v={usageWords(p.usage.h24).main} sub={usageWords(p.usage.h24).sub} />
+        <Pair k="Last 7 d" v={usageWords(p.usage.d7).main} sub={usageWords(p.usage.d7).sub} />
+        <Pair k="Configured" v={conf.words} title={conf.title} />
+        <Pair k="Now" v={nowWords(p.now)} />
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3">
+          <dt className="text-fg3">At once</dt>
+          <dd className="min-w-0">
+            <CapCell name={p.name} harness={p.harnessName} pattern={p.provider} atOnce={p.atOnce} caps={cap.caps} phone openId={cap.open} onOpen={cap.onOpen} />
+          </dd>
+        </div>
+      </dl>
+      {p.models.length ? (
+        <ul className="flex flex-col gap-1.5 border-t border-line pt-2">
+          {p.models.map((m) => (
+            <li key={m.key} className="flex flex-col gap-1 text-[0.8125rem] phone:text-[0.9375rem]">
+              <span className="flex items-baseline justify-between gap-3">
+                <span className="min-w-0 truncate text-fg2">{m.label}</span>
+                <span className="shrink-0 text-right tabular-nums">{idle ? '—' : `${tokens(m.usage.d7.tokens)} in 7 d`}</span>
+              </span>
+              <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={cap.caps} phone openId={cap.open} onOpen={cap.onOpen} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </li>
   )
 }
 

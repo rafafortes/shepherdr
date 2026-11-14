@@ -7,6 +7,7 @@
 import { useState } from 'react'
 import { act } from './kernel.ts'
 import { atOnceWords, fitToProviders, levelText, loweredWords, MAX_CAP, parseMaxAtOnce, spaceCapWords, withEntry, type MaxEntry } from '../shared/model-caps.ts'
+import { inHarness } from '../shared/harness.ts'
 import type { SummaryAtOnce, SummarySpaceText } from '../shared/types.ts'
 import { Pop } from './cell-pop.tsx'
 import { Ghost, Primary, Small } from './ui.tsx'
@@ -40,13 +41,15 @@ export const capId = (pattern: string, space?: string) => (space === undefined ?
  *  phone: under the line, the same controls) */
 export { atOnceWords }
 
-export function CapCell({ name, pattern: raw, atOnce, caps, phone, openId, onOpen }: { name: string; pattern: string; atOnce: SummaryAtOnce; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void }) {
+export function CapCell({ name, harness, pattern: raw, atOnce, caps, phone, openId, onOpen }: { name: string; harness?: string; pattern: string; atOnce: SummaryAtOnce; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void }) {
   // a cap's pattern is lowercase, as its text holds it: a model id with capitals (Qwen3.8-27B) is capped by its lowercase
   const pattern = raw.toLowerCase()
   const id = capId(pattern)
   const w = atOnceWords(atOnce)
   const open = openId === id
-  const editor = <CapEditor name={name} pattern={pattern} caps={caps} phone={phone} onClose={() => onOpen(null)} />
+  // the editor names the row outside its group: "pi · Spark (local)" (a single-account CLI is its own name)
+  const title = harness ? inHarness(harness, name) : name
+  const editor = <CapEditor name={title} pattern={pattern} caps={caps} phone={phone} onClose={() => onOpen(null)} />
   return (
     <span className="relative block min-w-0">
       <button type="button" data-cell={id} data-blocked={w.blocked || undefined} aria-haspopup={phone ? undefined : 'dialog'} aria-expanded={open} aria-label={`${name}: ${w.words}`} title={w.title} onClick={() => onOpen(open ? null : id)} className={`press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel${w.blocked ? ' font-medium text-need-fg' : ''}`}>
@@ -54,18 +57,18 @@ export function CapCell({ name, pattern: raw, atOnce, caps, phone, openId, onOpe
       </button>
       {open ? phone ? <div className="pt-1">{editor}</div> : <Pop onClose={() => onOpen(null)}>{editor}</Pop> : null}
       {(atOnce.spaces ?? []).map((s) => (
-        <SpaceCap key={s.key} name={name} pattern={pattern} space={s} caps={caps} phone={phone} openId={openId} onOpen={onOpen} />
+        <SpaceCap key={s.key} name={name} title={title} pattern={pattern} space={s} caps={caps} phone={phone} openId={openId} onOpen={onOpen} />
       ))}
     </span>
   )
 }
 
 /** one space's sub-limit under a row: its line, which opens the editor with that space chosen */
-function SpaceCap({ name, pattern, space, caps, phone, openId, onOpen }: { name: string; pattern: string; space: NonNullable<SummaryAtOnce['spaces']>[number]; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void }) {
+function SpaceCap({ name, title, pattern, space, caps, phone, openId, onOpen }: { name: string; title: string; pattern: string; space: NonNullable<SummaryAtOnce['spaces']>[number]; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void }) {
   const id = capId(pattern, space.key)
   const open = openId === id
   const words = spaceCapWords(space)
-  const editor = <CapEditor name={name} pattern={pattern} caps={caps} phone={phone} space={space.key} onClose={() => onOpen(null)} />
+  const editor = <CapEditor name={title} pattern={pattern} caps={caps} phone={phone} space={space.key} onClose={() => onOpen(null)} />
   return (
     <span className="relative mt-0.5 block min-w-0">
       <button type="button" data-cell={id} data-blocked={space.max === 0 || undefined} aria-haspopup={phone ? undefined : 'dialog'} aria-expanded={open} aria-label={`${name} in ${words}`} title={`Set by ${space.name}: ${pattern}=${space.max}. Click to change it.`} onClick={() => onOpen(open ? null : id)} className={`press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 pl-3 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel${space.max === 0 ? ' font-medium text-need-fg' : ' text-fg2'}`}>

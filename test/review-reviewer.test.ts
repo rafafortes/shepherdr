@@ -77,13 +77,13 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     expect(r.out).toBe(`Round 1 of 3 counted for ${t.id}. Review with a headless Codex or a Codex subagent (its default model and effort) this round. Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`)
     expect(t.reviews).toBe(1)
     // the lease counts toward the caps: the reviewer's run is on its model, of this space
-    expect(reviewLeases()).toEqual([expect.objectContaining({ key: 'openai/unknown', space: space.name, id: `review:${t.id}` })])
+    expect(reviewLeases()).toEqual([expect.objectContaining({ key: 'codex/unknown', space: space.name, id: `review:${t.id}` })])
   })
 
   test('the primary is at its limit: the first backup with room runs the round, and the answer says why', async () => {
     const t = task({ 'reviewer.fallback': 'pi' })
-    expect(src.settings.set('models.maxAtOnce', 'openai=1', 'machine').ok).toBe(true)
-    hold('advisor:busy', 'openai/gpt-5.5')
+    expect(src.settings.set('models.maxAtOnce', 'codex=1', 'machine').ok).toBe(true)
+    hold('advisor:busy', 'codex/gpt-5.5')
     const r = await review(t)
     expect(r.out).toBe(
       `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
@@ -94,7 +94,7 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
 
   test('the primary out: the backup runs the round, and the answer says the primary is out until when', async () => {
     const t = task({ 'reviewer.fallback': 'pi' })
-    src.engine.outNow = (key) => (key.startsWith('openai/') ? { until: '17:00' } : undefined)
+    src.engine.outNow = (key) => (key.startsWith('codex/') ? { until: '17:00' } : undefined)
     const r = await review(t)
     expect(r.out).toContain(`(${CODEX} is out until 17:00). Run`)
     expect(t.reviews).toBe(1)
@@ -102,16 +102,16 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
 
   test('a primary out with no day given says only that it is out', async () => {
     const t = task({ 'reviewer.fallback': 'pi' })
-    src.engine.outNow = (key) => (key.startsWith('openai/') ? {} : undefined)
+    src.engine.outNow = (key) => (key.startsWith('codex/') ? {} : undefined)
     expect((await review(t)).out).toContain(`(${CODEX} is out). Run`)
   })
 
   test('every reviewer full or out: the command waits up to its deadline, then says to end the turn, and the round is not counted yet', async () => {
     src.engine.reviewDeadline = 60
     const t = task({ 'reviewer.fallback': 'pi' })
-    expect(src.settings.set('models.maxAtOnce', 'openai=1, pi=1', 'machine').ok).toBe(true)
-    hold('advisor:a', 'openai/gpt-5.5')
-    hold('advisor:b', 'pi/spark/qwen')
+    expect(src.settings.set('models.maxAtOnce', 'codex=1, pi/unknown=1', 'machine').ok).toBe(true)
+    hold('advisor:a', 'codex/gpt-5.5')
+    hold('advisor:b', 'pi/unknown')
     const started = Date.now()
     const r = await review(t)
     expect(r.out).toBe(`Every reviewer ${t.id} may use is full or out: ${CODEX} (1 of 1 at once), ${PI} (1 of 1 at once). End your turn now; Shepherdr wakes you here when one is free, with the reviewer to use.`)
@@ -125,9 +125,9 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
 
   test('the wait is over at once when a slot frees while it waits: the command counts the round itself', async () => {
     const t = task({ 'reviewer.fallback': 'pi' })
-    expect(src.settings.set('models.maxAtOnce', 'openai=1, pi=1', 'machine').ok).toBe(true)
-    hold('advisor:a', 'openai/gpt-5.5')
-    hold('advisor:b', 'pi/spark/qwen')
+    expect(src.settings.set('models.maxAtOnce', 'codex=1, pi/unknown=1', 'machine').ok).toBe(true)
+    hold('advisor:a', 'codex/gpt-5.5')
+    hold('advisor:b', 'pi/unknown')
     const pending = review(t)
     await Bun.sleep(25)
     src.engine.unlease('advisor:b')
@@ -140,9 +140,9 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
   test('later, when a slot frees, the waiting agent is woken with the round and its reviewer: counted and leased then', async () => {
     src.engine.reviewDeadline = 60
     const t = task({ 'reviewer.fallback': 'pi' })
-    expect(src.settings.set('models.maxAtOnce', 'openai=1, pi=1', 'machine').ok).toBe(true)
-    hold('advisor:a', 'openai/gpt-5.5')
-    hold('advisor:b', 'pi/spark/qwen')
+    expect(src.settings.set('models.maxAtOnce', 'codex=1, pi/unknown=1', 'machine').ok).toBe(true)
+    hold('advisor:a', 'codex/gpt-5.5')
+    hold('advisor:b', 'pi/unknown')
     await review(t)
     expect(sent).toEqual([])
     // still full: nothing wakes it
@@ -167,9 +167,9 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
   test('the health look wakes a waiting round too (healthTick runs the same retry)', async () => {
     src.engine.reviewDeadline = 60
     const t = task({ 'reviewer.fallback': 'pi' })
-    expect(src.settings.set('models.maxAtOnce', 'openai=1, pi=1', 'machine').ok).toBe(true)
-    hold('advisor:a', 'openai/gpt-5.5')
-    hold('advisor:b', 'pi/spark/qwen')
+    expect(src.settings.set('models.maxAtOnce', 'codex=1, pi/unknown=1', 'machine').ok).toBe(true)
+    hold('advisor:a', 'codex/gpt-5.5')
+    hold('advisor:b', 'pi/unknown')
     await review(t)
     src.engine.unlease('advisor:a')
     src.healthTick(Date.now())
@@ -180,9 +180,9 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
 
   test('a round that is still being asked for is left to its command: the retry does not count it twice', async () => {
     const t = task({ 'reviewer.fallback': 'pi' })
-    expect(src.settings.set('models.maxAtOnce', 'openai=1, pi=1', 'machine').ok).toBe(true)
-    hold('advisor:a', 'openai/gpt-5.5')
-    hold('advisor:b', 'pi/spark/qwen')
+    expect(src.settings.set('models.maxAtOnce', 'codex=1, pi/unknown=1', 'machine').ok).toBe(true)
+    hold('advisor:a', 'codex/gpt-5.5')
+    hold('advisor:b', 'pi/unknown')
     const pending = review(t)
     await Bun.sleep(15)
     src.engine.unlease('advisor:a')
@@ -227,9 +227,9 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
 
   test('the task is stopped: its review ends, and a waiting round is not woken', async () => {
     const t = task({ 'reviewer.fallback': 'pi' })
-    expect(src.settings.set('models.maxAtOnce', 'openai=1, pi=1', 'machine').ok).toBe(true)
-    hold('advisor:a', 'openai/gpt-5.5')
-    hold('advisor:b', 'pi/spark/qwen')
+    expect(src.settings.set('models.maxAtOnce', 'codex=1, pi/unknown=1', 'machine').ok).toBe(true)
+    hold('advisor:a', 'codex/gpt-5.5')
+    hold('advisor:b', 'pi/unknown')
     await review(t)
     expect(t.reviewWait).toBeDefined()
     await src.engine.stopTask(t.id)
@@ -243,9 +243,9 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
   test('a waiting round whose rounds are all used meanwhile is dropped, not counted, and a task that ended loses its wait at the next look', async () => {
     src.engine.reviewDeadline = 60
     const t = task({ 'reviewer.fallback': 'pi' })
-    expect(src.settings.set('models.maxAtOnce', 'openai=1, pi=1', 'machine').ok).toBe(true)
-    hold('advisor:a', 'openai/gpt-5.5')
-    hold('advisor:b', 'pi/spark/qwen')
+    expect(src.settings.set('models.maxAtOnce', 'codex=1, pi/unknown=1', 'machine').ok).toBe(true)
+    hold('advisor:a', 'codex/gpt-5.5')
+    hold('advisor:b', 'pi/unknown')
     await review(t)
     expect(t.reviewWait).toBeDefined()
     // its rounds are used up by other means: nothing is counted for the wait
@@ -257,8 +257,8 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     expect(t.reviews).toBe(3)
     // a task that waits and then ends (merged) loses its wait at the release look, as its review ends
     const u = task({ 'reviewer.fallback': 'pi' })
-    hold('advisor:c', 'openai/gpt-5.5')
-    hold('advisor:d', 'pi/spark/qwen')
+    hold('advisor:c', 'codex/gpt-5.5')
+    hold('advisor:d', 'pi/unknown')
     await review(u)
     expect(u.reviewWait).toBeDefined()
     u.merged = true
@@ -279,9 +279,9 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
 
   test('a task that reported ready is never woken for a round it no longer runs', async () => {
     const t = task({ 'reviewer.fallback': 'pi' })
-    expect(src.settings.set('models.maxAtOnce', 'openai=1, pi=1', 'machine').ok).toBe(true)
-    hold('advisor:a', 'openai/gpt-5.5')
-    hold('advisor:b', 'pi/spark/qwen')
+    expect(src.settings.set('models.maxAtOnce', 'codex=1, pi/unknown=1', 'machine').ok).toBe(true)
+    hold('advisor:a', 'codex/gpt-5.5')
+    hold('advisor:b', 'pi/unknown')
     await review(t)
     t.reported = true
     src.engine.unlease('advisor:a')
@@ -319,9 +319,9 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
   test('a restart keeps no lease, but a round that waited is still counted and woken when a reviewer frees', async () => {
     src.engine.reviewDeadline = 60
     const t = task({ 'reviewer.fallback': 'pi' })
-    expect(src.settings.set('models.maxAtOnce', 'openai=1, pi=1', 'machine').ok).toBe(true)
-    hold('advisor:a', 'openai/gpt-5.5')
-    hold('advisor:b', 'pi/spark/qwen')
+    expect(src.settings.set('models.maxAtOnce', 'codex=1, pi/unknown=1', 'machine').ok).toBe(true)
+    hold('advisor:a', 'codex/gpt-5.5')
+    hold('advisor:b', 'pi/unknown')
     await review(t)
     expect(t.reviewWait).toBeDefined()
     // a lease held before the restart is gone with it: its round is over
@@ -339,8 +339,8 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     expect(again.reviewWait).toBeDefined()
     expect(reviewLeases()).toEqual([])
     // the runs that held the slots are gone with the restart as well: the reviewer is full again until they are back
-    hold('advisor:a', 'openai/gpt-5.5')
-    hold('advisor:b', 'pi/spark/qwen')
+    hold('advisor:a', 'codex/gpt-5.5')
+    hold('advisor:b', 'pi/unknown')
     src.engine.retryReviews()
     expect(sent).toEqual([])
     src.engine.unlease('advisor:a')
@@ -351,11 +351,11 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
 
   test('a lease counts toward the caps: a model another run needs is full while the reviewer holds it', async () => {
     const t = task()
-    expect(src.settings.set('models.maxAtOnce', 'openai=1', 'machine').ok).toBe(true)
+    expect(src.settings.set('models.maxAtOnce', 'codex=1', 'machine').ok).toBe(true)
     await review(t)
     // the reviewer of this round is on Codex's model, so a Codex run of another task has to wait for it
     const c = src.engine.decide(space.name, src.engine.chainOptions([{ n: 0, h: { kind: 'codex' } }]))
-    expect(c).toMatchObject({ wait: [{ why: 'full', name: 'openai' }] })
+    expect(c).toMatchObject({ wait: [{ why: 'full', name: 'codex' }] })
     await said(['review', t.id, '--done'], toBe(t))
     expect(src.engine.decide(space.name, src.engine.chainOptions([{ n: 0, h: { kind: 'codex' } }]))).toMatchObject({ harness: { n: 0 } })
   })

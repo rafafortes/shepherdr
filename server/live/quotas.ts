@@ -4,8 +4,8 @@
 // why; a read that gives a hint (no bubblewrap, no key) says what to add and fails nothing. Each window at or over the
 // warning share (quota.alertAt) alerts once, and again only once it has refilled or a new window came, or after it was
 // under the share.
-import { clock, leftWords, providerName, shareOf, type QuotaInput } from './models-summary.ts'
-import { opencodeEstimate, OPENCODE } from './quota-estimate.ts'
+import { clock, leftWords, providerWords, shareOf, type QuotaInput } from './models-summary.ts'
+import { opencodeEstimate, OPENCODE, OPENCODE_ROWS } from './quota-estimate.ts'
 import type { Reading } from './plan-limits.ts'
 import type { UsageLedger } from './usage-ledger.ts'
 import type { QuotaFigure, QuotaRead } from '../../shared/types.ts'
@@ -14,10 +14,11 @@ import type { QuotaFigure, QuotaRead } from '../../shared/types.ts'
 export const EVERY = 10 * 60_000
 export const ON_DEMAND = 60_000
 
-/** the Settings switch of each provider's quota (the estimate's too) */
-export const SWITCH: Record<string, string> = { anthropic: 'quota.claude', commandcode: 'quota.commandcode', [OPENCODE]: 'quota.opencodeGo' }
+/** the Settings switch of each provider's quota (the estimate's rows too): Claude Code's subscription, Command Code's account
+ *  (pi's provider), and OpenCode Go's estimate on both of its rows */
+export const SWITCH: Record<string, string> = { claude: 'quota.claude', 'pi.commandcode': 'quota.commandcode', 'pi.opencode-go': 'quota.opencodeGo', 'opencode.opencode-go': 'quota.opencodeGo' }
 /** the providers that have a read of their own */
-const READS = ['anthropic', 'commandcode'] as const
+const READS = ['claude', 'pi.commandcode'] as const
 type Reads = (typeof READS)[number]
 
 export interface QuotasDeps {
@@ -62,7 +63,7 @@ export class Quotas {
 
   /** the figure a provider shows now: its last good read (the ledger's), or OpenCode Go's estimate built now while its switch is on */
   figure(provider: string, now = Date.now()): QuotaFigure | undefined {
-    if (provider === OPENCODE) return this.d.on(SWITCH[OPENCODE]!) ? opencodeEstimate(this.d.usage, now) : undefined
+    if (OPENCODE_ROWS.includes(provider)) return this.d.on(SWITCH[OPENCODE]!) ? opencodeEstimate(this.d.usage, now) : undefined
     return this.d.usage.quota(provider)
   }
 
@@ -72,7 +73,7 @@ export class Quotas {
     const est = this.figure(OPENCODE, now)
     const share = this.d.alertAt()
     return {
-      figures: est ? { [OPENCODE]: est } : {},
+      figures: est ? Object.fromEntries(OPENCODE_ROWS.map((p) => [p, est])) : {},
       reads: Object.fromEntries(Object.keys(SWITCH).map((p) => [p, this.status(p)])),
       ...(share !== undefined ? { alertAt: share } : {}),
     }
@@ -174,7 +175,7 @@ export class Quotas {
       if (armed !== undefined && w.resetAt === undefined) continue
       this.d.usage.setAlerted(key, w.resetAt ?? 0)
       const refill = w.resetAt !== undefined ? `it refills ${clock(w.resetAt)}` : f.estimate ? "it drains as its calls leave the window" : "it has no refill time"
-      this.d.alert(provider, w.name, `${providerName(provider)} is at ${Math.round(pct)}%`, `${w.name} window: ${leftWords(pct)}, and ${refill}.`)
+      this.d.alert(provider, w.name, `${providerWords(provider)} is at ${Math.round(pct)}%`, `${w.name} window: ${leftWords(pct)}, and ${refill}.`)
     }
   }
 }

@@ -86,18 +86,29 @@
   why is in [tasks](tasks.md) and [machines](machines.md).
 - **Most agents at once per provider or per model** (`models.maxAtOnce`, the Machine section, under Max tasks working at
   once; no entry by default, which is no cap) caps how many of this machine's agents run on one provider or one model. It is a text, one entry
-  per pattern: `spark=4, radeon=1` caps every model of `spark` at 4 and every model of `radeon` at 1, and
-  `anthropic/claude-opus-5-5=2` caps one model (a provider is the part of a model's key before its slash: `spark`
-  for `spark/qwen3.8-flash-next-mlx4-mtp-tensorfold`, `anthropic` for Claude Code's models, `openai` for Codex's). The
-  DGX Spark takes four requests at once, so `spark=4` is the cap that keeps Shepherdr from sending it a fifth. It has
+  per pattern: `pi.spark=4, pi.radeon=1` caps every model of pi's `spark` provider at 4 and every model of its `radeon`
+  provider at 1, and `claude/claude-opus-5-5=2` caps one model. A key starts with its harness, named as the screens group
+  them (`claude`, `codex`, `pi`, `opencode`, `agy`). pi and OpenCode run several providers, so their keys add the provider
+  after a dot: `pi.spark` (its model is `pi.spark/qwen3.8-flash-next-mlx4-mtp-tensorfold`), `pi.anthropic` (pi's Anthropic
+  API), `opencode.opencode-go` (OpenCode's Go plan). A single-account CLI uses its own name alone: `claude` for Claude
+  Code's models, `codex` for Codex's, `agy` for Antigravity's. Each such row has its own limit, usage, quota and run-outs:
+  pi's Anthropic API and Claude Code's subscription share none of them. The DGX Spark takes four requests at once, so
+  `pi.spark=4` is the cap that keeps Shepherdr from sending it a fifth. It has
   **two scopes, both applied** (Settings → Space, next to Max tasks of this space working at once; Everywhere, this machine,
   or one space). The machine's total is the value at this machine or Everywhere: it counts every space's runs together.
   A space's value is its **sub-limit**: its own runs only, inside the machine's total, and it never replaces the total
-  (a space with no value of its own reads the machine's, the same entries). `spark=4` at the machine and `spark=2` for
+  (a space with no value of its own reads the machine's, the same entries). `pi.spark=4` at the machine and `pi.spark=2` for
   `lyvora-app` means the Spark takes at most four in all, and lyvora-app at most two of them. Off for a space is no
   sub-limit of its own; the total still holds for it. Its text is checked when
   it is set: a pattern is a provider or a model key in lowercase, a number from 0 to 200 is needed, a pattern may not
   repeat, and at most 200 entries (a refusal says which). Values are kept as written, lowercased.
+  The old names are still accepted and written in the new form: `spark=4` becomes `pi.spark=4` (and `opencode.spark=4` too
+  where OpenCode lists that provider's models), `anthropic=2` becomes `claude=2` (plus `pi.anthropic=2` and
+  `opencode.anthropic=2` where those harnesses offer Anthropic models), `openai=1` becomes `codex=1`, and
+  `anthropic/claude-opus-5-5=2` becomes `claude/claude-opus-5-5=2`. An entry already written in the new form wins over a
+  converted one, and a note says what was kept (`Kept as …`). Settings, profiles and usage saved before the harness keys
+  were converted once: each text is written in the new form and logged (`shepherdr: models.maxAtOnce at <level> "<old>" is
+  kept as "<new>"`), and the usage is read again from the agents' logs (the last 35 days, as before).
   - **The three choices, for every limit.** Each limit editor (Settings' Machine and Space rows, the Limits cells and bulk
     dialogs, a model's cap cell in Models → Summary) offers three separate choices, never one number that stands for two:
     **No cap** (unlimited: no entry, or `off` for a task count; the cell reads `no cap`, faint), **Blocked · 0 allowed** (`0`;
@@ -108,7 +119,7 @@
   - **A model never above its provider.** A provider's limit holds every model of it, so a model's own limit above its
     provider's at the same level would never be reached. Saving keeps them fitted, whichever changed: a provider set to 2
     lowers its models' own 3 to 2, and a model set to 5 under a provider of 2 is saved as 2. The cap editor says it before
-    you save (`Saving lowers spark/qwen… from 3 to 2 (spark allows 2 at once).`), and `shepherdr set` after the value. A
+    you save (`Saving lowers pi · spark/qwen… from 3 to 2 (pi · spark allows 2 at once).`), and `shepherdr set` after the value. A
     provider that is blocked (0) lowers nothing: its models keep their own numbers for when it is unblocked. A space's
     sub-limit is its own level, and is not changed by the machine's.
   - **What 0 means, by role.** Blocked (0) is a model that **nothing starts on**, in any role, and it is never waited for:
@@ -137,9 +148,9 @@
     model is blocked.`, with a Change… to the blocked cell. A provider or a model blocked while agents still run on it is a note:
     they keep running, and nothing new starts on it.
   - **What it holds.** A task whose agent would run on a capped model waits as Queued, held for a free slot of it (`Waiting
-    for a free slot of spark (4 of 4 at once)`), and the other tasks start past it; the held ones start in turn as the
+    for a free slot of pi · spark (4 of 4 at once)`), and the other tasks start past it; the held ones start in turn as the
     model frees up. A model's own entry sets its limit, and the provider's entry still holds the provider's total: with
-    `spark=4` and `spark/qwen…=2`, the qwen model has at most 2 of its own, and the Spark at most 4 in all, whatever the
+    `pi.spark=4` and `pi.spark/qwen…=2`, the qwen model has at most 2 of its own, and the Spark at most 4 in all, whatever the
     mix. A first in line passes neither.
   - **What counts.** The agents of this machine that hold a slot now (its working, starting or waiting-on-you tasks, as the
     machine's own limit counts them), each on the model its agent runs (its live agent's model, else the model it starts
@@ -155,10 +166,10 @@
   - **Where a task starts.** A task starts on the first harness of its chain that is not out and has room under every entry
     that covers it: its own agent first, then its backups in the order its coordinator's `--set` keeps them (Settings'
     `task.fallback…` otherwise). A primary at its cap starts the task on Backup 1 (a card in its chat: `Started on Codex:
-    spark is at its limit (1 of 1 at once)`), and the agent is told it runs on a backup with the same brief. Once started,
+    pi · spark is at its limit (1 of 1 at once)`), and the agent is told it runs on a backup with the same brief. Once started,
     it stays on that backup while it works; when it goes idle and its primary has room (and backup.watchReturn is go
     back), it goes back to its primary, as the way back does. Every harness full or out: the task is held, its row naming
-    the chain (its row, short: `Waiting: spark 1/1 · openai out`; the row's title and its card name each harness in words, `Codex (default)`, `pi · spark/…`), and release starts it on the first that frees.
+    the chain (its row, short: `Waiting: pi · spark 1/1 · codex out`; the row's title and its card name each harness in words, `Codex (default)`, `pi · spark/…`), and release starts it on the first that frees.
     A cut-off task's takeover skips the full backups, and waits for one with room the same way.
   - **Coordinators wait like tasks.** A coordinator's first start takes the first harness of its chain with room. When every
     one is full or out it does not start, never past a cap and never on a provider that is out: its chat says `Not started
@@ -171,7 +182,7 @@
     the caps while they work. A coordinator a cap started on a backup goes back to its primary the same way as a task.
   - **Restarts and relaunches.** Every new run of an agent obeys the caps, not only a first start: a restart by hand
     (⋯ → Restart agent…, `shepherdr restart`, `restart --all`) onto a full or blocked model is refused before anything is
-    saved or stopped (`Not restarted: spark is at its limit (4 of 4 at once): wait for a free slot, or pick another
+    saved or stopped (`Not restarted: pi · spark is at its limit (4 of 4 at once): wait for a free slot, or pick another
     model.`), its own run aside (a restart on the model it already runs frees its own slot first). An agent that stopped is
     started again (the revive loop) once its model has room, the wait counting none of its tries; its chat says so once. One
     that is gone and gets a message is not started on a full model: what was written waits for it. The way back takes an
@@ -184,7 +195,7 @@
     that sets its own sub-limit for the row shows it under the row as a line of its own: `lyvora-app: 1 of 2 at once`, the runs of
     that space it counts, or `lyvora-app: blocked · 0 allowed`; the line opens the editor at that space (No cap takes that
     space's value back). The line `shepherdr show` prints it as kept.
-  - **From the command.** `shepherdr set models.maxAtOnce "spark=4, radeon=1" --machine` (or Everywhere without `--machine`).
+  - **From the command.** `shepherdr set models.maxAtOnce "pi.spark=4, pi.radeon=1" --machine` (or Everywhere without `--machine`).
     `shepherdr set models.maxAtOnce off --machine` gives this machine no cap at all, whatever Everywhere says, and
     `shepherdr unset models.maxAtOnce --machine` takes this machine's value away, back to Everywhere's. Profiles hold it
     with the limits.
@@ -209,12 +220,13 @@ OpenCode is a chat CLI like Claude Code, Codex and pi: Settings and Restart offe
 It needs OpenCode 2.x.
 
 - **Models.** A model id is `provider/model`, as `opencode models` lists it and `opencode run -m` takes it: `opencode/minimax-m3.1-flash-free`,
-  `opencode-go/deepseek-v4.1-flash`, `nvidia/z-ai/glm-5.3-flash` (split at the first slash). The menus list them grouped by
+  `opencode-go/deepseek-v4.1-flash`, `nvidia/z-ai/glm-5.3-flash` (split at the first slash); Shepherdr's key for it adds the harness: `opencode.opencode-go/deepseek-v4.1-flash`. The menus list them grouped by
   provider, each named that way, as pi's are. Effort is the model's variant, in OpenCode's own words (`high`, `thinking`,
   `none`…), each for the models that have it; a model with none has no effort. A session with no model starts on OpenCode's
   own default (`opencode api model.default`), and that is the model it counts under.
-- **Providers.** A call counts under its provider, as pi's do. `opencode-go` is the Go plan: a call of it made from pi and
-  one made from OpenCode are one plan, one estimate ([Quotas](#quotas)). `opencode` is OpenCode Zen, whose free models
+- **Providers.** A call counts under its provider, as pi's do. `opencode-go` is the Go plan, and pi runs it too: the two are
+  two rows (`pi · OpenCode Go`, `OpenCode · OpenCode Go`), each with its own cap, usage, quota and run-outs. The plan's estimate
+  is one figure shown on both rows and warned about once ([Quotas](#quotas)). `opencode` is OpenCode Zen, whose free models
   have no quota (its row says so: "OpenCode Zen (free)"). `nvidia` is NVIDIA's API ("NVIDIA API"). `lmstudio` and `ollama` are
   local servers OpenCode has built in: local, like the Spark, with no quota. Another provider OpenCode adds shows its id in
   words until it has a name here (`amd-tokenlab` is "AMD TokenLab" and has one; an id with no name is title-cased, with the
@@ -315,14 +327,18 @@ a 1280 to 1440 px window without sideways scroll (the Provider column stays in v
 of this machine's agents (`usage.json` in Shepherdr's home, read from the agents' logs, never from another session folder).
 
 - **Per provider**: a row with its share of the tokens in the last 24 h and 7 d (a thin bar each), its **models** under it
-  (`models-summary`, a read action). A provider is `opencode-go`, `commandcode`, `spark`… (pi's model ids carry it), `anthropic`
-  for Claude Code, `openai` for Codex and `agy` for Antigravity (see [Antigravity](#antigravity)); OpenCode's are `opencode`
-  (Zen, free models), `nvidia` and its local servers (see [OpenCode](#opencode)). A local server (spark, radeon, avell, dell, lmstudio, ollama) has no quota: it is marked local.
-  Each provider is named as the table names it (`nvidia` is "NVIDIA API", `amd-tokenlab` "AMD TokenLab"; an id with no name
-  of its own is title-cased, see [OpenCode](#opencode)).
+  (`models-summary`, a read action). The rows are grouped by harness, under a heading, in this order: Claude Code, Codex, pi,
+  OpenCode, Antigravity. A single-account CLI is one row named after it (`claude`, `codex`, `agy`; see [Antigravity](#antigravity)).
+  pi and OpenCode have a heading each, with a row per provider: pi's `commandcode`, `opencode-go`, `spark`… (pi's model ids carry
+  it), and OpenCode's `opencode` (Zen, free models), `opencode-go`, `nvidia` and its local servers (see [OpenCode](#opencode)).
+  A local server (spark, radeon, avell, dell, lmstudio, ollama) has no quota: it is marked local.
+  Each provider is named as the table names it (`spark` is "Spark (local)", `anthropic` "Anthropic API", `nvidia` "NVIDIA API",
+  `amd-tokenlab` "AMD TokenLab"; an id with no name of its own is title-cased, see [OpenCode](#opencode)). A provider named
+  outside its group reads "<harness> · <provider>": "pi · Spark (local)", "OpenCode · OpenCode Go"; a single-account CLI
+  alone, as "Claude Code".
 - **Every provider a CLI offers.** The table lists each provider that any CLI offers on this machine, read from each CLI's
   own list: pi's models (the ones its `enabledModels` names, see below), OpenCode's models, Claude Code's models (its
-  `anthropic`) and Codex's (its `openai`). A provider in use (a slot, an agent, a task waiting on it, a run or a run-out in
+  `claude`) and Codex's (its `codex`). A provider in use (a slot, an agent, a task waiting on it, a run or a run-out in
   the last 7 days, or a cap) comes first, by its week's tokens. The others are under **Other providers (N)**, closed here: each
   with its models (the ones its CLI lists) and dashes for the numbers, so nothing is shown as used that is not. Each one has
   its cap cell too (as on Limits, below), so a cap can be set before the provider is used.
@@ -358,6 +374,8 @@ of this machine's agents (`usage.json` in Shepherdr's home, read from the agents
 - a provider that **ran out twice in 7 days** (a note);
 - a window of a provider **at or over its warning share** (`quota.alertAt`) that has not refilled: what is left, when it
   refills, and the two cells that use the provider most, the top one under Change… (a note; a risk at 100 %);
+- a plan that two harnesses share (OpenCode Go, under pi and under OpenCode) is **one** window warning naming both, as
+  `OpenCode Go (pi and OpenCode): 5 h is at 148%: over its limit.`, not one for each row;
 - **several working agents on one local model with no cap**: counted, and a note asks for a cap (`models.maxAtOnce`; Change… opens
   its cell). At its cap, a note says which tasks wait for the model (or its provider), and how many run there now.
 
@@ -484,7 +502,7 @@ row. The profiles bar sits above it (a profile saved from here includes the limi
   counted now (`1 of 2 at once`). A cell with no entry of its own says `machine's total applies (4 at once)`, or `no
   sub-limit` when the machine sets none. A sub-limit sits inside the machine's total: it never raises it.
 - **Providers and models**. Each provider with a cap, an agent, a run or usage, with its models under it (OpenCode's providers
-  too: `opencode-go`, the free `opencode` Zen models, `nvidia`, a local `ollama`, each as its own row). **Other providers (N)**,
+  too, under OpenCode's heading: `OpenCode Go`, the free `OpenCode Zen (free)` models, `NVIDIA API`, a local `ollama`, each as its own row). **Other providers (N)**,
   open here, lists every other provider a CLI offers on this machine (the same list as the Models summary, see
   [Summary](#summary)): `NVIDIA API`, `AMD TokenLab` and the rest, each with its models and the cap cell of its own, so a cap is
   set before the provider is used; once it has one, it moves up with the providers in use. **Max at once** is the
@@ -534,7 +552,8 @@ nothing here.
   The read follows the MIT package `pi-commandcode-provider` (Copyright (c) 2025 Pat Woz), credited in its code.
 - **OpenCode Go** (`quota.opencodeGo`, on by default): an **estimate only**. OpenCode does not tell its quota, so nothing is
   read. Shepherdr's own ledger gives the tokens and pi's cost of each window (the last 5 h and the week), counting every call of
-  `opencode-go` made from pi or from OpenCode (one plan, one number; OpenCode Zen's calls are not in it), and where the ledger
+  `opencode-go` made from pi and from OpenCode, each row counting its own calls (the plan's estimate is their sum, shown on both
+  rows; OpenCode Zen's calls are not in it), and where the ledger
   holds run-outs, a **learned limit**: what the window before each run-out held when OpenCode Go ran out (the latest three
   shown, "ran out at ~980k tokens · ≈ $0.42 est. in 5 h on Wed 3:14 PM"). The lowest learned limit is the cap, and the
   current window's use is a share of it, tagged **estimate**. No run-out yet: the usage alone, with no share. It is worked out
@@ -547,7 +566,7 @@ nothing here.
 - **Warn when a provider is at** (`quota.alertAt`, 50 to 95 %, or off, 80 % by default): a window at or over that share
   alerts **once**, to the home chat, with what is left and when it refills ("Claude Code is at 84%" · "5 h window: 16% left,
   and it refills Fri 3:00 PM."). It alerts again only after that window has refilled (its refill time has passed or a new
-  window is over the share), or after it fell under the share. The same window is in the summary's warnings. Off: no alert
+  window is over the share), or after it fell under the share. The same window is in the summary's warnings, once for the plan. Off: no alert
   and no warning here; a run-out still alerts.
 - **Local models** (spark, radeon, avell, dell, and OpenCode's lmstudio and ollama) have no quota: none is read. OpenCode Zen
   (free) has none either: its row shows its usage and no quota.
