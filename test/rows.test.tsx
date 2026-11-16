@@ -55,4 +55,20 @@ describe('a task row', () => {
   test("a chat's header still shows the % an agent waiting on you stopped at", () => {
     expect(text(renderToStaticMarkup(<ReportLine w={{ ...report, paused: true }} head />))).toContain('62%')
   })
+  test('a line past the cadence reads as older, one inside it does not, and one not working shows no status', () => {
+    const old = { ...report, stale: 12 }
+    // older than 5 minutes: the age quietly takes the line's end, and the time left under the dot is gone
+    // the dot's `gap-1` puts the space before the · on screen; text extraction keeps only the DOM's words
+    expect(text(line(task('work', { report: old })))).toBe(`${report.msg}· 12m ago`)
+    expect(text(renderToStaticMarkup(<ReportLine w={old} head />))).toContain('· 12m ago')
+    const dot = renderToStaticMarkup(<TaskDot s="work" w={old} />)
+    expect(dot).not.toContain('4m') // eta 4 hidden: a stale line must not read as nearly done
+    expect(dot).toContain('aria-label="Working, 62% done"') // its pie stays
+    // inside the cadence: the plain status line, nothing added
+    expect(text(line(task('work', { report })))).toBe(report.msg)
+    // not working: no status line at all, even with a report carried (what it asks / waits for is shown instead)
+    for (const s of ['need', 'ready', 'done', 'todo', 'scheduled', 'queued'] as const) {
+      expect(text(line(task(s, { report: old })))).toBe('Pick an upload limit')
+    }
+  })
 })
