@@ -29,6 +29,10 @@ next turn via the existing daemon. No thread is started or resumed to inspect it
   is visible on the next response or hook; a terminal picker change with neither observation remains unobserved.
 - **Pi:** the main assistant response’s `message.model`, plus `model_change.modelId` and `thinking_level_change.thinkingLevel`, including `off`. Separate events merge
   within that session. These record CLI configuration rather than guessing from the chosen model.
+- **A live switch (SHE-45):** Claude Code's `<local-command-stdout>` answer to `/model` or `/effort`, and Codex's
+  `thread_settings_applied` event, are read as runtime too, so the chat shows the new model before the next reply.
+  The switch waits for that line in the agent's own log and never trusts the typed command; the same read puts a
+  half-applied switch back on its starting values. These lines are not chat messages.
   **Resume limitation:** Pi restores saved model/thinking state without appending initial settings events for an
   existing session (`createAgentSession`, upstream `sdk.ts`, initial-entry block guarded by `!hasExistingSession`).
   Old pre-launch events cannot prove that CLI/config overrides did not change it. After a resume, the model is

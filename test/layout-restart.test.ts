@@ -150,6 +150,8 @@ describe.skipIf(!browser)('restarting an agent', () => {
       world.chats[chat].agent = { kind: 'codex' }
       world.chats[chat].cli = 'Codex'
       world.chats[chat].restart = undefined
+      // a working agent cannot switch in place: this keeps the test on the restart-and-save path
+      world.chats[chat].working = true
       const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
       let restart: unknown
       page.on('request', (r) => {
@@ -342,5 +344,40 @@ describe.skipIf(!browser)('restarting an agent', () => {
       await world.act({ type: 'setting', key: 'models.maxAtOnce', value: null, place: 'm:vm-str' } as never)
       await page.close()
     }
+  }, 30_000)
+
+  test('Switch to changes the model in place: the chat shows it, with no restart card', async () => {
+    const chat = 'GTM-17/Agent'
+    world.chats[chat].agent = { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }
+    world.chats[chat].cli = 'Claude Code'
+    world.chats[chat].restart = undefined
+    world.chats[chat].working = false
+    world.emit('snapshot')
+    const cards = () => world.chats[chat].messages.filter((m) => m.card?.restart).length
+    const before = cards()
+    let sent: Record<string, unknown> | undefined
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    page.on('request', (r) => {
+      if (r.url().endsWith('/api/action') && r.method() === 'POST') {
+        const a = r.postDataJSON()
+        if (a.type === 'live-switch') sent = a
+      }
+    })
+    await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}&task=GTM-17`)
+    const box = page.locator(`[data-composer]:has(textarea[data-chat="${chat}"])`)
+    await box.locator('button[aria-label="Attach files and more"]').click()
+    await page.locator('[data-agent-controls]:visible').last().getByRole('menuitem', { name: /^Model:/ }).click()
+    const sheet = page.getByRole('alertdialog')
+    await sheet.locator('[data-restart]').waitFor()
+    // no change, no switch button: the Restart path is all there is until a pick differs
+    expect(await sheet.getByRole('button', { name: 'Switch to', exact: true }).count()).toBe(0)
+    await sheet.getByRole('button', { name: /^Model: / }).click()
+    await page.getByRole('menuitemradio', { name: 'Sonnet 5.5', exact: true }).click()
+    await sheet.getByRole('button', { name: 'Switch to', exact: true }).click()
+    await sheet.waitFor({ state: 'detached' })
+    expect(sent).toMatchObject({ type: 'live-switch', chat, kind: 'claude', model: 'claude-sonnet-5-5' })
+    expect(cards()).toBe(before)
+    expect(world.chats[chat].agent?.runtime?.model).toBe('claude-sonnet-5-5')
+    await page.close()
   }, 30_000)
 })

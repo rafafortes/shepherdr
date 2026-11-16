@@ -7,6 +7,7 @@ import { effortFor, effortsOf, findModel, modelArg, modelsOf } from './models.ts
 import { picksOf } from './model-picks.ts'
 import { orderByPicks } from '../../shared/picks.ts'
 import { chatProblem } from './readers/index.ts'
+import { liveOK } from './live-switch.ts'
 import { CLI_NAME } from './settings.ts'
 import type { Harness } from './engine/engine.ts'
 
@@ -132,7 +133,8 @@ export function restartInfo(o: { role: 'task' | 'coordinator'; space?: string; o
     if (m && cli?.models && !cli.models.some((x) => x.id === m.id)) cli.models.push({ id: m.id, label: m.label, efforts: m.efforts, defaultEffort: m.effort })
   }
   const on = launchHarness(o.on)
-  return { role: o.role, space: o.space, onKnown: o.onKnown, on, onWords: harnessWords(on), want: fitHarness(o.want), clis, working: o.working }
+  return { role: o.role, space: o.space, onKnown: o.onKnown, on, onWords: harnessWords(on), want: fitHarness(o.want), clis, working: o.working,
+    live: !o.working && liveOK(o.on.kind) }
 }
 
 /** a chat's last words, latest last, for an agent taking over: yours, another agent's (named as it declared itself) and

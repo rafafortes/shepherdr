@@ -106,7 +106,7 @@ export class CodexReader implements Reader {
     const out: LogEvent[] = []
     for (const { text, offset } of lines) {
       // skip token counts, reasoning and tool runs without parsing them
-      if (!/"type":\s*"(turn_context|session_meta|message|function_call|custom_tool_call|function_call_output|custom_tool_call_output|task_started|task_complete|turn_aborted|token_count|item_completed)"/.test(text))
+      if (!/"type":\s*"(turn_context|session_meta|message|function_call|custom_tool_call|function_call_output|custom_tool_call_output|task_started|task_complete|turn_aborted|token_count|item_completed|thread_settings_applied)"/.test(text))
         continue
       const l = parseLine(text)
       const p = l?.payload
@@ -120,6 +120,14 @@ export class CodexReader implements Reader {
           source: 'session', at: t,
           ...(typeof p.model === 'string' && p.model !== 'default' ? { model: p.model } : {}),
           ...(typeof effort === 'string' && effort !== 'default' ? { effort } : {}),
+        } })
+      } else if (l.type === 'event_msg' && p.type === 'thread_settings_applied' && p.thread_settings) {
+        // a /model pick (and Codex's /fast) says what this thread runs on now, before its next turn says it (SHE-45)
+        const ts = p.thread_settings
+        out.push({ kind: 'runtime', file, id: `runtime-${offset}`, at: t, runtime: {
+          source: 'session', at: t,
+          ...(typeof ts.model === 'string' && ts.model !== 'default' ? { model: ts.model } : {}),
+          ...(typeof ts.reasoning_effort === 'string' && ts.reasoning_effort !== 'default' ? { effort: ts.reasoning_effort } : {}),
         } })
       } else if (l.type === 'session_meta') {
         const id = p.id ?? p.session_id

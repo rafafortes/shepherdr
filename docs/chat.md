@@ -62,6 +62,34 @@ Every agent, coordinator or task agent, gets the same chat.
   quota window past its warning share, `5 h 92%`), counting what runs now but not this chat's own run, and the one picked
   has a line below with what holds it or how much room it has, the tasks that run there and its provider's quota; on a
   full or blocked one, Restart stays off.
+- **Switching model or effort without a restart.** The restart sheet's **Switch to** button changes a running agent in
+  place, on the same CLI and the same session, so its turn, worktree and branch are untouched; the CLI's own commands
+  go in between turns and nothing is saved in Settings. It appears only when an idle agent's model or effort pick
+  differs on a CLI with a switch of its own, and the chat shows the new model from the agent's own log before the
+  action finishes — no restart card and no new launch:
+  - **Claude Code:** `/model` and `/effort`; its `Set model to …` and `Set effort level to …` lines in the session log
+    say what it now runs on. Those commands also save the pick as the default for new sessions, so the keys they touched
+    in the CLI's own settings are read and put back afterwards: only this agent keeps the new model, other sessions and
+    Shepherdr's Settings keep theirs.
+  - **pi:** `/model <provider/model>` and `/thinking <level>`; its `model_change` and `thinking_level_change` log
+    entries are the same ones the chat already uses to show its current model and level.
+  - **Codex:** `/model`'s picker, choosing the level for this session only (`s`, never Enter), confirmed by its
+    `thread_settings_applied` log line. Codex is not installed on this host (removed 2026-10-15), so this path comes
+    from upstream's Codex 0.163 and is covered by a fake screen and log, not by a local run.
+  - **OpenCode and agy keep the restart.** They do have in-session switches (OpenCode 2.3.0's `/models` and
+    `model.cycle_recent`, agy 1.5.9's `/model` picker and `/effort <level>`; checked in their installed command
+    registries, not just `--help`), but neither writes a line into its chat log naming the new model and level before
+    its next turn, which is the proof this path requires. So the sheet offers only **Restart** for them, as it does for
+    a different CLI or a permission change: that stops the turn first and resumes the session on the new settings.
+    Their chat readers can name a model on the next assistant message, which is not a proof of the switch itself.
+  A model full or blocked under [Most agents at once](settings.md#models) is refused for a switch as it is for a restart
+  (the Switch button stays off beside the same room line), and a target or starting value the chat cannot name takes the
+  restart path. A switch is refused while the agent is working or waiting on a question, so nothing can cut its turn. If any step
+  fails — including a step that was typed but whose answer never came — both model and effort are put back on what
+  they started with (a model switch can move the level on its own), and the chat must report the old values before the
+  failure is shown. A switch to the CLI's own default is resolved to a concrete id and level first: where neither the
+  target nor the starting value can be named from the chat, **Restart** is the only path. A switch the chat does not
+  report is never taken as a success.
 - One setting changed for every space is still one action. This machine's ⋯ in the places list carries the count —
   Restart 3 coordinators, and it is there only while some coordinator's Settings moved — and runs it, its answer in the
   row itself (the count, and the spaces that failed by name); `shepherdr restart --all` does the same from a terminal:
@@ -74,7 +102,8 @@ Every agent, coordinator or task agent, gets the same chat.
   takes no space and no CLI, model or effort of its own: each coordinator goes on what its Settings say.
 - A slash command you type (`/clear`, `/new`, `/compact`, `/model sonnet`, a custom one) goes into the agent's CLI as
   you typed it, once its turn is over, and the CLI runs it. The chat shows it as you typed it, and what the CLI printed
-  as its answer. After `/clear` or `/new` a quiet New session line starts the new session, whose log the chat reads
+  as its answer — except a `/model` or `/effort` answer, which is read as the model and effort the agent now runs on,
+  not posted as a message, so the composer shows the new value. After `/clear` or `/new` a quiet New session line starts the new session, whose log the chat reads
   from then on. A menu or view the command opens in the terminal (`/model` alone, `/usage`) comes into the chat and is
   closed, so your next message goes in; one that asks a question (Codex's `/new`: where should the new conversation
   run?) is a card to answer, and what you write meanwhile waits for it. A command the CLI didn't run fails with Retry.

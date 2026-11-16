@@ -7,7 +7,7 @@ import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, sep } from 'node:path'
+import { basename, dirname, join, sep } from 'node:path'
 import { askText, BODY_MAX, clip, lastReply, NOTIFY_KEY, openCards, taskAlert, TITLE_MAX } from '../../shared/alerts.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, sortPlaces } from '../../shared/order.ts'
 import { asEmoji, doneNewestFirst, modeCard, NAME_MAX, nameProblem, slugify, STATUS_MAX, type Action, type ActivityAnswer, type ActivityAsk, type AddSpace, type Alert, type Artifact, type CardAsk, type Chat, type RestartInfo, type Peer, type Question, type Folders, type LimitsView, type Machine, type ModelsSummary, type Need, type Place, type Section, type Snapshot, type Task, type TaskStatus, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
@@ -37,17 +37,18 @@ import { listFolders, makeRepo, resolveInHome } from './folders.ts'
 import { sh, validateBase } from './engine/git.ts'
 import { Artifacts, browserChecker, type ArtifactRec, type Checker } from './artifacts.ts'
 import { Machines } from './machines.ts'
-import { agentEnv, BOX, boxHome, notifiesWith } from './box.ts'
+import { agentEnv, BOX, boxHome, notifiesWith, run } from './box.ts'
 import { WaitAlerts, type Wait } from './wait-alerts.ts'
 import { ATTACH_MAX, fileType, isMedia, isVideo } from '../../shared/files.ts'
 import { smaller, type Small } from './media.ts'
 import { Mirror } from './mirror.ts'
-import { claudeProjectDir, piSessionDir } from './readers/find.ts'
+import { claudeHome, claudeProjectDir, piSessionDir } from './readers/find.ts'
 import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
 import { privatePrompt, coordinatorPrompt, backupCardWords, wentBackCardWords, type BackWhy, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
 import { chainWords, fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
+import { liveOK, switchLive, type SwitchIO } from './live-switch.ts'
 import { withRooms, type RoomInput } from './rooms.ts'
 import { backCard, canProbe, FIRST_WAIT, FRESH, QUIET, returnMode, Returns, type Outage, type Probe } from './return.ts'
 import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvice, runAdvisor, type Advice, type AdviceQuestion, type AdviceRec } from './advisor.ts'
@@ -2005,6 +2006,98 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return words
   }
 
+  /**
+   * Change a running agent's model/effort through its own CLI, without a restart (SHE-45): the same pane, session,
+   * turn and worktree. A CLI with no mid-session switch (OpenCode, agy), a different CLI, or one busy with a turn
+   * keeps today's restart instead. Every field the CLI says it changed is read back from the agent's own chat (its
+   * log, through that CLI's reader — the chat window's own path) before this reports success; a failed switch is put
+   * back to what it started on, with the same proof, so no half-applied mix is left behind.
+   */
+  /** a file in the CLI's own home on the agent's machine (CLAUDE_CONFIG_DIR decides which one) */
+  private agentPath(rel: string) {
+    return join(claudeHome(), basename(rel))
+  }
+
+  private async readAgentFile(rel: string): Promise<string | null> {
+    const r = await run(['cat', this.agentPath(rel)])
+    return r.code === 0 ? r.out : null
+  }
+
+  private async writeAgentFile(rel: string, text: string): Promise<void> {
+    await run(['sh', '-c', 'cat > "$1"', 'shepherdr', this.agentPath(rel)], { stdin: text })
+  }
+
+  private async liveSwitch(key: string, pick: { kind: string; model?: string; effort?: string }, injected?: SwitchIO) {
+    const x = this.restartable(key)
+    const requested = fitHarness({ kind: pick.kind, model: pick.model ?? '', effort: pick.effort ?? '' })
+    const fallback = async () => ({ on: await this.restart(key, requested), live: false })
+    // a switch can only be proved when its target is a concrete id/level the CLI's log will name. Resolve "Default"
+    // to what this CLI really serves; where it cannot be named, the restart path is the honest one.
+    const to = { ...requested }
+    if (!to.model) {
+      const def = modelsOf(requested.kind)?.default
+      if (!def) return fallback()
+      to.model = def
+    }
+    if (!to.effort) {
+      const eff = findModel(to.kind, to.model)?.effort
+      if (eff) to.effort = eff
+    }
+    this.chats.pull(key)
+    const runtime = this.chats.chat(key).agent?.runtime
+    // the model id from the log is taken as it is: two providers can serve the same bare name, and resolving it by
+    // suffix would compare against the wrong provider and prove the wrong switch
+    const from = {
+      kind: x.on.kind,
+      model: x.on.model || runtime?.model || '',
+      effort: x.on.effort || runtime?.effort || '',
+    }
+    if (x.t && ended(x.t)) throw new Error(`${x.t.id} is Done already: it has no agent to switch.`)
+    if (!this.engine.installed(to.kind)) throw new Error(`${CLI_NAME[to.kind] ?? to.kind} isn't installed on this machine.`)
+    if (!liveOK(to.kind) || !liveOK(from.kind) || to.kind !== from.kind) return fallback()
+    // a catalog default is a guess, not what this agent was observed on: without both starting values there is no
+    // honest way to put a failed switch back, so this is the restart decision again
+    if (!from.model || !from.effort) return fallback()
+    // the same Settings → Limits that a restart obeys: a full or blocked model is never switched to
+    const hold = this.engine.capHold(x.space ?? '', keyOf(to.kind, to.model), x.t ? x.t.id : key)
+    if (hold) throw new Error(this.engine.capRefusal('Not restarted', hold))
+    const st = this.agents.status(key)
+    if (st === 'working') throw new Error("It's busy with a turn. Switch once it's done, or stop it first.")
+    if (st === 'blocked') throw new Error("It's waiting on a question. Answer it, then switch.")
+    if (st === 'gone') throw new Error("Its agent isn't running. Start it, then switch.")
+    const io: SwitchIO = injected ?? (() => {
+      const pane = this.agents.info(key)?.pane_id
+      if (!pane) throw new Error("Its terminal isn't there any more. Restart it instead.")
+      return {
+        send: async (text) => {
+          const r = await this.agents.send(key, text, { command: true })
+          if (r.waiting) throw new Error("It couldn't take the command now.")
+        },
+        keys: async (...keys) => this.agents.keys(key, keys),
+        screen: async () => herdr.read(pane, 'text', 300).catch(() => ''),
+        // the chat window's own read: new lines through the CLI's reader, then the launch's runtime from sessionRuntime
+        chat: async () => {
+          this.chats.pull(key)
+          const runtime = this.chats.chat(key).agent?.runtime
+          return { model: runtime?.model, effort: runtime?.effort }
+        },
+        sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+        // the CLI saves /model and /effort as defaults for new sessions too: read and put back only what it touched
+        readFile: (rel) => this.readAgentFile(rel),
+        writeFile: (rel, text) => this.writeAgentFile(rel, text),
+      }
+    })()
+    const names = Object.fromEntries((modelsOf(to.kind)?.models ?? []).map((m) => [m.id, m.label]))
+    const changed = await switchLive(io, to.kind, from, to, names)
+    // proof first, record second: nothing moves if the chat did not report the new model and effort
+    this.agents.switched(key, changed)
+    const picked = changed.model ? findModel(to.kind, changed.model) : undefined
+    if (picked) rememberModel(to.kind, picked.id)
+    this.emit('snapshot')
+    this.emit('chat', key)
+    return { on: harnessWords({ kind: to.kind, model: to.model, effort: to.effort }), live: true }
+  }
+
   /** a coordinator that runs outside its folder (another machine's started in the main machine's path for it, where
    *  that machine had no such folder, or a home space's that was its machine's coordinator): started again in its own,
    *  with its session, once its turn is over */
@@ -3413,6 +3506,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           const kind = kindOf(a.kind)
           if (!kind) return { ok: false, error: `No CLI called ${a.kind}.` }
           return { ok: true, on: await this.restart(a.chat, { kind, model: a.model ?? '', effort: a.effort ?? '' }, !!a.save) }
+        } catch (e) {
+          return { ok: false, error: (e as Error).message }
+        }
+      }
+      case 'live-switch': {
+        try {
+          const kind = kindOf(a.kind)
+          if (!kind) return { ok: false, error: `No CLI called ${a.kind}.` }
+          const problem = harnessProblem({ kind, model: a.model, effort: a.effort })
+          if (problem) return { ok: false, error: problem }
+          return { ok: true, ...(await this.liveSwitch(a.chat, { kind, model: a.model, effort: a.effort })) }
         } catch (e) {
           return { ok: false, error: (e as Error).message }
         }

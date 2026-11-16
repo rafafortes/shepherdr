@@ -90,14 +90,13 @@ describe('claude reader', () => {
       `session:session-${S}`,
       'user:Make the button blue',
       'user:/model',
-      'agent:Set model to opus',
       'user:Also check the footer',
       'agent:The button is blue now.\n\nThe footer looks fine.',
       'turn-end:turn-msg_B',
     ])
     expect(ev[0]).toMatchObject({ kind: 'session', sessionId: S })
     // what the CLI says it runs on is a runtime line, not the chat's words
-    expect(ev.filter((e) => e.kind !== 'usage' && e.kind !== 'turn-start' && e.kind !== 'runtime' && !STEPS.has(e.kind))[5].id).toBe('msg_B')
+    expect(ev.filter((e) => e.kind !== 'usage' && e.kind !== 'turn-start' && e.kind !== 'runtime' && !STEPS.has(e.kind))[4].id).toBe('msg_B')
   })
 
   test("the message Claude Code shows as an update mid-turn is the agent's, from a coordinator log's own lines", () => {
@@ -151,7 +150,8 @@ describe('claude reader', () => {
       cuser('u4', '<command-name>/compact</command-name>\n            <command-message>compact</command-message>\n            <command-args></command-args>'),
       local('s6', '<local-command-stdout>Compacted (ctrl+o to see full summary)</local-command-stdout>'),
     ])
-    expect(brief(ev).slice(1)).toEqual(['user:/clear', 'user:/context', 'agent:```\n Context Usage\n⛀ ⛁ 31.5k tokens\n```', 'user:/model sonnet', 'agent:Set model to Sonnet 5.5', 'user:/compact', 'agent:Compacted (ctrl+o to see full summary)'])
+    // the /model answer is not a chat message: it is read as the runtime the CLI now runs on (runtime.test.ts)
+    expect(brief(ev).slice(1)).toEqual(['user:/clear', 'user:/context', 'agent:```\n Context Usage\n⛀ ⛁ 31.5k tokens\n```', 'user:/model sonnet', 'user:/compact', 'agent:Compacted (ctrl+o to see full summary)'])
     expect(ev.some((e) => e.kind === 'turn-start')).toBe(false)
   })
 

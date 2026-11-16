@@ -13,6 +13,7 @@ import { rebriefReviewer, settingsBlock } from '../live/prompts.ts'
 import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { CLI_NAME, repositorySection, defaultOf, kindOf } from '../live/settings.ts'
 import { harnessProblem, harnessWords, restartAllWords, restartClis, type RestartAllRow } from '../live/restart.ts'
+import { liveOK } from '../live/live-switch.ts'
 import { withRooms, type RoomInput } from '../live/rooms.ts'
 import { clockWords } from '../../shared/when.ts'
 import { picksIn, pickKey, withPin, withRecent, type Picks } from '../../shared/picks.ts'
@@ -952,7 +953,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const space = (t?.place ?? a.chat).split(':')[2] ?? '~'
         // a task that waits to start: Start with…'s pick, else what its chat's agent runs on (as the live one's go)
         const starts = t && ['queued', 'todo', 'scheduled'].includes(t.status) ? (this.workers.get(t.id) ?? c?.agent ?? { kind: on }) : undefined
-        return { ok: true, info: { role: a.chat.includes('/') ? 'task' : 'coordinator', space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name, on: c?.agent ?? { kind: on }, onWords: harnessWords(c?.agent ?? { kind: on }), want: { kind: want }, ...(starts ? { starts } : {}), clis: withRooms(clis, this.roomInput(space, t?.id ?? a.chat)), working: t?.status === 'work' } }
+        return { ok: true, info: { role: a.chat.includes('/') ? 'task' : 'coordinator', space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name, on: c?.agent ?? { kind: on }, onWords: harnessWords(c?.agent ?? { kind: on }), want: { kind: want }, ...(starts ? { starts } : {}), clis: withRooms(clis, this.roomInput(space, t?.id ?? a.chat)), working: t?.status === 'work', live: !c?.working && t?.status !== 'work' && liveOK(on) } }
       }
       case 'start-with': {
         // Start with…: the worker a waiting task starts on, for it alone; it stays in line (as the live one's setWorker)
@@ -975,6 +976,24 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         if (!m) return { ok: false, error: `${CLI_NAME[kind] ?? kind} has no model ${a.model}.` }
         this.picks = withPin(this.picks, pickKey(kind, m.id), !!a.on)
         return { ok: true, ...picksIn(this.picks, kind) }
+      }
+      case 'live-switch': {
+        // the demo's CLI is a stand-in: it reports the new model in its chat, with no restart card, where a real one
+        // types the command and reads its own log (server/live/live-switch.ts). A CLI with no switch still restarts.
+        const c = this.chat(a.chat)
+        if (!c) return { ok: false, error: 'No such chat.' }
+        const kind = kindOf(a.kind)
+        if (!kind) return { ok: false, error: `No CLI called ${a.kind}.` }
+        const problem = harnessProblem({ kind, model: a.model, effort: a.effort })
+        if (problem) return { ok: false, error: problem }
+        if (!liveOK(kind) || !liveOK(kindOf(c.cli) ?? '')) return { ...this.restartOn(a.chat, { kind, model: a.model, effort: a.effort }), live: false }
+        const model = a.model || undefined
+        const effort = a.effort || undefined
+        c.agent = { kind, ...(model ? { model } : {}), ...(effort ? { effort } : {}), runtime: { ...(model ? { model } : {}), ...(effort ? { effort } : {}), source: 'session', at: Date.now() } }
+        c.cli = CLI_NAME[kind] ?? kind
+        if (model) this.picks = withRecent(this.picks, pickKey(kind, model))
+        this.emit('chat', a.chat)
+        return { ok: true, on: harnessWords({ kind, model, effort }), live: true }
       }
       case 'restart':
         return this.restartOn(a.chat, { kind: a.kind, model: a.model, effort: a.effort })
