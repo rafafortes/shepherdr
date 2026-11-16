@@ -1755,7 +1755,7 @@ describe('on GitHub: a pull request per task', () => {
     expect(w.sent[1].text).not.toContain('Check failed')
   })
 
-  test('a branch just pushed whose repo has workflows on pull requests waits for its checks to show, never taking none as passed', async () => {
+  test('a workflow that runs on every pull request is never none: it waits, says why, and merges when checks really pass', async () => {
     const w = world()
     const g = onGitHub()
     waitForChecks(w)
@@ -1766,9 +1766,57 @@ describe('on GitHub: a pull request per task', () => {
     const m = await w.engine.merge(t.id, { self: true })
     expect(m.ok).toBe(false)
     expect(m.error).toContain('just pushed')
+    expect(m.error).toContain('not merging')
     expect(g.gh().prs[0].state).toBe('OPEN')
-    // a while later still none: they didn't run on it after all, and it merges
+    // long past the 90 s window, still none: an unfiltered workflow is not "none set up", so no merge on the unknown
     t.pushed!.at = 0
+    const later = await w.engine.merge(t.id, { self: true })
+    expect(later.ok).toBe(false)
+    expect(later.error).toContain('not merging')
+    expect(t.landing?.step).toBe('checks')
+    expect(t.landing?.why).toBe('Checks not started yet')
+    expect(w.engine.subOf(t)).toContain('Checks not started yet')
+    // the checks come: only now does it merge
+    g.set({ checks: [{ name: 'ci', bucket: 'pass' }] })
+    expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
+  })
+
+  test('a paths-filtered workflow that did not start is not decided on the first read, then merges like none', async () => {
+    const w = world()
+    const g = onGitHub()
+    waitForChecks(w)
+    const { t } = await started(w, g.dir, 'ghpaths')
+    mkdirSync(join(t.worktree!, '.github', 'workflows'), { recursive: true })
+    // this change is a doc, not backend/**: GitHub reports no checks for it
+    writeFileSync(join(t.worktree!, '.github', 'workflows', 'ci.yml'), 'on:\n  pull_request:\n    paths:\n      - backend/**\n')
+    sh('git add -A && git commit -qm ci', t.worktree!)
+    const first = await w.engine.merge(t.id, { self: true })
+    expect(first.ok).toBe(false)
+    expect(first.error).toContain('paths or branches filters')
+    expect(g.gh().prs[0].state).toBe('OPEN')
+    // the same 90 s window passes with still none: the filter does not apply to this change, so it merges as none
+    t.pushed!.at = 0
+    expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
+  })
+
+  test('checks that started read green or red, and green merges while red does not', async () => {
+    const w = world()
+    const g = onGitHub({ checks: [{ name: 'ci', bucket: 'pass' }] })
+    waitForChecks(w)
+    const { t } = await started(w, g.dir, 'ghgreen')
+    mkdirSync(join(t.worktree!, '.github', 'workflows'), { recursive: true })
+    writeFileSync(join(t.worktree!, '.github', 'workflows', 'ci.yml'), 'on:\n  pull_request:\n')
+    sh('git add -A && git commit -qm ci', t.worktree!)
+    await w.engine.openPr(t.id)
+    const green = await w.engine.checks(t.id, 0)
+    expect(green.ok).toBe(true)
+    expect(green.text).toContain('passed')
+    g.set({ checks: [{ name: 'ci', bucket: 'fail', link: 'https://github.com/acme/app/actions/runs/7' }] })
+    const red = await w.engine.checks(t.id, 0)
+    expect(red.ok).toBe(false)
+    expect(red.text).toContain('failed')
+    expect((await w.engine.merge(t.id, { self: true })).ok).toBe(false)
+    g.set({ checks: [{ name: 'ci', bucket: 'pass' }] })
     expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
   })
 

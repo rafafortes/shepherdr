@@ -429,7 +429,11 @@ export const closePr = (g: GitHub, cwd: string, n: number, comment: string) => g
 
 export const readyPr = (g: GitHub, cwd: string, n: number) => gh(g, cwd, 'pr', 'ready', String(n), ...R(g))
 
-export type PrChecks = { state: 'pending' | 'pass' | 'fail' | 'none' | 'error'; passed: number; failed: { name: string; link?: string }[]; error?: string }
+export type ChecksExpect = 'yes' | 'maybe' | 'none'
+
+/** `unknown` is GitHub reporting no checks while the repo's workflows at head could still run on the pull request:
+ *  not the same as `none`, which is a repo with no checks configured. `expect` is why it is still unknown. */
+export type PrChecks = { state: 'pending' | 'pass' | 'fail' | 'none' | 'error' | 'unknown'; passed: number; failed: { name: string; link?: string }[]; error?: string; expect?: ChecksExpect }
 
 /** a check as gh pr checks buckets it: pass, fail, pending, skipping or cancel */
 export type Check = { name: string; bucket: string; link?: string }
@@ -486,6 +490,78 @@ export async function prChecks(g: GitHub, cwd: string, n: number): Promise<PrChe
   return { state: failed.length ? 'fail' : pending ? 'pending' : 'pass', passed, failed }
 }
 
+const PR_EVENTS = ['pull_request', 'pull_request_target']
+const FILTERS = ['paths', 'paths-ignore', 'branches', 'branches-ignore']
+
+/**
+ * One workflow file's say on a pull request: `yes` (it runs on every one), `maybe` (a paths/branches filter may
+ * skip it), or `none` (never on one - push and workflow_dispatch run on their own refs). The `on:` block is read by
+ * indentation, as GitHub reads it.
+ */
+export function workflowExpect(text: string): ChecksExpect {
+  const lines = text.split('\n').map((l) => l.split(' #')[0].trimEnd()).filter((l) => l.trim() && !l.trim().startsWith('#'))
+  const ind = (l: string) => l.length - l.trimStart().length
+  const part = (l: string) => {
+    const t = l.trim().replace(/^[-*]\s+/, '')
+    const i = t.indexOf(':')
+    return { k: (i < 0 ? t : t.slice(0, i)).trim().replace(/^['"]|['"]$/g, ''), v: i < 0 ? '' : t.slice(i + 1).trim() }
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const p = part(lines[i])
+    if (ind(lines[i]) || (p.k !== 'on' && p.k !== 'true')) continue
+    if (p.v) return PR_EVENTS.some((e) => p.v.includes(e)) ? (FILTERS.some((f) => p.v.includes(f)) ? 'maybe' : 'yes') : 'none'
+    const end = lines.findIndex((l, n) => n > i && ind(l) === 0)
+    const block = lines.slice(i + 1, end < 0 ? lines.length : end)
+    if (!block.length) return 'none'
+    const at = Math.min(...block.map(ind))
+    let say: ChecksExpect = 'none'
+    for (let n = 0; n < block.length; n++) {
+      if (ind(block[n]) !== at) continue
+      const e = part(block[n])
+      const name = e.k || e.v.replace(/^['"]|['"]$/g, '')
+      if (PR_EVENTS.includes(name) || PR_EVENTS.some((x) => e.v === x)) {
+        const filtered = FILTERS.some((f) => e.v.includes(f)) || (() => {
+          for (let m = n + 1; m < block.length && ind(block[m]) > at; m++) if (FILTERS.includes(part(block[m]).k)) return true
+          return false
+        })()
+        if (!filtered) return 'yes'
+        say = 'maybe'
+      }
+      // push and workflow_dispatch run on their own refs, not on a pull request: they are no checks for one
+    }
+    return say
+  }
+  return 'none'
+}
+
+/**
+ * What the repo's workflows at HEAD say about checks on its pull requests: `yes` if any run on every one, else
+ * `maybe` if any have a paths/branches filter, else `none`. Read at the pull request's head, not this worktree's.
+ */
+export async function prWorkflowExpect(wt: string): Promise<ChecksExpect> {
+  const r = await git(wt, 'ls-tree', '--name-only', 'HEAD', '.github/workflows/')
+  if (!r.ok) return 'none'
+  let found: ChecksExpect = 'none'
+  for (const f of r.out.split('\n').filter((f) => /\.ya?ml$/.test(f))) {
+    const y = await git(wt, 'show', `HEAD:${f}`)
+    if (!y.ok) continue
+    const say = workflowExpect(y.out)
+    if (say === 'yes') return 'yes'
+    if (say === 'maybe') found = 'maybe'
+  }
+  return found
+}
+
+/**
+ * GitHub reporting no checks is not a repo with no checks configured while its workflows could still run on the
+ * pull request (#1044/#1018). An unfiltered one is never `none`; a filtered one is not decided on the first read,
+ * but after `waited` is taken as not applying to this change. `waited` is the same 90 s the merge already gives.
+ */
+export function noneIsUnknown(expect: ChecksExpect, waited: boolean): PrChecks {
+  if (expect === 'yes' || (expect === 'maybe' && !waited)) return { state: 'unknown', passed: 0, failed: [], expect }
+  return { state: 'none', passed: 0, failed: [] }
+}
+
 /** how long GitHub's checks on pull requests take (ms): the middle of the last few runs that passed; none when unknown */
 export async function checksTook(g: GitHub, cwd: string): Promise<number | undefined> {
   const r = await gh(g, cwd, 'api', '--jq', '.workflow_runs[] | [.run_started_at, .updated_at]', `repos/${g.repo}/actions/runs?event=pull_request&status=success&per_page=5`)
@@ -509,17 +585,10 @@ export async function checksTook(g: GitHub, cwd: string): Promise<number | undef
 export const mergePr = (g: GitHub, cwd: string, n: number, sha: string, subject: string, body: string) =>
   gh(g, cwd, 'pr', 'merge', String(n), ...R(g), '--squash', '--match-head-commit', sha, '--subject', subject, '--body', body)
 
-/** the repo has GitHub Actions workflows at this commit that run on pull requests: a pull request of it gets checks,
- *  even before they show */
+/** the repo has GitHub Actions workflows at this commit that may run on pull requests: a pull request of it may get
+ *  checks, even before they show. `prWorkflowExpect` tells whether any run on every one or only filtered ones. */
 export async function hasPrWorkflows(wt: string) {
-  const r = await git(wt, 'ls-tree', '--name-only', 'HEAD', '.github/workflows/')
-  if (!r.ok) return false
-  for (const f of r.out.split('\n').filter((f) => /\.ya?ml$/.test(f))) {
-    const y = await git(wt, 'show', `HEAD:${f}`)
-    // on: pull_request, on: [push, pull_request], or a pull_request: key under on:
-    if (y.ok && /^\s*(?:on:.*\bpull_request|-?\s*pull_request(?:_target)?\b)/m.test(y.out)) return true
-  }
-  return false
+  return (await prWorkflowExpect(wt)) !== 'none'
 }
 
 /** a commit's runs of GitHub Actions on a branch, as one verdict: all passed, one failed, or some still run */
