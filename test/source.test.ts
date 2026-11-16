@@ -1150,9 +1150,10 @@ describe("a task's own progress (shepherdr status)", () => {
       expect(view().report).toEqual({ msg: 'Fixing the two failing tests', progress: 40, eta: 80, paused: undefined })
       // the CLI's task list shows its own line while it works
       expect((await src.cli(['task', 'list'], {})).out).toContain(`${t.id}    work  Worked  · Fixing the two failing tests`)
-      // the minutes count down while it works
+      // the minutes count down while it works, and at the cadence the line reads as older
       t.report!.at -= 5 * 60_000
       expect(view().report!.eta).toBe(75)
+      expect(view().report!.stale).toBe(5)
       // waiting on you: frozen, and the time it waits does not count
       st = 'blocked'
       src.engine.agentStatus(key)
@@ -1163,7 +1164,7 @@ describe("a task's own progress (shepherdr status)", () => {
       expect(view().report!.eta).toBe(75)
       st = 'working'
       src.engine.agentStatus(key)
-      expect(view().report).toEqual({ msg: 'Fixing the two failing tests', progress: 40, eta: 75, paused: undefined })
+      expect(view().report).toEqual({ msg: 'Fixing the two failing tests', progress: 40, eta: 75, paused: undefined, stale: 5 })
       // a line too long is cut at a word, and it says so; no --left, no minutes
       const long = await src.cli(['status', t.id, 'Rebasing onto main and running every check again', '--done', '90'], { chat: key })
       expect(long.out).toBe(`Noted: ${t.id} shows "Rebasing onto main and running every" (cut to 40 characters), 90% done.\n`)
