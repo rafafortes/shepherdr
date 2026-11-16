@@ -1799,6 +1799,24 @@ describe('on GitHub: a pull request per task', () => {
     expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
   })
 
+  test("shepherdr checks says it is waiting, not merged, when a workflow's checks have not been reported yet", async () => {
+    const w = world()
+    const g = onGitHub()
+    waitForChecks(w)
+    const { t } = await started(w, g.dir, 'ghwaityet')
+    mkdirSync(join(t.worktree!, '.github', 'workflows'), { recursive: true })
+    writeFileSync(join(t.worktree!, '.github', 'workflows', 'ci.yml'), 'on:\n  pull_request:\n')
+    sh('git add -A && git commit -qm ci', t.worktree!)
+    await w.engine.openPr(t.id)
+    t.reported = true
+    t.landing = { step: 'checks', at: Date.now() }
+    const c = await w.engine.checks(t.id, 0)
+    expect(c.ok).toBe(false)
+    expect(c.text).toContain('not merging')
+    expect(t.landing?.why).toBe('Checks not started yet')
+    expect(w.engine.subOf(t)).toContain('Checks not started yet')
+  })
+
   test('checks that started read green or red, and green merges while red does not', async () => {
     const w = world()
     const g = onGitHub({ checks: [{ name: 'ci', bucket: 'pass' }] })

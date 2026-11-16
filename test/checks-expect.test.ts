@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { ChecksExpect } from '../server/live/engine/git.ts'
 import { hasPrWorkflows, noneIsUnknown, prWorkflowExpect, workflowExpect } from '../server/live/engine/git.ts'
 import { landingLine } from '../server/live/engine/engine.ts'
 import { sh } from './engine-world.ts'
@@ -23,7 +24,7 @@ function repoWith(workflows: Record<string, string> | null) {
 }
 
 describe('what one workflow says about a pull request (workflowExpect)', () => {
-  const cases: [string, string, string][] = [
+  const cases: [string, string, ChecksExpect][] = [
     ['an unfiltered pull_request runs on every one', 'on:\n  pull_request:\njobs: {}', 'yes'],
     ['pull_request_target counts too', 'on:\n  pull_request_target:\njobs: {}', 'yes'],
     ['a list on one line', 'on: [push, pull_request]\njobs: {}', 'yes'],
