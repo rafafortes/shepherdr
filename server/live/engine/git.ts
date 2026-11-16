@@ -28,7 +28,7 @@ export async function sh(cmd: string[], cwd: string, opts: { timeoutMs?: number;
 export const git = (cwd: string, ...args: string[]) => sh(['git', ...args], cwd)
 
 /** a line that names what was found, and one that names where: the row prefers these over git's own wrapper */
-const HEADLINE = /\b(gitleaks|findings?|lint|fatal|error|leak|violation|fail(?:ed)?)\b/i
+const HEADLINE = /\b(gitleaks|findings?|fatal|error|leak|violation|fail(?:ed)?|rejected|non-fast-forward|denied)\b/i
 const FILELINE = /\bfile\s*[:=]|\b[\w./-]+\.(?:ts|tsx|js|jsx|py|go|rs|rb|java|json|ya?ml|env)\b/i
 const GIT_WRAPPER = /failed to push some refs/i
 
@@ -41,8 +41,10 @@ const GIT_WRAPPER = /failed to push some refs/i
  */
 export function pushWords(r: Pick<Run, 'out' | 'err'>, lines = 12): string {
   const said = [...r.out.split('\n'), ...r.err.split('\n')].map((s) => s.trim()).filter(Boolean)
-  if (!said.some((s) => GIT_WRAPPER.test(s) || /hook failed|hook declined/i.test(s)))
-    return redact(r.err.split('\n').find(Boolean) ?? r.out.split('\n').find(Boolean) ?? '') || 'git push failed'
+  if (!said.some((s) => GIT_WRAPPER.test(s) || /hook failed|hook declined/i.test(s))) {
+    const first = (s: string) => s.split('\n').map((x) => x.trim()).find(Boolean)
+    return redact(first(r.err) ?? first(r.out) ?? '') || 'git push failed'
+  }
   const kept = said.slice(-lines)
   const head = said.find((s) => HEADLINE.test(s))
   if (head && !kept.includes(head)) kept.unshift(head)
@@ -61,10 +63,11 @@ export function pushRefusal(branch: string, push: Pick<Run, 'out' | 'err'>): { t
 /** a hook may print the very secret it found: keep the file and line it names, never the matched value */
 function redact(line: string): string {
   return line
-    // a labelled value with any prefix: MY_API_KEY=…, AWS_SECRET_ACCESS_KEY=…, Secret: …, DB_PASSWORD: …
-    .replace(/(?<![\w-])([A-Za-z0-9_]*(?:secret|token|password|passwd|api[-_]?key|access[-_]?key|credential|private[-_]?key|authorization|bearer)[A-Za-z0-9_]*\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;|]+)/gi, '$1[redacted]')
-    // an Authorization header with a space, not a colon
-    .replace(/(Bearer\s+)[^\s,;]+/gi, '$1[redacted]')
+    // a labelled value with any prefix: MY_API_KEY=…, AWS_SECRET_ACCESS_KEY=…, Secret: …, "client_secret": …,
+    // Authorization: Bearer … (a scheme word and its value are one value, or the short token would leak)
+    .replace(/(?<![\w-])([A-Za-z0-9_]*(?:secret|token|password|passwd|api[-_]?key|access[-_]?key|credential|private[-_]?key|authorization|bearer)[A-Za-z0-9_]*["']?\s*[:=]\s*)("[^"]*"|'[^']*'|(?:Bearer|Basic|Token)\s+[^\s,;|]+|[^\s,;|]+)/gi, '$1[redacted]')
+    // an unlabelled authorization scheme: Bearer …, Basic …, Token …
+    .replace(/\b(Bearer|Basic|Token)(\s+)[^\s,;]+/gi, (_m, scheme: string, space: string) => `${scheme}${space}[redacted]`)
     // credentials inside a URL's userinfo: https://token@host, postgres://user:pass@host
     .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi, '$1[redacted]@')
     // a JWT

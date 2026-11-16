@@ -135,6 +135,37 @@ test('with gitleaks banner fields, the row names the file, not a metadata line',
   expect(row).toBe('Could not push work/47-hook: Finding: AWS Access Key')
 })
 
+test('a labelled Authorization header does not leak its credential', () => {
+  const w = pushWords(push(
+    [
+      'Authorization: Bearer abcd1234efgh',
+      'Authorization: Basic dXNlcjpwYXNz',
+      'Authorization: Token 0123456789abcdef',
+      'Bearer wxyz1234ijkl',
+    ].join('\n'), "error: failed to push some refs to 'origin'",
+  ))
+  for (const secret of ['abcd1234efgh', 'dXNlcjpwYXNz', '0123456789abcdef', 'wxyz1234ijkl']) expect(w).not.toContain(secret)
+})
+
+test('a quoted JSON label is redacted too', () => {
+  const w = pushWords(push('{"client_secret":"abc123"}', "error: failed to push some refs to 'origin'"))
+  expect(w).not.toContain('abc123')
+  expect(w).toContain('client_secret')
+})
+
+test('a blank first stderr line does not swallow git\'s failure', () => {
+  const w = pushWords(push('', '   \nfatal: unable to access the remote'))
+  expect(w).toBe('fatal: unable to access the remote')
+})
+
+test('the row names the error line, not an npm hook banner', () => {
+  const { row } = pushRefusal('work/47', push(
+    '> app@1.0.0 lint\n12:7  error  Unexpected var  no-var', "error: failed to push some refs to 'origin'",
+  ))
+  expect(row).toContain('Unexpected var')
+  expect(row).not.toContain('app@1.0.0')
+})
+
 test('a non-hook ref rejection keeps git\'s own words, with no hook claim', () => {
   const w = pushWords(push('', [
     'error: failed to push some refs to ../remote.git',
@@ -145,6 +176,7 @@ test('a non-hook ref rejection keeps git\'s own words, with no hook claim', () =
   expect(w).toContain('non-fast-forward')
   expect(w).not.toContain('gitleaks')
   expect(w).not.toContain('hook')
+  expect(pushRefusal('work/47', push('', w)).row).toContain('non-fast-forward')
 })
 
 test('a failure that is not a refusal still prefers git\'s stderr over hook chatter', () => {
