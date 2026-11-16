@@ -4078,7 +4078,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return { name: this.chatName(key), ...(pane ? { pane } : {}), ...(t ? { task: t.id, space: this.chatName(t.project) } : { space: this.chatName(key) }) }
   }
 
-  /** a task's agent says how far along it is: shepherdr status <id> "<line>" --done <0-100> [--left 5m] */
+  /** a task's agent says how far along it is: shepherdr status <id> "<line>" --done <0-100> [--left 5m] — at the start,
+   *  at each natural step and at least every 5 minutes while it works; a revised --left says so in the line */
   private reportCommand(id: string, words: string[], p: Parsed, ctx: { chat?: string }) {
     const t = this.engine.task(id)
     if (!t) throw new Error(`No task ${id}; shepherdr status <id> "<line>" --done <0-100> [--left 5m]`)

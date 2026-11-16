@@ -213,7 +213,9 @@ Task agents
   shepherdr status <id> "<line>" --done <0-100> [--left 5m|1h20m]
                                                  how far along you are, in your own words: the task's status line (at
                                                  most ${STATUS_MAX} characters), its pie and the time left (it counts down
-                                                 while you work). Run it at the start and at each natural step
+                                                 while you work). Run it at the start, at each natural step and at least
+                                                 every 5 minutes; revise --left honestly each time and say in the line
+                                                 when it is a revision. A line older than 5 minutes reads as older
 
 Chat
   shepherdr ask "<question>" --choice "<label>" ... [--desc "<label>=<one line>"] [--other] [--multi] [--ordinary]

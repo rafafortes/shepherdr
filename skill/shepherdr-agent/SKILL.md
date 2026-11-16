@@ -44,12 +44,18 @@ build, check and review the work is your own judgment.
    that you wait, end your turn, and start on `<go>`; a message that is a go: `shepherdr task queue <id> --after none`
    and start.
 2. **Work** in your worktree and branch only. Say how far along you are, `shepherdr status <id> "<at most 40
-   characters>" --done <0-100> --left <5m, 1h20m>`, once you know the size of the work: `--left` is your own time until
-   `ready`, and Shepherdr shows nothing you didn't report. Ask the human only what no experiment can settle: once, a
-   card with your recommended choice first, then end your turn (a turn ended without `ready` and nothing running in
-   the background shows Needs you). A card they dismiss is their answer too: they declined to give one, so decide it
-   with your best judgment and say what you assumed — a dismissed plan is not approved, so don't carry it out. Decide
-   the rest yourself and list those decisions in the facts.
+   characters>" --done <0-100> --left <5m, 1h20m>`, once you know the size of the work, then again at each natural step
+   and at least every 5 minutes while you work: that cadence is your own discipline — Shepherdr never interrupts you to
+   ask for a status. Keep it one short line. `--left` is your own time until `ready`; revise it honestly each time from
+   how the work is really going (slower than you thought: say more), and when you revise it say so in the line — a
+   revision reads as a revision, never just a number counting down. Shepherdr shows nothing you didn't report and marks
+   a line older than 5 minutes as older — or sooner if its own time left has run out: its line ends with its age and
+   the minutes under the dot go. When a turn has nothing new to say, don't repeat the same line: leave the last
+   one (the mark explains its age) or report plainly, "still on X, n minutes in". Ask the human only what no
+   experiment can settle: once, a card with your recommended choice first, then end your turn (a turn ended without
+   `ready` and nothing running in the background shows Needs you). A card they dismiss is their answer too: they
+   declined to give one, so decide it with your best judgment and say what you assumed — a dismissed plan is not
+   approved, so don't carry it out. Decide the rest yourself and list those decisions in the facts.
 3. **Review**, unless Review is off or the brief says none: fresh eyes that didn't write the change (a subagent, or a
    headless `codex exec`, `claude -p` or `pi -p` as the Reviewer line names). Each round, ask `shepherdr review <id>`
    which reviewer to use: it counts the round, holds that reviewer for it, and answers with the reviewer and the words to

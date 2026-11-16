@@ -155,6 +155,11 @@ export const TITLE_MAX = 32
 /** The most characters an agent's status line may have: one line of a task row on a 375 px phone. */
 export const STATUS_MAX = 40
 
+/** How old a working task's last status line may be, in minutes, before the row reads it as older. A task agent reports
+ *  at least this often (its skill); a line past it — or past its own time left, whichever is sooner — is stale: the row
+ *  shows its age instead of a time left that lies. */
+export const STATUS_CADENCE_MIN = 5
+
 /** The most characters a task's summary may have: what changed for the human, in two or three lines of its card on a
     phone. More detail goes in its agent's chat or its proof, the facts (PR, commit, checks…) in the record, not on the card. */
 export const SUMMARY_MAX = 160
@@ -177,6 +182,9 @@ export interface Report {
   eta?: number
   /** the agent waits on you or is blocked: the report stays as it was */
   paused?: boolean
+  /** whole minutes since the agent reported this line, once it is past the cadence or its own time left while working:
+   *  the row shows this age instead of a time left that has run out. Never set while it waits on you (frozen on purpose). */
+  stale?: number
 }
 
 /** need: its agent asks or waits for you; ready: finished, waits for you to merge it; merging: finished and on its way

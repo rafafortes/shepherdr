@@ -13,7 +13,7 @@ import { trustWorktree } from '../trust.ts'
 import { existsSync, statSync } from '../mfs.ts'
 import { agentEnv, BOX } from '../box.ts'
 import { join } from 'node:path'
-import { STATUS_MAX, TITLE_MAX, type Question, type Report, type Task, type TaskRun, type TaskStatus, type UpdateCard } from '../../../shared/types.ts'
+import { STATUS_CADENCE_MIN, STATUS_MAX, TITLE_MAX, type Question, type Report, type Task, type TaskRun, type TaskStatus, type UpdateCard } from '../../../shared/types.ts'
 import { clockWords, startsLine } from '../../../shared/when.ts'
 import { Emitter } from '../../source.ts'
 import { spawn } from 'node:child_process'
@@ -297,8 +297,9 @@ export function fitStatus(text: string) {
 }
 
 /**
- * The report a task shows: while it works, its minutes left count down from what its agent said; while it waits on
- * you, all of it stays as it was. Nothing once its job is over (Ready, Done, To do, Queued).
+ * The report a task shows: while it works, its minutes left count down from what its agent said, and once the line is
+ * past the status cadence its age shows in place of a time left that has run out; while it waits on you, all of it
+ * stays as it was. Nothing once its job is over (Ready, Done, To do, Queued).
  */
 /** what a task started on a backup by the caps is told after its brief: the same work, on the model it runs now */
 const capLine = (on: string) => `Shepherdr started you on ${on}: your own model is at its limit or out, so the first backup with room took the work. The work is the same; carry on with your brief.`
@@ -314,7 +315,17 @@ export { capWords }
 export function reportOf(r: Reported | undefined, status: TaskStatus, now = Date.now()): Report | undefined {
   if (!r || (status !== 'work' && status !== 'need')) return undefined
   const spent = ((r.pausedAt ?? now) - r.at) / 60000
-  return { msg: r.msg, progress: r.progress, eta: r.left === undefined ? undefined : Math.max(0, Math.round(r.left - spent)), paused: status === 'need' || undefined }
+  // old once the cadence is past, or once the agent's own estimate has run out (whichever comes first): a line that
+  // says "<1m" four minutes after its estimate was up would read as nearly done when it is simply old
+  const staleAfter = Math.min(STATUS_CADENCE_MIN, r.left ?? STATUS_CADENCE_MIN)
+  return {
+    msg: r.msg,
+    progress: r.progress,
+    eta: r.left === undefined ? undefined : Math.max(0, Math.round(r.left - spent)),
+    paused: status === 'need' || undefined,
+    // Only while working: a task waiting on you keeps its line frozen, and its row says what it asks instead.
+    ...(status === 'work' && spent >= staleAfter ? { stale: Math.floor(spent) } : {}),
+  }
 }
 
 /** a question mark that ends a sentence, not one in code (a?.b) or a path */

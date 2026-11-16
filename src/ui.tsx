@@ -436,7 +436,9 @@ export function etaShort(eta: number) {
  */
 export function TaskDot({ s, w, under }: { s: Status; w?: Report; under?: boolean }) {
   const dot = <Dot s={s} p={w?.progress} frozen={w?.paused ? w : undefined} />
-  if (s !== 'work' || !w || w.paused || w.eta === undefined) return dot
+  // a stale line's time left has counted down to a number that no longer means it is nearly done: the row shows the
+  // line's age instead, so keep the dot's pie and drop the minutes under it
+  if (s !== 'work' || !w || w.paused || w.eta === undefined || w.stale !== undefined) return dot
   return (
     <span className="mt-[3px] flex w-3.5 shrink-0 flex-col items-center self-stretch phone:mt-1 phone:w-4">
       {dot}
@@ -449,9 +451,11 @@ export function TaskDot({ s, w, under }: { s: Status; w?: Report; under?: boolea
   )
 }
 
-/** The quiet words at the end of an agent's status line. In a header: the minutes left ("~12 min", "~12 min left" when
- *  wide), or frozen while it waits on you, the % it stopped at. In a row nothing: the minutes sit under the dot, which keeps the %. */
+/** The quiet words at the end of an agent's status line. Past the cadence, its age ("12m ago") and no time left: an
+ *  old line does not read as current. Otherwise in a header: the minutes left ("~12 min", "~12 min left" when wide),
+ *  or frozen while it waits on you, the % it stopped at. In a row nothing: the minutes sit under the dot, which keeps the %. */
 function reportEnd(w: Report, head: boolean, left: boolean) {
+  if (w.stale !== undefined) return `${w.stale}m ago`
   if (!head) return ''
   if (w.paused) return `${w.progress}%`
   return w.eta !== undefined ? `${minutesLeft(w.eta)}${left ? ' left' : ''}` : ''
@@ -459,7 +463,8 @@ function reportEnd(w: Report, head: boolean, left: boolean) {
 
 /**
  * What the agent is doing right now; in a header, its minutes left quietly at the end, the words giving way first so
- * the minutes never get cut off. While it waits on you, all of it frozen and quiet (no pause mark: stopping it is the
+ * the minutes never get cut off. Once the line is past the cadence, its age ("· 12m ago") quietly takes that place: it
+ * no longer reads as current. While it waits on you, all of it frozen and quiet (no pause mark: stopping it is the
  * menu's own action). `head` is a chat header's wording; on
  * a phone (`wrap`) the line flows centred, the minutes kept whole after the words: two lines at most for the
  * status line's 40 characters, and never more than three.

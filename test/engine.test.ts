@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { sh, repo, world, until, started, placeId, settingsBlock, writeJson, fakeHerdr } from './engine-world.ts'
 import { CODEX_WORDS, reviewerLineFor } from './reviewer-line.ts'
 const { fitStatus, reportOf, STALL_QUIET } = await import('../server/live/engine/engine.ts')
+const { STATUS_CADENCE_MIN } = await import('../shared/types.ts')
 
 describe('recovered private routing failures', () => {
   const failure = 'Could not provision private agent command routing'
@@ -570,6 +571,23 @@ describe("a task's own status line, % done and time left", () => {
     expect(reportOf({ ...r, left: undefined }, 'work', 0)!.eta).toBeUndefined()
     for (const s of ['ready', 'done', 'todo', 'queued'] as const) expect(reportOf(r, s, 0)).toBeUndefined()
     expect(reportOf(undefined, 'work')).toBeUndefined()
+  })
+  test('a line older than the 5-minute cadence reads as older, one inside it does not, and one not working never shows it', () => {
+    const r = { msg: 'Fixing tests', progress: 40, left: 12, at: 0 }
+    const cadence = STATUS_CADENCE_MIN * 60_000
+    // inside the cadence: no age, the time left is still current
+    expect(reportOf(r, 'work', cadence - 1)!.stale).toBeUndefined()
+    // at and past the cadence: whole minutes since it was reported, in place of a time left run out to 0
+    expect(reportOf(r, 'work', cadence)!.stale).toBe(STATUS_CADENCE_MIN)
+    expect(reportOf(r, 'work', 30 * 60_000)!.stale).toBe(30)
+    // a shorter estimate runs out first: "<1m" must not read as nearly done four minutes later
+    const short = { ...r, left: 1 }
+    expect(reportOf(short, 'work', 59_000)!.stale).toBeUndefined()
+    expect(reportOf(short, 'work', 60_000)!.stale).toBe(1)
+    // waiting on you: the line is frozen on purpose, never marked older
+    expect(reportOf({ ...r, pausedAt: cadence }, 'need', 60 * 60_000)!.stale).toBeUndefined()
+    // other statuses show no report at all, so no age either (a waiting task's frozen line is the row's "what it asks")
+    for (const s of ['ready', 'done', 'todo', 'queued', 'scheduled'] as const) expect(reportOf(r, s, 60 * 60_000)).toBeUndefined()
   })
 })
 
