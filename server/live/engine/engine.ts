@@ -3884,10 +3884,10 @@ export class Engine extends Emitter<Events> {
     const now = wait ? undefined : await G.prChecks(g, wt, n)
     let c: G.PrChecks
     if (wait) c = await this.checksOf(t, g, n, 0)
-    else if (now?.state === 'none') {
-      const expect = await G.prWorkflowExpect(t.worktree!)
-      c = expect === 'none' ? now : await this.checksOf(t, g, n, CHECKS_SHOW)
-    } else c = now?.state === 'fail' ? now : { state: 'pass' as const, passed: 0, failed: [] }
+    // checksOf reads the same workflows once: with none it either returns none (no workflow, or a filtered one
+    // that did not apply) or waits the 90 s out and refuses while the checks are still unknown
+    else if (now?.state === 'none') c = await this.checksOf(t, g, n, CHECKS_SHOW)
+    else c = now?.state === 'fail' ? now : { state: 'pass' as const, passed: 0, failed: [] }
     if (c.state === 'unknown') {
       if (t.landing) this.land(t, 'checks', await this.checksDue(t, p, g, head), { why: 'Checks not started yet' })
       return { ok: false, error: `GitHub has not reported checks on PR #${n}${pushing ? ` (just pushed${rebased ? `, rebased on ${t.base} for a conflict` : ''})` : ''} yet, but ${this.checksWhy(c.expect)}: waiting for them to start, not merging. Run shepherdr checks ${t.id} again.` }

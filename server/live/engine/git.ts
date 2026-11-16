@@ -491,7 +491,7 @@ export async function prChecks(g: GitHub, cwd: string, n: number): Promise<PrChe
 }
 
 const PR_EVENTS = ['pull_request', 'pull_request_target']
-const FILTERS = ['paths', 'paths-ignore', 'branches', 'branches-ignore']
+const FILTERS = ['paths', 'paths-ignore', 'branches', 'branches-ignore', 'types']
 
 /**
  * One workflow file's say on a pull request: `yes` (it runs on every one), `maybe` (a paths/branches filter may
@@ -536,7 +536,8 @@ export function workflowExpect(text: string): ChecksExpect {
 
 /**
  * What the repo's workflows at HEAD say about checks on its pull requests: `yes` if any run on every one, else
- * `maybe` if any have a paths/branches filter, else `none`. Read at the pull request's head, not this worktree's.
+ * `maybe` if any have a paths/branches/types filter, else `none`. Read at this worktree's HEAD: both callers check
+ * that the pull request's head is that same commit first, so this is the workflow GitHub will actually run.
  */
 export async function prWorkflowExpect(wt: string): Promise<ChecksExpect> {
   const r = await git(wt, 'ls-tree', '--name-only', 'HEAD', '.github/workflows/')
