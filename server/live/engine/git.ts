@@ -27,6 +27,58 @@ export async function sh(cmd: string[], cwd: string, opts: { timeoutMs?: number;
 
 export const git = (cwd: string, ...args: string[]) => sh(['git', ...args], cwd)
 
+/** a line that names what was found, and one that names where: the row prefers these over git's own wrapper */
+const HEADLINE = /\b(gitleaks|findings?|fatal|error|leak|violation|fail(?:ed)?|rejected|non-fast-forward|denied)\b/i
+const FILELINE = /\bfile\s*[:=]|\b[\w./-]+\.(?:ts|tsx|js|jsx|py|go|rs|rb|java|json|ya?ml|env)\b/i
+const GIT_WRAPPER = /failed to push some refs/i
+
+/**
+ * What a failed push said, for the agent that ran it and the task's own row (#963). A pre-push hook's reason
+ * (gitleaks, a lint) lands on *stdout*, which git leaves there; git's own "failed to push some refs" alone says
+ * nothing. Take the last lines of both streams — the reason is printed last — and keep a headline from earlier
+ * when the cut would lose it. A push that failed another way (auth, no remote, network) keeps git's own first
+ * line, stderr first as before; nothing here ever claims a hook said it.
+ */
+export function pushWords(r: Pick<Run, 'out' | 'err'>, lines = 12): string {
+  const said = [...r.out.split('\n'), ...r.err.split('\n')].map((s) => s.trim()).filter(Boolean)
+  if (!said.some((s) => GIT_WRAPPER.test(s) || /hook failed|hook declined/i.test(s))) {
+    const first = (s: string) => s.split('\n').map((x) => x.trim()).find(Boolean)
+    return redact(first(r.err) ?? first(r.out) ?? '') || 'git push failed'
+  }
+  const kept = said.slice(-lines)
+  const head = said.find((s) => HEADLINE.test(s))
+  if (head && !kept.includes(head)) kept.unshift(head)
+  return kept.map(redact).join('\n') || 'git push failed'
+}
+
+/** the two places the refusal is shown (#963): what `shepherdr pr`/`merge` prints to the agent, and the task's own row */
+export function pushRefusal(branch: string, push: Pick<Run, 'out' | 'err'>): { text: string; row: string } {
+  const words = pushWords(push)
+  const own = words.split('\n').filter(Boolean).filter((s) => !GIT_WRAPPER.test(s))
+  // the row is one line on a phone: the finding or the file it names, not a metadata field
+  const reason = own.find((s) => HEADLINE.test(s)) ?? own.find((s) => FILELINE.test(s)) ?? own[0] ?? words
+  return { text: `Could not push ${branch} to GitHub: ${words}`, row: `Could not push ${branch}: ${reason}` }
+}
+
+/** a hook may print the very secret it found: keep the file and line it names, never the matched value */
+function redact(line: string): string {
+  return line
+    // a labelled value with any prefix: MY_API_KEY=…, AWS_SECRET_ACCESS_KEY=…, Secret: …, "client_secret": …,
+    // Authorization: Bearer … (a scheme word and its value are one value, or the short token would leak)
+    .replace(/(?<![\w-])([A-Za-z0-9_]*(?:secret|token|password|passwd|api[-_]?key|access[-_]?key|credential|private[-_]?key|authorization|bearer)[A-Za-z0-9_]*["']?\s*[:=]\s*)("[^"]*"|'[^']*'|(?:Bearer|Basic|Token)\s+[^\s,;|]+|[^\s,;|]+)/gi, '$1[redacted]')
+    // an unlabelled authorization scheme: Bearer …, Basic …, Token …
+    .replace(/\b(Bearer|Basic|Token)(\s+)[^\s,;]+/gi, (_m, scheme: string, space: string) => `${scheme}${space}[redacted]`)
+    // credentials inside a URL's userinfo: https://token@host, postgres://user:pass@host
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi, '$1[redacted]@')
+    // a JWT
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted]')
+    // an AWS key id, or its 40-character secret (which may contain / and +)
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[redacted]')
+    .replace(/\b[A-Za-z0-9/+]{40}\b/g, (s) => /[A-Z]/.test(s) && /[a-z]/.test(s) && /[0-9/+]/.test(s) ? '[redacted]' : s)
+    // a long token on its own; a path segment, a commit sha and a lowercase word are not secrets
+    .replace(/(?<![/.\w-])[A-Za-z0-9_-]{20,}(?![/.\w-])/g, (s) => /[0-9]/.test(s) && /[A-Za-z]/.test(s) && !/^[0-9a-f]+$/i.test(s) ? '[redacted]' : s)
+}
+
 export async function isRepo(path: string) {
   return (await git(path, 'rev-parse', '--show-toplevel')).ok
 }

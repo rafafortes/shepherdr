@@ -3373,7 +3373,8 @@ export class Engine extends Emitter<Events> {
   private async pushBase(p: Space, base: string, note?: string) {
     if (!p.github) return note
     const push = await G.git(p.path, 'push', '--quiet', 'origin', base)
-    const pushed = push.ok ? `pushed ${base} to GitHub` : `could not push ${base} to GitHub: ${push.err.split('\n')[0]}`
+    // pushing the base is not a task branch: keep git's own one line, whatever refused it
+    const pushed = push.ok ? `pushed ${base} to GitHub` : `could not push ${base} to GitHub: ${G.pushWords(push).split('\n')[0]}`
     return note ? `${note}; ${pushed}` : pushed
   }
 
@@ -3386,12 +3387,26 @@ export class Engine extends Emitter<Events> {
   /** how long a merge gate may run: GATE_TIMEOUT, shorter in a test */
   gateTimeout = GATE_TIMEOUT
 
+  /** a push a hook refused, in the agent's tool output and on this task's own row (#963): the hook's last lines,
+   *  stdout included, with any value it printed redacted. Nothing here reaches another task's chat or row. */
+  private pushFailed(t: TaskRec, branch: string, push: G.Run): string {
+    const { text, row } = G.pushRefusal(branch, push)
+    t.mergeStop = row
+    this.settle(t)
+    return text
+  }
+
   /** push the task's branch as it is committed, to GitHub: forced, since it is rebased on main and only its agent's */
   private async push(t: TaskRec) {
     const sha = (await G.git(t.worktree!, 'rev-parse', 'HEAD')).out
     const r = await G.git(t.worktree!, 'push', '--quiet', '--force', 'origin', `HEAD:refs/heads/${t.branch}`)
     if (r.ok) {
       t.pushed = { sha, at: Date.now() }
+      // a push that works again clears the refusal it left on this task's row, without touching a gate's own note
+      if (t.mergeStop?.startsWith('Could not push ')) {
+        t.mergeStop = undefined
+        this.settle(t)
+      }
       this.save()
     }
     return r
@@ -3423,7 +3438,7 @@ export class Engine extends Emitter<Events> {
     if ((await G.aheadCount(t.worktree, t.base)) === 0) return { ok: false, text: `${t.id} has no commits yet: commit your work, then run shepherdr pr ${t.id} again.` }
     const dirty = await G.dirty(t.worktree)
     const pushed = await this.push(t)
-    if (!pushed.ok) return { ok: false, text: `Could not push ${t.branch} to GitHub: ${(pushed.err || pushed.out).split('\n')[0]}` }
+    if (!pushed.ok) return { ok: false, text: this.pushFailed(t, t.branch, pushed) }
     let pr = await this.prOf(t, g, t.worktree)
     if (pr && pr.baseRefName !== t.base) return { ok: false, text: `PR #${pr.number} targets ${pr.baseRefName}, but ${t.id} targets ${t.base}. Correct the pull request target on GitHub first.` }
     let opened = false
@@ -3863,7 +3878,7 @@ export class Engine extends Emitter<Events> {
     const pushing = !pr || pr.headRefOid !== head
     if (pushing) {
       const push = await this.push(t)
-      if (!push.ok) return { ok: false, error: `Could not push ${t.branch} to GitHub: ${(push.err || push.out).split('\n')[0]}` }
+      if (!push.ok) return { ok: false, error: this.pushFailed(t, t.branch!, push) }
     }
     if (!pr) {
       const o = await G.openPr(g, wt, { branch: t.branch!, base: t.base!, title: this.prTitle(t), body: this.prBody(t), draft: false })
