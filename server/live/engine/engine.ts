@@ -3115,16 +3115,30 @@ export class Engine extends Emitter<Events> {
     return null
   }
 
-  /** the pull request's words: the agent's summary, the brief's gist, and the footer its CLI signs with */
+  /** A pull request is found by its task's id, so its title starts with it, as our squash-merge commits do
+   *  ("SHE-12: …"). A title that already names the id is not made to name it twice. Set only when the pull request
+   *  opens: a title the human edited by hand is never renamed afterwards. */
+  private prTitle(t: TaskRec) {
+    const title = (t.title || '').trim().replace(/\s+/g, ' ')
+    const id = t.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const rest = title.replace(new RegExp(`^${id}\\b[\\s:-]*`, 'i'), '').trim()
+    return `${t.id}: ${rest || t.id}`
+  }
+
+  /** The pull request's words: its task's id, the summary, the proof (the facts the task reported) and the brief's
+   *  gist, so a reviewer reads what changed first and can still see what was asked. The brief stays reachable here:
+   *  it lives with the task in Shepherdr too. readyForReview rewrites this body when the report comes; the title is
+   *  touched only when the pull request opens, so a hand-edited one is left alone. */
   private prBody(t: TaskRec) {
     const kind = this.agents.record(this.key(t))?.kind ?? t.agent?.kind ?? this.settings.harness('task', this.nameOf(t)).kind
     // the coordinator's words, not the default way of working Shepherdr ended the brief with
     const brief = (splitBrief(t.desc)[0] || t.title).trim()
     const gist = brief.length > 700 ? `${brief.slice(0, 700).replace(/\s+\S*$/, '')} …` : brief
     return [
-      t.said || 'Work in progress: the summary comes when the task is done.',
-      ...(t.facts ? [`Facts: ${t.facts}`] : []),
-      `**Brief** (${t.id})\n\n${gist
+      `Task: ${t.id}`,
+      `## Summary\n\n${t.said || 'Work in progress: the summary comes when the task is done.'}`,
+      ...(t.facts ? [`## Proof\n\n${t.facts}`] : []),
+      `**Brief** (what was asked)\n\n${gist
         .split('\n')
         .map((l) => `> ${l}`.trimEnd())
         .join('\n')}`,
@@ -3391,7 +3405,7 @@ export class Engine extends Emitter<Events> {
 
   /**
    * shepherdr pr: push the branch and open its pull request (a draft until the agent reports done), or bring the open
-   * one up to the branch. Its title is the task's, its words the summary and the brief's gist.
+   * one up to the branch. Its title names the task's id; its body is the summary, the proof and the brief's gist.
    */
   openPr(id: string): Promise<{ ok: boolean; text: string }> {
     return this.onGitHub(() => this.openPrNow(this.req(id)), (text) => ({ ok: false, text }))
@@ -3412,7 +3426,7 @@ export class Engine extends Emitter<Events> {
     let opened = false
     if (pr?.state === 'MERGED') return { ok: false, text: `PR #${pr.number} is merged on GitHub already: run shepherdr merge ${t.id} to mark it merged and clean up.` }
     if (!pr) {
-      const o = await G.openPr(g, t.worktree, { branch: t.branch, base: t.base, title: t.title, body: this.prBody(t), draft: !t.reported })
+      const o = await G.openPr(g, t.worktree, { branch: t.branch, base: t.base, title: this.prTitle(t), body: this.prBody(t), draft: !t.reported })
       if ('error' in o) return { ok: false, text: `Pushed ${t.branch}, but GitHub did not open a pull request: ${o.error}` }
       t.pr = { number: o.number, url: o.url }
       this.save()
@@ -3834,7 +3848,7 @@ export class Engine extends Emitter<Events> {
       if (!push.ok) return { ok: false, error: `Could not push ${t.branch} to GitHub: ${(push.err || push.out).split('\n')[0]}` }
     }
     if (!pr) {
-      const o = await G.openPr(g, wt, { branch: t.branch!, base: t.base!, title: t.title, body: this.prBody(t), draft: false })
+      const o = await G.openPr(g, wt, { branch: t.branch!, base: t.base!, title: this.prTitle(t), body: this.prBody(t), draft: false })
       if ('error' in o) return { ok: false, error: `GitHub did not open a pull request for ${t.branch}: ${o.error}` }
       t.pr = { number: o.number, url: o.url }
       this.save()

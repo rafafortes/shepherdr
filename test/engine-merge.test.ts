@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { sh, repo, world, until, started, G, Settings } from './engine-world.ts'
 import type { FakeGitHub } from './fake-gh.ts'
 import { tmp } from './tmp.ts'
+import { SETTINGS_HEAD } from '../shared/brief.ts'
 
 // each test runs git dozens of times and gh (a bun process of its own) up to fifty: a few seconds alone, past 20 on a
 // machine as busy as a CI runner can get
@@ -1242,7 +1243,12 @@ describe('on GitHub: a pull request per task', () => {
     expect(t.pr).toEqual({ number: 1, url: 'https://github.com/acme/app/pull/1' })
     expect(w.engine.view(t).pr).toEqual(t.pr)
     const pr = g.gh().prs[0]
-    expect(pr).toMatchObject({ head: t.branch, base: 'main', title: 'Say hello', isDraft: true })
+    expect(pr).toMatchObject({ head: t.branch, base: 'main', title: `${t.id}: Say hello`, isDraft: true })
+    expect(pr.body).toContain(`Task: ${t.id}`)
+    expect(pr.body).toContain('## Summary')
+    expect(pr.body).toContain('Work in progress: the summary comes when the task is done.')
+    expect(pr.body).not.toContain('## Proof')
+    // what was asked stays reachable from the pull request
     expect(pr.body).toContain('> Add hello.txt. Merge when done.')
     expect(pr.body).toContain('Generated with [Claude Code]')
     // gh is told the host git really talks to
@@ -1252,7 +1258,7 @@ describe('on GitHub: a pull request per task', () => {
     expect((await w.engine.checks(t.id, 0)).text).toContain('no checks')
     await w.engine.done(t.id, 'Added hello.txt.')
     await until(() => !g.gh().prs[0].isDraft)
-    expect(g.gh().prs[0].body.startsWith('Added hello.txt.')).toBe(true)
+    expect(g.gh().prs[0].body).toContain('## Summary\n\nAdded hello.txt.')
     const m = await w.engine.merge(t.id, { self: true })
     expect(m).toEqual({ ok: true, note: 'merged PR #1 on GitHub, not waiting for its checks' })
     expect(g.gh().prs[0].state).toBe('MERGED')
@@ -1266,6 +1272,74 @@ describe('on GitHub: a pull request per task', () => {
     await until(() => !!t.cleaned)
     expect(existsSync(t.worktree!)).toBe(false)
     expect(sh('git branch --list "work/*"', g.dir)).toBe('')
+  })
+
+  test("a pull request's title names the task and its body is the summary, the proof and the brief", async () => {
+    const w = world()
+    const g = onGitHub({ remote: 'http://github.localhost/acme/app.git' })
+    const { t } = await started(w, g.dir, 'prshape', 'Fix the keyboard', 'Make the keys stop jumping.')
+    writeFileSync(join(t.worktree!, 'fix.txt'), 'fix\n')
+    sh('git add -A && git commit -qm fix', t.worktree!)
+    // opened as a draft, before the task reported ready: no summary, no proof yet, but the brief is reachable
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    const pr = g.gh().prs[0]
+    expect(pr.title).toBe(`${t.id}: Fix the keyboard`)
+    expect(pr.body).toContain(`Task: ${t.id}`)
+    expect(pr.body).toContain('## Summary\n\nWork in progress: the summary comes when the task is done.')
+    expect(pr.body).not.toContain('## Proof')
+    expect(pr.body).toContain('> Make the keys stop jumping.')
+    expect(pr.body).not.toContain(SETTINGS_HEAD) // the brief's Settings block is not "what was asked"
+    expect(pr.body).toContain('Generated with [Claude Code]')
+    // ready rewrites the body with the summary and the proof, in that order, brief still reachable
+    t.facts = 'PR #1 · commit abc123 · not proven: iOS Safari'
+    await w.engine.done(t.id, 'The keys stay put now.')
+    await until(() => !g.gh().prs[0].isDraft)
+    const body = g.gh().prs[0].body
+    expect(body).toContain(`Task: ${t.id}`)
+    expect(body).toContain('## Summary\n\nThe keys stay put now.')
+    expect(body).toContain('## Proof\n\nPR #1 · commit abc123 · not proven: iOS Safari')
+    expect(body).toContain('> Make the keys stop jumping.')
+    expect(body.indexOf('## Summary')).toBeLessThan(body.indexOf('## Proof'))
+    expect(body.indexOf('## Proof')).toBeLessThan(body.indexOf('**Brief**'))
+    expect(body.indexOf('**Brief**')).toBeLessThan(body.indexOf('Generated with'))
+    expect(g.gh().prs[0].title).toBe(`${t.id}: Fix the keyboard`)
+  })
+
+  test('a pull request title that already names the task is not named twice, and extra spaces collapse', async () => {
+    const w = world()
+    const g = onGitHub({ remote: 'http://github.localhost/acme/app.git' })
+    const named = await started(w, g.dir, 'prnamed', undefined, 'Work.')
+    writeFileSync(join(named.t.worktree!, 'a.txt'), 'a\n')
+    sh('git add -A && git commit -qm a', named.t.worktree!)
+    named.t.title = `${named.t.id}: Already named`
+    expect((await w.engine.openPr(named.t.id)).ok).toBe(true)
+    expect(g.gh().prs[0].title).toBe(`${named.t.id}: Already named`)
+    const spaced = await started(w, g.dir, 'prspaced', undefined, 'Work.')
+    writeFileSync(join(spaced.t.worktree!, 'b.txt'), 'b\n')
+    sh('git add -A && git commit -qm b', spaced.t.worktree!)
+    spaced.t.title = 'Two   spaces'
+    expect((await w.engine.openPr(spaced.t.id)).ok).toBe(true)
+    expect(g.gh().prs[1].title).toBe(`${spaced.t.id}: Two spaces`)
+  })
+
+  test("ready leaves a pull request's title the human edited by hand alone", async () => {
+    const w = world()
+    const g = onGitHub({ remote: 'http://github.localhost/acme/app.git' })
+    const { t } = await started(w, g.dir, 'prhand', undefined, 'Add a header.')
+    writeFileSync(join(t.worktree!, 'h.txt'), 'h\n')
+    sh('git add -A && git commit -qm h', t.worktree!)
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    // the human renamed the pull request on GitHub; Shepherdr only sets a title when it opens one
+    g.set({ prs: g.gh().prs.map((p) => ({ ...p, title: 'A title the human picked' })) })
+    t.reported = true
+    t.said = 'The header is in.'
+    t.facts = 'commit abc123'
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    expect(g.gh().prs[0].title).toBe('A title the human picked')
+    const body = g.gh().prs[0].body
+    expect(body).toContain('## Summary\n\nThe header is in.')
+    expect(body).toContain('## Proof\n\ncommit abc123')
+    expect(body).toContain('> Add a header.')
   })
 
   test('ready after its pull request was squash-merged on GitHub by hand: Done (merged), and no second pull request', async () => {
@@ -1853,7 +1927,7 @@ describe('on GitHub: a pull request per task', () => {
     expect(r.text).toContain('Pushed to PR #1')
     expect(g.gh().prs).toHaveLength(1)
     expect(g.gh().prs[0]).toMatchObject({ isDraft: false })
-    expect(g.gh().prs[0].body.startsWith('Added a and b.')).toBe(true)
+    expect(g.gh().prs[0].body).toContain('## Summary\n\nAdded a and b.')
     expect(sh(`git rev-parse refs/heads/${t.branch}`, g.bare)).toBe(sh('git rev-parse HEAD', t.worktree!))
     g.set({ mergeError: 'Pull request #1 is not mergeable: the merge commit cannot be cleanly created.' })
     const m = await w.engine.merge(t.id, { self: true })
