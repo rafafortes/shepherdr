@@ -23,15 +23,17 @@ own `v2.0.<n>` tags (Releases, below).
 
 **Last reviewed** (update these three lines at the end of every pass):
 
-- upstream `main`: `fc17865a` "SHEP-152 Copy buttons always copy, on every device", 2026-11-09 13:21 +0100
-- upstream tag `v3.1.28` (`9cc43dca`, 2026-11-09), the newest release
+- upstream `main`: `abd5a0f1` "SHEP-236: Release Shepherdr 3.1.35", 2026-11-15 12:19 +0100
+- upstream tag `v3.1.35` (`abd5a0f1`, 2026-11-15), the newest release
 - upstream branch `v2.0` tip: `ebb17d58` "SHE-295: Build coordinator Autopilot (#490)", 2026-10-29 (unchanged)
 
-Reviewed on 2026-11-09, the fourth pass: the 56 commits between `v3.1.14` and `main`'s tip, behind the fourteen tags of
-3.1.15 to 3.1.28 (2026-11-07 13:58 to 2026-11-09 12:09 UTC), the last of them published while the pass ran and read
-with it; every upstream commit after `v2.0.0` is weighed in [the ledger](upstream-ledger.md), the new ones in its 3.1.15
-to 3.1.28 section. The pass before it read 3.1.11 to 3.1.14 (2026-11-06), the one before that 3.1.4 to 3.1.10, and the
-first the 60 commits after `dc1b6782`.
+Reviewed on 2026-11-16, the fifth pass: the 100 commits from `fc17865a` (where the last pass stopped) to `main`'s tip
+`abd5a0f1`, behind the seven tags of 3.1.29 to 3.1.35 (2026-11-09 15:29 to 2026-11-15 11:19 UTC) — 71 improvements,
+7 release commits and 22 `AGENTS.md` notes; every upstream commit after `v2.0.0` is weighed in
+[the ledger](upstream-ledger.md), the new ones in its 3.1.29 to 3.1.35 section, of which six ideas come back as worth a
+task (four ports, one of them later, and two verify-first) and the rest as skips for the reasons their rows give. The
+pass before it read 3.1.15 to 3.1.28 (2026-11-09), the one before that 3.1.11 to 3.1.14 (2026-11-06), the one before
+that 3.1.4 to 3.1.10, and the first the 60 commits after `dc1b6782`.
 
 ## How we notice a new upstream release
 
