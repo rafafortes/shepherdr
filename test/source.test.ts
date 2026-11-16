@@ -2951,6 +2951,16 @@ describe('a live switch', () => {
         ;(src.agents as { send: unknown }).send = async () => ({ waiting: true, item: {} })
         await expect(liveSwitch(key, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow("couldn't take the command")
         expect(await src.act({ type: 'live-switch', chat: key, kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).toMatchObject({ ok: false, error: expect.stringContaining("couldn't take the command") })
+        // "Default" is resolved to a concrete id/level before proof; no switch is needed when it is what runs now
+        ;(src.agents.records[key] as { effort?: string }).effort = 'medium'
+        expect(await liveSwitch(key, { kind: 'claude', model: '', effort: '' })).toMatchObject({ live: true })
+        // the same Settings → Limits as a restart: a blocked model cannot be switched to
+        await src.settings.set('models.maxAtOnce', 'claude/claude-opus-5-5=0', { space: p.name })
+        try {
+          await expect(liveSwitch(key, { kind: 'claude', model: 'claude-opus-5-5', effort: 'medium' }, io)).rejects.toThrow('blocked (0 allowed)')
+        } finally {
+          await src.settings.set('models.maxAtOnce', null, { space: p.name })
+        }
       } finally {
         src.agents.send = realSend
         src.chats.pull = realPull
@@ -2971,6 +2981,18 @@ describe('a live switch', () => {
       delete src.agents.records[key]
     }
   }, 30_000)
+})
+
+test('a CLI settings file is read and written in that CLI own home', async () => {
+  const dir = tmp('claude-settings')
+  process.env.CLAUDE_CONFIG_DIR = dir
+  try {
+    const files = src as unknown as { readAgentFile: (r: string) => Promise<string | null>; writeAgentFile: (r: string, t: string) => Promise<void> }
+    await files.writeAgentFile('.claude/settings.json', '{"theme":"dark"}\n')
+    expect(await files.readAgentFile('.claude/settings.json')).toBe('{"theme":"dark"}\n')
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR
+  }
 })
 
 describe('visible launch controls', () => {

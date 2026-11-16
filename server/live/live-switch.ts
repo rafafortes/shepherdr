@@ -11,7 +11,8 @@
 // built-in `/model <provider/model>` and `/thinking <level>` (pi 1.5.2's slash-commands list). Codex is NOT installed
 // here (removed 2026-10-15): its `/model` picker and `thread_settings_applied` line come from upstream's Codex 0.163
 // (45d7e850) and are covered with a fake screen/log, not a local run. `opencode --help` and `agy --help` offer
-// model/effort only as start flags, with no in-session switch, so those two keep the restart.
+// with no in-session switch whose result their chat log reports before the next reply (their own /models and /model
+// exist), so those two keep the restart.
 
 /** CLIs with a mid-session model/effort switch. */
 export const LIVE_KINDS = ['claude', 'codex', 'pi'] as const
@@ -97,13 +98,31 @@ export function piSteps(ch: { model?: string; effort?: string }): Step[] {
   return out
 }
 
-/** A command went in: its own answer in the chat is the proof, never the fact that it was typed. */
+/** The screen's text after the newest line that echoes `text` as typed: only that is this command's own answer. */
+export function after(screen: string, text: string): string | null {
+  const lines = screen.split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i]!.replace(/^[\s❯>›»]+/, '').trimEnd() === text) return lines.slice(i + 1).join('\n')
+  }
+  return null
+}
+
+/** A command went in: its own answer in the chat is the proof, never the fact that it was typed, and never an old
+ *  line of scrollback that happens to say "not found" (a pane carries hundreds of lines of unrelated tool output). */
 async function awaitStep(io: SwitchIO, step: Step): Promise<void> {
   await io.send(step.text)
+  let asked = false
   for (let t = 0; t < 8000; t += 250) {
-    const screen = await io.screen()
-    const bad = step.fail ? step.fail.exec(screen) : null
-    if (bad) throw new Error(bad[0].trim())
+    const answer = after(await io.screen(), step.text)
+    if (answer !== null) {
+      const bad = step.fail ? step.fail.exec(answer) : null
+      if (bad) throw new Error(bad[0].trim())
+      // Claude Code asks before switching a model whose conversation is cached: Yes is the first choice
+      if (!asked && /Switch model\?/.test(answer) && /❯\s*1\.\s*Yes/.test(answer)) {
+        asked = true
+        await io.keys('enter')
+      }
+    }
     const chat = await io.chat()
     if (chat[step.field] === step.want) return
     await io.sleep(250)

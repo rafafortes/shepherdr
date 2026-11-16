@@ -51,9 +51,10 @@ describe('which CLI can switch in place', () => {
     // Codex 0.163's /model picker (upstream 45d7e850). The host's help and logs were checked (SHE-45).
     for (const kind of ['claude', 'codex', 'pi']) expect(liveOK(kind)).toBe(true)
   })
-  test('OpenCode and agy have model/effort only as start flags, so they keep the restart', () => {
-    // `opencode --help` / `opencode run --help`: --model is a start flag, no in-session command. `agy --help`:
-    // --model and --effort are start flags; no in-session switch. Neither CLI's log has a switch line to read back.
+  test('OpenCode and agy keep the restart: their switches cannot be proved from their chat before the next reply', () => {
+    // Checked the installed CLIs, not just --help: opencode 2.3.0 has /models and model.cycle_recent, agy 1.5.9 has
+    // /model's picker and /effort <level>. Neither writes the new model and level into its chat log at switch time,
+    // which is the proof this path requires, so both keep the restart (see docs/chat.md).
     for (const kind of ['opencode', 'agy']) expect(liveOK(kind)).toBe(false)
     expect(liveOK('cursor')).toBe(false)
   })
@@ -123,10 +124,37 @@ describe('Claude Code: typed and read back from its chat', () => {
     expect(t.sent).toEqual(['/effort low', '/effort high'])
   })
 
-  test('a refusal in the terminal says why, without waiting for a chat answer', async () => {
+  test("a refusal in the command's own answer says why, without waiting for the chat", async () => {
     const t = new FakeTerm()
-    t.onSend = () => { t.screen = 'Invalid effort: pick one of low, medium, high' }
+    t.onSend = (text) => { t.screen = `❯ ${text}\n  ⎿ Invalid effort: pick one of low, medium, high` }
     await expect(switchLive(t.io, 'claude', { kind: 'claude', effort: 'high' }, { kind: 'claude', effort: 'ultra' })).rejects.toThrow('Invalid effort')
+  })
+
+  test('unrelated scrollback is not a refusal: the command must have said it itself', async () => {
+    const t = new FakeTerm()
+    t.screen = 'tool: 404 Not Found\nerror: that isn\'t available\nerror: unknown option\n'
+    t.onSend = (text, t) => {
+      t.screen += `❯ ${text}\n⎿ Set effort level to low\n`
+      t.chatState.effort = 'low'
+    }
+    await switchLive(t.io, 'claude', { kind: 'claude', effort: 'high' }, { kind: 'claude', effort: 'low' })
+    expect(t.chatState.effort).toBe('low')
+  })
+
+  test("Claude Code's cached-conversation question is answered Yes", async () => {
+    const t = new FakeTerm()
+    t.chatState = { model: 'claude-opus-5-5', effort: 'high' }
+    t.onSend = (text, t) => {
+      if (text.startsWith('/model')) {
+        t.screen = `❯ ${text}\n   Switch model?\n   ❯ 1. Yes, switch to Sonnet 5.5\n     2. No, go back\n`
+        t.onKey = () => { t.chatState.model = 'claude-sonnet-5-5'; t.screen += '  ⎿ Set model to Sonnet 5.5\n' }
+      } else {
+        t.screen = `❯ ${text}\n  ⎿ Set effort level to high\n`
+      }
+    }
+    await switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'high' })
+    expect(t.keys).toEqual(['enter'])
+    expect(t.chatState).toEqual({ model: 'claude-sonnet-5-5', effort: 'high' })
   })
 
   test('a half-applied switch is put back on the model and effort it started on, each read back', async () => {
@@ -134,7 +162,7 @@ describe('Claude Code: typed and read back from its chat', () => {
     t.chatState = { model: 'claude-opus-5-5', effort: 'high' }
     t.onSend = (text, t) => {
       if (text === '/model claude-sonnet-5-5') t.chatState.model = 'claude-sonnet-5-5'
-      if (text === '/effort low') t.screen = 'Invalid effort: no such level'
+      if (text === '/effort low') t.screen = `❯ ${text}\n  ⎿ Invalid effort: no such level`
       if (text === '/model claude-opus-5-5') t.chatState.model = 'claude-opus-5-5'
     }
     await expect(switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow('Invalid effort')
@@ -152,6 +180,25 @@ describe('Claude Code: typed and read back from its chat', () => {
     expect(t.sent).toEqual([])
   })
 
+  test('a rollback is only declared good when the chat still reports both starting values', async () => {
+    const t = new FakeTerm()
+    t.chatState = { model: 'claude-opus-5-5', effort: 'high' }
+    t.onSend = (text, t) => {
+      if (text === '/model claude-sonnet-5-5') t.chatState.model = 'claude-sonnet-5-5'
+      if (text === '/effort low') t.screen = `❯ ${text}\n  ⎿ Invalid effort`
+      // both undo commands are taken, and each answer can be read back
+      if (text === '/model claude-opus-5-5' || text === '/effort high') t.chatState = { model: 'claude-opus-5-5', effort: 'high' }
+    }
+    let reads = 0
+    t.io.chat = async () => {
+      reads++
+      // after the undo answers, something else moved the model and level: the final read must catch it
+      if (reads >= 4) t.chatState = { model: 'claude-fable-5-1', effort: 'medium' }
+      return { ...t.chatState }
+    }
+    await expect(switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow('could not be put back on model and effort')
+  })
+
   test('a failed rollback says which field it could not put back', async () => {
     const t = new FakeTerm()
     t.chatState = { model: 'claude-opus-5-5', effort: 'high' }
@@ -167,7 +214,7 @@ describe('Claude Code: typed and read back from its chat', () => {
     t.chatState = { model: 'spark/qwen', effort: 'high' }
     t.onSend = (text, t) => {
       if (text === '/model commandcode/deepseek') t.chatState.model = 'commandcode/deepseek'
-      if (text === '/thinking low') t.screen = 'unknown thinking level'
+      if (text === '/thinking low') t.screen = `❯ ${text}\n  ⎿ unknown thinking level`
       if (text === '/model spark/qwen') t.chatState.model = 'spark/qwen'
       if (text === '/thinking high') t.chatState.effort = 'high'
     }

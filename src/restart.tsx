@@ -161,6 +161,8 @@ function Sheet({ chat, name, current, start }: Opening) {
   // a same-CLI model/effort change on an idle agent goes in through the CLI itself: no stop, no restart card. A
   // different CLI, a working agent or one whose CLI has no switch keeps the restart (the server decides too).
   const canLive = !start && !!info?.live && !other && (model !== (info.on.model ?? '') || effort !== (info.on.effort ?? ''))
+  // the save row is hidden while a switch is offered; a stale checked value must not save on a later Restart
+  useEffect(() => { if (canLive) setSave(false) }, [canLive])
   const label = (id: string) => (id ? (modelsOf(cli).find((m) => m.id === id)?.label ?? id) : DEFAULT)
   // the model list: pinned first, then the recent ones, then the CLI's own order, each under its heading
   const pickedHere = picks[kind] ?? NO_PICKS
@@ -190,7 +192,7 @@ function Sheet({ chat, name, current, start }: Opening) {
         <>
           {/* an explicit path: the same CLI's own switch keeps the turn, session, worktree and branch. Restart stays
               the other button, and the only one where this CLI has no switch or the agent is busy. */}
-          {canLive ? <Primary autoFocus disabled={!info || busy || unavailable} onClick={() => go(true)}>{busy ? 'Switching…' : 'Switch to'}</Primary> : null}
+          {canLive ? <Primary autoFocus disabled={!info || busy || unavailable || held} onClick={() => go(true)}>{busy ? 'Switching…' : 'Switch to'}</Primary> : null}
           <Primary autoFocus={!canLive} disabled={!info || busy || unavailable || held} onClick={() => go(false)}>
             {start === 'later' ? (busy ? 'Saving…' : 'Save') : start ? (busy ? 'Starting…' : 'Start now') : busy ? 'Restarting…' : 'Restart'}
           </Primary>

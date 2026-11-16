@@ -7,7 +7,7 @@ import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, sep } from 'node:path'
+import { basename, dirname, join, sep } from 'node:path'
 import { askText, BODY_MAX, clip, lastReply, NOTIFY_KEY, openCards, taskAlert, TITLE_MAX } from '../../shared/alerts.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, sortPlaces } from '../../shared/order.ts'
 import { asEmoji, doneNewestFirst, modeCard, NAME_MAX, nameProblem, slugify, STATUS_MAX, type Action, type ActivityAnswer, type ActivityAsk, type AddSpace, type Alert, type Artifact, type CardAsk, type Chat, type RestartInfo, type Peer, type Question, type Folders, type LimitsView, type Machine, type ModelsSummary, type Need, type Place, type Section, type Snapshot, type Task, type TaskStatus, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
@@ -42,7 +42,7 @@ import { WaitAlerts, type Wait } from './wait-alerts.ts'
 import { ATTACH_MAX, fileType, isMedia, isVideo } from '../../shared/files.ts'
 import { smaller, type Small } from './media.ts'
 import { Mirror } from './mirror.ts'
-import { claudeProjectDir, piSessionDir } from './readers/find.ts'
+import { claudeHome, claudeProjectDir, piSessionDir } from './readers/find.ts'
 import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
@@ -2013,6 +2013,20 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * log, through that CLI's reader — the chat window's own path) before this reports success; a failed switch is put
    * back to what it started on, with the same proof, so no half-applied mix is left behind.
    */
+  /** a file in the CLI's own home on the agent's machine (CLAUDE_CONFIG_DIR decides which one) */
+  private agentPath(rel: string) {
+    return join(claudeHome(), basename(rel))
+  }
+
+  private async readAgentFile(rel: string): Promise<string | null> {
+    const r = await run(['cat', this.agentPath(rel)])
+    return r.code === 0 ? r.out : null
+  }
+
+  private async writeAgentFile(rel: string, text: string): Promise<void> {
+    await run(['sh', '-c', 'cat > "$1"', 'shepherdr', this.agentPath(rel)], { stdin: text })
+  }
+
   private async liveSwitch(key: string, pick: { kind: string; model?: string; effort?: string }, injected?: SwitchIO) {
     const x = this.restartable(key)
     const requested = fitHarness({ kind: pick.kind, model: pick.model ?? '', effort: pick.effort ?? '' })
@@ -2031,14 +2045,22 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     this.chats.pull(key)
     const runtime = this.chats.chat(key).agent?.runtime
+    // the model id from the log is taken as it is: two providers can serve the same bare name, and resolving it by
+    // suffix would compare against the wrong provider and prove the wrong switch
     const from = {
       kind: x.on.kind,
-      model: x.on.model || (runtime?.model ? (findModel(x.on.kind, runtime.model)?.id ?? runtime.model) : '') || modelsOf(x.on.kind)?.default || '',
-      effort: x.on.effort || runtime?.effort || findModel(x.on.kind, x.on.model)?.effort || '',
+      model: x.on.model || runtime?.model || '',
+      effort: x.on.effort || runtime?.effort || '',
     }
     if (x.t && ended(x.t)) throw new Error(`${x.t.id} is Done already: it has no agent to switch.`)
     if (!this.engine.installed(to.kind)) throw new Error(`${CLI_NAME[to.kind] ?? to.kind} isn't installed on this machine.`)
     if (!liveOK(to.kind) || !liveOK(from.kind) || to.kind !== from.kind) return fallback()
+    // a catalog default is a guess, not what this agent was observed on: without both starting values there is no
+    // honest way to put a failed switch back, so this is the restart decision again
+    if (!from.model || !from.effort) return fallback()
+    // the same Settings → Limits that a restart obeys: a full or blocked model is never switched to
+    const hold = this.engine.capHold(x.space ?? '', keyOf(to.kind, to.model), x.t ? x.t.id : key)
+    if (hold) throw new Error(this.engine.capRefusal('Not restarted', hold))
     const st = this.agents.status(key)
     if (st === 'working') throw new Error("It's busy with a turn. Switch once it's done, or stop it first.")
     if (st === 'blocked') throw new Error("It's waiting on a question. Answer it, then switch.")
@@ -2057,18 +2079,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         chat: async () => {
           this.chats.pull(key)
           const runtime = this.chats.chat(key).agent?.runtime
-          const model = runtime?.model ? (findModel(to.kind, runtime.model)?.id ?? runtime.model) : undefined
-          return { model, effort: runtime?.effort }
+          return { model: runtime?.model, effort: runtime?.effort }
         },
         sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
         // the CLI saves /model and /effort as defaults for new sessions too: read and put back only what it touched
-        readFile: async (rel) => {
-          const r = await run(['sh', '-c', 'cat "$HOME/$1"', 'shepherdr', rel])
-          return r.code === 0 ? r.out : null
-        },
-        writeFile: async (rel, text) => {
-          await run(['sh', '-c', 'cat > "$HOME/$1"', 'shepherdr', rel], { stdin: text })
-        },
+        readFile: (rel) => this.readAgentFile(rel),
+        writeFile: (rel, text) => this.writeAgentFile(rel, text),
       }
     })()
     const names = Object.fromEntries((modelsOf(to.kind)?.models ?? []).map((m) => [m.id, m.label]))

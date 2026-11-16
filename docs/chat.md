@@ -76,11 +76,15 @@ Every agent, coordinator or task agent, gets the same chat.
   - **Codex:** `/model`'s picker, choosing the level for this session only (`s`, never Enter), confirmed by its
     `thread_settings_applied` log line. Codex is not installed on this host (removed 2026-10-15), so this path comes
     from upstream's Codex 0.163 and is covered by a fake screen and log, not by a local run.
-  - **OpenCode and agy have no in-session switch.** Checked their help (model and effort are start flags only:
-    `opencode run --model`, `agy --model`/`--effort`) and their logs/screens (no switch line or picker to read back),
-    so the sheet offers only **Restart** for them: like a different CLI or a permission change, that stops the turn
-    first and resumes the session on the new settings.
-  A switch is refused while the agent is working or waiting on a question, so nothing can cut its turn. If any step
+  - **OpenCode and agy keep the restart.** They do have in-session switches (OpenCode 2.3.0's `/models` and
+    `model.cycle_recent`, agy 1.5.9's `/model` picker and `/effort <level>`; checked in their installed command
+    registries, not just `--help`), but neither writes a line into its chat log naming the new model and level before
+    its next turn, which is the proof this path requires. So the sheet offers only **Restart** for them, as it does for
+    a different CLI or a permission change: that stops the turn first and resumes the session on the new settings.
+    Their chat readers can name a model on the next assistant message, which is not a proof of the switch itself.
+  A model full or blocked under [Most agents at once](settings.md#models) is refused for a switch as it is for a restart
+  (the Switch button stays off beside the same room line), and a target or starting value the chat cannot name takes the
+  restart path. A switch is refused while the agent is working or waiting on a question, so nothing can cut its turn. If any step
   fails — including a step that was typed but whose answer never came — both model and effort are put back on what
   they started with (a model switch can move the level on its own), and the chat must report the old values before the
   failure is shown. A switch to the CLI's own default is resolved to a concrete id and level first: where neither the
@@ -98,7 +102,8 @@ Every agent, coordinator or task agent, gets the same chat.
   takes no space and no CLI, model or effort of its own: each coordinator goes on what its Settings say.
 - A slash command you type (`/clear`, `/new`, `/compact`, `/model sonnet`, a custom one) goes into the agent's CLI as
   you typed it, once its turn is over, and the CLI runs it. The chat shows it as you typed it, and what the CLI printed
-  as its answer. After `/clear` or `/new` a quiet New session line starts the new session, whose log the chat reads
+  as its answer — except a `/model` or `/effort` answer, which is read as the model and effort the agent now runs on,
+  not posted as a message, so the composer shows the new value. After `/clear` or `/new` a quiet New session line starts the new session, whose log the chat reads
   from then on. A menu or view the command opens in the terminal (`/model` alone, `/usage`) comes into the chat and is
   closed, so your next message goes in; one that asks a question (Codex's `/new`: where should the new conversation
   run?) is a card to answer, and what you write meanwhile waits for it. A command the CLI didn't run fails with Retry.
