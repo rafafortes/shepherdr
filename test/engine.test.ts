@@ -580,6 +580,10 @@ describe("a task's own status line, % done and time left", () => {
     // at and past the cadence: whole minutes since it was reported, in place of a time left run out to 0
     expect(reportOf(r, 'work', cadence)!.stale).toBe(STATUS_CADENCE_MIN)
     expect(reportOf(r, 'work', 30 * 60_000)!.stale).toBe(30)
+    // a shorter estimate runs out first: "<1m" must not read as nearly done four minutes later
+    const short = { ...r, left: 1 }
+    expect(reportOf(short, 'work', 59_000)!.stale).toBeUndefined()
+    expect(reportOf(short, 'work', 60_000)!.stale).toBe(1)
     // waiting on you: the line is frozen on purpose, never marked older
     expect(reportOf({ ...r, pausedAt: cadence }, 'need', 60 * 60_000)!.stale).toBeUndefined()
     // other statuses show no report at all, so no age either (a waiting task's frozen line is the row's "what it asks")

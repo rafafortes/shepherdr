@@ -338,16 +338,19 @@
   does not answer. A branch counts as merged when main holds its exact tree (what the squash merge made), when
   squash-merging it again would make its task's own squash commit (so nothing came after the merge, however main
   moved on since), or when merging it into main would change nothing.
-- While a task's agent works, it says itself what it is doing and how far along it is, at the start and at each
-  natural step: `shepherdr status <id> "Fixing the two failing tests" --done 40 --left 5m` (its instructions tell it
-  to). Shepherdr guesses nothing: it shows what the agent said, and counts the minutes left down while it works. Its dot fills like a pie with
+- While a task's agent works, it says itself what it is doing and how far along it is, at the start, at each natural
+  step and at least every 5 minutes, revising its time left honestly when the work takes longer: `shepherdr status <id> "Fixing the two failing tests" --done 40 --left 5m` (its instructions tell it
+  to). Shepherdr guesses nothing: it shows what the agent said, and counts the minutes left down while it works. Past
+  five minutes (or its own time left), that line reads as older instead: `· 12m ago` takes the place of the countdown,
+  under the dot too, so an old line never looks current. Its dot fills like a pie with
   the % done and the minutes left sit small under it in the same orange (`6m`, `<1m`); its row's second line says
   what it does in at most 40 characters, so the title and that line each keep the row's whole width. A third, fainter
   line says what its agent runs on, while it works, merges or waits on you with its agent there: its CLI, provider and
   model (`pi · Spark (local) · qwen3.8-flash-next…`, `Codex · gpt-6-sol`), cut short when it is long (no tooltip: a
   screen reader hears it in full, with the provider's name and the effort, `Runs on pi · Spark (local) ·
   qwen3.8-flash-next-mlx4-mtp-tensorfold (high)`), and the minutes left stay level with the second line. Its chat header
-  says the same with the minutes at the end (`Fixing the two failing tests · ~6 min`). Coordinators report no
+  says the same with the minutes at the end (`Fixing the two failing tests · ~6 min`), or its age once it is old.
+  Coordinators report no
   progress: their typing dots say a message is on its way (at once for yours; for news, once the reply shows on its
   screen and isn't a hidden `<no-reply>`); while they only work in the background they show nothing (no dots, no word in
   the header). Task titles

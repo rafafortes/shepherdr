@@ -315,14 +315,16 @@ export { capWords }
 export function reportOf(r: Reported | undefined, status: TaskStatus, now = Date.now()): Report | undefined {
   if (!r || (status !== 'work' && status !== 'need')) return undefined
   const spent = ((r.pausedAt ?? now) - r.at) / 60000
+  // old once the cadence is past, or once the agent's own estimate has run out (whichever comes first): a line that
+  // says "<1m" four minutes after its estimate was up would read as nearly done when it is simply old
+  const staleAfter = Math.min(STATUS_CADENCE_MIN, r.left ?? STATUS_CADENCE_MIN)
   return {
     msg: r.msg,
     progress: r.progress,
     eta: r.left === undefined ? undefined : Math.max(0, Math.round(r.left - spent)),
     paused: status === 'need' || undefined,
-    // past the cadence it is an old line: say its age, not a time left that has run out to 0. Only while working — a
-    // task waiting on you keeps its line frozen, and its row says what it asks instead (never a status line).
-    ...(status === 'work' && spent >= STATUS_CADENCE_MIN ? { stale: Math.floor(spent) } : {}),
+    // Only while working: a task waiting on you keeps its line frozen, and its row says what it asks instead.
+    ...(status === 'work' && spent >= staleAfter ? { stale: Math.floor(spent) } : {}),
   }
 }
 
