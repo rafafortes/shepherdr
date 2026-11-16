@@ -27,35 +27,53 @@ export async function sh(cmd: string[], cwd: string, opts: { timeoutMs?: number;
 
 export const git = (cwd: string, ...args: string[]) => sh(['git', ...args], cwd)
 
+/** a line that names what was found, and one that names where: the row prefers these over git's own wrapper */
+const HEADLINE = /\b(gitleaks|findings?|lint|fatal|error|leak|violation|fail(?:ed)?)\b/i
+const FILELINE = /\bfile\s*[:=]|\b[\w./-]+\.(?:ts|tsx|js|jsx|py|go|rs|rb|java|json|ya?ml|env)\b/i
+const GIT_WRAPPER = /failed to push some refs/i
+
 /**
  * What a failed push said, for the agent that ran it and the task's own row (#963). A pre-push hook's reason
- * (gitleaks, a lint) lands on *stdout*, which git leaves there; git's own "failed to push some refs" on its own
- * says nothing. So take the last few lines of both streams — the reason is printed last — instead of the first.
- * A push that failed another way (auth, no remote, network) speaks with a `fatal:` line: it keeps its own first
- * line, and nothing is ever dressed up as a hook's saying when no hook refused.
+ * (gitleaks, a lint) lands on *stdout*, which git leaves there; git's own "failed to push some refs" alone says
+ * nothing. Take the last lines of both streams — the reason is printed last — and keep a headline from earlier
+ * when the cut would lose it. A push that failed another way (auth, no remote, network) keeps git's own first
+ * line, stderr first as before; nothing here ever claims a hook said it.
  */
-export function pushWords(r: Pick<Run, 'out' | 'err'>, lines = 8): string {
+export function pushWords(r: Pick<Run, 'out' | 'err'>, lines = 12): string {
   const said = [...r.out.split('\n'), ...r.err.split('\n')].map((s) => s.trim()).filter(Boolean)
-  const refused = said.some((s) => /failed to push some refs|hook failed|hook declined/i.test(s))
-  const kept = refused ? said.slice(-lines) : said.slice(0, 1)
+  if (!said.some((s) => GIT_WRAPPER.test(s) || /hook failed|hook declined/i.test(s)))
+    return redact(r.err.split('\n').find(Boolean) ?? r.out.split('\n').find(Boolean) ?? '') || 'git push failed'
+  const kept = said.slice(-lines)
+  const head = said.find((s) => HEADLINE.test(s))
+  if (head && !kept.includes(head)) kept.unshift(head)
   return kept.map(redact).join('\n') || 'git push failed'
 }
 
 /** the two places the refusal is shown (#963): what `shepherdr pr`/`merge` prints to the agent, and the task's own row */
 export function pushRefusal(branch: string, push: Pick<Run, 'out' | 'err'>): { text: string; row: string } {
   const words = pushWords(push)
-  // the row is one line on a phone: the reason, not git's own "failed to push some refs" wrapper
-  const reason = words.split('\n').filter(Boolean).find((s) => !/failed to push some refs/i.test(s)) ?? words
+  const own = words.split('\n').filter(Boolean).filter((s) => !GIT_WRAPPER.test(s))
+  // the row is one line on a phone: the finding or the file it names, not a metadata field
+  const reason = own.find((s) => HEADLINE.test(s)) ?? own.find((s) => FILELINE.test(s)) ?? own[0] ?? words
   return { text: `Could not push ${branch} to GitHub: ${words}`, row: `Could not push ${branch}: ${reason}` }
 }
 
 /** a hook may print the very secret it found: keep the file and line it names, never the matched value */
 function redact(line: string): string {
   return line
-    // "Secret: AKIA…", "token = …", "Bearer …": keep the key, drop the value
-    .replace(/(\b(?:secret|token|password|passwd|api[-_ ]?key|access[-_ ]?key|authorization|bearer|credential|private[-_ ]?key)\b\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi, '$1[redacted]')
-    // a credential printed on its own line, without a key in front of it; a path segment is not a secret
-    .replace(/(?<![/.\w-])[A-Za-z0-9_-]{20,}(?![/.\w-])/g, (s) => /[0-9]/.test(s) && /[A-Za-z]/.test(s) ? '[redacted]' : s)
+    // a labelled value with any prefix: MY_API_KEY=…, AWS_SECRET_ACCESS_KEY=…, Secret: …, DB_PASSWORD: …
+    .replace(/(?<![\w-])([A-Za-z0-9_]*(?:secret|token|password|passwd|api[-_]?key|access[-_]?key|credential|private[-_]?key|authorization|bearer)[A-Za-z0-9_]*\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;|]+)/gi, '$1[redacted]')
+    // an Authorization header with a space, not a colon
+    .replace(/(Bearer\s+)[^\s,;]+/gi, '$1[redacted]')
+    // credentials inside a URL's userinfo: https://token@host, postgres://user:pass@host
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi, '$1[redacted]@')
+    // a JWT
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted]')
+    // an AWS key id, or its 40-character secret (which may contain / and +)
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[redacted]')
+    .replace(/\b[A-Za-z0-9/+]{40}\b/g, (s) => /[A-Z]/.test(s) && /[a-z]/.test(s) && /[0-9/+]/.test(s) ? '[redacted]' : s)
+    // a long token on its own; a path segment, a commit sha and a lowercase word are not secrets
+    .replace(/(?<![/.\w-])[A-Za-z0-9_-]{20,}(?![/.\w-])/g, (s) => /[0-9]/.test(s) && /[A-Za-z]/.test(s) && !/^[0-9a-f]+$/i.test(s) ? '[redacted]' : s)
 }
 
 export async function isRepo(path: string) {

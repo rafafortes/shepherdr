@@ -3373,7 +3373,8 @@ export class Engine extends Emitter<Events> {
   private async pushBase(p: Space, base: string, note?: string) {
     if (!p.github) return note
     const push = await G.git(p.path, 'push', '--quiet', 'origin', base)
-    const pushed = push.ok ? `pushed ${base} to GitHub` : `could not push ${base} to GitHub: ${G.pushWords(push).replace(/\n/g, ' · ')}`
+    // pushing the base is not a task branch: keep git's own one line, whatever refused it
+    const pushed = push.ok ? `pushed ${base} to GitHub` : `could not push ${base} to GitHub: ${G.pushWords(push).split('\n')[0]}`
     return note ? `${note}; ${pushed}` : pushed
   }
 
