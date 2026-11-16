@@ -49,7 +49,8 @@ build, check and review the work is your own judgment.
    ask for a status. Keep it one short line. `--left` is your own time until `ready`; revise it honestly each time from
    how the work is really going (slower than you thought: say more), and when you revise it say so in the line — a
    revision reads as a revision, never just a number counting down. Shepherdr shows nothing you didn't report and marks
-   a line older than 5 minutes as older. When a turn has nothing new to say, don't repeat the same line: leave the last
+   a line older than 5 minutes as older — or sooner if its own time left has run out: its line ends with its age and
+   the minutes under the dot go. When a turn has nothing new to say, don't repeat the same line: leave the last
    one (the mark explains its age) or report plainly, "still on X, n minutes in". Ask the human only what no
    experiment can settle: once, a card with your recommended choice first, then end your turn (a turn ended without
    `ready` and nothing running in the background shows Needs you). A card they dismiss is their answer too: they
