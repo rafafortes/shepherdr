@@ -357,6 +357,18 @@ export class Agents extends Emitter<Events> {
     return this.records[key]?.tookOver
   }
 
+  /** A live model/effort switch: what the CLI now runs on, proved from the chat. No restart: the session, its route,
+   *  hooks, pane and folder stay as they are. Settings' `set` is left alone, so the restart hint still says what
+   *  Settings want; only this launch's own record moves to what the agent really runs on now. */
+  switched(key: string, to: { model?: string; effort?: string }) {
+    const r = this.records[key]
+    if (!r) return
+    if ('model' in to) r.model = to.model || undefined
+    if ('effort' in to) r.effort = to.effort || undefined
+    this.save()
+    this.emit('logs', key)
+  }
+
   /** mark this chat's agent as backed up once: another backup waits for the human */
   /** a coordinator's takeover is on its way (handover), or over (undefined) */
   markHandover(key: string, handover: AgentRecord['handover']) {

@@ -48,6 +48,26 @@ describe('CLI runtime observations, independent of launch policy', () => {
     expect(sessionRuntime(ev, 'pi', at)?.effort).toBeUndefined()
   })
 
+  test('a /model or /effort run in place is observed at once, without a chat message for its stdout', () => {
+    const reader = new ClaudeReader()
+    const ev = reader.parse(lines(
+      { type: 'user', timestamp: new Date(at).toISOString(), message: { role: 'user', content: '<local-command-stdout>Set model to Sonnet 5.5 and saved as your default for new sessions</local-command-stdout>' } },
+      { type: 'system', subtype: 'local_command', timestamp: new Date(at + 1).toISOString(), content: '<local-command-stdout>Set effort level to low (saved as your default)</local-command-stdout>' },
+      { type: 'user', timestamp: new Date(at + 2).toISOString(), message: { role: 'user', content: '<local-command-stdout>Ask a regular question</local-command-stdout>' } },
+    ), 'live')
+    expect(sessionRuntime(ev, 'live', 0)).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'low' })
+    // the switch's own answer is not a message in the chat; an unrelated command's still is
+    expect(ev.filter((e) => e.kind === 'agent')).toHaveLength(1)
+    expect(ev.filter((e) => e.kind === 'agent')[0]).toMatchObject({ text: 'Ask a regular question' })
+  })
+
+  test("Codex's thread settings applied by a /model pick are the thread's runtime before its next turn", () => {
+    const ev = new CodexReader().parse(lines(
+      { timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type: 'thread_settings_applied', thread_settings: { model: 'gpt-6.1-sol', reasoning_effort: 'medium' } } },
+    ), 'live')
+    expect(sessionRuntime(ev, 'live', 0)).toMatchObject({ model: 'gpt-6.1-sol', effort: 'medium' })
+  })
+
   test('Claude ignores synthetic error models and sidechains', () => {
     const reader = new ClaudeReader()
     const ev = reader.parse(lines(

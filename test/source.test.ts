@@ -25,6 +25,8 @@ const { NO_PICKS } = await import('../shared/picks.ts')
 const { ADVISOR_AT_ONCE } = await import('../shared/apply-waiting.ts')
 
 const src = new LiveSource()
+/** the live switch is private: drive it directly with an injected io (the action path is covered too) */
+const liveSwitch = (key: string, pick: unknown, io?: unknown) => (src as unknown as { liveSwitch: (k: string, p: unknown, io?: unknown) => Promise<unknown> }).liveSwitch(key, pick, io)
 // herdr makes task worktrees: a stand-in on real git; no terminal opens for their agents (no herdr is there)
 const fake = fakeHerdr()
 fake.h.createTab = async () => {
@@ -2892,6 +2894,83 @@ describe("a card dismissed on the CLI's own screen", () => {
       src.chats.forget(key)
     }
   })
+})
+
+describe('a live switch', () => {
+  test('changes the launch record in place, after the chat reports it; a busy agent or a CLI with no switch does not', async () => {
+    const dir = tmp('live-switch')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'live-switch')
+    const t = src.engine.add({ project: p.name, title: 'Live switch', by: 'test' })
+    const key = `${t.id}/Agent`
+    const name = `ls-${t.id.toLowerCase()}`
+    const set = { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }
+    src.agents.records[key] = { key, name, kind: 'claude', model: 'claude-opus-5-5', effort: 'high', cwd: dir, workspace: p.name, logs: [], started: 0, set } as never
+    const live = { agent: 'claude', agent_status: 'idle', cwd: dir, name, pane_id: 'p-live-switch', tab_id: 't', workspace_id: 'w' }
+    src.agents.live.set(name, live as never)
+    const chat = { model: '', effort: '' }
+    const io = {
+      send: async (text: string) => {
+        if (text.startsWith('/model')) chat.model = 'claude-sonnet-5-5'
+        if (text.startsWith('/effort')) chat.effort = 'low'
+      },
+      keys: async (..._keys: string[]) => {},
+      screen: async () => '',
+      chat: async () => ({ ...chat }),
+      sleep: async (_ms: number) => {},
+    }
+    try {
+      const r = await liveSwitch(key, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' }, io)
+      expect(r).toMatchObject({ live: true })
+      expect(src.agents.records[key]).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'low' })
+      expect(src.agents.records[key]!.set).toEqual(set)
+      // the same values: nothing to switch, so nothing is typed — the real io is still built and looked at
+      expect(await liveSwitch(key, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).toMatchObject({ live: true })
+      expect(await src.act({ type: 'live-switch', chat: key, kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).toMatchObject({ ok: true, live: true })
+      expect(await src.act({ type: 'live-switch', chat: key, kind: 'not-a-cli', model: '' })).toMatchObject({ ok: false })
+      expect(await src.act({ type: 'live-switch', chat: key, kind: 'claude', model: 'retired-model' })).toMatchObject({ ok: false })
+      // the real io: typed into the pane, read back from the chat window's own log path. The host's herdr is a
+      // stand-in here, so the transport and the chat read are stubbed; the switch itself is the one from live-switch.
+      const realSend = src.agents.send
+      const realPull = src.chats.pull
+      const realChat = src.chats.chat
+      const realRead = herdr.read
+      chat.model = 'claude-opus-5-5'
+      chat.effort = 'high'
+      ;(src.agents as { send: unknown }).send = async (text: string) => {
+        if (text.startsWith('/model')) chat.model = 'claude-opus-5-5'
+        if (text.startsWith('/effort')) chat.effort = 'high'
+        return { waiting: false, item: {} }
+      }
+      ;(src.chats as { pull: unknown }).pull = () => true
+      ;(src.chats as { chat: unknown }).chat = () => ({ agent: { runtime: chat } })
+      ;(herdr as { read: unknown }).read = async () => ''
+      try {
+        expect(await liveSwitch(key, { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' })).toMatchObject({ live: true })
+        expect(src.agents.records[key]).toMatchObject({ model: 'claude-opus-5-5', effort: 'high' })
+        ;(src.agents as { send: unknown }).send = async () => ({ waiting: true, item: {} })
+        await expect(liveSwitch(key, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow("couldn't take the command")
+        expect(await src.act({ type: 'live-switch', chat: key, kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).toMatchObject({ ok: false, error: expect.stringContaining("couldn't take the command") })
+      } finally {
+        src.agents.send = realSend
+        src.chats.pull = realPull
+        src.chats.chat = realChat
+        herdr.read = realRead
+      }
+      // a turn under way, a question, or no agent at all: no switch, no stopped turn
+      for (const [status, word] of [['working', 'busy with a turn'], ['blocked', 'waiting on a question'], ['gone', "isn't running"]] as const) {
+        src.agents.live.set(name, { ...live, agent_status: status } as never)
+        await expect(liveSwitch(key, { kind: 'claude', model: 'claude-sonnet-5-5' }, io)).rejects.toThrow(word)
+      }
+      src.agents.live.delete(name)
+      await expect(liveSwitch(key, { kind: 'claude', model: 'claude-opus-5-5' })).rejects.toThrow("isn't running")
+      // OpenCode has no in-session switch: the caller keeps the restart path
+      await expect(liveSwitch(key, { kind: 'opencode', model: 'a-model' }, io)).rejects.toThrow()
+    } finally {
+      src.agents.live.delete(name)
+      delete src.agents.records[key]
+    }
+  }, 30_000)
 })
 
 describe('visible launch controls', () => {

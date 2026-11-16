@@ -749,6 +749,8 @@ export interface RestartInfo {
   clis: RestartCli[]
   /** its agent is mid-turn: a restart interrupts it first */
   working: boolean
+  /** its CLI has a mid-session switch, and its agent is idle: a same-CLI model/effort change goes in without a restart */
+  live?: boolean
 }
 
 export interface ChatControls {
@@ -1452,6 +1454,9 @@ export type Action =
   /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as
       Settings say for its role); save: as its space's Settings for its role too */
   | { type: 'restart'; chat: string; kind?: string; model?: string; effort?: string; save?: boolean }
+  /** change a running agent's model/effort through its own CLI, without a restart; a CLI with no switch falls back to
+   *  restart. Never done while it works or asks. The chat is read back to prove the switch (or the restart) took */
+  | { type: 'live-switch'; chat: string; kind: string; model?: string; effort?: string }
   /** start a task that waits now, first in line (on a worker of the human's choosing, for it alone) */
   | { type: 'start-now'; chat: string; kind?: string; model?: string; effort?: string }
   /** the worker a task that waits starts on, for it alone, when its turn comes: it stays in line as it is */

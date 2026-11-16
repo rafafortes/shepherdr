@@ -101,6 +101,18 @@ describe('visible launch settings and supported restart choices', () => {
   })
 })
 
+test('the restart sheet offers a live switch only for an idle agent whose CLI has one', () => {
+  // claude, pi and codex switch through their own commands (SHE-45); opencode and agy keep the restart
+  const base = { role: 'task' as const, want: { kind: 'claude' }, kinds: ['claude', 'codex', 'pi', 'opencode', 'agy'] }
+  expect(restartInfo({ ...base, on: { kind: 'claude' }, working: false }).live).toBe(true)
+  expect(restartInfo({ ...base, on: { kind: 'pi' }, working: false }).live).toBe(true)
+  expect(restartInfo({ ...base, on: { kind: 'codex' }, working: false }).live).toBe(true)
+  expect(restartInfo({ ...base, on: { kind: 'opencode' }, working: false }).live).toBe(false)
+  expect(restartInfo({ ...base, on: { kind: 'agy' }, working: false }).live).toBe(false)
+  // a working agent's turn is never cut for a switch: the restart path stays
+  expect(restartInfo({ ...base, on: { kind: 'claude' }, working: true }).live).toBe(false)
+})
+
 test('restart offers readable chat kinds, including when the current agent has no reader', () => {
   const info = restartInfo({ role: 'task', on: { kind: 'cursor' }, want: { kind: 'codex' }, kinds: ['cursor', 'gemini', 'agy', 'claude', 'codex', 'pi'], working: false })
   expect(info.on.kind).toBe('cursor')

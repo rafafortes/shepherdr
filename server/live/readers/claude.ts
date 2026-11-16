@@ -7,8 +7,10 @@ import { basename, dirname, join } from 'node:path'
 import { isCommand } from '../commands.ts'
 import { fromAgent } from '../chatlines.ts'
 import { testResult } from '../../../shared/activity.ts'
+import { findModel } from '../models.ts'
 import { claudeStep, toolName } from './steps.ts'
 import type { CliQuestionItem, LogEvent, Reader } from './types.ts'
+import type { AgentRuntime } from '../../../shared/types.ts'
 
 type Json = any
 
@@ -85,6 +87,24 @@ function commandOutput(t: string): string | undefined {
   if (!out.trim()) return ''
   // a drawing or table keeps its lines and columns
   return out.includes('\n') ? `\`\`\`\n${out}\n\`\`\`` : out.trim()
+}
+
+/** A /model or /effort run in place (SHE-45) says here what it switched to, before its next reply names it. The chat
+ *  reads this as the launch's runtime, and a live switch reads it back to prove the change actually took. */
+function switchedRuntime(c: string, t: number, file: string, offset: number): LogEvent | undefined {
+  const m = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(c)
+  if (!m) return undefined
+  const text = m[1]!.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').trim()
+  let runtime: AgentRuntime | undefined
+  if (text.startsWith('Set model to ')) {
+    const name = text.slice('Set model to '.length).replace(/\s+and saved.*$/s, '').replace(/`/g, '').replace(/\s*\([^)]*\)\s*$/, '').trim()
+    const model = findModel('claude', name)
+    if (model) runtime = { model: model.id, source: 'session', at: t }
+  } else {
+    const effort = /^(?:Set effort level to|Effort level set to)\s+(\w+)/.exec(text)?.[1]
+    if (effort) runtime = { effort, source: 'session', at: t }
+  }
+  return runtime ? { kind: 'runtime', file, id: `runtime-${offset}`, at: t, runtime } : undefined
 }
 
 /** the human's words in one text, or '' when it is something Claude Code wrote */
@@ -261,9 +281,12 @@ export class ClaudeReader implements Reader {
         if (!isHumanLine(l)) continue
         // the human pressed Esc: the turn is over
         if (interrupted(c)) turnEnd(`turn-${l.uuid ?? offset}`, t)
+        // a /model or /effort run in place: what it runs on now, read back from the log to prove the switch took
+        const runtime = typeof c === 'string' ? switchedRuntime(c, t, file, offset) : undefined
+        if (runtime) out.push(runtime)
         const said = typeof c === 'string' ? commandOutput(c) : undefined
         if (said !== undefined) {
-          if (said) out.push({ kind: 'agent', id: String(l.uuid ?? `o${offset}`), at: t, text: said })
+          if (said && !runtime) out.push({ kind: 'agent', id: String(l.uuid ?? `o${offset}`), at: t, text: said })
           continue
         }
         const words = userContent(c)
@@ -338,11 +361,13 @@ export class ClaudeReader implements Reader {
       } else if (l.type === 'system' && l.subtype === 'turn_duration') {
         turnEnd(`turn-${l.uuid}`, t)
       } else if (l.type === 'system' && l.subtype === 'local_command' && typeof l.content === 'string' && !l.isSidechain) {
-        // a command Claude Code ran itself, as typed, and what it printed
+        // a command Claude Code ran itself, as typed, and what it printed; a /model or /effort says what runs now
+        const runtime = switchedRuntime(l.content, t, file, offset)
+        if (runtime) out.push(runtime)
         const cmd = slashCommand(l.content)
         const said = cmd === undefined ? commandOutput(l.content) : undefined
         if (cmd && once(cmd, t)) out.push({ kind: 'user', id: String(l.uuid ?? `u${offset}`), at: t, text: cmd })
-        else if (said) out.push({ kind: 'agent', id: String(l.uuid ?? `o${offset}`), at: t, text: said })
+        else if (said && !runtime) out.push({ kind: 'agent', id: String(l.uuid ?? `o${offset}`), at: t, text: said })
       }
     }
     return out

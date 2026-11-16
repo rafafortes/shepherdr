@@ -62,6 +62,24 @@ Every agent, coordinator or task agent, gets the same chat.
   quota window past its warning share, `5 h 92%`), counting what runs now but not this chat's own run, and the one picked
   has a line below with what holds it or how much room it has, the tasks that run there and its provider's quota; on a
   full or blocked one, Restart stays off.
+- **Switching model or effort without a restart.** The restart sheet's **Switch to** button changes a running agent in
+  place, on the same CLI and the same session, so its turn, worktree and branch are untouched; the CLI's own commands
+  go in between turns and nothing is saved in Settings. It appears only when an idle agent's model or effort pick
+  differs on a CLI with a switch of its own, and the chat shows the new model from the agent's own log before the
+  action finishes — no restart card and no new launch:
+  - **Claude Code:** `/model` and `/effort`; its `Set model to …` and `Set effort level to …` lines in the session log
+    say what it now runs on (the defaults those commands save are a side effect, not the picker's decision).
+  - **pi:** `/model <provider/model>` and `/thinking <level>`; its `model_change` and `thinking_level_change` log
+    entries are the same ones the chat already uses to show its current model and level.
+  - **Codex:** `/model`'s picker, choosing the level for this session only (`s`, never Enter), confirmed by its
+    `thread_settings_applied` log line.
+  - **OpenCode and agy have no in-session switch.** Checked their help (model and effort are start flags only:
+    `opencode run --model`, `agy --model`/`--effort`) and their logs/screens (no switch line or picker to read back),
+    so the sheet offers only **Restart** for them: like a different CLI or a permission change, that stops the turn
+    first and resumes the session on the new settings.
+  A switch is refused while the agent is working or waiting on a question, so nothing can cut its turn; if a model
+  goes in and its level does not, the model is put back on what it started with and read back from the chat before
+  the failure is shown. A switch the chat does not report is never taken as a success.
 - One setting changed for every space is still one action. This machine's ⋯ in the places list carries the count —
   Restart 3 coordinators, and it is there only while some coordinator's Settings moved — and runs it, its answer in the
   row itself (the count, and the spaces that failed by name); `shepherdr restart --all` does the same from a terminal:
