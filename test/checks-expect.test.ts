@@ -1,6 +1,6 @@
 // #1044/#1018: "no checks yet" is not "none set up". The repo's workflows at HEAD say whether checks will come
 // (git.ts: workflowExpect, prWorkflowExpect, noneIsUnknown), read by checksOf in engine.ts; a merge never decides on
-// the first unknown. These are the pure rules; the five end-to-end cases are with the engine in engine-merge.test.ts.
+// the first unknown. These are the pure rules; four end-to-end cases are with the engine in engine-merge.test.ts.
 import { describe, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -38,7 +38,10 @@ describe('what one workflow says about a pull request (workflowExpect)', () => {
     ['an inline filtered event', 'on:\n  pull_request: { paths: [docs/**] }\njobs: {}', 'maybe'],
     ['push and dispatch run on their own refs, not on a pull request', 'on:\n  push:\n    branches: [main]\n  workflow_dispatch:\njobs: {}', 'none'],
     ['a list with push but no pull request says none', 'on: [push, workflow_dispatch]\njobs: {}', 'none'],
+    ['a review-only trigger never checks a commit', 'on: pull_request_review\njobs: {}', 'none'],
+    ['a review-comment list never checks a commit', 'on: [pull_request_review_comment]\njobs: {}', 'none'],
     ['workflow_dispatch never runs on one', 'on: workflow_dispatch\njobs: {}', 'none'],
+    ['a bare on: says none', 'on:', 'none'],
     ['on under a job is not the top-level on:', 'jobs:\n  x:\n    on: pull_request', 'none'],
     ['no workflows at all', '', 'none'],
   ]

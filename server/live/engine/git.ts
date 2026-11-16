@@ -509,7 +509,12 @@ export function workflowExpect(text: string): ChecksExpect {
   for (let i = 0; i < lines.length; i++) {
     const p = part(lines[i])
     if (ind(lines[i]) || (p.k !== 'on' && p.k !== 'true')) continue
-    if (p.v) return PR_EVENTS.some((e) => p.v.includes(e)) ? (FILTERS.some((f) => p.v.includes(f)) ? 'maybe' : 'yes') : 'none'
+    if (p.v) {
+      // exact words: pull_request_review is not pull_request, or a review-only repo would "run" checks for ever
+      const words = p.v.split(/[\s,{}[\]:]+/).map((w) => w.replace(/^['"]|['"]$/g, '')).filter(Boolean)
+      if (!words.some((w) => PR_EVENTS.includes(w))) return 'none'
+      return words.some((w) => FILTERS.includes(w)) ? 'maybe' : 'yes'
+    }
     // a sequence under on: may sit at the same indent as the key ("on:\n- pull_request"), so it is part of the block
     let end = -1
     for (let n = i + 1; n < lines.length; n++) {
