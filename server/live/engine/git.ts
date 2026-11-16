@@ -27,6 +27,37 @@ export async function sh(cmd: string[], cwd: string, opts: { timeoutMs?: number;
 
 export const git = (cwd: string, ...args: string[]) => sh(['git', ...args], cwd)
 
+/**
+ * What a failed push said, for the agent that ran it and the task's own row (#963). A pre-push hook's reason
+ * (gitleaks, a lint) lands on *stdout*, which git leaves there; git's own "failed to push some refs" on its own
+ * says nothing. So take the last few lines of both streams — the reason is printed last — instead of the first.
+ * A push that failed another way (auth, no remote, network) speaks with a `fatal:` line: it keeps its own first
+ * line, and nothing is ever dressed up as a hook's saying when no hook refused.
+ */
+export function pushWords(r: Pick<Run, 'out' | 'err'>, lines = 8): string {
+  const said = [...r.out.split('\n'), ...r.err.split('\n')].map((s) => s.trim()).filter(Boolean)
+  const refused = said.some((s) => /failed to push some refs|hook failed|hook declined/i.test(s))
+  const kept = refused ? said.slice(-lines) : said.slice(0, 1)
+  return kept.map(redact).join('\n') || 'git push failed'
+}
+
+/** the two places the refusal is shown (#963): what `shepherdr pr`/`merge` prints to the agent, and the task's own row */
+export function pushRefusal(branch: string, push: Pick<Run, 'out' | 'err'>): { text: string; row: string } {
+  const words = pushWords(push)
+  // the row is one line on a phone: the reason, not git's own "failed to push some refs" wrapper
+  const reason = words.split('\n').filter(Boolean).find((s) => !/failed to push some refs/i.test(s)) ?? words
+  return { text: `Could not push ${branch} to GitHub: ${words}`, row: `Could not push ${branch}: ${reason}` }
+}
+
+/** a hook may print the very secret it found: keep the file and line it names, never the matched value */
+function redact(line: string): string {
+  return line
+    // "Secret: AKIA…", "token = …", "Bearer …": keep the key, drop the value
+    .replace(/(\b(?:secret|token|password|passwd|api[-_ ]?key|access[-_ ]?key|authorization|bearer|credential|private[-_ ]?key)\b\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi, '$1[redacted]')
+    // a credential printed on its own line, without a key in front of it; a path segment is not a secret
+    .replace(/(?<![/.\w-])[A-Za-z0-9_-]{20,}(?![/.\w-])/g, (s) => /[0-9]/.test(s) && /[A-Za-z]/.test(s) ? '[redacted]' : s)
+}
+
 export async function isRepo(path: string) {
   return (await git(path, 'rev-parse', '--show-toplevel')).ok
 }
