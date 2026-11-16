@@ -252,8 +252,12 @@
   another machine (a box) its helper records hooks but decides nothing, so its agents still ask. Codex runs without
   approvals; pi never asks for one.
 - On a repo with a GitHub remote that `gh` is logged in to, each task gets a pull request. The shepherdr-agent skill runs
-  `shepherdr pr <id>`: it pushes the branch and opens a draft (its title the task's, its words the agent's summary, the
-  brief's gist and a "Generated with" footer), and pushes to it again after new commits. `shepherdr checks <id>` waits
+  `shepherdr pr <id>`: it pushes the branch and opens a draft with the task's id in the title (`SHE-12: …`, as our
+  squash-merge commits are named, so a pull request is found by that id) and a short body: the task's id, the agent's
+  summary, its proof (the facts the task reported) and the brief's gist (what was asked, still reachable here and in
+  the task), plus a "Generated with" footer. Reporting it ready rewrites that body with the summary and proof; it
+  never changes the title, so one the human edited by hand on GitHub stays as they left it. Shepherdr sets a title only
+  when it opens the pull request. `shepherdr checks <id>` waits
   for GitHub's checks (merging waits for them only when Settings → How tasks work → Merge is "after GitHub checks", or the task's --set says so);
   failed ones go back to the agent to fix. Reporting it ready takes the pull request out of draft.
   While it waits, Shepherdr looks at it every two minutes and passes news on to the resting agent once, in
