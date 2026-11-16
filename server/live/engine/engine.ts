@@ -203,6 +203,8 @@ export interface Scheduled {
 export interface Landing {
   /** queue: in line behind another merge into its repo (behind: that task; gate: its space has a merge gate) */
   step: 'checks' | 'rebase' | 'merge' | 'gate' | 'queue'
+  /** checks: GitHub reported none while the repo's workflows could still run on the pull request, so why wait */
+  why?: string
   behind?: string
   gate?: boolean
   /** queue: it goes in with this task's merge train, on that one's gate run (train) */
@@ -222,6 +224,7 @@ export function landingLine(l: Landing, base = 'main', now = Date.now()) {
   if (l.step === 'gate') return l.cars ? `Running the merge gate (a train of ${l.cars})` : 'Running the merge gate'
   if (l.step === 'queue' && l.train) return `Going in with ${l.train}'s merge train`
   if (l.step === 'queue') return l.gate ? `Waiting for the merge gate (${l.behind}'s runs)` : `Waiting for ${l.behind}'s merge`
+  if (l.step === 'checks' && l.why) return l.why
   const left = l.due === undefined ? 0 : Math.ceil((l.due - now) / 60_000)
   return left > 0 ? `Checks running · ~${left}m` : 'Checks running'
 }
@@ -3440,22 +3443,26 @@ export class Engine extends Emitter<Events> {
   }
 
   /**
-   * GitHub's checks on the task's pull request, waited for while they run (up to `waitMs`). A commit Shepherdr just
-   * pushed, in a repo with workflows that run on pull requests, shows none for a moment: that moment is waited out, never taken as passed (after
-   * it, none is none: the repo's workflows may not run on pull requests). GitHub not answering three times running
-   * is said, not waited on.
+   * GitHub's checks on the task's pull request, waited for while they run (up to `waitMs`). GitHub saying "no checks"
+   * is only none when the repo has no workflow that could run on the pull request (#1044/#1018): a just-pushed commit
+   * shows none for a moment, which is waited out and never taken as passed. An unfiltered PR workflow keeps waiting
+   * (never a none-decided merge); a paths/branches-filtered one is not decided on the first read, but after the same
+   * 90 s is taken as not applying to this change. GitHub not answering three times running is said, not waited on.
    */
   private async checksOf(t: TaskRec, g: G.GitHub, n: number, waitMs: number): Promise<G.PrChecks> {
     const t0 = Date.now()
     const head = (await G.git(t.worktree!, 'rev-parse', 'HEAD')).out
-    const expect = await G.hasPrWorkflows(t.worktree!)
+    const expect = await G.prWorkflowExpect(t.worktree!)
     let errors = 0
     for (;;) {
       const c = await G.prChecks(g, t.worktree!, n)
       errors = c.state === 'error' ? errors + 1 : 0
-      const early = c.state === 'none' && expect && t.pushed?.sha === head && Date.now() - t.pushed.at < CHECKS_SHOW
-      if ((c.state !== 'pending' && c.state !== 'error' && !early) || errors >= 3) return c
-      if (Date.now() - t0 + CHECKS_EVERY > waitMs) return early ? { ...c, state: 'pending' } : c
+      const waited = t.pushed?.sha !== head || Date.now() - t.pushed.at >= CHECKS_SHOW
+      const verdict = c.state === 'none' && expect !== 'none' ? G.noneIsUnknown(expect, waited) : c
+      if (verdict.state === 'pass' || verdict.state === 'fail' || verdict.state === 'none') return verdict
+      if (errors >= 3) return c
+      if (verdict.state === 'unknown' && waited) return verdict
+      if (Date.now() - t0 + CHECKS_EVERY > waitMs) return verdict
       await Bun.sleep(CHECKS_EVERY)
     }
   }
@@ -3477,6 +3484,13 @@ export class Engine extends Emitter<Events> {
     }
     if (took.ms === undefined) return undefined
     return (t.pushed?.sha === head ? t.pushed.at : Date.now()) + took.ms
+  }
+
+  /** why a still-unreported check is waited for, in the answer and the task's row (#1044/#1018) */
+  private checksWhy(expect?: G.ChecksExpect) {
+    return expect === 'maybe'
+      ? 'a workflow with paths or branches filters may still run on this change'
+      : 'the repo has a workflow that runs on pull requests'
   }
 
   /** which of GitHub's checks failed, and where to see why */
@@ -3504,6 +3518,10 @@ export class Engine extends Emitter<Events> {
     // on its way into main (a merge waits for them): the row says they run, then what comes next
     if (t.landing) this.land(t, 'checks', await this.checksDue(t, p, g, head))
     const c = await this.checksOf(t, g, pr.number, waitMs)
+    if (c.state === 'unknown') {
+      if (t.landing) this.land(t, 'checks', await this.checksDue(t, p, g, head), { why: 'Checks not started yet' })
+      return { ok: false, text: `No checks are reported on PR #${pr.number} yet, but ${this.checksWhy(c.expect)}: waiting for them to start, not merging. Run shepherdr checks ${t.id} again; if that workflow cannot run on this pull request, merge it by hand on GitHub.` }
+    }
     if (t.landing && c.state !== 'pending') this.land(t, c.state === 'pass' || c.state === 'none' ? 'merge' : undefined)
     if (c.state === 'fail') {
       this.toldFailed(t, head, c)
@@ -3860,9 +3878,20 @@ export class Engine extends Emitter<Events> {
     const n = t.pr!.number
     const wait = t.waitChecks ?? this.settings.ways(p.name).waitChecks
     // not waited for (Settings): its own quick checks passed, and GitHub's run on, here and then on main
-    // (watchMain); only a failure GitHub already shows at this very commit stops it
-    const now = wait || pushing ? undefined : await G.prChecks(g, wt, n)
-    const c = wait ? await this.checksOf(t, g, n, 0) : now?.state === 'fail' ? now : { state: 'pass' as const, passed: 0, failed: [] }
+    // (watchMain); only a failure GitHub already shows at this very commit stops it. "No checks" on a just-pushed
+    // pull request is not "none configured" (#1044/#1018): give the repo's workflows the same 90 s Shepherdr always
+    // gives them before deciding, so no merge goes through on an unknown.
+    const now = wait ? undefined : await G.prChecks(g, wt, n)
+    let c: G.PrChecks
+    if (wait) c = await this.checksOf(t, g, n, 0)
+    // checksOf reads the same workflows once: with none it either returns none (no workflow, or a filtered one
+    // that did not apply) or waits the 90 s out and refuses while the checks are still unknown
+    else if (now?.state === 'none') c = await this.checksOf(t, g, n, CHECKS_SHOW)
+    else c = now?.state === 'fail' ? now : { state: 'pass' as const, passed: 0, failed: [] }
+    if (c.state === 'unknown') {
+      if (t.landing) this.land(t, 'checks', await this.checksDue(t, p, g, head), { why: 'Checks not started yet' })
+      return { ok: false, error: `GitHub has not reported checks on PR #${n}${pushing ? ` (just pushed${rebased ? `, rebased on ${t.base} for a conflict` : ''})` : ''} yet, but ${this.checksWhy(c.expect)}: waiting for them to start, not merging. Run shepherdr checks ${t.id} again; if that workflow cannot run on this pull request, merge it by hand on GitHub.` }
+    }
     if (c.state === 'pending') {
       this.land(t, 'checks', await this.checksDue(t, p, g, head))
       return { ok: false, error: `GitHub's checks are running on PR #${n}${pushing ? ` (just pushed${rebased ? `, rebased on ${t.base} for a conflict` : ''})` : ''}: wait for them with shepherdr checks ${t.id}, then run shepherdr merge ${t.id} again.` }
