@@ -29,6 +29,8 @@ describe('what one workflow says about a pull request (workflowExpect)', () => {
     ['pull_request_target counts too', 'on:\n  pull_request_target:\njobs: {}', 'yes'],
     ['a list on one line', 'on: [push, pull_request]\njobs: {}', 'yes'],
     ['a quoted key is still pull_request', "on:\n  'pull_request':\njobs: {}", 'yes'],
+    ['an unindented sequence under on:', 'on:\n- pull_request\njobs: {}', 'yes'],
+    ['an unindented push and pull request sequence', 'on:\n- push\n- pull_request\njobs: {}', 'yes'],
     ['a comment and a job below on: are not events', '# hi\non:\n  pull_request:\njobs:\n  x:\n    runs-on: ubuntu-latest', 'yes'],
     ['a paths filter may leave it out', 'on:\n  pull_request:\n    paths:\n      - backend/**\njobs: {}', 'maybe'],
     ['paths-ignore and branches both filter it', 'on:\n  pull_request:\n    paths-ignore: [docs/**]\n    branches: [main]\njobs: {}', 'maybe'],

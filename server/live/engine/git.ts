@@ -510,7 +510,13 @@ export function workflowExpect(text: string): ChecksExpect {
     const p = part(lines[i])
     if (ind(lines[i]) || (p.k !== 'on' && p.k !== 'true')) continue
     if (p.v) return PR_EVENTS.some((e) => p.v.includes(e)) ? (FILTERS.some((f) => p.v.includes(f)) ? 'maybe' : 'yes') : 'none'
-    const end = lines.findIndex((l, n) => n > i && ind(l) === 0)
+    // a sequence under on: may sit at the same indent as the key ("on:\n- pull_request"), so it is part of the block
+    let end = -1
+    for (let n = i + 1; n < lines.length; n++) {
+      if (ind(lines[n]) > 0 || /^\s*-\s/.test(lines[n])) continue
+      end = n
+      break
+    }
     const block = lines.slice(i + 1, end < 0 ? lines.length : end)
     if (!block.length) return 'none'
     const at = Math.min(...block.map(ind))
@@ -536,8 +542,9 @@ export function workflowExpect(text: string): ChecksExpect {
 
 /**
  * What the repo's workflows at HEAD say about checks on its pull requests: `yes` if any run on every one, else
- * `maybe` if any have a paths/branches/types filter, else `none`. Read at this worktree's HEAD: both callers check
- * that the pull request's head is that same commit first, so this is the workflow GitHub will actually run.
+ * `maybe` if any have a paths/branches/types filter, else `none`. Read at this worktree's HEAD: both callers bring
+ * the pull request to this commit first (`checksNow` refuses if it is not, merge pushes), so these are the workflows
+ * GitHub will run on it.
  */
 export async function prWorkflowExpect(wt: string): Promise<ChecksExpect> {
   const r = await git(wt, 'ls-tree', '--name-only', 'HEAD', '.github/workflows/')

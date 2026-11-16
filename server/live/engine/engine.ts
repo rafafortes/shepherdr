@@ -224,7 +224,7 @@ export function landingLine(l: Landing, base = 'main', now = Date.now()) {
   if (l.step === 'gate') return l.cars ? `Running the merge gate (a train of ${l.cars})` : 'Running the merge gate'
   if (l.step === 'queue' && l.train) return `Going in with ${l.train}'s merge train`
   if (l.step === 'queue') return l.gate ? `Waiting for the merge gate (${l.behind}'s runs)` : `Waiting for ${l.behind}'s merge`
-  if (l.why) return l.why
+  if (l.step === 'checks' && l.why) return l.why
   const left = l.due === undefined ? 0 : Math.ceil((l.due - now) / 60_000)
   return left > 0 ? `Checks running · ~${left}m` : 'Checks running'
 }
@@ -3520,7 +3520,7 @@ export class Engine extends Emitter<Events> {
     const c = await this.checksOf(t, g, pr.number, waitMs)
     if (c.state === 'unknown') {
       if (t.landing) this.land(t, 'checks', await this.checksDue(t, p, g, head), { why: 'Checks not started yet' })
-      return { ok: false, text: `No checks are reported on PR #${pr.number} yet, but ${this.checksWhy(c.expect)}: waiting for them to start, not merging. Run shepherdr checks ${t.id} again.` }
+      return { ok: false, text: `No checks are reported on PR #${pr.number} yet, but ${this.checksWhy(c.expect)}: waiting for them to start, not merging. Run shepherdr checks ${t.id} again; if that workflow cannot run on this pull request, merge it by hand on GitHub.` }
     }
     if (t.landing && c.state !== 'pending') this.land(t, c.state === 'pass' || c.state === 'none' ? 'merge' : undefined)
     if (c.state === 'fail') {
@@ -3890,7 +3890,7 @@ export class Engine extends Emitter<Events> {
     else c = now?.state === 'fail' ? now : { state: 'pass' as const, passed: 0, failed: [] }
     if (c.state === 'unknown') {
       if (t.landing) this.land(t, 'checks', await this.checksDue(t, p, g, head), { why: 'Checks not started yet' })
-      return { ok: false, error: `GitHub has not reported checks on PR #${n}${pushing ? ` (just pushed${rebased ? `, rebased on ${t.base} for a conflict` : ''})` : ''} yet, but ${this.checksWhy(c.expect)}: waiting for them to start, not merging. Run shepherdr checks ${t.id} again.` }
+      return { ok: false, error: `GitHub has not reported checks on PR #${n}${pushing ? ` (just pushed${rebased ? `, rebased on ${t.base} for a conflict` : ''})` : ''} yet, but ${this.checksWhy(c.expect)}: waiting for them to start, not merging. Run shepherdr checks ${t.id} again; if that workflow cannot run on this pull request, merge it by hand on GitHub.` }
     }
     if (c.state === 'pending') {
       this.land(t, 'checks', await this.checksDue(t, p, g, head))
