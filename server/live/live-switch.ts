@@ -7,10 +7,11 @@
 // echo as proof. If a step fails after an earlier one took, every field that did take is put back to what it started
 // on and verified the same way, so a half-applied switch is never left behind.
 //
-// Checked on this host (2026-11-16): Claude Code `/model` and `/effort` (its local-command-stdout log lines), pi's
-// built-in `/model <provider/model>` and `/thinking <level>` (pi 1.5.2's slash-commands list), and Codex's `/model`
-// picker (upstream's Codex 0.163 screen). `opencode --help` and `agy --help` offer model/effort only as start flags,
-// with no in-session switch, so those two keep the restart.
+// Checked on this host (2026-11-16): Claude Code `/model` and `/effort` (its local-command-stdout log lines) and pi's
+// built-in `/model <provider/model>` and `/thinking <level>` (pi 1.5.2's slash-commands list). Codex is NOT installed
+// here (removed 2026-10-15): its `/model` picker and `thread_settings_applied` line come from upstream's Codex 0.163
+// (45d7e850) and are covered with a fake screen/log, not a local run. `opencode --help` and `agy --help` offer
+// model/effort only as start flags, with no in-session switch, so those two keep the restart.
 
 /** CLIs with a mid-session model/effort switch. */
 export const LIVE_KINDS = ['claude', 'codex', 'pi'] as const
@@ -35,16 +36,35 @@ export interface SwitchIO {
   screen(): Promise<string>
   chat(): Promise<ChatState>
   sleep(ms: number): Promise<void>
+  /** files in the agent's home, for the defaults a CLI saves as a side effect of its command */
+  readFile?(rel: string): Promise<string | null>
+  writeFile?(rel: string, text: string): Promise<void>
 }
 
-/** A typed command, what its answer in the chat must say, and how to name the old value again. */
+/** A typed command and the concrete value its answer in the chat must say. */
 export interface Step {
   text: string
   field: 'model' | 'effort'
   want: string
-  /** the word a CLI takes for its own default (Claude's `default`/`auto`); '' when it must be named explicitly */
-  defaultWord?: string
   fail?: RegExp
+}
+
+/** Claude Code saves a /model or /effort as the default for NEW sessions too; put back only the keys it touched. */
+export const CLAUDE_SETTINGS = '.claude/settings.json'
+const CLAUDE_KEYS = ['model', 'effortLevel', 'fastMode', 'modelSettings']
+
+export function claudeRestore(before: string | null, now: string | null): string | null {
+  let b: Record<string, unknown>, n: Record<string, unknown>
+  try { b = JSON.parse(before || '{}'); n = JSON.parse(now || '{}') } catch { return null }
+  if (!b || !n || typeof b !== 'object' || typeof n !== 'object') return null
+  let changed = false
+  for (const k of CLAUDE_KEYS) {
+    if (JSON.stringify(b[k]) === JSON.stringify(n[k])) continue
+    changed = true
+    if (k in b) n[k] = b[k]
+    else delete n[k]
+  }
+  return changed ? JSON.stringify(n, null, 2) + (String(now).endsWith('\n') ? '\n' : '') : null
 }
 
 export function liveOK(kind: string): boolean {
@@ -61,11 +81,11 @@ export function liveChanges(from: SwitchTarget, to: SwitchTarget): { model?: str
   return out
 }
 
-/** Claude Code's commands, in order. */
+/** Claude Code's commands, in order. Every value is concrete: an unnamed default cannot be read back from the chat. */
 export function claudeSteps(ch: { model?: string; effort?: string }): Step[] {
   const out: Step[] = []
-  if (ch.model !== undefined) out.push({ text: `/model ${ch.model || 'default'}`, field: 'model', want: ch.model, defaultWord: 'default', fail: /Model .*not found|Invalid model|isn't available/i })
-  if (ch.effort !== undefined) out.push({ text: `/effort ${ch.effort || 'auto'}`, field: 'effort', want: ch.effort, defaultWord: 'auto', fail: /Invalid (?:effort|argument)/i })
+  if (ch.model !== undefined) out.push({ text: `/model ${ch.model}`, field: 'model', want: ch.model, fail: /Model .*not found|Invalid model|isn't available/i })
+  if (ch.effort !== undefined) out.push({ text: `/effort ${ch.effort}`, field: 'effort', want: ch.effort, fail: /Invalid (?:effort|argument)/i })
   return out
 }
 
@@ -78,46 +98,71 @@ export function piSteps(ch: { model?: string; effort?: string }): Step[] {
 }
 
 /** A command went in: its own answer in the chat is the proof, never the fact that it was typed. */
-async function awaitStep(io: SwitchIO, step: Step, rejected?: string): Promise<void> {
+async function awaitStep(io: SwitchIO, step: Step): Promise<void> {
   await io.send(step.text)
   for (let t = 0; t < 8000; t += 250) {
     const screen = await io.screen()
     const bad = step.fail ? step.fail.exec(screen) : null
     if (bad) throw new Error(bad[0].trim())
     const chat = await io.chat()
-    // going back to the CLI's own value: any different, reported value is evidence it left the one being undone
-    const took = rejected === undefined ? chat[step.field] === step.want : chat[step.field] === step.want || (step.want === '' && chat[step.field] !== rejected)
-    if (took) return
+    if (chat[step.field] === step.want) return
     await io.sleep(250)
   }
-  throw new Error(`${step.text.split(' ')[0]} didn't take: the chat didn't report it.`)
+  throw new Error(`${step.text.split(' ')[0]} didn't take: the chat didn't report ${step.want}.`)
 }
 
-/** The command that puts one field back where it started, or nothing when the CLI cannot name that value. */
+/** Wait until the chat reports the whole target at once (a model switch can also move the level). */
+async function awaitChat(io: SwitchIO, want: ChatState): Promise<boolean> {
+  for (let t = 0; t < 8000; t += 250) {
+    const chat = await io.chat()
+    if ((!want.model || chat.model === want.model) && (!want.effort || chat.effort === want.effort)) return true
+    await io.sleep(250)
+  }
+  return false
+}
+
+/** The command that puts one field back where it started, or nothing when the old value is not concrete. */
 function undo(step: Step, from: SwitchTarget): Step | undefined {
   const old = from[step.field] ?? ''
-  const word = !old && step.defaultWord ? step.defaultWord : old
-  if (!word) return undefined
-  return { ...step, text: `${step.text.split(' ')[0]} ${word}`, want: old }
+  if (!old) return undefined
+  return { ...step, text: `${step.text.split(' ')[0]} ${old}`, want: old }
 }
 
-/** Typed commands with a rollback: whatever took is put back and confirmed before the caller hears the failure. */
+/** Typed commands with a rollback: every field is restored, even one a model switch moved on its own. */
 async function typed(io: SwitchIO, steps: Step[], from: SwitchTarget): Promise<void> {
-  const applied: Step[] = []
   try {
     for (const step of steps) {
+      // a command that was typed may have taken effect even when its answer never came: it must be undone
       await awaitStep(io, step)
-      applied.push(step)
     }
   } catch (e) {
-    const rejected = new Map(steps.map((s) => [s.field, s.want]))
-    const back = applied.reverse().map((s) => undo(s, from)).filter((s): s is Step => !!s)
+    const back = steps.map((s) => undo(s, from)).filter((s): s is Step => !!s)
     const failed: string[] = []
     for (const step of back) {
-      try { await awaitStep(io, step, rejected.get(step.field)) }
+      try { await awaitStep(io, step) }
       catch { failed.push(step.field) }
     }
+    // restoring the level matters even when this switch never typed a level command: changing a model can reset it
+    if (!failed.length && !await awaitChat(io, { model: from.model, effort: from.effort })) failed.push('model and effort')
     throw new Error(failed.length ? `${(e as Error).message} It could not be put back on ${failed.join(' and ')}.` : (e as Error).message)
+  }
+}
+
+/** Claude Code saves the pick as the default for new sessions too: read its settings, then put the touched keys back. */
+async function withClaudeDefaults(io: SwitchIO, run: () => Promise<void>) {
+  const read = io.readFile?.bind(io)
+  const write = io.writeFile?.bind(io)
+  const before = read ? await read(CLAUDE_SETTINGS).catch(() => null) : null
+  try {
+    await run()
+  } finally {
+    if (before !== null) {
+      // the save lands with the command's answer; a moment more, then only the keys it touched go back
+      await io.sleep(300)
+      const now = await read!(CLAUDE_SETTINGS).catch(() => null)
+      const back = now == null ? null : claudeRestore(before, now)
+      if (back !== null) await write?.(CLAUDE_SETTINGS, back)
+    }
   }
 }
 
@@ -249,7 +294,16 @@ export async function switchLive(io: SwitchIO, kind: string, from: SwitchTarget,
   const ch = liveChanges(from, to)
   if (!Object.keys(ch).length) return ch
   if (!liveOK(kind)) throw new Error(`${kind} has no in-session model switch.`)
+  // a CLI's own default is not a value its chat reports: the caller resolves both sides to concrete ids/levels, or
+  // restarts. Without a concrete starting value there is no honest way to put a failed switch back.
+  if ((ch.model === '' && !!from.model) || (ch.effort === '' && !!from.effort)) throw new Error("A switch back to the CLI's own default can't be read back from its chat; use Restart.")
+  if ((ch.model !== undefined && !from.model) || (ch.effort !== undefined && !from.effort)) throw new Error("The agent's current model and effort were not reported; use Restart.")
   if (kind === 'codex') await codexSwitch(io, from, to, names)
-  else await typed(io, kind === 'pi' ? piSteps(ch) : claudeSteps(ch), from)
+  else {
+    const steps = kind === 'pi' ? piSteps(ch) : claudeSteps(ch)
+    const run = () => typed(io, steps, from)
+    if (kind === 'claude') await withClaudeDefaults(io, run)
+    else await run()
+  }
   return ch
 }

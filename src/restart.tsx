@@ -238,7 +238,7 @@ function Sheet({ chat, name, current, start }: Opening) {
                 {room.quota ? ` Quota: ${room.quota}.` : null}
               </p>
             ) : null}
-            {!start && (changed || save) ? (
+            {!start && !canLive && (changed || save) ? (
               <Line label={saveWords(info)}>
                 <Switch label={saveWords(info)} on={save} onChange={setSave} />
               </Line>

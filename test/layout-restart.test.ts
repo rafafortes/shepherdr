@@ -150,6 +150,8 @@ describe.skipIf(!browser)('restarting an agent', () => {
       world.chats[chat].agent = { kind: 'codex' }
       world.chats[chat].cli = 'Codex'
       world.chats[chat].restart = undefined
+      // a working agent cannot switch in place: this keeps the test on the restart-and-save path
+      world.chats[chat].working = true
       const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
       let restart: unknown
       page.on('request', (r) => {
@@ -349,6 +351,7 @@ describe.skipIf(!browser)('restarting an agent', () => {
     world.chats[chat].agent = { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }
     world.chats[chat].cli = 'Claude Code'
     world.chats[chat].restart = undefined
+    world.chats[chat].working = false
     world.emit('snapshot')
     const cards = () => world.chats[chat].messages.filter((m) => m.card?.restart).length
     const before = cards()

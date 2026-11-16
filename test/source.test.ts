@@ -2943,7 +2943,7 @@ describe('a live switch', () => {
         return { waiting: false, item: {} }
       }
       ;(src.chats as { pull: unknown }).pull = () => true
-      ;(src.chats as { chat: unknown }).chat = () => ({ agent: { runtime: chat } })
+      ;(src.chats as { chat: unknown }).chat = (k: string) => ({ key: k, cli: 'Claude Code', messages: [], agent: { runtime: chat } })
       ;(herdr as { read: unknown }).read = async () => ''
       try {
         expect(await liveSwitch(key, { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' })).toMatchObject({ live: true })

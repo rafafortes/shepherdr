@@ -5,8 +5,8 @@ import { DemoWorld } from '../server/demo/world.ts'
 import { VM } from '../server/demo/data.ts'
 import { Agents } from '../server/live/agents.ts'
 import {
-  claudeSteps, codexEffortRow, codexModelRow, codexPicker, codexRows, liveChanges, liveOK, moveTo, piSteps, switchLive,
-  type ChatState, type SwitchIO,
+  CLAUDE_SETTINGS, claudeRestore, claudeSteps, codexEffortRow, codexModelRow, codexPicker, codexRows, liveChanges, liveOK,
+  moveTo, piSteps, switchLive, type ChatState, type SwitchIO,
 } from '../server/live/live-switch.ts'
 
 const MODELS = `  Select Model and Effort
@@ -33,12 +33,15 @@ class FakeTerm {
   keys: string[] = []
   onSend?: (text: string, t: FakeTerm) => void
   onKey?: (key: string, t: FakeTerm) => void
+  files: Record<string, string> = {}
   io: SwitchIO = {
     send: async (text) => { this.sent.push(text); this.onSend?.(text, this) },
     keys: async (...k) => { this.keys.push(...k); for (const key of k) this.onKey?.(key, this) },
     screen: async () => this.screen,
     chat: async () => ({ ...this.chatState }),
     sleep: async () => {},
+    readFile: async (rel) => this.files[rel] ?? null,
+    writeFile: async (rel, text) => { this.files[rel] = text },
   }
 }
 
@@ -64,11 +67,40 @@ describe('what changes', () => {
     expect(liveChanges(from, from)).toEqual({})
     expect(liveChanges(from, { ...from, model: '' })).toEqual({ model: '', effort: 'high' })
   })
-  test('the commands each CLI takes, including the CLI default', () => {
-    expect(claudeSteps({ model: '', effort: '' }).map((s) => s.text)).toEqual(['/model default', '/effort auto'])
+  test('the commands each CLI takes, always with a concrete value', () => {
+    expect(claudeSteps({ model: 'claude-opus-5-5', effort: 'high' }).map((s) => s.text)).toEqual(['/model claude-opus-5-5', '/effort high'])
     expect(claudeSteps({ effort: 'medium' }).map((s) => s.text)).toEqual(['/effort medium'])
     expect(piSteps({ model: 'spark/qwen', effort: 'high' }).map((s) => s.text)).toEqual(['/model spark/qwen', '/thinking high'])
     expect(piSteps({ model: 'spark/qwen' }).map((s) => s.text)).toEqual(['/model spark/qwen'])
+  })
+})
+
+describe("Claude Code's saved defaults", () => {
+  test('only the keys the command touched go back; anything written meanwhile stays', () => {
+    const before = JSON.stringify({ theme: 'dark', modelSettings: { 'claude-opus-5-5': { effortLevel: 'medium' } } }, null, 2)
+    const now = JSON.stringify({ theme: 'light', model: 'claude-sonnet-5-5', modelSettings: { 'claude-opus-5-5': {}, 'claude-sonnet-5-5': { effortLevel: 'low' } } }, null, 2)
+    expect(JSON.parse(claudeRestore(before, now)!)).toEqual({ theme: 'light', modelSettings: { 'claude-opus-5-5': { effortLevel: 'medium' } } })
+    expect(claudeRestore(before, before)).toBeNull()
+    expect(claudeRestore('{', '{}')).toBeNull()
+  })
+
+  test('a switch puts them back after the command saved them', async () => {
+    const t = new FakeTerm()
+    const before = JSON.stringify({ theme: 'dark' }, null, 2)
+    t.files[CLAUDE_SETTINGS] = before
+    t.onSend = (text, t) => {
+      if (text.startsWith('/model')) {
+        t.chatState.model = 'claude-sonnet-5-5'
+        t.files[CLAUDE_SETTINGS] = JSON.stringify({ theme: 'dark', model: 'claude-sonnet-5-5' })
+      }
+      if (text.startsWith('/effort')) {
+        t.chatState.effort = 'low'
+        t.files[CLAUDE_SETTINGS] = JSON.stringify({ theme: 'dark', model: 'claude-sonnet-5-5', effortLevel: 'low' })
+      }
+    }
+    await switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })
+    expect(JSON.parse(t.files[CLAUDE_SETTINGS]!)).toEqual({ theme: 'dark' })
+    expect(t.chatState).toEqual({ model: 'claude-sonnet-5-5', effort: 'low' })
   })
 })
 
@@ -88,7 +120,7 @@ describe('Claude Code: typed and read back from its chat', () => {
   test('its own answer is the proof: a written command the chat does not report fails', async () => {
     const t = new FakeTerm()
     await expect(switchLive(t.io, 'claude', { kind: 'claude', effort: 'high' }, { kind: 'claude', effort: 'low' })).rejects.toThrow('/effort didn\'t take')
-    expect(t.sent).toEqual(['/effort low'])
+    expect(t.sent).toEqual(['/effort low', '/effort high'])
   })
 
   test('a refusal in the terminal says why, without waiting for a chat answer', async () => {
@@ -106,21 +138,18 @@ describe('Claude Code: typed and read back from its chat', () => {
       if (text === '/model claude-opus-5-5') t.chatState.model = 'claude-opus-5-5'
     }
     await expect(switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow('Invalid effort')
-    expect(t.sent).toEqual(['/model claude-sonnet-5-5', '/effort low', '/model claude-opus-5-5'])
+    // both fields are re-stated: a level a model switch may have moved on its own is restored too
+    expect(t.sent).toEqual(['/model claude-sonnet-5-5', '/effort low', '/model claude-opus-5-5', '/effort high'])
     expect(t.chatState).toEqual({ model: 'claude-opus-5-5', effort: 'high' })
   })
 
-  test('going back to a CLI default is named, and any different reported value proves it left the new one', async () => {
+  test('an unnamed value is never guessed: a default target, or an unreported start, is refused before typing', async () => {
     const t = new FakeTerm()
     t.chatState = { model: 'claude-sonnet-5-5', effort: 'high' }
-    t.onSend = (text, t) => {
-      if (text === '/effort low') t.screen = 'Invalid effort'
-      // the CLI reports its own default model, which is enough to prove the Sonnet pick is gone
-      if (text === '/model default') t.chatState.model = 'claude-opus-5-5'
-    }
-    await expect(switchLive(t.io, 'claude', { kind: 'claude', model: '', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow('Invalid effort')
-    expect(t.sent).toEqual(['/model claude-sonnet-5-5', '/effort low', '/model default'])
-    expect(t.chatState.model).toBe('claude-opus-5-5')
+    t.onSend = () => { t.chatState.model = 'claude-opus-5-5' }
+    await expect(switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: '', effort: 'high' })).rejects.toThrow("CLI's own default")
+    await expect(switchLive(t.io, 'claude', { kind: 'claude', model: '', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow('not reported')
+    expect(t.sent).toEqual([])
   })
 
   test('a failed rollback says which field it could not put back', async () => {
@@ -133,17 +162,18 @@ describe('Claude Code: typed and read back from its chat', () => {
     await expect(switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow('could not be put back on model')
   })
 
-  test('pi has no default word: a model it cannot name is not silently rolled back', async () => {
+  test('pi: when the effort step fails, both fields are put back, not just the model', async () => {
     const t = new FakeTerm()
     t.chatState = { model: 'spark/qwen', effort: 'high' }
     t.onSend = (text, t) => {
-      if (text === '/model opencode-go/deepseek') t.chatState.model = 'opencode-go/deepseek'
+      if (text === '/model commandcode/deepseek') t.chatState.model = 'commandcode/deepseek'
       if (text === '/thinking low') t.screen = 'unknown thinking level'
+      if (text === '/model spark/qwen') t.chatState.model = 'spark/qwen'
+      if (text === '/thinking high') t.chatState.effort = 'high'
     }
-    await expect(switchLive(t.io, 'pi', { kind: 'pi', model: '', effort: 'high' }, { kind: 'pi', model: 'opencode-go/deepseek', effort: 'low' })).rejects.toThrow('unknown')
-    expect(t.sent).toEqual(['/model opencode-go/deepseek', '/thinking low'])
-    // no `undo` step with an empty old value: nothing is typed that would leave a mix nobody asked for
-    expect(t.chatState.model).toBe('opencode-go/deepseek')
+    await expect(switchLive(t.io, 'pi', { kind: 'pi', model: 'spark/qwen', effort: 'high' }, { kind: 'pi', model: 'commandcode/deepseek', effort: 'low' })).rejects.toThrow('unknown')
+    expect(t.sent).toEqual(['/model commandcode/deepseek', '/thinking low', '/model spark/qwen', '/thinking high'])
+    expect(t.chatState).toEqual({ model: 'spark/qwen', effort: 'high' })
   })
 
   test('pi: model and thinking level both taken, read from its own chat', async () => {

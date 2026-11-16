@@ -953,7 +953,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const space = (t?.place ?? a.chat).split(':')[2] ?? '~'
         // a task that waits to start: Start with…'s pick, else what its chat's agent runs on (as the live one's go)
         const starts = t && ['queued', 'todo', 'scheduled'].includes(t.status) ? (this.workers.get(t.id) ?? c?.agent ?? { kind: on }) : undefined
-        return { ok: true, info: { role: a.chat.includes('/') ? 'task' : 'coordinator', space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name, on: c?.agent ?? { kind: on }, onWords: harnessWords(c?.agent ?? { kind: on }), want: { kind: want }, ...(starts ? { starts } : {}), clis: withRooms(clis, this.roomInput(space, t?.id ?? a.chat)), working: t?.status === 'work', live: t?.status !== 'work' && liveOK(on) } }
+        return { ok: true, info: { role: a.chat.includes('/') ? 'task' : 'coordinator', space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name, on: c?.agent ?? { kind: on }, onWords: harnessWords(c?.agent ?? { kind: on }), want: { kind: want }, ...(starts ? { starts } : {}), clis: withRooms(clis, this.roomInput(space, t?.id ?? a.chat)), working: t?.status === 'work', live: !c?.working && t?.status !== 'work' && liveOK(on) } }
       }
       case 'start-with': {
         // Start with…: the worker a waiting task starts on, for it alone; it stays in line (as the live one's setWorker)

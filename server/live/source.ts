@@ -37,7 +37,7 @@ import { listFolders, makeRepo, resolveInHome } from './folders.ts'
 import { sh, validateBase } from './engine/git.ts'
 import { Artifacts, browserChecker, type ArtifactRec, type Checker } from './artifacts.ts'
 import { Machines } from './machines.ts'
-import { agentEnv, BOX, boxHome, notifiesWith } from './box.ts'
+import { agentEnv, BOX, boxHome, notifiesWith, run } from './box.ts'
 import { WaitAlerts, type Wait } from './wait-alerts.ts'
 import { ATTACH_MAX, fileType, isMedia, isVideo } from '../../shared/files.ts'
 import { smaller, type Small } from './media.ts'
@@ -2015,9 +2015,27 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    */
   private async liveSwitch(key: string, pick: { kind: string; model?: string; effort?: string }, injected?: SwitchIO) {
     const x = this.restartable(key)
-    const to = fitHarness({ kind: pick.kind, model: pick.model ?? '', effort: pick.effort ?? '' })
-    const from = { ...x.on, kind: x.on.kind }
-    const fallback = async () => ({ on: await this.restart(key, to), live: false })
+    const requested = fitHarness({ kind: pick.kind, model: pick.model ?? '', effort: pick.effort ?? '' })
+    const fallback = async () => ({ on: await this.restart(key, requested), live: false })
+    // a switch can only be proved when its target is a concrete id/level the CLI's log will name. Resolve "Default"
+    // to what this CLI really serves; where it cannot be named, the restart path is the honest one.
+    const to = { ...requested }
+    if (!to.model) {
+      const def = modelsOf(requested.kind)?.default
+      if (!def) return fallback()
+      to.model = def
+    }
+    if (!to.effort) {
+      const eff = findModel(to.kind, to.model)?.effort
+      if (eff) to.effort = eff
+    }
+    this.chats.pull(key)
+    const runtime = this.chats.chat(key).agent?.runtime
+    const from = {
+      kind: x.on.kind,
+      model: x.on.model || (runtime?.model ? (findModel(x.on.kind, runtime.model)?.id ?? runtime.model) : '') || modelsOf(x.on.kind)?.default || '',
+      effort: x.on.effort || runtime?.effort || findModel(x.on.kind, x.on.model)?.effort || '',
+    }
     if (x.t && ended(x.t)) throw new Error(`${x.t.id} is Done already: it has no agent to switch.`)
     if (!this.engine.installed(to.kind)) throw new Error(`${CLI_NAME[to.kind] ?? to.kind} isn't installed on this machine.`)
     if (!liveOK(to.kind) || !liveOK(from.kind) || to.kind !== from.kind) return fallback()
@@ -2043,6 +2061,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           return { model, effort: runtime?.effort }
         },
         sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+        // the CLI saves /model and /effort as defaults for new sessions too: read and put back only what it touched
+        readFile: async (rel) => {
+          const r = await run(['sh', '-c', 'cat "$HOME/$1"', 'shepherdr', rel])
+          return r.code === 0 ? r.out : null
+        },
+        writeFile: async (rel, text) => {
+          await run(['sh', '-c', 'cat > "$HOME/$1"', 'shepherdr', rel], { stdin: text })
+        },
       }
     })()
     const names = Object.fromEntries((modelsOf(to.kind)?.models ?? []).map((m) => [m.id, m.label]))

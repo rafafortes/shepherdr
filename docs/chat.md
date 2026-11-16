@@ -68,18 +68,24 @@ Every agent, coordinator or task agent, gets the same chat.
   differs on a CLI with a switch of its own, and the chat shows the new model from the agent's own log before the
   action finishes — no restart card and no new launch:
   - **Claude Code:** `/model` and `/effort`; its `Set model to …` and `Set effort level to …` lines in the session log
-    say what it now runs on (the defaults those commands save are a side effect, not the picker's decision).
+    say what it now runs on. Those commands also save the pick as the default for new sessions, so the keys they touched
+    in the CLI's own settings are read and put back afterwards: only this agent keeps the new model, other sessions and
+    Shepherdr's Settings keep theirs.
   - **pi:** `/model <provider/model>` and `/thinking <level>`; its `model_change` and `thinking_level_change` log
     entries are the same ones the chat already uses to show its current model and level.
   - **Codex:** `/model`'s picker, choosing the level for this session only (`s`, never Enter), confirmed by its
-    `thread_settings_applied` log line.
+    `thread_settings_applied` log line. Codex is not installed on this host (removed 2026-10-15), so this path comes
+    from upstream's Codex 0.163 and is covered by a fake screen and log, not by a local run.
   - **OpenCode and agy have no in-session switch.** Checked their help (model and effort are start flags only:
     `opencode run --model`, `agy --model`/`--effort`) and their logs/screens (no switch line or picker to read back),
     so the sheet offers only **Restart** for them: like a different CLI or a permission change, that stops the turn
     first and resumes the session on the new settings.
-  A switch is refused while the agent is working or waiting on a question, so nothing can cut its turn; if a model
-  goes in and its level does not, the model is put back on what it started with and read back from the chat before
-  the failure is shown. A switch the chat does not report is never taken as a success.
+  A switch is refused while the agent is working or waiting on a question, so nothing can cut its turn. If any step
+  fails — including a step that was typed but whose answer never came — both model and effort are put back on what
+  they started with (a model switch can move the level on its own), and the chat must report the old values before the
+  failure is shown. A switch to the CLI's own default is resolved to a concrete id and level first: where neither the
+  target nor the starting value can be named from the chat, **Restart** is the only path. A switch the chat does not
+  report is never taken as a success.
 - One setting changed for every space is still one action. This machine's ⋯ in the places list carries the count —
   Restart 3 coordinators, and it is there only while some coordinator's Settings moved — and runs it, its answer in the
   row itself (the count, and the spaces that failed by name); `shepherdr restart --all` does the same from a terminal:
