@@ -20,6 +20,8 @@ type Sock =
   | { kind: 'browser'; task: string; bridge?: ReturnType<NonNullable<Source['browser']>> }
 
 const FONT = join(import.meta.dir, '..', 'node_modules', 'inter-ui', 'variable', 'InterVariable.woff2')
+/** the longest a snapshot waits for the one before it (see where `source.on('snapshot')` spaces them) */
+const SNAP_MAX = 2000
 
 export interface AppOptions {
   source: Source
@@ -66,17 +68,27 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
     source.watch([...chats], [...terms])
   }
 
+  const timed = <T>(label: string, f: () => T): T => (source.stall ? source.stall.run(label, f) : f())
   let snapTimer: ReturnType<typeof setTimeout> | null = null
+  // a snapshot is made synchronously: one that takes 200 ms stops everything else for 200 ms, and with 50 agents changing
+  // there is always another one wanted. So the next waits until the work has taken at most a fifth of the time since
+  // (what it cost, four times over), never more than SNAP_MAX
+  let snapEnd = 0
+  let snapCost = 0
   source.on('snapshot', () => {
     if (snapTimer) return
+    const wait = Math.min(SNAP_MAX, Math.max(30, snapEnd + snapCost * 4 - Date.now()))
     snapTimer = setTimeout(() => {
       snapTimer = null
-      const snapshot = source.snapshot()
+      const began = Date.now()
+      const snapshot = timed('snapshot', () => source.snapshot())
+      snapEnd = Date.now()
+      snapCost = snapEnd - began
       for (const ws of live) send(ws, { type: 'snapshot', snapshot })
-    }, 30)
+    }, wait)
   })
   source.on('chat', (key) => {
-    const chat = source.chat(key)
+    const chat = timed('chat', () => source.chat(key))
     if (!chat) return
     for (const ws of live) if (ws.data.kind === 'live' && ws.data.chats.includes(key)) send(ws, { type: 'chat', chat })
   })
@@ -129,9 +141,9 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
       try {
         if (path === '/api/chat') {
           const key = q.get('chat') ?? ''
-          return json({ chat: source.chat(key) ?? null, status: source.chatStatus?.(key) })
+          return json({ chat: timed('GET /api/chat', () => source.chat(key)) ?? null, status: source.chatStatus?.(key) })
         }
-        if (path === '/api/snapshot') return json(source.snapshot())
+        if (path === '/api/snapshot') return json(timed('GET /api/snapshot', () => source.snapshot()))
         // which Shepherdr answers: a start from another plugin folder or version stops it (scripts/plugin.ts)
         if (path === '/api/version') return json(running())
         // the updater restarts the server only once it has stopped new calls and none is on; both at once, so no call

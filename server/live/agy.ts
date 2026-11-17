@@ -4,7 +4,7 @@
 // copied into a JSONL file that the chat reads like any other CLI log. The steps' payloads are protobuf blobs with no
 // schema, so this file also holds a small wire-format decoder (ported from the reference decoder of the study).
 import { Database } from 'bun:sqlite'
-import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, renameSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { home, readJson, writeJson } from '../store.ts'
@@ -357,6 +357,46 @@ function parseLine(text: string): Record<string, unknown> | undefined {
 export function mirrorConversation(id: string, outFile: string): number {
   const db = agyDb(id)
   if (!existsSync(db)) return 0
+  // called for every chat on every pass: a conversation whose database and mirror are as the last pass left them has
+  // nothing new, and is not opened
+  const began = Date.now()
+  const seen = stamps(db, outFile)
+  if (unchanged.get(outFile) === seen.sig) {
+    mirrorCount.unchanged++
+    return 0
+  }
+  mirrorCount.opened++
+  const n = mirrorAgy(id, outFile, db)
+  // trusted only when the database was quiet before this pass read it: a write in the same clock tick as the one the
+  // stamp shows would leave it as it was
+  const after = stamps(db, outFile)
+  if (after.newest < began - 25) unchanged.set(outFile, after.sig)
+  else unchanged.delete(outFile)
+  return n
+}
+
+/** what a mirror last found for a log file: the stamps of its database, that database's WAL and the log */
+const unchanged = new Map<string, string>()
+
+/** how many mirrors opened the conversation's database and how many found nothing changed and did not (what a test reads) */
+export const mirrorCount = { opened: 0, unchanged: 0 }
+
+/** the size and modification time of a conversation's database, its WAL and its mirror, and the newest of those times */
+function stamps(db: string, out: string): { sig: string; newest: number } {
+  let newest = 0
+  const of = (f: string) => {
+    try {
+      const st = statSync(f)
+      newest = Math.max(newest, f === out ? 0 : st.mtimeMs)
+      return `${st.size}:${st.mtimeMs}:${st.ino}`
+    } catch {
+      return '-'
+    }
+  }
+  return { sig: [db, `${db}-wal`, out].map(of).join('|'), newest }
+}
+
+function mirrorAgy(id: string, outFile: string, db: string): number {
   const anew = !existsSync(outFile) || !current(outFile)
   const after = anew ? -1 : (lastIdx(outFile) ?? -1)
   const handle = new Database(db, { readonly: true })

@@ -239,7 +239,7 @@ export class Chats {
 
   /** a deleted task's chat: its log goes, and all that was read of it */
   forget(key: string) {
-    for (const m of [this.tails, this.events, this.where, this.reading, this.logs, this.menus, this.menuAt, this.shown]) m.delete(key)
+    for (const m of [this.tails, this.events, this.where, this.reading, this.logs, this.menus, this.menuAt, this.shown, this.revs, this.acts]) m.delete(key)
     rmSync(join(HOME, 'chatlog', `${safe(key)}.json`), { force: true })
   }
 
@@ -303,6 +303,20 @@ export class Chats {
 
   /* ---------- reading the CLI's logs ---------- */
 
+  /** how many times a chat's events changed, and the turns and jobs made from them at that count: they are asked for on
+   *  every pass of every watcher, and an unchanged log makes the same ones */
+  private revs = new Map<string, number>()
+  private acts = new Map<string, { rev: number; act: ReturnType<typeof activityOf> }>()
+
+  private activityFor(key: string) {
+    const rev = this.revs.get(key) ?? 0
+    const had = this.acts.get(key)
+    if (had?.rev === rev) return had.act
+    const act = activityOf(this.events.get(key) ?? [])
+    this.acts.set(key, { rev, act })
+    return act
+  }
+
   /** read new lines of this chat's log files, up to PIECE in all (the rest follows in the background); true when
    *  anything new came */
   pull(key: string): boolean {
@@ -346,7 +360,11 @@ export class Chats {
       // the next log once this one is read to its end: the chat keeps its order
       if ((behind = t.behind || left <= 0)) break
     }
-    if (changed) (this.events.set(key, all), this.where.set(key, where))
+    if (changed) {
+      this.events.set(key, all)
+      this.where.set(key, where)
+      this.revs.set(key, (this.revs.get(key) ?? 0) + 1)
+    }
     return { changed, behind }
   }
 
@@ -590,7 +608,7 @@ export class Chats {
    * say is over, and the headless agents it runs. Nothing once it is gone; with Claude Code, nothing once its turn is
    * over and its session says nothing runs (a log may miss an end).
    */
-  jobs(key: string, act = activityOf(this.events.get(key) ?? [])): JobRec[] {
+  jobs(key: string, act = this.activityFor(key)): JobRec[] {
     const st = this.agents.status(key)
     if (st === 'gone') return []
     const r = this.agents.record(key)
@@ -624,7 +642,7 @@ export class Chats {
   /** what the screen opens: a turn's steps, a step's raw output, a background job's own steps or output */
   activity(a: ActivityAsk): ActivityAnswer {
     this.pull(a.chat)
-    const act = activityOf(this.events.get(a.chat) ?? [])
+    const act = this.activityFor(a.chat)
     const turns = [...act.turns, ...(act.open ? [act.open] : [])]
     if (a.what === 'turn') {
       const t = turns.find((x) => x.id === a.id)
@@ -876,7 +894,7 @@ export class Chats {
     for (const f of later) f()
     // each turn's steps fold into one line just before its last reply; a turn nobody sees (news it answered with
     // nothing) shows none
-    const act = activityOf(ev)
+    const act = this.activityFor(key)
     for (const t of act.turns) {
       if (!t.steps.length) continue
       const reply = t.reply ? msgs.find((m) => m.id === t.reply) : undefined

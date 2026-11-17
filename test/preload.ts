@@ -27,6 +27,10 @@ process.env.SHEPHERDR_LAUNCH_AGENTS = '1'
 // there (a test that wants a herdr listens on one of its own, as test/launch-pending.test.ts does), and no inherited
 // pane, tab or workspace id says otherwise.
 process.env.HERDR_SOCKET_PATH = join(home, 'no-herdr.sock')
+// herdr dropping a call is tried again after a wait (server/live/herdr.ts): short here, so a test that meets one does not sit
+// through the seconds a real start waits
+process.env.SHEPHERDR_HERDR_RETRY_MS = '5,5,5'
+process.env.SHEPHERDR_START_RETRY_MS = '5,5,5'
 for (const k of ['SHEPHERDR_URL', 'SHEPHERDR_CHAT', 'HERDR_SOCKET', 'HERDR_PANE_ID', 'HERDR_WORKSPACE_ID', 'HERDR_TAB_ID']) delete process.env[k]
 
 // What this file sets above reaches every child too. Bun.spawn and Bun.spawnSync hand a child the environment the

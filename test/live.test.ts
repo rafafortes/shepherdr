@@ -333,6 +333,21 @@ describe('triggers', () => {
     expect(() => rule('every 30 minutes from 8 to 18')).toThrow('turn the human')
     expect(() => rule('FREQ=SECONDLY')).toThrow('Once a minute at most')
   })
+  test('the next runs in words are made once a minute, however often Settings asks for them', () => {
+    // 10:40 is in the minute floor(now / 60 s); a rule of its own, so nothing else made its words before
+    const r = rule('FREQ=MINUTELY;INTERVAL=20;BYHOUR=8,9,10,11,12')
+    const at = Math.floor(now / 60_000) * 60_000 + 5000
+    const first = T.nextWords(r, Z, at)
+    expect(first).toEqual(['Today 11:00', 'Today 11:20', 'Today 11:40'])
+    // the same minute: the same words, kept (not made again)
+    expect(T.nextWords(r, Z, at + 30_000)).toBe(first)
+    // the next minute: made again
+    const later = T.nextWords(r, Z, at + 60_000)
+    expect(later).not.toBe(first)
+    expect(later).toEqual(first)
+    // another zone or another count is another entry
+    expect(T.nextWords(r, Z, at, 1)).toEqual(['Today 11:00'])
+  })
   test("in words, in the time zone's own times, with the next runs", () => {
     const words = (x: string) => T.timeWords(rule(x), Z, now)
     expect(words('FREQ=MINUTELY;INTERVAL=30;BYHOUR=8,9,10,11,12,13,14,15,16,17,18,19,20,21;BYDAY=MO,TU,WE,TH,FR')).toBe('Every 30 minutes, 8:00-22:00, Monday to Friday (Stockholm)')

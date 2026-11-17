@@ -3,6 +3,7 @@
 import { execSync } from 'node:child_process'
 import { basename, join } from 'node:path'
 import { tmp } from './tmp.ts'
+import { HerdrError } from '../server/live/herdr.ts'
 
 // a git that stalls names itself: 30 s instead of the whole test's timeout, with nothing to say where it was (a
 // timeout on its own only says "ETIMEDOUT")
@@ -105,6 +106,27 @@ export function fakeHerdr() {
       drop(id)
     },
   }
-  return { h, spaces, agentPanes, busy, cwd, down: (on: boolean) => (down = on) }
+  // herdr closing a connection it was sent too late: the next calls of a method fail the passing way (herdr.ts PASSING),
+  // before it did what was asked, or after, with its answer lost
+  const drops = new Map<string, ('before' | 'after')[]>()
+  for (const k of Object.keys(h) as (keyof typeof h)[]) {
+    const f = h[k] as (...a: unknown[]) => Promise<unknown>
+    ;(h as Record<string, unknown>)[k] = async (...a: unknown[]) => {
+      const how = drops.get(k)?.shift()
+      if (how === 'before') throw new HerdrError('closed', `herdr closed the connection during ${k}`)
+      const r = await f(...a)
+      if (how === 'after') throw new HerdrError('closed', `herdr closed the connection during ${k}`)
+      return r
+    }
+  }
+  return {
+    h,
+    spaces,
+    agentPanes,
+    busy,
+    cwd,
+    down: (on: boolean) => (down = on),
+    drop: (method: keyof typeof h, ...how: ('before' | 'after')[]) => drops.set(method, [...(drops.get(method) ?? []), ...how]),
+  }
 }
 

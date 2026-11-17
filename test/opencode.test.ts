@@ -2,10 +2,10 @@
 // and a fake `opencode` script that records its argv and prints canned JSON (SHEPHERDR_OPENCODE_BIN points at it).
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs'
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync, appendFileSync, mkdirSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { api, createSession, defaultModel, listModels, mirrorSession, opencodeDb, opencodeLogPath, parseModel, putInstructions, switchModel } from '../server/live/opencode.ts'
+import { api, closeOpencodeDbs, createSession, defaultModel, listModels, mirrorCount, mirrorSession, opencodeDb, opencodeLogPath, parseModel, putInstructions, switchModel } from '../server/live/opencode.ts'
 import { tmp } from './tmp.ts'
 
 let dir = ''
@@ -97,6 +97,56 @@ describe('session mirror', () => {
     expect(text).toContain('B says')
     expect(text).not.toContain('HERON')
     expect(seqs(out)).toEqual([1, 2])
+  })
+
+  test('a pass that finds nothing changed asks the database nothing; a row another connection wrote is found', () => {
+    // a session of its own: the other tests read B's rows as they are
+    const d0 = new Database(db)
+    d0.run('INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)', ['ses_Q-1', 'ses_Q', 'user', 1, 1, 1, JSON.stringify({ time: { created: 100 }, text: 'first', files: [] })])
+    d0.close()
+    const out = join(dir, 'mirror', 'quiet.jsonl')
+    expect(mirrorSession('ses_Q', out)).toBe(1)
+    const asked = mirrorCount.asked
+    const unchanged = mirrorCount.unchanged
+    for (let i = 0; i < 5; i++) expect(mirrorSession('ses_Q', out)).toBe(0)
+    expect(mirrorCount.unchanged - unchanged).toBe(5)
+    expect(mirrorCount.asked).toBe(asked)
+    // a commit by another connection (OpenCode's own) is what makes the next pass ask again
+    const d = new Database(db)
+    d.run('INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)', ['ses_Q-2', 'ses_Q', 'user', 2, 1, 1, JSON.stringify({ time: { created: 120 }, text: 'later', files: [] })])
+    d.close()
+    expect(mirrorSession('ses_Q', out)).toBe(1)
+    expect(mirrorCount.asked).toBe(asked + 1)
+    expect(seqs(out)).toEqual([1, 2])
+    // and what was written to another session of the same database moves the version too: asked, found nothing
+    const d2 = new Database(db)
+    d2.run('INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)', ['ses_Z-1', 'ses_Z', 'user', 1, 1, 1, '{}'])
+    d2.close()
+    expect(mirrorSession('ses_Q', out)).toBe(0)
+    expect(mirrorCount.asked).toBe(asked + 2)
+  })
+
+  test('a log that is no longer as the last pass left it is read again, not trusted', () => {
+    const out = join(dir, 'mirror', 'trust.jsonl')
+    expect(mirrorSession('ses_B', out)).toBeGreaterThan(0)
+    expect(mirrorSession('ses_B', out)).toBe(0)
+    // someone emptied it: it is filled from the start
+    writeFileSync(out, '')
+    expect(mirrorSession('ses_B', out)).toBeGreaterThan(0)
+    expect(seqs(out)[0]).toBe(1)
+  })
+
+  test('a database file replaced by another is opened anew', () => {
+    const swap = join(dir, 'swap.db')
+    writeFixture(swap, [row('ses_D', 1, 'user', { text: 'old' })])
+    const out = join(dir, 'mirror', 'd.jsonl')
+    expect(mirrorSession('ses_D', out, swap)).toBe(1)
+    const next = join(dir, 'swap-next.db')
+    writeFixture(next, [row('ses_D', 1, 'user', { text: 'old' }), row('ses_D', 2, 'user', { text: 'new' })])
+    renameSync(next, swap)
+    expect(mirrorSession('ses_D', out, swap)).toBe(1)
+    expect(seqs(out)).toEqual([1, 2])
+    closeOpencodeDbs()
   })
 
   test('a session with no rows writes nothing, and creates no folder for them', () => {

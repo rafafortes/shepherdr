@@ -174,6 +174,8 @@ export function headless(argv: string[]): boolean {
 
 /** /proc is read again at most this often */
 const PROC_MS = 2000
+/** how long a process is read again each pass before it is taken as the plain one it looks like */
+const PLAIN_FOR = 30_000
 
 /**
  * The headless reviewers that run for each chat: a reviewer of another CLI is a shell to Claude Code, but it will wake
@@ -207,7 +209,7 @@ export class Reviewers {
   list(chat: string, now = Date.now()): Headless[] {
     if (now - this.at >= PROC_MS) {
       this.at = now
-      this.chats = this.scan()
+      this.chats = this.scan(now)
     }
     return this.chats.get(chat) ?? []
   }
@@ -218,7 +220,12 @@ export class Reviewers {
     chats.set(chat, list)
   }
 
-  private scan() {
+  /** the processes seen the last pass that are no headless CLI, and when each was first seen: a process keeps its command
+   *  line, so one older than PLAIN_FOR is not read again until it is gone (a busy machine has thousands of them, and this
+   *  ran for all of them every pass). A younger one is read again, since a shell that execs a CLI changes it */
+  private plain = new Map<string, number>()
+
+  private scan(now: number) {
     let pids: string[]
     try {
       pids = readdirSync(this.proc).filter((n) => /^\d+$/.test(n))
@@ -226,10 +233,21 @@ export class Reviewers {
       return this.fromPs()
     }
     const chats = new Map<string, Headless[]>()
+    const plain = new Map<string, number>()
     for (const pid of pids) {
+      const since = this.plain.get(pid)
+      if (since !== undefined && now - since > PLAIN_FOR) {
+        plain.set(pid, since)
+        continue
+      }
       try {
         const argv = readFileSync(join(this.proc, pid, 'cmdline'), 'utf8').split('\0').filter(Boolean)
-        if (!headless(argv)) continue
+        // an empty command line is a process still starting (or a kernel thread): looked at again next pass
+        if (!argv.length) continue
+        if (!headless(argv)) {
+          plain.set(pid, since ?? now)
+          continue
+        }
         const chat = readFileSync(join(this.proc, pid, 'environ'), 'utf8').split('\0').find((v) => v.startsWith(CHAT))
         // its folder in /proc is as old as it is
         if (chat) this.add(chats, chat.slice(CHAT.length), { argv, pid: Number(pid), at: statSync(join(this.proc, pid)).ctimeMs })
@@ -237,6 +255,7 @@ export class Reviewers {
         /* gone, or not ours */
       }
     }
+    this.plain = plain
     return chats
   }
 

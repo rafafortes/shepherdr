@@ -1,8 +1,8 @@
 // OpenCode as an agent kind: its local API (`opencode api --standalone <operationId>`: a private server for each call,
 // not OpenCode's background service; it prints {"data": ...}), its SQLite database (read only, to copy a session's final rows into a JSONL file that the
 // chat reads like any other CLI log), and the model list. Commands run with an argv array, never through a shell.
-import { Database } from 'bun:sqlite'
-import { appendFileSync, existsSync, fstatSync, mkdirSync, openSync, readSync, closeSync } from 'node:fs'
+import { Database, type Statement } from 'bun:sqlite'
+import { appendFileSync, existsSync, fstatSync, mkdirSync, openSync, readSync, closeSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -157,26 +157,93 @@ function lastSeq(file: string): number | undefined {
   }
 }
 
+/** OpenCode's database, kept open read only: opening it (and preparing a query on it) costs far more than a lookup, and
+ *  a mirror runs for every chat on every pass. One handle per file; a file replaced (a new inode) gets a new one */
+interface Open {
+  db: Database
+  ino: number
+  version: Statement<{ data_version: number }, []>
+}
+const opened = new Map<string, Open>()
+
+function handleOf(file: string): Open {
+  const ino = statSync(file).ino
+  const had = opened.get(file)
+  if (had?.ino === ino) return had
+  had?.db.close()
+  const db = new Database(file, { readonly: true })
+  const o: Open = { db, ino, version: db.query<{ data_version: number }, []>('PRAGMA data_version') }
+  opened.set(file, o)
+  return o
+}
+
+/** closes the databases kept open (a test that removes its fixture, a stop) */
+export function closeOpencodeDbs() {
+  for (const o of opened.values()) o.db.close()
+  opened.clear()
+}
+
+/** what a mirror last did for one log file: where it left off (the seq of its last line, the size and inode that file
+ *  had then) and what the database said then (its inode and data_version: it changes when another connection commits).
+ *  Nothing has changed since when all of them are as they were, so there is nothing to ask */
+interface Mirrored {
+  seq: number | undefined
+  size: number
+  ino: number
+  db: number
+  version: number
+}
+const mirrored = new Map<string, Mirrored>()
+
+/** how many mirrors asked the database and how many found nothing changed and asked nothing (what a test reads) */
+export const mirrorCount = { asked: 0, unchanged: 0 }
+
 /**
  * Copies the session's final rows that outFile does not have yet (seq above its last line's) as JSONL lines, in seq
  * order. A row is final unless it is an assistant row still streaming (no time.completed): the copy stops there, so
  * lines never change once written. Returns the number of lines appended; 0 and nothing created when there is no db.
+ * Called for every chat on every pass, so a pass that finds nothing new is a stat and a pragma: the database stays open,
+ * and the log's last seq is remembered while the log is as this mirror left it.
  */
 export function mirrorSession(sessionId: string, outFile: string, db: string = opencodeDb()): number {
   if (!existsSync(db)) return 0
-  const after = lastSeq(outFile) ?? -1
-  const rows = readRows(db, sessionId, after)
+  const o = handleOf(db)
+  const version = o.version.get()!.data_version
+  const out = statOf(outFile)
+  const was = mirrored.get(outFile)
+  const mine = was && out && was.size === out.size && was.ino === out.ino ? was : undefined
+  if (mine && mine.db === o.ino && mine.version === version) {
+    mirrorCount.unchanged++
+    return 0
+  }
+  mirrorCount.asked++
+  const after = (mine ? mine.seq : lastSeq(outFile)) ?? -1
+  const rows = readRows(o.db, sessionId, after)
   const lines: string[] = []
+  let seq = after < 0 ? undefined : after
   for (const row of rows) {
     const data = JSON.parse(row.data)
     if (row.type === 'assistant' && !data?.time?.completed) break
     lines.push(JSON.stringify({ id: row.id, type: row.type, seq: row.seq, time: row.time_created, data }))
+    seq = row.seq
   }
   if (lines.length) {
     mkdirSync(dirname(outFile), { recursive: true })
     appendFileSync(outFile, lines.join('\n') + '\n')
   }
+  const now = statOf(outFile)
+  if (now) mirrored.set(outFile, { seq, size: now.size, ino: now.ino, db: o.ino, version })
+  else mirrored.delete(outFile)
   return lines.length
+}
+
+const statOf = (f: string) => {
+  try {
+    const st = statSync(f)
+    return { size: st.size, ino: st.ino }
+  } catch {
+    return undefined
+  }
 }
 
 interface Row {
@@ -187,16 +254,11 @@ interface Row {
   data: string
 }
 
-/** the session's rows after seq `after`, in seq order; the database is opened read only and closed at once */
-function readRows(db: string, sessionId: string, after: number): Row[] {
-  const handle = new Database(db, { readonly: true })
-  try {
-    return handle
-      .query<Row, [string, number]>('SELECT id, type, seq, time_created, data FROM session_message WHERE session_id = ? AND seq > ? ORDER BY seq')
-      .all(sessionId, after)
-  } finally {
-    handle.close()
-  }
+/** the session's rows after seq `after`, in seq order */
+function readRows(handle: Database, sessionId: string, after: number): Row[] {
+  return handle
+    .query<Row, [string, number]>('SELECT id, type, seq, time_created, data FROM session_message WHERE session_id = ? AND seq > ? ORDER BY seq')
+    .all(sessionId, after)
 }
 
 /**
