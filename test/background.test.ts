@@ -382,6 +382,32 @@ describe('headless reviewers', () => {
     expect(r.runs('T-1/Agent')).toBe(true)
     expect(r.runs('T-2/Agent')).toBe(false)
   })
+  test('a process that is no headless CLI is read once, then again only while it is young', () => {
+    const proc = tmp('proc-plain')
+    const put = (pid: number, argv: string[], env: string[] = []) => {
+      mkdirSync(join(proc, String(pid)), { recursive: true })
+      writeFileSync(join(proc, String(pid), 'cmdline'), `${argv.join('\0')}\0`)
+      writeFileSync(join(proc, String(pid), 'environ'), `${env.join('\0')}\0`)
+    }
+    put(20, ['bash', '-c', 'sleep 1'])
+    const r = new Reviewers(proc)
+    const base = Date.now()
+    expect(r.runs('T-9/Agent', base)).toBe(false)
+    // the shell execs a headless CLI (same pid, new command line) while it is young: found
+    put(20, ['claude', '-p'], ['SHEPHERDR_CHAT=T-9/Agent'])
+    expect(r.runs('T-9/Agent', base + 2500)).toBe(true)
+    // an old plain one is not read again: a command line it grows later is not looked at (it never does, but the cost is
+    // what is saved on a machine with thousands)
+    put(21, ['sleep', '100'])
+    expect(r.runs('T-9/Agent', base + 5000)).toBe(true)
+    put(21, ['claude', '-p'], ['SHEPHERDR_CHAT=T-8/Agent'])
+    expect(r.runs('T-8/Agent', base + 40_000)).toBe(false)
+    // and a process that ended is forgotten: its pid may come back as another
+    rmSync(join(proc, '21'), { recursive: true })
+    expect(r.runs('T-8/Agent', base + 50_000)).toBe(false)
+    put(21, ['claude', '-p'], ['SHEPHERDR_CHAT=T-8/Agent'])
+    expect(r.runs('T-8/Agent', base + 60_000)).toBe(true)
+  })
   test('with no /proc (macOS) they are found in ps, which prints each command with its environment after it', () => {
     const ps = [
       '/usr/local/bin/codex exec -s workspace-write - TERM=xterm SHEPHERDR_CHAT=T-1/Agent HOME=/Users/e',

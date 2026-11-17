@@ -1,5 +1,6 @@
 import { TaskIds } from '../task-ids.ts'
 import { trustWorktree } from '../trust.ts'
+import { dropped, retrying, startDelays } from '../herdr.ts'
 // The tasks engine. A task is added by a coordinator and at once gets one agent, in its own git worktree and branch
 // from main. The coordinator's brief is the agent's first message and decides everything else (wait for a go, plan
 // first, ask a reviewer, merge or wait for a yes). Its status comes from that agent alone: working, waiting on you, To
@@ -612,11 +613,15 @@ export function age(t: number) {
 
 const ago = (t: number) => (age(t) === 'now' ? 'just now' : `${age(t)} ago`)
 
+// made once: toLocaleTimeString(…, options) builds a new formatter on every call, and a snapshot says the time hundreds of times
+const HM = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' })
+const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' })
+
 function clock(t: number) {
   const d = new Date(t)
   const today = new Date().toDateString() === d.toDateString()
-  const hm = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-  return today ? `today ${hm}` : `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} ${hm}`
+  const hm = HM.format(d)
+  return today ? `today ${hm}` : `${DAY.format(d)} ${hm}`
 }
 
 type Events = {
@@ -2104,7 +2109,9 @@ export class Engine extends Emitter<Events> {
       t.base ??= p.base
       this.save()
       await G.validateBase(p.path, t.base)
-      const made = await this.wt.create({ repo: p.path, name: p.name }, branch, t.base, labelOf(t)).catch((e) => {
+      // herdr dropping a call is tried again, as its agent's start does (agents.ts launch): creating the worktree finds the one a
+      // dropped try made, instead of making another
+      const made = await retrying(() => this.wt.create({ repo: p.path, name: p.name }, branch, t.base!, labelOf(t)), startDelays(), dropped).catch((e) => {
         throw new Error(`Could not make a worktree: ${(e as Error).message}`)
       })
       Object.assign(t, { branch, worktree: made.path })

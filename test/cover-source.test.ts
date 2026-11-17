@@ -389,6 +389,21 @@ describe('the shepherdr command', () => {
     expect(r.out).toContain(`doc: ${sp.dir}`)
   })
 
+  test('doctor says the stalls of its own event loop, and what ran in them', async () => {
+    const was = [src.stall.count, [...src.stall.stalls]] as const
+    try {
+      expect((await cli(['doctor'])).out).not.toContain('Event loop')
+      src.stall.count = 2
+      src.stall.stalls.push({ at: Date.now(), late: 2300, ran: [{ label: 'snapshot', ms: 900 }, { label: 'pollChats', ms: 400 }] })
+      const out = (await cli(['doctor'])).out
+      expect(out).toContain('Event loop: 2 stalls of 1.0 s or more since this server started (worst 2.3 s at')
+      expect(out).toContain('2.3 s late; slowest passes: snapshot 900 ms, pollChats 400 ms')
+    } finally {
+      src.stall.count = was[0]
+      src.stall.stalls.splice(0, src.stall.stalls.length, ...was[1])
+    }
+  })
+
   test('a plan needs its steps, and is posted on its task', async () => {
     const sp = await space('plans')
     const t = task(sp)

@@ -34,6 +34,8 @@ export class Emitter<E extends Record<string, unknown[]>> {
 
 export interface Source extends Emitter<SourceEvents> {
   readonly kind: 'live' | 'demo'
+  /** the live source's event loop watch: the server times what it holds the loop with by name (stall.ts) */
+  readonly stall?: import('./live/stall.ts').StallWatch
   snapshot(): Snapshot
   /** Owning agent status, for chat readers such as voice. */
   chatStatus?(key: string): string

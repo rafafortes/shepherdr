@@ -54,6 +54,7 @@ import { backCard, canProbe, FIRST_WAIT, FRESH, QUIET, returnMode, Returns, type
 import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvice, runAdvisor, type Advice, type AdviceQuestion, type AdviceRec } from './advisor.ts'
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
+import { StallWatch } from './stall.ts'
 import { carryOn, Retries, resetOf, type Cut, type Retry } from './retry.ts'
 import { modelsSummary, keyOf, patternName, providerWords, roleOfChat, type LiveAgent, type SummaryInput, type TaskFact } from './models-summary.ts'
 import { entryPatterns, knownOf, limitsView, type HeldFact } from './limits-view.ts'
@@ -232,8 +233,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       })
     : null
 
+  /** the event loop, watched: what held it when it stalled (stall.ts) */
+  readonly stall = new StallWatch()
+
   constructor() {
     super()
+    if (process.env.NODE_ENV !== 'test') this.stall.start()
     this.timers.push(setInterval(() => void this.drainRequestedNews(), 1000))
     this.agents.secretScope = (chat) => {
       const space = /^[^/]+\/(Agent|Reviewer)$/.test(chat) ? this.engine.task(chat.split('/')[0])?.project : this.places.find(chat)?.id === chat ? chat : undefined
@@ -245,7 +250,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (this.mirror) {
       this.followLogs()
       this.mirror.start()
-      this.timers.push(setInterval(() => this.followLogs(), 5000))
+      this.timers.push(setInterval(() => this.stall.run('followLogs', () => this.followLogs()), 5000))
       // the Everywhere defaults: the main machine's, read from its settings as they change
       this.adoptEverywhere()
       this.timers.push(setInterval(() => this.adoptEverywhere(), 3000))
@@ -326,7 +331,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // notifier (a hook of yours) may stand aside (box.ts agentEnv)
     notifiesWith(() => !!this.settings.alertCommand())
     // what waits on you, told by your alert command too (wait-alerts.ts): a look every few seconds
-    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.tellWaits(), WAIT_LOOK))
+    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.stall.run('tellWaits', () => this.tellWaits()), WAIT_LOOK))
     this.artifacts.migratePages(
       (chat) => (chat.includes('/') ? (this.engine.task(chat.split('/')[0])?.project ?? placeId.home()) : chat),
       (chat, id) => this.chats.repostPage(chat, id),
@@ -364,13 +369,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (this.places.retired.length) this.retire(this.places.retired)
     this.sayTookOver()
     // watched chats: read new log lines once a second; schedules once a minute
-    this.timers.push(setInterval(() => this.pollChats(), 1000))
+    this.timers.push(setInterval(() => this.stall.run('pollChats', () => this.pollChats()), 1000))
     // a ledger from before the harness keys: its run-outs take the keys of their chats' CLIs (usage-ledger.ts), then the feed reads on
     this.usage.migrateRunOuts((chat) => this.agents.records[chat]?.kind)
     if (process.env.NODE_ENV !== 'test') this.usageFeed.start()
     // a reply in a turn that goes on (or one only background work follows) changes no status: looked for here
-    this.timers.push(setInterval(() => Object.keys(this.agents.records).forEach((k) => this.agents.status(k) !== 'gone' && this.fresh(k)), 5000))
-    this.timers.push(setInterval(() => this.runSchedules(), 60_000))
+    this.timers.push(setInterval(() => this.stall.run('fresh', () => Object.keys(this.agents.records).forEach((k) => this.agents.status(k) !== 'gone' && this.fresh(k))), 5000))
+    this.timers.push(setInterval(() => this.stall.run('runSchedules', () => this.runSchedules()), 60_000))
     // the quota reads: each minute looks for the reads that are due (each every ten minutes), the first one at once
     if (process.env.NODE_ENV !== 'test') {
       void this.quotas.tick()
@@ -390,13 +395,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a question that waited long enough for the human goes to the advisor by itself (watchAdvice)
     if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => void this.watchAdvice().catch(() => undefined), 30_000))
     // heartbeats: looked for twice a minute, so a busy coordinator gets its own soon after its turn ends
-    this.timers.push(setInterval(() => this.heartbeat(), 30_000))
+    this.timers.push(setInterval(() => this.stall.run('heartbeat', () => this.heartbeat()), 30_000))
     this.timers.push(setInterval(() => this.emit('snapshot'), 30_000))
-    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.healthTick(), 5000))
-    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => void this.revive().catch(() => undefined), 15_000))
+    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.stall.run('healthTick', () => this.healthTick()), 5000))
+    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.stall.run('revive', () => void this.revive().catch(() => undefined)), 15_000))
     // a start that never becomes a turn: looked at twice a second past its first look, so a card or an error comes
     // within seconds of it stopping, not at the stalled notice twenty minutes later
-    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => void this.watchStarts().catch(() => undefined), 2000))
+    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.stall.run('watchStarts', () => void this.watchStarts().catch(() => undefined)), 2000))
   }
 
   /** once, after Shepherdr replaced herdr-projects here (scripts/take-over.ts): what it did, in the home space's chat */
@@ -470,6 +475,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   stop() {
+    this.stall.stop()
     this.peers?.stop()
     this.mirror?.stop()
     this.timers.forEach(clearInterval)
@@ -4659,7 +4665,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'doctor': {
         if (BOX) throw new Error(`shepherdr doctor checks every machine from the main one: run it there (${HOST} is run from it over SSH).`)
         const own = `${NAME} (this machine, the main one): herdr ${this.agents.reachable ? 'answers' : 'does not answer'}${this.browsers ? `; shared browser ${this.browsers.status().ready ? 'ready' : this.browsers.status().hint}` : ''}`
-        return [own, ...this.pushWarnings().map((warning) => `Alerts: ${warning}`), ...((await this.peers?.doctor()) ?? []), ...(await this.places.doctor())].join('\n')
+        return [own, ...this.stall.report(), ...this.pushWarnings().map((warning) => `Alerts: ${warning}`), ...((await this.peers?.doctor()) ?? []), ...(await this.places.doctor())].join('\n')
       }
       case 'secret': {
         if (a1 !== 'elevenlabs') return this.secretCommand(a1, rest, p, ctx)
@@ -5230,8 +5236,10 @@ function chatDir(chat: string) {
   return chat.replace(/[^a-zA-Z0-9_.-]+/g, '_').replace(/^\.+/, '_')
 }
 
+const HM = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' })
+
 function clock(t: number) {
-  return new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  return HM.format(new Date(t))
 }
 
 /** task add's --agent, --model and --effort: what it sets for this one task, refused when it makes no sense */

@@ -3,9 +3,9 @@
 // Every database is a fixture built here (agy-fixture.ts); SHEPHERDR_AGY_HOME points at a folder of the test's own.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { agyLogPath, agyModelId, field, fields, MIRROR_HEAD, mirrorConversation, newestConversation, stepTime, summaryTime, text } from '../server/live/agy.ts'
+import { agyLogPath, agyModelId, field, fields, MIRROR_HEAD, mirrorConversation, mirrorCount, newestConversation, stepTime, summaryTime, text } from '../server/live/agy.ts'
 import { findAgyLog, LOG_FINDERS, logKind } from '../server/live/readers/find.ts'
 import { CHAT_KINDS, chatProblem, LogTail, readerFor } from '../server/live/readers/index.ts'
 import { home, writeJson } from '../server/store.ts'
@@ -233,6 +233,42 @@ describe('the mirror of a conversation', () => {
     expect(mirrorConversation('conv-a', file)).toBe(7)
     expect(mirrorConversation('conv-a', file)).toBe(0)
     expect(lines(file)).toHaveLength(7)
+  })
+
+  test('a conversation whose database and mirror did not change is not opened again; a new step opens it', () => {
+    makeConversation(join(convs, 'conv-idle.db'), [{ idx: 0, step_type: 14, payload: userPayload('one') }])
+    const file = join(folder('quiet'), 'conv-idle.jsonl')
+    // quiet for an hour, so a write in the same clock tick as the last one cannot hide (the stamp is trusted only then)
+    const old = new Date(Date.now() - 3_600_000)
+    utimesSync(join(convs, 'conv-idle.db'), old, old)
+    expect(mirrorConversation('conv-idle', file)).toBe(1)
+    const opened = mirrorCount.opened
+    const unchanged = mirrorCount.unchanged
+    for (let i = 0; i < 3; i++) expect(mirrorConversation('conv-idle', file)).toBe(0)
+    // the first of those found it as the last one left it only now: the stamp is taken after a pass that wrote
+    expect(mirrorCount.unchanged - unchanged).toBeGreaterThanOrEqual(2)
+    expect(mirrorCount.opened - opened).toBeLessThanOrEqual(1)
+    const settled = mirrorCount.opened
+    expect(mirrorConversation('conv-idle', file)).toBe(0)
+    expect(mirrorCount.opened).toBe(settled)
+    // a step written since: its database is not as it was
+    addStep('conv-idle', { idx: 1, step_type: 14, payload: userPayload('two') })
+    expect(mirrorConversation('conv-idle', file)).toBe(1)
+    expect(mirrorCount.opened).toBe(settled + 1)
+    expect(lines(file).map((l) => l.idx)).toEqual([0, 1])
+  })
+
+  test('a mirror someone else changed is not trusted: it is read again', () => {
+    makeConversation(join(convs, 'conv-replaced.db'), [{ idx: 0, step_type: 14, payload: userPayload('one') }])
+    const file = join(folder('replaced'), 'conv-replaced.jsonl')
+    const old = new Date(Date.now() - 3_600_000)
+    utimesSync(join(convs, 'conv-replaced.db'), old, old)
+    expect(mirrorConversation('conv-replaced', file)).toBe(1)
+    expect(mirrorConversation('conv-replaced', file)).toBe(0)
+    // the log was removed: it comes again whole
+    rmSync(file)
+    expect(mirrorConversation('conv-replaced', file)).toBe(1)
+    expect(lines(file).map((l) => l.idx)).toEqual([0])
   })
 
   test('the mirror stops at the first step still running, and goes on when it is final', () => {

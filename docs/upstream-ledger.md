@@ -597,3 +597,13 @@ Upstream sends its alerts through its own push only ("no second transport", its 
 Needs you still open after a delay, and marks its agents' environment (`SHEPHERDR_NOTIFIES=1`) so a notifier inside
 their CLI can stand aside. See [settings](settings.md#alert-command).
 
+
+## Not from upstream: herdr drops a call the server sent late, built here
+
+Checked 2026-11-17 (SHE-52) on `upstream/main` (3.x) and `upstream/v2.0`: nothing for this. 3.x has no herdr socket client of
+its own (it runs on herdr-core and the Herdr desktop app), so there is no retry, no "herdr is down" against "herdr closed the
+connection" and no note of a stalled loop to port; its closest issue, #1130 (`herdr-task status` hanging 90 s while a check
+of the herdr app was busy), is another process's wait, not our loop. Ours (`server/live/herdr.ts`, `server/live/stall.ts`):
+a connection herdr closes after it was made is a passing failure, asked again (reads at once, changes once what the first try
+did has been looked for), a start that meets one is tried again by itself for about 90 s, and the server names the passes that
+held its loop when a tick comes a second late (in its log and in `shepherdr doctor`).

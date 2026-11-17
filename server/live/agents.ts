@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path'
 import { Emitter } from '../source.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
-import { herdr, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
+import { dropped, herdr, isPassing, retrying, startDelays, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
 import { agyScreenBackground, ClaudeSessions, Reviewers, screenBackground, sessionBackground, type Background } from './readers/background.ts'
 import { claudeHome, claudeLogPath, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind } from './readers/find.ts'
 import { createSession, mirrorSession, opencodeLogPath, putInstructions, switchModel } from './opencode.ts'
@@ -932,27 +932,33 @@ export class Agents extends Emitter<Events> {
       const log = carryClaudeSession(id, r.cwd)
       if (log) r.logs = [...r.logs.filter((f) => !f.endsWith(`/${id}.jsonl`)), log]
     }
-    const pane = place ? await place() : await this.paneFor(r, was)
+    // herdr dropping a call (it closes a connection it was sent too late, see herdr.ts PASSING) is no failed start: each of
+    // the two places that talk to it is tried again after a wait, a few times over a couple of minutes, and what the first
+    // made (the worktree's space, the pane) is found again, never made twice (herdr.ts changing). Only when those tries
+    // run out does the start fail, with the error
+    const pane = await this.again(r, () => (place ? place() : this.paneFor(r, was)))
     await this.closeLeftPane(r, pane)
     r.lastPane = pane
     await this.prepareOpencode(r, !!resume, changedPrompt)
     const args = this.args(r, !!resume)
     this.save()
-    // a new pane needs a moment before its shell is at the prompt
-    for (let i = 0; ; i++) {
-      try {
-        await herdr.start(r.name, r.kind, pane, args)
-        break
-      } catch (e) {
-        const code = (e as { code?: string }).code
-        if (code === 'agent_not_ready') break
-        if (i >= 8) {
-          console.error(`shepherdr: could not start ${r.name}: ${(e as Error).message}`)
-          throw e
+    await this.again(r, async () => {
+      // a new pane needs a moment before its shell is at the prompt
+      for (let i = 0; ; i++) {
+        try {
+          await herdr.start(r.name, r.kind, pane, args)
+          return
+        } catch (e) {
+          const code = (e as { code?: string }).code
+          if (code === 'agent_not_ready') return
+          if (i >= 8 || dropped(e)) {
+            console.error(`shepherdr: could not start ${r.name}: ${(e as Error).message}`)
+            throw e
+          }
+          await new Promise((res) => setTimeout(res, 750))
         }
-        await new Promise((res) => setTimeout(res, 750))
       }
-    }
+    })
     await this.refresh()
     await this.bindRoute(r, pane)
     // CLIs without an option for extra instructions get them first, hidden from the chat: Claude Code and pi take them as
@@ -963,6 +969,19 @@ export class Agents extends Emitter<Events> {
     setTimeout(() => this.discoverLog(r.key), 3000)
     setTimeout(() => this.discoverLog(r.key), 15000)
     return this.live.get(r.name) ?? null
+  }
+
+  /** `f` again after each wait of startDelays() while herdr fails it in a passing way (isPassing); said in the log */
+  private again<T>(r: AgentRecord, f: () => Promise<T>) {
+    let n = 0
+    return retrying(async () => {
+      try {
+        return await f()
+      } catch (e) {
+        if (isPassing(e)) console.error(`shepherdr: ${r.name}'s start met a passing herdr error (${(e as Error).message}); trying again (${++n})`)
+        throw e
+      }
+    }, startDelays(), dropped)
   }
 
   /**

@@ -301,9 +301,19 @@ export function runWords(at: number, zone: string, now = Date.now()) {
   return `${day} ${time(w.getUTCHours(), w.getUTCMinutes())}`
 }
 
-/** the next three runs in words, or why there are none */
+const WORDS = new Map<string, { minute: number; words: string[] }>()
+
+/** the next three runs in words, or why there are none. Settings asks for every level's rows with each snapshot and
+ *  the answer changes by the minute at most, so it is kept for the minute it was made in */
 export function nextWords(kept: string | undefined, zone: string, now = Date.now(), n = 3): string[] {
-  return nextRuns(kept, zone, now, n).map((at) => runWords(at, zone, now))
+  const key = `${kept}|${zone}|${n}`
+  const minute = Math.floor(now / 60_000)
+  const had = WORDS.get(key)
+  if (had?.minute === minute) return had.words
+  const words = nextRuns(kept, zone, now, n).map((at) => runWords(at, zone, now))
+  if (WORDS.size > 200) WORDS.clear()
+  WORDS.set(key, { minute, words })
+  return words
 }
 
 /* ---------- event rules ---------- */
