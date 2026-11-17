@@ -188,10 +188,10 @@ describe('waits and tries', () => {
 
   test('a filter refusal hands only this chat to its backup: no wait, no outage to watch', () => {
     const runs: string[] = []
-    const over: { cut: string; tries: number; reason: string; words: string; over?: boolean; lasting?: boolean }[] = []
-    const r = new Retries({ nudge: () => undefined, over: (_k: string, x: { cut: string; tries: number; reason: string; words: string; over?: boolean; lasting?: boolean }) => { over.push(x) }, changed: () => undefined, runOut: (k) => runs.push(k) }, WAITS)
+    const over: { cut: string; tries: number; reason: string; words: string; over?: boolean; lasting?: boolean; blocked?: boolean }[] = []
+    const r = new Retries({ nudge: () => undefined, over: (_k: string, x: { cut: string; tries: number; reason: string; words: string; over?: boolean; lasting?: boolean; blocked?: boolean }) => { over.push(x) }, changed: () => undefined, runOut: (k) => runs.push(k) }, WAITS)
     r.seen('F', { id: 'e1', at: Date.now(), text: 'Provider blocked the response', code: 'provider.content-filter' })
-    expect(over).toEqual([{ cut: 'e1', tries: 1, reason: "Response blocked by the provider's filter", words: 'Provider blocked the response', over: true }])
+    expect(over).toEqual([{ cut: 'e1', tries: 1, reason: "Response blocked by the provider's filter", words: 'Provider blocked the response', over: true, blocked: true }])
     expect(over[0].lasting).toBeUndefined()
     expect(r.get('F')!.due).toBeUndefined()
     expect(runs).toEqual([])

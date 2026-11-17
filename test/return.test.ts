@@ -1178,7 +1178,7 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
       Object.assign(t.t, { worktree: a.p.path, branch: 'main', base: 'main', agent: { kind: 'opencode', model: MODEL } })
       src.retries.seen(t.key, { id: 'filter-cut-1', at: Date.now(), text: 'Provider blocked the response', code: 'provider.content-filter' })
       // only this chat handed over to its backup, in its own words: no return entry, no run-out, no provider out
-      expect(t.t.tookOver).toMatchObject({ to: 'codex', why: "response blocked by the provider's filter", lasting: false })
+      expect(t.t.tookOver).toMatchObject({ to: 'codex', why: "response blocked by the provider's filter", blocked: true })
       expect(src.returns.list()).toEqual([])
       expect(out(KEY)).toBeUndefined()
       // the backup is up: the next return pass must not adopt a one-response takeover as an outage (and feed itself)
@@ -1228,6 +1228,48 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
     } finally {
       forget(s.p.name)
       setModels('opencode', undefined)
+      s.done()
+    }
+  })
+
+  test('a probe answer frees starts even when the run-out promised a reset', async () => {
+    const { setModels, opencodeList } = await import('../server/live/models.ts')
+    setModels('opencode', opencodeList([{ id: MODEL, label: MODEL, efforts: [] }], MODEL))
+    const s = await space('filter-reset')
+    try {
+      primary(s.p.name)
+      const now = Date.now()
+      // an allowance that ran out with "resets 5pm": until the primary speaks, that reset keeps new starts off it
+      src.usage.runOut({ at: now - 3_600_000, key: KEY, chat: `${s.p.name}/Agent`, role: 'task', reason: 'Out of allowance', words: 'resets 5pm', resetAt: now + 4 * 3_600_000 }, now)
+      src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: now - 3_600_000 })
+      expect(out(KEY)).toBeDefined()
+      expect(startsOn(s.p.name)).toBe('codex')
+      // it answered: the promised reset no longer holds, even though the chats are still on the backup
+      src.returns.ok('task', s.p.name, now)
+      expect(out(KEY)).toBeUndefined()
+      expect(startsOn(s.p.name)).toBe('opencode')
+    } finally {
+      forget(s.p.name)
+      setModels('opencode', undefined)
+      s.done()
+    }
+  })
+
+  test('a passing error that ran out of tries is still adopted: the watch brings its chat back', async () => {
+    const s = await nightWorld('passing-then-adopt')
+    try {
+      const a = task(s.p.name, 'claude')
+      Object.assign(a.t, { worktree: s.p.path, branch: 'main', base: 'main', agent: { kind: 'claude' } })
+      // "Provider overloaded, still after 5 tries": no note of its own, but the takeover is real
+      await s.src.engine.cantGoOn(a.t.id, 'Provider overloaded, still after 5 tries')
+      expect(a.t.tookOver).toMatchObject({ to: 'codex' })
+      expect(a.t.tookOver!.blocked).toBeUndefined()
+      Object.assign(s.src.agents.records[a.key], { kind: 'codex' })
+      await s.src.watchReturns(later())
+      // the next pass takes it in, asks the primary, and starts the chat back on it
+      expect(asked).toEqual(['claude'])
+      expect(s.started.map((x) => [x.key, x.kind])).toEqual([[a.key, 'claude']])
+    } finally {
       s.done()
     }
   })

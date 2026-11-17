@@ -51,7 +51,7 @@ const CODE_LASTING = ['unauthorized', 'bad_request', 'context_window_exceeded', 
  *  with no error object), Claude Code's `refusal` stop reason, Codex's policy errors, any provider's `content_filter`.
  *  Not a provider outage: the same context is likely blocked again, so only this task goes to its backup. */
 const CODE_CONTENT = ['provider.content-filter', 'content-filter', 'content_filter', 'content_policy', 'refusal', 'cyber_policy', 'bio_policy', 'misalignment_policy_violation']
-const WORDS_CONTENT = /\bflagged\b|content[\s_-]*(?:policy|filter|moderation)|safety[\s-]*(?:filter|settings|check|block)|(?:response|answer|request|content)\s+(?:was\s+)?blocked|blocked\s+(?:the\s+)?(?:response|answer|content)|reason:\s*content_filter/i
+const WORDS_CONTENT = /\bflagged\b|content[\s_-]*(?:policy|filter|moderation)|safety[\s-]*(?:filter|settings|check|block)|(?:response|answer)\s+(?:was\s+)?blocked|blocked\s+(?:the\s+)?(?:response|answer)|reason:\s*content_filter/i
 /** a rate limit in words, which OpenCode also types as its quota error (provider.quota) when the provider says so */
 const WORDS_RATE = /rate.?limit|too many requests/i
 const WORDS_AUTH = /\b(?:status|error|HTTP)\b[^\n]{0,12}\b40[13]\b|\b401 Unauthorized\b|please run \/login|login expired|not logged in|oauth token/i
@@ -137,8 +137,11 @@ export interface Retry {
   over?: boolean
   /** the provider itself is out (out of allowance, signed out, a model that is not there, a lasting refusal): only a
    *  backup or the human can, and its primary is watched until it answers. Unset when the tries ran out on an error
-   *  that passes by itself, and when one response was blocked by a content filter: that is no outage for other chats */
+   *  that passes by itself, and when one response was blocked by a content filter */
   lasting?: boolean
+  /** one response was refused by a filter: its chat goes to its backup, but there is no outage to watch, so this
+   *  takeover must not be adopted as one by the way back (unlike a passing error's five tries) */
+  blocked?: boolean
 }
 
 /** the line a cut-off agent is told after the wait */
@@ -194,7 +197,7 @@ export class Retries {
     }
     // a filter's refusal of one response hands only this chat to its backup: no wait (the same blocked context would
     // come back), and no lasting flag (no outage for the return watch, so its provider stays free for new starts)
-    const r: Retry = { cut: cut.id, tries, reason: e.passing ? `${e.reason}, still after ${tries} tries` : e.reason, words, over: true, ...(e.passing || e.blocked ? {} : { lasting: true }) }
+    const r: Retry = { cut: cut.id, tries, reason: e.passing ? `${e.reason}, still after ${tries} tries` : e.reason, words, over: true, ...(e.passing || e.blocked ? {} : { lasting: true }), ...(e.blocked ? { blocked: true } : {}) }
     this.set(key, r)
     if (!e.passing && runOutOf(e.reason)) this.hooks.runOut?.(key, cut, e.reason)
     // told by what comes next: a backup agent takes over, or the human hears

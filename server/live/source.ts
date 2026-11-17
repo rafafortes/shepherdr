@@ -1786,7 +1786,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const now = Date.now()
     const provider = providerOf(key)
     const mine = this.returns.list().filter((o) => providerOf(keyOf(o.primary.kind, o.primary.model)) === provider)
-    const backAt = mine.reduce((a, o) => Math.max(a, o.back ?? 0), 0) || undefined
+    // a probe that answered is as much an answer as a full way back, even when the run-out had a reset time: the
+    // provider answered now, so the reset it promised no longer holds new starts off it
+    const backAt = mine.reduce((a, o) => Math.max(a, o.back ?? 0, o.ok ?? 0), 0) || undefined
     const st = this.usage.outOf(provider, now, backAt)
     // `cut(onPrimary)` clears `ok` (return.ts): a cut on the primary puts it out again; one on its backup says nothing
     if (!st.out && !mine.some((o) => o.back === undefined && o.ok === undefined)) return undefined
@@ -2309,7 +2311,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** an agent can't go on by itself: its backup agent takes over once (a task's engine.ts cantGoOn, a coordinator's
    *  below), or it waits for you in its chat, with an alert */
   private cannotGoOn(key: string, r: Retry) {
-    if (key.includes('/')) return void this.engine.cantGoOn(key.split('/')[0], r.reason, r.lasting).catch(() => undefined)
+    if (key.includes('/')) return void this.engine.cantGoOn(key.split('/')[0], r.reason, r.lasting, r.blocked).catch(() => undefined)
     void this.coordinatorCantGoOn(key, r).catch(() => undefined)
   }
 
@@ -2341,7 +2343,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const on: Harness = backupHarness(plan.to, { kind: rec.kind, model: rec.model, effort: rec.effort })
       // the same mark as before it, with its place in the chain
       const prior = took
-      this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now(), step: plan.n, lasting: !!r.lasting })
+      this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now(), step: plan.n, ...(r.blocked ? { blocked: true } : {}) })
       // on its way from here: a restart of Shepherdr before the backup is up takes it again (resumeHandovers)
       this.agents.markHandover(key, { r, ...(prior ? { prior } : {}), at: Date.now() })
       try {
@@ -2579,7 +2581,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return r ? `${key}:cut:${r.cut}` : `${key}:took:${took ?? ''}`
   }
 
-  private adopt(role: 'task' | 'coordinator', space: string, key: string, took: { at: number; lasting?: boolean } | undefined, backups: Harness[], now: number) {
+  private adopt(role: 'task' | 'coordinator', space: string, key: string, took: { at: number; blocked?: boolean } | undefined, backups: Harness[], now: number) {
     const o = this.returns.get(role, space)
     if (o && !o.back) return
     const rec = this.agents.record(key)
@@ -2589,10 +2591,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const r = this.retries.get(key)
     const onBackup = backups.some((b) => !sameHarness(b, primary) && sameHarness(ran, b))
     const cut = !!r?.over && !!r.lasting && (sameHarness(ran, primary) || onBackup)
-    // still on a backup that took it over because its provider ran out (the backup may work: it goes back once the
-    // primary answers). A takeover for one blocked response is not an outage: nothing is watched, and its provider is
-    // never out for other chats. `lasting` is absent on marks written before this distinction, which were all outages.
-    const away = !!took && onBackup && took.lasting !== false
+    // still on a backup that took it over (the backup may work: it goes back once the primary answers). That covers
+    // an error that passed its five tries too: no note of its own, so only this adoption brings it back. A one-response
+    // filter refusal is not an outage though: its chat stays on the backup and its provider stays free for new starts.
+    const away = !!took && onBackup && !took.blocked
     if (!cut && !away) return
     const seen = this.cutMark(key, cut ? r : undefined, cut ? undefined : took?.at)
     if (this.adopted.has(seen)) return
