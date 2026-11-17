@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path'
 import { Emitter } from '../source.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
-import { herdr, isPassing, retrying, startDelays, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
+import { dropped, herdr, isPassing, retrying, startDelays, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
 import { agyScreenBackground, ClaudeSessions, Reviewers, screenBackground, sessionBackground, type Background } from './readers/background.ts'
 import { claudeHome, claudeLogPath, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind } from './readers/find.ts'
 import { createSession, mirrorSession, opencodeLogPath, putInstructions, switchModel } from './opencode.ts'
@@ -951,7 +951,7 @@ export class Agents extends Emitter<Events> {
         } catch (e) {
           const code = (e as { code?: string }).code
           if (code === 'agent_not_ready') return
-          if (i >= 8 || isPassing(e)) {
+          if (i >= 8 || dropped(e)) {
             console.error(`shepherdr: could not start ${r.name}: ${(e as Error).message}`)
             throw e
           }
@@ -981,7 +981,7 @@ export class Agents extends Emitter<Events> {
         if (isPassing(e)) console.error(`shepherdr: ${r.name}'s start met a passing herdr error (${(e as Error).message}); trying again (${++n})`)
         throw e
       }
-    }, startDelays())
+    }, startDelays(), dropped)
   }
 
   /**

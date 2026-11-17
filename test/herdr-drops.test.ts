@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { socketHerdr } from './socket-herdr.ts'
 
-const { herdr, HerdrError, isPassing, rpc, retrying } = await import('../server/live/herdr.ts')
+const { dropped, herdr, HerdrError, isPassing, rpc, retrying } = await import('../server/live/herdr.ts')
 
 let h: ReturnType<typeof socketHerdr>
 beforeEach(async () => {
@@ -202,8 +202,8 @@ describe('a change dropped is asked again only if it did not happen', () => {
     const w = h.space('w', '/x')
     await herdr.start('shep-a', 'pi', w.root_pane.pane_id, [])
     h.fail('agent.prompt', 'drop-after')
-    await herdr.prompt('shep-a', 'do the thing')
-    expect(h.panes[0].text).toBe('do the thing\n')
+    await herdr.prompt('shep-a', 'please do the thing now')
+    expect(h.panes[0].text).toBe('please do the thing now\n')
     expect(h.count('agent.prompt')).toBe(1)
   })
 
@@ -211,9 +211,32 @@ describe('a change dropped is asked again only if it did not happen', () => {
     const w = h.space('w', '/x')
     await herdr.start('shep-a', 'pi', w.root_pane.pane_id, [])
     h.fail('agent.prompt', 'drop')
-    await herdr.prompt('shep-a', 'do the thing')
-    expect(h.panes[0].text).toBe('do the thing\n')
+    await herdr.prompt('shep-a', 'please do the thing now')
+    expect(h.panes[0].text).toBe('please do the thing now\n')
     expect(h.count('agent.prompt')).toBe(2)
+  })
+
+  test('a short prompt, which may be on the screen already, is not guessed at: it fails as it did, sent once', async () => {
+    const w = h.space('w', '/x')
+    await herdr.start('shep-a', 'pi', w.root_pane.pane_id, [])
+    h.fail('agent.prompt', 'drop')
+    const e = await fails(() => herdr.prompt('shep-a', 'yes'))
+    expect(isPassing(e)).toBe(true)
+    expect(h.count('agent.prompt')).toBe(1)
+  })
+
+  test('a change that timed out is not asked again: herdr may still be doing it', async () => {
+    expect(dropped(new HerdrError('timeout', 'x'))).toBe(false)
+    expect(dropped(new HerdrError('closed', 'x'))).toBe(true)
+    // nor does a start retry on it, nor a worktree
+    let n = 0
+    await expect(
+      retrying(async () => {
+        n++
+        throw new HerdrError('timeout', 'x')
+      }, [1, 1], dropped),
+    ).rejects.toThrow('x')
+    expect(n).toBe(1)
   })
 
   test('a long prompt, which a screen may fold, is not guessed at: it fails as it did, sent once', async () => {

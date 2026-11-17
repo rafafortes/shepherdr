@@ -1,6 +1,6 @@
 import { TaskIds } from '../task-ids.ts'
 import { trustWorktree } from '../trust.ts'
-import { retrying, startDelays } from '../herdr.ts'
+import { dropped, retrying, startDelays } from '../herdr.ts'
 // The tasks engine. A task is added by a coordinator and at once gets one agent, in its own git worktree and branch
 // from main. The coordinator's brief is the agent's first message and decides everything else (wait for a go, plan
 // first, ask a reviewer, merge or wait for a yes). Its status comes from that agent alone: working, waiting on you, To
@@ -2111,7 +2111,7 @@ export class Engine extends Emitter<Events> {
       await G.validateBase(p.path, t.base)
       // herdr dropping a call is tried again, as its agent's start does (agents.ts launch): creating the worktree finds the one a
       // dropped try made, instead of making another
-      const made = await retrying(() => this.wt.create({ repo: p.path, name: p.name }, branch, t.base!, labelOf(t)), startDelays()).catch((e) => {
+      const made = await retrying(() => this.wt.create({ repo: p.path, name: p.name }, branch, t.base!, labelOf(t)), startDelays(), dropped).catch((e) => {
         throw new Error(`Could not make a worktree: ${(e as Error).message}`)
       })
       Object.assign(t, { branch, worktree: made.path })

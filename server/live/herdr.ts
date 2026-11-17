@@ -48,16 +48,19 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** `f`, and again after each delay while it fails in a passing way (isPassing): its last failure when they are used up.
  *  Anything else fails at once */
-export async function retrying<T>(f: () => Promise<T>, delays: number[] = retryDelays()): Promise<T> {
+export async function retrying<T>(f: () => Promise<T>, delays: number[] = retryDelays(), retry: (e: unknown) => boolean = isPassing): Promise<T> {
   for (let i = 0; ; i++) {
     try {
       return await f()
     } catch (e) {
-      if (!isPassing(e) || i >= delays.length) throw e
+      if (!retry(e) || i >= delays.length) throw e
       await sleep(delays[i])
     }
   }
 }
+
+/** a passing failure that is a connection closed, not our own wait running out: herdr may still be doing what a change asked, so a change is not asked again after the wait */
+export const dropped = (e: unknown) => isPassing(e) && (e as HerdrError).code !== 'timeout'
 
 let n = 0
 
@@ -249,7 +252,7 @@ async function changing<T>(attempt: () => Promise<T>, took: () => Promise<T | un
     try {
       return await attempt()
     } catch (e) {
-      if (!isPassing(e) || i >= delays.length) throw e
+      if (!dropped(e) || i >= delays.length) throw e
       await sleep(delays[i])
       let done: T | undefined
       try {
@@ -268,8 +271,9 @@ const NOT_FOUND = /not[_ ]found/i
 const squeeze = (t: string) => t.replace(/\s+/g, '')
 
 /** what a prompt that may not have gone in is looked for on: the pane's last lines. The text is only looked for when it is
- *  short: a long paste is shown folded by some CLIs ("[Pasted text +20 lines]"), so it cannot be told from one that never came */
+ *  distinctive (SEEN_MIN: "yes" is on a screen already) and short: a long paste is shown folded by some CLIs ("[Pasted text +20 lines]"), so it cannot be told from one that never came */
 const SEEN_LINES = 80
+const SEEN_MIN = 20
 const SEEN_MAX = 500
 
 export const herdr = {
@@ -314,7 +318,7 @@ export const herdr = {
     changing(
       () => once('agent.prompt', { target, text }, 20_000),
       async () => {
-        if (text.length > SEEN_MAX) throw new Error('too long to tell')
+        if (text.length < SEEN_MIN || text.length > SEEN_MAX) throw new Error('too short or too long to tell')
         const agent = await herdr.agent(target)
         const seen = squeeze(await herdr.read(agent.pane_id, 'text', SEEN_LINES))
         return seen.includes(squeeze(text)) ? {} : undefined
