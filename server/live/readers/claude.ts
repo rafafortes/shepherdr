@@ -353,6 +353,14 @@ export class ClaudeReader implements Reader {
         }
         // the reply's text line carries the final stop reason; turn_duration (below) covers replies without text
         if (m.stop_reason === 'end_turn' && texts.length) turnEnd(`turn-${id}`, t)
+        // a safety classifier's refusal is a normal HTTP 200 with stop_reason "refusal" and stop_details (not an API
+        // error): the same context would be refused again, so it cuts the turn off like a provider error. retry.ts
+        // reads the code and gives it its own words, never a provider outage
+        if (m.stop_reason === 'refusal') {
+          const said = typeof m.stop_details?.explanation === 'string' && m.stop_details.explanation.trim() ? m.stop_details.explanation.trim() : "Response blocked by the provider's filter"
+          out.push({ kind: 'error', id: `error-${l.uuid ?? id}`, at: t, text: said, code: 'refusal' })
+          turnEnd(`turn-${id}`, t)
+        }
         // the API failed for good (Claude Code retried it already): the turn is over
         if (l.isApiErrorMessage) {
           out.push({ kind: 'error', id: `error-${l.uuid ?? id}`, at: t, text: texts.join('\n'), code: typeof l.error === 'string' ? l.error : undefined, status: typeof l.apiErrorStatus === 'number' ? l.apiErrorStatus : undefined })

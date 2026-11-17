@@ -1146,3 +1146,84 @@ describe('OpenCode as the primary: asked and gone back to like the others', () =
     }
   })
 })
+
+describe('a filter refusal and a probe answer do not keep new starts off the primary', () => {
+  const MODEL = 'hy4-flash-free'
+  const KEY = `opencode/${MODEL}`
+  /** the source's own outNow, which chainOptions reads for every new start */
+  const out = (key: string) => (src as unknown as { outNow(k: string): { until?: string } | undefined }).outNow(key)
+  /** which harness a new task of that space starts on, under the caps as they are now */
+  const startsOn = (space: string) => {
+    const c = src.engine.decide(space, src.engine.chainOptions([{ h: { kind: 'opencode', model: MODEL } }, { h: { kind: 'codex' } }]))
+    return 'harness' in c ? c.harness.h.kind : 'wait'
+  }
+  /** Settings name OpenCode on hy4 for tasks of the space, with a Codex backup */
+  const primary = (name: string) => {
+    expect(src.settings.set('task.agent', 'OpenCode', { space: name }).ok).toBe(true)
+    expect(src.settings.set('task.model', MODEL, { space: name }).ok).toBe(true)
+    expect(src.settings.set('task.fallback', 'codex', { space: name }).ok).toBe(true)
+  }
+  const forget = (name: string) => { for (const k of ['task.agent', 'task.model', 'task.fallback']) src.settings.set(k, null, { space: name }) }
+
+  test('a content-filter cut on the primary leaves no outage: new tasks in two spaces start on the primary', async () => {
+    const { setModels, opencodeList } = await import('../server/live/models.ts')
+    setModels('opencode', opencodeList([{ id: MODEL, label: MODEL, efforts: [] }], MODEL))
+    const a = await space('filter-a')
+    const b = await space('filter-b')
+    try {
+      primary(a.p.name)
+      primary(b.p.name)
+      // POL-437 at 11:19: one response of the primary was blocked by the provider's filter
+      const t = task(a.p.name, 'opencode')
+      Object.assign(t.t, { worktree: a.p.path, branch: 'main', base: 'main', agent: { kind: 'opencode', model: MODEL } })
+      src.retries.seen(t.key, { id: 'filter-cut-1', at: Date.now(), text: 'Provider blocked the response', code: 'provider.content-filter' })
+      // only this chat handed over to its backup, in its own words: no return entry, no run-out, no provider out
+      expect(t.t.tookOver).toMatchObject({ to: 'codex', why: "response blocked by the provider's filter" })
+      expect(src.returns.list()).toEqual([])
+      expect(out(KEY)).toBeUndefined()
+      // a new task in the same space, and one in another space on the same provider, both start on the primary
+      expect(startsOn(a.p.name)).toBe('opencode')
+      expect(startsOn(b.p.name)).toBe('opencode')
+    } finally {
+      forget(a.p.name)
+      forget(b.p.name)
+      setModels('opencode', undefined)
+      b.done()
+      a.done()
+    }
+  })
+
+  test('a probe answer lets new tasks start on the primary while a chat is still on the backup', async () => {
+    const { setModels, opencodeList } = await import('../server/live/models.ts')
+    setModels('opencode', opencodeList([{ id: MODEL, label: MODEL, efforts: [] }], MODEL))
+    const s = await space('filter-probe')
+    try {
+      primary(s.p.name)
+      const onBackup = task(s.p.name, 'codex', { from: 'opencode' })
+      src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'signed out', at: Date.now() - FIRST_WAIT * 2 })
+      // unanswered: its provider is out, and a new task goes to the backup
+      expect(out(KEY)).toEqual({})
+      expect(startsOn(s.p.name)).toBe('codex')
+      // the primary answered a probe: no cut on it since, so new starts go back to it while the chat stays on its backup
+      src.returns.ok('task', s.p.name)
+      expect(src.returns.get('task', s.p.name)).toMatchObject({ ok: expect.any(Number), oks: 1 })
+      expect(src.returns.get('task', s.p.name)!.back).toBeUndefined()
+      expect(out(KEY)).toBeUndefined()
+      expect(startsOn(s.p.name)).toBe('opencode')
+      expect(src.agents.records[onBackup.key]).toMatchObject({ kind: 'codex' })
+      // a cut on the backup says nothing of the primary
+      src.returns.cut('task', s.p.name, Date.now(), { key: onBackup.key, onPrimary: false })
+      expect(out(KEY)).toBeUndefined()
+      expect(startsOn(s.p.name)).toBe('opencode')
+      // a cut on the primary clears the answer: its provider is out for new starts again
+      src.returns.cut('task', s.p.name, Date.now(), { key: 'other/Agent', onPrimary: true })
+      expect(src.returns.get('task', s.p.name)!.ok).toBeUndefined()
+      expect(out(KEY)).toEqual({})
+      expect(startsOn(s.p.name)).toBe('codex')
+    } finally {
+      forget(s.p.name)
+      setModels('opencode', undefined)
+      s.done()
+    }
+  })
+})

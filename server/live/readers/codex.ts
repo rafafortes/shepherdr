@@ -190,6 +190,8 @@ export class CodexReader implements Reader {
       } else if (l.type === 'event_msg' && p.type === 'task_started') {
         out.push({ kind: 'turn-start', id: `start-${p.turn_id ?? offset}`, at: t })
       } else if (l.type === 'event_msg' && (p.type === 'task_complete' || p.type === 'turn_aborted')) {
+        // a policy refusal arrives here too: codex_error_info names it (cyber_policy, bio_policy, …), and a
+        // content_filter stop says so in the message; retry.ts reads both as a filter, not a provider run-out
         const err = p.error
         if (err && typeof err === 'object') out.push({ kind: 'error', id: `error-${p.turn_id ?? offset}`, at: t, text: String(err.message ?? ''), code: typeof err.codex_error_info === 'string' ? err.codex_error_info : undefined })
         out.push({ kind: 'turn-end', id: `turn-${p.turn_id ?? offset}`, at: t })

@@ -257,6 +257,16 @@ describe('claude reader', () => {
     expect(said(a)).toMatchObject([{ kind: 'agent', id: 'msg_S', text: 'Part one.' }])
     expect(said(b)).toMatchObject([{ kind: 'agent', id: 'msg_S', text: 'Part one.\n\nPart two.' }])
   })
+
+  test('a safety classifier refusal (stop_reason refusal) is an error that ends the turn', () => {
+    const line = cassistant('a1', 'msg_R', { type: 'text', text: 'I cannot help with that.' }, 'refusal')
+    const ev = parse('claude', [
+      cuser('u1', 'Write the exploit', typed),
+      { ...line, message: { ...line.message, stop_details: { type: 'refusal', category: 'cyber', explanation: 'Declined: could enable cyber harm.' } } },
+    ])
+    expect(ev.filter((e) => e.kind === 'error')).toEqual([{ kind: 'error', id: 'error-a1', at: expect.any(Number), text: 'Declined: could enable cyber harm.', code: 'refusal' }])
+    expect(ev.findLastIndex((e) => e.kind === 'turn-end')).toBeGreaterThan(ev.findIndex((e) => e.kind === 'error'))
+  })
 })
 
 /* ---------- Codex ---------- */

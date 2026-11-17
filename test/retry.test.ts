@@ -78,7 +78,26 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(providerError('Streaming response failed: capacity is temporarily limited', 'provider.rate-limit', 200)).toEqual({ passing: true, reason: 'Rate limited' })
     expect(providerError('Upstream failed', 'provider.internal', 500)).toEqual({ passing: true, reason: 'Provider server error' })
     expect(providerError('Function not found', 'provider.invalid-request', 404)).toEqual({ passing: false, reason: 'Provider refused it' })
-    expect(providerError('Blocked by content filter', 'provider.content-filter')).toEqual({ passing: false, reason: 'Provider refused it' })
+    expect(providerError('Blocked by content filter', 'provider.content-filter')).toEqual({ passing: false, reason: "Response blocked by the provider's filter", blocked: true })
+  })
+
+  test("one response a content or safety filter refused is not a provider outage, in every CLI's own words", () => {
+    const blocked = { passing: false, reason: "Response blocked by the provider's filter", blocked: true }
+    // OpenCode: a `content-filter` finish with `provider.content-filter`
+    expect(ending('opencode-content-filter-made')).toEqual(blocked)
+    // Claude Code: a normal 200 with stop_reason "refusal" and stop_details (Anthropic's safety classifier)
+    expect(ending('claude-refusal-made')).toEqual(blocked)
+    // Codex: a policy error in codex_error_info, and a content_filter stop in its message
+    expect(ending('codex-policy-made')).toEqual(blocked)
+    expect(ending('codex-content-filter-made')).toEqual(blocked)
+    // pi and agy have no refusal code of their own: the provider's words reach us in their error
+    expect(ending('pi-content-filter-made')).toEqual(blocked)
+    expect(ending('agy-safety-made')).toEqual(blocked)
+    // a `content-filter` finish with no error object is still a filter, by its own words
+    expect(providerError('content-filter')).toEqual(blocked)
+    // a refusal that really is the provider's keeps its own words, and a filter is no run-out
+    expect(providerError('bad request', 'invalid_request', 400)).toEqual({ passing: false, reason: 'Provider refused it' })
+    expect(runOutOf("Response blocked by the provider's filter")).toBe(false)
   })
 
   test('a reset given as an ISO time is shown in this machine\'s time, with its zone name', () => {
@@ -164,6 +183,18 @@ describe('waits and tries', () => {
     r.seen('D', cut('e1', 'Insufficient account funds', 402))
     r.seen('E', cut('e2', 'bad request', 400))
     expect(runs).toEqual([{ key: 'D', id: 'e1', reason: 'Out of credit' }])
+    r.stop()
+  })
+
+  test('a filter refusal hands only this chat to its backup: no wait, no outage to watch', () => {
+    const runs: string[] = []
+    const over: { cut: string; tries: number; reason: string; words: string; over?: boolean; lasting?: boolean }[] = []
+    const r = new Retries({ nudge: () => undefined, over: (_k: string, x: { cut: string; tries: number; reason: string; words: string; over?: boolean; lasting?: boolean }) => { over.push(x) }, changed: () => undefined, runOut: (k) => runs.push(k) }, WAITS)
+    r.seen('F', { id: 'e1', at: Date.now(), text: 'Provider blocked the response', code: 'provider.content-filter' })
+    expect(over).toEqual([{ cut: 'e1', tries: 1, reason: "Response blocked by the provider's filter", words: 'Provider blocked the response', over: true }])
+    expect(over[0].lasting).toBeUndefined()
+    expect(r.get('F')!.due).toBeUndefined()
+    expect(runs).toEqual([])
     r.stop()
   })
 })

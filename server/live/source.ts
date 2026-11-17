@@ -1779,14 +1779,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** whether a model key's provider is out now, and until when: its run-outs (the Summary reads them the same way, for every
-   *  model of the provider) and the return watch's outage that has not seen its primary back yet. The choice skips it */
+   *  model of the provider) and the return watch's outage that has not seen its primary back yet. A primary that answered
+   *  a probe (`ok`, with no cut on it since) is back for new starts while the chats still on its backup go back, so an
+   *  outage cannot keep itself open through the tasks it put there. The choice skips the provider only when it is out. */
   private outNow(key: string): { until?: string } | undefined {
     const now = Date.now()
     const provider = providerOf(key)
     const mine = this.returns.list().filter((o) => providerOf(keyOf(o.primary.kind, o.primary.model)) === provider)
     const backAt = mine.reduce((a, o) => Math.max(a, o.back ?? 0), 0) || undefined
     const st = this.usage.outOf(provider, now, backAt)
-    if (!st.out && !mine.some((o) => o.back === undefined)) return undefined
+    // `cut(onPrimary)` clears `ok` (return.ts): a cut on the primary puts it out again; one on its backup says nothing
+    if (!st.out && !mine.some((o) => o.back === undefined && o.ok === undefined)) return undefined
     return st.out && st.last?.resetAt !== undefined ? { until: clockWords(st.last.resetAt, now, this.settings.zone()) } : {}
   }
 
