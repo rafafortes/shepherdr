@@ -3,8 +3,10 @@
 // carry on after 1, 2, 4 and 8 minutes, so five tries over fifteen minutes, and only then does the human hear. Errors
 // waiting can't fix (signed out, out of allowance, a model that isn't there, anything not recognised) go to a task's or
 // a coordinator's backup agent at once where one is set (engine.ts cantGoOn, source.ts cannotGoOn), and otherwise to the
-// human. Each CLI's log records the error (readers/), and this
-// decides what it means. From herdr-projects' docs/provider-errors.md, without the weight.
+// human. A content or safety filter refusing one response is different: the provider is fine for every other chat, so
+// that one task goes to its backup but no outage is kept and no provider is marked out (return.ts). Each CLI's log
+// records the error (readers/), and this decides what it means. From herdr-projects' docs/provider-errors.md, without
+// the weight.
 import { readJson, writeJson } from '../store.ts'
 import { hidden } from './agents.ts'
 
@@ -22,6 +24,8 @@ export interface ProviderError {
   passing: boolean
   /** in a few words, for a status line: "Provider overloaded", "Out of allowance" */
   reason: string
+  /** one response was refused by a content/safety filter: no provider outage, nothing for the return watch */
+  blocked?: boolean
 }
 
 const CODE_PASSING: Record<string, string> = {
@@ -42,7 +46,12 @@ const CODE_PASSING: Record<string, string> = {
   'provider.internal': 'Provider server error',
   'provider.invalid-output': 'Provider answer cut short',
 }
-const CODE_LASTING = ['unauthorized', 'bad_request', 'context_window_exceeded', 'usage_limit_exceeded', 'sandbox_error', 'authentication_failed', 'billing_error', 'invalid_request', 'model_not_found', 'max_output_tokens', 'provider.auth', 'provider.no-route', 'provider.content-filter', 'provider.invalid-request', 'provider.unsupported-operation', 'content-filter']
+const CODE_LASTING = ['unauthorized', 'bad_request', 'context_window_exceeded', 'usage_limit_exceeded', 'sandbox_error', 'authentication_failed', 'billing_error', 'invalid_request', 'model_not_found', 'max_output_tokens', 'provider.auth', 'provider.no-route', 'provider.invalid-request', 'provider.unsupported-operation']
+/** one response a content/safety filter refused: OpenCode's `provider.content-filter` (also a `content-filter` finish
+ *  with no error object), Claude Code's `refusal` stop reason, Codex's policy errors, any provider's `content_filter`.
+ *  Not a provider outage: the same context is likely blocked again, so only this task goes to its backup. */
+const CODE_CONTENT = ['provider.content-filter', 'content-filter', 'content_filter', 'content_policy', 'refusal', 'cyber_policy', 'bio_policy', 'misalignment_policy_violation']
+const WORDS_CONTENT = /\bflagged\b|content[\s_-]*(?:policy|filter|moderation)|safety[\s-]*(?:filter|settings|check|block)|(?:response|answer)\s+(?:was\s+)?blocked|blocked\s+(?:the\s+)?(?:response|answer)|reason:\s*content_filter/i
 /** a rate limit in words, which OpenCode also types as its quota error (provider.quota) when the provider says so */
 const WORDS_RATE = /rate.?limit|too many requests/i
 const WORDS_AUTH = /\b(?:status|error|HTTP)\b[^\n]{0,12}\b40[13]\b|\b401 Unauthorized\b|please run \/login|login expired|not logged in|oauth token/i
@@ -50,7 +59,7 @@ const WORDS_ALLOWANCE = /usage limit|(?<!rate.?)limit reached|hit your [\w ]*lim
 /** a prepaid balance that ran out: the provider says so with 402 Payment Required, or in these words */
 const WORDS_CREDIT = /insufficient (?:account )?(?:funds|balance|credits?)|out of credits?|credit balance|payment required/i
 // agy's words for a model it does not have: "invalid model selection", "is not recognized as a known model"
-const WORDS_LASTING = /not supported|unsupported|does not exist|may not exist|not found|unknown (?:provider|model)|invalid|context (?:window|length)|flagged|content policy|not recognized as a known model/i
+const WORDS_LASTING = /not supported|unsupported|does not exist|may not exist|not found|unknown (?:provider|model)|invalid|context (?:window|length)|not recognized as a known model/i
 const WORDS_PASSING: [RegExp, string][] = [
   [/at capacity/i, 'Model at capacity'],
   [/rate.?limit|too many requests|\b429\b/i, 'Rate limited'],
@@ -99,6 +108,9 @@ export function providerError(words: string, code = '', status = 0): ProviderErr
   if (status === 402 || WORDS_CREDIT.test(words)) return { passing: false, reason: `Out of credit${until(words)}` }
   // OpenCode's quota error is its plan's or its free models' allowance, unless the provider says it is a rate limit
   if (c === 'usage_limit_exceeded' || c === 'billing_error' || (c === 'provider.quota' && !WORDS_RATE.test(words)) || WORDS_ALLOWANCE.test(words)) return { passing: false, reason: `Out of allowance${until(words)}` }
+  // a filter refusing one response is no outage of the provider: its own task goes to its backup (no return entry),
+  // never a provider other chats are kept off. Waiting would only feed the same blocked context back to the same model.
+  if (CODE_CONTENT.includes(c) || WORDS_CONTENT.test(words)) return { passing: false, reason: "Response blocked by the provider's filter", blocked: true }
   if (CODE_LASTING.includes(c) || (status >= 400 && status < 500 && status !== 408 && status !== 429) || WORDS_LASTING.test(words)) return { passing: false, reason: c === 'context_window_exceeded' || /context (?:window|length)|too long/i.test(words) ? 'Context window full' : c === 'model_not_found' || c === 'provider.no-route' || /model/i.test(words) ? 'Model not available' : 'Provider refused it' }
   if (CODE_PASSING[c]) return { passing: true, reason: said ?? CODE_PASSING[c] }
   if (status === 429 || c === 'rate_limit') return { passing: true, reason: 'Rate limited' }
@@ -123,9 +135,13 @@ export interface Retry {
   nudged?: number
   /** given up: what waiting can't fix, or still cut off after the last try. The human (or a backup agent) is next */
   over?: boolean
-  /** waiting can't fix it (out of allowance, signed out, a model that is not there, a refusal): only a backup or the
-   *  human can. Unset when the tries ran out on an error that passes by itself */
+  /** the provider itself is out (out of allowance, signed out, a model that is not there, a lasting refusal): only a
+   *  backup or the human can, and its primary is watched until it answers. Unset when the tries ran out on an error
+   *  that passes by itself, and when one response was blocked by a content filter */
   lasting?: boolean
+  /** one response was refused by a filter: its chat goes to its backup, but there is no outage to watch, so this
+   *  takeover must not be adopted as one by the way back (unlike a passing error's five tries) */
+  blocked?: boolean
 }
 
 /** the line a cut-off agent is told after the wait */
@@ -179,7 +195,9 @@ export class Retries {
       this.hooks.changed(key)
       return
     }
-    const r: Retry = { cut: cut.id, tries, reason: e.passing ? `${e.reason}, still after ${tries} tries` : e.reason, words, over: true, ...(e.passing ? {} : { lasting: true }) }
+    // a filter's refusal of one response hands only this chat to its backup: no wait (the same blocked context would
+    // come back), and no lasting flag (no outage for the return watch, so its provider stays free for new starts)
+    const r: Retry = { cut: cut.id, tries, reason: e.passing ? `${e.reason}, still after ${tries} tries` : e.reason, words, over: true, ...(e.passing || e.blocked ? {} : { lasting: true }), ...(e.blocked ? { blocked: true } : {}) }
     this.set(key, r)
     if (!e.passing && runOutOf(e.reason)) this.hooks.runOut?.(key, cut, e.reason)
     // told by what comes next: a backup agent takes over, or the human hears

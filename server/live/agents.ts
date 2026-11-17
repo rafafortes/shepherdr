@@ -127,7 +127,7 @@ export interface AgentRecord {
   startError?: string
   /** a backup agent went in once, where the agent it backs up can't go on (source.ts cannotGoOn): another one waits for
    *  the human, so a backup that keeps failing never loops. A task's own record keeps the same mark (TaskRec.tookOver) */
-  tookOver?: { from: string; to: string; why: string; at: number; step?: number }
+  tookOver?: { from: string; to: string; why: string; at: number; step?: number; blocked?: boolean }
   /** a coordinator's takeover on its way (source.ts coordinatorCantGoOn): the cut-off it answers and its takeover before
    *  this one. Kept until the backup is up or it failed: a restart of Shepherdr in between takes it again */
   handover?: { r: { cut: string; tries: number; reason: string; words: string; over?: boolean; lasting?: boolean }; prior?: AgentRecord['tookOver']; at: number }

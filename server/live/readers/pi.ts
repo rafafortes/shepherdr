@@ -79,7 +79,8 @@ export class PiReader implements Reader {
           const model = typeof m.model === 'string' && m.model ? (provider && !m.model.startsWith(`${provider}/`) ? `${provider}/${m.model}` : m.model) : undefined
           const cost = typeof u?.cost?.total === 'number' && u.cost.total >= 0 ? u.cost.total : undefined
           if (tokens > 0) out.push({ kind: 'usage', id: `usage-${id}`, at: t, tokens, ...(model ? { model } : {}), ...(cost !== undefined ? { cost } : {}) })
-          // toolUse means the agent goes on; stop, aborted, error and length all end the turn
+          // toolUse means the agent goes on; stop, aborted, error and length all end the turn. pi has no refusal code
+          // of its own: a provider's content or safety filter arrives as an error with the provider's own words
           if (m.stopReason && m.stopReason !== 'toolUse') {
             if (m.stopReason === 'error') out.push({ kind: 'error', id: `error-${id}`, at: t, text: String(m.errorMessage ?? '') })
             this.ended.add(file)

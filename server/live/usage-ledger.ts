@@ -131,14 +131,15 @@ export const providerOf = (key: string) => (key.includes('/') ? key.slice(0, key
 /** a model key's model id (the rest after the provider) */
 export const modelOf = (key: string) => (key.includes('/') ? key.slice(key.indexOf('/') + 1) : '')
 
-/** whether a provider or model is out right now. A known reset decides (out until it). Without one, out until the
- *  return watch says its primary is back (backAt, after the run-out), or until a call of it went through after the
- *  run-out (successAfter). The last run-out is the one that counts. */
+/** whether a provider or model is out right now. An answer after the run-out (the return watch's back or a probe's
+ *  ok, passed as backAt) decides first: the provider speaks for itself now, whatever reset it had promised. Else a
+ *  known reset decides (out until it), and without one it is out until a call of it went through after the run-out
+ *  (successAfter). The last run-out is the one that counts. */
 export function outState(runOuts: RunOut[], successAfter: (at: number) => boolean, now: number, backAt?: number): { out: boolean; last?: RunOut } {
   const last = runOuts.reduce<RunOut | undefined>((a, r) => (!a || r.at > a.at ? r : a), undefined)
   if (!last) return { out: false }
-  if (last.resetAt !== undefined) return { out: last.resetAt > now, last }
   if (backAt !== undefined && backAt >= last.at) return { out: false, last }
+  if (last.resetAt !== undefined) return { out: last.resetAt > now, last }
   return { out: !successAfter(last.at), last }
 }
 

@@ -151,7 +151,7 @@ export interface TaskRec {
   /** what its agent last said of its own progress (shepherdr status): kept while it works or waits on you */
   report?: Reported
   /** its backup agent took over once its agent couldn't go on (retry.ts): from which CLI, to which, and why */
-  tookOver?: { from: string; to: string; why: string; at: number; step?: number }
+  tookOver?: { from: string; to: string; why: string; at: number; step?: number; blocked?: boolean }
   /** a takeover on its way (cantGoOn): why its agent couldn't go on, whether that lasts, and its takeover before this one.
    *  Kept until the backup is up or the takeover failed: a restart of Shepherdr in between finds it, and takes it again
    *  (resumeTakeovers) */
@@ -2606,7 +2606,7 @@ export class Engine extends Emitter<Events> {
    * takes over in the same worktree and branch, with the brief and what was done so far. Once the last one can't go on
    * either, or none is set, it waits for you.
    */
-  async cantGoOn(id: string, why: string, lasting = false) {
+  async cantGoOn(id: string, why: string, lasting = false, blocked = false) {
     const t = this.task(id)
     if (!t || !this.mayRetry(this.key(t)) || this.handing.has(t.id)) return
     const key = this.key(t)
@@ -2657,7 +2657,8 @@ export class Engine extends Emitter<Events> {
     this.handing.add(t.id)
     // on its way from here: a restart before the backup is up takes it again (resumeTakeovers)
     t.handover = { why, lasting, ...(t.tookOver ? { prior: t.tookOver } : {}), at: Date.now() }
-    t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now(), step: plan.n }
+    // kept on the mark: the way back adopts an open takeover as an outage, but a one-response filter refusal is none
+    t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now(), step: plan.n, ...(blocked ? { blocked: true } : {}) }
     this.save()
     // Settings' Backup model and effort (this task's own first), or else the task's own: its CLI may not take them, in
     // which case it starts on its own default. Its run counts there from now on: another cut-off a moment later sees it

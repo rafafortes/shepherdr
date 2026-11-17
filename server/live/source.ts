@@ -530,7 +530,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const rows = modelsMatrix(this.settings, { host: HOST, name: NAME }, spaces).rows.map((r) => r.id)
     const agents: LiveAgent[] = Object.values(this.agents.records).map((r) => ({ key: r.key, kind: r.kind, model: r.model, status: this.agents.status(r.key) }))
     const tasks: TaskFact[] = this.engine.tasks.filter((t) => !t.archived).map((t) => ({ status: this.engine.statusOf(t), agent: t.agent, reviewer: t.reviewer }))
-    const watch = this.returns.list().map((o) => ({ key: keyOf(o.primary.kind, o.primary.model), back: o.back }))
+    const watch = this.returns.list().map((o) => ({ key: keyOf(o.primary.kind, o.primary.model), back: o.back, ok: o.ok }))
     const now = Date.now()
     // what counts toward models.maxAtOnce now, and the entry each task held for a model's cap waits for
     const runs = this.engine.runs().map((r) => ({ key: r.key, space: r.space }))
@@ -1779,14 +1779,19 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** whether a model key's provider is out now, and until when: its run-outs (the Summary reads them the same way, for every
-   *  model of the provider) and the return watch's outage that has not seen its primary back yet. The choice skips it */
+   *  model of the provider) and the return watch's outage that has not seen its primary back yet. A primary that answered
+   *  a probe (`ok`, with no cut on it since) is back for new starts while the chats still on its backup go back, so an
+   *  outage cannot keep itself open through the tasks it put there. The choice skips the provider only when it is out. */
   private outNow(key: string): { until?: string } | undefined {
     const now = Date.now()
     const provider = providerOf(key)
     const mine = this.returns.list().filter((o) => providerOf(keyOf(o.primary.kind, o.primary.model)) === provider)
-    const backAt = mine.reduce((a, o) => Math.max(a, o.back ?? 0), 0) || undefined
+    // a probe that answered is as much an answer as a full way back, even when the run-out had a reset time: the
+    // provider answered now, so the reset it promised no longer holds new starts off it
+    const backAt = mine.reduce((a, o) => Math.max(a, o.back ?? 0, o.ok ?? 0), 0) || undefined
     const st = this.usage.outOf(provider, now, backAt)
-    if (!st.out && !mine.some((o) => o.back === undefined)) return undefined
+    // `cut(onPrimary)` clears `ok` (return.ts): a cut on the primary puts it out again; one on its backup says nothing
+    if (!st.out && !mine.some((o) => o.back === undefined && o.ok === undefined)) return undefined
     return st.out && st.last?.resetAt !== undefined ? { until: clockWords(st.last.resetAt, now, this.settings.zone()) } : {}
   }
 
@@ -2306,7 +2311,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** an agent can't go on by itself: its backup agent takes over once (a task's engine.ts cantGoOn, a coordinator's
    *  below), or it waits for you in its chat, with an alert */
   private cannotGoOn(key: string, r: Retry) {
-    if (key.includes('/')) return void this.engine.cantGoOn(key.split('/')[0], r.reason, r.lasting).catch(() => undefined)
+    if (key.includes('/')) return void this.engine.cantGoOn(key.split('/')[0], r.reason, r.lasting, r.blocked).catch(() => undefined)
     void this.coordinatorCantGoOn(key, r).catch(() => undefined)
   }
 
@@ -2338,7 +2343,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const on: Harness = backupHarness(plan.to, { kind: rec.kind, model: rec.model, effort: rec.effort })
       // the same mark as before it, with its place in the chain
       const prior = took
-      this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now(), step: plan.n })
+      this.agents.markTookOver(key, { from, to: plan.to.kind, why, at: Date.now(), step: plan.n, ...(r.blocked ? { blocked: true } : {}) })
       // on its way from here: a restart of Shepherdr before the backup is up takes it again (resumeHandovers)
       this.agents.markHandover(key, { r, ...(prior ? { prior } : {}), at: Date.now() })
       try {
@@ -2559,12 +2564,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     for (const t of this.engine.tasks) {
       if (ended(t) || t.stopped || t.archived || !t.worktree) continue
       const space = this.places.space(t.project)?.name
-      if (space !== undefined) this.adopt('task', space, `${t.id}/Agent`, t.tookOver?.at, this.engine.backupHarnesses('task', space, t.set), now)
+      if (space !== undefined) this.adopt('task', space, `${t.id}/Agent`, t.tookOver, this.engine.backupHarnesses('task', space, t.set), now)
     }
     for (const { id } of this.places.shown()) {
       if (!this.places.coordinator(id)) continue
       const space = this.spaceKey(id) ?? ''
-      this.adopt('coordinator', space, id, this.agents.tookOver(id)?.at, this.engine.backupHarnesses('coordinator', space || undefined), now)
+      this.adopt('coordinator', space, id, this.agents.tookOver(id), this.engine.backupHarnesses('coordinator', space || undefined), now)
     }
   }
 
@@ -2576,7 +2581,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return r ? `${key}:cut:${r.cut}` : `${key}:took:${took ?? ''}`
   }
 
-  private adopt(role: 'task' | 'coordinator', space: string, key: string, took: number | undefined, backups: Harness[], now: number) {
+  private adopt(role: 'task' | 'coordinator', space: string, key: string, took: { at: number; blocked?: boolean } | undefined, backups: Harness[], now: number) {
     const o = this.returns.get(role, space)
     if (o && !o.back) return
     const rec = this.agents.record(key)
@@ -2586,10 +2591,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const r = this.retries.get(key)
     const onBackup = backups.some((b) => !sameHarness(b, primary) && sameHarness(ran, b))
     const cut = !!r?.over && !!r.lasting && (sameHarness(ran, primary) || onBackup)
-    // still on a backup that took it over (the backup may work: it goes back once the primary answers)
-    const away = !!took && onBackup
+    // still on a backup that took it over (the backup may work: it goes back once the primary answers). That covers
+    // an error that passed its five tries too: no note of its own, so only this adoption brings it back. A one-response
+    // filter refusal is not an outage though: its chat stays on the backup and its provider stays free for new starts.
+    const away = !!took && onBackup && !took.blocked
     if (!cut && !away) return
-    const seen = this.cutMark(key, cut ? r : undefined, cut ? undefined : took)
+    const seen = this.cutMark(key, cut ? r : undefined, cut ? undefined : took?.at)
     if (this.adopted.has(seen)) return
     this.adopted.add(seen)
     // its last backup was cut off too, or there is none: every model of that role ran out here

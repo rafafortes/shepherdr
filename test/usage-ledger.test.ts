@@ -231,6 +231,9 @@ describe('run-outs: recorded once, and out until a reset, a return or a later ca
     expect(l.outOf('pi.opencode-go', NOW)).toMatchObject({ out: true })
     expect(l.outOf('pi.opencode-go', NOW + 4 * HOUR)).toMatchObject({ out: false })
     expect(l.outOf('spark', NOW)).toEqual({ out: false })
+    // the watch's answer after the run-out beats the reset it promised: the provider speaks for itself now
+    expect(l.outOf('pi.opencode-go', NOW, ago(1)).out).toBe(false)
+    expect(outState([{ ...runOut('A/Agent', 2), resetAt: NOW + HOUR }], () => false, NOW, ago(1))).toMatchObject({ out: false })
   })
 
   test('with no reset: out until the return watch says the primary is back, or a call of it goes through after the run-out', () => {

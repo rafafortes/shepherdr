@@ -123,7 +123,8 @@ export class AgyReader implements Reader {
     })
   }
 
-  /** the model's provider cut the reply off: the error with its HTTP status where it has one, and the turn ends with it */
+  /** the model's provider cut the reply off: the error with its HTTP status where it has one, and the turn ends with it.
+   *  agy has no separate refusal signal: a safety block arrives here as an error with the provider's own words */
   private error(out: LogEvent[], file: string, id: string, at: number, text: unknown, status: unknown) {
     out.push({ kind: 'error', id: `error-${id}`, at, text: String(text ?? 'the step failed'), ...(typeof status === 'number' ? { status } : {}) })
     this.end(out, file, id, at)
