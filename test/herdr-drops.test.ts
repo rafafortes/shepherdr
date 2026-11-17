@@ -189,6 +189,15 @@ describe('a change dropped is asked again only if it did not happen', () => {
     expect(h.count('agent.start')).toBe(1)
   })
 
+  test('a start whose look afterwards fails for a reason of herdr\'s own fails as the first try did, once', async () => {
+    const w = h.space('w', '/x')
+    h.fail('agent.start', 'drop-after')
+    h.fail('agent.get', 'error')
+    const e = await fails(() => herdr.start('shep-a', 'pi', w.root_pane.pane_id, []))
+    expect(isPassing(e)).toBe(true)
+    expect(h.count('agent.start')).toBe(1)
+  })
+
   test('a prompt that arrived is not sent again', async () => {
     const w = h.space('w', '/x')
     await herdr.start('shep-a', 'pi', w.root_pane.pane_id, [])

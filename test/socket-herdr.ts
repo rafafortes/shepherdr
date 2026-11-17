@@ -16,6 +16,8 @@ export type Failure =
   | 'reset'
   /** nothing, ever (our own timeout) */
   | 'hang'
+  /** an error of herdr's own, whatever was asked */
+  | 'error'
 
 interface Pane {
   pane_id: string
@@ -141,6 +143,7 @@ export function socketHerdr() {
       if (f === 'drop') return void c.destroy()
       if (f === 'reset') return void ((c as Socket & { resetAndDestroy?: () => void }).resetAndDestroy ? (c as Socket & { resetAndDestroy: () => void }).resetAndDestroy() : c.destroy())
       if (f === 'hang') return
+      if (f === 'error') return void c.end(`${JSON.stringify({ id: req.id, error: { code: 'internal', message: 'boom' } })}\n`)
       const done = act(req.method, (req.params ?? {}) as Record<string, any>)
       if (f === 'drop-after') return void c.destroy()
       c.write(`${JSON.stringify({ id: req.id, ...done })}\n`)
