@@ -124,8 +124,9 @@ export interface SummaryInput {
   usage: UsageLedger
   agents: LiveAgent[]
   tasks: TaskFact[]
-  /** the outages the return watch has open (no back yet) or has seen answer (back: when), by the primary's model key */
-  watch: { key: string; back?: number }[]
+  /** the outages the return watch has open (no back yet) or has seen answer (back, or a probe's ok: when), by the
+   *  primary's model key */
+  watch: { key: string; back?: number; ok?: number }[]
   /** the quota figures and reads (quotas.ts); none in a test that has no quota side */
   quota?: QuotaInput
   /** the runs that count toward models.maxAtOnce now (engine.runs): the model key each runs on, and its space's key */
@@ -211,7 +212,7 @@ const sumUsage = (list: UsageTotals[]): SummaryUsage => {
 }
 
 /** one row (a provider's, or a model's): what matches it, counted */
-function rowOf(f: SummaryInput, matches: (k: string) => boolean, conf: ConfRec[], watch: { key: string; back?: number }[], provider: string, model?: string): SummaryRow {
+function rowOf(f: SummaryInput, matches: (k: string) => boolean, conf: ConfRec[], watch: { key: string; back?: number; ok?: number }[], provider: string, model?: string): SummaryRow {
   const now = f.now
   const atOnce = atOnceOf(f, provider, model)
   const c: SummaryConfigured = { primary: 0, backup: 0, roles: {}, spaces: {} }
@@ -236,9 +237,11 @@ function rowOf(f: SummaryInput, matches: (k: string) => boolean, conf: ConfRec[]
   }
   const from = (w: number) => f.usage.byKey(now - w)
   const usage = { h5: sumUsage(keysOf(from(WINDOWS.h5), matches)), h24: sumUsage(keysOf(from(WINDOWS.h24), matches)), d7: sumUsage(keysOf(from(WINDOWS.d7), matches)) }
-  // a watch that has not seen the primary back is an outage that goes on; one that has is its answer
-  const backAt = watch.filter((w) => matches(w.key) && w.back !== undefined).reduce((a, w) => Math.max(a, w.back!), 0) || undefined
-  const openWatch = watch.some((w) => matches(w.key) && w.back === undefined)
+  // an outage the primary answered (back, or a probe's ok that no cut on it since has cleared) is over for new starts
+  // too (source.ts outNow), while the chats still on the backup go back. The row must not say it is out while they do.
+  const answered = (w: { back?: number; ok?: number }) => w.back ?? w.ok
+  const backAt = watch.filter((w) => matches(w.key) && answered(w) !== undefined).reduce((a, w) => Math.max(a, answered(w)!), 0) || undefined
+  const openWatch = watch.some((w) => matches(w.key) && answered(w) === undefined)
   const runs = f.usage.runOuts(matches)
   const inWeek = runs.filter((r) => r.at >= now - WEEK)
   const st = f.usage.outOf(provider, now, backAt, model)

@@ -167,6 +167,9 @@ describe('the summary: providers, models, usage, run-outs, what runs now', () =>
     // the watch saw it back after the run-out: not out
     const back = modelsSummary(input(s, u, { watch: [{ key: GO, back: NOW - HOUR }] }))
     expect(provider(back, 'pi.opencode-go').runOuts.out).toBe(false)
+    // a probe it answered is its answer for new starts too (source.ts outNow), while chats still on the backup go back
+    const ok = modelsSummary(input(s, u, { watch: [{ key: GO, ok: NOW - HOUR }] }))
+    expect(provider(ok, 'pi.opencode-go').runOuts.out).toBe(false)
   })
 
   test('the backfill is shown once it is done', () => {

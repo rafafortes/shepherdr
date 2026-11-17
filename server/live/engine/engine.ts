@@ -151,7 +151,7 @@ export interface TaskRec {
   /** what its agent last said of its own progress (shepherdr status): kept while it works or waits on you */
   report?: Reported
   /** its backup agent took over once its agent couldn't go on (retry.ts): from which CLI, to which, and why */
-  tookOver?: { from: string; to: string; why: string; at: number; step?: number }
+  tookOver?: { from: string; to: string; why: string; at: number; step?: number; lasting?: boolean }
   /** a takeover on its way (cantGoOn): why its agent couldn't go on, whether that lasts, and its takeover before this one.
    *  Kept until the backup is up or the takeover failed: a restart of Shepherdr in between finds it, and takes it again
    *  (resumeTakeovers) */
@@ -2657,7 +2657,8 @@ export class Engine extends Emitter<Events> {
     this.handing.add(t.id)
     // on its way from here: a restart before the backup is up takes it again (resumeTakeovers)
     t.handover = { why, lasting, ...(t.tookOver ? { prior: t.tookOver } : {}), at: Date.now() }
-    t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now(), step: plan.n }
+    // kept on the mark: the way back adopts an open takeover as an outage, and a one-response filter refusal is none
+    t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now(), step: plan.n, lasting }
     this.save()
     // Settings' Backup model and effort (this task's own first), or else the task's own: its CLI may not take them, in
     // which case it starts on its own default. Its run counts there from now on: another cut-off a moment later sees it

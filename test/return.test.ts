@@ -1178,7 +1178,12 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
       Object.assign(t.t, { worktree: a.p.path, branch: 'main', base: 'main', agent: { kind: 'opencode', model: MODEL } })
       src.retries.seen(t.key, { id: 'filter-cut-1', at: Date.now(), text: 'Provider blocked the response', code: 'provider.content-filter' })
       // only this chat handed over to its backup, in its own words: no return entry, no run-out, no provider out
-      expect(t.t.tookOver).toMatchObject({ to: 'codex', why: "response blocked by the provider's filter" })
+      expect(t.t.tookOver).toMatchObject({ to: 'codex', why: "response blocked by the provider's filter", lasting: false })
+      expect(src.returns.list()).toEqual([])
+      expect(out(KEY)).toBeUndefined()
+      // the backup is up: the next return pass must not adopt a one-response takeover as an outage (and feed itself)
+      Object.assign(src.agents.records[t.key], { kind: 'codex' })
+      await src.watchReturns(later())
       expect(src.returns.list()).toEqual([])
       expect(out(KEY)).toBeUndefined()
       // a new task in the same space, and one in another space on the same provider, both start on the primary
