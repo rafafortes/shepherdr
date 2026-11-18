@@ -1,0 +1,3 @@
+{"type": "session", "id": "s-made", "timestamp": "2026-11-17T20:50:10.000Z"}
+{"type": "message", "id": "u1", "parentId": null, "timestamp": "2026-11-17T20:50:10.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "Go on."}], "timestamp": 1794958210000}}
+{"type": "message", "id": "a1", "parentId": "u1", "timestamp": "2026-11-17T20:50:11.000Z", "message": {"role": "assistant", "content": [], "provider": "commandcode", "model": "deepseek-v4.1-flash", "usage": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0}, "stopReason": "error", "errorMessage": "429 usage limit reached for this plan, resets 3pm", "timestamp": 1794958211000}}

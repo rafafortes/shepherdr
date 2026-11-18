@@ -896,23 +896,30 @@ export class Engine extends Emitter<Events> {
     const key = this.key(t)
     const st = this.agents.status(key)
     // a start that stopped on a screen of its own (start.ts) waits on you as a menu does
-    if (st === 'blocked' || this.asks(key) || this.chats.startMenuUp(key)) return 'need'
+    if (st === 'blocked' || this.chats.startMenuUp(key)) return 'need'
+    const asks = this.asks(key)
+    // a card asked in the turn running now is still yours; one asked before it began is answered by the work that went on
+    const asked = asks && this.chats.asksInTurn(key)
+    const working = st === 'working' || this.handing.has(t.id)
+    // a card or question it waits on is yours until its agent is at work again, whatever its queue says
+    if (asks && !working) return 'need'
     // queued: until they are all done, or one ends without being done (then it waits for you to decide)
     if (this.queued(t)) return this.halts(t).length ? 'need' : 'queued'
     // held until the machine has room
     if (this.holding(t)) return 'queued'
     // its agent starting, or reading its brief, is To do; one its go starts (a queued task's turn came) is at work
     if (t.todo || ((this.starting.has(t.id) || this.briefing.has(t.id)) && !t.going)) return 'todo'
-    // on its way into main, nothing for you to do (a question or a card it asks is handled above: then it needs you)
+    // on its way into main, nothing for you to do (a question or a card it asks now is handled above: then it needs you)
     // a merge stopped on a conflict is its agent's to rebase by hand: no merging meanwhile, its own status (subOf says so)
-    if (t.reported && t.landing && t.landing.step !== 'rebase' && (st === 'working' || !this.asks(key))) return 'merging'
-    if (st === 'working' || this.handing.has(t.id)) return 'work'
+    if (t.reported && t.landing && t.landing.step !== 'rebase' && !asked) return 'merging'
+    // at work, and never Needs you for a card it asked before this turn began
+    if (working) return asked ? 'need' : 'work'
     if (this.agents.waiting(key).length || Date.now() - (this.wrote.get(t.id) ?? 0) < ANSWER_GRACE) return 'work'
     if (t.reported) return 'ready'
     if (this.retrying(t)) return 'work'
     // its turn ended while work it started in the background (a subagent, a shell, a monitor) still runs and will wake
     // it: a pause, not a question, unless what it said last asks you something
-    if (this.agents.background(key) && !this.asks(key)) return 'work'
+    if (this.agents.background(key)) return 'work'
     // its turn ended (or it stopped) without reporting done: it waits for you
     return 'need'
   }

@@ -10,13 +10,15 @@
 import { readJson, writeJson } from '../store.ts'
 import { hidden } from './agents.ts'
 
-/** what a CLI's log says cut its turn off: the provider's words, and its own code and HTTP status where it has them */
+/** what a CLI's log says cut its turn off: the provider's words, and its own code and HTTP status where it has them; how
+ *  long the CLI says to wait, where one says it (OpenCode's free models: `retryAfterMs`) */
 export interface Cut {
   id: string
   at: number
   text: string
   code?: string
   status?: number
+  retryAfterMs?: number
 }
 
 export interface ProviderError {
@@ -78,6 +80,9 @@ const local = (iso: string) => {
   return Number.isNaN(d.getTime()) ? iso : new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }).format(d)
 }
 
+/** a moment, in this machine's time zone and with its name: "11 Nov, 17:44 GMT-3" */
+export const momentOf = (at: number) => local(new Date(at).toISOString())
+
 /** the reset the provider's words give: what to show ("5pm", "11 Nov, 17:44 GMT-3") and, for an ISO time, when (ms) */
 export function resetOf(words: string): { when: string; at?: number } | undefined {
   const m = RESET.exec(words)
@@ -90,24 +95,28 @@ export function resetOf(words: string): { when: string; at?: number } | undefine
   return when ? { when } : undefined
 }
 
-const until = (words: string) => {
+const until = (words: string, resetAt?: number) => {
   const r = resetOf(words)
-  return r ? ` until ${r.when}` : ''
+  // a provider that says how long to wait (OpenCode's free models' retryAfterMs) instead of when: its reset, in this
+  // machine's time
+  return r ? ` until ${r.when}` : resetAt ? ` until ${momentOf(resetAt)}` : ''
 }
 
 /** a reason that is a provider's run-out: its allowance or its credit is used up (retry.ts providerError) */
 export const runOutOf = (reason: string) => /^Out of (?:allowance|credit)/.test(reason)
 
 /** which errors pass by themselves. The CLI's own code decides where it has one (Codex codex_error_info, Claude Code's
- *  error and HTTP status); its words decide for the rest. Not recognised: it doesn't pass. */
-export function providerError(words: string, code = '', status = 0): ProviderError {
+ *  error and HTTP status); its words decide for the rest. Not recognised: it doesn't pass. `resetAt` is when the provider
+ *  says its allowance comes back, where it said how long to wait rather than when (ms). */
+export function providerError(words: string, code = '', status = 0, resetAt?: number): ProviderError {
   const c = code.toLowerCase()
   const said = WORDS_PASSING.find(([re]) => re.test(words))?.[1]
   if (c === 'unauthorized' || c === 'authentication_failed' || c === 'provider.auth' || status === 401 || status === 403 || WORDS_AUTH.test(words)) return { passing: false, reason: 'Signed out' }
   // a prepaid balance that is spent (402, or its words) is out of credit; a plan's allowance is out of allowance
-  if (status === 402 || WORDS_CREDIT.test(words)) return { passing: false, reason: `Out of credit${until(words)}` }
-  // OpenCode's quota error is its plan's or its free models' allowance, unless the provider says it is a rate limit
-  if (c === 'usage_limit_exceeded' || c === 'billing_error' || (c === 'provider.quota' && !WORDS_RATE.test(words)) || WORDS_ALLOWANCE.test(words)) return { passing: false, reason: `Out of allowance${until(words)}` }
+  if (status === 402 || WORDS_CREDIT.test(words)) return { passing: false, reason: `Out of credit${until(words, resetAt)}` }
+  // OpenCode's quota error is its plan's or its free models' allowance (its `provider.free-limit`, whose retryAfterMs says
+  // when they come back), unless the provider says it is a rate limit
+  if (c === 'usage_limit_exceeded' || c === 'billing_error' || c === 'provider.free-limit' || (c === 'provider.quota' && !WORDS_RATE.test(words)) || WORDS_ALLOWANCE.test(words)) return { passing: false, reason: `Out of allowance${until(words, resetAt)}` }
   // a filter refusing one response is no outage of the provider: its own task goes to its backup (no return entry),
   // never a provider other chats are kept off. Waiting would only feed the same blocked context back to the same model.
   if (CODE_CONTENT.includes(c) || WORDS_CONTENT.test(words)) return { passing: false, reason: "Response blocked by the provider's filter", blocked: true }
@@ -185,7 +194,7 @@ export class Retries {
     // itself): it went on without being told, and the count starts again
     if (!cut) return was ? this.clear(key) : undefined
     if (was?.cut === cut.id) return
-    const e = providerError(cut.text, cut.code, cut.status)
+    const e = providerError(cut.text, cut.code, cut.status, cut.retryAfterMs ? cut.at + cut.retryAfterMs : undefined)
     const tries = (was?.tries ?? 0) + 1
     const words = cut.text.replace(/\s+/g, ' ').trim().slice(0, 300)
     if (e.passing && tries <= this.waits.length) {

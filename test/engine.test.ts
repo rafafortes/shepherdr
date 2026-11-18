@@ -378,6 +378,46 @@ describe('a task is its brief and one agent', () => {
     expect(w.news.at(-1)).toBe(`${t.id} needs you: Signed out`)
   }, 10000)
 
+  test('an agent at work is never needs you for a card it asked before this turn began; one asked in this turn is', async () => {
+    const w = world()
+    const { t, key } = await started(w, repo(), 'older-card')
+    w.status[key] = 'working'
+    // POL-442: a question card it posted an hour ago, while it went on working (a peer's answer reached it in between)
+    w.chat.card = 'ask'
+    w.chat.askedInTurn = false
+    expect(w.engine.statusOf(t)).toBe('work')
+    expect(w.engine.view(t).sub).toBe('Working')
+    // asked in the turn running now: that is yours, whatever herdr says it is doing
+    w.chat.askedInTurn = true
+    expect(w.engine.statusOf(t)).toBe('need')
+    expect(w.engine.view(t).sub).toBe('Question for you')
+    // its turn is over and the card still waits: needs you as before
+    w.status[key] = 'idle'
+    w.chat.askedInTurn = false
+    expect(w.engine.statusOf(t)).toBe('need')
+    expect(w.engine.view(t).sub).toBe('Question for you')
+  }, 10000)
+
+  test('a queued or held task whose agent asks something is needs you, not queued', async () => {
+    const w = world()
+    const { t, key } = await started(w, repo(), 'queued-ask')
+    w.status[key] = 'idle'
+    w.chat.card = 'ask'
+    // queued after another task that has not done: its agent asks while it waits, and that is yours, not Queued
+    const rec = w.engine.tasks.find((x) => x.id === t.id)!
+    rec.after = ['X-1']
+    expect(w.engine.statusOf(t)).toBe('need')
+    expect(w.engine.view(t).sub).toBe('Question for you')
+    // held until the machine has room, and its agent asks: yours too
+    rec.after = undefined
+    rec.held = { why: 'busy', since: Date.now() } as never
+    expect(w.engine.statusOf(t)).toBe('need')
+    // with no card of its, it waits as Queued, as before
+    rec.held = { why: 'busy', since: Date.now() } as never
+    w.chat.card = undefined
+    expect(w.engine.statusOf(t)).toBe('queued')
+  }, 10000)
+
   test('a turn that ends while its own background work runs is still work: no news, no card', async () => {
     const w = world()
     const { t, key } = await started(w, repo(), 'background')

@@ -254,7 +254,7 @@ function world(kind: 'claude' | 'codex', status: () => string, runs: () => strin
     status,
     stillRuns: runs,
     background: runs,
-    reviewers: { list: () => [] },
+    procs: { list: () => [] },
     sentLately: () => [],
     waiting: () => [],
     typedSince: () => [],

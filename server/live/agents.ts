@@ -11,7 +11,7 @@ import { Emitter } from '../source.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
 import { dropped, herdr, isPassing, retrying, startDelays, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
-import { agyScreenBackground, ClaudeSessions, Reviewers, screenBackground, sessionBackground, type Background } from './readers/background.ts'
+import { agyScreenBackground, ClaudeSessions, Procs, screenBackground, servesCommand, sessionBackground, type Background } from './readers/background.ts'
 import { claudeHome, claudeLogPath, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind } from './readers/find.ts'
 import { createSession, mirrorSession, opencodeLogPath, putInstructions, switchModel } from './opencode.ts'
 import { agyLogPath, agyModelId, mirrorConversation } from './agy.ts'
@@ -276,8 +276,9 @@ export class Agents extends Emitter<Events> {
   lastReach = Date.now()
   watchedPanes = new Set<string>()
   sessions = new ClaudeSessions()
-  /** headless reviewers of another CLI (codex exec, claude -p) each chat's agent runs: subagents, not shells */
-  reviewers = new Reviewers()
+  /** its processes: the headless reviewers of another CLI (codex exec, claude -p) it runs as subagents, not shells, and
+   *  the background shells OpenCode keeps under its pty daemon */
+  procs = new Procs()
   /** what the screen of a Claude Code with no session file says still runs in the background */
   private screens = new Map<string, Background>()
   /** what its hooks, session file or screen say still runs in the background, since when, and after which turn */
@@ -663,7 +664,7 @@ export class Agents extends Emitter<Events> {
    *  headless reviewer counts as a subagent. However long it has run (background() leaves shells out after a while) */
   stillRuns(key: string): Background | undefined {
     const what = this.ranOn(key)
-    return what && what !== 'agents' && this.reviewers.runs(key) ? 'agents' : what
+    return what && what !== 'agents' && this.procs.runs(key) ? 'agents' : what
   }
 
   private ranOn(key: string): Background | undefined {
@@ -671,6 +672,8 @@ export class Agents extends Emitter<Events> {
     const st = this.status(key)
     // agy has no hooks or session file: its screen says what its turn left running
     if (r?.kind === 'agy') return st === 'idle' || st === 'done' ? this.screens.get(key) : undefined
+    // OpenCode keeps its background shells under its own pty daemon, and wakes the agent when one ends
+    if (r?.kind === 'opencode') return st === 'idle' || st === 'done' ? this.opencodeWork(key) : undefined
     if (r?.kind !== 'claude' || st === 'working' || st === 'blocked' || st === 'gone') return undefined
     const file = this.sessions.status(r.sessionId, r.cwd)
     // its hooks said what still ran as its turn ended; its session file is newer once that work is gone, or once a
@@ -678,6 +681,15 @@ export class Agents extends Emitter<Events> {
     const said = this.said(key)
     if (said) return file === 'idle' ? undefined : said.bg && file === 'busy' ? 'agents' : said.bg
     return file === undefined ? this.screens.get(key) : sessionBackground(file)
+  }
+
+  /** what an OpenCode agent's turn left running: the shells its pty daemon still runs for it, each of which wakes it when
+   *  it ends ("↳ Shell finished"), and 'servers' when every one of them serves or watches (a dev server it left for you
+   *  to look at never does) */
+  private opencodeWork(key: string): Background | undefined {
+    const shells = this.procs.shells(key)
+    if (!shells.length) return undefined
+    return shells.some((argv) => !servesCommand(argv.join(' '))) ? 'shells' : 'servers'
   }
 
   /** what the pane's screen says still runs in the background, for an idle or done agent that has no other way to say it:

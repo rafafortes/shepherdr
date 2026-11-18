@@ -1,0 +1,2 @@
+{"timestamp": "2026-11-17T20:50:10.000Z", "ordinal": 1, "type": "event_msg", "payload": {"type": "task_started", "turn_id": "t-1"}}
+{"timestamp": "2026-11-17T20:50:11.000Z", "ordinal": 2, "type": "event_msg", "payload": {"type": "task_complete", "turn_id": "t-1", "last_agent_message": null, "error": {"message": "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/pricing) or try again at 5:00 PM.", "codex_error_info": "usage_limit_exceeded"}}}

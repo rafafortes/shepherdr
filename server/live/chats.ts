@@ -37,6 +37,11 @@ function shownAs(p: Parsed): { title?: string; text: string } | undefined {
   return undefined
 }
 
+/** a message of the human's, hidden or not: their words (or their notes on a page, which Shepherdr hides in a tag),
+ *  never only reactions and never Shepherdr's own news */
+const wordsOf = (text: string) =>
+  yours(text) || /<shepherdr[^>]*>\s*<browser\b/i.test(text)
+
 /** a line of yours the agent will answer: words of yours, not Shepherdr's hidden news and not only reactions */
 const yours = (text: string) =>
   stripHidden(text)
@@ -516,37 +521,65 @@ export class Chats {
     return this.menus.get(key)
   }
 
-  /** the question the CLI asks with its own tool, still open */
-  openQuestion(key: string): { id: string; items: { question: string; options: { label: string }[]; multiSelect: boolean }[] } | undefined {
+  /** the question the CLI asks with its own tool, still open: nothing reached the agent after it */
+  openQuestion(key: string): { id: string; at: number; items: { question: string; options: { label: string }[]; multiSelect: boolean }[] } | undefined {
     const ev = this.events.get(key) ?? []
     const answered = new Set(ev.filter((e) => e.kind === 'answered').map((e) => e.id))
     for (let i = ev.length - 1; i >= 0; i--) {
       const e = ev[i]
-      if (e.kind === 'question' && !answered.has(e.id)) return { id: e.id, items: e.items }
+      if (e.kind !== 'question' || answered.has(e.id)) continue
+      // a message that carries the human's words reached it after the question (typed as its answer, their notes on a
+      // page, another agent's relay): as far as this chat knows, that question is answered, whatever its tool result says.
+      // Shepherdr's own hidden news is no answer, though it arrives as a line of the human's
+      if (ev.some((m) => m.at > e.at && (m.kind === 'peer' || (m.kind === 'user' && wordsOf(m.text))))) continue
+      return { id: e.id, at: e.at, items: e.items }
     }
     return undefined
   }
 
   /** a plan or choice card the agent posted since you last wrote to it, still unanswered */
   openCard(key: string): 'plan' | 'ask' | undefined {
-    const id = this.openPosted(key)?.id
+    const id = this.openPosted(key)?.question?.id
     return id?.startsWith('plan:') ? 'plan' : id?.startsWith('ask:') ? 'ask' : undefined
   }
 
   /** that card's question, as the agent wrote it */
   openCardTitle(key: string): string | undefined {
-    return this.openPosted(key)?.title
+    return this.openPosted(key)?.question?.title
   }
 
-  private openPosted(key: string): Question | undefined {
+  /** a needs-you card or question, with when it was asked: the one it waits on now, if any */
+  askAt(key: string): number | undefined {
+    const posted = this.openPosted(key)
+    if (posted) return posted.at
+    return this.openQuestion(key)?.at
+  }
+  /** whether what it waits on now was asked in the turn running: one asked before this turn began no longer makes a
+   *  working agent wait on you (the turn's start and end are in its log; with no turn marks at all, what it asks stands) */
+  asksInTurn(key: string): boolean {
+    const at = this.askAt(key)
+    if (at === undefined) return false
+    this.pull(key)
+    const ev = this.events.get(key) ?? []
+    const start = ev.findLastIndex((e) => e.kind === 'turn-start')
+    if (start < 0) return true
+    if (ev.findLastIndex((e) => e.kind === 'turn-end') > start) return false
+    return at >= ev[start].at
+  }
+
+  /** the posted card it waits on now, with when it was posted */
+  private openPosted(key: string): Posted | undefined {
     this.pull(key)
     const l = this.log(key)
-    const since = Math.max(0, ...(this.events.get(key) ?? []).filter((e) => e.kind === 'user').map((e) => e.at), ...l.posted.filter((p) => p.who === 'you').map((p) => p.at))
+    // any message that reached it after the card answered it: the human's words, a hidden Shepherdr line carrying them,
+    // and another agent's relay (a peer's message the agent takes as its prompt)
+    const since = Math.max(0, ...(this.events.get(key) ?? []).filter((e) => e.kind === 'user' || e.kind === 'peer').map((e) => e.at), ...l.posted.filter((p) => p.who === 'you').map((p) => p.at))
     for (let i = l.posted.length - 1; i >= 0; i--) {
-      const q = l.posted[i].question
-      if (l.posted[i].at <= since) continue
+      const p = l.posted[i]
+      const q = p.question
+      if (p.at <= since) continue
       if (!q || q.sent !== undefined || l.answers[q.id] !== undefined) continue
-      if (q.id.startsWith('plan:') || q.id.startsWith('ask:')) return q
+      if (q.id.startsWith('plan:') || q.id.startsWith('ask:')) return p
     }
     return undefined
   }
@@ -558,7 +591,7 @@ export class Chats {
     const ev = this.events.get(key) ?? []
     const e = ev.findLast((e) => e.kind === 'error' || e.kind === 'turn-start' || e.kind === 'user')
     if (e?.kind !== 'error' || e.at < (this.agents.record(key)?.started ?? 0)) return undefined
-    return { id: e.id, at: e.at, text: e.text, code: e.code, status: e.status }
+    return { id: e.id, at: e.at, text: e.text, code: e.code, status: e.status, ...(e.retryAfterMs ? { retryAfterMs: e.retryAfterMs } : {}) }
   }
 
   /** its log shows a turn that ended after this time */
@@ -614,7 +647,7 @@ export class Chats {
     const r = this.agents.record(key)
     let list = act.jobs.map((j) => ({ ...j }))
     if (r?.kind === 'claude' && st !== 'working' && st !== 'blocked' && !this.agents.stillRuns(key)) list = []
-    const heads = this.agents.reviewers.list(key).map((h) => headlessJob(h, r?.logs ?? []))
+    const heads = this.agents.procs.list(key).map((h) => headlessJob(h, r?.logs ?? []))
     // a headless agent run as a background shell is the agent, once
     if (heads.length) list = list.filter((j) => j.kind !== 'shell' || !/\b(codex (exec|e)|(claude|pi)\b.* (-p|--print))\b/.test(j.title))
     list.push(...heads)

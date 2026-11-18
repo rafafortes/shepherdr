@@ -55,7 +55,7 @@ import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvi
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { StallWatch } from './stall.ts'
-import { carryOn, Retries, resetOf, type Cut, type Retry } from './retry.ts'
+import { carryOn, momentOf, Retries, resetOf, type Cut, type Retry } from './retry.ts'
 import { modelsSummary, keyOf, patternName, providerWords, roleOfChat, type LiveAgent, type SummaryInput, type TaskFact } from './models-summary.ts'
 import { entryPatterns, knownOf, limitsView, type HeldFact } from './limits-view.ts'
 import { readClaude, type Reading } from './plan-limits.ts'
@@ -137,6 +137,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     },
     runOut: (key, cut, reason) => this.ranOut(key, cut, reason),
   })
+  /** how long after its turn ended an agent's log may still name the provider cut that ended it: OpenCode's mirror writes
+   *  the failure a moment later (WEB-137: 7 s), so the cut is looked for again that long */
+  lateCutFor = 60_000
+  /** the chats whose turn ended and whose log is looked at again for a cut, and until when */
+  private lateCuts = new Map<string, number>()
   /** what each model call of Shepherdr's agents used, by the hour, and each provider's run-outs (usage-ledger.ts), read
    *  from the agents' logs (usage-feed.ts) */
   usage = new UsageLedger()
@@ -278,10 +283,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       this.revivals.status(key, st)
       this.engine.agentStatus(key)
       this.fresh(key)
-      // its turn ended: maybe its provider cut it off (its log may say so a moment later)
+      // its turn ended: maybe its provider cut it off, and its log may say so a moment later (OpenCode's mirror writes
+      // the failure seconds after the turn, WEB-137): looked at again while the window lasts
       if (st !== 'working' && st !== 'blocked') {
-        this.checkCut(key)
-        setTimeout(() => this.checkCut(key), 2000)
+        this.watchLateCut(key, this.checkCut(key))
         this.reseat(key)
       }
       this.emit('snapshot')
@@ -492,7 +497,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const rec = this.agents.record(key)
     if (!rec) return
     const model = keyOf(rec.kind, rec.model)
-    const reset = resetOf(cut.text)
+    // when it comes back: the provider's own words, or the wait its CLI named instead (OpenCode's free models' retryAfterMs)
+    const reset = resetOf(cut.text) ?? (cut.retryAfterMs ? { when: momentOf(cut.at + cut.retryAfterMs), at: cut.at + cut.retryAfterMs } : undefined)
     const { wasOut, added } = this.usage.runOut({
       at: cut.at,
       key: model,
@@ -1331,6 +1337,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   private async pollChats() {
+    // a cut its log only named after its turn ended is looked for again
+    this.lookForLateCut()
     for (const k of new Set([...this.watched, ...Object.keys(this.agents.records).filter((k) => !['gone', 'working'].includes(this.agents.status(k)))])) {
       // pull first: the reply's read goes by the turn the log shows now
       const pulled = this.chats.pull(k)
@@ -2310,8 +2318,32 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** what cut off an agent's last turn, if its log says the provider did */
-  private checkCut(key: string) {
-    if (this.agents.record(key) && !this.peers?.owner(key)) this.retries.seen(key, this.chats.cutOff(key))
+  private checkCut(key: string): Cut | undefined {
+    if (!this.agents.record(key) || this.peers?.owner(key)) return undefined
+    const cut = this.chats.cutOff(key)
+    this.retries.seen(key, cut)
+    return cut
+  }
+
+  /** its turn ended: its log may only say now what cut it off (OpenCode's mirror copies the failure seconds later). One
+   *  the log already names is no reason to look again */
+  private watchLateCut(key: string, cut?: Cut) {
+    if (cut || !this.agents.record(key) || this.peers?.owner(key)) return
+    this.lateCuts.set(key, Date.now() + this.lateCutFor)
+  }
+
+  /** the cuts a chat's log had not said yet when its turn ended are looked for again each second, however its log grows.
+   *  Once one is read it is the retry's own from there (its nudge, or what clears it), never looked at twice */
+  private lookForLateCut(now = Date.now()) {
+    for (const [key, until] of [...this.lateCuts]) {
+      const st = this.agents.status(key)
+      // its window is over, or it went back to work: nothing more to look for
+      if (now > until || st === 'working' || st === 'blocked') {
+        this.lateCuts.delete(key)
+        continue
+      }
+      if (this.checkCut(key)) this.lateCuts.delete(key)
+    }
   }
 
   /** an agent can't go on by itself: its backup agent takes over once (a task's engine.ts cantGoOn, a coordinator's

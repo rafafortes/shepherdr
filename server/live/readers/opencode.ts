@@ -8,13 +8,15 @@ import type { LogEvent, Reader } from './types.ts'
 
 type Json = any
 
-/** OpenCode's error of a row, as the error event keeps it: its words, its type as the code, its HTTP status; nothing for a
- *  user's abort (Esc in its TUI, "Step interrupted"), which is not a provider's cut-off */
-export function errorOf(error: Json, fallback: string): { text: string; code?: string; status?: number } | undefined {
+/** OpenCode's error of a row, as the error event keeps it: its words, its type as the code, its HTTP status, and how long
+ *  it says to wait before asking again (its free models' `retryAfterMs`: "Free usage limit reached", reset in 41 min);
+ *  nothing for a user's abort (Esc in its TUI, "Step interrupted"), which is not a provider's cut-off */
+export function errorOf(error: Json, fallback: string): { text: string; code?: string; status?: number; retryAfterMs?: number } | undefined {
   if (error?.type === 'aborted') return undefined
   const code = typeof error?.type === 'string' ? error.type : undefined
   const status = typeof error?.status === 'number' ? error.status : undefined
-  return { text: String(error?.message ?? error ?? fallback), ...(code ? { code } : {}), ...(status !== undefined ? { status } : {}) }
+  const retryAfterMs = typeof error?.retryAfterMs === 'number' && error.retryAfterMs > 0 ? error.retryAfterMs : undefined
+  return { text: String(error?.message ?? error ?? fallback), ...(code ? { code } : {}), ...(status !== undefined ? { status } : {}), ...(retryAfterMs !== undefined ? { retryAfterMs } : {}) }
 }
 
 const parseLine = (text: string): Json => {

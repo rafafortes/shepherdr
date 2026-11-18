@@ -74,7 +74,7 @@ function chatWith(kind: 'claude' | 'pi', lines: object[]) {
     status: () => 'idle',
     stillRuns: () => undefined,
     background: () => undefined,
-    reviewers: { list: () => [] },
+    procs: { list: () => [] },
     sentLately: () => [],
     waiting: () => [],
     typedSince: () => [],
