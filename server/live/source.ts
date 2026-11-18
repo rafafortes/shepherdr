@@ -286,8 +286,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // its turn ended: maybe its provider cut it off, and its log may say so a moment later (OpenCode's mirror writes
       // the failure seconds after the turn, WEB-137): looked at again while the window lasts
       if (st !== 'working' && st !== 'blocked') {
-        this.checkCut(key)
-        this.watchLateCut(key)
+        this.watchLateCut(key, this.checkCut(key))
         this.reseat(key)
       }
       this.emit('snapshot')
@@ -2318,27 +2317,31 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** what cut off an agent's last turn, if its log says the provider did */
-  private checkCut(key: string) {
-    if (this.agents.record(key) && !this.peers?.owner(key)) this.retries.seen(key, this.chats.cutOff(key))
+  private checkCut(key: string): Cut | undefined {
+    if (!this.agents.record(key) || this.peers?.owner(key)) return undefined
+    const cut = this.chats.cutOff(key)
+    this.retries.seen(key, cut)
+    return cut
   }
 
-  /** its turn ended: its log may only say now what cut it off (OpenCode's mirror copies the failure seconds later) */
-  private watchLateCut(key: string) {
-    if (!this.agents.record(key) || this.peers?.owner(key)) return
+  /** its turn ended: its log may only say now what cut it off (OpenCode's mirror copies the failure seconds later). One
+   *  the log already names is no reason to look again */
+  private watchLateCut(key: string, cut?: Cut) {
+    if (cut || !this.agents.record(key) || this.peers?.owner(key)) return
     this.lateCuts.set(key, Date.now() + this.lateCutFor)
   }
 
-  /** the cuts a chat's log had not said yet when its turn ended are looked for again each second, however its log grows */
+  /** the cuts a chat's log had not said yet when its turn ended are looked for again each second, however its log grows.
+   *  Once one is read it is the retry's own from there (its nudge, or what clears it), never looked at twice */
   private lookForLateCut(now = Date.now()) {
     for (const [key, until] of [...this.lateCuts]) {
       const st = this.agents.status(key)
-      // its window is over, it went back to work, or its cut is known: nothing more to look for
-      if (now > until || st === 'working' || st === 'blocked' || this.retries.get(key)) {
+      // its window is over, or it went back to work: nothing more to look for
+      if (now > until || st === 'working' || st === 'blocked') {
         this.lateCuts.delete(key)
         continue
       }
-      this.checkCut(key)
-      if (this.retries.get(key)) this.lateCuts.delete(key)
+      if (this.checkCut(key)) this.lateCuts.delete(key)
     }
   }
 

@@ -2604,6 +2604,8 @@ describe('a turn the provider cut off, end to end', () => {
         log.cut()
         src.agents.emit('status', key, 'idle')
         expect(src.retries.get(key)?.tries).toBe(i)
+        // its log named the cut at once: its log is not watched for another, so a try that is cleared stays cleared
+        expect((src as unknown as { lateCuts: Map<string, number> }).lateCuts.has(key)).toBe(false)
         if (i === 5) break
         // told to carry on once its wait is over; the line it is told is no message of yours: the count goes on
         await until(() => sent.length === i)
@@ -2675,6 +2677,45 @@ describe('a turn the provider cut off, end to end', () => {
       // once it is known, it is not looked for again
       expect((src as unknown as { lateCuts: Map<string, number> }).lateCuts.has(key)).toBe(false)
     } finally {
+      delete src.agents.records[key]
+    }
+  })
+
+  test('a turn that ends with no cut in its log is watched a while, and let go when it goes back to work or its window ends', async () => {
+    const key = 'OC-138/Agent'
+    const dir = join(process.env.SHEPHERDR_HOME!, 'opencode')
+    mkdirSync(dir, { recursive: true })
+    const f = join(dir, 'ses_e1416ef58ffeVNFzRxvs0xiNK2.jsonl')
+    const row = (o: object) => appendFileSync(f, `${JSON.stringify(o)}\n`)
+    row({ id: 'u1', type: 'user', seq: 1, time: 1000, data: { text: 'Go on', time: { created: 1000 } } })
+    src.agents.records[key] = { key, name: 'shep-oc-138-test', kind: 'opencode', cwd: '/w/138', workspace: 'web', logs: [f], started: 0 }
+    const late = (src as unknown as { lateCuts: Map<string, number> }).lateCuts
+    const was = src.lateCutFor
+    try {
+      const look = (src as unknown as { lookForLateCut: () => void }).lookForLateCut.bind(src)
+      src.lateCutFor = 5000
+      src.agents.emit('status', key, 'idle')
+      expect(late.has(key)).toBe(true)
+      // it went back to work (herdr says working again): its log is no longer watched for a cut that ended the turn
+      const status = src.agents.status
+      const working = (k: string) => (k === key ? 'working' : status.call(src.agents, k))
+      src.agents.status = working as never
+      try {
+        look()
+        expect(late.has(key)).toBe(false)
+      } finally {
+        src.agents.status = status
+      }
+      // a window that runs out lets go by itself, so an agent left quiet is not read for ever
+      src.lateCutFor = 100
+      src.agents.emit('status', key, 'idle')
+      expect(late.has(key)).toBe(true)
+      await Bun.sleep(150)
+      look()
+      expect(late.has(key)).toBe(false)
+      expect(src.retries.get(key)).toBeUndefined()
+    } finally {
+      src.lateCutFor = was
       delete src.agents.records[key]
     }
   })
