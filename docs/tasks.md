@@ -60,13 +60,13 @@
   a rebase or the merge itself, nothing for you to do) and Done (`shepherdr merge`: Merged, or closed: Nothing to merge). The list and the task's chat always show
   the same. Once started, only the agent puts a task in To do; one that stops for any other reason needs you, except
   while work it started in the background (a reviewer subagent, a shell, a monitor) still runs and will wake it: that
-  is still Working (shells alone for up to 10 minutes, since a server it started for you never wakes it; a shell
-  running a headless reviewer of another CLI, `codex exec` or `claude -p`, counts as a subagent), unless its last
-  words ask you something. Each CLI's own shape counts: Claude Code's hooks, session file and screen, Antigravity's
-  screen rows, and OpenCode's background shells, the commands its pty daemon still runs for it after the turn. A
-  card or question it asked before this turn began does not hold a working task on Needs you; one asked in the turn
-  running now does. A task that needs you says why in at most 40
-  characters, never by pasting the agent's message and never in a model's words: a standard reason (Plan to approve,
+  is still Working (shells alone for up to an hour, since a server it started for you never wakes it and is let go
+  after 10 minutes; a shell running a headless reviewer of another CLI, `codex exec` or `claude -p`, counts as a
+  subagent), unless its last words ask you something. Each CLI's own shape counts: Claude Code's hooks, session file
+  and screen, Antigravity's screen rows, and OpenCode's background shells, the commands its pty daemon still runs for
+  it after the turn. A card or question it asked before this turn began does not hold a working task on Needs you;
+  one asked in the turn running now does. A task that needs you says why in at most 40 characters, never by pasting
+  the agent's message and never in a model's words: a standard reason (Plan to approve,
   Asks permission, Signed out, Question for you, Waits for your reply), or the agent's own question cut to fit
   (from its question tool, its choice card, or the last sentence of its last message that asks). The tasks list, the
   card in its space's chat, alerts and coordinator news all say the same; the full message stays in the task's chat.

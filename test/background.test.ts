@@ -313,6 +313,9 @@ describe('an agent whose turn ended', () => {
     expect(shellCommand(['/bin/bash', '-c', 'bun test'])).toBe(true)
     expect(shellCommand(['/bin/sh', '-c', 'bun test'])).toBe(true)
     expect(shellCommand(['/bin/zsh', '-c', 'bun test'])).toBe(true)
+    // a login or interactive shell runs a command the same way
+    expect(shellCommand(['/bin/bash', '-lc', 'bun test'])).toBe(true)
+    expect(shellCommand(['/usr/bin/zsh', '-ic', 'bun test'])).toBe(true)
     expect(shellCommand(['/bin/bash'])).toBe(false)
     expect(shellCommand(['opencode', 'run', 'x'])).toBe(false)
   })

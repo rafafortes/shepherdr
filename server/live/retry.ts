@@ -80,6 +80,9 @@ const local = (iso: string) => {
   return Number.isNaN(d.getTime()) ? iso : new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }).format(d)
 }
 
+/** a moment, in this machine's time zone and with its name: "11 Nov, 17:44 GMT-3" */
+export const momentOf = (at: number) => local(new Date(at).toISOString())
+
 /** the reset the provider's words give: what to show ("5pm", "11 Nov, 17:44 GMT-3") and, for an ISO time, when (ms) */
 export function resetOf(words: string): { when: string; at?: number } | undefined {
   const m = RESET.exec(words)
@@ -96,7 +99,7 @@ const until = (words: string, resetAt?: number) => {
   const r = resetOf(words)
   // a provider that says how long to wait (OpenCode's free models' retryAfterMs) instead of when: its reset, in this
   // machine's time
-  return r ? ` until ${r.when}` : resetAt ? ` until ${local(new Date(resetAt).toISOString())}` : ''
+  return r ? ` until ${r.when}` : resetAt ? ` until ${momentOf(resetAt)}` : ''
 }
 
 /** a reason that is a provider's run-out: its allowance or its credit is used up (retry.ts providerError) */

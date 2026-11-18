@@ -18,7 +18,7 @@ const { herdr } = await import('../server/live/herdr.ts')
 const { hidden } = await import('../server/live/agents.ts')
 const { isAgentProcess } = await import('../server/live/agent-process.ts')
 const { heartbeatFile } = await import('../server/live/heartbeat.ts')
-const { carryOn } = await import('../server/live/retry.ts')
+const { carryOn, momentOf } = await import('../server/live/retry.ts')
 const { parseUserLine } = await import('../server/live/chatlines.ts')
 const { WorkerHealth } = await import('../server/live/recovery.ts')
 const { Worktrees } = await import('../server/live/engine/worktrees.ts')
@@ -2660,20 +2660,26 @@ describe('a turn the provider cut off, end to end', () => {
     mkdirSync(dir, { recursive: true })
     const f = join(dir, 'ses_e1415158bffes7UEypyB1KQKPL.jsonl')
     const row = (o: object) => appendFileSync(f, `${JSON.stringify(o)}\n`)
+    // a turn that ended a minute ago (the run-out is kept only so long after it)
+    const t0 = Date.now() - 60_000
     // its turn ended well, and its log has no failure yet: nothing to see when its status changes
-    row({ id: 'u1', type: 'user', seq: 1, time: 1000, data: { text: 'Go on', time: { created: 1000 } } })
-    row({ id: 'a1', type: 'assistant', seq: 2, time: 2000, data: { agent: 'build', model: { providerID: 'opencode', id: 'hy4-flash-free' }, content: [{ type: 'text', text: 'Running the check.' }], finish: 'stop', time: { created: 2000, completed: 2100 } } })
+    row({ id: 'u1', type: 'user', seq: 1, time: t0, data: { text: 'Go on', time: { created: t0 } } })
+    row({ id: 'a1', type: 'assistant', seq: 2, time: t0 + 1000, data: { agent: 'build', model: { providerID: 'opencode', id: 'hy4-flash-free' }, content: [{ type: 'text', text: 'Running the check.' }], finish: 'stop', time: { created: t0 + 1000, completed: t0 + 1100 } } })
     src.agents.records[key] = { key, name: 'shep-oc-137-test', kind: 'opencode', cwd: '/w/137', workspace: 'web', logs: [f], started: 0 }
     Object.assign(src.retries, { waits: [30, 30, 30, 30] })
     try {
       src.agents.emit('status', key, 'idle')
       expect(src.retries.get(key)).toBeUndefined()
       // seconds later the mirror copies the failure: its provider's free models ran out for ~41 minutes
-      row({ id: 'a2', type: 'assistant', seq: 3, time: 5000, data: { agent: 'build', model: { providerID: 'opencode', id: 'hy4-flash-free' }, content: [], finish: 'error', error: { type: 'provider.free-limit', message: 'Free usage limit reached. Connect a provider or subscribe to OpenCode Go to keep going, or switch models.', status: 429, retryAfterMs: 2_447_000 }, time: { created: 5000, completed: 5100 } } })
-      row({ id: 'i2', type: 'idle', seq: 4, time: 5200, data: { time: { created: 5200 }, outcome: 'failed', error: { type: 'provider.free-limit', message: 'Free usage limit reached.', status: 429, retryAfterMs: 2_447_000 } } })
+      row({ id: 'a2', type: 'assistant', seq: 3, time: t0 + 5000, data: { agent: 'build', model: { providerID: 'opencode', id: 'hy4-flash-free' }, content: [], finish: 'error', error: { type: 'provider.free-limit', message: 'Free usage limit reached. Connect a provider or subscribe to OpenCode Go to keep going, or switch models.', status: 429, retryAfterMs: 2_447_000 }, time: { created: t0 + 5000, completed: t0 + 5100 } } })
+      row({ id: 'i2', type: 'idle', seq: 4, time: t0 + 5200, data: { time: { created: t0 + 5200 }, outcome: 'failed', error: { type: 'provider.free-limit', message: 'Free usage limit reached.', status: 429, retryAfterMs: 2_447_000 } } })
       await until(() => src.retries.get(key) !== undefined, 8000, 'the late cut')
       // nothing waits on a limit that is out: it is the backup's, or the human's, at once, and its reset is known
-      expect(src.retries.get(key)).toMatchObject({ over: true, lasting: true, reason: 'Out of allowance until ' + new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }).format(new Date(5000 + 2_447_000)) })
+      expect(src.retries.get(key)).toMatchObject({ over: true, lasting: true, reason: `Out of allowance until ${momentOf(t0 + 5000 + 2_447_000)}` })
+      // its run-out keeps the reset its CLI named, so the Limits page and the models held for it say until when
+      const runOut = src.usage.runOuts((k) => k.includes('opencode')).at(-1)
+      expect(runOut?.reason).toStartWith('Out of allowance')
+      expect(runOut?.resetAt).toBe(t0 + 5000 + 2_447_000)
       // once it is known, it is not looked for again
       expect((src as unknown as { lateCuts: Map<string, number> }).lateCuts.has(key)).toBe(false)
     } finally {

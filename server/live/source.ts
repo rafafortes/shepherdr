@@ -55,7 +55,7 @@ import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvi
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { StallWatch } from './stall.ts'
-import { carryOn, Retries, resetOf, type Cut, type Retry } from './retry.ts'
+import { carryOn, momentOf, Retries, resetOf, type Cut, type Retry } from './retry.ts'
 import { modelsSummary, keyOf, patternName, providerWords, roleOfChat, type LiveAgent, type SummaryInput, type TaskFact } from './models-summary.ts'
 import { entryPatterns, knownOf, limitsView, type HeldFact } from './limits-view.ts'
 import { readClaude, type Reading } from './plan-limits.ts'
@@ -497,7 +497,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const rec = this.agents.record(key)
     if (!rec) return
     const model = keyOf(rec.kind, rec.model)
-    const reset = resetOf(cut.text)
+    // when it comes back: the provider's own words, or the wait its CLI named instead (OpenCode's free models' retryAfterMs)
+    const reset = resetOf(cut.text) ?? (cut.retryAfterMs ? { when: momentOf(cut.at + cut.retryAfterMs), at: cut.at + cut.retryAfterMs } : undefined)
     const { wasOut, added } = this.usage.runOut({
       at: cut.at,
       key: model,

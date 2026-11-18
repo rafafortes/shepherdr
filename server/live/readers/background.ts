@@ -185,8 +185,9 @@ export function headless(argv: string[]): boolean {
 export const servesCommand = (command: string) =>
   /\b(npm|pnpm|yarn|bun)( run)? (dev|start|serve|preview)\b|\b(vite|next|astro|nuxt|remix|wrangler|vercel|netlify) dev\b|\bvite( preview)?\s*($|[;&|])|http\.server|\b(uvicorn|gunicorn|flask run|rails s(erver)?)\b|\bnpx serve\b|--(watch|hot)\b|\btail -[fF]\b|sleep infinity/.test(command)
 
-/** a shell a CLI runs a command with: `/bin/sh -c <command>`, as OpenCode's pty daemon starts its background shells */
-export const shellCommand = (argv: string[]) => /^(ba|z|da)?sh$/.test(argv[0]?.split('/').at(-1) ?? '') && argv.includes('-c')
+/** a shell a CLI runs a command with: `/bin/sh -c <command>`, as OpenCode's pty daemon starts its background shells (a
+ *  login or interactive one, `-lc` or `-ic`, runs a command just the same) */
+export const shellCommand = (argv: string[]) => /^(ba|z|da)?sh$/.test(argv[0]?.split('/').at(-1) ?? '') && argv.some((w) => /^-[a-z]*c[a-z]*$/.test(w))
 
 /** /proc is read again at most this often */
 const PROC_MS = 2000
