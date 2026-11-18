@@ -73,9 +73,19 @@ test('Shepherdr’s own hidden line that carries the human’s words answers it 
   expect(chats.openQuestion(key)?.id).toBe('q2')
   // nothing reached it after q2 yet: a message from before it is no answer
   expect(chats.openQuestion(key)?.at).toBeGreaterThan(Date.now())
+  // Shepherdr's own hidden news arrives as a line of the human's, and it answers nothing: the CLI still waits on its tool
+  reached(chats, key, { kind: 'user', id: 'u-news', at: Date.now() + 4500, text: '<shepherdr><news task="T">Its reviewer reported.</news></shepherdr>' })
+  expect(chats.openQuestion(key)?.id).toBe('q2')
   reached(chats, key, { kind: 'peer', id: 'u-2', at: Date.now() + 5000, text: 'Relayed from the operator: B.' })
   expect(chats.openQuestion(key)).toBeUndefined()
   // with nothing after the question, it is still open
   reached(chats, key, { kind: 'question', id: 'q3', at: Date.now() + 6000, tool: 'AskUserQuestion', items: [{ question: 'And this one?', options: [{ label: 'A' }], multiSelect: false }] })
   expect(chats.openQuestion(key)?.id).toBe('q3')
+  // their notes on a page are their words, hidden in a tag of Shepherdr's: typed at the question, they answer it
+  reached(chats, key, { kind: 'user', id: 'u-notes', at: Date.now() + 7000, text: '<shepherdr><browser from="Elias">Make the button say Save</browser></shepherdr>' })
+  expect(chats.openQuestion(key)).toBeUndefined()
+  // and so does a plain line of theirs
+  reached(chats, key, { kind: 'question', id: 'q4', at: Date.now() + 8000, tool: 'AskUserQuestion', items: [{ question: 'Both?', options: [{ label: 'A' }], multiSelect: false }] })
+  reached(chats, key, { kind: 'user', id: 'u-typed', at: Date.now() + 9000, text: 'Both of them, Aldo first.' })
+  expect(chats.openQuestion(key)).toBeUndefined()
 })

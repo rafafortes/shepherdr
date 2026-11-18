@@ -552,9 +552,12 @@ describe("OpenCode's background shells", () => {
     // the same process, its command line changed: read again, since it is one of the chat's shells
     put(proc, 11, ['/bin/bash', '-c', 'tools/changed-check.sh'], ['SHEPHERDR_CHAT=T-1/Agent'], 10)
     expect(p.shells('T-1/Agent', Date.now() + 2500)).toEqual([['/bin/bash', '-c', 'tools/changed-check.sh']])
-    // it ended and was reaped: nothing runs for it again
-    rmSync(join(proc, '11'), { recursive: true })
+    // it ended and is a zombie: its folder is there, its command line empty, so it counts for nothing
+    writeFileSync(join(proc, '11', 'cmdline'), '')
     expect(p.shells('T-1/Agent', Date.now() + 5000)).toEqual([])
+    // and once it is reaped, nothing is left of it either
+    rmSync(join(proc, '11'), { recursive: true })
+    expect(p.shells('T-1/Agent', Date.now() + 7500)).toEqual([])
   })
 
   test('with no /proc (macOS) a shell carrying the chat is one of them, since its parent cannot be read there', () => {

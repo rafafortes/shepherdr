@@ -37,6 +37,11 @@ function shownAs(p: Parsed): { title?: string; text: string } | undefined {
   return undefined
 }
 
+/** a message of the human's, hidden or not: their words (or their notes on a page, which Shepherdr hides in a tag),
+ *  never only reactions and never Shepherdr's own news */
+const wordsOf = (text: string) =>
+  yours(text) || /<shepherdr[^>]*>\s*<browser\b/i.test(text)
+
 /** a line of yours the agent will answer: words of yours, not Shepherdr's hidden news and not only reactions */
 const yours = (text: string) =>
   stripHidden(text)
@@ -523,9 +528,10 @@ export class Chats {
     for (let i = ev.length - 1; i >= 0; i--) {
       const e = ev[i]
       if (e.kind !== 'question' || answered.has(e.id)) continue
-      // a message reached it after the question (the human's words typed as its answer, another agent's relay): as far as
-      // this chat knows, that question was answered, whatever the CLI's own tool result says
-      if (ev.some((m) => m.at > e.at && (m.kind === 'user' || m.kind === 'peer'))) continue
+      // a message that carries the human's words reached it after the question (typed as its answer, their notes on a
+      // page, another agent's relay): as far as this chat knows, that question is answered, whatever its tool result says.
+      // Shepherdr's own hidden news is no answer, though it arrives as a line of the human's
+      if (ev.some((m) => m.at > e.at && (m.kind === 'peer' || (m.kind === 'user' && wordsOf(m.text))))) continue
       return { id: e.id, at: e.at, items: e.items }
     }
     return undefined
