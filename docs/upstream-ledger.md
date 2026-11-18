@@ -630,11 +630,12 @@ Checked 2026-11-18 (SHE-55) on `upstream/main` (`b2797aaa`, 3.1.44) and `upstrea
 this to take. 3.x's `mods/tasks/bin/herdr_task/sessions.py` names a session file the same way we do (Claude Code's
 folder is the cwd with every non-alphanumeric turned into `-`), but its `find_log(a, ref, folders)` is handed a *list*
 of folders and looks in each, and its `session_of(pid)` finds the log by the session id across all `~/.claude/projects/*`
-folders, while its headless look reads `readlink /proc/<pid>/cwd`: the same two ideas we need — try more than one folder,
-and prefer the cwd the process actually runs in — but in a Python rewrite with no shepherdr records, herdr pane info or
-chat reader to port onto. Its history (`git log -i --grep 'symlink\|realpath\|session log\|project folder'`, read-only
-issues/PRs search) has nothing for a renamed repo's link. Upstream `v2.0`'s `server/live/readers/find.ts` is the same
-single-cwd code ours started from (its `activity.ts` uses `readlink /proc/<pid>/cwd` for one headless case only), so
+folders, and its process look reads open files through `readlink /proc/<p>/fd/<n>`: the same two ideas we need — try
+more than one folder, and find the session the process really holds — but in a Python rewrite with no shepherdr records,
+herdr pane info or chat reader to port onto. Its history (`git log -i --grep 'symlink\|realpath\|session log\|project
+folder'`, read-only issues/PRs search) has nothing for a renamed repo's link. Upstream `v2.0`'s
+`server/live/readers/find.ts` is the same single-cwd code ours started from (its `activity.ts` uses
+`readlink /proc/<pid>/cwd` for one headless case only), so
 there is no patch to cherry-pick there either. Ported the idea to 2.0's code (SHE-55): `cwdCandidates` leads with the
 live agent's cwd from herdr and resolves each path's real path before the remembered link, every CLI's finder tries the
 candidate folders in order, and a running chat whose log cannot be read says so in one calm line instead of looking

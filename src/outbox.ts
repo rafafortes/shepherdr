@@ -134,7 +134,7 @@ export function expire(
       changed = true
       return { ...o, state: 'failed' as const, error, lost }
     }
-    const lost = (o: Outgoing) => fail(unreadable(o.chat) ?? "It reached the agent but didn't show in the chat.", true)
+    const lost = (o: Outgoing) => fail(unreadable(o.chat) ?? "It went in, but it isn't in the chat I can read.", true)
     if (o.state === 'sending' && now - o.at > SEND_TIMEOUT + 5000) return fail('No answer from Shepherdr.')
     if (o.state === 'sent' && !o.waiting && now - (o.wentAt ?? o.at) > KEEP_BUSY) return lost(o)
     if (o.state === 'sent' && !o.waiting && working(o.chat)) {

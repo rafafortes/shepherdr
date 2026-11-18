@@ -2,7 +2,7 @@
 // the real path and herdr reports that real cwd. The chat must read that log, never the old folder, and say so calmly
 // when it cannot read one at all. Covers discovery (Agents), the chat (Chats) and the doctor line.
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -139,6 +139,35 @@ describe('a symlinked space reads the agent where it runs', () => {
       }
     } finally {
       a.stop()
+    }
+  })
+
+  test('every CLI\'s own session file name is recognised as readable', () => {
+    const dir = tmp('unreadable-names')
+    mkdirSync(dir, { recursive: true })
+    // pi prefixes its log with a timestamp; the others name it after the session id
+    const names: Record<string, string> = {
+      claude: `${S}.jsonl`,
+      pi: `2026-11-18T12-00-00-000Z_${S}.jsonl`,
+      codex: `rollout-2026-11-18T12-00-00-${S}.jsonl`,
+      opencode: `${S}.jsonl`,
+      agy: `${S}.jsonl`,
+    }
+    for (const [kind, name] of Object.entries(names)) {
+      const key = `p:test:${kind}`
+      const a = agentsWith(key, dir, dir, Date.now() - 60_000)
+      try {
+        a.record(key)!.kind = kind
+        a.record(key)!.sessionId = kind === 'codex' ? undefined : S
+        const log = join(dir, name)
+        writeFileSync(log, '')
+        a.record(key)!.logs = [log]
+        expect(a.unreadable(key), kind).toBeUndefined()
+        rmSync(log)
+        expect(a.unreadable(key), kind).toMatch(/can't be read right now/)
+      } finally {
+        a.stop()
+      }
     }
   })
 

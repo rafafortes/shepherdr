@@ -5,14 +5,14 @@ import { LinkBackoff } from './recovery.ts'
 // Codex and pi take it mid-turn, as steering). It waits only while the CLI shows a menu or permission prompt, where typed
 // text could pick an option, or is still starting; then it goes in as soon as it can.
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, mkdirSync, statSync, watch, type FSWatcher } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Emitter } from '../source.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
 import { dropped, herdr, isPassing, retrying, startDelays, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
 import { agyScreenBackground, ClaudeSessions, Procs, screenBackground, servesCommand, sessionBackground, type Background } from './readers/background.ts'
-import { claudeHome, claudeLogPath, cwdCandidates, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind } from './readers/find.ts'
+import { claudeHome, claudeLogPath, cwdCandidates, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind, type LogCwd } from './readers/find.ts'
 import { createSession, mirrorSession, opencodeLogPath, putInstructions, switchModel } from './opencode.ts'
 import { agyLogPath, agyModelId, mirrorConversation } from './agy.ts'
 import { agyIds, effortFor, modelArg } from './models.ts'
@@ -55,7 +55,7 @@ function addLog(r: AgentRecord, f: string): boolean {
   // a session is first named by a path guessed before its file existed (a symlink's remembered name, or the real
   // path): when a later look finds the same session under a folder that does hold it, follow it. Otherwise a chat
   // learned before the fix keeps its dead path for ever, and stays blank for the very session it is about.
-  if (r.logs[i] !== f && !existsSync(r.logs[i]) && existsSync(f)) {
+  if (r.logs[i] !== f && existsSync(f) && (!existsSync(r.logs[i]) || statSync(f).mtimeMs > statSync(r.logs[i]).mtimeMs)) {
     r.logs[i] = f
     return true
   }
@@ -87,7 +87,7 @@ function mirrorAgy(id: string): string {
 
 /** a Claude Code session, copied into the project folder of the cwd it resumes in (Claude Code looks for it only
  *  there) from wherever it was written on that machine; its log path, or nothing when there is none */
-export function carryClaudeSession(id: string, cwd: import('./readers/find.ts').LogCwd): string | undefined {
+export function carryClaudeSession(id: string, cwd: LogCwd): string | undefined {
   const to = claudeLogPath(cwd, id)
   const sh = `[ -e "$1" ] && exit 0; src=$(ls -t "$2"/*/"$3.jsonl" 2>/dev/null | head -n 1); [ -n "$src" ] || exit 1; mkdir -p "$(dirname "$1")" && cp "$src" "$1"`
   return runSync(['/bin/sh', '-c', sh, 'carry', task.unmirrored(to), task.unmirrored(join(claudeHome(), 'projects')), id]).code === 0 ? to : undefined
@@ -420,7 +420,8 @@ export class Agents extends Emitter<Events> {
     if (!r || !this.info(key) || Date.now() - r.started < 15_000) return undefined
     // the log that matters is the current session's: an older session's file still on disk says nothing about
     // whether the one this agent is in now can be read — that is the case that makes a chat look empty
-    const current = r.sessionId ? r.logs.find((f) => logName(f) === `${r.sessionId}.jsonl`) : r.logs.at(-1)
+    // pi names a file <timestamp>_<session id>.jsonl, so match the end of the name, not the whole of it
+    const current = r.sessionId ? r.logs.find((f) => f.endsWith(`${r.sessionId}.jsonl`)) : r.logs.at(-1)
     if (current && existsSync(current)) return undefined
     return UNREADABLE_LOG
   }
