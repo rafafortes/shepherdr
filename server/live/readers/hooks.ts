@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path'
 import { BOX, helperDir } from '../box.ts'
 import * as task from '../mfs.ts'
 import type { Background } from './background.ts'
+import { servesCommand } from './background.ts'
 import { deciderScript } from './own-commands.ts'
 
 /** one hook event, as the recorder writes it */
@@ -89,9 +90,7 @@ export function pickHook(input: any, at: number): HookEvent | undefined {
   if (input.hook_event_name === 'SessionStart') set('log', cut(input.transcript_path, 1000))
   // a shell that serves or watches (a dev server, a preview, tail -f) never ends to wake it: a "server", by what its
   // description or command says
-  const serves = (t: any) =>
-    /\b(server|serve|serving|preview)\b/i.test(String(t.description ?? '')) ||
-    /\b(npm|pnpm|yarn|bun)( run)? (dev|start|serve|preview)\b|\b(vite|next|astro|nuxt|remix|wrangler|vercel|netlify) dev\b|\bvite( preview)?\s*($|[;&|])|http\.server|\b(uvicorn|gunicorn|flask run|rails s(erver)?)\b|\bnpx serve\b|--(watch|hot)\b|\btail -[fF]\b|sleep infinity/.test(String(t.command ?? ''))
+  const serves = (t: any) => /\b(server|serve|serving|preview)\b/i.test(String(t.description ?? '')) || servesCommand(String(t.command ?? ''))
   if (Array.isArray(input.background_tasks))
     e.bg = input.background_tasks.filter((t: any) => t && t.status === 'running').map((t: any) => (t.type === 'shell' && serves(t) ? 'server' : String(t.type ?? 'task')))
   // the notices of background tasks that woke it, in order: a subagent waiting on work of its own, or a task that is
@@ -117,6 +116,7 @@ const ROTATE_AT = 256 * 1024
 /** the recorder Claude Code runs for every hook: reads the event from stdin, appends one line */
 export const recorderScript = () => `// Written by Shepherdr: records a Claude Code hook event (readers/hooks.ts).
 const { appendFileSync, renameSync, statSync } = require('node:fs')
+const servesCommand = ${servesCommand.toString()}
 const pickHook = ${pickHook.toString()}
 const file = process.argv[2]
 let s = ''

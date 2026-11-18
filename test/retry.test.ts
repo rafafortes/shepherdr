@@ -21,7 +21,7 @@ const ending = (name: string) => {
   if (e?.kind !== 'error') throw new Error(`${name}: no error read`)
   // the turn is over with it
   expect(ev.findLastIndex((x) => x.kind === 'turn-end')).toBeGreaterThan(ev.indexOf(e))
-  return providerError(e.text, e.code, e.status)
+  return providerError(e.text, e.code, e.status, e.retryAfterMs ? e.at + e.retryAfterMs : undefined)
 }
 
 describe("each CLI's log says what cut its turn off", () => {
@@ -78,6 +78,12 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(providerError('Streaming response failed: capacity is temporarily limited', 'provider.rate-limit', 200)).toEqual({ passing: true, reason: 'Rate limited' })
     expect(providerError('Upstream failed', 'provider.internal', 500)).toEqual({ passing: true, reason: 'Provider server error' })
     expect(providerError('Function not found', 'provider.invalid-request', 404)).toEqual({ passing: false, reason: 'Provider refused it' })
+    // its free models ran out: provider.free-limit, which says how long to wait (retryAfterMs) instead of when
+    // WEB-137: the failure at 20:50:11, its free models back in 2,447,000 ms (about 21:31)
+    const resetAt = 1794958211000 + 2_447_000
+    const shown = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }).format(new Date(resetAt))
+    expect(ending('opencode-free-limit-made')).toEqual({ passing: false, reason: `Out of allowance until ${shown}` })
+    expect(providerError('Free usage limit reached.', 'provider.free-limit', 429, resetAt)).toEqual({ passing: false, reason: `Out of allowance until ${shown}` })
     expect(providerError('Blocked by content filter', 'provider.content-filter')).toEqual({ passing: false, reason: "Response blocked by the provider's filter", blocked: true })
   })
 
@@ -98,6 +104,23 @@ describe("each CLI's log says what cut its turn off", () => {
     // a refusal that really is the provider's keeps its own words, and a filter is no run-out
     expect(providerError('bad request', 'invalid_request', 400)).toEqual({ passing: false, reason: 'Provider refused it' })
     expect(runOutOf("Response blocked by the provider's filter")).toBe(false)
+  })
+
+  test("every CLI's run-out keeps the reset its own log gives, so the wait says when it comes back", () => {
+    // Claude Code's words (resets 5pm), Codex's (try again at 5:00 PM), pi's provider words (resets 3pm), agy's quota
+    // (resets in 158h59m47s), and OpenCode's own retryAfterMs: each is a run-out, none is waited out
+    for (const [name, reason] of [
+      ['claude-usage-limit-made', 'Out of allowance until 5pm'],
+      ['codex-usage-limit-made', 'Out of allowance until 5:00 PM'],
+      ['pi-usage-limit-made', 'Out of allowance until 3pm'],
+      ['agy-quota-made', 'Out of allowance until in 158h59m47s'],
+      ['opencode-go-usage-limit-made', 'Out of allowance'],
+    ] as const) {
+      expect([name, ending(name)]).toEqual([name, { passing: false, reason }])
+      expect(runOutOf(reason)).toBe(true)
+    }
+    // OpenCode's free models are the one that says how long to wait instead of when: the reset is now plus that
+    expect(ending('opencode-free-limit-made').reason).toStartWith('Out of allowance until ')
   })
 
   test('a reset given as an ISO time is shown in this machine\'s time, with its zone name', () => {
@@ -184,6 +207,18 @@ describe('waits and tries', () => {
     r.seen('E', cut('e2', 'bad request', 400))
     expect(runs).toEqual([{ key: 'D', id: 'e1', reason: 'Out of credit' }])
     r.stop()
+  })
+
+  test("OpenCode's free models: a cut with its retryAfterMs gives up at once, with the reset it named", () => {
+    const w = world()
+    const at = Date.now()
+    w.r.seen('G', { id: 'e1', at, text: 'Free usage limit reached.', code: 'provider.free-limit', status: 429, retryAfterMs: 2_447_000 })
+    const shown = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }).format(new Date(at + 2_447_000))
+    expect(w.over).toEqual([{ key: 'G', reason: `Out of allowance until ${shown}` }])
+    expect(w.r.get('G')).toMatchObject({ over: true, lasting: true, tries: 1 })
+    // nothing is waited out: no nudge, no due time
+    expect(w.nudged).toEqual([])
+    w.r.stop()
   })
 
   test('a filter refusal hands only this chat to its backup: no wait, no outage to watch', () => {

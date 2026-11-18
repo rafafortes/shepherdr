@@ -137,6 +137,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     },
     runOut: (key, cut, reason) => this.ranOut(key, cut, reason),
   })
+  /** how long after its turn ended an agent's log may still name the provider cut that ended it: OpenCode's mirror writes
+   *  the failure a moment later (WEB-137: 7 s), so the cut is looked for again that long */
+  lateCutFor = 60_000
+  /** the chats whose turn ended and whose log is looked at again for a cut, and until when */
+  private lateCuts = new Map<string, number>()
   /** what each model call of Shepherdr's agents used, by the hour, and each provider's run-outs (usage-ledger.ts), read
    *  from the agents' logs (usage-feed.ts) */
   usage = new UsageLedger()
@@ -278,10 +283,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       this.revivals.status(key, st)
       this.engine.agentStatus(key)
       this.fresh(key)
-      // its turn ended: maybe its provider cut it off (its log may say so a moment later)
+      // its turn ended: maybe its provider cut it off, and its log may say so a moment later (OpenCode's mirror writes
+      // the failure seconds after the turn, WEB-137): looked at again while the window lasts
       if (st !== 'working' && st !== 'blocked') {
         this.checkCut(key)
-        setTimeout(() => this.checkCut(key), 2000)
+        this.watchLateCut(key)
         this.reseat(key)
       }
       this.emit('snapshot')
@@ -1331,6 +1337,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   private async pollChats() {
+    // a cut its log only named after its turn ended is looked for again
+    this.lookForLateCut()
     for (const k of new Set([...this.watched, ...Object.keys(this.agents.records).filter((k) => !['gone', 'working'].includes(this.agents.status(k)))])) {
       // pull first: the reply's read goes by the turn the log shows now
       const pulled = this.chats.pull(k)
@@ -2312,6 +2320,26 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** what cut off an agent's last turn, if its log says the provider did */
   private checkCut(key: string) {
     if (this.agents.record(key) && !this.peers?.owner(key)) this.retries.seen(key, this.chats.cutOff(key))
+  }
+
+  /** its turn ended: its log may only say now what cut it off (OpenCode's mirror copies the failure seconds later) */
+  private watchLateCut(key: string) {
+    if (!this.agents.record(key) || this.peers?.owner(key)) return
+    this.lateCuts.set(key, Date.now() + this.lateCutFor)
+  }
+
+  /** the cuts a chat's log had not said yet when its turn ended are looked for again each second, however its log grows */
+  private lookForLateCut(now = Date.now()) {
+    for (const [key, until] of [...this.lateCuts]) {
+      const st = this.agents.status(key)
+      // its window is over, it went back to work, or its cut is known: nothing more to look for
+      if (now > until || st === 'working' || st === 'blocked' || this.retries.get(key)) {
+        this.lateCuts.delete(key)
+        continue
+      }
+      this.checkCut(key)
+      if (this.retries.get(key)) this.lateCuts.delete(key)
+    }
   }
 
   /** an agent can't go on by itself: its backup agent takes over once (a task's engine.ts cantGoOn, a coordinator's

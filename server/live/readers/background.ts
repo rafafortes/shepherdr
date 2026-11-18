@@ -1,13 +1,21 @@
-// Work an agent started in the background that outlives its turn. Claude Code runs subagents, shells and monitors in
-// the background and wakes the agent when one finishes or reports, so a turn that ends while one runs is a pause, not a
-// question. Claude Code says so itself in its session file (~/.claude/sessions/<pid>.json): "busy" while a background
-// agent runs, "shell" while only shells or monitors do, "idle" once nothing does. Its screen says so too, and is read
-// when there is no session file: "✻ Waiting for 1 background agent to finish", "✻ … · done 10:04 PM · 1 shell, 1 monitor
-// still running", the footer's "· 2 shells ·" and a row per subagent below it. Codex keeps background terminals but is
-// never woken by them, and pi has none: their turn's end waits on you. Antigravity (agy) runs its long commands in the
-// background too, and its screen shows them below the input box (agyScreenBackground).
+// Work an agent started in the background that outlives its turn, and wakes it when it ends: a turn that ends while one
+// runs is a pause, not a question.
+// Claude Code runs subagents, shells and monitors in the background and wakes the agent when one finishes or reports. It
+// says so itself in its session file (~/.claude/sessions/<pid>.json): "busy" while a background agent runs, "shell"
+// while only shells or monitors do, "idle" once nothing does. Its screen says so too, and is read when there is no
+// session file: "✻ Waiting for 1 background agent to finish", "✻ … · done 10:04 PM · 1 shell, 1 monitor still running",
+// the footer's "· 2 shells ·" and a row per subagent below it. Antigravity (agy) runs its long commands in the background
+// too, and its screen shows them below the input box (agyScreenBackground).
+// OpenCode (2.3) keeps its background shells under a pty daemon of its own (opencode-pty, a child of its server): each is
+// a `/bin/sh -c <command>` whose environment carries the agent's SHEPHERDR_CHAT, and its footer counts them ("↓ 1 shell",
+// "↓ 1 subagent · 2 shells"). It wakes the agent when one ends ("↳ Shell finished · cd … && tools/changed-check.sh"), so
+// a shell still running is a pause as well (Procs.shells).
+// Codex keeps a command running past its turn (a process with a session id in its output, its code mode's cell), but is
+// never woken by it, and pi 1.5.2 has no background shell at all (its bash tool is one command it waits on; only a herdr
+// child it spawned wakes it, through pi-herdr's delivery, which is not read here): their turn's end waits on you.
 // A shell that ends (a test run, a review) wakes it, however long it takes; one that serves or watches (a dev server it
-// left for you to look at) never does. Its hooks name each shell's command, which tells them apart (hooks.ts).
+// left for you to look at) never does. Claude Code's hooks name each shell's command, which tells them apart (hooks.ts);
+// OpenCode's are told apart by the command its daemon runs (servesCommand).
 // A shell that runs a headless reviewer of another CLI (codex exec, claude -p: a task agent's own reviewer) wakes it like a
 // subagent, however long it takes: it is found by its command and its SHEPHERDR_CHAT (/proc, or ps), and counts as one.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -172,16 +180,25 @@ export function headless(argv: string[]): boolean {
   return false
 }
 
+/** a shell that serves or watches (a dev server, a preview, tail -f) never ends to wake the agent it runs under: a
+ *  "server", by what its command says */
+export const servesCommand = (command: string) =>
+  /\b(npm|pnpm|yarn|bun)( run)? (dev|start|serve|preview)\b|\b(vite|next|astro|nuxt|remix|wrangler|vercel|netlify) dev\b|\bvite( preview)?\s*($|[;&|])|http\.server|\b(uvicorn|gunicorn|flask run|rails s(erver)?)\b|\bnpx serve\b|--(watch|hot)\b|\btail -[fF]\b|sleep infinity/.test(command)
+
+/** a shell a CLI runs a command with: `/bin/sh -c <command>`, as OpenCode's pty daemon starts its background shells */
+export const shellCommand = (argv: string[]) => /^(ba|z|da)?sh$/.test(argv[0]?.split('/').at(-1) ?? '') && argv.includes('-c')
+
 /** /proc is read again at most this often */
 const PROC_MS = 2000
 /** how long a process is read again each pass before it is taken as the plain one it looks like */
 const PLAIN_FOR = 30_000
 
 /**
- * The headless reviewers that run for each chat: a reviewer of another CLI is a shell to Claude Code, but it will wake
- * the agent once it ends, like a subagent, however long it takes. Its environment says whose it is (SHEPHERDR_CHAT,
- * which every agent Shepherdr starts has, and its shells after it): read from /proc, or where there is none (macOS)
- * from `ps -E`, which prints each command with its environment after it.
+ * The processes of this machine that matter to the chats: the headless reviewers one runs (a reviewer of another CLI is
+ * a shell to Claude Code, but it will wake the agent once it ends, like a subagent, however long it takes), and the
+ * background shells OpenCode keeps under its pty daemon (they wake it too). A process's environment says whose it is
+ * (SHEPHERDR_CHAT, which every agent Shepherdr starts has, and its shells after it): read from /proc, or where there is
+ * none (macOS) from `ps -E`, which prints each command with its environment after it.
  */
 /** a headless CLI that runs: its words, since when, and its process (where /proc tells) */
 export interface Headless {
@@ -190,9 +207,15 @@ export interface Headless {
   pid?: number
 }
 
-export class Reviewers {
+export class Procs {
   private at = 0
   private chats = new Map<string, Headless[]>()
+  /** OpenCode's background shells now, by chat: the commands its pty daemon still runs for it */
+  private running = new Map<string, string[][]>()
+  /** the processes known to be one of those, by pid, so each is not looked at again to find out */
+  private tracked = new Map<string, { chat: string; argv: string[] }>()
+  /** the pids of OpenCode's pty daemons: their children are those shells (they live as long as the agent) */
+  private daemons = new Set<string>()
   /** when each was first seen, where nothing says when it started (ps) */
   private first = new Map<string, number>()
 
@@ -214,10 +237,51 @@ export class Reviewers {
     return this.chats.get(chat) ?? []
   }
 
-  private add(chats: Map<string, Headless[]>, chat: string, h: Headless) {
-    const list = chats.get(chat) ?? []
-    list.push(h)
-    chats.set(chat, list)
+  /** the commands a chat's OpenCode still runs after its turn, under its own pty daemon: work that wakes it when it ends */
+  shells(chat: string, now = Date.now()): string[][] {
+    this.list(chat, now)
+    return this.running.get(chat) ?? []
+  }
+
+  private add<T>(found: Map<string, T[]>, chat: string, what: T) {
+    const list = found.get(chat) ?? []
+    list.push(what)
+    found.set(chat, list)
+  }
+
+  /** a process's command line, or nothing when it is gone (a zombie's is empty) */
+  private argv(pid: string): string[] {
+    try {
+      return readFileSync(join(this.proc, pid, 'cmdline'), 'utf8').split('\0').filter(Boolean)
+    } catch {
+      return []
+    }
+  }
+
+  /** the chat a process works for: the SHEPHERDR_CHAT its environment carries (every agent Shepherdr starts has one,
+   *  and its shells after it) */
+  private chatOf(pid: string): string | undefined {
+    try {
+      return readFileSync(join(this.proc, pid, 'environ'), 'utf8').split('\0').find((v) => v.startsWith(CHAT))?.slice(CHAT.length) || undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** its parent is an OpenCode pty daemon, which is what an OpenCode background shell is a child of */
+  private underDaemon(pid: string): boolean {
+    let ppid: string
+    try {
+      ppid = readFileSync(join(this.proc, pid, 'stat'), 'utf8').split(') ').at(-1)!.split(' ')[1] ?? ''
+    } catch {
+      return false
+    }
+    if (!ppid || ppid === '0' || ppid === '1') return false
+    if (this.daemons.has(ppid)) return true
+    const parent = this.argv(ppid)
+    if (!parent.some((w) => /(^|\/)opencode-pty$/.test(w)) || !parent.includes('daemon')) return false
+    this.daemons.add(ppid)
+    return true
   }
 
   /** the processes seen the last pass that are no headless CLI, and when each was first seen: a process keeps its command
@@ -233,29 +297,49 @@ export class Reviewers {
       return this.fromPs()
     }
     const chats = new Map<string, Headless[]>()
+    const running = new Map<string, string[][]>()
     const plain = new Map<string, number>()
+    // one that ended is forgotten: its pid may come back as another
+    const live = new Set(pids)
+    for (const pid of [...this.tracked.keys()]) if (!live.has(pid)) this.tracked.delete(pid)
+    for (const pid of [...this.daemons]) if (!live.has(pid)) this.daemons.delete(pid)
+    // the shells known from before, read again: one still running keeps its command line
+    for (const [pid, known] of [...this.tracked]) {
+      const argv = this.argv(pid)
+      if (!argv.length) {
+        this.tracked.delete(pid)
+        continue
+      }
+      known.argv = argv
+      this.add(running, known.chat, argv)
+    }
     for (const pid of pids) {
+      if (this.tracked.has(pid)) continue
       const since = this.plain.get(pid)
       if (since !== undefined && now - since > PLAIN_FOR) {
         plain.set(pid, since)
         continue
       }
-      try {
-        const argv = readFileSync(join(this.proc, pid, 'cmdline'), 'utf8').split('\0').filter(Boolean)
-        // an empty command line is a process still starting (or a kernel thread): looked at again next pass
-        if (!argv.length) continue
-        if (!headless(argv)) {
-          plain.set(pid, since ?? now)
-          continue
-        }
-        const chat = readFileSync(join(this.proc, pid, 'environ'), 'utf8').split('\0').find((v) => v.startsWith(CHAT))
-        // its folder in /proc is as old as it is
-        if (chat) this.add(chats, chat.slice(CHAT.length), { argv, pid: Number(pid), at: statSync(join(this.proc, pid)).ctimeMs })
-      } catch {
-        /* gone, or not ours */
+      // an empty command line is a process still starting (or a kernel thread): looked at again next pass
+      const argv = this.argv(pid)
+      if (!argv.length) continue
+      const chat = this.chatOf(pid)
+      if (headless(argv)) {
+        // its folder in /proc is as old as it is; one that ended as the pass read it is left for the next pass
+        const st = statSync(join(this.proc, pid), { throwIfNoEntry: false })
+        if (chat && st) this.add(chats, chat, { argv, pid: Number(pid), at: st.ctimeMs })
+        continue
       }
+      // an OpenCode background shell: a command its own pty daemon still runs for this chat
+      if (chat && shellCommand(argv) && this.underDaemon(pid)) {
+        this.tracked.set(pid, { chat, argv })
+        this.add(running, chat, argv)
+        continue
+      }
+      plain.set(pid, since ?? now)
     }
     this.plain = plain
+    this.running = running
     return chats
   }
 
@@ -263,25 +347,36 @@ export class Reviewers {
    *  headless CLI by its first words and a chat key (which has none) by its variable */
   private fromPs() {
     const chats = new Map<string, Headless[]>()
+    const running = new Map<string, string[][]>()
     let out = ''
     try {
       out = this.ps()
     } catch {
+      this.running = running
       return chats
     }
     const seen = new Map<string, number>()
     for (const line of out.split('\n')) {
       const words = line.trim().split(/\s+/)
       const chat = words.find((w) => w.startsWith(CHAT))
-      if (!chat || !headless(words)) continue
+      if (!chat) continue
       // its words end where its environment starts
       const env = words.findIndex((w) => /^[A-Z_][A-Z0-9_]*=/.test(w))
       const argv = env > 0 ? words.slice(0, env) : words
+      const who = chat.slice(CHAT.length)
+      // with no /proc to read a process's parent from, any shell carrying the chat is taken as one of its background
+      // shells: the daemon it hangs under cannot be told there
+      if (shellCommand(argv)) {
+        this.add(running, who, argv)
+        continue
+      }
+      if (!headless(argv)) continue
       const k = line.trim()
       seen.set(k, this.first.get(k) ?? Date.now())
-      this.add(chats, chat.slice(CHAT.length), { argv, at: seen.get(k)! })
+      this.add(chats, who, { argv, at: seen.get(k)! })
     }
     this.first = seen
+    this.running = running
     return chats
   }
 }

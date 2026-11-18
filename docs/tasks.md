@@ -62,7 +62,10 @@
   while work it started in the background (a reviewer subagent, a shell, a monitor) still runs and will wake it: that
   is still Working (shells alone for up to 10 minutes, since a server it started for you never wakes it; a shell
   running a headless reviewer of another CLI, `codex exec` or `claude -p`, counts as a subagent), unless its last
-  words ask you something. A task that needs you says why in at most 40
+  words ask you something. Each CLI's own shape counts: Claude Code's hooks, session file and screen, Antigravity's
+  screen rows, and OpenCode's background shells, the commands its pty daemon still runs for it after the turn. A
+  card or question it asked before this turn began does not hold a working task on Needs you; one asked in the turn
+  running now does. A task that needs you says why in at most 40
   characters, never by pasting the agent's message and never in a model's words: a standard reason (Plan to approve,
   Asks permission, Signed out, Question for you, Waits for your reply), or the agent's own question cut to fit
   (from its question tool, its choice card, or the last sentence of its last message that asks). The tasks list, the
@@ -78,7 +81,9 @@
   a task stays Working, its line saying why and when (`Provider overloaded · retry in 2m`). Only when the fifth try is
   cut off too does it need you (`Provider overloaded, still after 5 tries`); a coordinator says so in its chat, with an
   alert. Errors waiting can't fix (signed out, out of allowance, a model that isn't there) go in at once to the backup
-  agent, a task's or a coordinator's, where one is set (below), and otherwise to you. Anything written to the agent
+  agent, a task's or a coordinator's, where one is set (below), and otherwise to you, with the reset the log names in
+  its line where it says one (OpenCode's free models' `retryAfterMs` counts too). A failure its log writes a moment
+  after the turn ended still counts: Shepherdr looks again for a while. Anything written to the agent
   starts the count again. Each CLI's log says what cut it off (`server/live/retry.ts` decides).
 - **First in line.** A coordinator marks a task with `shepherdr task priority <id>` (or adds it with `--priority`), as
   for a fix of a red main or merge gate: it goes ahead of the other held tasks and past the machine's load, pressure

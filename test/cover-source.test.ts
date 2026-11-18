@@ -1287,7 +1287,8 @@ describe('the advisor, while the human may still answer', () => {
       src.chats.answer(w.key, 'plan:g1', 0)
       expect(await src.act({ type: 'answer', chat: w.key, question: a.id, choice: 0 } as never)).toEqual({ ok: false, error: 'The question no longer waits: it was answered meanwhile.' })
       expect(src.advices.byCard(a.id)?.state).toBe('human')
-      expect(sent).toEqual([])
+      // nothing went in to the agent (the news another test's task sends meanwhile is none of this one's)
+      expect(sent.filter((s) => s.key === w.key)).toEqual([])
     } finally {
       w.done()
     }

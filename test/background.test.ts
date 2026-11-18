@@ -9,7 +9,7 @@ import { tmp } from './tmp.ts'
 process.env.SHEPHERDR_HOME = tmp('bg')
 process.env.CLAUDE_CONFIG_DIR = tmp('bg-claude')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'herdr.sock')
-const { agyScreenBackground, ClaudeSessions, Reviewers, headless, screenBackground, sessionBackground } = await import('../server/live/readers/background.ts')
+const { agyScreenBackground, ClaudeSessions, Procs, headless, screenBackground, servesCommand, sessionBackground, shellCommand } = await import('../server/live/readers/background.ts')
 const { Agents } = await import('../server/live/agents.ts')
 const { writeJson } = await import('../server/store.ts')
 const { record } = await import('../server/live/readers/hooks.ts')
@@ -155,7 +155,8 @@ describe("Claude Code's session file", () => {
 })
 
 describe('an agent whose turn ended', () => {
-  // herdr, standing in: two Claude Code agents whose turns ended; the second has no session file, only its screen
+  // herdr, standing in: two Claude Code agents whose turns ended; the second has no session file, only its screen; an
+  // agy, an OpenCode, a Codex and a pi agent, each with its turn over
   const screens: Record<string, string> = { p1: NOTHING, p2: REVIEWER, p3: AGY_IDLE }
   const server = createServer((c) => {
     let buf = ''
@@ -167,7 +168,11 @@ describe('an agent whose turn ended', () => {
       buf = buf.slice(i + 1)
       const agent = (name: string, pane_id: string, kind = 'claude') => ({ agent: kind, agent_status: 'done', name, pane_id, tab_id: 't', workspace_id: 'w', cwd: null, interactive_ready: true })
       const result =
-        method === 'agent.list' ? { agents: [agent('shep-t-1', 'p1'), agent('shep-t-2', 'p2'), agent('shep-t-3', 'p3', 'agy')] } : method === 'pane.read' ? { read: { text: screens[params.pane_id] ?? '' } } : {}
+        method === 'agent.list'
+          ? { agents: [agent('shep-t-1', 'p1'), agent('shep-t-2', 'p2'), agent('shep-t-3', 'p3', 'agy'), agent('shep-t-4', 'p4', 'opencode'), agent('shep-t-5', 'p5', 'codex'), agent('shep-t-6', 'p6', 'pi')] }
+          : method === 'pane.read'
+            ? { read: { text: screens[params.pane_id] ?? '' } }
+            : {}
       c.end(`${JSON.stringify({ id, result })}\n`)
     })
   }).listen(process.env.HERDR_SOCKET_PATH)
@@ -181,6 +186,9 @@ describe('an agent whose turn ended', () => {
     'T-1/Agent': rec('T-1/Agent', 'shep-t-1', '/w/1', 's1'),
     'T-2/Agent': rec('T-2/Agent', 'shep-t-2', '/w/2', 's2'),
     'T-3/Agent': { key: 'T-3/Agent', name: 'shep-t-3', kind: 'agy', cwd: '/w/3', workspace: 'w', logs: [], started: 0 },
+    'T-4/Agent': { key: 'T-4/Agent', name: 'shep-t-4', kind: 'opencode', cwd: '/w/4', workspace: 'w', logs: [], sessionId: 'ses_4', started: 0 },
+    'T-5/Agent': { key: 'T-5/Agent', name: 'shep-t-5', kind: 'codex', cwd: '/w/5', workspace: 'w', logs: [], started: 0 },
+    'T-6/Agent': { key: 'T-6/Agent', name: 'shep-t-6', kind: 'pi', cwd: '/w/6', workspace: 'w', logs: [], started: 0 },
   })
 
   test('its session file says what still runs, else its screen; a change is told as a status change', async () => {
@@ -223,15 +231,101 @@ describe('an agent whose turn ended', () => {
     a.stop()
   })
 
+  // SHE-53: OpenCode keeps its background shells under a pty daemon of its own, each a shell carrying the chat's
+  // SHEPHERDR_CHAT, and its footer counts them ("↓ 1 shell"); it wakes the agent when one ends
+  const proc = tmp('proc-opencode')
+  const DAEMON = 4242
+  /** its pty daemon: a child of its server, as `/proc` shows one */
+  const ptyDaemon = () => {
+    mkdirSync(join(proc, String(DAEMON)), { recursive: true })
+    writeFileSync(join(proc, String(DAEMON), 'cmdline'), `${['/home/u/.cache/opencode/bin/opencode-pty/0.5.2-bc9cb0fa/opencode-pty', 'daemon', '--runtime-dir', '/home/u/.local/state/opencode/pty'].join('\0')}\0`)
+    writeFileSync(join(proc, String(DAEMON), 'environ'), 'HOME=/h\0')
+    writeFileSync(join(proc, String(DAEMON), 'stat'), `${DAEMON} (opencode-pty) S 1 0 0 0\n`)
+  }
+  /** a process as `/proc/<pid>` keeps one: its command line, its environment, its parent */
+  const process_ = (pid: number, argv: string[], env: string[] = [], ppid = DAEMON) => {
+    mkdirSync(join(proc, String(pid)), { recursive: true })
+    writeFileSync(join(proc, String(pid), 'cmdline'), `${argv.join('\0')}\0`)
+    writeFileSync(join(proc, String(pid), 'environ'), `${env.join('\0')}\0`)
+    writeFileSync(join(proc, String(pid), 'stat'), `${pid} (${argv[0]?.split('/').at(-1) ?? 'x'}) S ${ppid} 0 0 0\n`)
+  }
+
+  test('OpenCode: a shell its pty daemon still runs keeps it at work; one that serves is a server, and none at all is needs you', async () => {
+    ptyDaemon()
+    process_(91, ['/bin/bash', '-c', 'cd /w/4 && tools/changed-check.sh --fast 2>&1 | tail -12'], ['HOME=/h', 'SHEPHERDR_CHAT=T-4/Agent'])
+    const a = new Agents()
+    a.procs = new Procs(proc)
+    const told: string[] = []
+    a.on('status', (key) => told.push(key))
+    await a.refresh()
+    await until(() => a.background('T-4/Agent') === 'shells')
+    expect(told).toContain('T-4/Agent')
+    // the count of how long shells alone keep it at work starts at the pass that read them
+    await until(() => (a as unknown as { seen: Map<string, unknown> }).seen.has('T-4/Agent'))
+    // a check that hangs is still a shell that ends and wakes it, but not for ever
+    expect(a.background('T-4/Agent', Date.now() + a.shellsFor + 1)).toBeUndefined()
+    // a dev server it left for you to look at never wakes it: only so long
+    process_(91, ['/bin/bash', '-c', 'bun run dev --port 5173'], ['HOME=/h', 'SHEPHERDR_CHAT=T-4/Agent'])
+    a.procs = new Procs(proc)
+    await a.refresh()
+    await until(() => a.background('T-4/Agent') === 'servers')
+    await until(() => (a as unknown as { seen: Map<string, { what: string }> }).seen.get('T-4/Agent')?.what === 'servers')
+    expect(a.background('T-4/Agent', Date.now() + a.serversFor + 1)).toBeUndefined()
+    // it ended and woke the agent, which stopped again with nothing in the background: it needs you
+    rmSync(join(proc, '91'), { recursive: true })
+    a.procs = new Procs(proc)
+    told.length = 0
+    await a.refresh()
+    await until(() => told.includes('T-4/Agent'))
+    expect(a.background('T-4/Agent')).toBeUndefined()
+    a.stop()
+  })
+
+  test('Codex: it keeps a command running past its turn but is never woken by it, so that turn waits on you', async () => {
+    // Codex 0.163+'s code mode keeps a process with a session id past the turn (upstream's SHEP-207), and nothing tells
+    // the agent when it exits: found here all the same, it counts for no CLI whose turn's end waits on you
+    process_(93, ['/bin/bash', '-c', 'bun test'], ['SHEPHERDR_CHAT=T-5/Agent'])
+    const a = new Agents()
+    a.procs = new Procs(proc)
+    await a.refresh()
+    expect(a.procs.shells('T-5/Agent')).toHaveLength(1)
+    expect(a.background('T-5/Agent')).toBeUndefined()
+    a.stop()
+  })
+
+  test('pi: no background shell at all, so a turn that ends waits on you', async () => {
+    // pi 1.5.2's bash is one command it waits on inside its turn (no run_in_background); a herdr child agent it
+    // spawned wakes it through pi-herdr's delivery, which is not a process of its own here
+    process_(94, ['/bin/bash', '-c', 'bun test'], ['SHEPHERDR_CHAT=T-6/Agent'])
+    const a = new Agents()
+    a.procs = new Procs(proc)
+    await a.refresh()
+    expect(a.background('T-6/Agent')).toBeUndefined()
+    a.stop()
+  })
+
+  test('what runs in the background, by CLI: the shell that ends wakes it, the one that serves does not', () => {
+    expect(servesCommand('/bin/bash -c cd /w && tools/changed-check.sh --fast 2>&1 | tail -12')).toBe(false)
+    expect(servesCommand('/bin/bash -c bun run dev --port 5173')).toBe(true)
+    expect(servesCommand('/bin/bash -c bun test --watch')).toBe(true)
+    expect(servesCommand('/bin/bash -c tail -f /tmp/build.log')).toBe(true)
+    // what an OpenCode background shell is: a shell command its pty daemon runs
+    expect(shellCommand(['/bin/bash', '-c', 'bun test'])).toBe(true)
+    expect(shellCommand(['/bin/sh', '-c', 'bun test'])).toBe(true)
+    expect(shellCommand(['/bin/zsh', '-c', 'bun test'])).toBe(true)
+    expect(shellCommand(['/bin/bash'])).toBe(false)
+    expect(shellCommand(['opencode', 'run', 'x'])).toBe(false)
+  })
+
   test('a shell running a headless reviewer of another CLI keeps it at work like a subagent, however long', async () => {
     session('shell')
     const a = new Agents()
-    a.reviewers = { runs: (chat: string) => chat === 'T-1/Agent' } as never
+    a.procs = { runs: (chat: string) => chat === 'T-1/Agent' } as never
     await a.refresh()
     expect(a.background('T-1/Agent')).toBe('agents')
     expect(a.background('T-1/Agent', Date.now() + a.shellsFor + 1)).toBe('agents')
     // the review is over: its shells alone again, for so long
-    a.reviewers = { runs: () => false } as never
+    a.procs = { runs: () => false } as never
     expect(a.background('T-1/Agent')).toBe('shells')
     a.stop()
   })
@@ -378,7 +472,7 @@ describe('headless reviewers', () => {
     put(11, ['claude', '--settings', 'x'], ['SHEPHERDR_CHAT=T-2/Agent'])
     put(12, ['claude', '-p'], ['HOME=/h'])
     mkdirSync(join(proc, 'self'))
-    const r = new Reviewers(proc)
+    const r = new Procs(proc)
     expect(r.runs('T-1/Agent')).toBe(true)
     expect(r.runs('T-2/Agent')).toBe(false)
   })
@@ -390,7 +484,7 @@ describe('headless reviewers', () => {
       writeFileSync(join(proc, String(pid), 'environ'), `${env.join('\0')}\0`)
     }
     put(20, ['bash', '-c', 'sleep 1'])
-    const r = new Reviewers(proc)
+    const r = new Procs(proc)
     const base = Date.now()
     expect(r.runs('T-9/Agent', base)).toBe(false)
     // the shell execs a headless CLI (same pid, new command line) while it is young: found
@@ -415,11 +509,60 @@ describe('headless reviewers', () => {
       'claude -p --model opus HOME=/Users/e',
       'grep codex exec SHEPHERDR_CHAT=T-3/Agent',
     ].join('\n')
-    const r = new Reviewers('/no/proc/here', () => ps)
+    const r = new Procs('/no/proc/here', () => ps)
     expect(r.runs('T-1/Agent')).toBe(true)
     expect(r.runs('T-2/Agent')).toBe(false)
     expect(r.runs('T-3/Agent')).toBe(false)
-    expect(new Reviewers('/no/proc/here', () => { throw new Error('no ps') }).runs('T-1/Agent')).toBe(false)
+    expect(new Procs('/no/proc/here', () => { throw new Error('no ps') }).runs('T-1/Agent')).toBe(false)
+  })
+})
+
+describe("OpenCode's background shells", () => {
+  /** a /proc of a test's own: an OpenCode pty daemon, and processes under it or elsewhere */
+  const put = (proc: string, pid: number, argv: string[], env: string[] = [], ppid = 0) => {
+    mkdirSync(join(proc, String(pid)), { recursive: true })
+    writeFileSync(join(proc, String(pid), 'cmdline'), `${argv.join('\0')}\0`)
+    writeFileSync(join(proc, String(pid), 'environ'), `${env.join('\0')}\0`)
+    writeFileSync(join(proc, String(pid), 'stat'), `${pid} (${argv[0]?.split('/').at(-1) ?? 'x'}) S ${ppid} 0 0 0\n`)
+  }
+  const daemon = (proc: string, pid = 10, ppid = 5) => put(proc, pid, ['/home/u/.cache/opencode/bin/opencode-pty/0.5.2/opencode-pty', 'daemon', '--runtime-dir', '/state'], ['HOME=/h'], ppid)
+
+  test('a shell under its pty daemon, by the chat its environment names: a command line is read again while it runs', () => {
+    const proc = tmp('proc-oc-procs')
+    daemon(proc)
+    put(proc, 11, ['/bin/bash', '-c', 'tools/changed-check.sh --fast'], ['SHEPHERDR_CHAT=T-1/Agent'], 10)
+    // a shell of that chat whose parent is no daemon (another CLI's own command), and one with no chat of its own
+    put(proc, 12, ['/bin/bash', '-c', 'bun test'], ['SHEPHERDR_CHAT=T-1/Agent'], 5)
+    put(proc, 13, ['/bin/bash', '-c', 'bun test'], ['HOME=/h'], 10)
+    // a process that vanished as the pass read it: its command line and environment there, no stat to name its parent
+    mkdirSync(join(proc, '15'))
+    writeFileSync(join(proc, '15', 'cmdline'), '/bin/bash\0-c\0bun test\0')
+    writeFileSync(join(proc, '15', 'environ'), 'SHEPHERDR_CHAT=T-1/Agent\0')
+    // a process still starting (an empty command line: a kernel thread, or a shell just forked)
+    mkdirSync(join(proc, '14'))
+    writeFileSync(join(proc, '14', 'cmdline'), '')
+    writeFileSync(join(proc, '14', 'environ'), 'SHEPHERDR_CHAT=T-1/Agent\0')
+    writeFileSync(join(proc, '14', 'stat'), '14 (bash) S 10 0 0 0\n')
+    const p = new Procs(proc)
+    expect(p.shells('T-1/Agent')).toEqual([['/bin/bash', '-c', 'tools/changed-check.sh --fast']])
+    expect(p.shells('T-2/Agent')).toEqual([])
+    // the same process, its command line changed: read again, since it is one of the chat's shells
+    put(proc, 11, ['/bin/bash', '-c', 'tools/changed-check.sh'], ['SHEPHERDR_CHAT=T-1/Agent'], 10)
+    expect(p.shells('T-1/Agent', Date.now() + 2500)).toEqual([['/bin/bash', '-c', 'tools/changed-check.sh']])
+    // it ended and was reaped: nothing runs for it again
+    rmSync(join(proc, '11'), { recursive: true })
+    expect(p.shells('T-1/Agent', Date.now() + 5000)).toEqual([])
+  })
+
+  test('with no /proc (macOS) a shell carrying the chat is one of them, since its parent cannot be read there', () => {
+    const ps = [
+      '/bin/bash -c tools/changed-check.sh --fast SHEPHERDR_CHAT=T-1/Agent HOME=/Users/e',
+      '/opt/google/chrome/chrome --type=renderer SHEPHERDR_CHAT=T-1/Agent',
+      '/bin/bash -c bun test HOME=/Users/e',
+    ].join('\n')
+    expect(new Procs('/no/proc/here', () => ps).shells('T-1/Agent')).toEqual([['/bin/bash', '-c', 'tools/changed-check.sh', '--fast']])
+    // a headless reviewer is still a reviewer there, never a shell
+    expect(new Procs('/no/proc/here', () => 'claude -p --model opus SHEPHERDR_CHAT=T-1/Agent').shells('T-1/Agent')).toEqual([])
   })
 })
 

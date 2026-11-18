@@ -8,6 +8,9 @@ import { CODEX_WORDS, PI_WORDS, reviewerLineFor } from './reviewer-line.ts'
 
 process.env.SHEPHERDR_HOME = tmp('source')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock')
+// no OpenCode database of this machine: its mirror copies rows from one that isn't there (an OpenCode log reads as a
+// copy of its session)
+process.env.SHEPHERDR_OPENCODE_DB = join(process.env.SHEPHERDR_HOME, 'no-opencode.db')
 delete process.env.SHEPHERDR_MAIN
 const { LiveSource } = await import('../server/live/source.ts')
 const { HOST, NAME, placeId, Places } = await import('../server/live/places.ts')
@@ -2646,6 +2649,33 @@ describe('a turn the provider cut off, end to end', () => {
       expect(src.retries.get(key)).toBeUndefined()
     } finally {
       src.agents.send = send
+    }
+  })
+
+  test('WEB-137: a cut its log names seconds after the turn ended is still seen, and OpenCode’s free-limit keeps its reset', async () => {
+    const key = 'OC-137/Agent'
+    const dir = join(process.env.SHEPHERDR_HOME!, 'opencode')
+    mkdirSync(dir, { recursive: true })
+    const f = join(dir, 'ses_e1415158bffes7UEypyB1KQKPL.jsonl')
+    const row = (o: object) => appendFileSync(f, `${JSON.stringify(o)}\n`)
+    // its turn ended well, and its log has no failure yet: nothing to see when its status changes
+    row({ id: 'u1', type: 'user', seq: 1, time: 1000, data: { text: 'Go on', time: { created: 1000 } } })
+    row({ id: 'a1', type: 'assistant', seq: 2, time: 2000, data: { agent: 'build', model: { providerID: 'opencode', id: 'hy4-flash-free' }, content: [{ type: 'text', text: 'Running the check.' }], finish: 'stop', time: { created: 2000, completed: 2100 } } })
+    src.agents.records[key] = { key, name: 'shep-oc-137-test', kind: 'opencode', cwd: '/w/137', workspace: 'web', logs: [f], started: 0 }
+    Object.assign(src.retries, { waits: [30, 30, 30, 30] })
+    try {
+      src.agents.emit('status', key, 'idle')
+      expect(src.retries.get(key)).toBeUndefined()
+      // seconds later the mirror copies the failure: its provider's free models ran out for ~41 minutes
+      row({ id: 'a2', type: 'assistant', seq: 3, time: 5000, data: { agent: 'build', model: { providerID: 'opencode', id: 'hy4-flash-free' }, content: [], finish: 'error', error: { type: 'provider.free-limit', message: 'Free usage limit reached. Connect a provider or subscribe to OpenCode Go to keep going, or switch models.', status: 429, retryAfterMs: 2_447_000 }, time: { created: 5000, completed: 5100 } } })
+      row({ id: 'i2', type: 'idle', seq: 4, time: 5200, data: { time: { created: 5200 }, outcome: 'failed', error: { type: 'provider.free-limit', message: 'Free usage limit reached.', status: 429, retryAfterMs: 2_447_000 } } })
+      await until(() => src.retries.get(key) !== undefined, 8000, 'the late cut')
+      // nothing waits on a limit that is out: it is the backup's, or the human's, at once, and its reset is known
+      expect(src.retries.get(key)).toMatchObject({ over: true, lasting: true, reason: 'Out of allowance until ' + new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }).format(new Date(5000 + 2_447_000)) })
+      // once it is known, it is not looked for again
+      expect((src as unknown as { lateCuts: Map<string, number> }).lateCuts.has(key)).toBe(false)
+    } finally {
+      delete src.agents.records[key]
     }
   })
 })
