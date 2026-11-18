@@ -2457,9 +2457,9 @@ describe('artifacts from the command', () => {
       const keepers = src.snapshot().artifacts.filter((a) => a.title.startsWith('Kept ')).map((a) => a.keeper)
       expect(keepers).toEqual(Array(5).fill('many-kept'))
       expect(built).toBe(1)
-      // outside a snapshot, a name is read from a list built for it, as before
+      // outside a snapshot, a name is read directly from places without building the full places list
       expect(src.chatName(t.project)).toBe('many-kept')
-      expect(built).toBe(2)
+      expect(built).toBe(1)
     } finally {
       side.listed = build
     }
@@ -3473,3 +3473,134 @@ describe('Settings → Models: the table of this machine, read and written by th
     expect(await src.act({ type: 'setting', key: 'space.maxTasks', value: null, place })).toEqual({ ok: true })
   })
 })
+
+describe('chatName, needs and withAsks avoid rebuilding unrelated chats', () => {
+  test('chatName resolves local and peer places without invoking listed() or asks()', async () => {
+    const dir = tmp('fast-name')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'fast-name')
+    const id = placeId.space(p.name)
+    const listedSpy = jestSpy(src as unknown as Record<string, () => unknown>, 'listed')
+    const peerPlace1 = { id: 'p:peer-box:app', chat: 'p:peer-box:app', name: 'app', machine: 'peer-box', status: 'idle' }
+    const peerPlace2 = { id: 'p:peer-box:api', chat: 'p:peer-box:api', name: 'api', machine: 'peer-box', status: 'idle' }
+    const origPeers = src.peers
+    src.peers = {
+      list: () => [
+        { rec: { machine: 'peer-box', url: 'http://unused' }, reachable: true, snap: { places: [peerPlace1, peerPlace2] } },
+        { rec: { machine: 'bare-box', url: 'http://unused' }, reachable: false, snap: undefined },
+      ],
+    } as never
+    src.places.rename('p:peer-box:app', 'web')
+    src.places.rename('p:peer-box:api', 'app')
+    try {
+      expect(src.chatName(id)).toBe('fast-name')
+      expect(src.chatName('p:peer-box:app')).toBe('web')
+      expect(src.chatName('p:peer-box:api')).toBe('app')
+      expect(src.chatName('p:bare-box:~')).toBe('home')
+      expect(src.chatName('p:unknown:nope')).toBe('p:unknown:nope')
+      expect(listedSpy.calls.length).toBe(0)
+    } finally {
+      listedSpy.restore()
+      src.peers = origPeers
+      src.places.rename('p:peer-box:app', '')
+      src.places.rename('p:peer-box:api', '')
+    }
+  })
+
+  test('tellWaits skips building idle coordinator chats and withAsks settles archived task cards once', async () => {
+    const dir = tmp('fast-asks')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'fast-asks')
+    const coord = placeId.space(p.name)
+    const chatSpy = jestSpy(src.chats as unknown as Record<string, (...args: unknown[]) => unknown>, 'chat')
+    src.tellWaits(Date.now())
+    expect(chatSpy.calls.filter((c) => c[0] === coord).length).toBe(0)
+    // 1) archived task with choice card answered in its chat, 2) archived task closed by a peer relay ("No longer waits ·"),
+    // 3) archived task with plain-reply ask, and 4) archived task whose background log read is still in flight (must not persist yet)
+    const baseAt = Date.now() - 20_000
+    const mkTask = (tid: string) => {
+      src.engine.tasks.push({ id: tid, n: 1, project: coord, base: 'main', branch: 'main', worktree: dir, title: `Task ${tid}`, desc: 'Done.', by: 'test', created: baseAt, updated: baseAt + 5000, merged: true, archived: true } as never)
+      return `${tid}/Agent`
+    }
+    const k1 = mkTask('FA-1')
+    src.chats.post(k1, { id: 'ask:fa', at: baseAt + 1000, question: { id: 'ask:fa', title: 'Which?', kind: 'Question', choices: [{ label: 'A' }], to: k1 } } as never)
+    src.chats.answer(k1, 'ask:fa', 0)
+    src.chats.post(coord, { id: 'need:FA-1:1', at: baseAt + 2000, card: { id: 'need:FA-1:1', task: 'FA-1', title: 'Task FA-1', status: 'need', text: 'needs you', ask: { chat: k1, questions: [{ id: 'ask:fa', title: 'Which?', kind: 'Question', choices: [{ label: 'A' }], to: k1 }] } } } as never)
+
+    const k2 = mkTask('FA-2')
+    src.chats.post(k2, { id: 'ask:fa2', at: baseAt + 1000, question: { id: 'ask:fa2', title: 'Keep?', kind: 'Question', choices: [{ label: 'Y' }], to: k2 } } as never)
+    src.chats.post(k2, { id: 'you:fa2', at: baseAt + 1500, who: 'you', text: 'Skip it' })
+    src.chats.post(coord, { id: 'need:FA-2:1', at: baseAt + 2000, card: { id: 'need:FA-2:1', task: 'FA-2', title: 'Task FA-2', status: 'need', text: 'needs you', ask: { chat: k2, questions: [{ id: 'ask:fa2', title: 'Keep?', kind: 'Question', choices: [{ label: 'Y' }], to: k2 }] } } } as never)
+
+    // also verify hostFor does not attach a posted card to an agent reply across a hidden browser note
+    const eventsMap = (src.chats as unknown as { events: Map<string, unknown[]> }).events
+    src.chats.post(k2, { id: 'ask:note', at: baseAt + 3000, question: { id: 'ask:note', title: 'Color?', kind: 'Question', choices: [{ label: 'Blue' }], to: k2 } } as never)
+    eventsMap.set(k2, [
+      { kind: 'agent', id: 'a-before', at: baseAt + 3010, text: 'Asking.' },
+      { kind: 'user', id: 'u-note', at: baseAt + 3100, text: '<shepherdr><browser from="Elias">Use blue</browser></shepherdr>' },
+      { kind: 'agent', id: 'a-after', at: baseAt + 3200, text: 'Done.' },
+    ])
+    src.chats.post(k2, { id: 'art:1', at: baseAt + 3210, artifact: { id: 'a1', v: 1 } })
+    src.chats.post(k2, { id: 'ask:art', at: baseAt + 3220, question: { id: 'ask:art', title: 'Ok?', kind: 'Question', choices: [{ label: 'Yes' }], to: k2 } } as never)
+    src.chats.post(k2, { id: 'sec:1', at: baseAt + 3300, secret: { id: 'sec:1', name: 'API_KEY', levels: [{ id: 'all', label: 'All' }] } })
+    const k2Chat = src.chats.chat(k2)
+    expect(k2Chat.messages.find((m) => m.question?.id === 'ask:note')?.at).toBeLessThan(baseAt + 3100)
+    expect(k2Chat.messages.some((m) => m.question?.id === 'ask:art')).toBe(true)
+    expect(k2Chat.messages.some((m) => m.secret?.name === 'API_KEY')).toBe(true)
+    expect(src.chats.tokens(k2)).toBe(0)
+    expect(src.chats.hasOpenQuestion(k2)).toBe(true)
+    src.chats.answer(k2, 'ask:art', 0)
+    expect(src.chats.hasOpenQuestion(k2)).toBe(false)
+
+    const k3 = mkTask('FA-3')
+    src.chats.post(coord, { id: 'need:FA-3:1', at: baseAt + 2000, card: { id: 'need:FA-3:1', task: 'FA-3', title: 'Task FA-3', status: 'need', text: 'needs you', ask: { chat: k3, reply: { id: 'r-3', text: 'Ready?' } } } } as never)
+
+    const k4 = mkTask('FA-4')
+    src.chats.post(coord, { id: 'need:FA-4:1', at: baseAt + 2000, card: { id: 'need:FA-4:1', task: 'FA-4', title: 'Task FA-4', status: 'need', text: 'needs you', ask: { chat: k4, reply: { id: 'r-4', text: 'Still reading?' } } } } as never)
+    const readingSet = (src.chats as unknown as { reading: Set<string> }).reading
+    readingSet.add(k4)
+    try {
+      chatSpy.calls.length = 0
+      const first = src.chat(coord)!
+      expect(first.messages.find((m) => m.card?.id === 'need:FA-1:1')?.card?.ask?.answered).toEqual({ where: 'task', text: undefined, dismissed: undefined })
+      expect(first.messages.find((m) => m.card?.id === 'need:FA-2:1')?.card?.ask?.open).toBe(false)
+      expect(first.messages.find((m) => m.card?.id === 'need:FA-2:1')?.card?.ask?.questions?.[0]?.elsewhere?.label).toBe('No longer waits ·')
+      expect(first.messages.find((m) => m.card?.id === 'need:FA-3:1')?.card?.ask?.answered).toEqual({ where: 'task' })
+      expect([k1, k2, k3, k4].every((k) => chatSpy.calls.filter((c) => c[0] === k).length === 1)).toBe(true)
+
+      readingSet.delete(k4)
+      chatSpy.calls.length = 0
+      const second = src.chat(coord)!
+      expect(second.messages.find((m) => m.card?.id === 'need:FA-1:1')?.card?.ask?.open).toBe(false)
+      expect(second.messages.find((m) => m.card?.id === 'need:FA-2:1')?.card?.ask?.open).toBe(false)
+      expect(second.messages.find((m) => m.card?.id === 'need:FA-3:1')?.card?.ask?.open).toBe(false)
+      // FA-1, FA-2, FA-3 were persisted and skipped; FA-4 was still reading on pass 1, so pass 2 reads and settles it once
+      expect(chatSpy.calls.filter((c) => c[0] === k1).length).toBe(0)
+      expect(chatSpy.calls.filter((c) => c[0] === k2).length).toBe(0)
+      expect(chatSpy.calls.filter((c) => c[0] === k3).length).toBe(0)
+      expect(chatSpy.calls.filter((c) => c[0] === k4).length).toBe(1)
+
+      chatSpy.calls.length = 0
+      src.chat(coord)
+      expect(chatSpy.calls.filter((c) => c[0] === k4).length).toBe(0)
+    } finally {
+      readingSet.delete(k4)
+      chatSpy.restore()
+    }
+  })
+})
+
+function jestSpy<T extends Record<string, (...args: never[]) => unknown>>(obj: T, method: keyof T) {
+  const orig = obj[method]
+  const calls: unknown[][] = []
+  obj[method] = ((...args: unknown[]) => {
+    calls.push(args)
+    return orig.apply(obj, args as never[])
+  }) as unknown as T[keyof T]
+  return {
+    calls,
+    restore: () => {
+      obj[method] = orig
+    },
+  }
+}

@@ -89,3 +89,45 @@ test('Shepherdr’s own hidden line that carries the human’s words answers it 
   reached(chats, key, { kind: 'user', id: 'u-typed', at: Date.now() + 9000, text: 'Both of them, Aldo first.' })
   expect(chats.openQuestion(key)).toBeUndefined()
 })
+
+test('hasOpenQuestion spots open menus, posted cards and CLI questions without building the chat', () => {
+  const key = 'T-open-check/Agent'
+  const chats = chatsWith(key)
+  const at = Date.now()
+  expect(chats.hasOpenQuestion(key)).toBe(false)
+  // a startup menu counts as open until cleared
+  chats.showStartMenu(key, { title: 'Trust folder?', choices: ['Yes'], cursor: 0, screen: 'Trust folder?', all: 'Trust folder?' })
+  expect(chats.hasOpenQuestion(key)).toBe(true)
+  chats.clearStartMenu(key)
+  expect(chats.hasOpenQuestion(key)).toBe(false)
+  // a posted question counts as open until answered
+  chats.post(key, { id: 'ask:fast', at, question: question('ask:fast') })
+  expect(chats.hasOpenQuestion(key)).toBe(true)
+  chats.answer(key, 'ask:fast', 0)
+  expect(chats.hasOpenQuestion(key)).toBe(false)
+  // posted plan/ask cards closed by a user message, peer relay, hidden browser note, or `you` post are no longer open
+  chats.post(key, { id: 'plan:typed', at: at + 200, question: question('plan:typed') })
+  expect(chats.hasOpenQuestion(key)).toBe(true)
+  reached(chats, key, { kind: 'user', id: 'u-plan', at: at + 300, text: 'Go ahead.' })
+  expect(chats.hasOpenQuestion(key)).toBe(false)
+  chats.post(key, { id: 'ask:relay', at: at + 400, question: question('ask:relay') })
+  expect(chats.hasOpenQuestion(key)).toBe(true)
+  reached(chats, key, { kind: 'peer', id: 'p-relay', at: at + 500, text: 'Relayed: yes.' })
+  expect(chats.hasOpenQuestion(key)).toBe(false)
+  chats.post(key, { id: 'ask:note', at: at + 600, question: question('ask:note') })
+  expect(chats.hasOpenQuestion(key)).toBe(true)
+  reached(chats, key, { kind: 'user', id: 'u-note', at: at + 700, text: '<shepherdr><browser from="Elias">Use blue</browser></shepherdr>' })
+  expect(chats.hasOpenQuestion(key)).toBe(false)
+  chats.post(key, { id: 'plan:you', at: at + 900, question: question('plan:you') })
+  expect(chats.hasOpenQuestion(key)).toBe(true)
+  chats.post(key, { id: 'you:app', at: at + 950, who: 'you', answered: 'Approved' })
+  expect(chats.hasOpenQuestion(key)).toBe(false)
+  // a CLI question counts as open until answered or closed by a later human/peer message
+  reached(chats, key, { kind: 'question', id: 'q-open', at: at + 1000, tool: 'AskUserQuestion', items: [{ question: 'Pick?', options: [{ label: 'A' }], multiSelect: false }] })
+  expect(chats.hasOpenQuestion(key)).toBe(true)
+  reached(chats, key, { kind: 'user', id: 'u-close', at: at + 2000, text: 'Pick A.' })
+  expect(chats.hasOpenQuestion(key)).toBe(false)
+  // forget() clears cached closing state alongside events and logs
+  chats.forget(key)
+  expect(chats.hasOpenQuestion(key)).toBe(false)
+})

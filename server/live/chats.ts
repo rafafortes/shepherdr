@@ -180,11 +180,11 @@ export function rememberReply(line: string, id: string) {
   if (replied.size > 500) replied.delete(replied.keys().next().value!)
 }
 
-/** the agent's reply of the same turn, written at or after `at`, before you wrote again */
-function hostFor(msgs: Message[], at: number, p: { question?: unknown; artifact?: unknown }, hosting: Set<Message>): Message | undefined {
+/** the agent's reply of the same turn, written at or after `at`, before you wrote again (never past `until`) */
+function hostFor(msgs: Message[], at: number, p: { question?: unknown; artifact?: unknown }, hosting: Set<Message>, until?: number): Message | undefined {
   for (const m of msgs) {
     if ((m.at ?? 0) < at - 1000) continue
-    if (m.who !== 'agent') return undefined
+    if (m.who !== 'agent' || (until !== undefined && (m.at ?? 0) >= until)) return undefined
     if (m.text && !m.card && !(p.question && m.question) && !(p.artifact && hosting.has(m))) return m
   }
   return undefined
@@ -218,6 +218,8 @@ export class Chats {
   private jobLogs = new JobLogs()
   private threadLogs = new Map<string, string>()
   private jobsSeen = new Map<string, string>()
+  /** latest event-log timestamp that closes open cards per chat revision, so `asks`, `openQuestion` and `needs` avoid rescanning */
+  private eventCloses = new Map<string, { rev: number; len: number; lastAt: number; at: number }>()
 
   constructor(
     private agents: Agents,
@@ -244,7 +246,7 @@ export class Chats {
 
   /** a deleted task's chat: its log goes, and all that was read of it */
   forget(key: string) {
-    for (const m of [this.tails, this.events, this.where, this.reading, this.logs, this.menus, this.menuAt, this.shown, this.revs, this.acts]) m.delete(key)
+    for (const m of [this.tails, this.events, this.where, this.reading, this.logs, this.menus, this.menuAt, this.shown, this.revs, this.acts, this.eventCloses]) m.delete(key)
     rmSync(join(HOME, 'chatlog', `${safe(key)}.json`), { force: true })
   }
 
@@ -521,17 +523,71 @@ export class Chats {
     return this.menus.get(key)
   }
 
-  /** the question the CLI asks with its own tool, still open: nothing reached the agent after it */
-  openQuestion(key: string): { id: string; at: number; items: { question: string; options: { label: string }[]; multiSelect: boolean }[] } | undefined {
+  /** latest timestamp in the CLI's log of a message that closes open cards (human words or another agent's relay),
+   *  cached per log revision and event tail so repeated checks never rescan thousands of events */
+  private lastEventClose(key: string): number {
     const ev = this.events.get(key) ?? []
-    const answered = new Set(ev.filter((e) => e.kind === 'answered').map((e) => e.id))
+    const rev = this.revs.get(key) ?? 0
+    const len = ev.length
+    const lastAt = len ? ev[len - 1]!.at : 0
+    const had = this.eventCloses.get(key)
+    if (had && had.rev === rev && had.len === len && had.lastAt === lastAt) return had.at
+    let at = 0
+    for (const e of ev) {
+      if ((e.kind === 'peer' || (e.kind === 'user' && wordsOf(e.text))) && e.at > at) at = e.at
+    }
+    this.eventCloses.set(key, { rev, len, lastAt, at })
+    return at
+  }
+
+  /** latest closing timestamp across both the CLI's log and Shepherdr's own `you` posts */
+  private lastClose(key: string): number {
+    let since = this.lastEventClose(key)
+    for (const p of this.log(key).posted) if (p.who === 'you' && p.at > since) since = p.at
+    return since
+  }
+
+  /** true while background chunks of this chat's log are still being read */
+  isReading(key: string): boolean {
+    return this.reading.has(key)
+  }
+
+  /** fast precheck for `needs()`: false guarantees `openCards(this.chat(key))` is empty without building the chat */
+  hasOpenQuestion(key: string): boolean {
+    if (this.menus.has(key)) return true
+    this.pull(key)
+    const l = this.log(key)
+    const since = this.lastClose(key)
+    if (l.posted.some((p) => p.question && p.question.sent === undefined && l.answers[p.question.id] === undefined && p.at >= since)) return true
+    const ev = this.events.get(key) ?? []
+    let answered: Set<string> | undefined
     for (let i = ev.length - 1; i >= 0; i--) {
       const e = ev[i]
-      if (e.kind !== 'question' || answered.has(e.id)) continue
+      if (e.kind !== 'question' || e.at + Math.max(0, e.items.length - 1) < since) continue
+      answered ??= new Set(ev.filter((x) => x.kind === 'answered').map((x) => x.id))
+      if (answered.has(e.id)) continue
+      for (let j = 0; j < e.items.length; j++) {
+        const qid = e.items.length > 1 ? `${e.id}:${j}` : e.id
+        if (l.answers[qid] === undefined && e.at + j >= since) return true
+      }
+    }
+    return false
+  }
+
+  /** the question the CLI asks with its own tool, still open: nothing reached the agent after it */
+  openQuestion(key: string): { id: string; at: number; items: { question: string; options: { label: string }[]; multiSelect: boolean }[] } | undefined {
+    this.pull(key)
+    const ev = this.events.get(key) ?? []
+    const closeAt = this.lastEventClose(key)
+    let answered: Set<string> | undefined
+    for (let i = ev.length - 1; i >= 0; i--) {
+      const e = ev[i]
       // a message that carries the human's words reached it after the question (typed as its answer, their notes on a
       // page, another agent's relay): as far as this chat knows, that question is answered, whatever its tool result says.
       // Shepherdr's own hidden news is no answer, though it arrives as a line of the human's
-      if (ev.some((m) => m.at > e.at && (m.kind === 'peer' || (m.kind === 'user' && wordsOf(m.text))))) continue
+      if (e.kind !== 'question' || e.at < closeAt) continue
+      answered ??= new Set(ev.filter((x) => x.kind === 'answered').map((x) => x.id))
+      if (answered.has(e.id)) continue
       return { id: e.id, at: e.at, items: e.items }
     }
     return undefined
@@ -581,7 +637,7 @@ export class Chats {
     // the one rule for a card and a CLI's own question alike (openQuestion): the human's words after it, hidden notes
     // included but never Shepherdr's own hidden news, or another agent's relay the agent takes as its prompt. Anything
     // else that reached it (the agent's own words, another card's answer, Shepherdr's news) leaves it waiting.
-    const since = Math.max(0, ...(this.events.get(key) ?? []).filter((e) => e.kind === 'peer' || (e.kind === 'user' && wordsOf(e.text))).map((e) => e.at), ...l.posted.filter((p) => p.who === 'you').map((p) => p.at))
+    const since = this.lastClose(key)
     for (let i = l.posted.length - 1; i >= 0; i--) {
       const p = l.posted[i]
       const q = p.question
@@ -884,6 +940,11 @@ export class Chats {
     }
     msgs.push(...cards)
     msgs.sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
+    // the card-closing rule from the raw log, for openCards and hostFor: hidden notes and app answers are no rows in `messages`
+    const closedAt = [
+      ...ev.filter((e) => e.kind === 'peer' || (e.kind === 'user' && wordsOf(e.text))).map((e) => e.at),
+      ...l.posted.filter((p) => p.who === 'you').map((p) => p.at),
+    ].sort((a, b) => a - b)
     // what else Shepherdr posted: a question or artifact joins the agent's reply of that turn
     const echoed = new Set<Message>()
     /** the replies an artifact came with: one each */
@@ -915,7 +976,8 @@ export class Chats {
         continue
       }
       const q = p.question ? withAnswer(p.question, l, this.answeredIn) : undefined
-      const host = hostFor(msgs, p.at, p, hosting)
+      const until = closedAt.find((t) => t > p.at)
+      const host = hostFor(msgs, p.at, p, hosting, until)
       if (host && !p.text) {
         if (q) host.question = q
         // an artifact is a message of its own, just after the words it came with
@@ -1013,11 +1075,7 @@ export class Chats {
       cli: CLI_NAME[kind] ?? kind,
       agent: r ? { runtime, ...launchHarness({ kind: r.kind, model: r.model, effort: r.effort }), ...(findModel(r.kind, r.model) ? { modelLabel: findModel(r.kind, r.model)!.label } : {}) } : undefined,
       messages: msgs,
-      // the card-closing rule from the raw log, for openCards: hidden notes and app answers are no rows in `messages`
-      closedAt: [
-        ...ev.filter((e) => e.kind === 'peer' || (e.kind === 'user' && wordsOf(e.text))).map((e) => e.at),
-        ...l.posted.filter((p) => p.who === 'you').map((p) => p.at),
-      ],
+      closedAt,
       failed: failed.length ? failed : undefined,
       unreadable: this.agents.unreadable?.(key),
       working: st === 'working' || undefined,

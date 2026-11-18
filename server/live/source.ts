@@ -353,7 +353,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (!t) return
       if (this.watched.includes(t.project)) this.emit('chat', t.project)
       // no one looks at it now: its card still keeps what it asks, to show how it was answered
-      else if (this.engine.statusOf(t) === 'need') this.withAsks(this.chats.chat(t.project))
+      else if (this.engine.statusOf(t) === 'need') this.syncAsks(t.project)
     })
     this.engine.on('news', (project, text, kind, about, card) => this.news(project, text, kind, about, card))
     this.engine.on('gone', (t, forget) => {
@@ -623,7 +623,22 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const [id, role] = key.split('/')
       return `${id} ${role.toLowerCase()}`
     }
-    return this.placeList().find((p) => p.chat === key)?.name ?? key
+    if (this.placesNow) return this.placesNow.find((p) => p.chat === key)?.name ?? key
+    // resolve directly from places / peers without calling listed(), which computes status() and asks() across every chat
+    if (!this.places) return this.placeList().find((p) => p.chat === key)?.name ?? key
+    const local = this.places.shown().find((p) => p.id === key)?.name
+    if (local) return local
+    for (const l of this.peers?.list() ?? []) {
+      const theirs = (l.snap?.places ?? [{ id: placeId.home(l.rec.machine), name: 'home', chat: placeId.home(l.rec.machine) }]).map((p) => ({ ...p }))
+      if (!theirs.some((p) => p.chat === key)) continue
+      for (const p of theirs) {
+        const want = this.places.names[p.id] && slugify(this.places.names[p.id])
+        if (want && !theirs.some((x) => x !== p && x.name === want)) p.name = want
+      }
+      const hit = theirs.find((p) => p.chat === key)
+      if (hit) return hit.name
+    }
+    return key
   }
 
   /** another machine's alert about its coordinator says the name the human gave the place: that machine knows only its own */
@@ -645,9 +660,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    *  themselves (just after a start, while they connect, as before it), the names the human gave them, in their order */
   private listed(): { places: Place[]; machines: Machine[]; sections: Section[] } {
     const ts = this.engine.tasks
+    let asks: Record<string, string> | undefined
+    const asksMap = () => (asks ??= this.asks())
     const status = (ids: string[], coord: string[]): Place['status'] => {
       const mine = ts.filter((t) => ids.includes(t.project) && !t.archived).map((t) => this.engine.statusOf(t))
-      if (mine.includes('need') || ids.some((id) => this.asks()[id])) return 'need'
+      if (mine.includes('need') || ids.some((id) => asksMap()[id])) return 'need'
       if (mine.includes('ready')) return 'ready'
       if (mine.includes('work') || mine.includes('merging') || coord.some((k) => this.agents.status(k) === 'working')) return 'work'
       return 'idle'
@@ -725,7 +742,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** only: one chat's needs alone (the advisor's look at a chat), without a look at every task */
   private needs(only?: string): Need[] {
     const out: Need[] = []
-    const open = (chat: string) => new Map(openCards(this.chats.chat(chat)).map((m) => [m.question.id, m]))
+    const built = new Map<string, Chat>()
+    const chatOf = (chat: string) => built.get(chat) ?? built.set(chat, this.chats.chat(chat)).get(chat)!
+    const open = (chat: string) => (this.chats.hasOpenQuestion(chat) ? new Map(openCards(chatOf(chat)).map((m) => [m.question.id, m])) : new Map())
     // a coordinator: the cards it asked that still wait, then the CLI's own menu, then a menu nobody reads
     for (const p of [placeId.home(), ...this.places.spaces.map((x) => placeId.space(x.name))]) {
       if (only && p !== only) continue
@@ -739,7 +758,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const text = 'The terminal is waiting for you'
         // its CLI's own menu is drawn anew on every look (its message says now), and a menu nobody reads names no time:
         // when its agent last said anything (0: before this screen knew)
-        const last = this.chats.chat(p).messages.findLast((m) => m.who === 'agent' && (m.text || m.file))?.at ?? 0
+        const last = chatOf(p).messages.findLast((m) => m.who === 'agent' && (m.text || m.file))?.at ?? 0
         const at = message && !question?.terminal ? (message.at ?? last) : last
         out.push({ id, chat: p, place: p, at, ...(question ? { question } : { text }) })
       }
@@ -844,8 +863,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** a chat whose open questions the advisor can take: their cards carry Ask the advisor (none asked yet, one set) */
   private withAdvice(c: Chat): Chat {
-    // nothing asked here: no need of any task to look at (a chat is drawn often, and a cold start draws hundreds)
-    if (!c.messages.some((m) => m.question && m.question.sent === undefined && !m.question.dismissed)) return c
+    // nothing open here: no need of any task to look at (a chat is drawn often, and a cold start draws hundreds)
+    if (!openCards(c).length) return c
     const open = new Set(this.advisable(c.key).filter((x) => x.need.question).map((x) => x.qid))
     if (!open.size) return c
     return { ...c, messages: c.messages.map((m) => (m.question && open.has(m.question.id) ? { ...m, question: { ...m.question, advise: true } } : m)) }
@@ -863,9 +882,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    *  swallows an alert); what it answers tells nothing. A wait the human was told about that ends runs the done command. */
   tellWaits(now = Date.now()) {
     const command = this.settings.alertCommand()
-    const advisable = new Map(command ? this.advisable(undefined, true).map((x) => [`${x.need.chat}:${x.need.id}`, x]) : [])
+    const needs = this.needs()
+    const advisable = new Map(command ? this.advisable(undefined, true, needs).map((x) => [`${x.need.chat}:${x.need.id}`, x]) : [])
     const skipped: string[] = []
-    const waits: Wait[] = this.needs()
+    const waits: Wait[] = needs
       .filter((n) => {
         if (n.task || this.settings.get(NOTIFY_KEY, this.spaceKey(n.chat)) !== 'Off') return true
         // a policy silence, not an end: never mark it done while the card is still open (wait-alerts.ts skipDone)
@@ -931,9 +951,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** `includeAsked`: tellWaits still needs the advisor's context and record after a run, when advisable() would skip a
    *  question already asked (only a failed or waiting one is offered again by watchAdvice) */
-  private advisable(only?: string, includeAsked = false): { need: Need; qid: string; q: AdviceQuestion; space: string; cwd: string; asker: string; brief?: string }[] {
+  private advisable(only?: string, includeAsked = false, precomputed?: Need[]): { need: Need; qid: string; q: AdviceQuestion; space: string; cwd: string; asker: string; brief?: string }[] {
     const out: ReturnType<LiveSource['advisable']> = []
-    for (const n of this.needs(only)) {
+    for (const n of precomputed ?? this.needs(only)) {
       const t = n.task ? this.engine.task(n.task) : undefined
       const space = t ? this.places.space(t.project)?.name : this.spaceKey(n.chat)
       if (space === undefined || !this.settings.advisor(space)) continue
@@ -1210,7 +1230,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    *  question cards as they stand there, or the agent's plain question and a reply box. What it asked is kept on the
    *  card once seen, so it still shows how it was answered */
   private withAsks(c: Chat): Chat {
-    const l = this.chats.log(c.key)
+    const shown = this.syncAsks(c.key)
+    if (!shown.size) return c
+    return { ...c, messages: c.messages.map((m) => (m.card && shown.has(m.card.id) ? { ...m, card: { ...m.card, ask: shown.get(m.card.id) } } : m)) }
+  }
+
+  private syncAsks(coordKey: string): Map<string, CardAsk> {
+    const l = this.chats.log(coordKey)
     const latest = new Map<string, string>()
     for (const p of l.posted) if (p.card?.task) latest.set(p.card.task, p.card.id)
     const chats = new Map<string, Chat>()
@@ -1225,6 +1251,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (!t || (!card.ask && !last)) continue
       const key = `${t.id}/Agent`
       const waits = last && this.engine.statusOf(t) === 'need'
+      // settled cards never change again: skip rebuilding their task chats
+      if (!waits && card.ask && (card.ask.reply ? !!card.ask.answered : !!card.ask.questions?.length && card.ask.questions.every((q) => q.sent !== undefined && q.elsewhere))) {
+        shown.set(card.id, { ...card.ask, open: false })
+        continue
+      }
       const tc = chatOf(key)
       const open = waits ? openCards(tc) : []
       // what it asks now, once seen: a question card that came while it waits, or its plain question
@@ -1238,11 +1269,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           saved = true
         }
       }
-      if (card.ask) shown.set(card.id, this.askOf(card.ask, tc, waits, t.id))
+      if (card.ask) {
+        const resolved = this.askOf(card.ask, tc, waits, t.id)
+        shown.set(card.id, resolved)
+        if (!waits && !resolved.open && !this.chats.isReading(key) && (t.archived || ended(t) || !last)) {
+          card.ask = resolved
+          saved = true
+        }
+      }
     }
-    if (saved) this.chats.saveLog(c.key)
-    if (!shown.size) return c
-    return { ...c, messages: c.messages.map((m) => (m.card && shown.has(m.card.id) ? { ...m, card: { ...m.card, ask: shown.get(m.card.id) } } : m)) }
+    if (saved) this.chats.saveLog(coordKey)
+    return shown
   }
 
   /** a needs-you card's ask as it stands now in its task's chat: each question as it is there (a terminal's menu is
@@ -1265,7 +1302,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const where = ask.answered?.where ?? (qs.some((q) => q.via === 'terminal') ? 'terminal' : 'task')
     const answeredLabel = where === 'space' ? 'Answered here ·' : where === 'terminal' ? 'Answered in the terminal ·' : 'Answered in'
     const questions = qs.map((q): Question => {
-      if (q.sent === undefined && !open.has(q.id)) return { ...q, sent: -1, elsewhere: link('No longer waits ·') }
+      if (q.sent === undefined && (!waits || !open.has(q.id))) return { ...q, sent: -1, elsewhere: link('No longer waits ·') }
       // the words it was answered with show on the card; the message that said them is in the task's chat
       // each question says how it was settled: a dismissed one among answered ones says so for itself
       return q.sent === undefined ? { ...q, ...(advisable.has(q.id) ? { advise: true } : {}) } : { ...q, via: undefined, elsewhere: link(q.dismissed ? 'Dismissed ·' : answeredLabel) }
@@ -3266,7 +3303,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.carded = t.id
     if (this.watched.includes(t.project)) this.emit('chat', t.project)
     // what it asks, kept on its card though no one looks yet
-    else if (status === 'need') this.withAsks(this.chats.chat(t.project))
+    else if (status === 'need') this.syncAsks(t.project)
   }
 
   /** what a task's alert says and where it opens: its open card, else its last reply; a done task's card */
