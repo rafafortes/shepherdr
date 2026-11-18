@@ -45,6 +45,15 @@ export function uniqueLogs(logs: string[]): string[] {
   return out
 }
 
+/** a log's time, or nothing when it vanished between the look and the stat (files do get pruned and mirrors rewritten) */
+function mtime(f: string): number | undefined {
+  try {
+    return statSync(f).mtimeMs
+  } catch {
+    return undefined
+  }
+}
+
 /** adds a log the record doesn't have yet; true when it was new or a dead path was replaced by a readable one */
 function addLog(r: AgentRecord, f: string): boolean {
   const i = r.logs.findIndex((x) => logName(x) === logName(f))
@@ -54,8 +63,13 @@ function addLog(r: AgentRecord, f: string): boolean {
   }
   // a session is first named by a path guessed before its file existed (a symlink's remembered name, or the real
   // path): when a later look finds the same session under a folder that does hold it, follow it. Otherwise a chat
-  // learned before the fix keeps its dead path for ever, and stays blank for the very session it is about.
-  if (r.logs[i] !== f && existsSync(f) && (!existsSync(r.logs[i]) || statSync(f).mtimeMs > statSync(r.logs[i]).mtimeMs)) {
+  // learned before the fix keeps its dead path for ever, and stays blank for the very session it is about. The newer
+  // of two readable copies wins, so a carried copy that stopped growing never replaces the live one.
+  if (r.logs[i] === f) return false
+  const now = mtime(f)
+  if (now === undefined) return false
+  const was = mtime(r.logs[i])
+  if (was === undefined || now > was) {
     r.logs[i] = f
     return true
   }

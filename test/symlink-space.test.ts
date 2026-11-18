@@ -142,6 +142,33 @@ describe('a symlinked space reads the agent where it runs', () => {
     }
   })
 
+  test('when both folders hold the session, the newer copy wins and the chat keeps one log', () => {
+    const { real, link } = place('both')
+    const now = Date.now()
+    const live = session(claudeProjectDir(real), S, logLines(real), now - 1000)
+    const frozen = session(claudeProjectDir(link), S, logLines(link), now - 600_000)
+    const a = agentsWith(KEY, link, real)
+    try {
+      a.record(KEY)!.logs = [frozen]
+      a.record(KEY)!.sessionId = S
+      ;(a as unknown as { learnSession(k: string, info: { agent_session: unknown }): void }).learnSession(KEY, { agent_session: { source: 'herdr', agent: NAME, kind: 'id', value: S } })
+      expect(a.record(KEY)!.logs).toEqual([live])
+      // if the copy in the remembered folder were the newer one, it would stay: no duplicate either way
+      const b = agentsWith(KEY, link, real)
+      try {
+        b.record(KEY)!.logs = [frozen]
+        b.record(KEY)!.sessionId = S
+        utimesSync(live, (now - 900_000) / 1000, (now - 900_000) / 1000)
+        ;(b as unknown as { learnSession(k: string, info: { agent_session: unknown }): void }).learnSession(KEY, { agent_session: { source: 'herdr', agent: NAME, kind: 'id', value: S } })
+        expect(b.record(KEY)!.logs).toEqual([frozen])
+      } finally {
+        b.stop()
+      }
+    } finally {
+      a.stop()
+    }
+  })
+
   test('every CLI\'s own session file name is recognised as readable', () => {
     const dir = tmp('unreadable-names')
     mkdirSync(dir, { recursive: true })

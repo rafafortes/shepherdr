@@ -93,7 +93,7 @@ describe('over time', () => {
   test('a lost one says why it did not come back: an unreadable chat says so, never "Not delivered"', () => {
     const sent = [out({ state: 'sent', serverAt: T })]
     const why = "This chat's log can't be read right now, so messages here may not show."
-    expect(expire(sent, T + KEEP_SENT + 10_000, undefined, (chat) => (chat === 'gtm' ? why : undefined))[0]).toMatchObject({ state: 'failed', lost: true, error: why })
+    expect(expire(sent, T + KEEP_SENT + 10_000, undefined, (chat) => (chat === 'gtm' ? why : undefined))[0]).toMatchObject({ state: 'failed', lost: true, error: "It went in, but I can't read this chat's log." })
     expect(expire(sent, T + KEEP_SENT + 10_000, undefined, () => undefined)[0].error).toBe("It went in, but it isn't in the chat I can read.")
   })
   test('in while the agent works, it may come back only at its next step: the wait counts from when it last worked', () => {
