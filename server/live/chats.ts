@@ -548,6 +548,13 @@ export class Chats {
     return this.openPosted(key)?.question?.title
   }
 
+  /** the coordinator's open `ask:` card, read from the raw log and events so `asks()` can use the one card-closing rule
+   *  without building the screen chat — `chat()` asks for the chat's name, which calls `asks()` back */
+  openAskId(key: string): string | undefined {
+    const id = this.openPosted(key)?.question?.id
+    return id?.startsWith('ask:') ? id : undefined
+  }
+
   /** a needs-you card or question, with when it was asked: the one it waits on now, if any */
   askAt(key: string): number | undefined {
     const posted = this.openPosted(key)

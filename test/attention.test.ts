@@ -1,5 +1,6 @@
 import { coordinatorRequestIds } from '../shared/attention.ts'
-import type { Message } from '../shared/types.ts'
+import { openCards } from '../shared/alerts.ts'
+import type { Chat, Message } from '../shared/types.ts'
 import { expect, test } from 'bun:test'
 import { attentionCounts } from '../src/attention.ts'
 import { DemoWorld } from '../server/demo/world.ts'
@@ -35,12 +36,20 @@ test('one row per card: a task with two open questions counts twice, a coordinat
   expect(attentionCounts(now, [p.id]).ready).toBe(now.tasks.filter((x) => x.place === p.id && x.status === 'ready' && !x.archived).length)
 })
 
-test('coordinator questions survive later news, count separately and stop counting when answered', () => {
+test('coordinator questions survive later news, count separately and stop counting when answered or relayed', () => {
   const q = (id: string): Message => ({ id, who: 'agent', question: { id, kind: 'Question', title: id, choices: [], to: 'you' } })
+  const chat = (messages: Message[]): Chat => ({ key: 'p', cli: 'Claude Code', messages })
+  const open = (messages: Message[]) => openCards(chat(messages)).map((m) => m.question.id)
   const posted: Message[] = [q('ask:1'), { id: 'news', who: 'agent', card: { id: 'news', task: 'T-1', status: 'ready', text: 'Ready' } }, q('ask:2'), { id: 'health', who: 'agent', text: 'Disk recovered.' }]
-  expect(coordinatorRequestIds(posted, {}, [], false)).toEqual(['ask:1', 'ask:2'])
-  expect(coordinatorRequestIds(posted, { 'ask:1': 0 }, [], false)).toEqual(['ask:2'])
-  expect(coordinatorRequestIds(posted, { 'ask:1': 0, 'ask:2': 0 }, [], false)).toEqual([])
-  expect(coordinatorRequestIds([], {}, [], true)).toEqual(['blocked'])
-  expect(coordinatorRequestIds(posted, {}, ['ask:1', 'menu'], true)).toEqual(['ask:1', 'ask:2', 'menu'])
+  // later news from the agent does not close a card that still waits
+  expect(open(posted)).toEqual(['ask:1', 'ask:2'])
+  expect(coordinatorRequestIds(open(posted), {}, false)).toEqual(['ask:1', 'ask:2'])
+  expect(coordinatorRequestIds(open(posted), { 'ask:1': 0 }, false)).toEqual(['ask:2'])
+  expect(coordinatorRequestIds(open(posted), { 'ask:1': 0, 'ask:2': 0 }, false)).toEqual([])
+  expect(coordinatorRequestIds([], {}, true)).toEqual(['blocked'])
+  expect(coordinatorRequestIds(['ask:1', 'menu'], {}, true)).toEqual(['ask:1', 'menu'])
+  // but another agent's relay after the cards closes them everywhere, a coordinator's as much as a task's (POL-442)
+  const relayed: Message[] = [...posted, { id: 'p1', who: 'peer', peer: { name: 'Another agent' }, text: 'The operator says pick the first.' }]
+  expect(open(relayed)).toEqual([])
+  expect(coordinatorRequestIds(open(relayed), {}, false)).toEqual([])
 })

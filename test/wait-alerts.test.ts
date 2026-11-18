@@ -202,7 +202,7 @@ describe('the command runs through sh, with what it is told as its arguments', (
     } finally {
       console.error = error
     }
-    expect(said).toEqual(expect.arrayContaining(['shepherdr: the alert command ended with 3', 'shepherdr: the alert command ended with 127']))
+    expect(said).toEqual(expect.arrayContaining(['shepherdr: the command ended with 3', 'shepherdr: the command ended with 127']))
   })
 })
 

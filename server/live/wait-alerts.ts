@@ -46,16 +46,19 @@ export class WaitAlerts {
    * one no longer open is forgotten, and one that was really told runs the done command with how it ended. `command`:
    * none while it is off (every wait counts as told then).
    */
-  look(waits: Wait[], o: { command?: string; after: number; doneCommand?: string }, now = Date.now()) {
+  look(waits: Wait[], o: { command?: string; after: number; doneCommand?: string; skipDone?: string[] }, now = Date.now()) {
     const s = (this.state ??= readJson<State>(FILE, { waits: {} }))
     const before = JSON.stringify(s)
     const open = new Set(waits.map((w) => w.key))
+    // left out for a policy reason (a coordinator whose space's Notify is Off), not because it ended: it is forgotten
+    // as before so turning Notify back on is a new wait, but no done command marks a wait that is still open
+    const skipped = new Set(o.skipDone ?? [])
     // a told wait that no longer waits is marked once, with the ending words from the last look; a command that fails
     // only says so in its log (runCommand), the wait is forgotten either way, and one still open is never marked
     for (const [k, x] of Object.entries(s.waits)) {
       if (open.has(k)) continue
       delete s.waits[k]
-      if (x.sent && o.doneCommand) {
+      if (x.sent && o.doneCommand && !skipped.has(k)) {
         // the wait is already marked: a command that throws or fails must not bring it back or stop the others
         try {
           this.run(o.doneCommand, [keyWords(k, x.seen), this.last.get(k)?.ended?.() ?? ENDED])
@@ -82,9 +85,9 @@ export class WaitAlerts {
  *  shell. It runs on its own: Shepherdr never waits for it, and only says when it could not run or failed */
 export function runCommand(command: string, args: string[]) {
   const p = spawn('sh', ['-c', `${command} "$@"`, 'shepherdr-alert', ...args], { stdio: 'ignore', detached: true })
-  p.on('error', (e) => console.error(`shepherdr: the alert command did not run: ${e.message}`))
+  p.on('error', (e) => console.error(`shepherdr: the command did not run: ${e.message}`))
   p.on('exit', (code) => {
-    if (code) console.error(`shepherdr: the alert command ended with ${code}`)
+    if (code) console.error(`shepherdr: the command ended with ${code}`)
   })
   p.unref()
 }

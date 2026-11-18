@@ -705,8 +705,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   asks(): Record<string, string> {
     const out: Record<string, string> = {}
     for (const p of [placeId.home(), ...this.places.spaces.map((x) => placeId.space(x.name))]) {
-      const open = this.chats.log(p).posted.find((x) => x.question && x.question.id.startsWith('ask:') && x.question.sent === undefined && this.chats.log(p).answers[x.question.id] === undefined)
-      if (open) out[p] = open.question!.id
+      // the same card-closing rule Needs you and the alert command read, not the posted log: a relay closes the card
+      const open = this.chats.openAskId(p)
+      if (open) out[p] = open
       // stopped on a start's screen of its own (start.ts): it waits on you as a menu does
       else if (this.chats.startMenuUp(p)) out[p] = menuId(p, this.chats.menu(p)!)
       else if (this.agents.status(p) === 'blocked') out[p] = 'blocked'
@@ -730,7 +731,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const log = this.chats.log(p)
       const cards = open(p)
       const blocked = this.agents.status(p) === 'blocked'
-      const ids = coordinatorRequestIds(log.posted, log.answers, [...cards.keys()], blocked)
+      const ids = coordinatorRequestIds([...cards.keys()], log.answers, blocked)
       for (const id of ids) {
         const message = cards.get(id) ?? log.posted.find((x) => x.question?.id === id)
         const question = message && 'question' in message ? message.question : undefined
@@ -862,8 +863,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   tellWaits(now = Date.now()) {
     const command = this.settings.alertCommand()
     const advisable = new Map(command ? this.advisable(undefined, true).map((x) => [`${x.need.chat}:${x.need.id}`, x]) : [])
+    const skipped: string[] = []
     const waits: Wait[] = this.needs()
-      .filter((n) => n.task || this.settings.get(NOTIFY_KEY, this.spaceKey(n.chat)) !== 'Off')
+      .filter((n) => {
+        if (n.task || this.settings.get(NOTIFY_KEY, this.spaceKey(n.chat)) !== 'Off') return true
+        // a policy silence, not an end: never mark it done while the card is still open (wait-alerts.ts skipDone)
+        skipped.push(`${n.chat}:${n.id}`)
+        return false
+      })
       .map((n) => {
         const key = `${n.chat}:${n.id}`
         const x = advisable.get(key)
@@ -878,19 +885,22 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           words: () => this.waitWords(n, x, now, rec, pending),
           // read at the moment it ends, from the live advice record and chat: the advisor may have answered since the
           // last look, when this wait was still open
-          ended: () => this.waitEnded(n),
+          ended: () => this.waitEnded(n, x?.qid),
         }
       })
-    this.waitAlerts.look(waits, { command, after: this.settings.alertAfter(), doneCommand: this.settings.doneCommand() }, now)
+    this.waitAlerts.look(waits, { command, after: this.settings.alertAfter(), doneCommand: this.settings.doneCommand(), skipDone: skipped }, now)
   }
 
   /** how a wait the human was told about ended, in words for the done command: the advisor's answer, a relay from
-   *  another agent, or the human's own answer (a task that moved on says the same). Read now, not at the last look. */
-  private waitEnded(n: Need): string {
-    const said = this.chats.chat(n.chat).messages.findLast((m) => m.who === 'agent' && m.text && !m.card)
-    const rec = this.advices.get(n.chat, n.question?.id ?? (said ? `words:${said.id}` : ''))
-    if (rec?.state === 'sent' || rec?.state === 'suggested') return 'The advisor answered'
-    if (this.chats.chat(n.chat).messages.some((m) => m.who === 'peer' && (m.at ?? 0) > n.at)) return 'Answered by another agent'
+   *  another agent, a decline, or the human's own answer (a task that moved on says the same). Read now, not at the
+   *  last look, and with the question id the advisor was asked about (the agent may have said more since a words ask). */
+  private waitEnded(n: Need, qid?: string): string {
+    const card = qid ?? n.question?.id ?? ''
+    const rec = this.advices.get(n.chat, card)
+    if (rec?.state === 'sent') return 'The advisor answered'
+    const msgs = this.chats.chat(n.chat).messages
+    if (msgs.some((m) => m.question?.id === card && m.question.dismissed)) return 'Dismissed'
+    if (msgs.some((m) => m.who === 'peer' && (m.at ?? 0) > n.at)) return 'Answered by another agent'
     return 'Answered'
   }
 

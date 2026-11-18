@@ -173,6 +173,50 @@ describe('what your alert command is told', () => {
     expect(ran.filter((r) => r.command === '~/bin/notify --done').map((r) => r.args)).toEqual([[keyWords(`${w.key}:ask:relayed`, at), 'Answered by another agent']])
   })
 
+  test("a coordinator's card closed by a relay no longer waits, asks or alerts", async () => {
+    const w = await world('wa-coord-relay')
+    const at = Date.now()
+    card(w.coord, 'ask:coord', 'Merge both now?', ['Yes', 'No'], at)
+    expect(openCards(src.chats.chat(w.coord)).map((m) => m.question.id)).toEqual(['ask:coord'])
+    expect(src.asks()[w.coord]).toBe('ask:coord')
+    reached(w.coord, { kind: 'peer', id: 'peer-1', at: at + 1000, text: 'Relayed from the operator: yes, merge.' })
+    // the same rule as a task's card, in Needs you, its counts and the coordinator's asks (POL-442)
+    expect(openCards(src.chats.chat(w.coord))).toEqual([])
+    expect(src.asks()[w.coord]).toBeUndefined()
+    ;(src.engine.task(w.id) as unknown as { reported: unknown }).reported = 'done'
+    src.tellWaits(at)
+    src.tellWaits(at + 10_000)
+    expect(ran).toEqual([])
+  })
+
+  test('Notify Off does not mark a still-open wait as ended', async () => {
+    const w = await world('wa-notify-off')
+    src.settings.set('alerts.doneCommand', '~/bin/notify --done', 'machine')
+    const at = Date.now()
+    card(w.coord, 'ask:off', 'Merge both now?', ['Yes', 'No'], at)
+    src.tellWaits(at)
+    src.tellWaits(at + 10_000)
+    expect(ran.map((r) => r.command)).toEqual(['~/bin/notify'])
+    // its space goes quiet: the card is still open, so nothing says it ended
+    src.settings.set('notify', 'Off', { space: w.p.name })
+    src.tellWaits(at + 20_000)
+    expect(ran.map((r) => r.command)).toEqual(['~/bin/notify'])
+    src.settings.set('notify', null, { space: w.p.name })
+  })
+
+  test('a dismissed card is marked as declined, not answered', async () => {
+    const w = await world('wa-dismissed')
+    const at = Date.now()
+    card(w.key, 'ask:declined', 'Which store?', ['A', 'B'], at)
+    src.settings.set('alerts.doneCommand', '~/bin/notify --done', 'machine')
+    src.tellWaits(at)
+    src.tellWaits(at + 180_000)
+    src.chats.answer(w.key, 'ask:declined', -1, undefined, undefined, true)
+    ;(src.engine.task(w.id) as unknown as { reported: unknown }).reported = 'done'
+    src.tellWaits(at + 190_000)
+    expect(ran.filter((r) => r.command === '~/bin/notify --done').map((r) => r.args)).toEqual([[keyWords(`${w.key}:ask:declined`, at), 'Dismissed']])
+  })
+
   test("a coordinator's question is told, unless its space's Notify is Off; its tasks' are told either way", async () => {
     const w = await world('wa-coord')
     // its task is not here: a task whose agent is not running needs you too (the last test)
