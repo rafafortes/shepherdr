@@ -1013,6 +1013,11 @@ export class Chats {
       cli: CLI_NAME[kind] ?? kind,
       agent: r ? { runtime, ...launchHarness({ kind: r.kind, model: r.model, effort: r.effort }), ...(findModel(r.kind, r.model) ? { modelLabel: findModel(r.kind, r.model)!.label } : {}) } : undefined,
       messages: msgs,
+      // the card-closing rule from the raw log, for openCards: hidden notes and app answers are no rows in `messages`
+      closedAt: [
+        ...ev.filter((e) => e.kind === 'peer' || (e.kind === 'user' && wordsOf(e.text))).map((e) => e.at),
+        ...l.posted.filter((p) => p.who === 'you').map((p) => p.at),
+      ],
       failed: failed.length ? failed : undefined,
       working: st === 'working' || undefined,
       queued: queued.length ? queued : undefined,

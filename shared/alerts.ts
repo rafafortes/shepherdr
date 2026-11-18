@@ -75,6 +75,9 @@ type Card = Message & { question: Question }
  *  to one of the other cards, and a message of yours that is only a card pick leave a card waiting (SHE-19). */
 export function openCards(chat: Chat | undefined): Card[] {
   const out: Card[] = []
+  // from the raw log (chats.ts), where hidden notes and answers sent from the app exist as well as visible rows; a chat
+  // the screen did not build (a demo, a test) has none and falls back to its rows below
+  const closed = chat?.closedAt ?? []
   for (const m of [...(chat?.messages ?? [])].reverse()) {
     // what you sent that waits for the menu to be answered, another agent's message still on its way in, and a note
     // beside the questions (the advisor's, by its id too for the ones posted before notes said so): none of them
@@ -87,7 +90,10 @@ export function openCards(chat: Chat | undefined): Card[] {
       if ((m.who === 'you' && !m.answered) || m.who === 'peer') break
       continue
     }
-    if (m.question.sent === undefined) out.unshift(m as Card)
+    if (m.question.sent !== undefined) continue
+    // a hidden note, a relay or an app answer reached the agent after this card: the same rule chats.ts uses
+    if (m.at !== undefined && closed.some((at) => at > m.at!)) continue
+    out.unshift(m as Card)
   }
   return out
 }

@@ -129,6 +129,17 @@ describe('what your alert command is told', () => {
     expect(ran.at(-1)!.args[1]).toContain('The advisor waits for a free model')
   })
 
+  test('an advisor answer before the delay tells nothing at all', async () => {
+    const w = await world('wa-auto')
+    const at = Date.now()
+    card(w.key, 'ask:auto', 'Which store?', ['A', 'B'], at)
+    advice(w, 'ask:auto', 'sent', { auto: true })
+    src.chats.answer(w.key, 'ask:auto', 0)
+    ;(src.engine.task(w.id) as unknown as { reported: unknown }).reported = 'done'
+    for (const t of [at, at + 10_000, at + 180_000, at + 240_000]) src.tellWaits(t)
+    expect(ran.filter((r) => r.args[0]!.includes(w.id))).toEqual([])
+  })
+
   test('the advisor answering by itself tells nothing, and marks the wait it had told', async () => {
     const w = await world('wa-solved')
     const at = Date.now()
@@ -187,6 +198,27 @@ describe('what your alert command is told', () => {
     src.tellWaits(at)
     src.tellWaits(at + 10_000)
     expect(ran).toEqual([])
+  })
+
+  test('a hidden note and an app answer close a card in Needs you and alerts, not just in the raw log', async () => {
+    const w = await world('wa-hidden')
+    const at = Date.now()
+    card(w.key, 'ask:hidden', 'Which store?', ['A', 'B'], at)
+    expect(openCards(src.chats.chat(w.key)).map((m) => m.question.id)).toEqual(['ask:hidden'])
+    // the operator's notes on a page: Shepherdr hides them in a line the screen does not show
+    reached(w.key, { kind: 'user', id: 'u-notes', at: at + 1000, text: '<shepherdr><browser from="Elias">Make the button say Save</browser></shepherdr>' })
+    expect(src.chats.openCard(w.key)).toBeUndefined()
+    expect(openCards(src.chats.chat(w.key))).toEqual([])
+    // an answer sent from the app to another card is a posted line of yours, not a visible answer row either
+    const v = await world('wa-app-answer')
+    card(v.key, 'ask:app', 'Which name?', ['A', 'B'], at)
+    expect(openCards(src.chats.chat(v.key)).map((m) => m.question.id)).toEqual(['ask:app'])
+    src.chats.post(v.key, { id: 'cli-answer', who: 'you', answered: 'Answered “Allow: rm -rf build?”', at: at + 1000 } as never)
+    expect(openCards(src.chats.chat(v.key))).toEqual([])
+    for (const x of [w, v]) (src.engine.task(x.id) as unknown as { reported: unknown }).reported = 'done'
+    src.tellWaits(at)
+    src.tellWaits(at + 10_000)
+    expect(ran.filter((r) => r.args[0]!.includes(w.id) || r.args[0]!.includes(v.id))).toEqual([])
   })
 
   test('Notify Off does not mark a still-open wait as ended', async () => {
@@ -304,6 +336,8 @@ describe("another agent's message in every CLI's chat closes the card it reached
       // the card is still in the chat, but the relay answered it: it is not open and not in Needs you
       expect(msgs.some((m) => m.question?.id === `ask:${kind}`)).toBe(true)
       expect(openCards(src.chats.chat(w.key))).toEqual([])
+      // the card itself is gone from Needs you, not just the task after the agent moved on
+      expect((src as unknown as { needs: () => { id: string }[] }).needs().some((n) => n.id === `ask:${kind}`)).toBe(false)
       // the relay woke the agent, which moved on: a task with no card left does not need the human either
       ;(src.engine.task(w.id) as unknown as { reported: unknown }).reported = 'done'
       src.tellWaits(at)
