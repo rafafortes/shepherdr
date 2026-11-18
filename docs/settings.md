@@ -761,9 +761,10 @@ what it asks through Shepherdr, its CLI's own questions and screens as Shepherdr
 with no card — so a CLI with no notifier of its own (OpenCode, Antigravity) is told of as well.
 
 A card or question stops waiting on one rule everywhere (Needs you, its counts, the app badge, alerts, answers from an
-alert and the chat's open cards alike): the human's own words after it, hidden notes on a page included, or a message
-from another agent that reached the agent after it (a relay it takes as its prompt, as POL-442's did); never Shepherdr's
-own news. The agent's own words after its card, a card of Shepherdr's, and an answer to another card leave it waiting.
+alert and the chat's open cards alike): the human's own words after it, hidden notes on a page included, another agent's
+message that reached the agent after it (a relay it takes as its prompt, as POL-442's did), or a pick answered from the
+app; never Shepherdr's own news. This is the raw rule in `chats.ts` (`openPosted` / `openQuestion`), which every reader
+shares. The agent's own words after its card and a card of Shepherdr's leave it waiting.
 
 - **How it runs.** Through `sh`, as `<command> <title> <message> <key>`, so `~` and words of your own work
   (`shepherdr set alerts.command '~/.local/bin/notify-operator' --machine`). The title says who asks and what

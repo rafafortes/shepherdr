@@ -886,6 +886,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           // read at the moment it ends, from the live advice record and chat: the advisor may have answered since the
           // last look, when this wait was still open
           ended: () => this.waitEnded(n, x?.qid),
+          // a card still open while its task reads Working (a typed message holds the turn): keep the wait, never say
+          // it ended or alert it twice when the task needs you again
+          stillOpen: () => !!n.question && openCards(this.chats.chat(n.chat)).some((m) => m.question.id === n.question!.id),
         }
       })
     this.waitAlerts.look(waits, { command, after: this.settings.alertAfter(), doneCommand: this.settings.doneCommand(), skipDone: skipped }, now)
@@ -900,6 +903,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (rec?.state === 'sent') return 'The advisor answered'
     const msgs = this.chats.chat(n.chat).messages
     if (msgs.some((m) => m.question?.id === card && m.question.dismissed)) return 'Dismissed'
+    // a terminal prompt's Dismiss presses Esc, so its card is gone from the chat; its own line still says so
+    if (msgs.some((m) => m.who === 'you' && /^Dismissed /.test(m.answered ?? ''))) return 'Dismissed'
     if (msgs.some((m) => m.who === 'peer' && (m.at ?? 0) > n.at)) return 'Answered by another agent'
     return 'Answered'
   }

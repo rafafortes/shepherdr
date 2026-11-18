@@ -68,11 +68,12 @@ type Card = Message & { question: Question }
 /** the cards the chat ends on, unanswered (a choice card, a plan, the CLI's own question or form, a menu): the agent
  *  waits on them. One rule everywhere, shared with the CLI's own cards and questions in chats.ts (`openPosted` /
  *  `openQuestion`, since SHE-53; the operator's choice on 2026-11-17): a card is answered by the
- *  human's own words after it (typed, or a hidden note on a page) or by another agent's message that reached the agent
- *  after it (a relay the agent takes as its prompt), never by Shepherdr's own news. The chat here holds the human's
- *  visible words and the other agents' rows; hidden notes and Shepherdr's hidden news are stripped before they reach
- *  it, so they are read from the raw log in chats.ts instead. The agent's own words, a card of Shepherdr's, an answer
- *  to one of the other cards, and a message of yours that is only a card pick leave a card waiting (SHE-19). */
+ *  human's own words after it (typed, or a hidden note on a page), by another agent's message that reached the agent
+ *  after it (a relay the agent takes as its prompt), or by a pick answered from the app — the raw rule in chats.ts
+ *  (`openPosted` / `openQuestion`) — never by Shepherdr's own news. The chat here holds the human's visible words and
+ *  the other agents' rows; hidden notes, app answers and Shepherdr's hidden news are no rows in it, so their times are
+ *  carried in `Chat.closedAt` from the raw log. The agent's own words and a card of Shepherdr's leave a card waiting
+ *  (SHE-19). */
 export function openCards(chat: Chat | undefined): Card[] {
   const out: Card[] = []
   // from the raw log (chats.ts), where hidden notes and answers sent from the app exist as well as visible rows; a chat

@@ -236,6 +236,42 @@ describe('what your alert command is told', () => {
     src.settings.set('notify', null, { space: w.p.name })
   })
 
+  test('a menu card still open while its task reads Working is not marked ended or told twice', async () => {
+    const w = await world('wa-menu-grace')
+    const at = Date.now()
+    const mid = `menu:${w.key}`
+    src.chats.post(w.key, { id: mid, at, question: { id: mid, kind: 'Form', title: 'Allow: rm -rf build', terminal: true, choices: [{ label: 'Yes' }, { label: 'No' }], to: w.key } } as never)
+    src.settings.set('alerts.doneCommand', '~/bin/notify --done', 'machine')
+    src.tellWaits(at)
+    src.tellWaits(at + 10_000)
+    expect(ran.filter((r) => r.command === '~/bin/notify')).toHaveLength(1)
+    // the human typed while the prompt is up: herdr holds the message, the task reads Working, the card stays open
+    const wrote = (src.engine as unknown as { wrote: Map<string, number> }).wrote
+    wrote.set(w.id, Date.now() + 60_000)
+    src.tellWaits(at + 13_000)
+    expect(ran.filter((r) => r.command === '~/bin/notify --done')).toEqual([])
+    // when it needs you again, the same card does not alert a second time under a new key
+    wrote.set(w.id, 0)
+    src.tellWaits(at + 40_000)
+    expect(ran.filter((r) => r.command === '~/bin/notify')).toHaveLength(1)
+  })
+
+  test('a declined terminal prompt is marked as dismissed, not answered', async () => {
+    const w = await world('wa-menu-dismiss')
+    const at = Date.now()
+    const mid = `menu:${w.key}`
+    src.chats.post(w.key, { id: mid, at, question: { id: mid, kind: 'Form', title: 'Allow: rm -rf build', terminal: true, choices: [{ label: 'Yes' }, { label: 'No' }], to: w.key } } as never)
+    src.settings.set('alerts.doneCommand', '~/bin/notify --done', 'machine')
+    src.tellWaits(at)
+    src.tellWaits(at + 10_000)
+    // Esc closes the terminal prompt: its card leaves the chat and the Dismiss line reaches the agent
+    ;(src.chats as unknown as { menus: Map<string, unknown> }).menus.delete(w.key)
+    src.chats.post(w.key, { id: 'menu-dismiss:1', who: 'you', answered: 'Dismissed “Allow: rm -rf build”', at: at + 11_000 } as never)
+    ;(src.engine as unknown as { wrote: Map<string, number> }).wrote.set(w.id, Date.now() + 60_000)
+    src.tellWaits(at + 13_000)
+    expect(ran.filter((r) => r.command === '~/bin/notify --done').map((r) => r.args)).toEqual([[keyWords(`${w.key}:${mid}`, at), 'Dismissed']])
+  })
+
   test('a dismissed card is marked as declined, not answered', async () => {
     const w = await world('wa-dismissed')
     const at = Date.now()

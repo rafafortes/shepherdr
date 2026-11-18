@@ -19,6 +19,9 @@ export interface Wait {
   after?: number
   /** how this wait ended, in words for the done command; read only when it ends, never while it is still open */
   ended?: () => string
+  /** is what it waits on still open, even though it left the look for another reason (a typed message holding its
+   *  task in Working)? Such a wait is kept as it was: no done command and no second alert if it comes back */
+  stillOpen?: () => boolean
 }
 
 interface State {
@@ -57,6 +60,9 @@ export class WaitAlerts {
     // only says so in its log (runCommand), the wait is forgotten either way, and one still open is never marked
     for (const [k, x] of Object.entries(s.waits)) {
       if (open.has(k)) continue
+      // the card may still be open even though its task stopped reading Needs you (a typed message, a grace period):
+      // keep the wait untouched, so nothing marks it answered and the same card cannot alert again under a new key
+      if (this.last.get(k)?.stillOpen?.()) continue
       delete s.waits[k]
       if (x.sent && o.doneCommand && !skipped.has(k)) {
         // the wait is already marked: a command that throws or fails must not bring it back or stop the others
