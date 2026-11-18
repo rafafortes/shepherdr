@@ -1,7 +1,7 @@
 // Background work that outlives an agent's turn (readers/background.ts): Claude Code's session file and its screen, on
 // samples captured from real panes and session files (Claude Code 2.1.310).
 import { afterAll, describe, expect, test } from 'bun:test'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
@@ -148,6 +148,25 @@ describe("Claude Code's session file", () => {
       // what it says now, once it is no longer fresh
       file(me, { sessionId: '764b1ad0-5551-4161-a30e-3706eb3321bc', cwd: '/w/59', status: 'idle', updatedAt: 1792966200000 })
       expect(s.status('764b1ad0-5551-4161-a30e-3706eb3321bc', '/w/59', (now += 2000))).toBe('idle')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('a symlinked folder is found by the remembered path and by the real one', () => {
+    const dir = tmp('sessions-symlink')
+    try {
+      const real = join(dir, 'lyvora-app')
+      const link = join(dir, 'polylog')
+      mkdirSync(real, { recursive: true })
+      symlinkSync(real, link)
+      const me = process.pid
+      writeFileSync(join(dir, `${me}.json`), JSON.stringify({ pid: me, version: '2.1.310', peerProtocol: 1, kind: 'interactive', name: 'x', sessionId: 'sym-ses', cwd: real, status: 'busy', updatedAt: 1792966090908 }))
+      const s = new ClaudeSessions(() => dir)
+      // callers pass the candidate cwds (the remembered link and the real path) as agents.logCwds does
+      expect(s.status(undefined, [link, real], 1_000_000)).toBe('busy')
+      expect(s.status(undefined, [real, link], 1_000_000)).toBe('busy')
+      expect(s.status(undefined, real, 1_000_000)).toBe('busy')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

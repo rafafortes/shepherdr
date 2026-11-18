@@ -5,14 +5,14 @@ import { LinkBackoff } from './recovery.ts'
 // Codex and pi take it mid-turn, as steering). It waits only while the CLI shows a menu or permission prompt, where typed
 // text could pick an option, or is still starting; then it goes in as soon as it can.
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, mkdirSync, statSync, watch, type FSWatcher } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Emitter } from '../source.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
 import { dropped, herdr, isPassing, retrying, startDelays, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
 import { agyScreenBackground, ClaudeSessions, Procs, screenBackground, servesCommand, sessionBackground, type Background } from './readers/background.ts'
-import { claudeHome, claudeLogPath, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind } from './readers/find.ts'
+import { claudeHome, claudeLogPath, cwdCandidates, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind, type LogCwd } from './readers/find.ts'
 import { createSession, mirrorSession, opencodeLogPath, putInstructions, switchModel } from './opencode.ts'
 import { agyLogPath, agyModelId, mirrorConversation } from './agy.ts'
 import { agyIds, effortFor, modelArg } from './models.ts'
@@ -45,11 +45,35 @@ export function uniqueLogs(logs: string[]): string[] {
   return out
 }
 
-/** adds a log the record doesn't have yet; true when it was new */
+/** a log's time, or nothing when it vanished between the look and the stat (files do get pruned and mirrors rewritten) */
+function mtime(f: string): number | undefined {
+  try {
+    return statSync(f).mtimeMs
+  } catch {
+    return undefined
+  }
+}
+
+/** adds a log the record doesn't have yet; true when it was new or a dead path was replaced by a readable one */
 function addLog(r: AgentRecord, f: string): boolean {
-  if (r.logs.some((x) => logName(x) === logName(f))) return false
-  r.logs.push(f)
-  return true
+  const i = r.logs.findIndex((x) => logName(x) === logName(f))
+  if (i < 0) {
+    r.logs.push(f)
+    return true
+  }
+  // a session is first named by a path guessed before its file existed (a symlink's remembered name, or the real
+  // path): when a later look finds the same session under a folder that does hold it, follow it. Otherwise a chat
+  // learned before the fix keeps its dead path for ever, and stays blank for the very session it is about. The newer
+  // of two readable copies wins, so a carried copy that stopped growing never replaces the live one.
+  if (r.logs[i] === f) return false
+  const now = mtime(f)
+  if (now === undefined) return false
+  const was = mtime(r.logs[i])
+  if (was === undefined || now > was) {
+    r.logs[i] = f
+    return true
+  }
+  return false
 }
 
 /** an OpenCode session's log: its mirror brought up to date once. The path comes back whether or not that worked (the
@@ -77,7 +101,7 @@ function mirrorAgy(id: string): string {
 
 /** a Claude Code session, copied into the project folder of the cwd it resumes in (Claude Code looks for it only
  *  there) from wherever it was written on that machine; its log path, or nothing when there is none */
-export function carryClaudeSession(id: string, cwd: string): string | undefined {
+export function carryClaudeSession(id: string, cwd: LogCwd): string | undefined {
   const to = claudeLogPath(cwd, id)
   const sh = `[ -e "$1" ] && exit 0; src=$(ls -t "$2"/*/"$3.jsonl" 2>/dev/null | head -n 1); [ -n "$src" ] || exit 1; mkdir -p "$(dirname "$1")" && cp "$src" "$1"`
   return runSync(['/bin/sh', '-c', sh, 'carry', task.unmirrored(to), task.unmirrored(join(claudeHome(), 'projects')), id]).code === 0 ? to : undefined
@@ -219,6 +243,10 @@ export function holdFrom(e: unknown): Hold | undefined {
 
 /** what an agent's hooks said is read again at most this often */
 const SAID_MS = 250
+
+/** one calm line for a chat whose agent runs but whose log can't be read (a symlinked space with no log under either
+ *  cwd, a folder gone, a CLI that did not write): the truth, without blaming the send */
+const UNREADABLE_LOG = "This chat's log can't be read right now, so messages here may not show."
 
 /** wraps text Shepherdr sends that is not for the chat (instructions, news), in a tag of what it is when it is one
  *  of its lines: <shepherdr><news task="SHE-9" event="merged">…</news></shepherdr>; readers' text is stripped of it */
@@ -389,6 +417,37 @@ export class Agents extends Emitter<Events> {
   info(key: string) {
     const r = this.records[key]
     return r ? this.live.get(r.name) : undefined
+  }
+
+  /** The cwds where this chat's agent may write its logs: what Shepherdr remembers, its real path (a symlinked space),
+   *  and, leading, the cwd herdr reports for the live agent. Only this chat's own paths ever go into a log lookup. */
+  logCwds(key: string): string[] {
+    const r = this.records[key]
+    return r ? cwdCandidates(r.cwd, this.info(key)?.cwd) : []
+  }
+
+  /** A running chat whose log can't be read is not an empty conversation: say so in one calm line (and in doctor),
+   *  rather than let the person's own message look lost. A just-launched agent gets a few seconds to write its first
+   *  log before this line appears. */
+  unreadable(key: string): string | undefined {
+    const r = this.records[key]
+    if (!r || !this.info(key) || Date.now() - r.started < 15_000) return undefined
+    // the log that matters is the current session's: an older session's file still on disk says nothing about
+    // whether the one this agent is in now can be read — that is the case that makes a chat look empty
+    // pi names a file <timestamp>_<session id>.jsonl, so match the end of the name, not the whole of it
+    const current = r.sessionId ? r.logs.find((f) => f.endsWith(`${r.sessionId}.jsonl`)) : r.logs.at(-1)
+    if (current && existsSync(current)) return undefined
+    return UNREADABLE_LOG
+  }
+
+  /** the doctor's lines: one per running chat whose log can't be read */
+  unreadableLogs(): string[] {
+    const out: string[] = []
+    for (const key of Object.keys(this.records)) {
+      const line = this.unreadable(key)
+      if (line) out.push(`${key}: ${line}`)
+    }
+    return out
   }
 
   /** Private routing was bound to this session's actual CLI process. */
@@ -675,7 +734,7 @@ export class Agents extends Emitter<Events> {
     // OpenCode keeps its background shells under its own pty daemon, and wakes the agent when one ends
     if (r?.kind === 'opencode') return st === 'idle' || st === 'done' ? this.opencodeWork(key) : undefined
     if (r?.kind !== 'claude' || st === 'working' || st === 'blocked' || st === 'gone') return undefined
-    const file = this.sessions.status(r.sessionId, r.cwd)
+    const file = this.sessions.status(r.sessionId, this.logCwds(key))
     // its hooks said what still ran as its turn ended; its session file is newer once that work is gone, or once a
     // subagent runs again (one that paused on shells of its own woke)
     const said = this.said(key)
@@ -700,7 +759,7 @@ export class Agents extends Emitter<Events> {
     const pane = this.info(key)?.pane_id
     if (!pane || (st !== 'idle' && st !== 'done')) return undefined
     if (r?.kind === 'agy') return agyScreenBackground(await herdr.visible(pane).catch(() => ''))
-    if (r?.kind === 'claude' && !this.said(key) && this.sessions.status(r.sessionId, r.cwd) === undefined) return screenBackground(await herdr.visible(pane).catch(() => ''))
+    if (r?.kind === 'claude' && !this.said(key) && this.sessions.status(r.sessionId, this.logCwds(key)) === undefined) return screenBackground(await herdr.visible(pane).catch(() => ''))
     return undefined
   }
 
@@ -783,7 +842,7 @@ export class Agents extends Emitter<Events> {
       this.save()
       this.emit('logs', key)
     } else if (s.kind === 'id' && r.kind === 'claude') {
-      const p = claudeLogPath(r.cwd, s.value)
+      const p = claudeLogPath(this.logCwds(key), s.value)
       if (addLog(r, p)) {
         r.sessionId = s.value
         this.save()
@@ -800,7 +859,7 @@ export class Agents extends Emitter<Events> {
     const s = this.hooks.read(mirrored(r.hooks)).session
     // another machine's copy of its events may still be an earlier run's, until the new run's first event comes
     if (!s || s.id === r.sessionId || s.at < r.started - 5000) return
-    const log = s.log ? mirrored(s.log) : claudeLogPath(r.cwd, s.id)
+    const log = s.log ? mirrored(s.log) : claudeLogPath(this.logCwds(key), s.id)
     r.sessionId = s.id
     addLog(r, log)
     this.save()
@@ -813,7 +872,7 @@ export class Agents extends Emitter<Events> {
     const r = this.records[key]
     if (!r || (r.kind === 'claude' && r.hooks)) return
     const look = () => {
-      const f = findLog(r.kind, r.cwd, since - 1000)
+      const f = findLog(r.kind, this.logCwds(key), since - 1000)
       if (!f || !addLog(r, f)) return
       // Claude Code and pi resume by the id in its name, OpenCode by its session id (its mirror is named by it); Codex by
       // its last log
@@ -831,7 +890,8 @@ export class Agents extends Emitter<Events> {
     const r = this.records[key]
     if (!r) return
     const since = r.started - 5000
-    const f = r.kind === 'claude' ? (r.sessionId ? claudeLogPath(r.cwd, r.sessionId) : findClaudeLog(r.cwd, since)) : r.kind === 'codex' ? findCodexLog(r.cwd, since) : r.kind === 'pi' ? findPiLog(r.cwd, since) : r.kind === 'opencode' ? (r.sessionId ? mirrorOpencode(r.sessionId) : findOpencodeLog(r.cwd, since)) : r.kind === 'agy' ? (r.sessionId ? mirrorAgy(r.sessionId) : findAgyLog(r.cwd, since)) : undefined
+    const cwds = this.logCwds(key)
+    const f = r.kind === 'claude' ? (r.sessionId ? claudeLogPath(cwds, r.sessionId) : findClaudeLog(cwds, since)) : r.kind === 'codex' ? findCodexLog(cwds, since) : r.kind === 'pi' ? findPiLog(cwds, since) : r.kind === 'opencode' ? (r.sessionId ? mirrorOpencode(r.sessionId) : findOpencodeLog(cwds, since)) : r.kind === 'agy' ? (r.sessionId ? mirrorAgy(r.sessionId) : findAgyLog(cwds, since)) : undefined
     // agy names its conversation by the log's name: that id is what --conversation resumes
     if (f && r.kind === 'agy') r.sessionId = logName(f).replace(/\.jsonl$/, '')
     if (f && addLog(r, f)) {
@@ -941,7 +1001,7 @@ export class Agents extends Emitter<Events> {
     // it starts in another folder now: its session goes with it, where --resume looks for it
     if (resume && r.kind === 'claude' && r.sessionId && from !== r.cwd) {
       const id = r.sessionId
-      const log = carryClaudeSession(id, r.cwd)
+      const log = carryClaudeSession(id, this.logCwds(spec.key))
       if (log) r.logs = [...r.logs.filter((f) => !f.endsWith(`/${id}.jsonl`)), log]
     }
     // herdr dropping a call (it closes a connection it was sent too late, see herdr.ts PASSING) is no failed start: each of

@@ -504,7 +504,7 @@ function putOutbox(out: Outgoing[]) {
 
 // one still sending long after its time didn't go through; one that went in but never came back stops showing
 setInterval(() => {
-  const out = expire(state.outbox, Date.now(), (chat) => !!state.chats[chat]?.working)
+  const out = expire(state.outbox, Date.now(), (chat) => !!state.chats[chat]?.working, (chat) => state.chats[chat]?.unreadable)
   if (out === state.outbox) return
   putOutbox(out)
   emit()

@@ -282,7 +282,7 @@ function NotSent({ out, className }: { out: Outgoing; className?: string }) {
   return (
     <div role="alert" className={clsx('mt-1 flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 text-[0.75rem] phone:text-[0.8125rem]', out.lost ? 'text-fg2' : 'text-need', className)}>
       {out.lost ? (
-        <span>Not delivered</span>
+        <span>{out.error}</span>
       ) : (
         <span className="flex items-center gap-1.5">
           <AlertIcon className="size-3.5 shrink-0" />
@@ -1417,7 +1417,7 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   return (
     // a finger sliding a message left moves them all (--peek), and each one's time comes in at the right, like iMessage
     <div ref={list} data-messages className="mx-auto flex w-full max-w-read flex-1 flex-col gap-3.5 px-5 pt-5 pb-3 phone:px-4">
-      {!rows.length ? <Empty className="p-0!">No messages yet. Write to start.</Empty> : null}
+      {!rows.length && !chat.unreadable ? <Empty className="p-0!">No messages yet. Write to start.</Empty> : null}
       {rows.map((it) => {
         const at = it.at > 1e12 ? it.at : 0
         const d = at ? new Date(at).toDateString() : day
@@ -1439,6 +1439,9 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
           </Fragment>
         )
       })}
+      {chat.unreadable ? (
+        <div role="status" className="self-center text-center text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{chat.unreadable}</div>
+      ) : null}
       {registry.chatTail.map(({ View }, i) => (
         <View key={i} chat={chat} from={from} />
       ))}

@@ -1,8 +1,8 @@
 // The log readers, on made-up lines in each CLI's exact format (field names and nesting copied from real logs).
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { claudeLogPath, findClaudeLog, findCodexLog, findPiLog, piSessionDir } from '../server/live/readers/find.ts'
+import { claudeLogPath, claudeProjectDir, cwdCandidates, findClaudeLog, findCodexLog, findPiLog, piSessionDir } from '../server/live/readers/find.ts'
 import { LogTail, readerFor } from '../server/live/readers/index.ts'
 import type { LogEvent } from '../server/live/readers/types.ts'
 import { tmp } from './tmp.ts'
@@ -557,6 +557,83 @@ describe('finding logs', () => {
     touch(join(piSessionDir(cwd), '2026-10-13T21-00-00-000Z_b.jsonl'), piSession('b'), now - 2000)
     expect(findPiLog(cwd)).toBe(join(piSessionDir(cwd), '2026-10-13T21-00-00-000Z_b.jsonl'))
     expect(findPiLog(cwd, now)).toBeUndefined()
+  })
+
+  /* a renamed repo leaves a link at its old name: Shepherdr remembers the link, the CLI writes under the real path */
+
+  test('cwd candidates: the real path and the link are both looked at, the live agent cwd leads', () => {
+    const real = join(dir, 'real-space')
+    const link = join(dir, 'link-space')
+    mkdirSync(real, { recursive: true })
+    symlinkSync(real, link)
+    expect(cwdCandidates(link)).toEqual([real, link])
+    expect(cwdCandidates(link, link)).toEqual([real, link])
+    expect(cwdCandidates(real)).toEqual([real])
+    expect(cwdCandidates('/nowhere')).toEqual(['/nowhere'])
+    expect(cwdCandidates('  ')).toEqual([])
+  })
+
+  test('claude: a symlinked space reads the live log under the real path, never the old folder', () => {
+    process.env.CLAUDE_CONFIG_DIR = join(dir, 'claude')
+    const real = join(dir, 'lyvora-app')
+    const link = join(dir, 'polylog')
+    mkdirSync(real, { recursive: true })
+    symlinkSync(real, link)
+    const now = Date.now()
+    // the live session: Claude Code named its folder after the real cwd it ran in
+    const live = join(claudeProjectDir(real), '52b0d94e-130f-4675-86e4-7d5d0c89c92e.jsonl')
+    touch(live, '{}', now - 1000)
+    // a stale session in the folder named after the remembered link, from before the rename
+    const old = join(claudeProjectDir(link), '7c8f7a4b-0000-4000-8000-000000000000.jsonl')
+    touch(old, '{}', now - 60_000)
+    // before: one folder guessed from the remembered path finds nothing recent. After: both are tried.
+    expect(findClaudeLog(claudeProjectDir(link), now - 5000)).toBeUndefined()
+    expect(findClaudeLog(cwdCandidates(link), now - 5000)).toBe(live)
+    // herdr's reported cwd leads when it is known, and the same session is still one log
+    expect(findClaudeLog(cwdCandidates(link, real), now - 5000)).toBe(live)
+    expect(new Set([live, findClaudeLog(cwdCandidates(link, real))]).size).toBe(1)
+  })
+
+  test('claude: a symlinked space whose log lies under the remembered path still reads', () => {
+    process.env.CLAUDE_CONFIG_DIR = join(dir, 'claude')
+    const real = join(dir, 'real-claude-2')
+    const link = join(dir, 'link-claude-2')
+    mkdirSync(real, { recursive: true })
+    symlinkSync(real, link)
+    const now = Date.now()
+    const remembered = join(claudeProjectDir(link), 'aaaaaaaa-0000-4000-8000-000000000000.jsonl')
+    touch(remembered, '{}', now - 1000)
+    expect(findClaudeLog(cwdCandidates(link), now - 5000)).toBe(remembered)
+    // a known session id is found in whichever folder holds it
+    expect(claudeLogPath(cwdCandidates(link), 'aaaaaaaa-0000-4000-8000-000000000000')).toBe(remembered)
+  })
+
+  test('codex: a rollout started from a symlinked cwd is found by the remembered path', () => {
+    process.env.CODEX_HOME = join(dir, 'codex')
+    const real = join(dir, 'real-codex')
+    const link = join(dir, 'link-codex')
+    mkdirSync(real, { recursive: true })
+    symlinkSync(real, link)
+    const d = new Date()
+    const day = join(dir, 'codex', 'sessions', String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0'))
+    const now = Date.now()
+    const rollout = join(day, 'rollout-real.jsonl')
+    touch(rollout, jl(sessionMeta(real)) + jl(cxmsg('m', 'user', [])), now - 1000)
+    expect(findCodexLog(link)).toBe(rollout)
+    expect(findCodexLog(link, now)).toBeUndefined()
+  })
+
+  test('pi: a session folder under a symlinked cwd is found by the remembered path', () => {
+    process.env.PI_CODING_AGENT_DIR = join(dir, 'pi')
+    const real = join(dir, 'real-pi')
+    const link = join(dir, 'link-pi')
+    mkdirSync(real, { recursive: true })
+    symlinkSync(real, link)
+    const now = Date.now()
+    const session = join(piSessionDir(real), '2026-11-18T12-00-00-000Z_live.jsonl')
+    touch(session, piSession('live'), now - 1000)
+    expect(findPiLog(link)).toBe(session)
+    expect(findPiLog(link, now)).toBeUndefined()
   })
 })
 

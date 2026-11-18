@@ -143,13 +143,15 @@ export class ClaudeSessions {
     }
   }
 
-  /** the session file of the Claude Code with this session id, else the newest one running in this folder */
-  private find(sessionId: string | undefined, cwd: string, now: number): SessionFile | null {
+  /** the session file of the Claude Code with this session id, else the newest one running in any candidate folder
+   *  (a remembered path and its real path name the same folder to a symlinked space) */
+  private find(sessionId: string | undefined, cwd: string | string[], now: number): SessionFile | null {
+    const cwds = Array.isArray(cwd) ? cwd : [cwd]
     const look = () => {
-      for (const k of [sessionId && `id:${sessionId}`, `cwd:${cwd}`]) {
+      for (const k of [sessionId && `id:${sessionId}`, ...cwds.map((c) => `cwd:${c}`)]) {
         const f = k && this.files.get(k)
         const s = f && this.load(f, now)
-        if (s && (s.sessionId === sessionId || s.cwd === cwd)) return s
+        if (s && (s.sessionId === sessionId || (s.cwd && cwds.includes(s.cwd)))) return s
       }
       return null
     }
@@ -160,7 +162,7 @@ export class ClaudeSessions {
   }
 
   /** what its session file says now ("busy", "shell", "idle", …), or nothing when there is none */
-  status(sessionId: string | undefined, cwd: string, now = Date.now()): string | undefined {
+  status(sessionId: string | undefined, cwd: string | string[], now = Date.now()): string | undefined {
     const s = this.find(sessionId, cwd, now)
     return s ? (s.status ?? 'idle') : undefined
   }
