@@ -17,7 +17,11 @@ policy). The capability is written via stdin over the existing private SSH conne
 agent records, prompt text or CLI output. `helper/route.pl --bind PID` reads JSON on stdin, creates owner-only files
 in owner-only `~/.shepherdr/helper/routes` and `<shepherdr home>/helper/credentials` directories (`SHEPHERDR_HOME`
 moves the credentials with the rest of the home; the routes stay in the login home, where the CLI's own helper looks for
-them), and binds them to the process start stamp. A server with a home of its own binds neither, since it starts no
+them), and binds them to the process start stamp. `helper/route.pl --check PID` reads the same JSON and answers 0
+exactly when the live route for that pid is the one asked for — same chat, cwd, credential, capability and server or
+command, and the credential file really on disk — and 1 when it is not: the server verifies a write whose child was
+killed late by a stalled event loop before it takes a non-zero `--bind` as failure (SHE-56). A server with a home of
+its own binds neither, since it starts no
 agent unless `SHEPHERDR_LAUNCH_AGENTS=1` says it may (launch-policy.ts); one that does writes its credentials in that
 home, and its route files where every CLI's helper looks for them.
 The CLI obtains proof from a live ancestor's binding or that explicit credential reference. Folder/chat routing may

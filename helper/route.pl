@@ -199,8 +199,33 @@ sub bind_route {
   }
 }
 
+# Did a route for this pid really land? A --bind killed by its caller's timeout may still have written it; reading the
+# file (with the same stamp check the CLI uses) is the only honest answer. Exit 0 when the live route is the one asked
+# for, 1 when it isn't there. Kept here so the check reads exactly what repairRoutes binds and the CLI looks for.
+sub check_route {
+  my ($pid) = @_;
+  my $want = eval { local $/; JSON::PP->new->decode(<STDIN>) } or return 0;
+  # the file's cwd is what bind_route wrote: canonicalized. Compare like against like, or a cwd with a symlink
+  # component (~/www/misc/polylog on this host) answers "absent" for a route that landed
+  $want->{cwd} = abs_path($want->{cwd}) // $want->{cwd} if $want->{cwd};
+  my $r = read_route(route_dir() . "/$pid.json", $pid) or return 0;
+  return 0 unless ($r->{chat} // '') eq ($want->{chat} // '');
+  return 0 unless ($r->{pid} // 0) == 0 + $pid;
+  return 0 unless ($r->{cwd} // '') eq ($want->{cwd} // '');
+  return 0 unless (($r->{credentialFile} // '') eq ($want->{credentialFile} // ''));
+  # the same server and command the launch provisioned, never a route another Shepherdr wrote for this pid
+  return 0 unless (($r->{url} // '') eq ($want->{url} // '') && ($r->{helper} // '') eq ($want->{helper} // ''));
+  # the credential the route hands the CLI: the same capability, and a file that really exists (bind writes the route
+  # file first, the credential second; one killed between the two leaves a route the CLI cannot use, so it is no
+  # verification of a launch)
+  return 0 unless (($r->{capability} // '') eq ($want->{capability} // ''));
+  return 0 if defined($r->{credentialFile}) && $r->{credentialFile} ne '' && !-f $r->{credentialFile};
+  return 1;
+}
+
 unless (caller) {
   if (($ARGV[0] // '') eq '--bind') { shift @ARGV; bind_route(@ARGV); exit 0; }
+  if (($ARGV[0] // '') eq '--check') { shift @ARGV; my $pid = shift @ARGV // ''; exit(check_route($pid) ? 0 : 1); }
   my $local = shift @ARGV;
   delete $ENV{SHEPHERDR_SECRET_CAPABILITY};
   # SHEPHERDR_URL changed by the caller remains explicit; --url also targets even the inherited URL deliberately.

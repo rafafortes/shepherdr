@@ -202,6 +202,18 @@ export interface Sent {
 
 export const ROUTING_FAILURE = 'Could not provision private agent command routing'
 
+/** A route write is given 5 s. A stalled event loop can kill it late and report the child as failed although the
+ *  write landed, so a non-zero code is never the answer on its own: read the file, retry a couple of times with backoff
+ *  once the loop is healthy again, and fail only when the route is really absent. All waits are timers: no busy-wait,
+ *  no synchronous sleep, and a ceiling so a wedged server cannot hold a launch for ever. */
+const ROUTE_BIND_MS = 5_000
+const ROUTE_CHECK_MS = 3_000
+const ROUTE_BACKOFF = [500, 1000]
+const ROUTE_POLL = 500
+const ROUTE_DEADLINE = 60_000
+/** the repair pass binds many agents in series: its ceiling is short, so a wedged machine cannot starve it for minutes */
+const ROUTE_REPAIR_MS = 10_000
+
 type Events = {
   routed: [key: string]
   status: [key: string, status: AgentStatus | 'gone']
@@ -270,6 +282,10 @@ export class Agents extends Emitter<Events> {
   private routesAt = 0
   private routing = false
   private routes = new Map<string, string>()
+  /** whether its own event loop is keeping up: source.ts sets this from the stall watch. A loop that stalls answers its
+   *  own timers and child processes late, so no route check is trusted until it is healthy again. Tests leave it true. */
+  healthy: () => boolean = () => true
+
   private starting = new Map<string, Promise<AgentInfo | null>>()
   /** agents being stopped for a restart: what you send waits for the one it starts */
   private stopping = new Set<string>()
@@ -666,8 +682,10 @@ export class Agents extends Emitter<Events> {
     await herdr.closePane(pane).catch(() => undefined)
   }
 
-  /** Bind the actual CLI process, not HERDR_PANE_ID (old shells can inherit another pane's id). */
-  private async bindRoute(r: AgentRecord, pane: string) {
+  /** Bind the actual CLI process, not HERDR_PANE_ID (old shells can inherit another pane's id). `own`: the start
+   *  flow itself (a launch) binds the agent it just started, so a restart's or a relaunch's stopping flag — held for
+   *  what you send, not against its own bind — does not skip it. `deadlineMs`: the repair pass binds many, often. */
+  private async bindRoute(r: AgentRecord, pane: string, own = false, deadlineMs = ROUTE_DEADLINE) {
     // a server that may start no agent binds no route for one either: no route file, no credential (launch-policy.ts)
     if (!launchesAgents()) {
       this.routes.delete(r.key)
@@ -676,7 +694,7 @@ export class Agents extends Emitter<Events> {
     }
     const p = await herdr.processInfo(pane)
     const proc = p.foreground_processes?.find((x) => x.pid && isAgentProcess(r.kind, x.argv))
-    if (!proc?.pid || r.finished || this.records[r.key]?.finished || this.stopping.has(r.key)) { this.routes.delete(r.key); this.secretAccess.revoke(r.key); return }
+    if (!proc?.pid || r.finished || this.records[r.key]?.finished || (!own && this.stopping.has(r.key))) { this.routes.delete(r.key); this.secretAccess.revoke(r.key); return }
     const env = agentEnv(r.key, ROOT)
     const chain = this.secretScope(r.key)
     const capability = chain ? this.secretAccess.issue(r.key, `${proc.pid}:${r.started}`, chain) : undefined
@@ -686,16 +704,42 @@ export class Agents extends Emitter<Events> {
     const router = BOX ? join(helperDir(BOX.home), 'route.pl') : join(ROOT, 'helper', 'route.pl')
     // the box's own Shepherdr home, said rather than left to what its login shell exports: the credential file it writes
     // is the box's, whether or not that shell sets SHEPHERDR_HOME as well
-    const result = await run(['perl', router, '--bind', String(proc.pid)], { stdin: JSON.stringify(route), timeoutMs: 5000, ...(BOX ? { env: { SHEPHERDR_HOME: join(BOX.home, '.shepherdr') } } : {}) })
-    if (result.code) {
+    const opts = { stdin: JSON.stringify(route), ...(BOX ? { env: { SHEPHERDR_HOME: join(BOX.home, '.shepherdr') } } : {}) }
+    if (!(await this.provisionRoute(proc.pid, r.key, router, opts, own, deadlineMs))) {
       this.routes.delete(r.key)
       this.secretAccess.revoke(r.key)
+      // a stop or a restart took the agent over while it provisioned: no failure of the start it abandoned — its own
+      // flow owns what happens next, so a task the human just stopped never reads "Went wrong" for it
+      if (this.records[r.key]?.finished || (!own && this.stopping.has(r.key))) return
       throw new Error(ROUTING_FAILURE)
     }
     // A stop may have raced the asynchronous provisioning write. Never restore its authority.
-    if (this.records[r.key]?.finished || this.stopping.has(r.key)) { this.secretAccess.revoke(r.key); return }
+    if (this.records[r.key]?.finished || (!own && this.stopping.has(r.key))) { this.secretAccess.revoke(r.key); return }
     this.routes.set(r.key, signature)
     this.emit('routed', r.key)
+  }
+
+  /** `--bind` once, then verify the file rather than trusting a non-zero code (a stall can kill it late, after the write
+   *  landed). A route genuinely absent is retried a couple of times after the loop is healthy again, with backoff and a
+   *  ceiling. The waits are timers, so the loop stays free for herdr and the screen. `own` and `deadlineMs` ride from
+   *  bindRoute: a launch's own bind is not cancelled by the restart that launched it, and the repair pass is short. */
+  private async provisionRoute(pid: number, key: string, router: string, opts: { stdin: string; env?: Record<string, string> }, own = false, deadlineMs = ROUTE_DEADLINE) {
+    const deadline = Date.now() + deadlineMs
+    for (let attempt = 0; ; attempt++) {
+      const result = await run(['perl', router, '--bind', String(pid)], { ...opts, timeoutMs: ROUTE_BIND_MS })
+      if (!result.code) return true
+      // a stalled loop answers its own timers late: wait for it to keep up before reading any answer as final
+      while (!this.healthy() && Date.now() < deadline) await new Promise((res) => setTimeout(res, ROUTE_POLL))
+      // a stop or a restart that took the agent over is not a routing failure of the start it abandoned (bindRoute
+      // returns quietly for it); only the server itself stopping is, and its caller learns of the record either way
+      if (this.stopped || this.records[key]?.finished || (!own && this.stopping.has(key))) return false
+      // a clean "not there", a check reported late, and the ceiling passing alike, are never the answer: a write
+      // killed at its very end can still have landed, so the file decides — including one last read past the ceiling
+      const check = await run(['perl', router, '--check', String(pid)], { ...opts, timeoutMs: ROUTE_CHECK_MS })
+      if (check.code === 0) return true
+      if (attempt >= ROUTE_BACKOFF.length || Date.now() >= deadline) return false
+      await new Promise((res) => setTimeout(res, ROUTE_BACKOFF[attempt]))
+    }
   }
 
   private async repairRoutes() {
@@ -703,7 +747,7 @@ export class Agents extends Emitter<Events> {
     try {
       for (const r of Object.values(this.records)) {
         const a = this.live.get(r.name)
-        if (a) await this.bindRoute(r, a.pane_id).catch((e) => console.error(`shepherdr: routing ${r.key}: ${e.message}`))
+        if (a) await this.bindRoute(r, a.pane_id, false, ROUTE_REPAIR_MS).catch((e) => console.error(`shepherdr: routing ${r.key}: ${e.message}`))
       }
     } finally { this.routing = false }
   }
@@ -1032,7 +1076,20 @@ export class Agents extends Emitter<Events> {
       }
     })
     await this.refresh()
-    await this.bindRoute(r, pane)
+    try {
+      // this launch owns the agent it just started: a restart's or a relaunch's stopping flag (held for what you send)
+      // does not cancel its own bind, so the route is provisioned here, not left for the repair pass
+      await this.bindRoute(r, pane, true)
+    } catch (e) {
+      // The CLI is up but Shepherdr cannot own it: an idle agent with no brief is worse than no agent. Take it down so
+      // the next attempt starts clean, rather than leaving a pane that reads Working and never got its brief — also
+      // inside a restart or a recovery, whose finally only delivers what you sent, never starts or stops. The pane
+      // itself, not the live map finish() reads (which a concurrent refresh can leave stale under a stall): this
+      // launch knows the pane it opened. A stop that raced the write already finished the record: never twice.
+      if (!this.records[spec.key]?.finished) await this.finish(spec.key)
+      await herdr.closePane(pane).catch(() => undefined)
+      throw e
+    }
     // CLIs without an option for extra instructions get them first, hidden from the chat: Claude Code and pi take them as
     // a flag, OpenCode in its session (prepareOpencode). Both wait until the CLI is ready, ahead of what you sent
     // meanwhile (a restart)

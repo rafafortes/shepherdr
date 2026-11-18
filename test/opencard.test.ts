@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
 process.env.SHEPHERDR_HOME ??= tmp('card')
-const { Chats } = await import('../server/live/chats.ts')
+const { Chats, menuId } = await import('../server/live/chats.ts')
 
 const question = (id: string) => ({ id, title: 'x', kind: 'Plan' as const, choices: [{ label: 'Yes' }], to: 'T agent' })
 const chatsWith = (key: string) => new Chats({ record: () => undefined } as never, (k) => k, () => 'You')
@@ -90,44 +90,81 @@ test('Shepherdr’s own hidden line that carries the human’s words answers it 
   expect(chats.openQuestion(key)).toBeUndefined()
 })
 
-test('hasOpenQuestion spots open menus, posted cards and CLI questions without building the chat', () => {
+test('the cheap open cards spot menus, posted cards and CLI questions without building the chat', () => {
   const key = 'T-open-check/Agent'
   const chats = chatsWith(key)
+  const ids = () => chats.openCardsQuick(key).map((m) => m.question.id)
   const at = Date.now()
-  expect(chats.hasOpenQuestion(key)).toBe(false)
+  expect(ids()).toEqual([])
   // a startup menu counts as open until cleared
-  chats.showStartMenu(key, { title: 'Trust folder?', choices: ['Yes'], cursor: 0, screen: 'Trust folder?', all: 'Trust folder?' })
-  expect(chats.hasOpenQuestion(key)).toBe(true)
+  const menu = { title: 'Trust folder?', choices: ['Yes'], cursor: 0, screen: 'Trust folder?', all: 'Trust folder?' }
+  chats.showStartMenu(key, menu)
+  expect(ids()).toEqual([menuId(key, menu)])
   chats.clearStartMenu(key)
-  expect(chats.hasOpenQuestion(key)).toBe(false)
-  // a posted question counts as open until answered
+  expect(ids()).toEqual([])
+  // a posted question counts as open until answered; a note beside the questions and an advisor's own note never
   chats.post(key, { id: 'ask:fast', at, question: question('ask:fast') })
-  expect(chats.hasOpenQuestion(key)).toBe(true)
+  chats.post(key, { id: 'note:aside', at, card: { id: 'note:aside', aside: true }, question: question('note:aside') } as never)
+  chats.post(key, { id: 'advice-note:mine', at, card: { id: 'advice-note:mine' }, question: question('advice-note:mine') } as never)
+  expect(ids()).toEqual(['ask:fast'])
   chats.answer(key, 'ask:fast', 0)
-  expect(chats.hasOpenQuestion(key)).toBe(false)
+  expect(ids()).toEqual([])
   // posted plan/ask cards closed by a user message, peer relay, hidden browser note, or `you` post are no longer open
   chats.post(key, { id: 'plan:typed', at: at + 200, question: question('plan:typed') })
-  expect(chats.hasOpenQuestion(key)).toBe(true)
+  expect(ids()).toEqual(['plan:typed'])
   reached(chats, key, { kind: 'user', id: 'u-plan', at: at + 300, text: 'Go ahead.' })
-  expect(chats.hasOpenQuestion(key)).toBe(false)
+  expect(ids()).toEqual([])
   chats.post(key, { id: 'ask:relay', at: at + 400, question: question('ask:relay') })
-  expect(chats.hasOpenQuestion(key)).toBe(true)
+  expect(ids()).toEqual(['ask:relay'])
   reached(chats, key, { kind: 'peer', id: 'p-relay', at: at + 500, text: 'Relayed: yes.' })
-  expect(chats.hasOpenQuestion(key)).toBe(false)
+  expect(ids()).toEqual([])
   chats.post(key, { id: 'ask:note', at: at + 600, question: question('ask:note') })
-  expect(chats.hasOpenQuestion(key)).toBe(true)
+  expect(ids()).toEqual(['ask:note'])
   reached(chats, key, { kind: 'user', id: 'u-note', at: at + 700, text: '<shepherdr><browser from="Elias">Use blue</browser></shepherdr>' })
-  expect(chats.hasOpenQuestion(key)).toBe(false)
+  expect(ids()).toEqual([])
   chats.post(key, { id: 'plan:you', at: at + 900, question: question('plan:you') })
-  expect(chats.hasOpenQuestion(key)).toBe(true)
+  expect(ids()).toEqual(['plan:you'])
   chats.post(key, { id: 'you:app', at: at + 950, who: 'you', answered: 'Approved' })
-  expect(chats.hasOpenQuestion(key)).toBe(false)
+  expect(ids()).toEqual([])
   // a CLI question counts as open until answered or closed by a later human/peer message
   reached(chats, key, { kind: 'question', id: 'q-open', at: at + 1000, tool: 'AskUserQuestion', items: [{ question: 'Pick?', options: [{ label: 'A' }], multiSelect: false }] })
-  expect(chats.hasOpenQuestion(key)).toBe(true)
+  expect(ids()).toEqual(['q-open'])
   reached(chats, key, { kind: 'user', id: 'u-close', at: at + 2000, text: 'Pick A.' })
-  expect(chats.hasOpenQuestion(key)).toBe(false)
+  expect(ids()).toEqual([])
+  // a card posted with no words rides the agent reply of its turn: a line of yours between the reply and the post
+  // closes it here as it does on the screen (chat(): hostFor) — the card carries the reply's time, not its own post's
+  reached(chats, key, { kind: 'agent', id: 'a-host', at: at + 3000, text: 'Ready when you are.' })
+  reached(chats, key, { kind: 'user', id: 'u-host', at: at + 3050, text: 'Then go.' })
+  chats.post(key, { id: 'plan:ride', at: at + 3100, question: question('plan:ride') })
+  expect(ids()).toEqual([])
+  // without a line in between it stays open, riding that reply
+  reached(chats, key, { kind: 'agent', id: 'a-host2', at: at + 4000, text: 'Once more.' })
+  chats.post(key, { id: 'plan:ride2', at: at + 4100, question: question('plan:ride2') })
+  expect(ids()).toEqual(['plan:ride2'])
   // forget() clears cached closing state alongside events and logs
   chats.forget(key)
-  expect(chats.hasOpenQuestion(key)).toBe(false)
+  expect(ids()).toEqual([])
+})
+
+test('the cheap open cards Needs you reads are the cards, closed the same way (SHE-56)', async () => {
+  const key = 'T-56/Agent'
+  const chats = chatsWith(key)
+  const ids = () => chats.openCardsQuick(key).map((m) => m.question.id).sort()
+  expect(ids()).toEqual([])
+  chats.post(key, { id: 'ask:card', question: question('ask:card') })
+  chats.post(key, { id: 'plan:card', question: question('plan:card') })
+  reached(chats, key, { kind: 'question', id: 'q1', at: Date.now(), tool: 'AskUserQuestion', items: [{ question: 'Which?', options: [{ label: 'A' }], multiSelect: false }] })
+  expect(ids()).toEqual(['ask:card', 'plan:card', 'q1'].sort())
+  reached(chats, key, { kind: 'answered', id: 'q1', at: Date.now() })
+  expect(ids()).toEqual(['ask:card', 'plan:card'].sort())
+  // a relay from another agent, then the person's own words, answer the cards that came before them
+  reached(chats, key, { kind: 'peer', id: 'peer-1', at: Date.now() + 1, text: 'The operator said: do it.' })
+  expect(ids()).toEqual([])
+  chats.post(key, { id: 'you:1', who: 'you', text: 'Do it.' })
+  expect(ids()).toEqual([])
+  await Bun.sleep(6)
+  chats.post(key, { id: 'ask:new', question: question('ask:new') })
+  expect(ids()).toEqual(['ask:new'])
+  chats.answer(key, 'ask:new', 0)
+  expect(ids()).toEqual([])
 })

@@ -3548,9 +3548,9 @@ describe('chatName, needs and withAsks avoid rebuilding unrelated chats', () => 
     expect(k2Chat.messages.some((m) => m.question?.id === 'ask:art')).toBe(true)
     expect(k2Chat.messages.some((m) => m.secret?.name === 'API_KEY')).toBe(true)
     expect(src.chats.tokens(k2)).toBe(0)
-    expect(src.chats.hasOpenQuestion(k2)).toBe(true)
+    expect(src.chats.openCardsQuick(k2).map((m) => m.question.id)).toContain('ask:art')
     src.chats.answer(k2, 'ask:art', 0)
-    expect(src.chats.hasOpenQuestion(k2)).toBe(false)
+    expect(src.chats.openCardsQuick(k2)).toEqual([])
 
     const k3 = mkTask('FA-3')
     src.chats.post(coord, { id: 'need:FA-3:1', at: baseAt + 2000, card: { id: 'need:FA-3:1', task: 'FA-3', title: 'Task FA-3', status: 'need', text: 'needs you', ask: { chat: k3, reply: { id: 'r-3', text: 'Ready?' } } } } as never)
