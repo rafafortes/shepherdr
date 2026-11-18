@@ -5,14 +5,14 @@ import { LinkBackoff } from './recovery.ts'
 // Codex and pi take it mid-turn, as steering). It waits only while the CLI shows a menu or permission prompt, where typed
 // text could pick an option, or is still starting; then it goes in as soon as it can.
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, mkdirSync, watch, type FSWatcher } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Emitter } from '../source.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
 import { dropped, herdr, isPassing, retrying, startDelays, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
 import { agyScreenBackground, ClaudeSessions, Procs, screenBackground, servesCommand, sessionBackground, type Background } from './readers/background.ts'
-import { claudeHome, claudeLogPath, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind } from './readers/find.ts'
+import { claudeHome, claudeLogPath, cwdCandidates, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind } from './readers/find.ts'
 import { createSession, mirrorSession, opencodeLogPath, putInstructions, switchModel } from './opencode.ts'
 import { agyLogPath, agyModelId, mirrorConversation } from './agy.ts'
 import { agyIds, effortFor, modelArg } from './models.ts'
@@ -220,6 +220,10 @@ export function holdFrom(e: unknown): Hold | undefined {
 /** what an agent's hooks said is read again at most this often */
 const SAID_MS = 250
 
+/** one calm line for a chat whose agent runs but whose log can't be read (a symlinked space with no log under either
+ *  cwd, a folder gone, a CLI that did not write): the truth, without blaming the send */
+const UNREADABLE_LOG = "This chat's log can't be read right now, so messages here may not show."
+
 /** wraps text Shepherdr sends that is not for the chat (instructions, news), in a tag of what it is when it is one
  *  of its lines: <shepherdr><news task="SHE-9" event="merged">…</news></shepherdr>; readers' text is stripped of it */
 export const hidden = (s: string, kind?: string, attrs: Record<string, string> = {}) => tag('shepherdr', {}, kind ? tag(kind, attrs, s) : s)
@@ -389,6 +393,33 @@ export class Agents extends Emitter<Events> {
   info(key: string) {
     const r = this.records[key]
     return r ? this.live.get(r.name) : undefined
+  }
+
+  /** The cwds where this chat's agent may write its logs: what Shepherdr remembers, its real path (a symlinked space),
+   *  and, leading, the cwd herdr reports for the live agent. Only this chat's own paths ever go into a log lookup. */
+  logCwds(key: string): string[] {
+    const r = this.records[key]
+    return r ? cwdCandidates(r.cwd, this.info(key)?.cwd) : []
+  }
+
+  /** A running chat whose log can't be read is not an empty conversation: say so in one calm line (and in doctor),
+   *  rather than let the person's own message look lost. A just-launched agent gets a few seconds to write its first
+   *  log before this line appears. */
+  unreadable(key: string): string | undefined {
+    const r = this.records[key]
+    if (!r || !this.info(key) || Date.now() - r.started < 15_000) return undefined
+    if (r.logs.some((f) => existsSync(f))) return undefined
+    return UNREADABLE_LOG
+  }
+
+  /** the doctor's lines: one per running chat whose log can't be read */
+  unreadableLogs(): string[] {
+    const out: string[] = []
+    for (const key of Object.keys(this.records)) {
+      const line = this.unreadable(key)
+      if (line) out.push(`${key}: ${line}`)
+    }
+    return out
   }
 
   /** Private routing was bound to this session's actual CLI process. */
@@ -783,7 +814,7 @@ export class Agents extends Emitter<Events> {
       this.save()
       this.emit('logs', key)
     } else if (s.kind === 'id' && r.kind === 'claude') {
-      const p = claudeLogPath(r.cwd, s.value)
+      const p = claudeLogPath(this.logCwds(key), s.value)
       if (addLog(r, p)) {
         r.sessionId = s.value
         this.save()
@@ -800,7 +831,7 @@ export class Agents extends Emitter<Events> {
     const s = this.hooks.read(mirrored(r.hooks)).session
     // another machine's copy of its events may still be an earlier run's, until the new run's first event comes
     if (!s || s.id === r.sessionId || s.at < r.started - 5000) return
-    const log = s.log ? mirrored(s.log) : claudeLogPath(r.cwd, s.id)
+    const log = s.log ? mirrored(s.log) : claudeLogPath(this.logCwds(key), s.id)
     r.sessionId = s.id
     addLog(r, log)
     this.save()
@@ -813,7 +844,7 @@ export class Agents extends Emitter<Events> {
     const r = this.records[key]
     if (!r || (r.kind === 'claude' && r.hooks)) return
     const look = () => {
-      const f = findLog(r.kind, r.cwd, since - 1000)
+      const f = findLog(r.kind, this.logCwds(key), since - 1000)
       if (!f || !addLog(r, f)) return
       // Claude Code and pi resume by the id in its name, OpenCode by its session id (its mirror is named by it); Codex by
       // its last log
@@ -831,7 +862,8 @@ export class Agents extends Emitter<Events> {
     const r = this.records[key]
     if (!r) return
     const since = r.started - 5000
-    const f = r.kind === 'claude' ? (r.sessionId ? claudeLogPath(r.cwd, r.sessionId) : findClaudeLog(r.cwd, since)) : r.kind === 'codex' ? findCodexLog(r.cwd, since) : r.kind === 'pi' ? findPiLog(r.cwd, since) : r.kind === 'opencode' ? (r.sessionId ? mirrorOpencode(r.sessionId) : findOpencodeLog(r.cwd, since)) : r.kind === 'agy' ? (r.sessionId ? mirrorAgy(r.sessionId) : findAgyLog(r.cwd, since)) : undefined
+    const cwds = this.logCwds(key)
+    const f = r.kind === 'claude' ? (r.sessionId ? claudeLogPath(cwds, r.sessionId) : findClaudeLog(cwds, since)) : r.kind === 'codex' ? findCodexLog(cwds, since) : r.kind === 'pi' ? findPiLog(cwds, since) : r.kind === 'opencode' ? (r.sessionId ? mirrorOpencode(r.sessionId) : findOpencodeLog(cwds, since)) : r.kind === 'agy' ? (r.sessionId ? mirrorAgy(r.sessionId) : findAgyLog(cwds, since)) : undefined
     // agy names its conversation by the log's name: that id is what --conversation resumes
     if (f && r.kind === 'agy') r.sessionId = logName(f).replace(/\.jsonl$/, '')
     if (f && addLog(r, f)) {

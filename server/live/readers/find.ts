@@ -1,6 +1,6 @@
 // Where each CLI keeps an agent's log file. Homes follow the CLIs' own settings: CLAUDE_CONFIG_DIR, CODEX_HOME,
 // PI_CODING_AGENT_DIR (tests point these at fixtures).
-import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { home } from '../../store.ts'
@@ -15,24 +15,56 @@ export const piHome = () => env('PI_CODING_AGENT_DIR') ?? join(homedir(), '.pi',
 
 const trimSlash = (p: string) => (p.length > 1 ? p.replace(/[/\\]+$/, '') : p)
 
-/** newest .jsonl in a folder changed at or after sinceMs */
-function newestLog(dir: string, sinceMs = 0): string | undefined {
-  let best: { f: string; m: number } | undefined
-  let names: string[]
-  try {
-    names = readdirSync(dir)
-  } catch {
-    return undefined
-  }
-  for (const n of names) {
-    if (!n.endsWith('.jsonl')) continue
-    const f = join(dir, n)
+/** A CLI's log folder is derived from a cwd. Shepherdr remembers the path a space was added with, but the CLI runs in
+ *  the real path when that one is a symlink (a renamed repo leaves a link at the old name). One folder is never enough:
+ *  the remembered path and its real path are two different folders to a CLI's log. */
+export type LogCwd = string | string[]
+
+/** The candidate cwds in preference order: the live agent's own cwd first when herdr knows it, then each given path's
+ *  real path before the path itself (where the CLI writes is where the link resolves), deduped. A path that cannot be
+ *  resolved still stands on its own, so a folder that does not exist here leaves the look going. */
+export function cwdCandidates(remembered: LogCwd, live?: string | null): string[] {
+  const out: string[] = []
+  const add = (p?: string | null) => {
+    if (typeof p !== 'string' || !p.trim()) return
+    const c = trimSlash(p.trim())
     try {
-      const m = statSync(f).mtimeMs
-      if (m >= sinceMs && (!best || m > best.m)) best = { f, m }
-    } catch {}
+      const real = trimSlash(realpathSync(c))
+      if (real && !out.includes(real)) out.push(real)
+    } catch {
+      /* a path that is gone (or is not a link) still stands below */
+    }
+    if (c && !out.includes(c)) out.push(c)
   }
-  return best?.f
+  add(live)
+  for (const c of Array.isArray(remembered) ? remembered : [remembered]) add(c)
+  return out
+}
+
+const cwds = (cwd: LogCwd): string[] => cwdCandidates(cwd)
+
+/** newest .jsonl in the first candidate folder that has one changed at or after sinceMs; later folders are only looked
+ *  in when the preferred one has no log, so old sessions from a link's former name are never read into this chat */
+function newestLog(dirs: string | string[], sinceMs = 0): string | undefined {
+  for (const dir of Array.isArray(dirs) ? dirs : [dirs]) {
+    let best: { f: string; m: number } | undefined
+    let names: string[]
+    try {
+      names = readdirSync(dir)
+    } catch {
+      continue
+    }
+    for (const n of names) {
+      if (!n.endsWith('.jsonl')) continue
+      const f = join(dir, n)
+      try {
+        const m = statSync(f).mtimeMs
+        if (m >= sinceMs && (!best || m > best.m)) best = { f, m }
+      } catch {}
+    }
+    if (best) return best.f
+  }
+  return undefined
 }
 
 /* ---------- Claude Code ---------- */
@@ -54,10 +86,29 @@ export function claudeProjectDir(cwd: string): string {
   return dir
 }
 
-export const claudeLogPath = (cwd: string, sessionId: string) => join(claudeProjectDir(cwd), `${sessionId}.jsonl`)
+/** every candidate project folder for a cwd (a remembered path and its real path are two) */
+export function claudeProjectDirs(cwd: LogCwd): string[] {
+  const dirs: string[] = []
+  for (const c of cwds(cwd)) {
+    const d = claudeProjectDir(c)
+    if (!dirs.includes(d)) dirs.push(d)
+  }
+  return dirs
+}
+
+/** the log of a known session: the first candidate folder that holds it, else the first folder's path (where the CLI
+ *  will write it). The same session in both folders is still one log. */
+export function claudeLogPath(cwd: LogCwd, sessionId: string): string {
+  const dirs = claudeProjectDirs(cwd)
+  for (const d of dirs) {
+    const f = join(d, `${sessionId}.jsonl`)
+    if (existsSync(f)) return f
+  }
+  return join(dirs[0] ?? claudeProjectDir(typeof cwd === 'string' ? cwd : (cwd[0] ?? '')), `${sessionId}.jsonl`)
+}
 
 /** the newest Claude Code session log for this cwd, changed at or after sinceMs */
-export const findClaudeLog = (cwd: string, sinceMs?: number) => newestLog(claudeProjectDir(cwd), sinceMs)
+export const findClaudeLog = (cwd: LogCwd, sinceMs?: number) => newestLog(claudeProjectDirs(cwd), sinceMs)
 
 /* ---------- Codex ---------- */
 
@@ -106,9 +157,10 @@ function codexDayDirs(sinceMs?: number): string[] {
   return [...dirs]
 }
 
-/** the newest Codex rollout started in this cwd and changed at or after sinceMs (subagents' rollouts are left out) */
-export function findCodexLog(cwd: string, sinceMs = 0): string | undefined {
-  const want = trimSlash(cwd)
+/** the newest Codex rollout started in this cwd and changed at or after sinceMs (subagents' rollouts are left out).
+ *  session_meta names the folder it started in: match it against every candidate, the link and the real path. */
+export function findCodexLog(cwd: LogCwd, sinceMs = 0): string | undefined {
+  const wants = new Set(cwds(cwd))
   const files: { f: string; m: number }[] = []
   for (const dir of codexDayDirs(sinceMs)) {
     let names: string[]
@@ -135,7 +187,7 @@ export function findCodexLog(cwd: string, sinceMs = 0): string | undefined {
       continue
     }
     const p = meta?.type === 'session_meta' ? meta.payload : undefined
-    if (!p || typeof p.cwd !== 'string' || trimSlash(p.cwd) !== want) continue
+    if (!p || typeof p.cwd !== 'string' || !wants.has(trimSlash(p.cwd))) continue
     if (p.thread_source === 'subagent' || (p.source && typeof p.source === 'object' && 'subagent' in p.source)) continue
     return f
   }
@@ -150,38 +202,57 @@ export function piSessionDir(cwd: string): string {
   return join(piHome(), 'sessions', name)
 }
 
+/** every candidate session folder for a cwd */
+export function piSessionDirs(cwd: LogCwd): string[] {
+  const dirs: string[] = []
+  for (const c of cwds(cwd)) {
+    const d = piSessionDir(c)
+    if (!dirs.includes(d)) dirs.push(d)
+  }
+  return dirs
+}
+
 /** the newest pi session log for this cwd, changed at or after sinceMs */
-export const findPiLog = (cwd: string, sinceMs?: number) => newestLog(piSessionDir(cwd), sinceMs)
+export const findPiLog = (cwd: LogCwd, sinceMs?: number) => newestLog(piSessionDirs(cwd), sinceMs)
 
 /* ---------- OpenCode ---------- */
 
 /** the newest top-level OpenCode session of this folder (its database says), mirrored into Shepherdr's home as a log;
- *  changed at or after sinceMs. Discovery never throws: a database or a mirror that fails leaves no log, and the look goes on */
-export function findOpencodeLog(cwd: string, sinceMs?: number): string | undefined {
-  let id: string | undefined
-  try {
-    id = newestSession(trimSlash(cwd.trim()), sinceMs)
-  } catch {
-    return undefined
+ *  changed at or after sinceMs. The preferred folder with a session wins; discovery never throws: a database or a
+ *  mirror that fails leaves the look going on to the next folder. */
+export function findOpencodeLog(cwd: LogCwd, sinceMs?: number): string | undefined {
+  for (const c of cwds(cwd)) {
+    let id: string | undefined
+    try {
+      id = newestSession(trimSlash(c.trim()), sinceMs)
+    } catch {
+      continue
+    }
+    if (!id) continue
+    const file = opencodeLogPath(home(), id)
+    try {
+      mirrorSession(id, file)
+    } catch {}
+    return file
   }
-  if (!id) return undefined
-  const file = opencodeLogPath(home(), id)
-  try {
-    mirrorSession(id, file)
-  } catch {}
-  return file
+  return undefined
 }
 
 /* ---------- Antigravity CLI (agy) ---------- */
 
 /** the newest conversation of this folder in agy's store, mirrored into Shepherdr's home as a log (agy.ts conversationLog);
- *  changed at or after sinceMs. Never throws: a store that is missing or unreadable leaves no log */
-export function findAgyLog(cwd: string, sinceMs?: number): string | undefined {
-  return conversationLog(trimSlash(cwd), sinceMs)
+ *  changed at or after sinceMs. The preferred folder with a conversation wins; a missing or unreadable store leaves
+ *  the look going on, never a throw. */
+export function findAgyLog(cwd: LogCwd, sinceMs?: number): string | undefined {
+  for (const c of cwds(cwd)) {
+    const file = conversationLog(trimSlash(c), sinceMs)
+    if (file) return file
+  }
+  return undefined
 }
 
 /** Runtime log discovery, also used to decide which kinds can supply chat. */
-export const LOG_FINDERS: Record<string, (cwd: string, sinceMs?: number) => string | undefined> = {
+export const LOG_FINDERS: Record<string, (cwd: LogCwd, sinceMs?: number) => string | undefined> = {
   claude: findClaudeLog,
   codex: findCodexLog,
   pi: findPiLog,
@@ -189,8 +260,8 @@ export const LOG_FINDERS: Record<string, (cwd: string, sinceMs?: number) => stri
   agy: findAgyLog,
 }
 
-/** the newest log of this CLI for this cwd */
-export function findLog(cli: string, cwd: string, sinceMs?: number): string | undefined {
+/** the newest log of this CLI for this cwd (or any of its candidate cwds) */
+export function findLog(cli: string, cwd: LogCwd, sinceMs?: number): string | undefined {
   return Object.hasOwn(LOG_FINDERS, cli) ? LOG_FINDERS[cli](cwd, sinceMs) : undefined
 }
 

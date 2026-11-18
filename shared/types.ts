@@ -670,6 +670,8 @@ export interface Chat {
   background?: boolean
   /** what a screen sent (by its Message.cid) that waited for the agent and then couldn't go in, and why */
   failed?: { cid: string; error: string }[]
+  /** the agent runs but its log can't be read: one calm line, so an empty chat is not mistaken for a lost message */
+  unreadable?: string
   /** finished agent: writing resumes it */
   finished?: boolean
   /** the turn that runs now: how far it got and its step on now, drawn as one quiet line at the end of the chat */

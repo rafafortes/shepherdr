@@ -119,23 +119,31 @@ export function priorOf(chat: Chat | undefined): string[] {
 
 /** what didn't go through in time fails, keeping its words and files for Retry: one still sending long after its time
  *  (the screen reloaded while it was on its way), one that went in but never showed in the chat (counted from when its
- *  agent last worked: a working CLI keeps it until its next step), and one waiting for a machine out of reach for long */
-export function expire(out: Outgoing[], now: number, working: (chat: string) => boolean = () => false): Outgoing[] {
+ *  agent last worked: a working CLI keeps it until its next step), and one waiting for a machine out of reach for long.
+ *  A lost one did go in, so its reason is the truth: if the chat says its log can't be read, that is why it never came
+ *  back — never "Not delivered", which blames the send. */
+export function expire(
+  out: Outgoing[],
+  now: number,
+  working: (chat: string) => boolean = () => false,
+  unreadable: (chat: string) => string | undefined = () => undefined,
+): Outgoing[] {
   let changed = false
   const next = out.map((o) => {
     const fail = (error: string, lost?: boolean) => {
       changed = true
       return { ...o, state: 'failed' as const, error, lost }
     }
+    const lost = (o: Outgoing) => fail(unreadable(o.chat) ?? "It reached the agent but didn't show in the chat.", true)
     if (o.state === 'sending' && now - o.at > SEND_TIMEOUT + 5000) return fail('No answer from Shepherdr.')
-    if (o.state === 'sent' && !o.waiting && now - (o.wentAt ?? o.at) > KEEP_BUSY) return fail("It didn't show up in the chat.", true)
+    if (o.state === 'sent' && !o.waiting && now - (o.wentAt ?? o.at) > KEEP_BUSY) return lost(o)
     if (o.state === 'sent' && !o.waiting && working(o.chat)) {
       // noted now and then, not on every tick: it is saved with the rest
       if (now - (o.busyAt ?? 0) < 30_000) return o
       changed = true
       return { ...o, busyAt: now }
     }
-    if (o.state === 'sent' && !o.waiting && now - Math.max(o.wentAt ?? o.at, o.busyAt ?? 0) > KEEP_SENT) return fail("It didn't show up in the chat.", true)
+    if (o.state === 'sent' && !o.waiting && now - Math.max(o.wentAt ?? o.at, o.busyAt ?? 0) > KEEP_SENT) return lost(o)
     if (o.state === 'sent' && o.waiting && !o.queued && now - o.at > KEEP_WAITING) return fail('Still waiting after 30 minutes.')
     return o
   })

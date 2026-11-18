@@ -3,7 +3,7 @@
 // Every database is a fixture built here (agy-fixture.ts); SHEPHERDR_AGY_HOME points at a folder of the test's own.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { agyLogPath, agyModelId, field, fields, MIRROR_HEAD, mirrorConversation, mirrorCount, newestConversation, stepTime, summaryTime, text } from '../server/live/agy.ts'
 import { findAgyLog, LOG_FINDERS, logKind } from '../server/live/readers/find.ts'
@@ -15,10 +15,15 @@ import { tmp } from './tmp.ts'
 const store = tmp('agy-store')
 const savedHome = process.env.SHEPHERDR_AGY_HOME
 const convs = join(store, 'conversations')
+/** a renamed repo: agy's conversation names the real folder, Shepherdr remembers the link at its old name */
+const realFolder = join(store, 'real-agy')
+const linkFolder = join(store, 'link-agy')
 
 beforeAll(() => {
   process.env.SHEPHERDR_AGY_HOME = store
   mkdirSync(convs, { recursive: true })
+  mkdirSync(realFolder, { recursive: true })
+  symlinkSync(realFolder, linkFolder)
   // the summaries of the folders the tests ask about (the bad rows default to the newest time: they must not match)
   const app = JSON.stringify(['file:///w/app'])
   makeSummaries(join(store, 'conversation_summaries.db'), [
@@ -34,6 +39,7 @@ beforeAll(() => {
     { id: 'conv-nouris', uris: null },
     { id: 'conv-other', uris: JSON.stringify(['file:///w/other']), last: '2026-11-13 13:00:00+00:00' },
     { id: 'conv-f', uris: JSON.stringify(['file:///w/agy-app']), last: '2026-11-13 14:00:00+00:00' },
+    { id: 'conv-linked', uris: JSON.stringify([`file://${realFolder}`]), last: '2026-11-18 10:00:00+00:00' },
   ])
 })
 
@@ -394,6 +400,14 @@ describe('agy in the finder and the chat reader', () => {
     const path = findAgyLog('/w/agy-app/')!
     expect(path).toBe(agyLogPath(home(), 'conv-f'))
     expect(lines(path)).toEqual([{ idx: 0, at: 1_700_000_000_000, kind: 'user', text: 'hi there' }])
+  })
+
+  test('a symlinked cwd finds the conversation of its real path by the remembered link', () => {
+    // before: one folder guessed from the link's name matches no summary
+    expect(newestConversation(linkFolder)).toBeUndefined()
+    const path = findAgyLog(linkFolder)!
+    expect(path).toBe(agyLogPath(home(), 'conv-linked'))
+    expect(findAgyLog(linkFolder, Date.UTC(2026, 10, 18, 11))).toBeUndefined()
   })
 
   test('sinceMs and headless runs: no conversation, so no log', () => {

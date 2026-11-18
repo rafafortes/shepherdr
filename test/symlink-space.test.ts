@@ -1,0 +1,123 @@
+// A renamed repo leaves a link at its old name: the space still remembers the link, but the CLI writes its log under
+// the real path and herdr reports that real cwd. The chat must read that log, never the old folder, and say so calmly
+// when it cannot read one at all. Covers discovery (Agents), the chat (Chats) and the doctor line.
+import { describe, expect, test } from 'bun:test'
+import { mkdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmp } from './tmp.ts'
+
+process.env.CLAUDE_CONFIG_DIR = tmp('symlink-claude')
+
+const { Agents } = await import('../server/live/agents.ts')
+const { Chats } = await import('../server/live/chats.ts')
+const { claudeProjectDir, claudeLogPath } = await import('../server/live/readers/find.ts')
+type AgentInfo = import('../server/live/herdr.ts').AgentInfo
+
+const KEY = 'p:usuario-X570S-AORUS-ELITE-AX:polylog'
+const NAME = 'shep-polylog'
+const S = '52b0d94e-130f-4675-86e4-7d5d0c89c92e'
+const OLD = '7c8f7a4b-0000-4000-8000-000000000000'
+
+/** the link Shepherdr remembers and the folder the CLI really runs in */
+function place(tag: string) {
+  const real = join(tmp(`symlink-real-${tag}`), 'lyvora-app')
+  const link = join(tmp(`symlink-link-${tag}`), 'polylog')
+  mkdirSync(real, { recursive: true })
+  symlinkSync(real, link)
+  return { real, link }
+}
+
+/** a Claude Code transcript: one message of yours and the coordinator's reply */
+function logLines(cwd: string) {
+  const base = { isSidechain: false, userType: 'external', entrypoint: 'cli', cwd, sessionId: S, version: '2.1.283' }
+  const user = { parentUuid: null, ...base, promptId: 'p-1', type: 'user', message: { role: 'user', content: 'Desligamos o reasoning?' }, uuid: 'u1', timestamp: '2026-11-18T17:47:00.000Z' }
+  const agent = { parentUuid: 'u1', ...base, message: { model: 'claude-opus-5-5', id: 'msg_r', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'Sim, desligamos.' }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }, type: 'assistant', uuid: 'a1', timestamp: '2026-11-18T17:47:38.000Z' }
+  return [user, agent].map((o) => JSON.stringify(o)).join('\n') + '\n'
+}
+
+/** write a session file straight into a project folder, with a time of our choosing */
+function session(folder: string, id: string, text: string, at: number) {
+  mkdirSync(folder, { recursive: true })
+  const f = join(folder, `${id}.jsonl`)
+  writeFileSync(f, text)
+  utimesSync(f, at / 1000, at / 1000)
+  return f
+}
+
+/** an Agents with our chat's record and herdr reporting the live agent at the given cwd */
+function agentsWith(key: string, cwd: string, liveCwd: string | null, started = Date.now()) {
+  const a = new Agents()
+  a.records[key] = { key, name: NAME, kind: 'claude', cwd, workspace: 'lyvora', logs: [], started }
+  ;(a as unknown as { byName: Map<string, string> }).byName.set(NAME, key)
+  const info: AgentInfo = { name: NAME, agent: 'claude', agent_status: 'working', cwd: liveCwd, pane_id: 'w1:p1', tab_id: 'w1:t1', workspace_id: 'w1' }
+  ;(a as unknown as { live: Map<string, AgentInfo> }).live = new Map([[NAME, info]])
+  return a
+}
+
+describe('a symlinked space reads the agent where it runs', () => {
+  test('discovery prefers herdr\'s live cwd and finds the log under the real path', () => {
+    const { real, link } = place('discover')
+    const now = Date.now()
+    const live = session(claudeProjectDir(real), S, logLines(real), now - 1000)
+    // the stale session from before the rename still sits in the folder named after the link
+    session(claudeProjectDir(link), OLD, logLines(link), now - 60_000)
+    const a = agentsWith(KEY, link, real)
+    try {
+      a.discoverLog(KEY)
+      expect(a.record(KEY)!.logs).toEqual([live])
+      // herdr naming the same session, or another look, never adds it twice
+      ;(a as unknown as { learnSession(k: string, info: { agent_session: unknown }): void }).learnSession(KEY, { agent_session: { source: 'herdr', agent: NAME, kind: 'id', value: S } })
+      a.discoverLog(KEY)
+      expect(a.record(KEY)!.logs).toEqual([live])
+      // the path is checked in both folders and lands on the one that holds the session
+      expect(claudeLogPath(a.logCwds(KEY), S)).toBe(live)
+    } finally {
+      a.stop()
+    }
+  })
+
+  test('the chat shows the human and the reply from the real-path log, not the old folder', () => {
+    const { real, link } = place('chat')
+    const now = Date.now()
+    const live = session(claudeProjectDir(real), S, logLines(real), now - 1000)
+    session(claudeProjectDir(link), OLD, logLines(link), now - 60_000)
+    const a = agentsWith(KEY, link, real)
+    try {
+      a.discoverLog(KEY)
+      const chats = new Chats(a, () => 'coordinator', () => 'Elias')
+      const chat = chats.chat(KEY)
+      const said = chat.messages.filter((m) => m.text).map((m) => m.text)
+      expect(said).toContain('Desligamos o reasoning?')
+      expect(said).toContain('Sim, desligamos.')
+      // nothing from the stale session's different text is in this chat
+      expect(chat.messages).toHaveLength(2)
+      expect(a.record(KEY)!.logs).toEqual([live])
+      expect(chat.unreadable).toBeUndefined()
+    } finally {
+      a.stop()
+    }
+  })
+
+  test('a running agent with no readable log says so in one calm line, in the chat and in doctor', () => {
+    const { real, link } = place('none')
+    const a = agentsWith(KEY, link, real, Date.now() - 60_000)
+    try {
+      // both candidate folders exist, but neither holds a log
+      expect(a.unreadable(KEY)).toMatch(/can't be read right now/)
+      expect(a.unreadableLogs()).toEqual([`${KEY}: ${a.unreadable(KEY)}`])
+      const chats = new Chats(a, () => 'coordinator', () => 'Elias')
+      const chat = chats.chat(KEY)
+      expect(chat.messages).toHaveLength(0)
+      expect(chat.unreadable).toBe(a.unreadable(KEY))
+      // a just-launched agent gets a few seconds to write its first log first
+      const fresh = agentsWith(KEY, link, real)
+      try {
+        expect(fresh.unreadable(KEY)).toBeUndefined()
+      } finally {
+        fresh.stop()
+      }
+    } finally {
+      a.stop()
+    }
+  })
+})

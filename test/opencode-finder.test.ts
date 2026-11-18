@@ -2,10 +2,10 @@
 // keeps OpenCode's session_v2 and session_message tables; rows added to it between two reads show up in the tail.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { opencodeLogPath } from '../server/live/opencode.ts'
-import { findOpencodeLog, LOG_FINDERS, logKind } from '../server/live/readers/find.ts'
+import { newestSession, opencodeLogPath } from '../server/live/opencode.ts'
+import { cwdCandidates, findOpencodeLog, LOG_FINDERS, logKind } from '../server/live/readers/find.ts'
 import { LogTail, readerFor } from '../server/live/readers/index.ts'
 import { home } from '../server/store.ts'
 import { tmp } from './tmp.ts'
@@ -52,6 +52,25 @@ describe('finding the OpenCode session of a folder', () => {
     expect(findOpencodeLog('/w/app/')).toBe(path)
     expect(readFileSync(path, 'utf8')).toContain('hello')
     expect(findOpencodeLog('/w/app')).toBe(path)
+  })
+
+  test('a symlinked cwd finds the session of its real path by the remembered link', () => {
+    const real = join(dir, 'real-opencode')
+    const link = join(dir, 'link-opencode')
+    mkdirSync(real, { recursive: true })
+    symlinkSync(real, link)
+    const d = new Database(db)
+    d.run('INSERT INTO session_v2 (id, directory, parent_id, time_archived, time_updated) VALUES (?, ?, NULL, NULL, 700)', ['ses_linked', real])
+    d.close()
+    addMessage('ses_linked', 1, 'user', { time: { created: 701 }, text: 'from the real path', files: [] })
+    // before: one folder guessed from the link's name has no session in the database
+    expect(newestSession(link)).toBeUndefined()
+    const path = opencodeLogPath(home(), 'ses_linked')
+    expect(findOpencodeLog(link)).toBe(path)
+    expect(findOpencodeLog(link, 601)).toBe(path)
+    expect(findOpencodeLog(link, 800)).toBeUndefined()
+    // the remembered path and its real path are both looked at: still one log
+    expect(findOpencodeLog(cwdCandidates(link))).toBe(path)
   })
 
   test('a folder with no session, and a folder with only archived or subagent sessions, has no log', () => {

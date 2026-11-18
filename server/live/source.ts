@@ -42,7 +42,7 @@ import { WaitAlerts, type Wait } from './wait-alerts.ts'
 import { ATTACH_MAX, fileType, isMedia, isVideo } from '../../shared/files.ts'
 import { smaller, type Small } from './media.ts'
 import { Mirror } from './mirror.ts'
-import { claudeHome, claudeProjectDir, piSessionDir } from './readers/find.ts'
+import { claudeHome, claudeProjectDirs, piSessionDirs } from './readers/find.ts'
 import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
@@ -466,9 +466,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     const dirs = [join(boxDir(), 'hooks'), `${b.home}/.claude/sessions`, day(Date.now()), day(Date.now() - 86_400_000)]
     const files: string[] = []
-    for (const r of Object.values(this.agents.records)) {
-      if (r.kind === 'claude') dirs.push(task.unmirrored(claudeProjectDir(r.cwd)))
-      if (r.kind === 'pi') dirs.push(task.unmirrored(piSessionDir(r.cwd)))
+    for (const [key, r] of Object.entries(this.agents.records)) {
+      const cwds = this.agents.logCwds(key)
+      if (r.kind === 'claude') dirs.push(...claudeProjectDirs(cwds).map(task.unmirrored))
+      if (r.kind === 'pi') dirs.push(...piSessionDirs(cwds).map(task.unmirrored))
       files.push(...r.logs.map(task.unmirrored))
     }
     this.mirror!.follow(dirs, files)
@@ -4749,7 +4750,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'doctor': {
         if (BOX) throw new Error(`shepherdr doctor checks every machine from the main one: run it there (${HOST} is run from it over SSH).`)
         const own = `${NAME} (this machine, the main one): herdr ${this.agents.reachable ? 'answers' : 'does not answer'}${this.browsers ? `; shared browser ${this.browsers.status().ready ? 'ready' : this.browsers.status().hint}` : ''}`
-        return [own, ...this.stall.report(), ...this.pushWarnings().map((warning) => `Alerts: ${warning}`), ...((await this.peers?.doctor()) ?? []), ...(await this.places.doctor())].join('\n')
+        return [own, ...this.stall.report(), ...this.pushWarnings().map((warning) => `Alerts: ${warning}`), ...this.agents.unreadableLogs(), ...((await this.peers?.doctor()) ?? []), ...(await this.places.doctor())].join('\n')
       }
       case 'secret': {
         if (a1 !== 'elevenlabs') return this.secretCommand(a1, rest, p, ctx)

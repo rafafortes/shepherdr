@@ -1019,6 +1019,7 @@ export class Chats {
         ...l.posted.filter((p) => p.who === 'you').map((p) => p.at),
       ],
       failed: failed.length ? failed : undefined,
+      unreadable: this.agents.unreadable?.(key),
       working: st === 'working' || undefined,
       queued: queued.length ? queued : undefined,
       // its turn is over, or ended while work it started still runs: a subagent, a shell
