@@ -66,7 +66,13 @@ export function askText(who: string, q: Question): { title: string; body: string
 type Card = Message & { question: Question }
 
 /** the cards the chat ends on, unanswered (a choice card, a plan, the CLI's own question or form, a menu): the agent
- *  waits on them. A card with words or a reply after it no longer counts (a plan answered by typing stays open). */
+ *  waits on them. One rule everywhere, shared with the CLI's own cards and questions in chats.ts (`openPosted` /
+ *  `openQuestion`, since SHE-53; the operator's choice on 2026-11-17): a card is answered by the
+ *  human's own words after it (typed, or a hidden note on a page) or by another agent's message that reached the agent
+ *  after it (a relay the agent takes as its prompt), never by Shepherdr's own news. The chat here holds the human's
+ *  visible words and the other agents' rows; hidden notes and Shepherdr's hidden news are stripped before they reach
+ *  it, so they are read from the raw log in chats.ts instead. The agent's own words, a card of Shepherdr's, an answer
+ *  to one of the other cards, and a message of yours that is only a card pick leave a card waiting (SHE-19). */
 export function openCards(chat: Chat | undefined): Card[] {
   const out: Card[] = []
   for (const m of [...(chat?.messages ?? [])].reverse()) {
@@ -75,10 +81,10 @@ export function openCards(chat: Chat | undefined): Card[] {
     // answers a question
     if (m.waiting || m.card?.aside || m.card?.id.startsWith('advice-note:')) continue
     if (!m.question) {
-      // the human's own words after them: what was asked before is answered by them, or moot. Anything else after a
-      // question — the agent's own words ("asked you the one thing…"), Shepherdr's cards, another agent's message, an
-      // answer to one of the others — leaves it waiting for its answer (the operator's decision, 2026-11-10: SHE-19)
-      if (m.who === 'you' && !m.answered) break
+      // words of yours that are not a card pick, or a row from another agent: what was asked before is answered by
+      // them, or moot. Anything else — the agent's own words ("asked you the one thing…"), Shepherdr's cards, an
+      // answer to one of the others, a card pick — leaves it waiting for its answer.
+      if ((m.who === 'you' && !m.answered) || m.who === 'peer') break
       continue
     }
     if (m.question.sent === undefined) out.unshift(m as Card)

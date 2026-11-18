@@ -571,9 +571,10 @@ export class Chats {
   private openPosted(key: string): Posted | undefined {
     this.pull(key)
     const l = this.log(key)
-    // any message that reached it after the card answered it: the human's words, a hidden Shepherdr line carrying them,
-    // and another agent's relay (a peer's message the agent takes as its prompt)
-    const since = Math.max(0, ...(this.events.get(key) ?? []).filter((e) => e.kind === 'user' || e.kind === 'peer').map((e) => e.at), ...l.posted.filter((p) => p.who === 'you').map((p) => p.at))
+    // the one rule for a card and a CLI's own question alike (openQuestion): the human's words after it, hidden notes
+    // included but never Shepherdr's own hidden news, or another agent's relay the agent takes as its prompt. Anything
+    // else that reached it (the agent's own words, another card's answer, Shepherdr's news) leaves it waiting.
+    const since = Math.max(0, ...(this.events.get(key) ?? []).filter((e) => e.kind === 'peer' || (e.kind === 'user' && wordsOf(e.text))).map((e) => e.at), ...l.posted.filter((p) => p.who === 'you').map((p) => p.at))
     for (let i = l.posted.length - 1; i >= 0; i--) {
       const p = l.posted[i]
       const q = p.question

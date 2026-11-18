@@ -127,6 +127,13 @@ Every agent, coordinator or task agent, gets the same chat.
   ```
   <agent-message from="SHE-17 agent" to="SHE-18 agent" pane="w7R:p2" space="shepherdr" task="SHE-17">Merge it once the checks pass.</agent-message>
   ```
+  How it reaches the chat differs by CLI, though the row looks the same: Claude Code's own log marks a cross-session
+  message as a peer line (`origin.kind: "peer"`), which its reader turns straight into that row; Codex, pi, OpenCode and
+  Antigravity receive the `<agent-message>` envelope typed into the pane, which the chat reads as a row naming the
+  sender. Either way, a card or a question the agent asked before it is answered by that message as far as the chat
+  knows (it is the prompt the agent will read next), so it leaves Needs you — the same rule as the human's own words,
+  hidden notes included, and never Shepherdr's own news (SHE-53, SHE-54). There is a test per CLI in
+  `test/wait-alerts-source.test.ts`.
 - An agent's own pictures and videos reach its chat, sent with `shepherdr attach <file> --caption "…"` (the shepherdr
   skill's "A picture or a video in your chat"): the file is copied into that chat's own inbox, as one you send is, and
   posted as a message of the agent's — the caption, then each file a message of its own, pictures sent together lying

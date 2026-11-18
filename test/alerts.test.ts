@@ -74,18 +74,19 @@ describe('which card an alert is about', () => {
     expect(a).toMatchObject({ title: 'X · Allow: rm -rf x?', go: { focus: 'menu:X/Agent' } })
     expect(a.card).toBeUndefined()
   })
-  test("a card waits until the human answers it or writes: the agent's words, a card or another agent's message after it leave it open (SHE-19)", () => {
-    // decided by the operator (2026-11-10): an agent that writes a summary after its card ("asked you the one thing…"), a
-    // coordinator writing to a task while its plan waits, or an answer to another card never take the card away
+  test("a card waits until the human answers it or writes, or another agent's message reaches the agent: the agent's own words, a card or an answer to another card leave it open (SHE-19, SHE-53)", () => {
+    // one rule everywhere (operator's choice on 2026-11-17): the human's words close a card, hidden notes included, and so
+    // does another agent's relay that reached the agent after it (POL-442) — Shepherdr's own news never does. An agent
+    // that writes a summary after its card ("asked you the one thing…") or an answer to another card never takes it away.
     const plan = { id: 'm1', who: 'agent' as const, text: 'Here is my plan.', question: q({ id: 'plan:X:1', kind: 'Plan' as const, title: 'Plan for X' }) }
     const peer = { id: 'p1', who: 'peer' as const, peer: { name: 'p coordinator', space: 'p' }, text: 'Keep the plan as it is.' }
     const summary = { id: 's1', who: 'agent' as const, text: 'Asked you the one thing no experiment here can settle.' }
     const answer = { id: 'y1', who: 'you' as const, text: 'Both', answered: 'Answered “Which voices?”' }
     expect(about(chat([plan]))).toMatchObject({ title: 'X · Plan to approve', go: { focus: 'plan:X:1' } })
-    expect(about(chat([plan, peer]))).toMatchObject({ title: 'X · Plan to approve', go: { focus: 'plan:X:1' } })
     expect(about(chat([plan, summary]))).toMatchObject({ title: 'X · Plan to approve', go: { focus: 'plan:X:1' } })
     expect(about(chat([plan, answer]))).toMatchObject({ title: 'X · Plan to approve', go: { focus: 'plan:X:1' } })
-    // what the human writes is their answer to what was asked before it
+    // what the human writes, or another agent's message, is their answer to what was asked before it
+    expect(about(chat([plan, peer])).go).not.toMatchObject({ focus: 'plan:X:1' })
     const typed = { id: 'y2', who: 'you' as const, text: 'Go with the first one.' }
     expect(about(chat([plan, summary, typed])).go).not.toMatchObject({ focus: 'plan:X:1' })
   })

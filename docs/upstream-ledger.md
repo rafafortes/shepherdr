@@ -600,6 +600,18 @@ Upstream sends its alerts through its own push only ("no second transport", its 
 Needs you still open after a delay, and marks its agents' environment (`SHEPHERDR_NOTIFIES=1`) so a notifier inside
 their CLI can stand aside. See [settings](settings.md#alert-command).
 
+Checked again 2026-11-18 (SHE-54) on `upstream/main` (3.x) and `upstream/v2.0`, plus the upstream issues and pull requests
+(`gh issue list`/`gh pr list`, read only): nothing to port for this task. 3.x's design answers the same "one rule for
+what needs you" question (`web/shared/needs-you.ts` `needsYou`, SHEP-250/255, PRs #1177/#727): its Tasks panel, badges
+and the phone's glance feed all read one list, and an alert stops standing when its need is answered, its agent ends or
+it ages out. That is the principle behind making our `openCards`, `openQuestion` and `openPosted` share one closing rule
+(SHE-53's, the operator's choice) and letting every reader of it — Needs you, the counts, the alert command, web push —
+follow; 3.x has no equivalent of our alert command, done command or advisor, and its code (`core/`, `mods/`, Python
+`herdr-task`) has no peer relays or agent CLIs to port. Ours adds what 3.x has no shape for: an optional
+`alerts.doneCommand` that marks a wait the human was told about when it ends (answered, relay, advisor, or the task moved
+on), and an advisor that takes first refusal on a question it will answer by itself (no alert until it hands back, fails,
+waits for room, or runs out of time), so an alert read later never asks for something already done.
+
 
 ## Not from upstream: herdr drops a call the server sent late, built here
 

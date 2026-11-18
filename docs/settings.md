@@ -760,13 +760,27 @@ opens again is a new wait. It is the same for an agent of every CLI — Claude C
 what it asks through Shepherdr, its CLI's own questions and screens as Shepherdr reads them, and a task that waits on you
 with no card — so a CLI with no notifier of its own (OpenCode, Antigravity) is told of as well.
 
+A card or question stops waiting on one rule everywhere (Needs you, its counts, the app badge, alerts, answers from an
+alert and the chat's open cards alike): the human's own words after it, hidden notes on a page included, or a message
+from another agent that reached the agent after it (a relay it takes as its prompt, as POL-442's did); never Shepherdr's
+own news. The agent's own words after its card, a card of Shepherdr's, and an answer to another card leave it waiting.
+
 - **How it runs.** Through `sh`, as `<command> <title> <message> <key>`, so `~` and words of your own work
   (`shepherdr set alerts.command '~/.local/bin/notify-operator' --machine`). The title says who asks and what
   (`Shepherdr · POL-12 · Which store for the outbox?`, `… · Plan to approve`, `… · Needs you`); the message's first line
   is its space and task (`lyvora-app · POL-12: Pick a store`, or `lyvora-app · its coordinator`), then its options or
-  what it waits with, and, when the advisor would answer it by itself, when (`If you don't answer, the advisor answers
-  for you at 14:32.`). The key is its own for each wait. Shepherdr never waits for the command; one that fails says so in
-  its log.
+  what it waits with. For a question the advisor will answer by itself (a choice, not a plan, with **Answers for you
+  after** set) the alert waits: it tells only when the advisor hands the question back, fails or waits for room — with
+  the advisor's reason in the message — or when the advisor has not finished a minute past that time, so one that hangs
+  cannot swallow the alert. A question the advisor answers tells nothing at all. Everything else says when the advisor
+  would answer (`If you don't answer, the advisor answers for you at 14:32.`). The key is its own for each wait.
+  Shepherdr never waits for the command; one that fails says so in its log.
+- **When a wait ends.** **Done command** (`alerts.doneCommand`, also Everywhere or for a machine, off unless set) is
+  told once when a wait you were alerted about ends — answered, answered by another agent's relay, answered by the
+  advisor, or the task moved on. It runs as `<command> <key> <how it ended>` with the same key the alert got, so your
+  notifier can mark the message it sent (`shepherdr set alerts.doneCommand '~/.local/bin/notify-operator --done'
+  --machine`). A wait answered before its delay, or while the command was off, ends nothing; a failure of this command
+  is logged and never brings a wait back.
 - **What is told.** A coordinator's waits are left out where its space's Notify is Off; a task's are told either way, as
   its pushes are. What was told is kept (`~/.shepherdr/wait-alerts.json`), so a restart of Shepherdr tells nothing
   twice; while the command is off, what waits counts as told, so turning it on tells what comes next, never a backlog.

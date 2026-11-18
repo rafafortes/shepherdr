@@ -490,6 +490,7 @@ export const CATALOG: Section[] = [
     rows: [
       { label: 'Alert command', key: 'alerts.command', value: 'off', text: true, hint: 'A command of yours told what waits for you: each question, plan, choice, permission or task that needs you, of an agent of any CLI, once it has waited the time below; one answered sooner runs nothing. It runs through sh as <command> <title> <message> <key>. Off: none.' },
       { label: 'Tell it after', key: 'alerts.after', value: '10 s', options: [...ALERT_AFTER] },
+      { label: 'Done command', key: 'alerts.doneCommand', value: 'off', text: true, hint: 'A command of yours told when a wait you were alerted about ends, as <command> <key> <how it ended>, with the same key the alert got so a notifier can mark the message it sent (answer, relay, advisor, or the task moved on). Off: none.' },
     ],
   },
   {
@@ -992,6 +993,12 @@ export class Settings {
   /** the command told what waits on you (alerts.command); nothing while it is off */
   alertCommand(): string | undefined {
     const v = this.get('alerts.command').trim()
+    return v && v.toLowerCase() !== 'off' ? v : undefined
+  }
+
+  /** the command told when a wait you were alerted about ends (alerts.doneCommand); nothing while it is off */
+  doneCommand(): string | undefined {
+    const v = this.get('alerts.doneCommand').trim()
     return v && v.toLowerCase() !== 'off' ? v : undefined
   }
 
