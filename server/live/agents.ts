@@ -45,11 +45,21 @@ export function uniqueLogs(logs: string[]): string[] {
   return out
 }
 
-/** adds a log the record doesn't have yet; true when it was new */
+/** adds a log the record doesn't have yet; true when it was new or a dead path was replaced by a readable one */
 function addLog(r: AgentRecord, f: string): boolean {
-  if (r.logs.some((x) => logName(x) === logName(f))) return false
-  r.logs.push(f)
-  return true
+  const i = r.logs.findIndex((x) => logName(x) === logName(f))
+  if (i < 0) {
+    r.logs.push(f)
+    return true
+  }
+  // a session is first named by a path guessed before its file existed (a symlink's remembered name, or the real
+  // path): when a later look finds the same session under a folder that does hold it, follow it. Otherwise a chat
+  // learned before the fix keeps its dead path for ever, and stays blank for the very session it is about.
+  if (r.logs[i] !== f && !existsSync(r.logs[i]) && existsSync(f)) {
+    r.logs[i] = f
+    return true
+  }
+  return false
 }
 
 /** an OpenCode session's log: its mirror brought up to date once. The path comes back whether or not that worked (the
@@ -77,7 +87,7 @@ function mirrorAgy(id: string): string {
 
 /** a Claude Code session, copied into the project folder of the cwd it resumes in (Claude Code looks for it only
  *  there) from wherever it was written on that machine; its log path, or nothing when there is none */
-export function carryClaudeSession(id: string, cwd: string): string | undefined {
+export function carryClaudeSession(id: string, cwd: import('./readers/find.ts').LogCwd): string | undefined {
   const to = claudeLogPath(cwd, id)
   const sh = `[ -e "$1" ] && exit 0; src=$(ls -t "$2"/*/"$3.jsonl" 2>/dev/null | head -n 1); [ -n "$src" ] || exit 1; mkdir -p "$(dirname "$1")" && cp "$src" "$1"`
   return runSync(['/bin/sh', '-c', sh, 'carry', task.unmirrored(to), task.unmirrored(join(claudeHome(), 'projects')), id]).code === 0 ? to : undefined
@@ -408,7 +418,10 @@ export class Agents extends Emitter<Events> {
   unreadable(key: string): string | undefined {
     const r = this.records[key]
     if (!r || !this.info(key) || Date.now() - r.started < 15_000) return undefined
-    if (r.logs.some((f) => existsSync(f))) return undefined
+    // the log that matters is the current session's: an older session's file still on disk says nothing about
+    // whether the one this agent is in now can be read — that is the case that makes a chat look empty
+    const current = r.sessionId ? r.logs.find((f) => logName(f) === `${r.sessionId}.jsonl`) : r.logs.at(-1)
+    if (current && existsSync(current)) return undefined
     return UNREADABLE_LOG
   }
 
@@ -706,7 +719,7 @@ export class Agents extends Emitter<Events> {
     // OpenCode keeps its background shells under its own pty daemon, and wakes the agent when one ends
     if (r?.kind === 'opencode') return st === 'idle' || st === 'done' ? this.opencodeWork(key) : undefined
     if (r?.kind !== 'claude' || st === 'working' || st === 'blocked' || st === 'gone') return undefined
-    const file = this.sessions.status(r.sessionId, r.cwd)
+    const file = this.sessions.status(r.sessionId, this.logCwds(key))
     // its hooks said what still ran as its turn ended; its session file is newer once that work is gone, or once a
     // subagent runs again (one that paused on shells of its own woke)
     const said = this.said(key)
@@ -731,7 +744,7 @@ export class Agents extends Emitter<Events> {
     const pane = this.info(key)?.pane_id
     if (!pane || (st !== 'idle' && st !== 'done')) return undefined
     if (r?.kind === 'agy') return agyScreenBackground(await herdr.visible(pane).catch(() => ''))
-    if (r?.kind === 'claude' && !this.said(key) && this.sessions.status(r.sessionId, r.cwd) === undefined) return screenBackground(await herdr.visible(pane).catch(() => ''))
+    if (r?.kind === 'claude' && !this.said(key) && this.sessions.status(r.sessionId, this.logCwds(key)) === undefined) return screenBackground(await herdr.visible(pane).catch(() => ''))
     return undefined
   }
 
@@ -973,7 +986,7 @@ export class Agents extends Emitter<Events> {
     // it starts in another folder now: its session goes with it, where --resume looks for it
     if (resume && r.kind === 'claude' && r.sessionId && from !== r.cwd) {
       const id = r.sessionId
-      const log = carryClaudeSession(id, r.cwd)
+      const log = carryClaudeSession(id, this.logCwds(spec.key))
       if (log) r.logs = [...r.logs.filter((f) => !f.endsWith(`/${id}.jsonl`)), log]
     }
     // herdr dropping a call (it closes a connection it was sent too late, see herdr.ts PASSING) is no failed start: each of

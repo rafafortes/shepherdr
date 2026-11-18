@@ -2,7 +2,7 @@
 // the real path and herdr reports that real cwd. The chat must read that log, never the old folder, and say so calmly
 // when it cannot read one at all. Covers discovery (Agents), the chat (Chats) and the doctor line.
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -89,9 +89,30 @@ describe('a symlinked space reads the agent where it runs', () => {
       const said = chat.messages.filter((m) => m.text).map((m) => m.text)
       expect(said).toContain('Desligamos o reasoning?')
       expect(said).toContain('Sim, desligamos.')
-      // nothing from the stale session's different text is in this chat
+      // only the live session's two rows: the stale session in the link folder is never added (count, not text)
       expect(chat.messages).toHaveLength(2)
       expect(a.record(KEY)!.logs).toEqual([live])
+      expect(chat.unreadable).toBeUndefined()
+    } finally {
+      a.stop()
+    }
+  })
+
+  test('a stale log path learned before the fix is replaced by the readable one', () => {
+    const { real, link } = place('stale')
+    const now = Date.now()
+    const live = session(claudeProjectDir(real), S, logLines(real), now - 1000)
+    const a = agentsWith(KEY, link, real)
+    try {
+      // the record Shepherdr saved under the old code: the current session named in the link's folder, where no file
+      // was ever written. Its id is already there, so a plain "have we got this log" check keeps it for ever.
+      a.record(KEY)!.logs = [join(claudeProjectDir(link), `${S}.jsonl`)]
+      a.record(KEY)!.sessionId = S
+      a.discoverLog(KEY)
+      ;(a as unknown as { learnSession(k: string, info: { agent_session: unknown }): void }).learnSession(KEY, { agent_session: { source: 'herdr', agent: NAME, kind: 'id', value: S } })
+      expect(a.record(KEY)!.logs).toEqual([live])
+      const chat = new Chats(a, () => 'coordinator', () => 'Elias').chat(KEY)
+      expect(chat.messages.map((m) => m.text).filter(Boolean)).toEqual(['Desligamos o reasoning?', 'Sim, desligamos.'])
       expect(chat.unreadable).toBeUndefined()
     } finally {
       a.stop()
@@ -116,6 +137,28 @@ describe('a symlinked space reads the agent where it runs', () => {
       } finally {
         fresh.stop()
       }
+    } finally {
+      a.stop()
+    }
+  })
+
+  test('the calm line is about the current session, not an older log that still exists', () => {
+    const { real, link } = place('current')
+    const now = Date.now()
+    const old = session(claudeProjectDir(real), OLD, logLines(real), now - 600_000)
+    const current = join(claudeProjectDir(real), `${S}.jsonl`)
+    const a = agentsWith(KEY, link, real, now - 60_000)
+    try {
+      a.record(KEY)!.logs = [old, current]
+      a.record(KEY)!.sessionId = S
+      // an older session's file on disk must never say the live one is readable
+      expect(existsSync(old)).toBe(true)
+      expect(existsSync(current)).toBe(false)
+      expect(a.unreadable(KEY)).toMatch(/can't be read right now/)
+      expect(a.unreadableLogs()).toHaveLength(1)
+      session(claudeProjectDir(real), S, logLines(real), now - 1000)
+      expect(a.unreadable(KEY)).toBeUndefined()
+      expect(a.unreadableLogs()).toEqual([])
     } finally {
       a.stop()
     }
