@@ -705,8 +705,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   asks(): Record<string, string> {
     const out: Record<string, string> = {}
     for (const p of [placeId.home(), ...this.places.spaces.map((x) => placeId.space(x.name))]) {
-      const open = this.chats.log(p).posted.find((x) => x.question && x.question.id.startsWith('ask:') && x.question.sent === undefined && this.chats.log(p).answers[x.question.id] === undefined)
-      if (open) out[p] = open.question!.id
+      // the same card-closing rule Needs you and the alert command read, not the posted log: a relay closes the card
+      const open = this.chats.openAskId(p)
+      if (open) out[p] = open
       // stopped on a start's screen of its own (start.ts): it waits on you as a menu does
       else if (this.chats.startMenuUp(p)) out[p] = menuId(p, this.chats.menu(p)!)
       else if (this.agents.status(p) === 'blocked') out[p] = 'blocked'
@@ -730,7 +731,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const log = this.chats.log(p)
       const cards = open(p)
       const blocked = this.agents.status(p) === 'blocked'
-      const ids = coordinatorRequestIds(log.posted, log.answers, [...cards.keys()], blocked)
+      const ids = coordinatorRequestIds([...cards.keys()], log.answers, blocked)
       for (const id of ids) {
         const message = cards.get(id) ?? log.posted.find((x) => x.question?.id === id)
         const question = message && 'question' in message ? message.question : undefined
@@ -856,29 +857,80 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * and not asked about already.
    */
   /** your alert command's look (wait-alerts.ts): every wait of Needs you on this machine, a coordinator's left out where its
-   *  Notify is Off (a task's never), each in words when it is told */
+   *  Notify is Off (a task's never), each in words when it is told. A question the advisor will take by itself gets first
+   *  refusal: no alert while it is on it, one when it hands the question back or runs out of time (a stuck advisor never
+   *  swallows an alert); what it answers tells nothing. A wait the human was told about that ends runs the done command. */
   tellWaits(now = Date.now()) {
     const command = this.settings.alertCommand()
-    const advisable = new Map(command ? this.advisable().map((x) => [`${x.need.chat}:${x.need.id}`, x]) : [])
+    const advisable = new Map(command ? this.advisable(undefined, true).map((x) => [`${x.need.chat}:${x.need.id}`, x]) : [])
+    const skipped: string[] = []
     const waits: Wait[] = this.needs()
-      .filter((n) => n.task || this.settings.get(NOTIFY_KEY, this.spaceKey(n.chat)) !== 'Off')
-      .map((n) => ({ key: `${n.chat}:${n.id}`, words: () => this.waitWords(n, advisable.get(`${n.chat}:${n.id}`), now) }))
-    this.waitAlerts.look(waits, { command, after: this.settings.alertAfter() }, now)
+      .filter((n) => {
+        if (n.task || this.settings.get(NOTIFY_KEY, this.spaceKey(n.chat)) !== 'Off') return true
+        // a policy silence, not an end: never mark it done while the card is still open (wait-alerts.ts skipDone)
+        skipped.push(`${n.chat}:${n.id}`)
+        return false
+      })
+      .map((n) => {
+        const key = `${n.chat}:${n.id}`
+        const x = advisable.get(key)
+        const rec = x ? this.advices.get(n.chat, x.qid) : undefined
+        // a choice or a plain question the advisor will answer by itself holds the alert until it has had its turn,
+        // then gets a margin so one that never finishes still tells. A plan, a permission and a question it handed
+        // back (human), failed or left waiting for room are told as they always were (with its reason in the words).
+        const pending = !!x && !x.q.plan && this.settings.advisorAfter(x.space) !== null && (!rec || rec.state === 'asking')
+        return {
+          key,
+          ...(pending ? { after: this.settings.advisorAfter(x!.space)! + ADVISOR_MARGIN } : {}),
+          words: () => this.waitWords(n, x, now, rec, pending),
+          // read at the moment it ends, from the live advice record and chat: the advisor may have answered since the
+          // last look, when this wait was still open
+          ended: () => this.waitEnded(n, x?.qid),
+          // a card still open while its task reads Working (a typed message holds the turn): keep the wait, never say
+          // it ended or alert it twice when the task needs you again
+          stillOpen: () => !!n.question && openCards(this.chats.chat(n.chat)).some((m) => m.question.id === n.question!.id),
+        }
+      })
+    this.waitAlerts.look(waits, { command, after: this.settings.alertAfter(), doneCommand: this.settings.doneCommand(), skipDone: skipped }, now)
+  }
+
+  /** how a wait the human was told about ended, in words for the done command: the advisor's answer, a relay from
+   *  another agent, a decline, or the human's own answer (a task that moved on says the same). Read now, not at the
+   *  last look, and with the question id the advisor was asked about (the agent may have said more since a words ask). */
+  private waitEnded(n: Need, qid?: string): string {
+    const card = qid ?? n.question?.id ?? ''
+    const rec = this.advices.get(n.chat, card)
+    if (rec?.state === 'sent') return 'The advisor answered'
+    const msgs = this.chats.chat(n.chat).messages
+    if (msgs.some((m) => m.question?.id === card && m.question.dismissed)) return 'Dismissed'
+    // a terminal prompt's Dismiss presses Esc, so its card is gone from the chat; its own line still says so
+    if (msgs.some((m) => m.who === 'you' && /^Dismissed /.test(m.answered ?? ''))) return 'Dismissed'
+    if (msgs.some((m) => m.who === 'peer' && (m.at ?? 0) > n.at)) return 'Answered by another agent'
+    return 'Answered'
   }
 
   /** a wait in words for your alert command: what asks and what (its question, plan, menu or words), its space and task,
-   *  and when the advisor answers for you if you don't */
-  private waitWords(n: Need, advisor: { space: string; q: AdviceQuestion } | undefined, now: number): { title: string; body: string } {
+   *  and what the advisor is doing about it when it would answer by itself */
+  private waitWords(n: Need, advisor: { space: string; q: AdviceQuestion } | undefined, now: number, rec?: AdviceRec, pending = false): { title: string; body: string } {
     const t = n.task ? this.engine.task(n.task) : undefined
     const space = t ? (this.places.space(t.project)?.name ?? t.project) : (this.spaceKey(n.chat) ?? n.chat)
     const place = space === '~' ? 'home' : this.places.shownName(space)
     const asked = n.question ? askText(t?.id ?? `${place}'s coordinator`, n.question) : { title: `${t?.id ?? `${place}'s coordinator`} · Needs you`, body: n.text ?? '' }
-    const after = advisor && !advisor.q.plan ? this.settings.advisorAfter(advisor.space) : null
-    const advice = after === null ? '' : `If you don't answer, the advisor answers for you at ${clockWords(n.at + after, now, this.settings.zone())}.`
+    let advice = ''
+    if (advisor && !advisor.q.plan) {
+      const after = this.settings.advisorAfter(advisor.space)
+      if (rec?.state === 'human') advice = `The advisor left this to you: ${rec.advice?.human ?? 'it was not sure'} (${rec.advice?.by ?? 'the advisor'}).`
+      else if (rec?.state === 'failed') advice = 'The advisor could not answer, so this waits for you.'
+      else if (rec?.state === 'waiting') advice = 'The advisor waits for a free model, so this waits for you.'
+      else if (pending || rec?.state === 'asking') advice = 'The advisor is answering this but has not finished; it may still take it.'
+      else if (after !== null) advice = `If you don't answer, the advisor answers for you at ${clockWords(n.at + after, now, this.settings.zone())}.`
+    }
     return { title: `Shepherdr · ${asked.title}`, body: [t ? `${place} · ${t.id}: ${t.title}` : `${place} · its coordinator`, asked.body, advice].filter(Boolean).join('\n') }
   }
 
-  private advisable(only?: string): { need: Need; qid: string; q: AdviceQuestion; space: string; cwd: string; asker: string; brief?: string }[] {
+  /** `includeAsked`: tellWaits still needs the advisor's context and record after a run, when advisable() would skip a
+   *  question already asked (only a failed or waiting one is offered again by watchAdvice) */
+  private advisable(only?: string, includeAsked = false): { need: Need; qid: string; q: AdviceQuestion; space: string; cwd: string; asker: string; brief?: string }[] {
     const out: ReturnType<LiveSource['advisable']> = []
     for (const n of this.needs(only)) {
       const t = n.task ? this.engine.task(n.task) : undefined
@@ -908,7 +960,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       }
       const had = this.advices.get(n.chat, qid)
       // a failed one is asked again by hand; a waiting one goes on as soon as a harness of its chain has room (retryAdvice)
-      if (had && had.state !== 'failed' && had.state !== 'waiting') continue
+      if (had && !includeAsked && had.state !== 'failed' && had.state !== 'waiting') continue
       out.push({ need: n, qid, q, space, cwd, asker, brief })
     }
     return out
@@ -5227,6 +5279,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 const OVERVIEW_MAX = 240
 /** how often what waits on you is looked at for your alert command (tellWaits): a wait is told at most this long late */
 const WAIT_LOOK = 5_000
+/** a question the advisor will take by itself waits this much longer than advisor.after before an alert goes out anyway,
+ *  so an advisor that never finishes (a run that hangs, no model that can run) cannot swallow the alert */
+const ADVISOR_MARGIN = 60_000
 /** the held reasons whose words name their own limit (heldWords), in a task's add and tell replies */
 const HELD_NAMED = new Set<HeldWhy>(['space', 'model', 'blocked', 'zero', 'spaceZero'])
 

@@ -51,7 +51,7 @@ describe('the alert command is told what waits on you', () => {
     again.w.look([wait('a'), wait('b'), wait('c')], ON, 12_000)
     again.w.look([wait('a'), wait('b'), wait('c')], ON, 22_000)
     expect(again.ran.map((r) => r.args[0])).toEqual(['asks c'])
-    expect(readJson<{ waits: Record<string, unknown> }>('wait-alerts.json', { waits: {} }).waits).toEqual({ a: { seen: 0, told: true }, b: { seen: 0, told: true }, c: { seen: 12_000, told: true } })
+    expect(readJson<{ waits: Record<string, unknown> }>('wait-alerts.json', { waits: {} }).waits).toEqual({ a: { seen: 0, told: true, sent: true }, b: { seen: 0, told: true, sent: true }, c: { seen: 12_000, told: true, sent: true } })
   })
 
   test('while it is off nothing runs and every wait counts as told: turning it on tells only what comes next', () => {
@@ -86,6 +86,97 @@ describe('the alert command is told what waits on you', () => {
   })
 })
 
+describe('a wait the human was told about is marked when it ends', () => {
+  const DONE = { command: 'notify', after: 10_000, doneCommand: 'notify --done' }
+  const ending = (key: string, how: string): Wait => ({ key, words: () => ({ title: `asks ${key}`, body: `about ${key}` }), ended: () => how })
+
+  test('once, with the same key and how it ended, only after it was really told', () => {
+    const { w, ran } = watcher()
+    w.look([ending('a', 'Answered')], DONE, 1000)
+    w.look([ending('a', 'Answered')], DONE, 11_000)
+    expect(ran.map((r) => r.args)).toEqual([['asks a', 'about a', 'shepherdr-a-1000']])
+    // a second look while it still waits marks nothing
+    w.look([ending('a', 'Answered')], DONE, 20_000)
+    expect(ran).toHaveLength(1)
+    w.look([], DONE, 21_000)
+    expect(ran.at(-1)).toEqual({ command: 'notify --done', args: ['shepherdr-a-1000', 'Answered'] })
+    // and a third look does not mark it twice
+    w.look([], DONE, 22_000)
+    expect(ran).toHaveLength(2)
+    expect(readJson<{ waits: Record<string, unknown> }>('wait-alerts.json', { waits: {} }).waits).toEqual({})
+  })
+
+  test('a wait answered before its delay, or while the command was off, marks nothing', () => {
+    const { w, ran } = watcher()
+    w.look([ending('quick', 'Answered')], DONE, 0)
+    w.look([], DONE, 1000)
+    w.look([ending('off', 'Answered')], { after: 10_000, doneCommand: 'notify --done' }, 2000)
+    w.look([ending('off', 'Answered')], { after: 10_000, doneCommand: 'notify --done' }, 20_000)
+    w.look([], DONE, 21_000)
+    expect(ran).toEqual([])
+  })
+
+  test('a told wait that ends uses its ending words; one with none says it no longer waits', () => {
+    const { w, ran } = watcher()
+    w.look([ending('r', 'Answered by another agent'), wait('b')], DONE, 0)
+    w.look([ending('r', 'Answered by another agent'), wait('b')], DONE, 10_000)
+    // r ends by a relay, b is still open: only r is marked
+    w.look([wait('b')], DONE, 11_000)
+    expect(ran.map((r) => [r.command, r.args])).toEqual([
+      ['notify', ['asks r', 'about r', 'shepherdr-r-0']],
+      ['notify', ['asks b', 'about b', 'shepherdr-b-0']],
+      ['notify --done', ['shepherdr-r-0', 'Answered by another agent']],
+    ])
+    // b ends later with no ending words of its own
+    w.look([], DONE, 12_000)
+    expect(ran.at(-1)).toEqual({ command: 'notify --done', args: ['shepherdr-b-0', 'No longer waiting'] })
+  })
+
+  test('a new wait after an answered one is told once, and the old one is marked once', () => {
+    const { w, ran } = watcher()
+    w.look([ending('a1', 'Answered')], DONE, 0)
+    w.look([ending('a1', 'Answered')], DONE, 10_000)
+    w.look([ending('a2', 'Answered')], DONE, 11_000)
+    w.look([ending('a2', 'Answered')], DONE, 21_000)
+    expect(ran.filter((r) => r.command === 'notify').map((r) => r.args[0])).toEqual(['asks a1', 'asks a2'])
+    expect(ran.filter((r) => r.command === 'notify --done').map((r) => r.args)).toEqual([['shepherdr-a1-0', 'Answered']])
+  })
+
+  test('a done command that throws still marks the wait and does not stop the others', async () => {
+    const err = console.error
+    const said: string[] = []
+    console.error = (m: string) => void said.push(m)
+    writeJson('wait-alerts.json', { waits: {} })
+    let calls = 0
+    const w = new WaitAlerts((command, args) => {
+      calls++
+      if (command === 'notify --done') throw new Error('boom')
+      void args
+    })
+    try {
+      w.look([ending('x', 'Answered'), ending('y', 'Answered')], DONE, 0)
+      w.look([ending('x', 'Answered'), ending('y', 'Answered')], DONE, 10_000)
+      w.look([], DONE, 11_000)
+    } finally {
+      console.error = err
+    }
+    expect(calls).toBe(4)
+    expect(said).toEqual(expect.arrayContaining(['shepherdr: the done command did not run: boom']))
+    expect(readJson<{ waits: Record<string, unknown> }>('wait-alerts.json', { waits: {} }).waits).toEqual({})
+    await Bun.sleep(0)
+  })
+
+  test('a wait can set its own delay instead of the shared one', () => {
+    const { w, ran } = watcher()
+    const slow: Wait = { key: 'slow', words: () => ({ title: 'slow', body: 'b' }), after: 60_000 }
+    w.look([wait('fast'), slow], ON, 0)
+    w.look([wait('fast'), slow], ON, 10_000)
+    expect(ran.map((r) => r.args[0])).toEqual(['asks fast'])
+    w.look([wait('fast'), slow], ON, 60_000)
+    expect(ran.map((r) => r.args[0])).toEqual(['asks fast', 'slow'])
+  })
+})
+
 describe('the command runs through sh, with what it is told as its arguments', () => {
   const dir = tmp('wait-alerts-run')
   test('~ and words of its own work; quotes, $( ) and ; in the words are never run', async () => {
@@ -111,7 +202,7 @@ describe('the command runs through sh, with what it is told as its arguments', (
     } finally {
       console.error = error
     }
-    expect(said).toEqual(expect.arrayContaining(['shepherdr: the alert command ended with 3', 'shepherdr: the alert command ended with 127']))
+    expect(said).toEqual(expect.arrayContaining(['shepherdr: the command ended with 3', 'shepherdr: the command ended with 127']))
   })
 })
 
@@ -130,7 +221,14 @@ describe('the settings', () => {
     expect(s.alertAfter()).toBe(30_000)
     // a machine's own command, never a space's
     expect(s.set('alerts.command', 'x', { space: 'app' }).ok).toBe(false)
-    for (const k of ['alerts.command', 'alerts.after']) s.set(k, null)
+    // the done command is optional too: off by default, machine or Everywhere, never a space's
+    expect(s.doneCommand()).toBeUndefined()
+    expect(s.set('alerts.doneCommand', '~/.local/bin/notify-operator --done', 'machine').ok).toBe(true)
+    expect(s.doneCommand()).toBe('~/.local/bin/notify-operator --done')
+    expect(s.set('alerts.doneCommand', ' OFF ', 'machine').ok).toBe(true)
+    expect(s.doneCommand()).toBeUndefined()
+    expect(s.set('alerts.doneCommand', 'x', { space: 'app' }).ok).toBe(false)
+    for (const k of ['alerts.command', 'alerts.after', 'alerts.doneCommand']) s.set(k, null)
   })
 })
 

@@ -656,6 +656,10 @@ export interface Chat {
   key: string
   /** the agent's and yours, and Shepherdr's update cards among them */
   messages: Message[]
+  /** when a message that answers a card before it reached the agent: the human's words, hidden notes on a page
+   *  included, another agent's relay, or an answer sent from the app. Hidden notes and Shepherdr's own lines are not
+   *  rows in `messages`, so `openCards` reads these times from the raw log to close cards by the one rule too. */
+  closedAt?: number[]
   /** herdr says the agent works: the CLI takes what you send at its next step */
   working?: boolean
   /** the ids the screen gave what it sent that the CLI still holds in its own queue (it takes one at its next step, or

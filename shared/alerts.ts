@@ -66,22 +66,35 @@ export function askText(who: string, q: Question): { title: string; body: string
 type Card = Message & { question: Question }
 
 /** the cards the chat ends on, unanswered (a choice card, a plan, the CLI's own question or form, a menu): the agent
- *  waits on them. A card with words or a reply after it no longer counts (a plan answered by typing stays open). */
+ *  waits on them. One rule everywhere, shared with the CLI's own cards and questions in chats.ts (`openPosted` /
+ *  `openQuestion`, since SHE-53; the operator's choice on 2026-11-17): a card is answered by the
+ *  human's own words after it (typed, or a hidden note on a page), by another agent's message that reached the agent
+ *  after it (a relay the agent takes as its prompt), or by a pick answered from the app — the raw rule in chats.ts
+ *  (`openPosted` / `openQuestion`) — never by Shepherdr's own news. The chat here holds the human's visible words and
+ *  the other agents' rows; hidden notes, app answers and Shepherdr's hidden news are no rows in it, so their times are
+ *  carried in `Chat.closedAt` from the raw log. The agent's own words and a card of Shepherdr's leave a card waiting
+ *  (SHE-19). */
 export function openCards(chat: Chat | undefined): Card[] {
   const out: Card[] = []
+  // from the raw log (chats.ts), where hidden notes and answers sent from the app exist as well as visible rows; a chat
+  // the screen did not build (a demo, a test) has none and falls back to its rows below
+  const closed = chat?.closedAt ?? []
   for (const m of [...(chat?.messages ?? [])].reverse()) {
     // what you sent that waits for the menu to be answered, another agent's message still on its way in, and a note
     // beside the questions (the advisor's, by its id too for the ones posted before notes said so): none of them
     // answers a question
     if (m.waiting || m.card?.aside || m.card?.id.startsWith('advice-note:')) continue
     if (!m.question) {
-      // the human's own words after them: what was asked before is answered by them, or moot. Anything else after a
-      // question — the agent's own words ("asked you the one thing…"), Shepherdr's cards, another agent's message, an
-      // answer to one of the others — leaves it waiting for its answer (the operator's decision, 2026-11-10: SHE-19)
-      if (m.who === 'you' && !m.answered) break
+      // words of yours that are not a card pick, or a row from another agent: what was asked before is answered by
+      // them, or moot. Anything else — the agent's own words ("asked you the one thing…"), Shepherdr's cards, an
+      // answer to one of the others, a card pick — leaves it waiting for its answer.
+      if ((m.who === 'you' && !m.answered) || m.who === 'peer') break
       continue
     }
-    if (m.question.sent === undefined) out.unshift(m as Card)
+    if (m.question.sent !== undefined) continue
+    // a hidden note, a relay or an app answer reached the agent after this card: the same rule chats.ts uses
+    if (m.at !== undefined && closed.some((at) => at > m.at!)) continue
+    out.unshift(m as Card)
   }
   return out
 }

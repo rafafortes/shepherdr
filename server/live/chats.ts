@@ -548,6 +548,13 @@ export class Chats {
     return this.openPosted(key)?.question?.title
   }
 
+  /** the coordinator's open `ask:` card, read from the raw log and events so `asks()` can use the one card-closing rule
+   *  without building the screen chat — `chat()` asks for the chat's name, which calls `asks()` back */
+  openAskId(key: string): string | undefined {
+    const id = this.openPosted(key)?.question?.id
+    return id?.startsWith('ask:') ? id : undefined
+  }
+
   /** a needs-you card or question, with when it was asked: the one it waits on now, if any */
   askAt(key: string): number | undefined {
     const posted = this.openPosted(key)
@@ -571,9 +578,10 @@ export class Chats {
   private openPosted(key: string): Posted | undefined {
     this.pull(key)
     const l = this.log(key)
-    // any message that reached it after the card answered it: the human's words, a hidden Shepherdr line carrying them,
-    // and another agent's relay (a peer's message the agent takes as its prompt)
-    const since = Math.max(0, ...(this.events.get(key) ?? []).filter((e) => e.kind === 'user' || e.kind === 'peer').map((e) => e.at), ...l.posted.filter((p) => p.who === 'you').map((p) => p.at))
+    // the one rule for a card and a CLI's own question alike (openQuestion): the human's words after it, hidden notes
+    // included but never Shepherdr's own hidden news, or another agent's relay the agent takes as its prompt. Anything
+    // else that reached it (the agent's own words, another card's answer, Shepherdr's news) leaves it waiting.
+    const since = Math.max(0, ...(this.events.get(key) ?? []).filter((e) => e.kind === 'peer' || (e.kind === 'user' && wordsOf(e.text))).map((e) => e.at), ...l.posted.filter((p) => p.who === 'you').map((p) => p.at))
     for (let i = l.posted.length - 1; i >= 0; i--) {
       const p = l.posted[i]
       const q = p.question
@@ -1005,6 +1013,11 @@ export class Chats {
       cli: CLI_NAME[kind] ?? kind,
       agent: r ? { runtime, ...launchHarness({ kind: r.kind, model: r.model, effort: r.effort }), ...(findModel(r.kind, r.model) ? { modelLabel: findModel(r.kind, r.model)!.label } : {}) } : undefined,
       messages: msgs,
+      // the card-closing rule from the raw log, for openCards: hidden notes and app answers are no rows in `messages`
+      closedAt: [
+        ...ev.filter((e) => e.kind === 'peer' || (e.kind === 'user' && wordsOf(e.text))).map((e) => e.at),
+        ...l.posted.filter((p) => p.who === 'you').map((p) => p.at),
+      ],
       failed: failed.length ? failed : undefined,
       working: st === 'working' || undefined,
       queued: queued.length ? queued : undefined,
