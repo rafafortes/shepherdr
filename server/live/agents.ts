@@ -393,7 +393,8 @@ export class Agents extends Emitter<Events> {
     if (this.soon) clearTimeout(this.soon)
     this.hookWatch?.close()
     this.sub.stop()
-    this.flushRecords()
+    // a failed write at shutdown must not skip the rest of the stop (engine, usage, retries)
+    try { this.flushRecords() } catch (e) { this.writeFailed(e) }
   }
 
   /** outbox.json goes down at once (a queued message must survive a crash); agents.json is coalesced to one write per

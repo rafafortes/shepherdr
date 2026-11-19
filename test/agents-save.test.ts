@@ -192,6 +192,58 @@ describe('agents.json writes are debounced, outbox.json is not', () => {
       fail = false
       a.flushRecords()
       expect(onDisk('agents.json')[KEY].model).toBe('retry-me')
+      // a failed write at shutdown is caught too, so the rest of stop() still runs
+      fail = true
+      a.record(KEY)!.model = 'at-stop'
+      a.save()
+      await Promise.resolve()
+      expect(() => a.stop()).not.toThrow()
+    } finally {
+      a.stop()
+      spy.mockRestore()
+      errors.mockRestore()
+    }
+  })
+
+  test('a stop while a flip timer is pending flushes the flip once and cancels the timer', async () => {
+    put()
+    const errors = spyOn(console, 'error').mockImplementation(() => {})
+    const spy = spyOn(store, 'writeJson').mockImplementation((...args: Parameters<typeof store.writeJson>) => realWriteJson(...args))
+    const a = new Agents()
+    a.recordsSaveAfter = 5000 // far off: only stop can write in this test
+    a.pendingFor = 0
+    try {
+      a.live = new Map([[name, { name, launch_pending: true } as unknown as AgentInfo]])
+      ;(a as unknown as { settleLaunches: () => void }).settleLaunches()
+      expect(writes(spy, 'agents.json')).toBe(0)
+      a.stop()
+      expect(writes(spy, 'agents.json')).toBe(1)
+      expect(onDisk('agents.json')[KEY].pendingLaunch).toBe(true)
+      await Bun.sleep(20)
+      expect(writes(spy, 'agents.json')).toBe(1) // the cancelled timer never writes a second time
+    } finally {
+      spy.mockRestore()
+      errors.mockRestore()
+    }
+  })
+
+  test('a save() in the flip turn flushes once and cancels the timer', async () => {
+    put()
+    const errors = spyOn(console, 'error').mockImplementation(() => {})
+    const spy = spyOn(store, 'writeJson').mockImplementation((...args: Parameters<typeof store.writeJson>) => realWriteJson(...args))
+    const a = new Agents()
+    a.recordsSaveAfter = 5000
+    a.pendingFor = 0
+    try {
+      a.live = new Map([[name, { name, launch_pending: true } as unknown as AgentInfo]])
+      ;(a as unknown as { settleLaunches: () => void }).settleLaunches()
+      a.record(KEY)!.model = 'same-turn'
+      a.save() // its microtask flushes the flip too, clearing the timer
+      await Promise.resolve()
+      expect(writes(spy, 'agents.json')).toBe(1)
+      expect(onDisk('agents.json')[KEY].pendingLaunch).toBe(true)
+      await Bun.sleep(20)
+      expect(writes(spy, 'agents.json')).toBe(1)
     } finally {
       a.stop()
       spy.mockRestore()
