@@ -1,6 +1,8 @@
-// check:local --quick is the pre-ready run: incremental types + the tests that reach what changed + the build. It never
-// runs the coverage ratchet, records no baseline or screen map, and its verdict is marked QUICK on its first line in a
-// file of its own, so a full verdict asked for elsewhere (QG-10) cannot mistake it for one. The full gate still runs.
+// check:local --quick is a task's pre-ready run: incremental types + the tests that reach what changed + the build. It
+// never runs the coverage ratchet, records no baseline or screen map, and its verdict is marked QUICK on its first line
+// in a file of its own, so a full verdict asked for elsewhere (QG-10) cannot mistake it for one. The full gate still
+// runs (the merge gate, the weekly sweep and a release), and a change to a file that can break any test runs the whole
+// suite even in a quick run. These tests hold that composition, and the rule the repo's own pages tell a task.
 import { describe, expect, test } from 'bun:test'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -123,5 +125,39 @@ describe('what --quick runs', () => {
     const v = f.verdict('verdict-quick.txt')
     expect(v.split('\n').filter((l) => l.startsWith('PASSED') || l.startsWith('FAILED')).length).toBeGreaterThan(0)
     for (const l of v.split('\n').filter((l) => l.startsWith('PASSED') || l.startsWith('FAILED'))) expect(l).toContain('not a full gate verdict')
+  })
+})
+
+/** a page's text with its line breaks taken out, so a rule reads the same however it is wrapped */
+const flat = (path: string) => readFileSync(join(root, path), 'utf8').replace(/\s+/g, ' ')
+
+describe('the pre-ready run the repo asks for', () => {
+  test('AGENTS.md asks for the quick run before ready, forbids a single worker, and keeps the full check elsewhere', () => {
+    const agents = flat('AGENTS.md')
+    expect(agents).toContain('A task runs `bun run check:local --quick` before `shepherdr ready`')
+    expect(agents).toContain('`SHEPHERDR_TEST_JOBS=1` serializes the suite and is for debugging')
+    expect(agents).toContain('The full `bun run check:local` is where nothing may be missed')
+    expect(agents).toContain('the weekly sweep, and the coordinator')
+  })
+
+  test('the agent skill and docs/develop.md say the same, so no harness reads another rule', () => {
+    const skill = flat(join('skill', 'shepherdr-agent', 'SKILL.md'))
+    expect(skill).toContain("a task runs the repository's own quick pre-ready check")
+    expect(skill).toContain('`bun run check:local --quick` in Shepherdr')
+    expect(skill).toContain('`SHEPHERDR_TEST_JOBS=1`')
+    const develop = flat(join('docs', 'develop.md'))
+    expect(develop).toContain("`bun run check:local --quick` is a task's pre-ready run")
+    expect(develop).toContain('the merge gate, the weekly sweep, and the coordinator')
+  })
+
+  test('a change to a file that can break any test runs the whole suite, in a quick run too', () => {
+    const source = readFileSync(join(root, 'scripts', 'test.ts'), 'utf8')
+    expect(source).toContain('if (touched.some((f) => EVERYTHING.includes(f))) files = null')
+    const list = /const EVERYTHING = \[([^\]]*)\]/.exec(source)?.[1] ?? ''
+    for (const f of ['package.json', 'bun.lock', 'bunfig.toml', 'tsconfig.json', 'test/preload.ts', 'test/once.ts', 'scripts/test.ts']) {
+      expect(list).toContain(`'${f}'`)
+    }
+    // the pages name the same list, so a task knows what makes its quick run the whole suite
+    for (const page of ['AGENTS.md', join('docs', 'develop.md')]) expect(flat(page)).toContain('`test/preload.ts`, `test/once.ts`, `scripts/test.ts`')
   })
 })

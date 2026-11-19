@@ -7,16 +7,17 @@ bun run dev           # the screen with hot reload, on :5173, talking to the ser
 bun run typecheck     # types, in seconds warm (tsc's incremental cache in node_modules/.cache): what to run while you work
 bun run test changed  # the tests that reach what you changed from the default branch
 bun run test          # every test, in parallel, a quarter of the cores as the check does (but no lock)
-bun run check:local   # the whole check: dependencies, dependency audit, secrets, scripts, docs, version, types, language, every test with the browser ones, the coverage ratchet, the build (about 2 minutes warm on a quiet machine; 5m34s under load)
-bun run check:local --quick  # opt-in: incremental types + changed tests + build, no coverage (see below)
+bun run check:local   # the whole check: dependencies, dependency audit, secrets, scripts, docs, version, types, language, every test with the browser ones, the coverage ratchet, the build (about 2 minutes warm on a quiet machine; 5m34s under load); what the merge gate, the weekly sweep and a release run
+bun run check:local --quick  # a task's pre-ready run: incremental types + changed tests + build, no coverage (see below)
 bun run check:local --reuse  # the merge gate's cheap ask: answers at once when this tree already passed (see below)
 ```
 
 The whole check runs on this machine: GitHub Actions is off on this repo (2026-11-06), so `.github/workflows/check.yml`
-keeps only `workflow_dispatch` and starts nothing by itself. A task runs `bun run check:local` before `shepherdr ready`
-and says the result in its facts, and the coordinator runs it on `herdr-tui` before a release. A check that did not pass
-keeps the task from `shepherdr ready` and from merging, whatever file the failure is in: the task fixes a small one and
-says so, otherwise it stops, says what fails and why the failure is not its own, and its coordinator decides. It runs at
+keeps only `workflow_dispatch` and starts nothing by itself. A task runs `bun run check:local --quick` before `shepherdr
+ready` and says the result in its facts; the full check is where nothing may be missed — the merge gate, the weekly
+sweep, and the coordinator's run on `herdr-tui` before a release. A check that did not pass keeps the task from
+`shepherdr ready` and from merging, whatever file the failure is in: the task fixes a small one and says so, otherwise
+it stops, says what fails and why the failure is not its own, and its coordinator decides. It runs at
 the lowest priority (nice 19, idle disk), one run at a time across every worktree of the repo (a lock file under
 `$XDG_RUNTIME_DIR`, else `~/.cache`), and the test files are capped at `SHEPHERDR_TEST_JOBS` workers (a quarter of the
 cores by default) so herdr, the server and the agents keep the CPU: the tests' own `systemd-run` scope, where systemd
@@ -27,12 +28,17 @@ timeout or in the background, where its verdict waits in
 On a machine where herdr runs as a systemd user service, give it (and the server and agents it holds) the CPU first:
 `systemctl --user set-property herdr.service CPUWeight=1000`.
 
-`bun run check:local --quick` is the opt-in pre-ready run: the same incremental types and build, but `30-tests` runs
+`bun run check:local --quick` is a task's pre-ready run: the same incremental types and build, but `30-tests` runs
 `bun run test changed --force` instead of the whole forceful suite, and `40-coverage` does not run at all (so no screen map or
 coverage baseline is recorded). Its verdict says `QUICK` and what it did not run on its first line, in
 `verdict-quick.txt`, so it can never be taken for a full verdict where one is asked for; a quick run that fails types
-or the build still fails the gate. The default stays full: the whole gate still runs at the merge, weekly on
-`herdr-tui`, and before every release. `scripts/build-plugins.ts` hashes its inputs into `node_modules/.cache` so the
+or the build still fails the gate. A change to a file that can break any test — `test/preload.ts`, `test/once.ts`,
+`scripts/test.ts`, `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json` (`scripts/test.ts`'s `EVERYTHING` list) —
+runs the whole suite in a quick run as well, so a change to the harness or the config is never proven by a handful of
+files. Never hand the runner a worker count of one (`SHEPHERDR_TEST_JOBS=1`) to make a run simpler: it serializes the
+suite, and the lock is the only thing that should queue a run (one worker is for debugging a test's order). The full
+check is never skipped for a quick one: it runs at the merge gate, weekly on `herdr-tui`, and before every release.
+`scripts/build-plugins.ts` hashes its inputs into `node_modules/.cache` so the
 typecheck, tests and build steps share one build per run instead of three, and `tsc`'s `--incremental` cache lives
 there too. A release symlinks its `node_modules` to a shared deps folder, where the hash and the check that the
 registries still match what it wrote keep a shared cache safe; neither weakens what any step checks.

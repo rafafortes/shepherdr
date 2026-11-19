@@ -5,10 +5,10 @@
 # own file under scripts/checks/.
 # GitHub Actions is off on rafafortes/shepherdr (SHE-21), so this is the check every change goes through:
 #
-#   bun run check:local        # a task runs it before `shepherdr ready`; the coordinator before a release
-#   bun run check:local --quick  # opt-in: incremental types + changed tests + build, no coverage; marked QUICK in a
-#                                # verdict of its own, never a baseline or a full verdict (the full gate still runs at
-#                                # the merge, weekly and before a release)
+#   bun run check:local --quick  # a task's pre-ready run: incremental types + changed tests + build, no coverage; marked
+#                                # QUICK in a verdict of its own, never a baseline or a full verdict (the full gate still
+#                                # runs at the merge, weekly and before a release)
+#   bun run check:local        # the full gate: the merge gate, the weekly sweep and the coordinator before a release
 #   bun run check:local --reuse  # the merge gate's cheap question: answers at once when this very tree already passed
 #                                # the full check in some worktree, and runs the full check when it did not (QG-10)
 #

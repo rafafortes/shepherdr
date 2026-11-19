@@ -157,11 +157,14 @@ report that operational follow-up instead of using an unauthenticated fallback.
 ## QC
 
 - Nothing merged on a red check you know of, or past "ask the human first"; nothing irreversible without their yes.
-  A failed check of the repository is never merged over, whatever file the failure is in: a red full check (`bun run
-  check:local` here, or whatever the repo's own full check is) keeps `shepherdr ready` unrun and the change unmerged.
-  Fix it when it is small and say so in the facts; otherwise stop, say what fails and why it is not yours, and let your
-  coordinator decide. It is not a merge gate and does not replace one: the gate, where the space sets one, runs at the
-  merge.
+  A failed check of the repository is never merged over, whatever file the failure is in. Before `shepherdr ready` a task
+  runs the repository's own quick pre-ready check where it has one (`bun run check:local --quick` in Shepherdr): the
+  incremental types, the tests that reach what changed and the build, in a verdict marked QUICK and never a full gate
+  verdict. That is the task's proof of its own change; the full check (`bun run check:local` there) is where nothing may
+  be missed — the merge gate, the weekly sweep and a release — and a full check that fails still keeps the change
+  unmerged. Never cheapen the run by hand: a single test worker (`SHEPHERDR_TEST_JOBS=1`) serializes the suite and is for
+  debugging one test's order, not for a gate. Fix a failure that is small and say so in the facts; otherwise stop, say
+  what fails and why it is not yours, and let your coordinator decide.
 - Each thing the brief asked for has a real proof or a "Not proven" line.
 - The summary says what changed for the human; failures lead the facts.
 

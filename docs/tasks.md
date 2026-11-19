@@ -160,8 +160,11 @@
   base — the merge made here and the merge of its pull request alike —, with `SHEPHERDR_TASK` and `SHEPHERDR_BASE` set.
   Exit 0 lets it in, and the last line it printed goes into the merge commit (for a squash on GitHub, the body of that
   commit); anything else, or 45 minutes without an end, refuses the merge with the end of its output, the base stays as
-  it was and the task is Ready again. Merges into one repo go one at a time, so the others wait while it runs; a
-  `shepherdr merge` that asks meanwhile hears that the gate still runs. If the base moved anyway while it ran, the
+  it was and the task is Ready again. It is where a change's full check happens: a task proves its own change with the
+  quick pre-ready run before `shepherdr ready` ([develop](develop.md)), so a space that wants the whole check on every
+  merge sets the gate to it — `shepherdr set merge.gate "bun run check:local" --space <name>`. Merges into one repo go
+  one at a time, so the others wait while it runs; a `shepherdr merge` that asks meanwhile hears that the gate still
+  runs. If the base moved anyway while it ran, the
   branch is rebased on it and the gate runs again (three times at most). It is never a git hook: a hook that refuses an
   update leaves what it would write in the space's checkout. The gate runs detached, its words and exit code in files of
   their own, so a restart of Shepherdr (an update) leaves it running: the Shepherdr that comes back goes on from it and
@@ -322,7 +325,8 @@
   does.
 - The agent merges when its brief or you say so: `shepherdr merge <id>` squash-merges the branch into main.
   On GitHub that goes through its pull request (opened then if the agent never did), as soon as the agent's own checks
-  pass (in Shepherdr: the whole check, `bun run check:local`, AGENTS.md), without waiting for GitHub's checks: where a
+  pass (in Shepherdr: the quick pre-ready check, `bun run check:local --quick`, and the space's merge gate where it has
+  one, AGENTS.md), without waiting for GitHub's checks: where a
   repo's workflows run, they still do it on every push to main (and on the pull request), and only a failure GitHub
   already shows at that commit stops the merge.
   With Settings → How tasks work → Merge on "after GitHub checks", it merges only once GitHub's checks pass. Either way only
