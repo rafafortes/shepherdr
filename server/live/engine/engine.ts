@@ -1018,6 +1018,11 @@ export class Engine extends Emitter<Events> {
    */
   subOf(t: TaskRec, status = this.statusOf(t), full = false): string {
     const key = this.key(t)
+    // parked: its agent was closed by the idle sweep (SHE-72) — the row says so, not a wait that only its next
+    // message answers; a card it asked is still the thing to answer, so it keeps its own line
+    const parked = this.agents.record(key)?.parked
+    if (parked && status === 'need' && !ended(t) && !this.asks(key) && !this.chats.startMenuUp(key))
+      return `Parked ${ago(parked)} · a message starts it again`
     const s = (() => {
       // a few words, never the summary: that is in its chat's card
       if (status === 'done') return t.closed ? 'Nothing to merge' : 'Merged'
@@ -1811,6 +1816,13 @@ export class Engine extends Emitter<Events> {
   /** a held task's line in words, the whole chain named (the Limits page's list of what waits) */
   holdLine(t: TaskRec) {
     return this.heldLabel(t, true)
+  }
+
+  /** whether the task's own machinery, not the human, gives its agent its next word: a review round (running, or
+   *  waiting for a reviewer) or its way into main (checks, rebase, gate, merge). Its agent is never parked while it
+   *  does (SHE-72): the machinery starts it or sends to it itself, on the same session */
+  machineryHoldsAgent(t: TaskRec): boolean {
+    return this.reviewLive.has(t.id) || this.reviewing.has(t.id) || (!!t.reviewWait && this.atReviewStep(t)) || !!t.landing
   }
 
   /** the reviews that wait for a reviewer now: each task, its space and each reviewer that is full or out, in words (none

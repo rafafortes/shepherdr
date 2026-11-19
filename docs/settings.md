@@ -8,7 +8,7 @@
   or default for the CLI's own; effort: default, lowest, low, medium, high, xhigh or max, each CLI taking it its own
   way, and in words on screen — Extra high for xhigh) and the backup agents that take over when a task's or a
   coordinator's agent can't go on, whether one of those is told when its primary answers again, when Done tasks archive
-  themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, each space's cap on its working tasks and the most agents at once per provider or model, the host names the app answers to (`app.hosts`), the idle browser, dictation, Notifications
+  themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, each space's cap on its working tasks and the most agents at once per provider or model, the host names the app answers to (`app.hosts`), the idle browser, idle agents, dictation, Notifications
   and Voice. Notifications gathers scoped delivery rules and device enrolment; device delivery is Everywhere. Space menus still offer Notify. Its
   defaults are set Everywhere, for a machine or for a space (`shepherdr set <key> <value> [--machine | --space NAME]`, from any machine);
   the most specific one set wins. Editing above the content names the scope; its searchable hierarchy handles many machines and spaces. Values set here are highlighted, with their inherited value, source and Reset beside them. And, kept on each device, its Appearance: System (the device's own light
@@ -823,6 +823,25 @@ shares. The agent's own words after its card and a card of Shepherdr's leave it 
 - **Your CLIs' own notifiers.** While it is set, every agent Shepherdr starts, of every CLI, has `SHEPHERDR_NOTIFIES=1`
   in its environment, so a notifier of your own that runs inside the CLI (a Claude Code hook, a pi extension) can stand
   aside for Shepherdr's agents and you are told once. An agent started before it was set has it from its next start.
+
+## Idle agents
+
+An agent Shepherdr runs keeps its herdr pane, its CLI process and its memory for as long as its chat lives, however
+long it sits idle between messages. Settings → Agents (Everywhere or one machine) parks them instead, so the machine
+does not hold dozens of idle CLIs around the clock:
+
+- **Park idle agents after** (`agents.idleClose`, 120 min): a task's agent or reviewer idle this long — herdr shows it
+  idle or done, with nothing it started in the background still running and no message waiting for it — has its pane
+  and CLI closed, and what it left running is reaped with them. Its chat keeps reading its session, the task row and
+  its chat say it is parked, and the next message to the chat starts it again on the same session, with the model and
+  effort it ran on. Never parked: one at work or blocked, one asking you something (a card or its CLI's own
+  question), one whose task is in a review round or on its way into main (checks, gate, merge — the machinery gives it
+  its next word), and one with no session to come back to.
+- **Park idle coordinators after** (`agents.idleCloseCoordinators`, off): a space's coordinator too, on the same rule.
+  Off until you say otherwise: a coordinator parked starts again on its next message, but its space waits meanwhile.
+
+Off on either row: agents of that kind run until their task ends or you restart them. `shepherdr status` says how many
+agents are parked now.
 
 ## Dictation
 

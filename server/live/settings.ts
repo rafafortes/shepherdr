@@ -488,6 +488,18 @@ export const CATALOG: Section[] = [
     rows: [{ label: 'Close idle browser after', key: 'browser.idleClose', value: '10 min', num: { min: 1, max: 1440, unit: 'min', off: true } }],
   },
   {
+    // an idle agent's pane and CLI are parked (source.ts parkIdleAgents, SHE-72): the chat keeps its session, and the
+    // next message to it starts it again on the same session. Coordinators have their own gate, off until the operator
+    // answers whether they are parked too
+    name: 'Agents',
+    levels: ['all', 'machine'],
+    about: "An agent idle this long has its pane and CLI closed, so it stops using memory: its chat keeps its session, and a message there starts it again on the same session. Off: agents run until their task ends or you restart them.",
+    rows: [
+      { label: 'Park idle agents after', key: 'agents.idleClose', value: '120 min', num: { min: 1, max: 1440, unit: 'min', off: true }, hint: "A task's agent or reviewer idle this long is parked. Never one at work, on a menu, asking you something, with work it started still running, with a message waiting to go in, or while its task's review or merge holds it." },
+      { label: 'Park idle coordinators after', key: 'agents.idleCloseCoordinators', value: 'off', num: { min: 1, max: 1440, unit: 'min', off: true }, hint: "A space's coordinator too, on the same rule. Off: a coordinator runs until you restart it, whatever it idles." },
+    ],
+  },
+  {
     // what buzzes from each place's coordinator chat (shared/alerts.ts notifies); a machine's or space's own is set from its row's menu
     name: 'Notify',
     about: "Which alerts a place's coordinator chat sends you. All: every new message too. Needs me: its questions and alerts. Off: none, and its row stays quiet. Tasks alert you either way. A place can set its own from its menu in the sidebar.",
@@ -914,6 +926,18 @@ export class Settings {
   /** how long a task's shared browser may sit idle before it closes, in ms, at a level; null: it never does */
   idleClose(l: Level = 'machine'): number | null {
     const n = Number.parseFloat(this.pick('browser.idleClose', l).value)
+    return Number.isFinite(n) && n > 0 ? n * 60_000 : null
+  }
+
+  /** how long an agent may sit idle before Shepherdr parks it (closes its pane and CLI), in ms, at a level; null: it
+   *  never does. Coordinators have their own gate (agents.idleCloseCoordinators), off by default (SHE-72) */
+  agentIdleClose(l: Level = 'machine'): number | null {
+    const n = Number.parseFloat(this.pick('agents.idleClose', l).value)
+    return Number.isFinite(n) && n > 0 ? n * 60_000 : null
+  }
+
+  coordinatorIdleClose(l: Level = 'machine'): number | null {
+    const n = Number.parseFloat(this.pick('agents.idleCloseCoordinators', l).value)
     return Number.isFinite(n) && n > 0 ? n * 60_000 : null
   }
 

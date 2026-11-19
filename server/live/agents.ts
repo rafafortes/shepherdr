@@ -130,6 +130,9 @@ export interface AgentRecord {
   started: number
   /** set when the agent's run ended for good (task done): writing resumes it */
   finished?: boolean
+  /** set when the idle sweep parked it (SHE-72): the run ended the same way a finish ends it, and the task row, its
+   *  chat and shepherdr status say so. Cleared when it starts again */
+  parked?: number
   /** 'ask' keeps the CLI's own approvals; otherwise (task agents) it runs without asking */
   access?: 'full' | 'ask'
   /** environment for its terminal: who it is to the shepherdr command */
@@ -1085,7 +1088,7 @@ export class Agents extends Emitter<Events> {
     const r: AgentRecord = old ?? { ...spec, logs: [], started: Date.now() }
     const changedPrompt = old?.system !== spec.system
     const from = old?.cwd
-    Object.assign(r, { name: spec.name, kind: spec.kind, cwd: spec.cwd, workspace: spec.workspace, tab: spec.tab ?? r.tab, env: spec.env ?? r.env, access: spec.access ?? r.access, model: spec.model ?? r.model, effort: spec.effort ?? r.effort, system: spec.system ?? r.system, set: spec.set ?? r.set, finished: false })
+    Object.assign(r, { name: spec.name, kind: spec.kind, cwd: spec.cwd, workspace: spec.workspace, tab: spec.tab ?? r.tab, env: spec.env ?? r.env, access: spec.access ?? r.access, model: spec.model ?? r.model, effort: spec.effort ?? r.effort, system: spec.system ?? r.system, set: spec.set ?? r.set, finished: false, parked: undefined })
     this.codexState.delete(spec.key)
     r.started = Date.now()
     r.resumed = !!resume
@@ -1585,6 +1588,16 @@ export class Agents extends Emitter<Events> {
       .catch(() => [] as number[])
     await herdr.closePane(pane).catch(() => undefined)
     if (caught.length) await this.reaper.end(caught).catch(() => undefined)
+  }
+
+  /** park an idle agent (source.ts's sweep, SHE-72): its run ends as a finish ends it, its pane closes and what it
+   *  left running is reaped, and the record keeps that it was parked, so the task row, its chat and shepherdr status
+   *  can say so. Its chat keeps reading its session, and the next message to it starts it again on the same session */
+  async park(key: string, at = Date.now()) {
+    const r = this.records[key]
+    if (!r || r.finished) return
+    r.parked = at
+    await this.finish(key)
   }
 
   /** end a task agent's run: its pane closes; its chat stays and writing to it resumes it */
