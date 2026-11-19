@@ -357,6 +357,8 @@ function wrongHost(req: Request, port: number, configured: string[]) {
   const key = host.toLowerCase()
   if (!refusedHosts.has(key)) {
     refusedHosts.add(key)
+    // a rebinding page can spin up many names: keep doctor's list and this process's memory bounded
+    if (refusedHosts.size > 20) refusedHosts.delete(refusedHosts.values().next().value!)
     console.error(`shepherdr: refused Host ${JSON.stringify(host)} on port ${port}; set app.hosts to allow it`)
   }
   const answer = [
@@ -367,6 +369,7 @@ function wrongHost(req: Request, port: number, configured: string[]) {
     'On this machine, run:',
     '',
     `shepherdr set app.hosts ${host}`,
+    ...(configured.length ? ['app.hosts already has names: repeat them in the new value, separated by commas.'] : []),
     '',
   ].join('\n')
   return new Response(answer, {

@@ -3241,7 +3241,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       held: held.length,
       heldWhy: held[0] && this.engine.subOf(held[0]),
       at: clock(s.at),
-      hostWarning: this.settings.get('app.hosts').trim() ? undefined : 'Only the loopback page works until app.hosts is set. On this machine run: shepherdr set app.hosts <host>.',
+      hostWarning: BOX || this.settings.get('app.hosts').trim() ? undefined : 'Only the loopback page works until app.hosts is set. On this machine run: shepherdr set app.hosts <host>.',
     }
   }
 

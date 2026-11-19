@@ -3,6 +3,7 @@ import { afterAll, describe, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { startApp } from '../server/app.ts'
+import { refusedHosts } from '../server/hosts.ts'
 import type { Push } from '../server/push.ts'
 import type { Alert, UpdateStatus } from '../shared/types.ts'
 import { Emitter, type Source, type SourceEvents } from '../server/source.ts'
@@ -103,6 +104,21 @@ describe('the Host header', () => {
     const r = await fetch(`${base}/api/cli`, { method: 'POST', headers: { host: `127.0.0.1:${server.port}` }, body: JSON.stringify({ args: ['status'] }) })
     expect(r.status).toBe(200)
     expect((await r.text())).toContain('does not accept shepherdr commands')
+  })
+
+  test('a refused host is logged once, and the list stays bounded', async () => {
+    const errors: string[] = []
+    const log = console.error
+    console.error = (...a: unknown[]) => void errors.push(a.join(' '))
+    try {
+      for (let i = 0; i < 2; i++) expect((await fetch(`${base}/api/snapshot`, { headers: { host: 'once.example:7787' } })).status).toBe(421)
+      for (let i = 0; i < 25; i++) await fetch(`${base}/api/snapshot`, { headers: { host: `many-${i}.example:7787` } })
+    } finally {
+      console.error = log
+    }
+    expect(errors.filter((e) => e.includes('once.example'))).toHaveLength(1)
+    expect(refusedHosts.size).toBeLessThanOrEqual(20)
+    refusedHosts.clear()
   })
 })
 
