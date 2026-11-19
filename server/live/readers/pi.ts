@@ -26,6 +26,16 @@ function texts(c: Json): string[] {
   return c.filter((b) => b?.type === 'text' && typeof b.text === 'string').map((b) => b.text)
 }
 
+/** The HTTP status pi's error message names at its start, where it names one: "exe-dev-openai API error (502): …"
+ *  or "429 usage limit reached …". Both forms are anchored, and a bare leading number must be a 4xx or 5xx: a count
+ *  ("700 tokens requested", "max_tokens must be at most 500") is not a status. pi keeps no structured status of its
+ *  own, so recover the one in the provider's words and let retry.ts read it as every other CLI's status; the words
+ *  stay in the event unchanged. */
+const statusOf = (text: string): number | undefined => {
+  const m = /^(?:\w[\w-]* )?API error \((\d{3})\)|^([45]\d\d)\b/.exec(text)
+  return m ? Number(m[1] ?? m[2]) : undefined
+}
+
 export class PiReader implements Reader {
   cli = 'pi'
   private sessions = new Set<string>()
@@ -82,7 +92,11 @@ export class PiReader implements Reader {
           // toolUse means the agent goes on; stop, aborted, error and length all end the turn. pi has no refusal code
           // of its own: a provider's content or safety filter arrives as an error with the provider's own words
           if (m.stopReason && m.stopReason !== 'toolUse') {
-            if (m.stopReason === 'error') out.push({ kind: 'error', id: `error-${id}`, at: t, text: String(m.errorMessage ?? '') })
+            if (m.stopReason === 'error') {
+              const text = String(m.errorMessage ?? '')
+              const status = statusOf(text)
+              out.push({ kind: 'error', id: `error-${id}`, at: t, text, ...(status !== undefined ? { status } : {}) })
+            }
             this.ended.add(file)
             out.push({ kind: 'turn-end', id: `turn-${id}`, at: t })
           }

@@ -34,6 +34,44 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(ending('pi-gateway-502').passing).toBe(true)
   })
 
+  test("pi's status alone waits out a cut-off its words do not describe, as for every other CLI", () => {
+    // a provider rewords its errors: these words match no passing word rule, only the HTTP status pi recovered from
+    // them decides. Without the status the same words are unrecognised and go to the backup or the human at once.
+    const words = '503 provider returned: request could not be completed at this time'
+    expect(providerError(words)).toEqual({ passing: false, reason: 'Provider error' })
+    const line = {
+      type: 'message', id: 'e1', timestamp: '2026-11-18T10:00:00.000Z',
+      message: { role: 'assistant', content: [], usage: {}, stopReason: 'error', errorMessage: words },
+    }
+    const e = readerFor('pi')!.parse([{ text: JSON.stringify(line), offset: 0 }], '/logs/pi-reworded.jsonl').find((x) => x.kind === 'error')
+    if (e?.kind !== 'error') throw new Error('pi reworded: no error read')
+    expect(e.status).toBe(503)
+    expect(providerError(e.text, e.code, e.status)).toEqual({ passing: true, reason: 'Provider server error' })
+  })
+
+  test("pi's recovered status leaves every pinned sample's classification unchanged", () => {
+    const cut = (name: string) => {
+      const lines = readFileSync(join(import.meta.dir, 'samples', 'endings', `${name}.jsonl`), 'utf8')
+        .split('\n').filter(Boolean).map((text, i) => ({ text, offset: i * 1000 }))
+      const e = readerFor('pi')!.parse(lines, `/logs/${name}.jsonl`).find((x) => x.kind === 'error')
+      if (e?.kind !== 'error') throw new Error(`${name}: no error read`)
+      return e
+    }
+    // only the two samples whose words name one gain a status
+    expect(cut('pi-gateway-502').status).toBe(502)
+    expect(cut('pi-usage-limit-made').status).toBe(429)
+    for (const name of ['pi-content-filter-made', 'pi-overloaded', 'pi-socket-closed', 'pi-unknown-provider']) {
+      expect('status' in cut(name)).toBe(false)
+    }
+    // the words still win where they match, so each pinned sample keeps the classification it had before
+    expect(ending('pi-gateway-502')).toEqual({ passing: true, reason: 'Provider server error' })
+    expect(ending('pi-overloaded')).toEqual({ passing: true, reason: 'Provider overloaded' })
+    expect(ending('pi-socket-closed')).toEqual({ passing: true, reason: 'Connection dropped' })
+    expect(ending('pi-unknown-provider')).toEqual({ passing: false, reason: 'Provider refused it' })
+    expect(ending('pi-content-filter-made')).toEqual({ passing: false, reason: "Response blocked by the provider's filter", blocked: true })
+    expect(ending('pi-usage-limit-made')).toEqual({ passing: false, reason: 'Out of allowance until 3pm' })
+  })
+
   test('errors waiting cannot fix go on at once, in a few words', () => {
     expect(ending('claude-usage-limit-made')).toEqual({ passing: false, reason: 'Out of allowance until 5pm' })
     expect(ending('claude-model-not-found')).toEqual({ passing: false, reason: 'Model not available' })
