@@ -12,6 +12,7 @@
 import { appendFileSync, closeSync, mkdirSync, openSync, readSync, renameSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { BOX, helperDir } from '../box.ts'
+import { swallow } from '../debug.ts'
 import * as task from '../mfs.ts'
 import type { Background } from './background.ts'
 import { servesCommand } from './background.ts'
@@ -118,6 +119,7 @@ export const recorderScript = () => `// Written by Shepherdr: records a Claude C
 const { appendFileSync, renameSync, statSync } = require('node:fs')
 const servesCommand = ${servesCommand.toString()}
 const pickHook = ${pickHook.toString()}
+const note = (why, e) => { if (process.env.SHEPHERDR_DEBUG) console.error('shepherdr: ' + why + ' ignored: ' + (e && e.name || typeof e)) }
 const file = process.argv[2]
 let s = ''
 process.stdin.setEncoding('utf8')
@@ -128,9 +130,9 @@ process.stdin.on('end', () => {
     if (!e) return
     try {
       if (statSync(file).size > ${ROTATE_AT}) renameSync(file, file + '.1')
-    } catch {}
+    } catch (e) { note('hook log rotate', e) }
     appendFileSync(file, JSON.stringify(e) + '\\n')
-  } catch {}
+  } catch (e) { note('hook event parse', e) }
 })
 `
 
@@ -235,7 +237,7 @@ export function foldHook(s: Said | undefined, e: HookEvent): Said | undefined {
   }
 }
 
-export const parseHookLines = (text: string): HookEvent[] =>
+export const parseHookLines = (text: string, file?: string): HookEvent[] =>
   text
     .split('\n')
     .flatMap((l) => {
@@ -247,9 +249,7 @@ export const parseHookLines = (text: string): HookEvent[] =>
           return picked ? [picked] : []
         }
         return e && typeof e.event === 'string' && typeof e.at === 'number' ? [e as HookEvent] : []
-      } catch {
-        return []
-      }
+      } catch (e) { swallow('hook event line', e, 'claude', file); return [] }
     })
 
 /** the CLI session an agent is in now, as its hooks last said: its id, and its transcript where it said */
@@ -293,7 +293,7 @@ export class HookLogs {
       }
       const cut = fresh.lastIndexOf('\n')
       f.carry = cut < 0 ? fresh : fresh.slice(cut + 1)
-      for (const e of parseHookLines(cut < 0 ? '' : fresh.slice(0, cut))) {
+      for (const e of parseHookLines(cut < 0 ? '' : fresh.slice(0, cut), file)) {
         if (!e.agent) {
           if (e.event === 'SessionStart' && e.type !== 'compact') f.runtime = undefined
           if (e.model || e.effort) f.runtime = { ...(e.model && f.runtime?.model && e.model !== f.runtime.model ? {} : f.runtime), ...(e.model ? { model: e.model } : {}), ...(e.effort ? { effort: e.effort } : {}), at: e.at, session: e.session ?? f.session?.id }

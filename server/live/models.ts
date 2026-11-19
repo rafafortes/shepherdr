@@ -12,6 +12,7 @@
 import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { readJson, writeJson } from '../store.ts'
+import { swallow } from './debug.ts'
 import { codexHome, piHome } from './readers/find.ts'
 import { agyHome } from './agy.ts'
 import { defaultModel, listModels, opencodeConfigDir, opencodeDataDir, type OpencodeModel } from './opencode.ts'
@@ -160,13 +161,16 @@ export function piEnabled(): string[] | undefined {
   let at = ''
   try {
     at = `${file}@${statSync(file).mtimeMs}`
-  } catch {}
+  } catch (e) {
+    // a machine with no pi settings has nothing to read: only a file that went away is worth saying, once
+    if (enabled.at) swallow('pi settings stat', e, 'pi', file)
+  }
   if (at !== enabled.at) {
     let patterns: string[] | undefined
     try {
       const list = at ? JSON.parse(readFileSync(file, 'utf8'))?.enabledModels : undefined
       if (Array.isArray(list)) patterns = list.filter((p): p is string => typeof p === 'string' && !!p.trim())
-    } catch {}
+    } catch (e) { swallow('pi settings parse', e, 'pi', file) }
     enabled = { at, patterns: patterns?.length ? patterns : undefined }
   }
   return enabled.patterns
