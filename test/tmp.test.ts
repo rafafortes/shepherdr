@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { leftBy, ownerOf, run, STALE, sweep, tmp } from './tmp.ts'
+import { killLeft, leftBy, ownerOf, run, STALE, sweep, tmp } from './tmp.ts'
 
 const at = (name: string) => join(tmpdir(), name)
 /** a folder written that long ago */
@@ -75,11 +75,86 @@ describe('a temporary folder of a test', () => {
     const other = `shep-left-other-run-${dead}-MnOqRs`
     for (const p of [ours, alive, other]) mkdirSync(at(p))
     try {
-      expect(leftBy(run)).toContain(ours)
-      expect(leftBy(run)).not.toContain(alive)
-      expect(leftBy(run)).not.toContain(other)
+      const paths = leftBy(run).map((l) => l.path)
+      expect(paths).toContain(at(ours))
+      expect(paths).not.toContain(at(alive))
+      expect(paths).not.toContain(at(other))
     } finally {
       for (const p of [ours, alive, other]) rmSync(at(p), { recursive: true, force: true })
+    }
+  })
+
+  test('a process still running in a folder of this run is named, one of another running suite is left alone', async () => {
+    const dir = tmp('left-child')
+    const child = Bun.spawn(['/bin/sh', '-c', 'sleep 30'], { cwd: dir, detached: true, stdout: 'ignore', stderr: 'ignore' })
+    const other = at(`shep-other-suite-888888-77777-AbCdEf`)
+    mkdirSync(other)
+    const otherChild = Bun.spawn(['/bin/sh', '-c', 'sleep 30'], { cwd: other, detached: true, stdout: 'ignore', stderr: 'ignore' })
+    try {
+      const left = leftBy(run)
+      expect(left.map((l) => l.path)).toContain(`pid ${child.pid}`)
+      expect(left.map((l) => l.path)).not.toContain(`pid ${otherChild.pid}`)
+    } finally {
+      for (const p of [child, otherChild]) {
+        killLeft([{ path: `pid ${p.pid}`, why: '', pid: p.pid }])
+        await Promise.race([p.exited, Bun.sleep(2000)])
+      }
+      rmSync(other, { recursive: true, force: true })
+    }
+  })
+
+  test('leftBy still names a process whose folder was removed before the check', async () => {
+    const dir = tmp('gone-child')
+    const child = Bun.spawn(['/bin/sh', '-c', 'sleep 30'], { cwd: dir, detached: true, stdout: 'ignore', stderr: 'ignore' })
+    rmSync(dir, { recursive: true, force: true })
+    try {
+      expect(leftBy(run).map((l) => l.path)).toContain(`pid ${child.pid}`)
+    } finally {
+      killLeft([{ path: `pid ${child.pid}`, why: '', pid: child.pid }])
+      await Promise.race([child.exited, Bun.sleep(2000)])
+    }
+  })
+
+  test('the sweep leaves alone a process that merely names a shep-* file that is not one of our folders', async () => {
+    const file = at(`shep-not-a-run-${run}.txt`)
+    rmSync(file, { force: true })
+    const child = Bun.spawn(['/bin/sh', '-c', `echo ${file} >/dev/null; sleep 30`], { cwd: tmpdir(), detached: true, stdout: 'ignore', stderr: 'ignore' })
+    try {
+      sweep()
+      try {
+        process.kill(child.pid, 0)
+      } catch {
+        throw new Error('the sweep killed a process whose command names a file, not a test folder')
+      }
+    } finally {
+      killLeft([{ path: `pid ${child.pid}`, why: '', pid: child.pid }])
+      await Promise.race([child.exited, Bun.sleep(2000)])
+    }
+  })
+
+  test('the sweep kills a process left in a folder that has gone, but leaves another running suite alone', async () => {
+    const dir = tmp('dead-child')
+    const child = Bun.spawn(['/bin/sh', '-c', 'sleep 30'], { cwd: dir, detached: true, stdout: 'ignore', stderr: 'ignore' })
+    const live = at(`shep-live-suite-888888-66666-GhIjKl`)
+    mkdirSync(live)
+    const other = Bun.spawn(['/bin/sh', '-c', 'sleep 30'], { cwd: live, detached: true, stdout: 'ignore', stderr: 'ignore' })
+    try {
+      // its folder is gone: the process goes on without one, as a gate loop does after its run ends
+      rmSync(dir, { recursive: true, force: true })
+      expect(sweep()).toBeGreaterThan(0)
+      for (let i = 0; i < 20 && child.exitCode === null && child.signalCode === null; i++) await Bun.sleep(50)
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
+      try {
+        process.kill(other.pid, 0)
+      } catch {
+        throw new Error('the sweep killed a process of a suite whose folder still exists')
+      }
+    } finally {
+      for (const p of [child, other]) {
+        killLeft([{ path: `pid ${p.pid}`, why: '', pid: p.pid }])
+        await Promise.race([p.exited, Bun.sleep(2000)])
+      }
+      rmSync(live, { recursive: true, force: true })
     }
   })
 })

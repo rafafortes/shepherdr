@@ -19,17 +19,18 @@
 // of the cores by default, so herdr, the live server and the agents keep the CPU while several tasks test at once.
 //
 // The folders the tests make in /tmp come from test/tmp.ts's tmp(), which removes them when their file's tests end; a
-// run that leaves one of its own behind fails, and what a killed run left (two hours old, its process gone) is swept
-// first, since /tmp is on the root disk and systemd-tmpfiles keeps it for 30 days (SHE-32).
+// run that leaves one of its own behind, or a process (a gate loop) still running in one of its folders, fails and has
+// it killed. What a killed run left (two hours old, its process gone, or a loop in a folder since removed) is swept
+// first, since /tmp is on the root disk and systemd-tmpfiles keeps it for 30 days (SHE-32, LEAD-01).
 //
 // The tests run below everything else on this machine, on a quarter of the cores unless SHEPHERDR_TEST_JOBS or a flag
 // says more: they take only the CPU and disk no one else wants, so herdr, Shepherdr's server and the agents stay quick
 // while several tasks test at once.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { cpus, tmpdir } from 'node:os'
+import { cpus } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { gather, mapFile, pick, readMap, screenMap } from '../test/screen-map.ts'
-import { leftBy, sweep } from '../test/tmp.ts'
+import { killLeft, leftBy, sweep } from '../test/tmp.ts'
 import { INPUTS } from '../test/web.ts'
 import { writeRegistries } from './build-plugins.ts'
 
@@ -220,7 +221,8 @@ function lowPriority(): string[] {
 mkdirSync(cache, { recursive: true })
 // the folders of a run killed before it could remove what it made go now, two hours old or more (test/tmp.ts): /tmp is
 // on the root disk, and systemd-tmpfiles keeps what it finds there for 30 days
-sweep()
+const swept = sweep()
+if (swept) console.log(`Swept ${swept} process${swept === 1 ? '' : 'es'} a dead test run left in a removed folder.`)
 const jobs = `--parallel=${process.env.SHEPHERDR_TEST_JOBS ?? Math.max(1, Math.floor(cpus().length / 4))}`
 // a test may take longer while every core is busy (several tasks test at once): 5 s, bun's default, is too tight
 const decoder = new TextDecoder()
@@ -298,9 +300,19 @@ for (const until = Date.now() + 3000; left.length && Date.now() < until; ) {
   left = leftBy(testRun)
 }
 if (left.length) {
-  console.error(`\nThis run left ${left.length} temporary folder${left.length === 1 ? '' : 's'} in /tmp. A test makes one through test/tmp.ts's tmp(), which removes it when its process ends: these outlived theirs.`)
-  for (const name of left.slice(0, 20)) console.error(`  ${join(tmpdir(), name)}`)
-  if (left.length > 20) console.error(`  … and ${left.length - 20} more`)
+  const folders = left.filter((l) => !l.pid)
+  const procs = left.filter((l) => l.pid)
+  if (folders.length) {
+    console.error(`\nThis run left ${folders.length} temporary folder${folders.length === 1 ? '' : 's'} in /tmp. A test makes one through test/tmp.ts's tmp(), which removes it when its process ends: these outlived theirs.`)
+    for (const l of folders.slice(0, 20)) console.error(`  ${l.path}`)
+    if (folders.length > 20) console.error(`  … and ${folders.length - 20} more`)
+  }
+  if (procs.length) {
+    console.error(`\nThis run left ${procs.length} process${procs.length === 1 ? '' : 'es'} running in its folders; they are being killed.`)
+    for (const l of procs.slice(0, 20)) console.error(`  ${l.path} — ${l.why}`)
+    if (procs.length > 20) console.error(`  … and ${procs.length - 20} more`)
+  }
+  killLeft(left)
 }
 const exitCode = left.length ? 1 : code
 if (mapOut) {

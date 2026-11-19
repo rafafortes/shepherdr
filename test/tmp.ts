@@ -5,9 +5,10 @@
 // to remove (a run killed out of time, or by a stop) goes two hours later, when any test process starts: /tmp sits on
 // the root disk, not on a tmpfs, and systemd-tmpfiles keeps what it finds there for 30 days (one day of runs left
 // 43,339 of them behind, SHE-32).
-import { lstatSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, lstatSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { killGroup, processes } from '../server/procs.ts'
 
 /** first in every name here: what the sweep looks for, and what only the tests make */
 const PREFIX = 'shep-'
@@ -66,13 +67,25 @@ const alive = (pid: number) => {
   }
 }
 
+/** the test folder a process's cwd or command line names, if any: the root of a run's folders, not a `go` file in it.
+ *  Only a name the tests make counts — another `shep-*` file in /tmp named in a command is none of this sweep's business.
+ *  A command may name several paths; a stray `shep-*` file before a real run folder must not hide the latter. */
+const shepRoots = (s: string) => {
+  const base = tmpdir().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const roots: string[] = []
+  for (const m of s.matchAll(new RegExp(`${base}/(shep-[^\\s'"/]+)`, 'g'))) if (ownerOf(m[1]) && !roots.includes(m[1])) roots.push(m[1])
+  return roots
+}
+
 /** how old a folder has to be to go: a suite in flight is younger (every test writes into its own), and one older is a
  *  run that was killed before it could remove what it made (scripts/test.ts sweeps at the start of every run) */
 export const STALE = 2 * 3600_000
 
-/** what a killed run left: every folder of ours older than that, whose process is gone, goes now. Only a folder named as
- *  the tests name them is ours to remove, and a folder of an older run (43,339 of them by 2026-11-07, before the name
- *  carried its run) goes with them; another program's folder in /tmp, and a file, are left alone */
+/** what a killed run left: every folder of ours older than that, whose process is gone, goes now, and so does the
+ *  process a dead run left running in a folder that has since gone (its loop would fork sleep forever, LEAD-01). Only a
+ *  folder named as the tests name them is ours to remove, and a folder of an older run (43,339 of them by 2026-11-07,
+ *  before the name carried its run) goes with them; another program's folder in /tmp, and a file, are left alone.
+ *  Returns how many processes it killed. */
 export function sweep(age = STALE) {
   const me = process.getuid?.() ?? null
   const now = Date.now()
@@ -91,13 +104,47 @@ export function sweep(age = STALE) {
       /* gone already, or not ours to read */
     }
   }
+  // a loop a dead run left behind goes on forking sleep after its folder is gone (LEAD-01): kill it as well
+  let killed = 0
+  for (const p of processes()) {
+    if (p.pid === process.pid) continue
+    const roots = [p.cwd, p.cmd].flatMap(shepRoots)
+    if (roots.some((root) => !existsSync(join(tmpdir(), root))) && alive(p.pid)) {
+      killGroup(p.pid)
+      killed++
+    }
+  }
+  return killed
 }
 
-/** what one run left behind: its folders whose process is gone (one whose process still runs belongs to another suite,
- *  or to a test's own child) */
-export function leftBy(runID: string): string[] {
-  return entries().filter((name) => {
+/** one thing a run left: a folder, or a process of this run still alive in one of its folders */
+export type Left = { path: string; why: string; pid?: number }
+
+/** what one run left behind: its folders whose process is gone, and any process of this run still alive in its folders.
+ *  A process of another suite, or one whose folder is gone, belongs to that run's own check (or to sweep()). */
+export function leftBy(runID: string): Left[] {
+  const left: Left[] = entries().filter((name) => {
     const owner = ownerOf(name)
     return owner?.run === runID && !alive(owner.pid)
-  })
+  }).map((name) => ({ path: join(tmpdir(), name), why: 'a folder whose process is gone' }))
+  for (const p of processes()) {
+    if (p.pid === process.pid) continue
+    // the folder itself may be gone already (its process removed it on the way out): the name still says whose it was
+    const inRun = [p.cwd, p.cmd].some((s) => shepRoots(s).some((root) => ownerOf(root)?.run === runID))
+    if (inRun) left.push({ path: `pid ${p.pid}`, pid: p.pid, why: `${p.cmd.slice(0, 120) || '(no command)'} is still running in this run's folder` })
+  }
+  return left
+}
+
+/** kill the processes a run's check named, once it has named them (scripts/test.ts); folders go with cleanup() */
+export function killLeft(left: Left[]) {
+  for (const { pid } of left) {
+    if (!pid || pid === process.pid) continue
+    killGroup(pid)
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      /* gone already */
+    }
+  }
 }
