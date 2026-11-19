@@ -80,19 +80,19 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   the background and read the verdict it prints.
 - A task runs `bun run check:local --quick` before `shepherdr ready` and says the result in `--facts`: passed, about
   how long, or what failed — and, when the verdict names a part that did not run (a browser that could not start), that
-  it did not. It is the incremental types, the tests that reach what changed and the build, with no coverage ratchet,
-  marked `QUICK` in a verdict of its own so it is never taken for a full one. A change to one of the files that can
-  break any test (`test/preload.ts`, `test/once.ts`, `scripts/test.ts`, `package.json`, `bun.lock`, `bunfig.toml`,
-  `tsconfig.json`: `scripts/test.ts`'s `EVERYTHING`) runs the whole suite in a quick run too.
+  it did not. It is the full check's steps with the tests narrowed to what changed and no coverage ratchet, marked
+  `QUICK` in a verdict of its own so it is never taken for a full one. A change to one of the files that can break any
+  test (`test/preload.ts`, `test/once.ts`, `scripts/test.ts`, `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`:
+  `scripts/test.ts`'s `EVERYTHING`) runs the whole suite in a quick run too.
 - Never make a check cheaper by hand: `SHEPHERDR_TEST_JOBS=1` serializes the suite and is for debugging one test's
-  order, never for a gate — the runner already caps the workers and takes the lock that keeps full runs apart.
-- The full `bun run check:local` is where nothing may be missed, and a task does not skip it to save time: the merge
-  gate (a space sets `merge.gate` to it), the weekly sweep, and the coordinator's run on `herdr-tui` before a release,
-  which also records the screen map `bun run test changed` picks from (until it has, a change of the screen's files runs
-  every browser test). A check that did not pass keeps `shepherdr ready` unrun and the change unmerged, whatever file the
-  failure is in: the task fixes a small failure and says so, or it stops, says what fails and why the failure is not its
-  own, and its coordinator decides. While you work, `bun run typecheck` (seconds) and `bun run test changed` (a quarter of
-  the cores, like the check, but no lock) are enough to keep moving.
+  order, never for a gate — the runner already caps the workers and takes the lock that keeps runs apart.
+- The full `bun run check:local` is where nothing may be missed: the merge gate (where a space sets `merge.gate` to it),
+  the weekly sweep, and the coordinator's run on `herdr-tui` before a release, which also records the screen map `bun run
+  test changed` picks from (until it has, a change of the screen's files runs every browser test). A check that did not
+  pass keeps `shepherdr ready` unrun and the change unmerged, whatever file the failure is in: the task fixes a small
+  failure and says so, or it stops, says what fails and why the failure is not its own, and its coordinator decides.
+  While you work, `bun run typecheck` (seconds) and `bun run test changed` (a quarter of the cores, like the check, but
+  no lock) are enough to keep moving.
 - Check what you changed on the screen by hand in your shared browser, for the proof, against a proof server of your
   own, never the one the human runs: the demo source (`SHEPHERDR_SOURCE=demo`) first, or `HERDR_SOCKET_PATH` at a
   socket that isn't there (as the tests do), a `SHEPHERDR_HOME` under `/tmp`, a `SHEPHERDR_PORT` other than 7787 and
@@ -120,8 +120,9 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   fail here) says why on it or on the line above: `// coverage-exempt: <why>`, never to skip a test you could write. The
   lines each file misses are in the check's logs, `coverage/report.txt`. The baseline is the default branch's, recorded
   by the coordinator's check there before a release, in the repo's `.git` like the screen map; until the first one
-  nothing is compared. A quick run prints no coverage line: say in `--facts` the percentages a full run you made printed,
-  or that your check was the quick one and the ratchet holds at the merge gate (or the weekly sweep) until a release.
+  nothing is compared. A quick run prints no coverage line, and a new file its tests never reach passes it: write the
+  test, or run the full check, rather than reporting a coverage line you did not see. Say in `--facts` the percentages a
+  full run you made printed, or that your check was the quick one and the ratchet is held where the full check runs.
 - GitHub Actions is off: `.github/workflows/check.yml` keeps only `workflow_dispatch`, so nothing waits for GitHub and
   `shepherdr checks` finds nothing to wait for. A branch can still be checked there by hand (`gh workflow run check.yml
   --ref <branch>`, then `gh run watch`), only for a rare case such as a review asking for it.

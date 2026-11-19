@@ -342,7 +342,7 @@ show_failure() { # the reasons a step failed
 dirty=''
 [ -n "$(git -C "$root" status --porcelain 2>/dev/null)" ] && dirty=' and what is not committed'
 if [ "$quick" = 1 ]; then
-  say "check:local QUICK · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty · NOT run: the full suite, coverage, screen map and baseline · the full gate runs at the merge, weekly and before a release"
+  say "check:local QUICK · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty · NOT run: coverage, screen map and baseline · the full suite only if a shared file changed · the full gate runs at the merge, weekly and before a release"
 else
   say "check:local · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty${reuse_miss:+ · $reuse_miss} · $jobs test workers · $priority"
 fi

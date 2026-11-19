@@ -34,10 +34,11 @@ coverage baseline is recorded). Its verdict says `QUICK` and what it did not run
 `verdict-quick.txt`, so it can never be taken for a full verdict where one is asked for; a quick run that fails types
 or the build still fails the gate. A change to a file that can break any test — `test/preload.ts`, `test/once.ts`,
 `scripts/test.ts`, `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json` (`scripts/test.ts`'s `EVERYTHING` list) —
-runs the whole suite in a quick run as well, so a change to the harness or the config is never proven by a handful of
-files. Never hand the runner a worker count of one (`SHEPHERDR_TEST_JOBS=1`) to make a run simpler: it serializes the
-suite, and the lock is the only thing that should queue a run (one worker is for debugging a test's order). The full
-check is never skipped for a quick one: it runs at the merge gate, weekly on `herdr-tui`, and before every release.
+runs the whole suite in a quick run as well, so a change to one of them is never proven by a handful of files. Never
+hand the runner a worker count of one (`SHEPHERDR_TEST_JOBS=1`) to make a run simpler: it serializes the whole suite,
+and the lock is the only thing that should queue a run (one worker is for debugging a test's order). A quick run is
+never a replacement for the full check: that runs at the merge gate where a space sets one, weekly on `herdr-tui`, and
+before every release.
 `scripts/build-plugins.ts` hashes its inputs into `node_modules/.cache` so the
 typecheck, tests and build steps share one build per run instead of three, and `tsc`'s `--incremental` cache lives
 there too. A release symlinks its `node_modules` to a shared deps folder, where the hash and the check that the

@@ -22,7 +22,8 @@ describe('what --quick composes', () => {
     expect(lines).toContain('[ "$quick" = 1 ] && { map_flag=\'\'; record_flag=\'\'; }')
     // the first line says what kind of run it was and what it did not run
     expect(lines).toContain('check:local QUICK')
-    expect(lines).toContain('NOT run: the full suite, coverage, screen map and baseline')
+    expect(lines).toContain('NOT run: coverage, screen map and baseline')
+    expect(lines).toContain('the full suite only if a shared file changed')
     // what it must not change: the lock, the worker cap, the timeout or the exit-code contract
     expect(lines).toContain('exec 9>>"$lock"')
     expect(lines).toContain('export SHEPHERDR_TEST_JOBS="$jobs"')
@@ -97,7 +98,7 @@ describe('what --quick runs', () => {
     expect(out).toMatch(/^check:local QUICK · /)
     const lines = f.verdict('verdict-quick.txt').trim().split('\n')
     expect(lines[0]).toContain('QUICK')
-    expect(lines[0]).toContain('NOT run: the full suite, coverage, screen map and baseline')
+    expect(lines[0]).toContain('NOT run: coverage, screen map and baseline')
     expect(existsSync(join(f.logs, 'verdict.txt'))).toBe(false)
   })
 
@@ -138,16 +139,25 @@ describe('the pre-ready run the repo asks for', () => {
     expect(agents).toContain('`SHEPHERDR_TEST_JOBS=1` serializes the suite and is for debugging')
     expect(agents).toContain('The full `bun run check:local` is where nothing may be missed')
     expect(agents).toContain('the weekly sweep, and the coordinator')
+    // nothing is left asking a task for the whole check before it is ready (a revert of the rule fails here)
+    for (const page of [agents, flat(join('docs', 'develop.md')), flat(join('skill', 'shepherdr-agent', 'SKILL.md'))]) {
+      expect(page).not.toContain('`bun run check:local` before `shepherdr ready`')
+    }
   })
 
   test('the agent skill and docs/develop.md say the same, so no harness reads another rule', () => {
     const skill = flat(join('skill', 'shepherdr-agent', 'SKILL.md'))
-    expect(skill).toContain("a task runs the repository's own quick pre-ready check")
-    expect(skill).toContain('`bun run check:local --quick` in Shepherdr')
+    expect(skill).toContain("a task runs that repository's own pre-ready check")
+    expect(skill).toContain('`bun run check:local --quick` in')
+    expect(skill).toContain('otherwise its own full check')
     expect(skill).toContain('`SHEPHERDR_TEST_JOBS=1`')
     const develop = flat(join('docs', 'develop.md'))
     expect(develop).toContain("`bun run check:local --quick` is a task's pre-ready run")
     expect(develop).toContain('the merge gate, the weekly sweep, and the coordinator')
+    // the product page says where the full check now happens, and how a space asks for it on every merge
+    const tasks = flat(join('docs', 'tasks.md'))
+    expect(tasks).toContain('the quick pre-ready check, `bun run check:local --quick`')
+    expect(tasks).toContain('merge sets the gate to it (`shepherdr set merge.gate')
   })
 
   test('a change to a file that can break any test runs the whole suite, in a quick run too', () => {

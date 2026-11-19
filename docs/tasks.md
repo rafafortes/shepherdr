@@ -162,11 +162,13 @@
   commit); anything else, or 45 minutes without an end, refuses the merge with the end of its output, the base stays as
   it was and the task is Ready again. It is where a change's full check happens: a task proves its own change with the
   quick pre-ready run before `shepherdr ready` ([develop](develop.md)), so a space that wants the whole check on every
-  merge sets the gate to it — `shepherdr set merge.gate "bun run check:local" --space <name>`. Merges into one repo go
-  one at a time, so the others wait while it runs; a `shepherdr merge` that asks meanwhile hears that the gate still
-  runs. If the base moved anyway while it ran, the
-  branch is rebased on it and the gate runs again (three times at most). It is never a git hook: a hook that refuses an
-  update leaves what it would write in the space's checkout. The gate runs detached, its words and exit code in files of
+  merge sets the gate to it (`shepherdr set merge.gate "bun run check:local" --space <name>`), knowing that the gate's
+  last printed line goes into the merge commit: the runner's last line carries its log folder, under the agent's home,
+  so a repository whose history may not hold the operator's paths wants a wrapper that prints a short line instead.
+  Merges into one repo go one at a time, so the others wait while it runs; a `shepherdr merge` that asks meanwhile hears
+  that the gate still runs. If the base moved anyway while it ran, the branch is rebased on it and the gate runs again
+  (three times at most). It is never a git hook: a hook that refuses an update leaves what it would write in the space's
+  checkout. The gate runs detached, its words and exit code in files of
   their own, so a restart of Shepherdr (an update) leaves it running: the Shepherdr that comes back goes on from it and
   merges once it passes. It has a limit of its own inside the command (45 minutes, under `timeout` where that binary
   exists, exiting 124), so it ends even if Shepherdr never comes back; it is also stopped when a newer run replaces it
@@ -326,9 +328,8 @@
 - The agent merges when its brief or you say so: `shepherdr merge <id>` squash-merges the branch into main.
   On GitHub that goes through its pull request (opened then if the agent never did), as soon as the agent's own checks
   pass (in Shepherdr: the quick pre-ready check, `bun run check:local --quick`, and the space's merge gate where it has
-  one, AGENTS.md), without waiting for GitHub's checks: where a
-  repo's workflows run, they still do it on every push to main (and on the pull request), and only a failure GitHub
-  already shows at that commit stops the merge.
+  one, AGENTS.md), without waiting for GitHub's checks: where a repo's workflows run, they still do it on every push to
+  main (and on the pull request), and only a failure GitHub already shows at that commit stops the merge.
   With Settings → How tasks work → Merge on "after GitHub checks", it merges only once GitHub's checks pass. Either way only
   at the commit this machine has (`gh pr merge --squash --match-head-commit`), then its branch on GitHub is deleted
   and main here is pulled, so Shepherdr's own update sees the merge. Failed checks are sent back to the agent. A branch
