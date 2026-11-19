@@ -252,14 +252,19 @@ export function liveWorktree(cwd: string, o: ScanOpts): boolean {
   return !!root && o.exists(root)
 }
 
-/** a process whose ancestry reaches herdr runs in a live pane: an agent, a shell, a helper or a server it started.
- *  Even when its worktree has since gone, it is a live task's and is never a finding or a kill candidate. */
+/** the executable a command runs, not its arguments: a task's server often names its worktree in an argument, and
+ *  `~/.herdr/worktrees/...` would otherwise look like the herdr daemon */
+const exe = (cmd: string) => (cmd.split(/\s+/)[0] ?? '').split('/').at(-1) ?? ''
+const HERDR_EXE = /^herdr(?:-[a-z0-9-]+)?$/i
+
+/** a process whose ancestry reaches the herdr daemon runs in a live pane: an agent, a shell, a helper or a server it
+ *  started. Even when its worktree has since gone, it is a live task's and is never a finding or a kill candidate. */
 export function underHerdr(pid: number, byPid: Map<number, Row>): boolean {
   let p = pid
   for (let i = 0; i < 64; i++) {
     const row = byPid.get(p)
     if (!row) return false
-    if (/\bherdr\b/i.test(row.cmd)) return true
+    if (HERDR_EXE.test(exe(row.cmd))) return true
     if (row.ppid <= 1) return false
     p = row.ppid
   }
@@ -302,7 +307,7 @@ export function lines(found: Finding[]): string[] {
   const ready = (proof.length ? proof : found.slice(0, 1).map((f) => f.pid)).slice(0, SHOWN)
   const more = ready.length < (proof.length || 1) ? ` (first ${SHOWN})` : ''
   const shown = found.slice(0, SHOWN).map((f) => `  pid ${f.pid}: ${f.cmd.slice(0, 90) || '(no command)'} — ${f.why}; end it: ${f.kill}${f.kind === 'proof' ? ' (proof-marked; auto-end is off until the operator decides)' : ''}`)
-  if (found.length > SHOWN) shown.push(`  ... and ${found.length - SHOWN} more (all ended by the same command above)`)
+  if (found.length > SHOWN) shown.push(`  ... and ${found.length - SHOWN} more (not shown; each keeps its own ready kill line in the sweep)`)
   return [
     `Orphaned processes (RES-03): ${found.length} found at the last hourly look. End ${proof.length ? 'the proof-marked ones' : 'one'} with: kill -TERM ${ready.join(' ')}${more}`,
     ...shown,

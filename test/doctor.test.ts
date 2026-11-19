@@ -99,6 +99,12 @@ describe('what the sweep recognises', () => {
     expect(O.underHerdr(700, new Map([[700, { pid: 700, ppid: 701, cmd: 'x', cwd: '' }], [701, { pid: 701, ppid: 700, cmd: 'y', cwd: '' }]]))).toBe(false)
   })
 
+  test('a worktree path in a command is not the herdr daemon: the real orphan stays visible', () => {
+    // a server started with an absolute path into its worktree is exactly the leftover Part 2 exists to find
+    const orphan: Row[] = [{ pid: 800, ppid: 1, cmd: 'node qa.mjs --out /home/u/.herdr/worktrees/website/work-38/out', cwd: '/wt/repo/gone' }]
+    expect(O.scan(orphan, opts).map((f) => f.pid)).toEqual([800])
+  })
+
   test('only proof-marked pids are ever candidates for an end, and none when clean', () => {
     expect(O.proofPids(O.scan(rows, opts))).toEqual([102, 103])
     expect(O.scan([], opts)).toEqual([])
