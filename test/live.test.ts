@@ -908,6 +908,8 @@ describe('settings', () => {
     expect(s.set('app.hosts', 'x', { space: 'web' }).ok).toBe(false)
     expect(s.set('app.hosts', 'app.example.com').ok).toBe(true)
     expect(s.get('app.hosts')).toBe('app.example.com')
+    // shepherdr show prints every setting's value and source, this one included
+    expect(s.lines()).toContain('app.hosts')
     expect(s.sections([], [], null, 'vm', ['web']).find((x) => x.level === 'all' && x.name === 'App')!.rows.find((r) => r.key === 'app.hosts')!.warn).toBeUndefined()
   })
   test("a model set Everywhere is checked against this machine's backups too, and the spaces'", () => {
