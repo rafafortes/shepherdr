@@ -190,6 +190,56 @@ function hostFor(msgs: Message[], at: number, p: { question?: unknown; artifact?
   return undefined
 }
 
+/** an artifact's card in a chat, by the version posted (the latest post of it when that version's is gone) */
+function artifactPost(msgs: Message[], id: string, v?: number) {
+  return msgs.findLast((m) => m.artifact?.id === id && !m.text && (v === undefined || m.artifact.v === v)) ?? msgs.findLast((m) => m.artifact?.id === id && !m.text)
+}
+
+/** a reply's quote of the message it answers: that message when it is still in the chat, else the quote alone. An
+ *  artifact's card is posted after the log line that quotes it, so the build resolves such a quote once cards joined. */
+function replyTo(msgs: Message[], quoted: string, path?: string, line?: string, artifact?: string, later?: (() => void)[], joined = true): Message['reply'] {
+  if (artifact) {
+    const q: NonNullable<Message['reply']> = { text: quoted.replace(/”/g, '"'), artifact: true }
+    const find = () => {
+      const m = artifactPost(msgs, artifact, Number(quoted.match(/ · v(\d+)$/)?.[1]) || undefined)
+      if (m) Object.assign(q, { id: m.id, who: m.who })
+    }
+    if (joined) find()
+    else later?.push(find)
+    return q
+  }
+  const id = line && replied.get(words(line))
+  const m = (id && msgs.find((x) => x.id === id)) || findQuoted(msgs, quoted, path)
+  if (!m) return { text: quoted.replace(/”/g, '"') }
+  return { id: m.id, who: m.who, ...(m.peer ? { from: m.peer.name } : {}), text: m.text ? excerpt(m.text, 160) : (m.file?.name ?? ''), ...(m.text ? {} : { file: true }) }
+}
+
+/** add or take away a reaction on one message of a chat */
+function addRx(m: Message | undefined, emoji: string, who: 'me' | 'them', on: boolean, pending = false) {
+  if (!m) return
+  const rx = (m.reactions ??= [])
+  const i = rx.findIndex((x) => x.emoji === emoji)
+  const cur = i >= 0 ? rx[i].by : undefined
+  let next: Reaction['by'] | undefined
+  if (on) next = cur && cur !== who ? 'both' : who
+  else next = cur === 'both' ? (who === 'me' ? 'them' : 'me') : cur === who ? undefined : cur
+  if (i >= 0) rx.splice(i, 1)
+  if (next) rx.splice(i >= 0 ? i : rx.length, 0, { emoji, by: next, ...(pending ? { pending } : {}) })
+}
+
+/** the first close time strictly after `at` in a sorted list: a binary search, so a chat with many posted cards and
+ *  many close lines does not scan the whole list for each card (the old `closedAt.find` was O(posted × closed)) */
+export function nextClose(closedAt: number[], at: number): number | undefined {
+  let lo = 0
+  let hi = closedAt.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (closedAt[mid]! <= at) lo = mid + 1
+    else hi = mid
+  }
+  return lo < closedAt.length ? closedAt[lo] : undefined
+}
+
 /** one more read of the screen: the reply counts once it grew since the last read and, past its reaction and reply
  *  lines, starts with two letters or more that aren't a hidden marker (<no-reply>, an older [[...]]), whole or still coming */
 export function sawReply(s: Pick<Shown, 'last' | 'on'>, text: string | undefined): Pick<Shown, 'last' | 'on'> {
@@ -220,6 +270,13 @@ export class Chats {
   private jobsSeen = new Map<string, string>()
   /** latest event-log timestamp that closes open cards per chat revision, so `asks`, `openQuestion` and `needs` avoid rescanning */
   private eventCloses = new Map<string, { rev: number; len: number; lastAt: number; at: number }>()
+  /** every change to Shepherdr's own log, so a post or an answer rebuilds a chat built from it */
+  private logRevs = new Map<string, number>()
+  /** the built messages and their close times, held until the events, the log or the menu move: the costly pass is
+   *  repeated on every 'chat' emit, GET /api/chat, needs() and syncAsks otherwise */
+  private chatCache = new Map<string, { sig: string; msgs: Message[]; closedAt: number[] }>()
+  /** how many times a chat's messages were built; a test reads it to prove an unchanged chat is built once */
+  chatBuilds = 0
 
   constructor(
     private agents: Agents,
@@ -244,9 +301,14 @@ export class Chats {
     writeJson(`chatlog/${safe(key)}.json`, this.log(key))
   }
 
+  /** Shepherdr's own log changed: anything built from it must be built again */
+  private touchLog(key: string) {
+    this.logRevs.set(key, (this.logRevs.get(key) ?? 0) + 1)
+  }
+
   /** a deleted task's chat: its log goes, and all that was read of it */
   forget(key: string) {
-    for (const m of [this.tails, this.events, this.where, this.reading, this.logs, this.menus, this.menuAt, this.shown, this.revs, this.acts, this.eventCloses]) m.delete(key)
+    for (const m of [this.tails, this.events, this.where, this.reading, this.logs, this.menus, this.menuAt, this.shown, this.revs, this.acts, this.eventCloses, this.logRevs, this.chatCache]) m.delete(key)
     rmSync(join(HOME, 'chatlog', `${safe(key)}.json`), { force: true })
   }
 
@@ -259,6 +321,7 @@ export class Chats {
     const item = { at: Date.now(), ...p }
     if (i >= 0) l.posted[i] = { ...l.posted[i], ...item, at: l.posted[i].at }
     else l.posted.push(item)
+    this.touchLog(key)
     this.saveLog(key)
     if (i < 0 && !p.who) this.onPost?.(key)
   }
@@ -270,6 +333,7 @@ export class Chats {
     if (!p) return
     delete p.page
     p.artifact = { id, v: 1 }
+    this.touchLog(key)
     this.saveLog(key)
   }
 
@@ -279,12 +343,14 @@ export class Chats {
     const l = this.log(key)
     l.answers[qid] = choice
     if (other || space || dismissed) (l.said ??= {})[qid] = { text: other, space, dismissed }
+    this.touchLog(key)
     this.saveLog(key)
   }
 
   /** a reply to the agent's plain question went from its copy in a space's chat: the reply says so */
   repliedFrom(key: string, reply: string, space: string) {
     ;((this.log(key).said ??= {})[`reply:${reply}`] = { space })
+    this.touchLog(key)
     this.saveLog(key)
   }
 
@@ -304,6 +370,7 @@ export class Chats {
       l.answers[p.question!.id] = -1
       ;(l.said ??= {})[p.question!.id] = { text: text?.trim() || undefined, chat: true }
     }
+    this.touchLog(key)
     this.saveLog(key)
     return true
   }
@@ -696,7 +763,7 @@ export class Chats {
       const q = withAnswer(p.question, l, this.answeredIn)
       // no words of its own: it rides the first free agent reply of its turn (chat(): hostFor) and takes that row,
       // answered or not, exactly as chat() takes it — a card posted next within that second must not land on it
-      const at = p.text ? p.at : (hostAt(p.at, closedAt.find((t) => t > p.at)) ?? p.at)
+      const at = p.text ? p.at : (hostAt(p.at, nextClose(closedAt, p.at)) ?? p.at)
       if (q.sent !== undefined || closed(at)) continue
       out.push({ ...p, who: 'agent', at, question: q })
     }
@@ -835,6 +902,15 @@ export class Chats {
     })
   }
 
+  /** what the built messages depend on: any of these moving makes the next chat() build them again. The event count
+   *  and last time are there as well as the revision, so a log changed behind the reader's back cannot serve a stale
+   *  build; the rest are the log's own changes, the menu, the agent's name and what a screen sent with an id. */
+  private chatSig(key: string, from: string, user: string): string {
+    const ev = this.events.get(key) ?? []
+    const menu = this.menus.get(key)
+    return [this.revs.get(key) ?? 0, ev.length, ev.length ? ev[ev.length - 1]!.at : 0, this.logRevs.get(key) ?? 0, from, user, menu ? menuId(key, menu) : '', this.startScreens.has(key) ? 1 : 0, this.agents.sentLately(key).length].join('|')
+  }
+
   chat(key: string): Chat {
     this.pull(key)
     const r = this.agents.record(key)
@@ -843,44 +919,117 @@ export class Chats {
     const from = this.nameOf(key)
     const ev = this.events.get(key) ?? []
     const l = this.log(key)
+    const { msgs: built, closedAt } = this.chatBuild(key, from, user)
+    // the queue, a menu and a reply linked from a space change without the built log: they go on a copy of the array,
+    // and a message a decoration touches is copied first, so what chatBuild cached stays the same for the next reader
+    const msgs = built.slice()
+    // what waits to go in, and why: the first in line holds the rest
+    const queue = this.agents.waiting(key)
+    const waitsFor = queue.length ? this.agents.holdOf(key, queue[0]) : undefined
+    for (const o of queue) {
+      if (o.reaction) {
+        const i = msgs.findIndex((x) => x.id === o.reaction!.message)
+        if (i >= 0) {
+          const m = { ...msgs[i]!, reactions: [...(msgs[i]!.reactions ?? [])] }
+          msgs[i] = m
+          addRx(m, o.reaction.emoji, 'me', parseUserLine(o.text)?.kind !== 'unreact', true)
+        }
+      } else {
+        // a message from another agent waiting to go in says who sent it here too, exactly as it will in the log
+        const froms = fromAgents(stripHidden(o.text))
+        if (froms.length) {
+          this.peerRows(msgs, o.id, o.at, froms, undefined, { waiting: true, waitsFor })
+          continue
+        }
+        const files: { name: string; path: string }[] = []
+        const pr = parseReply(o.text)
+        const reply = pr ? replyTo(msgs, pr.to, undefined, pr.line, pr.artifact) : undefined
+        let answered: string | undefined
+        const text = stripHidden(
+          (pr ? [...userLines(pr.text), ...pr.rest] : userLines(o.text))
+            .flatMap((ln) => {
+              const p = parseUserLine(ln)
+              if (p?.kind === 'attach') files.push({ name: p.name, path: p.path })
+              const s = p && shownAs(p)
+              if (s?.title) answered = s.title
+              return p?.kind === 'attach' ? [] : [s ? s.text : ln]
+            })
+            .join('\n'),
+        )
+        // what Shepherdr itself sends (instructions, news) never shows as yours
+        if (text || answered) msgs.push({ id: o.id, who: 'you', at: o.at, text: text || undefined, answered, waiting: true, waitsFor, cid: o.cid, reply })
+        files.forEach((file, i) => msgs.push({ id: `${o.id}:${i}`, who: 'you', at: o.at, file, waiting: true, waitsFor, cid: o.cid, reply: !i && !text ? reply : undefined }))
+      }
+    }
+    // your reply to a plain question, sent from its copy in a space's chat: a link there
+    for (const [id, s] of Object.entries(l.said ?? {}))
+      if (id.startsWith('reply:') && s.space) {
+        const i = msgs.findIndex((x) => x.who === 'you' && x.reply?.id === id.slice('reply:'.length))
+        if (i >= 0) {
+          const m = { ...msgs[i]! }
+          msgs[i] = m
+          Object.assign(m, { answered: m.answered ?? 'Answered', elsewhere: this.answeredIn(s.space) })
+        }
+      }
+    // a menu in the terminal shows as a question card, posted by Shepherdr
+    const menu = this.menus.get(key)
+    if (menu && !this.openQuestion(key)) {
+      const waitingAt = msgs.findIndex((m) => m.waiting)
+      const card: Message = {
+        id: menuId(key, menu),
+        who: 'agent',
+        at: Date.now(),
+        question: { id: menuId(key, menu), title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, kind: 'Form', choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: from, asks: `${CLI_NAME[kind] ?? kind} asks`, noDismiss: this.startScreens.has(key) || !menu.choices.length || undefined },
+      }
+      if (waitingAt >= 0) msgs.splice(waitingAt, 0, card)
+      else msgs.push(card)
+    }
+    const st = this.agents.status(key)
+    const queued = this.inQueue(key)
+    const failed = this.agents.failedLately(key)
+    const active = this.agents.info(key)?.agent_session
+    const file = active?.kind === 'path' ? r?.logs.find((f) => f.endsWith('/' + active.value.split('/').at(-1)))
+      : r?.sessionId ? r.logs.find((f) => f.endsWith(`${r.sessionId}.jsonl`)) : r?.logs.at(-1)
+    let runtime = sessionRuntime(ev, file, r?.started ?? 0)
+    if (st !== 'working' || !runtime) runtime = this.agents.runtime(key) ?? runtime
+    const hook = this.agents.runtimeHook(key)
+    if (hook) runtime = !runtime || hook.at >= runtime.at ? { ...(hook.model && runtime?.model && hook.model !== runtime.model ? {} : runtime), ...hook, source: 'hook' } : { ...(hook.model && runtime.model && hook.model !== runtime.model ? {} : hook), ...runtime }
+    if (runtime?.model) runtime.modelLabel = findModel(kind, runtime.model)?.label
+    const act = this.activityFor(key)
+    const jobs = this.jobs(key, act).map(({ log: _l, output: _o, ...j }): Job => j)
+    return {
+      key,
+      cli: CLI_NAME[kind] ?? kind,
+      agent: r ? { runtime, ...launchHarness({ kind: r.kind, model: r.model, effort: r.effort }), ...(findModel(r.kind, r.model) ? { modelLabel: findModel(r.kind, r.model)!.label } : {}) } : undefined,
+      messages: msgs,
+      closedAt,
+      failed: failed.length ? failed : undefined,
+      unreadable: this.agents.unreadable?.(key),
+      working: st === 'working' || undefined,
+      queued: queued.length ? queued : undefined,
+      // its turn is over, or ended while work it started still runs: a subagent, a shell
+      background: (st === 'working' && !this.replying(key, ev)) || !!this.agents.background(key) || undefined,
+      finished: (r?.finished && st === 'gone') || undefined,
+      live: st === 'working' && act.open ? lineOf(act.open, true) : undefined,
+      jobs: jobs.length ? jobs : undefined,
+      controls: this.controls(key, kind),
+    }
+  }
+
+  /** the messages of a chat and the times that close its cards, built from the CLI's log and Shepherdr's own until one
+   *  of them changes. Parsing, replies, hosts, activity and two sorts make this the chat's costly pass; every screen
+   *  emit, GET /api/chat, needs() and syncAsks read the same unchanged chat again. */
+  private chatBuild(key: string, from: string, user: string): { msgs: Message[]; closedAt: number[] } {
+    const sig = this.chatSig(key, from, user)
+    const had = this.chatCache.get(key)
+    if (had?.sig === sig) return had
+    const ev = this.events.get(key) ?? []
+    const l = this.log(key)
     const msgs: Message[] = []
     const answered = new Set(ev.filter((e) => e.kind === 'answered').map((e) => e.id))
-    // a file is named by its path (two may share a name); one quoted by its name alone is the latest of that name
-    const byText = (quoted: string, path?: string) => findQuoted(msgs, quoted, path)
-    /** an artifact's card, by the version posted (the latest post of it when that version's is gone) */
-    const artifactPost = (id: string, v?: number) =>
-      msgs.findLast((m) => m.artifact?.id === id && !m.text && (v === undefined || m.artifact.v === v)) ?? msgs.findLast((m) => m.artifact?.id === id && !m.text)
     // artifacts join the chat after what the log says: what quotes one waits for them
     const later: (() => void)[] = []
     let joined = false
-    /** a reply's quote of the message it answers: that message when it is still in the chat, else the quote alone */
-    const replyTo = (quoted: string, path?: string, line?: string, artifact?: string): Message['reply'] => {
-      if (artifact) {
-        const q: NonNullable<Message['reply']> = { text: quoted.replace(/”/g, '"'), artifact: true }
-        const find = () => {
-          const m = artifactPost(artifact, Number(quoted.match(/ · v(\d+)$/)?.[1]) || undefined)
-          if (m) Object.assign(q, { id: m.id, who: m.who })
-        }
-        if (joined) find()
-        else later.push(find)
-        return q
-      }
-      const id = line && replied.get(words(line))
-      const m = (id && msgs.find((x) => x.id === id)) || byText(quoted, path)
-      if (!m) return { text: quoted.replace(/”/g, '"') }
-      return { id: m.id, who: m.who, ...(m.peer ? { from: m.peer.name } : {}), text: m.text ? excerpt(m.text, 160) : (m.file?.name ?? ''), ...(m.text ? {} : { file: true }) }
-    }
-    const addRx = (m: Message | undefined, emoji: string, who: 'me' | 'them', on: boolean, pending = false) => {
-      if (!m) return
-      const rx = (m.reactions ??= [])
-      const i = rx.findIndex((x) => x.emoji === emoji)
-      const cur = i >= 0 ? rx[i].by : undefined
-      let next: Reaction['by'] | undefined
-      if (on) next = cur && cur !== who ? 'both' : who
-      else next = cur === 'both' ? (who === 'me' ? 'them' : 'me') : cur === who ? undefined : cur
-      if (i >= 0) rx.splice(i, 1)
-      if (next) rx.splice(i >= 0 ? i : rx.length, 0, { emoji, by: next, ...(pending ? { pending } : {}) })
-    }
     // what you sent from a screen gets the screen's id back, so the screen swaps the message it showed at once for it:
     // the same words, read from the log once they went in
     const lately = this.agents.sentLately(key).map((o) => ({ cid: o.cid!, at: o.at, words: words(stripHidden(o.text)) }))
@@ -924,7 +1073,7 @@ export class Chats {
         // a reply: its words, then its files; notes from the shared browser show short: each element and its note
         const bn = parseBrowserNotes(text)
         const r = bn ? null : parseReply(text)
-        const reply = r ? replyTo(r.to, undefined, r.line, r.artifact) : undefined
+        const reply = r ? replyTo(msgs, r.to, undefined, r.line, r.artifact, later, joined) : undefined
         const lines = bn
           ? [`Notes in the browser on ${shortUrl(bn.url)}:`, ...bn.notes.map((n, i) => `${i + 1}. ${n.element}: ${n.note}`), ...bn.rest]
           : r
@@ -943,8 +1092,8 @@ export class Chats {
           if (p.kind === 'attach') files.push({ name: p.name, path: p.path })
           else if (p.kind === 'react' || p.kind === 'unreact') {
             const { artifact: a, emoji, kind } = p
-            if (a) later.push(() => addRx(artifactPost(a.id, a.v), emoji, 'me', kind === 'react'))
-            else addRx(byText(p.to, p.path), p.emoji, 'me', p.kind === 'react')
+            if (a) later.push(() => addRx(artifactPost(msgs, a.id, a.v), emoji, 'me', kind === 'react'))
+            else addRx(findQuoted(msgs, p.to, p.path), p.emoji, 'me', p.kind === 'react')
             consumed = true
           } else {
             const s = shownAs(p)!
@@ -966,9 +1115,9 @@ export class Chats {
       }
       if (e.kind === 'agent') {
         const { text, reactions, reply } = agentLines(stripHidden(e.text))
-        for (const x of reactions) addRx(byText(x.to, x.path), x.emoji, 'them', true)
+        for (const x of reactions) addRx(findQuoted(msgs, x.to, x.path), x.emoji, 'them', true)
         if (!text) continue
-        msgs.push({ id: e.id, who: 'agent', at: e.at, text, newSession: newSession || undefined, reply: reply ? replyTo(reply.to, reply.path) : undefined })
+        msgs.push({ id: e.id, who: 'agent', at: e.at, text, newSession: newSession || undefined, reply: reply ? replyTo(msgs, reply.to, reply.path) : undefined })
         newSession = false
         continue
       }
@@ -1040,7 +1189,7 @@ export class Chats {
         continue
       }
       const q = p.question ? withAnswer(p.question, l, this.answeredIn) : undefined
-      const until = closedAt.find((t) => t > p.at)
+      const until = nextClose(closedAt, p.at)
       const host = hostFor(msgs, p.at, p, hosting, until)
       if (host && !p.text) {
         if (q) host.question = q
@@ -1069,88 +1218,10 @@ export class Chats {
       msgs.push({ id: `act:${t.id}`, who: 'agent', at: reply ? (reply.at ?? 0) - 0.5 : t.end, activity: lineOf(t) })
     }
     msgs.sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
-    // what waits to go in, and why: the first in line holds the rest
-    const queue = this.agents.waiting(key)
-    const waitsFor = queue.length ? this.agents.holdOf(key, queue[0]) : undefined
-    for (const o of queue) {
-      if (o.reaction) {
-        const m = msgs.find((x) => x.id === o.reaction!.message)
-        addRx(m, o.reaction.emoji, 'me', parseUserLine(o.text)?.kind !== 'unreact', true)
-      } else {
-        // a message from another agent waiting to go in says who sent it here too, exactly as it will in the log
-        const froms = fromAgents(stripHidden(o.text))
-        if (froms.length) {
-          this.peerRows(msgs, o.id, o.at, froms, undefined, { waiting: true, waitsFor })
-          continue
-        }
-        const files: { name: string; path: string }[] = []
-        const r = parseReply(o.text)
-        const reply = r ? replyTo(r.to, undefined, r.line, r.artifact) : undefined
-        let answered: string | undefined
-        const text = stripHidden(
-          (r ? [...userLines(r.text), ...r.rest] : userLines(o.text))
-            .flatMap((ln) => {
-              const p = parseUserLine(ln)
-              if (p?.kind === 'attach') files.push({ name: p.name, path: p.path })
-              const s = p && shownAs(p)
-              if (s?.title) answered = s.title
-              return p?.kind === 'attach' ? [] : [s ? s.text : ln]
-            })
-            .join('\n'),
-        )
-        // what Shepherdr itself sends (instructions, news) never shows as yours
-        if (text || answered) msgs.push({ id: o.id, who: 'you', at: o.at, text: text || undefined, answered, waiting: true, waitsFor, cid: o.cid, reply })
-        files.forEach((file, i) => msgs.push({ id: `${o.id}:${i}`, who: 'you', at: o.at, file, waiting: true, waitsFor, cid: o.cid, reply: !i && !text ? reply : undefined }))
-      }
-    }
-    // your reply to a plain question, sent from its copy in a space's chat: a link there
-    for (const [id, s] of Object.entries(l.said ?? {}))
-      if (id.startsWith('reply:') && s.space) {
-        const m = msgs.find((x) => x.who === 'you' && x.reply?.id === id.slice('reply:'.length))
-        if (m) Object.assign(m, { answered: m.answered ?? 'Answered', elsewhere: this.answeredIn(s.space) })
-      }
-    // a menu in the terminal shows as a question card, posted by Shepherdr
-    const menu = this.menus.get(key)
-    if (menu && !this.openQuestion(key)) {
-      const waitingAt = msgs.findIndex((m) => m.waiting)
-      const card: Message = {
-        id: menuId(key, menu),
-        who: 'agent',
-        at: Date.now(),
-        question: { id: menuId(key, menu), title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, kind: 'Form', choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: from, asks: `${CLI_NAME[kind] ?? kind} asks`, noDismiss: this.startScreens.has(key) || !menu.choices.length || undefined },
-      }
-      if (waitingAt >= 0) msgs.splice(waitingAt, 0, card)
-      else msgs.push(card)
-    }
-    const st = this.agents.status(key)
-    const queued = this.inQueue(key)
-    const failed = this.agents.failedLately(key)
-    const active = this.agents.info(key)?.agent_session
-    const file = active?.kind === 'path' ? r?.logs.find((f) => f.endsWith('/' + active.value.split('/').at(-1)))
-      : r?.sessionId ? r.logs.find((f) => f.endsWith(`${r.sessionId}.jsonl`)) : r?.logs.at(-1)
-    let runtime = sessionRuntime(ev, file, r?.started ?? 0)
-    if (st !== 'working' || !runtime) runtime = this.agents.runtime(key) ?? runtime
-    const hook = this.agents.runtimeHook(key)
-    if (hook) runtime = !runtime || hook.at >= runtime.at ? { ...(hook.model && runtime?.model && hook.model !== runtime.model ? {} : runtime), ...hook, source: 'hook' } : { ...(hook.model && runtime.model && hook.model !== runtime.model ? {} : hook), ...runtime }
-    if (runtime?.model) runtime.modelLabel = findModel(kind, runtime.model)?.label
-    const jobs = this.jobs(key, act).map(({ log: _l, output: _o, ...j }): Job => j)
-    return {
-      key,
-      cli: CLI_NAME[kind] ?? kind,
-      agent: r ? { runtime, ...launchHarness({ kind: r.kind, model: r.model, effort: r.effort }), ...(findModel(r.kind, r.model) ? { modelLabel: findModel(r.kind, r.model)!.label } : {}) } : undefined,
-      messages: msgs,
-      closedAt,
-      failed: failed.length ? failed : undefined,
-      unreadable: this.agents.unreadable?.(key),
-      working: st === 'working' || undefined,
-      queued: queued.length ? queued : undefined,
-      // its turn is over, or ended while work it started still runs: a subagent, a shell
-      background: (st === 'working' && !this.replying(key, ev)) || !!this.agents.background(key) || undefined,
-      finished: (r?.finished && st === 'gone') || undefined,
-      live: st === 'working' && act.open ? lineOf(act.open, true) : undefined,
-      jobs: jobs.length ? jobs : undefined,
-      controls: this.controls(key, kind),
-    }
+    this.chatBuilds++
+    const built = { msgs, closedAt }
+    this.chatCache.set(key, { ...built, sig })
+    return built
   }
 
   private replying(key: string, ev: LogEvent[]) {

@@ -168,3 +168,28 @@ test('the cheap open cards Needs you reads are the cards, closed the same way (S
   chats.answer(key, 'ask:new', 0)
   expect(ids()).toEqual([])
 })
+
+test('SHE-68: repeated chat reads leave the cheap open cards, and so Needs, unchanged', () => {
+  const key = 'T-68/Agent'
+  const chats = new Chats({
+    record: () => undefined, sentLately: () => [], waiting: () => [], holdOf: () => undefined,
+    status: () => 'blocked', failedLately: () => [], info: () => undefined, runtime: () => undefined,
+    runtimeHook: () => undefined, background: () => false, unreadable: () => undefined,
+    stillRuns: () => false, procs: { list: () => [] },
+  } as never, (k) => k, () => 'You')
+  const ids = () => chats.openCardsQuick(key).map((m) => m.question.id)
+  chats.post(key, { id: 'ask:1', question: question('ask:1') })
+  const before = ids()
+  chats.chat(key)
+  chats.chat(key)
+  chats.chat(key)
+  expect(ids()).toEqual(before)
+  chats.answer(key, 'ask:1', 0)
+  chats.chat(key)
+  expect(ids()).toEqual([])
+  chats.post(key, { id: 'ask:2', question: question('ask:2') })
+  const after = ids()
+  chats.chat(key)
+  expect(ids()).toEqual(after)
+  expect(after).toEqual(['ask:2'])
+})
