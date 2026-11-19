@@ -1,10 +1,11 @@
 // Shepherdr's own folder (server/store.ts): what a store that cannot be read keeps, what a write never erases, and how a
 // write of a store of record survives a power loss. A store of record (tasks, spaces, settings, automations) keeps its
-// bytes and takes no write that run; a cache starts from the fallback and fills again.
+// bytes and takes no write that run, and the two big caches (agents, usage) are guarded the same way when a write would
+// empty them; every other store is a cache that starts from the fallback and fills again.
 import { describe, expect, spyOn, test } from 'bun:test'
 import * as fs from 'node:fs'
 import { join } from 'node:path'
-import { beside, COPIES, home, readJson, writeJson } from '../server/store.ts'
+import { COPIES, copyName, home, pruneCopies, readJson, writeJson } from '../server/store.ts'
 import { TaskIds } from '../server/live/task-ids.ts'
 import type { Space } from '../server/live/places.ts'
 import { tmp } from './tmp.ts'
@@ -15,6 +16,9 @@ const id = (name: string) => `p:machine:${name}`
 
 /** the copies of a store beside it, oldest first */
 const copies = (dir: string, kind: 'corrupt' | 'before-empty') => fs.readdirSync(dir).filter((n) => n.includes(`.${kind}-`)).sort()
+
+/** what a copy of a file that cannot be read says: its file, the bytes it was, and where the copy is */
+const said = (page: ReturnType<typeof spyOn>, i = 0) => String(page.mock.calls[i]?.[0])
 
 describe('a clean store', () => {
   test('reads as it was written, leaves no copy and says nothing', () => {
@@ -43,12 +47,11 @@ describe('a store that cannot be read', () => {
       fs.writeFileSync(join(dir, 'agents.json'), bytes)
       expect(readJson('agents.json', {}, dir)).toEqual({})
       expect(page).toHaveBeenCalledTimes(1)
-      const said = String(page.mock.calls[0]?.[0])
       const [copy] = copies(dir, 'corrupt')
       expect(copy).toBeDefined()
-      expect(said).toContain(join(dir, 'agents.json'))
-      expect(said).toContain(String(bytes.length))
-      expect(said).toContain(join(dir, copy))
+      expect(said(page)).toContain(join(dir, 'agents.json'))
+      expect(said(page)).toContain(`${bytes.length} bytes`)
+      expect(said(page)).toContain(join(dir, copy))
       expect(fs.readFileSync(join(dir, copy), 'utf8')).toBe(bytes)
       // a cache takes writes again: the run goes on from what herdr and the agents say
       writeJson('agents.json', { b: 1 }, dir)
@@ -70,7 +73,21 @@ describe('a store that cannot be read', () => {
       const kept = copies(dir, 'corrupt')
       expect(kept).toHaveLength(COPIES)
       expect(kept.map((n) => fs.readFileSync(join(dir, n), 'utf8'))).toEqual(['{"broken": 1', '{"broken": 2', '{"broken": 3'])
-      expect(String(page.mock.calls[0]?.[0])).toContain(`newest ${COPIES}`)
+      expect(said(page)).toContain(`newest ${COPIES}`)
+    } finally {
+      page.mockRestore()
+    }
+  })
+
+  test('one unreadable file read twice in a run makes one copy and says one line', () => {
+    const dir = tmp('store-read-twice')
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      fs.writeFileSync(join(dir, 'spaces.json'), '[{"name": "a"},')
+      expect(readJson('spaces.json', null, dir)).toBeNull()
+      expect(readJson('spaces.json', [], dir)).toEqual([])
+      expect(page).toHaveBeenCalledTimes(1)
+      expect(copies(dir, 'corrupt')).toHaveLength(1)
     } finally {
       page.mockRestore()
     }
@@ -84,7 +101,7 @@ describe('a store that cannot be read', () => {
       fs.writeFileSync(join(dir, 'tasks.json'), bytes)
       const tasks = readJson('tasks.json', { next: {}, tasks: [] }, dir)
       expect(tasks).toEqual({ next: {}, tasks: [] })
-      expect(String(page.mock.calls[0]?.[0])).toContain('read-only')
+      expect(said(page)).toContain('read-only')
       writeJson('tasks.json', tasks, dir)
       writeJson('tasks.json', { next: { A: 1 }, tasks: [{ id: 'A-1' }] }, dir)
       expect(fs.readFileSync(join(dir, 'tasks.json'), 'utf8')).toBe(bytes)
@@ -110,17 +127,47 @@ describe('a store that cannot be read', () => {
       fs.mkdirSync(join(dir, 'agents.json'))
       expect(readJson('agents.json', { fallback: true }, dir)).toEqual({ fallback: true })
       expect(page).toHaveBeenCalledTimes(1)
-      const said = String(page.mock.calls[0]?.[0])
-      expect(said).toContain(join(dir, 'agents.json'))
-      expect(said).toContain('cannot be read')
-      expect(said).toContain('could not be copied')
+      expect(said(page)).toContain(join(dir, 'agents.json'))
+      expect(said(page)).toContain('cannot be read')
+      expect(said(page)).toContain('could not be copied')
     } finally {
       page.mockRestore()
     }
   })
 })
 
-describe('a write that would empty a store', () => {
+describe('the copies beside a store', () => {
+  test('a copy carries a stamp, and the newest three of its kind are the ones kept', () => {
+    const dir = tmp('store-prune')
+    expect(copyName(join(dir, 'agents.json'), 'corrupt')).toContain('agents.json.corrupt-')
+    pruneCopies(join(dir, 'gone', 'agents.json'), 'corrupt') // a folder that is not there has nothing to go through
+    for (const t of ['01', '02', '03', '04']) fs.writeFileSync(join(dir, `agents.json.corrupt-1970-01-${t}T00-00-00.000Z`), t)
+    pruneCopies(join(dir, 'agents.json'), 'corrupt')
+    expect(copies(dir, 'corrupt')).toEqual(['1970-01-02', '1970-01-03', '1970-01-04'].map((t) => `agents.json.corrupt-${t}T00-00-00.000Z`))
+  })
+
+  test('an old copy that will not go stays, and the read goes on', () => {
+    const dir = tmp('store-stubborn-copy')
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    const stuck = join(dir, 'agents.json.corrupt-1970-01-01T00-00-00.000Z')
+    fs.mkdirSync(join(stuck, 'inside'), { recursive: true })
+    fs.writeFileSync(join(stuck, 'inside', 'a file'), 'kept')
+    fs.writeFileSync(join(dir, 'agents.json.corrupt-1970-01-02T00-00-00.000Z'), 'old')
+    fs.writeFileSync(join(dir, 'agents.json.corrupt-1970-01-03T00-00-00.000Z'), 'old')
+    fs.writeFileSync(join(dir, 'agents.json'), '{"a":')
+    fs.chmodSync(join(stuck, 'inside'), 0o500) // it cannot be removed, and that is not a reason to fail the read
+    try {
+      expect(readJson('agents.json', {}, dir)).toEqual({})
+      expect(copies(dir, 'corrupt').filter((n) => !n.includes('1970-'))).toHaveLength(1)
+      expect(copies(dir, 'corrupt')).toHaveLength(4) // the oldest could not go, so the three it kept are still four
+    } finally {
+      fs.chmodSync(join(stuck, 'inside'), 0o700)
+      page.mockRestore()
+    }
+  })
+})
+
+describe('a write that would leave a store with nothing in it', () => {
   test('keeps the file it replaces when that file has entries, and copies nothing that has none', () => {
     const dir = tmp('store-empty')
     const page = spyOn(console, 'error').mockImplementation(() => {})
@@ -135,7 +182,7 @@ describe('a write that would empty a store', () => {
       expect(fs.readFileSync(join(dir, copy), 'utf8')).toBe(bytes)
       expect(readJson<unknown>('agents.json', null, dir)).toEqual({})
       expect(copies(dir, 'corrupt')).toHaveLength(1)
-      // a file already holding an empty collection, or nothing at all, is replaced as before: no copy of it
+      // a file already holding nothing, or nothing at all, is replaced as before: no copy of it
       writeJson('agents.json', {}, dir)
       fs.writeFileSync(join(dir, 'health.json'), '')
       writeJson('health.json', {}, dir)
@@ -146,6 +193,35 @@ describe('a write that would empty a store', () => {
       expect(readJson<unknown>('usage.json', null, dir)).toEqual({ b: 2 })
       expect(copies(dir, 'before-empty')).toHaveLength(1)
       expect(page.mock.calls.map((c) => String(c[0])).join('\n')).toContain('written empty')
+    } finally {
+      page.mockRestore()
+    }
+  })
+
+  test("the empty state of tasks.json ({ next: {}, tasks: [] }) is kept off a file that has tasks in it", () => {
+    const dir = tmp('store-tasks-empty')
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      writeJson('tasks.json', { next: { A: 1 }, tasks: [{ id: 'A-1', n: 1 }] }, dir)
+      writeJson('tasks.json', { next: {}, tasks: [] }, dir)
+      const [copy] = copies(dir, 'before-empty')
+      expect(copy).toBeDefined()
+      expect(readJson<unknown>(copy, null, dir)).toMatchObject({ tasks: [{ id: 'A-1', n: 1 }] })
+      expect(said(page)).toContain('written empty')
+    } finally {
+      page.mockRestore()
+    }
+  })
+
+  test('a small cache that drains as it should is written over as before, with no copy of it', () => {
+    const dir = tmp('store-drain')
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      writeJson('outbox.json', ['a'], dir)
+      writeJson('outbox.json', [], dir)
+      expect(readJson<unknown>('outbox.json', null, dir)).toEqual([])
+      expect(copies(dir, 'before-empty')).toHaveLength(0)
+      expect(page).not.toHaveBeenCalled()
     } finally {
       page.mockRestore()
     }
@@ -184,14 +260,17 @@ describe('the file that keeps task numbers', () => {
     const legacy = { next: { WEB: 250 }, tasks: [{ id: 'WEB-250', n: 250, project: id('web') }] }
     try {
       fs.writeFileSync(join(dir, 'task-ids.sqlite'), 'not a database at all')
+      fs.writeFileSync(join(dir, 'task-ids.sqlite-wal'), 'its log')
       const ids = new TaskIds([space('web', 'WEB')], legacy, id, dir)
       try {
         expect(page).toHaveBeenCalledTimes(1)
-        const said = String(page.mock.calls[0]?.[0])
+        // one repair is one entry beside the store, holding every file SQLite kept of it
         const [copy] = fs.readdirSync(dir).filter((n) => n.startsWith('task-ids.sqlite.corrupt-'))
         expect(copy).toBeDefined()
-        expect(said).toContain(join(dir, copy))
-        expect(fs.readFileSync(join(dir, copy), 'utf8')).toBe('not a database at all')
+        expect(said(page)).toContain(join(dir, copy))
+        // SQLite takes a stale write-ahead log of a file it cannot read with it; what is there is kept inside
+        expect(fs.readdirSync(join(dir, copy))).toContain('task-ids.sqlite')
+        expect(fs.readFileSync(join(dir, copy, 'task-ids.sqlite'), 'utf8')).toBe('not a database at all')
         expect(ids.allocate(id('web')).id).toBe('WEB-251')
       } finally {
         ids.close()
@@ -214,10 +293,10 @@ describe('the file that keeps task numbers', () => {
     const page = spyOn(console, 'error').mockImplementation(() => {})
     try {
       fs.writeFileSync(join(dir, 'task-ids.sqlite'), 'not a database at all')
-      fs.chmodSync(dir, 0o500) // its file can be read and written, the folder cannot take the rename
+      fs.chmodSync(dir, 0o500) // its file can be read and written, the folder cannot take the new entry
       try {
         expect(() => new TaskIds([space('web', 'WEB')], { next: {}, tasks: [] }, id, dir)).toThrow()
-        expect(String(page.mock.calls[0]?.[0])).toContain('could not be moved aside')
+        expect(said(page)).toContain('could not be moved aside')
       } finally {
         fs.chmodSync(dir, 0o700)
       }
@@ -236,7 +315,7 @@ describe('the engine on a store it cannot read', () => {
     try {
       const w = world()
       expect(page).toHaveBeenCalledTimes(1)
-      expect(String(page.mock.calls[0]?.[0])).toContain('read-only')
+      expect(said(page)).toContain('read-only')
       expect(w.engine.tasks).toEqual([])
       const [copy] = copies(home(), 'corrupt')
       expect(copy).toBeDefined()
@@ -245,37 +324,5 @@ describe('the engine on a store it cannot read', () => {
     } finally {
       page.mockRestore()
     }
-  })
-})
-
-describe('the copies beside a store', () => {
-  test('a folder that is not there, or an old copy that will not go, costs the copy and not the run', () => {
-    const page = spyOn(console, 'error').mockImplementation(() => {})
-    try {
-      // a folder that is not there has nothing to prune: the name the copy would take is still given
-      expect(beside(join(tmp('store-gone'), 'kept', 'agents.json'), 'corrupt')).toContain('agents.json.corrupt-')
-      // an old copy that cannot be removed (a folder named like one) stays, and the read still copies and answers
-      const dir = tmp('store-odd-copy')
-      const odd = 'agents.json.corrupt-1970-01-01T00-00-00.000Z'
-      fs.mkdirSync(join(dir, odd, 'inside'), { recursive: true })
-      fs.writeFileSync(join(dir, 'agents.json.corrupt-1970-01-02T00-00-00.000Z'), 'old')
-      fs.writeFileSync(join(dir, 'agents.json.corrupt-1970-01-03T00-00-00.000Z'), 'old')
-      fs.writeFileSync(join(dir, 'agents.json'), '{"a":')
-      expect(readJson('agents.json', {}, dir)).toEqual({})
-      const fresh = copies(dir, 'corrupt').filter((n) => !n.includes('1970-'))
-      expect(fresh).toHaveLength(1)
-      expect(fs.readFileSync(join(dir, fresh[0]), 'utf8')).toBe('{"a":')
-    } finally {
-      page.mockRestore()
-    }
-  })
-
-  test('a file it cannot read is copied nowhere before an empty write, and the write goes in', () => {
-    const dir = tmp('store-unreadable-empty')
-    fs.writeFileSync(join(dir, 'agents.json'), '{"a": 1}')
-    fs.chmodSync(join(dir, 'agents.json'), 0o000)
-    writeJson('agents.json', {}, dir)
-    expect(copies(dir, 'before-empty')).toHaveLength(0)
-    expect(readJson<unknown>('agents.json', null, dir)).toEqual({})
   })
 })

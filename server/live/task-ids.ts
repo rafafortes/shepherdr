@@ -2,9 +2,9 @@
 // restarts and deleted tasks cannot reuse an ID. Remote settings and creation are routed to that machine.
 import { Database } from 'bun:sqlite'
 import { existsSync, mkdirSync, renameSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import type { SettingSection } from '../../shared/types.ts'
-import { beside, COPIES, home } from '../store.ts'
+import { COPIES, copyName, home, pruneCopies } from '../store.ts'
 import type { Space } from './places.ts'
 
 export const MAX_TASK_NUMBER = Number.MAX_SAFE_INTEGER - 1
@@ -45,11 +45,13 @@ function opened(dir: string, retry = true): Database {
     const words = e instanceof Error ? e.message : String(e)
     let moved = ''
     try {
-      const to = beside(file, 'corrupt')
-      renameSync(file, to)
+      // one repair is one entry beside the store, holding the three files SQLite keeps (the database, its write-ahead log
+      // and its index): the newest COPIES repairs stay beside it, as they do for a JSON store
+      const to = copyName(file, 'corrupt')
+      mkdirSync(to)
+      for (const ext of ['', '-wal', '-shm']) if (existsSync(file + ext)) renameSync(file + ext, join(to, basename(file) + ext))
       moved = to
-      // a write-ahead log and its index belong to the file that just went: one left behind would be read against the new one
-      for (const ext of ['-wal', '-shm']) if (existsSync(file + ext)) renameSync(file + ext, to + ext)
+      pruneCopies(file, 'corrupt')
     } catch {
       /* it cannot be moved: the new file's own failure says why below */
     }
