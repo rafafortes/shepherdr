@@ -24,7 +24,7 @@ case "$FAKE_MODE" in
   ok) echo 'all good' ;;
   fail) echo 'some words' ; echo '402 Insufficient account funds' >&2 ; exit 3 ;;
   hang) exec sleep 30 ;;
-  held) sleep 2 & exec sleep 30 ;;
+  held) (while kill -0 \$PPID 2>/dev/null; do sleep 0.2; done) & exec sleep 30 ;;
 esac
 `,
   )
