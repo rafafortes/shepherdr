@@ -94,15 +94,15 @@ function CallBox({ chatKey }: { chatKey: string }) {
         {ui.callMuted ? <MicOffIcon className={ic} /> : <MicIcon className={ic} />}
       </IconButton>
       <LiveWave sample={callSample} label={`Voice call with ${chatName(snap, chatKey)}`} className="ml-1.5 flex-1" />
-      <p className="flex min-w-0 items-start gap-1.5 px-2 text-[0.8125rem] phone:text-[0.9375rem]">
-        {/* the pill is role=status: a new caption is announced, politely, with the phase word */}
-        <span role="status" aria-live="polite" className="min-w-0 font-medium text-fg">
+      <p className="flex shrink-0 items-start gap-1.5 px-2 text-[0.8125rem] phone:text-[0.9375rem]">
+        {/* the pill is role=status: a new caption is announced, politely; only the changed line, not the old words */}
+        <span role="status" aria-live="polite" aria-atomic="false" className="min-w-0 max-w-[8rem] phone:max-w-[9rem] font-medium text-fg">
           <span className="block">{word}</span>
-          {captions.map((c, i) => (
-            <span key={i} className="block text-[0.75rem] leading-snug font-normal text-fg2">
-              {c.who === 'you' ? 'You: ' : ''}{c.text}
+          {captions.length > 0 && (
+            <span className="line-clamp-2 whitespace-pre-line break-words text-[0.75rem] leading-snug font-normal text-fg2">
+              {captions.map((c) => `${c.who === 'you' ? 'You: ' : ''}${c.text}`).join('\n')}
             </span>
-          ))}
+          )}
         </span>
         <span className="text-fg3 tabular-nums">{t}</span>
       </p>

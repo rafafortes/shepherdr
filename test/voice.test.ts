@@ -158,6 +158,7 @@ describe.skipIf(!browser)('a voice call lives in the chat box', () => {
     await caption('agent', 'on it')
     await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('on it'), status)
     expect(await page.getAttribute(status, 'aria-live')).toBe('polite')
+    expect(await page.getAttribute(status, 'aria-atomic')).toBe('false')
     // two lines at most: the oldest drops out, nothing accumulates as history
     await caption('you', 'and one more')
     await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('and one more'), status)
@@ -167,6 +168,33 @@ describe.skipIf(!browser)('a voice call lives in the chat box', () => {
     // ending the call takes the captions with it; nothing is kept on screen
     await page.tap(`${box} button[aria-label="End call"]`)
     await page.waitForSelector(`${box} textarea`)
+    await page.tap('button[aria-label="Voice call"]')
+    await page.waitForSelector(status)
+    expect(await page.textContent(status)).toBe('Connecting')
+    await page.tap(`${box} button[aria-label="End call"]`)
+    await ctx.close()
+  }, 30_000)
+
+  test('a long caption keeps the wave and the pill within their room', async () => {
+    const { ctx, page } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    await page.tap('button[aria-label="Voice call"]')
+    const wave = `${box} canvas[aria-label^="Voice call with"]`
+    await page.waitForSelector(wave)
+    const waveWidth = () => page.$eval(wave, (c) => c.getBoundingClientRect().width)
+    const width = await waveWidth()
+    const height = await page.$eval(box, (b) => b.getBoundingClientRect().height)
+    await page.evaluate(() =>
+      (window as unknown as { caption(w: string, t: string): void }).caption(
+        'agent',
+        'I have sent that to the agent and will tell you as soon as it replies, which should be shortly.',
+      ),
+    )
+    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('I have sent'), `${box} [role=status]`)
+    // the wave still shows who is talking, and the pill stays close to its one-line height
+    expect(width).toBeGreaterThan(20)
+    expect(await waveWidth()).toBeGreaterThan(20)
+    expect(await page.$eval(box, (b) => b.getBoundingClientRect().height)).toBeLessThan(height + 20)
+    await page.tap(`${box} button[aria-label="End call"]`)
     await ctx.close()
   }, 30_000)
 
