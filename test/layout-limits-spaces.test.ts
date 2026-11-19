@@ -203,6 +203,59 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await page.close()
     }
   })
+  test('two spaces with the same number: an arrow still moves its row one place, and the numbered ones are given 1, 2, 3, …', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      // both spaces say 1, so the list keeps them by age: herdr-projects is below gtm with the same number
+      await set('space.priority', '1', 'p:vm-str:gtm')
+      await set('space.priority', '1', 'p:vm-str:herdr-projects')
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 1/ }).waitFor()
+      expect(at(await rowLabels(table), 'gtm')).toBeLessThan(at(await rowLabels(table), 'herdr-projects'))
+      // ↑ on the second one is on, as it is on any row with rows above it: equal numbers are no order at all (the two go
+      // by age), so the numbered ones get 1, 2, 3, … in the order the move makes, writing only what changes
+      await table.getByRole('button', { name: 'Move herdr-projects up' }).click()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 1/ }).waitFor()
+      await settled(page)
+      expect(await places()).toEqual({ gtm: '2', 'herdr-projects': '1' })
+      expect(at(await rowLabels(table), 'herdr-projects')).toBeLessThan(at(await rowLabels(table), 'gtm'))
+      // and the row it passed went exactly one place: one move, one place
+      expect(at(await rowLabels(table), 'herdr-projects') + 1).toBe(at(await rowLabels(table), 'gtm'))
+    } finally {
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await page.close()
+    }
+  })
+  test('a stored number Settings reads as no place is no place in the page either: ↑ gives that space a place, it swaps nothing', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    // a settings.json the human edited by hand: 201 is outside the range Settings keeps, so spacePriority reads no place
+    const raw = world.stores['vm-str'] as unknown as { d: { spaces: Record<string, Record<string, string>> } }
+    try {
+      await openLimits(page)
+      await set('space.priority', '1', 'p:vm-str:gtm')
+      raw.d.spaces['herdr-projects'] = { 'space.priority': '201' }
+      // a write of a setting sends a snapshot, so the page reads the view with it
+      await set('space.maxTasks', '2', 'p:vm-str:gtm')
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      // the page treats it as a space with no number: ↑ puts it last among the numbered ones instead of swapping with gtm
+      await table.getByRole('button', { name: 'Move herdr-projects up' }).click()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
+      expect(await places()).toEqual({ gtm: '1', 'herdr-projects': '2' })
+    } finally {
+      delete raw.d.spaces['herdr-projects']
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await page.close()
+    }
+  })
   test('a move the server refuses says why under the table, and writes nothing', async () => {
     const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })

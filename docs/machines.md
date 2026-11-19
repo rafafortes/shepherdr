@@ -47,7 +47,8 @@ quietly holding every new start, and says when every one of them is back under.
 - **Room for tasks** (Shepherdr enforces it): a task added, or told to go (a queued task's go, or a coordinator's
   `task tell` to one that waits), waits as Queued, `Waiting for a free slot` or `Waiting for the machine` (or `This
   machine is set to 0 tasks`, when Max tasks is 0; `Waiting for a free slot of <space>` once that space's own cap,
-  Settings → Space, is full; `Waiting for its turn` while a task ahead of it in the line could start), with no agent
+  Settings → Space, is full; `Waiting for its turn` while a task ahead of it in the line could start, or `Waiting for the
+  gap between starts` when nothing is ahead of it and Start one task at most every is what holds it), with no agent
   started yet. It starts by itself once there's room and its turn comes — first in line, then each space's
   `space.priority`, then oldest first — and **Start one task at most every** (`machine.startEvery`, 2 min; 0 for as many
   at once as there's room for) spaces out every start Shepherdr makes by itself, a task you or a coordinator add

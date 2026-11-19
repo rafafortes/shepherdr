@@ -2257,7 +2257,18 @@ export class Engine extends Emitter<Events> {
           return
         }
         // one first in line doesn't wait for the spacing either
-        if (!t.priority && !this.startsNow(now)) return
+        if (!t.priority && !this.startsNow(now)) {
+          // the room is there and the spacing is all that holds them: their rows say the gap, not the slot or the load
+          // they just came out of (hold and startGate say the same when a task joins the line)
+          let restated = false
+          for (const x of order) {
+            if (!x.held || x.held.why === 'turn' || !MACHINE_WIDE.has(x.held.why)) continue
+            x.held.why = 'turn'
+            restated = true
+          }
+          if (restated) this.save()
+          return
+        }
         this.lastStart = now
         const why = {
           slots: 'a slot is free',
