@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { sh, repo, world, until, started, G, Settings } from './engine-world.ts'
 import type { FakeGitHub } from './fake-gh.ts'
 import { tmp } from './tmp.ts'
-import { processes } from '../server/procs.ts'
+import { killGroup, processes } from '../server/procs.ts'
 import { SETTINGS_HEAD } from '../shared/brief.ts'
 
 // each test runs git dozens of times and gh (a bun process of its own) up to fifty: a few seconds alone, past 20 on a
@@ -41,12 +41,7 @@ const groupAlive = (pid: number) => {
 const gateGone = (run: { log: string; exit: string }) =>
   !processes().some((p) => p.cmd.includes(run.log) || p.cmd.includes(run.exit))
 afterEach(() => {
-  for (const pid of gatesStarted.splice(0))
-    try {
-      process.kill(-pid, 'SIGKILL')
-    } catch {
-      /* it ended already */
-    }
+  for (const pid of gatesStarted.splice(0)) killGroup(pid)
 })
 
 describe('shepherdr merge', () => {
@@ -456,17 +451,38 @@ describe('shepherdr merge', () => {
       expect(await waitGate(run, 5000)).toMatchObject({ code: 124 })
     })
 
+    test('a gate that leaves a child running is stopped with it at its hard limit', async () => {
+      const { waitGate } = await import('../server/live/engine/engine.ts')
+      const dir = tmp('gate-child')
+      const childFile = join(dir, 'child')
+      const run = await gate(`sleep 1234 & echo \$! > ${childFile}; wait`, dir, {}, dir, 'CHILD-1', { head: 'h', tip: 't' }, 700)
+      expect((await waitGate(run, 6000)).code).toBe(124)
+      const child = Number(readFileSync(childFile, 'utf8').trim())
+      await until(() => child > 0 && !processes().some((p) => p.pid === child), 20_000)
+    })
+
+    test('deleting a task while its merge waits in a gate stops the gate instead of hanging', async () => {
+      const goDir = tmp('gate-delete-active')
+      const { w, t } = await gated('gate-delete-active', waitFor(join(goDir, 'go'), goDir, 'echo ok'))
+      const merging = w.engine.merge(t.id, { self: true })
+      await until(() => !!t.gateRun?.pid, 20_000)
+      const run = t.gateRun!
+      await w.engine.deleteTask(t.id, { force: true })
+      await until(() => gateGone(run), 20_000)
+      expect((await merging).ok).toBe(false)
+    })
+
     test('the plain line is the fallback where there is no timeout binary, and still writes its exit code', async () => {
       const { gateCommand, waitGate } = await import('../server/live/engine/engine.ts')
       const dir = tmp('gate-no-timeout')
       const log = join(dir, 'plain.log')
       const exit = join(dir, 'plain.exit')
-      expect(gateCommand('echo x', log, exit, 30)).toContain('timeout -s KILL --foreground 30')
+      expect(gateCommand('echo x', log, exit, 30)).toContain('timeout -s KILL 30')
       // hide the binary from PATH: the default seam then picks the plain line
       const path = process.env.PATH
       process.env.PATH = join(dir, 'empty')
       try {
-        expect(gateCommand('echo x', log, exit, 30)).not.toContain('timeout -s KILL --foreground')
+        expect(gateCommand('echo x', log, exit, 30)).not.toContain('timeout -s KILL')
       } finally {
         process.env.PATH = path
       }

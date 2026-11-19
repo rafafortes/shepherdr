@@ -103,6 +103,18 @@ describe('a temporary folder of a test', () => {
     }
   })
 
+  test('leftBy still names a process whose folder was removed before the check', async () => {
+    const dir = tmp('gone-child')
+    const child = Bun.spawn(['/bin/sh', '-c', 'sleep 30'], { cwd: dir, detached: true, stdout: 'ignore', stderr: 'ignore' })
+    rmSync(dir, { recursive: true, force: true })
+    try {
+      expect(leftBy(run).map((l) => l.path)).toContain(`pid ${child.pid}`)
+    } finally {
+      killLeft([{ path: `pid ${child.pid}`, why: '', pid: child.pid }])
+      await Promise.race([child.exited, Bun.sleep(2000)])
+    }
+  })
+
   test('the sweep leaves alone a process that merely names a shep-* file that is not one of our folders', async () => {
     const file = at(`shep-not-a-run-${run}.txt`)
     rmSync(file, { force: true })

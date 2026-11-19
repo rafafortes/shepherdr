@@ -68,11 +68,12 @@ const alive = (pid: number) => {
 }
 
 /** the test folder a process's cwd or command line names, if any: the root of a run's folders, not a `go` file in it.
- *  Only a name the tests make counts — another `shep-*` file in /tmp named in a command is none of this sweep's business. */
+ *  Only a name the tests make counts — another `shep-*` file in /tmp named in a command is none of this sweep's business.
+ *  A command may name several paths; a stray `shep-*` file before a real run folder must not hide the latter. */
 const shepRoot = (s: string) => {
   const base = tmpdir().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const name = s.match(new RegExp(`${base}/(shep-[^\\s'"/]+)`))?.[1]
-  return name && ownerOf(name) ? name : undefined
+  for (const m of s.matchAll(new RegExp(`${base}/(shep-[^\\s'"/]+)`, 'g'))) if (ownerOf(m[1])) return m[1]
+  return undefined
 }
 
 /** how old a folder has to be to go: a suite in flight is younger (every test writes into its own), and one older is a
@@ -105,6 +106,7 @@ export function sweep(age = STALE) {
   // a loop a dead run left behind goes on forking sleep after its folder is gone (LEAD-01): kill it as well
   let killed = 0
   for (const p of processes()) {
+    if (p.pid === process.pid) continue
     const roots = [p.cwd, p.cmd].map(shepRoot).filter((root): root is string => !!root)
     if (roots.some((root) => !existsSync(join(tmpdir(), root))) && alive(p.pid)) {
       killGroup(p.pid)
@@ -120,17 +122,14 @@ export type Left = { path: string; why: string; pid?: number }
 /** what one run left behind: its folders whose process is gone, and any process of this run still alive in its folders.
  *  A process of another suite, or one whose folder is gone, belongs to that run's own check (or to sweep()). */
 export function leftBy(runID: string): Left[] {
-  const ours = new Set(entries().filter((name) => ownerOf(name)?.run === runID).map((name) => join(tmpdir(), name)))
   const left: Left[] = entries().filter((name) => {
     const owner = ownerOf(name)
     return owner?.run === runID && !alive(owner.pid)
   }).map((name) => ({ path: join(tmpdir(), name), why: 'a folder whose process is gone' }))
-  if (ours.size) for (const p of processes()) {
+  for (const p of processes()) {
     if (p.pid === process.pid) continue
-    const inRun = [p.cwd, p.cmd].some((s) => {
-      const root = shepRoot(s)
-      return !!root && ours.has(join(tmpdir(), root))
-    })
+    // the folder itself may be gone already (its process removed it on the way out): the name still says whose it was
+    const inRun = [p.cwd, p.cmd].some((s) => ownerOf(shepRoot(s) ?? '')?.run === runID)
     if (inRun) left.push({ path: `pid ${p.pid}`, pid: p.pid, why: `${p.cmd.slice(0, 120) || '(no command)'} is still running in this run's folder` })
   }
   return left

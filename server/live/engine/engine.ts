@@ -441,12 +441,15 @@ const timeoutOnPath = () => (process.env.PATH ?? '').split(':').some((dir) => {
 })
 
 /** the shell line a gate runs: with a `timeout` binary the command has its own hard limit, so it ends even when Shepherdr
- *  never comes back (a timeout exits 124, as waitGate does); without one the plain line is the fallback and waitGate's
- *  limit is all there is. `--foreground` keeps `timeout` in the detached shell's process group: otherwise it starts one
- *  of its own and a group kill of the run would leave the command (and its sleep loop) running. The words and exit code
- *  still go to the same files, named for this run alone. */
+ *  never comes back; without one the plain line is the fallback and waitGate's limit is all there is. `timeout` kills
+ *  only the shell it starts, so once it ends the whole group it led is killed too: a child the command left running (or
+ *  forking sleep) cannot outlive the limit. killGroup() reaches both groups when a run is dropped. Exit 124 is kept for
+ *  a timeout, as waitGate returns, and the words and code go to the same files, named for this run alone. */
 export function gateCommand(cmd: string, log: string, exit: string, seconds: number, hasTimeout = timeoutOnPath()) {
-  const body = hasTimeout ? `timeout -s KILL --foreground ${seconds} sh -c ${q(cmd)}` : cmd
+  const s = Math.max(1, Math.floor(seconds))
+  const body = hasTimeout
+    ? `timeout -s KILL ${s} sh -c ${q(cmd)} & t=$!; wait \$t; st=\$?; kill -KILL -\$t 2>/dev/null; [ \"\$st\" -eq 137 ] && st=124; exit \$st`
+    : cmd
   return `(${body}) > ${q(log)} 2>&1; echo $? > ${q(exit)}.tmp && mv ${q(exit)}.tmp ${q(exit)}`
 }
 
@@ -4344,6 +4347,8 @@ export class Engine extends Emitter<Events> {
     if (this.starting.has(t.id) || this.cleaning.has(t.id)) throw new Error(`${t.id} is starting or being put away: try again in a moment`)
     const p = this.places.space(t.project)
     const key = this.key(t)
+    // stop its gate first: a merge waiting in it would hold the repo's merge promise for the whole limit
+    this.dropTaskGate(t)
     // a merge under way in its repo goes first: never its worktree removed under it
     if (p) await this.merging.get(p.path)
     if (!this.task(t.id)) throw new Error(`No task ${id}`)
@@ -4354,7 +4359,6 @@ export class Engine extends Emitter<Events> {
       if (held.length) throw Object.assign(new Error(`Not deleted: ${t.id} holds ${held.join(', ')}.${stopped} Merge or save that work first, or delete with --force to lose it.`), { held, stopped: !!stopped })
     }
     await holds()
-    this.dropTaskGate(t)
     this.cleaning.add(t.id)
     try {
       await this.agents.interrupt(key)
