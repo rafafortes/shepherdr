@@ -579,6 +579,13 @@ describe('headless reviewers', () => {
     expect(r.runs('T-1/Agent')).toBe(true)
     expect(r.runs('T-2/Agent')).toBe(false)
   })
+  test('a headless CLI whose environment cannot be read is passed over, not fatal', () => {
+    const proc = tmp('proc-no-environ')
+    mkdirSync(join(proc, '30'))
+    writeFileSync(join(proc, '30', 'cmdline'), 'claude\0-p\0')
+    // no environ file: chatOf's read throws and the process is skipped, whatever else the scan is doing
+    expect(new Procs(proc).runs('T-9/Agent', Date.now())).toBe(false)
+  })
   test('a process that is no headless CLI is read once, then again only while it is young', () => {
     const proc = tmp('proc-plain')
     const put = (pid: number, argv: string[], env: string[] = []) => {

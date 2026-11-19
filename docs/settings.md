@@ -37,6 +37,9 @@
   - **From the command.** `shepherdr set task.model <model> --space NAME --apply-waiting` (also `task.agent` and `task.effort`, with
     `--machine`, or Everywhere without `--space`) makes the same change and says in one line what it did, with the same counts.
     Without `--apply-waiting` nothing waiting moves.
+- **Coordinators** (`coordinator.agent`, `coordinator.model`, `coordinator.effort`): the CLI, model and effort a new
+  coordinator starts with, set and inherited the same way as the tasks' three. Its backup's own pair sits under
+  Coordinators in [Backup agents](#backup-agents).
 - **The reviewer of the tasks already created** (`reviewer.agent`, `reviewer.model`, `reviewer.effort`, and the backup reviewers'
   keys, `reviewer.fallback…`). A task's reviewer is written into its brief when it is added, in the Reviewer line of its Settings
   block, so the same question follows a change of Settings' reviewer. Right after you save one, Settings asks **Apply to the
@@ -77,6 +80,8 @@
   first merges in line go in together on one gate run, each as its own commit. It needs a gate set and works only for
   merges made here, not through a GitHub pull request. Off means one at a time. What each row does is in
   [tasks](tasks.md).
+- **Base branch** (`space.base`, a space's Repository section): the branch new tasks of that space start from and merge
+  into; tasks already created keep their target. [Spaces](spaces.md) says how it is set.
 - **Max tasks of this space working at once** (`space.maxTasks`, the Space section; No cap by default, or 0 to 200) caps how
   many of one space's tasks work on this machine at once. **0 starts none**: every task of that space is held, as `<space> is
   set to 0 tasks`, and another space's tasks start as before. No cap is not 0: it is unlimited within the machine's limit. It works together with the machine's own limit (Machine → Max
@@ -239,6 +244,50 @@
   Settings and Restart offer Claude Code, Codex, pi, OpenCode and Antigravity; other herdr CLIs are refused before a chat launch because
   their replies cannot be shown. Existing saved choices are kept, but an unsupported choice must be changed before
   launching again. Headless reviewer choices are separate; this does not add or prove support for other reviewers.
+
+## How tasks work
+
+The review and merge keys here are the Settings-block lines every new brief ends with; a coordinator can change one for
+a single task with `task add --set` (see [the agent's skill](../skill/shepherdr-agent/SKILL.md)). Merge gate and Merge
+train, above, are this section's other controls, and the Reviewer rows name the reviewer and its backups.
+
+- **Review** (`brief.review`, on): whether a task's agent has its finished change reviewed by fresh eyes before it
+  merges. Off leaves the review out of the brief.
+- **Must fix** (`review.mustFix`, major): the least severity a reviewer's finding must have for the agent to fix it and
+  review again — critical, major, minor or trivial.
+- **Review rounds** (`review.rounds`, 3, from 1 to 10): how many rounds an agent runs at most, each counted when it calls
+  `shepherdr review`, plus one its coordinator may add.
+- **Merge** (`brief.merge`, on its own): when its agent merges — on its own once its quick checks pass, after GitHub's
+  checks, or ask me first.
+
+## Autopilot
+
+On Autopilot a coordinator works on its own within what you asked for and asks you when unsure.
+
+- **Heartbeat** (`heartbeat.when`, every 30 minutes): when its coordinator goes through its checklist. **Wakes at once
+  on** (`heartbeat.on`, all news) names the news that wakes it immediately; the rest waits for the heartbeat. A limit
+  such as 5 new tasks a day is words in the checklist. Heartbeats use the time zone set in Settings → Time zone.
+- **Checklist**: a space's own HEARTBEAT.md, a file rather than a value inherited from a level above it;
+  [Autopilot](autopilot.md) says what goes in it and how the coordinator reads it.
+
+## Tasks
+
+- **Archive Done after** (`tasks.archiveAfter`, 7 days, from 1 to 3650 days or off): a Done task moves to its place's
+  Archived list this long after it finishes. Off keeps it where it is.
+
+## Browser
+
+- **Close idle browser after** (`browser.idleClose`, 10 minutes, from 1 to 1440 minutes or off): a task's shared browser
+  closes after this long with no agent command and no one watching it in its Browser panel, so it stops using CPU.
+  Sign-ins stay, and the next command or a look at the panel starts it again. Off keeps it open.
+
+## Alerts and voice
+
+- **Alerts on** (`alerts`): the devices enrolled for a place's pushes; it reads "No device yet" until one is added.
+- **Notify** (`notify`): what a place's coordinator chat sends you — All, Needs me or Off — from its menu in the sidebar;
+  tasks alert either way. [Spaces](spaces.md) has the detail.
+- **Voice agent** (`voice.service`, ElevenLabs): the voice service set for a place; the same on every machine and space,
+  set on Settings → Alerts and voice.
 
 ## OpenCode
 
@@ -518,8 +567,8 @@ row. The profiles bar sits above it (a profile saved from here includes the limi
   against the cores), **Wait while CPU pressure is over** (`machine.startPressure`; now, the pressure), **Wait while memory is
   over** (`machine.startMemory`; now, the memory in use), and **Start one task at most every** (`machine.startEvery`). **Merge
   train** (`merge.train`) is a column here only when Everywhere sets one; the spaces read it otherwise. Under the table,
-  **Alerts** (collapsed) holds the four thresholds the coordinator is told by (`machine.alertLoad`, `alertMemory`,
-  `alertDisk`, `alertHerdr`), each with its number now: they only tell, as above.
+  **Alerts** (collapsed) holds the four thresholds the coordinator is told by (`machine.alertLoad`,
+  `machine.alertMemory`, `machine.alertDisk`, `machine.alertHerdr`), each with its number now: they only tell, as above.
 - **Spaces** (one row per space of this machine, listed in queue order; home only when it sets one of these keys itself). **Priority** (the space's `space.priority`; a number, or off) comes first, with ↑ and ↓ buttons that move a space up or down among the numbered ones: ↑ swaps its number with the space above it and ↓ with the space below, writing only the values that change; ↓ on the last numbered space clears its number, so it goes back to by age; ↑ on a space with no number puts it last among the numbered ones, in one write, and its ↓ is off. A space with no number keeps none until you give it a place. A move is one action, sent whole or refused whole, and every arrow is off until it answers, so two quick taps cannot take each other's place. The keyboard works them too (Tab to a button, Enter or Space), as does touch. One line under the table says it: `A space with no number goes by age, after the numbered ones.` **Max tasks** of the space
   (`space.maxTasks`; `2 of 3 working · 1 held`) and **Merge train** (`merge.train`). Then one column per provider or model
   that a `models.maxAtOnce` entry names at any level (`models.maxAtOnce` is in [Most agents at once](#models), above); **+
@@ -671,9 +720,23 @@ why. Each value shows where it comes from, with Reset to the inherited one, like
 
 Each role's backup is the first of a chain: **+ Add a backup**, at the end of that role's Backups sub-block (Tasks,
 Coordinators, Reviewer, Advisor), adds the next under its last one, up to five, each with its own CLI, Model and Effort
-(Backup 2, Backup 2 model, Backup 2 effort …)
-(`task.fallback2`, `task.fallback2Model`, `task.fallback2Effort` … `task.fallback5…`; `coordinator.fallback2…`,
-`reviewer.fallback2…`, `advisor.fallback2…`). The new one starts on the CLI of the one before it; Off takes it out. They
+(Backup 2, Backup 2 model, Backup 2 effort …). The keys of Backup 2 to 5, by role, are:
+
+- Tasks: CLI `task.fallback2`, `task.fallback3`, `task.fallback4`, `task.fallback5`; model `task.fallback2Model`,
+  `task.fallback3Model`, `task.fallback4Model`, `task.fallback5Model`; effort `task.fallback2Effort`,
+  `task.fallback3Effort`, `task.fallback4Effort`, `task.fallback5Effort`.
+- Coordinators: CLI `coordinator.fallback2`, `coordinator.fallback3`, `coordinator.fallback4`, `coordinator.fallback5`;
+  model `coordinator.fallback2Model`, `coordinator.fallback3Model`, `coordinator.fallback4Model`,
+  `coordinator.fallback5Model`; effort `coordinator.fallback2Effort`, `coordinator.fallback3Effort`,
+  `coordinator.fallback4Effort`, `coordinator.fallback5Effort`.
+- Reviewer: CLI `reviewer.fallback2`, `reviewer.fallback3`, `reviewer.fallback4`, `reviewer.fallback5`; model
+  `reviewer.fallback2Model`, `reviewer.fallback3Model`, `reviewer.fallback4Model`, `reviewer.fallback5Model`; effort
+  `reviewer.fallback2Effort`, `reviewer.fallback3Effort`, `reviewer.fallback4Effort`, `reviewer.fallback5Effort`.
+- Advisor: CLI `advisor.fallback2`, `advisor.fallback3`, `advisor.fallback4`, `advisor.fallback5`; model
+  `advisor.fallback2Model`, `advisor.fallback3Model`, `advisor.fallback4Model`, `advisor.fallback5Model`; effort
+  `advisor.fallback2Effort`, `advisor.fallback3Effort`, `advisor.fallback4Effort`, `advisor.fallback5Effort`.
+
+The new one starts on the CLI of the one before it; Off takes it out. They
 go in turn: where the agent on Backup 1 can't go on either, Backup 2 takes over, the same way (the same CLI resumes its
 session, another CLI takes the work over with the handover), each once, and past the last one it waits for you. One
 that is off, isn't installed or is set to a model its CLI lacks is passed over for the next. A backup reviewer's chain is
@@ -864,12 +927,12 @@ at all, silently.
 
 Settings → Dictation (Everywhere or one machine) has what it needs:
 
-- **Model**: the model file, `~/.local/share/shepherdr-whisper/ggml-base.bin` unless set elsewhere. It must be a
-  multilingual model (`ggml-base.bin`, not `ggml-base.en.bin`), so one machine writes down more than one language.
-  Download: `curl -L -o ~/.local/share/shepherdr-whisper/ggml-base.bin
+- **Model** (`dictate.model`): the model file, `~/.local/share/shepherdr-whisper/ggml-base.bin` unless set elsewhere.
+  It must be a multilingual model (`ggml-base.bin`, not `ggml-base.en.bin`), so one machine writes down more than one
+  language. Download: `curl -L -o ~/.local/share/shepherdr-whisper/ggml-base.bin
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin`.
-- **Language**: Detect it (whisper works the language out itself), English or Portuguese. A whisper language code
-  (`es`) is also accepted.
+- **Language** (`dictate.language`): Detect it (whisper works the language out itself), English or Portuguese. A
+  whisper language code (`es`) is also accepted.
 
 whisper.cpp itself installs from the Ubuntu archive (`sudo apt install whisper.cpp`), which provides
 `whisper-cli`; Shepherdr finds it on `PATH`, then at `/usr/bin`, `/usr/local/bin`, `~/.local/bin` and Homebrew's
