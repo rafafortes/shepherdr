@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { resetSwallowed, swallow, swallowedReport } from '../server/live/debug.ts'
 import { piEnabled } from '../server/live/models.ts'
 import { claudeProjectDir, findClaudeLog, findCodexLog, findOpencodeLog, findPiLog } from '../server/live/readers/find.ts'
-import { recorderScript } from '../server/live/readers/hooks.ts'
+import { parseHookLines, recorderScript } from '../server/live/readers/hooks.ts'
 import { LogTail, readerFor } from '../server/live/readers/index.ts'
 import { opencodeLogPath } from '../server/live/opencode.ts'
 import { home } from '../server/store.ts'
@@ -231,6 +231,28 @@ describe('swallow', () => {
 })
 
 describe('the hook recorder', () => {
+  test('a malformed hook event line is counted for claude and logged only under the gate', () => {
+    const logged: string[] = []
+    const stderr = console.error
+    const saved = process.env.SHEPHERDR_DEBUG
+    delete process.env.SHEPHERDR_DEBUG
+    resetSwallowed()
+    console.error = (...a: unknown[]) => void logged.push(a.map(String).join(' '))
+    try {
+      expect(parseHookLines('{ not json', '/tmp/agent.events.jsonl')).toEqual([])
+      expect(logged).toEqual([])
+      process.env.SHEPHERDR_DEBUG = '1'
+      expect(parseHookLines('{ not json', '/tmp/agent.events.jsonl')).toEqual([])
+      expect(logged).toEqual(['shepherdr: hook event line ignored: SyntaxError (agent.events.jsonl)'])
+      expect(swallowedReport()).toEqual(['The claude reader ignored 2 lines it could not read since this server started; set SHEPHERDR_DEBUG=1 to log each one.'])
+    } finally {
+      console.error = stderr
+      if (saved === undefined) delete process.env.SHEPHERDR_DEBUG
+      else process.env.SHEPHERDR_DEBUG = saved
+      resetSwallowed()
+    }
+  })
+
   test('its own gated line names the reason without the event text', async () => {
     const script = recorderScript()
     expect(script).toContain("if (process.env.SHEPHERDR_DEBUG) console.error")
