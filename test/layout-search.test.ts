@@ -94,4 +94,62 @@ describe.skipIf(!browser)('unified search', () => {
       expect(page.url()).toContain('mac%2Flilla-varlden')
     } finally { await page.close() }
   }, 90_000)
+
+  test('a settings row is found by its key and opens its section', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await page.goto(url())
+      await page.locator('textarea[name="message"]').first().waitFor()
+      await page.keyboard.press('Control+k')
+      const search = page.getByRole('combobox', { name: 'Search or jump to' })
+      await search.fill('rounds')
+      const group = page.getByRole('group', { name: 'Settings', exact: true })
+      const hit = group.getByRole('option').filter({ hasText: 'Review rounds' }).first()
+      await hit.waitFor()
+      expect(await hit.textContent()).toContain('How tasks work')
+      await hit.click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.waitFor()
+      expect(await settings.getByRole('button', { name: /^Editing:/ }).getAttribute('aria-label')).toContain('Everywhere')
+      expect(await settings.textContent()).toContain('Review rounds')
+    } finally { await page.close() }
+  }, 90_000)
+
+  test('a space-level row appears only in its space and opens at that level', async () => {
+    const space = 'p:vm-str:~'
+    await world.act({ type: 'setting', key: 'review.rounds', value: '2', place: space })
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await page.goto(url())
+      await page.locator('textarea[name="message"]').first().waitFor()
+      await page.keyboard.press('Control+k')
+      const search = page.getByRole('combobox', { name: 'Search or jump to' })
+      await search.fill('rounds')
+      const group = page.getByRole('group', { name: 'Settings', exact: true })
+      const everywhere = group.getByRole('option').filter({ hasText: 'Review rounds' }).first()
+      await everywhere.waitFor()
+      expect(await everywhere.textContent()).toContain('Everywhere')
+      await page.getByRole('button', { name: 'Space: home', exact: true }).click()
+      const inSpace = group.getByRole('option').filter({ hasText: 'Review rounds' }).first()
+      await until(() => inSpace.textContent(), s => !!s && s.includes('home'))
+      await inSpace.click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.waitFor()
+      expect(await settings.getByRole('button', { name: /^Editing:/ }).getAttribute('aria-label')).toContain('home')
+    } finally {
+      await world.act({ type: 'setting', key: 'review.rounds', value: null, place: space })
+      await page.close()
+    }
+  }, 90_000)
+
+  test('the four existing result types keep their order with Settings appended last', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await page.goto(url())
+      await page.locator('textarea[name="message"]').first().waitFor()
+      await page.keyboard.press('Control+k')
+      await page.getByRole('combobox', { name: 'Search or jump to' }).waitFor()
+      expect(await page.getByRole('group', { name: 'Result types' }).getByRole('button').allTextContents()).toEqual(['All types', 'Spaces', 'Tasks', 'Messages', 'Artifacts', 'Settings'])
+    } finally { await page.close() }
+  })
 })

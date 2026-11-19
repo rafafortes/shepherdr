@@ -3,7 +3,7 @@ import type { Chat, Snapshot } from '../../shared/types.ts'
 import { findIn, messageText } from '../chat/days.ts'
 
 export type SearchScope = { kind: 'all' } | { kind: 'machine' | 'space' | 'chat'; id: string }
-export type SearchKind = 'Spaces' | 'Tasks' | 'Messages' | 'Artifacts'
+export type SearchKind = 'Spaces' | 'Tasks' | 'Messages' | 'Artifacts' | 'Settings'
 /** Only the newest messages of a chat are scanned; older ones stay reachable by jumping to the chat itself. */
 export const SEARCH_MESSAGE_WINDOW = 500
 /** No more than this many hits of one kind are built before sorting, so a wide scope stays bounded. */
@@ -18,6 +18,9 @@ export interface SearchHit {
   chat?: string
   message?: string
   artifact?: string
+  /** a settings hit opens its page (section name) at its level */
+  setting?: string
+  level?: string
   at: number
 }
 
@@ -46,8 +49,12 @@ export function searchResults(snap: Snapshot, scope: SearchScope, q: string, cha
     const p = snap.places.find(p => p.id === id)
     return `${p?.name ?? id} · ${snap.machines.find(m => m.machine === p?.machine)?.name ?? p?.machine ?? ''}`
   }
+  // Settings defaults live at a level: Everywhere, a machine or a space (a chat reads its place's space). The scope
+  // picks the level, so a space's override is found there and not mixed into Everywhere's rows.
+  const level = scope.kind === 'machine' ? `m:${scope.id}` : scope.kind === 'space' ? scope.id : scope.kind === 'chat' ? sources.find(c => c.key === scope.id)?.place ?? 'all' : 'all'
+  const levelName = (l: string) => l === 'all' ? 'Everywhere' : snap.places.find(p => p.id === l)?.name ?? snap.machines.find(m => m.machine === l.slice(2))?.name ?? l
   const hits: SearchHit[] = []
-  const counts: Record<SearchKind, number> = { Spaces: 0, Tasks: 0, Messages: 0, Artifacts: 0 }
+  const counts: Record<SearchKind, number> = { Spaces: 0, Tasks: 0, Messages: 0, Artifacts: 0, Settings: 0 }
   const add = (hit: SearchHit) => {
     if (counts[hit.kind] >= SEARCH_HITS_PER_KIND) return
     counts[hit.kind]++
@@ -64,6 +71,23 @@ export function searchResults(snap: Snapshot, scope: SearchScope, q: string, cha
     for (const m of msgs) {
       if (m.waiting || !found.has(m.id)) continue
       add({ key: `m:${c.key}:${m.id}`, kind: 'Messages', label: searchExcerpt(messageText(m), q), context: `${c.label} · ${context(c.place)}`, place: c.place, chat: c.key, message: m.id, at: m.at ?? 0 })
+    }
+  }
+  // Settings are matched only by their words and where they open, never by their value: a value can hold a private
+  // instruction or a secret. With no query 'Recent items' stays as it was, so all 66 rows do not flood the sheet.
+  if (q.trim()) for (const section of snap.settings ?? []) {
+    if (section.level !== level) continue
+    for (const row of section.rows) {
+      if (words(q, row.label, row.key, row.hint, row.group, row.sub)) add({
+        key: `s:${section.level}:${section.name}:${row.key}`,
+        kind: 'Settings',
+        label: row.label,
+        context: `${section.name}${row.group ? ` · ${row.group}` : ''} · ${levelName(section.level)}`,
+        place: '',
+        setting: section.name,
+        level: section.level,
+        at: 0,
+      })
     }
   }
   return hits.sort((a, b) => b.at - a.at)
