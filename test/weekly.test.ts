@@ -19,6 +19,7 @@ import {
   leftovers,
   lowPriorityArgs,
   main,
+  mtimeOf,
   orderBySlowest,
   parseArgs,
   parseDur,
@@ -400,6 +401,7 @@ describe('the report and its tasks', () => {
     })
     const report = buildReport(run)
     expect(report).toContain('# Weekly full check · 2026-11-22T08:30:00.000Z')
+    expect(report).toContain('Took 8m20s.')
     expect(report).toContain('## Gate\nPASSED in 1m08s')
     expect(report).toContain('- tests ok (1m02s): Ran 400 tests across 80 files')
     expect(report).toContain('- docs skipped: gitleaks is missing')
@@ -544,6 +546,8 @@ describe('the run itself', () => {
     // a command this host does not have is one failed process, never a crash
     expect(realRun(['/nonexistent-shepherdr-weekly-command']).exitCode).not.toBe(0)
     expect(lowPriorityArgs(() => false)).toEqual([])
+    // an entry that went while /tmp was listed is no age, never an error that loses the whole listing
+    expect(mtimeOf('/nonexistent-shepherdr-weekly-entry')).toBe(0)
     expect(lowPriorityArgs(() => true)).toEqual(['nice', '-n', '19', 'ionice', '-c', '3'])
   })
 

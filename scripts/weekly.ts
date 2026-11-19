@@ -70,10 +70,19 @@ export function lowPriorityArgs(which: (cmd: string) => boolean = (c) => !!Bun.w
   return out
 }
 
-/** a folder's entries with their age; a folder that is not there, or an entry that went while it was listed, is nothing */
+/** a file's age, or 0 for one that went while its folder was being listed */
+export const mtimeOf = (file: string): number => {
+  try {
+    return lstatSync(file).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
+/** a folder's entries with their age; a folder that is not there is nothing */
 const listDir = (dir: string): Entry[] => {
   try {
-    return readdirSync(dir, { withFileTypes: true }).map((e) => ({ name: e.name, dir: e.isDirectory(), mtime: lstatSync(join(dir, e.name)).mtimeMs }))
+    return readdirSync(dir, { withFileTypes: true }).map((e) => ({ name: e.name, dir: e.isDirectory(), mtime: mtimeOf(join(dir, e.name)) }))
   } catch {
     return []
   }
@@ -566,7 +575,7 @@ export function main(argv: string[], overrides: Partial<Deps> = {}): number {
     leftovers: leftovers(d, base, branch),
     took: 0,
   }
-  run.took = d.clock() - started
+  run.took = Math.round((d.clock() - started) / 1000)
   const reds = redTasks(run)
   d.write(run.report, buildReport(run, reds))
   d.write(join(weeklyDir(common), 'state.json'), JSON.stringify({ at: run.at, commit, sample: probe.files.map((f) => f.file) } satisfies State))
