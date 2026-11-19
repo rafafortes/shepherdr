@@ -47,31 +47,30 @@ describe('one design across the screen', () => {
       return (hi + 0.05) / (lo + 0.05)
     }
     const floor = 4.5
-    // the quiet words (times, ids, hints) sit on the page, the canvas, the well and the agent's bubble
-    expect(contrast(light['--fg3'], light['--bg'])).toBeGreaterThanOrEqual(floor)
-    for (const surface of ['canvas', 'well', 'bubble']) expect(contrast(light['--fg3'], light[`--${surface}`])).toBeGreaterThanOrEqual(floor)
-    for (const surface of ['bg', 'well', 'bubble']) expect(contrast(dark['--fg3'], dark[`--${surface}`])).toBeGreaterThanOrEqual(floor)
+    const surfaces = ['bg', 'canvas', 'well', 'bubble'] as const
+    // the quiet words (times, ids, hints) and the status text twins sit on the page, the canvas, the well
+    // and the agent's bubble: the browser panel's error, for one, is drawn on the bubble
+    for (const theme of [light, dark])
+      for (const surface of surfaces) {
+        expect(contrast(theme['--fg3'], theme[`--${surface}`])).toBeGreaterThanOrEqual(floor)
+        for (const token of ['work', 'ready', 'need']) expect(contrast(theme[`--${token}-fg`], theme[`--${surface}`])).toBeGreaterThanOrEqual(floor)
+      }
     // the accents themselves are dots and fills: byte-for-byte unchanged, with darker twins for text
     expect([light['--work'], light['--ready'], light['--need']]).toEqual(['#e2a336', '#30a46c', '#e5484d'])
     expect([dark['--work'], dark['--ready'], dark['--need']]).toEqual(['#f5b544', '#3dd68c', '#ff6369'])
-    for (const token of ['work', 'ready', 'need']) {
-      expect(contrast(light[`--${token}-fg`], light['--bg'])).toBeGreaterThanOrEqual(floor)
-      expect(contrast(dark[`--${token}-fg`], dark['--bg'])).toBeGreaterThanOrEqual(floor)
+    for (const token of ['work', 'ready', 'need'])
       // dark maps the twin to the accent, so changing the utility cannot change dark
       expect(dark[`--${token}-fg`]).toBe(dark[`--${token}`])
-    }
-    // italic code comments are deliberately quiet: light now sits beside dark's ~3.9:1 instead of 2.46:1,
-    // with the residual left in the axe allowlist (A11Y-07) rather than gamed into passing
-    for (const theme of [light, dark]) {
-      const c = contrast(theme['--syn-com'], theme['--well'])
-      expect(c).toBeGreaterThanOrEqual(3.8)
-      expect(c).toBeLessThan(floor)
-    }
+    // italic code comments are deliberately quiet: light now sits beside dark's ~3.9:1 instead of 2.46:1;
+    // the residual is reported for the axe allowlist (A11Y-07), not gamed into passing. This floor leaves
+    // room for a later change to make comments fully readable instead of locking today's number in place
+    for (const theme of [light, dark]) expect(contrast(theme['--syn-com'], theme['--well'])).toBeGreaterThanOrEqual(3.8)
     // the text utilities that used the accent colours use their readable twins now
     const add = readFileSync(join(root, 'plugins/places/add.tsx'), 'utf8')
     expect(source['src/ui.tsx']).toContain('whitespace-nowrap text-work-fg tabular-nums')
     expect(add).toContain('if (error) return <span className="text-need-fg">{error}</span>')
     expect(add).toContain('if (t?.error) return <span className="text-need-fg">{t.error}</span>')
+    expect(add).toContain("nameBad && shownName ? 'text-need-fg' : 'text-fg3'")
     expect(source['plugins/browser/client.tsx']).toContain('<Small className="text-ready-fg">{sent}</Small>')
     expect(source['plugins/browser/client.tsx']).toContain('<Small className="text-need-fg">{draft.error}</Small>')
     expect(source['plugins/artifacts/client.tsx'].match(/className="text-need-fg!"/g)?.length).toBe(2)

@@ -46,7 +46,7 @@
   --bg: #fff;
   --fg: #09090b;
   --fg2: #52525b;
-  /* the faintest words (ids, times, hints, placeholders): 4.5:1 on the page, the canvas and the well, so they read */
+  /* the faintest words (ids, times, hints, placeholders): 4.5:1 on page, canvas, well and bubble, so they read */
   --fg3: #6f6f78;
   --line: rgb(9 9 11 / 0.07);
   --line2: rgb(9 9 11 / 0.12);

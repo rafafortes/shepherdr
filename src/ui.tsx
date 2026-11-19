@@ -430,7 +430,7 @@ export function etaShort(eta: number) {
 
 /**
  * A task row's status mark: working, the dot's pie shows the % done and the minutes left sit small under it, in the
- * dot's orange, level with the status line, centred on the dot without widening its column; the status line keeps
+ * readable work text colour, level with the status line, centred on the dot without widening its column; the status line keeps
  * the row's whole width. Anything else is the dot alone; frozen while it waits on you, the % it stopped at stays in its
  * pie (still working) or, on the needs-you mark, for screen readers: its line says what it asks.
  */

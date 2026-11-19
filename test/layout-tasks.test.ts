@@ -55,14 +55,14 @@ describe.skipIf(!browser)("the agent's status line, % done and minutes left", ()
       expect(wtext).not.toContain('40%')
       const dot = working.getByRole('img', { name: 'Working, 40% done' })
       expect(await dot.evaluate((d) => getComputedStyle(d).getPropertyValue('--p').trim())).toBe('40%')
-      // the minutes: small, under the dot and centred on it, in the dot's orange, level with the status line
+      // the minutes: small, under the dot and centred on it, in the readable work text colour, level with the status line
       const eta = working.getByText('12m', { exact: true })
       const [d, e, line] = [(await dot.boundingBox())!, (await eta.boundingBox())!, (await working.getByText('Tracing why mute ends the call', { exact: true }).boundingBox())!]
       expect(e.y).toBeGreaterThanOrEqual(d.y + d.height)
       expect(Math.abs(e.x + e.width / 2 - (d.x + d.width / 2))).toBeLessThan(1)
       expect(Math.abs(e.y + e.height / 2 - (line.y + line.height / 2))).toBeLessThan(3)
       expect(e.height).toBeLessThan(line.height + 1)
-      const work = await dot.evaluate((x) => getComputedStyle(x).getPropertyValue('--work').trim())
+      const work = await dot.evaluate((x) => getComputedStyle(x).getPropertyValue('--work-fg').trim())
       expect(await eta.evaluate((x, c) => {
         const probe = document.createElement('span')
         probe.style.color = c
@@ -108,7 +108,7 @@ describe.skipIf(!browser)("the agent's status line, % done and minutes left", ()
       await page.close()
     }, 30_000)
 
-  test('a narrow tasks sidebar keeps the age whole at the row\'s end and the minutes whole under the dot, in its orange (light and dark)', async () => {
+  test('a narrow tasks sidebar keeps the age whole at the row\'s end and the minutes whole under the dot, in the readable work text colour (light and dark)', async () => {
     for (const scheme of ['light', 'dark'] as const) {
       const page = await browser!.newPage({ viewport: { width: 1440, height: 800 }, colorScheme: scheme })
       await page.goto(`http://127.0.0.1:${server!.port}/?place=vm-str/home`)
@@ -136,12 +136,12 @@ describe.skipIf(!browser)("the agent's status line, % done and minutes left", ()
       const box = (await end.boundingBox())!
       expect(box.width).toBeGreaterThan(10)
       expect(box.x).toBeGreaterThanOrEqual(row.x)
-      // in the dot's orange, apart from what it does, in either theme
+      // in the readable work text colour, apart from what it does, in either theme
       const color = (l: import('playwright-core').Locator) => l.evaluate((e) => getComputedStyle(e).color)
       expect(await color(end)).not.toBe(await color(working.getByText('Tracing why mute ends the call', { exact: true })))
       expect(await color(end)).toBe(await working.getByRole('img', { name: /Working/ }).evaluate((d) => {
         const probe = document.createElement('span')
-        probe.style.color = getComputedStyle(d).getPropertyValue('--work')
+        probe.style.color = getComputedStyle(d).getPropertyValue('--work-fg')
         document.body.append(probe)
         const c = getComputedStyle(probe).color
         probe.remove()
