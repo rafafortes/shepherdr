@@ -453,6 +453,32 @@ describe('the line holds every start Shepherdr makes by itself', () => {
     expect(w.started.some((s) => s.key === `${second.id}/Agent`)).toBe(false)
   })
 
+  test('the spacing restates what truly holds each task: one its own space cap holds keeps that', async () => {
+    const w = fresh({ 'machine.maxTasks': '2', 'machine.startEvery': '0' })
+    const { a, b } = await twoSpaces(w)
+    expect(w.settings.set('space.maxTasks', '1', { space: b.name }).ok).toBe(true)
+    // B's one task and one of A's hold the machine's two slots, so the two behind them wait for a slot
+    const bAtWork = w.engine.add({ project: b.name, title: 'B at work', by: 'test' })
+    await until(() => w.started.some((s) => s.key === `${bAtWork.id}/Agent`))
+    w.brief(`${bAtWork.id}/Agent`)
+    const aAtWork = w.engine.add({ project: a.name, title: 'A at work', by: 'test' })
+    await until(() => w.started.some((s) => s.key === `${aAtWork.id}/Agent`))
+    w.brief(`${aAtWork.id}/Agent`)
+    const aNext = w.engine.add({ project: a.name, title: 'A next', by: 'test' })
+    const bNext = w.engine.add({ project: b.name, title: 'B next', by: 'test' })
+    expect([aNext.held?.why, bNext.held?.why]).toEqual(['slots', 'slots'])
+    // the spacing of a start made just now, so the freed slot waits for the gap rather than starting at once
+    expect(w.settings.set('machine.startEvery', '2 min').ok).toBe(true)
+    // one of A's frees a slot: A's next waits for the gap, and B's next for its own space's cap, which is what holds it
+    await w.engine.done(aAtWork.id, 'Nothing to change.')
+    w.agentIs(`${aAtWork.id}/Agent`, 'idle')
+    const t0 = Date.now()
+    w.engine.release(t0)
+    expect([aNext.held?.why, bNext.held?.why]).toEqual(['turn', 'space'])
+    expect(w.engine.subOf(aNext)).toBe('Waiting for the gap between starts')
+    expect(w.engine.subOf(bNext)).toBe(`Waiting for a free slot of ${b.name}`)
+  })
+
   test('a scheduled task whose time comes joins the line, held for its turn', async () => {
     const w = fresh({ 'machine.maxTasks': '1', 'machine.startEvery': '0' })
     const { a, b } = await twoSpaces(w)

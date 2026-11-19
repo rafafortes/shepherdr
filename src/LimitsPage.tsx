@@ -770,6 +770,9 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
     inFlight.current = true
     setMoving(true)
     setMoveError('')
+    // counted before it is sent: a read that came back from before this move (or from during it) says nothing of the rows
+    // it makes, so it leaves the arrows off; only the move's own answer and the read it asks for bring them back
+    moved.current++
     const r = (await act({ type: 'space-order', moves }).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string }
     // written: the arrows stay off until the page has read the rows the write made (the snapshot it brings); refused: no
     // snapshot comes, so they come back now with the reason
@@ -777,10 +780,7 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
       inFlight.current = false
       setMoving(false)
       setMoveError(r?.error ?? "That didn't go through.")
-    } else {
-      moved.current++
-      askNow.current()
-    }
+    } else askNow.current()
   }
   // the reads of the view: one at a time, at most one every LIMITS_EVERY while something changed (one trailing read,
   // never a queue of them), at once for a write made here, and none while the tab is hidden: shown again, it reads once

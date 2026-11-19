@@ -1916,8 +1916,8 @@ export class Engine extends Emitter<Events> {
     return { space, shown: this.places.shownName(space), max, working: this.workingIn(space, pass) }
   }
 
-  /** a task's place in this machine's queue: its space's priority, or past the end when the space has none (a line sorts
-   *  by this, so it reads the settings once per space there, never per comparison) */
+  /** a task's place in this machine's queue: its space's priority, or none when the space has none (a review line sorts
+   *  by this and is short, so it reads the settings per comparison; the tasks' own line sorts with placeOrder) */
   private spaceOrder(space: string) {
     return this.settings.spacePriority(space)
   }
@@ -2237,7 +2237,8 @@ export class Engine extends Emitter<Events> {
     this.releasing = true
     try {
       // the line, computed once for this pass
-      const order = this.startLine(now).order
+      const line = this.startLine(now)
+      const order = line.order
       for (const t of order) {
         const r = this.room(t)
         // its own space waits for its models, or its cap is full, or its model's: another space's or model's may still start
@@ -2258,12 +2259,15 @@ export class Engine extends Emitter<Events> {
         }
         // one first in line doesn't wait for the spacing either
         if (!t.priority && !this.startsNow(now)) {
-          // the room is there and the spacing is all that holds them: their rows say the gap, not the slot or the load
-          // they just came out of (hold and startGate say the same when a task joins the line)
+          // the room is there and the spacing is all that holds them now: each row says what truly holds it — the wait of
+          // its own space or model when it has one (the line's own wait), and the gap otherwise (hold and startGate say
+          // the same when a task joins the line). A task ahead of it was started just now, so nothing else is left to say
           let restated = false
           for (const x of order) {
-            if (!x.held || x.held.why === 'turn' || !MACHINE_WIDE.has(x.held.why)) continue
-            x.held.why = 'turn'
+            if (!x.held) continue
+            const why = line.own.get(x.id) ?? 'turn'
+            if (x.held.why === why) continue
+            x.held.why = why
             restated = true
           }
           if (restated) this.save()

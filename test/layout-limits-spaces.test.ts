@@ -410,6 +410,20 @@ const letViewsGo = (page: Page) =>
     for (const go of list) go()
   })
 
+/** the write of a move, held at its fetch until the test lets it go, as a slow server would (the read of it is held by
+ *  holdViews' own gate, so a test can decide which answer lands first) */
+async function holdMoves(page: Page) {
+  const w = { release: undefined as undefined | (() => void), asked: 0 }
+  await page.route('**/api/action', async (route) => {
+    const a = route.request().postDataJSON() as { type?: string }
+    if (a.type !== 'space-order') return route.continue()
+    w.asked++
+    await new Promise<void>((go) => (w.release = go))
+    return route.continue()
+  })
+  return w
+}
+
 describe.skipIf(!browser)('Settings → Limits: a move waits for an answer the write could not have overtaken (SHE-165)', () => {
   test('the arrows come back with the rows the move made, not with an answer sent before it', async () => {
     const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
@@ -445,6 +459,55 @@ describe.skipIf(!browser)('Settings → Limits: a move waits for an answer the w
       await table.getByRole('button', { name: /^gtm · Priority: 2/ }).waitFor()
       expect(await table.getByRole('button', { name: 'Move gtm up' }).isEnabled()).toBe(true)
       expect(await table.getByRole('button', { name: 'Move herdr-projects down' }).isEnabled()).toBe(true)
+    } finally {
+      await gateViews(page, false)
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await page.close()
+    }
+  })
+  test('the arrows stay off while the write is out, though a read sent before it lands meanwhile', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await holdViews(page)
+      const write = await holdMoves(page)
+      await openLimits(page)
+      await set('space.priority', '1', 'p:vm-str:gtm')
+      await set('space.priority', '2', 'p:vm-str:herdr-projects')
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
+      // a read is out, and the move is written while it is: its rows are the ones before the move, so its answer is no
+      // reason to let a second tap through
+      await gateViews(page, true)
+      world.emit('snapshot')
+      await until(
+        () => heldViews(page),
+        (n) => n >= 1,
+        10_000,
+      )
+      await table.getByRole('button', { name: 'Move herdr-projects up' }).click()
+      await until(
+        async () => write.asked,
+        (n) => n >= 1,
+        10_000,
+      )
+      // that read lands while the write is still out: every arrow is off, as the answer says nothing of the move
+      await letViewsGo(page)
+      await settled(page)
+      expect(await table.getByRole('button', { name: 'Move gtm up' }).isDisabled()).toBe(true)
+      expect(await table.getByRole('button', { name: 'Move herdr-projects down' }).isDisabled()).toBe(true)
+      // the write answers, the page reads the rows it made, and the arrows come back
+      await gateViews(page, false)
+      write.release?.()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 1/ }).waitFor({ timeout: 10_000 })
+      await until(
+        () => table.getByRole('button', { name: 'Move gtm up' }).isEnabled(),
+        (on) => on,
+        10_000,
+      )
     } finally {
       await gateViews(page, false)
       await set('space.priority', null, 'p:vm-str:gtm')
