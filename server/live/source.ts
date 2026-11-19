@@ -244,6 +244,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   constructor() {
     super()
     if (process.env.NODE_ENV !== 'test') this.stall.start()
+    // a route provisioned while the loop stalls is answered late by its own timers: bindRoute waits for the loop to keep
+    // up before it trusts a check, without polling herdr any more often than it does today
+    this.agents.healthy = () => !this.stall.stalls.length || Date.now() - this.stall.stalls.at(-1)!.at > 1500
     this.timers.push(setInterval(() => void this.drainRequestedNews(), 1000))
     this.agents.secretScope = (chat) => {
       const space = /^[^/]+\/(Agent|Reviewer)$/.test(chat) ? this.engine.task(chat.split('/')[0])?.project : this.places.find(chat)?.id === chat ? chat : undefined
@@ -744,7 +747,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const out: Need[] = []
     const built = new Map<string, Chat>()
     const chatOf = (chat: string) => built.get(chat) ?? built.set(chat, this.chats.chat(chat)).get(chat)!
-    const open = (chat: string) => (this.chats.hasOpenQuestion(chat) ? new Map(openCards(chatOf(chat)).map((m) => [m.question.id, m])) : new Map())
+    // open cards from the raw log (SHE-56): no full chat build for the map, the cached chat serves only a coordinator's
+    // last-said lookup below
+    const open = (chat: string) => new Map(this.chats.openCardsQuick(chat).map((m) => [m.question.id, m]))
     // a coordinator: the cards it asked that still wait, then the CLI's own menu, then a menu nobody reads
     for (const p of [placeId.home(), ...this.places.spaces.map((x) => placeId.space(x.name))]) {
       if (only && p !== only) continue
@@ -909,7 +914,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           ended: () => this.waitEnded(n, x?.qid),
           // a card still open while its task reads Working (a typed message holds the turn): keep the wait, never say
           // it ended or alert it twice when the task needs you again
-          stillOpen: () => !!n.question && openCards(this.chats.chat(n.chat)).some((m) => m.question.id === n.question!.id),
+          stillOpen: () => !!n.question && this.chats.openCardsQuick(n.chat).some((m) => m.question.id === n.question!.id),
         }
       })
     this.waitAlerts.look(waits, { command, after: this.settings.alertAfter(), doneCommand: this.settings.doneCommand(), skipDone: skipped }, now)

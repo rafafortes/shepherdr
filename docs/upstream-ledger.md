@@ -640,3 +640,27 @@ there is no patch to cherry-pick there either. Ported the idea to 2.0's code (SH
 live agent's cwd from herdr and resolves each path's real path before the remembered link, every CLI's finder tries the
 candidate folders in order, and a running chat whose log cannot be read says so in one calm line instead of looking
 like a lost message.
+
+## Not from upstream: a stalled server must not fail a launch, built here
+
+Checked 2026-11-18 (SHE-56) on `upstream/main` (3.x, through 3.1.44 `b2797aaa`) and `upstream/v2.0` (`ebb17d58`), their
+histories and the public issues and pull requests (read only): nothing for this. The `v2.0` line carries the same code we
+started from — `bindRoute` throws `ROUTING_FAILURE` on any non-zero `route.pl --bind` result, and `repairRoutes` re-binds
+every 30 s — and its only later routing commit is `e4fd736a` (SHE-269, a *different machine's* command routing, already
+merged here in PR #2); there is no late-write check, no backoff and no stall-aware wait anywhere on that line. Upstream
+3.x has no `helper/route.pl`, no private agent command routing and no herdr socket client at all (its agents run in
+herdr-core's terminals, its code is `core/`, `mods/` and a Python `herdr-task`), so there is nothing to port. The commits
+since the last intake pass (3.1.36 to 3.1.44) are voice, glance feed, notification and release work; none names a stalled
+event loop, a route write or a launch that fails after its write landed. `docs/upstream.md`'s four criteria also fail for
+3.x here (terminal plugin, our login, pi, polylog-bridge's CLI).
+
+Ours: a non-zero `--bind` is never evidence of absence on its own. `helper/route.pl --check` reads the file for that pid
+with the same stamp check the CLI uses (and the same `abs_path` the write canonicalized, so a symlinked cwd is no
+absence); `bindRoute` waits for the loop to be healthy again, verifies the file, and retries the write a couple of
+times with backoff under a 60 s ceiling (the repair pass's is short), using timers (no busy-wait, no extra herdr
+polling). A route that is really absent still fails with `ROUTING_FAILURE`, and the idle agent is closed first — the
+launch's own bind runs inside a restart or a recovery too, so no path leaves a healthy CLI without a brief and a
+task that only says "Went wrong". A task's own harness is never overwritten by Settings on a relaunch or a recovery.
+The worst remaining event-loop cost was `tellWaits` rebuilding full screen chats to read their open cards: it now
+reads them from the raw log (`chats.openCardsQuick`), riding the same rows the screen's chat builds, with the one
+residue a logged command matched to the log's own line can move a row of yours a moment sooner than its post.

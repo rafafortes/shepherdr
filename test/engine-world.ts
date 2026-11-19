@@ -53,7 +53,7 @@ export function repo() {
 /** boot: what herdr says once the agent is ready; any but working leaves its brief waiting to go in */
 export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
   process.env.SHEPHERDR_HOME = base
-  const started: { key: string; first?: string; cwd: string; system?: string; pane?: string }[] = []
+  const started: { key: string; first?: string; cwd: string; system?: string; pane?: string; kind: string; model?: string; effort?: string }[] = []
   const status: Record<string, string> = {}
   const sent: { key: string; text: string }[] = []
   const records: Record<string, { kind: string; model?: string; started: number; finished?: boolean; sessionId?: string; logs: string[] }> = {}

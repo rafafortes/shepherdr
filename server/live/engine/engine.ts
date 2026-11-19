@@ -2182,18 +2182,22 @@ export class Engine extends Emitter<Events> {
       } else first = first ? `${first}\n\n${moved}` : moved
     }
     const env = this.env(key)
-    // a task from before tasks kept their own CLI starts on Settings'
-    const h = t.agent ?? this.settings.harness('task', this.nameOf(t))
-    trustWorktree(t.worktree!, as?.kind ?? rec?.kind ?? h.kind, env)
+    const set = this.settings.harness('task', this.nameOf(t))
+    // The harness this launch really uses, in one place: a restart or a backup's own choice, else what its record already
+    // runs (a relaunch after a stop or a recovery), else the task's own --agent/--model/--effort, else Settings. Settings
+    // only ever goes in `set` (the restart hint); it can never write kind/model/effort on a relaunch or a recovery, so
+    // the record always shows the CLI and model that really run in the pane.
+    const own = as ?? (rec ? { kind: rec.kind, model: rec.model, effort: rec.effort } : (t.agent ?? set))
+    trustWorktree(t.worktree!, own.kind, env)
     const spec: Spec = {
       access: 'full',
       key,
       name: rec?.name ?? `shep-${t.id.toLowerCase()}`,
-      kind: as?.kind ?? rec?.kind ?? h.kind,
-      // only its first start (or a backup's, on its CLI's own model): later, its own chat's pickers are what count
-      ...(as ? { model: as.model ?? 'default', effort: as.effort } : rec ? {} : { model: h.model, effort: h.effort }),
+      kind: own.kind,
+      // a restart to 'default' clears a model the record kept; otherwise what it ran is what it runs again
+      ...(as ? { model: as.model ?? 'default', effort: as.effort } : { model: own.model, effort: own.effort }),
       // what Settings said when it started on them: a change since is offered as a restart (restart.ts)
-      ...(as || !rec ? { set: this.settings.harness('task', this.nameOf(t)) } : {}),
+      ...(as || !rec ? { set } : {}),
       cwd: t.worktree!,
       workspace: labelOf(t),
       tab: 'Agent',

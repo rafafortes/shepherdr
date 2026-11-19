@@ -552,28 +552,6 @@ export class Chats {
     return this.reading.has(key)
   }
 
-  /** fast precheck for `needs()`: false guarantees `openCards(this.chat(key))` is empty without building the chat */
-  hasOpenQuestion(key: string): boolean {
-    if (this.menus.has(key)) return true
-    this.pull(key)
-    const l = this.log(key)
-    const since = this.lastClose(key)
-    if (l.posted.some((p) => p.question && p.question.sent === undefined && l.answers[p.question.id] === undefined && p.at >= since)) return true
-    const ev = this.events.get(key) ?? []
-    let answered: Set<string> | undefined
-    for (let i = ev.length - 1; i >= 0; i--) {
-      const e = ev[i]
-      if (e.kind !== 'question' || e.at + Math.max(0, e.items.length - 1) < since) continue
-      answered ??= new Set(ev.filter((x) => x.kind === 'answered').map((x) => x.id))
-      if (answered.has(e.id)) continue
-      for (let j = 0; j < e.items.length; j++) {
-        const qid = e.items.length > 1 ? `${e.id}:${j}` : e.id
-        if (l.answers[qid] === undefined && e.at + j >= since) return true
-      }
-    }
-    return false
-  }
-
   /** the question the CLI asks with its own tool, still open: nothing reached the agent after it */
   openQuestion(key: string): { id: string; at: number; items: { question: string; options: { label: string }[]; multiSelect: boolean }[] } | undefined {
     this.pull(key)
@@ -646,6 +624,92 @@ export class Chats {
       if (q.id.startsWith('plan:') || q.id.startsWith('ask:')) return p
     }
     return undefined
+  }
+
+  /**
+   * The open question cards, from the raw log and events without building the whole screen chat. What Needs you, its
+   * alert command and the doctor read every few seconds: on a busy home a full `chat()` builds hundreds of messages,
+   * replies, activity and jobs for each of a dozen chats and held the loop for seconds (`tellWaits` in stall.ts).
+   * The card list is the same one `openCards(chat())` gives: cards the log or events carry, still unanswered and with no
+   * word of yours (or another agent's) after them — a card posted with no words rides the first free agent reply of its
+   * turn and closes as of it, exactly as the screen's rows do (`hostAt` here walks the same log rows `hostFor` does:
+   * an agent row only when chat() shows one, a card's own words, rows that already ask, hosts taken in posted order); a
+   * terminal menu where there is no CLI question. The residue: a logged command matched to the log's own line can move
+   * a row of yours a moment earlier than its post, so a card between the two can close here a tick sooner than the
+   * screen closes it. The screen still calls `chat()` for the chat the person looks at, so nothing there changes.
+   */
+  openCardsQuick(key: string): (Message & { question: Question })[] {
+    this.pull(key)
+    const ev = this.events.get(key) ?? []
+    const l = this.log(key)
+    // the same closure times chat() carries in Chat.closedAt — lastClose is cached per log revision, so repeated looks
+    // never rescan thousands of events: hidden notes and app answers are no visible rows
+    const lastClose = this.lastClose(key)
+    const closed = (at: number) => at < lastClose
+    // a text-less posted card rides the agent reply of its turn (chat(): hostFor): only then are the raw rows needed
+    const riders = l.posted.some((p) => p.question && !p.text && !p.card?.aside && !p.card?.id.startsWith('advice-note:'))
+    // the raw rows hostFor walks in chat(): the agent's words (a row only when chat() shows one: agentLines of the
+    // stripped text, and a card's own words), the rows that already ask (a CLI question, or the reply a card posted
+    // before this one rides — a card's own question never reaches its row there), and the lines of yours or another
+    // agent's that break its search
+    const rows = riders ? [
+      ...l.posted.filter((p) => !p.files?.length).map((p) => ({ at: p.at, agent: p.who !== 'you', text: p.who !== 'you' ? (p.card ? cardMessage(p.card, p.at).text ?? '' : p.text ?? '') : '', asks: !!p.question && !p.card })),
+      ...ev.filter((e) => e.kind === 'agent' || e.kind === 'peer' || e.kind === 'question' || (e.kind === 'user' && yours(e.text))).map((e) => ({ at: e.at, agent: e.kind === 'agent' || e.kind === 'question', text: e.kind === 'agent' ? agentLines(stripHidden(e.text)).text ?? '' : '', asks: e.kind === 'question' })),
+    ].sort((a, b) => a.at - b.at) : []
+    // the closure times themselves, for the `until` that cuts a host search at the first thing that answers
+    const closedAt = riders ? [
+      ...ev.filter((e) => e.kind === 'peer' || (e.kind === 'user' && wordsOf(e.text))).map((e) => e.at),
+      ...l.posted.filter((p) => p.who === 'you').map((p) => p.at),
+    ].sort((a, b) => a - b) : []
+    const taken = new Set<number>()
+    const hostAt = (at: number, until: number | undefined) => {
+      for (const r of rows) {
+        if (r.at < at - 1000) continue
+        if (until !== undefined && r.at >= until) return undefined
+        if (!r.agent) return undefined
+        if (r.asks || taken.has(r.at)) continue
+        if (r.text) { taken.add(r.at); return r.at }
+      }
+      return undefined
+    }
+    const out: (Message & { question: Question })[] = []
+    let answered: Set<string> | undefined
+    const questions = ev.filter((e): e is Extract<LogEvent, { kind: 'question' }> => e.kind === 'question')
+    for (const e of ev) if (e.kind === 'answered') (answered ??= new Set<string>()).add(e.id)
+    for (const e of questions) {
+      e.items.forEach((it, i) => {
+        const qid = e.items.length > 1 ? `${e.id}:${i}` : e.id
+        // a picked or terminal-answered question is not open in the screen's chat either (its `sent` is set there)
+        if (l.answers[qid] !== undefined || answered?.has(e.id) || closed(e.at + i)) return
+        out.push({
+          id: `${e.id}#${i}`,
+          who: 'agent',
+          at: e.at + i,
+          question: { id: qid, title: it.question, kind: 'Question', choices: it.options, multi: it.multiSelect, other: it.allowCustom, to: this.nameOf(key) },
+        })
+      })
+    }
+    for (const p of l.posted) {
+      if (!p.question) continue
+      // the same two skips openCards gives a note beside the questions and an advisor's own note
+      if (p.card?.aside || p.card?.id.startsWith('advice-note:')) continue
+      const q = withAnswer(p.question, l, this.answeredIn)
+      // no words of its own: it rides the first free agent reply of its turn (chat(): hostFor) and takes that row,
+      // answered or not, exactly as chat() takes it — a card posted next within that second must not land on it
+      const at = p.text ? p.at : (hostAt(p.at, closedAt.find((t) => t > p.at)) ?? p.at)
+      if (q.sent !== undefined || closed(at)) continue
+      out.push({ ...p, who: 'agent', at, question: q })
+    }
+    const menu = this.menus.get(key)
+    if (menu && !this.openQuestion(key)) {
+      const id = menuId(key, menu)
+      const kind = this.agents.record(key)?.kind ?? 'claude'
+      out.push({
+        id, who: 'agent', at: Date.now(),
+        question: { id, title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, kind: 'Form', choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: this.nameOf(key), asks: `${CLI_NAME[kind] ?? kind} asks`, noDismiss: this.startScreens.has(key) || !menu.choices.length || undefined },
+      })
+    }
+    return out.sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
   }
 
   /** what cut off the agent's last turn (its provider failed), when nothing began since; never one from before it last

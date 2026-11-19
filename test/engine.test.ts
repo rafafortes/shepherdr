@@ -581,11 +581,13 @@ describe("a task's CLI, model and effort", () => {
     expect(t4.agent).toEqual({ kind: 'claude', model: 'claude-opus-5-5', effort: 'max' })
     w.settings.set('task.model', null)
     await until(() => [t3, t4].every((x) => w.started.some((s) => s.key === `${x.id}/Agent`)))
-    // started again later (its chat may have picked another model since): what its record holds counts
+    // started again later (its chat may have picked another model since): what its record holds counts, not Settings
     w.agentIs(key, 'gone')
     await w.engine.resume(t.id)
     const again = w.started.filter((s) => s.key === key).at(-1)!
-    expect('model' in again).toBe(false)
+    // SHE-56: the record is now written from the harness the launch used, so the key is always present; the value is
+    // still the one this task started on, not Settings' (which was cleared above)
+    expect(again.model).toBe('claude-opus-5-5')
   })
 })
 
