@@ -35,7 +35,8 @@ import { inMins, type Retry } from '../retry.ts'
 import { pastTimes } from '../estimates.ts'
 import { backupModelOf, chainPairs, CLI_NAME, kindOf, type Settings } from '../settings.ts'
 import { findModel, knowsModels } from '../models.ts'
-import { keyOf, providerName } from '../models-summary.ts'
+import { andWords, keyOf, providerName } from '../models-summary.ts'
+import { comparePlace, placeOrder } from '../../../shared/space-order.ts'
 import { allBlocked, blockedOnly, capWords, choose, waitShort, waitWords, type Blocked, type Choice, type Option, type Run } from './choose.ts'
 import { chainWords, fitHarness, harnessWords, recentChat, sameHarness } from '../restart.ts'
 import * as G from './git.ts'
@@ -514,9 +515,13 @@ const trainLog = (line: string) => console.error(`shepherdr: ${line}`)
 const pathList = (files: string[]) => (files.length > 3 ? `${files.slice(0, 3).join(', ')} and ${files.length - 3} more` : files.join(', '))
 
 /** why a task waits to start: its slots are taken, the machine is busy, every model of its space ran out (a start
- *  would only be cut off as well), its tasks that were cut off go back to work first (source.ts, return.ts), or its
- *  space's own cap (space.maxTasks, inside the machine's) is full: another space's task may still start */
-export type HeldWhy = 'slots' | 'machine' | 'models' | 'resume' | 'space' | 'model' | 'blocked' | 'zero' | 'spaceZero'
+ *  would only be cut off as well), its tasks that were cut off go back to work first (source.ts, return.ts), its
+ *  space's own cap (space.maxTasks, inside the machine's) is full (another space's task may still start), or its turn in
+ *  the line has not come (tasks ahead of it start first, one every machine.startEvery) */
+export type HeldWhy = 'slots' | 'machine' | 'models' | 'resume' | 'space' | 'model' | 'blocked' | 'zero' | 'spaceZero' | 'turn'
+
+/** the held reasons the machine gives every task alike: while one holds, nothing on it starts, so no task is stepped over */
+const MACHINE_WIDE = new Set<HeldWhy>(['slots', 'machine', 'zero'])
 /** a reviewer of a task's chain: its step (0: its own reviewer, n: its backup n) and its harness */
 export interface ReviewStep {
   n: number
@@ -536,6 +541,7 @@ export interface Round {
 
 export const HELD = {
   slots: 'Waiting for a free slot',
+  turn: 'Waiting for its turn',
   machine: 'Waiting for the machine',
   models: 'Waiting: every model ran out',
   resume: 'Waiting: cut-off tasks go back to work first',
@@ -545,6 +551,9 @@ export const HELD = {
   zero: 'This machine is set to 0 tasks',
   spaceZero: 'Its space is set to 0 tasks',
 } as const
+
+/** a task held only by the spacing between starts (machine.startEvery), with nothing ahead of it: its line says so */
+export const TURN_GAP = 'Waiting for the gap between starts'
 
 /** queued tasks are first looked at once herdr has told which agents are alive: a go sent before would start a second */
 const RECHECK_FIRST = 15_000
@@ -670,6 +679,29 @@ const LATER = "Don't start yet: wait for a go."
 
 /** who a `task tell` comes from, when an agent's own shell runs it: what it says about itself (chatlines.FromAgent) */
 export type TellFrom = { name: string; pane?: string; space?: string; task?: string }
+
+/**
+ * What one computation of the machine's line reads once for every task in it, instead of once per task: how many tasks
+ * work in each space, and the runs that hold the models' caps. A line of 200 held tasks on a machine of 1,500 asks each
+ * of those 200 times otherwise, on every snapshot.
+ */
+export interface Pass {
+  inSpace: Map<string, number>
+  runs?: Map<string, Run>
+}
+
+/**
+ * The line tasks wait in to start on this machine, computed once for every row, table and pass that reads it: the tasks
+ * holding now in the order release() starts them (first in line, then each space's place in the queue — space.priority —
+ * then how long they waited), the wait each one has of its own (its space's cap, its own model, its space's models, which
+ * the ones behind it are stepped over for), and what is truly ahead of each: how many tasks that could start, and the
+ * spaces they are in, in the line's order.
+ */
+export interface StartLine {
+  order: TaskRec[]
+  own: Map<string, HeldWhy | undefined>
+  ahead: Map<string, { count: number; spaces: string[] }>
+}
 
 export class Engine extends Emitter<Events> {
   /** the folder its files are in, taken when it is made: a test's world keeps its own, whatever comes after it */
@@ -829,6 +861,9 @@ export class Engine extends Emitter<Events> {
   machine?: () => { busy?: 'cpu' | 'memory'; herdr: boolean } | undefined
   /** when a held task last started while load decided */
   private lastStart = 0
+  /** how many times this machine's line was computed: one per snapshot, however many held rows it builds (a test counts
+   *  it, see startLine) */
+  lineComputations = 0
   private releasing = false
   private checking = false
   /** a look at done tasks' pull requests is under way */
@@ -1016,7 +1051,7 @@ export class Engine extends Emitter<Events> {
    * the second line of a list row: what the status is about, in one short standard line, never the brief. While it
    * works, its agent's own status line (shepherdr status) takes its place on screen and in the CLI (source.ts).
    */
-  subOf(t: TaskRec, status = this.statusOf(t), full = false): string {
+  subOf(t: TaskRec, status = this.statusOf(t), full = false, line?: StartLine): string {
     const key = this.key(t)
     // parked: its agent was closed by the idle sweep (SHE-72) — the row says so, not a wait that only its next
     // message answers. Anything with a reason of its own keeps it: a card it asked is still the thing to answer, and
@@ -1037,7 +1072,7 @@ export class Engine extends Emitter<Events> {
       if (t.trouble) return fitStatus(`Went wrong: ${t.trouble}`)
       // a To do row is its title alone
       if (status === 'todo') return ''
-      if (status === 'queued') return this.holding(t) ? `${t.priority ? 'First in line · ' : ''}${this.heldLabel(t, full)}` : this.waitLine(t)
+      if (status === 'queued') return this.holding(t) ? `${t.priority ? 'First in line · ' : ''}${this.heldLabel(t, full, line)}` : this.waitLine(t)
       if (status === 'need' && this.queued(t) && this.agents.status(key) !== 'blocked') return fitStatus(this.halts(t).join(' · '))
       if (status === 'need') return this.reasonOf(key) ?? NEED.reply
       // why its last merge stopped, while its agent is on it: a conflict to rebase by hand, or the gate's refusal
@@ -1173,14 +1208,14 @@ export class Engine extends Emitter<Events> {
     return { run: { provider, providerName: providerName(provider), model: id === 'unknown' ? 'default' : id, ...(rec.effort ? { effort: rec.effort } : {}) } }
   }
 
-  view(t: TaskRec): Task {
+  view(t: TaskRec, line?: StartLine): Task {
     const status = this.statusOf(t)
     const key = this.key(t)
     const rec = this.agents.record(key)
     const cli = CLI_NAME[rec?.kind ?? t.agent?.kind ?? ''] ?? this.settings.get('task.agent', this.nameOf(t))
-    const sub = this.subOf(t, status)
+    const sub = this.subOf(t, status, false, line)
     // a row's line may be cut short: its title names what the line says in full (a held task's whole chain)
-    const longSub = this.subOf(t, status, true)
+    const longSub = this.subOf(t, status, true, line)
     const doneAt = status === 'done' ? (t.doneAt ?? t.updated) : undefined
     return {
       id: t.id,
@@ -1542,8 +1577,14 @@ export class Engine extends Emitter<Events> {
   }
 
   /** of the machine's working tasks, how many belong to one space (its key, as its settings name it) */
-  workingIn(space: string) {
-    return this.tasks.filter((t) => this.nameOf(t) === space && this.busy(t)).length
+  workingIn(space: string, pass?: Pass) {
+    if (!pass) return this.tasks.filter((t) => this.nameOf(t) === space && this.busy(t)).length
+    let n = pass.inSpace.get(space)
+    if (n === undefined) {
+      n = this.tasks.filter((t) => this.nameOf(t) === space && this.busy(t)).length
+      pass.inSpace.set(space, n)
+    }
+    return n
   }
 
   /** of those, how many wait on you */
@@ -1569,15 +1610,25 @@ export class Engine extends Emitter<Events> {
     // one first in line goes past the machine's load and pressure, and ahead of the cut-off tasks' way back; never past
     // a herdr that doesn't answer, nor its space's models all out (it would only be cut off)
     if (m && (!m.herdr || (m.busy && !t?.priority))) return { why: 'machine' }
-    const w = t ? this.startsWait?.(t) : undefined
-    if (w && !(w === 'resume' && t?.priority)) return { why: w }
-    // a first in line passes neither: its space's cap is as much its slots as the machine's are, nor its model's
-    const cap = t ? this.spaceCap(t) : undefined
-    if (cap && cap.max === 0) return { why: 'spaceZero' }
-    if (cap && cap.working >= cap.max) return { why: 'space' }
     if (!t) return {}
-    const c = this.taskChoice(t)
-    return 'wait' in c ? { why: blockedOnly(c) ? 'blocked' : 'model' } : {}
+    const w = this.ownWait(t)
+    return w ? { why: w } : {}
+  }
+
+  /**
+   * Why a task cannot start for its own reasons — its space's models all ran out, its space's cap (space.maxTasks) is
+   * full, its own model's cap is, or every model it may use is blocked — and none when its own limits leave it room. The
+   * machine's own room is room's. release() steps over a task held by one of these, so the tasks behind it start in the
+   * same pass, and the line counts only the ones that could start.
+   */
+  private ownWait(t: TaskRec, pass?: Pass): HeldWhy | undefined {
+    const w = this.startsWait?.(t)
+    if (w && !(w === 'resume' && t.priority)) return w
+    const cap = this.spaceCap(t, pass)
+    if (cap && cap.max === 0) return 'spaceZero'
+    if (cap && cap.working >= cap.max) return 'space'
+    const c = this.taskChoice(t, [], pass)
+    return 'wait' in c ? (blockedOnly(c) ? 'blocked' : 'model') : undefined
   }
 
   /** the model a task's agent runs on, as its usage is kept (keyOf): its live agent's model, else the one it starts on
@@ -1597,13 +1648,19 @@ export class Engine extends Emitter<Events> {
    * leases (lease). Each chat counts once. `except`: the chat that is choosing (a task's id, or a coordinator's key), which
    * does not count against itself; `plus`: runs started in the same pass
    */
-  runs(except?: string, plus: Run[] = []): Run[] {
+  runs(except?: string, plus: Run[] = [], pass?: Pass): Run[] {
+    const all = pass ? (pass.runs ??= this.runMap()) : this.runMap()
+    const mine = (chat: string, r: Run) => except !== undefined && (chat === except || r.id === except)
+    return [...[...all].filter(([chat, r]) => !mine(chat, r)).map(([, r]) => r), ...this.leased.values(), ...plus]
+  }
+
+  /** the runs of runs() that are not the one choosing: each chat's once (choose.ts), with no leases */
+  private runMap(): Map<string, Run> {
     const out = new Map<string, Run>()
-    const mine = (chat: string, id?: string) => except !== undefined && (chat === except || id === except)
-    for (const [chat, r] of this.claims) if (!mine(chat, r.id)) out.set(chat, r)
+    for (const [chat, r] of this.claims) out.set(chat, r)
     for (const t of this.tasks) {
       const chat = this.key(t)
-      if (!out.has(chat) && !mine(chat, t.id) && this.busy(t)) out.set(chat, { key: this.modelOfTask(t), space: this.nameOf(t) ?? '', role: 'task', id: t.id })
+      if (!out.has(chat) && this.busy(t)) out.set(chat, { key: this.modelOfTask(t), space: this.nameOf(t) ?? '', role: 'task', id: t.id })
     }
     for (const [chat, r] of Object.entries(this.agents.records)) {
       if (out.has(chat) || this.agents.status(chat) !== 'working') continue
@@ -1612,10 +1669,9 @@ export class Engine extends Emitter<Events> {
       // the task is done or archived (its agent is being closed); a chat of no task of this machine's is none
       const t = chat.includes('/') ? this.task(chat.split('/')[0]) : undefined
       if (chat.includes('/') && (!t || this.key(t) !== chat || ended(t) || t.archived || t.landing?.step === 'queue' || t.landing?.step === 'gate')) continue
-      if (mine(chat, t?.id)) continue
       out.set(chat, t ? { key: keyOf(r.kind, r.model), space: this.nameOf(t) ?? '', role: 'task', id: t.id } : { key: keyOf(r.kind, r.model), space: this.places.space(chat)?.name ?? '~', role: 'coordinator', id: chat })
     }
-    return [...out.values(), ...this.leased.values(), ...plus]
+    return out
   }
 
   /** a start or a switch is on its way to a model: its run counts there from now (runs), until unclaim once its agent is
@@ -1674,9 +1730,9 @@ export class Engine extends Emitter<Events> {
   }
 
   /** the choice among a role's options for a space, under the caps as they are now (choose.ts). `except`: a task's own run,
-   *  `plus`: the runs a pass has started already */
-  decide<T>(space: string, options: Option<T>[], except?: string, plus: Run[] = []): Choice<T> {
-    return choose<T>({ space, options, runs: this.runs(except, plus), machine: this.settings.maxAtOnce(), own: this.settings.maxAtOnce(space) })
+   *  `plus`: the runs a pass has started already, `pass`: the line computation the runs are read once for */
+  decide<T>(space: string, options: Option<T>[], except?: string, plus: Run[] = [], pass?: Pass): Choice<T> {
+    return choose<T>({ space, options, runs: this.runs(except, plus, pass), machine: this.settings.maxAtOnce(), own: this.settings.maxAtOnce(space) })
   }
 
   /** whether a model key is blocked (0 allowed) for a space now: nothing starts on it, in any role (choose.ts) */
@@ -1711,8 +1767,8 @@ export class Engine extends Emitter<Events> {
 
   /** the harness a task starts on now, the first of its chain with room under the caps and not out; or the wait, each
    *  harness and why it cannot (choose.ts). Its own run is not held against it */
-  taskChoice(t: TaskRec, plus: Run[] = []): Choice<{ step: number; h: Harness }> {
-    return this.decide(this.nameOf(t) ?? '', this.chainOptions(this.taskChain(t)), t.id, plus)
+  taskChoice(t: TaskRec, plus: Run[] = [], pass?: Pass): Choice<{ step: number; h: Harness }> {
+    return this.decide(this.nameOf(t) ?? '', this.chainOptions(this.taskChain(t)), t.id, plus, pass)
   }
 
   /** the entries a task waits for, by name (a full model or provider, or one that is out): what the summary counts as held
@@ -1736,57 +1792,91 @@ export class Engine extends Emitter<Events> {
   /** a task's space's own cap on this machine (space.maxTasks), with how many of that space's tasks work now (busy, as
    *  the machine's count is); none when the space has no cap of its own. `space` is the name it was added under (the
    *  key its settings and returns keep); `shown` is the name the human reads (places.shownName) */
-  spaceCap(t: TaskRec): { space: string; shown: string; max: number; working: number } | undefined {
+  spaceCap(t: TaskRec, pass?: Pass): { space: string; shown: string; max: number; working: number } | undefined {
     const space = this.places.space(t.project)?.name
     const max = space === undefined ? null : this.settings.spaceMax(space)
     if (space === undefined || max === null) return undefined
-    return { space, shown: this.places.shownName(space), max, working: this.tasks.filter((x) => this.places.space(x.project)?.name === space && this.busy(x)).length }
+    return { space, shown: this.places.shownName(space), max, working: this.workingIn(space, pass) }
   }
 
-  /** a task's place in this machine's queue: its space's priority, or past the end when the space has none */
-  private spaceOrder(t: TaskRec) {
-    return this.settings.spacePriority(this.nameOf(t) ?? '') ?? Number.POSITIVE_INFINITY
+  /** a task's place in this machine's queue: its space's priority, or past the end when the space has none (a line sorts
+   *  by this, so it reads the settings once per space there, never per comparison) */
+  private spaceOrder(space: string) {
+    return this.settings.spacePriority(space)
   }
 
-  /** the line held tasks start in: first in line, then its space's priority (unset spaces last), then how long it waited */
-  private heldOrder(a: TaskRec, b: TaskRec) {
-    const pa = this.spaceOrder(a)
-    const pb = this.spaceOrder(b)
-    return Number(!!b.priority) - Number(!!a.priority) || (pa === pb ? 0 : pa - pb) || a.held!.since - b.held!.since
-  }
-
-  /** the line review waits are woken in: the same order, by how long the review has waited */
+  /** the line review waits are woken in: first in line, then the space's place (space-order.ts), then how long the review
+   *  has waited */
   private reviewOrder(a: TaskRec, b: TaskRec) {
-    const pa = this.spaceOrder(a)
-    const pb = this.spaceOrder(b)
-    return Number(!!b.priority) - Number(!!a.priority) || (pa === pb ? 0 : pa - pb) || (a.reviewWait?.since ?? 0) - (b.reviewWait?.since ?? 0)
+    const pa = this.spaceOrder(this.nameOf(a) ?? '')
+    const pb = this.spaceOrder(this.nameOf(b) ?? '')
+    return Number(!!b.priority) - Number(!!a.priority) || comparePlace(pa, pb) || (a.reviewWait?.since ?? 0) - (b.reviewWait?.since ?? 0)
   }
 
-  /** a shared wait's "after <space>'s tasks": the one ahead of this task is in a space ordered before its own */
-  private behindWords(t: TaskRec) {
-    const why = t.held?.why
-    if (why !== 'slots' && why !== 'machine') return ''
-    const list = this.heldTasks()
-    const at = list.indexOf(t)
-    if (at <= 0) return ''
-    const first = list[0]!
-    if (this.spaceOrder(first) >= this.spaceOrder(t)) return ''
-    return ` · after ${this.places.shownName(this.nameOf(first) ?? '')}'s tasks`
+  /**
+   * The line tasks wait in to start here, computed once: the tasks holding now in the order release() starts them — first
+   * in line, then each space's place in the queue, then how long it waited — with the wait each one has of its own and what
+   * is truly ahead of each (StartLine). `also`: a task about to hold (one just added, or a go): the line it would join.
+   * Every row of one snapshot, the Limits view and release() read it here, so one snapshot sorts the line once.
+   */
+  startLine(now = Date.now(), also?: TaskRec): StartLine {
+    this.lineComputations++
+    // the numbers of this machine's spaces read once, never per comparison; the same order the Spaces table and
+    // `shepherdr space list` sort by (shared/space-order.ts)
+    const byPlace = placeOrder((space) => this.settings.spacePriority(space))
+    const space = (t: TaskRec) => this.nameOf(t) ?? ''
+    // a task about to hold is as old as the look at it (it holds from now)
+    const since = (t: TaskRec) => t.held?.since ?? now
+    const pass: Pass = { inSpace: new Map() }
+    // a task that is not in the list yet (one being added) joins it for this look
+    const tasks = also && !this.tasks.includes(also) ? [...this.tasks, also] : this.tasks
+    const order = tasks
+      .filter((t) => t === also || (this.holding(t) && !t.archived))
+      .sort((a, b) => Number(!!b.priority) - Number(!!a.priority) || byPlace(space(a), space(b)) || since(a) - since(b))
+    const own = new Map(order.map((t) => [t.id, this.ownWait(t, pass)]))
+    // the tasks ahead of each that could start, in the order they are ahead: a task held for its own space or model is
+    // stepped over, so it neither waits nor is named
+    const ahead = new Map<string, { count: number; spaces: string[] }>()
+    const spaces: string[] = []
+    let count = 0
+    for (const t of order) {
+      ahead.set(t.id, { count, spaces: [...spaces] })
+      if (own.get(t.id)) continue
+      count++
+      const shown = space(t) ? this.places.shownName(space(t)) : ''
+      if (shown && !spaces.includes(shown)) spaces.push(shown)
+    }
+    return { order, own, ahead }
+  }
+
+  /** what is truly ahead of a held task, in words: how many tasks that could start, and their spaces ("4 ahead, of
+   *  lyvora-app and lyvora-site"); nothing when it has its turn next */
+  private aheadWords(t: TaskRec, line: StartLine) {
+    const a = line.ahead.get(t.id)
+    if (!a?.count) return ''
+    const names = a.spaces.length > 3 ? [...a.spaces.slice(0, 3), `${a.spaces.length - 3} more`] : a.spaces
+    return ` · ${a.count} ahead${names.length ? `, of ${andWords(names)}` : ''}`
   }
 
   /** a held task's line in its row: a task held by its space's cap names the space, as it shows; one held for its models
    *  names each harness of its chain, short (waitShort), and in full when `full` (the row's title) */
-  private heldLabel(t: TaskRec, full = false) {
-    if (t.held!.why === 'model' || t.held!.why === 'blocked') {
+  private heldLabel(t: TaskRec, full = false, read?: StartLine) {
+    const why = t.held!.why
+    if (why === 'model' || why === 'blocked') {
       const c = this.taskChoice(t)
       // every model it may use is blocked: nothing will free up, so the row says so (not a wait)
       if ('wait' in c && blockedOnly(c)) return HELD.blocked
       // the row is one short line (waitShort); its title, and the card, name the whole chain (full)
       if ('wait' in c) return `Waiting: ${full ? this.waitIn(c.wait) : waitShort(c.wait, (x) => this.places.shownName(x))}`
     }
-    const cap = t.held!.why === 'space' || t.held!.why === 'spaceZero' ? this.spaceCap(t) : undefined
-    if (cap && t.held!.why === 'spaceZero') return `${cap.shown} is set to 0 tasks`
-    return (cap ? `Waiting for a free slot of ${cap.shown}` : HELD[t.held!.why]) + this.behindWords(t)
+    const cap = why === 'space' || why === 'spaceZero' ? this.spaceCap(t) : undefined
+    if (cap && why === 'spaceZero') return `${cap.shown} is set to 0 tasks`
+    // a wait of its own says its own words, and reads no line: only the shared room and the line name what is ahead
+    if (!cap && !MACHINE_WIDE.has(why) && why !== 'turn') return HELD[why]
+    // the line this row reads: the one the pass computed, or its own (a row drawn on its own, never a snapshot's)
+    const line = read ?? this.startLine()
+    const words = cap ? `Waiting for a free slot of ${cap.shown}` : why === 'turn' && !line.ahead.get(t.id)?.count ? TURN_GAP : HELD[why]
+    return words + this.aheadWords(t, line)
   }
 
   /** the name a space of this machine was added under, for a scope that names it: its place id, the name it was added
@@ -1816,8 +1906,8 @@ export class Engine extends Emitter<Events> {
   }
 
   /** a held task's line in words, the whole chain named (the Limits page's list of what waits) */
-  holdLine(t: TaskRec) {
-    return this.heldLabel(t, true)
+  holdLine(t: TaskRec, line?: StartLine) {
+    return this.heldLabel(t, true, line)
   }
 
   /** whether the task's own machinery, not the human, gives its agent its next word: a review round (running, or
@@ -1841,7 +1931,7 @@ export class Engine extends Emitter<Events> {
 
   /** tasks held now, in the line release() starts them: first in line, then space priority, then oldest first */
   heldTasks() {
-    return this.tasks.filter((t) => this.holding(t) && !t.archived).sort((a, b) => this.heldOrder(a, b))
+    return this.startLine().order
   }
 
   /**
@@ -1942,10 +2032,12 @@ export class Engine extends Emitter<Events> {
     const id = `held:${t.id}:${Date.now()}`
     const cap = why === 'space' || why === 'spaceZero' ? this.spaceCap(t) : undefined
     const choice = why === 'model' || why === 'blocked' ? this.taskChoice(t) : undefined
-    const after = this.behindWords(t)
+    // what is ahead of it in the line now, in the same words as its row (it holds from this moment on)
+    const ahead = why === 'slots' || why === 'machine' || why === 'turn' ? this.aheadWords(t, this.startLine()) : ''
     const words = {
-      slots: `waiting for a free slot (${this.slotsWords(l.max)})${after}`,
-      machine: `waiting for the machine: it is busy${after}`,
+      slots: `waiting for a free slot (${this.slotsWords(l.max)})${ahead}`,
+      machine: `waiting for the machine: it is busy${ahead}`,
+      turn: (ahead ? `waiting for its turn${ahead}` : 'waiting for the gap between starts'),
       models: 'waiting: every model of this space ran out, so a start would only be cut off too',
       resume: 'waiting: the tasks that were cut off go back to work first',
       space: `waiting for a free slot of ${cap?.shown ?? 'its space'} (${cap?.working ?? 0} of ${cap?.max ?? 0} of its tasks working)`,
@@ -1957,29 +2049,51 @@ export class Engine extends Emitter<Events> {
     this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: words } })
     this.save()
     this.settleOne(t)
+    // its turn comes at a pass: one held only by the line asks for it now, so a machine with room does not sit on a task
+    // until the next health sample (release() starts the ones ahead of it, and then it, at their turn)
+    if (why === 'turn') this.release()
   }
 
-  /** the go, now if this machine has room, else once it has */
-  private goWhenRoom(t: TaskRec, text: string, why: string, plain = false) {
+  /**
+   * The one rule every start Shepherdr makes by itself passes through: this machine has room for it (room), the spacing
+   * after the last start is over (machine.startEvery, none while a task is first in line), and no task ahead of it in the
+   * line could start (its turn: the ones waiting for their own space's cap or own model are stepped over). A task marked
+   * first in line passes the line and the spacing, as it always did. release() is this same rule walked in the line's
+   * order, which is how a turn comes; a task added, a time come, a go and the end of an --after wait ask here.
+   */
+  private startGate(t: TaskRec, now = Date.now()): { why?: HeldWhy } {
     const r = this.room(t)
+    if (r.why || t.priority) return r
+    if (!this.startsNow(now)) return { why: 'turn' }
+    const line = this.startLine(now, t)
+    const at = line.order.indexOf(t)
+    return at > 0 && line.order.slice(0, at).some((h) => !line.own.get(h.id)) ? { why: 'turn' } : {}
+  }
+
+  /** the go, now if this machine has room and its turn came, else once they have */
+  private goWhenRoom(t: TaskRec, text: string, why: string, plain = false) {
+    const r = this.startGate(t)
     if (r.why) return this.hold(t, r.why, { text, why, plain })
     this.go(t, text, why, plain)
   }
 
   /**
-   * Start held tasks while this machine has room, in heldTasks' order (first in line, then space priority, then age),
-   * one at a time machine.startEvery apart (2 min by
-   * default): the load averages take minutes to show what a task adds. Called on each health sample and status change.
+   * Start held tasks while this machine has room, in the line's order (first in line, then space priority, then age), one
+   * at a time machine.startEvery apart (2 min by default): the load averages take minutes to show what a task adds. It is
+   * startGate's rule walked in order — a task whose own space or model holds it is stepped over, and a machine without room
+   * (or the spacing) stops the walk. Called on each health sample and status change.
    */
   release(now = Date.now()) {
     this.sweepReviews(now)
     if (this.releasing) return
     this.releasing = true
     try {
-      for (const t of this.heldTasks()) {
+      // the line, computed once for this pass
+      const order = this.startLine(now).order
+      for (const t of order) {
         const r = this.room(t)
         // its own space waits for its models, or its cap is full, or its model's: another space's or model's may still start
-        if (r.why === 'models' || r.why === 'resume' || r.why === 'space' || r.why === 'model' || r.why === 'blocked' || r.why === 'spaceZero') {
+        if (r.why && !MACHINE_WIDE.has(r.why)) {
           if (t.held!.why !== r.why) {
             t.held!.why = r.why
             this.save()
@@ -1989,7 +2103,7 @@ export class Engine extends Emitter<Events> {
         }
         if (r.why) {
           // each one waits for the same reason: its line says the one that holds them now
-          const stale = this.heldTasks().filter((x) => x.held!.why !== r.why)
+          const stale = order.filter((x) => this.holding(x) && x.held!.why !== r.why)
           for (const x of stale) x.held!.why = r.why
           if (stale.length) this.save()
           return
@@ -1997,7 +2111,7 @@ export class Engine extends Emitter<Events> {
         // one first in line doesn't wait for the spacing either
         if (!t.priority && !this.startsNow(now)) return
         this.lastStart = now
-        const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work', space: 'a slot of its space is free', model: 'a slot of its model is free', blocked: 'a limit changed', zero: 'the machine has room', spaceZero: 'its space has room' }[t.held!.why]
+        const why = { slots: 'a slot is free', machine: 'the machine has room', models: 'its models answer again', resume: 'the cut-off tasks went back to work', space: 'a slot of its space is free', model: 'a slot of its model is free', blocked: 'a limit changed', zero: 'the machine has room', spaceZero: 'its space has room', turn: 'its turn came' }[t.held!.why]
         // a cut-off that waited for a backup with room takes it over now, as cantGoOn would (the caps are read again there)
         if (t.held!.takeover) {
           const { why: cut, lasting } = t.held!.takeover
@@ -2104,10 +2218,11 @@ export class Engine extends Emitter<Events> {
     }
     if (after.length) t.after = after
     if (set) t.set = set
-    // one that starts work now waits for room; one for later only reads its brief, so it starts at once. One queued
-    // after other tasks gets no worktree, agent or herdr space while it waits: its go starts it (starter), as the
-    // scheduler starts a queued task at its turn upstream (3.x herdr-task tick), and a message to it starts it sooner
-    const room = after.length || o.later ? {} : this.room(t)
+    // one that starts work now waits for room and its turn in the line (startGate); one for later only reads its brief, so
+    // it starts at once. One queued after other tasks gets no worktree, agent or herdr space while it waits: its go starts
+    // it (starter), as the scheduler starts a queued task at its turn upstream (3.x herdr-task tick), and a message to it
+    // starts it sooner
+    const room = after.length || o.later ? {} : this.startGate(t)
     this.data.tasks.push(t)
     if (room.why) {
       t.told = 'queued'
@@ -2223,7 +2338,7 @@ export class Engine extends Emitter<Events> {
       this.settleOne(t)
       return
     }
-    const r = this.room(t)
+    const r = this.startGate(t, now)
     if (r.why) {
       this.hold(t, r.why)
       return
@@ -2270,7 +2385,7 @@ export class Engine extends Emitter<Events> {
       this.settle(t)
       return { queued: open }
     }
-    const r = this.room(t)
+    const r = this.startGate(t)
     if (r.why) {
       this.hold(t, r.why)
       return { held: r.why }
@@ -2443,7 +2558,7 @@ export class Engine extends Emitter<Events> {
     if (on) t.switchTo = t.worktree && rec && !sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, on) ? on : undefined
     const why = `you started it now${on ? ` on ${harnessWords(fitHarness(on))}` : ''}${was.length ? `; it no longer waits for ${was.join(', ')}` : ''}`
     const goText = was.length ? goLine(was, [], true) : 'Go: you were started now, start the work.'
-    const r = this.room(t)
+    const r = this.startGate(t)
     if (r.why) {
       if (t.worktree) this.hold(t, r.why, { text: goText, why })
       else this.hold(t, r.why)
@@ -4428,7 +4543,7 @@ export class Engine extends Emitter<Events> {
     }
     // a stopped task is no wait for room: its agent is closed, and the words start it again where it is
     const waits = wasScheduled || (this.statusOf(t) === 'todo' && !t.stopped) || this.holding(t)
-    const r = gate && waits && !ended(t) ? this.room(t) : {}
+    const r = gate && waits && !ended(t) ? this.startGate(t) : {}
     if (r.why) {
       if (!t.worktree) {
         // its brief takes the words, as below, plain: a brief is its own words, never another agent's envelope; it

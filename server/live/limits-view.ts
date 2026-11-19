@@ -13,6 +13,7 @@ import type { HeldWhy } from './engine/engine.ts'
 import { capsOf, keyOf, keyWords, providerWords, type RunOn } from './models-summary.ts'
 import { CATALOG, kindOf, type Level, Settings } from './settings.ts'
 import { providerOf } from './usage-ledger.ts'
+import { placeOrder } from '../../shared/space-order.ts'
 
 /** the machine's keys that start tasks, in the order the page shows them */
 export const MACHINE_KEYS = ['machine.maxTasks', 'machine.startLoad', 'machine.startPressure', 'machine.startMemory', 'machine.startEvery']
@@ -141,6 +142,8 @@ export function waitingOf(input: LimitsInput): WaitingNow {
   // 0 is a limit of its own: none starts here, so the group says so rather than naming a busy machine
   if (of('zero').length) groups.push({ id: 'zero', title: 'This machine is set to 0 tasks', limit: '0 tasks', tasks: of('zero').map(task) })
   if (of('machine').length) groups.push({ id: 'machine', title: 'The machine is too busy', limit: machineReason(input.sample, input.herdr, input.settings), tasks: of('machine').map(task) })
+  // its turn in the line has not come: the tasks ahead of it start first, one every machine.startEvery
+  if (of('turn').length) groups.push({ id: 'turn', title: 'Waiting for its turn in the line', tasks: of('turn').map(task) })
   const spaces = [...new Set(of('space').map((h) => h.space))]
   for (const key of spaces) {
     const hs = of('space').filter((h) => h.space === key)
@@ -264,14 +267,15 @@ function byRoleOf(runs: LimitsInput['runs'], covered: (key: string) => boolean):
 
 /** the spaces of this machine in queue order: numbered by their priority, then the ones with none as they were listed.
  *  The sort is stable, so spaces with the same number (or none) keep their old order and their tasks go by age. Shared by
- *  the Spaces table and the Waiting list so a group never disagrees with the table's order. */
+ *  the Spaces table and the Waiting list so a group never disagrees with the table's order; the order itself is one
+ *  comparator (shared/space-order.ts), the engine's own line and `shepherdr space list` reading it too. */
 function listedSpaces(input: LimitsInput): { id: string; name: string; key: string }[] {
   const s = input.settings
   const listed = input.matrix.rows.filter((r) => r.kind === 'space').map((r) => ({ id: r.id, name: r.name, key: r.id.split(':')[2]! }))
   const homeSets = [...SPACE_KEYS, 'models.maxAtOnce'].some((k) => s.pick(k, { space: HOME }).from === 'space')
   if (homeSets && !listed.some((x) => x.key === HOME)) listed.unshift({ id: placeId.home(input.host), name: 'home', key: HOME })
-  const priority = (key: string) => s.spacePriority(key) ?? Number.POSITIVE_INFINITY
-  return listed.sort((a, b) => priority(a.key) - priority(b.key))
+  const byPlace = placeOrder((key) => s.spacePriority(key))
+  return listed.sort((a, b) => byPlace(a.key, b.key))
 }
 
 /** the Spaces table: each space of this machine in queue order, its Priority, Max tasks and Merge train, and its sub-limit
@@ -299,7 +303,7 @@ function spacesOf(input: LimitsInput): LimitsView['spaces'] {
     const held = input.held.filter((h) => h.space === key).length
     const maxTasks = s.spaceMax(key)
     const cells: Record<string, LimitCell> = {
-      'space.priority': cellOf(input, 'space.priority', { space: key }, id, false),
+      'space.priority': { ...cellOf(input, 'space.priority', { space: key }, id, false), ...(key === HOME ? { now: 'the home space holds no tasks' } : {}) },
       'space.maxTasks': {
         ...cellOf(input, 'space.maxTasks', { space: key }, id, false),
         now: `${working}${maxTasks === null ? '' : ` of ${maxTasks}`} working${held ? ` · ${held} held` : ''}`,
@@ -309,7 +313,7 @@ function spacesOf(input: LimitsInput): LimitsView['spaces'] {
     const caps = Object.fromEntries(
       own(key).map((e) => [e.pattern, { max: e.max, now: runs.filter((x) => x.space === key && covers(e.pattern, x.key)).length }]),
     )
-    return { id, name, kind: 'space' as const, key, working, held, cells, caps }
+    return { id, name, kind: 'space' as const, key, ...(key === HOME ? { home: true } : {}), working, held, cells, caps }
     })
   return { columns: cols, rows, patterns, totals }
 }

@@ -25,6 +25,12 @@ async function fresh(page: Page) {
   await page.evaluate(() => localStorage.removeItem('limits:columns'))
 }
 
+/** the Priority value each space of this machine holds now, as Settings → Limits reads it (off: no number) */
+const places = async () => {
+  const v = (await world.act({ type: 'limits-view' } as never)) as { spaces: { rows: { name: string; cells: Record<string, { row: { value: string } }> }[] } }
+  return Object.fromEntries(v.spaces.rows.map((r) => [r.name, r.cells['space.priority']!.row.value]))
+}
+
 /** whether the second element comes after the first in the page */
 const follows = (first: Locator, second: Locator) => second.elementHandle().then((h) => first.evaluate((el, other) => (el.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0, h))
 
@@ -371,7 +377,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
     }
   })
 
-  test('the Priority column lists the spaces in order; moving one by keyboard writes 1..n and re-orders the list', async () => {
+  test('the Priority column lists the spaces in order; an arrow swaps two numbers by keyboard, and re-orders the list', async () => {
     const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
@@ -384,22 +390,112 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await table.getByRole('button', { name: /^gtm · Priority: 2/ }).waitFor()
       const labels = await rowLabels(table)
       expect(labels.indexOf('herdr-projects')).toBeLessThan(labels.indexOf('gtm'))
-      // keyboard: Tab to gtm's ↑ and press Enter. Both moves renumber every space, so the new Priority: 1 proves the write
+      // keyboard: Tab to gtm's ↑ and press Enter. The two numbered spaces swap their numbers, so Priority: 1 proves the write
       const up = table.getByRole('button', { name: 'Move gtm up' })
       await up.focus()
       await page.keyboard.press('Enter')
       await table.getByRole('button', { name: /^gtm · Priority: 1/ }).waitFor()
       expect((await rowLabels(table)).indexOf('gtm')).toBeLessThan((await rowLabels(table)).indexOf('herdr-projects'))
       await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
-      // the other direction works too: gtm is first now, so its ↓ is on and takes the list back
+      // the other direction works too: gtm is first now, so its ↓ is on and swaps the two back
       await table.getByRole('button', { name: 'Move gtm down' }).click()
       await table.getByRole('button', { name: /^herdr-projects · Priority: 1/ }).waitFor()
       expect(await up.isEnabled()).toBe(true)
       expect(await table.getByRole('button', { name: 'Move herdr-projects up' }).isDisabled()).toBe(true)
       expect(await table.getByRole('button', { name: 'Move herdr-projects down' }).isEnabled()).toBe(true)
+      // one line under the table says what no number means
+      await page.getByText('A space with no number goes by age, after the numbered ones.').first().waitFor()
     } finally {
       await set('space.priority', null, 'p:vm-str:herdr-projects')
       await set('space.priority', null, 'p:vm-str:gtm')
+      await page.close()
+    }
+  })
+
+  test('the arrows keep a space with no number without one: ↑ puts it last among the numbered ones, ↓ on the last clears it', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      // nothing is numbered yet: ↑ gives it the first place, in one write; ↓ has nothing to go below
+      expect(await table.getByRole('button', { name: 'Move gtm down' }).isDisabled()).toBe(true)
+      // ↑ on a space with no number puts it last among the numbered ones: one value written, the other space keeps none
+      await table.getByRole('button', { name: 'Move gtm up' }).click()
+      await table.getByRole('button', { name: /^gtm · Priority: 1/ }).waitFor()
+      expect(await places()).toEqual({ gtm: '1', 'herdr-projects': 'off' })
+      expect(await table.getByRole('button', { name: 'Move gtm up' }).isDisabled()).toBe(true)
+      // the second one goes after it, and only its own value changes
+      await table.getByRole('button', { name: 'Move herdr-projects up' }).click()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
+      expect(await places()).toEqual({ gtm: '1', 'herdr-projects': '2' })
+      // ↓ on the last numbered space clears its number: it goes back to by age, and the other keeps its own
+      await table.getByRole('button', { name: 'Move herdr-projects down' }).click()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: Off/ }).waitFor()
+      expect(await places()).toEqual({ gtm: '1', 'herdr-projects': 'off' })
+      expect(await table.getByRole('button', { name: 'Move herdr-projects down' }).isDisabled()).toBe(true)
+    } finally {
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await page.close()
+    }
+  })
+
+  test('two quick taps cannot take each other\'s place: the arrows are off while a move is written, and the second is dropped', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      await set('space.priority', '1', 'p:vm-str:gtm')
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: /^gtm · Priority: 1/ }).waitFor()
+      const up = table.getByRole('button', { name: 'Move herdr-projects up' })
+      // two taps in the same tick, as a quick double tap sends them: the first writes hp=2, the second would swap both
+      // back if it went through
+      await up.evaluate((el) => {
+        ;(el as HTMLElement).click()
+        ;(el as HTMLElement).click()
+      })
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
+      await settled(page)
+      expect(await places()).toEqual({ gtm: '1', 'herdr-projects': '2' })
+      expect(await rowLabels(table).then((l) => l.indexOf('gtm'))).toBeLessThan(await rowLabels(table).then((l) => l.indexOf('herdr-projects')))
+    } finally {
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await page.close()
+    }
+  })
+
+  test('a move the server refuses says why under the table, and writes nothing', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    // the demo's own answer for one move: the screen's error path, which a real refusal (the home space, another machine)
+    // cannot reach from this machine's table
+    const real = world.act.bind(world)
+    let asked = 0
+    ;(world as unknown as { act: (a: unknown) => Promise<unknown> }).act = async (a: unknown) => {
+      if ((a as { type?: string }).type !== 'space-order') return real(a as never)
+      asked++
+      return { ok: false, error: 'That space cannot move: it is not on this machine.' }
+    }
+    try {
+      await openLimits(page)
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: 'Move gtm up' }).click()
+      const refused = page.getByRole('alert').filter({ hasText: 'That space cannot move: it is not on this machine.' })
+      await refused.waitFor()
+      expect(asked).toBe(1)
+      expect(await places()).toEqual({ gtm: 'off', 'herdr-projects': 'off' })
+      // the arrows come back on once it has answered
+      expect(await table.getByRole('button', { name: 'Move gtm up' }).isEnabled()).toBe(true)
+    } finally {
+      ;(world as unknown as { act: (a: unknown) => Promise<unknown> }).act = real as never
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
       await page.close()
     }
   })

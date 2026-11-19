@@ -103,6 +103,8 @@ type Pair = { cli: string; model: string; effort: string }
  * the brief's Reviewer line, source.ts advise); the way back still asks the primary alone (return.ts).
  */
 export const MAX_BACKUPS = 5
+/** the highest place in a machine's queue a space's own number may name (space.priority): 1 is first */
+export const PLACE_MAX = 200
 export type Chain = 'task' | 'coordinator' | 'reviewer' | 'advisor'
 const CHAINS: Chain[] = ['task', 'coordinator', 'reviewer', 'advisor']
 const EXTRA = [2, 3, 4, 5] as const
@@ -422,7 +424,7 @@ export const CATALOG: Section[] = [
     rows: [
       // a space's own order in the shared queue, at this machine's spaces only: no Everywhere or machine default, since
       // an order is only meaningful between the spaces of one machine (engine.heldTasks and engine.retryReviews)
-      { label: 'Priority order of this space', key: 'space.priority', value: 'off', num: { min: 1, max: 200, off: true }, levels: ['space'], hint: "1 is first, 2 next, and so on; a space with no number comes after every numbered one, and spaces with the same number go by how long their tasks waited. Strict: while the first space has a task that can start, no later space starts one — give it a Max tasks cap to leave room for the others, e.g. set space.priority 1 on lyvora-app and cap its working tasks at 2. A task marked first in line still goes ahead of every space. Set with shepherdr set space.priority 1 --space lyvora-app. Off: the order by age as before." },
+      { label: 'Priority order of this space', key: 'space.priority', value: 'off', num: { min: 1, max: PLACE_MAX, off: true }, levels: ['space'], hint: "1 is first, 2 next, and so on; a space with no number comes after every numbered one, and spaces with the same number go by how long their tasks waited. Strict: while the first space has a task that can start, no later space starts one — give it a Max tasks cap to leave room for the others, e.g. set space.priority 1 on lyvora-app and cap its working tasks at 2. A task marked first in line still goes ahead of every space. A task held behind one of another space's says how many are ahead of it and of which spaces. Set with shepherdr set space.priority 1 --space lyvora-app. The home space holds no tasks of its own, so it has no place in this order. Off: the order by age as before." },
       { label: 'Max tasks of this space working at once', key: 'space.maxTasks', value: 'off', num: { min: 0, max: 200, off: true, limit: true }, hint: "Caps this space's working tasks within the machine's own limit, so a space that matters more can have more of them running than the others. 0: the space starts no task (its tasks wait, held). No cap: only the machine's limit." },
       // per provider or per model. Read at two levels, both applied (model-caps.ts, choose.ts): the machine's own value (Machine,
       // or Everywhere) is the machine's total, and a space's own value (pick: its own, else the machine's) is that space's
@@ -780,6 +782,20 @@ export class Settings {
     return note ? { ok: true, note } : { ok: true }
   }
 
+  /**
+   * Set several values as one write (a space's move up or down the queue): each is tried on a copy of every level first,
+   * so a value any of them refuses leaves none of them written, and two moves can never interleave their values.
+   */
+  setMany(moves: { key: string; value: string | null; level: Level }[]): { ok: boolean; error?: string } {
+    const trial = this.copy()
+    for (const m of moves) {
+      const r = trial.set(m.key, m.value, m.level)
+      if (!r.ok) return { ok: false, error: r.error }
+    }
+    for (const m of moves) this.set(m.key, m.value, m.level)
+    return { ok: true }
+  }
+
   /** the picks a role's model rows lead with: this machine's, or none for a world of its own (the demo's) */
   picksAt(kind: string) {
     return this.seed ? NO_PICKS : picksOf(kind)
@@ -986,11 +1002,13 @@ export class Settings {
   }
 
   /** a space's place in this machine's queue (space.priority): 1 first, lower numbers before higher ones; null for a space
-   *  with no number, which comes after every numbered space. It is a space's own setting: no machine or Everywhere value */
+   *  with no number, which comes after every numbered space. It is a space's own setting: no machine or Everywhere value.
+   *  A value stored by hand outside the range is no place at all, never the number it starts with */
   spacePriority(space: string): number | null {
-    const v = this.pick('space.priority', { space }).value.trim().toLowerCase()
-    const n = Number.parseInt(v, 10)
-    return Number.isFinite(n) && n >= 1 ? n : null
+    const v = this.pick('space.priority', { space }).value.trim()
+    if (!/^[0-9]+$/.test(v)) return null
+    const n = Number(v)
+    return n >= 1 && n <= PLACE_MAX ? n : null
   }
 
   /** the CLI, model and effort tasks or coordinators start with, or tasks are reviewed by, for a space (none: this

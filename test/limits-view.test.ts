@@ -7,6 +7,7 @@ import { modelsSummary, type SummaryInput } from '../server/live/models-summary.
 import { modelsMatrix } from '../server/live/models-matrix.ts'
 import { entryPatterns, knownOf, limitsView, machineColumns, machineReason, waitingOf, type HeldFact, type LimitsInput } from '../server/live/limits-view.ts'
 import { Settings } from '../server/live/settings.ts'
+import { comparePlace, NO_PLACE, placeOrder } from '../shared/space-order.ts'
 import { UsageLedger } from '../server/live/usage-ledger.ts'
 import { piOffers } from './pi-offers.ts'
 import { tmp } from './tmp.ts'
@@ -123,6 +124,33 @@ describe('the spaces: Max tasks and Merge train, and one sub-limit per provider 
     expect(view.spaces.rows.map((r) => r.cells['space.priority']!.row.value)).toEqual(['1', '2', '2', 'off'])
     expect(view.spaces.rows[0]!.cells['space.priority']).toMatchObject({ place: 'p:box:alpha', from: 'space', set: true })
     expect(view.spaces.rows[3]!.cells['space.priority']).toMatchObject({ place: 'p:box:beta', from: 'default', set: false })
+  })
+
+  test('one order for every mix of numbered, equal and unnumbered spaces: the Spaces table, the engine and space list read it', () => {
+    // the comparator itself, over mixes: a number first, then its own order for the rest (the sort is stable)
+    const cases: { priority: Record<string, number>; listed: string[]; want: string[] }[] = [
+      { priority: {}, listed: ['zeta', 'alpha', 'gtm'], want: ['zeta', 'alpha', 'gtm'] },
+      { priority: { alpha: 1 }, listed: ['zeta', 'alpha', 'gtm'], want: ['alpha', 'zeta', 'gtm'] },
+      { priority: { zeta: 2, gtm: 1 }, listed: ['zeta', 'alpha', 'gtm'], want: ['gtm', 'zeta', 'alpha'] },
+      { priority: { zeta: 2, gtm: 2 }, listed: ['zeta', 'alpha', 'gtm'], want: ['zeta', 'gtm', 'alpha'] },
+      { priority: { zeta: 2, gtm: 2, alpha: 1 }, listed: ['zeta', 'alpha', 'gtm'], want: ['alpha', 'zeta', 'gtm'] },
+      { priority: { zeta: 200, gtm: 1, alpha: 3 }, listed: ['zeta', 'alpha', 'gtm'], want: ['gtm', 'alpha', 'zeta'] },
+    ]
+    for (const c of cases) {
+      const byPlace = placeOrder((space) => c.priority[space] ?? null)
+      expect([...c.listed].sort(byPlace)).toEqual(c.want)
+      // the Spaces table lists them in the same order (it sorts by the same comparator)
+      const s = settings({ spaces: Object.fromEntries(Object.entries(c.priority).map(([k, v]) => [k, { 'space.priority': String(v) }])) })
+      const places = c.listed.map((key) => ({ key, name: key }))
+      const view = limitsView(input(s, { matrix: modelsMatrix(s, { host: HOST, name: HOST }, places) }))
+      expect(view.spaces.rows.map((r) => r.key)).toEqual(c.want)
+    }
+    // no number is past the end, and two of them are equal: never an infinity subtracted from an infinity
+    expect(comparePlace(null, null)).toBe(0)
+    expect(comparePlace(null, 200)).toBeGreaterThan(0)
+    expect(comparePlace(3, null)).toBeLessThan(0)
+    expect(comparePlace(null, 3)).toBeGreaterThan(0)
+    expect(NO_PLACE).toBeGreaterThan(200)
   })
 
   test('a space with no value of its own still shows its tasks; a machine total with no space entry shows as its total', () => {

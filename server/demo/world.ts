@@ -11,7 +11,7 @@ import { DEMO_PRS, demoWorktree } from './code.ts'
 import { demoActivity } from './activity.ts'
 import { rebriefReviewer, settingsBlock } from '../live/prompts.ts'
 import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
-import { CLI_NAME, repositorySection, defaultOf, kindOf } from '../live/settings.ts'
+import { CLI_NAME, repositorySection, defaultOf, kindOf, type Level } from '../live/settings.ts'
 import { harnessProblem, harnessWords, restartAllWords, restartClis, type RestartAllRow } from '../live/restart.ts'
 import { liveOK } from '../live/live-switch.ts'
 import { withRooms, type RoomInput } from '../live/rooms.ts'
@@ -831,6 +831,20 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
           const r = st.set(a.key, a.value, level)
           if (!r.ok) return r
         }
+        this.sections = D.settings(this.stores, this.checklists, this.pluginsOff)
+        this.emit('snapshot')
+        return { ok: true }
+      }
+      case 'space-order': {
+        // a space's move up or down the queue in Settings → Limits → Spaces: every value it writes, as one write
+        // (settings.ts setMany), so a move happens whole or not at all and two moves cannot interleave
+        const moves = a.moves.flatMap((m) => {
+          const [kind, , space] = m.place.split(':')
+          return kind === 'p' && space && space !== '~' ? [{ key: 'space.priority', value: m.value, level: { space } as Level }] : []
+        })
+        if (!moves.length || moves.length !== a.moves.length) return { ok: false, error: 'A move names a space of this machine, and never the home space.' }
+        const moved = this.stores[D.DEMO_HOST].setMany(moves)
+        if (!moved.ok) return moved
         this.sections = D.settings(this.stores, this.checklists, this.pluginsOff)
         this.emit('snapshot')
         return { ok: true }

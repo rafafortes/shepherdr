@@ -4,6 +4,14 @@ import { describe, expect, test } from 'bun:test'
 import { Settings } from '../server/live/settings.ts'
 
 const fresh = () => new Settings({ everywhere: {}, machine: {}, spaces: {} })
+
+/** a value as a hand-edited settings.json could keep it: the app itself refuses one written through it, so the accessor
+ *  must never read a number out of something that is not one */
+const stored = (space: string, value: string) => {
+  const s = fresh()
+  ;(s as unknown as { d: { spaces: Record<string, Record<string, string>> } }).d.spaces[space] = { 'space.priority': value }
+  return s
+}
 const row = (s: Settings, level: string) => s.sections([], [], null, 'host', ['web']).find((x) => x.level === level && x.name === 'Space')?.rows.find((r) => r.key === 'space.priority')
 
 describe('a space’s priority in the queue (space.priority)', () => {
@@ -55,5 +63,11 @@ describe('a space’s priority in the queue (space.priority)', () => {
   test('a value no longer readable reads as off, never as a priority', () => {
     const s = new Settings({ everywhere: {}, machine: {}, spaces: { web: { 'space.priority': 'lots' } } })
     expect(s.spacePriority('web')).toBeNull()
+  })
+
+  test('only a whole number from 1 to 200 is a place: "3abc", "0", "-1", "1.5", "201" and an empty value are none', () => {
+    // the parse is strict about what a hand-edited file may hold, never reading a number out of the start of a word
+    for (const bad of ['3abc', '0', '-1', '1.5', '201', '999', '', '  ', '1e3', '+2', 'off']) expect(stored('web', bad).spacePriority('web')).toBeNull()
+    for (const [value, n] of [['1', 1], ['6', 6], ['200', 200], ['007', 7], [' 3 ', 3]] as const) expect(stored('web', value).spacePriority('web')).toBe(n)
   })
 })

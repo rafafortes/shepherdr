@@ -33,7 +33,7 @@ import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
 import { DISMISSED, dismissKind, dismissWords } from './dismiss.ts'
 import { dictate as dictation } from './dictate.ts'
-import { age, askOf, backupHarness, capWords, checkTitle, ended, Engine, fitStatus, retuneLine, reviewRetuneLine, type BackupPlan, type HeldWhy, type Retune, type TaskRec } from './engine/engine.ts'
+import { age, askOf, backupHarness, capWords, checkTitle, ended, Engine, fitStatus, retuneLine, reviewRetuneLine, type BackupPlan, type HeldWhy, type Retune, type StartLine, type TaskRec } from './engine/engine.ts'
 import { allBlocked, blockedOnly, waitWords, type Blocked, type Run } from './engine/choose.ts'
 import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { listFolders, makeRepo, resolveInHome } from './folders.ts'
@@ -79,6 +79,7 @@ import { Unread } from './unread.ts'
 import { Monitor, meters, procLines, summary, topProcs, type HealthEvent, type Kind } from './health.ts'
 import { has, PLUGIN_KEY, pluginSection, setPluginOn } from '../plugins.ts'
 import { TOOK_OVER, type TookOver } from '../../scripts/take-over.ts'
+import { placeOrder } from '../../shared/space-order.ts'
 
 /** a coordinator that waits for room under the caps (source.ts capWaits): its start, or its takeover after the cut-off `r`
  *  on the model `on` */
@@ -679,7 +680,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const summary = this.summaryNow()
     const runs = this.engine.runs()
     const workingIn = Object.fromEntries(spaces.map((x) => [x.key, this.engine.workingIn(x.key)]))
-    const held = this.engine.heldTasks().map((t): HeldFact => {
+    // the engine's line, computed once: the Waiting list and each row's words read it from here
+    const line = this.engine.startLine(now)
+    const held = line.order.map((t): HeldFact => {
       const key = this.places.space(t.project)?.name ?? '~'
       const why = t.held!.why
       const c = why === 'model' || why === 'blocked' ? this.engine.taskChoice(t) : undefined
@@ -690,7 +693,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         space: key,
         spaceName: this.places.shownName(key),
         why,
-        words: this.engine.holdLine(t),
+        words: this.engine.holdLine(t, line),
         ...(t.priority ? { priority: true } : {}),
         ...(full?.cap ? { entry: { name: patternName(full.name), count: full.cap.count, max: full.cap.max } } : cap ? { entry: { name: cap.shown, count: cap.working, max: cap.max } } : {}),
       }
@@ -778,7 +781,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** every space and every machine, as the sidebar shows them: this machine's, then the others' as they last showed
    *  themselves (just after a start, while they connect, as before it), the names the human gave them, in their order */
-  private listed(): { places: Place[]; machines: Machine[]; sections: Section[] } {
+  private listed(line?: StartLine): { places: Place[]; machines: Machine[]; sections: Section[] } {
     const ts = this.engine.tasks
     let asks: Record<string, string> | undefined
     const asksMap = () => (asks ??= this.asks())
@@ -791,7 +794,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     const peers = this.peers?.list() ?? []
     const up = this.agents.reachable
-    const machines: Machine[] = [{ id: placeId.machine(), machine: HOST, name: NAME, status: up ? 'idle' : 'off', unreachableSince: up ? undefined : clock(this.agents.lastReach), health: this.healthView(), herdrDown: up ? undefined : clock(this.agents.lastReach) }]
+    const machines: Machine[] = [{ id: placeId.machine(), machine: HOST, name: NAME, status: up ? 'idle' : 'off', unreachableSince: up ? undefined : clock(this.agents.lastReach), health: this.healthView(line), herdrDown: up ? undefined : clock(this.agents.lastReach) }]
     const places: Place[] = this.places.shown().map(({ id, name, space }) => ({
       id,
       name,
@@ -907,7 +910,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /* ---------- reading ---------- */
 
   snapshot(): Snapshot {
-    const { places, machines, sections } = this.listed()
+    // the line held tasks start in: one computation for the whole snapshot, however many held rows it draws
+    const line = this.engine.startLine()
+    const { places, machines, sections } = this.listed(line)
     this.placesNow = places
     try {
       const peers = this.peers?.list() ?? []
@@ -929,7 +934,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         tasks: [
           ...this.engine.tasks
             .filter((t) => this.places.space(t.project))
-            .map((t) => ({ ...this.engine.view(t), ...(this.browsers && !ended(t) ? { browser: t.stopped ? STOPPED : this.browsers.status() } : {}) })),
+            .map((t) => ({ ...this.engine.view(t, line), ...(this.browsers && !ended(t) ? { browser: t.stopped ? STOPPED : this.browsers.status() } : {}) })),
           ...peers.flatMap((l) => l.snap?.tasks ?? []),
         ],
         automations,
@@ -3323,6 +3328,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return {
       slots: `all ${this.settings.machine().max} slots are taken`,
       machine: 'the machine is busy',
+      turn: 'its turn in the line has not come: the tasks ahead of it start first, one at a time',
       models: 'every model of its space ran out, so it would only be cut off too, until the primary answers again',
       resume: 'the tasks that were cut off go back to work first',
       space: cap ? `${cap.shown}'s own limit of ${cap.max} tasks is taken` : 'its space is at its own limit',
@@ -3340,10 +3346,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** this machine's numbers for the screen */
-  private healthView() {
+  private healthView(line?: StartLine) {
     const s = this.health.last
     if (!s || !has('health')) return undefined
-    const held = this.engine.heldTasks()
+    const held = line?.order ?? this.engine.heldTasks()
     return {
       meters: meters(s, this.settings.machine(), this.health.told()),
       herdr: this.agents.reachable,
@@ -3351,7 +3357,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       waiting: this.engine.waitingOnYou(),
       max: this.settings.machine().max ?? undefined,
       held: held.length,
-      heldWhy: held[0] && this.engine.subOf(held[0]),
+      heldWhy: held[0] && this.engine.subOf(held[0], this.engine.statusOf(held[0]), false, line),
       at: clock(s.at),
       hostWarning: BOX || this.settings.get('app.hosts').trim() ? undefined : 'Only the loopback page works until app.hosts is set. On this machine run: shepherdr set app.hosts <host>.',
     }
@@ -3646,8 +3652,21 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // its level: Everywhere (all, or none), this machine (its m: id), or one of its spaces
         const pr = a.place?.startsWith('p:') ? this.spaceKey(a.place) : undefined
         if (a.place?.startsWith('p:') && !pr) return { ok: false, error: 'No such space.' }
+        if (a.key === 'space.priority' && pr === '~') return { ok: false, error: HOME_NO_PLACE }
         const r = this.settings.set(a.key, a.value, pr ? { space: pr } : a.place?.startsWith('m:') ? 'machine' : 'all')
         if (r.ok) this.settingChanged(a.key)
+        return r
+      }
+      case 'space-order': {
+        // a space's move up or down the queue: every value it writes, as one write (settings.ts setMany), so two moves
+        // can never interleave and a refused one leaves none of its values behind
+        const moves = a.moves.flatMap((m) => {
+          const pr = m.place.startsWith('p:') ? this.spaceKey(m.place) : undefined
+          return pr && pr !== '~' ? [{ key: 'space.priority', value: m.value, level: { space: pr } as Level }] : []
+        })
+        if (!moves.length || moves.length !== a.moves.length) return { ok: false, error: 'A move names a space of this machine, and never the home space.' }
+        const r = this.settings.setMany(moves)
+        if (r.ok) this.emit('snapshot')
         return r
       }
       case 'models-matrix':
@@ -4612,8 +4631,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** this machine's spaces in the order their tasks wait for its room: numbered ones by their number, then the rest. A
    *  stable sort keeps the usual order for spaces with the same number (or none), as the engine's queue does */
   private orderedSpaces() {
-    const priority = (x: ReturnType<Places['shown']>[number]) => this.settings.spacePriority(x.space?.name ?? '~') ?? Number.POSITIVE_INFINITY
-    return [...this.places.shown()].sort((a, b) => priority(a) - priority(b))
+    // the same order the engine's line and the Spaces table sort by (shared/space-order.ts), each space's number read once
+    const byPlace = placeOrder((space) => this.settings.spacePriority(space))
+    const key = (x: ReturnType<Places['shown']>[number]) => x.space?.name ?? '~'
+    return [...this.places.shown()].sort((a, b) => byPlace(key(a), key(b)))
   }
 
   /** the one line shepherdr status adds when a space of this machine has a priority (none otherwise) */
@@ -4822,6 +4843,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // Everywhere unless it says --machine (this machine's own) or --space NAME (that space's own)
         const named = one(p, 'space')
         const pr = named ? (this.places.find(named)?.id === placeId.home() ? '~' : this.projectFor(p, ctx).name) : undefined
+        if (a1 === 'space.priority' && pr === '~') throw new Error(HOME_NO_PLACE)
         const level: Level = pr ? { space: pr } : p.flags.has('machine') ? 'machine' : 'all'
         // what the setting kept otherwise than written, said after its value
         let note: string | undefined
@@ -5466,8 +5488,9 @@ const WAIT_LOOK = 5_000
 /** a question the advisor will take by itself waits this much longer than advisor.after before an alert goes out anyway,
  *  so an advisor that never finishes (a run that hangs, no model that can run) cannot swallow the alert */
 const ADVISOR_MARGIN = 60_000
-/** the held reasons whose words name their own limit (heldWords), in a task's add and tell replies */
-const HELD_NAMED = new Set<HeldWhy>(['space', 'model', 'blocked', 'zero', 'spaceZero'])
+/** the held reasons heldWords gives their own words, in a task's add and tell replies (the machine's own room and its line
+ *  have theirs there) */
+const HELD_NAMED = new Set<HeldWhy>(['space', 'model', 'blocked', 'zero', 'spaceZero', 'turn'])
 
 /** how a coordinator answers news the human sees as a card: the card is never the chat's last word */
 const REPLY_AFTER_CARD =
@@ -5477,6 +5500,8 @@ const REPLY_AFTER_CARD =
 /** who added a task an automation added: "the automation “Nightly”" */
 const BY_AUTOMATION = 'the automation'
 
+/** the home space holds no repo, so no task starts in it: a place in this machine's queue would decide nothing */
+const HOME_NO_PLACE = 'The home space holds no repo, so no task starts in it: a place in this machine’s queue would decide nothing. Set space.priority on a space (shepherdr space list shows them).'
 
 /** no backup is left after the harness an agent ran on: it was the last of its chain that differs from the primary, or
  *  none differs (then it ran on the primary): every model of that role ran out */
