@@ -54,25 +54,26 @@ describe.skipIf(!browser)('chat rows redraw only when their message changes', ()
       const added = await counts(page)
       expect(drawn(added, {})).toEqual([`${KEY}:row-new`])
 
-      // a reaction on one message redraws that message alone
-      chat.messages.find((m) => m.id === 'row-10')!.reactions = [{ emoji: '👍', by: 'them' }]
+      // a reaction on one message redraws that message alone (row-280: in the rendered window, the older rows
+      // are outside it, and reaching them is the window's own test)
+      chat.messages.find((m) => m.id === 'row-280')!.reactions = [{ emoji: '👍', by: 'them' }]
       emit()
       await until(
         () => counts(page),
-        (c) => c[`${KEY}:row-10`] === 1,
+        (c) => c[`${KEY}:row-280`] === 1,
       )
       const reacted = await counts(page)
-      expect(drawn(reacted, added)).toEqual([`${KEY}:row-10`])
+      expect(drawn(reacted, added)).toEqual([`${KEY}:row-280`])
 
       // an edit to one message redraws that message alone
-      chat.messages.find((m) => m.id === 'row-20')!.text = 'An edited message'
+      chat.messages.find((m) => m.id === 'row-270')!.text = 'An edited message'
       emit()
       await until(
         () => counts(page),
-        (c) => c[`${KEY}:row-20`] === 1,
+        (c) => c[`${KEY}:row-270`] === 1,
       )
       const edited = await counts(page)
-      expect(drawn(edited, reacted)).toEqual([`${KEY}:row-20`])
+      expect(drawn(edited, reacted)).toEqual([`${KEY}:row-270`])
 
       // answering the card redraws its row (and the new rows the answer brings), not the 300 existing rows or the
       // waiting one; GoToQuestion is its own subscriber, so its link goes without redrawing the waiting bubble

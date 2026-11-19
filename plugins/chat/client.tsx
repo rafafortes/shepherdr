@@ -6,11 +6,13 @@ import {
   createContext,
   Fragment,
   memo,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ChangeEvent,
   type ComponentType,
   type CSSProperties,
@@ -109,6 +111,7 @@ import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, LiveLine, TurnLine } from './activity.tsx'
 import { AgentControls, PlaceRestartItem, RestartSheet } from '@client/restart.tsx'
 import { countRender, currentChat, memoRow, rememberChat } from './rows.ts'
+import { CHAT_BATCH, floorOf, revealMore, setRows, subscribeFloor, topOf, watchReveal } from './windowing.ts'
 
 /* ---------- messages ---------- */
 
@@ -722,6 +725,12 @@ function jumps(chat: string, q: ReplyQuote, label: string) {
     reactions and the buttons beside it stay by it) and a long quote reaches past a short reply toward the middle.
     loose: on its own, not tucked (a card answered in the chat quotes the message that answered it) */
 export function Quote({ q, chat, from, you, loose, label = 'Replying to' }: { q: ReplyQuote; chat: string; from: string; you: boolean; loose?: boolean; label?: string }) {
+  return <QuoteInner q={q} chat={chat} from={from} you={you} loose={loose} label={label} />
+}
+
+/** the same quote, without the windowing: every reply quote in a jump's way goes in first (a jump lights one that
+ *  only exists because of it) */
+export function QuoteInner({ q, chat, from, you, loose, label = 'Replying to' }: { q: ReplyQuote; chat: string; from: string; you: boolean; loose?: boolean; label?: string }) {
   const name = q.who === 'you' ? 'You' : q.who === 'peer' ? (q.from ?? 'Another agent') : q.who === 'agent' ? from : null
   return (
     <div className={clsx('relative flex', loose ? 'min-w-0' : '-mb-2 w-0 min-w-full', you ? 'justify-end' : 'justify-start')}>
@@ -1589,21 +1598,52 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   // a message just sent, or just in, rises into place
   const list = useRef<HTMLDivElement>(null)
   useArrive(list, chat.key)
+  // the window: the last rows by default, higher where the reader has scrolled or a jump has asked (windowing.ts)
+  const floor = useSyncExternalStore(useCallback((l) => subscribeFloor(chat.key)(l), [chat.key]), () => floorOf(chat.key))
+  setRows(chat.key, new Map(rows.map((it, i) => [('msg' in it ? it.msg.id : it.album[0].id), i])))
+  const top = topOf(chat.key, rows.length)
+  // the sentinel shows only while rows are hidden above the window (top 0: everything is rendered already)
+  const hidden = top > 0
+  const shown = rows.slice(top)
+  const floorRef = useRef(floor)
+  floorRef.current = floor
+  // the reader's own scroll into the sentinel: one more batch. The sentinel's own pass lands below the edge after
+  // the browser keeps the reader where they were, so a pass can't reveal on its own
+  useEffect(() => {
+    if (!hidden) return
+    return watchReveal(list.current!, chat.key, () => revealMore(chat.key, floorRef.current))
+  }, [hidden, chat.key])
+  // a date line goes on the first row of its day, as before: computed over the whole list, drawn where it shows
   let day = ''
+  const dated: boolean[] = []
+  for (const it of rows) {
+    const at = it.at > 1e12 ? it.at : 0
+    const d = at ? new Date(at).toDateString() : day
+    dated.push(!!at && d !== day)
+    day = d
+  }
   return (
     // a finger sliding a message left moves them all (--peek), and each one's time comes in at the right, like iMessage
     <div ref={list} data-messages className="mx-auto flex w-full max-w-read flex-1 flex-col gap-3.5 px-5 pt-5 pb-3 phone:px-4">
       {!rows.length && !chat.unreadable ? <Empty className="p-0!">No messages yet. Write to start.</Empty> : null}
-      {rows.map((it) => {
+      {hidden ? (
+        <div data-earlier onClick={() => revealMore(chat.key, top)} onDoubleClick={() => revealMore(chat.key, top)}
+          role="button" tabIndex={0}
+          aria-label={`Earlier messages: show ${Math.min(CHAT_BATCH, top)} more`}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), e.stopPropagation(), revealMore(chat.key, top))}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="sticky top-0 z-[1] -mb-3.5 flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 self-center bg-bg py-2 text-[0.75rem] font-medium text-fg3 hover:text-fg2 phone:text-[0.8125rem]">
+          <UpIcon aria-hidden className={ic} />
+          Earlier
+        </div>
+      ) : null}
+      {shown.map((it, j) => {
         const at = it.at > 1e12 ? it.at : 0
-        const d = at ? new Date(at).toDateString() : day
-        const dated = !!at && d !== day
-        day = d
         const first = 'album' in it ? it.album[0].id : it.msg.id
         const key = keyOf('album' in it ? it.album[0] : it.msg)
         return (
           <Fragment key={key}>
-            {dated ? <DateLine at={at} /> : null}
+            {dated[top + j] ? <DateLine at={at} /> : null}
             {newAt === first ? <NewLine /> : null}
             {/* queued: one you sent that Claude Code holds in its own queue; it takes it now with Ctrl+Enter, which
                 the server presses only while its screen offers it. Another CLI offers nothing, so nothing shows */}
@@ -2964,7 +3004,7 @@ function StickToBottom({ chatKey, children }: { chatKey: string; children: React
   useEffect(() => {
     const m = jump ? msgs?.find((x) => x.id === jump || x.question?.id === jump) : undefined
     if (!m) return
-    // after the chat has settled at its newest message
+    // after the chat has settled at its newest message (jumpTo puts the row in the window first, if it was out)
     const t = setTimeout(() => {
       if (jumpTo(chatKey, m.id, { card: !!m.question && m.question.id === jump })) setUI({ jump: null })
     }, 120)

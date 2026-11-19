@@ -769,7 +769,10 @@ describe.skipIf(!browser)('typing in the message box', () => {
     await page.goto(`http://127.0.0.1:${app.port}/?place=${encodeURIComponent(gtm.id)}`)
     const box = page.locator('textarea[name=message]')
     await box.waitFor()
-    await page.waitForFunction(() => document.querySelectorAll('[data-messages] [data-msg]').length >= 400)
+    // the chat is windowed (the last 200 rows): the long day is in the store, and its newest row is what the
+    // window shows — typing must not re-lay-out more than what is on screen
+    await page.locator('[data-msg="long-399"]').waitFor()
+    expect(await page.locator('[data-msg]').count()).toBeLessThanOrEqual(300)
     // places and tasks show beside the chat
     expect(await page.locator('#places').isVisible()).toBe(true)
     await box.click()

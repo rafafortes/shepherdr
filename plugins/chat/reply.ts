@@ -6,6 +6,7 @@ import { getState, setUI } from '@client/kernel.ts'
 import { unfold } from './fold.tsx'
 import { excerpt } from '@shared/excerpt.ts'
 import { artifactQuote, type Chat, type Message, type Question, type ReplyQuote } from '@shared/types.ts'
+import { revealChat } from './windowing.ts'
 
 /** the start of a message as a quote shows it: one line of plain words (a file by its name, an artifact by its title
     and version) */
@@ -60,15 +61,21 @@ const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 const lit = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>()
 
 /** scroll a message into view (opened, if it was folded) and light it up for a moment; false when the chat no longer
-    has it. card: its card (a question) rather than its words, with the card's buttons in view */
-export function jumpTo(chat: string, id: string, { card = false } = {}) {
+    has it (or the row is still getting into the rendered window: the reveal is a redraw, retried a few frames)
+    card: its card (a question) rather than its words, with the card's buttons in view */
+export function jumpTo(chat: string, id: string, { card = false } = {}, tries = 0): boolean {
+  // the row may be outside the rendered window: it goes in first, so the jump has something to bring into view
+  revealChat(chat, id)
   unfold(id)
   const at = `[data-chat="${CSS.escape(chat)}"]`
   const el = document.querySelector<HTMLElement>(`[data-msg="${CSS.escape(id)}"]${at}`)
   // a question's card sits beside the message's words (or alone, the CLI's own question)
   const box = card ? document.querySelector<HTMLElement>(`[data-whole="${CSS.escape(id)}"]${at} [data-card]`) : null
   const anchor = box ?? el?.querySelector<HTMLElement>('[data-anchor]') ?? el
-  if (!anchor) return false
+  if (!anchor) {
+    if (tries < 20) requestAnimationFrame(() => jumpTo(chat, id, { card }, tries + 1))
+    return false
+  }
   const tall = !!box && box.offsetHeight > innerHeight * 0.7
   // the chat lets go of its bottom and leaves the scroll alone while it glides there: setting it would stop the glide
   anchor.dispatchEvent(new Event('chat-jump', { bubbles: true }))
