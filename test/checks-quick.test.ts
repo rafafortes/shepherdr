@@ -5,7 +5,7 @@
 // suite even in a quick run. These tests hold that composition, and the rule the repo's own pages tell a task.
 import { describe, expect, test } from 'bun:test'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { tmp } from './tmp.ts'
 
 const root = join(import.meta.dir, '..')
@@ -24,6 +24,14 @@ describe('what --quick composes', () => {
     expect(lines).toContain('check:local QUICK')
     expect(lines).toContain('NOT run: coverage, screen map and baseline')
     expect(lines).toContain('the full suite only if a shared file changed')
+    // a quick run never waits behind a full one: it takes a lock of its own, and while a full run holds the shared one
+    // it caps its workers to max(2, cores / 8) unless the caller set SHEPHERDR_TEST_JOBS itself (SHE-172)
+    expect(lines).toContain('full_lock="$HOME/.cache/shepherdr/check-local.lock"')
+    expect(lines).toContain('quick_lock="$HOME/.cache/shepherdr/check-local-quick.lock"')
+    expect(lines).toContain('[ "$quick" = 1 ] && lock=$quick_lock')
+    expect(lines).toContain('share=$((cores / 8))')
+    expect(lines).toContain('[ "$share" -ge 2 ] || share=2')
+    expect(lines).toContain('[ -z "$caller_jobs" ] || return 0')
     // what it must not change: the lock, the worker cap, the timeout or the exit-code contract
     expect(lines).toContain('exec 9>>"$lock"')
     expect(lines).toContain('export SHEPHERDR_TEST_JOBS="$jobs"')
@@ -48,7 +56,7 @@ describe('what --quick composes', () => {
 })
 
 /** a fixture repo with the real runner and fake checks that record that they ran, like test/checks-runner.test.ts */
-function fixture(checks: Record<string, string>, branch = 'herdr-tui') {
+function fixture(checks: Record<string, string>, branch = 'herdr-tui', opts: { cores?: number; env?: Record<string, string> } = {}) {
   const dir = tmp('checks-quick')
   const home = join(dir, 'home')
   mkdirSync(join(dir, 'scripts', 'checks'), { recursive: true })
@@ -63,28 +71,52 @@ function fixture(checks: Record<string, string>, branch = 'herdr-tui') {
   git('-c', 'user.name=CI', '-c', 'user.email=ci@localhost', 'commit', '-qm', 'init')
   copyFileSync(runner, join(dir, 'scripts', 'check-local.sh'))
   writeFileSync(join(dir, 'scripts', 'check-browsers.ts'), "console.log('chromium: ok (fixture)')\nconsole.log('webkit: ok (fixture)')\n")
+  // a fake nproc, so the worker cap is the same on every machine this check runs on
+  let path = process.env.PATH ?? ''
+  if (opts.cores) {
+    const bin = join(dir, 'bin')
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, 'nproc'), `#!/bin/sh\necho ${opts.cores}\n`)
+    chmodSync(join(bin, 'nproc'), 0o755)
+    path = `${bin}:${path}`
+  }
   for (const [name, body] of Object.entries(checks)) {
     const f = join(dir, 'scripts', 'checks', name)
     writeFileSync(f, `#!/usr/bin/env bash\nset -uo pipefail\necho "$SHEPHERDR_CHECK_NAME $SHEPHERDR_CHECK_QUICK" >> "$SHEPHERDR_CHECK_ROOT/calls.txt"\necho "$SHEPHERDR_CHECK_NAME map=\${SHEPHERDR_CHECK_MAP:-} record=\${SHEPHERDR_CHECK_RECORD:-}" >> "$SHEPHERDR_CHECK_ROOT/flags.txt"\n${body}\nexit 0\n`)
     chmodSync(f, 0o755)
   }
   const logs = join(home, '.cache', 'shepherdr', 'check-local', basename(dir))
+  const spawn = (quick: boolean) =>
+    Bun.spawnSync(['bash', join(dir, 'scripts', 'check-local.sh'), ...(quick ? ['--quick'] : [])], {
+      cwd: dir,
+      // a check of the real suite passes its own SHEPHERDR_TEST_JOBS down: this fixture never inherits one
+      env: { ...process.env, HOME: home, PATH: path, SHEPHERDR_TEST_JOBS: '', SHEPHERDR_CHECK_WAIT: '5', SHEPHERDR_CHECK_STEP_TIMEOUT: '30', ...opts.env },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
   return {
     dir,
+    home,
     logs,
     run: (quick: boolean) => {
-      const r = Bun.spawnSync(['bash', join(dir, 'scripts', 'check-local.sh'), ...(quick ? ['--quick'] : [])], {
-        cwd: dir,
-        env: { ...process.env, HOME: home, SHEPHERDR_CHECK_WAIT: '5', SHEPHERDR_CHECK_STEP_TIMEOUT: '30' },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      })
+      const r = spawn(quick)
       expect(r.exitCode, r.stderr.toString()).toBe(0)
       return r.stdout.toString()
     },
+    runRaw: spawn,
     calls: () => (existsSync(join(dir, 'calls.txt')) ? readFileSync(join(dir, 'calls.txt'), 'utf8').trim().split('\n') : []),
     flags: () => (existsSync(join(dir, 'flags.txt')) ? readFileSync(join(dir, 'flags.txt'), 'utf8').trim().split('\n') : []),
     verdict: (file: string) => readFileSync(join(logs, file), 'utf8'),
+    /** hold the shared lock from another process, as a full run does, until stopped */
+    holdFullLock: async (ms = 4000) => {
+      const lock = join(home, '.cache', 'shepherdr', 'check-local.lock')
+      mkdirSync(dirname(lock), { recursive: true })
+      const held = join(dir, 'held')
+      const proc = Bun.spawn(['bash', '-c', `exec 9>>"${lock}"; flock 9; touch "${held}"; exec sleep ${ms / 1000}`], { stdout: 'ignore', stderr: 'ignore' })
+      for (let i = 0; i < 200 && !existsSync(held); i++) await Bun.sleep(25)
+      expect(existsSync(held), 'the full lock is held').toBe(true)
+      return { held, stop: () => proc.kill() }
+    },
   }
 }
 
@@ -187,5 +219,90 @@ describe('the pre-ready run the repo asks for', () => {
   test('a quick run nothing reached says so, instead of leaving the result line blank', () => {
     const step = readFileSync(join(root, 'scripts', 'checks', '30-tests'), 'utf8')
     expect(step).toContain("note='no test reaches what changed'")
+  })
+})
+
+// SHE-172: a quick run is the pre-ready one, so it can never sit behind a full run that has 3 to 20 minutes of tests
+// left. It takes a lock of its own and runs at once, capping its own changed tests while a full run holds the machine.
+describe('a quick run beside a full one', () => {
+  const record = 'echo "$SHEPHERDR_CHECK_NAME jobs=$SHEPHERDR_TEST_JOBS held=$([ -f "$SHEPHERDR_CHECK_ROOT/held" ] && echo yes || echo no)" >> "$SHEPHERDR_CHECK_ROOT/jobs.txt"'
+  const checks = { '30-tests': record }
+  const jobs = (f: ReturnType<typeof fixture>) => readFileSync(join(f.dir, 'jobs.txt'), 'utf8').trim()
+
+  test('runs at once while a full run holds the shared lock, taking max(2, cores / 8) workers and never writing its pid', async () => {
+    const f = fixture(checks, 'herdr-tui', { cores: 32 })
+    const holder = await f.holdFullLock()
+    try {
+      const out = f.run(true)
+      // 32 cores: a quarter is 8, and 4 is the conservative share a full run leaves it
+      expect(jobs(f)).toBe('tests jobs=4 held=yes')
+      expect(out).toContain('4 test workers (a full check holds the machine)')
+      expect(f.verdict('verdict-quick.txt')).toContain('PASSED in')
+      // its own lock: the full run's pid file is not its to write
+      expect(existsSync(join(f.home, '.cache', 'shepherdr', 'check-local.lock.pid'))).toBe(false)
+    } finally {
+      holder.stop()
+    }
+  })
+
+  test('with no full run beside it, it takes the ordinary quarter of the cores', () => {
+    const f = fixture(checks, 'herdr-tui', { cores: 32 })
+    f.run(true)
+    expect(jobs(f)).toBe('tests jobs=8 held=no')
+    expect(f.verdict('verdict-quick.txt')).not.toContain('holds the machine')
+  })
+
+  test('an explicit SHEPHERDR_TEST_JOBS is never capped', async () => {
+    const f = fixture(checks, 'herdr-tui', { cores: 32, env: { SHEPHERDR_TEST_JOBS: '3' } })
+    const holder = await f.holdFullLock()
+    try {
+      f.run(true)
+      expect(jobs(f)).toBe('tests jobs=3 held=yes')
+    } finally {
+      holder.stop()
+    }
+  })
+
+  test('another quick run is the only one it waits for, and it says so before its checks', async () => {
+    const f = fixture(checks)
+    const lock = join(f.home, '.cache', 'shepherdr', 'check-local-quick.lock')
+    mkdirSync(dirname(lock), { recursive: true })
+    const held = join(f.dir, 'quick-held')
+    const proc = Bun.spawn(['bash', '-c', `exec 9>>"${lock}"; flock 9; touch "${held}"; sleep 2`], { stdout: 'ignore', stderr: 'ignore' })
+    try {
+      for (let i = 0; i < 200 && !existsSync(held); i++) await Bun.sleep(25)
+      expect(existsSync(held), 'the quick lock is held').toBe(true)
+      const r = f.runRaw(true)
+      expect(r.exitCode, r.stderr.toString()).toBe(0)
+      const out = r.stdout.toString()
+      expect(out).toContain('Another check is running: waiting for it')
+      // the header first, then the wait: the verdict never starts with a line about somebody else
+      expect(out.indexOf('check:local QUICK')).toBeLessThan(out.indexOf('Another check is running'))
+      expect(out).toMatch(/1\/1 tests ok/)
+    } finally {
+      proc.kill()
+    }
+  })
+
+  test('a quick run too long kept out of its own lock says nothing ran, and exits 2', async () => {
+    const f = fixture(checks)
+    const lock = join(f.home, '.cache', 'shepherdr', 'check-local-quick.lock')
+    mkdirSync(dirname(lock), { recursive: true })
+    const held = join(f.dir, 'quick-held')
+    const proc = Bun.spawn(['bash', '-c', `exec 9>>"${lock}"; flock 9; touch "${held}"; sleep 30`], { stdout: 'ignore', stderr: 'ignore' })
+    try {
+      for (let i = 0; i < 200 && !existsSync(held); i++) await Bun.sleep(25)
+      const r = Bun.spawnSync(['bash', join(f.dir, 'scripts', 'check-local.sh'), '--quick'], {
+        cwd: f.dir,
+        env: { ...process.env, HOME: f.home, SHEPHERDR_TEST_JOBS: '', SHEPHERDR_CHECK_WAIT: '1', SHEPHERDR_CHECK_STEP_TIMEOUT: '30' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      expect(r.exitCode).toBe(2)
+      expect(r.stdout.toString()).toContain('GAVE UP: another check still ran after 1s; nothing ran here.')
+      expect(existsSync(join(f.dir, 'jobs.txt'))).toBe(false)
+    } finally {
+      proc.kill()
+    }
   })
 })

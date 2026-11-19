@@ -4,7 +4,7 @@
 // The pattern is test/check-workflow.test.ts's: a git repo made in /tmp, driven by the file's own commands.
 import { describe, expect, test } from 'bun:test'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { tmp } from './tmp.ts'
 
 const root = join(import.meta.dir, '..')
@@ -236,10 +236,12 @@ describe('the verdict a tree already passed (--reuse)', () => {
     expect(after.out).toContain('no full check has passed on this tree yet')
   })
 
-  test('a run that waited behind another answers from the verdict it kept meanwhile, without running', async () => {
-    // the point of asking again after the lock: a gate queued behind another worktree's check does not pay a second run
+  test('a run that waited behind another answers from the verdict it kept meanwhile, and pays for no shared phase', async () => {
+    // the point of asking again after the lock: a gate queued behind another worktree's check does not run the tests,
+    // the coverage, the build and the dist budget a second time. Its own worktree-local steps already ran by then, so
+    // those keep their lines in its verdict (SHE-172 split the run in two phases)
     if (!Bun.which('flock')) return // the runner then runs without the one-at-a-time lock, and there is nothing to wait for
-    const f = fixture(passing)
+    const f = fixture({ '10-one': check(), '30-tests': check() })
     const lock = join(f.home, '.cache', 'shepherdr', 'check-local.lock')
     mkdirSync(join(f.home, '.cache', 'shepherdr'), { recursive: true })
     // holds the lock for a moment: room enough for a loaded machine's runner to reach it and say it waits, and short
@@ -248,14 +250,14 @@ describe('the verdict a tree already passed (--reuse)', () => {
     await Bun.sleep(300)
     const runner = Bun.spawn(['bash', join(f.dir, 'scripts', 'check-local.sh'), '--reuse'], {
       cwd: f.dir,
-      env: { ...process.env, HOME: f.home, SHEPHERDR_CHECK_WAIT: '20', SHEPHERDR_CHECK_STEP_TIMEOUT: '30' },
+      env: { ...process.env, HOME: f.home, SHEPHERDR_TEST_JOBS: '', SHEPHERDR_CHECK_WAIT: '20', SHEPHERDR_CHECK_STEP_TIMEOUT: '30' },
       stdout: 'pipe',
       stderr: 'pipe',
     })
     const decoder = new TextDecoder()
     const reader = runner.stdout.getReader()
     let out = ''
-    // it said it waits for the other check, so it is past its first look at the verdicts
+    // it said it waits for the other check, so it is past its first look at the verdicts and past its local phase
     while (!out.includes('waiting for it, up to')) {
       const { value, done } = await reader.read()
       if (done) break
@@ -273,9 +275,11 @@ describe('the verdict a tree already passed (--reuse)', () => {
     }
     expect(await runner.exited).toBe(0)
     expect(out).toContain('this exact tree passed the full check already')
-    expect(f.calls()).toEqual([])
-    // the worktree's verdict says what happened, not the note that stood there while it waited
-    expect(f.verdict()).toContain('nothing ran here')
+    // the worktree-local check ran; the shared one, what a second full run would pay for, did not
+    expect(f.calls()).toEqual(['one'])
+    // the worktree's verdict says what happened, beside the steps this run did run
+    expect(f.verdict()).toContain('this exact tree passed the full check already')
+    expect(f.verdict()).toContain('the shared phase did not run here')
   })
 
   test('a tree the branch moved away from while the check ran is never kept', () => {
@@ -333,5 +337,63 @@ describe('the check files themselves', () => {
       expect(r.stdout.toString()).toContain(join(root, script))
       expect(r.stdout.toString()).not.toContain(join(root, 'scripts', script))
     }
+  })
+})
+
+// SHE-172: the run is two phases. Everything numbered below 30 is worktree-local and runs before the one-at-a-time
+// lock, so broken types, scripts, docs, version or language fail in seconds instead of after the test queue; 30 and
+// up (tests, coverage, build) share the machine's browsers and cores and still go one run at a time under the lock.
+describe('the two phases of a full run', () => {
+  /** records whether the shared lock was held while this check ran */
+  const phases = `#!/usr/bin/env bash
+set -uo pipefail
+echo "$SHEPHERDR_CHECK_NAME held=$([ -f "$SHEPHERDR_CHECK_ROOT/held" ] && echo yes || echo no)" >> "$SHEPHERDR_CHECK_ROOT/phases.txt"
+exit 0
+`
+  /** hold the shared lock from another process for ms, as a full run does, then release it */
+  const holdLock = async (f: ReturnType<typeof fixture>, ms = 2000) => {
+    const lock = join(f.home, '.cache', 'shepherdr', 'check-local.lock')
+    mkdirSync(dirname(lock), { recursive: true })
+    const held = join(f.dir, 'held')
+    const proc = Bun.spawn(['bash', '-c', `exec 9>>"${lock}"; flock 9; touch "${held}"; sleep ${ms / 1000}; rm -f "${held}"`], { stdout: 'ignore', stderr: 'ignore' })
+    for (let i = 0; i < 200 && !existsSync(held); i++) await Bun.sleep(25)
+    expect(existsSync(held), 'the shared lock is held').toBe(true)
+    return { held, stop: () => proc.kill() }
+  }
+
+  test('the worktree-local checks run while the shared lock is held, and the shared ones wait for it', async () => {
+    const f = fixture({ '10-one': phases, '30-tests': phases })
+    const holder = await holdLock(f)
+    try {
+      const r = f.run()
+      expect(r.code).toBe(0)
+      expect(readFileSync(join(f.dir, 'phases.txt'), 'utf8').trim().split('\n')).toEqual(['one held=yes', 'tests held=no'])
+      expect(r.out).toContain('· worktree-local checks done in')
+      expect(r.out).toMatch(/2\/2 tests ok/)
+    } finally {
+      holder.stop()
+    }
+  })
+
+  test('a worktree-local failure fails at once, never reaching the queue for the shared phase', async () => {
+    const f = fixture({ '10-one': check('', 1), '30-tests': phases })
+    const holder = await holdLock(f)
+    try {
+      const r = f.run()
+      expect(r.code).toBe(1)
+      expect(f.calls()).toEqual(['one'])
+      expect(r.out).not.toContain('waiting for it')
+      expect(existsSync(join(f.dir, 'phases.txt'))).toBe(false)
+    } finally {
+      holder.stop()
+    }
+  })
+
+  test('with no shared check to run, no lock is taken at all', () => {
+    const f = fixture({ '10-one': check(), '20-two': check() })
+    const r = f.run()
+    expect(r.code).toBe(0)
+    expect(r.out).not.toContain('Another check')
+    expect(existsSync(join(f.home, '.cache', 'shepherdr', 'check-local.lock.pid'))).toBe(false)
   })
 })

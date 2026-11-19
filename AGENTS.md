@@ -71,13 +71,17 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
 ## Tests
 
 - The whole check runs here: `bun run check:local` (`scripts/check-local.sh`) — `bun run typecheck`, every test with
-  the browser tests (`scripts/test.ts`), and the build. It runs last in line for the CPU (nice 19, idle disk), one run
-  at a time across every worktree of the repo (a lock file under `$XDG_RUNTIME_DIR` or `~/.cache`, never in the repo and
-  never in `~/.shepherdr`), and the test files are capped at `SHEPHERDR_TEST_JOBS` workers (a quarter of the cores by
-  default) so herdr, the live server and the agents keep the CPU. It prints one line per step, the failing tests' names
+  the browser tests (`scripts/test.ts`), and the build. Its worktree-local steps (dependencies, dependency audit,
+  secrets, scripts, docs, version, types, language) run first and without waiting for anybody, so a broken type or
+  script fails in seconds; its shared steps (tests, coverage, build, dist budget) run last in line for the CPU (nice 19,
+  idle disk), one run at a time across every
+  worktree of the repo (a lock file under `$XDG_RUNTIME_DIR` or `~/.cache`, never in the repo and never in
+  `~/.shepherdr`), and the test files are capped at `SHEPHERDR_TEST_JOBS` workers (a quarter of the cores by default) so
+  herdr, the live server and the agents keep the CPU; a `--quick` run has a lock of its own and never waits behind a
+  full one. It prints one line per step, the failing tests' names
   by file, the verdict and where the logs are. It takes about two minutes warm, longer while other work keeps the
-  machine busy or behind another worktree's check (it waits for it, up to an hour): run it with a long timeout, or in
-  the background and read the verdict it prints.
+  machine busy or behind another worktree's check (the tests, coverage, build and dist budget wait for it, up to an
+  hour): run it with a long timeout, or in the background and read the verdict it prints.
 - A task runs `bun run check:local --quick` before `shepherdr ready` and says the result in `--facts`: passed, about
   how long, or what failed — and, when the verdict names a part that did not run (a browser that could not start), that
   it did not. It is the full check's steps with the tests narrowed to what changed and no coverage ratchet, marked
