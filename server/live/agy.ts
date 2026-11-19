@@ -347,6 +347,11 @@ const NOT_FINAL = new Set([0, 1, 2])
 
 const EMPTY = new Uint8Array(0)
 
+/** how long a step may run with steps after it before the mirror copies it as it stands: agy runs tool calls side by side, so
+ *  one can still run while a later step's row is there, and the longest a real one has taken is 15 minutes; a call agy never
+ *  came back from keeps its status at 2 for good, and waiting for it would hide the rest of the conversation */
+const STEP_WAIT_MS = 30 * 60_000
+
 /** one row of the steps table, as the mirror reads it */
 interface Step {
   idx: number
@@ -454,16 +459,19 @@ export function mirrorConversation(id: string, outFile: string): number {
   }
   mirrorCount.opened++
   const n = mirrorAgy(id, outFile, db)
-  // trusted only when the database was quiet before this pass read it: a write in the same clock tick as the one the
-  // stamp shows would leave it as it was
+  // trusted only when the database was quiet before this pass read it (a write in the same clock tick as the one the stamp
+  // shows would leave it as it was), and never while a step was held back: that one is looked at again whatever the store does
   const after = stamps(db, outFile)
-  if (after.newest < began - 25) unchanged.set(outFile, after.sig)
+  if (!behind.has(outFile) && after.newest < began - 25) unchanged.set(outFile, after.sig)
   else unchanged.delete(outFile)
   return n
 }
 
 /** what a mirror last found for a log file: the stamps of its database, that database's WAL and the log */
 const unchanged = new Map<string, string>()
+
+/** the mirrors that stopped before a step agy may still write: their store is read again on every pass, quiet or not */
+const behind = new Set<string>()
 
 /** how many mirrors opened the conversation's database and how many found nothing changed and did not (what a test reads) */
 export const mirrorCount = { opened: 0, unchanged: 0 }
@@ -492,7 +500,11 @@ function mirrorAgy(id: string, outFile: string, db: string): number {
     const steps = handle
       .query<Step, [number]>('SELECT idx, step_type, status, step_payload, error_details FROM steps WHERE idx > ? ORDER BY idx')
       .all(after)
-    const final = steps.findIndex((s, i) => unsettled(s, i === steps.length - 1))
+    const now = Date.now()
+    const final = steps.findIndex((s, i) => unsettled(s, i === steps.length - 1, now))
+    // a step held back is looked at again on the next pass, however quiet the store is: it may come back after this one
+    if (final === -1) behind.delete(outFile)
+    else behind.add(outFile)
     const done = final === -1 ? steps : steps.slice(0, final)
     const gens = gensFor(handle, id, new Set(done.filter((s) => s.step_type === 15).map((s) => s.idx - 1)))
     const ids = agyIds()
@@ -511,17 +523,17 @@ function mirrorAgy(id: string, outFile: string, db: string): number {
 }
 
 /**
- * Whether agy is still writing this step. Only a conversation's last step can be on its way: agy appends its steps in order
- * and writes a model response's usage with its last write of it. So the last step waits while it runs, and while it is a
- * model response without its usage yet (an empty response an abandoned run left thus stays uncopied, which costs the chat
- * nothing: it shows nothing, and the conversation goes on the moment a step follows it). A step with steps after it is
- * copied as it stands: agy leaves a tool call's status at 2 when it never comes back, and waiting for it would hide the rest
- * of the conversation for good.
+ * Whether agy is still writing this step. A step that runs is waited for while it is the conversation's last step, or while it
+ * began less than STEP_WAIT_MS ago (agy runs tool calls side by side, so a later step can be there while this one still runs;
+ * one agy never came back from is copied as it stands once it is old). A step whose end time is in its payload is over,
+ * whatever its status says. The conversation's last step also waits while it is a model response without its usage yet: an
+ * empty response an abandoned run left stays uncopied, which costs the chat nothing, and the conversation goes on the moment
+ * a step follows it.
  */
-function unsettled(s: Step, last: boolean): boolean {
-  if (!last) return false
-  if (NOT_FINAL.has(s.status)) return true
-  return s.step_type === 15 && !s.error_details?.length && pending(s.step_payload ?? EMPTY)
+function unsettled(s: Step, last: boolean, now: number): boolean {
+  const p = s.step_payload ?? EMPTY
+  if (NOT_FINAL.has(s.status)) return field(p, '5.8') === undefined && (last || now - stepTime(p) < STEP_WAIT_MS)
+  return last && s.step_type === 15 && !s.error_details?.length && pending(p)
 }
 
 /** the newest conversation of a folder for this CLI: its mirror's path, or nothing; a failure is never thrown */

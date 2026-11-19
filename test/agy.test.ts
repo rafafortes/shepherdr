@@ -304,6 +304,26 @@ describe('the mirror of a conversation', () => {
     expect(lines(file)[1]).toMatchObject({ kind: 'agent', text: 'final' })
   })
 
+  test('a tool call still running is waited for while a later step is already there, and copied once it is over', () => {
+    // agy runs tool calls side by side: a fast one's step is written while a slow one still runs
+    const nowSec = Math.round(Date.now() / 1000)
+    makeConversation(join(convs, 'conv-parallel.db'), [
+      { idx: 0, step_type: 14, payload: userPayload('one') },
+      { idx: 1, step_type: 15, status: 3, payload: agentPayload({ text: 'both at once', tokensIn: 5, tokensOut: 2 }) },
+      { idx: 2, step_type: 132, status: 2, payload: toolPayload({ tool: 'run_command', args: '{"CommandLine":"bun test"}', sec: nowSec }) },
+      { idx: 3, step_type: 132, status: 3, payload: toolPayload({ tool: 'view_file', args: '{}', output: 'a file', sec: nowSec + 1 }) },
+    ])
+    const file = join(folder('parallel'), 'conv-parallel.jsonl')
+    // step 2 began now and has no output or end time yet: it is on its way, and the step after it waits with it
+    expect(mirrorConversation('conv-parallel', file)).toBe(2)
+    const d = new Database(join(convs, 'conv-parallel.db'))
+    d.run('UPDATE steps SET status = 3, step_payload = ? WHERE idx = 2', [toolPayload({ tool: 'run_command', args: '{"CommandLine":"bun test"}', output: 'Command exited with code 0.\n\nCommand output: all pass', sec: nowSec })])
+    d.close()
+    expect(mirrorConversation('conv-parallel', file)).toBe(2)
+    expect(lines(file).map((l) => l.idx)).toEqual([0, 1, 2, 3])
+    expect(lines(file)[2]).toMatchObject({ kind: 'tool', tool: 'run_command', output: 'Command exited with code 0.\n\nCommand output: all pass' })
+  })
+
   test('a step agy left running is copied as it stands once a step follows it, so the rest of the conversation shows', () => {
     // agy leaves a tool call's status at 2 when it never comes back: waiting for it would stop the mirror for good (it did
     // in 9 of this machine's real conversations)
