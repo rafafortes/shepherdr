@@ -215,8 +215,15 @@ const ROUTE_CHECK_MS = 3_000
 const ROUTE_BACKOFF = [500, 1000]
 const ROUTE_POLL = 500
 const ROUTE_DEADLINE = 60_000
-/** the repair pass binds many agents in series: its ceiling is short, so a wedged machine cannot starve it for minutes */
+/** the repair pass binds many agents: its ceiling is short, so a wedged machine cannot starve it for minutes */
 const ROUTE_REPAIR_MS = 10_000
+/** how many routes the repair pass binds at once. A restart re-provisions every live agent, and one at a time that
+ *  chain is as long as the number of agents — minutes with ~60 — while a task starting during it can fail its first
+ *  write (SHE-56). A handful at a time keeps the pass short without a burst of helper processes on a busy machine. */
+const ROUTE_REPAIR_CHUNK = 6
+/** how often a repair pass runs once the routes are there. The first one runs at the first look at herdr (routesAt
+ *  starts at 0), so a restart repairs its routes at once instead of waiting this out. */
+const ROUTE_REPAIR_EVERY = 30_000
 
 type Events = {
   routed: [key: string]
@@ -646,7 +653,7 @@ export class Agents extends Emitter<Events> {
         }
       }
       // Repair running sessions without interrupting them, including ones restored by herdr.
-      if (Date.now() - this.routesAt > 30_000 && !this.routing) {
+      if (Date.now() - this.routesAt > ROUTE_REPAIR_EVERY && !this.routing) {
         this.routesAt = Date.now()
         void this.repairRoutes()
       }
@@ -833,16 +840,30 @@ export class Agents extends Emitter<Events> {
     }
   }
 
+  /**
+   * Bring every live agent's route back, a chunk at a time: the pass binds the agents already talking to herdr, and
+   * never one whose own launch is about to bind it (a launch's bind stays its own, so the repair pass can neither
+   * skip nor duplicate it). Each route fails on its own, said once, and never stops the others.
+   */
   private async repairRoutes() {
     this.routing = true
     try {
-      for (const r of Object.values(this.records)) {
-        const a = this.live.get(r.name)
-        if (a) await this.bindRoute(r, a.pane_id, false, ROUTE_REPAIR_MS).catch((e) => console.error(`shepherdr: routing ${r.key}: ${e.message}`))
+      const todo = Object.values(this.records).filter((r) => this.live.has(r.name) && !r.pendingLaunch && !this.starting.has(r.key))
+      for (let i = 0; i < todo.length; i += ROUTE_REPAIR_CHUNK) {
+        if (this.stopped) return
+        await Promise.allSettled(todo.slice(i, i + ROUTE_REPAIR_CHUNK).map((r) => this.repairRoute(r)))
       }
     } finally {
       this.routing = false
     }
+  }
+
+  /** one route of the repair pass: its failure is said here and belongs to this route alone */
+  private async repairRoute(r: AgentRecord) {
+    const a = this.live.get(r.name)
+    if (!a) return
+    try { await this.bindRoute(r, a.pane_id, false, ROUTE_REPAIR_MS) }
+    catch (e) { console.error(`shepherdr: routing ${r.key}: ${(e as Error).message}`) }
   }
 
   /**
