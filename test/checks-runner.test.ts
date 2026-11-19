@@ -242,8 +242,9 @@ describe('the verdict a tree already passed (--reuse)', () => {
     const f = fixture(passing)
     const lock = join(f.home, '.cache', 'shepherdr', 'check-local.lock')
     mkdirSync(join(f.home, '.cache', 'shepherdr'), { recursive: true })
-    // holds the lock for a moment: long enough for the runner to reach it and say it waits, short enough not to slow the suite
-    const holder = Bun.spawn(['flock', lock, 'sleep', '2'])
+    // holds the lock for a moment: room enough for a loaded machine's runner to reach it and say it waits, and short
+    // enough not to slow the suite
+    const holder = Bun.spawn(['flock', lock, 'sleep', '4'])
     await Bun.sleep(300)
     const runner = Bun.spawn(['bash', join(f.dir, 'scripts', 'check-local.sh'), '--reuse'], {
       cwd: f.dir,
@@ -273,6 +274,8 @@ describe('the verdict a tree already passed (--reuse)', () => {
     expect(await runner.exited).toBe(0)
     expect(out).toContain('this exact tree passed the full check already')
     expect(f.calls()).toEqual([])
+    // the worktree's verdict says what happened, not the note that stood there while it waited
+    expect(f.verdict()).toContain('nothing ran here')
   })
 
   test('a tree the branch moved away from while the check ran is never kept', () => {

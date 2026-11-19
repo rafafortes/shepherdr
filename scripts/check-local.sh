@@ -152,8 +152,12 @@ if command -v flock >/dev/null 2>&1; then
 else
   echo "flock is missing: running without the one-at-a-time lock."
 fi
-# the check this one waited behind may have kept this very tree's verdict while it ran: asked again here, before the run
-reuse_answer && exit 0
+# the check this one waited behind may have kept this very tree's verdict while it ran: asked again here, before the run,
+# and its own line stands in this worktree's verdict for the note above, which did while this one waited
+if reuse_answer; then
+  printf 'check:local reuse: this tree passed the full check already, so nothing ran here\n' >"$V"
+  exit 0
+fi
 # this run's own verdict, from its header on (what stood there while it waited was the note above)
 : >"$V"
 started=$SECONDS

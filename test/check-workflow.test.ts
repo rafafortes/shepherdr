@@ -72,7 +72,8 @@ describe('the check itself', () => {
     // a quick run answers nothing and keeps nothing, and the gate question is asked after the lock wait too (the run
     // it waited behind may have just kept this very tree)
     expect(lines).toContain(`if [ "$quick" = 1 ] && [ "$reuse" = 1 ]; then`)
-    expect(lines.filter((l) => l === 'reuse_answer && exit 0')).toHaveLength(2)
+    expect(lines).toContain('reuse_answer && exit 0')
+    expect(lines).toContain('if reuse_answer; then')
     // a tree's verdict is written only once the run passed whole, and taken away when it fails
     const call = lines.indexOf('  record 1')
     expect(call).toBeGreaterThan(-1)
