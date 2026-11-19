@@ -6,7 +6,7 @@
 // plugins add (a desktop's keyboard shortcuts). A phone lists the sections in rounded groups, as iOS's Settings does, and a tap pushes one over
 // the list; a wider screen keeps the list down its side.
 import clsx from 'clsx'
-import { Fragment, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Component, Fragment, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { machineName, type Place, type SettingRow, type SettingSection } from '@shared/types.ts'
 import { act, registry, setUI, useSnap, useUI, type UI } from './kernel.ts'
 import { usePluginErrors } from './guard.tsx'
@@ -17,8 +17,28 @@ import { APPEARANCES, setAppearance, useAppearance } from './theme.ts'
 import { BackIcon, CheckIcon, Empty, Ghost, Head, IconButton, NextIcon, PhoneTop, PlaceIcon, PlusIcon, RoundButton, SecretField, Small, Who, XIcon, field, ic } from './ui.tsx'
 import { APPEARANCE, Control, DocValue, LOOKS, Pick, SEGMENTS, TriggerValue, card, groupsOf, heading, iconOf, levelHint, levelName, levelsOf, levelOf, numShown, rowLook, shown, subHeading, type Page } from './settings-parts.tsx'
 
-// kept where callers have always found them (main.tsx, the health and keyboard plugins)
-export { rowLook, sectionOf, settingsPageOf } from './settings-parts.tsx'
+// the shared names keep the old import path too: main.tsx and the human's own plugins import pieces from here
+export * from './settings-parts.tsx'
+
+/** a page body that fails to load (a new build replaced its chunk under an open tab) leaves Settings usable */
+class PageLoadBoundary extends Component<{ children?: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  componentDidCatch(e: unknown) {
+    console.error('a Settings page failed to load:', e)
+  }
+  render() {
+    if (!this.state.failed) return this.props.children
+    return (
+      <div role="alert" className="flex flex-col gap-2">
+        <Empty>Couldn't load this page. A new version may have replaced it.</Empty>
+        <Ghost onClick={() => location.reload()}>Reload Shepherdr</Ghost>
+      </div>
+    )
+  }
+}
 
 /** Settings → Plugins with what failed on this screen too: a plugin of the human's own that threw here */
 export function withPluginErrors(sections: SettingSection[], errors: Record<string, string>): SettingSection[] {
@@ -253,9 +273,11 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
       {page === APPEARANCE ? <AppearancePick phone={phone} /> : null}
       {page.secrets && page.level ? <SecretsList level={page.level} secrets={page.secrets} phone={phone} /> : null}
       {page.View ? (
-        <Suspense fallback={<div data-suspense-fallback><Empty>Loading…</Empty></div>}>
-          <page.View phone={phone} />
-        </Suspense>
+        <PageLoadBoundary>
+          <Suspense fallback={<div role="status" data-suspense-fallback><Empty>Loading…</Empty></div>}>
+            <page.View phone={phone} />
+          </Suspense>
+        </PageLoadBoundary>
       ) : null}
       {groups.map(({ name, rows }, g) => (
         <div key={name ?? g} className="w-full">
