@@ -492,6 +492,7 @@ describe('logs a CLI starts on its own', () => {
     a.adopt(key, agent, 'pi', 'ws')
     expect(a.record(key)).toMatchObject({ key, name: 'shep-adopted', kind: 'pi', cwd: '/work/here', workspace: 'ws', logs: ['/logs/adopted.jsonl'] })
     // a new Agents reads it back: it was saved
+    a.flushRecords()
     const again = new Agents()
     made.push(again)
     expect(again.record(key)?.name).toBe('shep-adopted')

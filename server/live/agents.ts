@@ -277,6 +277,13 @@ export class Agents extends Emitter<Events> {
   private readingBackground = false
   private refreshing = false
   private stopped = false
+  /** agents.json is a whole 3.6 MB store: a change writes it once per event-loop turn (the microtask coalesces every
+   *  save() in one turn), and the bursty, harmless pendingLaunch flips of settleLaunches get this short delay so a
+   *  start burst becomes one write. outbox.json stays immediate: a queued message lost to a crash is data loss. */
+  recordsSaveAfter = 1000
+  private recordsDirty = false
+  private recordsTimer: ReturnType<typeof setTimeout> | null = null
+  private recordsFlushQueued = false
   private retryAt = 0
   private recovery = new LinkBackoff()
   private routesAt = 0
@@ -386,11 +393,46 @@ export class Agents extends Emitter<Events> {
     if (this.soon) clearTimeout(this.soon)
     this.hookWatch?.close()
     this.sub.stop()
+    this.flushRecords()
   }
 
+  /** outbox.json goes down at once (a queued message must survive a crash); agents.json is coalesced to one write per
+   *  turn by saveRecords. Callers that must be durable when they return (finish, forget) follow save() with
+   *  flushRecords(). */
   save() {
-    writeJson('agents.json', this.records)
+    this.saveRecords()
     writeJson('outbox.json', this.outbox)
+  }
+
+  /** records changed: write once at the end of this event-loop turn, whatever else changed them meanwhile */
+  private saveRecords() {
+    this.recordsDirty = true
+    if (this.recordsFlushQueued) return
+    this.recordsFlushQueued = true
+    queueMicrotask(() => {
+      this.recordsFlushQueued = false
+      this.flushRecords()
+    })
+  }
+
+  /** a pendingLaunch flip (settleLaunches): harmless to delay, and many happen in one refresh burst, so one timer
+   *  serves all flips until it fires. A save() in the same turn still flushes them at the end of that turn. */
+  private savePending() {
+    this.recordsDirty = true
+    if (this.recordsTimer) return
+    this.recordsTimer = setTimeout(() => this.flushRecords(), this.recordsSaveAfter)
+    this.recordsTimer.unref?.()
+  }
+
+  /** write the dirty records once, now; the outbox is never held back */
+  flushRecords() {
+    if (this.recordsTimer) {
+      clearTimeout(this.recordsTimer)
+      this.recordsTimer = null
+    }
+    if (!this.recordsDirty) return
+    this.recordsDirty = false
+    writeJson('agents.json', this.records, home(), true)
   }
 
   record(key: string) {
@@ -629,7 +671,7 @@ export class Agents extends Emitter<Events> {
       if (!a.launch_pending) {
         if (r?.pendingLaunch) {
           r.pendingLaunch = false
-          this.save()
+          this.savePending()
         }
         this.pendingSince.delete(name)
         this.pendingSaid.delete(name)
@@ -637,7 +679,7 @@ export class Agents extends Emitter<Events> {
       }
       if (r && !r.pendingLaunch) {
         r.pendingLaunch = true
-        this.save()
+        this.savePending()
       }
       const since = this.pendingSince.get(name) ?? now
       this.pendingSince.set(name, since)
@@ -1041,6 +1083,8 @@ export class Agents extends Emitter<Events> {
     this.records[spec.key] = r
     this.byName.set(r.name, r.key)
     this.save()
+    // the start path reads this record back (a restart mid-launch must resume the new session), so make it durable
+    this.flushRecords()
     task.mkdirSync(r.cwd, { recursive: true })
     // it starts in another folder now: its session goes with it, where --resume looks for it
     if (resume && r.kind === 'claude' && r.sessionId && from !== r.cwd) {
@@ -1058,6 +1102,7 @@ export class Agents extends Emitter<Events> {
     await this.prepareOpencode(r, !!resume, changedPrompt)
     const args = this.args(r, !!resume)
     this.save()
+    this.flushRecords()
     await this.again(r, async () => {
       // a new pane needs a moment before its shell is at the prompt
       for (let i = 0; ; i++) {
@@ -1132,6 +1177,7 @@ export class Agents extends Emitter<Events> {
     addLog(r, opencodeLogPath(home(), r.sessionId))
     if (r.system) await putInstructions(r.sessionId, r.system, r.cwd)
     this.save()
+    this.flushRecords()
   }
 
   args(r: AgentRecord, resume: boolean): string[] {
@@ -1521,6 +1567,7 @@ export class Agents extends Emitter<Events> {
     const a = this.info(key)
     if (r) r.finished = true
     this.save()
+    this.flushRecords()
     if (!a) return
     await herdr.closePane(a.pane_id).catch(() => undefined)
     // gone from what herdr runs at once: starting it again (a backup agent taking over) starts a new one
@@ -1538,6 +1585,8 @@ export class Agents extends Emitter<Events> {
     this.failures = this.failures.filter((f) => f.key !== key)
     this.stranded.delete(key)
     this.save()
+    // a forget is durable when it returns: a restart must not bring the deleted chat's agent back
+    this.flushRecords()
   }
 
   /** a turn under way ended cleanly before its run ends (a restart): interrupted, then a few seconds for the CLI to

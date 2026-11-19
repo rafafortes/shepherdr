@@ -1460,6 +1460,7 @@ describe('what you send shows at once', () => {
       // This is the actual delivery bookkeeping, which must outlive a process restart.
       ;(agents as unknown as { went(o: typeof item): void }).went(item)
       agents.save() // simulate a crash after receipt, before removing the queued copy
+      agents.flushRecords()
       const { Agents } = await import('../server/live/agents.ts')
       const restarted = new Agents()
       try {

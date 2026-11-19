@@ -603,6 +603,7 @@ describe('the logs an agent keeps', () => {
     ;(a as unknown as { learnSession: (k: string, i: object) => void }).learnSession('T-3/Agent', { agent_session: { kind: 'path', value: p('a', '/elsewhere') } })
     expect(a.record('T-3/Agent')!.logs).toEqual([p('a'), p('b'), p('c')])
     a.save()
+    a.flushRecords()
     expect(JSON.parse(readFileSync(join(process.env.SHEPHERDR_HOME!, 'agents.json'), 'utf8'))['T-3/Agent'].logs).toEqual([p('a'), p('b'), p('c')])
     a.stop()
   })
