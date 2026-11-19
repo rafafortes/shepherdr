@@ -49,7 +49,8 @@ export interface Source extends Emitter<SourceEvents> {
   artifactThumb(id: string, dark: boolean): Promise<Blob | null>
   /** which chats and terminal are on someone's screen: read them while they are */
   watch(chats: string[], terms: string[]): void
-  upload(chat: string, name: string, data: Uint8Array): Promise<string>
+  /** the signal stops a peer copy when the uploader's connection goes away while it is being forwarded */
+  upload(chat: string, name: string, data: Uint8Array, signal?: AbortSignal): Promise<string>
   /** talk to type: a recording, written down on this machine (whisper.cpp), its words back; throws with words for the
    *  screen when it can't (no whisper.cpp, no model, nothing said). It stops when the screen goes away (signal) */
   dictate?(audio: Blob, signal?: AbortSignal): Promise<string>

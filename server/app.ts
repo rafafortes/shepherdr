@@ -6,7 +6,7 @@ import { basename, dirname, join, normalize } from 'node:path'
 import { notifies, waiting } from '../shared/alerts.ts'
 import { buildId } from '../shared/build.ts'
 import { DICTATE_CAP, DICTATE_TOO_LONG } from '../shared/dictate.ts'
-import { fileType } from '../shared/files.ts'
+import { ATTACH_MAX, fileType, UPLOAD_TOO_LARGE } from '../shared/files.ts'
 import type { Action, AddSpace, ServerEvent, UpdateStatus, WorktreeAsk } from '../shared/types.ts'
 import { frameResponse, wrapPage } from './frame.ts'
 import { hostAllowed, refusedHosts } from './hosts.ts'
@@ -35,9 +35,12 @@ export interface AppOptions {
   hosts?: () => string[]
   /** update.json: how the last update of Shepherdr went, shown on every screen */
   updates?: string
+  /** the largest file /api/upload accepts, in bytes; a test injects a small one so an over-cap post needs no 100 MB
+   *  body. Everything else uses ATTACH_MAX, the same 100 MB the "Up to 100 MB each" help promises. */
+  uploadCap?: number
 }
 
-export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts = () => [], updates }: AppOptions) {
+export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts = () => [], updates, uploadCap = ATTACH_MAX }: AppOptions) {
   const live = new Set<ServerWebSocket<Sock>>()
   const send = (ws: ServerWebSocket<Sock>, e: ServerEvent) => ws.send(JSON.stringify(e))
 
@@ -209,11 +212,19 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
         if (path === '/api/font/InterVariable.woff2')
           return new Response(Bun.file(FONT), { headers: { 'content-type': 'font/woff2', 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=86400' } })
         if (path === '/api/upload' && req.method === 'POST') {
+          // a file over the cap is refused before its body is read into memory, the way dictate refuses a long
+          // recording. The signal is passed on so a peer copy stops if the uploader goes away mid-forward.
+          if (Number(req.headers.get('content-length') ?? 0) > uploadCap) return json({ error: UPLOAD_TOO_LARGE }, 413)
           const form = await req.formData()
           const file = form.get('file') as File | null
           const chat = String(form.get('chat') ?? '')
           if (!file) return json({ error: 'No file' }, 400)
-          const p = await source.upload(chat, file.name, new Uint8Array(await file.arrayBuffer()))
+          // content-length can be left out on a streamed body: the file itself is the last word
+          if (file.size > uploadCap) return json({ error: UPLOAD_TOO_LARGE }, 413)
+          // Bun's multipart File is a Blob with .stream() but no filesystem path: writing it straight to the inbox as
+          // a stream would need a different source.upload signature (and a separate peer path). The cap bounds what
+          // is materialized here; arrayBuffer() is a view over one buffer, not a second full copy.
+          const p = await source.upload(chat, file.name, new Uint8Array(await file.arrayBuffer()), req.signal)
           return json({ path: p })
         }
         if (path === '/api/file') {

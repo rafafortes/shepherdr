@@ -1460,14 +1460,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
   }
 
-  async upload(chat: string, name: string, data: Uint8Array) {
+  async upload(chat: string, name: string, data: Uint8Array, signal?: AbortSignal) {
     // a file lands on the machine of the agent it is for
     const peer = this.peers?.owner(chat)
     if (peer) {
       const body = new FormData()
       body.append('chat', chat)
       body.append('file', new File([new Uint8Array(data)], name))
-      const r = await this.peers!.fetch(peer, '/api/upload', { method: 'POST', body })
+      const r = await this.peers!.fetch(peer, '/api/upload', { method: 'POST', body, signal })
       return ((await r.json()) as { path: string }).path
     }
     // on the machine of the agent it is for: there it reads it

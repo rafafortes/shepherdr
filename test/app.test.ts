@@ -1,10 +1,12 @@
 // The web server lets only this app's own pages (and local programs) act: another website can't.
 import { afterAll, describe, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
+import { connect } from 'node:net'
 import { join } from 'node:path'
 import { startApp } from '../server/app.ts'
 import { refusedHosts } from '../server/hosts.ts'
 import type { Push } from '../server/push.ts'
+import { UPLOAD_TOO_LARGE } from '../shared/files.ts'
 import type { Alert, UpdateStatus } from '../shared/types.ts'
 import { Emitter, type Source, type SourceEvents } from '../server/source.ts'
 import { tmp } from './tmp.ts'
@@ -29,8 +31,10 @@ class Stub extends Emitter<SourceEvents> {
     return id === 'ab12' ? new Blob(['png'], { type: 'image/png' }) : null
   }
   watch() {}
-  async upload() {
-    return ''
+  uploads: { chat: string; name: string; size: number }[] = []
+  async upload(chat: string, name: string, data: Uint8Array) {
+    this.uploads.push({ chat, name, size: data.byteLength })
+    return `/inbox/${chat}/${name}`
   }
   async attachment(chat: string, path: string) {
     return chat === 'c' && path.startsWith('/inbox/') ? new Blob(['<svg onload="alert(1)"/>']) : null
@@ -70,6 +74,13 @@ const post = (headers: Record<string, string>) => postAt(base, headers)
 // a second server with a published name, as the app behaves once app.hosts is set
 const published = startApp({ source: new Stub() as unknown as Source, dist: '/nonexistent', port: 0, hosts: () => ['app.example.com'] })
 afterAll(() => published.stop(true))
+
+// a server with a tiny upload cap, so an over-cap post needs no 100 MB body; it records what the source would write
+const CAP = 1024
+const capped = new Stub()
+const cappedServer = startApp({ source: capped as unknown as Source, dist: '/nonexistent', port: 0, uploadCap: CAP })
+const cappedBase = `http://127.0.0.1:${cappedServer.port}`
+afterAll(() => cappedServer.stop(true))
 
 describe('the Host header', () => {
   test('a rebound Host is refused with 421 on every API route, with or without Origin', async () => {
@@ -309,6 +320,71 @@ describe('attached files', () => {
     expect((await get('/inbox/c/x-clip.mp4', {}, '&poster=1')).status).toBe(404)
     // and a path the source refuses is refused the same way, never read from disk
     expect((await get('/etc/passwd', {}, '&thumb=1')).status).toBe(404)
+  })
+})
+
+describe('upload cap', () => {
+  const postFile = (size: number) => {
+    const body = new FormData()
+    body.append('chat', 'c')
+    body.append('file', new Blob([new Uint8Array(size)]), 'big.png')
+    return fetch(`${cappedBase}/api/upload`, { method: 'POST', body })
+  }
+
+  test('a file over the cap is refused with 413 and nothing is written', async () => {
+    const before = capped.uploads.length
+    const r = await postFile(CAP + 1)
+    expect(r.status).toBe(413)
+    expect(await r.json()).toEqual({ error: UPLOAD_TOO_LARGE })
+    expect(capped.uploads.length).toBe(before)
+  })
+
+  test('a content-length over the cap is refused before any body is read', async () => {
+    // a raw socket sends the header with no body at all: without the early check formData() would wait for a body
+    // that never comes, so a quick 413 proves the refusal happens before the body is read
+    const before = capped.uploads.length
+    const port = cappedServer.port!
+    const raw = await new Promise<string>((resolve, reject) => {
+      const socket = connect(port, '127.0.0.1', () => {
+        socket.write(`POST /api/upload HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Type: multipart/form-data; boundary=x\r\nContent-Length: ${CAP + 1}\r\nConnection: close\r\n\r\n`)
+      })
+      socket.setTimeout(5000)
+      let out = ''
+      socket.on('data', (d) => { out += d.toString() })
+      socket.on('timeout', () => { socket.destroy(); reject(new Error('no early answer')) })
+      socket.on('end', () => resolve(out))
+      socket.on('error', reject)
+    })
+    expect(raw).toStartWith('HTTP/1.1 413')
+    expect(JSON.parse(raw.split('\r\n\r\n')[1])).toEqual({ error: UPLOAD_TOO_LARGE })
+    expect(capped.uploads.length).toBe(before)
+  })
+
+  test('a streamed body with no content-length is refused by the file size too', async () => {
+    const before = capped.uploads.length
+    const boundary = 'uploadcap'
+    const enc = new TextEncoder()
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(enc.encode(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="big.png"\r\n\r\n`))
+        c.enqueue(new Uint8Array(CAP + 1))
+        c.enqueue(enc.encode(`\r\n--${boundary}--\r\n`))
+        c.close()
+      },
+    })
+    const r = await fetch(`${cappedBase}/api/upload`, { method: 'POST', headers: { 'content-type': `multipart/form-data; boundary=${boundary}` }, body })
+    expect(r.status).toBe(413)
+    expect(await r.json()).toEqual({ error: UPLOAD_TOO_LARGE })
+    expect(capped.uploads.length).toBe(before)
+  })
+
+  test('a file under the cap still reaches the source and answers with its path', async () => {
+    const before = capped.uploads.length
+    const r = await postFile(64)
+    expect(r.status).toBe(200)
+    expect(await r.json()).toEqual({ path: '/inbox/c/big.png' })
+    expect(capped.uploads.length).toBe(before + 1)
+    expect(capped.uploads.at(-1)).toEqual({ chat: 'c', name: 'big.png', size: 64 })
   })
 })
 

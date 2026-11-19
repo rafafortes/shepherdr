@@ -32,8 +32,12 @@ export const isImage = (name: string) => extOf(name) in IMAGE
 
 export const isVideo = (name: string) => extOf(name) in VIDEO
 
-/** the most a picture or a video an agent sends into its chat may be: a phone downloads it whole to look at it */
+/** the most a picture or a video an agent sends into its chat may be: a phone downloads it whole to look at it.
+ *  The "Up to 100 MB each" help and /api/upload's cap both use this one number, so they cannot drift apart. */
 export const ATTACH_MAX = 100 * 1024 * 1024
+
+/** the words /api/upload answers with when a file is over the cap, from the same promise the help prints */
+export const UPLOAD_TOO_LARGE = `That file is too large: ${ATTACH_MAX / 1024 / 1024} MB at most.`
 
 /** a picture or a video: what an agent sends into its chat, and what the chat shows in place */
 export const isMedia = (name: string) => isImage(name) || isVideo(name)
