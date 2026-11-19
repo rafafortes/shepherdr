@@ -484,10 +484,11 @@ export function LimitValue({ title, cell, machine, phone }: { title: string; cel
 /** one value a move writes: the place of a space's Priority cell, and its number now (null: it goes back to by age) */
 type Move = { place: string; value: string | null }
 
-/** the number a space's Priority cell holds now, or null when it has none: off, a value no longer readable, or one outside
- *  the range Settings keeps (1 to PLACE_MAX), which the queue reads as no place at all (settings.ts spacePriority) */
+/** the number a space's Priority cell holds now, or null when it has none: off, a value no longer readable, one outside the
+ *  range Settings keeps (1 to PLACE_MAX), which the queue reads as no place at all (settings.ts spacePriority), or the home
+ *  space's, which has no tasks of its own and no place to move (the server refuses a write there) */
 function placeOf(row: LimitSpaceRow): number | null {
-  const v = row.cells['space.priority']?.row.value.trim() ?? ''
+  const v = row.home ? '' : (row.cells['space.priority']?.row.value.trim() ?? '')
   if (!/^[0-9]+$/.test(v)) return null
   const n = Number(v)
   return n >= 1 && n <= PLACE_MAX ? n : null
@@ -503,8 +504,8 @@ function placeOf(row: LimitSpaceRow): number | null {
  *
  * Two spaces may hold the same number (they then go by age, as the setting says), and a swap of two numbers can say
  * nothing there: equal numbers would leave the list as it was, and two different ones let the row jump over the numbers
- * between them. So when two numbered spaces share a number, the numbered ones are given 1, 2, 3, … in their new order
- * instead — the same places in the same order, now each its own, and only the numbers that change are written.
+ * between them. So while any two numbered spaces share a number, a move gives the numbered ones 1, 2, 3, … in their new
+ * order instead — the same places in the same order, now each its own, and only the numbers that change are written.
  */
 function moveOf(rows: LimitSpaceRow[], at: number, dir: -1 | 1): Move[] | null {
   const row = rows[at]
@@ -512,23 +513,22 @@ function moveOf(rows: LimitSpaceRow[], at: number, dir: -1 | 1): Move[] | null {
   const place = placeAt(row)
   const mine = placeOf(row)
   if (!place) return null
-  const numbered = rows.flatMap((r, i) => {
-    const n = i === at ? null : placeOf(r)
-    return n === null ? [] : [n]
-  })
+  const numbered = rows.filter((r) => placeOf(r) !== null)
+  const numbers = numbered.map((r) => placeOf(r) ?? 0)
   // no number yet: it goes last among the numbered ones (the first one when nothing is numbered), and no lower. Past the
   // range there is no place to give it: the arrow is off rather than refused by the server
   if (mine === null) {
-    const next = Math.max(0, ...numbered) + 1
+    const next = Math.max(0, ...numbers) + 1
     return dir < 0 && next <= PLACE_MAX ? [{ place, value: String(next) }] : null
   }
-  // two numbered spaces share a number: the numbered ones are renumbered 1, 2, 3, … in the order the move makes
-  if (numbered.includes(mine)) {
-    const list = rows.filter((r) => placeOf(r) !== null)
-    const from = list.indexOf(row)
+  // a tie anywhere among the numbered ones: the numbered spaces are renumbered 1, 2, 3, … in the order the move makes
+  if (new Set(numbers).size !== numbers.length) {
+    const from = numbered.indexOf(row)
     const to = from + dir
-    if (to < 0 || to >= list.length) return null
-    const order = list.filter((_, i) => i !== from)
+    // ↓ on the last numbered one still clears its number, as it does with no tie: it goes back to by age
+    if (to >= numbered.length) return [{ place, value: null }]
+    if (to < 0) return null
+    const order = numbered.filter((_, i) => i !== from)
     order.splice(to, 0, row)
     return order.flatMap((r, i) => {
       const cell = placeAt(r)
