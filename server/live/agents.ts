@@ -1040,17 +1040,53 @@ export class Agents extends Emitter<Events> {
     const p = (async () => {
       await p0?.catch(() => undefined)
       this.stopping.add(spec.key)
+      let next: { place: () => Promise<string>; close: () => Promise<void> } | undefined
       try {
         const first = await before?.()
+        // the pane its new run goes in is opened while the run it takes over from still holds its own: herdr closes a
+        // space with its last pane, and closing a task's only pane closed its worktree's space with it, under the run
+        // coming in (a hand-over, SHE-166)
+        next = await this.ahead(spec)
         await this.finish(spec.key)
-        return await this.launch({ ...spec, ...(first ? { first } : {}) }).catch((e) => this.startedWrongly(spec.key, e))
+        return await this.launch({ ...spec, ...(first ? { first } : {}), ...(next ? { pane: next.place } : {}) }).catch((e) => this.startedWrongly(spec.key, e))
       } finally {
+        await next?.close()
         this.stopping.delete(spec.key)
         this.deliver(spec.key)
       }
     })().finally(() => this.starting.delete(spec.key))
     this.starting.set(spec.key, p)
     return p
+  }
+
+  /**
+   * The pane this chat's next run goes in, opened before the run it takes over from ends (a restart): herdr closes a
+   * space with its last pane, so a hand-over that closed a task's worktree space with the agent's only pane left the
+   * run coming in nowhere to go. What the start would have opened itself, opened now; when that fails it falls back to
+   * opening it in the start, as it always did, and a start that never gets that far (a cap, a worktree, a CLI) closes
+   * the pane it never used.
+   */
+  private async ahead(spec: Spec) {
+    const record = this.records[spec.key] ?? ({ ...spec, logs: [], started: Date.now() } as AgentRecord)
+    const make = spec.pane ?? (() => this.paneFor(record, spec.was))
+    let pane: string | undefined
+    try {
+      pane = await make()
+    } catch (e) {
+      console.error(`shepherdr: couldn't open ${spec.key}'s pane ahead of its restart: ${(e as Error).message}`)
+    }
+    if (!pane) return undefined
+    const made = pane
+    let used = false
+    return {
+      place: async () => {
+        used = true
+        return made
+      },
+      close: async () => {
+        if (!used) await herdr.closePane(made).catch(() => undefined)
+      },
+    }
   }
 
   /** start (or resume) this chat's agent; resolves once herdr says it is ready for input */

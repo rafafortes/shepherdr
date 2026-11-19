@@ -267,6 +267,11 @@ async function changing<T>(attempt: () => Promise<T>, took: () => Promise<T | un
 
 const NOT_FOUND = /not[_ ]found/i
 
+/** herdr answering that something it had is not there any more: a workspace or a pane that closed meanwhile (a hand-over
+ *  closes an agent's pane, and herdr closes the space with it). Not a call herdr failed: nothing is tried again */
+export const missing = (e: unknown) =>
+  e instanceof HerdrError ? NOT_FOUND.test(e.code) || NOT_FOUND.test(e.message) : NOT_FOUND.test((e as { message?: string } | null)?.message ?? '')
+
 /** text as the screen shows it, to look for what was typed: no blanks, since the screen wraps lines where it likes */
 const squeeze = (t: string) => t.replace(/\s+/g, '')
 

@@ -326,8 +326,9 @@ describe('a space whose repo moved', () => {
     const added = await src.cli(['space', 'add', to], {})
     expect(added.code).toBe(0)
     expect(added.out).toContain(`Found shop again at ${to} (its folder was ${dir}), by its repo: its name, tasks, chat and mode are as they were.`)
-    // and its coordinator was restarted in the folder the repo is in now (herdr isn't here, so the start itself fails)
-    expect(src.agents.record(placeId.space('shop'))?.cwd).toBe(to)
+    // and its coordinator was restarted in the folder the repo is in now (herdr isn't here, so the start itself fails):
+    // the restart goes on in the background, its record written once it is under way
+    await until(() => src.agents.record(placeId.space('shop'))?.cwd === to, 8000, "shop's coordinator in its new folder")
     expect(src.places.byName('shop')!.path).toBe(to)
     expect(src.places.spaces.filter((x) => x.name === 'shop').length).toBe(1)
     // the space's own view says where it is, and where it was

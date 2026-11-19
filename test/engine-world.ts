@@ -102,8 +102,11 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
     stopTurn: async (key: string) => void (status[key] === 'working' && stopped.push(key)),
     restart: async (s: { key: string; first?: string; cwd: string; kind: string; pane?: () => Promise<string> }, before?: () => Promise<string | void>) => {
       const first = await before?.()
+      // as the real one does: the pane its new run goes in is opened while the run it takes over from still holds its
+      // own (agents.ts restart, SHE-166), so herdr never closes the space in between
+      const pane = await s.pane?.()
       await agents.finish(s.key)
-      return agents.ensure({ ...s, ...(first ? { first } : {}) })
+      return agents.ensure({ ...s, ...(first ? { first } : {}), ...(pane ? { pane: async () => pane } : {}) })
     },
     forget: (key: string) => {
       delete records[key]

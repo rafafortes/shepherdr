@@ -6,7 +6,7 @@
 import { boxHome } from '../box.ts'
 import { existsSync, realpathSync } from '../mfs.ts'
 import { home, readJson, writeJson } from '../../store.ts'
-import { herdr, type WorkspaceInfo, type WorktreeFrom, type WorktreeSpace } from '../herdr.ts'
+import { herdr, missing, type WorkspaceInfo, type WorktreeFrom, type WorktreeSpace } from '../herdr.ts'
 import * as G from './git.ts'
 
 /** what this asks of herdr; tests give a stand-in */
@@ -117,10 +117,17 @@ export class Worktrees {
     return (wt ? all.find((w) => w.worktree?.is_linked_worktree && real(w.worktree.checkout_path) === real(wt)) : undefined) ?? all.find((w) => !w.worktree && w.label === label)
   }
 
+  /** the task's space opened again from its worktree: a hand-over closed its last pane, and herdr the space with it */
+  async reopen(home: Home, wt: string, label: string): Promise<Made> {
+    return this.made(await this.opening(home, (from) => this.h.worktreeOpen(from, wt, label)), wt)
+  }
+
   /**
    * A pane for the task's agent, in a tab of its own that has the agent's environment (herdr's worktree commands take
    * none): in the space just made, in its space as it is, or in its space opened again from the worktree through
-   * herdr. The shell herdr opened a new space with is closed.
+   * herdr. The shell herdr opened a new space with is closed. A space that closed between finding it and opening a tab
+   * in it (herdr closes it with the agent's last pane, when the agent's run ends) is opened again from the worktree and
+   * the tab made there: the run coming in has somewhere to go without the space being lost.
    */
   async agentPane(o: { home: Home; wt: string; label: string; tab: string; env: Record<string, string>; made?: Made }) {
     let ws: string
@@ -129,9 +136,18 @@ export class Worktrees {
     else {
       const open = await this.spaceOf(o.wt, o.label)
       if (open) ws = open.workspace_id
-      else ({ workspace: ws, root } = this.made(await this.opening(o.home, (from) => this.h.worktreeOpen(from, o.wt, o.label)), o.wt))
+      else ({ workspace: ws, root } = await this.reopen(o.home, o.wt, o.label))
     }
-    const pane = (await this.h.createTab(ws, o.tab, o.wt, o.env)).root_pane.pane_id
+    let pane: string
+    try {
+      pane = (await this.h.createTab(ws, o.tab, o.wt, o.env)).root_pane.pane_id
+    } catch (e) {
+      // a space just made is the one to be in, and any other failure is the start's own; a space found by its worktree
+      // that herdr no longer has is opened again, once
+      if (o.made || !missing(e)) throw e
+      ;({ workspace: ws, root } = await this.reopen(o.home, o.wt, o.label))
+      pane = (await this.h.createTab(ws, o.tab, o.wt, o.env)).root_pane.pane_id
+    }
     if (root) await this.h.closePane(root).catch(() => undefined)
     return pane
   }

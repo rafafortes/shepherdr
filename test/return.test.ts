@@ -1299,9 +1299,13 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
       expect(a.t.tookOver!.blocked).toBeUndefined()
       Object.assign(s.src.agents.records[a.key], { kind: 'codex' })
       await s.src.watchReturns(later())
-      // the next pass takes it in, asks the primary, and starts the chat back on it
+      // the next pass takes it in, asks the primary, and starts the chat back on it — after the backup the takeover
+      // started in the worktree
       expect(asked).toEqual(['claude'])
-      expect(s.started.map((x) => [x.key, x.kind])).toEqual([[a.key, 'claude']])
+      expect(s.started.map((x) => [x.key, x.kind])).toEqual([
+        [a.key, 'codex'],
+        [a.key, 'claude'],
+      ])
     } finally {
       s.done()
     }

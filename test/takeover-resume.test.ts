@@ -4,6 +4,7 @@
 // Codex stands for all of them.
 import { describe, expect, test } from 'bun:test'
 import { repo, until, world } from './engine-world.ts'
+const { HerdrError } = await import('../server/live/herdr.ts')
 
 const SPARK = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
 
@@ -18,12 +19,12 @@ function fresh() {
   return w
 }
 
-/** a task on pi, started at once */
-async function running(w: ReturnType<typeof world>, name: string) {
+/** a task on pi (or the CLI named), started at once */
+async function running(w: ReturnType<typeof world>, name: string, kind = 'pi') {
   const p = await w.places.add(repo(), name)
-  const t = w.engine.add({ project: p.name, title: 'T1', desc: 'Add t1.txt.', by: 'test', agent: { kind: 'pi', model: SPARK } })
+  const t = w.engine.add({ project: p.name, title: 'T1', desc: 'Add t1.txt.', by: 'test', agent: { kind, ...(kind === 'pi' ? { model: SPARK } : {}) } })
   await until(() => w.started.some((s) => s.key === `${t.id}/Agent`))
-  w.records[`${t.id}/Agent`] = { ...w.records[`${t.id}/Agent`], model: SPARK } as never
+  if (kind === 'pi') w.records[`${t.id}/Agent`] = { ...w.records[`${t.id}/Agent`], model: SPARK } as never
   w.brief(`${t.id}/Agent`)
   return { t, key: `${t.id}/Agent` }
 }
@@ -88,5 +89,108 @@ describe('a restart that cut a takeover short takes it again', () => {
     expect(t.handover).toBeUndefined()
     expect(t.tookOver).toEqual(before)
     expect(w.started.filter((s) => s.key === key)).toHaveLength(starts)
+  })
+})
+
+// herdr closes a space with its last pane: a task agent's only pane carried its worktree's space away with it, and the
+// backup taking over had nowhere to start (SHE-166). The pane its new run goes in is opened before the old run ends
+// (agents.ts restart), a space that closed anyway is opened again from the worktree (worktrees.ts agentPane and
+// engine.ts cantGoOn), and a backup that still cannot start leaves the task as it was rather than as nothing.
+const CLIS = ['claude', 'codex', 'pi', 'opencode', 'agy']
+
+/** the herdr space a task's worktree has: its id in the fake herdr */
+const spaceOf = (w: ReturnType<typeof world>, path: string) => w.herdr.spaces.find((s) => s.worktree?.checkout_path === path)?.workspace_id
+
+describe('the space a takeover goes in', () => {
+  for (const [i, from] of CLIS.entries()) {
+    for (const same of [true, false]) {
+      const to = same ? from : CLIS[(i + 1) % CLIS.length]
+      test(`${from} → ${to} (${same ? 'its own session resumed' : 'another CLI'}): the task's space stays open`, async () => {
+        const w = fresh()
+        const { t, key } = await running(w, `handover-${from}-${same ? 'same' : 'cross'}`, from)
+        w.settings.set('task.fallback', to)
+        try {
+          const before = spaceOf(w, t.worktree!)
+          expect(before).toBeDefined()
+          await w.engine.cantGoOn(t.id, 'Out of allowance')
+          const s = w.started.filter((x) => x.key === key)
+          expect(s).toHaveLength(2)
+          expect(s[1]).toMatchObject({ kind: to })
+          // never closed in between: the same space, the run in a tab of its own in it
+          expect(spaceOf(w, t.worktree!)).toBe(before)
+          expect(w.herdr.spaces.filter((x) => x.worktree?.checkout_path === t.worktree)).toHaveLength(1)
+          expect(t.tookOver).toMatchObject({ from, to })
+          expect(t.trouble).toBeUndefined()
+        } finally {
+          w.settings.set('task.fallback', null)
+        }
+      })
+    }
+  }
+
+  test('a task restarted by hand keeps it open too: the new run is a tab in the space it has', async () => {
+    const w = fresh()
+    const { t, key } = await running(w, 'restart-space')
+    const before = spaceOf(w, t.worktree!)
+    await w.engine.restart(t.id, { kind: 'codex' })
+    expect(kindOf(w, key)).toBe('codex')
+    expect(spaceOf(w, t.worktree!)).toBe(before)
+    // its turn was stopped before its session was resumed
+    expect(w.stopped).toContain(key)
+  })
+})
+
+describe('a space herdr closes while a backup starts', () => {
+  test('the first tab refused there: the space is opened again from its worktree and the backup starts in it', async () => {
+    const w = fresh()
+    const { t, key } = await running(w, 'handover-reopen')
+    w.settings.set('task.fallback', 'codex')
+    // herdr no longer has the space, and says so: nothing is tried again by herdr's own retries
+    const createTab = w.herdr.h.createTab
+    let n = 0
+    w.herdr.h.createTab = async (...args: Parameters<typeof createTab>) => {
+      if (!n++) throw new HerdrError('workspace_not_found', 'workspace w9 not found')
+      return createTab(...args)
+    }
+    try {
+      await w.engine.cantGoOn(t.id, 'Out of allowance')
+    } finally {
+      w.herdr.h.createTab = createTab
+      w.settings.set('task.fallback', null)
+    }
+    // the backup went in all the same, with no failure left on the task
+    expect(kindOf(w, key)).toBe('codex')
+    expect(t.tookOver).toMatchObject({ from: 'pi', to: 'codex', step: 1 })
+    expect(t.handover).toBeUndefined()
+    expect(t.trouble).toBeUndefined()
+    expect(spaceOf(w, t.worktree!)).toBeDefined()
+  })
+
+  test('a space that cannot be opened at all: the task waits for you with the chain as it was, and says so', async () => {
+    const w = fresh()
+    const { t, key } = await running(w, 'handover-stuck')
+    w.settings.set('task.fallback', 'codex')
+    const createTab = w.herdr.h.createTab
+    w.herdr.h.createTab = async () => {
+      throw new HerdrError('workspace_not_found', 'workspace w9 not found')
+    }
+    try {
+      await w.engine.cantGoOn(t.id, 'Out of allowance', true)
+    } finally {
+      w.herdr.h.createTab = createTab
+      w.settings.set('task.fallback', null)
+    }
+    // nothing started, and the task says why rather than looking as it did
+    expect(kindOf(w, key)).toBe('pi')
+    expect(t.trouble).toContain('not found')
+    expect(w.engine.view(t)).toMatchObject({ status: 'need' })
+    // the chain is as it was: no takeover counted, no hand-over left for a restart to take again
+    expect(t.tookOver).toBeUndefined()
+    expect(t.handover).toBeUndefined()
+    expect(w.posted.some((p) => p.key === key && p.card?.text.includes('No backup agent took over'))).toBe(true)
+    const starts = w.started.length
+    w.engine.resumeTakeovers()
+    await Bun.sleep(50)
+    expect(w.started).toHaveLength(starts)
   })
 })
