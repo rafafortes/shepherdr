@@ -28,7 +28,7 @@ export const KEYS: [string[], string][] = [
   [['Esc'], 'Back'],
   [['[', ']'], 'Previous or next place'],
   [[ALT, '↑', '↓'], 'Place above or below in Places, from the message box too'],
-  [[ALT, SHIFT, '↑', '↓'], 'Move a focused machine or space up or down'],
+  [[ALT, SHIFT, '↑', '↓'], 'Move a focused machine, section or space up or down'],
   [[MOD, 'K'], 'Search and jump'],
   [[MOD, 'B'], 'Show or hide Places'],
   [[MOD, 'Click'], 'Open a space, task or artifact in split view'],
