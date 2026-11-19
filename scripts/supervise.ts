@@ -29,6 +29,17 @@ async function drain(on: boolean) {
   }
 }
 
+/** the operator's own alert command, as wait-alerts.ts runs it: words as argv, never shell words, and an env marker
+ *  that says this is Shepherdr itself in a crash loop, not something waiting on the operator */
+function alert(command: string, args: string[], env: Record<string, string | undefined>) {
+  const p = spawn('sh', ['-c', `${command} "$@"`, 'shepherdr-alert', ...args], { stdio: 'ignore', detached: true, env })
+  p.on('error', (e) => console.error(`shepherdr: the alert command did not run: ${e.message}`))
+  p.on('exit', (code) => {
+    if (code) console.error(`shepherdr: the alert command ended with ${code}`)
+  })
+  p.unref()
+}
+
 const sup = new Supervisor({
   root: ROOT,
   home: HOME,
@@ -38,16 +49,17 @@ const sup = new Supervisor({
   restart: () => child?.kill('SIGTERM'),
   sleep: (ms) => Bun.sleep(ms),
   log: (m) => console.log(m),
+  alert,
 })
 
 function run() {
   // the agents' shepherdr command and skill stay in the checkout (SHEPHERDR_ROOT); the server runs from the release
   child = spawn(process.execPath, [join(sup.dir(), 'server', 'main.ts')], { cwd: ROOT, stdio: 'inherit', env: { ...process.env, SHEPHERDR_ROOT: ROOT, SHEPHERDR_SUPERVISOR: String(process.pid) } })
+  sup.started()
   child.on('exit', (code) => {
     child = null
     if (stopping) return
-    sup.stopped(code)
-    setTimeout(run, code === 0 ? 200 : 2000)
+    setTimeout(run, sup.stopped(code))
   })
 }
 
