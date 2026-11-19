@@ -704,3 +704,23 @@ age) in `engine.heldTasks()` and the waiting-review path `retryReviews()`, with 
 → Spaces that lists spaces in order and renumbers them 1..n when one is moved. The order is strict, with the first
 space's `space.maxTasks` cap as the way to leave room for the others; a first-in-line task still goes ahead of every
 space, and a space held for its own cap or model is stepped over, as before. Nothing set leaves today's order intact.
+
+## A closed pane's orphans: the tree-kill idea ported from upstream 3.x
+
+Checked 2026-11-19 (SHE-70) on `upstream/main` and `upstream/v2.0`, their histories and the public issues (read only):
+nothing reaps a pane's orphans after it closes. The nearest pieces are `mods/chat/core/bg-jobs.js:22-49`, whose `tree()`
+reads `ps -A -o pid= -o ppid= -o args=` and ends a job's tree with `kill -TERM $(tree "$what" ...)`; `c2537f8d`
+(SHEP-235, #1068) makes one process-table read serve a whole search instead of a `pgrep` per process; the 1.2.x Rust
+`d42befc7` (#310/#337, "Stop ends what the agent launched") and `6a0eba34` (#311/#326, reaping a page server) end what
+an agent or a keeper started; issues #342 and #343 report dev servers and conversation folders left under removed
+worktrees. None closes a pane and ends what escaped it, and 3.x's Rust/herdr-core code has no 2.0 pane to walk: only
+the tree-kill and one-read ideas port.
+
+Ours: `agents.finish` (so `stopTask`, a delete and a restart too) captures what runs under the pane's shell before
+`closePane`, then ends only the survivors with SIGTERM then SIGKILL — one CLI-agnostic tree walk covers Claude Code,
+Codex, pi, OpenCode and agy. A live task's shared browser goes with its whole Chrome subtree to `browser.ts`, and a
+process of another user or one outside the captured tree is never touched. An hourly sweep (beside `sweepBrowsers`)
+lists what escaped earlier in `shepherdr doctor` with a ready kill line; a worktree still on disk or an ancestor named
+herdr excludes a live task. Auto-ending the proof-marked leftovers is implemented but off until the operator answers
+the open question. The close path reads only parent and command (two `/proc` reads per process), not the five the
+hourly sweep needs.
