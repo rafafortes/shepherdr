@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Check 6: the dist budget. It runs after the build and only reads what the build left in dist/. On the default branch it
+# records the baseline in the repo's .git; the note is the summary line, read from this check's own log.
+set -uo pipefail
+root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
+cd "$root" || exit 1
+record=()
+[ "${SHEPHERDR_CHECK_RECORD:-}" = 1 ] && record=(--record)
+bun "$root/scripts/checks/dist-budget.ts" "$root/dist" ${record[@]+"${record[@]}"}
+code=$?
+grep -E '^Dist budget: ' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1 >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
+exit "$code"

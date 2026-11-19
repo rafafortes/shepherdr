@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The whole check on this machine, for this fork: dependencies, a dependency audit (bun audit + licence allowlist), a
 # gitleaks secret scan, shell/Perl lint, doc links and verbs, the version fields, the types, the language scan, every
-# test (the browser tests too), the coverage ratchet (scripts/coverage.ts) and the build, each in its own file under
-# scripts/checks/.
+# test (the browser tests too), the coverage ratchet (scripts/coverage.ts), the build and the dist budget, each in its
+# own file under scripts/checks/.
 # GitHub Actions is off on rafafortes/shepherdr (SHE-21), so this is the check every change goes through:
 #
 #   bun run check:local        # a task runs it before `shepherdr ready`; the coordinator before a release
@@ -30,9 +30,9 @@
 #
 # A check is one executable file in scripts/checks/, named <number>-<name> with the numbers spaced by ten
 # (10-dependencies, 12-audit, 15-secrets, 17-scripts, 18-docs, 19-version, 20-types, 21-language, 30-tests,
-# 40-coverage, 50-build). The runner discovers them by sorted file name; a .ts file beside them is a check's own logic,
-# not a check. Adding a check is adding one file, and
-# the order is reviewed because it is the file name. Each check gets its shared context
+# 40-coverage, 50-build, 60-dist-budget). The runner discovers them by sorted file name; a .ts file beside them is a
+# check's own logic, not a check. Adding a check is adding one file, and the order is reviewed because it is the file
+# name. Each check gets its shared context
 # in SHEPHERDR_CHECK_* environment variables (never positional arguments), writes its note to SHEPHERDR_CHECK_NOTE and
 # a reason for skipping to SHEPHERDR_CHECK_SKIP, and exits non-zero on failure. The whole contract is in docs/develop.md.
 set -uo pipefail
@@ -120,8 +120,9 @@ case $jobs in '' | *[!0-9]*) jobs=$((cores / 4)) ;; esac
 [ "$jobs" -ge 1 ] || jobs=1
 export SHEPHERDR_TEST_JOBS="$jobs"
 
-# the screen map and the coverage baseline are recorded on the default branch alone: a task's branch would record them
-# at its own commit, and a diff from there would pick no browser test or hold coverage against the wrong commit
+# the screen map and the coverage and dist baselines are recorded on the default branch alone: a task's branch would
+# record them at its own commit, and a diff from there would pick no browser test or hold coverage and sizes against the
+# wrong commit
 base=$(git -C "$root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
 base=${base#origin/}
 [ -n "$base" ] || base=main
@@ -160,7 +161,8 @@ declare -a what=()
 
 say() { printf '%s\n' "$1" | tee -a "$V"; }
 
-# the note a check wrote for its own line: tests say how many ran, coverage its percentage, build its time
+# the note a check wrote for its own line: tests say how many ran, coverage its percentage, build its time, the dist
+# budget its sizes
 step_note() {
   cat "$logs/$1.note" 2>/dev/null
 }
