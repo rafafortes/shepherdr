@@ -145,7 +145,8 @@ function onCopy(e: MouseEvent) {
   e.stopPropagation()
   const code = el.tagName === 'CODE' ? el : el.parentElement?.querySelector('pre')
   if (!code?.textContent) return
-  copyText(code.textContent.replace(/\n$/, ''))
+  // the words are copied or they are not: a browser that refuses both ways leaves no rejection behind
+  copyText(code.textContent.replace(/\n$/, '')).catch(() => {})
   copied(el)
 }
 

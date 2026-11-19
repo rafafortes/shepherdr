@@ -383,8 +383,9 @@ function Lifted({ msg, chat }: { msg: Message; chat: string }) {
               <MenuItem
                 icon={<CopyIcon className={ic} />}
                 onClick={() => {
-                  // in the tap itself: Safari copies only then
-                  copyText(text)
+                  // in the tap itself: Safari copies only then. A browser that refuses both ways leaves it uncopied,
+                  // never an unhandled rejection behind the closed menu
+                  copyText(text).catch(() => {})
                   leave()
                 }}
               >

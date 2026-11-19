@@ -559,3 +559,37 @@ describe.skipIf(!browser)('the message menu Copy where the clipboard is refused'
     await ctx.close()
   }, 30_000)
 })
+
+describe.skipIf(!browser)('the message menu Copy when both ways to copy are refused', () => {
+  test('a browser that refuses the clipboard and the old way closes the menu and leaves no rejection behind', async () => {
+    if (!browser) throw new Error('no browser: this file skips these tests before they run')
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    const page = await ctx.newPage()
+    // the clipboard API is there but refuses the words, and the hidden textarea's old way throws too
+    const failed: string[] = []
+    page.on('pageerror', (e) => failed.push(e.message))
+    await page.goto(url())
+    await page.waitForSelector('[data-msg="long-agent"] [data-anchor]')
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('clipboard refused')) }, configurable: true })
+      const doc = document as Document & { execCommand: (cmd: string) => boolean }
+      doc.execCommand = () => {
+        throw new Error('copy refused')
+      }
+    })
+    const cdp = await ctx.newCDPSession(page)
+    await page.$eval('[data-msg="long-agent"]', (m) => m.scrollIntoView({ block: 'center' }))
+    await page.waitForTimeout(350)
+    const box = (await page.$eval('[data-msg="long-agent"] [data-anchor]', (b) => b.getBoundingClientRect().toJSON())) as Box
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.left + 30, y: box.top + 16 }] })
+    await page.waitForTimeout(600)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await page.waitForSelector('[role=menuitem]:has-text("Copy")')
+    await page.tap('[role=menuitem]:has-text("Copy")')
+    // the menu closes either way, and the refused copy is a quiet nothing: no unhandled rejection reaches the page
+    await page.waitForSelector('[role=dialog][aria-label=React]', { state: 'detached' })
+    await page.waitForTimeout(300)
+    expect(failed).toEqual([])
+    await ctx.close()
+  }, 30_000)
+})
