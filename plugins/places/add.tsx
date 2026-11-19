@@ -201,8 +201,8 @@ function AddDialog() {
   }
 
   const status = (() => {
-    if (error) return <span className="text-need">{error}</span>
-    if (t?.error) return <span className="text-need">{t.error}</span>
+    if (error) return <span className="text-need-fg">{error}</span>
+    if (t?.error) return <span className="text-need-fg">{t.error}</span>
     if (!named || path === '~/') return 'Pick a folder in your home, or type a name for a new one.'
     if (named === '~') return 'Your home folder is the home space already: pick a folder in it.'
     if (!info) return ' '
@@ -338,7 +338,7 @@ function AddDialog() {
                 }}
                 className="h-9 w-full rounded-full bg-bg px-3 shadow-[inset_0_0_0_1px_var(--line2)] outline-none focus:shadow-box-focus aria-invalid:shadow-[inset_0_0_0_1.5px_var(--color-need-fg)] phone:h-11 phone:px-3.5 phone:text-[1rem]"
               />
-              <p id={`${listId}-name-hint`} className={clsx('text-[0.75rem] phone:text-[0.875rem]', nameBad && shownName ? 'text-need' : 'text-fg3', typing && !(nameBad && shownName) && 'sr-only')}>
+              <p id={`${listId}-name-hint`} className={clsx('text-[0.75rem] phone:text-[0.875rem]', nameBad && shownName ? 'text-need-fg' : 'text-fg3', typing && !(nameBad && shownName) && 'sr-only')}>
                 {nameBad && shownName ? nameBad : 'Lowercase letters, numbers, - and _. Its links and commands use it.'}
               </p>
             </div>

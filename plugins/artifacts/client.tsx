@@ -532,11 +532,11 @@ function Viewer() {
                   </MenuItem>
                 ) : null}
                 {menu === 'more' ? (
-                  <MenuItem className="text-need!" onClick={() => setMenu('delete')}>
+                  <MenuItem className="text-need-fg!" onClick={() => setMenu('delete')}>
                     Delete artifact
                   </MenuItem>
                 ) : (
-                  <MenuItem className="text-need!" onClick={del}>
+                  <MenuItem className="text-need-fg!" onClick={del}>
                     Delete “{art.title}” for good
                   </MenuItem>
                 )}

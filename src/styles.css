@@ -46,8 +46,8 @@
   --bg: #fff;
   --fg: #09090b;
   --fg2: #52525b;
-  /* the faintest words (ids, times, hints, placeholders): still 4.5:1 on the page, so they read */
-  --fg3: #76767f;
+  /* the faintest words (ids, times, hints, placeholders): 4.5:1 on page, canvas, well and bubble, so they read */
+  --fg3: #6f6f78;
   --line: rgb(9 9 11 / 0.07);
   --line2: rgb(9 9 11 / 0.12);
   --hover: rgb(9 9 11 / 0.035);
@@ -101,7 +101,7 @@
   --syn-kw: #7c3aed;
   --syn-str: #15803d;
   --syn-num: #b45309;
-  --syn-com: #a1a1aa;
+  --syn-com: #7a7a83;
   --syn-fn: #2563eb;
   --syn-type: #0e7490;
   --syn-tag: #be123c;
@@ -134,7 +134,7 @@
   --bg: #0b0b0d;
   --fg: #fafafa;
   --fg2: #a1a1aa;
-  --fg3: #7c7c85;
+  --fg3: #86868f;
   --line: rgb(255 255 255 / 0.07);
   --line2: rgb(255 255 255 / 0.12);
   --hover: rgb(255 255 255 / 0.04);

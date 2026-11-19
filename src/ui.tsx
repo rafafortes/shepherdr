@@ -430,7 +430,7 @@ export function etaShort(eta: number) {
 
 /**
  * A task row's status mark: working, the dot's pie shows the % done and the minutes left sit small under it, in the
- * dot's orange, level with the status line, centred on the dot without widening its column; the status line keeps
+ * readable work text colour, level with the status line, centred on the dot without widening its column; the status line keeps
  * the row's whole width. Anything else is the dot alone; frozen while it waits on you, the % it stopped at stays in its
  * pie (still working) or, on the needs-you mark, for screen readers: its line says what it asks.
  */
@@ -443,7 +443,7 @@ export function TaskDot({ s, w, under }: { s: Status; w?: Report; under?: boolea
     <span className="mt-[3px] flex w-3.5 shrink-0 flex-col items-center self-stretch phone:mt-1 phone:w-4">
       {dot}
       {/* beside the status line: with a line under it (what the agent runs on, RowText's more), one line higher */}
-      <span aria-hidden className={clsx('mt-auto text-[0.625rem]/4 font-semibold whitespace-nowrap text-work tabular-nums phone:text-[0.6875rem]/5', under && 'mb-[17px] phone:mb-[21px]')}>
+      <span aria-hidden className={clsx('mt-auto text-[0.625rem]/4 font-semibold whitespace-nowrap text-work-fg tabular-nums phone:text-[0.6875rem]/5', under && 'mb-[17px] phone:mb-[21px]')}>
         {etaShort(w.eta)}
       </span>
       <span className="sr-only">{`, about ${minutesLeft(w.eta).replace(/^~/, '')} left`}</span>

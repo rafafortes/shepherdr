@@ -25,6 +25,56 @@ describe('one design across the screen', () => {
   test('colours come from the theme tokens, which have a dark twin, not from fixed greys', () => {
     expect(offenders(/\b(?:bg|text|border|ring|fill|stroke)-(?:gray|slate|zinc|neutral)-\d/)).toEqual([])
   })
+  test('status words and the faintest text clear 4.5:1 on every surface in both themes', () => {
+    const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
+    const vars = (selector: string) => {
+      const open = css.indexOf('{', css.indexOf(selector))
+      const body = css.slice(open + 1, css.indexOf('\n}', open))
+      return Object.fromEntries([...body.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]))
+    }
+    const light = vars(':root {')
+    const dark = vars(':root[data-theme=dark] {')
+    // WCAG 2.x relative luminance: each channel's sRGB value, linearised, then weighted
+    const lum = (hex: string) => {
+      const full = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex
+      return [1, 3, 5]
+        .map((i) => parseInt(full.slice(i, i + 2), 16) / 255)
+        .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
+        .reduce((l, c, i) => l + [0.2126, 0.7152, 0.0722][i] * c, 0)
+    }
+    const contrast = (fg: string, bg: string) => {
+      const [hi, lo] = [lum(fg), lum(bg)].sort((a, b) => b - a)
+      return (hi + 0.05) / (lo + 0.05)
+    }
+    const floor = 4.5
+    const surfaces = ['bg', 'canvas', 'well', 'bubble'] as const
+    // the quiet words (times, ids, hints) and the status text twins sit on the page, the canvas, the well
+    // and the agent's bubble: the browser panel's error, for one, is drawn on the bubble
+    for (const theme of [light, dark])
+      for (const surface of surfaces) {
+        expect(contrast(theme['--fg3'], theme[`--${surface}`])).toBeGreaterThanOrEqual(floor)
+        for (const token of ['work', 'ready', 'need']) expect(contrast(theme[`--${token}-fg`], theme[`--${surface}`])).toBeGreaterThanOrEqual(floor)
+      }
+    // the accents themselves are dots and fills: byte-for-byte unchanged, with darker twins for text
+    expect([light['--work'], light['--ready'], light['--need']]).toEqual(['#e2a336', '#30a46c', '#e5484d'])
+    expect([dark['--work'], dark['--ready'], dark['--need']]).toEqual(['#f5b544', '#3dd68c', '#ff6369'])
+    for (const token of ['work', 'ready', 'need'])
+      // dark maps the twin to the accent, so changing the utility cannot change dark
+      expect(dark[`--${token}-fg`]).toBe(dark[`--${token}`])
+    // italic code comments are deliberately quiet: light now sits beside dark's ~3.9:1 instead of 2.46:1;
+    // the residual is reported for the axe allowlist (A11Y-07), not gamed into passing. This floor leaves
+    // room for a later change to make comments fully readable instead of locking today's number in place
+    for (const theme of [light, dark]) expect(contrast(theme['--syn-com'], theme['--well'])).toBeGreaterThanOrEqual(3.8)
+    // the text utilities that used the accent colours use their readable twins now
+    const add = readFileSync(join(root, 'plugins/places/add.tsx'), 'utf8')
+    expect(source['src/ui.tsx']).toContain('whitespace-nowrap text-work-fg tabular-nums')
+    expect(add).toContain('if (error) return <span className="text-need-fg">{error}</span>')
+    expect(add).toContain('if (t?.error) return <span className="text-need-fg">{t.error}</span>')
+    expect(add).toContain("nameBad && shownName ? 'text-need-fg' : 'text-fg3'")
+    expect(source['plugins/browser/client.tsx']).toContain('<Small className="text-ready-fg">{sent}</Small>')
+    expect(source['plugins/browser/client.tsx']).toContain('<Small className="text-need-fg">{draft.error}</Small>')
+    expect(source['plugins/artifacts/client.tsx'].match(/className="text-need-fg!"/g)?.length).toBe(2)
+  })
   test('every button says whether it submits', () => {
     const bare = files.flatMap((f) =>
       [...source[f].matchAll(/<button\b([^>]*)>/g)].filter((m) => !/\btype=/.test(m[1])).map(() => f),
