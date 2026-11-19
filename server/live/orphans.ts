@@ -14,7 +14,7 @@
 // a live task (browser.ts sweeps those), a process that cannot be tied to the closing pane's shell or to one of
 // Shepherdr's own worktrees/proof homes.
 import { existsSync, readFileSync, readdirSync, readlinkSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 /** one process and as much as the platform tells about it. `ppid` is what ties it to a pane's shell. */
@@ -83,7 +83,7 @@ export function rowFromProc(pid: number, s: Source): Row | null {
     pid,
     ppid,
     cmd: s.read(`/proc/${pid}/cmdline`).split('\0').filter(Boolean).join(' '),
-    cwd: s.link(`/proc/${pid}/cwd`),
+    cwd: s.link(`/proc/${pid}/cwd`).replace(/ \(deleted\)$/, ''),
     ...(home ? { home } : {}),
     ...(Number.isFinite(uid) ? { uid } : {}),
   }
@@ -133,13 +133,18 @@ export function descendants(rows: Row[], shellPid: number): number[] {
  *  browser.ts's sweep: a live task's browser must never be ended here. Puppeteer's /tmp profiles do not match. */
 export const isAgentBrowser = (cmd: string) => /--user-data-dir=\S*\/browser\/[A-Za-z0-9]+-\d+/.test(cmd)
 
-/** what runs under the pane's shell now and is ours to end when the pane closes */
+/** what runs under the pane's shell now and is ours to end when the pane closes. A shared browser is left out with
+ *  everything under it: its zygote and crashpad children have no profile flag of their own, and browser.ts owns them. */
 export function capture(rows: Row[], shellPid: number): number[] {
   const byPid = new Map(rows.map((r) => [r.pid, r]))
-  return descendants(rows, shellPid).filter((pid) => {
-    const r = byPid.get(pid)
-    return !!r && !isAgentBrowser(r.cmd) && pid !== process.pid
-  })
+  const caught = descendants(rows, shellPid)
+  const excluded = new Set(caught.filter((pid) => isAgentBrowser(byPid.get(pid)?.cmd ?? '')))
+  for (;;) {
+    const more = caught.filter((pid) => !excluded.has(pid) && excluded.has(byPid.get(pid)?.ppid ?? -1))
+    if (!more.length) break
+    for (const pid of more) excluded.add(pid)
+  }
+  return caught.filter((pid) => !excluded.has(pid) && pid !== process.pid)
 }
 
 /** how a process is signalled and watched; injected in tests, real ones below */
@@ -209,13 +214,25 @@ export const scanOpts: ScanOpts = { worktrees: join(homedir(), '.herdr', 'worktr
 /** a SHEPHERDR_HOME under /tmp is the marker a proof server's gate gives it (launch-policy.ts, docs/develop.md) */
 export const proofHome = (home: string | undefined) => !!home && home.startsWith('/tmp/')
 
+/** a cwd under ~/.herdr/worktrees/<repo>/<task>, and the worktree folder itself */
+function worktreeRoot(cwd: string, o: ScanOpts): string | undefined {
+  if (!cwd.startsWith(`${o.worktrees}/`)) return undefined
+  const [repo, task] = cwd.slice(o.worktrees.length + 1).split('/')
+  return repo && task ? join(o.worktrees, repo, task) : undefined
+}
+
 /** a cwd under ~/.herdr/worktrees/<repo>/<task> whose worktree folder no longer exists */
 export function removedWorktree(cwd: string, o: ScanOpts): boolean {
-  if (!cwd.startsWith(`${o.worktrees}/`)) return false
-  const [repo, task] = cwd.slice(o.worktrees.length + 1).split('/')
-  if (!repo || !task) return false
-  const root = join(o.worktrees, repo, task)
-  return (cwd === root || cwd.startsWith(`${root}/`)) && !o.exists(root)
+  const plain = cwd.replace(/ \(deleted\)$/, '')
+  const root = worktreeRoot(plain, o)
+  return !!root && (plain === root || plain.startsWith(`${root}/`)) && !o.exists(root)
+}
+
+/** a cwd under a worktree that is still there belongs to a live task: its proof server and its tests are not orphans,
+ *  and must never be reported or ended (even if the proof mark would otherwise catch them) */
+export function liveWorktree(cwd: string, o: ScanOpts): boolean {
+  const root = worktreeRoot(cwd.replace(/ \(deleted\)$/, ''), o)
+  return !!root && o.exists(root)
 }
 
 /** processes of finished tasks that still run: proof homes and cwds under removed worktrees. Nothing is ended here. */
@@ -223,15 +240,17 @@ export function scan(rows: Row[], o: ScanOpts = scanOpts): Finding[] {
   const out: Finding[] = []
   for (const r of rows) {
     if (r.pid <= 1) continue
+    const cwd = r.cwd.replace(/ \(deleted\)$/, '')
+    if (liveWorktree(cwd, o)) continue // a live task's work: never a finding, never a kill candidate
     const proof = proofHome(r.home)
-    const gone = !!r.cwd && removedWorktree(r.cwd, o)
+    const gone = removedWorktree(cwd, o)
     if (!proof && !gone) continue
     const why = proof && gone
-      ? `SHEPHERDR_HOME ${r.home} and cwd in a removed worktree ${r.cwd}`
+      ? `SHEPHERDR_HOME ${r.home} and cwd in a removed worktree ${cwd}`
       : proof
         ? `SHEPHERDR_HOME ${r.home}`
-        : `cwd in a removed worktree ${r.cwd}`
-    out.push({ pid: r.pid, cmd: r.cmd, cwd: r.cwd, ...(r.home ? { home: r.home } : {}), kind: proof ? 'proof' : 'worktree', why, kill: `kill -TERM ${r.pid}` })
+        : `cwd in a removed worktree ${cwd}`
+    out.push({ pid: r.pid, cmd: r.cmd, cwd, ...(r.home ? { home: r.home } : {}), kind: proof ? 'proof' : 'worktree', why, kill: `kill -TERM ${r.pid}` })
   }
   return out
 }

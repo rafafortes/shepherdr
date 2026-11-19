@@ -737,7 +737,7 @@ export class Agents extends Emitter<Events> {
     r.pendingLaunch = false
     if (!dropped || !pane || pane === startingIn || [...this.live.values()].some((a) => a.pane_id === pane)) return
     if (!(await herdr.paneIdle(pane).catch(() => false))) return
-    await this.reapPane(pane)
+    await herdr.closePane(pane).catch(() => undefined)
   }
 
   /** Bind the actual CLI process, not HERDR_PANE_ID (old shells can inherit another pane's id). `own`: the start
@@ -1302,7 +1302,7 @@ export class Agents extends Emitter<Events> {
     try {
       const a = close ? this.info(key) : undefined
       if (a) {
-        await this.reapPane(a.pane_id)
+        await herdr.closePane(a.pane_id).catch(() => undefined)
         await this.refresh()
       }
       await start()

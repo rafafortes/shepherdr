@@ -386,7 +386,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const sweep = () => void this.sweepBrowsers().catch(() => undefined)
       this.timers.push(setTimeout(sweep, 20_000) as unknown as ReturnType<typeof setInterval>, setInterval(sweep, 600_000))
       // processes a finished task left running: the same cadence, named in doctor (RES-03)
-      this.timers.push(setTimeout(() => void this.sweepOrphans().catch(() => undefined), 20_000) as unknown as ReturnType<typeof setInterval>, setInterval(() => void this.sweepOrphans().catch(() => undefined), 600_000))
+      this.timers.push(setTimeout(() => void this.sweepOrphans().catch(() => undefined), 20_000) as unknown as ReturnType<typeof setInterval>, setInterval(() => void this.sweepOrphans().catch(() => undefined), 3_600_000))
       // browsers left idle (Settings, browser.idleClose): looked for once a minute
       this.timers.push(setInterval(() => void this.browsers?.closeIdle().catch(() => undefined), 60_000))
     }
@@ -444,7 +444,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   private retire(names: string[], tries = 60) {
     const left = names.filter((n) => {
       const a = this.agents.live.get(n)
-      if (a) void this.agents.reapPane(a.pane_id).catch(() => undefined)
+      if (a) void herdr.closePane(a.pane_id).catch(() => undefined)
       return !a
     })
     if (left.length && tries > 0) this.timers.push(setTimeout(() => this.retire(left, tries - 1), 5000) as unknown as ReturnType<typeof setInterval>)

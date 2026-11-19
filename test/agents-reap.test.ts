@@ -28,6 +28,8 @@ const rows: Row[] = [
   { pid: 207, ppid: shell, cmd: 'agy helper', cwd: '/work' }, // agy's helper
   { pid: 208, ppid: shell, cmd: 'bun server/main.ts', cwd: '/work' }, // the dev server the task left
   { pid: 300, ppid: shell, cmd: 'chrome --user-data-dir=/home/u/.shepherdr/browser/SHE-99/', cwd: '/work' }, // a live task's browser
+  { pid: 301, ppid: 300, cmd: 'chrome --type=zygote', cwd: '/work' }, // its helper: no profile flag of its own
+  { pid: 302, ppid: 301, cmd: 'crashpad_handler --database=/tmp/x', cwd: '/work' }, // nor its grandchild
   { pid: 400, ppid: 1, cmd: 'definitely not ours', cwd: '/work' },
 ]
 
@@ -56,6 +58,8 @@ function procSource(rows: Row[], uid = UID) {
     selfUid: () => uid,
     ps: () => '',
     now: () => 1000,
+    /** herdr's close killed this one: take it out of the table to simulate the "diff after" */
+    remove: (pid: number) => { byPid.delete(pid) },
   }
   return s
 }
@@ -114,14 +118,22 @@ describe('reading the process table', () => {
       try { child.kill() } catch { /* gone */ }
     }
   }, 10_000)
+
+  test('a process that went away meanwhile is a no-op in the production signal helpers', () => {
+    // a pid no one holds: both the kill and the liveness check swallow it rather than break a close
+    expect(() => O.endDeps.signal(999_999, 'SIGTERM')).not.toThrow()
+    expect(O.endDeps.alive(999_999)).toBe(false)
+  })
 })
 
 describe('reaping a closing pane', () => {
   test('all five CLIs\' descendants are caught; a live task\'s agent-browser Chrome and a stranger are not', async () => {
     const caught = O.capture(rows, shell).sort((a, b) => a - b)
     expect(caught).toEqual([201, 202, 203, 204, 205, 206, 207, 208])
-    // the live task's Chrome (300) stays for browser.ts; pid 400 is not under the shell
+    // the live task's Chrome (300) and its zygote and crashpad children stay for browser.ts; 400 is not under the shell
     expect(caught).not.toContain(300)
+    expect(caught).not.toContain(301)
+    expect(caught).not.toContain(302)
     expect(caught).not.toContain(400)
     const spy = endSpy(new Set(caught))
     expect(await O.end(caught, spy.d, 10)).toEqual([])
@@ -183,6 +195,32 @@ describe('finish closes the pane and ends what survived it', () => {
       expect(close).toHaveBeenCalledWith('pane-1')
       expect(ended).toEqual([[201, 202, 203, 204, 205, 206, 207, 208]]) // not the live task's Chrome
       expect(agents.records['SHE-70/Agent'].finished).toBe(true)
+    } finally {
+      refresh.mockRestore(); info.mockRestore(); close.mockRestore()
+    }
+  })
+
+  test('only what is still there after the close is ended: the diff, not the whole snapshot', async () => {
+    const source = procSource(rows)
+    const agents = new Agents()
+    agents.records['SHE-70/Agent'] = { key: 'SHE-70/Agent', name: 'agent-three', kind: 'pi', cwd: '/work', workspace: 'w', started: 0, logs: [], finished: false } as never
+    agents.live.set('agent-three', { pane_id: 'pane-3' } as never)
+    const signalled: number[] = []
+    agents.reaper = {
+      source,
+      // the production ender, with liveness read from the table: herdr's close already removed some pids
+      end: (pids) => O.end(pids, {
+        signal: (pid) => { signalled.push(pid); source.remove(pid) },
+        alive: (pid) => source.pids().includes(String(pid)),
+        wait: async () => undefined,
+      }, 10),
+    }
+    const refresh = spyOn(agents, 'refresh').mockResolvedValue(undefined as never)
+    const info = spyOn(herdr, 'processInfo').mockResolvedValue({ shell_pid: shell } as never)
+    const close = spyOn(herdr, 'closePane').mockImplementation((async () => { source.remove(201); source.remove(202); source.remove(300) }) as never)
+    try {
+      await agents.finish('SHE-70/Agent')
+      expect(signalled.sort((a, b) => a - b)).toEqual([203, 204, 205, 206, 207, 208])
     } finally {
       refresh.mockRestore(); info.mockRestore(); close.mockRestore()
     }
