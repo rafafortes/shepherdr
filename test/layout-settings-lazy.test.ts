@@ -52,4 +52,22 @@ describe.skipIf(!browser)('Settings loads its page bodies on demand', () => {
   test('on a phone: the same fallback, then the level cards', async () => {
     await opensThroughFallback(true)
   })
+  test('a chunk that fails to load leaves the shell usable and shows a local error', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } })
+    try {
+      await page.route('**/ModelsPage-*.js', (route) => route.abort())
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.getByRole('button', { name: 'Models', exact: true }).click()
+      const error = settings.getByRole('alert')
+      await error.waitFor()
+      expect(await error.textContent()).toContain("Couldn't load this page")
+      // the rest of Settings still answers: one broken page does not take the screen down
+      await settings.getByRole('button', { name: 'Limits', exact: true }).click()
+      expect(await settings.getByRole('button', { name: 'Limits', exact: true }).count()).toBe(1)
+    } finally {
+      await page.close()
+    }
+  })
 })

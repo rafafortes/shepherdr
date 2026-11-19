@@ -32,5 +32,11 @@ for chunk in ModelsPage LimitsPage; do
     exit 1
   fi
 done
-printf '%s; main chunk %s B\n' "$(grep -oE 'built in [0-9.]+m?s' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1)" "$(wc -c <"${mains[0]}" | tr -d ' ')" >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
+size=$(wc -c <"${mains[0]}" | tr -d ' ')
+# hold the gain of this finding (898 kB before, 678 kB after); the audit's bundle budget can set a tighter limit later
+if [ "$size" -ge 800000 ]; then
+  echo "build: the first-load chunk grew to $size B, past SHE-112's 800000 B limit" >&2
+  exit 1
+fi
+printf '%s; main chunk %s B\n' "$(grep -oE 'built in [0-9.]+m?s' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1)" "$size" >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
 exit 0

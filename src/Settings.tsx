@@ -33,7 +33,7 @@ class PageLoadBoundary extends Component<{ children?: ReactNode }, { failed: boo
     if (!this.state.failed) return this.props.children
     return (
       <div role="alert" className="flex flex-col gap-2">
-        <Empty>Couldn't load this page. A new version may have replaced it.</Empty>
+        <Empty>Couldn't load this page. Reload and try again; if it keeps happening, the page has an error.</Empty>
         <Ghost onClick={() => location.reload()}>Reload Shepherdr</Ghost>
       </div>
     )
@@ -274,7 +274,7 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
       {page.secrets && page.level ? <SecretsList level={page.level} secrets={page.secrets} phone={phone} /> : null}
       {page.View ? (
         <PageLoadBoundary>
-          <Suspense fallback={<div role="status" data-suspense-fallback><Empty>Loading…</Empty></div>}>
+          <Suspense fallback={<div role="status" aria-live="polite" data-suspense-fallback><Empty>Loading…</Empty></div>}>
             <page.View phone={phone} />
           </Suspense>
         </PageLoadBoundary>
