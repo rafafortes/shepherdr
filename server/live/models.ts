@@ -161,7 +161,10 @@ export function piEnabled(): string[] | undefined {
   let at = ''
   try {
     at = `${file}@${statSync(file).mtimeMs}`
-  } catch (e) { swallow('pi settings stat', e, 'pi', file) }
+  } catch (e) {
+    // a machine with no pi settings has nothing to read: only a file that went away is worth saying, once
+    if (enabled.at) swallow('pi settings stat', e, 'pi', file)
+  }
   if (at !== enabled.at) {
     let patterns: string[] | undefined
     try {

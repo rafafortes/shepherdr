@@ -3,7 +3,7 @@
 // changes. The error's message is never written, so a chat line or a secret in it cannot leak into the log.
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { mkdirSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { resetSwallowed, swallow, swallowedReport } from '../server/live/debug.ts'
 import { piEnabled } from '../server/live/models.ts'
@@ -103,12 +103,28 @@ describe('swallow', () => {
     }
   })
 
-  test('pi settings that cannot be stated at all are counted too', () => {
-    const restore = env('PI_CODING_AGENT_DIR', tmp('debug-pi-missing'))
+  test('a pi settings file that was never there is ordinary; one that goes away is said once', () => {
+    const dir = tmp('debug-pi-missing')
+    const restore = env('PI_CODING_AGENT_DIR', dir)
+    const file = join(dir, 'settings.json')
+    const count = () => Number(swallowedReport().find((l) => l.includes('pi reader'))?.match(/ignored (\d+)/)?.[1] ?? 0)
     try {
+      // an absent settings file is ordinary: a file an earlier test read may be said once, but no lookup piles up
       expect(piEnabled()).toBeUndefined()
+      const before = count()
+      expect(piEnabled()).toBeUndefined()
+      expect(piEnabled()).toBeUndefined()
+      expect(count()).toBe(before)
       expect(logged).toEqual([])
-      expect(swallowedReport()).toEqual(['The pi reader ignored 1 line it could not read since this server started; set SHEPHERDR_DEBUG=1 to log each one.'])
+      writeFileSync(file, JSON.stringify({ enabledModels: ['spark/qwen'] }))
+      expect(piEnabled()).toEqual(['spark/qwen'])
+      rmSync(file)
+      // a file that was read and then went away is worth one line, then quiet again
+      expect(piEnabled()).toBeUndefined()
+      expect(count()).toBe(before + 1)
+      expect(piEnabled()).toBeUndefined()
+      expect(count()).toBe(before + 1)
+      expect(logged).toEqual([])
     } finally {
       restore()
     }
