@@ -435,6 +435,12 @@ Upstream: nothing for this. Neither line starts Antigravity: both list `agy` onl
 Ours reads its conversation store read only (`<agy home>/conversations/<id>.db`) and runs its headless calls as JSON
 (`agy -p … --output-format json --mode plan`); see [Antigravity](settings.md#antigravity) in the settings page.
 
+## The gate's build cache (SHE-75)
+
+| Improvement | What it does | Verdict | Why | Risk to our flow | Size |
+| --- | --- | --- | --- | --- | --- |
+| **Checks share cores and one build-cache server** (`f2ac2eec` #322, `main`) | A pinned sccache binary, one server and one cache under `~/.cache` shared by every worktree, plus a dynamic share of the cores counted from the checks running now | **port (the idea only)** | The shared build cache is the part we needed; sccache caches Rust compiles and our gate is TypeScript plus registry writes. Our lock already serializes checks, so there is no race over cores and no server to keep alive: `scripts/build-plugins.ts` hashes its inputs into a per-worktree file under `node_modules/.cache`, which typecheck, tests and the build all share, and tsc's own `--incremental` cache makes a warm types step seconds | No daemon, no download, no new network trust; the lock, worker cap, coverage ratchet, timeout and exit-code contract stay as they are | M |
+
 ## Ranked: adopt and port, by value to us
 
 Order is the sequence the operator would get the most from; each is one task and one pull request. **SHE-2 merged the

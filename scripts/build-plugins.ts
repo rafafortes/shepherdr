@@ -3,9 +3,10 @@
 // updates never touch them. A build reads the copies staged in it (user-plugins/, user-plugins.json): a release stages
 // them when it is made (scripts/update.ts), `--user` stages them here first. One with a base plugin's name replaces it;
 // the human's list (~/.shepherdr/plugins.json, { "off": [...] }) turns any of them off.
+import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 const root = join(import.meta.dir, '..')
 const NAME = /^[a-z][a-z0-9-]*$/
@@ -114,7 +115,66 @@ function put(file: string, text: string) {
   renameSync(tmp, file)
 }
 
+/* A build is a pure function of its inputs, so a worktree that already wrote them need not write them again. The gate's
+ * lock keeps one build at a time, so this needs no cache server: a hash in node_modules/.cache (per worktree) is enough.
+ * typecheck, tests and build all call writeRegistries, so they share one build per run. */
+const outputs = (dir: string) => [join(dir, 'generated', 'client-plugins.ts'), join(dir, 'generated', 'server-plugins.ts')]
+const cacheFile = (dir: string) => join(dir, 'node_modules', '.cache', 'build-plugins.json')
+
+/** the names and bytes of every input that changes the registries: the two lists, both plugin folders and this generator */
+function inputsHash(dir: string): string {
+  const h = createHash('sha256')
+  const add = (p: string, name: string) => {
+    h.update(name)
+    try { h.update(readFileSync(p)) } catch { h.update('-') }
+  }
+  add(join(dir, 'plugins.json'), 'plugins.json')
+  add(join(dir, 'user-plugins.json'), 'user-plugins.json')
+  add(join(import.meta.dir, 'build-plugins.ts'), 'generator')
+  for (const folder of ['plugins', 'user-plugins']) {
+    const walk = (d: string, prefix: string) => {
+      for (const n of existsSync(d) ? readdirSync(d).sort() : []) {
+        if (n === '.git') continue
+        const p = join(d, n), name = `${folder}/${prefix}${n}`
+        if (statSync(p).isDirectory()) walk(p, `${prefix}${n}/`)
+        else add(p, name)
+      }
+    }
+    walk(join(dir, folder), '')
+  }
+  return h.digest('hex')
+}
+
+/** a hash of what a build wrote, so a deleted or edited registry is written again even when the inputs did not change */
+function outputHash(files: string[]): string {
+  const h = createHash('sha256')
+  for (const f of files) { h.update(f); try { h.update(readFileSync(f)) } catch { h.update('-') } }
+  return h.digest('hex')
+}
+
+/** the names the last matching build wrote, or null on a miss (no cache yet, changed inputs or a changed registry) */
+function readBuildCache(dir: string, hash: string, files: string[]): string[] | null {
+  try {
+    const c = JSON.parse(readFileSync(cacheFile(dir), 'utf8')) as { hash: string; names: string[]; out: string }
+    return c.hash === hash && c.out === outputHash(files) && files.every(existsSync) ? c.names : null
+  } catch {
+    return null
+  }
+}
+
+function writeBuildCache(dir: string, hash: string, names: string[], files: string[]) {
+  const to = cacheFile(dir)
+  mkdirSync(dirname(to), { recursive: true })
+  const tmp = `${to}.${process.pid}`
+  writeFileSync(tmp, JSON.stringify({ hash, names, out: outputHash(files) }))
+  renameSync(tmp, to)
+}
+
 export function writeRegistries(dir = root) {
+  const files = outputs(dir)
+  const hash = inputsHash(dir)
+  const hit = readBuildCache(dir, hash, files)
+  if (hit) return hit
   const catalog = pluginCatalog(dir)
   const on = catalog.filter((p) => p.on)
   const names = on.map((p) => p.name)
@@ -164,6 +224,7 @@ export default [${server
       .join(', ')}]
 `,
   )
+  writeBuildCache(dir, hash, names, files)
   return names
 }
 
