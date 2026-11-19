@@ -20,14 +20,34 @@ let captionSeq = 0
 
 const RATE = 16000
 
-function toPcm16(input: Float32Array, from: number): ArrayBuffer {
-  const ratio = from / RATE
-  const out = new Int16Array(Math.floor(input.length / ratio))
-  for (let i = 0; i < out.length; i++) {
-    const s = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)]))
-    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff
+/** The microphone's own rate down to the 16 kHz the speech service takes, piece by piece: each sample out is the mean
+ *  of the ones it covers, a plain low-pass (at 48 kHz, two thirds of what is just above 8 kHz still gets through, a
+ *  third by 12 kHz and a twelfth by 15 kHz, against all of it folding back before), its place carried from one piece
+ *  to the next. */
+export function toPcm16(rate: number) {
+  const step = rate / RATE
+  /** where the next sample out starts among this piece's samples */
+  let pos = 0
+  /** what a piece left over: shorter than the next block, so it waits for the rest of it */
+  let carry = new Float32Array(0)
+  return (input: Float32Array): ArrayBuffer => {
+    const x = carry.length ? Float32Array.from([...carry, ...input]) : input
+    const out = new Int16Array(Math.ceil((x.length - pos) / step) + 1)
+    let n = 0
+    while (pos + step <= x.length) {
+      const a = Math.max(0, Math.floor(pos))
+      const b = Math.min(x.length, Math.floor(pos + step))
+      let sum = 0
+      for (let i = a; i < b; i++) sum += x[i]
+      const s = Math.max(-1, Math.min(1, b > a ? sum / (b - a) : (x[a] ?? 0)))
+      out[n++] = s < 0 ? s * 0x8000 : s * 0x7fff
+      pos += step
+    }
+    const keep = Math.floor(pos)
+    carry = x.slice(keep)
+    pos -= keep
+    return out.slice(0, n).buffer
   }
-  return out.buffer
 }
 
 function play(buf: ArrayBuffer) {
@@ -99,9 +119,10 @@ export async function startCall(chatKey: string, onError: (message: string) => v
     yours = meter(c)
     src.connect(yours)
     node = c.createScriptProcessor(4096, 1, 1)
+    const down = toPcm16(c.sampleRate)
     node.onaudioprocess = (e) => {
       if (muted || ws?.readyState !== WebSocket.OPEN) return
-      ws.send(toPcm16(e.inputBuffer.getChannelData(0), c.sampleRate))
+      ws.send(down(e.inputBuffer.getChannelData(0)))
     }
     src.connect(node)
     node.connect(c.destination)
