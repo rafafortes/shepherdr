@@ -82,7 +82,7 @@ describe('the discovered checks', () => {
     for (const name of ['one', 'two', 'three']) expect(existsSync(join(f.logs, `${name}.log`))).toBe(true)
   })
 
-  test('stop at the first failure: no later check, and no older run\'s notes', () => {
+  test("stop at the first failure: no later check, and no older run's notes", () => {
     const f = fixture({ '10-one': check(), '20-two': check('', 1), '30-three': check() })
     // a run that stopped before the tests must not report skips from an earlier run's tests.log
     mkdirSync(f.logs, { recursive: true })
@@ -216,7 +216,7 @@ describe('the verdict a tree already passed (--reuse)', () => {
     expect(existsSync(f.kept)).toBe(false)
   })
 
-  test('a quick run is refused as a gate question, and a later failure takes the tree\'s verdict away', () => {
+  test("a quick run is refused as a gate question, and a later failure takes the tree's verdict away", () => {
     // the check fails only while the fixture's HOME holds a flag: the same tree, a different host state
     const f = fixture({ '10-one': check('[ -f "$HOME/fail" ] && exit 1') })
     expect(f.run().code).toBe(0)
@@ -297,8 +297,27 @@ describe('the check files themselves', () => {
     expect(statSync(join(dir, 'secrets.ts')).mode & 0o111, 'secrets.ts is a module, not a check').toBe(0)
     expect(statSync(join(dir, 'scripts.ts')).mode & 0o111, 'scripts.ts is a module, not a check').toBe(0)
     expect(statSync(join(dir, 'audit.ts')).mode & 0o111, 'audit.ts is a module, not a check').toBe(0)
-    const names = readdirSync(dir).filter((n) => !n.endsWith('.ts')).sort()
-    expect(names).toEqual(['10-dependencies', '12-audit', '15-secrets', '17-scripts', '18-docs', '19-version', '20-types', '21-language', '30-tests', '40-coverage', '50-build', '60-dist-budget'])
+    expect(statSync(join(dir, 'lint.ts')).mode & 0o111, 'lint.ts is a module, not a check').toBe(0)
+    expect(statSync(join(dir, 'format.ts')).mode & 0o111, 'format.ts is a module, not a check').toBe(0)
+    const names = readdirSync(dir)
+      .filter((n) => !n.endsWith('.ts'))
+      .sort()
+    expect(names).toEqual([
+      '10-dependencies',
+      '12-audit',
+      '15-secrets',
+      '17-scripts',
+      '18-docs',
+      '19-version',
+      '20-types',
+      '21-language',
+      '22-lint',
+      '23-format',
+      '30-tests',
+      '40-coverage',
+      '50-build',
+      '60-dist-budget',
+    ])
     const text = Object.fromEntries(names.map((n) => [n, readFileSync(join(dir, n), 'utf8')])) as Record<string, string>
     expect(text['10-dependencies']).toContain('bun install --frozen-lockfile')
     expect(text['12-audit']).toContain('scripts/checks/audit.ts')
@@ -308,6 +327,8 @@ describe('the check files themselves', () => {
     expect(text['19-version']).toContain('scripts/checks/version.ts')
     expect(text['20-types']).toContain('bun run typecheck')
     expect(text['21-language']).toContain('scripts/checks/language.ts')
+    expect(text['22-lint']).toContain('scripts/checks/lint.ts')
+    expect(text['23-format']).toContain('scripts/checks/format.ts')
     expect(text['30-tests']).toContain('scripts/test.ts')
     expect(text['30-tests']).toContain('--force')
     expect(text['30-tests']).toContain('SHEPHERDR_CHECK_MAP')
@@ -326,7 +347,11 @@ describe('the check files themselves', () => {
     const stub = join(bin, 'bun')
     writeFileSync(stub, '#!/bin/sh\nprintf "%s\\n" "$@"\n')
     chmodSync(stub, 0o755)
-    for (const [name, script] of [['30-tests', 'scripts/test.ts'], ['40-coverage', 'scripts/coverage.ts'], ['60-dist-budget', 'scripts/checks/dist-budget.ts']]) {
+    for (const [name, script] of [
+      ['30-tests', 'scripts/test.ts'],
+      ['40-coverage', 'scripts/coverage.ts'],
+      ['60-dist-budget', 'scripts/checks/dist-budget.ts'],
+    ]) {
       const r = Bun.spawnSync(['bash', join(root, 'scripts', 'checks', name)], {
         cwd: root,
         env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
@@ -417,10 +442,19 @@ echo "tests $2 $(date +%s%N)" >> "$SHEPHERDR_CHECK_ROOT/phases.txt"
       })
     const [a, b] = [spawn(), spawn()]
     expect(await Promise.all([a.exited, b.exited])).toEqual([0, 0])
-    const lines = readFileSync(join(f.dir, 'phases.txt'), 'utf8').trim().split('\n').map((l) => l.split(' '))
+    const lines = readFileSync(join(f.dir, 'phases.txt'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => l.split(' '))
     expect(lines.length).toBe(4)
-    const starts = lines.filter((l) => l[1] === 'start').map((l) => Number(l[2])).sort((x, y) => x - y)
-    const ends = lines.filter((l) => l[1] === 'end').map((l) => Number(l[2])).sort((x, y) => x - y)
+    const starts = lines
+      .filter((l) => l[1] === 'start')
+      .map((l) => Number(l[2]))
+      .sort((x, y) => x - y)
+    const ends = lines
+      .filter((l) => l[1] === 'end')
+      .map((l) => Number(l[2]))
+      .sort((x, y) => x - y)
     // each test step finishes before the other starts: the lock serializes them, not the minute of the run
     expect(ends[0]).toBeLessThan(starts[1])
   })

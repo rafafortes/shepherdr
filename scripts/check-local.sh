@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The whole check on this machine, for this fork: dependencies, a dependency audit (bun audit + licence allowlist), a
-# gitleaks secret scan, shell/Perl lint, doc links and verbs, the version fields, the types, the language scan, every
-# test (the browser tests too), the coverage ratchet (scripts/coverage.ts), the build and the dist budget, each in its
-# own file under scripts/checks/.
+# gitleaks secret scan, shell/Perl lint, doc links and verbs, the version fields, the types, the language scan, the Biome
+# lint ratchet and the formatter over the diff's files, every test (the browser tests too), the coverage ratchet
+# (scripts/coverage.ts), the build and the dist budget, each in its own file under scripts/checks/.
 # GitHub Actions is off on rafafortes/shepherdr (SHE-21), so this is the check every change goes through:
 #
 #   bun run check:local --quick  # a task's pre-ready run: incremental types + changed tests + build, no coverage; marked
@@ -40,9 +40,9 @@
 # up waiting for another check.
 #
 # A check is one executable file in scripts/checks/, named <number>-<name> with the numbers spaced by ten
-# (10-dependencies, 12-audit, 15-secrets, 17-scripts, 18-docs, 19-version, 20-types, 21-language, 30-tests,
-# 40-coverage, 50-build, 60-dist-budget). The runner discovers them by sorted file name; a .ts file beside them is a
-# check's own logic, not a check. Adding a check is adding one file, and the order is reviewed because it is the file
+# (10-dependencies, 12-audit, 15-secrets, 17-scripts, 18-docs, 19-version, 20-types, 21-language, 22-lint, 23-format,
+# 30-tests, 40-coverage, 50-build, 60-dist-budget). The runner discovers them by sorted file name; a .ts file beside them
+# is a check's own logic, not a check. Adding a check is adding one file, and the order is reviewed because it is the file
 # name; a number below 30 is worktree-local and a number of 30 or more runs in the shared, one-at-a-time phase (a check
 # that needs the machine is numbered there). Each check gets its shared context
 # in SHEPHERDR_CHECK_* environment variables (never positional arguments), writes its note to SHEPHERDR_CHECK_NOTE and
