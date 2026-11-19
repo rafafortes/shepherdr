@@ -3088,9 +3088,9 @@ export class Engine extends Emitter<Events> {
           console.error(`shepherdr: couldn't keep that ${t.id} runs on a backup: ${(e as Error).message}`)
         }
     } catch (e) {
-      // the backup didn't start: the task says why and waits for you, with the chain as it was (no takeover counted and
-      // no hand-over kept, so a later one tries the same backup again), and its chat says that no backup took over
-      // rather than leaving it to guess
+      // the backup didn't start: the task says why, with the chain as it was (no takeover counted and no hand-over kept,
+      // so a later one tries the same backup again) and "No backup agent took over" in its chat rather than silence. A
+      // start refused before it got going (a cap, a worktree) left the run it takes over from exactly as it was
       t.trouble = troubleOf(e)
       t.tookOver = prior
       t.handover = undefined

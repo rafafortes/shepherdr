@@ -145,11 +145,12 @@ describe('a space herdr closes while a backup starts', () => {
     const w = fresh()
     const { t, key } = await running(w, 'handover-reopen')
     w.settings.set('task.fallback', 'codex')
-    // herdr no longer has the space, and says so: nothing is tried again by herdr's own retries
+    // herdr no longer has the space, and says so: the pane the hand-over opens ahead fails, and the tab agentPane
+    // opens once more from the worktree finds it gone as well. Nothing is tried again by herdr's own retries
     const createTab = w.herdr.h.createTab
     let n = 0
     w.herdr.h.createTab = async (...args: Parameters<typeof createTab>) => {
-      if (!n++) throw new HerdrError('workspace_not_found', 'workspace w9 not found')
+      if (n++ < 2) throw new HerdrError('workspace_not_found', 'workspace w9 not found')
       return createTab(...args)
     }
     try {
@@ -158,7 +159,7 @@ describe('a space herdr closes while a backup starts', () => {
       w.herdr.h.createTab = createTab
       w.settings.set('task.fallback', null)
     }
-    // the backup went in all the same, with no failure left on the task
+    // the backup went in all the same, in a space opened again from its worktree, with no failure left on the task
     expect(kindOf(w, key)).toBe('codex')
     expect(t.tookOver).toMatchObject({ from: 'pi', to: 'codex', step: 1 })
     expect(t.handover).toBeUndefined()

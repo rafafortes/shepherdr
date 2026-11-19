@@ -75,6 +75,21 @@ describe("a task's agent pane", () => {
     expect(fake.spaces.some((w) => w.workspace_id === 'w-gone')).toBe(false)
   })
 
+  test('a command herdr could not find is no closed space either: nothing is reopened', async () => {
+    const { fake, wt, home, made } = await setup()
+    const createTab = fake.h.createTab
+    fake.h.createTab = async () => {
+      // herdr's own words for a shell it could not run: "not found", and no space of it is gone
+      throw new Error('agent start: claude: command not found')
+    }
+    try {
+      await expect(wt.agentPane({ home, wt: made.path, label: LABEL, tab: 'Agent', env: {} })).rejects.toThrow('command not found')
+      expect(spaceOf(fake, made.path)?.workspace_id).toBe(made.workspace)
+    } finally {
+      fake.h.createTab = createTab
+    }
+  })
+
   test('any other failure from the tab is not mistaken for a closed space', async () => {
     const { fake, wt, home, made } = await setup()
     const createTab = fake.h.createTab

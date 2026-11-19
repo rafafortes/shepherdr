@@ -1067,7 +1067,18 @@ export class Agents extends Emitter<Events> {
    * the pane it never used.
    */
   private async ahead(spec: Spec) {
-    const record = this.records[spec.key] ?? ({ ...spec, logs: [], started: Date.now() } as AgentRecord)
+    // the record as the launch will leave it — its folder, space and tab as this spec has them, not as the run it takes
+    // over from had them: a coordinator whose repo moved opens its tab in the folder the repo is in now
+    const old = this.records[spec.key]
+    const record: AgentRecord = {
+      ...(old ?? { logs: [], started: Date.now() }),
+      name: spec.name,
+      kind: spec.kind,
+      cwd: spec.cwd,
+      workspace: spec.workspace,
+      tab: spec.tab ?? old?.tab,
+      env: spec.env ?? old?.env,
+    }
     const make = spec.pane ?? (() => this.paneFor(record, spec.was))
     let pane: string | undefined
     try {

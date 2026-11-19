@@ -37,6 +37,7 @@ const listing: AgentInfo[] = []
 
 const events: string[] = []
 const started: { name: string; kind: string; pane: string; args: string[] }[] = []
+const tabDirs: string[] = []
 
 /** herdr, standing in: the old pane is the agent's, the new tab holds the pane the run goes in */
 function spies() {
@@ -55,8 +56,9 @@ function spies() {
       const at = listing.findIndex((a) => a.pane_id === pane)
       if (at >= 0) listing.splice(at, 1)
     }),
-    createTab: spyOn(herdr, 'createTab').mockImplementation(async (id: string) => {
+    createTab: spyOn(herdr, 'createTab').mockImplementation(async (id: string, _label: string, dir: string) => {
       events.push(`tab ${id}`)
+      tabDirs.push(dir)
       return { tab: { tab_id: 't2' }, root_pane: { pane_id: NEW } } as never
     }),
     workspaces: spyOn(herdr, 'workspaces').mockResolvedValue([{ workspace_id: 'w1', label: 'T-166: keep the space' }, { workspace_id: 'w0', label: 'a project' }] as never),
@@ -81,6 +83,7 @@ function chat(c: { kind: string; logs: string[] }) {
   writeJson('outbox.json', [])
   events.length = 0
   started.length = 0
+  tabDirs.length = 0
 }
 
 describe('a restart opens the new pane before it ends the run it takes over from', () => {
@@ -148,6 +151,26 @@ describe('a restart opens the new pane before it ends the run it takes over from
         expect(errors.mock.calls.flat().join(' ')).toContain("ahead of its restart")
       } finally {
         errors.mockRestore()
+        a.stop()
+      }
+    } finally {
+      for (const spy of Object.values(s)) spy.mockRestore()
+    }
+  })
+
+  test('a chat whose folder moved (a coordinator, its repo elsewhere now): its tab is opened in the new folder', async () => {
+    const s = spies()
+    const moved = tmp('agent-restart-moved')
+    try {
+      chat(CASES[2])
+      const a = new Agents()
+      try {
+        await a.refresh()
+        // its record is where it ran before; the restart puts it in the folder the repo is in now
+        await a.restart({ key: KEY, name: NAME, kind: 'pi', cwd: moved, workspace: 'T-166: keep the space', tab: 'Agent', env: {} })
+        expect(tabDirs).toEqual([moved])
+        expect(events).toEqual(['tab w1', `close ${OLD}`, `start ${NEW}`])
+      } finally {
         a.stop()
       }
     } finally {
