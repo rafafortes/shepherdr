@@ -114,6 +114,23 @@ export function readRows(s: Source): Row[] {
   return s.platform === 'linux' ? rowsFromProc(s) : rowsFromPs(s)
 }
 
+/** only what a close needs: parent and command, to walk the shell's tree and leave shared browsers out. No cwd or
+ *  environment reads, and no uid read: anything under our own shell is ours, and this runs on every agent finish on a
+ *  host with thousands of processes (two reads each, against the hourly sweep's five). */
+export function readTree(s: Source): Row[] {
+  if (s.platform !== 'linux') return rowsFromPs(s)
+  const out: Row[] = []
+  for (const name of s.pids()) {
+    const stat = s.read(`/proc/${name}/stat`)
+    if (!stat) continue
+    const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
+    const ppid = Number(f[1])
+    if (!Number.isFinite(ppid) || ppid < 0) continue
+    out.push({ pid: Number(name), ppid, cmd: s.read(`/proc/${name}/cmdline`).split('\0').filter(Boolean).join(' '), cwd: '' })
+  }
+  return out
+}
+
 /** every process that runs under shellPid now, the shell itself left out (herdr closes that one) */
 export function descendants(rows: Row[], shellPid: number): number[] {
   if (!shellPid || shellPid <= 1) return []
@@ -235,11 +252,26 @@ export function liveWorktree(cwd: string, o: ScanOpts): boolean {
   return !!root && o.exists(root)
 }
 
+/** a process whose ancestry reaches herdr runs in a live pane: an agent, a shell, a helper or a server it started.
+ *  Even when its worktree has since gone, it is a live task's and is never a finding or a kill candidate. */
+export function underHerdr(pid: number, byPid: Map<number, Row>): boolean {
+  let p = pid
+  for (let i = 0; i < 64; i++) {
+    const row = byPid.get(p)
+    if (!row) return false
+    if (/\bherdr\b/i.test(row.cmd)) return true
+    if (row.ppid <= 1) return false
+    p = row.ppid
+  }
+  return false
+}
+
 /** processes of finished tasks that still run: proof homes and cwds under removed worktrees. Nothing is ended here. */
 export function scan(rows: Row[], o: ScanOpts = scanOpts): Finding[] {
   const out: Finding[] = []
+  const byPid = new Map(rows.map((r) => [r.pid, r]))
   for (const r of rows) {
-    if (r.pid <= 1) continue
+    if (r.pid <= 1 || r.pid === process.pid || isAgentBrowser(r.cmd) || underHerdr(r.pid, byPid)) continue
     const cwd = r.cwd.replace(/ \(deleted\)$/, '')
     if (liveWorktree(cwd, o)) continue // a live task's work: never a finding, never a kill candidate
     const proof = proofHome(r.home)
@@ -258,18 +290,29 @@ export function scan(rows: Row[], o: ScanOpts = scanOpts): Finding[] {
 /** only proof-marked ones are even candidates for auto-ending, and that is off until the operator decides */
 export const proofPids = (found: Finding[]) => found.filter((f) => f.kind === 'proof').map((f) => f.pid)
 
-/** the doctor's resource lines: a header with one ready command, then each process with its reason. None when clean. */
+/** how many a doctor line or the news names before "and N more": a phone's screen, and one kill command, stay short */
+export const SHOWN = 8
+
+/** the doctor's resource lines: a header with one ready command, then each process with its reason. None when clean.
+ *  The kill line names only proof-marked pids, the ones that may ever be ended; a report-only one keeps its own line.
+ *  Both are from the last hourly look, so a pid may have gone (or been reused) since. */
 export function lines(found: Finding[]): string[] {
   if (!found.length) return []
+  const proof = proofPids(found)
+  const ready = (proof.length ? proof : found.slice(0, 1).map((f) => f.pid)).slice(0, SHOWN)
+  const more = ready.length < (proof.length || 1) ? ` (first ${SHOWN})` : ''
+  const shown = found.slice(0, SHOWN).map((f) => `  pid ${f.pid}: ${f.cmd.slice(0, 90) || '(no command)'} — ${f.why}; end it: ${f.kill}${f.kind === 'proof' ? ' (proof-marked; auto-end is off until the operator decides)' : ''}`)
+  if (found.length > SHOWN) shown.push(`  ... and ${found.length - SHOWN} more (all ended by the same command above)`)
   return [
-    `Orphaned processes (RES-03): ${found.length} found. End them all with: kill -TERM ${found.map((f) => f.pid).join(' ')}`,
-    ...found.map((f) => `  pid ${f.pid}: ${f.cmd.slice(0, 90) || '(no command)'} — ${f.why}; end it: ${f.kill}${f.kind === 'proof' ? ' (proof-marked; auto-end is off until the operator decides)' : ''}`),
+    `Orphaned processes (RES-03): ${found.length} found at the last hourly look. End ${proof.length ? 'the proof-marked ones' : 'one'} with: kill -TERM ${ready.join(' ')}${more}`,
+    ...shown,
   ]
 }
 
-/** the news when the set changes: each one named, with the ready command */
+/** the news when the set changes: each one named, capped, with the ready command */
 export function newsLine(found: Finding[], ended: number[]): string {
-  const names = found.map((f) => `pid ${f.pid} (${f.cmd.slice(0, 60) || 'process'})`)
-  const said = ended.length ? `Ended ${ended.length} proof-marked: ${ended.join(', ')}. ` : ''
-  return `${said}Orphans of finished tasks still running: ${names.join(', ')}. End one with kill -TERM <pid>.`
+  const names = found.slice(0, SHOWN).map((f) => `pid ${f.pid} (${f.cmd.slice(0, 60) || 'process'})`)
+  const more = found.length > SHOWN ? ` and ${found.length - SHOWN} more` : ''
+  const said = ended.length ? `Ended ${ended.length} proof-marked: ${ended.slice(0, SHOWN).join(', ')}${more}. ` : ''
+  return `${said}Orphans of finished tasks still running: ${names.join(', ')}${more}. End one with kill -TERM <pid>.`
 }

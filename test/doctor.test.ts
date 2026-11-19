@@ -33,6 +33,9 @@ const rows: Row[] = [
   { pid: 104, ppid: 1, cmd: 'claude', cwd: '/wt/repo/live', home: '/home/u/.shepherdr' }, // live worktree, real home
   { pid: 105, ppid: 1, cmd: 'bun server/main.ts', cwd: '/wt/repo/live', home: '/tmp/proof-live' }, // a LIVE task's proof server
   { pid: 106, ppid: 1, cmd: 'bun server/main.ts', cwd: '/wt/repo/gone (deleted)' }, // cwd of a removed folder, as /proc names it
+  { pid: 500, ppid: 1, cmd: 'herdr --serve', cwd: '/' }, // a live pane's ancestry
+  { pid: 501, ppid: 500, cmd: 'bash', cwd: '/' },
+  { pid: 502, ppid: 501, cmd: 'pi', cwd: '/wt/repo/gone', home: '/tmp/proof-pane' }, // live agent, removed cwd + proof home
   { pid: 1, ppid: 0, cmd: 'init', cwd: '/wt/repo/gone', home: '/tmp/proof-init' }, // never pid 1
 ]
 
@@ -72,8 +75,9 @@ describe('what the sweep recognises', () => {
     expect(found[2].why).toContain('SHEPHERDR_HOME /tmp/proof-y')
     expect(found[3].why).toBe('cwd in a removed worktree /wt/repo/gone') // /proc's " (deleted)" stripped
     expect(found.map((f) => f.kill)).toEqual(['kill -TERM 101', 'kill -TERM 102', 'kill -TERM 103', 'kill -TERM 106'])
-    // a live task's worktree — even with a /tmp proof home — a real home and pid 1 are none of this sweep's business
-    expect(found.some((f) => f.pid === 104 || f.pid === 105 || f.pid === 1)).toBe(false)
+    // a live task's worktree, a live pane's ancestry (even under a removed worktree with a proof home), a real home
+    // and pid 1 are none of this sweep's business
+    expect(found.some((f) => [104, 105, 502, 1].includes(f.pid))).toBe(false)
   })
 
   test('the helpers stay narrow: only /tmp homes, only worktrees directly under the root that are gone', () => {
@@ -88,6 +92,11 @@ describe('what the sweep recognises', () => {
     expect(O.liveWorktree('/wt/repo/live', opts)).toBe(true)
     expect(O.liveWorktree('/wt/repo/gone', opts)).toBe(false)
     expect(O.liveWorktree('/elsewhere', opts)).toBe(false)
+    const byPid = new Map(rows.map((r) => [r.pid, r]))
+    expect(O.underHerdr(502, byPid)).toBe(true)
+    expect(O.underHerdr(101, byPid)).toBe(false)
+    // a corrupt parent chain that loops must end, not spin
+    expect(O.underHerdr(700, new Map([[700, { pid: 700, ppid: 701, cmd: 'x', cwd: '' }], [701, { pid: 701, ppid: 700, cmd: 'y', cwd: '' }]]))).toBe(false)
   })
 
   test('only proof-marked pids are ever candidates for an end, and none when clean', () => {
@@ -102,7 +111,7 @@ describe('the doctor lines', () => {
     const found = O.scan(rows, opts)
     const lines = O.lines(found)
     expect(lines).toHaveLength(5)
-    expect(lines[0]).toBe('Orphaned processes (RES-03): 4 found. End them all with: kill -TERM 101 102 103 106')
+    expect(lines[0]).toBe('Orphaned processes (RES-03): 4 found at the last hourly look. End the proof-marked ones with: kill -TERM 102 103')
     expect(lines[1]).toContain('pid 101: node dev.mjs — cwd in a removed worktree /wt/repo/gone/sub; end it: kill -TERM 101')
     expect(lines[2]).toContain('proof-marked; auto-end is off until the operator decides')
     expect(lines[3]).toContain('end it: kill -TERM 103')
@@ -111,12 +120,26 @@ describe('the doctor lines', () => {
     expect(O.newsLine(found, [])).toContain('pid 101 (node dev.mjs)')
   })
 
+  test('a large sweep stays short: eight named, the count of the rest, and a capped kill line', () => {
+    const many = Array.from({ length: 24 }, (_, i) => ({ pid: 900 + i, ppid: 1, cmd: 'node dev.mjs', cwd: '/wt/repo/gone', home: i % 2 ? '/tmp/proof' : undefined }))
+    const found = O.scan(many, opts)
+    const lines = O.lines(found)
+    expect(found).toHaveLength(24)
+    expect(lines).toHaveLength(1 + O.SHOWN + 1)
+    expect(lines[0]).toContain('24 found')
+    expect(lines[0]).toContain('(first 8)')
+    expect(lines.at(-1)).toContain('and 16 more')
+    const news = O.newsLine(found, O.proofPids(found))
+    expect(news).toContain('and 16 more')
+    expect(news.length).toBeLessThan(2500) // a phone's card, not 24 pids in three places
+  })
+
   test('the CLI prints the resource lines when the sweep found orphans, and none when it did not', async () => {
     src.orphansFound = O.scan(rows, opts)
     try {
       const out = (await src.cli(['doctor'], {})).out
-      expect(out).toContain('Orphaned processes (RES-03): 4 found.')
-      expect(out).toContain('kill -TERM 101 102 103 106')
+      expect(out).toContain('Orphaned processes (RES-03): 4 found at the last hourly look.')
+      expect(out).toContain('kill -TERM 102 103')
       expect(out).toContain('pid 101: node dev.mjs')
     } finally {
       src.orphansFound = []

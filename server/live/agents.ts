@@ -28,7 +28,7 @@ import { readCodexRuntime } from './codex-runtime.ts'
 import { SecretAccess } from './secret-access.ts'
 import { isAgentProcess } from './agent-process.ts'
 import { launchesAgents, skippedLaunch } from './launch-policy.ts'
-import { capture, end as endProcesses, endDeps, readRows, systemSource, type Source } from './orphans.ts'
+import { capture, end as endProcesses, endDeps, readTree, systemSource, type Source } from './orphans.ts'
 
 /** a log's name (its session id), wherever it lies: one named both by its mirrored path and by its own is one log */
 const logName = (f: string) => f.slice(f.lastIndexOf('/') + 1)
@@ -1581,7 +1581,7 @@ export class Agents extends Emitter<Events> {
    *  left to browser.ts, and another user's process is never in the table (orphans.ts). */
   async reapPane(pane: string) {
     const caught = await herdr.processInfo(pane)
-      .then((p) => (p.shell_pid ? capture(readRows(this.reaper.source), p.shell_pid) : []))
+      .then((p) => (p.shell_pid ? capture(readTree(this.reaper.source), p.shell_pid) : []))
       .catch(() => [] as number[])
     await herdr.closePane(pane).catch(() => undefined)
     if (caught.length) await this.reaper.end(caught).catch(() => undefined)

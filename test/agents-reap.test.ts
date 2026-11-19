@@ -58,8 +58,15 @@ function procSource(rows: Row[], uid = UID) {
     selfUid: () => uid,
     ps: () => '',
     now: () => 1000,
-    /** herdr's close killed this one: take it out of the table to simulate the "diff after" */
+    /** one process ended by a signal */
     remove: (pid: number) => { byPid.delete(pid) },
+    /** herdr's close: the shell and its CLI go, their children reparent to init — the real mechanism behind the diff */
+    closePane: (gone: number[]) => {
+      for (const pid of gone) {
+        for (const r of byPid.values()) if (r.ppid === pid) r.ppid = 1
+        byPid.delete(pid)
+      }
+    },
   }
   return s
 }
@@ -102,6 +109,16 @@ describe('reading the process table', () => {
       { pid: 201, ppid: 100, cmd: 'node mcp.js', cwd: '' },
     ])
     expect(O.descendants(rows, 100)).toEqual([201])
+  })
+
+  test('the close reader takes only parent and command: two reads per process, not five', () => {
+    const source = procSource(rows)
+    const tree = O.readTree(source)
+    expect(tree).toHaveLength(rows.length)
+    expect(tree.find((r) => r.pid === 201)).toEqual({ pid: 201, ppid: shell, cmd: 'node chrome-devtools-mcp.js', cwd: '' })
+    expect(source.reads).toBe(rows.length * 2)
+    // the macOS reader is the same ps table, with no cwd either
+    expect(O.readTree(psSource('  600     1 node x'))).toEqual([{ pid: 600, ppid: 1, cmd: 'node x', cwd: '' }])
   })
 
   test('the machine reader reads the real /proc, and the signal helpers end a process of this test', async () => {
@@ -162,7 +179,7 @@ describe('reaping a closing pane', () => {
     expect(O.capture(rows, 99999)).toEqual([])
   })
 
-  test('a real spin of 208 orphan Chromes in a busy table: all are ended, from one table read', async () => {
+  test('a counter with 208 orphan Chromes in a stand-in busy table: all ended, from one table read', async () => {
     const busy: Row[] = [{ pid: shell, ppid: 1, cmd: '/bin/bash', cwd: '/work' }]
     for (let i = 0; i < 208; i++) busy.push({ pid: 1000 + i, ppid: shell, cmd: `chrome --user-data-dir=/tmp/puppeteer_dev_chrome_profile-${i}`, cwd: '/tmp' })
     for (let i = 0; i < 1000; i++) busy.push({ pid: 10000 + i, ppid: 1, cmd: 'unrelated', cwd: '/' })
@@ -217,9 +234,10 @@ describe('finish closes the pane and ends what survived it', () => {
     }
     const refresh = spyOn(agents, 'refresh').mockResolvedValue(undefined as never)
     const info = spyOn(herdr, 'processInfo').mockResolvedValue({ shell_pid: shell } as never)
-    const close = spyOn(herdr, 'closePane').mockImplementation((async () => { source.remove(201); source.remove(202); source.remove(300) }) as never)
+    const close = spyOn(herdr, 'closePane').mockImplementation((async () => source.closePane([shell, 201, 202, 300])) as never)
     try {
       await agents.finish('SHE-70/Agent')
+      // capture must have run before the close: afterwards every survivor's ppid is 1, and none would be found
       expect(signalled.sort((a, b) => a - b)).toEqual([203, 204, 205, 206, 207, 208])
     } finally {
       refresh.mockRestore(); info.mockRestore(); close.mockRestore()
