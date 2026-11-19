@@ -134,7 +134,7 @@ function unreadable<T>(f: string, fallback: T, why: string, bytes?: number): T {
   // a copy of this same file made earlier in this run has said its line already, and so has one whose bytes could not
   // be copied at all: a file read again and again says it once
   if (made || (!copy && !said.has(f))) {
-    said.add(f)
+    if (!copy) said.add(f)
     console.error(
       `shepherdr: ${f} ${why} (${bytes === undefined ? 'size unknown' : `${bytes} bytes`}): ` +
         (copy ? `its bytes are kept in ${copy}, the newest ${COPIES} of each copy stay beside it; ` : `it could not be copied (${failed}); `) +
@@ -149,11 +149,15 @@ const PRIVATE = new Set(['secrets.json', 'vapid.json', 'push.json'])
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
+/** the keys of a store that say how it is kept, not what is kept: a store written empty holds its version and nothing else */
+const FORMAT = new Set(['version'])
+
 /** whether a value has nothing in it at any depth: an empty collection, or one whose entries are all like that (the
- *  empty state of tasks.json is `{ next: {}, tasks: [] }`). A number, a string or a flag is something. */
+ *  empty state of tasks.json is `{ next: {}, tasks: [] }`, the usage ledger's is `{ version: 2, usage: {}, … }`). A
+ *  number, a string or a flag under a key of its own is something. */
 function nothingIn(v: unknown): boolean {
   if (Array.isArray(v)) return v.every(nothingIn)
-  if (isObject(v)) return Object.values(v).every(nothingIn)
+  if (isObject(v)) return Object.entries(v).every(([k, x]) => FORMAT.has(k) || nothingIn(x))
   return false
 }
 
@@ -217,9 +221,10 @@ export function writeJson(name: string, value: unknown, dir = home(), compact = 
   fs.mkdirSync(dirname(f), { recursive: true, mode: 0o700 })
   beforeEmpty(f, value)
   const tmp = `${f}.tmp`
+  const data = compact ? JSON.stringify(value) : JSON.stringify(value, null, 2)
   const fd = fs.openSync(tmp, 'w', PRIVATE.has(name) ? 0o600 : 0o644)
   try {
-    fs.writeFileSync(fd, compact ? JSON.stringify(value) : JSON.stringify(value, null, 2))
+    fs.writeFileSync(fd, data)
     if (RECORD.has(basename(f))) fs.fsyncSync(fd)
   } finally {
     fs.closeSync(fd)

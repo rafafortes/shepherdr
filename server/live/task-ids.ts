@@ -59,8 +59,10 @@ function opened(dir: string, retry = true): Database {
       // and its index): the newest COPIES repairs stay beside it, as they do for a JSON store
       const to = copyName(file, 'corrupt')
       mkdirSync(to)
-      for (const ext of ['', '-wal', '-shm']) if (existsSync(file + ext)) renameSync(file + ext, join(to, basename(file) + ext))
+      renameSync(file, join(to, basename(file)))
       moved = to
+      // its log and its index belong to the database that just went: one left behind would be read against the new one
+      for (const ext of ['-wal', '-shm']) if (existsSync(file + ext)) renameSync(file + ext, join(to, basename(file) + ext))
       pruneCopies(file, 'corrupt')
     } catch {
       /* it cannot be moved: the new file's own failure says why below */

@@ -6,6 +6,7 @@ import { describe, expect, spyOn, test } from 'bun:test'
 import * as fs from 'node:fs'
 import { join } from 'node:path'
 import { COPIES, copyName, home, pruneCopies, readJson, writeJson } from '../server/store.ts'
+import { migrateToSpaces } from '../server/live/migrate.ts'
 import { TaskIds } from '../server/live/task-ids.ts'
 import type { Space } from '../server/live/places.ts'
 import { tmp } from './tmp.ts'
@@ -213,6 +214,42 @@ describe('a write that would leave a store with nothing in it', () => {
     }
   })
 
+  test("the empty state of the usage ledger ({ version: 2, usage: {}, … }) is kept off a file with rows in it", () => {
+    const dir = tmp('store-usage-empty')
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    const fresh = { version: 2, usage: {}, seen: {}, runOuts: [], quotas: {}, alerts: {}, files: {} }
+    try {
+      writeJson('usage.json', { ...fresh, usage: { 'claude|week': { at: 1 } }, files: { '/a.jsonl': { ino: 1, offset: 2 } } }, dir)
+      writeJson('usage.json', fresh, dir)
+      expect(copies(dir, 'before-empty')).toHaveLength(1)
+      expect(said(page)).toContain('written empty')
+    } finally {
+      page.mockRestore()
+    }
+  })
+
+  test('a file whose bytes cannot be copied later is said again, not masked by the copy it had', () => {
+    const dir = tmp('store-said-again')
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      fs.writeFileSync(join(dir, 'agents.json'), '{"a":')
+      readJson('agents.json', {}, dir) // a copy of it, and its line
+      fs.writeFileSync(join(dir, 'agents.json'), '{"broken": true,')
+      Bun.sleepSync(2) // a stamp of the same millisecond would name the copy that is already there, and writing over a
+      // file the folder already holds is allowed: this one has to be a copy that is not there yet
+      fs.chmodSync(dir, 0o500) // nothing inside can be copied out, and nothing can be copied in
+      try {
+        expect(readJson('agents.json', {}, dir)).toEqual({})
+      } finally {
+        fs.chmodSync(dir, 0o700)
+      }
+      expect(page).toHaveBeenCalledTimes(2)
+      expect(said(page, 1)).toContain('could not be copied')
+    } finally {
+      page.mockRestore()
+    }
+  })
+
   test('a small cache that drains as it should is written over as before, with no copy of it', () => {
     const dir = tmp('store-drain')
     const page = spyOn(console, 'error').mockImplementation(() => {})
@@ -265,6 +302,23 @@ describe('a store of record that is empty', () => {
       expect(copies(dir, 'corrupt')).toHaveLength(0)
       writeJson('tasks.json', { next: { A: 1 }, tasks: [] }, dir)
       expect(readJson<unknown>('tasks.json', null, dir)).toEqual({ next: { A: 1 }, tasks: [] })
+    } finally {
+      page.mockRestore()
+    }
+  })
+})
+
+describe('a store of record the migration reads', () => {
+  test('a corrupt spaces.json does not run the legacy migration over the rest of the home', () => {
+    const dir = home()
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      fs.writeFileSync(join(dir, 'spaces.json'), '[{"name": "a"},')
+      fs.writeFileSync(join(dir, 'projects.json'), '[]')
+      migrateToSpaces((m) => `p:${m ?? 'here'}:home`, 'p:here:home')
+      expect(page).toHaveBeenCalledTimes(1) // the read's line, and no migration writing over the rest
+      expect(fs.existsSync(join(dir, 'projects.json'))).toBe(true)
+      expect(fs.existsSync(join(dir, 'modes.json'))).toBe(false)
     } finally {
       page.mockRestore()
     }
