@@ -954,6 +954,8 @@ describe('the line of what waits: the engine lists each kind with its wait and t
     // a working task and one queued after it: only this one has all its blockers at work
     const work = await started(w, repo(), 'atwork', 'Still working')
     const afterWork = w.engine.add({ project: p.name, title: 'After the worker', by: 'test', after: [work.t.id] })
+    // the same, first in line: among those whose blockers are at work, it goes first (recheck's own order)
+    const firstInLine = w.engine.add({ project: p.name, title: 'First in line', by: 'test', after: [work.t.id], priority: true })
     // a To do and a scheduled task
     const todo = await started(w, repo(), 'todotask', 'Wait for a go')
     w.engine.todo(todo.t.id)
@@ -973,15 +975,12 @@ describe('the line of what waits: the engine lists each kind with its wait and t
     } as never)
 
     const q = w.engine.queueWaiters(now)
-    // those whose blockers are all at work come first; the wait lines are the engine's own
-    expect(q.queued.map((t) => t.id)).toEqual([afterWork.id, afterRoot.id, afterChain.id])
-    expect(q.queued[0]!.words).toBe(`After ${work.t.id}`)
-    expect(q.queued[0]!.need).toBeUndefined()
-    expect(q.queued[1]!.words).toBe(`After ${root.t.id}`)
-    expect(q.queued[1]!.need).toEqual({ id: root.t.id, words: 'waits for your reply' })
-    // the chain of two reaches the same root
-    expect(q.queued[2]!.words).toBe(`After ${afterRoot.id}`)
-    expect(q.queued[2]!.need).toEqual({ id: root.t.id, words: 'waits for your reply' })
+    // those whose blockers are all at work come first, a first-in-line task before the rest of its group; the wait lines
+    // are the engine's own
+    expect(q.queued.map((t) => t.id)).toEqual([firstInLine.id, afterWork.id, afterRoot.id, afterChain.id])
+    expect(q.queued.map((t) => t.words)).toEqual([`After ${work.t.id}`, `After ${work.t.id}`, `After ${root.t.id}`, `After ${afterRoot.id}`])
+    // only the chain that ends at the task waiting on you names it, and the chain of two reaches the same root
+    expect(q.queued.map((t) => t.need)).toEqual([undefined, undefined, { id: root.t.id, words: 'waits for your reply' }, { id: root.t.id, words: 'waits for your reply' }])
     expect(q.todo.map((t) => t.id)).toEqual([todo.t.id])
     expect(q.todo[0]!.words).toMatch(/^Added /)
     expect(q.scheduled.map((t) => t.id)).toEqual([later.id])

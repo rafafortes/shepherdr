@@ -41,7 +41,9 @@ const WAIT_ROWS = 10
 const LIMITS_EVERY = 2_000
 function readOpen(): Record<string, boolean> {
   try {
-    return JSON.parse(localStorage.getItem(WAIT_OPEN) ?? '{}') as Record<string, boolean>
+    // a stored value that is no object (another version, a hand) keeps no section open instead of breaking the page
+    const v = JSON.parse(localStorage.getItem(WAIT_OPEN) ?? '{}') as unknown
+    return v && typeof v === 'object' ? (v as Record<string, boolean>) : {}
   } catch {
     return {}
   }
