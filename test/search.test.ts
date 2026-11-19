@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { DemoWorld } from '../server/demo/world.ts'
-import { searchChats, searchExcerpt, searchResults } from '../plugins/keyboard/search-data.ts'
+import { searchCapped, searchChats, searchExcerpt, searchResults, SEARCH_HITS_PER_KIND, SEARCH_MESSAGE_WINDOW } from '../plugins/keyboard/search-data.ts'
 import { findIn } from '../plugins/chat/days.ts'
 import type { Chat, Message } from '../shared/types.ts'
 
@@ -85,5 +85,53 @@ describe('unified search identities, scope and privacy', () => {
     expect(hits).toHaveLength(65)
     expect(hits[0].message).toBe('page-64')
     expect(searchExcerpt('A'.repeat(500) + 'target word', 'target')).toContain('target word')
+  })
+})
+
+describe('bounded search loads', () => {
+  test('an empty query lists snapshot items only, even when chats are in hand', () => {
+    const snap = new DemoWorld().snapshot()
+    const c = searchChats(snap, all)[0]
+    const chats: Record<string, Chat> = { [c.key]: { key: c.key, cli: 'Codex', messages: [
+      { id: 'real-a', who: 'agent', text: 'a real message', at: 1 },
+      { id: 'real-b', who: 'you', text: 'another real message', at: 2 },
+    ] } }
+    const hits = searchResults(snap, all, '', chats)
+    expect(hits.some(h => h.kind === 'Messages')).toBe(false)
+    for (const kind of ['Spaces', 'Tasks', 'Artifacts'] as const) expect(hits.some(h => h.kind === kind)).toBe(true)
+  })
+
+  test('only the newest messages of a chat are scanned, and a capped chat is reported', () => {
+    const snap = new DemoWorld().snapshot()
+    const c = searchChats(snap, all)[0]
+    const scope = { kind: 'chat' as const, id: c.key }
+    const needle = 'window-needle'
+    const messages: Message[] = Array.from({ length: SEARCH_MESSAGE_WINDOW + 20 }, (_, n): Message => ({ id: `m-${n}`, who: 'agent', text: `filler ${n}`, at: n + 1 }))
+    messages[2] = { id: 'outside', who: 'agent', text: `old ${needle}`, at: 3 }
+    messages[messages.length - 1] = { id: 'inside', who: 'agent', text: `recent ${needle}`, at: messages.length }
+    const chats: Record<string, Chat> = { [c.key]: { key: c.key, cli: 'Codex', messages } }
+    const hits = searchResults(snap, scope, needle, chats).filter(h => h.kind === 'Messages')
+    expect(hits.map(h => h.message)).toEqual(['inside'])
+    expect(searchCapped(searchChats(snap, scope), chats)).toBe(true)
+    expect(searchCapped(searchChats(snap, scope), { [c.key]: { key: c.key, cli: 'Codex', messages: messages.slice(-SEARCH_MESSAGE_WINDOW) } })).toBe(false)
+  })
+
+  test('no more than SEARCH_HITS_PER_KIND hits of any one kind are built', () => {
+    const snap = new DemoWorld().snapshot()
+    const place = snap.places[0]
+    const task = snap.tasks[0]
+    const artifact = snap.artifacts[0]
+    const over = SEARCH_HITS_PER_KIND + 10
+    snap.places = Array.from({ length: over }, (_, n) => ({ ...place, id: `cap-place-${n}`, name: `CapSpace ${n}`, chat: `cap-place-${n}` }))
+    snap.tasks = Array.from({ length: over }, (_, n) => ({ ...task, id: `CAP-T-${n}`, name: `CapTask ${n}`, agent: undefined }))
+    snap.artifacts = Array.from({ length: over }, (_, n) => ({ ...artifact, id: `cap-a-${n}`, title: `CapArt ${n}`, place: place.id }))
+    const c = searchChats(snap, all)[0]
+    const messages: Message[] = Array.from({ length: over }, (_, n) => ({ id: `cap-m-${n}`, who: 'agent', text: `CapMsg ${n}`, at: n + 1 }))
+    const chats: Record<string, Chat> = { [c.key]: { key: c.key, cli: 'Codex', messages } }
+    for (const [q, kind] of [['CapSpace', 'Spaces'], ['CapTask', 'Tasks'], ['CapArt', 'Artifacts'], ['CapMsg', 'Messages']] as const) {
+      const hits = searchResults(snap, all, q, chats)
+      expect(hits.every(h => h.kind === kind)).toBe(true)
+      expect(hits).toHaveLength(SEARCH_HITS_PER_KIND)
+    }
   })
 })
