@@ -959,6 +959,67 @@ describe.skipIf(!browser)('the order of places', () => {
     }
   }, 30_000)
 
+  test('Alt+Shift+↑/↓ moves a focused machine or section heading, its spaces along, as a drag does; only while its group has more than one (desktop)', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 800 } })
+    const headings = (p: Page = page) => p.$$eval('#places li[data-heading]', (ls) => ls.map((l) => l.getAttribute('data-heading')))
+    const keys = (id: string) => page.locator(`#places li[data-heading="${id}"]`).getAttribute('aria-keyshortcuts')
+    const folder = (id: string) => page.locator(`#places li[data-heading="${id}"] h2 button`)
+    try {
+      await page.goto(url())
+      await page.waitForSelector('#places li')
+      expect(await headings()).toEqual(['m:mac', 'm:nas', 'm:vm-str'])
+      // a machine folded, then moved down with the keys: its spaces go with it, folded as they were
+      await page.locator('#places li[data-heading="m:nas"]').getByRole('button', { name: 'nas', exact: true }).click()
+      expect(await order(page)).toEqual(['mac', 'home', 'lilla-varlden', 'nas', 'vm-str', 'home', 'gtm', 'herdr-projects'])
+      expect(await keys('m:nas')).toBe('Alt+Shift+ArrowUp Alt+Shift+ArrowDown')
+      await folder('m:nas').focus()
+      await page.keyboard.press('Alt+Shift+ArrowDown')
+      await page.waitForFunction(() => [...document.querySelectorAll('#places li[data-heading]')].map((l) => l.getAttribute('data-heading')).join() === 'm:mac,m:vm-str,m:nas')
+      expect(world.order.all).toEqual(['m:mac', 'm:vm-str', 'm:nas'])
+      expect(await order(page)).toEqual(['mac', 'home', 'lilla-varlden', 'vm-str', 'home', 'gtm', 'herdr-projects', 'nas'])
+      expect(await page.locator('#places li[data-heading="m:nas"] button[aria-expanded]').first().getAttribute('aria-expanded')).toBe('false')
+      // the top stays the top
+      await page.keyboard.press('Alt+Shift+ArrowDown')
+      await page.waitForTimeout(200)
+      expect(await headings()).toEqual(['m:mac', 'm:vm-str', 'm:nas'])
+
+      // sections: two at the top beside a Pinned that holds nothing, two in a machine, and one alone in another
+      world.groups = { 's:cli': { name: 'Clients' }, 's:lab': { name: 'Labs' }, 's:ops': { name: 'Ops', machine: 'vm-str' }, 's:qa': { name: 'QA', machine: 'vm-str' }, 's:solo': { name: 'Solo', machine: 'mac' } }
+      world.order = { ...world.order, sections: ['pinned', 's:cli', 's:lab'], 'sections:m:vm-str': ['s:ops', 's:qa'] }
+      world.emit('snapshot')
+      await page.locator('#places li[data-heading="s:qa"]').waitFor()
+      expect(await headings()).toEqual(['s:cli', 's:lab', 'm:mac', 's:solo', 'm:vm-str', 's:ops', 's:qa', 'm:nas'])
+      // a section at the top moves among them, its spaces along, and Pinned keeps its place out of sight
+      expect(await keys('s:cli')).toBe('Alt+Shift+ArrowUp Alt+Shift+ArrowDown')
+      await folder('s:cli').focus()
+      await page.keyboard.press('Alt+Shift+ArrowDown')
+      await page.waitForFunction(() => [...document.querySelectorAll('#places li[data-heading]')].slice(0, 2).map((l) => l.getAttribute('data-heading')).join() === 's:lab,s:cli')
+      expect(world.order.sections).toEqual(['pinned', 's:lab', 's:cli'])
+      // and one in a machine, among the sections there
+      expect(await keys('s:ops')).toBe('Alt+Shift+ArrowUp Alt+Shift+ArrowDown')
+      await folder('s:ops').focus()
+      await page.keyboard.press('Alt+Shift+ArrowDown')
+      await page.waitForFunction(() => [...document.querySelectorAll('#places li[data-heading^="s:"][data-machine="m:vm-str"]')].map((l) => l.getAttribute('data-heading')).join() === 's:qa,s:ops')
+      expect(world.order['sections:m:vm-str']).toEqual(['s:qa', 's:ops'])
+      // alone among its siblings it says no key, and the keys move nothing
+      expect(await keys('s:solo')).toBeNull()
+      await folder('s:solo').focus()
+      await page.keyboard.press('Alt+Shift+ArrowDown')
+      await page.waitForTimeout(200)
+      expect(world.order['sections:m:mac']).toBeUndefined()
+      // another device has the order the keys left
+      const other = await browser!.newPage({ viewport: { width: 1440, height: 800 } })
+      await other.goto(url())
+      await other.waitForSelector('#places li[data-heading="s:qa"]')
+      expect(await headings(other)).toEqual(['s:lab', 's:cli', 'm:mac', 's:solo', 'm:vm-str', 's:qa', 's:ops', 'm:nas'])
+      await other.close()
+    } finally {
+      await page.close()
+      world.groups = {}
+      forget()
+    }
+  }, 30_000)
+
   test('a finger holds a space (its menu opens), slides it (the menu goes), and lets go: it lands there (phone)', async () => {
     const ctx = await browser!.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     const page = await ctx.newPage()

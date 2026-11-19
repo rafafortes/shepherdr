@@ -138,6 +138,9 @@ interface Sort {
   under: string
   /** its place and its siblings as they show */
   ids: string[]
+  /** the order those siblings keep, when one of them sits out of sight among them (Pinned while it holds nothing):
+   *  where it was, as a drag keeps it */
+  keep?: string[]
 }
 
 function moveKey(e: ReactKeyboardEvent, id: string, sort: Sort) {
@@ -148,7 +151,7 @@ function moveKey(e: ReactKeyboardEvent, id: string, sort: Sort) {
   if (i < 0 || j < 0 || j >= sort.ids.length) return
   const ids = sort.ids.filter((x) => x !== id)
   ids.splice(j, 0, id)
-  reorder(sort.under, ids)
+  reorder(sort.under, sort.keep ? kept(sort.keep, ids) : ids)
 }
 
 /* ---------- the tree: sections at the top, then the machines with their spaces and sections ---------- */
@@ -751,6 +754,9 @@ function MachineHeading({ m, snap, shut, spaces, sort, className }: { m: Machine
       data-drop={m.id}
       className={clsx(dragged, dropHeading, className, menu.open && 'bg-hover')}
       onPointerDown={(e) => press(e, { id: m.id, siblings: sort.ids, level: 'machine', drop: (ids) => reorder(sort.under, ids), ...(off ? {} : { hold: menu.hold, lift: menu.close, release: menu.release }) })}
+      // a keyboard moves it as a drag does, from its name's button (the keys bubble up to it)
+      onKeyDown={(e) => moveKey(e, m.id, sort)}
+      aria-keyshortcuts={sort.ids.length > 1 ? 'Alt+Shift+ArrowUp Alt+Shift+ArrowDown' : undefined}
       onContextMenu={off ? undefined : (e) => (dragging() ? e.preventDefault() : menu.press.onContextMenu(e))}
     >
       {off ? null : <AddButton machine={m.machine} name={m.name} />}
@@ -819,6 +825,9 @@ function SectionHeading({ g, snap, sort, keep, at, className }: { g: Group; snap
       className={clsx(dragged, dropHeading, at === 'inner' && 'pl-5 phone:pl-6', className, menu.open && 'bg-hover')}
       // Pinned out of sight while it holds nothing keeps its place among them
       onPointerDown={(e) => press(e, { id: s.id, siblings: sort.ids, level: 'section', drop: (ids) => reorder(sort.under, keep ? kept(keep, ids) : ids), hold: menu.hold, lift: menu.close, release: menu.release })}
+      // as a machine's: the keys move it, its spaces along, from its name's button
+      onKeyDown={(e) => moveKey(e, s.id, keep ? { ...sort, keep } : sort)}
+      aria-keyshortcuts={sort.ids.length > 1 ? 'Alt+Shift+ArrowUp Alt+Shift+ArrowDown' : undefined}
       onContextMenu={(e) => (dragging() ? e.preventDefault() : menu.press.onContextMenu(e))}
     >
       <RowMenuButton menu={menu} label={`More for ${s.name}`} className="relative z-1 -mr-1 phone:-mr-1.5 phone:size-8" />
