@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { sh, repo, world, until, started, G, Settings } from './engine-world.ts'
 import type { FakeGitHub } from './fake-gh.ts'
 import { tmp } from './tmp.ts'
+import { processes } from '../server/procs.ts'
 import { SETTINGS_HEAD } from '../shared/brief.ts'
 
 // each test runs git dozens of times and gh (a bun process of its own) up to fifty: a few seconds alone, past 20 on a
@@ -35,6 +36,10 @@ const groupAlive = (pid: number) => {
     return false
   }
 }
+/** a gate is gone only when no process still runs its command: `timeout` may lead a group of its own, so the leader's
+ *  pid alone cannot tell (LEAD-01). Its log path is unique to this run and survives in the command line. */
+const gateGone = (run: { log: string; exit: string }) =>
+  !processes().some((p) => p.cmd.includes(run.log) || p.cmd.includes(run.exit))
 afterEach(() => {
   for (const pid of gatesStarted.splice(0))
     try {
@@ -404,7 +409,7 @@ describe('shepherdr merge', () => {
       expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
       expect(readdirSync(gates)).toEqual([])
       // the dropped run's whole process group is gone, not left to end: it can no longer fork sleep
-      await until(() => !groupAlive(stale.pid), 20_000)
+      await until(() => gateGone(stale), 20_000)
       // even an exit code written as the kill landed goes to its own files, and the late cleanup removes it
       writeFileSync(stale.exit, '0\n')
       expect(existsSync(stale.exit)).toBe(true)
@@ -456,12 +461,12 @@ describe('shepherdr merge', () => {
       const dir = tmp('gate-no-timeout')
       const log = join(dir, 'plain.log')
       const exit = join(dir, 'plain.exit')
-      expect(gateCommand('echo x', log, exit, 30)).toContain('timeout -s KILL 30')
+      expect(gateCommand('echo x', log, exit, 30)).toContain('timeout -s KILL --foreground 30')
       // hide the binary from PATH: the default seam then picks the plain line
       const path = process.env.PATH
       process.env.PATH = join(dir, 'empty')
       try {
-        expect(gateCommand('echo x', log, exit, 30)).not.toContain('timeout -s KILL')
+        expect(gateCommand('echo x', log, exit, 30)).not.toContain('timeout -s KILL --foreground')
       } finally {
         process.env.PATH = path
       }
@@ -481,7 +486,7 @@ describe('shepherdr merge', () => {
         else if (how === 'stop') await w.engine.stopTask(t.id)
         else if (how === 'archive') await w.engine.archive(t.id)
         else await w.engine.deleteTask(t.id, { force: true })
-        await until(() => !groupAlive(run.pid), 20_000)
+        await until(() => gateGone(run), 20_000)
         expect(t.gateRun).toBeUndefined()
       }
     })
@@ -489,16 +494,17 @@ describe('shepherdr merge', () => {
     test('a restart stops a gate past its limit or of a task that is gone', async () => {
       const gates = join(process.env.SHEPHERDR_HOME!, 'gates')
       const { w, t } = await gated('gate-old', 'echo fine')
-      const old = await gate('sleep 30', t.worktree!, {}, gates, t.id, { head: 'h', tip: 't' }, 500)
+      // long-lived gates: only the sweep can stop them here, not the limit inside the command
+      const old = await gate('sleep 300', t.worktree!, {}, gates, t.id, { head: 'h', tip: 't' })
       old.at = Date.now() - 46 * 60_000
       t.landing = { step: 'gate', at: Date.now() }
       t.gateRun = old
       // a run whose task is gone from the record: its command still names a gate file in this home
-      const orphan = await gate('sleep 30', t.worktree!, {}, gates, 'GONE-99', { head: 'h', tip: 't' }, 500)
-      expect(groupAlive(old.pid)).toBe(true)
-      expect(groupAlive(orphan.pid)).toBe(true)
+      const orphan = await gate('sleep 300', t.worktree!, {}, gates, 'GONE-99', { head: 'h', tip: 't' })
+      expect(gateGone(old)).toBe(false)
+      expect(gateGone(orphan)).toBe(false)
       w.engine.resumeMerges()
-      await until(() => !groupAlive(old.pid) && !groupAlive(orphan.pid), 20_000)
+      await until(() => gateGone(old) && gateGone(orphan), 20_000)
       expect(t.gateRun).toBeUndefined()
       expect(w.engine.subOf(t)).toBe('Merge gate interrupted by a restart: run shepherdr merge again')
     })

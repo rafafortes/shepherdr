@@ -442,9 +442,11 @@ const timeoutOnPath = () => (process.env.PATH ?? '').split(':').some((dir) => {
 
 /** the shell line a gate runs: with a `timeout` binary the command has its own hard limit, so it ends even when Shepherdr
  *  never comes back (a timeout exits 124, as waitGate does); without one the plain line is the fallback and waitGate's
- *  limit is all there is. The words and exit code still go to the same files, named for this run alone. */
+ *  limit is all there is. `--foreground` keeps `timeout` in the detached shell's process group: otherwise it starts one
+ *  of its own and a group kill of the run would leave the command (and its sleep loop) running. The words and exit code
+ *  still go to the same files, named for this run alone. */
 export function gateCommand(cmd: string, log: string, exit: string, seconds: number, hasTimeout = timeoutOnPath()) {
-  const body = hasTimeout ? `timeout -s KILL ${seconds} sh -c ${q(cmd)}` : cmd
+  const body = hasTimeout ? `timeout -s KILL --foreground ${seconds} sh -c ${q(cmd)}` : cmd
   return `(${body}) > ${q(log)} 2>&1; echo $? > ${q(exit)}.tmp && mv ${q(exit)}.tmp ${q(exit)}`
 }
 

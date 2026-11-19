@@ -103,6 +103,23 @@ describe('a temporary folder of a test', () => {
     }
   })
 
+  test('the sweep leaves alone a process that merely names a shep-* file that is not one of our folders', async () => {
+    const file = at(`shep-not-a-run-${run}.txt`)
+    rmSync(file, { force: true })
+    const child = Bun.spawn(['/bin/sh', '-c', `echo ${file} >/dev/null; sleep 30`], { cwd: tmpdir(), detached: true, stdout: 'ignore', stderr: 'ignore' })
+    try {
+      sweep()
+      try {
+        process.kill(child.pid, 0)
+      } catch {
+        throw new Error('the sweep killed a process whose command names a file, not a test folder')
+      }
+    } finally {
+      killLeft([{ path: `pid ${child.pid}`, why: '', pid: child.pid }])
+      await Promise.race([child.exited, Bun.sleep(2000)])
+    }
+  })
+
   test('the sweep kills a process left in a folder that has gone, but leaves another running suite alone', async () => {
     const dir = tmp('dead-child')
     const child = Bun.spawn(['/bin/sh', '-c', 'sleep 30'], { cwd: dir, detached: true, stdout: 'ignore', stderr: 'ignore' })

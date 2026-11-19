@@ -67,10 +67,12 @@ const alive = (pid: number) => {
   }
 }
 
-/** the shep-* folder a process's cwd or command line names, if any: the root of a run's folders, not a `go` file in it */
+/** the test folder a process's cwd or command line names, if any: the root of a run's folders, not a `go` file in it.
+ *  Only a name the tests make counts — another `shep-*` file in /tmp named in a command is none of this sweep's business. */
 const shepRoot = (s: string) => {
   const base = tmpdir().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return s.match(new RegExp(`${base}/(shep-[^\\s'"/]+)`))?.[1]
+  const name = s.match(new RegExp(`${base}/(shep-[^\\s'"/]+)`))?.[1]
+  return name && ownerOf(name) ? name : undefined
 }
 
 /** how old a folder has to be to go: a suite in flight is younger (every test writes into its own), and one older is a
@@ -104,7 +106,7 @@ export function sweep(age = STALE) {
   let killed = 0
   for (const p of processes()) {
     const roots = [p.cwd, p.cmd].map(shepRoot).filter((root): root is string => !!root)
-    if (roots.some((root) => !existsSync(join(tmpdir(), root)))) {
+    if (roots.some((root) => !existsSync(join(tmpdir(), root))) && alive(p.pid)) {
       killGroup(p.pid)
       killed++
     }

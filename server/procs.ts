@@ -37,11 +37,16 @@ export function processes(): Proc[] {
   return ps.stdout.toString().split('\n').flatMap((line) => { const m = line.match(/^\s*(\d+)\s+(.*)$/); return m ? [{ pid: Number(m[1]), cmd: m[2], cwd: '' }] : [] })
 }
 
-/** stop a process group: a gate (and a test's shell) is detached, so its pid leads a group of its own */
+/** stop a process group: a gate (and a test's shell) is detached, so its pid leads a group of its own. A child that is
+ *  not a group leader is killed on its own instead, so a sweep never calls a kill it did not make. */
 export function killGroup(pid: number) {
   try {
     process.kill(-pid, 'SIGKILL')
   } catch {
-    /* it ended already, or it is not a group leader */
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      /* it ended already */
+    }
   }
 }
