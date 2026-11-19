@@ -1,11 +1,12 @@
 // The usage ledger: a model call counted once per chat (dedupe across re-reads and resumed sessions), bucketed by the
 // hour, the windows of 5 h, 24 h and 7 d, pruned past its 35 days, kept in usage.json across a restart, the backfill
 // marked done once, and a provider's run-outs: out right now, or back, by a reset, a return or a later call.
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, jest, spyOn, test } from 'bun:test'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
-import { HOUR, harnessOf, KEEP_RUNOUTS, KEEP_USAGE, modelKey, modelOf, outState, providerOf, providerPart, rekey, UsageLedger, VERSION, type RunOut } from '../server/live/usage-ledger.ts'
+import * as store from '../server/store.ts'
+import { HOUR, harnessOf, KEEP_RUNOUTS, KEEP_USAGE, modelKey, modelOf, outState, providerOf, providerPart, rekey, SAVE_AFTER_MAX, SAVE_AFTER_MIN, UsageLedger, VERSION, type RunOut } from '../server/live/usage-ledger.ts'
 
 // every time is read from the clock, so the windows are the same whenever the suite runs
 const NOW = Date.now()
@@ -336,5 +337,129 @@ describe('a usage.json from before the harness keys', () => {
     const fresh = new UsageLedger(tmp('ledger-fresh'), true)
     fresh.migrateRunOuts(() => 'codex')
     expect(fresh.byKey(0).size).toBe(0)
+  })
+})
+
+describe('writing usage.json: one write per delay under a trickle, compact and current on stop', () => {
+  test('a steady trickle writes once per delay, and the delay grows while the events keep coming', () => {
+    jest.useFakeTimers({ now: 0 })
+    const dir = tmp('ledger-save-rate')
+    const at: number[] = []
+    const spy = spyOn(store, 'writeJson').mockImplementation((name: string) => {
+      if (name === 'usage.json') at.push(Date.now())
+    })
+    try {
+      const l = new UsageLedger(dir)
+      let i = 0
+      const event = () => l.count('A/Agent', 'k/m', { id: `e${i}`, at: i * 1000, tokens: 10 }, i * 1000)
+      // one event, then advance a second at a time; the second event of a tick lands after any timer that tick fired
+      const tick = (n: number) => {
+        for (let k = 0; k < n; k++) {
+          jest.advanceTimersByTime(1000)
+          event()
+          i++
+        }
+      }
+      event()
+      i++
+      tick(4) // t=1..4: still inside the first 5 s window
+      expect(at.length).toBe(0)
+      tick(1) // t=5: first write; the next event arms a 10 s timer
+      expect(at.length).toBe(1)
+      tick(9) // t=6..14
+      expect(at.length).toBe(1)
+      tick(1) // t=15: second write, 10 s after the first
+      expect(at.length).toBe(2)
+      tick(19) // t=16..34
+      expect(at.length).toBe(2)
+      tick(1) // t=35: third write, 20 s after the second
+      expect(at.length).toBe(3)
+      tick(29) // t=36..64
+      expect(at.length).toBe(3)
+      tick(1) // t=65: fourth write, 30 s after the third (SAVE_AFTER_MAX)
+      expect(at.length).toBe(4)
+      tick(29) // t=66..94
+      expect(at.length).toBe(4)
+      tick(1) // t=95: fifth write, still 30 s later
+      expect(at).toEqual([SAVE_AFTER_MIN, 15000, 35000, 65000, 95000])
+      expect(SAVE_AFTER_MAX).toBe(30_000)
+      l.stop()
+    } finally {
+      spy.mockRestore()
+      jest.useRealTimers()
+    }
+  })
+
+  test('a one-off change after a quiet spell is written at the short delay, not the grown one', () => {
+    jest.useFakeTimers({ now: 0 })
+    const dir = tmp('ledger-save-quiet')
+    const at: number[] = []
+    const spy = spyOn(store, 'writeJson').mockImplementation((name: string) => {
+      if (name === 'usage.json') at.push(Date.now())
+    })
+    try {
+      const l = new UsageLedger(dir)
+      let i = 0
+      const event = () => l.count('A/Agent', 'k/m', { id: `e${i}`, at: i * 1000, tokens: 10 }, i * 1000)
+      const tick = (n: number) => {
+        for (let k = 0; k < n; k++) {
+          jest.advanceTimersByTime(1000)
+          event()
+          i++
+        }
+      }
+      event()
+      i++
+      tick(44) // a steady trickle: writes at 5, 15, 35 s, growing the delay to 30 s
+      expect(at).toEqual([SAVE_AFTER_MIN, 15000, 35000])
+      jest.advanceTimersByTime(200_000) // quiet: the one pending 65 s timer fires, then nothing
+      expect(at).toEqual([SAVE_AFTER_MIN, 15000, 35000, 65000])
+      i = Date.now() / 1000
+      event() // a one-off long after the trickle: the grown delay is reset, so durable 5 s later
+      jest.advanceTimersByTime(SAVE_AFTER_MIN)
+      expect(at.length).toBe(5)
+      expect(at[4]).toBe(Date.now())
+      l.stop()
+    } finally {
+      spy.mockRestore()
+      jest.useRealTimers()
+    }
+  })
+
+  test('stop and flush keep the file current; compact JSON parses and prune still drops old hours', () => {
+    const dir = tmp('ledger-compact')
+    const recent = Math.floor(NOW / HOUR)
+    const oldHour = Math.floor((NOW - 30 * 24 * HOUR) / HOUR) // kept on load (30 days), dropped when flushed 10 days later
+    writeFileSync(join(dir, 'usage.json'), JSON.stringify({
+      version: VERSION,
+      usage: { 'k/old': { [oldHour]: { tokens: 1, calls: 1 } }, 'k/new': { [recent]: { tokens: 2, calls: 1 } } },
+      seen: {}, runOuts: [], quotas: {}, alerts: {}, files: {},
+    }))
+    const l = new UsageLedger(dir)
+    l.count('A/Agent', 'k/new', { id: 'fresh', at: NOW + 1000, tokens: 3 }, NOW)
+    expect(l.byKey(NOW - HOUR).get('k/new')!.tokens).toBe(5)
+    l.flush(NOW + 10 * 24 * HOUR)
+    const raw = readFileSync(join(dir, 'usage.json'), 'utf8')
+    expect(raw).not.toContain('\n') // compact: no indentation, but still the same JSON shape
+    const parsed = JSON.parse(raw)
+    expect(parsed.usage['k/old']).toBeUndefined()
+    expect(parsed.usage['k/new'][String(recent)].tokens).toBe(5)
+    l.stop()
+  })
+
+  test('a reader sees the change in memory before it reaches disk, so a cap never reads a stale file', () => {
+    jest.useFakeTimers({ now: NOW })
+    const dir = tmp('ledger-memory')
+    try {
+      const l = new UsageLedger(dir)
+      l.count('A/Agent', 'k/m', { id: 'now', at: NOW + 1000, tokens: 7 }, NOW)
+      // the screen, shepherdr status and models.maxAtOnce all read through the ledger's in-memory state
+      expect(l.byKey(NOW - HOUR).get('k/m')!.tokens).toBe(7)
+      expect(existsSync(join(dir, 'usage.json'))).toBe(false) // a longer on-disk delay only widens this gap
+      l.stop() // durability is restored at the end of a run
+      expect(JSON.parse(readFileSync(join(dir, 'usage.json'), 'utf8')).usage['k/m'][String(Math.floor(NOW / HOUR))].tokens).toBe(7)
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })
