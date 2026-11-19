@@ -4497,6 +4497,21 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
   }
 
+  /** this machine's spaces in the order their tasks wait for its room: numbered ones by their number, then the rest. A
+   *  stable sort keeps the usual order for spaces with the same number (or none), as the engine's queue does */
+  private orderedSpaces() {
+    const priority = (x: ReturnType<Places['shown']>[number]) => this.settings.spacePriority(x.space?.name ?? '~') ?? Number.POSITIVE_INFINITY
+    return [...this.places.shown()].sort((a, b) => priority(a) - priority(b))
+  }
+
+  /** the one line shepherdr status adds when a space of this machine has a priority (none otherwise) */
+  private spaceOrderLine() {
+    const named = this.orderedSpaces().filter((x) => this.settings.spacePriority(x.space?.name ?? '~') !== null)
+    if (!named.length) return ''
+    const list = named.map((x) => `${x.name} (${this.settings.spacePriority(x.space?.name ?? '~')})`).join(' · ')
+    return `Space order here: ${list}; spaces with no priority come after.`
+  }
+
   private async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string }): Promise<string> {
     const [a0, a1, ...rest] = p.words
     if (!a0 || a0 === 'help' || p.flags.has('help')) return HELP
@@ -4505,7 +4520,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (a1) return this.reportCommand(a1, rest, p, ctx)
         const kept = this.engine.keptLeftovers()
         const line = `Shepherdr on ${NAME}: ${this.places.shown().length} spaces, ${this.engine.tasks.filter((t) => !ended(t) && !t.archived).length} open tasks; herdr ${this.agents.reachable ? 'answers' : 'does not answer'}.`
-        return kept.length ? `${line}\nDone tasks that kept work (remove it by hand once you're sure):\n${kept.map((k) => `  ${k}`).join('\n')}` : line
+        const text = [line, this.spaceOrderLine()].filter(Boolean).join('\n')
+        return kept.length ? `${text}\nDone tasks that kept work (remove it by hand once you're sure):\n${kept.map((k) => `  ${k}`).join('\n')}` : text
       }
       // project, from before spaces, is space
       case 'project':
@@ -4526,8 +4542,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           return `Added ${named} (${pr.path}) as a space; its tasks are ${pr.key}-1, ${pr.key}-2, …${pr.github ? ` GitHub: ${pr.github}.` : ' No GitHub remote: tasks merge here.'}`
         }
         if (a1 === 'list' || !a1)
-          return this.places
-            .shown()
+          return this.orderedSpaces()
             .map((x) => (x.space ? `${x.name}  ${x.space.key}  ${this.places.folderLine(x.space)}${x.space.github ? `  github:${x.space.github}` : ''}` : `${x.name}  (home space)  ${boxHome()}`))
             .join('\n')
         if (a1 === 'rename') {

@@ -188,7 +188,7 @@ export interface Num {
   limit?: boolean
 }
 
-type Row = { label: string; key: string; value: string; options?: string[]; ordered?: boolean; ids?: Record<string, string>; text?: boolean; multiline?: boolean; fixed?: boolean; group?: string; sub?: string; num?: Num; hint?: string; warn?: string; chain?: SettingRow['chain'] }
+type Row = { label: string; key: string; value: string; options?: string[]; ordered?: boolean; ids?: Record<string, string>; text?: boolean; multiline?: boolean; fixed?: boolean; group?: string; sub?: string; num?: Num; hint?: string; warn?: string; chain?: SettingRow['chain']; /** levels this row alone may be set at, narrower than its section's (a space's own order) */ levels?: LevelKind[] }
 
 /** the small heading of a role's backups, under the role's own rows: its chain sits in a sub-block of that name */
 const BACKUPS = 'Backups'
@@ -418,8 +418,11 @@ export const CATALOG: Section[] = [
     // that matters more may have more of them running. Off: only the machine's limit. Set at any of the three levels,
     // the most specific one that sets it wins (pick)
     name: 'Space',
-    about: "How many of a space's tasks work at once on this machine, and how many agents of one model or provider it may run at once. Both work together with the machine's limits (Machine → Max tasks working at once, and Most at once per model or provider at this machine): a task starts only when every one has room. Off: only the machine's limits.",
+    about: "The order of a space's tasks in this machine's queue, how many of them work at once here, and how many agents of one model or provider it may run at once. They work together with the machine's limits (Machine → Max tasks working at once, and Most at once per model or provider at this machine): a task starts only when every one has room. Off: only the machine's limits.",
     rows: [
+      // a space's own order in the shared queue, at this machine's spaces only: no Everywhere or machine default, since
+      // an order is only meaningful between the spaces of one machine (engine.heldTasks and engine.retryReviews)
+      { label: 'Priority order of this space', key: 'space.priority', value: 'off', num: { min: 1, max: 200, off: true }, levels: ['space'], hint: "1 is first, 2 next, and so on; a space with no number comes after every numbered one, and spaces with the same number go by how long their tasks waited. Strict: while the first space has a task that can start, no later space starts one — give it a Max tasks cap to leave room for the others, e.g. set space.priority 1 on lyvora-app and cap its working tasks at 2. A task marked first in line still goes ahead of every space. Set with shepherdr set space.priority 1 --space lyvora-app. Off: the order by age as before." },
       { label: 'Max tasks of this space working at once', key: 'space.maxTasks', value: 'off', num: { min: 0, max: 200, off: true, limit: true }, hint: "Caps this space's working tasks within the machine's own limit, so a space that matters more can have more of them running than the others. 0: the space starts no task (its tasks wait, held). No cap: only the machine's limit." },
       // per provider or per model. Read at two levels, both applied (model-caps.ts, choose.ts): the machine's own value (Machine,
       // or Everywhere) is the machine's total, and a space's own value (pick: its own, else the machine's) is that space's
@@ -598,7 +601,11 @@ export type LevelKind = 'all' | 'machine' | 'space'
 export type Level = 'all' | 'machine' | { space: string }
 
 const kindOfLevel = (l: Level): LevelKind => (typeof l === 'string' ? l : 'space')
-const levelsOf = (key: string): LevelKind[] => CATALOG.find((s) => s.rows.some((r) => r.key === key))?.levels ?? ['all', 'machine', 'space']
+/** the levels a key may be set at: its own row's, else its section's, else all three */
+const levelsOf = (key: string): LevelKind[] => {
+  const row = ROWS.find((r) => r.key === key)
+  return row?.levels ?? CATALOG.find((s) => s.rows.some((r) => r.key === key))?.levels ?? ['all', 'machine', 'space']
+}
 
 type Values = Record<string, string>
 export interface Stored {
@@ -709,7 +716,10 @@ export class Settings {
   /** set (or with null, unset) a value at a level (Everywhere when none); refused values say why */
   set(key: string, value: string | null, l: Level = 'all'): { ok: boolean; error?: string; note?: string } {
     if (!KEYS.includes(key)) return { ok: false, error: `No setting ${key}` }
-    if (!levelsOf(key).includes(kindOfLevel(l))) return { ok: false, error: levelsOf(key).includes('machine') ? `${key} is set Everywhere or for one machine, not a space.` : `${key} is set Everywhere only.` }
+    if (!levelsOf(key).includes(kindOfLevel(l))) {
+      const levels = levelsOf(key)
+      return { ok: false, error: !levels.includes('space') ? (levels.includes('machine') ? `${key} is set Everywhere or for one machine, not a space.` : `${key} is set Everywhere only.`) : `${key} is a space's own setting: add --space NAME.` }
+    }
     /** what the human is told of a value kept otherwise than written (a model's limit lowered to its provider's) */
     let note: string | undefined
     if (value !== null) {
@@ -951,6 +961,14 @@ export class Settings {
     return this.taskLimit('space.maxTasks', { space })
   }
 
+  /** a space's place in this machine's queue (space.priority): 1 first, lower numbers before higher ones; null for a space
+   *  with no number, which comes after every numbered space. It is a space's own setting: no machine or Everywhere value */
+  spacePriority(space: string): number | null {
+    const v = this.pick('space.priority', { space }).value.trim().toLowerCase()
+    const n = Number.parseInt(v, 10)
+    return Number.isFinite(n) && n >= 1 ? n : null
+  }
+
   /** the CLI, model and effort tasks or coordinators start with, or tasks are reviewed by, for a space (none: this
    *  machine); nothing for a CLI's own default */
   harness(role: 'task' | 'coordinator' | 'reviewer', space?: string): { kind: string; model?: string; effort?: string } {
@@ -1123,7 +1141,7 @@ export class Settings {
       const lines: Record<string, string | undefined> = s.told
         ? { 'brief.review': text('review'), 'reviewer.agent': text('reviewer'), ...Object.fromEntries(REVIEWER_BACKUP_KEYS.map((k) => [k, text('reviewer')])), 'review.mustFix': text('mustFix'), 'review.rounds': text('rounds'), 'brief.merge': text('merge') }
         : {}
-      return s.rows.map((r) => {
+      return s.rows.filter((r) => levelsOf(r.key).includes(kindOfLevel(l))).map((r) => {
         if (r.key === 'alerts') return { ...r, value: devices.length ? devices.join(', ') : 'No device yet', warn: pushWarnings.length ? `${pushWarnings.length} device${pushWarnings.length === 1 ? '' : 's'} could not receive the last alert.\n${pushWarnings.slice(0, 3).join('\n')}${pushWarnings.length > 3 ? '\nMore details: shepherdr doctor' : ''}` : undefined }
         const p = this.pick(r.key, l)
         // its value as it is read: a backup's own key at default reads the tasks' pair's (readAt), and says so

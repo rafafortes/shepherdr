@@ -84,7 +84,9 @@ also has a side panel: its live herdr terminal, its files, its diff against main
   once; a finger holds the row, its menu opens, and sliding it closes the menu and moves the row); a machine takes its
   spaces and sections along, a section its spaces, and Option+Shift+↑/↓ (Alt+Shift off a Mac) moves a focused space. The main
   machine keeps the order (`order.json`), so every device sees it; a space added later slots in A to Z among the
-  rest.
+  rest. That is the sidebar's order, not the tasks' queue order: the latter is the human's `space.priority` setting,
+   shown and reordered in Settings → Limits → Spaces, with the numbered spaces first; `shepherdr space list` shows
+   this machine's spaces in that queue order. Nothing here changes the sidebar, and a coordinator never changes it.
 - A space's ⋯ pins it (Pin / Unpin), as Slack stars a channel: it moves out of the tree into Pinned, a heading at the
   top of the sidebar that folds like the others (each pin with its machine after its name), and Unpin puts it back.
   Only spaces pin. Pins drag into order and Option+↑/↓ walks them first; the main machine keeps them with the order,

@@ -50,7 +50,12 @@ Spaces (a folder on a machine with a name and its own coordinator; each machine 
                                                  follows the space rules: lowercase letters, numbers, - and _,
                                                  at most 80 characters, its own on its machine
   shepherdr space set base <branch> --space NAME  new tasks start from and merge into this branch; existing tasks keep theirs
-  shepherdr space list
+  shepherdr space list                           this machine's spaces in queue order (the numbered ones first)
+  shepherdr set space.priority <1-200> --space NAME
+                                                 a space's place in this machine's queue: 1 first, a space with no
+                                                 number after all numbered ones. Strict: while the first space has a
+                                                 task that can start, no later space starts one — cap its Max tasks to
+                                                 leave room. shepherdr unset clears it; shepherdr show lists it
   shepherdr space rename <name> <new-name>       only the name that shows changes (its folder, herdr space and task
                                                  ids stay)
   shepherdr space remove <name>                  Shepherdr forgets it (its folder stays); not while its tasks work,

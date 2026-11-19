@@ -682,3 +682,24 @@ task that only says "Went wrong". A task's own harness is never overwritten by S
 The worst remaining event-loop cost was `tellWaits` rebuilding full screen chats to read their open cards: it now
 reads them from the raw log (`chats.openCardsQuick`), riding the same rows the screen's chat builds, with the one
 residue a logged command matched to the log's own line can move a row of yours a moment sooner than its post.
+
+
+## Not from upstream: a priority order between spaces, built here
+
+Checked 2026-11-18 (SHE-161) on `upstream/main` (3.x) and `upstream/v2.0`, their histories and the public issues (read
+only): nothing for an order **between spaces** on either line. `git grep -n -i 'priorit' upstream/main -- core mods
+service web docs` finds only Codex's `service_tier` named priority, worker niceness, and Autopilot's "priorities" in a
+heartbeat; `web/shared/order.ts` is the *sidebar's* display order of machines and spaces, not a queue. On `upstream/v2.0`
+only the autopilot and develop docs use the word. Two open issues come near but are per task: **#1193**, "Priority flags
+on tasks (click to set, sort by priority)", five Jira-like levels on each task plus a viewer's sort; and **#1195**, idea
+4 "Auto-start in priority order", a rank on todo tasks starting the highest-ranked one when running drops below
+`max_running`. Neither orders spaces, and the operator asked for an order rather than levels (three levels cannot order
+seven spaces). Upstream's per-folder `tasks.max_running` (`83548e45`, SHEP-7) is already here as `space.maxTasks` and
+is a share, not an order. No commit or issue ported; 3.x's rewrite (`core/`, `mods/`, a Python `herdr-task`) has no
+2.0 engine, spaces settings or Limits screen to receive this.
+
+Ours: `space.priority` is a whole number at one space only (1 first, unset spaces after all numbered ones, ties by
+age) in `engine.heldTasks()` and the waiting-review path `retryReviews()`, with a Priority column on Settings → Limits
+→ Spaces that lists spaces in order and renumbers them 1..n when one is moved. The order is strict, with the first
+space's `space.maxTasks` cap as the way to leave room for the others; a first-in-line task still goes ahead of every
+space, and a space held for its own cap or model is stepped over, as before. Nothing set leaves today's order intact.
