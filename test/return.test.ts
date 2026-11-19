@@ -1358,6 +1358,10 @@ describe('the machine’s own work on the primary is its answer', () => {
       s.src.agents.status = ((k: string) => (k === s.key ? 'working' : status.call(s.src.agents, k))) as never
       const at = Date.now()
       s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at })
+      // a second short of the quiet, the work is not the answer yet, and its own question is not due: nothing either way
+      await s.src.watchReturns(at + QUIET - 1_000)
+      expect(asked).toEqual([])
+      expect(cards(a.key)).toEqual([])
       // its own question is not due yet, and the work answers for it: nothing is asked
       await s.src.watchReturns(at + QUIET)
       expect(asked).toEqual([])
@@ -1474,6 +1478,34 @@ describe('a model answers for the whole machine, not for one space', () => {
       expect(a.src.returns.get('task', b.p.name)!.tries).toBe(1)
       expect(a.started).toEqual([])
       expect(b.started).toEqual([])
+    } finally {
+      b.done()
+      a.done()
+    }
+  })
+
+  test('a cut on the primary while a probe is out answers nothing: that answer is older than the cut', async () => {
+    const a = await goingBack('share-cut-a')
+    const b = await goingBack('share-cut-b')
+    try {
+      const ta = a.onBackup()
+      const tb = b.onBackup()
+      const late = Date.now() - FIRST_WAIT * 2
+      a.src.returns.note({ role: 'task', space: a.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
+      b.src.returns.note({ role: 'task', space: b.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
+      const now = later()
+      // while that probe is out, the primary cuts b off again: its refusal is newer than the answer on its way back
+      a.src.returns.probe = async (h: { kind: string }) => {
+        asked.push(h.kind)
+        a.src.returns.cut('task', b.p.name, now + 60_000, { key: tb.key, onPrimary: true })
+        return { ok: true, said: 'ok' }
+      }
+      await a.src.watchReturns(now)
+      // a went back on the answer; b did not, and is not told the primary answers
+      expect(asked).toEqual(['claude'])
+      expect(started.map((x) => x.key)).toEqual([ta.key])
+      expect(b.src.returns.get('task', b.p.name)!.ok).toBeUndefined()
+      expect(cards(tb.key)).toEqual([])
     } finally {
       b.done()
       a.done()

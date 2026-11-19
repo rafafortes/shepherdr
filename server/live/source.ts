@@ -2785,6 +2785,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
             this.returns.failed(o.role, o.space, now)
             continue
           }
+          // a cut on the primary while this pass was asking (one probe may take up to its timeout) is the provider
+          // refusing again: its answer is older than that cut, so this outage is never answered by it
+          if ((o.lastCut ?? o.at) > now) continue
           // the one that asked counts this answer; its siblings hear of it unasked, each on its own schedule
           this.returns.ok(o.role, o.space, now, !askedBefore)
           if (!askedBefore) this.answeredModel(to.primary, now, o)
