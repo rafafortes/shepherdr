@@ -182,6 +182,12 @@
   nothing was merged`); a base that moved after it ran, while GitHub's checks were read, no
   merge at all — the next `shepherdr merge` gates the branch on the new base. GitHub's own checks, where a repository has
   them, are read as before: the gate is one more condition, never a replacement.
+  The gate that costs nothing when nothing changed is the check itself: a space turns it on with `shepherdr set merge.gate
+  "bash scripts/check-local.sh --reuse" --space <name>` ([develop](develop.md) has how `--reuse` answers and what it
+  keeps). It replies at once when the branch's tree already passed the full check — the task's own `bun run check:local`
+  on a clean worktree — and runs the full check when it did not: nothing has passed on that tree yet, or the branch was
+  rebased onto a base that moved, so what will land is checked before it lands. A merge train runs its gate on the top of
+  its stack, a tree no single run recorded, so a train always pays one full run.
 - A space with a merge gate may also take **merge trains** (Settings → How tasks work → Merge train, `merge.train`: off
   by default, or 2 to 5, the most merges one train takes, the head included). When several merges wait in line here,
   the first one in line runs the gate once for them all: their changes are stacked on main, one on top of the other,

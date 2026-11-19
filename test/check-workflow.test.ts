@@ -61,6 +61,22 @@ describe('the check itself', () => {
     expect(scripts['check:local']).toBe('bash scripts/check-local.sh')
     expect(scripts.check).toBe('bun run check:local')
   })
+  test('answers --reuse from the verdict every worktree shares by tree, and keeps one for each tree that passed', () => {
+    const lines = readFileSync(join(root, 'scripts', 'check-local.sh'), 'utf8')
+      .split('\n')
+      .filter((l) => l.trim() && !l.trim().startsWith('#'))
+    // the cheap merge gate (QG-10): the tree the check read, in a folder every worktree of the repo shares
+    expect(lines).toContain('verdicts="$HOME/.cache/shepherdr/check-local/verdicts"')
+    expect(lines).toContain(`tree=$(git -C "$root" rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null)`)
+    expect(lines).toContain('for arg in "$@"; do [ "$arg" = --reuse ] && reuse=1; done')
+    // a quick run is no full verdict in either direction: it reuses none and keeps none
+    expect(lines).toContain('[ "$quick" = 1 ] && reuse=0')
+    // a run is kept only once it passed whole: right before the line that says it did
+    const call = lines.indexOf('  record')
+    expect(call).toBeGreaterThan(-1)
+    expect(lines[call + 1]).toStartWith('  say "PASSED in')
+  })
+
   test('whose runner discovers the checks, one run at a time, last in line for the CPU', () => {
     // its comments name these too: what runs is what a line that isn't a comment says
     const lines = readFileSync(join(root, 'scripts', 'check-local.sh'), 'utf8')
