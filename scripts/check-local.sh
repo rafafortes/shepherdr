@@ -413,7 +413,7 @@ acquire_lock() { # <nothing|shared>: what a give-up leaves unrun
       if [ "${1:-nothing}" = nothing ]; then
         say "GAVE UP: another check${holder:+ (pid $holder)} still ran after $(dur "$wait_timeout"); nothing ran here."
       else
-        say "GAVE UP: another check${holder:+ (pid $holder)} still ran after $(dur "$wait_timeout"); the tests, coverage and build did not run."
+        say "GAVE UP: another check${holder:+ (pid $holder)} still ran after $(dur "$wait_timeout"); the tests, coverage, build and dist budget did not run."
       fi
       return 2
     fi
@@ -486,7 +486,7 @@ run_phase "${local_files[@]}"
 # lock above and never waits here). A failure in the worktree-local checks never gets this far: it fails in seconds.
 if [ ${#failed[@]} -eq 0 ] && [ ${#shared_files[@]} -gt 0 ]; then
   if [ "$quick" = 0 ]; then
-    say "· worktree-local checks done in $(dur $((SECONDS - started))): the tests, coverage and build go one worktree at a time"
+    say "· worktree-local checks done in $(dur $((SECONDS - started))): the shared phase (tests, coverage, build, dist budget) goes one worktree at a time"
   fi
   lock_code=0
   acquire_lock shared || lock_code=$?
