@@ -146,13 +146,12 @@ export const definePlugin = (p: ClientPlugin) => p
 let enabledNames: string[] = []
 export const has = (name: string) => enabledNames.includes(name)
 
-/** set up each plugin on the slots; `user`: the human's own, guarded so one that throws stops only itself (guard.tsx) */
-export function installPlugins(plugins: ClientPlugin[], enabled: string[], user: string[] = []) {
+/** Set up each plugin on the slots. Every one goes through setupGuarded (guard.tsx): built in or the human's own, a
+ *  plugin that throws leaves the registry as it was and stops only its own parts. The order is unchanged, so the
+ *  human's own still come after the built-ins and replace them by name. */
+export function installPlugins(plugins: ClientPlugin[], enabled: string[]) {
   enabledNames = enabled
-  for (const p of plugins) {
-    if (user.includes(p.name)) setupGuarded(p.name, registry, (r) => p.setup(r))
-    else p.setup(registry)
-  }
+  for (const p of plugins) setupGuarded(p.name, registry, (r) => p.setup(r))
   const byOrder = (a: { order: number }, b: { order: number }) => a.order - b.order
   registry.messageParts.sort(byOrder)
   registry.messageEdge.sort(byOrder)

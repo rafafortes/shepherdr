@@ -21,6 +21,11 @@ save a file there and Shepherdr rebuilds and restarts within seconds; open scree
   if it had one, else it is left out (a built-in one it replaced comes back). One that throws as the server loads it is
   skipped there; one that throws on the screen stops only its own parts. A line at the top of the screen says so, and
   Settings → Plugins shows the error. Fix the file and it comes back with the next rebuild.
+- **The same guard covers every plugin**, built in or yours: a setup that throws leaves the registry as it was, and a
+  view or function that throws stops only that plugin's part. Nothing a plugin relies on changed — `definePlugin`, the
+  slots, the order they load in and `setupGuarded`'s behaviour are the same; the built-ins simply go through it too.
+  If something outside every plugin breaks the screen itself, a small card with Reload takes over instead of a blank
+  screen; when the same break comes back three times after reloading, the card says to restart Shepherdr instead.
 
 A hello world, `~/.shepherdr/plugins/hello/client.tsx`:
 

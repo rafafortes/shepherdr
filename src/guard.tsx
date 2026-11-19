@@ -98,3 +98,101 @@ export function setupGuarded<R extends object>(name: string, registry: R, setup:
     }
   }
 }
+
+/* ---------- a break outside any plugin: a way out instead of a blank screen ---------- */
+
+const CRASH_KEY = 'shepherdr.screen-crash'
+/** how many tries of the same break, each right after a Reload, before the card says to restart instead */
+export const CRASH_RELOADS = 3
+
+export interface ScreenCrash {
+  message: string
+  count: number
+  /** the card's Reload was pressed: the next break of the same kind is another try, not a new break */
+  reloaded: boolean
+  at: number
+}
+
+/** The count on this screen: a repeat of the same break right after a Reload is another try. React can call the
+ *  error lifecycle twice for one break, so a repeat without a Reload keeps the count instead of starting over. */
+export function nextCrash(prev: ScreenCrash | null, message: string, now = Date.now()): ScreenCrash {
+  if (prev && prev.message === message) return { message, count: prev.reloaded ? prev.count + 1 : prev.count, reloaded: false, at: now }
+  return { message, count: 1, reloaded: false, at: now }
+}
+
+/** private windows can block storage: the card still works, without a count across reloads */
+function storage(): Storage | null {
+  try {
+    return sessionStorage
+  } catch {
+    return null // coverage-exempt: sessionStorage is blocked in a private window
+  }
+}
+
+function readCrash(s: Storage | null = storage()): ScreenCrash | null {
+  if (!s) return null // coverage-exempt: storage is blocked
+  try {
+    const raw = s.getItem(CRASH_KEY)
+    return raw ? (JSON.parse(raw) as ScreenCrash) : null
+  } catch {
+    return null // coverage-exempt: a value left by an older build can be unreadable
+  }
+}
+
+function keepCrash(c: ScreenCrash) {
+  const s = storage()
+  if (!s) return // coverage-exempt: storage is blocked
+  try {
+    s.setItem(CRASH_KEY, JSON.stringify(c))
+  } catch {
+    // coverage-exempt: storage can be full; the card still counts in memory
+  }
+}
+
+/** the Reload button remembers it was pressed, so the same break coming back is counted as another try */
+function reloadScreen() {
+  const c = readCrash()
+  if (c) keepCrash({ ...c, reloaded: true })
+  location.reload()
+}
+
+/** a small card with nothing of its own: it draws before the first snapshot and with no registry or plugin loaded */
+function Crashed({ crash }: { crash: ScreenCrash }) {
+  return (
+    <div data-screen-crash role="alert" className="grid h-full place-items-center bg-bg px-6 font-sans text-sm/5 text-fg antialiased phone:text-base/6">
+      <div className="flex max-w-md flex-col items-center gap-3 text-center">
+        <h1 className="text-base font-semibold">Something on the screen broke.</h1>
+        <p className="text-fg2">
+          {crash.count >= CRASH_RELOADS
+            ? `Reloading hasn't fixed this after ${crash.count} tries. Restart Shepherdr from herdr, or check for an update.`
+            : 'Reload to try again.'}
+        </p>
+        <button type="button" onClick={reloadScreen} className="press-dim inline-flex h-[34px] shrink-0 items-center rounded-full bg-fg px-3.5 font-medium text-bg coarse:h-11 phone:h-11">
+          Reload
+        </button>
+        <details className="w-full text-left text-[0.8125rem] text-fg3">
+          <summary className="cursor-pointer">Show the error</summary>
+          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono">{crash.message}</pre>
+        </details>
+      </div>
+    </div>
+  )
+}
+
+/** around <App />: a render break anywhere under it gets a way out, not a blank document */
+export class ScreenBoundary extends Component<{ children?: ReactNode }, { crash: ScreenCrash | null }> {
+  state = { crash: null as ScreenCrash | null }
+  static getDerivedStateFromError(e: unknown) {
+    const message = e instanceof Error ? e.message : String(e)
+    const crash = nextCrash(readCrash(), message)
+    keepCrash(crash)
+    return { crash }
+  }
+  componentDidCatch(e: unknown) {
+    console.error('the screen broke:', e)
+  }
+  render() {
+    const { crash } = this.state
+    return crash ? <Crashed crash={crash} /> : this.props.children
+  }
+}
