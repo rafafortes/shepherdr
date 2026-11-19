@@ -76,8 +76,13 @@ describe('the check itself', () => {
     // a tree's verdict is written only once the run passed whole, and taken away when it fails
     const call = lines.indexOf('  record 1')
     expect(call).toBeGreaterThan(-1)
-    expect(lines[call + 1]).toStartWith('  say "PASSED in')
     expect(lines).toContain('record 0')
+    // a --reuse run's last line is the one a merge commit carries: the log folder is said before it, never in it
+    const tail = lines.slice(call)
+    const logs = tail.indexOf('    say "· logs: $logs"')
+    const passed = tail.findIndex((l) => l.includes('say "PASSED in'))
+    expect(logs).toBeGreaterThan(0)
+    expect(logs).toBeLessThan(passed)
   })
 
   test('whose runner discovers the checks, one run at a time, last in line for the CPU', () => {

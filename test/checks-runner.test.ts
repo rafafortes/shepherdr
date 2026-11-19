@@ -162,6 +162,8 @@ describe('the verdict a tree already passed (--reuse)', () => {
     expect(first.code).toBe(0)
     expect(first.out).toContain('no full check has passed on this tree yet')
     expect(f.calls()).toEqual(['one'])
+    // the last line is what a merge commit carries: no path of this machine in it
+    expect(first.out.trimEnd().split('\n').at(-1)).toMatch(/^PASSED in \d+s$/)
     rmSync(join(f.home, 'calls.txt'))
     // another commit is another tree: the one that passed says nothing of it
     writeFileSync(join(f.dir, 'README.md'), 'fixture, changed\n')
@@ -232,6 +234,45 @@ describe('the verdict a tree already passed (--reuse)', () => {
     const after = f.run('--reuse')
     expect(after.code).toBe(1)
     expect(after.out).toContain('no full check has passed on this tree yet')
+  })
+
+  test('a run that waited behind another answers from the verdict it kept meanwhile, without running', async () => {
+    // the point of asking again after the lock: a gate queued behind another worktree's check does not pay a second run
+    if (!Bun.which('flock')) return // the runner then runs without the one-at-a-time lock, and there is nothing to wait for
+    const f = fixture(passing)
+    const lock = join(f.home, '.cache', 'shepherdr', 'check-local.lock')
+    mkdirSync(join(f.home, '.cache', 'shepherdr'), { recursive: true })
+    // holds the lock for a moment: long enough for the runner to reach it and say it waits, short enough not to slow the suite
+    const holder = Bun.spawn(['flock', lock, 'sleep', '2'])
+    await Bun.sleep(300)
+    const runner = Bun.spawn(['bash', join(f.dir, 'scripts', 'check-local.sh'), '--reuse'], {
+      cwd: f.dir,
+      env: { ...process.env, HOME: f.home, SHEPHERDR_CHECK_WAIT: '20', SHEPHERDR_CHECK_STEP_TIMEOUT: '30' },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const decoder = new TextDecoder()
+    const reader = runner.stdout.getReader()
+    let out = ''
+    // it said it waits for the other check, so it is past its first look at the verdicts
+    while (!out.includes('waiting for it, up to')) {
+      const { value, done } = await reader.read()
+      if (done) break
+      out += decoder.decode(value)
+    }
+    expect(out).toContain('waiting for it, up to')
+    // the check it waits behind keeps this very tree's verdict, then goes away
+    mkdirSync(f.kept, { recursive: true })
+    writeFileSync(join(f.kept, f.tree()), `tree ${f.tree()}\nat ${Math.floor(Date.now() / 1000)}\ntook 12\n`)
+    expect(await holder.exited).toBe(0)
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      out += decoder.decode(value)
+    }
+    expect(await runner.exited).toBe(0)
+    expect(out).toContain('this exact tree passed the full check already')
+    expect(f.calls()).toEqual([])
   })
 
   test('a tree the branch moved away from while the check ran is never kept', () => {

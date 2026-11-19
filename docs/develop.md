@@ -41,16 +41,19 @@ registries still match what it wrote keep a shared cache safe; neither weakens w
 already passed the full check in any worktree of the repository it prints when and how long, runs nothing, and exits 0;
 with no such verdict it runs the full check, saying in its first line why. A full PASSED verdict of a clean worktree is
 kept by the tree it ran on (`git rev-parse HEAD^{tree}`) in `~/.cache/shepherdr/check-local/verdicts/<tree>`, one place
-every worktree shares, so no tree is ever checked twice, and a later full run that fails on the same tree takes it away
-again. A run with a part skipped, a quick run and an uncommitted worktree are never kept: they did not check that tree
-whole, and asked as `--reuse` the runner refuses them (exit 1, naming what did not run) rather than pass the gate on
+every worktree shares, so a tree whose verdict stands is not checked again; a later full run that fails on it takes that
+verdict away. A run with a part skipped, a quick run and an uncommitted worktree are never kept: they did not check that
+tree whole, and asked as `--reuse` the runner refuses them (exit 1, naming what did not run) rather than pass the gate on
 them; `--quick` and `--reuse` together are refused. A branch rebased onto a base that moved has a tree no verdict names,
 so it is checked in full before it lands: two branches that each passed on the old base cannot break the base together.
 The gate runs its command in the task's worktree after the rebase, at the tip that lands, so the tree it asks for is the
-one that lands. A verdict is only as good as the run behind it: the tree is not a run's only input (the host's
-browsers, the coverage baseline and `node_modules` decide one too), and since the gate runs the branch's own script, an
-agent that edits it or writes a verdict file can still fake a pass — the flag closes the quiet skip, not tampering. A
-hit leaves the worktree's own `verdict.txt` as the last run left it.
+one that lands, and a `--reuse` run's last line (the one a merge commit carries) names no path of this machine. Commit
+the work before running the check: a run on a worktree with uncommitted changes is kept for no tree, and the commit the
+merge makes would leave the gate a tree it has to check in full. A verdict is only as good as the run behind it: the
+tree is not a run's only input (the base's history, the host's browsers, the coverage baseline and `node_modules` decide
+one too), and since the gate runs the branch's own script, an agent that edits it or writes a verdict file can still
+fake a pass — the flag closes the quiet skip, not tampering. A hit leaves the worktree's own `verdict.txt` as the last
+run left it.
 
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe; each step is
 one executable file in `scripts/checks/`, named `<number>-<name>` with the numbers spaced by ten (`10-dependencies`,

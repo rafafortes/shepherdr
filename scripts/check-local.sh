@@ -390,7 +390,14 @@ fi
 echo
 if [ ${#failed[@]} -eq 0 ] && [ ${#notes[@]} -eq 0 ]; then
   record 1
-  say "PASSED in $(dur $((SECONDS - started)))$verdict_kind · logs: $logs"
+  # a --reuse run is the merge gate's, and what it says last goes into the merge commit (docs/tasks.md): the log folder
+  # of this machine is said first, so no path of it lands in the repository's history
+  if [ "$reuse" = 1 ]; then
+    say "· logs: $logs"
+    say "PASSED in $(dur $((SECONDS - started)))$verdict_kind"
+  else
+    say "PASSED in $(dur $((SECONDS - started)))$verdict_kind · logs: $logs"
+  fi
   exit 0
 fi
 if [ ${#failed[@]} -eq 0 ]; then
