@@ -13,6 +13,7 @@ import { useDialogFocus } from '@client/focus.ts'
 import { follow as followFinger, mayPanDown } from '@client/gestures.ts'
 import { ClockIcon, CopyIcon, ic, MenuItem, PlusIcon, ReplyIcon, SearchIcon, SelectIcon } from '@client/ui.tsx'
 import type { Message } from '@shared/types.ts'
+import { copyText } from '@plugins/chat/markdown.tsx'
 import { canReply, startReply } from '@plugins/chat/reply.ts'
 import { frequent, loadEmoji, quickRow, remember, search, setTone, tone, TONES, withTone, type Emoji, type Group } from './emoji.ts'
 
@@ -372,7 +373,7 @@ function Lifted({ msg, chat }: { msg: Message; chat: string }) {
                 icon={<CopyIcon className={ic} />}
                 onClick={() => {
                   // in the tap itself: Safari copies only then
-                  navigator.clipboard?.writeText(text).catch(() => {})
+                  copyText(text)
                   leave()
                 }}
               >
