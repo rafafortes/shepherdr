@@ -2,6 +2,7 @@
 // a cell's write is the setting action at its place (the same keys Settings writes), read back by the next look.
 import { afterAll, describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
+import { placeId } from '../server/live/places.ts'
 import { tmp } from './tmp.ts'
 
 process.env.SHEPHERDR_HOME = tmp('limits-source')
@@ -64,5 +65,87 @@ describe('the Limits action', () => {
     expect(await src.act({ type: 'setting', key: 'models.maxAtOnce', value: null, place: here })).toMatchObject({ ok: true })
     expect(((await src.act({ type: 'limits-view' })) as View).spaces.patterns).not.toContain('pi.spark')
     await src.act({ type: 'setting', key: 'machine.maxTasks', value: null, place: here })
+  })
+})
+
+describe('the view kept between asks (SHE-165)', () => {
+  /** the view as the page asks for it, and how many builds it took */
+  const look = async () => {
+    const before = src.limitsBuilds
+    const v = (await src.act({ type: 'limits-view' })) as View
+    return { v, builds: src.limitsBuilds - before }
+  }
+  const here = async () => ((await src.act({ type: 'limits-view' })) as View).machine.id
+
+  test('one build serves every screen that asks within its interval; a setting change, a held task or the interval drops it', async () => {
+    // this write drops whatever an earlier test left kept, so the count below starts from nothing
+    expect(await src.act({ type: 'setting', key: 'machine.maxTasks', value: '7', place: await here() })).toMatchObject({ ok: true })
+    const first = await look()
+    expect(first.builds).toBe(1)
+    // a second screen asking at once is answered with that same build, not another
+    const second = await look()
+    expect(second.builds).toBe(0)
+    expect(second.v).toBe(first.v)
+    // a setting written here drops it at once
+    expect(await src.act({ type: 'setting', key: 'machine.maxTasks', value: '8', place: await here() })).toMatchObject({ ok: true })
+    expect((await look()).builds).toBe(1)
+    // so does the held line: a task held, and the same one let go
+    const held = { id: 'LIM-KEEP', n: 9, project: 'nowhere', title: 'Held', desc: '', by: 'test', created: Date.now(), updated: Date.now(), held: { why: 'slots', since: Date.now() } }
+    src.engine.tasks.push(held as never)
+    try {
+      const withHeld = await look()
+      expect(withHeld.builds).toBe(1)
+      expect(withHeld.v.waiting.held).toBe(1)
+    } finally {
+      src.engine.tasks.splice(src.engine.tasks.findIndex((t) => t.id === 'LIM-KEEP'), 1)
+    }
+    expect((await look()).builds).toBe(1)
+    // and nothing held it past its interval
+    await Bun.sleep(1_100)
+    expect((await look()).builds).toBe(1)
+    expect((await look()).builds).toBe(0)
+    await src.act({ type: 'setting', key: 'machine.maxTasks', value: null, place: await here() })
+  })
+
+  test('the build for 300 waiting tasks is timed, and a slow one is named by the stall watch', async () => {
+    // the walk's worst shape: a chain of 300 queued tasks, each after the one before, ending at a task at work
+    const now = Date.now()
+    const project = placeId.home()
+    const base = (id: string) => ({ id, n: 1, project, title: id, by: 't', created: now, updated: now })
+    src.engine.tasks.push({ ...base('LIM-WORK') } as never)
+    const statusOf = src.engine.statusOf.bind(src.engine)
+    src.engine.statusOf = ((t: never) => ((t as { id: string }).id === 'LIM-WORK' ? 'work' : statusOf(t))) as never
+    for (let i = 0; i < 300; i++) src.engine.tasks.push({ ...base(`LIM-W-${i}`), after: [i === 0 ? 'LIM-WORK' : `LIM-W-${i - 1}`] } as never)
+    try {
+      expect(src.engine.statusOf(src.engine.task('LIM-WORK')!)).toBe('work')
+      const ms: number[] = []
+      for (let i = 0; i < 3; i++) {
+        // a setting between the runs drops the kept view, so each is a build of its own
+        await src.act({ type: 'setting', key: 'machine.maxTasks', value: String(6 + i), place: await here() })
+        const t0 = performance.now()
+        const v = (await src.act({ type: 'limits-view' })) as View
+        ms.push(performance.now() - t0)
+        expect(v.waiting.queued.reduce((n, g) => n + g.tasks.length, 0)).toBe(300)
+      }
+      console.log(`SHE-165 synthetic engine: the view built for 300 waiting tasks in ${ms.map((n) => n.toFixed(1)).join(' / ')} ms`)
+      expect(Math.max(...ms)).toBeLessThan(2_000)
+      // a slow build is one of the passes the stall watch times, so a stall names it
+      const queueWaiters = src.engine.queueWaiters.bind(src.engine)
+      src.engine.queueWaiters = ((at?: number) => {
+        const end = Date.now() + 150
+        while (Date.now() < end);
+        return queueWaiters(at)
+      }) as never
+      src.stall.tick()
+      await src.act({ type: 'setting', key: 'machine.maxTasks', value: '5', place: await here() })
+      await src.act({ type: 'limits-view' })
+      src.engine.queueWaiters = queueWaiters
+      await Bun.sleep(1_300)
+      expect(src.stall.tick()?.ran.map((p) => p.label)).toContain('limits-view')
+    } finally {
+      src.engine.statusOf = statusOf
+      for (const id of ['LIM-WORK', ...Array.from({ length: 300 }, (_, i) => `LIM-W-${i}`)]) src.engine.tasks.splice(src.engine.tasks.findIndex((t) => t.id === id), 1)
+      await src.act({ type: 'setting', key: 'machine.maxTasks', value: null, place: await here() })
+    }
   })
 })

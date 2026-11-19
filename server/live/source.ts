@@ -250,6 +250,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** the event loop, watched: what held it when it stalled (stall.ts) */
   readonly stall = new StallWatch()
 
+  /** Settings → Limits' view, kept for the next asker (limitsNow): the whole queue and every table are one build, and
+   *  several screens may have the page open. Nothing of it outlives LIMITS_KEPT of the moment it was built, and a
+   *  setting change or a held line that changed drops it at once. */
+  private limitsKept?: { at: number; held: string; view: LimitsView }
+  /** how many times the view was built since this started, never counting the asks a kept one answers */
+  limitsBuilds = 0
+
   /** processes of finished tasks still running, found hourly (RES-03); named in doctor with a ready kill line */
   orphansFound: Finding[] = []
   private orphanSignature = ''
@@ -673,9 +680,25 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** Settings → Limits (limits-view.ts): every limit of this machine at its levels with the numbers now, the spaces' and the
-   *  providers' caps, and what waits and why. Read only: a cell's write is the setting action at its place */
+   *  providers' caps, and what waits and why. Read only: a cell's write is the setting action at its place.
+   *
+   *  One build serves every screen that has the page open for LIMITS_KEPT ms: the view is the whole queue (a walk over
+   *  every task, three status reads each: SHE-162's 41 to 99 ms for 300 waiting tasks) and a busy hour pushes several
+   *  snapshots a second. A setting change, or a held line that changed, drops it at once (settingChanged, and the stamp
+   *  below); the build is a pass of the stall watch (`limits-view`), so a slow one is named. */
   private limitsNow(): LimitsView {
     const now = Date.now()
+    const held = this.engine.heldStamp()
+    const kept = this.limitsKept
+    if (kept && kept.held === held && now - kept.at < LIMITS_KEPT) return kept.view
+    const view = this.stall.run('limits-view', () => this.buildLimits(now))
+    this.limitsBuilds++
+    this.limitsKept = { at: now, held, view }
+    return view
+  }
+
+  /** the view built from this machine now: the one read limitsNow serves until it is dropped */
+  private buildLimits(now: number): LimitsView {
     const spaces = this.matrixSpaces()
     const matrix = modelsMatrix(this.settings, { host: HOST, name: NAME }, spaces)
     const summary = this.summaryNow()
@@ -1785,6 +1808,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** what a changed default sets going: Done tasks archived on time, held ones started where there is room */
   private settingChanged(key: string) {
+    // what it reads is out of date: the Limits view is dropped, not kept until its interval is over
+    this.limitsKept = undefined
     if (key === 'tasks.archiveAfter') this.engine.autoArchive()
     // a limit that changed may free a held task (or hold one): the held ones are looked at again
     if (key.startsWith('machine.') || key === 'models.maxAtOnce' || key === 'space.maxTasks') this.engine.release()
@@ -3725,7 +3750,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         })
         if (!moves.length || moves.length !== a.moves.length) return { ok: false, error: 'A move names a space of this machine, and never the home space.' }
         const r = this.settings.setMany(moves)
-        if (r.ok) this.emit('snapshot')
+        // a space's place is a setting the Limits view shows: dropped, as the setting action's own writes are
+        if (r.ok) {
+          this.limitsKept = undefined
+          this.emit('snapshot')
+        }
         return r
       }
       case 'models-matrix':
@@ -5550,6 +5579,10 @@ export const FIRST_LOOK = 60_000
 const OVERVIEW_MAX = 240
 /** how often what waits on you is looked at for your alert command (tellWaits): a wait is told at most this long late */
 const WAIT_LOOK = 5_000
+/** how long Settings → Limits' view is kept for the next asker, ms: one build serves every screen with the page open,
+ *  and the page asks no more often than this while something changes (src/LimitsPage.tsx). Dropped at once when a
+ *  setting changes or a held task comes or goes (source.ts limitsNow) */
+const LIMITS_KEPT = 1_000
 /** a question the advisor will take by itself waits this much longer than advisor.after before an alert goes out anyway,
  *  so an advisor that never finishes (a run that hangs, no model that can run) cannot swallow the alert */
 const ADVISOR_MARGIN = 60_000

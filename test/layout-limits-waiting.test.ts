@@ -164,3 +164,63 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
     }
   })
 })
+
+describe.skipIf(!browser)('Settings → Limits: the Waiting now sections and their buttons', () => {
+  test('each section is a level 3 heading around its button, which says whether it is open and what it controls', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      const waiting = page.getByRole('region', { name: 'Waiting now' })
+      // the heading holds the button (a button holding the heading would lose it to a screen reader)
+      const heading = waiting.getByRole('heading', { level: 3, name: 'Held for room', exact: true })
+      await heading.waitFor()
+      const button = heading.getByRole('button', { name: 'Held for room', exact: true })
+      expect(await button.getAttribute('aria-expanded')).toBe('true')
+      const controlled = (await button.getAttribute('aria-controls'))!
+      expect(controlled).toBeTruthy()
+      expect(await page.locator(`#${controlled}`).count()).toBe(1)
+      expect(await page.locator(`#${controlled} li[data-group]`).count()).toBeGreaterThan(0)
+      // closed: it says so, the region it names is still there and empty, and the heading is still a heading
+      await button.click()
+      expect(await button.getAttribute('aria-expanded')).toBe('false')
+      expect(await page.locator(`#${controlled} li[data-group]`).count()).toBe(0)
+      await waiting.getByRole('heading', { level: 3, name: 'Held for room', exact: true }).waitFor()
+      await button.click()
+      expect(await button.getAttribute('aria-expanded')).toBe('true')
+      // every section of it is one, in order (a heading's name is what a screen reader reads: the sign is not in it)
+      expect(await waiting.getByRole('heading', { level: 3 }).count()).toBe(5)
+      for (const name of ['Held for room', 'Queued after other tasks', 'Scheduled', 'Waiting for a go', 'Merges waiting']) await waiting.getByRole('heading', { level: 3, name, exact: true }).waitFor()
+    } finally {
+      await page.close()
+    }
+  })
+
+  test('the tasks that need you are buttons that open them, one after another and never run together', async () => {
+    world.queueOverride = {
+      queued: [
+        { id: 'HP-205', space: 'herdr-projects', spaceName: 'herdr-projects', words: 'After HP-202', need: { id: 'HP-201', words: 'waits for your reply' } },
+        { id: 'HP-206', space: 'herdr-projects', spaceName: 'herdr-projects', words: 'After HP-205', need: { id: 'HP-202', words: 'waits for your reply' } },
+      ],
+      scheduled: [],
+      todo: [],
+      merges: [],
+    }
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      const section = page.getByRole('region', { name: 'Queued after other tasks' })
+      await section.getByRole('button', { name: 'Queued after other tasks', exact: true }).click()
+      const line = section.getByText(/tasks wait behind 2 tasks that need you:/).first()
+      await line.waitFor()
+      // the count stays words, and the ids are the rows' own buttons, kept apart as a sentence keeps them
+      expect((await line.textContent())?.trim()).toBe('2 tasks wait behind 2 tasks that need you: HP-201, HP-202')
+      const ids = line.getByRole('button', { name: /^[A-Z]+-\d+$/ })
+      expect(await ids.count()).toBe(2)
+      await ids.nth(1).click()
+      await page.waitForURL(/[?&]task=HP-202(&|$)/, { timeout: 10_000 })
+    } finally {
+      world.queueOverride = undefined
+      await page.close()
+    }
+  })
+})

@@ -2,7 +2,7 @@
 // tables fitting the Settings width, in a real browser (layout.ts).
 import { afterAll, describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
-import { at, layout, pickLimit, rowLabels, settled } from './layout.ts'
+import { at, layout, pickLimit, rowLabels, settled, until } from './layout.ts'
 import { piOffers } from './pi-offers.ts'
 
 // pi lists nvidia and amd-tokenlab, which nothing in the demo uses: they are the providers under Other providers
@@ -246,6 +246,67 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
         expect(fit.width).toBeLessThanOrEqual(1)
       }
     } finally {
+      await page.close()
+    }
+  })
+})
+
+/** the page's own reads of the view, held at its fetch until the test lets them through (an answer the test decides when
+ *  to land: SHE-165's move stamp is about which read came back when) */
+async function holdViews(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as { viewGate: boolean; held: (() => void)[] }
+    w.viewGate = false
+    w.held = []
+    const send = window.fetch
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const back = send(input, init)
+      if (!w.viewGate || !(typeof init?.body === 'string' && init.body.includes('"limits-view"'))) return back
+      return new Promise((res, rej) => w.held.push(() => back.then(res, rej)))
+    }) as typeof window.fetch
+  })
+}
+const gateViews = (page: Page, on: boolean) => page.evaluate((v) => void ((window as unknown as { viewGate: boolean }).viewGate = v), on)
+const heldViews = (page: Page) => page.evaluate(() => (window as unknown as { held: (() => void)[] }).held.length)
+const letViewsGo = (page: Page) =>
+  page.evaluate(() => {
+    const w = window as unknown as { held: (() => void)[] }
+    const list = w.held
+    w.held = []
+    for (const go of list) go()
+  })
+
+describe.skipIf(!browser)('Settings → Limits: a move waits for an answer the write could not have overtaken (SHE-165)', () => {
+  test('the arrows come back with the rows the move made, not with an answer sent before it', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await holdViews(page)
+      await openLimits(page)
+      await set('space.priority', '1', 'p:vm-str:gtm')
+      await set('space.priority', '2', 'p:vm-str:herdr-projects')
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
+      // a change asks the page for a read, and the page's fetch is held: the answer is out when the move is written
+      await gateViews(page, true)
+      world.emit('snapshot')
+      await until(() => heldViews(page), (n) => n >= 1, 10_000)
+      await table.getByRole('button', { name: 'Move herdr-projects up' }).click()
+      await letViewsGo(page)
+      // that answer was sent before the write, so the page asks again, and the arrows stay off until that one lands
+      await until(() => heldViews(page), (n) => n >= 1, 10_000)
+      expect(await table.getByRole('button', { name: 'Move herdr-projects down' }).isDisabled()).toBe(true)
+      // the one the write asked for: the arrows come back with the rows the move made, never with the ones before it
+      await letViewsGo(page)
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 1/ }).waitFor({ timeout: 5_000 })
+      await table.getByRole('button', { name: /^gtm · Priority: 2/ }).waitFor()
+      expect(await table.getByRole('button', { name: 'Move gtm up' }).isEnabled()).toBe(true)
+      expect(await table.getByRole('button', { name: 'Move herdr-projects down' }).isEnabled()).toBe(true)
+    } finally {
+      await gateViews(page, false)
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
       await page.close()
     }
   })

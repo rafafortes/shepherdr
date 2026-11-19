@@ -2,7 +2,7 @@
 // three choices, a column's sub-limit, Running now and Other providers, in a real browser (layout.ts).
 import { afterAll, describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
-import { at, layout, pickLimit, rowLabels, settled } from './layout.ts'
+import { at, layout, pickLimit, rowLabels, settled, until } from './layout.ts'
 import { piOffers } from './pi-offers.ts'
 
 // pi lists nvidia and amd-tokenlab, which nothing in the demo uses: they are the providers under Other providers
@@ -249,6 +249,105 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await pop.waitFor({ state: 'detached' })
       // capped now: it is one of the providers in use, with its cap
       await page.getByRole('table', { name: 'Providers and models' }).getByRole('button', { name: /^NVIDIA API: 0 of 2 at once/ }).waitFor()
+    } finally {
+      await page.close()
+    }
+  })
+})
+
+/** the page counting its own reads of the view: the action's name in what it sends (SHE-165) */
+async function countReads(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as { limitsReads: number }
+    w.limitsReads = 0
+    const send = window.fetch
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      if (typeof init?.body === 'string' && init.body.includes('"limits-view"')) w.limitsReads++
+      return send(input, init)
+    }) as typeof window.fetch
+  })
+}
+const readsOf = (page: Page) => page.evaluate(() => (window as unknown as { limitsReads: number }).limitsReads)
+const clearReads = (page: Page) => page.evaluate(() => void ((window as unknown as { limitsReads: number }).limitsReads = 0))
+/** the tab hidden, or shown again, as the browser tells the page */
+const tab = (page: Page, state: 'hidden' | 'visible') =>
+  page.evaluate((to) => {
+    Object.defineProperty(document, 'visibilityState', { value: to, configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }, state)
+
+describe.skipIf(!browser)('Settings → Limits asks for its view less often (SHE-165)', () => {
+  test('20 snapshots in 2 seconds make it read at most twice: one read trails them, never one for each', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await countReads(page)
+      await openLimits(page)
+      expect(await readsOf(page)).toBeGreaterThanOrEqual(1)
+      await clearReads(page)
+      for (let i = 0; i < 20; i++) {
+        world.emit('snapshot')
+        await Bun.sleep(100)
+      }
+      // the whole view is a build of the server's own thread: a burst of changes is one read, not twenty
+      const sent = await readsOf(page)
+      expect(sent).toBeGreaterThanOrEqual(1)
+      expect(sent).toBeLessThanOrEqual(2)
+      await page.getByRole('heading', { name: 'Waiting now', exact: true }).waitFor()
+    } finally {
+      await page.close()
+    }
+  })
+
+  test('a write made on the page shows at once, inside the interval', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await countReads(page)
+      await openLimits(page)
+      // the read the page just made would answer a change for LIMITS_EVERY: a write made here asks for its own
+      await clearReads(page)
+      const cell = page.getByRole('button', { name: /^vm-str · Max tasks working at once: 10/ })
+      await cell.scrollIntoViewIfNeeded()
+      await cell.click()
+      const pop = page.getByRole('dialog', { name: 'Edit this setting' })
+      await pickLimit(pop, '7')
+      await pop.waitFor({ state: 'detached' })
+      // shown well inside the interval the next snapshot's read would have waited (the editor's own save brings it in)
+      await page.getByRole('button', { name: /^vm-str · Max tasks working at once: 7, / }).waitFor({ timeout: 1_500 })
+      expect(await readsOf(page)).toBeGreaterThanOrEqual(1)
+      expect(await readsOf(page)).toBeLessThanOrEqual(2)
+      const back = page.getByRole('button', { name: /^vm-str · Max tasks working at once: 7, / })
+      await back.click()
+      await pop.getByRole('button', { name: 'Reset to inherited', exact: true }).click()
+      await pop.waitFor({ state: 'detached' })
+    } finally {
+      await page.close()
+    }
+  })
+
+  test('a hidden tab reads nothing and reads once when it is shown again', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await countReads(page)
+      await openLimits(page)
+      await tab(page, 'hidden')
+      await clearReads(page)
+      for (let i = 0; i < 10; i++) {
+        world.emit('snapshot')
+        await Bun.sleep(60)
+      }
+      // nothing asks while it is out of sight, however many changes come
+      expect(await readsOf(page)).toBe(0)
+      await tab(page, 'visible')
+      await until(() => readsOf(page), (n) => n >= 1)
+      expect(await readsOf(page)).toBe(1)
+      // shown again with nothing changed in between: it catches up once, too
+      await tab(page, 'hidden')
+      await clearReads(page)
+      await Bun.sleep(200)
+      expect(await readsOf(page)).toBe(0)
+      await tab(page, 'visible')
+      await until(() => readsOf(page), (n) => n >= 1)
+      expect(await readsOf(page)).toBe(1)
     } finally {
       await page.close()
     }

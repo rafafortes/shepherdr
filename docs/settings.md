@@ -558,7 +558,9 @@ at 08:00 with the day one, and the bar says which of them is next.
 Settings → How Shepherdr runs → **Limits** (after Models) puts every limit of this machine in one place: the machine's own,
 each space's, and each provider's and model's, with the live numbers beside them and what waits now. It writes the same
 settings Settings writes, at the same level: nothing new is stored, and a cell's value is the one Settings shows for its
-row. The profiles bar sits above it (a profile saved from here includes the limits by default).
+row. The profiles bar sits above it (a profile saved from here includes the limits by default). It reads the view when it
+opens, at once after a write made here, and otherwise at most once every two seconds while something changes; a hidden tab
+reads nothing, and reads once when it is shown again.
 
 - **Every limit has three choices**: No cap, Blocked (0) or Limit: N (see [Most agents at once](#models)); a task count's 0 reads
   `0 · starts none`, and a blocked model's cell `blocked · 0 allowed`, in the warning colour.
@@ -597,8 +599,8 @@ row. The profiles bar sits above it (a profile saved from here includes the limi
   taken from the engine, never sorted again on the screen; the number is the task's place in the whole held line, so a
   group may read 2, 5, 9. **Queued after other tasks** has a group per space in queue order,
   each task with the engine's wait line (`After SHE-58, SHE-57`); a task whose chain ends at one you can act on names it
-  (`After SHE-58, which waits for your reply`) and a line counts them all (`12 tasks wait behind 1 task that needs you:
-  SHE-58`). **Scheduled** shows when each starts, soonest first; **Waiting for a go** shows To do tasks with since when;
+  (`After SHE-58, which waits for your reply`) and a line counts them all, each id a button that opens it (`12 tasks wait
+  behind 1 task that needs you: SHE-58`). **Scheduled** shows when each starts, soonest first; **Waiting for a go** shows To do tasks with since when;
   **Merges waiting** shows what each merge is behind. A group shows its count and its first ten rows with **Show all N**; a
   phone draws one card per group. Then the questions waiting for the advisor and the review rounds waiting for a reviewer.
   A task's id opens it; nothing here starts, stops or reorders a task.
