@@ -5,6 +5,9 @@
 # GitHub Actions is off on rafafortes/shepherdr (SHE-21), so this is the check every change goes through:
 #
 #   bun run check:local        # a task runs it before `shepherdr ready`; the coordinator before a release
+#   bun run check:local --quick  # opt-in: incremental types + changed tests + build, no coverage; marked QUICK in a
+#                                # verdict of its own, never a baseline or a full verdict (the full gate still runs at
+#                                # the merge, weekly and before a release)
 #
 # It runs at the lowest priority (nice 19, idle disk), one run at a time across every worktree of the repo (a lock
 # file under $XDG_RUNTIME_DIR, or ~/.cache where that isn't set: never in the repo, never in ~/.shepherdr), and the
@@ -36,10 +39,20 @@ set -uo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 branch=$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)
 [ -n "$branch" ] && [ "$branch" != HEAD ] || branch=$(git -C "$root" rev-parse --short HEAD)
+# --quick (bun run check:local --quick): the pre-ready run, incremental types + changed tests + build. The full gate
+# still runs at the merge, weekly and before a release; a quick verdict is never a baseline and never answers where a
+# full verdict is asked for (QG-10), so it goes in a file of its own and says what it did not run on its first line.
+quick=0
+for arg in "$@"; do [ "$arg" = --quick ] && quick=1; done
 # a log folder of this worktree's own: several worktrees' checks never overwrite each other's
 logs="$HOME/.cache/shepherdr/check-local/$(basename "$root")"
 mkdir -p "$logs"
 V="$logs/verdict.txt"
+[ "$quick" = 1 ] && V="$logs/verdict-quick.txt"
+vname=$(basename "$V")
+# every verdict line, not just the header, says a quick run is not a full gate verdict
+verdict_kind=''
+[ "$quick" = 1 ] && verdict_kind=' (quick run; not a full gate verdict)'
 # a run gone by must not answer for this one, while this one waits for the lock
 printf 'check:local is running: no verdict yet\n' >"$V"
 # one lock for every session (never in the repo, never in ~/.shepherdr): a shell without XDG_RUNTIME_DIR takes it too
@@ -114,12 +127,22 @@ base=${base#origin/}
 map_flag=''
 record_flag=''
 [ "$branch" = "$base" ] && { map_flag=1; record_flag=1; }
+# a quick run picks tests from the map but never records one, and never records a coverage baseline
+[ "$quick" = 1 ] && { map_flag=''; record_flag=''; }
 cover="$logs/coverage"
 
 # discover the checks by sorted file name: a .ts file beside them is a check's own logic, not a check
 # (docs/develop.md). A check that landed without its executable bit is still discovered and fails loudly.
 checks_dir="$root/scripts/checks"
 mapfile -t check_files < <(find "$checks_dir" -maxdepth 1 -type f ! -name '.*' ! -name '*.ts' -printf '%f\n' 2>/dev/null | LC_ALL=C sort)
+if [ "$quick" = 1 ]; then
+  # the coverage ratchet needs the whole suite: a quick run leaves it to the full gate (and records no baseline)
+  kept=()
+  for file in "${check_files[@]}"; do
+    [ "${file#*-}" = coverage ] || kept+=("$file")
+  done
+  check_files=("${kept[@]}")
+fi
 total=${#check_files[@]}
 
 # the shared context every check gets by environment, never as positional arguments
@@ -128,6 +151,7 @@ export SHEPHERDR_CHECK_LOGS="$logs"
 export SHEPHERDR_CHECK_COVER="$cover"
 export SHEPHERDR_CHECK_MAP="$map_flag"
 export SHEPHERDR_CHECK_RECORD="$record_flag"
+export SHEPHERDR_CHECK_QUICK="$quick"
 
 declare -a failed=()
 declare -a notes=()
@@ -235,7 +259,11 @@ show_failure() { # the reasons a step failed
 
 dirty=''
 [ -n "$(git -C "$root" status --porcelain 2>/dev/null)" ] && dirty=' and what is not committed'
-say "check:local · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty · $jobs test workers · $priority"
+if [ "$quick" = 1 ]; then
+  say "check:local QUICK · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty · NOT run: the full suite, coverage, screen map and baseline · the full gate runs at the merge, weekly and before a release"
+else
+  say "check:local · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty · $jobs test workers · $priority"
+fi
 
 # the browsers the tests open, named before the run instead of skipping quietly inside it. The first check installs the
 # dependencies playwright-core needs, so the probe runs once right after it; a fake browser is an empty test stand-in
@@ -283,11 +311,11 @@ fi
 
 echo
 if [ ${#failed[@]} -eq 0 ] && [ ${#notes[@]} -eq 0 ]; then
-  say "PASSED in $(dur $((SECONDS - started))) · logs: $logs"
+  say "PASSED in $(dur $((SECONDS - started)))$verdict_kind · logs: $logs"
   exit 0
 fi
 if [ ${#failed[@]} -eq 0 ]; then
-  say "PASSED in $(dur $((SECONDS - started))), with parts of it not run:"
+  say "PASSED in $(dur $((SECONDS - started)))$verdict_kind, with parts of it not run:"
   for n in "${notes[@]}"; do say "  ! $n"; done
   say "· logs: $logs"
   exit 0
@@ -298,6 +326,6 @@ if [ ${#notes[@]} -gt 0 ]; then
   say ""
 fi
 for name in "${failed[@]}"; do say "$(show_failure "$name")"; done
-say "FAILED in $(dur $((SECONDS - started))): ${failed[*]}"
-say "Full logs: $logs (verdict.txt)"
+say "FAILED in $(dur $((SECONDS - started)))$verdict_kind: ${failed[*]}"
+say "Full logs: $logs ($vname)"
 exit 1

@@ -4,10 +4,11 @@
 bun install
 bun run demo          # the server with fictional data (the prototype's world), on :7787
 bun run dev           # the screen with hot reload, on :5173, talking to the server above
-bun run typecheck     # types, in seconds: what to run while you work
+bun run typecheck     # types, in seconds warm (tsc's incremental cache in node_modules/.cache): what to run while you work
 bun run test changed  # the tests that reach what you changed from the default branch
 bun run test          # every test, in parallel, a quarter of the cores as the check does (but no lock)
 bun run check:local   # the whole check: dependencies, secrets, scripts, docs, version, types, language, every test with the browser ones, the coverage ratchet, the build (about 2 minutes)
+bun run check:local --quick  # opt-in: incremental types + changed tests + build, no coverage (see below)
 ```
 
 The whole check runs on this machine: GitHub Actions is off on this repo (2026-11-06), so `.github/workflows/check.yml`
@@ -22,6 +23,16 @@ verdict waits in `~/.cache/shepherdr/check-local/<worktree>/verdict.txt` (with e
 On a machine where herdr runs as a systemd user service, give it (and the server and agents it holds) the CPU first:
 `systemctl --user set-property herdr.service CPUWeight=1000`.
 
+`bun run check:local --quick` is the opt-in pre-ready run: the same incremental types and build, but `30-tests` runs
+`bun run test changed --force` instead of the whole forceful suite, and `40-coverage` does not run at all (so no screen map or
+coverage baseline is recorded). Its verdict says `QUICK` and what it did not run on its first line, in
+`verdict-quick.txt`, so it can never be taken for a full verdict where one is asked for; a quick run that fails types
+or the build still fails the gate. The default stays full: the whole gate still runs at the merge, weekly on
+`herdr-tui`, and before every release. `scripts/build-plugins.ts` hashes its inputs into `node_modules/.cache` so the
+typecheck, tests and build steps share one build per run instead of three, and `tsc`'s `--incremental` cache lives
+there too. A release symlinks its `node_modules` to a shared deps folder, where the hash and the check that the
+registries still match what it wrote keep a shared cache safe; neither weakens what any step checks.
+
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe; each step is
 one executable file in `scripts/checks/`, named `<number>-<name>` with the numbers spaced by ten (`10-dependencies`,
 `15-secrets`, `17-scripts`, `18-docs`, `19-version`, `20-types`, `21-language`, `30-tests`, `40-coverage`, `50-build`).
@@ -33,8 +44,8 @@ name. A check file:
 - gets its shared context in `SHEPHERDR_CHECK_*` environment variables, never positional arguments:
   `SHEPHERDR_CHECK_ROOT`, `SHEPHERDR_CHECK_LOGS`, `SHEPHERDR_CHECK_COVER`, `SHEPHERDR_CHECK_MAP` and
   `SHEPHERDR_CHECK_RECORD` (the last two are `1` only on the default branch, for the screen map and the coverage
-  baseline), plus its own `SHEPHERDR_CHECK_NAME`, `SHEPHERDR_CHECK_LOG`, `SHEPHERDR_CHECK_NOTE` and
-  `SHEPHERDR_CHECK_SKIP`;
+  baseline, and both empty in a `--quick` run), `SHEPHERDR_CHECK_QUICK` (`1` in a quick run), plus its own
+  `SHEPHERDR_CHECK_NAME`, `SHEPHERDR_CHECK_LOG`, `SHEPHERDR_CHECK_NOTE` and `SHEPHERDR_CHECK_SKIP`;
 - exits 0 on pass and non-zero on failure (the runner maps 124/137 to timed out or killed, and stops at the first
   failure, so a later check never reads a half-finished world);
 - writes its note — the human line appended to its result, e.g. how many tests ran — as one line to
