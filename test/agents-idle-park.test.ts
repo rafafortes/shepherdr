@@ -88,12 +88,13 @@ const aTask = (id: string, set: Partial<TaskRec> = {}) => {
   return t
 }
 
-/** one agent of each kind, idle far past the setting, each in its own task chat; codex's session is its log's name */
+/** one agent of each kind, idle far past the setting, each in its own task chat. Codex's record keeps no session id
+ *  (production never sets one): it resumes by the uuid in its last log's name */
 const fiveIdle = () =>
   KINDS.map((kind, i) => {
     const id = `IDLE-K${i}`
-    const sessionId = kind === 'codex' ? 'c0de0000-0000-4000-8000-000000000004' : `${kind}-sess`
-    return agent(`${id}/Agent`, kind, { sessionId, log: kind === 'codex' ? `${sessionId}.jsonl` : `${id}.jsonl` })
+    const sessionId = kind === 'codex' ? null : `${kind}-sess`
+    return agent(`${id}/Agent`, kind, { sessionId, log: kind === 'codex' ? 'c0de0000-0000-4000-8000-000000000004.jsonl' : `${id}.jsonl` })
   })
 
 describe('the idle sweep parks', () => {
@@ -129,7 +130,9 @@ describe('the idle sweep parks', () => {
       spyOn(a, 'refresh').mockResolvedValue(undefined as never)
       const key = `RES-${i}/Agent`
       const name = Agents.nameFor(key)
-      const sessionId = kind === 'codex' ? 'c0de0000-0000-4000-8000-000000000004' : `${kind}-sess`
+      // codex keeps no session id of its own: it resumes by the uuid in its last log's name, as production records it
+      const sessionId = kind === 'codex' ? null : `${kind}-sess`
+      const log = kind === 'codex' ? 'c0de0000-0000-4000-8000-000000000004.jsonl' : `${key.replace(/[^a-z0-9-]/gi, '')}.jsonl`
       a.records[key] = {
         key,
         name,
@@ -137,8 +140,8 @@ describe('the idle sweep parks', () => {
         cwd: home,
         workspace: 'res',
         started: 0,
-        logs: [logAgo(kind === 'codex' ? `${sessionId}.jsonl` : `${key.replace(/[^a-z0-9-]/gi, '')}.jsonl`, 5 * H)],
-        sessionId,
+        logs: [logAgo(log, 5 * H)],
+        ...(sessionId ? { sessionId } : {}),
         model: 'm1',
         effort: 'high',
       } as never
@@ -170,22 +173,23 @@ describe('the idle sweep parks', () => {
         const args = started[0]!
         if (kind === 'claude') {
           expect(args[0]).toBe('--resume')
-          expect(args[1]).toBe(sessionId)
+          expect(args[1]).toBe(`${kind}-sess`)
           expect(args[args.indexOf('--model') + 1]).toBe('m1')
           expect(args[args.indexOf('--effort') + 1]).toBe('high')
         } else if (kind === 'pi') {
-          expect(args[args.indexOf('--session-id') + 1]).toBe(sessionId)
+          expect(args[args.indexOf('--session-id') + 1]).toBe(`${kind}-sess`)
           expect(args[args.indexOf('--model') + 1]).toBe('m1')
           expect(args[args.indexOf('--thinking') + 1]).toBe('high')
         } else if (kind === 'codex') {
           expect(args[0]).toBe('resume')
-          expect(args[1]).toBe(sessionId)
+          // by the uuid in its last log's name, its record keeping no session id
+          expect(args[1]).toBe('c0de0000-0000-4000-8000-000000000004')
           expect(args[args.indexOf('-m') + 1]).toBe('m1')
           expect(args).toContain('model_reasoning_effort="high"')
         } else if (kind === 'opencode') {
-          expect(args[args.indexOf('--session') + 1]).toBe(sessionId)
+          expect(args[args.indexOf('--session') + 1]).toBe(`${kind}-sess`)
         } else {
-          expect(args[args.indexOf('--conversation') + 1]).toBe(sessionId)
+          expect(args[args.indexOf('--conversation') + 1]).toBe(`${kind}-sess`)
           expect(args[args.indexOf('--model') + 1]).toBe('m1')
         }
       } finally {
@@ -241,7 +245,7 @@ describe('the idle sweep parks', () => {
     const noSessionPi = agent('IDLE-N/Agent', 'pi', { sessionId: null })
     const noSessionOpencode = agent('IDLE-O/Agent', 'opencode', { sessionId: null, log: 'IDLE-O.jsonl' })
     const noSessionAgy = agent('IDLE-Y/Agent', 'agy', { sessionId: null, log: 'IDLE-Y.jsonl' })
-    const codexNoUuid = agent('IDLE-C/Agent', 'codex', { sessionId: 'not-a-uuid', log: 'plain-name.jsonl' })
+    const codexNoUuid = agent('IDLE-C/Agent', 'codex', { sessionId: null, log: 'plain-name.jsonl' })
     const freshStart = agent('IDLE-S/Agent', 'codex', { log: 'c0de0000-0000-4000-8000-000000000004.jsonl' })
     ;(freshStart as { fresh?: boolean }).fresh = true
     expect(await src.parkIdleAgents()).toEqual([])

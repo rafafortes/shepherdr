@@ -495,7 +495,7 @@ export const CATALOG: Section[] = [
     levels: ['all', 'machine'],
     about: "An agent idle this long has its pane and CLI closed, so it stops using memory: its chat keeps its session, and a message there starts it again on the same session. Off: agents run until their task ends or you restart them.",
     rows: [
-      { label: 'Park idle agents after', key: 'agents.idleClose', value: '120 min', num: { min: 1, max: 1440, unit: 'min', off: true }, hint: "A task's agent idle this long is parked. Never one at work, on a menu, asking you something, with work it started still running, with a message waiting to go in, or while its task's review or merge holds it." },
+      { label: 'Park idle agents after', key: 'agents.idleClose', value: '120 min', num: { min: 1, max: 1440, unit: 'min', off: true }, hint: "A task's agent idle this long is parked. Never one at work, on a menu, asking you something, with background work of its own still counting, with a message waiting to go in, or while its task's review or merge holds it." },
       { label: 'Park idle coordinators after', key: 'agents.idleCloseCoordinators', value: 'off', num: { min: 1, max: 1440, unit: 'min', off: true }, hint: "A space's coordinator too, on the same rule. Off: a coordinator runs until you restart it, whatever it idles." },
     ],
   },

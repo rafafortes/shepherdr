@@ -1019,11 +1019,11 @@ export class Engine extends Emitter<Events> {
   subOf(t: TaskRec, status = this.statusOf(t), full = false): string {
     const key = this.key(t)
     // parked: its agent was closed by the idle sweep (SHE-72) — the row says so, not a wait that only its next
-    // message answers; a card it asked is still the thing to answer, so it keeps its own line, and so is why it
-    // went wrong or its provider gave up: those are the reasons to read first
+    // message answers. Anything with a reason of its own keeps it: a card it asked is still the thing to answer, and
+    // why it went wrong, that its provider gave up or it signed out, an agent's own plain question, are the reasons
+    // to read first
     const parked = this.agents.record(key)?.parked
-    const cut = this.retry?.(key)
-    if (parked && status === 'need' && !ended(t) && !t.trouble && !cut?.over && !this.asks(key) && !this.chats.startMenuUp(key))
+    if (parked && status === 'need' && !ended(t) && !t.trouble && !this.reasonOf(key))
       return `Parked ${ago(parked)} · a message starts it again`
     const s = (() => {
       // a few words, never the summary: that is in its chat's card

@@ -831,12 +831,14 @@ long it sits idle between messages. Settings → Idle agents (Everywhere or one 
 does not hold dozens of idle CLIs around the clock:
 
 - **Park idle agents after** (`agents.idleClose`, 120 min): a task's agent idle this long — herdr shows it
-  idle or done, with nothing it started in the background still running and no message waiting for it — has its pane
-  and CLI closed, and what it left running is reaped with them. Its chat keeps reading its session, the task row and
-  its chat say it is parked, and the next message to the chat starts it again on the same session, with the model and
-  effort it ran on. Never parked: one at work or blocked, one asking you something (a card or its CLI's own
-  question), one whose task is in a review round or on its way into main (checks, gate, merge — the machinery gives it
-  its next word), and one with no session to come back to.
+  idle or done, with none of the background work that keeps its task at work still counting (the same read the task
+  row uses) and no message waiting for it — has its pane and CLI closed, and whatever still runs under the pane is
+  reaped with them. Its chat keeps reading its session, the task row and its chat say it is parked, and the next
+  message to the chat starts it again on the same session, with the model and effort it ran on. Never parked: one at
+  work or blocked, one asking you something (a card or its CLI's own question), one whose task is in a review round or
+  on its way into main (checks, gate, merge — the machinery gives it its next word), and one with no session to come
+  back to (claude and pi by their session id, opencode and agy by their mirror's name, codex by the uuid in its last
+  log's name).
 - **Park idle coordinators after** (`agents.idleCloseCoordinators`, off): a space's coordinator too, on the same rule.
   Off until you say otherwise: a coordinator parked starts again on its next message, but its space waits meanwhile.
 

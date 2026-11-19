@@ -515,9 +515,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (this.agents.typedSince(key, now - 10 * 60_000).length) continue
       if (this.chats.openCard(key) || this.chats.openQuestion(key) || this.chats.startMenuUp(key)) continue
       if (held && this.engine.machineryHoldsAgent(held)) continue
-      // a parked agent must come back on its session: each CLI resumes by its own id (agents.ts args), so a record
-      // with nothing to resume by is left as it is
-      if (!r.sessionId || (r.kind === 'codex' && !r.logs.some((f) => /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/.test(f)))) continue
+      // a parked agent must come back on its session: each CLI resumes by its own id (agents.ts args) — claude and pi
+      // by the session id their record keeps, opencode and agy by the one their mirror is named by, codex by the uuid
+      // in its last log's name — so a record with none to resume by is left as it is
+      const resumable = r.kind === 'codex'
+        ? r.logs.some((f) => /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/.test(f))
+        : !!r.sessionId
+      if (!resumable) continue
       const idle = now - this.lastLife(key, now)
       if (idle < ms) continue
       await this.agents.park(key, now)
