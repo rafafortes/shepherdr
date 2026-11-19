@@ -653,6 +653,15 @@ describe('the cost of a /proc pass', () => {
     expect(count.argv).toBe(104)
   })
 
+  // a process can end between its argv and its environ being read: the catch in chatOf is a normal pass on a busy
+  // host, but only a fake /proc makes it deterministic, so the coverage ratchet does not depend on host churn
+  test('a headless process whose environ vanished as the pass read it is skipped, not fatal', () => {
+    const proc = tmp('proc-environ-gone')
+    put(proc, 30, ['codex', 'exec', '-'], ['SHEPHERDR_CHAT=T-1/Agent'])
+    rmSync(join(proc, '30', 'environ'))
+    expect(new Procs(proc).runs('T-1/Agent')).toBe(false)
+  })
+
   test('every CLI headless pattern still reaches its environ and is found', () => {
     const proc = tmp('proc-every-cli')
     mkdirSync(proc, { recursive: true })
