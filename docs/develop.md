@@ -22,17 +22,29 @@ the lowest priority (nice 19, idle disk), one run at a time across every worktre
 `$XDG_RUNTIME_DIR`, else `~/.cache`), and the test files are capped at `SHEPHERDR_TEST_JOBS` workers (a quarter of the
 cores by default) so herdr, the server and the agents keep the CPU: the tests' own `systemd-run` scope, where systemd
 runs this user's services, gives them the least CPU and IO weight too. It takes about two minutes warm on a quiet
-machine, 5m34s under load; it also waits (up to an hour) while another worktree's check runs, so run it with a long
-timeout or in the background, where its verdict waits in
+machine, 5m34s under load, and its shared phase waits (up to an hour) while another worktree's check runs, so run it
+with a long timeout or in the background, where its verdict waits in
 `~/.cache/shepherdr/check-local/<worktree>/verdict.txt` (with each step's log beside it).
+
+A run is two phases, split by the check's number. Everything below `30` is worktree-local — its own `node_modules`, its
+own files, no browser — and runs before the lock: `10-dependencies`, `12-audit`, `15-secrets`, `17-scripts`, `18-docs`,
+`19-version`, `20-types` and `21-language`, so a broken type, script, doc, version or language scan fails in seconds
+instead of after a queue for the tests. `30-tests`, `40-coverage`, `50-build` and `60-dist-budget` share the machine's
+browsers and cores with every other worktree and go under the lock, one run at a time; dependencies stay first because a
+fresh worktree has none and the types need them. A new check that needs the machine to itself is numbered 30 or more.
 On a machine where herdr runs as a systemd user service, give it (and the server and agents it holds) the CPU first:
 `systemctl --user set-property herdr.service CPUWeight=1000`.
 
 `bun run check:local --quick` is a task's pre-ready run: the same incremental types and build, but `30-tests` runs
 `bun run test changed --force` instead of the whole forceful suite, and `40-coverage` does not run at all (so no screen map or
-coverage baseline is recorded). Its verdict says `QUICK` and what it did not run on its first line, in
-`verdict-quick.txt`, so it can never be taken for a full verdict where one is asked for, and it is never kept as a
-tree's verdict for the merge gate (`--reuse`, below) to answer from; a quick run that fails types or the build still
+coverage baseline is recorded). It takes a lock of its own (`check-local-quick.lock`), so it never waits behind a full
+run: it starts at once and, while a full run holds the shared lock, its changed tests take `max(2, cores / 8)` workers
+rather than a quarter of the cores, so the full run's browser tests do not flake on the contention (an explicit
+`SHEPHERDR_TEST_JOBS` is never overridden), and two quick runs still go one at a time. `60-dist-budget` still runs on
+what its own build left in `dist/` (the same build lock keeps a full run's build from emptying it mid-read). Its verdict
+says `QUICK` and what it did not run on its first line, in `verdict-quick.txt`, so it can never be taken for a full
+verdict where one is asked for, and it is never kept as a tree's verdict for the merge gate (`--reuse`, below) to answer
+from; a quick run that fails types or the build still
 fails the gate. A change to a file that can break any test — `test/preload.ts`, `test/once.ts`,
 `scripts/test.ts`, `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json` (`scripts/test.ts`'s `EVERYTHING` list) —
 runs the whole suite in a quick run as well, so a change to one of them is never proven by a handful of files. A change
@@ -62,15 +74,27 @@ running the check: a run on a worktree with uncommitted changes is kept for no t
 would leave the gate a tree it has to check in full. A verdict is only as good as the run behind it: the tree is not a
 run's only input (the base's history, the host's browsers, the coverage baseline and `node_modules` decide one too), and
 since the gate runs the branch's own script, an agent that edits it or writes a verdict file can still fake a pass —
-the flag closes the quiet skip, not tampering. A hit leaves the worktree's own `verdict.txt` as the last run left it (a
-hit that waited behind another check writes a line saying nothing ran here). A verdict does not expire: it goes away when
-a full run of that tree fails, or when the folder is cleared, so clear `~/.cache/shepherdr/check-local/verdicts` after
-changing the host's tools (a new browser, another gitleaks) if the trees should be checked again.
+the flag closes the quiet skip, not tampering. A hit leaves the worktree's own `verdict.txt` as the last run left it; a
+hit that waited behind another check for the machine writes its two lines into that verdict beside the worktree-local
+steps this run had already put there, and the tests, coverage, build and dist budget it would have paid for do not run.
+A verdict does not expire: it goes away when a full run of that tree fails, or when the folder is cleared, so clear
+`~/.cache/shepherdr/check-local/verdicts` after changing the host's tools (a new browser, another gitleaks) if the trees
+should be checked again.
 
-The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe; each step is
-one executable file in `scripts/checks/`, named `<number>-<name>` with the numbers spaced by ten (`10-dependencies`,
-`12-audit`, `15-secrets`, `17-scripts`, `18-docs`, `19-version`, `20-types`, `21-language`, `30-tests`, `40-coverage`,
-`50-build`, `60-dist-budget`). The runner discovers the executable
+What two runs of the same worktree still share is safe to share: `50-build` takes a lock of its own
+(`<logs>/build.lock`), because both runs write `dist/` and vite empties it first, and `60-dist-budget` holds the same
+lock while it reads `dist/`, so no build ever interleaves with another or with the check over it; the plugin registries
+are written atomically (a run reads the old or the new file, never half of one); and a
+quick run's logs, notes, skips, browser probe and gitleaks report take `-quick`, beside its own verdict. A `tsc` build
+info file one run replaces under the other only costs a rebuild, never a wrong answer. Two runs of the same kind in one
+worktree still report to one `verdict.txt` and one set of step logs, so a worktree runs one full check at a time; the
+overlap to use is a `--quick` run beside a full one.
+
+The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe, and runs the
+checks in the two phases above; each step is one executable file in `scripts/checks/`, named `<number>-<name>` with the
+numbers spaced by ten (`10-dependencies`, `12-audit`, `15-secrets`, `17-scripts`, `18-docs`, `19-version`, `20-types`,
+`21-language`, `30-tests`, `40-coverage`, `50-build`, `60-dist-budget`). A number below 30 is worktree-local and runs
+before the lock, one of 30 or more runs in the shared phase under it. The runner discovers the executable
 files by sorted file name, so adding a check is adding one file and no later task edits a shared list: a `.ts` file
 beside them is a check's own logic, not a check (e.g. `secrets.ts`), and the order is reviewed because it is the file
 name. A check file:
@@ -83,14 +107,16 @@ name. A check file:
 - exits 0 on pass and non-zero on failure (the runner maps 124/137 to timed out or killed, and stops at the first
   failure, so a later check never reads a half-finished world);
 - writes its note — the human line appended to its result, e.g. how many tests ran — as one line to
-  `$SHEPHERDR_CHECK_NOTE`; its stdout and stderr already go to `$SHEPHERDR_CHECK_LOG` (`<logs>/<name>.log`), the log the
+  `$SHEPHERDR_CHECK_NOTE`; its stdout and stderr already go to `$SHEPHERDR_CHECK_LOG` (`<logs>/<name>.log`, and
+  `<logs>/<name>-quick.log` in a `--quick` run, which can run beside a full run of the same worktree), the log the
   runner reads to show why a failure happened;
 - says it cannot run (a tool is missing, say) by writing one reason to `$SHEPHERDR_CHECK_SKIP` and exiting 0: the result
   line reads `N/<total> <name> skipped: <reason>`, is named in the verdict's "parts not run", and is not a failure.
 
 The secrets step (`15-secrets`, whose logic is `scripts/checks/secrets.ts`) runs `gitleaks detect --source . --redact`,
 so it reads the committed tree and its history, not uncommitted files: commit before the gate. Its JSON report goes to
-the run's log folder, never the repo, and only a finding's file, line and rule are printed, never its value. A finding
+the run's log folder, named after that run's own log (`secrets.log.json`, `secrets-quick.log.json`), never the repo, and
+only a finding's file, line and rule are printed, never its value. A finding
 that predates the step is baselined in `.gitleaksignore` as one fingerprint per line, with a `#` line above saying why
 it is a false positive or a revoked token; a new fingerprint fails the step. A host without gitleaks skips it with the
 install command, and the verdict names the part that did not run.

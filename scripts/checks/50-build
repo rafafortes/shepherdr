@@ -3,6 +3,18 @@
 set -uo pipefail
 root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
 cd "$root" || exit 1
+# one build of this worktree at a time: a --quick run can run beside a full run of the same worktree (its own lock), and
+# both write dist/, which vite empties first, so their builds and the checks over it never interleave (SHE-172). The
+# lock file sits in this run's log folder: per worktree, never in the repo, and it goes when this step does.
+build_lock=${SHEPHERDR_CHECK_LOGS:-$root/node_modules/.cache}/build.lock
+if command -v flock >/dev/null 2>&1 && mkdir -p "$(dirname "$build_lock")" 2>/dev/null && exec 8>>"$build_lock"; then
+  # say it when another run of this worktree is building: what it waits is part of this step's time, and the step's own
+  # timeout is what ends a build that never comes back
+  if ! flock -n 8; then
+    echo 'waiting for another build of this worktree to finish'
+    flock 8
+  fi
+fi
 bun run build
 code=$?
 if [ "$code" -ne 0 ]; then exit "$code"; fi

@@ -18,6 +18,8 @@ export type Finding = { File: string; RuleID: string; StartLine: number; Fingerp
 export type Options = {
   root: string
   logs: string
+  /** where the report goes; default <logs>/gitleaks.json, and the run's own log name when the runner names one */
+  report?: string
   binary: string | null
   log?: (line: string) => void
   note?: (line: string) => void
@@ -31,7 +33,7 @@ export function runSecrets(o: Options): number {
     o.log?.(INSTALL)
     return 0
   }
-  const report = join(o.logs, 'gitleaks.json')
+  const report = o.report ?? join(o.logs, 'gitleaks.json')
   mkdirSync(o.logs, { recursive: true })
   const r = Bun.spawnSync(
     [o.binary, 'detect', '--source', '.', '--redact', '--report-path', report, '--report-format', 'json', '--no-banner'],
@@ -61,12 +63,16 @@ export function runSecrets(o: Options): number {
 export function main(env: Record<string, string | undefined> = process.env): number {
   const root = env.SHEPHERDR_CHECK_ROOT ?? join(import.meta.dir, '..', '..')
   const logs = env.SHEPHERDR_CHECK_LOGS ?? join(root, 'node_modules', '.cache', 'secrets')
+  // the report takes the name of this run's own log: a --quick run can run beside a full run of the same worktree, and
+  // neither may overwrite the other's report (SHE-172)
+  const report = env.SHEPHERDR_CHECK_LOG ? `${env.SHEPHERDR_CHECK_LOG}.json` : undefined
   const write = (file: string | undefined, text: string) => {
     if (file) writeFileSync(file, `${text}\n`)
   }
   return runSecrets({
     root,
     logs,
+    report,
     binary: Bun.which('gitleaks') ?? null,
     log: (line) => console.log(line),
     note: (line) => write(env.SHEPHERDR_CHECK_NOTE, line),

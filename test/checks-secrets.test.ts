@@ -103,4 +103,12 @@ describe.skipIf(!gitleaks)('gitleaks over a fixture repo and its history', () =>
     expect(existsSync(skip), 'no skip when the binary is there').toBe(false)
     expect(main({ SHEPHERDR_CHECK_ROOT: planted.dir, SHEPHERDR_CHECK_LOGS: planted.logs })).toBe(1)
   })
+
+  test("a run's report sits beside its own log, so a quick run beside a full one never overwrites it", () => {
+    const f = repo()
+    const log = join(f.logs, 'secrets-quick.log')
+    expect(main({ SHEPHERDR_CHECK_ROOT: f.dir, SHEPHERDR_CHECK_LOGS: f.logs, SHEPHERDR_CHECK_LOG: log })).toBe(0)
+    expect(existsSync(`${log}.json`)).toBe(true)
+    expect(existsSync(join(f.logs, 'gitleaks.json'))).toBe(false)
+  })
 })

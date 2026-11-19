@@ -73,7 +73,8 @@ describe('the check itself', () => {
     // it waited behind may have just kept this very tree)
     expect(lines).toContain(`if [ "$quick" = 1 ] && [ "$reuse" = 1 ]; then`)
     expect(lines).toContain('reuse_answer && exit 0')
-    expect(lines).toContain('if reuse_answer; then')
+    // asked again once the run reaches the lock (it may be indented inside the shared phase)
+    expect(lines.some((l) => l.trim() === 'if reuse_answer; then')).toBe(true)
     // a tree's verdict is written only once the run passed whole, and taken away when it fails
     const call = lines.indexOf('  record 1')
     expect(call).toBeGreaterThan(-1)

@@ -4,6 +4,15 @@
 set -uo pipefail
 root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
 cd "$root" || exit 1
+# the same lock 50-build holds: a --quick run can build beside a full run of the same worktree, and a build empties dist/
+# before it fills it, so reading it here must not overlap one (SHE-172). The lock file sits in this run's log folder.
+dist_lock=${SHEPHERDR_CHECK_LOGS:-$root/node_modules/.cache}/build.lock
+if command -v flock >/dev/null 2>&1 && mkdir -p "$(dirname "$dist_lock")" 2>/dev/null && exec 8>>"$dist_lock"; then
+  if ! flock -n 8; then
+    echo 'waiting for the build of this worktree to finish'
+    flock 8
+  fi
+fi
 record=()
 [ "${SHEPHERDR_CHECK_RECORD:-}" = 1 ] && record=(--record)
 bun "$root/scripts/checks/dist-budget.ts" "$root/dist" ${record[@]+"${record[@]}"}

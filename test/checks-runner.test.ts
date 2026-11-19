@@ -4,7 +4,7 @@
 // The pattern is test/check-workflow.test.ts's: a git repo made in /tmp, driven by the file's own commands.
 import { describe, expect, test } from 'bun:test'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { tmp } from './tmp.ts'
 
 const root = join(import.meta.dir, '..')
@@ -236,10 +236,12 @@ describe('the verdict a tree already passed (--reuse)', () => {
     expect(after.out).toContain('no full check has passed on this tree yet')
   })
 
-  test('a run that waited behind another answers from the verdict it kept meanwhile, without running', async () => {
-    // the point of asking again after the lock: a gate queued behind another worktree's check does not pay a second run
+  test('a run that waited behind another answers from the verdict it kept meanwhile, and pays for no shared phase', async () => {
+    // the point of asking again after the lock: a gate queued behind another worktree's check does not run the tests,
+    // the coverage, the build and the dist budget a second time. Its own worktree-local steps already ran by then, so
+    // those keep their lines in its verdict (SHE-172 split the run in two phases)
     if (!Bun.which('flock')) return // the runner then runs without the one-at-a-time lock, and there is nothing to wait for
-    const f = fixture(passing)
+    const f = fixture({ '10-one': check(), '30-tests': check() })
     const lock = join(f.home, '.cache', 'shepherdr', 'check-local.lock')
     mkdirSync(join(f.home, '.cache', 'shepherdr'), { recursive: true })
     // holds the lock for a moment: room enough for a loaded machine's runner to reach it and say it waits, and short
@@ -248,14 +250,14 @@ describe('the verdict a tree already passed (--reuse)', () => {
     await Bun.sleep(300)
     const runner = Bun.spawn(['bash', join(f.dir, 'scripts', 'check-local.sh'), '--reuse'], {
       cwd: f.dir,
-      env: { ...process.env, HOME: f.home, SHEPHERDR_CHECK_WAIT: '20', SHEPHERDR_CHECK_STEP_TIMEOUT: '30' },
+      env: { ...process.env, HOME: f.home, SHEPHERDR_TEST_JOBS: '', SHEPHERDR_CHECK_WAIT: '20', SHEPHERDR_CHECK_STEP_TIMEOUT: '30' },
       stdout: 'pipe',
       stderr: 'pipe',
     })
     const decoder = new TextDecoder()
     const reader = runner.stdout.getReader()
     let out = ''
-    // it said it waits for the other check, so it is past its first look at the verdicts
+    // it said it waits for the other check, so it is past its first look at the verdicts and past its local phase
     while (!out.includes('waiting for it, up to')) {
       const { value, done } = await reader.read()
       if (done) break
@@ -273,9 +275,11 @@ describe('the verdict a tree already passed (--reuse)', () => {
     }
     expect(await runner.exited).toBe(0)
     expect(out).toContain('this exact tree passed the full check already')
-    expect(f.calls()).toEqual([])
-    // the worktree's verdict says what happened, not the note that stood there while it waited
-    expect(f.verdict()).toContain('nothing ran here')
+    // the worktree-local check ran; the shared one, what a second full run would pay for, did not
+    expect(f.calls()).toEqual(['one'])
+    // the worktree's verdict says what happened, beside the steps this run did run
+    expect(f.verdict()).toContain('this exact tree passed the full check already')
+    expect(f.verdict()).toContain('the shared phase did not run here')
   })
 
   test('a tree the branch moved away from while the check ran is never kept', () => {
@@ -332,6 +336,123 @@ describe('the check files themselves', () => {
       expect(r.exitCode, r.stderr.toString()).toBe(0)
       expect(r.stdout.toString()).toContain(join(root, script))
       expect(r.stdout.toString()).not.toContain(join(root, 'scripts', script))
+    }
+  })
+})
+
+// SHE-172: the run is two phases. Everything numbered below 30 is worktree-local and runs before the one-at-a-time
+// lock, so broken types, scripts, docs, version or language fail in seconds instead of after the test queue; 30 and
+// up (tests, coverage, build) share the machine's browsers and cores and still go one run at a time under the lock.
+describe('the two phases of a full run', () => {
+  /** records whether the shared lock was held while this check ran */
+  const phases = `#!/usr/bin/env bash
+set -uo pipefail
+echo "$SHEPHERDR_CHECK_NAME held=$([ -f "$SHEPHERDR_CHECK_ROOT/held" ] && echo yes || echo no)" >> "$SHEPHERDR_CHECK_ROOT/phases.txt"
+exit 0
+`
+  /** hold the shared lock from another process for ms, as a full run does, then release it */
+  const holdLock = async (f: ReturnType<typeof fixture>, ms = 2000) => {
+    const lock = join(f.home, '.cache', 'shepherdr', 'check-local.lock')
+    mkdirSync(dirname(lock), { recursive: true })
+    const held = join(f.dir, 'held')
+    const proc = Bun.spawn(['bash', '-c', `exec 9>>"${lock}"; flock 9; touch "${held}"; sleep ${ms / 1000}; rm -f "${held}"`], { stdout: 'ignore', stderr: 'ignore' })
+    for (let i = 0; i < 200 && !existsSync(held); i++) await Bun.sleep(25)
+    expect(existsSync(held), 'the shared lock is held').toBe(true)
+    return { held, stop: () => proc.kill() }
+  }
+
+  test('the worktree-local checks run while the shared lock is held, and the shared ones wait for it', async () => {
+    const f = fixture({ '10-one': phases, '30-tests': phases })
+    const holder = await holdLock(f)
+    try {
+      const r = f.run()
+      expect(r.code).toBe(0)
+      expect(readFileSync(join(f.dir, 'phases.txt'), 'utf8').trim().split('\n')).toEqual(['one held=yes', 'tests held=no'])
+      expect(r.out).toContain('· worktree-local checks done in')
+      expect(r.out).toMatch(/2\/2 tests ok/)
+    } finally {
+      holder.stop()
+    }
+  })
+
+  test('a worktree-local failure fails at once, never reaching the queue for the shared phase', async () => {
+    const f = fixture({ '10-one': check('', 1), '30-tests': phases })
+    const holder = await holdLock(f)
+    try {
+      const r = f.run()
+      expect(r.code).toBe(1)
+      expect(f.calls()).toEqual(['one'])
+      expect(r.out).not.toContain('waiting for it')
+      expect(existsSync(join(f.dir, 'phases.txt'))).toBe(false)
+    } finally {
+      holder.stop()
+    }
+  })
+
+  test('with no shared check to run, no lock is taken at all', () => {
+    const f = fixture({ '10-one': check(), '20-two': check() })
+    const r = f.run()
+    expect(r.code).toBe(0)
+    expect(r.out).not.toContain('Another check')
+    expect(existsSync(join(f.home, '.cache', 'shepherdr', 'check-local.lock.pid'))).toBe(false)
+  })
+})
+
+// Two runs of one worktree can now overlap (a --quick one beside a full one): what they still share must never race.
+describe('what two runs of one worktree share', () => {
+  test('two full runs never run their shared phase at once: 30-tests still goes one at a time', async () => {
+    const tests = `#!/usr/bin/env bash
+set -uo pipefail
+echo "tests $1 $(date +%s%N)" >> "$SHEPHERDR_CHECK_ROOT/phases.txt"
+sleep 0.4
+echo "tests $2 $(date +%s%N)" >> "$SHEPHERDR_CHECK_ROOT/phases.txt"
+`
+    const f = fixture({ '10-one': check(), '30-tests': tests.replace('$1', 'start').replace('$2', 'end') })
+    const spawn = () =>
+      Bun.spawn(['bash', join(f.dir, 'scripts', 'check-local.sh')], {
+        cwd: f.dir,
+        env: { ...process.env, HOME: f.home, SHEPHERDR_TEST_JOBS: '', SHEPHERDR_CHECK_WAIT: '30', SHEPHERDR_CHECK_STEP_TIMEOUT: '30' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+    const [a, b] = [spawn(), spawn()]
+    expect(await Promise.all([a.exited, b.exited])).toEqual([0, 0])
+    const lines = readFileSync(join(f.dir, 'phases.txt'), 'utf8').trim().split('\n').map((l) => l.split(' '))
+    expect(lines.length).toBe(4)
+    const starts = lines.filter((l) => l[1] === 'start').map((l) => Number(l[2])).sort((x, y) => x - y)
+    const ends = lines.filter((l) => l[1] === 'end').map((l) => Number(l[2])).sort((x, y) => x - y)
+    // each test step finishes before the other starts: the lock serializes them, not the minute of the run
+    expect(ends[0]).toBeLessThan(starts[1])
+  })
+
+  test('one build of a worktree at a time: the build and the budget over dist wait for the lock another run holds', async () => {
+    const dir = tmp('build-lock')
+    const logs = join(dir, 'logs')
+    mkdirSync(join(dir, 'scripts', 'checks'), { recursive: true })
+    mkdirSync(logs, { recursive: true })
+    // both read or write dist/, so both take the same lock: the build because vite empties it, the budget because it reads it
+    for (const name of ['50-build', '60-dist-budget']) copyFileSync(join(root, 'scripts', 'checks', name), join(dir, 'scripts', 'checks', name))
+    // a bun that only records whether the other run was still building when it ran
+    const bin = join(dir, 'bin')
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, 'bun'), `#!/bin/sh\necho "held=$([ -f "${dir}/held" ] && echo yes || echo no)" >> "${dir}/built.txt"\n`)
+    chmodSync(join(bin, 'bun'), 0o755)
+    const held = join(dir, 'held')
+    const proc = Bun.spawn(['bash', '-c', `exec 9>>"${join(logs, 'build.lock')}"; flock 9; touch "${held}"; sleep 1.5; rm -f "${held}"`], { stdout: 'ignore', stderr: 'ignore' })
+    try {
+      for (let i = 0; i < 200 && !existsSync(held); i++) await Bun.sleep(25)
+      expect(existsSync(held), 'the build lock is held').toBe(true)
+      // the build fails on the dist checks below (the fixture builds nothing), which is not what this test is about
+      for (const name of ['50-build', '60-dist-budget'])
+        Bun.spawnSync(['bash', join(dir, 'scripts', 'checks', name)], {
+          cwd: dir,
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SHEPHERDR_CHECK_ROOT: dir, SHEPHERDR_CHECK_LOGS: logs, SHEPHERDR_CHECK_LOG: join(logs, `${name}.log`) },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        })
+      expect(readFileSync(join(dir, 'built.txt'), 'utf8').trim().split('\n')).toEqual(['held=no', 'held=no'])
+    } finally {
+      proc.kill()
     }
   })
 })
