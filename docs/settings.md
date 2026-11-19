@@ -529,10 +529,23 @@ row. The profiles bar sits above it (a profile saved from here includes the limi
   under it). Beside it: **running now** by role (tasks, coordinators, the advisor, reviewers), the tasks named after their
   count, each id a button that opens it (`3 tasks POL-313 POL-314 POL-315 · 1 coordinator`), **held**, **out now** (until
   when), and the **quota**, read only (the details are in Models). A local server is marked local.
-- **Waiting now** (at the top, read only). The held tasks grouped by what holds them, each group with its count and its limit
+- **Waiting now** (at the top, read only). The whole line of this machine: every task that has not started, or waits to go
+  on, and why — not just the ones held for room. The count line names every kind that has any: **held for room**, **queued
+  after other tasks**, **scheduled**, **waiting for a go** and **merges waiting**. Above the groups, one line per space reads
+  how many of its tasks work, are held and are queued. **Held for room** is open first; the other sections start closed and
+  the page remembers what you opened. Its groups are the held tasks by what holds them, each with its count and its limit
   now: **machine slots**, **this machine set to 0 tasks**, the **machine's** load, pressure or memory (or herdr that does not
   answer), each **space's cap** (and each **space set to 0 tasks**), each **model's cap** (with the chain it waits on), **every
-  model blocked (0 allowed)**, **every model of a space out**, and the **cut-off tasks** that go back to work first. Then the questions waiting for the advisor and the review rounds waiting for a reviewer. A task's id opens it.
+  model blocked (0 allowed)**, **every model of a space out**, and the **cut-off tasks** that go back to work first. Within
+  them the tasks are numbered in the order `release()` starts them — first in line, then the space's priority, then age —
+  taken from the engine, never sorted again on the screen; the number is the task's place in the whole held line, so a
+  group may read 2, 5, 9. **Queued after other tasks** has a group per space in queue order,
+  each task with the engine's wait line (`After SHE-58, SHE-57`); a task whose chain ends at one you can act on names it
+  (`After SHE-58, which waits for your reply`) and a line counts them all (`12 tasks wait behind 1 task that needs you:
+  SHE-58`). **Scheduled** shows when each starts, soonest first; **Waiting for a go** shows To do tasks with since when;
+  **Merges waiting** shows what each merge is behind. A group shows its count and its first ten rows with **Show all N**; a
+  phone draws one card per group. Then the questions waiting for the advisor and the review rounds waiting for a reviewer.
+  A task's id opens it; nothing here starts, stops or reorders a task.
 - **Bulk.** A column's ⋯ → **Set for every space…**: for Max tasks and Merge train, each space's own value, or **Everywhere,
   and reset the spaces** (each space and this machine lose their own, so every space reads Everywhere's); for a provider's or
   model's column, the same number as each space's sub-limit, the other entries kept. A provider's ⋯ → **Clear every space's

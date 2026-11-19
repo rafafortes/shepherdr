@@ -1119,6 +1119,10 @@ export interface WaitingTask {
   id: string
   space: string
   words: string
+  /** the task's place in the line held tasks start in (the engine's own order, 0 based): the screen numbers them */
+  order?: number
+  /** a queued task whose wait chain ends at a task you can act on: that task's id and what it waits for */
+  need?: { id: string; words: string }
 }
 /** one group of the Waiting now list: what holds the tasks in it, its limit now, and the tasks */
 export interface WaitingGroup {
@@ -1127,13 +1131,45 @@ export interface WaitingGroup {
   limit?: string
   tasks: WaitingTask[]
 }
-/** what holds work now (limits-view.ts): the held tasks grouped by what holds them, the advisor's questions and the reviews
- *  that wait for a reviewer */
+/** one task in the whole queue (queued, scheduled, To do or waiting to merge): its id, space and line, and — when its
+ *  wait chain ends at a task you can act on — that task's id and what it waits for ("waits for your reply") */
+export interface QueueTask {
+  id: string
+  space: string
+  spaceName: string
+  words: string
+  need?: { id: string; words: string }
+  /** when it starts (scheduled) or since when it has waited (To do, a merge): for ordering and the "since" line */
+  since?: number
+}
+/** the whole line of tasks waiting to start on this machine, as the engine has it (limits-view.ts groups and numbers it) */
+export interface LimitsQueue {
+  /** queued after other tasks, in the order they will go: those whose blockers are all at work first */
+  queued: QueueTask[]
+  /** waiting for their time, soonest first */
+  scheduled: QueueTask[]
+  /** waiting for a go (To do), oldest first */
+  todo: QueueTask[]
+  /** merges waiting in a line (a merge train or a gate behind another task's merge), oldest first */
+  merges: QueueTask[]
+}
+/** what holds work now (limits-view.ts): every task that has not started, grouped by what holds it. The held tasks keep
+ *  the engine's start order; the rest are queued after other tasks, scheduled, waiting for a go or waiting to merge.
+ *  The advisor's questions and the review rounds wait too. */
 export interface WaitingNow {
   held: number
   groups: WaitingGroup[]
   advisor: { chat: string; task?: string; words: string }[]
   reviews: { task: string; space: string; words: string }[]
+  /** queued after other tasks, one group per space in queue order */
+  queued: WaitingGroup[]
+  scheduled: QueueTask[]
+  todo: QueueTask[]
+  merges: QueueTask[]
+  /** queued tasks whose wait chain ends at a task you can act on: how many, and the distinct root ids */
+  behindYou: { tasks: number; roots: string[] }
+  /** one line per space: what works, is held for room and is queued there now */
+  spaceLines: { name: string; working: number; held: number; queued: number }[]
 }
 /** a pattern the + column can add: a provider, or a model key, with its words */
 export interface LimitKnown {

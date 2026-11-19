@@ -4,6 +4,7 @@
 // phone draws one card per section, space and provider. Each test is short, so the browser tests fit on a loaded machine.
 import { afterAll, describe, expect, test } from 'bun:test'
 import type { Locator, Page } from 'playwright-core'
+import type { LimitsQueue } from '../shared/types.ts'
 import { at, layout, pickLimit, rowLabels, settled } from './layout.ts'
 import { piOffers } from './pi-offers.ts'
 
@@ -26,6 +27,17 @@ async function fresh(page: Page) {
 
 /** whether the second element comes after the first in the page */
 const follows = (first: Locator, second: Locator) => second.elementHandle().then((h) => first.evaluate((el, other) => (el.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0, h))
+
+/** 300 waiting tasks: 200 in one queued group (for Show all), the rest in the other kinds */
+function bigQueue(): LimitsQueue {
+  const task = (id: string, space: string, words: string) => ({ id, space, spaceName: space, words })
+  return {
+    queued: Array.from({ length: 200 }, (_, i) => task(`QP-${i}`, 'herdr-projects', `After QP-${i}-x`)),
+    scheduled: Array.from({ length: 50 }, (_, i) => task(`SP-${i}`, 'gtm', 'Starts Tomorrow 9:00')),
+    todo: Array.from({ length: 30 }, (_, i) => task(`TP-${i}`, 'gtm', 'Added 1h ago')),
+    merges: Array.from({ length: 20 }, (_, i) => task(`MP-${i}`, 'gtm', "Waiting for other's merge")),
+  }
+}
 
 /** the Limits page on a desktop, opened from Settings → How Shepherdr runs */
 async function openLimits(page: Page, phone = false) {
@@ -351,6 +363,9 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await page.getByRole('button', { name: '+ column', exact: true }).click()
       await page.getByRole('menuitem', { name: /^pi · Spark \(local\) provider$/ }).click()
       await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^pi · Spark \(local\) in gtm: no sub-limit$/ }).waitFor()
+      // opening a Waiting section with no storage still works: its opened state is kept for this page only
+      await page.getByRole('region', { name: 'Scheduled' }).getByRole('button', { name: 'Scheduled' }).click()
+      await page.getByRole('region', { name: 'Scheduled' }).getByText('Starts', { exact: false }).first().waitFor()
     } finally {
       await page.close()
     }
@@ -405,6 +420,111 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
         expect(fit.width).toBeLessThanOrEqual(1)
       }
     } finally {
+      await page.close()
+    }
+  })
+
+  test('Waiting now names every kind, numbers the held tasks in the engine order, marks the chain that needs you and remembers what you opened', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await page.goto(url())
+      await page.evaluate(() => localStorage.removeItem('limits:waiting'))
+      await openLimits(page)
+      const waiting = page.getByRole('region', { name: 'Waiting now' })
+      expect(await waiting.locator('h2 + div').textContent()).toBe('2 held for room · 3 queued after other tasks · 1 scheduled · 1 waiting for a go · 1 merge waiting')
+      // one line per space with something waiting
+      await waiting.getByText(/herdr-projects:.*queued/).waitFor()
+      // Held for room is open, its tasks numbered 1 and 2 in the engine's start order
+      const held = page.getByRole('region', { name: 'Held for room' })
+      expect(await held.getByRole('button', { name: 'Held for room' }).getAttribute('aria-expanded')).toBe('true')
+      expect(await held.locator('li', { hasText: 'HP-204' }).last().textContent()).toContain('1.')
+      expect(await held.locator('li', { hasText: 'GTM-17' }).last().textContent()).toContain('2.')
+      // the other four sections start closed
+      for (const name of ['Queued after other tasks', 'Scheduled', 'Waiting for a go', 'Merges waiting']) {
+        const sec = page.getByRole('region', { name })
+        expect(await sec.getByRole('button', { name }).getAttribute('aria-expanded')).toBe('false')
+      }
+      // open Queued: the needs-you line, the direct mark and the chain of two
+      const queued = page.getByRole('region', { name: 'Queued after other tasks' })
+      await queued.getByRole('button', { name: 'Queued after other tasks' }).click()
+      await queued.getByText('2 tasks wait behind 1 task that needs you: HP-201').waitFor()
+      await queued.getByText('After HP-201, which waits for your reply').waitFor()
+      await queued.getByText('After HP-205 · HP-201 waits for your reply').waitFor()
+      for (const [name, text] of [['Scheduled', 'Starts'], ['Waiting for a go', 'Added'], ['Merges waiting', "Waiting for GTM-18's merge"]] as const) {
+        const sec = page.getByRole('region', { name })
+        await sec.getByRole('button', { name }).click()
+        await sec.getByText(text, { exact: false }).first().waitFor()
+      }
+      // what the viewer opened is kept across a fresh look
+      await openLimits(page)
+      expect(await page.getByRole('region', { name: 'Queued after other tasks' }).getByRole('button', { name: 'Queued after other tasks' }).getAttribute('aria-expanded')).toBe('true')
+      expect(await page.getByRole('region', { name: 'Scheduled' }).getByRole('button', { name: 'Scheduled' }).getAttribute('aria-expanded')).toBe('true')
+    } finally {
+      await page.close()
+    }
+  })
+
+  test('with nothing waiting it says what it always did, and an empty section says so too', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    world.waitingEmpty = true
+    try {
+      await openLimits(page)
+      const waiting = page.getByRole('region', { name: 'Waiting now' })
+      expect(await waiting.locator('h2 + div').textContent()).toBe('Nothing is held for room')
+      await waiting.getByText('Every limit has room now: nothing waits for a slot, a load or a cap.').waitFor()
+      expect(await waiting.locator('li[data-group]').count()).toBe(0)
+      // no empty section headers either: the page says only what it said before
+      expect(await page.getByRole('region', { name: 'Held for room' }).count()).toBe(0)
+      expect(await page.getByRole('region', { name: 'Scheduled' }).count()).toBe(0)
+      // an empty section reached another way (a queue override with only held) says so in its group
+      world.waitingEmpty = false
+      world.queueOverride = { queued: [], scheduled: [], todo: [], merges: [] }
+      await world.act({ type: 'setting', key: 'machine.maxTasks', value: '7', place: 'm:vm-str' } as never)
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      await page.getByRole('region', { name: 'Settings' }).getByRole('button', { name: 'Limits', exact: true }).click()
+      await settled(page)
+      const scheduled = page.getByRole('region', { name: 'Scheduled' })
+      await scheduled.getByRole('button', { name: 'Scheduled' }).click()
+      await scheduled.getByText('Nothing here now.').waitFor()
+      await world.act({ type: 'setting', key: 'machine.maxTasks', value: null, place: 'm:vm-str' } as never)
+    } finally {
+      world.waitingEmpty = undefined
+      await page.close()
+    }
+  })
+
+  test('a group of 200 shows ten rows and Show all 200, and a line of 300 tasks builds and renders quickly', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    world.queueOverride = bigQueue()
+    try {
+      const t0 = Date.now()
+      await openLimits(page)
+      await page.getByRole('region', { name: 'Queued after other tasks' }).getByRole('button', { name: 'Queued after other tasks' }).click()
+      const group = page.locator('li[data-group="queued:herdr-projects"]')
+      await group.waitFor()
+      const render = Date.now() - t0
+      const t1 = Date.now()
+      await world.act({ type: 'limits-view' })
+      const build = Date.now() - t1
+      console.log(`SHE-162 300 waiting tasks: view built in ${build}ms, page rendered in ${render}ms`)
+      expect(build).toBeLessThan(2000)
+      expect(render).toBeLessThan(15_000)
+      // ten rows show, and Show all 200 opens them all
+      expect(await group.locator('ul > li').count()).toBe(10)
+      await group.getByRole('button', { name: 'Show all 200' }).click()
+      expect(await group.locator('ul > li').count()).toBe(200)
+      await group.getByRole('button', { name: 'Show less' }).click()
+      expect(await group.locator('ul > li').count()).toBe(10)
+      // the other kinds have the same count and Show all: their rows stay light too
+      const scheduled = page.getByRole('region', { name: 'Scheduled' })
+      await scheduled.getByRole('button', { name: 'Scheduled' }).click()
+      const schedGroup = page.locator('li[data-group="list:scheduled"]')
+      expect(await schedGroup.locator('ul > li').count()).toBe(10)
+      await schedGroup.getByRole('button', { name: 'Show all 50' }).click()
+      expect(await schedGroup.locator('ul > li').count()).toBe(50)
+    } finally {
+      world.queueOverride = undefined
       await page.close()
     }
   })
@@ -488,6 +608,35 @@ describe.skipIf(!browser)('Settings → Limits on a phone', () => {
     } finally {
       await set('models.maxAtOnce', null, 'm:vm-str')
       await set('models.maxAtOnce', null, 'p:vm-str:gtm')
+      await page.close()
+    }
+  })
+
+  test('a phone shows one card per group, the count line, and Show all 200 with 300 waiting tasks', async () => {
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    world.queueOverride = bigQueue()
+    try {
+      const t0 = Date.now()
+      await openLimits(page, true)
+      await page.getByRole('region', { name: 'Queued after other tasks' }).getByRole('button', { name: 'Queued after other tasks' }).tap()
+      const group = page.locator('li[data-group="queued:herdr-projects"]')
+      await group.waitFor()
+      const render = Date.now() - t0
+      console.log(`SHE-162 phone, 300 waiting tasks: rendered in ${render}ms`)
+      expect(render).toBeLessThan(15_000)
+      const waiting = page.getByRole('region', { name: 'Waiting now' })
+      expect(await waiting.locator('h2 + div').textContent()).toContain('200 queued after other tasks')
+      expect(await group.locator('ul > li').count()).toBe(10)
+      await group.getByRole('button', { name: 'Show all 200' }).tap()
+      expect(await group.locator('ul > li').count()).toBe(200)
+      // each other section opens to its own cards
+      for (const [name, text] of [['Scheduled', 'Starts'], ['Waiting for a go', 'Added'], ['Merges waiting', 'Waiting for other']] as const) {
+        const sec = page.getByRole('region', { name })
+        await sec.getByRole('button', { name }).tap()
+        await sec.getByText(text, { exact: false }).first().waitFor()
+      }
+    } finally {
+      world.queueOverride = undefined
       await page.close()
     }
   })

@@ -4,7 +4,7 @@
 // at each level the way Settings reads them (Settings.pick), the numbers now come from the health sample and the engine's
 // own accessors, the providers from the summary (models-summary.ts), and a write is the setting action at the cell's
 // place. The page's cells, the held groups and the waits are built from these, with `now` as a parameter for a test.
-import type { LimitByRole, LimitCell, LimitColumn, LimitKnown, LimitProvider, LimitRow, LimitSpaceRow, LimitTable, LimitsView, MatrixRole, ModelsMatrix, ModelsSummary, SettingRow, WaitingGroup, WaitingNow, WaitingTask } from '../../shared/types.ts'
+import type { LimitByRole, LimitCell, LimitColumn, LimitKnown, LimitProvider, LimitRow, LimitSpaceRow, LimitTable, LimitsQueue, LimitsView, MatrixRole, ModelsMatrix, ModelsSummary, QueueTask, SettingRow, WaitingGroup, WaitingNow, WaitingTask } from '../../shared/types.ts'
 import { capFor, parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
 import { busy, memPct, type Sample } from './health.ts'
 import { placeId } from './places.ts'
@@ -53,6 +53,8 @@ export interface LimitsInput {
   herdr: boolean
   advisor: { chat: string; task?: string; words: string }[]
   reviews: { task: string; space: string; words: string }[]
+  /** the whole line of tasks waiting to start (queued, scheduled, To do and merges), as the engine lists them */
+  queue: LimitsQueue
   /** the patterns the + column can add */
   known: LimitKnown[]
 }
@@ -128,7 +130,9 @@ export function machineReason(sample: Sample | undefined, herdr: boolean, s: Set
  *  spaces' caps (one group each), the models' caps (one group each, by the entry that holds them), every model out, and the
  *  cut-off tasks that go back to work first */
 export function waitingOf(input: LimitsInput): WaitingNow {
-  const task = (h: HeldFact): WaitingTask => ({ id: h.id, space: h.spaceName, words: h.words })
+  // the held tasks come from the engine's heldTasks() already in start order: number them there, never sort them here
+  const orderOf = new Map(input.held.map((h, i) => [h, i]))
+  const task = (h: HeldFact): WaitingTask => ({ id: h.id, space: h.spaceName, words: h.words, order: orderOf.get(h) })
   const of = (why: HeldWhy) => input.held.filter((h) => h.why === why)
   const groups: WaitingGroup[] = []
   const machine = input.settings.machine('machine')
@@ -157,7 +161,54 @@ export function waitingOf(input: LimitsInput): WaitingNow {
   if (of('blocked').length) groups.push({ id: 'blocked', title: 'Every model blocked (0 allowed)', tasks: of('blocked').map(task) })
   if (of('models').length) groups.push({ id: 'models', title: 'Every model of the space ran out', tasks: of('models').map(task) })
   if (of('resume').length) groups.push({ id: 'resume', title: 'Cut-off tasks go back to work first', tasks: of('resume').map(task) })
-  return { held: input.held.length, groups, advisor: input.advisor, reviews: input.reviews }
+
+  // queued after other tasks: one group per space, in the same queue order as the Spaces table, each group's tasks kept
+  // in the order the engine gave them (those whose blockers are all at work first)
+  const queuedTask = (q: QueueTask): WaitingTask => ({ id: q.id, space: q.spaceName, words: q.words, ...(q.need ? { need: q.need } : {}) })
+  const listed = listedSpaces(input)
+  const bySpace = (key: string) => input.queue.queued.filter((q) => q.space === key)
+  const queued: WaitingGroup[] = []
+  for (const sp of listed) {
+    const tasks = bySpace(sp.key)
+    if (tasks.length) queued.push({ id: `queued:${sp.key}`, title: sp.name, tasks: tasks.map(queuedTask) })
+  }
+  // a space with no Spaces-table row (home when it sets nothing) still keeps its queued tasks
+  for (const key of [...new Set(input.queue.queued.map((q) => q.space))]) {
+    if (listed.some((sp) => sp.key === key) || !bySpace(key).length) continue
+    queued.push({ id: `queued:${key}`, title: bySpace(key)[0]!.spaceName, tasks: bySpace(key).map(queuedTask) })
+  }
+  // how many queued tasks end at a root you can act on, and the distinct roots they end at
+  const needs = input.queue.queued.flatMap((q) => (q.need ? [q.need] : []))
+  const behindYou = { tasks: needs.length, roots: [...new Set(needs.map((n) => n.id))] }
+
+  // one summary line per space, with the same working and held counts as the Spaces table, plus its queued count
+  const lineOf = (key: string, name: string) => ({
+    name,
+    working: input.workingIn[key] ?? 0,
+    held: input.held.filter((h) => h.space === key).length,
+    queued: bySpace(key).length,
+  })
+  const lines = listed.map((sp) => lineOf(sp.key, sp.name))
+  // a space with no Spaces-table row (home when it sets nothing) still gets a line when something waits there
+  for (const key of [...new Set([...input.queue.queued.map((q) => q.space), ...input.held.map((h) => h.space)])]) {
+    if (listed.some((sp) => sp.key === key)) continue
+    const name = input.queue.queued.find((q) => q.space === key)?.spaceName ?? input.held.find((h) => h.space === key)?.spaceName ?? key
+    lines.push(lineOf(key, name))
+  }
+  const spaceLines = lines.filter((s) => s.working || s.held || s.queued)
+
+  return {
+    held: input.held.length,
+    groups,
+    advisor: input.advisor,
+    reviews: input.reviews,
+    queued,
+    scheduled: input.queue.scheduled,
+    todo: input.queue.todo,
+    merges: input.queue.merges,
+    behindYou,
+    spaceLines,
+  }
 }
 
 /** home's key: its settings are the `~` level (places.ts HOME_KEY) */
@@ -211,6 +262,18 @@ function byRoleOf(runs: LimitsInput['runs'], covered: (key: string) => boolean):
   return tasks.length ? { byRole, tasks } : { byRole }
 }
 
+/** the spaces of this machine in queue order: numbered by their priority, then the ones with none as they were listed.
+ *  The sort is stable, so spaces with the same number (or none) keep their old order and their tasks go by age. Shared by
+ *  the Spaces table and the Waiting list so a group never disagrees with the table's order. */
+function listedSpaces(input: LimitsInput): { id: string; name: string; key: string }[] {
+  const s = input.settings
+  const listed = input.matrix.rows.filter((r) => r.kind === 'space').map((r) => ({ id: r.id, name: r.name, key: r.id.split(':')[2]! }))
+  const homeSets = [...SPACE_KEYS, 'models.maxAtOnce'].some((k) => s.pick(k, { space: HOME }).from === 'space')
+  if (homeSets && !listed.some((x) => x.key === HOME)) listed.unshift({ id: placeId.home(input.host), name: 'home', key: HOME })
+  const priority = (key: string) => s.spacePriority(key) ?? Number.POSITIVE_INFINITY
+  return listed.sort((a, b) => priority(a.key) - priority(b.key))
+}
+
 /** the Spaces table: each space of this machine in queue order, its Priority, Max tasks and Merge train, and its sub-limit
  *  per pattern column */
 function spacesOf(input: LimitsInput): LimitsView['spaces'] {
@@ -230,14 +293,7 @@ function spacesOf(input: LimitsInput): LimitsView['spaces'] {
     }),
   )
   const cols: LimitColumn[] = SPACE_KEYS.map((key) => ({ key, ...titleOf(key) }))
-  // the spaces of this machine as the Models table lists them, and home too when it sets one of these keys itself
-  const listed = matrix.rows.filter((r) => r.kind === 'space').map((r) => ({ id: r.id, name: r.name, key: r.id.split(':')[2]! }))
-  const homeSets = [...SPACE_KEYS, 'models.maxAtOnce'].some((k) => s.pick(k, { space: HOME }).from === 'space')
-  if (homeSets && !listed.some((x) => x.key === HOME)) listed.unshift({ id: placeId.home(input.host), name: 'home', key: HOME })
-  // the page lists them in queue order: numbered spaces by their number, then the ones with none as they were listed.
-  // The sort is stable, so spaces with the same number (or none) keep their old order and their tasks go by age
-  const priority = (key: string) => s.spacePriority(key) ?? Number.POSITIVE_INFINITY
-  listed.sort((a, b) => priority(a.key) - priority(b.key))
+  const listed = listedSpaces(input)
   const rows: LimitSpaceRow[] = listed.map(({ id, name, key }) => {
     const working = input.workingIn[key] ?? 0
     const held = input.held.filter((h) => h.space === key).length

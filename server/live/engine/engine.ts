@@ -14,7 +14,7 @@ import { dropped, retrying, startDelays } from '../herdr.ts'
 import { existsSync, statSync } from '../mfs.ts'
 import { agentEnv, BOX } from '../box.ts'
 import { join } from 'node:path'
-import { STATUS_CADENCE_MIN, STATUS_MAX, TITLE_MAX, type Question, type Report, type Task, type TaskRun, type TaskStatus, type UpdateCard } from '../../../shared/types.ts'
+import { STATUS_CADENCE_MIN, STATUS_MAX, TITLE_MAX, type LimitsQueue, type Question, type QueueTask, type Report, type Task, type TaskRun, type TaskStatus, type UpdateCard } from '../../../shared/types.ts'
 import { clockWords, startsLine } from '../../../shared/when.ts'
 import { Emitter } from '../../source.ts'
 import { spawn } from 'node:child_process'
@@ -1828,6 +1828,95 @@ export class Engine extends Emitter<Events> {
   /** tasks held now, in the line release() starts them: first in line, then space priority, then oldest first */
   heldTasks() {
     return this.tasks.filter((t) => this.holding(t) && !t.archived).sort((a, b) => this.heldOrder(a, b))
+  }
+
+  /**
+   * The whole line of tasks waiting to start on this machine (Settings → Limits' Waiting now), as the engine has it. Held
+   * tasks are not here: the view takes those from heldTasks() so the screen cannot disagree with what starts next. Each
+   * other task carries its own wait line and, when its wait chain ends at a task you can act on, that task's id and why.
+   */
+  queueWaiters(now = Date.now()): LimitsQueue {
+    const of = (t: TaskRec): QueueTask => {
+      const space = this.nameOf(t) ?? '~'
+      return { id: t.id, space, spaceName: this.places.shownName(space), words: '', ...(t.scheduled ? { since: t.scheduled.at } : t.landing ? { since: t.landing.at } : {}) }
+    }
+    // walk a queued task's wait chain to the root the human can act on: a task that waits on you, went wrong, was stopped
+    // or is gone. A root simply at work needs no mark. `seen` keeps a cycle from looping; `memo` keeps a long chain of
+    // hundreds of queued tasks from being walked again for each one behind it (only found roots are kept, so a cycle
+    // seen from one task cannot hide a root when the same task is reached from another).
+    const memo = new Map<string, { id: string; words: string }>()
+    const rootNeed = (ref: string, seen = new Set<string>()): { id: string; words: string } | undefined => {
+      const found = memo.get(ref)
+      if (found) return found
+      const [machine, id] = splitRef(ref)
+      if (machine || seen.has(id)) return undefined
+      seen.add(id)
+      const d = this.task(id)
+      const finish = (need?: { id: string; words: string }) => {
+        if (need) memo.set(ref, need)
+        return need
+      }
+      // depState treats a task whose space was removed as gone too: its blocker is as little actionable as a deleted one
+      if (!d || (!ended(d) && !this.places.space(d.project))) return finish({ id, words: 'is gone' })
+      const outcome = this.outcomeOf(d)
+      if (outcome === 'failed') return finish({ id, words: 'went wrong' })
+      if (outcome === 'stopped') return finish({ id, words: 'was stopped' })
+      if (ended(d)) return undefined
+      // walk a queued task's own chain first: one halted by a stopped, failed or gone blocker is marked with that root,
+      // not with itself. A queued task that only waits on you has no such root, and is marked below.
+      if (this.queued(d)) for (const r of d.after ?? []) {
+        const need = rootNeed(r, seen)
+        if (need) return finish(need)
+      }
+      return this.statusOf(d) === 'need' ? finish({ id, words: 'waits for your reply' }) : undefined
+    }
+    const queued = this.tasks
+      .filter((t) => this.queued(t) && !t.scheduled && !t.archived)
+      .map((t) => {
+        const q: QueueTask & { blockersWorking?: boolean } = of(t)
+        q.words = this.waitLine(t)
+        const need = (t.after ?? []).flatMap((ref) => {
+          const n = rootNeed(ref)
+          return n ? [n] : []
+        })[0]
+        if (need) q.need = need
+        // a task whose blockers are all at work will go when they finish: it comes before one held up by a need
+        const open = this.open(t)
+        q.blockersWorking = open.length > 0 && open.every((ref) => {
+          const d = splitRef(ref)[0] ? undefined : this.task(ref)
+          return !!d && this.statusOf(d) === 'work'
+        })
+        return q
+      })
+      // a stable sort: within either group the engine's own order (age) stays
+      .sort((a, b) => Number(!!b.blockersWorking) - Number(!!a.blockersWorking))
+      .map(({ blockersWorking: _blockersWorking, ...q }) => q)
+    const scheduled = this.tasks
+      .filter((t) => !!t.scheduled && !t.archived && !ended(t))
+      .map((t) => {
+        const q = of(t)
+        q.words = startsLine(t.scheduled!.at, now, this.zone())
+        return q
+      })
+      .sort((a, b) => a.since! - b.since!)
+    const todo = this.tasks
+      .filter((t) => this.statusOf(t) === 'todo' && !t.archived)
+      .map((t) => {
+        const q = of(t)
+        q.words = `Added ${ago(t.created)}`
+        q.since = t.created
+        return q
+      })
+      .sort((a, b) => a.since! - b.since!)
+    const merges = this.tasks
+      .filter((t) => t.landing?.step === 'queue' && !t.archived && !ended(t))
+      .map((t) => {
+        const q = of(t)
+        q.words = landingLine(t.landing!, t.base, now)
+        return q
+      })
+      .sort((a, b) => a.since! - b.since!)
+    return { queued, scheduled, todo, merges }
   }
 
   /** hold it until there's room: its line says why, and its chat gets a small card */

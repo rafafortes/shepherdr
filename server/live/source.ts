@@ -606,6 +606,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       herdr: this.agents.reachable,
       advisor,
       reviews,
+      queue: this.engine.queueWaiters(now),
       known: knownOf(matrix, summary),
     })
   }

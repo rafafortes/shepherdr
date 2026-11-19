@@ -891,3 +891,114 @@ describe('archiving', () => {
     expect(w.settings.set('tasks.archiveAfter', '10').ok).toBe(true)
   })
 })
+
+describe('the line of what waits: the engine lists each kind with its wait and the root you can act on', () => {
+  test('queueWaiters lists queued, scheduled, To do and merges; a chain to a task that waits on you names its root', async () => {
+    const w = world()
+    const now = Date.now()
+    const p = await w.places.add(repo(), 'queue')
+    // a root that waits on you: its agent is blocked on a question
+    const root = await started(w, repo(), 'needsyou', 'A question')
+    w.engine.todo(root.t.id)
+    w.agentIs(root.key, 'blocked')
+    expect(w.engine.statusOf(root.t)).toBe('need')
+    // two queued tasks, one after the other: both end at the root that waits on you
+    const afterRoot = w.engine.add({ project: p.name, title: 'After the question', by: 'test', after: [root.t.id] })
+    const afterChain = w.engine.add({ project: p.name, title: 'After the queued one', by: 'test', after: [afterRoot.id] })
+    // a working task and one queued after it: only this one has all its blockers at work
+    const work = await started(w, repo(), 'atwork', 'Still working')
+    const afterWork = w.engine.add({ project: p.name, title: 'After the worker', by: 'test', after: [work.t.id] })
+    // a To do and a scheduled task
+    const todo = await started(w, repo(), 'todotask', 'Wait for a go')
+    w.engine.todo(todo.t.id)
+    w.agentIs(todo.key, 'idle')
+    const later = w.engine.add({ project: p.name, title: 'For later', by: 'test', at: now + 2 * 3_600_000 })
+    // a merge waiting behind another task's merge
+    w.engine.tasks.push({ id: 'Q-90', n: 90, project: p.key, title: 'Merge in line', by: 'test', created: now - 600_000, updated: now - 600_000, reported: true, landing: { step: 'queue', behind: root.t.id, at: now - 600_000 } } as never)
+
+    const q = w.engine.queueWaiters(now)
+    // those whose blockers are all at work come first; the wait lines are the engine's own
+    expect(q.queued.map((t) => t.id)).toEqual([afterWork.id, afterRoot.id, afterChain.id])
+    expect(q.queued[0]!.words).toBe(`After ${work.t.id}`)
+    expect(q.queued[0]!.need).toBeUndefined()
+    expect(q.queued[1]!.words).toBe(`After ${root.t.id}`)
+    expect(q.queued[1]!.need).toEqual({ id: root.t.id, words: 'waits for your reply' })
+    // the chain of two reaches the same root
+    expect(q.queued[2]!.words).toBe(`After ${afterRoot.id}`)
+    expect(q.queued[2]!.need).toEqual({ id: root.t.id, words: 'waits for your reply' })
+    expect(q.todo.map((t) => t.id)).toEqual([todo.t.id])
+    expect(q.todo[0]!.words).toMatch(/^Added /)
+    expect(q.scheduled.map((t) => t.id)).toEqual([later.id])
+    expect(q.scheduled[0]!.words).toMatch(/^Starts /)
+    expect(q.merges.map((t) => t.id)).toEqual(['Q-90'])
+    expect(q.merges[0]!.words).toBe(`Waiting for ${root.t.id}'s merge`)
+  })
+
+  test('a synthetic engine builds the line of 300 waiting tasks quickly', async () => {
+    const w = world()
+    const p = await w.places.add(repo(), 'many')
+    const now = Date.now()
+    const base = (id: string) => ({ id, n: 1, project: placeId.space(p.name), title: id, by: 't', created: now, updated: now })
+    w.engine.tasks.push({ ...base('ROOT-NEED') } as never)
+    // one chain of 300: each waits for the one before it, so the walk to the root must stay cheap
+    for (let i = 0; i < 300; i++) w.engine.tasks.push({ ...base(`WAIT-${i}`), after: [i === 0 ? 'ROOT-NEED' : `WAIT-${i - 1}`] } as never)
+    const t0 = performance.now()
+    const q = w.engine.queueWaiters(now)
+    const ms = performance.now() - t0
+    console.log(`SHE-162 synthetic engine: 300 waiting tasks, queueWaiters in ${ms.toFixed(1)}ms`)
+    expect(q.queued).toHaveLength(300)
+    expect(q.queued[299]!.need).toEqual({ id: 'ROOT-NEED', words: 'waits for your reply' })
+    expect(ms).toBeLessThan(2000)
+  })
+
+  test('a chain ending at a failed, stopped or gone task names it; a cycle does not loop', async () => {
+    const w = world()
+    const p = await w.places.add(repo(), 'chain')
+    const base = (id: string) => ({ id, n: 1, project: placeId.space(p.name), title: id, by: 't', created: 1, updated: 1 })
+    w.engine.tasks.push(
+      { ...base('ROOT-F'), trouble: 'it failed' } as never,
+      { ...base('ROOT-S'), stopped: true } as never,
+      { ...base('Q-F'), after: ['ROOT-F'] } as never,
+      { ...base('Q-S'), after: ['ROOT-S'] } as never,
+      { ...base('Q-G'), after: ['MISSING-1'] } as never,
+      { ...base('Q-M'), after: ['vm-x:ELA-3'] } as never,
+      { ...base('ROOT-STOP'), stopped: true } as never,
+      { ...base('ROOT-REMOVED'), project: 'p:box:removed' } as never,
+      { ...base('Q-REMOVED'), after: ['ROOT-REMOVED'] } as never,
+      { ...base('MID'), after: ['ROOT-STOP'] } as never,
+      { ...base('TOP'), after: ['MID'] } as never,
+      { ...base('CYC-1'), after: ['CYC-2'] } as never,
+      { ...base('CYC-2'), after: ['CYC-1'] } as never,
+    )
+    const by = Object.fromEntries(w.engine.queueWaiters().queued.map((t) => [t.id, t]))
+    expect(by['Q-F']!.need).toEqual({ id: 'ROOT-F', words: 'went wrong' })
+    expect(by['Q-S']!.need).toEqual({ id: 'ROOT-S', words: 'was stopped' })
+    expect(by['Q-G']!.need).toEqual({ id: 'MISSING-1', words: 'is gone' })
+    // a task on another machine is not ours to walk into
+    expect(by['Q-M']!.need).toBeUndefined()
+    // a blocker whose space was removed is as gone as a deleted one
+    expect(by['Q-REMOVED']!.need).toEqual({ id: 'ROOT-REMOVED', words: 'is gone' })
+    // a halted middle task is walked through to the stopped root, not marked as needing you itself
+    expect(by['MID']!.need).toEqual({ id: 'ROOT-STOP', words: 'was stopped' })
+    expect(by['TOP']!.need).toEqual({ id: 'ROOT-STOP', words: 'was stopped' })
+    expect(by['CYC-1']!.need).toBeUndefined()
+    expect(by['CYC-2']!.need).toBeUndefined()
+  })
+
+  test('heldTasks is the start order the screen numbers: first in line, then space priority, then age', async () => {
+    const w = world()
+    const alpha = await w.places.add(repo(), 'alpha')
+    const zeta = await w.places.add(repo(), 'zeta')
+    expect(w.settings.set('space.priority', '1', { space: 'alpha' }).ok).toBe(true)
+    expect(w.settings.set('space.priority', '2', { space: 'zeta' }).ok).toBe(true)
+    const now = Date.now()
+    const held = (id: string, project: string, since: number, priority = false) => ({ id, n: 1, project, title: id, by: 'test', created: since, updated: since, held: { why: 'slots', since }, ...(priority ? { priority: true as const } : {}) })
+    w.engine.tasks.push(
+      held('ALPHA-NEW', placeId.space(alpha.name), now - 100) as never,
+      held('ZETA-NEW', placeId.space(zeta.name), now - 200) as never,
+      held('FIRST', placeId.space(alpha.name), now - 50, true) as never,
+      held('ALPHA-OLD', placeId.space(alpha.name), now - 500) as never,
+    )
+    expect(w.engine.heldTasks().map((t) => t.id)).toEqual(['FIRST', 'ALPHA-OLD', 'ALPHA-NEW', 'ZETA-NEW'])
+  })
+})

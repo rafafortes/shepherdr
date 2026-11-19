@@ -30,7 +30,7 @@ function input(s: Settings, over: Partial<LimitsInput> = {}): LimitsInput {
   const matrix = modelsMatrix(s, { host: HOST, name: HOST }, SPACES)
   const summaryInput: SummaryInput = { now: NOW, settings: s, host: HOST, spaces: SPACES, rows: matrix.rows.map((r) => r.id), usage: new UsageLedger(tmp(`lv-${Math.random()}`), true), agents: [], tasks: [], watch: [], runs: over.runs ?? [], providers: over.summary ? undefined : [] }
   const summary = over.summary ?? modelsSummary(summaryInput)
-  return { now: NOW, settings: s, host: HOST, machineName: HOST, matrix, summary, runs: [], held: [], working: 0, waitingOnYou: 0, workingIn: {}, herdr: true, advisor: [], reviews: [], known: knownOf(matrix, summary), ...over }
+  return { now: NOW, settings: s, host: HOST, machineName: HOST, matrix, summary, runs: [], held: [], working: 0, waitingOnYou: 0, workingIn: {}, herdr: true, advisor: [], reviews: [], queue: { queued: [], scheduled: [], todo: [], merges: [] }, known: knownOf(matrix, summary), ...over }
 }
 
 const held = (over: Partial<HeldFact> & Pick<HeldFact, 'id' | 'why'>): HeldFact => ({ space: '~', spaceName: 'home', words: `${over.id} waits`, ...over })
@@ -226,12 +226,90 @@ describe('what waits now: the held tasks grouped by what holds them, in the page
 
   test('nothing held: no groups, and no limit names a number of waits', () => {
     const w = waitingOf(input(settings()))
-    expect(w).toEqual({ held: 0, groups: [], advisor: [], reviews: [] })
+    expect(w).toEqual({ held: 0, groups: [], advisor: [], reviews: [], queued: [], scheduled: [], todo: [], merges: [], behindYou: { tasks: 0, roots: [] }, spaceLines: [] })
   })
 
   test('a machine group with no limit that holds it now says the machine has room', () => {
     const w = waitingOf(input(settings(), { held: [held({ id: 'B-1', why: 'machine' })], sample: { ...sample, load: 1, load5: 1, memUsed: 10 }, herdr: true }))
     expect(w.groups[0]!.limit).toBe('the machine has room now: the next look starts it')
+  })
+})
+
+describe('the whole line of waiting tasks: held order, queued groups, the other kinds and the needs-you chain', () => {
+  const spaces = [
+    { key: '~', name: 'home' },
+    { key: 'gtm', name: 'gtm' },
+    { key: 'zeta', name: 'zeta' },
+  ]
+  const s = () => settings({ spaces: { gtm: { 'space.priority': '1' }, zeta: { 'space.priority': '2' } } })
+  const matrix = () => modelsMatrix(s(), { host: HOST, name: HOST }, spaces)
+
+  test('held tasks keep the engine order with their numbers; queued groups follow the spaces, and the other kinds keep their order', () => {
+    const inputVal = input(s(), {
+      matrix: matrix(),
+      workingIn: { gtm: 1, zeta: 0 },
+      held: [
+        held({ id: 'H-1', why: 'slots', words: 'first' }),
+        held({ id: 'H-2', why: 'machine', words: 'second' }),
+        held({ id: 'H-3', why: 'slots', words: 'third' }),
+      ],
+      queue: {
+        queued: [
+          { id: 'Q-2', space: 'gtm', spaceName: 'gtm', words: 'After H-1' },
+          { id: 'Q-3', space: 'zeta', spaceName: 'zeta', words: 'After H-2' },
+          { id: 'Q-1', space: 'gtm', spaceName: 'gtm', words: 'After H-1' },
+          { id: 'Q-4', space: '~', spaceName: 'home', words: 'After H-1' },
+        ],
+        scheduled: [
+          { id: 'S-late', space: 'gtm', spaceName: 'gtm', words: 'Starts later', since: 200 },
+          { id: 'S-soon', space: 'gtm', spaceName: 'gtm', words: 'Starts sooner', since: 100 },
+        ],
+        todo: [{ id: 'T-1', space: 'zeta', spaceName: 'zeta', words: 'Added 20m ago', since: 50 }],
+        merges: [{ id: 'M-1', space: 'gtm', spaceName: 'gtm', words: "Waiting for H-1's merge", since: 25 }],
+      },
+    })
+    const w = waitingOf(inputVal)
+    // held: two slots in one group, the machine in another; each task numbered by its place in the whole held line
+    expect(w.groups.map((g) => g.id)).toEqual(['slots', 'machine'])
+    expect(w.groups[0]!.tasks).toEqual([
+      { id: 'H-1', space: 'home', words: 'first', order: 0 },
+      { id: 'H-3', space: 'home', words: 'third', order: 2 },
+    ])
+    expect(w.groups[1]!.tasks).toEqual([{ id: 'H-2', space: 'home', words: 'second', order: 1 }])
+    // queued: a group per space in queue order, a space without a Spaces row (home) kept too, each group's order kept
+    expect(w.queued.map((g) => g.id)).toEqual(['queued:gtm', 'queued:zeta', 'queued:~'])
+    expect(w.queued[0]!.tasks.map((t) => t.id)).toEqual(['Q-2', 'Q-1'])
+    expect(w.queued[2]!.title).toBe('home')
+    expect(w.queued[2]!.tasks.map((t) => t.id)).toEqual(['Q-4'])
+    // the other kinds are passed through as given: the view never reorders them
+    expect(w.scheduled.map((t) => t.id)).toEqual(['S-late', 'S-soon'])
+    expect(w.todo.map((t) => t.id)).toEqual(['T-1'])
+    expect(w.merges.map((t) => t.id)).toEqual(['M-1'])
+    // one summary line per space, with the same working and held numbers as the Spaces table
+    expect(w.spaceLines).toEqual([
+      { name: 'gtm', working: 1, held: 0, queued: 2 },
+      { name: 'zeta', working: 0, held: 0, queued: 1 },
+      { name: 'home', working: 0, held: 3, queued: 1 },
+    ])
+  })
+
+  test('a chain that ends at a task you can act on marks each task with the root, and the section counts them once', () => {
+    const w = waitingOf(
+      input(settings(), {
+        queue: {
+          queued: [
+            { id: 'Q-1', space: 'gtm', spaceName: 'gtm', words: 'After HP-201', need: { id: 'HP-201', words: 'waits for your reply' } },
+            { id: 'Q-2', space: 'gtm', spaceName: 'gtm', words: 'After Q-1, HP-55', need: { id: 'HP-201', words: 'waits for your reply' } },
+            { id: 'Q-3', space: 'gtm', spaceName: 'gtm', words: 'After HP-202' },
+          ],
+          scheduled: [],
+          todo: [],
+          merges: [],
+        },
+      }),
+    )
+    expect(w.behindYou).toEqual({ tasks: 2, roots: ['HP-201'] })
+    expect(w.queued[0]!.tasks.map((t) => t.need)).toEqual([{ id: 'HP-201', words: 'waits for your reply' }, { id: 'HP-201', words: 'waits for your reply' }, undefined])
   })
 })
 
@@ -257,6 +335,13 @@ describe('the demo world reads the same view (its own tasks, its fixtures for wh
     expect(v.waiting.groups[1]).toMatchObject({ limit: '0 of 2 working' })
     expect(v.waiting.advisor.length).toBe(1)
     expect(v.waiting.reviews.length).toBe(1)
+    // the demo has a task of every kind, so the whole line shows on this page too
+    expect(v.waiting.queued.map((g) => g.id)).toEqual(['queued:herdr-projects'])
+    expect(v.waiting.queued[0]!.tasks.map((t) => t.id)).toEqual(['HP-203', 'HP-205', 'HP-206'])
+    expect(v.waiting.scheduled.map((t) => t.id)).toEqual(['GTM-20'])
+    expect(v.waiting.todo.map((t) => t.id)).toEqual(['GTM-22'])
+    expect(v.waiting.merges.map((t) => t.id)).toEqual(['GTM-19'])
+    expect(v.waiting.behindYou).toEqual({ tasks: 2, roots: ['HP-201'] })
     expect(v.spaces.rows.find((r) => r.key === 'gtm')!.cells['space.maxTasks']).toMatchObject({ from: 'space', row: { value: '2' } })
     // a write from the page lands at its place, and the next read shows it
     expect(await w.act({ type: 'setting', key: 'machine.maxTasks', value: '7', place: `m:${'vm-str'}` })).toMatchObject({ ok: true })
@@ -264,6 +349,16 @@ describe('the demo world reads the same view (its own tasks, its fixtures for wh
     expect(after.machineTable.rows[1]!.cells['machine.maxTasks']).toMatchObject({ from: 'machine', row: { value: '7' } })
     // the summary the demo shows still reads (the Models page and the Limits page share its inputs)
     expect(((await w.act({ type: 'models-summary' })) as { providers: unknown[] }).providers.length).toBeGreaterThan(0)
+  })
+})
+
+describe('the whole queue is built only on request, not on every snapshot', () => {
+  test('the snapshot keeps its old shape: no waiting queue rides along with it', async () => {
+    const { DemoWorld } = await import('../server/demo/world.ts')
+    const snap = new DemoWorld().snapshot()
+    expect(Object.keys(snap).sort()).toEqual(['artifacts', 'asks', 'attentionRequests', 'automations', 'demo', 'host', 'last', 'machines', 'name', 'needs', 'places', 'read', 'sections', 'settings', 'tasks', 'user'])
+    expect(JSON.stringify(snap)).not.toContain('queued after other tasks')
+    expect(JSON.stringify(snap)).not.toContain('QP-')
   })
 })
 
