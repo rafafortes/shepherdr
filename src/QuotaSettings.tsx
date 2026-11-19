@@ -4,7 +4,7 @@
 import { useState } from 'react'
 import type { SettingRow } from '@shared/types.ts'
 import { act, useSnap } from './kernel.ts'
-import { Control, QUOTAS, rowLook } from './Settings.tsx'
+import { Control, QUOTAS, rowLook } from './settings-parts.tsx'
 import { readingWords } from './ModelsSummary.tsx'
 import { Ghost, Small } from './ui.tsx'
 

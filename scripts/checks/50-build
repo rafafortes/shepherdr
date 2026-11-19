@@ -1,9 +1,27 @@
 #!/usr/bin/env bash
-# Check 5: the build. The note is its time, read from this check's own log, exactly as the runner used to read it.
+# Check 5: the build. The note is its time and the first-load chunk's size (SHE-112 keeps an eye on both).
 set -uo pipefail
 root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
 cd "$root" || exit 1
 bun run build
 code=$?
-grep -oE 'built in [0-9.]+m?s' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1 >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
-exit "$code"
+if [ "$code" -ne 0 ]; then exit "$code"; fi
+main=$(ls dist/assets/index-*.js 2>/dev/null | head -1)
+if [ -z "$main" ]; then echo 'build: no main index chunk in dist/assets' >&2; exit 1; fi
+# The heavy Settings page bodies must load on demand, not ride in the first-load chunk (SHE-112). Each marker is a
+# string of its own page that survives minification; the first check is the one that holds the bundle-size gain.
+for marker in 'Reading every level' 'Waiting now'; do
+  if grep -q "$marker" "$main"; then
+    echo "build: the first-load chunk still holds a Settings page body ($marker)" >&2
+    exit 1
+  fi
+  if ! grep -rq "$marker" dist/assets; then
+    echo "build: the lazy Settings page body is missing ($marker)" >&2
+    exit 1
+  fi
+done
+{
+  grep -oE 'built in [0-9.]+m?s' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1
+  printf 'main chunk %s B' "$(wc -c <"$main" | tr -d ' ')"
+} >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
+exit 0
