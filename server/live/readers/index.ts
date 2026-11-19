@@ -3,6 +3,7 @@
 import { closeSync, openSync, readSync, statSync } from 'node:fs'
 import { basename } from 'node:path'
 import { mirrorConversation } from '../agy.ts'
+import { swallow } from '../debug.ts'
 import { mirrorSession } from '../opencode.ts'
 import { AgyReader } from './agy.ts'
 import { ClaudeReader } from './claude.ts'
@@ -148,7 +149,7 @@ export class LogTail {
     try {
       if (this.reader.cli === 'opencode') mirrorSession(id, this.file)
       else if (this.reader.cli === 'agy') mirrorConversation(id, this.file)
-    } catch {}
+    } catch (e) { swallow(`${this.reader.cli} log refresh`, e, this.reader.cli, this.file) }
   }
 
   private restart(ino: number) {

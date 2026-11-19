@@ -118,6 +118,7 @@ export const recorderScript = () => `// Written by Shepherdr: records a Claude C
 const { appendFileSync, renameSync, statSync } = require('node:fs')
 const servesCommand = ${servesCommand.toString()}
 const pickHook = ${pickHook.toString()}
+const note = (why, e) => { if (process.env.SHEPHERDR_DEBUG) console.error('shepherdr: ' + why + ' ignored: ' + (e && e.name || typeof e)) }
 const file = process.argv[2]
 let s = ''
 process.stdin.setEncoding('utf8')
@@ -128,9 +129,9 @@ process.stdin.on('end', () => {
     if (!e) return
     try {
       if (statSync(file).size > ${ROTATE_AT}) renameSync(file, file + '.1')
-    } catch {}
+    } catch (e) { note('hook log rotate', e) }
     appendFileSync(file, JSON.stringify(e) + '\\n')
-  } catch {}
+  } catch (e) { note('hook event parse', e) }
 })
 `
 

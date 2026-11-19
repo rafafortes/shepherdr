@@ -4,6 +4,7 @@ import { closeSync, existsSync, openSync, readSync, readdirSync, realpathSync, s
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { home } from '../../store.ts'
+import { swallow } from '../debug.ts'
 import { conversationLog } from '../agy.ts'
 import { mirrorSession, newestSession, opencodeLogPath } from '../opencode.ts'
 
@@ -45,7 +46,7 @@ const cwds = (cwd: LogCwd): string[] => cwdCandidates(cwd)
 
 /** newest .jsonl in the first candidate folder that has one changed at or after sinceMs; later folders are only looked
  *  in when the preferred one has no log, so old sessions from a link's former name are never read into this chat */
-function newestLog(dirs: string | string[], sinceMs = 0): string | undefined {
+function newestLog(dirs: string | string[], reader: string, sinceMs = 0): string | undefined {
   for (const dir of Array.isArray(dirs) ? dirs : [dirs]) {
     let best: { f: string; m: number } | undefined
     let names: string[]
@@ -60,7 +61,7 @@ function newestLog(dirs: string | string[], sinceMs = 0): string | undefined {
       try {
         const m = statSync(f).mtimeMs
         if (m >= sinceMs && (!best || m > best.m)) best = { f, m }
-      } catch {}
+      } catch (e) { swallow('log stat', e, reader, f) }
     }
     if (best) return best.f
   }
@@ -82,7 +83,7 @@ export function claudeProjectDir(cwd: string): string {
   try {
     const hit = readdirSync(root).find((n) => n.startsWith(name.slice(0, MAX_NAME)))
     if (hit) return join(root, hit)
-  } catch {}
+  } catch (e) { swallow('claude project dirs', e, 'claude', root) }
   return dir
 }
 
@@ -108,7 +109,7 @@ export function claudeLogPath(cwd: LogCwd, sessionId: string): string {
 }
 
 /** the newest Claude Code session log for this cwd, changed at or after sinceMs */
-export const findClaudeLog = (cwd: LogCwd, sinceMs?: number) => newestLog(claudeProjectDirs(cwd), sinceMs)
+export const findClaudeLog = (cwd: LogCwd, sinceMs?: number) => newestLog(claudeProjectDirs(cwd), 'claude', sinceMs)
 
 /* ---------- Codex ---------- */
 
@@ -175,7 +176,7 @@ export function findCodexLog(cwd: LogCwd, sinceMs = 0): string | undefined {
       try {
         const m = statSync(f).mtimeMs
         if (m >= sinceMs) files.push({ f, m })
-      } catch {}
+      } catch (e) { swallow('codex log stat', e, 'codex', f) }
     }
   }
   files.sort((a, b) => b.m - a.m)
@@ -213,7 +214,7 @@ export function piSessionDirs(cwd: LogCwd): string[] {
 }
 
 /** the newest pi session log for this cwd, changed at or after sinceMs */
-export const findPiLog = (cwd: LogCwd, sinceMs?: number) => newestLog(piSessionDirs(cwd), sinceMs)
+export const findPiLog = (cwd: LogCwd, sinceMs?: number) => newestLog(piSessionDirs(cwd), 'pi', sinceMs)
 
 /* ---------- OpenCode ---------- */
 
@@ -232,7 +233,7 @@ export function findOpencodeLog(cwd: LogCwd, sinceMs?: number): string | undefin
     const file = opencodeLogPath(home(), id)
     try {
       mirrorSession(id, file)
-    } catch {}
+    } catch (e) { swallow('opencode log mirror', e, 'opencode', file) }
     return file
   }
   return undefined

@@ -430,6 +430,22 @@ describe('the shepherdr command', () => {
     }
   })
 
+  test('doctor counts the lines each reader ignored, one line per reader only while the count is not zero', async () => {
+    const { swallow, resetSwallowed } = await import('../server/live/debug.ts')
+    resetSwallowed()
+    try {
+      expect((await cli(['doctor'])).out).not.toContain('reader ignored')
+      swallow('test', new Error('x'), 'pi')
+      swallow('test', new Error('x'), 'pi')
+      swallow('test', new Error('x'), 'codex')
+      const out = (await cli(['doctor'])).out
+      expect(out).toContain('The codex reader ignored 1 line it could not read since this server started')
+      expect(out).toContain('The pi reader ignored 2 lines it could not read since this server started')
+    } finally {
+      resetSwallowed()
+    }
+  })
+
   test('a plan needs its steps, and is posted on its task', async () => {
     const sp = await space('plans')
     const t = task(sp)

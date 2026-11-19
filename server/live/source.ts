@@ -56,6 +56,7 @@ import { adviceWords, advisorPrompt, advisorWords, Advices, canAdvise, parseAdvi
 import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { StallWatch } from './stall.ts'
+import { swallowedReport } from './debug.ts'
 import { carryOn, momentOf, Retries, resetOf, type Cut, type Retry } from './retry.ts'
 import { modelsSummary, keyOf, patternName, providerWords, roleOfChat, type LiveAgent, type SummaryInput, type TaskFact } from './models-summary.ts'
 import { entryPatterns, knownOf, limitsView, type HeldFact } from './limits-view.ts'
@@ -4805,7 +4806,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const allowed = parseHosts(named)
         const still = [...refusedHosts].filter((h) => !allowed.includes(h) && !allowed.includes(h.replace(/:\d+$/, '')))
         const refused = still.length ? `Refused Host headers: ${still.join(', ')}. To allow one on this machine run: shepherdr set app.hosts <host>.` : ''
-        return [own, hosts, refused, ...this.stall.report(), ...this.pushWarnings().map((warning) => `Alerts: ${warning}`), ...this.agents.unreadableLogs(), ...((await this.peers?.doctor()) ?? []), ...(await this.places.doctor())].filter(Boolean).join('\n')
+        return [own, hosts, refused, ...this.stall.report(), ...swallowedReport(), ...this.pushWarnings().map((warning) => `Alerts: ${warning}`), ...this.agents.unreadableLogs(), ...((await this.peers?.doctor()) ?? []), ...(await this.places.doctor())].filter(Boolean).join('\n')
       }
       case 'secret': {
         if (a1 !== 'elevenlabs') return this.secretCommand(a1, rest, p, ctx)
