@@ -148,21 +148,22 @@ describe.skipIf(!browser)('a voice call lives in the chat box', () => {
     const { ctx, page } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     await page.tap('button[aria-label="Voice call"]')
     const status = `${box} [role=status]`
+    const lines = `${box} [data-captions]`
     await page.waitForSelector(status)
     // no transcript yet: the pill still just says what the call is doing
     expect(await page.textContent(status)).toBe('Connecting')
     const caption = (who: string, text: string) =>
       page.evaluate(([w, t]) => (window as unknown as { caption(w: string, t: string): void }).caption(w, t), [who, text])
     await caption('you', 'ship it')
-    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('You: ship it'), status)
+    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('You: ship it'), lines)
     await caption('agent', 'on it')
-    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('on it'), status)
-    expect(await page.getAttribute(status, 'aria-live')).toBe('polite')
-    expect(await page.getAttribute(status, 'aria-atomic')).toBe('false')
+    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('on it'), lines)
+    expect(await page.getAttribute(lines, 'aria-live')).toBe('polite')
+    expect(await page.getAttribute(lines, 'aria-atomic')).toBe('false')
     // two lines at most: the oldest drops out, nothing accumulates as history
     await caption('you', 'and one more')
-    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('and one more'), status)
-    const shown = (await page.textContent(status)) ?? ''
+    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('and one more'), lines)
+    const shown = (await page.textContent(lines)) ?? ''
     expect(shown).not.toContain('ship it')
     expect(shown).toContain('on it')
     // ending the call takes the captions with it; nothing is kept on screen
@@ -171,32 +172,33 @@ describe.skipIf(!browser)('a voice call lives in the chat box', () => {
     await page.tap('button[aria-label="Voice call"]')
     await page.waitForSelector(status)
     expect(await page.textContent(status)).toBe('Connecting')
+    expect(await page.$(lines)).toBeNull()
     await page.tap(`${box} button[aria-label="End call"]`)
     await ctx.close()
   }, 30_000)
 
-  test('a long caption keeps the wave and the pill within their room', async () => {
-    const { ctx, page } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
-    await page.tap('button[aria-label="Voice call"]')
-    const wave = `${box} canvas[aria-label^="Voice call with"]`
-    await page.waitForSelector(wave)
-    const waveWidth = () => page.$eval(wave, (c) => c.getBoundingClientRect().width)
-    const width = await waveWidth()
-    const height = await page.$eval(box, (b) => b.getBoundingClientRect().height)
-    await page.evaluate(() =>
-      (window as unknown as { caption(w: string, t: string): void }).caption(
-        'agent',
-        'I have sent that to the agent and will tell you as soon as it replies, which should be shortly.',
-      ),
-    )
-    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('I have sent'), `${box} [role=status]`)
-    // the wave still shows who is talking, and the pill stays close to its one-line height
-    expect(width).toBeGreaterThan(20)
-    expect(await waveWidth()).toBeGreaterThan(20)
-    expect(await page.$eval(box, (b) => b.getBoundingClientRect().height)).toBeLessThan(height + 20)
-    await page.tap(`${box} button[aria-label="End call"]`)
-    await ctx.close()
-  }, 30_000)
+  test('a long caption shows all its words and keeps the wave, on a phone and a narrow one', async () => {
+    const words = 'I have sent that to the agent and will tell you as soon as it replies, which should be shortly.'
+    for (const width of [390, 360]) {
+      const { ctx, page } = await open({ viewport: { width, height: 844 }, hasTouch: true, isMobile: true })
+      await page.tap('button[aria-label="Voice call"]')
+      const wave = `${box} canvas[aria-label^="Voice call with"]`
+      const lines = `${box} [data-captions]`
+      await page.waitForSelector(wave)
+      const waveWidth = () => page.$eval(wave, (c) => c.getBoundingClientRect().width)
+      const before = await waveWidth()
+      const height = await page.$eval(box, (b) => b.getBoundingClientRect().height)
+      await page.evaluate((text) => (window as unknown as { caption(w: string, t: string): void }).caption('agent', text), words)
+      await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('I have sent'), lines)
+      // the wave still shows who is talking, and none of the words are clipped away
+      expect(before).toBeGreaterThan(20)
+      expect(await waveWidth()).toBeGreaterThan(20)
+      expect(await page.$eval(lines, (p) => p.scrollHeight <= p.clientHeight + 1)).toBe(true)
+      expect(await page.$eval(box, (b) => b.getBoundingClientRect().height)).toBeLessThan(height + 120)
+      await page.tap(`${box} button[aria-label="End call"]`)
+      await ctx.close()
+    }
+  }, 60_000)
 
   test('your voice reaches the voice agent: the microphone starts before the audio, and Mute stops it', async () => {
     const { ctx, page } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })

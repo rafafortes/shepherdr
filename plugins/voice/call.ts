@@ -15,7 +15,8 @@ let theirs: AnalyserNode | null = null
 let phase: 'connecting' | 'listening' | 'thinking' = 'connecting'
 let phaseAt = 0
 /** the last spoken lines, for the pill's captions; display-only, never saved */
-let captions: { who: 'agent' | 'you'; text: string }[] = []
+let captions: { id: number; who: 'agent' | 'you'; text: string }[] = []
+let captionSeq = 0
 
 const RATE = 16000
 
@@ -66,7 +67,7 @@ export async function startCall(chatKey: string, onError: (message: string) => v
       phaseAt = Date.now()
     }
     // words the service heard and said, for the pill: no history, just the last couple of lines
-    if (m.type === 'caption' && m.who && m.text) captions = [...captions, { who: m.who, text: m.text }].slice(-2)
+    if (m.type === 'caption' && m.who && m.text) captions = [...captions, { id: ++captionSeq, who: m.who, text: m.text }].slice(-2)
     // you talked over it: what it was about to say is dropped
     if (m.type === 'interrupt') {
       sources.forEach((s) => s.stop())
@@ -121,7 +122,7 @@ export function callPhase(): 'connecting' | 'listening' | 'thinking' | 'speaking
 }
 
 /** the last lines said on the call, newest last, for the pill's captions */
-export function callCaptions(): { who: 'agent' | 'you'; text: string }[] {
+export function callCaptions(): { id: number; who: 'agent' | 'you'; text: string }[] {
   return captions
 }
 

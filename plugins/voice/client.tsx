@@ -83,7 +83,8 @@ function CallBox({ chatKey }: { chatKey: string }) {
   // muted shows whenever the agent isn't speaking, so a silent call never looks like it's listening
   const word = ui.callMuted && phase !== 'speaking' ? 'Muted' : WORD[phase]
   return (
-    <>
+    // the controls keep their row: the captions, when there are any, get a whole line of their own beneath it
+    <div className="flex w-full flex-wrap items-center gap-1">
       {/* a call control, not the talk to type mic: filled, and struck through and dark while muted */}
       <IconButton
         label={ui.callMuted ? 'Unmute' : 'Mute'}
@@ -93,16 +94,10 @@ function CallBox({ chatKey }: { chatKey: string }) {
       >
         {ui.callMuted ? <MicOffIcon className={ic} /> : <MicIcon className={ic} />}
       </IconButton>
-      <LiveWave sample={callSample} label={`Voice call with ${chatName(snap, chatKey)}`} className="ml-1.5 flex-1" />
-      <p className="flex shrink-0 items-start gap-1.5 px-2 text-[0.8125rem] phone:text-[0.9375rem]">
-        {/* the pill is role=status: a new caption is announced, politely; only the changed line, not the old words */}
-        <span role="status" aria-live="polite" aria-atomic="false" className="min-w-0 max-w-[8rem] phone:max-w-[9rem] font-medium text-fg">
-          <span className="block">{word}</span>
-          {captions.length > 0 && (
-            <span className="line-clamp-2 whitespace-pre-line break-words text-[0.75rem] leading-snug font-normal text-fg2">
-              {captions.map((c) => `${c.who === 'you' ? 'You: ' : ''}${c.text}`).join('\n')}
-            </span>
-          )}
+      <LiveWave sample={callSample} label={`Voice call with ${chatName(snap, chatKey)}`} className="ml-1.5 min-w-10 flex-1" />
+      <p className="flex shrink-0 items-baseline gap-1.5 px-2 text-[0.8125rem] phone:text-[0.9375rem]">
+        <span role="status" className="font-medium text-fg">
+          {word}
         </span>
         <span className="text-fg3 tabular-nums">{t}</span>
       </p>
@@ -114,7 +109,17 @@ function CallBox({ chatKey }: { chatKey: string }) {
       >
         <EndCallIcon className={ic} />
       </button>
-    </>
+      {/* the words said on the call, last two lines, no history: display only, gone when the call ends */}
+      {captions.length > 0 && (
+        <p data-captions role="status" aria-live="polite" aria-atomic="false" className="w-full px-2 text-[0.8125rem] leading-snug text-fg2">
+          {captions.map((c) => (
+            <span key={c.id} className="block">
+              {c.who === 'you' ? 'You: ' : ''}{c.text}
+            </span>
+          ))}
+        </p>
+      )}
+    </div>
   )
 }
 
