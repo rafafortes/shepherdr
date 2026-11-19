@@ -24,9 +24,10 @@ On a machine where herdr runs as a systemd user service, give it (and the server
 
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe; each step is
 one executable file in `scripts/checks/`, named `<number>-<name>` with the numbers spaced by ten (`10-dependencies`,
-`15-secrets`, `20-types`, `30-tests`, `40-coverage`, `50-build`). The runner discovers the executable files by sorted
-file name, so adding a check is adding one file and no later task edits a shared list: a `.ts` file beside them is a
-check's own logic, not a check (e.g. `secrets.ts`), and the order is reviewed because it is the file name. A check file:
+`15-secrets`, `17-scripts`, `20-types`, `30-tests`, `40-coverage`, `50-build`). The runner discovers the executable
+files by sorted file name, so adding a check is adding one file and no later task edits a shared list: a `.ts` file
+beside them is a check's own logic, not a check (e.g. `secrets.ts`), and the order is reviewed because it is the file
+name. A check file:
 
 - gets its shared context in `SHEPHERDR_CHECK_*` environment variables, never positional arguments:
   `SHEPHERDR_CHECK_ROOT`, `SHEPHERDR_CHECK_LOGS`, `SHEPHERDR_CHECK_COVER`, `SHEPHERDR_CHECK_MAP` and
@@ -47,6 +48,12 @@ the run's log folder, never the repo, and only a finding's file, line and rule a
 that predates the step is baselined in `.gitleaksignore` as one fingerprint per line, with a `#` line above saying why
 it is a false positive or a revoked token; a new fingerprint fails the step. A host without gitleaks skips it with the
 install command, and the verdict names the part that did not run.
+
+The scripts step (`17-scripts`, whose logic is `scripts/checks/scripts.ts`) runs `shellcheck -S warning` over
+`scripts/*.sh`, `bin/shepherdr` and `bin/agent-browser`, and `perl -c` over `helper/*.pl` and `helper/shepherdr`. A
+warning or a syntax error fails with its file and line; an accepted finding is baselined with `# shellcheck disable=`
+and the reason on the line. perlcritic is not gated on: its style rules are too opinionated for a check. A host without
+either tool skips just that part, naming it, and the verdict says what did not run.
 
 The tests never touch the Shepherdr on this machine or its herdr: `test/preload.ts` gives each file a home of its own
 under `/tmp`, a socket that isn't there and no inherited pane, tab or workspace id. Every temporary folder a test makes
