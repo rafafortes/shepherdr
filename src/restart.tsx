@@ -347,9 +347,9 @@ export function RestartAllItem({ onPick }: { onPick?: () => void }) {
     <MenuItem
       icon={<RestartIcon className={ic} />}
       onClick={() => {
-        // the dialog takes the answer: the menu gives the focus back to the ⋯, which the dialog takes back when it goes
         onPick?.()
-        setAskingAll(true)
+        // once the menu has given the focus back to the ⋯, which the dialog takes back when it goes
+        setTimeout(() => setAskingAll(true))
       }}
     >
       {`Restart ${count} coordinator${count === 1 ? '' : 's'}`}
@@ -393,7 +393,7 @@ function RestartAllBox() {
     setError(null)
     const r = (await act({ type: 'restart-all' }).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string; restarted?: number; failed?: number; failures?: string[] }
     setBusy(false)
-    if (r.ok === false) return setError(r.error || 'It could not restart them.')
+    if (!r.ok || r.error) return setError(r.error ?? 'It could not restart them.')
     if (!r.restarted && !r.failed) setAnswer({ text: 'Nothing new in their Settings', failed: false })
     else setAnswer({ text: `Restarted ${r.restarted ?? 0}${r.failed ? `, ${r.failed} failed: ${(r.failures ?? []).join(', ')}` : ''}`, failed: !!r.failed })
   }
@@ -414,14 +414,16 @@ function RestartAllBox() {
     <Dialog
       title={`Restart ${count} coordinator${count === 1 ? '' : 's'}?`}
       safe
-      onCancel={cancel}
+      onCancel={() => {
+        if (!busy) cancel()
+      }}
       buttons={
         <Primary disabled={busy} onClick={go}>
           {busy ? 'Restarting…' : 'Restart'}
         </Primary>
       }
     >
-      <ul className="flex flex-col gap-1">
+      <ul className="max-h-[45vh] flex flex-col gap-1 overflow-y-auto">
         {affected.map((p) => {
           const atWork = watched.has(p.chat) && !!chats[p.chat]?.working
           return (

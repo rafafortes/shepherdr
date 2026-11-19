@@ -59,7 +59,7 @@ import {
   UnpinIcon,
 } from '@client/ui.tsx'
 import { MarkRead, markPlaceRead, muted, placeUnread } from '@client/unread.ts'
-import { RestartAllItem, RestartItem, ConfirmRestartAll } from '@client/restart.tsx'
+import { ConfirmRestartAll, RestartAllItem, RestartItem } from '@client/restart.tsx'
 import { NOTIFY, NOTIFY_KEY, notifyOf, notifyRow } from '@shared/alerts.ts'
 import { kept, PINNED, sectionsIn, TOP, type PlaceOrder } from '@shared/order.ts'
 import { machineName, NAME_MAX, nameProblem, slugify, type Machine, type Place, type Section, type Snapshot } from '@shared/types.ts'
