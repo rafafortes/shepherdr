@@ -11,7 +11,12 @@ import type { LogEvent, Reader } from './types.ts'
 
 type Json = any
 
-/** a tool part of an OpenCode reply as a step: its own words where known, else the tool's name in words */
+/** a file tool's words, or the tool's name when the part has no path to name */
+const fileStep = (name: 'Read' | 'Edit' | 'Write', path: string, input: Json): Said =>
+  path ? claudeStep(name, { file_path: path, ...input })! : { step: 'other', ...words(`Use ${name.toLowerCase()}`) }
+
+/** a tool part of an OpenCode reply as a step: its own words where known, else the tool's name in words. The part shape
+ *  is OpenCode SDK's ToolPart (tool, state.{status,input,output,time}); older rows use name and input instead. */
 export function opencodeStep(tool: string, input: Json = undefined): Said {
   const i = input && typeof input === 'object' ? input : {}
   const path = String(i.filePath ?? i.file_path ?? '')
@@ -19,11 +24,11 @@ export function opencodeStep(tool: string, input: Json = undefined): Said {
     case 'bash':
       return runStep(i.command, i.description)
     case 'read':
-      return path ? claudeStep('Read', { file_path: path })! : { step: 'other', ...words('Use read') }
+      return fileStep('Read', path, {})
     case 'edit':
-      return claudeStep('Edit', { file_path: path, old_string: i.oldString, new_string: i.newString })!
+      return fileStep('Edit', path, { old_string: i.oldString, new_string: i.newString })
     case 'write':
-      return claudeStep('Write', { file_path: path, content: i.content })!
+      return fileStep('Write', path, { content: i.content })
     case 'grep':
       return claudeStep('Grep', { pattern: i.pattern, path: i.path })!
     case 'glob':
@@ -125,12 +130,15 @@ export class OpencodeReader implements Reader {
           const state = part.state ?? part
           const output = typeof state.output === 'string' ? state.output : undefined
           const said = opencodeStep(tool, state.input ?? part.input)
+          // a part keeps its own start and end where OpenCode recorded them; older rows only have the row's time
+          const began = typeof state.time?.start === 'number' ? state.time.start : at
+          const over = typeof state.time?.end === 'number' ? state.time.end : at
           out.push({
             kind: 'step',
             id: `${id}-${index}`,
-            at,
+            at: began,
             tool,
-            end: at,
+            end: over,
             failed: state.status === 'error' || undefined,
             result: said.test && output ? testResult(output) : undefined,
             out: { file, offset },

@@ -1,15 +1,31 @@
 // pi's log: ~/.pi/agent/sessions/--<cwd>--/<time>_<id>.jsonl. The first line is {type: 'session', id, cwd}; then
 // entries with their own id: message {message: {role, content}}, model_change, custom, ... The chat reads the user's
 // and the assistant's text, and their tool calls and results as steps; system prompts and thinking stay out.
+import { basename } from 'node:path'
 import { testResult, words } from '../../../shared/activity.ts'
-import { runStep, type Said } from './steps.ts'
+import { claudeStep, runStep, type Said } from './steps.ts'
 import type { LogEvent, Reader } from './types.ts'
 
 type Json = any
 
-/** a pi tool call as a step: a shell command in words, else the tool's name */
-export function piStep(name: string, args: Json): Said {
-  if (name === 'bash') return runStep(args && typeof args === 'object' ? args.command : undefined)
+/** a pi tool call as a step: the tool's own words where known, else its name */
+export function piStep(name: string, args: Json = undefined): Said {
+  const a = args && typeof args === 'object' ? args : {}
+  const path = String(a.path ?? a.filePath ?? '')
+  switch (name) {
+    case 'bash':
+      return runStep(a.command)
+    case 'read':
+      return path ? claudeStep('Read', { file_path: path })! : { step: 'other', ...words('Use read') }
+    case 'write':
+      return path ? claudeStep('Write', { file_path: path, content: a.content })! : { step: 'other', ...words('Use write') }
+    case 'edit':
+      return path ? claudeStep('Edit', { file_path: path, old_string: a.oldText, new_string: a.newText })! : { step: 'other', ...words('Use edit') }
+    case 'grep':
+      return claudeStep('Grep', { pattern: a.pattern })!
+    case 'find':
+      return claudeStep('Glob', { pattern: a.pattern ?? a.query })!
+  }
   return { step: 'other', ...words(`Use ${name.replace(/_/g, ' ')}`) }
 }
 
@@ -51,8 +67,10 @@ export class PiReader implements Reader {
   private ended = new Set<string>()
   /** tool calls shown as steps and not over yet, by file and id: whether it was a test run */
   private steps = new Map<string, boolean>()
-  /** a call id repeats across sessions, so it names a step only together with its file */
+  /** a call id repeats across sessions, so it names a step only together with its file; the chat's own step ids are
+   *  file-qualified too, since it folds the steps of all a task's log files into one list */
   private stepKey = (file: string, id: string) => `${file}\0${id}`
+  private stepId = (file: string, id: string) => `${basename(file, '.jsonl')}-${id}`
 
   reset(file: string) {
     this.sessions.delete(file)
@@ -104,7 +122,7 @@ export class PiReader implements Reader {
             const name = String(b.name ?? '')
             const said = piStep(name, b.arguments)
             this.steps.set(key, !!said.test)
-            out.push({ kind: 'step', id: call, at: t, tool: name, ...said })
+            out.push({ kind: 'step', id: this.stepId(file, call), at: t, tool: name, ...said })
           })
           const u = m.usage
           const tokens = typeof u?.totalTokens === 'number' ? u.totalTokens : (u?.input ?? 0) + (u?.output ?? 0) + (u?.cacheRead ?? 0) + (u?.cacheWrite ?? 0)
@@ -132,7 +150,7 @@ export class PiReader implements Reader {
           if (test !== undefined) {
             this.steps.delete(key)
             const body = texts(m.content).join('\n')
-            out.push({ kind: 'step-end', id: call, at: t, failed: m.isError === true || undefined, out: { file, offset }, ...(test && body ? { result: testResult(body) } : {}) })
+            out.push({ kind: 'step-end', id: this.stepId(file, call), at: t, failed: m.isError === true || undefined, out: { file, offset }, ...(test && body ? { result: testResult(body) } : {}) })
           }
         }
       }

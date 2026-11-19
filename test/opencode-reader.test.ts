@@ -245,12 +245,12 @@ describe('opencode reader', () => {
   test('a tool-only row keeps the turn open until the reply after it; a tool run counts its result', () => {
     const ev = parse([
       row('u11', 'user', { text: 'go' }),
-      turn('a21', { content: [{ type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'bun test' }, output: '41 passed' } }], finish: 'tool-calls' }),
+      turn('a21', { content: [{ type: 'tool', tool: 'bash', state: { status: 'completed', time: { start: 8, end: 12 }, input: { command: 'bun test' }, output: '41 passed' } }], finish: 'tool-calls' }),
       turn('a22', { content: [{ type: 'text', text: 'ok' }], finish: 'stop' }),
     ])
     expect(turns(ev)).toEqual(['turn-start:start-u11', 'turn-end:turn-a22'])
     expect(ev.find((e) => e.kind === 'step')).toMatchObject({
-      id: 'a21-0', tool: 'bash', step: 'run', title: 'Ran tests', test: true, result: '41 passed', end: 10,
+      id: 'a21-0', tool: 'bash', step: 'run', title: 'Ran tests', test: true, result: '41 passed', at: 8, end: 12,
     })
   })
 
@@ -259,7 +259,9 @@ describe('opencode reader', () => {
     expect(opencodeStep('read', { filePath: '/w/a.ts' })).toMatchObject({ step: 'read', title: 'Read a.ts' })
     expect(opencodeStep('read', undefined)).toMatchObject({ step: 'other', title: 'Used read' })
     expect(opencodeStep('edit', { filePath: '/w/a.ts', oldString: 'a', newString: 'a\nb' })).toMatchObject({ step: 'edit', title: 'Edited a.ts', added: 1 })
+    expect(opencodeStep('edit', undefined)).toMatchObject({ step: 'other', title: 'Used edit' })
     expect(opencodeStep('write', { filePath: '/w/a.ts', content: 'a\nb' })).toMatchObject({ step: 'edit', title: 'Wrote a.ts', added: 2 })
+    expect(opencodeStep('write', undefined)).toMatchObject({ step: 'other', title: 'Used write' })
     expect(opencodeStep('grep', { pattern: 'review' })).toMatchObject({ step: 'search', title: 'Searched the code for “review”' })
     expect(opencodeStep('glob', { pattern: '*.ts' })).toMatchObject({ step: 'search', title: 'Looked for files named *.ts' })
     expect(opencodeStep('webfetch', { url: 'https://example.com/docs' })).toMatchObject({ step: 'web', title: 'Read example.com/docs' })

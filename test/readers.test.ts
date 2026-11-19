@@ -4,6 +4,7 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSyn
 import { join } from 'node:path'
 import { claudeLogPath, claudeProjectDir, cwdCandidates, findClaudeLog, findCodexLog, findPiLog, piSessionDir } from '../server/live/readers/find.ts'
 import { outputAt } from '../server/live/activity.ts'
+import { piStep } from '../server/live/readers/pi.ts'
 import { LogTail, readerFor } from '../server/live/readers/index.ts'
 import type { LogEvent } from '../server/live/readers/types.ts'
 import { tmp } from './tmp.ts'
@@ -473,10 +474,10 @@ describe('pi reader', () => {
     const offsets = [0, Buffer.byteLength(JSON.stringify(lines[0]) + '\n')]
     const ev = readerFor('pi')!.parse(lines.map((l, i) => ({ text: JSON.stringify(l), offset: offsets[i] })), file)
     expect(ev.filter((e) => e.kind === 'step')).toMatchObject([
-      { kind: 'step', id: 'call_1', tool: 'bash', step: 'run', title: 'Ran tests', test: true },
+      { kind: 'step', id: 'pi-call_1', tool: 'bash', step: 'run', title: 'Ran tests', test: true },
     ])
     const end = ev.find((e) => e.kind === 'step-end')!
-    expect(end).toMatchObject({ id: 'call_1', result: '41 passed', out: { file, offset: offsets[1] } })
+    expect(end).toMatchObject({ id: 'pi-call_1', result: '41 passed', out: { file, offset: offsets[1] } })
     expect(outputAt(end.kind === 'step-end' ? end.out! : { file, offset: 0 }, end.id)).toBe('41 passed')
   })
 
@@ -487,14 +488,27 @@ describe('pi reader', () => {
       pimsg('p5', 'p4', { role: 'toolResult', toolCallId: 'call_2', content: [{ type: 'text', text: 'oops' }], isError: true, timestamp: 2 }),
     ])
     expect(ev.filter((e) => e.kind === 'step')).toMatchObject([
-      { id: 'call_2', tool: 'some_tool', step: 'other', title: 'Used some tool' },
-      { id: 'call_3', tool: 'bash', step: 'run', title: 'Ran a command' },
-      { id: 't0-2', tool: 'read', step: 'other', title: 'Used read' },
+      { id: 'pi-call_2', tool: 'some_tool', step: 'other', title: 'Used some tool' },
+      { id: 'pi-call_3', tool: 'bash', step: 'run', title: 'Ran a command' },
+      { id: 'pi-t0-2', tool: 'read', step: 'other', title: 'Used read' },
     ])
     const ends = ev.filter((e) => e.kind === 'step-end')
     expect(ends).toHaveLength(1)
-    expect(ends[0]).toMatchObject({ id: 'call_2', failed: true })
+    expect(ends[0]).toMatchObject({ id: 'pi-call_2', failed: true })
     expect(ends[0]).not.toHaveProperty('result')
+  })
+
+  test('each tool reads in words, like the other CLIs: shell, files, search and an unknown tool', () => {
+    expect(piStep('bash', { command: 'git status' })).toMatchObject({ step: 'run', title: 'Checked git status' })
+    expect(piStep('read', { path: '/w/a.ts' })).toMatchObject({ step: 'read', title: 'Read a.ts' })
+    expect(piStep('read')).toMatchObject({ step: 'other', title: 'Used read' })
+    expect(piStep('write', { path: '/w/a.ts', content: 'a\nb' })).toMatchObject({ step: 'edit', title: 'Wrote a.ts', added: 2 })
+    expect(piStep('write')).toMatchObject({ step: 'other', title: 'Used write' })
+    expect(piStep('edit', { path: '/w/a.ts', oldText: 'a', newText: 'a\nb' })).toMatchObject({ step: 'edit', title: 'Edited a.ts', added: 1 })
+    expect(piStep('edit')).toMatchObject({ step: 'other', title: 'Used edit' })
+    expect(piStep('grep', { pattern: 'review' })).toMatchObject({ step: 'search', title: 'Searched the code for “review”' })
+    expect(piStep('find', { pattern: '*.ts' })).toMatchObject({ step: 'search', title: 'Looked for files named *.ts' })
+    expect(piStep('todowrite')).toMatchObject({ step: 'other', title: 'Used todowrite' })
   })
 
   test('a call id is a step in each session, and a reset forgets only that session’s steps', () => {
@@ -506,7 +520,7 @@ describe('pi reader', () => {
     expect(steps(a)).toHaveLength(1)
     expect(steps(b)).toHaveLength(1)
     expect(steps(a)).toHaveLength(0)
-    reader.reset(a)
+    reader.reset?.(a)
     expect(steps(a)).toHaveLength(1)
   })
 })
