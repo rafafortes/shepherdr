@@ -92,6 +92,9 @@ describe('unified search identities, scope and privacy', () => {
     expect(space.length).toBeGreaterThan(0)
     expect(space.every(h => h.level === 'p:vm-str:~')).toBe(true)
     expect(space.some(h => h.label === 'Review rounds')).toBe(true)
+    // global sections have no single page to open (Quotas has none; Alerts and voice splits), so they are not indexed
+    expect(searchResults(snap, all, 'voice', {}).some(h => h.kind === 'Settings')).toBe(false)
+    expect(searchResults(snap, all, 'quota', {}).some(h => h.kind === 'Settings')).toBe(false)
     // no query keeps 'Recent items' as it was: all 66 rows do not flood the sheet
     expect(searchResults(snap, all, '', {}).some(h => h.kind === 'Settings')).toBe(false)
   })

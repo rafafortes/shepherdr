@@ -142,6 +142,21 @@ describe.skipIf(!browser)('unified search', () => {
     }
   }, 90_000)
 
+  test('a settings hit opens its page on a phone too', async () => {
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
+    try {
+      await page.goto(url())
+      await page.locator('textarea[name="message"]').first().waitFor()
+      await page.keyboard.press('Control+k')
+      const search = page.getByRole('combobox', { name: 'Search or jump to' })
+      await search.fill('rounds')
+      const hit = page.getByRole('group', { name: 'Settings', exact: true }).getByRole('option').filter({ hasText: 'Review rounds' }).first()
+      await hit.waitFor()
+      await hit.click()
+      await page.getByRole('region', { name: 'How tasks work' }).waitFor()
+    } finally { await page.close() }
+  }, 90_000)
+
   test('the four existing result types keep their order with Settings appended last', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {

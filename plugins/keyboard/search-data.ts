@@ -75,8 +75,10 @@ export function searchResults(snap: Snapshot, scope: SearchScope, q: string, cha
   }
   // Settings are matched only by their words and where they open, never by their value: a value can hold a private
   // instruction or a secret. With no query 'Recent items' stays as it was, so all 66 rows do not flood the sheet.
+  // Global sections (Quotas, Alerts and voice) are not pages of their own - one has no page, the other splits into
+  // Notifications and Voice - so their rows have no single section to open and stay out of the index.
   if (q.trim()) for (const section of snap.settings ?? []) {
-    if (section.level !== level) continue
+    if (section.level !== level || section.global) continue
     for (const row of section.rows) {
       if (words(q, row.label, row.key, row.hint, row.group, row.sub)) add({
         key: `s:${section.level}:${section.name}:${row.key}`,
