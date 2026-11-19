@@ -151,6 +151,7 @@ describe('the pre-ready run the repo asks for', () => {
     expect(agents).toContain('`SHEPHERDR_TEST_JOBS=1` serializes the suite and is for debugging')
     expect(agents).toContain('The full `bun run check:local` is where nothing may be missed')
     expect(agents).toContain('the weekly sweep, and the coordinator')
+    expect(agents).toContain('`bash scripts/check-local.sh --reuse`')
     // no page asks for the whole check before ready again (a revert of the rule fails here)
     for (const page of [agents, develop, skill]) expect(page).not.toMatch(FULL_BEFORE_READY)
   })
@@ -166,7 +167,10 @@ describe('the pre-ready run the repo asks for', () => {
     expect(develop).toContain('the merge gate, the weekly sweep, and the coordinator')
     // the product page says where the full check now happens, and how a space asks for it on every merge
     expect(tasks).toContain('the quick pre-ready check, `bun run check:local --quick`')
-    expect(tasks).toContain('merge sets the gate to it (`shepherdr set merge.gate')
+    expect(tasks).toContain('merge sets the gate to the check itself, below')
+    // the gate answers at once only for a tree a full run passed, and a task's quick run never becomes one
+    expect(flat(join(root, 'docs', 'tasks.md'))).toContain("is never kept as a tree's verdict")
+    expect(pages().agents).toContain('`bash scripts/check-local.sh --reuse`')
   })
 
   test('a change to a file that can break any test runs the whole suite, in a quick run too', () => {

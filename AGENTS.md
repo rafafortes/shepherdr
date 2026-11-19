@@ -88,8 +88,9 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   the full check for it.
 - Never make a check cheaper by hand: `SHEPHERDR_TEST_JOBS=1` serializes the suite and is for debugging one test's
   order, never for a gate — the runner already caps the workers and takes the lock that keeps runs apart.
-- The full `bun run check:local` is where nothing may be missed: the merge gate (where a space sets `merge.gate` to it),
-  the weekly sweep, and the coordinator's run on `herdr-tui` before a release, which also records the screen map `bun run
+- The full `bun run check:local` is where nothing may be missed: the merge gate (a space sets `merge.gate` to the check
+  itself, `bash scripts/check-local.sh --reuse`, which answers at once for a tree a full run already passed), the weekly
+  sweep, and the coordinator's run on `herdr-tui` before a release, which also records the screen map `bun run
   test changed` picks from (until it has, a change of the screen's files runs every browser test). A check that did not
   pass keeps `shepherdr ready` unrun and the change unmerged, whatever file the failure is in: the task fixes a small
   failure and says so, or it stops, says what fails and why the failure is not its own, and its coordinator decides.

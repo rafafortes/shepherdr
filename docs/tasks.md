@@ -162,9 +162,7 @@
   commit); anything else, or 45 minutes without an end, refuses the merge with the end of its output, the base stays as
   it was and the task is Ready again. It is where a change's full check happens: a task proves its own change with the
   quick pre-ready run before `shepherdr ready` ([develop](develop.md)), so a space that wants the whole check on every
-  merge sets the gate to it (`shepherdr set merge.gate "bun run check:local" --space <name>`), knowing that the gate's
-  last printed line goes into the merge commit: the runner's last line carries its log folder, under the agent's home,
-  so a repository whose history may not hold the operator's paths wants a wrapper that prints a short line instead.
+  merge sets the gate to the check itself, below.
   Merges into one repo go one at a time, so the others wait while it runs; a `shepherdr merge` that asks meanwhile hears
   that the gate still runs. If the base moved anyway while it ran, the branch is rebased on it and the gate runs again
   (three times at most). It is never a git hook: a hook that refuses an update leaves what it would write in the space's
@@ -188,10 +186,12 @@
   them, are read as before: the gate is one more condition, never a replacement.
   The gate that costs nothing while the base did not move is the check itself: a space turns it on with `shepherdr set merge.gate
   "bash scripts/check-local.sh --reuse" --space <name>` ([develop](develop.md) has how `--reuse` answers and what it
-  keeps). It replies at once when the branch's tree already passed the full check — the task's own `bun run check:local`
-  on a clean worktree — and runs the full check when it did not: nothing has passed on that tree yet, or the branch was
-  rebased onto a base that moved, so what will land is checked before it lands. A merge train runs its gate on the top of
-  its stack, a tree no single run recorded, so a train always pays one full run.
+  keeps). It replies at once when that exact tree already passed the full check in any worktree of the repo, and runs
+  the full check when it did not: nothing has passed on that tree yet — a task's own pre-ready run is the quick one and
+  is never kept as a tree's verdict ([develop](develop.md)) — or the branch was rebased onto a base that moved, so what
+  will land is checked before it lands. The first merge of a tree therefore pays one full run, and a merge retried on the
+  same tree pays nothing. A merge train runs its gate on the top of its stack, a tree no single run recorded, so a train
+  always pays one full run.
 - A space with a merge gate may also take **merge trains** (Settings → How tasks work → Merge train, `merge.train`: off
   by default, or 2 to 5, the most merges one train takes, the head included). When several merges wait in line here,
   the first one in line runs the gate once for them all: their changes are stacked on main, one on top of the other,
