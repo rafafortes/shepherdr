@@ -9,6 +9,8 @@
 #   bun run check:local --quick  # opt-in: incremental types + changed tests + build, no coverage; marked QUICK in a
 #                                # verdict of its own, never a baseline or a full verdict (the full gate still runs at
 #                                # the merge, weekly and before a release)
+#   bun run check:local --reuse  # the merge gate's cheap question: answers at once when this very tree already passed
+#                                # the full check in some worktree, and runs the full check when it did not (QG-10)
 #
 # It runs at the lowest priority (nice 19, idle disk), one run at a time across every worktree of the repo (a lock
 # file under $XDG_RUNTIME_DIR, or ~/.cache where that isn't set: never in the repo, never in ~/.shepherdr), and the
@@ -40,11 +42,25 @@ set -uo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 branch=$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)
 [ -n "$branch" ] && [ "$branch" != HEAD ] || branch=$(git -C "$root" rev-parse --short HEAD)
+
+dur() {
+  local s=$1
+  if [ "$s" -ge 60 ]; then printf '%dm%02ds' $((s / 60)) $((s % 60)); else printf '%ds' "$s"; fi
+}
+
 # --quick (bun run check:local --quick): the pre-ready run, incremental types + changed tests + build. The full gate
 # still runs at the merge, weekly and before a release; a quick verdict is never a baseline and never answers where a
 # full verdict is asked for (QG-10), so it goes in a file of its own and says what it did not run on its first line.
+# --reuse (bun run check:local --reuse): the merge gate's question, answered below before anything runs, by the verdict
+# of the tree it ran on. It asks for a full verdict, so a quick run is refused rather than answered.
 quick=0
 for arg in "$@"; do [ "$arg" = --quick ] && quick=1; done
+reuse=0
+for arg in "$@"; do [ "$arg" = --reuse ] && reuse=1; done
+if [ "$quick" = 1 ] && [ "$reuse" = 1 ]; then
+  printf 'check:local: --quick and --reuse ask different things: --reuse is the merge gate question, and only a full check answers it.\n'
+  exit 1
+fi
 # a log folder of this worktree's own: several worktrees' checks never overwrite each other's
 logs="$HOME/.cache/shepherdr/check-local/$(basename "$root")"
 mkdir -p "$logs"
@@ -54,6 +70,43 @@ vname=$(basename "$V")
 # every verdict line, not just the header, says a quick run is not a full gate verdict
 verdict_kind=''
 [ "$quick" = 1 ] && verdict_kind=' (quick run; not a full gate verdict)'
+# --reuse: a full PASSED verdict of a clean worktree is kept by the tree it ran on (git's HEAD^{tree}) in one place every
+# worktree of the repo shares, and this answers at once when that very tree has one: nothing runs, no test worker is
+# taken. A tree is exactly what the check read, so an uncommitted change, a run with a part skipped and a quick run are
+# never a tree's verdict; a branch rebased onto a base that moved has another tree, which is checked before it lands.
+verdicts="$HOME/.cache/shepherdr/check-local/verdicts"
+tree=''
+uncommitted=''
+reuse_miss=''
+# 0 when it answered (its verdict was printed), 1 when the full check has to run; it reads the tree afresh, since a check
+# this one waited behind may have just kept it
+reuse_answer() {
+  tree=$(git -C "$root" rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null)
+  uncommitted=$(git -C "$root" status --porcelain 2>/dev/null)
+  reuse_miss=''
+  [ "$reuse" = 1 ] || return 1
+  if [ -z "$tree" ]; then
+    reuse_miss='the worktree has no commit yet, so no tree of it can have passed'
+  elif [ -n "$uncommitted" ]; then
+    reuse_miss='the worktree has uncommitted changes, so no tree of it can have passed'
+  elif [ ! -s "$verdicts/$tree" ]; then
+    reuse_miss='no full check has passed on this tree yet'
+  else
+    local at took ago
+    at=$(sed -n 's/^at //p' "$verdicts/$tree" | head -1)
+    took=$(sed -n 's/^took //p' "$verdicts/$tree" | head -1)
+    case $at in '' | *[!0-9]*) reuse_miss='the verdict kept for this tree is unreadable' ;; esac
+    [ -z "$reuse_miss" ] || return 1
+    case $took in '' | *[!0-9]*) took=0 ;; esac
+    ago=$(($(date +%s) - at))
+    [ "$ago" -ge 0 ] || ago=0
+    printf 'check:local reuse · %s at %s · this exact tree passed the full check already\n' "$branch" "$(git -C "$root" rev-parse --short HEAD 2>/dev/null)"
+    printf 'Reused the verdict of %s ago (it took %s): nothing ran now.\n' "$(dur "$ago")" "$(dur "$took")"
+    return 0
+  fi
+  return 1
+}
+reuse_answer && exit 0
 # a run gone by must not answer for this one, while this one waits for the lock
 printf 'check:local is running: no verdict yet\n' >"$V"
 # one lock for every session (never in the repo, never in ~/.shepherdr): a shell without XDG_RUNTIME_DIR takes it too
@@ -63,11 +116,6 @@ step_timeout=${SHEPHERDR_CHECK_STEP_TIMEOUT:-1800}
 wait_timeout=${SHEPHERDR_CHECK_WAIT:-3600}
 case $step_timeout in '' | *[!0-9]*) step_timeout=1800 ;; esac
 case $wait_timeout in '' | *[!0-9]*) wait_timeout=3600 ;; esac
-
-dur() {
-  local s=$1
-  if [ "$s" -ge 60 ]; then printf '%dm%02ds' $((s / 60)) $((s % 60)); else printf '%ds' "$s"; fi
-}
 
 # last in line for the CPU and the disk, behind herdr and the agents (env is the no-op a missing tool leaves behind)
 prio=(env)
@@ -103,6 +151,12 @@ if command -v flock >/dev/null 2>&1; then
   trap 'rm -f "$lock.pid"' EXIT
 else
   echo "flock is missing: running without the one-at-a-time lock."
+fi
+# the check this one waited behind may have kept this very tree's verdict while it ran: asked again here, before the run,
+# and its own line stands in this worktree's verdict for the note above, which did while this one waited
+if reuse_answer; then
+  printf 'check:local reuse: this tree passed the full check already, so nothing ran here\n' >"$V"
+  exit 0
 fi
 # this run's own verdict, from its header on (what stood there while it waited was the note above)
 : >"$V"
@@ -233,6 +287,27 @@ failing_tests() {
   ' "$1" | sort -u
 }
 
+# what a run does with the verdict of the tree it read: a full PASSED one is kept for --reuse, and a failure takes away
+# whatever that tree had (a tree that just failed is no tree a verdict may answer for, whatever it did before). A run
+# with a part skipped, a quick run or an uncommitted tree is never kept, and a base that moved gives the branch another
+# tree, so the tree that lands is checked before it lands.
+record() { # <1 when it passed whole>
+  [ "$quick" = 1 ] && return 0
+  [ -n "$tree" ] && [ -z "$uncommitted" ] || return 0
+  # the tree this run read, not one the branch may have moved to while it ran
+  [ "$(git -C "$root" rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null)" = "$tree" ] || return 0
+  [ -z "$(git -C "$root" status --porcelain 2>/dev/null)" ] || return 0
+  if [ "$1" != 1 ]; then
+    [ -f "$verdicts/$tree" ] && rm -f "$verdicts/$tree"
+    return 0
+  fi
+  mkdir -p "$verdicts"
+  local tmp="$logs/.verdict.$tree.$$"
+  printf 'tree %s\ncommit %s\nbranch %s\nat %s\ntook %s\nlogs %s\n' \
+    "$tree" "$(git -C "$root" rev-parse --verify --quiet HEAD)" "$branch" "$(date +%s)" "$((SECONDS - started))" "$logs" >"$tmp" &&
+    mv -f "$tmp" "$verdicts/$tree"
+}
+
 show_failure() { # the reasons a step failed
   local name=$1 log="$logs/$1.log" shown=''
   case $name in
@@ -269,7 +344,7 @@ dirty=''
 if [ "$quick" = 1 ]; then
   say "check:local QUICK · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty · NOT run: the full suite, coverage, screen map and baseline · the full gate runs at the merge, weekly and before a release"
 else
-  say "check:local · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty · $jobs test workers · $priority"
+  say "check:local · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty${reuse_miss:+ · $reuse_miss} · $jobs test workers · $priority"
 fi
 
 # the browsers the tests open, named before the run instead of skipping quietly inside it. The first check installs the
@@ -318,10 +393,26 @@ fi
 
 echo
 if [ ${#failed[@]} -eq 0 ] && [ ${#notes[@]} -eq 0 ]; then
-  say "PASSED in $(dur $((SECONDS - started)))$verdict_kind · logs: $logs"
+  record 1
+  # a --reuse run is the merge gate's, and what it says last goes into the merge commit (docs/tasks.md): the log folder
+  # of this machine is said first, so no path of it lands in the repository's history
+  if [ "$reuse" = 1 ]; then
+    say "· logs: $logs"
+    say "PASSED in $(dur $((SECONDS - started)))$verdict_kind"
+  else
+    say "PASSED in $(dur $((SECONDS - started)))$verdict_kind · logs: $logs"
+  fi
   exit 0
 fi
 if [ ${#failed[@]} -eq 0 ]; then
+  # --reuse is the merge gate's question: a tree whose check skipped a part did not pass it, so the gate refuses here
+  # rather than passing a tree that nothing checked whole (the pre-ready run still exits 0, saying what did not run)
+  if [ "$reuse" = 1 ]; then
+    say "NOT A FULL VERDICT in $(dur $((SECONDS - started))): this run did not check the tree whole, so the merge gate refuses it:"
+    for n in "${notes[@]}"; do say "  ! $n"; done
+    say "· logs: $logs ($vname)"
+    exit 1
+  fi
   say "PASSED in $(dur $((SECONDS - started)))$verdict_kind, with parts of it not run:"
   for n in "${notes[@]}"; do say "  ! $n"; done
   say "· logs: $logs"
@@ -333,6 +424,7 @@ if [ ${#notes[@]} -gt 0 ]; then
   say ""
 fi
 for name in "${failed[@]}"; do say "$(show_failure "$name")"; done
+record 0
 say "FAILED in $(dur $((SECONDS - started)))$verdict_kind: ${failed[*]}"
 say "Full logs: $logs ($vname)"
 exit 1

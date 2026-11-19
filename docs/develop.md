@@ -9,6 +9,7 @@ bun run test changed  # the tests that reach what you changed from the default b
 bun run test          # every test, in parallel, a quarter of the cores as the check does (but no lock)
 bun run check:local   # the whole check: dependencies, dependency audit, secrets, scripts, docs, version, types, language, every test with the browser ones, the coverage ratchet, the build (about 2 minutes warm on a quiet machine; 5m34s under load)
 bun run check:local --quick  # opt-in: incremental types + changed tests + build, no coverage (see below)
+bun run check:local --reuse  # the merge gate's cheap ask: answers at once when this tree already passed (see below)
 ```
 
 The whole check runs on this machine: GitHub Actions is off on this repo (2026-11-06), so `.github/workflows/check.yml`
@@ -35,6 +36,28 @@ or the build still fails the gate. The default stays full: the whole gate still 
 typecheck, tests and build steps share one build per run instead of three, and `tsc`'s `--incremental` cache lives
 there too. A release symlinks its `node_modules` to a shared deps folder, where the hash and the check that the
 registries still match what it wrote keep a shared cache safe; neither weakens what any step checks.
+
+`bun run check:local --reuse` is the question a merge gate asks (`merge.gate`, [tasks](tasks.md)): when this very
+tree already passed the full check in any worktree of the repository it prints when and how long, runs nothing, and
+exits 0; with no such verdict it runs the full check, saying in its first line why. A full PASSED verdict of a clean
+worktree is kept by the tree it ran on (`git rev-parse HEAD^{tree}`) in
+`~/.cache/shepherdr/check-local/verdicts/<tree>`, one place every worktree shares, so a tree whose verdict stands is not
+checked again; a later full run that fails on the same tree takes that verdict away. A run with a part skipped, a quick
+run and an uncommitted worktree are never kept: they did not check that tree whole. Asked as `--reuse`, a run that ends
+with a part skipped is refused (exit 1, naming what did not run) rather than pass the gate on it, and an uncommitted
+worktree or one with no commit has no tree to name, so its full check runs and keeps nothing; `--quick` and `--reuse`
+together are refused. A branch rebased onto a base that moved has a tree no verdict names, so it is checked in full
+before it lands: two branches that each passed on the old base cannot break the base together. The gate runs its
+command in the task's worktree after the rebase, at the tip that lands, so the tree it asks for is the one that lands,
+and a `--reuse` run's last line (the one a merge commit carries) names no path of this machine. Commit the work before
+running the check: a run on a worktree with uncommitted changes is kept for no tree, and the commit the merge makes
+would leave the gate a tree it has to check in full. A verdict is only as good as the run behind it: the tree is not a
+run's only input (the base's history, the host's browsers, the coverage baseline and `node_modules` decide one too), and
+since the gate runs the branch's own script, an agent that edits it or writes a verdict file can still fake a pass —
+the flag closes the quiet skip, not tampering. A hit leaves the worktree's own `verdict.txt` as the last run left it (a
+hit that waited behind another check writes a line saying nothing ran here). A verdict does not expire: it goes away when
+a full run of that tree fails, or when the folder is cleared, so clear `~/.cache/shepherdr/check-local/verdicts` after
+changing the host's tools (a new browser, another gitleaks) if the trees should be checked again.
 
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe; each step is
 one executable file in `scripts/checks/`, named `<number>-<name>` with the numbers spaced by ten (`10-dependencies`,

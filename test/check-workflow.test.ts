@@ -61,6 +61,31 @@ describe('the check itself', () => {
     expect(scripts['check:local']).toBe('bash scripts/check-local.sh')
     expect(scripts.check).toBe('bun run check:local')
   })
+  test('answers --reuse from the verdict every worktree shares by tree, and keeps one for each tree that passed', () => {
+    const lines = readFileSync(join(root, 'scripts', 'check-local.sh'), 'utf8')
+      .split('\n')
+      .filter((l) => l.trim() && !l.trim().startsWith('#'))
+    // the cheap merge gate (QG-10): the tree the check read, in a folder every worktree of the repo shares
+    expect(lines).toContain('verdicts="$HOME/.cache/shepherdr/check-local/verdicts"')
+    expect(lines).toContain(`  tree=$(git -C "$root" rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null)`)
+    expect(lines).toContain('for arg in "$@"; do [ "$arg" = --reuse ] && reuse=1; done')
+    // a quick run answers nothing and keeps nothing, and the gate question is asked after the lock wait too (the run
+    // it waited behind may have just kept this very tree)
+    expect(lines).toContain(`if [ "$quick" = 1 ] && [ "$reuse" = 1 ]; then`)
+    expect(lines).toContain('reuse_answer && exit 0')
+    expect(lines).toContain('if reuse_answer; then')
+    // a tree's verdict is written only once the run passed whole, and taken away when it fails
+    const call = lines.indexOf('  record 1')
+    expect(call).toBeGreaterThan(-1)
+    expect(lines).toContain('record 0')
+    // a --reuse run's last line is the one a merge commit carries: the log folder is said before it, never in it
+    const tail = lines.slice(call)
+    const logs = tail.indexOf('    say "· logs: $logs"')
+    const passed = tail.findIndex((l) => l.includes('say "PASSED in'))
+    expect(logs).toBeGreaterThan(0)
+    expect(logs).toBeLessThan(passed)
+  })
+
   test('whose runner discovers the checks, one run at a time, last in line for the CPU', () => {
     // its comments name these too: what runs is what a line that isn't a comment says
     const lines = readFileSync(join(root, 'scripts', 'check-local.sh'), 'utf8')

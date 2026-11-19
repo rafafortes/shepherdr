@@ -3,25 +3,27 @@
 // its own with fake checks: adding a check must need no edit to a shared list, and one failure must stop the run.
 // The pattern is test/check-workflow.test.ts's: a git repo made in /tmp, driven by the file's own commands.
 import { describe, expect, test } from 'bun:test'
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { tmp } from './tmp.ts'
 
 const root = join(import.meta.dir, '..')
 const runner = join(root, 'scripts', 'check-local.sh')
 
-/** a fake check: it records that it ran, then does whatever the test gives it and exits with its status */
+/** a fake check: it records that it ran (in the fixture's HOME, never in the repo, whose tree must stay clean), then
+ *  does whatever the test gives it and exits with its status */
 const check = (extra = '', exit = 0) => `#!/usr/bin/env bash
 set -uo pipefail
-echo "$SHEPHERDR_CHECK_NAME" >> "$SHEPHERDR_CHECK_ROOT/calls.txt"
+echo "$SHEPHERDR_CHECK_NAME" >> "$HOME/calls.txt"
 ${extra}
 exit ${exit}
 `
 
-/** a fixture repo holding a copy of the real runner, the given checks, a stand-in browser probe and a HOME of its own */
-function fixture(checks: Record<string, string>, branch = 'herdr-tui') {
+/** a fixture repo holding a copy of the real runner, the given checks, a stand-in browser probe and a HOME of its own
+ *  (outside the repo: a file left in the worktree would change the tree a verdict is kept by) */
+function fixture(checks: Record<string, string>, branch = 'herdr-tui', commit = true) {
   const dir = tmp('checks-runner')
-  const home = join(dir, 'home')
+  const home = tmp('checks-runner-home')
   mkdirSync(join(dir, 'scripts', 'checks'), { recursive: true })
   mkdirSync(home, { recursive: true })
   const git = (...args: string[]) => {
@@ -31,8 +33,6 @@ function fixture(checks: Record<string, string>, branch = 'herdr-tui') {
   }
   git('init', '-q', '-b', branch)
   writeFileSync(join(dir, 'README.md'), 'fixture\n')
-  git('add', '-A')
-  git('-c', 'user.name=CI', '-c', 'user.email=ci@localhost', 'commit', '-qm', 'init')
   copyFileSync(runner, join(dir, 'scripts', 'check-local.sh'))
   writeFileSync(join(dir, 'scripts', 'check-browsers.ts'), "console.log('chromium: ok (fixture)')\nconsole.log('webkit: ok (fixture)')\n")
   for (const [name, body] of Object.entries(checks)) {
@@ -40,12 +40,22 @@ function fixture(checks: Record<string, string>, branch = 'herdr-tui') {
     writeFileSync(file, body)
     chmodSync(file, 0o755)
   }
+  // the scaffolding is committed with the fixture: a worktree with a file of its own is no clean tree
+  if (commit) {
+    git('add', '-A')
+    git('-c', 'user.name=CI', '-c', 'user.email=ci@localhost', 'commit', '-qm', 'init')
+  }
   const logs = join(home, '.cache', 'shepherdr', 'check-local', basename(dir))
+  const kept = join(home, '.cache', 'shepherdr', 'check-local', 'verdicts')
   return {
     dir,
+    home,
     logs,
-    run: () => {
-      const r = Bun.spawnSync(['bash', join(dir, 'scripts', 'check-local.sh')], {
+    kept,
+    git,
+    tree: () => git('rev-parse', 'HEAD^{tree}'),
+    run: (...args: string[]) => {
+      const r = Bun.spawnSync(['bash', join(dir, 'scripts', 'check-local.sh'), ...args], {
         cwd: dir,
         env: { ...process.env, HOME: home, SHEPHERDR_CHECK_WAIT: '5', SHEPHERDR_CHECK_STEP_TIMEOUT: '30' },
         stdout: 'pipe',
@@ -53,8 +63,8 @@ function fixture(checks: Record<string, string>, branch = 'herdr-tui') {
       })
       return { out: r.stdout.toString(), err: r.stderr.toString(), code: r.exitCode }
     },
-    calls: () => (existsSync(join(dir, 'calls.txt')) ? readFileSync(join(dir, 'calls.txt'), 'utf8').trim().split('\n').filter(Boolean) : []),
-    verdict: () => readFileSync(join(logs, 'verdict.txt'), 'utf8'),
+    calls: () => (existsSync(join(home, 'calls.txt')) ? readFileSync(join(home, 'calls.txt'), 'utf8').trim().split('\n').filter(Boolean) : []),
+    verdict: (file = 'verdict.txt') => readFileSync(join(logs, file), 'utf8'),
   }
 }
 
@@ -118,6 +128,161 @@ describe('the discovered checks', () => {
       expect(f.run().code).toBe(0)
       expect(readFileSync(join(f.dir, 'flags.txt'), 'utf8').trim()).toBe(want)
     }
+  })
+})
+
+describe('the verdict a tree already passed (--reuse)', () => {
+  const passing = { '10-one': check() }
+
+  test('a clean full run keeps its verdict by tree, and --reuse answers from it without running anything', () => {
+    const f = fixture(passing)
+    expect(f.run().code).toBe(0)
+    expect(f.calls()).toEqual(['one'])
+    const tree = f.tree()
+    const kept = readFileSync(join(f.kept, tree), 'utf8')
+    expect(kept).toContain(`tree ${tree}`)
+    expect(kept).toContain(`commit ${f.git('rev-parse', 'HEAD')}`)
+    expect(kept).toContain('branch herdr-tui')
+    expect(kept).toMatch(/^at \d+$/m)
+    expect(kept).toMatch(/^took \d+$/m)
+    // the same tree again: nothing runs, and its own log folder is left alone
+    rmSync(join(f.home, 'calls.txt'))
+    const again = f.run('--reuse')
+    expect(again.code).toBe(0)
+    expect(again.err).toBe('')
+    expect(f.calls()).toEqual([])
+    expect(again.out).toMatch(/^check:local reuse · herdr-tui at [0-9a-f]+ · this exact tree passed the full check already$/m)
+    expect(again.out).toContain('Reused the verdict of')
+    expect(again.out).not.toContain('/1 one')
+  })
+
+  test('a tree with no verdict, and one that moved, are checked in full', () => {
+    const f = fixture(passing)
+    const first = f.run('--reuse')
+    expect(first.code).toBe(0)
+    expect(first.out).toContain('no full check has passed on this tree yet')
+    expect(f.calls()).toEqual(['one'])
+    // the last line is what a merge commit carries: no path of this machine in it
+    expect(first.out.trimEnd().split('\n').at(-1)).toMatch(/^PASSED in \d+s$/)
+    rmSync(join(f.home, 'calls.txt'))
+    // another commit is another tree: the one that passed says nothing of it
+    writeFileSync(join(f.dir, 'README.md'), 'fixture, changed\n')
+    f.git('add', '-A')
+    f.git('-c', 'user.name=CI', '-c', 'user.email=ci@localhost', 'commit', '-qm', 'change')
+    expect(f.run('--reuse').code).toBe(0)
+    expect(f.calls()).toEqual(['one'])
+  })
+
+  test('a dirty worktree and one with no commit are named, checked, and kept for no tree', () => {
+    // uncommitted: HEAD's tree is not what the run read
+    const dirty = fixture(passing)
+    writeFileSync(join(dirty.dir, 'extra.txt'), 'not committed\n')
+    const d = dirty.run('--reuse')
+    expect(d.code).toBe(0)
+    expect(d.out).toContain('the worktree has uncommitted changes')
+    expect(dirty.calls()).toEqual(['one'])
+    expect(existsSync(dirty.kept)).toBe(false)
+    // a repository with no commit has no tree to name either
+    const bare = fixture(passing, 'herdr-tui', false)
+    const b = bare.run('--reuse')
+    expect(b.code).toBe(0)
+    expect(b.out).toContain('no commit yet')
+    expect(bare.calls()).toEqual(['one'])
+    expect(existsSync(bare.kept)).toBe(false)
+  })
+
+  test('a record that cannot be read is no verdict: the check runs again', () => {
+    const f = fixture(passing)
+    mkdirSync(f.kept, { recursive: true })
+    writeFileSync(join(f.kept, f.tree()), 'tree whatever\nat nope\n')
+    const r = f.run('--reuse')
+    expect(r.code).toBe(0)
+    expect(r.out).toContain('unreadable')
+    expect(f.calls()).toEqual(['one'])
+  })
+
+  test('a part skipped keeps no verdict, and the gate refuses it instead of passing it', () => {
+    const f = fixture({ '10-one': check(`printf 'the tool is missing\\n' > "$SHEPHERDR_CHECK_SKIP"`) })
+    // the pre-ready run stays soft: it passed, saying what did not run
+    const pre = f.run()
+    expect(pre.code).toBe(0)
+    expect(pre.out).toContain('with parts of it not run:')
+    expect(existsSync(f.kept)).toBe(false)
+    // the gate's ask: a tree nothing checked whole is no tree that passed
+    const gate = f.run('--reuse')
+    expect(gate.code).toBe(1)
+    expect(gate.out).toContain('NOT A FULL VERDICT')
+    expect(gate.out).toContain('the tool is missing')
+    expect(existsSync(f.kept)).toBe(false)
+  })
+
+  test('a quick run is refused as a gate question, and a later failure takes the tree\'s verdict away', () => {
+    // the check fails only while the fixture's HOME holds a flag: the same tree, a different host state
+    const f = fixture({ '10-one': check('[ -f "$HOME/fail" ] && exit 1') })
+    expect(f.run().code).toBe(0)
+    const tree = f.tree()
+    expect(existsSync(join(f.kept, tree))).toBe(true)
+    rmSync(join(f.home, 'calls.txt'))
+    const both = f.run('--quick', '--reuse')
+    expect(both.code).toBe(1)
+    expect(both.out).toContain('--quick and --reuse ask different things')
+    expect(f.calls()).toEqual([])
+    // the same tree fails on a later full run: its old verdict is not one to answer from
+    writeFileSync(join(f.home, 'fail'), '')
+    expect(f.run().code).toBe(1)
+    expect(existsSync(join(f.kept, tree))).toBe(false)
+    const after = f.run('--reuse')
+    expect(after.code).toBe(1)
+    expect(after.out).toContain('no full check has passed on this tree yet')
+  })
+
+  test('a run that waited behind another answers from the verdict it kept meanwhile, without running', async () => {
+    // the point of asking again after the lock: a gate queued behind another worktree's check does not pay a second run
+    if (!Bun.which('flock')) return // the runner then runs without the one-at-a-time lock, and there is nothing to wait for
+    const f = fixture(passing)
+    const lock = join(f.home, '.cache', 'shepherdr', 'check-local.lock')
+    mkdirSync(join(f.home, '.cache', 'shepherdr'), { recursive: true })
+    // holds the lock for a moment: room enough for a loaded machine's runner to reach it and say it waits, and short
+    // enough not to slow the suite
+    const holder = Bun.spawn(['flock', lock, 'sleep', '4'])
+    await Bun.sleep(300)
+    const runner = Bun.spawn(['bash', join(f.dir, 'scripts', 'check-local.sh'), '--reuse'], {
+      cwd: f.dir,
+      env: { ...process.env, HOME: f.home, SHEPHERDR_CHECK_WAIT: '20', SHEPHERDR_CHECK_STEP_TIMEOUT: '30' },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const decoder = new TextDecoder()
+    const reader = runner.stdout.getReader()
+    let out = ''
+    // it said it waits for the other check, so it is past its first look at the verdicts
+    while (!out.includes('waiting for it, up to')) {
+      const { value, done } = await reader.read()
+      if (done) break
+      out += decoder.decode(value)
+    }
+    expect(out).toContain('waiting for it, up to')
+    // the check it waits behind keeps this very tree's verdict, then goes away
+    mkdirSync(f.kept, { recursive: true })
+    writeFileSync(join(f.kept, f.tree()), `tree ${f.tree()}\nat ${Math.floor(Date.now() / 1000)}\ntook 12\n`)
+    expect(await holder.exited).toBe(0)
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      out += decoder.decode(value)
+    }
+    expect(await runner.exited).toBe(0)
+    expect(out).toContain('this exact tree passed the full check already')
+    expect(f.calls()).toEqual([])
+    // the worktree's verdict says what happened, not the note that stood there while it waited
+    expect(f.verdict()).toContain('nothing ran here')
+  })
+
+  test('a tree the branch moved away from while the check ran is never kept', () => {
+    const moved = `printf 'x\\n' >> "$SHEPHERDR_CHECK_ROOT/README.md" && git -C "$SHEPHERDR_CHECK_ROOT" -c user.name=CI -c user.email=ci@localhost commit -qam moved`
+    const f = fixture({ '10-one': check(moved) })
+    expect(f.run().code).toBe(0)
+    expect(existsSync(f.kept)).toBe(false)
   })
 })
 
