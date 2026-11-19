@@ -22,14 +22,14 @@ export const usePluginErrors = () =>
   )
 
 class Boundary extends Component<{ name: string; children?: ReactNode }, { failed: boolean }> {
-  state = { failed: false }
+  override state = { failed: false }
   static getDerivedStateFromError() {
     return { failed: true }
   }
-  componentDidCatch(e: unknown) {
+  override componentDidCatch(e: unknown) {
     pluginFailed(this.props.name, e)
   }
-  render() {
+  override render() {
     return this.state.failed ? null : this.props.children
   }
 }
@@ -184,17 +184,17 @@ function Crashed({ crash }: { crash: ScreenCrash }) {
 
 /** around <App />: a render break anywhere under it gets a way out, not a blank document */
 export class ScreenBoundary extends Component<{ children?: ReactNode }, { crash: ScreenCrash | null }> {
-  state = { crash: null as ScreenCrash | null }
+  override state = { crash: null as ScreenCrash | null }
   static getDerivedStateFromError(e: unknown) {
     const message = e instanceof Error ? e.message : String(e)
     const crash = nextCrash(readCrash(), message)
     keepCrash(crash)
     return { crash }
   }
-  componentDidCatch(e: unknown) {
+  override componentDidCatch(e: unknown) {
     console.error('the screen broke:', e)
   }
-  render() {
+  override render() {
     const { crash } = this.state
     return crash ? <Crashed crash={crash} /> : this.props.children
   }

@@ -1,0 +1,15 @@
+// The strict island: the compiler flags that are still too costly for the whole tree, turned on for the directories
+// that already pass them. `bun run typecheck` runs it after the main typecheck, so a directory listed here never falls
+// back. A directory joins once its own files and everything they import pass (tsc also checks what an included file
+// imports). Still to come, with their errors on noUncheckedIndexedAccess at the first landing: test 1423,
+// server/live 468 (engine 48 and readers 12 inside it), src 106, plugins/chat 46, scripts 42, server/demo 34,
+// plugins/places 24, and the other plugins.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true,
+    "tsBuildInfoFile": "node_modules/.cache/tsconfig.strict.tsbuildinfo"
+  },
+  "include": ["shared"],
+  "exclude": ["user-plugins"]
+}

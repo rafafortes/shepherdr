@@ -11,7 +11,8 @@
     "dev": "bun scripts/build-plugins.ts && vite",
     "start": "bun server/main.ts",
     "demo": "SHEPHERDR_SOURCE=demo bun server/main.ts",
-    "typecheck": "bun scripts/build-plugins.ts && tsc --noEmit",
+    "typecheck": "bun scripts/build-plugins.ts && tsc --noEmit && bun run typecheck:strict",
+    "typecheck:strict": "tsc -p tsconfig.strict.json",
     "test": "bun scripts/test.ts",
     "check": "bun run check:local",
     "check:local": "bash scripts/check-local.sh"

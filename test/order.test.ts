@@ -85,6 +85,17 @@ describe('sections', () => {
     expect(sectionProblem(defs, '')).toBe('A section needs a name.')
   })
 
+  test('a section whose def is missing at runtime is named by its id instead of crashing', () => {
+    // no store reaches this state; the test forces what the type allows (a defs key with no value), so the guard
+    // added for noUncheckedIndexedAccess can never become a crash
+    const gone = 's:gone'
+    const defs = { [gone]: undefined } as unknown as SectionDefs
+    expect(sortPlaces(places, machines, { [TOP]: [gone] }, defs).sections.map((s) => [s.id, s.name])).toEqual([
+      [gone, gone],
+      [PINNED, 'Pinned'],
+    ])
+  })
+
   test("a machine's spaces dragged as they show keep those in sections where they were", () => {
     const order: PlaceOrder = { 'm:vm': ['p:vm:~', 'p:vm:a', 'p:vm:b'] }
     // a sits in a section: the human drags b over home

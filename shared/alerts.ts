@@ -36,7 +36,10 @@ export function keptTags(snap: Pick<Snapshot, 'places' | 'tasks' | 'asks'>, onSc
 }
 
 /** a choice as an alert shows it: a choice that needs a note says so in the app, not in the alert */
-const short = (q: Question, i: number) => (q.noteRequiredFor === i ? q.choices[i].label.replace(/ with a note$/i, '') : q.choices[i].label)
+const short = (q: Question, i: number) => {
+  const label = q.choices[i]?.label ?? ''
+  return q.noteRequiredFor === i ? label.replace(/ with a note$/i, '') : label
+}
 
 /** the card's choices in short: "Approve the plan · Send it back" */
 export const choicesLine = (q: Question) => q.choices.map((_, i) => short(q, i)).join(' · ')
@@ -122,8 +125,9 @@ export function taskAlert(
     return { title: clip(`${t.id} · Done`, TITLE_MAX), body: clip(summaryOf(t), BODY_MAX), go: { place: t.project, focus: card?.id }, tag, task: true }
   }
   const open = openCards(chats.task)
-  if (open.length) {
-    const q = open[0].question
+  const first = open[0]
+  if (first) {
+    const q = first.question
     // a form of several questions is answered in the app, where all of them show
     const card = { chat: chats.task!.key, question: q.id, choices: open.length > 1 ? [] : quickChoices(q) }
     return { ...askText(t.id, q), go: { ...go, focus: q.id }, tag, task: true, card: card.choices.length ? card : undefined }

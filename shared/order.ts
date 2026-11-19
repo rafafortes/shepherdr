@@ -64,16 +64,16 @@ export function sortPlaces(places: Place[], machines: Machine[], order: PlaceOrd
   const taken = new Set<string>()
   const section = (id: string, fits: (p: Place) => boolean): Section => {
     // Pinned keeps its pin: a name of its own, never an emoji
-    const d = id === PINNED ? { name: defs[PINNED]?.name || 'Pinned' } : defs[id]
+    const d = id === PINNED ? { name: defs[PINNED]?.name || 'Pinned' } : (defs[id] ?? { name: id })
     const spaces = [...new Set(order[id] ?? [])].filter((x) => known.has(x) && !taken.has(x) && fits(known.get(x)!))
     for (const x of spaces) taken.add(x)
     return { id, name: d.name, ...(d.emoji ? { emoji: d.emoji } : {}), ...(d.machine ? { machine: d.machine } : {}), spaces }
   }
   const ids = Object.keys(defs).filter((id) => id !== PINNED)
-  const sections = listed([PINNED, ...ids.filter((id) => !defs[id].machine)], order[TOP]).map((id) => section(id, () => true))
+  const sections = listed([PINNED, ...ids.filter((id) => !defs[id]?.machine)], order[TOP]).map((id) => section(id, () => true))
   const out = sections.flatMap((s) => s.spaces.map((x) => known.get(x)!))
   for (const m of ms) {
-    const inside = listed(ids.filter((id) => defs[id].machine === m.machine), order[sectionsIn(m.id)]).map((id) => section(id, (p) => p.machine === m.machine))
+    const inside = listed(ids.filter((id) => defs[id]?.machine === m.machine), order[sectionsIn(m.id)]).map((id) => section(id, (p) => p.machine === m.machine))
     out.push(...machineSpaces(places, m, order).filter((p) => !taken.has(p.id)), ...inside.flatMap((s) => s.spaces.map((x) => known.get(x)!)))
     sections.push(...inside)
   }
