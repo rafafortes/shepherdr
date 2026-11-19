@@ -14,8 +14,8 @@ The whole check runs on this machine: GitHub Actions is off on this repo (2026-1
 keeps only `workflow_dispatch` and starts nothing by itself. A task runs `bun run check:local` before `shepherdr ready`
 and says the result in its facts, and the coordinator runs it on `herdr-tui` before a release. A check that did not pass
 keeps the task from `shepherdr ready` and from merging, whatever file the failure is in: the task fixes a small one and
-says so, otherwise it stops, says what fails and why the failure is not its own, and its coordinator decides. It runs at the lowest
-priority (nice 19, idle disk), one run at a time across every worktree of the repo (a lock file under
+says so, otherwise it stops, says what fails and why the failure is not its own, and its coordinator decides. It runs at
+the lowest priority (nice 19, idle disk), one run at a time across every worktree of the repo (a lock file under
 `$XDG_RUNTIME_DIR`, else `~/.cache`), and the test files are capped at `SHEPHERDR_TEST_JOBS` workers (a quarter of the
 cores by default) so herdr, the server and the agents keep the CPU: the tests' own `systemd-run` scope, where systemd
 runs this user's services, gives them the least CPU and IO weight too. It takes about two minutes warm, and waits

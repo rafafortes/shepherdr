@@ -165,8 +165,9 @@
   not only on a conflict, so that what the gate checks is what will land), the gate runs on that very commit before
   anything is pushed, and the pull request merges only while its head is still that commit and GitHub's base is still the
   one it ran on, as far as a fetch just before the merge can tell (GitHub itself pins only the head). A merge that comes
-  back for GitHub's checks gates again on its next `shepherdr merge`: the gate is on every one of them. A base that moved while it ran: the branch is rebased and the gate runs again (three times at most, then
-  `main kept moving while … nothing was merged`); a base that moved after it ran, while GitHub's checks were read, no
+  back for GitHub's checks gates again on its next `shepherdr merge`: the gate is on every one of them. A base that moved
+  while it ran: the branch is rebased and the gate runs again (three times at most, then `main kept moving while …
+  nothing was merged`); a base that moved after it ran, while GitHub's checks were read, no
   merge at all — the next `shepherdr merge` gates the branch on the new base. GitHub's own checks, where a repository has
   them, are read as before: the gate is one more condition, never a replacement.
 - A space with a merge gate may also take **merge trains** (Settings → How tasks work → Merge train, `merge.train`: off
@@ -177,8 +178,8 @@
   line `Merge train: A, B, C (one merge gate run)`. The riders are the next tasks in line with the same gate, whose agent
   is at rest and has read its messages. One whose change conflicts with the ones before it, or adds nothing to them,
   keeps its place and goes in on its own turn, as usual. Only merges made here take part: a space whose merges go
-  through a pull request takes no train, and the server's log says so once per merge (`… merges through a pull request,
-  and a merge train is for merges made here`).
+  through a pull request takes no train, and the server's log says so (`… merges through a pull request, and a merge
+  train is for merges made here`).
   If the gate refuses the train, nothing of it lands: each member then goes alone once, on its own gate, before it rides
   a train again, and only the task whose change fails is told of the refusal. If main moves while the train's gate
   runs, the head goes alone and the riders wait in line as before. The server's log names each train decision and why a

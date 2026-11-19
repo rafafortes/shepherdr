@@ -3414,8 +3414,9 @@ export class Engine extends Emitter<Events> {
     let at = ''
     /** the branch on the base as it is now: the error that stopped it, or nothing when it is */
     const onto = async () => {
-      // a worker machine runs the gate over its own link, in that machine's worktree, so there is nothing here to rebase
-      if (BOX) return
+      // nothing to bring it onto when the base can't be read (a link to another machine that is down, say): the run
+      // itself says what is wrong, as it always did
+      if (!at) return
       if ((await G.git(wt, 'merge-base', '--is-ancestor', at, 'HEAD')).ok) return
       if (!(await G.rebase(wt, on)).ok) {
         this.land(t, 'rebase')
