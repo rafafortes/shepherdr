@@ -59,7 +59,7 @@ import {
   UnpinIcon,
 } from '@client/ui.tsx'
 import { MarkRead, markPlaceRead, muted, placeUnread } from '@client/unread.ts'
-import { RestartAllItem, RestartItem } from '@client/restart.tsx'
+import { RestartAllItem, RestartItem, ConfirmRestartAll } from '@client/restart.tsx'
 import { NOTIFY, NOTIFY_KEY, notifyOf, notifyRow } from '@shared/alerts.ts'
 import { kept, PINNED, sectionsIn, TOP, type PlaceOrder } from '@shared/order.ts'
 import { machineName, NAME_MAX, nameProblem, slugify, type Machine, type Place, type Section, type Snapshot } from '@shared/types.ts'
@@ -846,7 +846,7 @@ function MachineHeading({ m, snap, shut, spaces, sort, className }: { m: Machine
             Rename machine…
           </MenuItem>
           {/* its coordinators are this machine's to restart; another machine's place belongs to that machine */}
-          {m.machine === snap.host ? <RestartAllItem /> : null}
+          {m.machine === snap.host ? <RestartAllItem onPick={menu.close} /> : null}
         </RowMenu>
       ) : null}
     </Heading>
@@ -1059,7 +1059,7 @@ export default definePlugin({
   setup(reg) {
     reg.views.places = Places
     reg.views.placesMenu = NewSection
-    reg.overlays.push(AddSpace, ConfirmRemove, MarkRead, SectionDialogs)
+    reg.overlays.push(AddSpace, ConfirmRemove, MarkRead, SectionDialogs, ConfirmRestartAll)
     reg.keys.push({ order: 1, handle: ({ e, ui, snap }) => stepPlace(e, ui, snap) })
   },
 })
