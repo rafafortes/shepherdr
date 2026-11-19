@@ -951,6 +951,38 @@ describe('the line of what waits: the engine lists each kind with its wait and t
     expect(ms).toBeLessThan(2000)
   })
 
+  test("the walk is remembered in both answers: a chain of 100 queued tasks ending at a task at work walks each one once", async () => {
+    const w = world()
+    const p = await w.places.add(repo(), 'walk-once')
+    // the common shape: the chain ends at a task simply at work, so it names no root at all
+    const work = await started(w, repo(), 'atwork', 'Still working')
+    const now = Date.now()
+    const base = (id: string) => ({ id, n: 1, project: placeId.space(p.name), title: id, by: 't', created: now, updated: now })
+    for (let i = 0; i < 100; i++) w.engine.tasks.push({ ...base(`W-${i}`), after: [i === 0 ? work.t.id : `W-${i - 1}`] } as never)
+    // every lookup of a task, by id: the walk of a chain starts at this.task, so a task walked once from each of the
+    // tasks behind it would be looked up 100 times
+    const seen = new Map<string, number>()
+    const task = w.engine.task.bind(w.engine)
+    w.engine.task = ((id: string) => {
+      seen.set(id, (seen.get(id) ?? 0) + 1)
+      return task(id)
+    }) as typeof w.engine.task
+    let q
+    try {
+      q = w.engine.queueWaiters(now)
+    } finally {
+      w.engine.task = task
+    }
+    expect(q.queued).toHaveLength(100)
+    expect(q.queued.every((t) => !t.need)).toBe(true)
+    // each task is looked up a handful of times (the row's own checks, its chain once): never once for each task behind
+    // it, which is what the chain costs when only the roots found are kept (203 lookups of the first, 10 599 in all)
+    expect(seen.get('W-0')).toBeLessThanOrEqual(10)
+    expect(Math.max(...seen.values())).toBeLessThanOrEqual(10)
+    // and the whole call is of the size of the chain, never of its square
+    expect([...seen.values()].reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(1200)
+  })
+
   test('a chain ending at a failed, stopped or gone task names it; a cycle does not loop', async () => {
     const w = world()
     const p = await w.places.add(repo(), 'chain')
@@ -969,6 +1001,13 @@ describe('the line of what waits: the engine lists each kind with its wait and t
       { ...base('TOP'), after: ['MID'] } as never,
       { ...base('CYC-1'), after: ['CYC-2'] } as never,
       { ...base('CYC-2'), after: ['CYC-1'] } as never,
+      // a cycle with a way out, listed from its second member: CY-C waits for CY-B, which waits for CY-C and for CY-F, so
+      // what CY-C reaches is cut short by the cycle and only CY-B's other blocker has the root. Neither CY-C nor a task
+      // behind it may keep the "nothing found" that walk gives, or CY-Y loses the root CY-F
+      { ...base('CY-F'), trouble: 'it failed' } as never,
+      { ...base('CY-C'), after: ['CY-B'] } as never,
+      { ...base('CY-B'), after: ['CY-C', 'CY-F'] } as never,
+      { ...base('CY-Y'), after: ['CY-C'] } as never,
     )
     const by = Object.fromEntries(w.engine.queueWaiters().queued.map((t) => [t.id, t]))
     expect(by['Q-F']!.need).toEqual({ id: 'ROOT-F', words: 'went wrong' })
@@ -983,6 +1022,8 @@ describe('the line of what waits: the engine lists each kind with its wait and t
     expect(by['TOP']!.need).toEqual({ id: 'ROOT-STOP', words: 'was stopped' })
     expect(by['CYC-1']!.need).toBeUndefined()
     expect(by['CYC-2']!.need).toBeUndefined()
+    // the cycle's way out is reached from every side of it
+    for (const id of ['CY-B', 'CY-C', 'CY-Y']) expect(by[id]!.need).toEqual({ id: 'CY-F', words: 'went wrong' })
   })
 
   test('200 held tasks: the line is computed once for all their rows, and each row says what is truly ahead of it', async () => {

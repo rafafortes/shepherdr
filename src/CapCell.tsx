@@ -41,7 +41,7 @@ export const capId = (pattern: string, space?: string) => (space === undefined ?
  *  phone: under the line, the same controls) */
 export { atOnceWords }
 
-export function CapCell({ name, harness, pattern: raw, atOnce, caps, phone, openId, onOpen }: { name: string; harness?: string; pattern: string; atOnce: SummaryAtOnce; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void }) {
+export function CapCell({ name, harness, pattern: raw, atOnce, caps, phone, openId, onOpen, onSaved }: { name: string; harness?: string; pattern: string; atOnce: SummaryAtOnce; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void; onSaved?: () => void }) {
   // a cap's pattern is lowercase, as its text holds it: a model id with capitals (Qwen3.8-27B) is capped by its lowercase
   const pattern = raw.toLowerCase()
   const id = capId(pattern)
@@ -49,7 +49,7 @@ export function CapCell({ name, harness, pattern: raw, atOnce, caps, phone, open
   const open = openId === id
   // the editor names the row outside its group: "pi · Spark (local)" (a single-account CLI is its own name)
   const title = harness ? inHarness(harness, name) : name
-  const editor = <CapEditor name={title} pattern={pattern} caps={caps} phone={phone} onClose={() => onOpen(null)} />
+  const editor = <CapEditor name={title} pattern={pattern} caps={caps} phone={phone} onClose={() => onOpen(null)} onSaved={onSaved} />
   return (
     <span className="relative block min-w-0">
       <button type="button" data-cell={id} data-blocked={w.blocked || undefined} aria-haspopup={phone ? undefined : 'dialog'} aria-expanded={open} aria-label={`${name}: ${w.words}`} title={w.title} onClick={() => onOpen(open ? null : id)} className={`press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel${w.blocked ? ' font-medium text-need-fg' : ''}`}>
@@ -57,18 +57,18 @@ export function CapCell({ name, harness, pattern: raw, atOnce, caps, phone, open
       </button>
       {open ? phone ? <div className="pt-1">{editor}</div> : <Pop onClose={() => onOpen(null)}>{editor}</Pop> : null}
       {(atOnce.spaces ?? []).map((s) => (
-        <SpaceCap key={s.key} name={name} title={title} pattern={pattern} space={s} caps={caps} phone={phone} openId={openId} onOpen={onOpen} />
+        <SpaceCap key={s.key} name={name} title={title} pattern={pattern} space={s} caps={caps} phone={phone} openId={openId} onOpen={onOpen} onSaved={onSaved} />
       ))}
     </span>
   )
 }
 
 /** one space's sub-limit under a row: its line, which opens the editor with that space chosen */
-function SpaceCap({ name, title, pattern, space, caps, phone, openId, onOpen }: { name: string; title: string; pattern: string; space: NonNullable<SummaryAtOnce['spaces']>[number]; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void }) {
+function SpaceCap({ name, title, pattern, space, caps, phone, openId, onOpen, onSaved }: { name: string; title: string; pattern: string; space: NonNullable<SummaryAtOnce['spaces']>[number]; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void; onSaved?: () => void }) {
   const id = capId(pattern, space.key)
   const open = openId === id
   const words = spaceCapWords(space)
-  const editor = <CapEditor name={title} pattern={pattern} caps={caps} phone={phone} space={space.key} onClose={() => onOpen(null)} />
+  const editor = <CapEditor name={title} pattern={pattern} caps={caps} phone={phone} space={space.key} onClose={() => onOpen(null)} onSaved={onSaved} />
   return (
     <span className="relative mt-0.5 block min-w-0">
       <button type="button" data-cell={id} data-blocked={space.max === 0 || undefined} aria-haspopup={phone ? undefined : 'dialog'} aria-expanded={open} aria-label={`${name} in ${words}`} title={`Set by ${space.name}: ${pattern}=${space.max}. Click to change it.`} onClick={() => onOpen(open ? null : id)} className={`press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 pl-3 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel${space.max === 0 ? ' font-medium text-need-fg' : ' text-fg2'}`}>
@@ -81,7 +81,7 @@ function SpaceCap({ name, title, pattern, space, caps, phone, openId, onOpen }: 
 
 /** the editor of one cap: its three choices (no cap = its entry taken out at the level, blocked = 0, or a number from 1 to 200) at
  *  this machine, Everywhere, or one space (`space`: the one it opens for, else the first space), saved at that level */
-export function CapEditor({ name, pattern, caps, phone, space, onClose }: { name: string; pattern: string; caps: CapsText; phone: boolean; space?: string; onClose: () => void }) {
+export function CapEditor({ name, pattern, caps, phone, space, onClose, onSaved }: { name: string; pattern: string; caps: CapsText; phone: boolean; space?: string; onClose: () => void; onSaved?: () => void }) {
   const spaces = caps.spaces
   const [scope, setScope] = useState<'machine' | 'all' | 'space'>(space === undefined ? 'machine' : 'space')
   const [spaceKey, setSpaceKey] = useState(space ?? spaces[0]?.key ?? '')
@@ -124,8 +124,11 @@ export function CapEditor({ name, pattern, caps, phone, space, onClose }: { name
     setError('')
     const r = (await act({ type: 'setting', key: CAP_KEY, value: text || null, place }).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string }
     setBusy(false)
-    if (r?.ok) onClose()
-    else setError(r?.error ?? "That didn't go through.")
+    if (r?.ok) {
+      // a page that shows this cap reads its view again at once (SHE-165)
+      onSaved?.()
+      onClose()
+    } else setError(r?.error ?? "That didn't go through.")
   }
   return (
     <div aria-label={`Most ${name} at once`} className={phone ? 'flex flex-col gap-2 pb-2' : 'flex w-72 flex-col gap-2 text-left'}>

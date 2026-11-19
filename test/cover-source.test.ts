@@ -258,6 +258,13 @@ describe('the screen acts', () => {
     // and one clearing them, as ↓ on the last numbered space sends it, writes none
     expect(await src.act({ type: 'space-order', moves: [{ place: one.place, value: null }, { place: two.place, value: null }] } as never)).toEqual({ ok: true })
     expect([src.settings.spacePriority(one.p.name), src.settings.spacePriority(two.p.name)]).toEqual([null, null])
+    // a move is a setting the Limits view shows: its kept view is dropped, so the next ask reads the rows it made (SHE-165)
+    const kept = await src.act({ type: 'limits-view' } as never)
+    expect(await src.act({ type: 'limits-view' } as never)).toBe(kept)
+    const builds = src.limitsBuilds
+    expect(await src.act({ type: 'space-order', moves: [{ place: one.place, value: '1' }] } as never)).toEqual({ ok: true })
+    expect(await src.act({ type: 'limits-view' } as never)).not.toBe(kept)
+    expect(src.limitsBuilds).toBe(builds + 1)
   })
 
   test('a task is archived and brought back, paused, and a stop that fails says why', async () => {

@@ -1943,6 +1943,18 @@ export class Engine extends Emitter<Events> {
   }
 
   /**
+   * The held line in one cheap string, read on each ask for Settings → Limits: each held task's id, why, since and
+   * first-in-line, in the tasks' own order. The view is kept between asks (source.ts limitsNow) and this is what says it
+   * is still true: a task held or let go, or a wait of a held task that changed, makes another build; a space's place or
+   * another setting drops the kept view itself.
+   */
+  heldStamp(): string {
+    let out = ''
+    for (const t of this.tasks) if (t.held && !t.archived) out += `${t.id}:${t.held.why}:${t.held.since}:${t.priority ? 1 : 0};`
+    return out
+  }
+
+  /**
    * The whole line of tasks waiting to start on this machine (Settings → Limits' Waiting now), as the engine has it. Held
    * tasks are not here: the view takes those from heldTasks() so the screen cannot disagree with what starts next. Each
    * other task carries its own wait line and, when its wait chain ends at a task you can act on, that task's id and why.
@@ -1954,18 +1966,28 @@ export class Engine extends Emitter<Events> {
     }
     // walk a queued task's wait chain to the root the human can act on: a task that waits on you, went wrong, was stopped
     // or is gone. A root simply at work needs no mark. `seen` keeps a cycle from looping; `memo` keeps a long chain of
-    // hundreds of queued tasks from being walked again for each one behind it (only found roots are kept, so a cycle
-    // seen from one task cannot hide a root when the same task is reached from another).
-    const memo = new Map<string, { id: string; words: string }>()
-    const rootNeed = (ref: string, seen = new Set<string>()): { id: string; words: string } | undefined => {
-      const found = memo.get(ref)
-      if (found) return found
+    // hundreds of queued tasks from being walked again for each one behind it, and it keeps both answers: the root found,
+    // and none (a chain that ends at a task at work, the common case, which walks once now instead of once per task
+    // behind it). A task whose chain ran into a cycle is not kept, and neither is anything above it in that walk: what it
+    // reached was cut short, so it says nothing of the same task reached from another (SHE-165).
+    const memo = new Map<string, { id: string; words: string } | null>()
+    // one walk per chain asked about: how deep it is, and the depth of the task the shallowest cycle it met came back to.
+    // A task at or above that depth is the cycle's own way back, so what it reached is all of its answer and is kept; one
+    // below it was cut short by the cycle, and what it found says nothing of the same task reached from another chain.
+    const rootNeed = (ref: string, seen = new Map<string, number>(), walk = { cycleAt: Infinity, depth: 0 }): { id: string; words: string } | undefined => {
+      if (memo.has(ref)) return memo.get(ref) ?? undefined
       const [machine, id] = splitRef(ref)
-      if (machine || seen.has(id)) return undefined
-      seen.add(id)
+      if (machine) return undefined
+      const above = seen.get(id)
+      if (above !== undefined) {
+        walk.cycleAt = Math.min(walk.cycleAt, above)
+        return undefined
+      }
+      seen.set(id, walk.depth)
+      const depth = walk.depth
       const d = this.task(id)
       const finish = (need?: { id: string; words: string }) => {
-        if (need) memo.set(ref, need)
+        if (walk.cycleAt >= depth) memo.set(ref, need ?? null)
         return need
       }
       // depState treats a task whose space was removed as gone too: its blocker is as little actionable as a deleted one
@@ -1973,14 +1995,16 @@ export class Engine extends Emitter<Events> {
       const outcome = this.outcomeOf(d)
       if (outcome === 'failed') return finish({ id, words: 'went wrong' })
       if (outcome === 'stopped') return finish({ id, words: 'was stopped' })
-      if (ended(d)) return undefined
+      if (ended(d)) return finish()
       // walk a queued task's own chain first: one halted by a stopped, failed or gone blocker is marked with that root,
       // not with itself. A queued task that only waits on you has no such root, and is marked below.
       if (this.queued(d)) for (const r of d.after ?? []) {
-        const need = rootNeed(r, seen)
+        walk.depth++
+        const need = rootNeed(r, seen, walk)
+        walk.depth--
         if (need) return finish(need)
       }
-      return this.statusOf(d) === 'need' ? finish({ id, words: 'waits for your reply' }) : undefined
+      return this.statusOf(d) === 'need' ? finish({ id, words: 'waits for your reply' }) : finish()
     }
     const queued = this.tasks
       .filter((t) => this.queued(t) && !t.scheduled && !t.archived)

@@ -35,6 +35,10 @@ const WAIT_OPEN = 'limits:waiting'
 const WAIT_CARD = 'rounded-box bg-bg px-3 py-2 shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble'
 /** how many rows of a group show before its Show all button */
 const WAIT_ROWS = 10
+/** How long the page waits before it reads the view again after a change. A snapshot arrives with every change of any
+ *  task (and one every 30 s at rest), and each read is the whole queue and every table built on the server: one read at
+ *  most per this, never one per snapshot, and at once for a write made on this page (SHE-165). */
+const LIMITS_EVERY = 2_000
 function readOpen(): Record<string, boolean> {
   try {
     return JSON.parse(localStorage.getItem(WAIT_OPEN) ?? '{}') as Record<string, boolean>
@@ -68,10 +72,20 @@ type Caps = LimitsView['caps']
 type Result = { ok: boolean; error?: string }
 
 /** one write: the setting at its place, and the question about the waiting tasks it reaches (the server says whether any would change) */
-async function write(place: string, key: string, value: string | null): Promise<Result> {
+async function write(place: string, key: string, value: string | null, quiet = false): Promise<Result> {
   const r = (await act({ type: 'setting', key, value, place }).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string }
   if (r?.ok) void askWaitingMany([{ key, place }])
+  // the page reads its view again at once: the snapshot this write brings may be behind the read of the moment, and the
+  // result of a write made here is never up to LIMITS_EVERY late. A bulk write says `quiet` and asks once at its end
+  if (r?.ok && !quiet) asked()
   return r?.ok ? { ok: true } : { ok: false, error: r?.error ?? "That didn't go through." }
+}
+
+/** the Limits pages open now, each asked to read the view again: a write made on one shows its result at once */
+const openPages = new Set<() => void>()
+/** every open page reads its view again now */
+const asked = () => {
+  for (const ask of openPages) ask()
 }
 
 /** where a value comes from, in words */
@@ -216,7 +230,13 @@ export function Waiting({ w, phone }: { w: WaitingNow; phone: boolean }) {
           <WaitSection id="queued" title="Queued after other tasks" open={shown} toggle={toggle}>
             {w.behindYou.tasks ? (
               <Small className="text-pretty">
-                {w.behindYou.tasks} {w.behindYou.tasks === 1 ? 'task waits' : 'tasks wait'} behind {w.behindYou.roots.length} {w.behindYou.roots.length === 1 ? 'task that needs' : 'tasks that need'} you: {w.behindYou.roots.join(', ')}
+                {w.behindYou.tasks} {w.behindYou.tasks === 1 ? 'task waits' : 'tasks wait'} behind {w.behindYou.roots.length} {w.behindYou.roots.length === 1 ? 'task that needs' : 'tasks that need'} you:{' '}
+                {w.behindYou.roots.map((id, i) => (
+                  <Fragment key={id}>
+                    <TaskButton id={id} />
+                    {i < w.behindYou.roots.length - 1 ? ', ' : ''}
+                  </Fragment>
+                ))}
               </Small>
             ) : null}
             {w.queued.length ? (
@@ -274,16 +294,21 @@ export function Waiting({ w, phone }: { w: WaitingNow; phone: boolean }) {
   )
 }
 
-/** one collapsible section of Waiting now: Held for room starts open, the rest closed; what the viewer opened is kept */
+/** one collapsible section of Waiting now: Held for room starts open, the rest closed; what the viewer opened is kept.
+ *  Its title is a heading and the button inside it (a button holds no heading: assistive technology would lose it), and
+ *  the button says whether it is open and which region it controls */
 function WaitSection({ id, title, byDefault = false, open, toggle, children }: { id: string; title: string; byDefault?: boolean; open: (id: string, byDefault: boolean) => boolean; toggle: (id: string, byDefault: boolean) => void; children: ReactNode }) {
   const isOpen = open(id, byDefault)
+  const content = `waiting-${id}`
   return (
     <section aria-label={title} className="flex flex-col gap-2">
-      <button type="button" aria-expanded={isOpen} onClick={() => toggle(id, byDefault)} className="press-dim flex w-full items-center justify-between gap-2 rounded-row py-0.5 text-left hover:bg-hover">
-        <h3 className="font-medium">{title}</h3>
-        <span aria-hidden="true" className="text-fg3">{isOpen ? '−' : '+'}</span>
-      </button>
-      {isOpen ? children : null}
+      <h3 className="font-medium">
+        <button type="button" aria-expanded={isOpen} aria-controls={content} onClick={() => toggle(id, byDefault)} className="press-dim flex w-full items-center justify-between gap-2 rounded-row py-0.5 text-left hover:bg-hover">
+          {title}
+          <span aria-hidden="true" className="text-fg3">{isOpen ? '−' : '+'}</span>
+        </button>
+      </h3>
+      <div id={content} className={isOpen ? 'flex flex-col gap-2' : 'hidden'}>{isOpen ? children : null}</div>
     </section>
   )
 }
@@ -479,13 +504,13 @@ function PriorityCell({ row, rows, machine, phone, moving, onMove }: { row: Limi
 
 /** a space's sub-limit for one pattern: its own entry (strong: its runs now, of its max), or none (faint: the machine's total
  *  applies, or no sub-limit). Either opens the cap editor at this space: a number, or Clear here */
-function SpaceCapCell({ name, pattern, space, caps, total, phone, openId, onOpen }: { name: string; pattern: string; space: LimitSpaceRow; caps: Caps; total?: number; phone: boolean; openId: string | null; onOpen: (id: string | null) => void }) {
+function SpaceCapCell({ name, pattern, space, caps, total, phone, openId, onOpen, onSaved }: { name: string; pattern: string; space: LimitSpaceRow; caps: Caps; total?: number; phone: boolean; openId: string | null; onOpen: (id: string | null) => void; onSaved?: () => void }) {
   // its own id: a provider's cap (CapCell) names the same space's line as cap|<pattern>|<space>, which must not open with this one
   const id = `space-cap|${pattern}|${space.key}`
   const mine = space.caps[pattern]
   const open = openId === id
   const words = mine ? (mine.max === 0 ? BLOCKED_WORDS : `${mine.now} of ${mine.max} at once`) : total ? `machine's total applies (${total} at once)` : 'no sub-limit'
-  const editor = <CapEditor name={name} pattern={pattern} caps={caps} phone={phone} space={space.key} onClose={() => onOpen(null)} />
+  const editor = <CapEditor name={name} pattern={pattern} caps={caps} phone={phone} space={space.key} onClose={() => onOpen(null)} onSaved={onSaved} />
   return (
     <span className="relative block min-w-0">
       <button
@@ -601,6 +626,10 @@ function More({ id, label, menu, setMenu, items }: { id: string; label: string; 
  *  clearing one pattern's sub-limits */
 type Bulk = { kind: 'column'; key: string; title: string; row: SettingRow } | { kind: 'pattern'; pattern: string; name: string } | { kind: 'clear'; pattern: string; name: string }
 
+/** what the page's reads are doing: the timer of the next one, one on its way, a change since the last read, a write
+ *  that asked for a read while one was on its way, when the last read started, and gone once the page closed */
+type Reads = { timer: ReturnType<typeof setTimeout> | null; busy: boolean; dirty: boolean; soon: boolean; at: number; gone: boolean; for: unknown; moves: number }
+
 /** Settings → Limits */
 export default function LimitsPage({ phone }: { phone: boolean }) {
   const snap = useSnap()
@@ -629,24 +658,108 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
       inFlight.current = false
       setMoving(false)
       setMoveError(r?.error ?? "That didn't go through.")
+    } else {
+      moved.current++
+      askNow.current()
     }
   }
-  // every change of Settings is a new snapshot: the page reads again
-  useEffect(() => {
-    let live = true
-    act({ type: 'limits-view' })
-      .then((r) => {
-        if (!live) return
-        setV(r as LimitsView)
-        // a move's write is in: its arrows come back with the rows the write made, never with the ones before it
-        inFlight.current = false
-        setMoving(false)
-      })
-      .catch((e: Error) => live && setFailed(e.message))
-    return () => {
-      live = false
+  // the reads of the view: one at a time, at most one every LIMITS_EVERY while something changed (one trailing read,
+  // never a queue of them), at once for a write made here, and none while the tab is hidden: shown again, it reads once
+  const reads = useRef<Reads>({ timer: null, busy: false, dirty: false, soon: false, at: 0, gone: false, for: snap, moves: 0 })
+  // the snapshot on screen now: one that arrives while a read is on its way makes that read out of date
+  const seen = useRef(snap)
+  // how many moves this page has written: an answer sent before one of them says nothing of the rows it made
+  const moved = useRef(0)
+  /** read the view now, unless the tab is hidden (then it is asked for once it is shown again) */
+  const go = () => {
+    const r = reads.current
+    if (r.gone) return
+    if (document.visibilityState === 'hidden') {
+      r.dirty = true
+      return
     }
+    r.busy = true
+    r.dirty = false
+    r.at = Date.now()
+    r.for = seen.current
+    r.moves = moved.current
+    act({ type: 'limits-view' })
+      .then((next) => {
+        if (r.gone) return
+        setV(next as LimitsView)
+        setFailed('')
+        // a move's write is in: its arrows come back with the rows the write made, never with the ones before it. A read
+        // a change overtook says nothing of those rows, so one more read is due instead
+        if (r.moves >= moved.current) {
+          inFlight.current = false
+          setMoving(false)
+        }
+        // a change that landed while this read was on its way may make what it brought older than the screen
+        if (seen.current !== r.for) r.dirty = true
+      })
+      .catch((e: Error) => !r.gone && setFailed(e.message))
+      .finally(() => {
+        r.busy = false
+        if (r.gone) return
+        // a write asked for a read while this one was on its way: it goes at once; a change, at the interval's pace
+        if (r.soon) {
+          r.soon = false
+          go()
+        } else if (r.dirty) ask(false)
+      })
+  }
+  /** a change (or this page's own write, `atOnce`): a read now if the last one was a while ago, else one read when its
+   *  interval is over, and nothing at all while the tab is hidden */
+  const ask = (atOnce: boolean) => {
+    const r = reads.current
+    if (r.busy) {
+      if (atOnce) r.soon = true
+      else r.dirty = true
+      return
+    }
+    if (atOnce) {
+      if (r.timer) clearTimeout(r.timer)
+      r.timer = null
+      go()
+      return
+    }
+    r.dirty = true
+    if (r.timer || document.visibilityState === 'hidden') return
+    r.timer = setTimeout(() => {
+      r.timer = null
+      go()
+    }, Math.max(0, r.at + LIMITS_EVERY - Date.now()))
+  }
+  const askNow = useRef(() => ask(true))
+  askNow.current = () => ask(true)
+  // the snapshot on screen when the page opened is what its first read reads
+  useEffect(() => {
+    const r = reads.current
+    r.gone = false
+    const mine = () => askNow.current()
+    openPages.add(mine)
+    ask(true)
+    return () => {
+      openPages.delete(mine)
+      r.gone = true
+      if (r.timer) clearTimeout(r.timer)
+      r.timer = null
+    }
+  }, [])
+  // a change of Settings is a new snapshot: the page reads again, at most once every LIMITS_EVERY
+  useEffect(() => {
+    if (seen.current === snap) return
+    seen.current = snap
+    ask(false)
   }, [snap])
+  // a hidden tab asks nothing; shown again, it reads once when something changed while it was away
+  useEffect(() => {
+    const shownAgain = () => {
+      if (document.visibilityState !== 'hidden') ask(true)
+    }
+    document.addEventListener('visibilitychange', shownAgain)
+    return () => document.removeEventListener('visibilitychange', shownAgain)
+  }, [])
   if (!v) return <p className="px-6 pt-5 text-fg2">{failed || 'Reading every limit…'}</p>
   // the pattern columns: those the entries name, then those the + column added (this browser's)
   const patterns = [...v.spaces.patterns, ...columns.filter((c) => !v.spaces.patterns.includes(c))]
@@ -691,13 +804,13 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
             </div>
             <div className="flex flex-col gap-1 px-4 pb-2">
               <Small className="text-fg2">Max at once</Small>
-              <CapCell name={p.name} harness={p.harnessName} pattern={p.provider} atOnce={p.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
+              <CapCell name={p.name} harness={p.harnessName} pattern={p.provider} atOnce={p.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} onSaved={() => askNow.current()} />
               <ProviderFacts byRole={p.byRole} tasks={p.tasks} held={p.atOnce.held} runOuts={p.runOuts} quota={p.quota} read={p.quotaRead} />
             </div>
             {p.models.map((m) => (
               <div key={m.key} className="flex flex-col gap-1 border-t border-line px-4 py-2">
                 <span className="truncate text-fg2">{m.label}</span>
-                <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} />
+                <CapCell name={m.label} pattern={m.key} atOnce={m.atOnce} caps={v.caps} phone openId={capOpen} onOpen={setCapOpen} onSaved={() => askNow.current()} />
                 <ProviderFacts byRole={m.byRole} tasks={m.tasks} held={m.atOnce.held} runOuts={m.runOuts} />
               </div>
             ))}
@@ -733,7 +846,7 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
           <Fragment key={g.harness}>
             {g.single ? null : <HarnessRow name={g.name} cols={6} />}
             {g.list.map((p) => (
-              <ProviderRows key={p.provider} p={p} v={v} nested={!g.single} capOpen={capOpen} setCapOpen={setCapOpen} menu={menu} setMenu={setMenu} hasSubs={hasSubs(p.provider)} onClear={() => setBulk({ kind: 'clear', pattern: p.provider, name: inHarness(p.harnessName, p.name) })} />
+              <ProviderRows key={p.provider} p={p} v={v} nested={!g.single} capOpen={capOpen} setCapOpen={setCapOpen} menu={menu} setMenu={setMenu} hasSubs={hasSubs(p.provider)} onClear={() => setBulk({ kind: 'clear', pattern: p.provider, name: inHarness(p.harnessName, p.name) })} onSaved={() => askNow.current()} />
             ))}
           </Fragment>
         ))}
@@ -785,7 +898,7 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
                     {patterns.map((p) => (
                       <li key={p} className="flex flex-col gap-1 border-t border-line py-2">
                         <Small className="text-fg2">{nameOf(v, p)} · at once in this space</Small>
-                        <SpaceCapCell name={nameOf(v, p)} pattern={p} space={row} caps={v.caps} total={machineTotal(p)} phone openId={capOpen} onOpen={setCapOpen} />
+                        <SpaceCapCell name={nameOf(v, p)} pattern={p} space={row} caps={v.caps} total={machineTotal(p)} phone openId={capOpen} onOpen={setCapOpen} onSaved={() => askNow.current()} />
                       </li>
                     ))}
                   </ul>
@@ -893,7 +1006,7 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
                     ))}
                     {patterns.map((p) => (
                       <td key={p} className="relative py-1.5 pr-3 align-top">
-                        <SpaceCapCell name={nameOf(v, p)} pattern={p} space={row} caps={v.caps} total={machineTotal(p)} phone={false} openId={capOpen} onOpen={setCapOpen} />
+                        <SpaceCapCell name={nameOf(v, p)} pattern={p} space={row} caps={v.caps} total={machineTotal(p)} phone={false} openId={capOpen} onOpen={setCapOpen} onSaved={() => askNow.current()} />
                       </td>
                     ))}
                     <td />
@@ -980,13 +1093,13 @@ function ProviderFacts({ byRole, tasks, held, runOuts, quota, read }: { byRole: 
 
 /** a provider's row and its models' rows, as the desktop table draws them: the cap (its row's ⋯ clears the spaces' sub-limits),
  *  what runs by role, what is held, whether it is out, and its quota (a provider's only; a details link to Models) */
-function ProviderRows({ p, v, nested, capOpen, setCapOpen, menu, setMenu, hasSubs, onClear }: { p: LimitProvider; v: LimitsView; nested: boolean; capOpen: string | null; setCapOpen: (id: string | null) => void; menu: string | null; setMenu: (m: string | null) => void; hasSubs: boolean; onClear: () => void }) {
+function ProviderRows({ p, v, nested, capOpen, setCapOpen, menu, setMenu, hasSubs, onClear, onSaved }: { p: LimitProvider; v: LimitsView; nested: boolean; capOpen: string | null; setCapOpen: (id: string | null) => void; menu: string | null; setMenu: (m: string | null) => void; hasSubs: boolean; onClear: () => void; onSaved?: () => void }) {
   const cells = (name: string, pattern: string, atOnce: LimitProvider['atOnce'], byRole: LimitProvider['byRole'], tasks: string[] | undefined, runOuts: LimitProvider['runOuts'], held: number, quota?: LimitProvider['quota'], read?: LimitProvider['quotaRead'], clear?: boolean, harness?: string) => (
     <>
       <td className="relative py-1.5 pr-3 align-top">
         <span className="flex items-start gap-1">
           <span className="min-w-0 flex-1">
-            <CapCell name={name} harness={harness} pattern={pattern} atOnce={atOnce} caps={v.caps} phone={false} openId={capOpen} onOpen={setCapOpen} />
+            <CapCell name={name} harness={harness} pattern={pattern} atOnce={atOnce} caps={v.caps} phone={false} openId={capOpen} onOpen={setCapOpen} onSaved={onSaved} />
           </span>
           {clear ? (
             <More
@@ -1058,14 +1171,16 @@ function SetForSpaces({ bulk, rows, caps, phone, onClose }: { bulk: Extract<Bulk
     const failed: string[] = []
     if (mode === 'each') {
       for (const r of rows) {
-        const res = await write(caps.spaces.find((s) => s.key === r.key)?.place ?? r.id, bulk.key, draft)
+        const res = await write(caps.spaces.find((s) => s.key === r.key)?.place ?? r.id, bulk.key, draft, true)
         if (!res.ok) failed.push(`${r.name}: ${res.error}`)
       }
     } else {
-      const res = await write('all', bulk.key, draft)
+      const res = await write('all', bulk.key, draft, true)
       if (!res.ok) failed.push(`Everywhere: ${res.error}`)
-      else for (const r of rows) await write(r.id, bulk.key, null)
+      else for (const r of rows) await write(r.id, bulk.key, null, true)
     }
+    // one read for the whole bulk, not one for each setting it wrote
+    asked()
     setBusy(false)
     if (failed.length) setError(failed.join(' '))
     else onClose()
@@ -1114,9 +1229,10 @@ function SetPatternForSpaces({ pattern, name, spaces, onClose }: { pattern: stri
     const failed: string[] = []
     const max = draft === 'off' ? undefined : Number(draft)
     for (const s of spaces) {
-      const r = await write(s.place, CAP_KEY, withEntry(s.text, pattern, max) || null)
+      const r = await write(s.place, CAP_KEY, withEntry(s.text, pattern, max) || null, true)
       if (!r.ok) failed.push(`${s.name}: ${r.error}`)
     }
+    asked()
     setBusy(false)
     if (failed.length) setError(failed.join(' '))
     else onClose()
@@ -1150,9 +1266,10 @@ function ClearSubLimits({ pattern, name, spaces, onClose }: { pattern: string; n
     setError('')
     const failed: string[] = []
     for (const s of hit) {
-      const r = await write(s.place, CAP_KEY, withEntry(s.text, pattern, undefined) || null)
+      const r = await write(s.place, CAP_KEY, withEntry(s.text, pattern, undefined) || null, true)
       if (!r.ok) failed.push(`${s.name}: ${r.error}`)
     }
+    asked()
     setBusy(false)
     if (failed.length) setError(failed.join(' '))
     else onClose()
