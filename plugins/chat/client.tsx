@@ -23,6 +23,7 @@ import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } fro
 import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, LiveLine, TurnLine } from './activity.tsx'
 import { AgentControls, PlaceRestartItem, RestartSheet } from '@client/restart.tsx'
+import { countRender, currentChat, memoRow, rememberChat } from './rows.ts'
 
 /* ---------- messages ---------- */
 
@@ -46,7 +47,9 @@ export function From({ children }: { children: ReactNode }) {
 }
 
 /** out: what you just sent, not back from the agent's log yet (last: its last bubble, which says when it failed) */
-function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from: string; out?: Outgoing; last?: boolean }) {
+export const Bubble = memoRow(function Bubble({ msg, chatKey, from, out, last, queued }: { msg: Message; chatKey: string; from: string; out?: Outgoing; last?: boolean; queued: boolean }) {
+  countRender(`${chatKey}:${msg.id}`)
+  const chat = currentChat(chatKey)
   const you = msg.who === 'you'
   // another agent's message: not the human's words and not this chat's agent's either, so it says who sent it
   const peer = msg.who === 'peer' ? (msg.peer ?? { name: 'Another agent' }) : null
@@ -54,7 +57,7 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
   const art = isArtifact(msg)
   const canReact = has('reactions') && !msg.waiting && !out && !!(msg.text || msg.file || art)
   const replies = canReply(msg, out)
-  const picked = usePicked(msg.id, chat.key)
+  const picked = usePicked(msg.id, chatKey)
   const selecting = useUI((u) => u.selecting === msg.id)
   const text = useRef<HTMLDivElement>(null)
   // one on its way isn't a message yet: a hold (or ⋯ with a mouse) offers only to take it out
@@ -62,7 +65,7 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
   const pending = out && out.state !== 'failed' ? out : undefined
   // a finger holds a message to react (like iMessage) and slides it right to reply; Select text in the bar lets it
   // select instead, until a tap elsewhere
-  const hold = useHold(canReact && !selecting ? (at) => openBar(chat.key, msg.id, at) : pending ? () => setMenu(true) : null, replies && !selecting ? () => startReply(chat.key, msg) : null)
+  const hold = useHold(canReact && !selecting ? (at) => openBar(chatKey, msg.id, at) : pending ? () => setMenu(true) : null, replies && !selecting ? () => startReply(chatKey, msg) : null)
   useEffect(() => {
     if (!selecting) return
     if (text.current) getSelection()?.selectAllChildren(text.current)
@@ -72,29 +75,26 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
   }, [selecting])
   const keys = canReact
     ? {
-        onKeyDown: (e: KeyboardEvent) => e.key === 'Enter' && e.target === e.currentTarget && openBar(chat.key, msg.id),
+        onKeyDown: (e: KeyboardEvent) => e.key === 'Enter' && e.target === e.currentTarget && openBar(chatKey, msg.id),
         tabIndex: 0,
         'aria-label': 'Message: press Enter to react',
       }
     : {}
   // a file waiting to go in shows faded, without a line saying so
   const body = !!(msg.text || msg.answered || msg.waiting)
-  // one you sent that Claude Code may be holding in its own queue: it takes it now with Ctrl+Enter, and the server
-  // presses that only while its screen offers it. Another CLI has no such offer, so nothing shows there
-  const queued = !!you && inQueue(chat, pending)
   const reacted = !!msg.reactions?.length
   const edge = registry.messageEdge.map(({ View }, i) => <View key={i} msg={msg} chat={chat} />)
   // reactions sit on the bubble's bottom right corner, yours and the agent's alike (like iMessage and WhatsApp); a row
   // wider than a short bubble grows toward the middle of the screen, never off it
   const pills = reacted ? <div className="relative -mt-2 flex max-w-full flex-wrap justify-end gap-1 self-end pr-2.5 pl-1 phone:-mt-2.5">{edge}</div> : null
   // a reply's quote rides on its first part: the words, or the file when there are none
-  const quote = msg.reply ? <Quote q={msg.reply} chat={chat.key} from={from} you={you} /> : null
+  const quote = msg.reply ? <Quote q={msg.reply} chat={chatKey} from={from} you={you} /> : null
   const wide = !!msg.artifact
   const parts = registry.messageParts.map(({ View }, i) => <View key={i} msg={msg} chat={chat} from={from} />)
   const unit = (anchor: ReactNode, quoted?: boolean) => (
     <div
       data-msg={msg.id}
-      data-chat={chat.key}
+      data-chat={chatKey}
       data-you={you ? '' : undefined}
       className={clsx(
         'group/msg relative flex flex-col',
@@ -108,7 +108,7 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
       {quoted ? quote : null}
       {anchor}
       {pills}
-      <Beside msg={msg} chat={chat.key} you={you} picked={picked || menu} react={canReact} reply={replies} more={pending && (() => setMenu(true))} />
+      <Beside msg={msg} chat={chatKey} you={you} picked={picked || menu} react={canReact} reply={replies} more={pending && (() => setMenu(true))} />
       {pending && menu ? <PendingMenu out={pending} onClose={() => setMenu(false)} /> : null}
     </div>
   )
@@ -120,7 +120,7 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
       {/* data-whole: the message with its parts (a question's card), which an alert's link brings into view */}
       <div
         data-whole={msg.id}
-        data-chat={chat.key}
+        data-chat={chatKey}
         className={clsx(
           'flex flex-col transition-opacity duration-200',
           you ? 'items-end self-end' : 'items-start self-start',
@@ -136,7 +136,7 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
           unit(
             <Card
               card={msg.card}
-              chat={chat.key}
+              chat={chatKey}
               at={msg.at}
               press={hold}
               keys={msg.card.task ? undefined : keys}
@@ -181,12 +181,9 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
                 ) : null}
                 {msg.waiting ? <div className="text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{msg.waitsFor === 'menu' ? <>
                   Waiting for your answer above.{' '}
-                  {(() => {
-                    const blocker = chat.messages.findLast((m) => m.question?.sent === undefined && !!m.question && !m.waiting)
-                    return blocker ? <LinkButton onClick={() => jumpTo(chat.key, blocker.id, { card: true })}>Go to question</LinkButton> : null
-                  })()}
+                  <GoToQuestion chatKey={chatKey} />
                 </> : waitLine(msg.waitsFor)}</div> : null}
-                {queued && body ? <QueueLine chatKey={chat.key} /> : null}
+                {queued && body ? <QueueLine chatKey={chatKey} /> : null}
                 {msg.text ? <div ref={text} data-text>{you ? <YourText text={msg.text} /> : <Fold id={msg.id}><Markdown text={msg.text} /></Fold>}</div> : null}
               </div>,
               true,
@@ -195,11 +192,11 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
         {msg.file
           ? unit(
               <div data-anchor {...hold} className={clsx('relative max-w-full select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies), you ? 'self-end' : 'self-start')}>
-                {queued && !pending?.text ? <QueueLine chatKey={chat.key} /> : null}
+                {queued && !pending?.text ? <QueueLine chatKey={chatKey} /> : null}
                 {isVideo(msg.file.name) ? (
-                  <VideoTile name={msg.file.name} chat={chat.key} path={msg.file.path} tucked={!body && !!quote} />
+                  <VideoTile name={msg.file.name} chat={chatKey} path={msg.file.path} tucked={!body && !!quote} />
                 ) : (
-                  <FileTile name={msg.file.name} chat={chat.key} path={msg.file.path} tucked={!body && !!quote} />
+                  <FileTile name={msg.file.name} chat={chatKey} path={msg.file.path} tucked={!body && !!quote} />
                 )}
               </div>,
               !body,
@@ -223,6 +220,13 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
       </div>
     </>
   )
+})
+
+/** the question a waiting message points back to: it reads just the id from the store, so answering one card never
+ *  redraws every waiting row */
+function GoToQuestion({ chatKey }: { chatKey: string }) {
+  const id = useStore((s) => s.chats[chatKey]?.messages.findLast((m) => !!m.question && m.question.sent === undefined && !m.waiting)?.id)
+  return id ? <LinkButton onClick={() => jumpTo(chatKey, id, { card: true })}>Go to question</LinkButton> : null
 }
 
 /** one you sent that Claude Code holds in its own queue: Send now presses its Ctrl+Enter, which the server does only
@@ -675,10 +679,12 @@ export function albumRows(n: number) {
 
 /** pictures sent together: small tiles about the size of the ones in the message box, side by side, the album's outer
  *  corners rounded like a bubble's (the small one points at whoever sent them) */
-function Album({ msgs, chat, from, out, last: lastPart }: { msgs: Message[]; chat: Chat; from: string; out?: Outgoing; last?: boolean }) {
+export const Album = memoRow(function Album({ msgs, chatKey, from, out, last: lastPart, queued: inQueueNow }: { msgs: Message[]; chatKey: string; from: string; out?: Outgoing; last?: boolean; queued: boolean }) {
+  countRender(`${chatKey}:${msgs[0].id}`)
+  const chat = currentChat(chatKey)
   const you = msgs[0].who === 'you'
   // pictures alone carry the queue line: a picture sent with words has it under them
-  const queued = you && !out?.text && inQueue(chat, out)
+  const queued = you && !out?.text && inQueueNow
   const rows = albumRows(msgs.length)
   const cols = Math.max(...rows)
   // the sixth tile is covered too: +N counts every picture not seen
@@ -703,8 +709,8 @@ function Album({ msgs, chat, from, out, last: lastPart }: { msgs: Message[]; cha
         )}
       >
         {canReply(msgs[0], out) ? <SwipeHint /> : null}
-        {msgs[0].reply ? <Quote q={msgs[0].reply} chat={chat.key} from={from} you={you} /> : null}
-        {queued ? <QueueLine chatKey={chat.key} /> : null}
+        {msgs[0].reply ? <Quote q={msgs[0].reply} chat={chatKey} from={from} you={you} /> : null}
+        {queued ? <QueueLine chatKey={chatKey} /> : null}
         {rows.map((len, r) => (
           <div key={r} className={clsx('flex gap-[3px]', you && 'justify-end')}>
             {Array.from({ length: len }, (_, c) => {
@@ -717,7 +723,7 @@ function Album({ msgs, chat, from, out, last: lastPart }: { msgs: Message[]; cha
                 last && c === len - 1 ? (you ? '6px' : big) : small,
                 last && !c ? (you ? big : '6px') : small,
               ].join(' ')
-              return <Tile key={keyOf(m)} msg={m} chat={chat} you={you} radius={radius} single={msgs.length === 1} more={i === 6 ? more : 0} out={out} />
+              return <Tile key={keyOf(m)} msg={m} chatKey={chatKey} you={you} radius={radius} single={msgs.length === 1} more={i === 6 ? more : 0} out={out} />
             })}
           </div>
         ))}
@@ -725,35 +731,36 @@ function Album({ msgs, chat, from, out, last: lastPart }: { msgs: Message[]; cha
       {out?.state === 'failed' && lastPart ? <NotSent out={out} className="-mt-2.5 self-end" /> : null}
     </>
   )
-}
+})
 
 /** one picture in an album, a message of its own: a tap opens it full screen; a hold (or the smiley on it, with a
  *  mouse) reacts, and its reactions sit in its bottom right corner */
-function Tile({ msg, chat, you, radius, single, more, out }: { msg: Message; chat: Chat; you: boolean; radius: string; single: boolean; more: number; out?: Outgoing }) {
+function Tile({ msg, chatKey, you, radius, single, more, out }: { msg: Message; chatKey: string; you: boolean; radius: string; single: boolean; more: number; out?: Outgoing }) {
+  const chat = currentChat(chatKey)
   const f = msg.file!
   // a picture this browser can't show (HEIC on most desktops) is a file tile, or a small one in an album
   const [broken, setBroken] = useState(false)
   // one on its way isn't a message yet: nothing to react to
   const canReact = has('reactions') && !msg.waiting && !out
   const replies = canReply(msg, out)
-  const picked = usePicked(msg.id, chat.key)
+  const picked = usePicked(msg.id, chatKey)
   // one on its way offers only Remove, as a bubble does
   const [menu, setMenu] = useState(false)
   const pending = out && out.state !== 'failed' ? out : undefined
-  const hold = useHold(canReact ? (at) => openBar(chat.key, msg.id, at) : pending ? () => setMenu(true) : null, replies ? () => startReply(chat.key, msg) : null)
+  const hold = useHold(canReact ? (at) => openBar(chatKey, msg.id, at) : pending ? () => setMenu(true) : null, replies ? () => startReply(chatKey, msg) : null)
   const edge = msg.reactions?.length ? registry.messageEdge.map(({ View }, i) => <View key={i} msg={msg} chat={chat} />) : null
   const smiley = (beside: boolean) => (
     <>
-      <Beside msg={msg} chat={chat.key} you={you} picked={picked || menu} react={canReact} reply={replies} more={pending && (() => setMenu(true))} name={f.name} over={!beside} />
+      <Beside msg={msg} chat={chatKey} you={you} picked={picked || menu} react={canReact} reply={replies} more={pending && (() => setMenu(true))} name={f.name} over={!beside} />
       {pending && menu ? <PendingMenu out={pending} onClose={() => setMenu(false)} /> : null}
     </>
   )
   // on its own it is a file tile like any other file, its reactions on its bottom right corner as on a bubble
   if (broken && single)
     return (
-      <div data-msg={msg.id} data-chat={chat.key} data-you={you ? '' : undefined} className="group/msg relative flex max-w-full flex-col">
+      <div data-msg={msg.id} data-chat={chatKey} data-you={you ? '' : undefined} className="group/msg relative flex max-w-full flex-col">
         <div data-anchor {...hold} className={clsx('relative max-w-full select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies))}>
-          <FileTile name={f.name} chat={chat.key} path={f.path} />
+          <FileTile name={f.name} chat={chatKey} path={f.path} />
         </div>
         {edge ? <div className="relative -mt-2 flex max-w-full flex-wrap justify-end gap-1 self-end pr-2.5 pl-1 phone:-mt-2.5">{edge}</div> : null}
         {smiley(true)}
@@ -761,11 +768,11 @@ function Tile({ msg, chat, you, radius, single, more, out }: { msg: Message; cha
     )
   const frame = 'relative block overflow-hidden bg-bubble after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_1px_var(--line)]'
   return (
-    <div data-msg={msg.id} data-chat={chat.key} data-you={you ? '' : undefined} className={clsx('group/msg relative min-w-0', !single && 'h-(--tile) flex-1')}>
+    <div data-msg={msg.id} data-chat={chatKey} data-you={you ? '' : undefined} className={clsx('group/msg relative min-w-0', !single && 'h-(--tile) flex-1')}>
       {broken ? (
         <a
           data-anchor
-          href={fileUrl(chat.key, f.path, true)}
+          href={fileUrl(chatKey, f.path, true)}
           download={f.name}
           aria-label={`Download ${f.name}`}
           {...hold}
@@ -784,12 +791,12 @@ function Tile({ msg, chat, you, radius, single, more, out }: { msg: Message; cha
           aria-label={more ? `Open ${f.name} and ${more - 1} more` : `Open ${f.name}`}
           {...hold}
           // one on its way isn't a message yet: it opens on its own, like a file in the message box
-          onClick={() => setUI({ photo: out ? { chat: chat.key, file: f } : { chat: chat.key, msg: msg.id } })}
+          onClick={() => setUI({ photo: out ? { chat: chatKey, file: f } : { chat: chatKey, msg: msg.id } })}
           style={{ borderRadius: radius }}
           className={clsx(frame, 'select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies), !single && 'size-full', picked && 'outline-2 outline-offset-2 outline-(--line2)')}
         >
           <img
-            src={thumbUrl(chat.key, f.path)}
+            src={thumbUrl(chatKey, f.path)}
             alt={f.name}
             draggable={false}
             onError={() => setBroken(true)}
@@ -1141,10 +1148,16 @@ function NewLine() {
 }
 
 /** one message (or album, or card) across the chat's width, its time just past the right edge for a slide to show */
-function Row({ at, arrive, children }: { at: number; arrive: string; children: ReactNode }) {
+export const Row = memoRow(function Row({ at, arrive, msg, msgs, chatKey, from, out, last, queued }: {
+  at: number; arrive: string; msg?: Message; msgs?: Message[]; chatKey: string; from: string; out?: Outgoing; last?: boolean; queued: boolean
+}) {
   return (
     <div data-arrive={arrive} className="relative flex flex-col gap-3.5">
-      {children}
+      {msgs ? (
+        <Album msgs={msgs} chatKey={chatKey} from={from} out={out} last={last} queued={queued} />
+      ) : (
+        <Bubble msg={msg!} chatKey={chatKey} from={from} out={out} last={last} queued={queued} />
+      )}
       {at ? (
         <time
           dateTime={new Date(at).toISOString()}
@@ -1156,7 +1169,7 @@ function Row({ at, arrive, children }: { at: number; arrive: string; children: R
       ) : null}
     </div>
   )
-}
+})
 
 const NOW: Record<string, string> = { done: 'done', work: 'working', ready: 'ready', merging: 'merging', queued: 'queued' }
 
@@ -1383,6 +1396,7 @@ function PrOnCard({ pr, className }: { pr: { number: number; url: string }; clas
 
 /** drawn again only when its chat, what you sent or the New line changes: never as you type */
 const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: string }) {
+  rememberChat(chat)
   const outbox = useStore((s) => s.outbox)
   type Item = { at: number; msg: Message; out?: Outgoing; last?: boolean } | { at: number; album: Message[]; out?: Outgoing; last?: boolean }
   const items: Item[] = chat.messages.map((msg) => ({ at: msg.at ?? 0, msg }))
@@ -1429,13 +1443,10 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
           <Fragment key={key}>
             {dated ? <DateLine at={at} /> : null}
             {newAt === first ? <NewLine /> : null}
-            <Row at={at} arrive={key}>
-              {'album' in it ? (
-                <Album msgs={it.album} chat={chat} from={from} out={it.out} last={it.last} />
-              ) : (
-                <Bubble msg={it.msg} chat={chat} from={from} out={it.out} last={it.last} />
-              )}
-            </Row>
+            {/* queued: one you sent that Claude Code holds in its own queue; it takes it now with Ctrl+Enter, which
+                the server presses only while its screen offers it. Another CLI offers nothing, so nothing shows */}
+            <Row at={at} arrive={key} msg={'msg' in it ? it.msg : undefined} msgs={'album' in it ? it.album : undefined}
+              chatKey={chat.key} from={from} out={it.out} last={it.last} queued={it.out ? inQueue(chat, it.out) : false} />
           </Fragment>
         )
       })}
