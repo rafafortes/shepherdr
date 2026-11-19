@@ -24,8 +24,9 @@ On a machine where herdr runs as a systemd user service, give it (and the server
 
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe; each step is
 one executable file in `scripts/checks/`, named `<number>-<name>` with the numbers spaced by ten (`10-dependencies`,
-`20-types`, `30-tests`, `40-coverage`, `50-build`). The runner discovers them by sorted file name, so adding a check is
-adding one file and no later task edits a shared list: the order is reviewed because it is the file name. A check file:
+`15-secrets`, `20-types`, `30-tests`, `40-coverage`, `50-build`). The runner discovers the executable files by sorted
+file name, so adding a check is adding one file and no later task edits a shared list: a `.ts` file beside them is a
+check's own logic, not a check (e.g. `secrets.ts`), and the order is reviewed because it is the file name. A check file:
 
 - gets its shared context in `SHEPHERDR_CHECK_*` environment variables, never positional arguments:
   `SHEPHERDR_CHECK_ROOT`, `SHEPHERDR_CHECK_LOGS`, `SHEPHERDR_CHECK_COVER`, `SHEPHERDR_CHECK_MAP` and

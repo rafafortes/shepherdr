@@ -1,0 +1,27 @@
+# Findings that predate the secrets check (audit 2026-11-18, QG-06), baselined so a NEW one fails the gate.
+# gitleaks' format is one fingerprint per line; the # line above each says why it is not a credential.
+# Every one below is a deliberately fake value in a test fixture - no real secret, nothing to revoke.
+
+# Fake JWT used to assert how the push-hook words render a finding.
+2083416f156649b191c52f3fed417e7643e6da27:test/push-words.test.ts:jwt:88
+# Fake API keys in the same push-hook words fixture.
+2083416f156649b191c52f3fed417e7643e6da27:test/push-words.test.ts:generic-api-key:85
+2083416f156649b191c52f3fed417e7643e6da27:test/push-words.test.ts:generic-api-key:92
+# Fake quota API keys in the quota-source tests.
+ad9267ec29b4b5e26ee77a5a3b10ba34a69c2166:test/command-code-quota.test.ts:generic-api-key:7
+ad9267ec29b4b5e26ee77a5a3b10ba34a69c2166:test/quotas-source.test.ts:generic-api-key:23
+# Fake API key in a dictate (voice) test.
+41d290345481e438c2e1e888291c50aae918687f:service/dictate.test.ts:generic-api-key:126
+# Fake Stripe token in the same dictate test.
+4ea75f25feb988e27063317b31d7a853f79eea61:service/dictate.test.ts:stripe-access-token:8
+# Fake Stripe token in a historic upstream voice-key test, kept in this repo's history.
+dee301b94aa1e8c0b396187657cdd8015a5a9d81:core/voice-key.test.js:stripe-access-token:12
+# Fake API keys in the artifact and app tests.
+74da1e637001c900a5cdb82853a0116d7614bf5f:test/artifacts.test.ts:generic-api-key:112
+74da1e637001c900a5cdb82853a0116d7614bf5f:test/app.test.ts:generic-api-key:87
+# Fake keys and tokens in historic upstream voice tests, kept in this repo's history.
+a2dbe574c4f71b45f6a513d5c98f24d971dc8b31:tests/voice_key.rs:generic-api-key:16
+a2dbe574c4f71b45f6a513d5c98f24d971dc8b31:tests/voice_key.rs:stripe-access-token:26
+a2dbe574c4f71b45f6a513d5c98f24d971dc8b31:tests/voice_key.rs:stripe-access-token:31
+0de0c5952146c9f51ba40c112e29ca3afc4d8b07:tests/voice.rs:stripe-access-token:34
+0de0c5952146c9f51ba40c112e29ca3afc4d8b07:tests/voice.rs:stripe-access-token:161

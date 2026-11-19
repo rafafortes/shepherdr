@@ -113,9 +113,10 @@ record_flag=''
 [ "$branch" = "$base" ] && { map_flag=1; record_flag=1; }
 cover="$logs/coverage"
 
-# discover the checks by sorted file name: adding a check is adding one file, with no list here to edit
+# discover the executable checks by sorted file name: a .ts file beside them is a check's own logic, not a check
+# (docs/develop.md). Adding a check is adding one executable file, with no list here to edit.
 checks_dir="$root/scripts/checks"
-mapfile -t check_files < <(find "$checks_dir" -maxdepth 1 -type f ! -name '.*' -printf '%f\n' 2>/dev/null | LC_ALL=C sort)
+mapfile -t check_files < <(find "$checks_dir" -maxdepth 1 -type f -executable ! -name '.*' -printf '%f\n' 2>/dev/null | LC_ALL=C sort)
 total=${#check_files[@]}
 
 # the shared context every check gets by environment, never as positional arguments
