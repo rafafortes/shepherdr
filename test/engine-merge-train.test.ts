@@ -1,14 +1,11 @@
 // A merge train (engine-world.ts): the merges that wait for one gate run go in together, and what a rider that
 // cannot ride it out does, through a restart, a stop and a deadline.
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { sh, repo, world, until, started, G, Settings } from './engine-world.ts'
-import type { FakeGitHub } from './fake-gh.ts'
+import { sh, repo, world, until, started } from './engine-world.ts'
 import { tmp } from './tmp.ts'
-import { killGroup, processes } from '../server/procs.ts'
-import { SETTINGS_HEAD } from '../shared/brief.ts'
+import { killGroup } from '../server/procs.ts'
 
 // each test runs git dozens of times and gh (a bun process of its own) up to fifty: a few seconds alone, past 20 on a
 // machine as busy as a CI runner can get
@@ -28,18 +25,6 @@ async function gate(cmd: string, wt: string, env: Record<string, string>, dir: s
   gatesStarted.push(run.pid)
   return run
 }
-const groupAlive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-/** a gate is gone only when no process still runs its command: `timeout` may lead a group of its own, so the leader's
- *  pid alone cannot tell (LEAD-01). Its log path is unique to this run and survives in the command line. */
-const gateGone = (run: { log: string; exit: string }) =>
-  !processes().some((p) => p.cmd.includes(run.log) || p.cmd.includes(run.exit))
 afterEach(() => {
   for (const pid of gatesStarted.splice(0)) killGroup(pid)
 })

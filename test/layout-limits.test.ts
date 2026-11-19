@@ -1,8 +1,7 @@
 // Settings → Limits, the values and caps of a machine, its spaces, providers and models: where a value is edited, the
 // three choices, a column's sub-limit, Running now and Other providers, in a real browser (layout.ts).
 import { afterAll, describe, expect, test } from 'bun:test'
-import type { Locator, Page } from 'playwright-core'
-import type { LimitsQueue } from '../shared/types.ts'
+import type { Page } from 'playwright-core'
 import { at, layout, pickLimit, rowLabels, settled } from './layout.ts'
 import { piOffers } from './pi-offers.ts'
 
@@ -21,26 +20,6 @@ async function fresh(page: Page) {
   await set('space.maxTasks', null, 'all')
   await page.goto(url())
   await page.evaluate(() => localStorage.removeItem('limits:columns'))
-}
-
-/** the Priority value each space of this machine holds now, as Settings → Limits reads it (off: no number) */
-const places = async () => {
-  const v = (await world.act({ type: 'limits-view' } as never)) as { spaces: { rows: { name: string; cells: Record<string, { row: { value: string } }> }[] } }
-  return Object.fromEntries(v.spaces.rows.map((r) => [r.name, r.cells['space.priority']!.row.value]))
-}
-
-/** whether the second element comes after the first in the page */
-const follows = (first: Locator, second: Locator) => second.elementHandle().then((h) => first.evaluate((el, other) => (el.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0, h))
-
-/** 300 waiting tasks: 200 in one queued group (for Show all), the rest in the other kinds */
-function bigQueue(): LimitsQueue {
-  const task = (id: string, space: string, words: string) => ({ id, space, spaceName: space, words })
-  return {
-    queued: Array.from({ length: 200 }, (_, i) => task(`QP-${i}`, 'herdr-projects', `After QP-${i}-x`)),
-    scheduled: Array.from({ length: 50 }, (_, i) => task(`SP-${i}`, 'gtm', 'Starts Tomorrow 9:00')),
-    todo: Array.from({ length: 30 }, (_, i) => task(`TP-${i}`, 'gtm', 'Added 1h ago')),
-    merges: Array.from({ length: 20 }, (_, i) => task(`MP-${i}`, 'gtm', "Waiting for other's merge")),
-  }
 }
 
 /** the Limits page on a desktop, opened from Settings → How Shepherdr runs */

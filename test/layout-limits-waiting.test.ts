@@ -1,9 +1,9 @@
 // Settings → Limits, Waiting now: what holds the held tasks, the advisor and reviews, the empty page, and 300 waiting
 // tasks drawn lightly, in a real browser (layout.ts).
 import { afterAll, describe, expect, test } from 'bun:test'
-import type { Locator, Page } from 'playwright-core'
+import type { Page } from 'playwright-core'
 import type { LimitsQueue } from '../shared/types.ts'
-import { at, layout, pickLimit, rowLabels, settled } from './layout.ts'
+import { layout, settled } from './layout.ts'
 import { piOffers } from './pi-offers.ts'
 
 // pi lists nvidia and amd-tokenlab, which nothing in the demo uses: they are the providers under Other providers
@@ -22,15 +22,6 @@ async function fresh(page: Page) {
   await page.goto(url())
   await page.evaluate(() => localStorage.removeItem('limits:columns'))
 }
-
-/** the Priority value each space of this machine holds now, as Settings → Limits reads it (off: no number) */
-const places = async () => {
-  const v = (await world.act({ type: 'limits-view' } as never)) as { spaces: { rows: { name: string; cells: Record<string, { row: { value: string } }> }[] } }
-  return Object.fromEntries(v.spaces.rows.map((r) => [r.name, r.cells['space.priority']!.row.value]))
-}
-
-/** whether the second element comes after the first in the page */
-const follows = (first: Locator, second: Locator) => second.elementHandle().then((h) => first.evaluate((el, other) => (el.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0, h))
 
 /** 300 waiting tasks: 200 in one queued group (for Show all), the rest in the other kinds */
 function bigQueue(): LimitsQueue {

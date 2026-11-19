@@ -1,20 +1,9 @@
 // The sidebars: their width, hiding and coming back, and the drawer or docking the room chooses, in a real browser
 // (layout.ts).
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import type { Page } from 'playwright-core'
-import { layout, settled, type Box } from './layout.ts'
+import { describe, expect, test } from 'bun:test'
+import { layout, settled } from './layout.ts'
 
-const { browser, world, server, url } = await layout()
-
-/** adds vm-str's quiet project: nothing waits on you there and nothing is unread, so folding vm-str hides it (what has
- *  something in it stays in sight). Gives back a function that takes it away again */
-async function quietProject() {
-  await world.addSpace({ machine: 'vm-str', path: '~/dev/quiet', create: true })
-  return () => {
-    world.places = world.places.filter((p) => p.id !== 'p:vm-str:quiet')
-    world.emit('snapshot')
-  }
-}
+const { browser, url } = await layout()
 
 describe.skipIf(!browser)('sidebars', () => {
   const width = (page: import('playwright-core').Page, sel: string) => page.$eval(sel, (el) => Math.round(el.getBoundingClientRect().width))

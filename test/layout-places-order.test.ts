@@ -1,8 +1,8 @@
 // The order of the places and taking one away: a mouse drag, Alt+Shift+↑/↓, a finger hold, and the question a remove
 // asks first, in a real browser (layout.ts).
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
-import { layout, settled, type Box } from './layout.ts'
+import { layout, settled } from './layout.ts'
 
 const { browser, world, server, url } = await layout()
 

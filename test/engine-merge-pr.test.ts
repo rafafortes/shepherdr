@@ -1,48 +1,17 @@
 // On GitHub (a stand-in, test/fake-gh.ts): one pull request per task, its title, its body, and what ready says once
 // its work is in main — by a squash, a merge commit or a hand merge — or its pull request merged already.
-import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { sh, repo, world, until, started, G, Settings } from './engine-world.ts'
 import type { FakeGitHub } from './fake-gh.ts'
 import { tmp } from './tmp.ts'
-import { killGroup, processes } from '../server/procs.ts'
 import { SETTINGS_HEAD } from '../shared/brief.ts'
 
 // each test runs git dozens of times and gh (a bun process of its own) up to fifty: a few seconds alone, past 20 on a
 // machine as busy as a CI runner can get
 setDefaultTimeout(60_000)
-
-/** a waiting gate command that ends by itself: when its folder goes, when the test process that started it goes (even
- *  one killed without cleanup), or after 1200 turns (about a minute), rather than forking sleep for days (LEAD-01).
- *  `dir` holds `go`; `after` is what it says when it ends. A production gate has no test pid: its own hard limit stops it. */
-const waitFor = (go: string, dir: string, after = 'echo ok') =>
-  `i=0; while [ ! -f ${go} ] && [ -d ${dir} ] && kill -0 ${process.pid} 2>/dev/null && [ \$i -lt 1200 ]; do sleep 0.05; i=\$((i+1)); done; ${after}`
-
-/** every gate this file starts by hand, so a failing or interrupted test cannot leave one behind */
-const gatesStarted: number[] = []
-async function gate(cmd: string, wt: string, env: Record<string, string>, dir: string, id: string, at: { head: string; tip: string }, limitMs?: number, hasTimeout?: boolean) {
-  const { startGate } = await import('../server/live/engine/engine.ts')
-  const run = startGate(cmd, wt, env, dir, id, at, limitMs, hasTimeout)
-  gatesStarted.push(run.pid)
-  return run
-}
-const groupAlive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-/** a gate is gone only when no process still runs its command: `timeout` may lead a group of its own, so the leader's
- *  pid alone cannot tell (LEAD-01). Its log path is unique to this run and survives in the command line. */
-const gateGone = (run: { log: string; exit: string }) =>
-  !processes().some((p) => p.cmd.includes(run.log) || p.cmd.includes(run.exit))
-afterEach(() => {
-  for (const pid of gatesStarted.splice(0)) killGroup(pid)
-})
 
 /** a GitHub stand-in: a bare repo is GitHub, gh is test/fake-gh.ts; the clone's origin reads as GitHub's */
 const ghBin = tmp('ghbin')
@@ -64,8 +33,6 @@ function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['ch
   return { bare, dir, gh, set }
 }
 
-/** Settings → How tasks work → Merge after GitHub checks, for one test (it is kept on disk: back to its default after) */
-const waitForChecks = (w: ReturnType<typeof world>) => w.settings.set('brief.merge', 'after GitHub checks')
 afterEach(() => void new Settings().set('brief.merge', null))
 
 /**

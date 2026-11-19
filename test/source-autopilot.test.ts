@@ -1,11 +1,10 @@
 // Autopilot, its news and its artifacts: the mode, the heartbeat, automations, the news a coordinator gets, artifacts
 // from the command and another machine's, a task row's menu, and Autopilot from the command.
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { afterAll, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { tmp } from './tmp.ts'
-import { CODEX_WORDS, PI_WORDS, reviewerLineFor } from './reviewer-line.ts'
 
 process.env.SHEPHERDR_HOME = tmp('source')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock')
@@ -14,26 +13,16 @@ process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock'
 process.env.SHEPHERDR_OPENCODE_DB = join(process.env.SHEPHERDR_HOME, 'no-opencode.db')
 delete process.env.SHEPHERDR_MAIN
 const { LiveSource } = await import('../server/live/source.ts')
-const { HOST, NAME, placeId, Places } = await import('../server/live/places.ts')
+const { HOST, placeId, Places } = await import('../server/live/places.ts')
 const { herdr } = await import('../server/live/herdr.ts')
-const { hidden } = await import('../server/live/agents.ts')
-const { isAgentProcess } = await import('../server/live/agent-process.ts')
 const { heartbeatFile } = await import('../server/live/heartbeat.ts')
-const { carryOn, momentOf } = await import('../server/live/retry.ts')
-const { parseUserLine } = await import('../server/live/chatlines.ts')
-const { WorkerHealth } = await import('../server/live/recovery.ts')
 const { Worktrees } = await import('../server/live/engine/worktrees.ts')
 const { fakeHerdr } = await import('./fake-herdr.ts')
-const { setPicks } = await import('../server/live/model-picks.ts')
-const { NO_PICKS } = await import('../shared/picks.ts')
-const { ADVISOR_AT_ONCE } = await import('../shared/apply-waiting.ts')
 
 const src = new LiveSource()
 // this file is not about the spacing between starts: with machine.startEvery's 2 minutes, the shared machine of these
 // tests would start one task every two minutes (every start Shepherdr makes by itself follows it now, engine.startGate)
 src.settings.set('machine.startEvery', '0', 'machine')
-/** the live switch is private: drive it directly with an injected io (the action path is covered too) */
-const liveSwitch = (key: string, pick: unknown, io?: unknown) => (src as unknown as { liveSwitch: (k: string, p: unknown, io?: unknown) => Promise<unknown> }).liveSwitch(key, pick, io)
 // herdr makes task worktrees: a stand-in on real git; no terminal opens for their agents (no herdr is there)
 const fake = fakeHerdr()
 fake.h.createTab = async () => {
@@ -69,9 +58,6 @@ const run = (cmd: string, cwd: string): string => {
     throw new Error(`\`${cmd}\` in ${cwd}: ${(e as Error).message.trim()}`, { cause: e })
   }
 }
-
-/** how many tasks a place holds: what a refused add must leave exactly as it was, whatever else the home holds */
-const tasksIn = (place: string) => src.engine.tasks.filter((t) => t.project === place).length
 
 /** a project with a task whose agent has committed work on its branch (herdr isn't there: its agent can't start) */
 async function workedTask(name: string) {

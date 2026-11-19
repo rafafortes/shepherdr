@@ -3,7 +3,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import type { Locator, Page } from 'playwright-core'
 import type { LimitsQueue } from '../shared/types.ts'
-import { at, layout, pickLimit, rowLabels, settled } from './layout.ts'
+import { at, layout, settled } from './layout.ts'
 import { piOffers } from './pi-offers.ts'
 
 // pi lists nvidia and amd-tokenlab, which nothing in the demo uses: they are the providers under Other providers
@@ -21,12 +21,6 @@ async function fresh(page: Page) {
   await set('space.maxTasks', null, 'all')
   await page.goto(url())
   await page.evaluate(() => localStorage.removeItem('limits:columns'))
-}
-
-/** the Priority value each space of this machine holds now, as Settings → Limits reads it (off: no number) */
-const places = async () => {
-  const v = (await world.act({ type: 'limits-view' } as never)) as { spaces: { rows: { name: string; cells: Record<string, { row: { value: string } }> }[] } }
-  return Object.fromEntries(v.spaces.rows.map((r) => [r.name, r.cells['space.priority']!.row.value]))
 }
 
 /** whether the second element comes after the first in the page */

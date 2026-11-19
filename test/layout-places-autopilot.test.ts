@@ -1,20 +1,9 @@
 // A place's Autopilot and Run now: the switch in the ⋯ menu, the pill beside it, and waking its coordinator, in a real
 // browser (layout.ts).
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import type { Page } from 'playwright-core'
-import { layout, settled, type Box } from './layout.ts'
+import { describe, expect, test } from 'bun:test'
+import { layout, settled } from './layout.ts'
 
 const { browser, world, server, url } = await layout()
-
-/** adds vm-str's quiet project: nothing waits on you there and nothing is unread, so folding vm-str hides it (what has
- *  something in it stays in sight). Gives back a function that takes it away again */
-async function quietProject() {
-  await world.addSpace({ machine: 'vm-str', path: '~/dev/quiet', create: true })
-  return () => {
-    world.places = world.places.filter((p) => p.id !== 'p:vm-str:quiet')
-    world.emit('snapshot')
-  }
-}
 
 describe.skipIf(!browser)("a place's Autopilot", () => {
   for (const [name, opts] of [
