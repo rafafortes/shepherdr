@@ -1,9 +1,10 @@
-// Check 1 of the gate after dependencies: scan the tree and its history for committed secrets (audit 2026-11-18,
+// Check 2 of the gate, after dependencies: scan the committed tree and its history for secrets (audit 2026-11-18,
 // QG-06). The runner discovers the executable shim scripts/checks/15-secrets; the logic and its fixture tests live
 // here. gitleaks reads .gitleaksignore at the repo root, where findings that predate the check are baselined with the
 // reason each one is a fake token in a test. A new finding fails the step and names its file and rule, never its
 // value (--redact). On a host without gitleaks the step skips with the install command, like a browser that cannot
-// start, so the verdict still says which part did not run.
+// start, so the verdict still says which part did not run. gitleaks detect reads commits, not uncommitted files, so
+// commit before the gate: a key left only in the working tree is picked up by the next run once it is committed.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -37,7 +38,7 @@ export function runSecrets(o: Options): number {
     { cwd: o.root, stdout: 'pipe', stderr: 'pipe' },
   )
   if (r.exitCode === 0) {
-    o.note?.('no secrets found in the tree or its history')
+    o.note?.('no secrets found in the committed tree or its history')
     return 0
   }
   if (r.exitCode !== 1) {

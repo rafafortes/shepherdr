@@ -90,7 +90,7 @@ describe.skipIf(!gitleaks)('gitleaks over a fixture repo and its history', () =>
     f.git('-c', 'user.name=CI', '-c', 'user.email=ci@localhost', 'commit', '-qm', 'baseline the fake key')
     const notes: string[] = []
     expect(runSecrets({ root: f.dir, logs: f.logs, binary: gitleaks, note: (n) => notes.push(n) })).toBe(0)
-    expect(notes).toEqual(['no secrets found in the tree or its history'])
+    expect(notes).toEqual(['no secrets found in the committed tree or its history'])
   })
 
   test('the runner entry point reads its environment, writes its note and names a new finding', () => {
