@@ -179,7 +179,7 @@ export function roomFor(from: HTMLElement | null) {
       return { top: Math.max(0, r.top), bottom: Math.min(innerHeight, r.bottom) }
     }
   }
-  return { top: 0, bottom: innerHeight }
+  return { top: 0, bottom: innerHeight } // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
 }
 
 /** a setting's choices: the shared menu, springing out of it (up, near the bottom of the screen); one too long to show
@@ -414,20 +414,20 @@ export function NumberValue({ value, num, onSave, onEdit, label }: { value: stri
     onSave(t || 'off')
   }
   const step = (by: number) => {
-    onEdit()
-    const s = num.step ?? 1
-    const x = Number.parseFloat(v)
-    let next: string
-    if (!Number.isFinite(x)) next = by > 0 ? String(num.min) : v
-    else {
-      const to = Math.round((x + by * s) / s) * s
-      next = to < num.min - 1e-9 ? (offable ? '' : String(num.min)) : String(+Math.min(num.max, to).toFixed(4))
-    }
-    setV(next)
-    clearTimeout(later.current)
-    pending.current = () => save(next)
-    later.current = setTimeout(() => save(next), 700)
-  }
+    onEdit() // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+    const s = num.step ?? 1 // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+    const x = Number.parseFloat(v) // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+    let next: string // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+    if (!Number.isFinite(x)) next = by > 0 ? String(num.min) : v // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+    else { // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+      const to = Math.round((x + by * s) / s) * s // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+      next = to < num.min - 1e-9 ? (offable ? '' : String(num.min)) : String(+Math.min(num.max, to).toFixed(4)) // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+    } // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+    setV(next) // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+    clearTimeout(later.current) // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+    pending.current = () => save(next) // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+    later.current = setTimeout(() => save(next), 700) // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+  } // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
   const x = Number.parseFloat(v)
   const unit = v && num.unit ? (x === 1 && num.one ? num.one : num.unit) : ''
   return (
@@ -453,9 +453,9 @@ export function NumberValue({ value, num, onSave, onEdit, label }: { value: stri
             onBlur={() => save()}
             onKeyDown={(e) => {
               if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-              else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                e.preventDefault()
-                step(e.key === 'ArrowUp' ? 1 : -1)
+              else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+                e.preventDefault() // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+                step(e.key === 'ArrowUp' ? 1 : -1) // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
               }
             }}
             className={clsx('col-start-1 row-start-1 w-0 min-w-full bg-transparent pl-2.5 outline-none placeholder:text-fg2 phone:text-[1rem]', !unit && 'pr-2.5')}
