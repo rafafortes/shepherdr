@@ -7,7 +7,7 @@
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { slugify } from '../../shared/types.ts'
-import { home as storeHome, readJson, writeJson } from '../store.ts'
+import { home as storeHome, readJson, readOnly, writeJson } from '../store.ts'
 
 /** what a coordinator's id from before is now: All machines' and a machine's go to a home space */
 export function movedId(id: string, home: (machine?: string) => string): string {
@@ -31,6 +31,10 @@ export function migrateToSpaces(home: (machine?: string) => string, homeAgent: s
   // spaces.json was the herdr spaces opened for repos (engine/worktrees.ts) before: a map, not the list of spaces
   const was = readJson<unknown>('spaces.json', null)
   if (Array.isArray(was)) return { retire: [] }
+  // a spaces.json that could not be read is no map to migrate from, and its own line said so: the migration's one marker
+  // is the list it writes at the end, which would never land, so it would run again at every start (and remove
+  // projects.json each time) with nothing left to move
+  if (readOnly(join(storeHome(), 'spaces.json'))) return { retire: [] }
   if (was && typeof was === 'object') writeJson('repo-spaces.json', { ...(was as Record<string, string>), ...readJson<Record<string, string>>('repo-spaces.json', {}) })
   const to = (id: string) => movedId(id, home)
   const retire: string[] = []
