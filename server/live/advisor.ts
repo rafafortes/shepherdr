@@ -105,7 +105,8 @@ export const canAdvise = (kind: string) => !!adviceArgs({ kind }, '')
 
 /**
  * Run one advisor: its CLI, read only, in the folder of the work, with a hard timeout over the whole call (a grandchild
- * holding its pipes open never keeps it waiting). Nobody's turn: no chat line, no herdr pane, no agent's secret.
+ * holding its pipes open never keeps it waiting). The CLI leads its own process group, so the timeout kills its whole
+ * tree, children and MCP servers too, not just the CLI pid. Nobody's turn: no chat line, no herdr pane, no secret.
  */
 export async function runAdvisor(h: Harness, prompt: string, cwd: string, timeoutMs = ADVICE_TIMEOUT): Promise<{ ok: boolean; out: string }> {
   // the demo world is a fiction of its own: it never asks a real model anything
@@ -117,12 +118,22 @@ export async function runAdvisor(h: Harness, prompt: string, cwd: string, timeou
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(?:SHEPHERDR_|HERDR_)/.test(k))) as Record<string, string>
   let p: ReturnType<typeof Bun.spawn>
   try {
-    p = Bun.spawn(a.cmd, { cwd, stdin: a.stdin !== undefined ? Buffer.from(a.stdin) : 'ignore', stdout: 'pipe', stderr: 'pipe', env })
+    p = Bun.spawn(a.cmd, { cwd, stdin: a.stdin !== undefined ? Buffer.from(a.stdin) : 'ignore', stdout: 'pipe', stderr: 'pipe', env, detached: true })
   } catch (e) {
     return { ok: false, out: (e as Error).message }
   }
   let late: ReturnType<typeof setTimeout> | undefined
-  const timer = setTimeout(() => p.kill(9), timeoutMs)
+  let killed = false
+  const timer = setTimeout(() => {
+    killed = true
+    // the CLI leads its own group: kill the whole tree, not just the pid (the merge gate's pattern in engine.ts)
+    try {
+      process.kill(-p.pid!, 'SIGKILL')
+      // coverage-exempt: the group ended between the timeout and this kill, a race no test can time
+    } catch {
+      /* gone meanwhile */
+    }
+  }, timeoutMs)
   const gaveUp = new Promise<undefined>((r) => {
     late = setTimeout(() => r(undefined), timeoutMs + 2_000)
   })
@@ -134,6 +145,8 @@ export async function runAdvisor(h: Harness, prompt: string, cwd: string, timeou
     const got = await Promise.race([read.catch((e: Error) => ({ failed: e })), gaveUp])
     if (!got) return { ok: false, out: 'timed out' }
     if ('failed' in got) return { ok: false, out: got.failed.message }
+    // the group kill closed the pipes, so read won the race: the run still timed out, say so as before
+    if (killed) return { ok: false, out: 'timed out' }
     if (h.kind === 'agy') {
       if (p.signalCode) return { ok: false, out: 'timed out' }
       const a = headlessOutcome(got.out, got.code)
