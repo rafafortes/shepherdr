@@ -27,6 +27,7 @@ import { Heartbeats, heartbeatFile, Wakes, wakeProblem } from './heartbeat.ts'
 import { eventRules, eventsText, eventWords, matches, nextWords, runWords, timeRule, timeWords, triggerWords, type Happened, type TriggerEvent } from './trigger.ts'
 import { clockWords, startsWords, whenFrom } from '../../shared/when.ts'
 import { Browsers, type BrowserBridge, type BrowserClient } from './browser.ts'
+import { end as endOrphans, endDeps, lines as orphanLines, newsLine as orphanNews, proofPids, readRows as readOrphanRows, scan as scanOrphans, scanOpts, systemSource as orphanSystemSource, type Finding, type ScanOpts, type Source as ProcessSource } from './orphans.ts'
 import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
 import { DISMISSED, dismissKind, dismissWords } from './dismiss.ts'
@@ -247,6 +248,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** the event loop, watched: what held it when it stalled (stall.ts) */
   readonly stall = new StallWatch()
 
+  /** processes of finished tasks still running, found hourly (RES-03); named in doctor with a ready kill line */
+  orphansFound: Finding[] = []
+  private orphanSignature = ''
+  /** the process table the sweep reads, and how proof-marked orphans are ended once allowed; tests inject both */
+  orphanSource: ProcessSource = orphanSystemSource
+  orphanOpts: ScanOpts = scanOpts
+  orphanEnd: (pids: number[]) => Promise<number[]> = (pids) => endOrphans(pids, endDeps)
+  /** off until the operator answers whether the sweep may end proof-marked orphans: report-only until then */
+  autoKillProof = false
+
   constructor() {
     super()
     if (process.env.NODE_ENV !== 'test') this.stall.start()
@@ -374,6 +385,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // browsers left from before a restart, or opened again after their task ended (tests never sweep this machine's)
       const sweep = () => void this.sweepBrowsers().catch(() => undefined)
       this.timers.push(setTimeout(sweep, 20_000) as unknown as ReturnType<typeof setInterval>, setInterval(sweep, 600_000))
+      // processes a finished task left running: the same cadence, named in doctor (RES-03)
+      this.timers.push(setTimeout(() => void this.sweepOrphans().catch(() => undefined), 20_000) as unknown as ReturnType<typeof setInterval>, setInterval(() => void this.sweepOrphans().catch(() => undefined), 600_000))
       // browsers left idle (Settings, browser.idleClose): looked for once a minute
       this.timers.push(setInterval(() => void this.browsers?.closeIdle().catch(() => undefined), 60_000))
     }
@@ -431,7 +444,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   private retire(names: string[], tries = 60) {
     const left = names.filter((n) => {
       const a = this.agents.live.get(n)
-      if (a) void herdr.closePane(a.pane_id).catch(() => undefined)
+      if (a) void this.agents.reapPane(a.pane_id).catch(() => undefined)
       return !a
     })
     if (left.length && tries > 0) this.timers.push(setTimeout(() => this.retire(left, tries - 1), 5000) as unknown as ReturnType<typeof setInterval>)
@@ -446,6 +459,19 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       (id) => !!task(id) && !ended(task(id)!) && !task(id)!.stopped && !task(id)!.archived,
       (id) => !task(id) || ended(task(id)!),
     )
+  }
+
+  /** what already escaped the close reap: named in doctor, with a ready kill line. Proof-marked ones may be ended
+   *  once the operator says so; until then nothing here kills. A change in the set is named in the home space's news. */
+  async sweepOrphans(): Promise<Finding[]> {
+    const found = scanOrphans(readOrphanRows(this.orphanSource), this.orphanOpts)
+    this.orphansFound = found
+    const kills = this.autoKillProof ? proofPids(found) : []
+    if (kills.length) await this.orphanEnd(kills).catch(() => undefined)
+    const sig = found.map((f) => `${f.pid}:${f.kind}`).join(',')
+    if (sig && sig !== this.orphanSignature) this.news(placeId.home(), orphanNews(found, kills), 'stalled')
+    this.orphanSignature = sig
+    return found
   }
 
   /** a look at this machine: limits judged, held tasks started where there is room, the screen told of new numbers */
@@ -4821,7 +4847,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const allowed = parseHosts(named)
         const still = [...refusedHosts].filter((h) => !allowed.includes(h) && !allowed.includes(h.replace(/:\d+$/, '')))
         const refused = still.length ? `Refused Host headers: ${still.join(', ')}. To allow one on this machine run: shepherdr set app.hosts <host>.` : ''
-        return [own, hosts, refused, ...this.stall.report(), ...swallowedReport(), ...this.pushWarnings().map((warning) => `Alerts: ${warning}`), ...this.agents.unreadableLogs(), ...((await this.peers?.doctor()) ?? []), ...(await this.places.doctor())].filter(Boolean).join('\n')
+        return [own, hosts, refused, ...this.stall.report(), ...swallowedReport(), ...this.pushWarnings().map((warning) => `Alerts: ${warning}`), ...this.agents.unreadableLogs(), ...orphanLines(this.orphansFound), ...((await this.peers?.doctor()) ?? []), ...(await this.places.doctor())].filter(Boolean).join('\n')
       }
       case 'secret': {
         if (a1 !== 'elevenlabs') return this.secretCommand(a1, rest, p, ctx)

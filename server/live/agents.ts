@@ -28,6 +28,7 @@ import { readCodexRuntime } from './codex-runtime.ts'
 import { SecretAccess } from './secret-access.ts'
 import { isAgentProcess } from './agent-process.ts'
 import { launchesAgents, skippedLaunch } from './launch-policy.ts'
+import { capture, end as endProcesses, endDeps, readRows, systemSource, type Source } from './orphans.ts'
 
 /** a log's name (its session id), wherever it lies: one named both by its mirrored path and by its own is one log */
 const logName = (f: string) => f.slice(f.lastIndexOf('/') + 1)
@@ -330,6 +331,11 @@ export class Agents extends Emitter<Events> {
   /** its processes: the headless reviewers of another CLI (codex exec, claude -p) it runs as subagents, not shells, and
    *  the background shells OpenCode keeps under its pty daemon */
   procs = new Procs()
+  /** the process table and how a closing pane's leftovers are ended (RES-03); tests inject both */
+  reaper: { source: Source; end: (pids: number[]) => Promise<number[]> } = {
+    source: systemSource,
+    end: (pids) => endProcesses(pids, endDeps),
+  }
   /** what the screen of a Claude Code with no session file says still runs in the background */
   private screens = new Map<string, Background>()
   /** what its hooks, session file or screen say still runs in the background, since when, and after which turn */
@@ -731,7 +737,7 @@ export class Agents extends Emitter<Events> {
     r.pendingLaunch = false
     if (!dropped || !pane || pane === startingIn || [...this.live.values()].some((a) => a.pane_id === pane)) return
     if (!(await herdr.paneIdle(pane).catch(() => false))) return
-    await herdr.closePane(pane).catch(() => undefined)
+    await this.reapPane(pane)
   }
 
   /** Bind the actual CLI process, not HERDR_PANE_ID (old shells can inherit another pane's id). `own`: the start
@@ -1296,7 +1302,7 @@ export class Agents extends Emitter<Events> {
     try {
       const a = close ? this.info(key) : undefined
       if (a) {
-        await herdr.closePane(a.pane_id).catch(() => undefined)
+        await this.reapPane(a.pane_id)
         await this.refresh()
       }
       await start()
@@ -1569,6 +1575,18 @@ export class Agents extends Emitter<Events> {
     if (changed) this.refresh()
   }
 
+  /** close a pane Shepherdr itself is done with: capture what runs under its shell, then end what survived the close.
+   *  An MCP server, its Chrome, a dev or proof server the agent left are all reparented to init when the pane goes;
+   *  they are ours to end only because their ancestry ran through this shell. A live task's agent-browser Chrome is
+   *  left to browser.ts, and another user's process is never in the table (orphans.ts). */
+  async reapPane(pane: string) {
+    const caught = await herdr.processInfo(pane)
+      .then((p) => (p.shell_pid ? capture(readRows(this.reaper.source), p.shell_pid) : []))
+      .catch(() => [] as number[])
+    await herdr.closePane(pane).catch(() => undefined)
+    if (caught.length) await this.reaper.end(caught).catch(() => undefined)
+  }
+
   /** end a task agent's run: its pane closes; its chat stays and writing to it resumes it */
   async finish(key: string) {
     this.secretAccess.revoke(key)
@@ -1579,7 +1597,7 @@ export class Agents extends Emitter<Events> {
     this.save()
     this.flushRecords()
     if (!a) return
-    await herdr.closePane(a.pane_id).catch(() => undefined)
+    await this.reapPane(a.pane_id)
     // gone from what herdr runs at once: starting it again (a backup agent taking over) starts a new one
     await this.refresh()
   }
