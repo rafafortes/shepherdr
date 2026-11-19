@@ -2793,6 +2793,7 @@ describe('machine health', () => {
       // shown on the machine: red memory, amber is nothing else
       const h = src.snapshot().machines.find((m) => m.id === placeId.machine())!.health!
       expect(h.meters.find((m) => m.name === 'Memory')).toMatchObject({ pct: 96, level: 'over' })
+      expect(h.hostWarning).toContain('shepherdr set app.hosts <host>')
       // told once
       const n = sent.length
       src.healthTick(Date.now() + 31_000)

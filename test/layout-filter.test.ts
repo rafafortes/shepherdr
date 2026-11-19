@@ -142,6 +142,22 @@ describe.skipIf(!browser)('no chat attention summary and quiet health', () => {
     }
   })
 
+  test('the health details name the host to allow while app.hosts is unset', async () => {
+    const health = world.machines.find((m) => m.machine === 'mac')!.health!
+    health.hostWarning = 'Only the loopback page works until app.hosts is set. On this machine run: shepherdr set app.hosts <host>.'
+    const page = await browser!.newPage({ viewport: { width: 820, height: 1180 } })
+    try {
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=p:mac:~`)
+      await page.getByRole('button', { name: /^Machine health/ }).click()
+      const dialog = page.getByRole('dialog', { name: 'mac health' })
+      await dialog.waitFor()
+      expect(await dialog.textContent()).toContain('shepherdr set app.hosts <host>')
+    } finally {
+      delete health.hostWarning
+      await page.close()
+    }
+  })
+
   test('chat stays free of aggregate summaries with matching or filtered Tasks, preserving questions and health', async () => {
     const page = await browser!.newPage({ viewport: { width: 820, height: 1180 } })
     await page.goto(`http://127.0.0.1:${server!.port}/?place=p:mac:~`)

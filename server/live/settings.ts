@@ -445,6 +445,16 @@ export const CATALOG: Section[] = [
     ],
   },
   {
+    // the published names the web app answers to besides loopback: a foreign Host is refused with 421 until the
+    // operator names it here (upstream 3.x's service/auth.ts). Never the operator's host name in the repository.
+    name: 'App',
+    levels: ['all', 'machine'],
+    about: 'The host names this app answers to, besides its own loopback address. Set the name your phone uses before the release that refuses unknown hosts: until then only the loopback page works. Nothing of this machine goes in the repository.',
+    rows: [
+      { label: 'Allowed hosts', key: 'app.hosts', value: '', text: true, hint: 'Comma-separated host names your published page uses, e.g. app.example.com. Loopback addresses always work, including through a local port forward. On this machine: shepherdr set app.hosts <host>. Read at once; no restart needed.' },
+    ],
+  },
+  {
     // each machine's own: when its tasks may start (engine.release holds the rest as Queued) and when its coordinator
     // hears that it struggles (health.ts). Load is the 1-minute load average, in multiples of the machine's cores
     name: 'Machine',
@@ -1123,12 +1133,13 @@ export class Settings {
         // set here: what a reset goes back to; not set here: where its value comes from
         const back = up ? this.resetTo(r.key, l, up) : { value: defaultOf(r.key) ?? '', from: 'default' as const }
         const warn = this.modelProblem(r.key, read, l)
+        const hostWarn = r.key === 'app.hosts' && !read.value.trim() ? 'Only the loopback page works until this is set. On this machine run: shepherdr set app.hosts <host>.' : undefined
         return {
           ...agentRow({ ...r, value: read.value }, (k) => this.readAt(k, l).value, (kind) => this.picksAt(kind)),
           ...(lines[r.key] ? { line: lines[r.key] } : {}),
           ...this.triggerRow(r.key, p.value),
           ...(here ? { inherits: { value: back.value, from: back.from === 'default' && l === 'all' ? 'Default' : fromPeer(back.from) } } : l === 'all' ? {} : { from: read.follows ? `the tasks' backup (${fromPeer(read.from)})` : fromName(read.from) }),
-          ...(warn ? { warn } : {}),
+          ...(warn ? { warn } : hostWarn ? { warn: hostWarn } : {}),
         }
       })
     }

@@ -641,6 +641,24 @@ live agent's cwd from herdr and resolves each path's real path before the rememb
 candidate folders in order, and a running chat whose log cannot be read says so in one calm line instead of looking
 like a lost message.
 
+## Not from upstream: a refused Host stops DNS rebinding, ported from upstream 3.x
+
+Checked 2026-11-18 (SHE-62) on `upstream/main` (3.x, through `b2797aaa`) and `upstream/v2.0` (`ebb17d58`), their
+histories, and the public issues and pull requests (read only): the host check came in with `83548e45` (SHEP-7, 3.1.0),
+`service/auth.ts:41,50` compares the request's Host against the configured DNS name and `127.0.0.1:<port>` /
+`localhost:<port>` and answers 421 "wrong host"; `service/auth.test.ts` names it "another host name is refused (DNS
+rebinding)". No later commit changes it, no public issue or pull request names it, and `upstream/v2.0` — the base of our
+line — has the same weakness (`sameSite()` compares Origin only with the request's own Host). Upstream 3.x's check sits
+behind a Tailscale login and a local bearer token in herdr-core's service, so its code cannot be taken; the idea ports.
+
+Ours: the route guard in `server/app.ts` refuses a Host that is neither loopback nor named in the new `app.hosts`
+setting, before `sameSite()` runs; a rebound page can no longer make its Origin and Host agree and pass every guard.
+The published name is a setting (Everywhere or this machine), never a name in the repository, and it is read on each
+request so a change needs no restart. A refusal is a small plain-text 421 page that names the host and the exact
+`shepherdr set app.hosts <host>` command, logged once per host and named by doctor and the health details too. The
+helper's Unix-socket transport name and loopback addresses through local forwards stay accepted: neither is a browser
+address. The x-shepherdr and sec-fetch-site rules are untouched.
+
 ## Not from upstream: a stalled server must not fail a launch, built here
 
 Checked 2026-11-18 (SHE-56) on `upstream/main` (3.x, through 3.1.44 `b2797aaa`) and `upstream/v2.0` (`ebb17d58`), their

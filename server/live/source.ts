@@ -12,6 +12,7 @@ import { askText, BODY_MAX, clip, lastReply, NOTIFY_KEY, openCards, taskAlert, T
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, sortPlaces } from '../../shared/order.ts'
 import { asEmoji, doneNewestFirst, modeCard, NAME_MAX, nameProblem, slugify, STATUS_MAX, type Action, type ActivityAnswer, type ActivityAsk, type AddSpace, type Alert, type Artifact, type CardAsk, type Chat, type RestartInfo, type Peer, type Question, type Folders, type LimitsView, type Machine, type ModelsSummary, type Need, type Place, type Section, type Snapshot, type Task, type TaskStatus, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
 import { Emitter, type Overview, type Source, type SourceEvents } from '../source.ts'
+import { parseHosts, refusedHosts } from '../hosts.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
 import { ROOT } from '../root.ts'
 import { wrapPage } from '../frame.ts'
@@ -101,6 +102,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   readonly kind = 'live' as const
   user = userName()
   settings = new Settings()
+  /** the published names the app answers to (app.hosts), read fresh so a change to the setting needs no restart */
+  hosts(): string[] {
+    return parseHosts(this.settings.get('app.hosts'))
+  }
   places = new Places()
   agents = new Agents()
   chats = new Chats(
@@ -3236,6 +3241,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       held: held.length,
       heldWhy: held[0] && this.engine.subOf(held[0]),
       at: clock(s.at),
+      hostWarning: this.settings.get('app.hosts').trim() ? undefined : 'Only the loopback page works until app.hosts is set. On this machine run: shepherdr set app.hosts <host>.',
     }
   }
 
@@ -4792,7 +4798,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'doctor': {
         if (BOX) throw new Error(`shepherdr doctor checks every machine from the main one: run it there (${HOST} is run from it over SSH).`)
         const own = `${NAME} (this machine, the main one): herdr ${this.agents.reachable ? 'answers' : 'does not answer'}${this.browsers ? `; shared browser ${this.browsers.status().ready ? 'ready' : this.browsers.status().hint}` : ''}`
-        return [own, ...this.stall.report(), ...this.pushWarnings().map((warning) => `Alerts: ${warning}`), ...this.agents.unreadableLogs(), ...((await this.peers?.doctor()) ?? []), ...(await this.places.doctor())].join('\n')
+        const named = this.settings.get('app.hosts').trim()
+        const hosts = named
+          ? `app.hosts: ${named}`
+          : 'app.hosts is unset: only the loopback page works. On this machine run: shepherdr set app.hosts <host> (the host your phone uses).'
+        const allowed = parseHosts(named)
+        const still = [...refusedHosts].filter((h) => !allowed.includes(h) && !allowed.includes(h.replace(/:\d+$/, '')))
+        const refused = still.length ? `Refused Host headers: ${still.join(', ')}. To allow one on this machine run: shepherdr set app.hosts <host>.` : ''
+        return [own, hosts, refused, ...this.stall.report(), ...this.pushWarnings().map((warning) => `Alerts: ${warning}`), ...this.agents.unreadableLogs(), ...((await this.peers?.doctor()) ?? []), ...(await this.places.doctor())].filter(Boolean).join('\n')
       }
       case 'secret': {
         if (a1 !== 'elevenlabs') return this.secretCommand(a1, rest, p, ctx)

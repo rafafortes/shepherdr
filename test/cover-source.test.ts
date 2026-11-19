@@ -387,6 +387,24 @@ describe('the shepherdr command', () => {
     expect(r.out).toContain('shared browser')
     expect(r.out).toContain('Alerts: no device yet')
     expect(r.out).toContain(`doc: ${sp.dir}`)
+    expect(r.out).toContain('app.hosts is unset: only the loopback page works')
+    expect(r.out).toContain('shepherdr set app.hosts <host>')
+  })
+
+  test('doctor names the published host, and a refused host only while it stays refused', async () => {
+    const { refusedHosts } = await import('../server/hosts.ts')
+    refusedHosts.add('evil.example:7787')
+    refusedHosts.add('app.example.com')
+    try {
+      expect((await cli(['set', 'app.hosts', 'app.example.com'])).code).toBe(0)
+      const out = (await cli(['doctor'])).out
+      expect(out).toContain('app.hosts: app.example.com')
+      expect(out).toContain('Refused Host headers: evil.example:7787.')
+      expect(out).not.toContain('app.example.com.')
+    } finally {
+      refusedHosts.clear()
+      expect((await cli(['unset', 'app.hosts'])).code).toBe(0)
+    }
   })
 
   test('doctor says the stalls of its own event loop, and what ran in them', async () => {

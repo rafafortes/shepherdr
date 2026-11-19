@@ -118,6 +118,7 @@ function Details({ m, h, onClose }: { m: Machine; h: MachineHealth; onClose: () 
           <dd className={h.herdr ? 'text-fg2' : 'text-need-fg'}>{h.herdr ? 'Answering' : "Isn't answering"}</dd>
         </div>
       </dl>
+      {h.hostWarning ? <p className="mt-3 border-t border-line pt-3 text-[0.75rem] text-work-fg phone:text-[0.8125rem]">{h.hostWarning}</p> : null}
       {page !== undefined ? (
         <button
           type="button"

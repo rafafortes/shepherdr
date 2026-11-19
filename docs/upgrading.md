@@ -51,3 +51,19 @@ the updater itself (`scripts/supervise.ts` and what it imports) starts it again 
 that release is past its trial and no voice call is on.
 
 By hand: `bun run build && bun server/main.ts` serves on `http://127.0.0.1:7787` (`SHEPHERDR_PORT` to change it).
+
+## Before the release that checks the Host header
+
+That release refuses any request whose `Host` is neither a loopback address nor a name you set. Set
+the name your phone uses **before** installing that release, on the machine that runs Shepherdr:
+
+```sh
+shepherdr set app.hosts <the host your phone uses>
+```
+
+Several names go in one comma-separated value, at Everywhere or for this machine. Nothing is stored in the repository.
+A refused request gets a page with the exact command for the host it saw, and the server logs each refused host once;
+`shepherdr doctor` and the app's health details name it too. Until the setting is named, only the loopback page and the
+`shepherdr` command work — they never depend on it. The lab-ingress proxy passes `Host` through untouched, so the
+published page keeps working once its name is set. `x-forwarded-host` is deliberately not trusted here: a browser can
+send that header itself.

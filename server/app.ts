@@ -9,6 +9,7 @@ import { DICTATE_CAP, DICTATE_TOO_LONG } from '../shared/dictate.ts'
 import { fileType } from '../shared/files.ts'
 import type { Action, AddSpace, ServerEvent, UpdateStatus, WorktreeAsk } from '../shared/types.ts'
 import { frameResponse, wrapPage } from './frame.ts'
+import { hostAllowed, refusedHosts } from './hosts.ts'
 import type { Source } from './source.ts'
 import { span } from './live/media.ts'
 import type { Push } from './push.ts'
@@ -29,11 +30,14 @@ export interface AppOptions {
   push?: Push
   port: number
   host?: string
+  /** the published names this app answers to besides loopback (app.hosts); read on every request so a change to the
+   *  setting takes effect without a restart. Nothing of the operator's host is kept in the repository. */
+  hosts?: () => string[]
   /** update.json: how the last update of Shepherdr went, shown on every screen */
   updates?: string
 }
 
-export function startApp({ source, dist, push, port, host = '127.0.0.1', updates }: AppOptions) {
+export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts = () => [], updates }: AppOptions) {
   const live = new Set<ServerWebSocket<Sock>>()
   const send = (ws: ServerWebSocket<Sock>, e: ServerEvent) => ws.send(JSON.stringify(e))
 
@@ -122,6 +126,11 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
     hostname: host,
     idleTimeout: 120,
     async fetch(req, srv) {
+      // a foreign Host must be refused before any other check: a DNS-rebinding page sends an Origin that matches its
+      // own Host, so sameSite() alone cannot tell it from the app (upstream 3.x answers 421 "wrong host" here too).
+      const configured = hosts()
+      const listening = srv.port ?? port
+      if (!hostAllowed(req.headers.get('host') ?? '', listening, configured)) return wrongHost(req, listening, configured)
       const url = new URL(req.url)
       // the app may sit under a path (/shepherdr): everything is addressed relative to the app's own folder
       const at = url.pathname.indexOf('/api/')
@@ -340,6 +349,30 @@ function running() {
   } catch {}
   const sup = Number(process.env.SHEPHERDR_SUPERVISOR)
   return { root, version, supervisor: sup > 0 ? sup : null }
+}
+
+/** A refused Host gets a small plain-text page naming it and the one command that lets it in. One log line per host. */
+function wrongHost(req: Request, port: number, configured: string[]) {
+  const host = req.headers.get('host') ?? ''
+  const key = host.toLowerCase()
+  if (!refusedHosts.has(key)) {
+    refusedHosts.add(key)
+    console.error(`shepherdr: refused Host ${JSON.stringify(host)} on port ${port}; set app.hosts to allow it`)
+  }
+  const answer = [
+    `wrong host: ${host}`,
+    '',
+    `This Shepherdr answers to 127.0.0.1:${port}, localhost:${port}, [::1]:${port}${configured.length ? `, ${configured.join(', ')}` : ''}.`,
+    '',
+    'On this machine, run:',
+    '',
+    `shepherdr set app.hosts ${host}`,
+    '',
+  ].join('\n')
+  return new Response(answer, {
+    status: 421,
+    headers: { 'content-type': 'text/plain; charset=utf-8', 'content-security-policy': "default-src 'none'; sandbox", 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' },
+  })
 }
 
 /**
