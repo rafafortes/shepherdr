@@ -24,6 +24,29 @@ const FONT = join(import.meta.dir, '..', 'node_modules', 'inter-ui', 'variable',
 /** the longest a snapshot waits for the one before it (see where `source.on('snapshot')` spaces them) */
 const SNAP_MAX = 2000
 
+/**
+ * The app's own origin holds the x-shepherdr write capability and all its data, so its pages get their own wall too:
+ * only this origin for code, styles, media and API calls, and nothing can frame it or turn it into a plugin's host.
+ * Artifacts and attachments keep their much stricter sandbox in frame.ts and file()'s siblings; they are not this app.
+ * Inline styles are still allowed (React's style props and the libraries' own injected CSS); scripts are not — the
+ * theme's first-paint script lives in public/theme.js for that reason.
+ */
+export const APP_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "worker-src 'self'",
+  "frame-src 'self'",
+  "frame-ancestors 'self'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "form-action 'none'",
+].join('; ')
+
 export interface AppOptions {
   source: Source
   dist: string
@@ -483,6 +506,7 @@ function file(f: string) {
   return new Response(Bun.file(f), {
     headers: {
       'content-type': TYPES[ext] ?? 'application/octet-stream',
+      'content-security-policy': APP_CSP,
       'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
       'x-content-type-options': 'nosniff',
       'referrer-policy': 'no-referrer',
