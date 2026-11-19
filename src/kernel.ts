@@ -147,8 +147,8 @@ let enabledNames: string[] = []
 export const has = (name: string) => enabledNames.includes(name)
 
 /** Set up each plugin on the slots. Every one goes through setupGuarded (guard.tsx): built in or the human's own, a
- *  plugin that throws leaves the registry as it was and stops only its own parts. The order is unchanged, so the
- *  human's own still come after the built-ins and replace them by name. */
+ *  plugin that throws leaves the registry as it was and stops only its own parts. The order is unchanged: one of the
+ *  human's that replaces a built-in keeps its place, the rest come after. */
 export function installPlugins(plugins: ClientPlugin[], enabled: string[]) {
   enabledNames = enabled
   for (const p of plugins) setupGuarded(p.name, registry, (r) => p.setup(r))

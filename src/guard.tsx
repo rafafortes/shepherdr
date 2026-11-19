@@ -1,11 +1,12 @@
-// A plugin of the human's own (~/.shepherdr/plugins) can't take the screen down: its setup runs in a try, and whatever
-// it adds to the slots is wrapped, so an error in it stops only that plugin's parts. Settings → Plugins says why.
+// Any plugin, built in or the human's own (~/.shepherdr/plugins), can't take the screen down: its setup runs in a try,
+// and whatever it adds to the slots is wrapped, so an error in it stops only that plugin's parts. Settings → Plugins
+// says why.
 import { Component, createElement, useSyncExternalStore, type FC, type ReactNode } from 'react'
 
 let errors: Record<string, string> = {}
 const listeners = new Set<() => void>()
 
-/** a plugin of the human's own failed on this screen: its first error is kept */
+/** a plugin failed on this screen: its first error is kept */
 export function pluginFailed(name: string, e: unknown) {
   if (errors[name]) return
   console.error(`plugin ${name} failed, so its parts are stopped:`, e)
@@ -13,7 +14,7 @@ export function pluginFailed(name: string, e: unknown) {
   for (const l of listeners) l()
 }
 
-/** the human's own plugins that failed on this screen, by name */
+/** the plugins that failed on this screen, by name */
 export const usePluginErrors = () =>
   useSyncExternalStore(
     (l) => (listeners.add(l), () => listeners.delete(l)),
@@ -56,8 +57,7 @@ export function guardFn<A extends unknown[], R>(name: string, f: (...a: A) => R,
 /** the parts of a slot item that are views; the rest of its functions are plain ones */
 const VIEWS = new Set(['View', 'Icon'])
 
-/** Run a plugin of the human's own's setup: on an error the registry is as it was before, and each part it added is
- *  wrapped. */
+/** Run a plugin's setup: on an error the registry is as it was before, and each part it added is wrapped. */
 export function setupGuarded<R extends object>(name: string, registry: R, setup: (r: R) => void) {
   const reg = registry as Record<string, unknown>
   const before: Record<string, unknown> = Object.fromEntries(
@@ -137,7 +137,7 @@ function readCrash(s: Storage | null = storage()): ScreenCrash | null {
     const raw = s.getItem(CRASH_KEY)
     return raw ? (JSON.parse(raw) as ScreenCrash) : null
   } catch {
-    return null // coverage-exempt: a value left by an older build can be unreadable
+    return null // a value left by an older build can be unreadable: the card still starts at one
   }
 }
 

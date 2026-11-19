@@ -129,6 +129,14 @@ describe('on the screen', () => {
     expect(reg.composerIdle).toBeNull()
   })
 
+  test('installPlugins wires every plugin through the guard, not only yours', () => {
+    const kernel = readFileSync(join(import.meta.dir, '..', 'src', 'kernel.ts'), 'utf8')
+    const body = kernel.match(/export function installPlugins[\s\S]*?\n}\n/)?.[0] ?? ''
+    expect(body).toContain('setupGuarded(p.name, registry, (r) => p.setup(r))')
+    expect(body).not.toContain('user.includes')
+    expect(body).not.toContain('else p.setup(registry)')
+  })
+
   test('a built-in name is guarded the same way: its setup throw leaves the slots as they were', () => {
     const View = () => null
     const reg = { messageEdge: [] as { View: typeof View }[], topBars: [View] }

@@ -66,10 +66,13 @@ function PluginTrouble() {
   const names = [...new Set([...(page?.rows ?? []).filter((r) => r.warn).map((r) => r.label), ...Object.keys(errors)])]
   const key = names.join(' ')
   if (!names.length || hidden === key) return null
+  // a name on the page under Yours is theirs even when its file doesn't build (a failed override is listed under
+  // Built in, with a warn that starts with "Yours")
+  const mine = (n: string) => (user as string[]).includes(n) || (page?.rows ?? []).some((r) => r.label === n && (r.group === 'Yours' || !!r.warn?.startsWith('Yours')))
   const open = () => setUI({ settings: { section: Math.max(0, sectionOf('Plugins', settings ?? [], getState().ui)) }, drawer: false })
   return (
     <div role="status" data-topbar className={topBar}>
-      {names.length === 1 ? `${(user as string[]).includes(names[0]) ? 'Your' : 'A built-in'} plugin “${names[0]}” has a problem` : `Plugins ${names.map((n) => `“${n}”`).join(', ')} have problems`}.{' '}
+      {names.length === 1 ? `${mine(names[0]) ? 'Your' : 'A built-in'} plugin “${names[0]}” has a problem` : `${names.every(mine) ? 'Your plugins' : 'Plugins'} ${names.map((n) => `“${n}”`).join(', ')} have problems`}.{' '}
       <button type="button" className={barButton} onClick={open}>
         Why
       </button>{' '}

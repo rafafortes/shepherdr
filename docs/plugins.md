@@ -25,8 +25,8 @@ save a file there and Shepherdr rebuilds and restarts within seconds; open scree
   view or function that throws stops only that plugin's part. Nothing a plugin relies on changed — `definePlugin`, the
   slots, the order they load in and `setupGuarded`'s behaviour are the same; the built-ins simply go through it too.
   If something outside every plugin breaks the screen itself, a small card with Reload takes over instead of a blank
-  screen; when the same break takes three tries (the first, then two reloads), the card says to restart Shepherdr
-  instead. A break much later starts a fresh count.
+  screen; when the same break takes three tries (the first, then two reloads), the card also says to restart Shepherdr
+  from herdr. A break much later starts a fresh count.
 
 A hello world, `~/.shepherdr/plugins/hello/client.tsx`:
 
