@@ -786,17 +786,26 @@ itself; going back undoes it once the primary answers. A role whose Settings nam
 nothing to come back to, and is never asked.
 
 - **When it asks.** After a takeover for a reason waiting can't fix (out of allowance, signed out, a model that is not
-  there, a provider's refusal — never an error that passes by itself), the primary is first asked about half an hour
-  later, and while it still doesn't answer each wait doubles — an hour, then two, then four, the longest — with a fifth
-  of the wait either way at random, so two roles rarely fall due together. A probe is one tiny request through that
+  there, a provider's refusal — never an error that passes by itself), the primary is first asked three minutes later
+  (a burst, such as a free-usage 429, often clears in minutes), and while it still doesn't answer each wait doubles — six
+  minutes, twelve, twenty-four — up to four hours, the longest — with a fifth of the wait either way at random, so two
+  roles rarely fall due together and a provider that is out for good is never hammered. A probe is one tiny request
+  through that
   CLI: one line in, one word out, no tools, a hard timeout. Claude Code and pi are asked with their coding assistant's
   prompt and the person's MCP servers and settings left out, and keep no session; pi does load its own extensions, which
   is how a provider one of them adds (a pi package) is asked at all. Codex runs in its read-only sandbox with its own
   config, and may keep its rollout file. OpenCode's headless runs leave their session in its history (see [OpenCode](#opencode)). An agent of this machine at work on that very model, with no cut-off of its own
-  and none in that outage for ten minutes (a turn already under way when the provider began refusing may still be
-  working a while), is the answer itself, and nothing is asked. One cut-off after another keeps the schedule of the
-  first: a night of them never puts the question off. One at a time, and never at boot. It is nobody's turn: no chat line, no herdr pane, no agent's secret, and its own failure is
-  silent for you — no card, no alert, nothing to answer, nothing of its words in a chat (the server's log says why, for
+  and none in that outage for two minutes (a turn already under way when the provider began refusing may still be
+  working a while), is the answer itself, and nothing is asked — and no probe runs beside work on the model it asks: the
+  next pass, a minute later, asks once that work is over. A model is this machine's, not a space's: one answer for it frees
+  every space and role waiting on it, so a probe in one space unlocks the others at once (and is not asked again for
+  them), each still going back on its own setting and its own count of returns, and a space whose watch is off is never
+  written into. An answer only counts until that model refuses a chat again, whichever space: an answer older than the
+  newest cut-off is no answer, and the machine's own work only answers an outage whose own two minutes are over. One
+  cut-off after another keeps the schedule of the first: a night of them never puts the question off. One at a time,
+  and not at boot: the first look comes a minute after Shepherdr started, so an outage kept from before a restart, its
+  wait long over, is asked then. It is nobody's turn: no chat line, no herdr pane, no agent's secret, and its own
+  failure is silent for you — no card, no alert, nothing to answer, nothing of its words in a chat (the server's log says why, for
   the day it needs explaining — an option its CLI is too old to know shows up there too).
 - **Never a loop.** A role and space go back by themselves at most three times a day. A primary that runs out again
   each time leaves the next return to you: its chats get the tell me card instead, saying so, and a day later the count

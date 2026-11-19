@@ -12,9 +12,9 @@ import { tmp } from './tmp.ts'
 process.env.SHEPHERDR_HOME = tmp('return')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock')
 delete process.env.SHEPHERDR_MAIN
-const { LiveSource } = await import('../server/live/source.ts')
+const { FIRST_LOOK, LiveSource } = await import('../server/live/source.ts')
 const { placeId } = await import('../server/live/places.ts')
-const { FIRST_WAIT, FRESH, LONGEST_WAIT, MAX_RETURNS, QUIET, oneShot, probeHarness, wait } = await import('../server/live/return.ts')
+const { canProbe, FIRST_WAIT, FRESH, LONGEST_WAIT, MAX_RETURNS, QUIET, oneShot, probeHarness, wait } = await import('../server/live/return.ts')
 const { Retries } = await import('../server/live/retry.ts')
 type Retry = import('../server/live/retry.ts').Retry
 
@@ -189,17 +189,18 @@ describe('when the primary answers again', () => {
       s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: Date.now() - FIRST_WAIT * 2 })
       s.src.returns.note({ role: 'coordinator', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: Date.now() - FIRST_WAIT * 2 })
       await s.src.watchReturns(later())
-      // the primary was asked, one probe at a time, and answered
-      expect(asked).toEqual(['claude', 'claude'])
+      // the primary was asked once, and answered for the task and the coordinator alike: a model is this machine's, not a
+      // space's or a role's
+      expect(asked).toEqual(['claude'])
       expect(cards(a.key)).toEqual([`The primary model answers again: Claude Code. ${a.id} still runs on its backup (Codex): restart it to go back — shepherdr restart ${a.id}, or ⋯ → Restart agent in its chat. Nothing was switched.`])
       expect(cards(b.key)).toEqual([`The primary model answers again: Claude Code. ${b.id} still runs on its backup (Codex): restart it to go back — shepherdr restart ${b.id}, or ⋯ → Restart agent in its chat. Nothing was switched.`])
       expect(cards(s.key)).toEqual([`The primary model answers again: Claude Code. ${s.p.name}'s coordinator still runs on its backup (Codex): restart it to go back — shepherdr restart ${s.p.name}, or ⋯ → Restart agent in its chat. Nothing was switched.`])
       // the one that went back already hears nothing
       expect(cards(c.key)).toEqual([])
       expect(alerts.map((a) => a.title)).toEqual(['The primary model answers again', 'The primary model answers again'])
-      // a primary that keeps answering posts nothing more
+      // a primary that keeps answering posts nothing more, and is not asked again
       await s.src.watchReturns(later() + 3_600_000)
-      expect(asked).toEqual(['claude', 'claude'])
+      expect(asked).toEqual(['claude'])
       expect(cards(a.key)).toHaveLength(1)
       expect(cards(s.key)).toHaveLength(1)
     } finally {
@@ -360,7 +361,8 @@ describe('going back by itself', () => {
       s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: late })
       s.src.returns.note({ role: 'coordinator', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: late })
       await s.src.watchReturns(later())
-      expect(asked).toEqual(['claude', 'claude'])
+      // one question for the model, however many roles of the machine wait on it
+      expect(asked).toEqual(['claude'])
       // both started again on Settings' primary: Claude Code, which the task's brief and the coordinator's chat carry over
       expect(s.started.map((x) => [x.key, x.kind])).toEqual([
         [a.key, 'claude'],
@@ -379,7 +381,7 @@ describe('going back by itself', () => {
       // over: counted as one return of the day each, and nothing more is asked or started
       expect(s.src.returns.get('task', s.p.name)).toMatchObject({ back: expect.any(Number), returned: [expect.any(Number)] })
       await s.src.watchReturns(later() + 3_600_000)
-      expect(asked).toHaveLength(2)
+      expect(asked).toHaveLength(1)
       expect(s.started).toHaveLength(2)
     } finally {
       s.done()
@@ -1016,14 +1018,16 @@ describe('what is never asked', () => {
     }
   })
 
-  test('one probe at a time: a pass that comes while one runs asks nothing, and roles are asked one after another', async () => {
+  test('one probe at a time: a pass that comes while one runs asks nothing, and two models are asked one after another', async () => {
     const s = await space('back-once')
     try {
       const a = task(s.p.name, 'codex', { from: 'claude' })
       coordinator(s.key, 'codex')
+      // the coordinator's own primary, another model: its question is a second one, asked after the task's
+      expect(s.src.settings.set('coordinator.agent', 'pi', { space: s.p.name }).ok).toBe(true)
       const late = Date.now() - FIRST_WAIT * 2
       s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
-      s.src.returns.note({ role: 'coordinator', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
+      s.src.returns.note({ role: 'coordinator', space: s.p.name, primary: { kind: 'pi' }, to: { kind: 'codex' }, why: 'signed out', at: late })
       // a probe that answers only when this test says so
       let release: () => void = () => undefined
       const gate = new Promise<void>((r) => (release = r))
@@ -1041,11 +1045,12 @@ describe('what is never asked', () => {
       expect(cards(a.key)).toEqual([])
       release()
       await first
-      // the first pass went on to the second role, one probe at a time, and both chats heard
-      expect(asked).toEqual(['claude', 'claude'])
+      // the first pass went on to the other model, one probe at a time, and both chats heard
+      expect(asked).toEqual(['claude', 'pi'])
       expect(cards(a.key)).toHaveLength(1)
       expect(cards(s.key)).toHaveLength(1)
     } finally {
+      s.src.settings.set('coordinator.agent', null, { space: s.p.name })
       s.done()
     }
   })
@@ -1255,6 +1260,34 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
     }
   })
 
+  test('the watch’s own probe frees starts at once, and an answered outage keeps them free, though a reset is far ahead', async () => {
+    const { setModels, opencodeList } = await import('../server/live/models.ts')
+    setModels('opencode', opencodeList([{ id: MODEL, label: MODEL, efforts: [] }], MODEL))
+    const s = await space('reset-watch')
+    try {
+      primary(s.p.name)
+      const now = Date.now()
+      // an allowance that ran out hours ago with "resets 5pm": until the primary speaks, that reset keeps starts off it
+      src.usage.runOut({ at: now - 3 * 3_600_000, key: KEY, chat: `${s.p.name}/Agent`, role: 'task', reason: 'Out of allowance', words: 'resets 5pm', resetAt: now + 4 * 3_600_000 }, now)
+      const onBackup = task(s.p.name, 'codex', { from: 'opencode' })
+      src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: now - FIRST_WAIT * 2 })
+      expect(out(KEY)).toEqual({ until: expect.any(String) })
+      expect(startsOn(s.p.name)).toBe('codex')
+      await src.watchReturns(now)
+      // its probe answered after the cut-off: the outage is answered, and the promised reset no longer holds a start off
+      expect(src.returns.get('task', s.p.name)!.back).toBeGreaterThan(now - FIRST_WAIT * 2)
+      expect(src.returns.get('task', s.p.name)!.back).toBeGreaterThanOrEqual(now)
+      expect(out(KEY)).toBeUndefined()
+      expect(startsOn(s.p.name)).toBe('opencode')
+      // and the chat stays on its backup until the human restarts it: tell me switches nothing
+      expect(src.agents.records[onBackup.key]).toMatchObject({ kind: 'codex' })
+    } finally {
+      forget(s.p.name)
+      setModels('opencode', undefined)
+      s.done()
+    }
+  })
+
   test('a passing error that ran out of tries is still adopted: the watch brings its chat back', async () => {
     const s = await nightWorld('passing-then-adopt')
     try {
@@ -1270,6 +1303,385 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
       expect(asked).toEqual(['claude'])
       expect(s.started.map((x) => [x.key, x.kind])).toEqual([[a.key, 'claude']])
     } finally {
+      s.done()
+    }
+  })
+})
+
+describe('how soon the primary is asked', () => {
+  test('the first question comes in about three minutes, and each failure doubles it up to four hours', () => {
+    // a burst — a free-usage 429, a provider's hiccup — often clears in minutes: no half hour of waiting for it
+    expect(FIRST_WAIT).toBeGreaterThanOrEqual(2 * 60_000)
+    expect(FIRST_WAIT).toBeLessThanOrEqual(3 * 60_000)
+    // a fifth of the wait either way, so two roles rarely fall due together
+    expect(wait(0, 0)).toBe(FIRST_WAIT * 0.8)
+    expect(wait(0, 1)).toBe(FIRST_WAIT * 1.2)
+    // a provider that is out for good is asked less and less, never hammered, up to the longest wait
+    expect(wait(1, 0.5)).toBe(FIRST_WAIT * 2)
+    expect(wait(2, 0.5)).toBe(FIRST_WAIT * 4)
+    expect(wait(3, 0.5)).toBe(FIRST_WAIT * 8)
+    expect(wait(20, 0.5)).toBe(LONGEST_WAIT)
+  })
+
+  test('a takeover is asked on the first pass after its few minutes, and nothing is asked before', async () => {
+    const s = await space('soon-minute')
+    try {
+      const a = task(s.p.name, 'codex', { from: 'claude' })
+      const at = Date.now()
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at })
+      // a minute on: its question is not due yet, and nothing is posted
+      await s.src.watchReturns(at + 60_000)
+      expect(asked).toEqual([])
+      expect(cards(a.key)).toEqual([])
+      // four minutes on (three, a fifth either way): it is asked, and its chat hears
+      await s.src.watchReturns(at + FIRST_WAIT * 1.2 + 1)
+      expect(asked).toEqual(['claude'])
+      expect(cards(a.key)).toHaveLength(1)
+    } finally {
+      s.done()
+    }
+  })
+
+  test('the first look after a restart is a minute: an outage kept from before is not left for ten', () => {
+    expect(FIRST_LOOK).toBeGreaterThan(0)
+    expect(FIRST_LOOK).toBeLessThanOrEqual(2 * 60_000)
+  })
+})
+
+describe('the machine’s own work on the primary is its answer', () => {
+  test('two clean minutes on it free the space waiting on it, without asking the provider', async () => {
+    const s = await space('quiet-two')
+    const status = s.src.agents.status
+    try {
+      const a = task(s.p.name, 'codex', { from: 'claude' })
+      coordinator(s.key, 'claude')
+      s.src.agents.status = ((k: string) => (k === s.key ? 'working' : status.call(s.src.agents, k))) as never
+      const at = Date.now()
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at })
+      // a second short of the quiet, the work is not the answer yet, and its own question is not due: nothing either way
+      await s.src.watchReturns(at + QUIET - 1_000)
+      expect(asked).toEqual([])
+      expect(cards(a.key)).toEqual([])
+      // its own question is not due yet, and the work answers for it: nothing is asked
+      await s.src.watchReturns(at + QUIET)
+      expect(asked).toEqual([])
+      expect(cards(a.key)).toHaveLength(1)
+      // the answer is the work's, not a probe's: no count of probes puts its next question off
+      expect(s.src.returns.get('task', s.p.name)).toMatchObject({ back: expect.any(Number) })
+      expect(s.src.returns.get('task', s.p.name)!.oks).toBeUndefined()
+    } finally {
+      s.src.agents.status = status
+      s.done()
+    }
+  })
+
+  test('a question due while a turn still runs on it waits for the quiet, never asked beside that work', async () => {
+    const s = await space('quiet-beside-work')
+    const status = s.src.agents.status
+    try {
+      const a = task(s.p.name, 'codex', { from: 'claude' })
+      coordinator(s.key, 'claude')
+      s.src.agents.status = ((k: string) => (k === s.key ? 'working' : status.call(s.src.agents, k))) as never
+      const at = Date.now()
+      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at })
+      // the primary cut another chat off a moment ago: the question is due, its quiet is not over, and the work goes on
+      const cutAt = at + FIRST_WAIT * 2
+      s.src.returns.cut('task', s.p.name, cutAt, { key: `${a.id}-other/Agent`, onPrimary: true })
+      await s.src.watchReturns(cutAt)
+      expect(asked).toEqual([])
+      expect(cards(a.key)).toEqual([])
+      // the quiet over: the work is the answer, and the probe still never runs beside it
+      await s.src.watchReturns(cutAt + QUIET)
+      expect(asked).toEqual([])
+      expect(cards(a.key)).toHaveLength(1)
+    } finally {
+      s.src.agents.status = status
+      s.done()
+    }
+  })
+})
+
+describe('a model answers for the whole machine, not for one space', () => {
+  /** the starts the way back makes: one array, since the source and its one start are the whole machine's */
+  const started: { key: string; kind: string }[] = []
+  beforeEach(() => {
+    started.length = 0
+  })
+
+  /** a space going back by itself, whose starts are kept rather than made (as goingBack above) */
+  async function goingBack(name: string) {
+    const s = await space(name)
+    expect(s.src.settings.set('backup.watchReturn', 'go back', { space: s.p.name }).ok).toBe(true)
+    s.src.agents.restart = (async (spec: { key: string; kind: string; model?: string }) => {
+      started.push({ key: spec.key, kind: spec.kind })
+      // what a real start leaves: its agent runs on what it started on
+      const r = s.src.agents.records[spec.key]
+      if (r) Object.assign(r, { kind: spec.kind, model: spec.model })
+      return null
+    }) as never
+    const status = s.src.agents.status
+    s.src.agents.status = (() => 'idle') as never
+    /** a task of the space on the backup, as a real one is: its worktree and branch are the space's own */
+    const onBackup = () => {
+      const x = task(s.p.name, 'codex', { from: 'claude' })
+      Object.assign(x.t, { worktree: s.p.path, branch: 'main', base: 'main', agent: { kind: 'codex' } })
+      return x
+    }
+    const done = () => {
+      s.src.agents.status = status
+      s.src.settings.set('backup.watchReturn', null, { space: s.p.name })
+      s.done()
+    }
+    return { ...s, started, onBackup, done }
+  }
+
+  test('one probe answers for two spaces waiting on it, and both go back on it', async () => {
+    const a = await goingBack('share-one-a')
+    const b = await goingBack('share-one-b')
+    try {
+      const ta = a.onBackup()
+      const tb = b.onBackup()
+      const late = Date.now() - FIRST_WAIT * 2
+      a.src.returns.note({ role: 'task', space: a.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: late })
+      b.src.returns.note({ role: 'task', space: b.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: late })
+      await a.src.watchReturns(later())
+      // one question, and both chats started again on the primary it answered for
+      expect(asked).toEqual(['claude'])
+      expect(a.started.map((x) => [x.key, x.kind])).toEqual([
+        [ta.key, 'claude'],
+        [tb.key, 'claude'],
+      ])
+      // each over, each with its own return of the day, and neither asked again while the answer holds
+      expect(a.src.returns.get('task', a.p.name)!.back).toBeDefined()
+      expect(a.src.returns.get('task', b.p.name)!.back).toBeDefined()
+      await b.src.watchReturns(later() + 3_600_000)
+      expect(asked).toEqual(['claude'])
+    } finally {
+      b.done()
+      a.done()
+    }
+  })
+
+  test('a failure is one question too: both spaces back off, and neither asks again in that pass', async () => {
+    const a = await goingBack('share-fail-a')
+    const b = await goingBack('share-fail-b')
+    try {
+      answers = false
+      a.onBackup()
+      b.onBackup()
+      const late = Date.now() - FIRST_WAIT * 2
+      a.src.returns.note({ role: 'task', space: a.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
+      b.src.returns.note({ role: 'task', space: b.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
+      await a.src.watchReturns(later())
+      expect(asked).toEqual(['claude'])
+      expect(a.src.returns.get('task', a.p.name)!.tries).toBe(1)
+      expect(a.src.returns.get('task', b.p.name)!.tries).toBe(1)
+      expect(a.started).toEqual([])
+      expect(b.started).toEqual([])
+    } finally {
+      b.done()
+      a.done()
+    }
+  })
+
+  test('a cut on the primary while a probe is out answers nothing: that answer is older than the cut', async () => {
+    const a = await goingBack('share-cut-a')
+    const b = await goingBack('share-cut-b')
+    try {
+      const ta = a.onBackup()
+      const tb = b.onBackup()
+      const late = Date.now() - FIRST_WAIT * 2
+      a.src.returns.note({ role: 'task', space: a.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
+      b.src.returns.note({ role: 'task', space: b.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
+      const now = later()
+      // while that probe is out, the primary cuts b off again: its refusal is newer than the answer on its way back
+      a.src.returns.probe = async (h: { kind: string }) => {
+        asked.push(h.kind)
+        a.src.returns.cut('task', b.p.name, now + 60_000, { key: tb.key, onPrimary: true })
+        return { ok: true, said: 'ok' }
+      }
+      await a.src.watchReturns(now)
+      // the model refused a chat during the probe: nothing is answered by it, and neither chat is started on it
+      expect(asked).toEqual(['claude'])
+      expect(started).toEqual([])
+      expect(a.src.returns.get('task', a.p.name)!.ok).toBeUndefined()
+      expect(b.src.returns.get('task', b.p.name)!.ok).toBeUndefined()
+      expect(cards(tb.key)).toEqual([])
+      expect(cards(ta.key)).toEqual([])
+    } finally {
+      b.done()
+      a.done()
+    }
+  })
+
+  test('a fresh answer stops counting once another space is cut on that model again', async () => {
+    const a = await goingBack('share-recut-a')
+    const b = await goingBack('share-recut-b')
+    const status = a.src.agents.status
+    try {
+      const ta = a.onBackup()
+      const tb = b.onBackup()
+      const late = Date.now() - FIRST_WAIT * 2
+      a.src.returns.note({ role: 'task', space: a.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
+      b.src.returns.note({ role: 'task', space: b.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
+      const now = later()
+      // both are freed by the same answer; a is idle and goes back, b is still at work
+      a.src.agents.status = ((k: string) => (k === tb.key ? 'working' : 'idle')) as never
+      await a.src.watchReturns(now)
+      expect(started.map((x) => x.key)).toEqual([ta.key])
+      expect(a.src.returns.get('task', b.p.name)!.ok).toBeDefined()
+      // a's restarted chat is cut on the primary a minute later, and b goes idle two minutes after the answer: b is not
+      // started on a model that has just refused a, though its answer is still inside the fresh quarter of an hour
+      a.src.agents.status = status
+      a.src.returns.note({ role: 'task', space: a.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: now + 60_000 })
+      await b.src.watchReturns(now + 2 * 60_000)
+      expect(started.map((x) => x.key)).toEqual([ta.key])
+      // its own question comes due once the refusal is older than the fresh quarter of an hour: then it goes back
+      await b.src.watchReturns(now + FRESH + 60_000)
+      expect(started.map((x) => x.key)).toEqual([ta.key, tb.key])
+    } finally {
+      a.src.agents.status = status
+      b.done()
+      a.done()
+    }
+  })
+
+  test('another space’s clean work does not free a chat cut on that model a moment ago', async () => {
+    const b = await space('share-quiet-b')
+    const a = await goingBack('share-quiet-a')
+    const status = a.src.agents.status
+    try {
+      const tb = task(b.p.name, 'codex', { from: 'claude' })
+      coordinator(a.key, 'claude')
+      a.src.agents.status = ((k: string) => (k === a.key ? 'working' : 'idle')) as never
+      const at = Date.now()
+      b.src.returns.note({ role: 'task', space: b.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: at - 10 * 60_000 })
+      // cut on the primary ten seconds ago: its own quiet is not over, so the machine's clean work is no answer for it
+      b.src.returns.cut('task', b.p.name, at - 10_000, { key: tb.key, onPrimary: true })
+      await b.src.watchReturns(at)
+      expect(asked).toEqual([])
+      expect(cards(tb.key)).toEqual([])
+      expect(b.src.returns.get('task', b.p.name)!.ok).toBeUndefined()
+      // its own quiet over, the work is the answer: the card comes without a probe
+      await b.src.watchReturns(at - 10_000 + QUIET)
+      expect(asked).toEqual([])
+      expect(cards(tb.key)).toHaveLength(1)
+    } finally {
+      a.src.agents.status = status
+      a.done()
+      b.done()
+    }
+  })
+
+  test('a space whose watch is off hears nothing of it: its outage is left as it was', async () => {
+    // the space whose starts are not kept first: goingBack's own start stub is the machine's one
+    const b = await space('share-off-b')
+    const a = await goingBack('share-off-a')
+    try {
+      expect(b.src.settings.set('backup.watchReturn', 'off', { space: b.p.name }).ok).toBe(true)
+      const ta = a.onBackup()
+      const tb = task(b.p.name, 'codex', { from: 'claude' })
+      const late = Date.now() - FIRST_WAIT * 2
+      a.src.returns.note({ role: 'task', space: a.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: late })
+      b.src.returns.note({ role: 'task', space: b.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: late })
+      await a.src.watchReturns(later())
+      expect(asked).toEqual(['claude'])
+      expect(a.started.map((x) => x.key)).toEqual([ta.key])
+      // off is off: the machine's answer is never written into that space's outage, and no card goes to its chat
+      expect(b.src.returns.get('task', b.p.name)!.ok).toBeUndefined()
+      expect(b.src.returns.get('task', b.p.name)!.back).toBeUndefined()
+      expect(cards(tb.key)).toEqual([])
+    } finally {
+      b.src.settings.set('backup.watchReturn', null, { space: b.p.name })
+      a.done()
+      b.done()
+    }
+  })
+
+  test('the shared answer does not restart a space that already went back as often as it may today', async () => {
+    const a = await goingBack('share-often-a')
+    const b = await goingBack('share-often-b')
+    try {
+      const ta = a.onBackup()
+      const tb = b.onBackup()
+      // b went back by itself three times today and ran out again each time: its next return is the human's
+      let at = Date.now() - 4 * 3_600_000
+      for (let i = 0; i < MAX_RETURNS; i++) {
+        b.src.returns.note({ role: 'task', space: b.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance', at })
+        b.src.returns.wentBack('task', b.p.name, at)
+        b.src.returns.answered('task', b.p.name, at + 60_000)
+        at += 3_600_000
+      }
+      const late = Date.now() - FIRST_WAIT * 2
+      b.src.returns.note({ role: 'task', space: b.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance', at: late })
+      a.src.returns.note({ role: 'task', space: a.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'out of allowance', at: late })
+      await a.src.watchReturns(later())
+      expect(asked).toEqual(['claude'])
+      // a goes back; b only hears, with the card that says why
+      expect(started.map((x) => x.key)).toEqual([ta.key])
+      expect(started.map((x) => x.key)).not.toContain(tb.key)
+      expect(cards(tb.key).at(-1)).toContain(`It went back by itself ${MAX_RETURNS} times today and ran out again each time, so this time it waits for you.`)
+    } finally {
+      b.done()
+      a.done()
+    }
+  })
+
+  test('an agent of the machine at work on the model answers for every space waiting on it', async () => {
+    const b = await space('share-work-b')
+    const a = await goingBack('share-work-a')
+    const status = a.src.agents.status
+    try {
+      const tb = task(b.p.name, 'codex', { from: 'claude' })
+      coordinator(a.key, 'claude')
+      a.src.agents.status = ((k: string) => (k === a.key ? 'working' : 'idle')) as never
+      const at = Date.now()
+      b.src.returns.note({ role: 'task', space: b.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at })
+      // b's own question is not due yet; the work on the machine answers for it, without a probe
+      await a.src.watchReturns(at + QUIET)
+      expect(asked).toEqual([])
+      expect(cards(tb.key)).toHaveLength(1)
+    } finally {
+      a.src.agents.status = status
+      a.done()
+      b.done()
+    }
+  })
+})
+
+describe('every CLI Shepherdr can ask, as the primary that comes back', () => {
+  test('each of the five has its own quiet one-shot, and one it has none for is never asked', () => {
+    // Claude Code, Codex, pi, OpenCode and Antigravity: no tools, no MCP servers, no session kept
+    expect(oneShot({ kind: 'claude' })).toEqual(expect.arrayContaining(['-p', '--no-session-persistence', '--strict-mcp-config', '--restricted']))
+    expect(oneShot({ kind: 'codex' })).toEqual(expect.arrayContaining(['exec', '--sandbox', 'read-only', '--skip-git-repo-check']))
+    expect(oneShot({ kind: 'pi' })).toEqual(expect.arrayContaining(['-p', '--no-tools', '--no-session', '--no-mcp', '--no-skills']))
+    expect(oneShot({ kind: 'opencode' })).toEqual(expect.arrayContaining(['run', '--standalone', '--agent', 'plan']))
+    expect(oneShot({ kind: 'agy' })).toEqual(expect.arrayContaining(['-p', '--output-format', 'json', '--mode', 'plan']))
+    for (const kind of ['claude', 'codex', 'pi', 'opencode', 'agy']) expect(canProbe(kind)).toBe(true)
+    // one Shepherdr knows no silent call for is never asked
+    expect(canProbe('gemini')).toBe(false)
+    expect(oneShot({ kind: 'gemini' })).toBeUndefined()
+  })
+
+  test('each of the five, as the primary, is asked once and its chat hears that it answers', async () => {
+    const s = await space('every-cli-back')
+    try {
+      const backupOf = (kind: string) => (kind === 'codex' ? 'claude' : 'codex')
+      for (const kind of ['claude', 'codex', 'pi', 'opencode', 'agy']) {
+        // each round starts with nothing kept from the one before
+        for (const o of s.src.returns.list()) s.src.returns.forget(o.role, o.space)
+        s.src.engine.tasks.length = 0
+        for (const k of Object.keys(s.src.agents.records)) delete s.src.agents.records[k]
+        asked.length = 0
+        expect(s.src.settings.set('task.agent', kind, { space: s.p.name }).ok).toBe(true)
+        const t = task(s.p.name, backupOf(kind), { from: kind })
+        s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind }, to: { kind: backupOf(kind) }, why: 'out of allowance until 5pm', at: Date.now() - FIRST_WAIT * 2 })
+        await s.src.watchReturns(later())
+        expect(asked).toEqual([kind])
+        expect(cards(t.key)).toHaveLength(1)
+      }
+    } finally {
+      s.src.settings.set('task.agent', null, { space: s.p.name })
       s.done()
     }
   })

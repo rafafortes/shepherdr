@@ -1,5 +1,5 @@
 // The live source started as the server starts it, outside tests: it also sets going what a test never wants on its
-// own (the shared browsers' sweeps, the way back to a primary model ten minutes on, the advisor, the machine's health,
+// own (the shared browsers' sweeps, the way back to a primary model a minute on, the advisor, the machine's health,
 // revivals and the watch on starts), and its link to the other machines looks for the ones saved in herdr. That look
 // is a stand-in here, so no herdr is run and no machine is reached; the server is stopped before any first look of its
 // own is due.
@@ -29,16 +29,16 @@ process.env.SHEPHERDR_AGENT_BROWSER = join(standIns, 'agent-browser')
   Bun.spawn = ((a: unknown, o?: Opts) => spawn(...withEnv(a, o))) as typeof Bun.spawn
   Bun.spawnSync = ((a: unknown, o?: Opts) => spawnSync(...withEnv(a, o))) as typeof Bun.spawnSync
 }
-const { LiveSource } = await import('../server/live/source.ts')
+const { FIRST_LOOK, LiveSource } = await import('../server/live/source.ts')
 const { Machines } = await import('../server/live/machines.ts')
 
 describe('started as the server starts it', () => {
-  test('it sets its watches going, the way back ten minutes on, and looks for the saved machines; stopped, it leaves none behind', async () => {
+  test('it sets its watches going, the way back a minute on, and looks for the saved machines; stopped, it leaves none behind', async () => {
     const env = process.env.NODE_ENV
     const sync = Machines.prototype.sync
     let synced = 0
     Machines.prototype.sync = async () => void synced++
-    // what it sets going later, by how long it waits: the way back's first look is ten minutes on
+    // what it sets going later, by how long it waits: the way back's first look is a minute on
     const later = new Map<number, () => void>()
     const setTimeout_ = globalThis.setTimeout
     globalThis.setTimeout = ((f: () => void, ms?: number, ...a: unknown[]) => (later.set(ms ?? 0, f), setTimeout_(f, ms, ...a))) as typeof setTimeout
@@ -52,11 +52,11 @@ describe('started as the server starts it', () => {
       const timers = (src as unknown as { timers: unknown[] }).timers
       // a test's own server sets six of them; this one the rest too
       expect(timers.length).toBeGreaterThanOrEqual(14)
-      // ten minutes on: the way back looks once, and then every minute
+      // a minute on: the way back looks once, and then every minute
       const n = timers.length
       let looked = 0
       src.watchReturns = (async () => void looked++) as never
-      later.get(10 * 60_000)!()
+      later.get(FIRST_LOOK)!()
       expect(looked).toBe(1)
       expect(timers.length).toBe(n + 1)
     } finally {

@@ -6,7 +6,9 @@
 // back (tell me). No setting is ever written and no model chosen on its own: what it goes back to is what Settings name.
 //
 // It is kept across a restart (returns.json, like retries.json) and it is this machine's own: a machine never asks
-// another machine's models, and a CLI Shepherdr has no silent one-shot for is never asked at all.
+// another machine's models, and a CLI Shepherdr has no silent one-shot for is never asked at all. A model and its
+// provider are the machine's too, not a space's: one answer for a model frees every space and role waiting on it, and is
+// asked once (source.ts returnPass).
 import { tmpdir } from 'node:os'
 import { readJson, writeJson } from '../store.ts'
 import { fitHarness, harnessWords, type Harness } from './restart.ts'
@@ -61,8 +63,10 @@ export interface Outage {
   returned?: number[]
 }
 
-/** how long after a takeover its primary is first asked, and how far the wait doubles while it keeps failing */
-export const FIRST_WAIT = 30 * 60_000
+/** how long after a takeover its primary is first asked, and how far the wait doubles while it keeps failing: a burst —
+ *  a free-usage 429, a provider's hiccup — often clears in minutes, so the first question comes in three (a fifth of it
+ *  either way), and a provider that is out for good is asked less and less, up to the longest wait, never hammered */
+export const FIRST_WAIT = 3 * 60_000
 export const LONGEST_WAIT = 4 * 3_600_000
 /** how long one probe may take before it is killed: a provider that answers answers at once */
 export const PROBE_TIMEOUT = 45_000
@@ -73,8 +77,9 @@ export const FRESH = 15 * 60_000
 export const MAX_RETURNS = 3
 const DAY = 24 * 3_600_000
 /** how long without a new cut-off before an agent at work on the primary counts as its answer: a turn already under way
- *  when the provider began refusing may still be working for a while */
-export const QUIET = 10 * 60_000
+ *  when the provider began refusing may still be working for a while, but a clean one after that is the primary answering
+ *  — two minutes, so the machine's own work frees the spaces waiting on it long before a probe would */
+export const QUIET = 2 * 60_000
 /** a fifth either side of the wait, so two roles rarely fall due together (when they do, the probes are taken one by one) */
 const JITTER = 0.2
 
