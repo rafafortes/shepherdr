@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { claudeLogPath, claudeProjectDir, cwdCandidates, findClaudeLog, findCodexLog, findPiLog, piSessionDir } from '../server/live/readers/find.ts'
 import { outputAt } from '../server/live/activity.ts'
 import { piStep } from '../server/live/readers/pi.ts'
-import { LogTail, readerFor } from '../server/live/readers/index.ts'
+import { CodexReader, LogTail, readerFor } from '../server/live/readers/index.ts'
 import type { LogEvent } from '../server/live/readers/types.ts'
 import { tmp } from './tmp.ts'
 
@@ -617,10 +617,10 @@ describe('LogTail', () => {
 
   test('a line a CLI is still writing waits for its newline: codex, as it writes its log a piece at a time', () => {
     const f = join(dir, 'codex-partial.jsonl')
-    const head = JSON.stringify(sessionMeta('/work/app')) + '\n'
-    const next = JSON.stringify(cxmsg('msg_u1', 'user', [{ type: 'input_text', text: 'Add a dark mode' }], ['user.text'])) + '\n'
+    const head = `${JSON.stringify(sessionMeta('/work/app'))}\n`
+    const next = `${JSON.stringify(cxmsg('msg_u1', 'user', [{ type: 'input_text', text: 'Add a dark mode' }], ['user.text']))}\n`
     writeFileSync(f, head + next.slice(0, 40))
-    const tail = new LogTail(f, readerFor('codex')!)
+    const tail = new LogTail(f, readerFor('codex') ?? new CodexReader())
     // the half line says nothing yet: it is joined once its newline is there
     expect(brief(tail.read())).toEqual([`session:session-${T}`])
     appendFileSync(f, next.slice(40))

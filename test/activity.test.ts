@@ -625,7 +625,8 @@ ${JSON.stringify({ idx: 1, at: 1_700_000_000_000, kind: 'tool', tool: 'run_comma
       const logs = new JobLogs()
       const file = agyLogPath(home(), 'conv-again')
       mkdirSync(dirname(file), { recursive: true })
-      const tool = (idx: number, command: string) => JSON.stringify({ idx, at: 1_700_000_000_000 + idx, kind: 'tool', tool: 'run_command', args: JSON.stringify({ CommandLine: command }), output: 'Command exited with code 0.' })
+      const tool = (idx: number, command: string) =>
+        JSON.stringify({ idx, at: 1_700_000_000_000 + idx, kind: 'tool', tool: 'run_command', args: JSON.stringify({ CommandLine: command }), output: 'Command exited with code 0.' })
       writeFileSync(file, `${MIRROR_HEAD}\n${tool(1, 'bun test')}\n`)
       expect(logs.steps(file).steps.map((s) => s.title)).toEqual(['Ran tests'])
       // the same log again, whole, in a new file (a store's mirror written again whole), and one more step with it

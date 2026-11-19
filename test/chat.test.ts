@@ -210,18 +210,26 @@ describe('the built chat is cached per revision', () => {
 
 describe('a log read again from its start', () => {
   /** a pi log with a session line and one message per text */
-  const piLog = (lines: { role: 'user' | 'assistant'; text: string }[], n = 0) =>
-    [
-      { type: 'session', version: 3, id: 'sw-1', timestamp: '2026-10-13T20:52:53.359Z', cwd: '/w' },
-      ...lines.map((l, i) => ({ type: 'message', id: `e${n + i}`, parentId: null, timestamp: 1000 + n + i, message: { role: l.role, content: [{ type: 'text', text: l.text }], timestamp: 1000 + n + i } })),
-    ]
+  const piLog = (lines: { role: 'user' | 'assistant'; text: string }[], n = 0) => [
+    { type: 'session', version: 3, id: 'sw-1', timestamp: '2026-10-13T20:52:53.359Z', cwd: '/w' },
+    ...lines.map((l, i) => ({
+      type: 'message',
+      id: `e${n + i}`,
+      parentId: null,
+      timestamp: 1000 + n + i,
+      message: { role: l.role, content: [{ type: 'text', text: l.text }], timestamp: 1000 + n + i },
+    })),
+  ]
 
   test('a log written again whole (a store mirror, a rotated file) says nothing twice', () => {
     const dir = tmp('chat-reread')
     const file = join(dir, 'session.jsonl')
     const key = 'reread/Agent'
-    const body = piLog([{ role: 'user', text: 'Hello.' }, { role: 'assistant', text: 'Hi there.' }])
-    writeFileSync(file, body.map((l) => JSON.stringify(l)).join('\n') + '\n')
+    const body = piLog([
+      { role: 'user', text: 'Hello.' },
+      { role: 'assistant', text: 'Hi there.' },
+    ])
+    writeFileSync(file, `${body.map((l) => JSON.stringify(l)).join('\n')}\n`)
     const agents = { ...agentsForChat(), record: () => ({ kind: 'pi', logs: [file] }) }
     const chats = chatWith(agents as never)
     expect(chats.chat(key).messages.map((m) => [m.who, m.text])).toEqual([
@@ -231,7 +239,7 @@ describe('a log read again from its start', () => {
     // the same log again, whole, under a new file (as a mirror written again is), and one more message with it
     const written = [...body, ...piLog([{ role: 'user', text: 'One more.' }], 10)]
     const tmpFile = join(dir, 'session.new')
-    writeFileSync(tmpFile, written.map((l) => JSON.stringify(l)).join('\n') + '\n')
+    writeFileSync(tmpFile, `${written.map((l) => JSON.stringify(l)).join('\n')}\n`)
     renameSync(tmpFile, file)
     expect(chats.chat(key).messages.map((m) => [m.who, m.text])).toEqual([
       ['you', 'Hello.'],

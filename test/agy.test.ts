@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, uti
 import { join } from 'node:path'
 import { agyLogPath, agyModelId, field, fields, MIRROR_HEAD, mirrorConversation, mirrorCount, newestConversation, stepTime, summaryTime, text } from '../server/live/agy.ts'
 import { findAgyLog, LOG_FINDERS, logKind } from '../server/live/readers/find.ts'
-import { CHAT_KINDS, chatProblem, LogTail, readerFor } from '../server/live/readers/index.ts'
+import { AgyReader, CHAT_KINDS, chatProblem, LogTail, readerFor } from '../server/live/readers/index.ts'
 import { home, writeJson } from '../server/store.ts'
 import { agentPayload, genRow, makeConversation, makeSummaries, noticePayload, pb, stepAt, toolPayload, userPayload, type StepRow } from './agy-fixture.ts'
 import { tmp } from './tmp.ts'
@@ -287,7 +287,7 @@ describe('the mirror of a conversation', () => {
     expect(lines(file).map((l) => l.idx)).toEqual([0])
   })
 
-  test('the conversation\'s last step waits while it runs, and is copied once it is over', () => {
+  test("the conversation's last step waits while it runs, and is copied once it is over", () => {
     makeConversation(join(convs, 'conv-b.db'), [
       { idx: 0, step_type: 14, payload: userPayload('one') },
       { idx: 1, step_type: 15, status: 1, payload: agentPayload({ text: 'partial' }) },
@@ -317,7 +317,9 @@ describe('the mirror of a conversation', () => {
     // step 2 began now and has no output or end time yet: it is on its way, and the step after it waits with it
     expect(mirrorConversation('conv-parallel', file)).toBe(2)
     const d = new Database(join(convs, 'conv-parallel.db'))
-    d.run('UPDATE steps SET status = 3, step_payload = ? WHERE idx = 2', [toolPayload({ tool: 'run_command', args: '{"CommandLine":"bun test"}', output: 'Command exited with code 0.\n\nCommand output: all pass', sec: nowSec })])
+    d.run('UPDATE steps SET status = 3, step_payload = ? WHERE idx = 2', [
+      toolPayload({ tool: 'run_command', args: '{"CommandLine":"bun test"}', output: 'Command exited with code 0.\n\nCommand output: all pass', sec: nowSec }),
+    ])
     d.close()
     expect(mirrorConversation('conv-parallel', file)).toBe(2)
     expect(lines(file).map((l) => l.idx)).toEqual([0, 1, 2, 3])
@@ -340,7 +342,7 @@ describe('the mirror of a conversation', () => {
     expect(lines(file)[2]).toMatchObject({ kind: 'tool', tool: 'run_command' })
   })
 
-  test('a step\'s status: 0, 1 and 2 are not final while the step is the conversation\'s last; a later step settles it', () => {
+  test("a step's status: 0, 1 and 2 are not final while the step is the conversation's last; a later step settles it", () => {
     makeConversation(join(convs, 'conv-s.db'), [
       { idx: 0, step_type: 14, status: 3, payload: userPayload('s3') },
       { idx: 1, step_type: 14, status: 6, payload: userPayload('s6') },
@@ -400,10 +402,14 @@ describe('the mirror of a conversation', () => {
   test('a mirror of the older format that froze a reply agy had not written yet is written again whole, with the reply', () => {
     // the production case: line 324 of a conversation copied as {"idx":324,"kind":"agent"} while the reply was on its way,
     // and never read again
-    makeConversation(join(convs, 'conv-frozen.db'), [
-      { idx: 0, step_type: 14, payload: userPayload('hi') },
-      { idx: 1, step_type: 15, payload: agentPayload({ text: 'the reply', sec: 103, tokensIn: 5, tokensOut: 2 }) },
-    ], [genRow({ label: 'Gemini 3.8 Flash (Low)', id: 'gemini-3.8-flash-low', lastStep: 0 })])
+    makeConversation(
+      join(convs, 'conv-frozen.db'),
+      [
+        { idx: 0, step_type: 14, payload: userPayload('hi') },
+        { idx: 1, step_type: 15, payload: agentPayload({ text: 'the reply', sec: 103, tokensIn: 5, tokensOut: 2 }) },
+      ],
+      [genRow({ label: 'Gemini 3.8 Flash (Low)', id: 'gemini-3.8-flash-low', lastStep: 0 })],
+    )
     const file = join(folder('frozen'), 'conv-frozen.jsonl')
     writeFileSync(file, `${JSON.stringify({ mirror: 2 })}\n${JSON.stringify({ idx: 0, at: 100_000, kind: 'user', text: 'hi' })}\n${JSON.stringify({ idx: 1, at: 103_000, kind: 'agent' })}\n`)
     expect(mirrorConversation('conv-frozen', file)).toBe(2)
@@ -464,16 +470,20 @@ describe('the mirror of a conversation', () => {
   test('the model and tokens of a response come from the generation row that answers it, not from its order among the responses', () => {
     // a subagent's generation row sits among this conversation's, before the row that answers its reply: counting the rows
     // would hand its model to the wrong step
-    makeConversation(join(convs, 'conv-drift.db'), [
-      { idx: 0, step_type: 14, payload: userPayload('ask') },
-      { idx: 1, step_type: 15, payload: agentPayload({ text: 'mine' }) },
-      { idx: 2, step_type: 14, payload: userPayload('again') },
-      { idx: 3, step_type: 15, payload: agentPayload({ text: 'mine too', tokensIn: 8, tokensOut: 4 }) },
-    ], [
-      genRow({ label: 'Another Conversation', id: 'another-model', cascade: 'someone-else', lastStep: 0 }),
-      genRow({ label: 'Gemini 3.8 Flash (Low)', id: 'gemini-3.8-flash-low', lastStep: 0, cascade: 'conv-drift' }),
-      genRow({ label: 'Gemini 3.8 Flash (High)', id: 'gemini-3.8-flash-high', lastStep: 2, cascade: 'conv-drift' }),
-    ])
+    makeConversation(
+      join(convs, 'conv-drift.db'),
+      [
+        { idx: 0, step_type: 14, payload: userPayload('ask') },
+        { idx: 1, step_type: 15, payload: agentPayload({ text: 'mine' }) },
+        { idx: 2, step_type: 14, payload: userPayload('again') },
+        { idx: 3, step_type: 15, payload: agentPayload({ text: 'mine too', tokensIn: 8, tokensOut: 4 }) },
+      ],
+      [
+        genRow({ label: 'Another Conversation', id: 'another-model', cascade: 'someone-else', lastStep: 0 }),
+        genRow({ label: 'Gemini 3.8 Flash (Low)', id: 'gemini-3.8-flash-low', lastStep: 0, cascade: 'conv-drift' }),
+        genRow({ label: 'Gemini 3.8 Flash (High)', id: 'gemini-3.8-flash-high', lastStep: 2, cascade: 'conv-drift' }),
+      ],
+    )
     const file = join(folder('drift'), 'conv-drift.jsonl')
     expect(mirrorConversation('conv-drift', file)).toBe(4)
     expect(lines(file).map((l) => [l.idx, l.model])).toEqual([
@@ -486,10 +496,14 @@ describe('the mirror of a conversation', () => {
 
   test('a model response is copied once, whole: a row agy has not written its payload for yet is not copied at all', () => {
     // agy writes the step row before its payload, and the payload's usage (5.9.3) last
-    makeConversation(join(convs, 'conv-late.db'), [
-      { idx: 0, step_type: 14, payload: userPayload('hi') },
-      { idx: 1, step_type: 15, payload: pb({ ...stepAt(1700000100) }) },
-    ], [genRow({ label: 'Gemini 3.8 Flash (Low)', id: 'gemini-3.8-flash-low', lastStep: 0 })])
+    makeConversation(
+      join(convs, 'conv-late.db'),
+      [
+        { idx: 0, step_type: 14, payload: userPayload('hi') },
+        { idx: 1, step_type: 15, payload: pb({ ...stepAt(1700000100) }) },
+      ],
+      [genRow({ label: 'Gemini 3.8 Flash (Low)', id: 'gemini-3.8-flash-low', lastStep: 0 })],
+    )
     const file = join(folder('late'), 'conv-late.jsonl')
     expect(mirrorConversation('conv-late', file)).toBe(1)
     expect(lines(file).map((l) => l.idx)).toEqual([0])
@@ -505,10 +519,14 @@ describe('the mirror of a conversation', () => {
   test('a reply whose words are there but whose usage is not yet is still on its way: the words grow after it lands', () => {
     // the production case of steps 316, 318 and 333: agy wrote part of the reply, the mirror copied it, and the rest of the
     // reply — and the whole reply's model and tokens — never reached the chat
-    makeConversation(join(convs, 'conv-words.db'), [
-      { idx: 0, step_type: 14, payload: userPayload('hi') },
-      { idx: 1, step_type: 15, payload: agentPayload({ text: 'half a rep', sec: 1700000100 }) },
-    ], [genRow({ label: 'Gemini 3.8 Flash (Low)', id: 'gemini-3.8-flash-low', lastStep: 0 })])
+    makeConversation(
+      join(convs, 'conv-words.db'),
+      [
+        { idx: 0, step_type: 14, payload: userPayload('hi') },
+        { idx: 1, step_type: 15, payload: agentPayload({ text: 'half a rep', sec: 1700000100 }) },
+      ],
+      [genRow({ label: 'Gemini 3.8 Flash (Low)', id: 'gemini-3.8-flash-low', lastStep: 0 })],
+    )
     const file = join(folder('words'), 'conv-words.jsonl')
     expect(mirrorConversation('conv-words', file)).toBe(1)
     expect(lines(file).map((l) => l.idx)).toEqual([0])
@@ -571,7 +589,7 @@ describe('agy in the finder and the chat reader', () => {
 
   test('a tail over the mirror reads the steps written since, from the store', () => {
     const path = findAgyLog('/w/agy-app')!
-    const tail = new LogTail(path, readerFor('agy')!)
+    const tail = new LogTail(path, readerFor('agy') ?? new AgyReader())
     expect(tail.read().map((e) => e.kind)).toEqual(['session', 'turn-start', 'user'])
     addStep('conv-f', { idx: 1, step_type: 15, payload: agentPayload({ text: 'hello back', tokensIn: 3, tokensOut: 1 }) })
     expect(tail.read().map((e) => e.kind)).toEqual(['agent', 'usage', 'turn-end'])
@@ -584,7 +602,7 @@ describe('agy in the finder and the chat reader', () => {
       { idx: 1, step_type: 15, payload: pb({ ...stepAt(1700000200), '20': pb({ '12': 2 }) }) },
     ])
     const path = agyLogPath(home(), 'conv-live')
-    const tail = new LogTail(path, readerFor('agy')!)
+    const tail = new LogTail(path, readerFor('agy') ?? new AgyReader())
     expect(tail.read().map((e) => e.kind)).toEqual(['session', 'turn-start', 'user'])
     const d = new Database(join(convs, 'conv-live.db'))
     d.run('UPDATE steps SET step_payload = ? WHERE idx = 1', [agentPayload({ text: 'hello back', tokensIn: 3, tokensOut: 1, sec: 1700000200 })])

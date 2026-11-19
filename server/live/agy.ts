@@ -411,9 +411,7 @@ function gensFor(handle: Database, id: string, prevs: Set<number>): Map<number, 
   const found = new Map<number, { rank: number; data: Uint8Array }>()
   let before = Number.MAX_SAFE_INTEGER
   while (found.size < prevs.size) {
-    const rows = handle
-      .query<{ idx: number; data: Uint8Array }, [number]>('SELECT idx, data FROM gen_metadata WHERE idx < ? ORDER BY idx DESC LIMIT 32')
-      .all(before)
+    const rows = handle.query<{ idx: number; data: Uint8Array }, [number]>('SELECT idx, data FROM gen_metadata WHERE idx < ? ORDER BY idx DESC LIMIT 32').all(before)
     if (!rows.length) break
     for (const row of rows) {
       before = row.idx
@@ -497,9 +495,7 @@ function mirrorAgy(id: string, outFile: string, db: string): number {
   const handle = new Database(db, { readonly: true })
   let lines: string[]
   try {
-    const steps = handle
-      .query<Step, [number]>('SELECT idx, step_type, status, step_payload, error_details FROM steps WHERE idx > ? ORDER BY idx')
-      .all(after)
+    const steps = handle.query<Step, [number]>('SELECT idx, step_type, status, step_payload, error_details FROM steps WHERE idx > ? ORDER BY idx').all(after)
     const now = Date.now()
     const final = steps.findIndex((s, i) => unsettled(s, i === steps.length - 1, now))
     // a step held back is looked at again on the next pass, however quiet the store is: it may come back after this one
