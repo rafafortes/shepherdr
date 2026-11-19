@@ -32,7 +32,8 @@ export const HEALTH: Record<string, MachineHealth> = {
   'vm-str': {
     meters: [
       { name: 'CPU', pct: 112, detail: 'load 17.9 on 16 cores', level: 'busy' },
-      { name: 'Memory', pct: 58, detail: '18 GB of 31 GB', level: 'ok' },
+      { name: 'Memory', pct: 58, detail: '18 GB of 31 GB · swap 6 GB · pressure 3%', level: 'ok' },
+      { name: 'I/O', pct: 2, detail: 'the share of the last minute some task waited on I/O', level: 'ok' },
       { name: 'Disk', pct: 64, detail: 'home 64%', level: 'ok' },
     ],
     herdr: true,
@@ -592,9 +593,23 @@ export function chats(): Record<string, Chat> {
   )
 }
 
-/** the health sample the demo's machine shows (HEALTH, vm-str: 17.9 on 16 cores, 58% of memory), as the Limits page reads it */
+/** the health sample the demo's machine shows (HEALTH, vm-str: 17.9 on 16 cores, 58% of memory, 6 GB of swap), as the Limits page reads it */
 export function demoSample(): Sample {
-  return { at: Date.now(), cores: 16, load: 17.9, load5: 17.9, memTotal: 31 * 2 ** 30, memUsed: 18 * 2 ** 30, disks: [{ path: '~', pct: 64, freeGb: 90, dev: 1 }], gpus: [] }
+  return {
+    at: Date.now(),
+    cores: 16,
+    load: 17.9,
+    load5: 17.9,
+    cpuSome: 31.2,
+    memSome: 3.4,
+    ioSome: 1.8,
+    memTotal: 31 * 2 ** 30,
+    memUsed: 18 * 2 ** 30,
+    swapTotal: 8 * 2 ** 30,
+    swapUsed: 6 * 2 ** 30,
+    disks: [{ path: '~', pct: 64, freeGb: 90, dev: 1 }],
+    gpus: [],
+  }
 }
 
 /** what holds the demo's tasks for Settings → Limits' Waiting now: a fiction like the rest of the demo, in the shape the

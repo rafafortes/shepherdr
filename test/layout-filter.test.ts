@@ -174,7 +174,7 @@ describe.skipIf(!browser)('no chat attention summary and quiet health', () => {
     await page.getByRole('button', { name: /^Machine health/ }).click()
     const health = page.getByRole('dialog', { name: 'mac health' })
     await health.waitFor()
-    expect(await health.textContent()).toContain('Alert limit crossed')
+    expect(await health.textContent()).toContain('Over its limit')
     expect(await health.textContent()).toContain('18%') // Healthy CPU still available beside the disk warning.
     await page.keyboard.press('Escape')
     await page.goto(`http://127.0.0.1:${server!.port}/?place=p:vm-str:gtm`)

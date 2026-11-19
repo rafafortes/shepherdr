@@ -6,6 +6,7 @@ import { type Sample } from '../server/live/health.ts'
 import { modelsSummary, type SummaryInput } from '../server/live/models-summary.ts'
 import { modelsMatrix } from '../server/live/models-matrix.ts'
 import { entryPatterns, knownOf, limitsView, machineColumns, machineReason, waitingOf, type HeldFact, type LimitsInput } from '../server/live/limits-view.ts'
+import type { LimitRow } from '../shared/types.ts'
 import { Settings } from '../server/live/settings.ts'
 import { comparePlace, NO_PLACE, placeOrder } from '../shared/space-order.ts'
 import { UsageLedger } from '../server/live/usage-ledger.ts'
@@ -84,12 +85,29 @@ describe('the machine rows: Everywhere and this machine, each value with where i
     expect(here!.cells['machine.startPressure']!.now).toBe('no pressure reading')
     expect(here!.cells['machine.startMemory']!.now).toBe('85% now')
     expect(all!.cells['machine.startMemory']!.now).toBeUndefined()
+    // the memory pressure, I/O pressure and swap readings a Linux kernel gives
+    const now = (row: LimitRow | undefined, key: string) => row?.cells[key]?.now
+    const linux = limitsView(input(settings(), { working: 7, sample: { ...sample, memSome: 0.92, ioSome: 33.6, swapTotal: 128 * 2 ** 30, swapUsed: 64 * 2 ** 30 }, herdr: true })).machineTable.rows[1]
+    expect(now(linux, 'machine.startMemoryPressure')).toBe('1% now')
+    expect(now(linux, 'machine.startIoPressure')).toBe('34% now')
+    expect(now(linux, 'machine.startSwap')).toBe('50% now')
+    // a machine without swap (macOS) says so rather than 0%
+    expect(now(here, 'machine.startSwap')).toBe('no swap')
     expect(view.machine).toEqual({ id: `m:${HOST}`, name: HOST, herdr: false })
   })
 
   test('the alerts are a table of their own, with the herdr and load numbers now; merge train joins the machine only when Everywhere sets it', () => {
     const plain = limitsView(input(settings(), { sample, herdr: false }))
-    expect(machineColumns(settings())).toEqual(['machine.maxTasks', 'machine.startLoad', 'machine.startPressure', 'machine.startMemory', 'machine.startEvery'])
+    expect(machineColumns(settings())).toEqual([
+      'machine.maxTasks',
+      'machine.startLoad',
+      'machine.startPressure',
+      'machine.startMemoryPressure',
+      'machine.startIoPressure',
+      'machine.startMemory',
+      'machine.startSwap',
+      'machine.startEvery',
+    ])
     expect(plain.machineTable.columns.map((c) => c.key)).not.toContain('merge.train')
     const alerts = limitsView(input(settings({ everywhere: { 'merge.train': '3' } }), { sample, herdr: true }))
     expect(alerts.machineTable.columns.map((c) => c.key)).toContain('merge.train')
@@ -107,12 +125,18 @@ describe('the machine rows: Everywhere and this machine, each value with where i
     expect(view.machineTable.rows[1]!.cells['machine.maxTasks']!.now).toBe('0 of 10 working')
   })
 
-  test('machineReason names what holds the machine: herdr, its CPU, its memory, or nothing that holds', () => {
+  test('machineReason names what holds the machine: herdr, its CPU, its memory (in use, in swap or under pressure), its I/O, or nothing that holds', () => {
     const s = settings()
     expect(machineReason(sample, false, s)).toBe("herdr doesn't answer · CPU is busy: load 1.50× cores (limit 1×)")
     expect(machineReason({ ...sample, load: 1, load5: 1 }, true, s)).toBe('memory 85% (limit 80%)')
     expect(machineReason({ ...sample, load: 1, load5: 1, memUsed: 10 }, true, s)).toBe('the machine has room now: the next look starts it')
     expect(machineReason(undefined, true, s)).toBe('the machine has room now: the next look starts it')
+    // a machine thrashing in swap with its memory share calm, and one waiting on its disk
+    const thrash = { ...sample, load: 1, load5: 1, memUsed: 43, swapTotal: 128 * 2 ** 30, swapUsed: 57 * 2 ** 30 }
+    expect(machineReason(thrash, true, settings({ machine: { 'machine.startSwap': '20%' } }))).toBe('swap 45% used (limit 20%)')
+    expect(machineReason({ ...thrash, memUsed: 10 }, true, settings({ machine: { 'machine.startMemoryPressure': '20%' } }))).toBe('the machine has room now: the next look starts it')
+    expect(machineReason({ ...thrash, load: 1, load5: 1, memUsed: 10, memSome: 24.5 }, true, settings({ machine: { 'machine.startMemoryPressure': '20%' } }))).toBe('memory pressure 25% (limit 20%)')
+    expect(machineReason({ ...thrash, load: 1, load5: 1, memUsed: 10, ioSome: 33.6 }, true, settings({ machine: { 'machine.startIoPressure': '25%' } }))).toBe('I/O pressure 34% (limit 25%)')
   })
 })
 

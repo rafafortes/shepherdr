@@ -135,12 +135,16 @@ describe('the helper', () => {
     deaf.stop()
   })
 
-  test.if(perl)('health.pl says the cores, load, memory and disks', () => {
+  test.if(perl)('health.pl says the cores, load, memory, swap and disks', () => {
     const r = spawnSync('perl', [join(root, 'helper', 'health.pl')], { encoding: 'utf8' })
     const j = JSON.parse(r.stdout)
     expect(j.cores).toBeGreaterThan(0)
     expect(j.memTotal).toBeGreaterThan(0)
     expect(j.disks.length).toBeGreaterThan(0)
+    // swap and the pressure readings only where the kernel gives them (a Linux machine with swap and PSI)
+    if (j.swapTotal !== undefined) expect(j.swapUsed).toBeGreaterThanOrEqual(0)
+    expect(j.swapUsed ?? 0).toBeLessThanOrEqual(j.swapTotal ?? 0)
+    for (const k of ['cpuSome', 'memSome', 'ioSome']) if (j[k] !== undefined) expect(j[k]).toBeGreaterThanOrEqual(0)
   })
 
   test('its files: the command, the scripts and the skills; its version changes with them', () => {

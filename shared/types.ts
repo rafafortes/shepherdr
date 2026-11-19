@@ -122,18 +122,18 @@ export interface Machine {
 export type HealthLevel = 'ok' | 'busy' | 'over'
 
 export interface HealthMeter {
-  /** CPU, Memory, Disk, GPU */
+  /** CPU, Memory, I/O (pressure, where the kernel gives it), Disk, GPU */
   name: string
   /** 0-100, or above for a CPU loaded past its cores */
   pct: number
-  /** the numbers behind it, in a few words ("load 13.2 on 16 cores", "10 of 31 GB", "home 22% · /tmp 22%") */
+  /** the numbers behind it, in a few words ("load 13.2 on 16 cores", "10 of 31 GB · swap 4 GB", "home 22% · /tmp 22%") */
   detail: string
   /** ok; busy: new tasks wait (start limit); over: past the alert limit, and the coordinator was told */
   level: HealthLevel
 }
 
 export interface MachineHealth {
-  /** CPU, Memory, Disk, and GPU where the machine has one */
+  /** CPU, Memory, I/O (where the kernel gives a pressure reading), Disk, and GPU where the machine has one */
   meters: HealthMeter[]
   /** herdr answers */
   herdr: boolean

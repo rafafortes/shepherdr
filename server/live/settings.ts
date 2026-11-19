@@ -278,9 +278,16 @@ export interface MachineLimits {
   startLoad: number | null
   /** new tasks wait while some task waited for a CPU more than this share of the last minute (%, Linux PSI); none: off */
   startPressure: number | null
+  /** new tasks wait while some task waited for memory, or for I/O, more than this share of the last minute (%, Linux
+   *  PSI); none: off */
+  startMemoryPressure: number | null
+  startIoPressure: number | null
   /** minutes between two starts Shepherdr makes by itself (held tasks, the way back); none: as many as there's room for */
   startEvery: number | null
   startMemory: number | null
+  /** new tasks wait while swap in use is over this share of it (%, Linux): memory short enough for the kernel to swap;
+   *  none: off, as a machine without swap shows nothing */
+  startSwap: number | null
   /** the coordinator is told when the load stays over this many times the cores for 2 minutes, memory or a disk is
    *  fuller than this (%), or herdr stops answering; null: that one is off */
   alertLoad: number | null
@@ -627,7 +634,33 @@ export const CATALOG: Section[] = [
         num: { ...PCT, off: true },
         hint: 'The share of the last minute some task spent waiting for a CPU (Linux pressure, /proc/pressure/cpu).',
       },
+      // memory and I/O pressure, each its own (Linux PSI; off unless set, health.ts busy)
+      {
+        group: 'Working tasks',
+        label: 'Wait while memory pressure is over',
+        key: 'machine.startMemoryPressure',
+        value: 'off',
+        num: { ...PCT, off: true },
+        hint: 'The share of the last minute some task spent waiting for memory (Linux pressure, /proc/pressure/memory). Past it the coordinator is told once it stays over, as for the CPU load.',
+      },
+      {
+        group: 'Working tasks',
+        label: 'Wait while I/O pressure is over',
+        key: 'machine.startIoPressure',
+        value: 'off',
+        num: { ...PCT, off: true },
+        hint: 'The share of the last minute some task spent waiting on disk or network I/O (Linux pressure, /proc/pressure/io). Past it the coordinator is told once it stays over, as for the CPU load.',
+      },
       { group: 'Working tasks', label: 'Wait while memory is over', key: 'machine.startMemory', value: '80%', num: PCT },
+      // swap in use is the sign memory is short while the memory share still looks calm: off unless set
+      {
+        group: 'Working tasks',
+        label: 'Wait while swap is over',
+        key: 'machine.startSwap',
+        value: 'off',
+        num: { ...PCT, off: true },
+        hint: 'The share of swap in use (Linux, /proc/meminfo). Memory in swap is memory short: the machine crawls with its memory share under 80%. Past it the coordinator is told once it stays over, as for the CPU load.',
+      },
       // the load averages take minutes to show what a start adds: tasks Shepherdr starts by itself go one at a time
       // (engine.release, source.goBack); one you or a coordinator add starts at once when there is room
       {
@@ -1178,8 +1211,11 @@ export class Settings {
       max: this.taskLimit('machine.maxTasks', l),
       startLoad: num('machine.startLoad'),
       startPressure: num('machine.startPressure'),
+      startMemoryPressure: num('machine.startMemoryPressure'),
+      startIoPressure: num('machine.startIoPressure'),
       startEvery: num('machine.startEvery'),
       startMemory: num('machine.startMemory'),
+      startSwap: num('machine.startSwap'),
       alertLoad: num('machine.alertLoad'),
       alertMemory: num('machine.alertMemory'),
       alertDisk: num('machine.alertDisk'),

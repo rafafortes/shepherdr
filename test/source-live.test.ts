@@ -358,6 +358,39 @@ describe('machine health', () => {
     }
   })
 
+  test('an I/O-pressure tell closes no finished browser and lists no process: a browser is memory and CPU, not I/O', async () => {
+    const mon = src.health as unknown as { take: () => unknown; last?: unknown; watch: Record<string, unknown> }
+    const take = mon.take
+    const watch = mon.watch
+    const browsers = src.browsers as NonNullable<typeof src.browsers>
+    const sweep = browsers.sweep
+    const send = src.agents.send
+    let swept = 0
+    browsers.sweep = async () => {
+      swept++
+      return []
+    }
+    src.agents.send = (async (k: string, text: string) => ({ waiting: false, item: { id: 'x', key: k, text, at: Date.now() } })) as never
+    src.settings.set('machine.startIoPressure', '25%', 'machine')
+    try {
+      // over its 2 minutes: this look tells the coordinator (kind pressure), so onHealth runs too
+      mon.watch = { pressure: { since: Date.now() - 200_000 } }
+      mon.take = () => ({ at: 0, cores: 16, load: 1, load5: 1, ioSome: 60, memTotal: 100 * 2 ** 30, memUsed: 40 * 2 ** 30, disks: [{ path: '/tmp', pct: 40, freeGb: 60, dev: 1 }], gpus: [] })
+      mon.last = undefined
+      src.healthTick()
+      expect(src.health.busy()).toBe('io')
+      await Bun.sleep(50)
+      expect(swept).toBe(0)
+    } finally {
+      browsers.sweep = sweep
+      src.agents.send = send
+      src.settings.set('machine.startIoPressure', null, 'machine')
+      mon.take = take
+      mon.watch = watch
+      mon.last = undefined
+    }
+  })
+
   test("herdr's socket refusing is said plainly", async () => {
     const e = await herdr.ping().catch((x: Error) => x)
     expect((e as Error).message).toBe("herdr isn't answering")

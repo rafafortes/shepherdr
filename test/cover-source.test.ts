@@ -1311,16 +1311,21 @@ describe("this machine's health", () => {
     const send = src.agents.send
     const wakes = priv.wakes
     priv.wakes = () => true
+    // a machine in swap tells with the processes holding memory beside the numbers (SHE-73)
+    src.settings.set('machine.startSwap', '25%', 'machine')
     try {
       await priv.onHealth({ kind: 'herdr', what: 'back', since: Date.now() - 60_000, sample })
       await priv.onHealth({ kind: 'disk', what: 'over', sample })
+      await priv.onHealth({ kind: 'pressure', what: 'over', sample: { ...sample, memTotal: 100 * 2 ** 30, memUsed: 43 * 2 ** 30, swapTotal: 100 * 2 ** 30, swapUsed: 57 * 2 ** 30 } })
     } finally {
       priv.wakes = wakes
+      src.settings.set('machine.startSwap', null, 'machine')
     }
     expect(send).toBe(src.agents.send)
     const lines = sent.filter((s) => s.key === placeId.home()).map((s) => s.text)
     expect(lines.some((l) => l.includes('Agents it ran may have stopped with it'))).toBe(true)
     expect(lines.some((l) => l.includes('/data is 97% full') && l.includes('clean up'))).toBe(true)
+    expect(lines.some((l) => l.includes('the machine is short of memory or I/O') && l.includes('swap 57% used (limit 25%)') && l.includes('swap 57 GB'))).toBe(true)
   })
 })
 

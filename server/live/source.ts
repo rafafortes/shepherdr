@@ -148,7 +148,7 @@ import { SECRET_NAME, secretPages, Vault } from './secrets.ts'
 import { diffFiles, diffPatch, listFiles, pullRequest, readFile } from './worktree.ts'
 import { RequestedNewsMailbox } from './requested-news.ts'
 import { Unread } from './unread.ts'
-import { Monitor, meters, procLines, summary, topProcs, type HealthEvent, type Kind } from './health.ts'
+import { Monitor, memoryOver, meters, procLines, shortage, summary, swapPct, topProcs, type HealthEvent, type Kind } from './health.ts'
 import { has, PLUGIN_KEY, pluginSection, setPluginOn } from '../plugins.ts'
 import { TOOK_OVER, type TookOver } from '../../scripts/take-over.ts'
 import { placeOrder } from '../../shared/space-order.ts'
@@ -652,8 +652,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   healthTick(now = Date.now()) {
     const at = this.health.last?.at
     this.health.tick(now)
-    // too busy to start held tasks: browsers finished tasks left open go first (at most once a minute)
-    if (this.health.last?.at !== at && this.health.busy() && now - this.sweptAt > 60_000) {
+    // too busy to start held tasks: browsers finished tasks left open go first (at most once a minute); an I/O wait is
+    // no reason to close one (onHealth skips it too: a browser's frames are memory and CPU, not I/O)
+    const why = this.health.last?.at !== at ? this.health.busy() : undefined
+    if (why && why !== 'io' && now - this.sweptAt > 60_000) {
       this.sweptAt = now
       void this.sweepBrowsers().catch(() => undefined)
     }
@@ -3707,15 +3709,18 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const l = this.settings.machine()
     const load = (x: number | null) => +((x ?? 0) * s.cores).toFixed(1)
     const disk = s.disks.reduce((a, d) => (d.pct > a.pct ? d : a), s.disks[0])
+    const short = shortage(s, l)
     const over: Record<Kind, string> = {
       cpu: `CPU load has stayed over ${load(l.alertLoad)} (${l.alertLoad}× its ${s.cores} cores) for 2 minutes: ${s.load.toFixed(1)} now`,
       memory: `memory is over ${l.alertMemory}%: ${Math.round((s.memUsed / s.memTotal) * 100)}% in use`,
+      pressure: `the machine is short of memory or I/O, over for 2 minutes: ${short.length ? short.join(', ') : `swap ${swapPct(s)}% used`}`,
       disk: `${disk?.path === homedir() ? 'home' : disk?.path} is ${disk?.pct}% full (over ${l.alertDisk}%), ${Math.round(disk?.freeGb ?? 0)} GB free`,
       herdr: `herdr isn't answering (since ${clock(e.since ?? Date.now())}), so its agents can't hear anything`,
     }
     const back: Record<Kind, string> = {
       cpu: `CPU load is back under ${load(l.alertLoad)}: ${s.load.toFixed(1)} now`,
       memory: `memory is back under ${l.alertMemory}%`,
+      pressure: `the machine is no longer short of memory or I/O: swap ${swapPct(s)}% used${s.memSome !== undefined ? `, memory pressure ${Math.round(s.memSome)}%` : ''}${s.ioSome !== undefined ? `, I/O pressure ${Math.round(s.ioSome)}%` : ''}`,
       disk: 'disk space is back under its limit',
       herdr: `herdr answers again; it was gone from ${clock(e.since ?? Date.now())} to ${clock(Date.now())}`,
     }
@@ -3723,6 +3728,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const brief: Record<Kind, [string, string]> = {
       cpu: [`CPU load is high: ${s.load.toFixed(1)}`, 'CPU load is back to normal'],
       memory: [`memory is ${Math.round((s.memUsed / s.memTotal) * 100)}% used`, 'memory is back to normal'],
+      pressure: [short.length ? `short: ${short.join(', ')}` : 'the machine is short', 'the machine is no longer short'],
       disk: [`${disk?.path === homedir() ? 'home' : disk?.path} is ${disk?.pct}% full`, 'disk space is back to normal'],
       herdr: ["herdr isn't answering", 'herdr answers again'],
     }
@@ -3737,14 +3743,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.emit('news', { place: machine, line: words, kind: 'health', about: { kind: e.kind, what: e.what } })
     // herdr gone takes its agents with it, coordinators too: they hear of it once it is back
     if (e.kind === 'herdr' && e.what === 'over') return
-    // browsers that finished tasks left open go first: a web game in one takes a core or two for nothing
-    const swept = e.what === 'over' && (e.kind === 'cpu' || e.kind === 'memory') ? await this.sweepBrowsers().catch(() => []) : []
+    // browsers that finished tasks left open go first: a web game in one takes a core or two for nothing; a memory
+    // problem (in use, in swap, or under pressure) lists what holds memory. An I/O wait closes no browser and lists no
+    // process: a browser's frames are memory and CPU
+    const mem = e.kind === 'memory' || (e.kind === 'pressure' && memoryOver(s, l))
+    const swept = e.what === 'over' && (e.kind === 'cpu' || mem) ? await this.sweepBrowsers().catch(() => []) : []
     const procs =
-      e.kind === 'cpu' || e.kind === 'memory'
+      e.kind === 'cpu' || mem
         ? procLines(
-            await topProcs(e.kind),
+            await topProcs(e.kind === 'cpu' ? 'cpu' : 'memory'),
             this.engine.tasks.filter((t) => !ended(t)),
-            e.kind,
+            e.kind === 'cpu' ? 'cpu' : 'memory',
           )
         : []
     const what =
