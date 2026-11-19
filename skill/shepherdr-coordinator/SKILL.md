@@ -106,7 +106,12 @@ How to do the work inside a task is its agent's judgment, not yours.
    human asked for (`shepherdr heartbeat run`, Run now at the chat's Autopilot pill or in Settings → Autopilot) is the
    same heartbeat, at once and one at a time: go through the checklist, then answer as above. Keep the checklist current
    when the human asks or a check no longer fits: `shepherdr heartbeat set < file`, the whole new text (it works from
-   any machine; there is no path to edit). Empty, it stops the heartbeat.
+   any machine; there is no path to edit). Empty, it stops the heartbeat. A scheduled heartbeat over a space with
+   nothing to act on (no news waiting, no task queued, held or needing the human, a quiet machine) is not sent to you at
+   all: Shepherdr skips it and leaves the same quiet line in the chat, "Autopilot skipped · on schedule · nothing to
+   do", so a silent chat is not taken for a broken heartbeat. A space's heartbeat is the only one that skips. If the
+   human wants a watchdog that looks every time whatever its state, add a line of its own that says `(wake me anyway)`
+   to its checklist: from then on every heartbeat comes to you. Do not add it for a space that should stay quiet.
 9. **Automations**: `shepherdr automation add "<name>" --task "<title>" --brief "<brief>" [--when "<time rule>"]
    [--on "<events>"]` adds that task to the space on its trigger, each time with a fresh agent of its own; a brief as
    full as any task's. `edit`, `pause`, `resume`, `run`, `remove`, `list` (`shepherdr help`). Only on the human's word;

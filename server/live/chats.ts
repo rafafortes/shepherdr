@@ -143,6 +143,9 @@ export interface Posted {
   /** pictures or a video an agent sends into its chat (shepherdr attach): the words above them, then each file a
    *  message of its own, exactly as the person's own attachments go */
   files?: { name: string; path: string }[]
+  /** an Autopilot heartbeat skipped for having nothing to act on: its one quiet line, as a wake's own (heartbeat.ts
+   *  SKIPPED_LINE), drawn by the chat the same way */
+  pilot?: string
   /** a line of yours Shepherdr shows for you (an answer typed as keys, or a command, which the log doesn't keep) */
   who?: 'you'
   answered?: string
@@ -520,7 +523,7 @@ export class Chats {
     this.pull(key)
     const ev = this.events.get(key) ?? []
     const e = ev.findLast((x) => (x.kind === 'agent' && agentLines(stripHidden(x.text)).text) || x.kind === 'question')
-    const p = this.log(key).posted.findLast((x) => !x.who)
+    const p = this.log(key).posted.findLast((x) => !x.who && !x.pilot)
     const reply = e && { at: e.at, text: e.kind === 'agent' ? agentLines(stripHidden(e.text)).text : undefined }
     const posted = p && { at: p.at, text: p.card?.text ?? p.text ?? p.question?.title, card: !!p.card }
     return !reply || (posted && posted.at > reply.at) ? posted : reply
@@ -1290,6 +1293,11 @@ export class Chats {
       }
       if (p.secret) {
         msgs.push({ id: p.id, who: 'agent', at: p.at, secret: p.secret })
+        continue
+      }
+      // a heartbeat skipped over nothing: one quiet line, where it came due
+      if (p.pilot) {
+        msgs.push({ id: p.id, who: 'agent', at: p.at, pilot: p.pilot })
         continue
       }
       const q = p.question ? withAnswer(p.question, l, this.answeredIn) : undefined

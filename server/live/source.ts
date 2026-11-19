@@ -55,7 +55,7 @@ import { effortsOf, findModel, knowsModels, modelsOf, nearest } from './models.t
 import { picksOf, pinModel, rememberModel } from './model-picks.ts'
 import { HELP, one, parseArgs, summaryOpts, type Parsed } from './args.ts'
 import { Automations, type Automation, type Template } from './automations.ts'
-import { Heartbeats, heartbeatFile, Wakes, wakeProblem } from './heartbeat.ts'
+import { Heartbeats, heartbeatFile, SKIPPED_LINE, WAKE_ANYWAY, Wakes, wakeProblem, wakesAnyway } from './heartbeat.ts'
 import { eventRules, eventsText, eventWords, matches, nextWords, runWords, timeRule, timeWords, triggerWords, type Happened, type TriggerEvent } from './trigger.ts'
 import { clockWords, span, startsWords, whenFrom } from '../../shared/when.ts'
 import { Browsers, type BrowserBridge, type BrowserClient } from './browser.ts'
@@ -148,7 +148,7 @@ import { SECRET_NAME, secretPages, Vault } from './secrets.ts'
 import { diffFiles, diffPatch, listFiles, pullRequest, readFile } from './worktree.ts'
 import { RequestedNewsMailbox } from './requested-news.ts'
 import { Unread } from './unread.ts'
-import { Monitor, memoryOver, meters, procLines, shortage, summary, swapPct, topProcs, type HealthEvent, type Kind } from './health.ts'
+import { levels, Monitor, memoryOver, meters, procLines, shortage, summary, swapPct, topProcs, type HealthEvent, type Kind } from './health.ts'
 import { has, PLUGIN_KEY, pluginSection, setPluginOn } from '../plugins.ts'
 import { TOOK_OVER, type TookOver } from '../../scripts/take-over.ts'
 import { placeOrder } from '../../shared/space-order.ts'
@@ -3560,9 +3560,51 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       }
       const h = this.settings.heartbeat(this.levelOf(p.id))
       if (!free || !this.heartbeats.due(p.id, h.time, h.zone, now)) continue
+      if (this.roleOf(p.id) === 'space' && this.heartbeatSkip(p.id, now)) continue
       const text = this.heartbeats.beat(p.id, this.roleOf(p.id), now)
       if (text) this.agents.send(p.id, hidden(text, 'heartbeat'), { ensure: this.starter(p.id), idle: true }).catch(() => undefined)
     }
+  }
+
+  /** a scheduled heartbeat with nothing to act on, skipped whole: no coordinator turn (a model call and a CLI start), one
+   *  quiet line instead, so a quiet night is never taken for a broken heartbeat. Space coordinators only: a home space
+   *  keeps its machine watch, and a checklist with (wake me anyway) in it is woken every time. Run now never skips, and
+   *  neither does a heartbeat with an empty checklist, which is stopped (beat) and leaves nothing to say. */
+  private heartbeatSkip(id: string, now = Date.now()): boolean {
+    const list = this.heartbeats.read(id, 'space')
+    if (!list.trim() || wakesAnyway(list)) return false
+    if (this.heartbeatWork(id, now).length) return false
+    this.heartbeats.pass(id, now)
+    this.chats.post(id, { id: `skip:${now}`, pilot: SKIPPED_LINE })
+    if (this.watched.includes(id)) this.emit('chat', id)
+    return true
+  }
+
+  /**
+   * What, right now, gives a place's own coordinator something to act on: news waiting for its heartbeat, a task of its
+   * space waiting to start or held, one needing the human (a question, a start that went wrong), one Ready whose brief
+   * says it merges itself and hasn't, its own start that went wrong, or this machine past one of its alert limits.
+   * Read from what is already in memory: the 30 s tick asks it, so it starts nothing and reads no file.
+   */
+  private heartbeatWork(id: string, now = Date.now()): string[] {
+    const out: string[] = []
+    if (this.heartbeats.held(id).length) out.push('news waiting')
+    if (this.engine.startFailedAt(id)) out.push('a start of its own that went wrong')
+    const space = this.places.space(id)
+    for (const t of this.engine.tasks) {
+      if (t.archived || t.project !== id) continue
+      const st = this.engine.statusOf(t)
+      if (st === 'need') out.push(`${t.id} needs you`)
+      else if (st === 'queued') out.push(`${t.id} waits to start`)
+      else if (st === 'ready' && now - (t.reportedAt ?? t.updated) > SELF_MERGE_PATIENCE && this.settings.ways(space?.name, t.set).merge === 'on its own') out.push(`${t.id} waits to merge itself`)
+    }
+    const s = this.health.last
+    if (has('health') && s) {
+      // the machine's own numbers only: herdr's alert is not a limit here, since without herdr nothing wakes at all
+      const over = levels(s, true, this.settings.machine())
+      for (const kind of Object.keys(over) as Kind[]) if (over[kind].over) out.push(`the machine's ${kind}`)
+    }
+    return out
   }
 
   /** Autopilot's Run now (Settings → Autopilot, the chat's pill, shepherdr heartbeat run): one heartbeat to a place's
@@ -5442,12 +5484,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const when = `${timeWords(h.time, h.zone)}${due !== undefined ? `; last ${age(last!)} ago` : ''}${times.length ? `; next ${times.join(', ')}${due !== undefined ? ' once idle' : ''}` : ''}`
         const held = this.heartbeats.held(at.id)
         const list = this.heartbeats.read(at.id, this.roleOf(at.id)).trim()
+        // what a scheduled heartbeat over this place would find now: nothing, and it is skipped (heartbeatSkip)
+        const skips = at.mode === 'autopilot' && this.roleOf(at.id) === 'space' && !!list && !wakesAnyway(list) && !this.heartbeatWork(at.id).length
         return [
           `${at.name}: Autopilot ${at.mode === 'autopilot' ? 'on' : 'off'}; heartbeat: ${when}. Wakes at once on: ${eventWords(h.on).toLowerCase()}${held.length ? ` (${held.length} news waiting for the heartbeat)` : ''}. (Settings: heartbeat.when, heartbeat.on, time.zone.)`,
+          skips ? `Next wake would be skipped: nothing to do. To be woken every time, add ${WAKE_ANYWAY} to its HEARTBEAT.md.` : '',
           list ? `HEARTBEAT.md${existsSync(heartbeatFile(at.id)) ? '' : ' (the starting checklist: none saved yet)'}:\n${list}` : 'HEARTBEAT.md is empty: no heartbeat until it has a checklist.',
           `Change it: shepherdr heartbeat set${named ? ` ${at.name}` : ''} < file (the whole new text on stdin; empty stops the heartbeat), or the human in Settings → Autopilot.`,
           `Wake it once now: shepherdr heartbeat run${named ? ` ${at.name}` : ''} (one wake at a time, only on Autopilot).`,
-        ].join('\n\n')
+        ]
+          .filter(Boolean)
+          .join('\n\n')
       }
       case 'doctor': {
         if (BOX) throw new Error(`shepherdr doctor checks every machine from the main one: run it there (${HOST} is run from it over SSH).`)
@@ -6098,6 +6145,10 @@ const ADVISOR_MARGIN = 60_000
 /** the held reasons heldWords gives their own words, in a task's add and tell replies (the machine's own room and its line
  *  have theirs there) */
 const HELD_NAMED = new Set<HeldWhy>(['space', 'model', 'blocked', 'zero', 'spaceZero', 'turn'])
+
+/** how long a Ready task whose brief says it merges on its own may wait before a wake is spent on it: its agent merges
+ *  as soon as it reports, so a Ready one this old was left behind (heartbeatWork) */
+const SELF_MERGE_PATIENCE = 10 * 60_000
 
 /** how a coordinator answers news the human sees as a card: the card is never the chat's last word */
 const REPLY_AFTER_CARD =

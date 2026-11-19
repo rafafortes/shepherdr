@@ -284,7 +284,12 @@ function PageBody({
         <div className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2.5 pb-3!', row.inherits && 'border-l-2 border-accent pl-3')}>
           <dt className="flex min-w-0 flex-col">
             {row.label}
-            {row.doc ? <Small className="text-pretty">Its coordinator goes through it each heartbeat, and may edit it too.</Small> : null}
+            {row.doc ? (
+              <Small className="text-pretty">
+                Its coordinator goes through it each heartbeat, and may edit it too. A space's heartbeat is skipped while its state gives it nothing to act on; (wake me anyway) on a line of its own
+                keeps it coming every time.
+              </Small>
+            ) : null}
             {under(row)}
           </dt>
           <dd>

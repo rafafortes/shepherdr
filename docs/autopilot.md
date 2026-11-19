@@ -43,6 +43,15 @@
   turn is over; none while its HEARTBEAT.md is empty and no news waits. News its event rules name wakes the coordinator
   at once, so a news card gets its reply right after it; other news waits and comes with the next heartbeat (quiet
   nights: a time rule within the day's hours, and only what can't wait as its events).
+- **A heartbeat with nothing to act on is skipped**: no coordinator turn (a model call and a CLI start), one quiet line
+  instead, so a quiet night is never taken for a broken heartbeat. A space's scheduled heartbeat is skipped when all of
+  these hold: no news waiting for it, no task of the space queued or held, none needing you (a question, a start that
+  went wrong), no start of its own that went wrong, this machine under its alert limits, and no Ready task whose brief
+  says it merges on its own still unmerged ten minutes after it reported. Any of them alone wakes it as ever, and a
+  home space is woken every time (its machine watch is its own). A checklist with a line of its own that says **(wake me
+  anyway)** is woken at every heartbeat, a watchdog of its own: that is the way to keep one (a line that only tells you
+  about it is not asking). Run now never skips. The `shepherdr heartbeat`
+  command says whether the next wake would be skipped.
 - **Run now** is that heartbeat on your word: beside the Autopilot pill at the top of the space's chat, at the top of
   Settings → Autopilot, and `shepherdr heartbeat run [<space>]`. One wake per tap, refused while a wake already waits or
   runs (the button says Queued or Waking then); a tap while its coordinator is busy waits for its turn, so two taps never
