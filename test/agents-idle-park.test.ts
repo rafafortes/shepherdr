@@ -105,10 +105,15 @@ describe('the idle sweep parks', () => {
     for (const r of recs) {
       expect(r.finished).toBe(true)
       expect(typeof r.parked).toBe('number')
-      // its pane closed (what it left running is reaped with it), and its chat says the way back in
+      // its pane closed (what it left running is reaped with it), and its chat says the way back in, as a card of
+      // Shepherdr's own, never as a word in the agent's voice
       expect(closedPanes()).toContain(`${r.name}-pane`)
       const line = src.chats.log(r.key).posted.find((p) => p.id.startsWith('parked:'))
-      expect(line?.text).toContain('starts it again on the same session')
+      expect(line?.card?.text).toContain('starts it again on the same session')
+      expect(line?.text).toBeUndefined()
+      // herdr has it no more: gone, and the message that starts it again is the way back in
+      src.agents.live.delete(r.name)
+      expect(src.agents.status(r.key)).toBe('gone')
     }
     // shepherdr status counts them
     expect(src.parkedCount()).toBe(KINDS.length)
@@ -116,8 +121,10 @@ describe('the idle sweep parks', () => {
     expect(out.out).toContain(`${KINDS.length} agents parked`)
   })
 
-  test('a parked agent of each kind starts again on its session, with its model and effort', async () => {
-    for (const [i, kind] of KINDS.entries()) {
+  // one test per CLI (the fork's rule): a parked agent of that kind starts again on its session, with its model and
+  // effort, by the args that CLI is handed
+  for (const [i, kind] of KINDS.entries())
+    test(`a parked ${kind} agent starts again on its session, with its model and effort`, async () => {
       const a = new Agents()
       spyOn(a, 'refresh').mockResolvedValue(undefined as never)
       const key = `RES-${i}/Agent`
@@ -184,8 +191,7 @@ describe('the idle sweep parks', () => {
       } finally {
         for (const s of [close, ws, tab, start]) s.mockRestore()
       }
-    }
-  })
+    })
 
   test('one still working, blocked, asking, with background work, or with a message waiting is never parked', async () => {
     expect(src.settings.set('agents.idleClose', '1', 'machine').ok).toBe(true)
@@ -231,11 +237,15 @@ describe('the idle sweep parks', () => {
   test('not idle long enough, or a session it cannot come back to: left as it is', async () => {
     expect(src.settings.set('agents.idleClose', '120', 'machine').ok).toBe(true)
     const fresh = agent('IDLE-F/Agent', 'claude', { idleAgo: H, log: 'IDLE-F.jsonl' })
-    const noSession = agent('IDLE-N/Agent', 'pi', { sessionId: null })
+    // each CLI resumes by its own id: a record with none to resume by is left, whatever its logs say
+    const noSessionPi = agent('IDLE-N/Agent', 'pi', { sessionId: null })
+    const noSessionOpencode = agent('IDLE-O/Agent', 'opencode', { sessionId: null, log: 'IDLE-O.jsonl' })
+    const noSessionAgy = agent('IDLE-Y/Agent', 'agy', { sessionId: null, log: 'IDLE-Y.jsonl' })
+    const codexNoUuid = agent('IDLE-C/Agent', 'codex', { sessionId: 'not-a-uuid', log: 'plain-name.jsonl' })
     const freshStart = agent('IDLE-S/Agent', 'codex', { log: 'c0de0000-0000-4000-8000-000000000004.jsonl' })
     ;(freshStart as { fresh?: boolean }).fresh = true
     expect(await src.parkIdleAgents()).toEqual([])
-    for (const r of [fresh, noSession, freshStart]) expect(r.finished).toBeUndefined()
+    for (const r of [fresh, noSessionPi, noSessionOpencode, noSessionAgy, codexNoUuid, freshStart]) expect(r.finished).toBeUndefined()
   })
 
   test('off: nothing is parked', async () => {
@@ -267,7 +277,7 @@ describe('coordinators', () => {
     expect(src.settings.set('agents.idleCloseCoordinators', '120', 'machine').ok).toBe(true)
     expect(await src.parkIdleAgents()).toEqual([r.key])
     expect(r.finished).toBe(true)
-    expect(src.chats.log(r.key).posted.find((p) => p.id.startsWith('parked:'))?.text).toContain('starts it again')
+    expect(src.chats.log(r.key).posted.find((p) => p.id.startsWith('parked:'))?.card?.text).toContain('starts it again')
   })
 })
 

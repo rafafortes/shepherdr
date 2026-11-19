@@ -827,10 +827,10 @@ shares. The agent's own words after its card and a card of Shepherdr's leave it 
 ## Idle agents
 
 An agent Shepherdr runs keeps its herdr pane, its CLI process and its memory for as long as its chat lives, however
-long it sits idle between messages. Settings → Agents (Everywhere or one machine) parks them instead, so the machine
+long it sits idle between messages. Settings → Idle agents (Everywhere or one machine) parks them instead, so the machine
 does not hold dozens of idle CLIs around the clock:
 
-- **Park idle agents after** (`agents.idleClose`, 120 min): a task's agent or reviewer idle this long — herdr shows it
+- **Park idle agents after** (`agents.idleClose`, 120 min): a task's agent idle this long — herdr shows it
   idle or done, with nothing it started in the background still running and no message waiting for it — has its pane
   and CLI closed, and what it left running is reaped with them. Its chat keeps reading its session, the task row and
   its chat say it is parked, and the next message to the chat starts it again on the same session, with the model and

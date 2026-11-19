@@ -496,6 +496,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (!launchesAgents() || !this.agents.reachable) return []
     const out: string[] = []
     for (const [key, r] of Object.entries(this.agents.records)) {
+      // a chat of another role (a legacy reviewer): the engine puts it away itself
+      if (key.includes('/') && !key.endsWith('/Agent')) continue
       if (r.finished || r.fresh || r.handover || this.agents.busy(key)) continue
       const a = this.agents.info(key)
       if (!a || a.launch_pending || a.interactive_ready === false) continue
@@ -513,13 +515,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (this.agents.typedSince(key, now - 10 * 60_000).length) continue
       if (this.chats.openCard(key) || this.chats.openQuestion(key) || this.chats.startMenuUp(key)) continue
       if (held && this.engine.machineryHoldsAgent(held)) continue
-      if (!r.sessionId && !r.logs.length) continue
+      // a parked agent must come back on its session: each CLI resumes by its own id (agents.ts args), so a record
+      // with nothing to resume by is left as it is
+      if (!r.sessionId || (r.kind === 'codex' && !r.logs.some((f) => /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/.test(f)))) continue
       const idle = now - this.lastLife(key, now)
       if (idle < ms) continue
       await this.agents.park(key, now)
       this.chats.post(key, {
         id: `parked:${key}:${now}`,
-        text: `Parked: idle ${span(idle)}. Its pane closed to free memory; a message here starts it again on the same session.`,
+        card: { id: `parked:${key}:${now}`, text: `Parked: idle ${span(idle)}. Its pane closed to free memory; a message here starts it again on the same session.` },
       })
       out.push(key)
     }
@@ -528,9 +532,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** agents parked now (the idle sweep, SHE-72), still waiting for the message that starts them again: shepherdr
-   *  status counts them */
+   *  status counts them. One whose task ended since (its record kept to keep reading its chat) is not waiting */
   parkedCount(): number {
-    return Object.values(this.agents.records).filter((r) => r.parked).length
+    return Object.entries(this.agents.records).filter(([key, r]) => {
+      if (!r.parked) return false
+      const t = key.includes('/') ? this.engine.task(key.split('/')[0]) : undefined
+      return !t || !ended(t)
+    }).length
   }
 
   /** what already escaped the close reap: named in doctor, with a ready kill line. Proof-marked ones may be ended
