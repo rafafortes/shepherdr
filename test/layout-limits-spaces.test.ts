@@ -281,6 +281,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await set('space.maxTasks', '2', 'p:vm-str:gtm')
       const table = page.getByRole('table', { name: 'Spaces' })
       await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: /^gtm · Priority: 1/ }).waitFor()
       // the page treats it as a space with no number: ↑ puts it last among the numbered ones instead of swapping with gtm
       await table.getByRole('button', { name: 'Move herdr-projects up' }).click()
       await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
@@ -309,6 +310,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       const table = page.getByRole('table', { name: 'Spaces' })
       await table.scrollIntoViewIfNeeded()
       const up = table.getByRole('button', { name: 'Move herdr-projects up' })
+      await table.getByRole('button', { name: /^gtm · Priority: 1/ }).waitFor()
       await up.waitFor()
       await expect(up.isEnabled()).resolves.toBe(true)
       // the move is written, and the read that follows it fails: the table says so, and its rows are the ones before the
