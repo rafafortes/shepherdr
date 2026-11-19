@@ -1,12 +1,40 @@
 // OpenCode's mirrored log (server/live/opencode.ts mirrorSession): one JSONL line per final row of its session,
-// {id, type, seq, time, data}. The chat reads the user's and the agent's text, the model, the tokens and cost of each
-// reply, where a session and a turn start and end, and the errors; system rows (Shepherdr's own instructions) stay out.
+// {id, type, seq, time, data}. The chat reads the user's and the agent's text, the tool parts of a reply as steps, the
+// model, the tokens and cost of each reply, where a session and a turn start and end, and the errors; system rows
+// (Shepherdr's own instructions) stay out.
 // An error is OpenCode's own `{type, message, status}` (provider.quota, provider.auth, provider.rate-limit…): its type and
 // status go with the message, so retry.ts reads them as it reads Claude Code's and Codex's codes.
 import { basename } from 'node:path'
+import { testResult, words } from '../../../shared/activity.ts'
+import { claudeStep, runStep, type Said } from './steps.ts'
 import type { LogEvent, Reader } from './types.ts'
 
 type Json = any
+
+/** a tool part of an OpenCode reply as a step: its own words where known, else the tool's name in words */
+export function opencodeStep(tool: string, input: Json = undefined): Said {
+  const i = input && typeof input === 'object' ? input : {}
+  const path = String(i.filePath ?? i.file_path ?? '')
+  switch (tool) {
+    case 'bash':
+      return runStep(i.command, i.description)
+    case 'read':
+      return path ? claudeStep('Read', { file_path: path })! : { step: 'other', ...words('Use read') }
+    case 'edit':
+      return claudeStep('Edit', { file_path: path, old_string: i.oldString, new_string: i.newString })!
+    case 'write':
+      return claudeStep('Write', { file_path: path, content: i.content })!
+    case 'grep':
+      return claudeStep('Grep', { pattern: i.pattern, path: i.path })!
+    case 'glob':
+      return claudeStep('Glob', { pattern: i.pattern, path: i.path })!
+    case 'webfetch':
+      return claudeStep('WebFetch', { url: i.url })!
+    case 'task':
+      return claudeStep('Task', { description: i.description, prompt: i.prompt })!
+  }
+  return { step: 'other', ...words(`Use ${tool.replace(/_/g, ' ')}`) }
+}
 
 /** OpenCode's error of a row, as the error event keeps it: its words, its type as the code, its HTTP status, and how long
  *  it says to wait before asking again (its free models' `retryAfterMs`: "Free usage limit reached", reset in 41 min);
@@ -60,7 +88,7 @@ export class OpencodeReader implements Reader {
 
   parse(lines: { text: string; offset: number }[], file: string): LogEvent[] {
     const out: LogEvent[] = []
-    for (const { text } of lines) {
+    for (const { text, offset } of lines) {
       const l = parseLine(text)
       if (!l || typeof l !== 'object' || typeof l.id !== 'string') continue
       const d = l.data ?? {}
@@ -82,12 +110,33 @@ export class OpencodeReader implements Reader {
         if (this.ended.has(file)) this.start(out, file, id, at)
         const model = typeof d.model?.providerID === 'string' && typeof d.model?.id === 'string' ? `${d.model.providerID}/${d.model.id}` : undefined
         if (model) out.push({ kind: 'runtime', file, id: `runtime-model-${id}`, at, runtime: { model, source: 'session', at } })
-        const words = (Array.isArray(d.content) ? d.content : [])
+        const content: Json[] = Array.isArray(d.content) ? d.content : []
+        const body = content
           .filter((b: Json) => b?.type === 'text' && typeof b.text === 'string')
           .map((b: { text: string }) => b.text.trim())
           .filter(Boolean)
           .join('\n\n')
-        if (words) out.push({ kind: 'agent', id, at, text: words })
+        if (body) out.push({ kind: 'agent', id, at, text: body })
+        // a mirrored row is final, so each tool part in it is one step, over already; its raw output stays in this
+        // line, read back from the offset when the human opens the step
+        content.forEach((part: Json, index: number) => {
+          if (part?.type !== 'tool') return
+          const tool = String(part.tool ?? part.name ?? '')
+          const state = part.state ?? part
+          const output = typeof state.output === 'string' ? state.output : undefined
+          const said = opencodeStep(tool, state.input ?? part.input)
+          out.push({
+            kind: 'step',
+            id: `${id}-${index}`,
+            at,
+            tool,
+            end: at,
+            failed: state.status === 'error' || undefined,
+            result: said.test && output ? testResult(output) : undefined,
+            out: { file, offset },
+            ...said,
+          })
+        })
         const t = d.tokens
         const tokens = (t?.input ?? 0) + (t?.output ?? 0) + (t?.reasoning ?? 0) + (t?.cache?.read ?? 0) + (t?.cache?.write ?? 0)
         const cost = typeof d.cost === 'number' && d.cost >= 0 ? d.cost : undefined

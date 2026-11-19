@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { glance, jobsWords, rowsOf, say, testResult, took } from '../shared/activity.ts'
-import { activityOf, cutOutput, lineOf } from '../server/live/activity.ts'
+import { activityOf, cutOutput, lineOf, outputAt } from '../server/live/activity.ts'
 import { ClaudeReader, readerFor } from '../server/live/readers/index.ts'
 import { notices } from '../server/live/readers/claude.ts'
 import { claudeStep, codexItem, commandSay, commandWords } from '../server/live/readers/steps.ts'
@@ -104,6 +104,16 @@ describe('words', () => {
     expect(c.cut).toBe(true)
     expect(c.output.split('\n')).toHaveLength(400)
     expect(c.output.endsWith('line 449')).toBe(true)
+  })
+  test('outputAt reads a tool part’s output in an OpenCode row and a tool result in a pi row', () => {
+    const dir = tmp('act-output-at')
+    const oc = join(dir, 'ses_1.jsonl')
+    writeFileSync(oc, JSON.stringify({ id: 'a1', type: 'assistant', seq: 1, time: 10, data: { content: [{ type: 'text', text: 'hi' }, { type: 'tool', tool: 'read', state: { status: 'completed', output: 'line one\nline two' } }] } }) + '\n')
+    expect(outputAt({ file: oc, offset: 0 }, 'a1-1')).toBe('line one\nline two')
+    expect(outputAt({ file: oc, offset: 0 }, 'a1-0')).toBeUndefined()
+    const pi = join(dir, 'pi.jsonl')
+    writeFileSync(pi, JSON.stringify({ type: 'message', id: 'p2', message: { role: 'toolResult', toolCallId: 'call_1', content: [{ type: 'text', text: 'a.ts' }] } }) + '\n')
+    expect(outputAt({ file: pi, offset: 0 }, 'call_1')).toBe('a.ts')
   })
 })
 

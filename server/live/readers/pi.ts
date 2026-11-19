@@ -1,9 +1,17 @@
 // pi's log: ~/.pi/agent/sessions/--<cwd>--/<time>_<id>.jsonl. The first line is {type: 'session', id, cwd}; then
 // entries with their own id: message {message: {role, content}}, model_change, custom, ... The chat reads the user's
-// and the assistant's text; system prompts, tool calls and results, and thinking stay out.
+// and the assistant's text, and their tool calls and results as steps; system prompts and thinking stay out.
+import { testResult, words } from '../../../shared/activity.ts'
+import { runStep, type Said } from './steps.ts'
 import type { LogEvent, Reader } from './types.ts'
 
 type Json = any
+
+/** a pi tool call as a step: a shell command in words, else the tool's name */
+export function piStep(name: string, args: Json): Said {
+  if (name === 'bash') return runStep(args && typeof args === 'object' ? args.command : undefined)
+  return { step: 'other', ...words(`Use ${name.replace(/_/g, ' ')}`) }
+}
 
 const parseLine = (text: string): Json => {
   try {
@@ -41,10 +49,15 @@ export class PiReader implements Reader {
   private sessions = new Set<string>()
   /** files whose last turn ended: a reply that comes next (pi retrying an error) starts a turn of its own */
   private ended = new Set<string>()
+  /** tool calls shown as steps and not over yet, by file and id: whether it was a test run */
+  private steps = new Map<string, boolean>()
+  /** a call id repeats across sessions, so it names a step only together with its file */
+  private stepKey = (file: string, id: string) => `${file}\0${id}`
 
   reset(file: string) {
     this.sessions.delete(file)
     this.ended.delete(file)
+    for (const key of this.steps.keys()) if (key.startsWith(`${file}\0`)) this.steps.delete(key)
   }
 
   parse(lines: { text: string; offset: number }[], file: string): LogEvent[] {
@@ -81,6 +94,18 @@ export class PiReader implements Reader {
             .filter(Boolean)
             .join('\n\n')
           if (words) out.push({ kind: 'agent', id, at: t, text: words })
+          // a tool call starts a step now; its result line ends it and holds the raw output
+          const content = Array.isArray(m.content) ? m.content : []
+          content.forEach((b: Json, index: number) => {
+            if (b?.type !== 'toolCall') return
+            const call = typeof b.id === 'string' ? b.id : `t${offset}-${index}`
+            const key = this.stepKey(file, call)
+            if (this.steps.has(key)) return
+            const name = String(b.name ?? '')
+            const said = piStep(name, b.arguments)
+            this.steps.set(key, !!said.test)
+            out.push({ kind: 'step', id: call, at: t, tool: name, ...said })
+          })
           const u = m.usage
           const tokens = typeof u?.totalTokens === 'number' ? u.totalTokens : (u?.input ?? 0) + (u?.output ?? 0) + (u?.cacheRead ?? 0) + (u?.cacheWrite ?? 0)
           // the model as pi names it, with its provider in front (spark/qwen3.8-…, commandcode/deepseek/…); pi's own cost
@@ -99,6 +124,15 @@ export class PiReader implements Reader {
             }
             this.ended.add(file)
             out.push({ kind: 'turn-end', id: `turn-${id}`, at: t })
+          }
+        } else if (m.role === 'toolResult') {
+          const call = String(m.toolCallId ?? '')
+          const key = this.stepKey(file, call)
+          const test = this.steps.get(key)
+          if (test !== undefined) {
+            this.steps.delete(key)
+            const body = texts(m.content).join('\n')
+            out.push({ kind: 'step-end', id: call, at: t, failed: m.isError === true || undefined, out: { file, offset }, ...(test && body ? { result: testResult(body) } : {}) })
           }
         }
       }

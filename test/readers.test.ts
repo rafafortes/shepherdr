@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { claudeLogPath, claudeProjectDir, cwdCandidates, findClaudeLog, findCodexLog, findPiLog, piSessionDir } from '../server/live/readers/find.ts'
+import { outputAt } from '../server/live/activity.ts'
 import { LogTail, readerFor } from '../server/live/readers/index.ts'
 import type { LogEvent } from '../server/live/readers/types.ts'
 import { tmp } from './tmp.ts'
@@ -459,6 +460,54 @@ describe('pi reader', () => {
     // a leading number that is not an HTTP status is not one either
     const leadingCount = err('700 tokens requested exceeds the model limit')
     expect(leadingCount && 'status' in leadingCount).toBe(false)
+  })
+
+  test('tool calls are steps, their results end them with the output kept in the log', () => {
+    const dir = tmp('pi-reader-steps')
+    const file = join(dir, 'pi.jsonl')
+    const lines = [
+      pimsg('p1', null, { role: 'assistant', content: [{ type: 'toolCall', id: 'call_1', name: 'bash', arguments: { command: 'bun test' } }], stopReason: 'toolUse', timestamp: 1 }),
+      pimsg('p2', 'p1', { role: 'toolResult', toolCallId: 'call_1', content: [{ type: 'text', text: '41 passed' }], isError: false, timestamp: 2 }),
+    ]
+    writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
+    const offsets = [0, Buffer.byteLength(JSON.stringify(lines[0]) + '\n')]
+    const ev = readerFor('pi')!.parse(lines.map((l, i) => ({ text: JSON.stringify(l), offset: offsets[i] })), file)
+    expect(ev.filter((e) => e.kind === 'step')).toMatchObject([
+      { kind: 'step', id: 'call_1', tool: 'bash', step: 'run', title: 'Ran tests', test: true },
+    ])
+    const end = ev.find((e) => e.kind === 'step-end')!
+    expect(end).toMatchObject({ id: 'call_1', result: '41 passed', out: { file, offset: offsets[1] } })
+    expect(outputAt(end.kind === 'step-end' ? end.out! : { file, offset: 0 }, end.id)).toBe('41 passed')
+  })
+
+  test('an unknown tool reads in words; an unmatched result says nothing, a failed one ends its step', () => {
+    const ev = parse('pi', [
+      pimsg('p3', null, { role: 'assistant', content: [{ type: 'toolCall', id: 'call_2', name: 'some_tool' }, { type: 'toolCall', id: 'call_3', name: 'bash' }, { type: 'toolCall', name: 'read' }], stopReason: 'toolUse', timestamp: 1 }),
+      pimsg('p4', 'p3', { role: 'toolResult', toolCallId: 'other', content: 'nothing', isError: true, timestamp: 2 }),
+      pimsg('p5', 'p4', { role: 'toolResult', toolCallId: 'call_2', content: [{ type: 'text', text: 'oops' }], isError: true, timestamp: 2 }),
+    ])
+    expect(ev.filter((e) => e.kind === 'step')).toMatchObject([
+      { id: 'call_2', tool: 'some_tool', step: 'other', title: 'Used some tool' },
+      { id: 'call_3', tool: 'bash', step: 'run', title: 'Ran a command' },
+      { id: 't0-2', tool: 'read', step: 'other', title: 'Used read' },
+    ])
+    const ends = ev.filter((e) => e.kind === 'step-end')
+    expect(ends).toHaveLength(1)
+    expect(ends[0]).toMatchObject({ id: 'call_2', failed: true })
+    expect(ends[0]).not.toHaveProperty('result')
+  })
+
+  test('a call id is a step in each session, and a reset forgets only that session’s steps', () => {
+    const reader = readerFor('pi')!
+    const a = '/logs/pi-a.jsonl'
+    const b = '/logs/pi-b.jsonl'
+    const line = pimsg('p1', null, { role: 'assistant', content: [{ type: 'toolCall', id: 'call_same', name: 'bash', arguments: { command: 'ls' } }], stopReason: 'toolUse', timestamp: 1 })
+    const steps = (file: string) => reader.parse([{ text: JSON.stringify(line), offset: 0 }], file).filter((e) => e.kind === 'step')
+    expect(steps(a)).toHaveLength(1)
+    expect(steps(b)).toHaveLength(1)
+    expect(steps(a)).toHaveLength(0)
+    reader.reset(a)
+    expect(steps(a)).toHaveLength(1)
   })
 })
 
