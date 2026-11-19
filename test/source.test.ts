@@ -635,12 +635,11 @@ describe('Queued from the command', () => {
       health: new WorkerHealth(),
     })
     expect((await src.cli(['task', 'add', 'Use it', '--desc', 'y', '--after', 'vm-x:ELA-3'], { chat: place })).out).toContain("can't reach vm-x")
-    // the link is marked reachable right before each add that needs it: the machine poller marks it away again (its URL
-    // answers nothing), and a poll between this line and a slow add (git, under load) made the add say "can't reach"
-    const reach = () => ((links.get('vm-x') as { reachable: boolean }).reachable = true)
-    reach()
+    // from here the link answers as reachable whatever the poller says: its URL answers nothing, so one poll in five
+    // seconds marks it away again, and one that landed between this line and a slow add (git, under load) made the add
+    // say "can't reach". The test takes the link away at its end.
+    Object.defineProperty(links.get('vm-x') as object, 'reachable', { get: () => true, set: () => {} })
     expect((await src.cli(['task', 'add', 'Use it', '--desc', 'y', '--after', 'vm-x:ELA-9'], { chat: place })).out).toContain('vm-x has no task ELA-9')
-    reach()
     const used = await src.cli(['task', 'add', 'Use it', '--desc', 'y', '--after', 'Vm-X:ela-3'], { chat: place })
     expect(used.out).toContain('queued after vm-x:ELA-3')
     const use = src.engine.task(idOf(used.out))!
