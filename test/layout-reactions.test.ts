@@ -514,3 +514,45 @@ describe.skipIf(!browser)('an artifact card', () => {
     await page.close()
   }, 30_000)
 })
+
+describe.skipIf(!browser)('the message menu Copy where the clipboard is refused', () => {
+  test('copies through the same old textarea path the code block uses when there is no clipboard API', async () => {
+    const ctx = await browser!.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    const page = await ctx.newPage()
+    await page.goto(url())
+    await page.waitForSelector('[data-msg="long-agent"] [data-anchor]')
+    // a plain-http page (or a webview) has no clipboard API; watch the hidden textarea + execCommand fallback
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+      const w = window as unknown as { selected: string[]; execs: string[] }
+      w.selected = []
+      w.execs = []
+      const select = HTMLTextAreaElement.prototype.select
+      HTMLTextAreaElement.prototype.select = function () {
+        w.selected.push(this.value)
+        return select.call(this)
+      }
+      const doc = document as Document & { execCommand: (cmd: string) => boolean }
+      doc.execCommand = (cmd: string) => {
+        w.execs.push(cmd)
+        return true
+      }
+    })
+    const cdp = await ctx.newCDPSession(page)
+    await page.$eval('[data-msg="long-agent"]', (m) => m.scrollIntoView({ block: 'center' }))
+    await page.waitForTimeout(350)
+    const box = (await page.$eval('[data-msg="long-agent"] [data-anchor]', (b) => b.getBoundingClientRect().toJSON())) as Box
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.left + 30, y: box.top + 16 }] })
+    await page.waitForTimeout(600)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await page.waitForSelector('[role=menuitem]:has-text("Copy")')
+    await page.tap('[role=menuitem]:has-text("Copy")')
+    const path = await page.evaluate(() => {
+      const w = window as unknown as { selected: string[]; execs: string[] }
+      return { selected: w.selected, execs: w.execs }
+    })
+    expect(path.execs).toContain('copy')
+    expect(path.selected).toContain('It is the clock. The test waits 50 ms for a timer the mock never advances, so a slow runner times out.')
+    await ctx.close()
+  }, 30_000)
+})

@@ -35,7 +35,7 @@ export function span(range: string | null | undefined, size: number): [number, n
   return start > end || start >= size ? 'bad' : [start, end]
 }
 
-/** la presence of a tool on the machine the file lives on: asked once, the same answer after */
+/** the presence of a tool on the machine the file lives on: asked once, the same answer after */
 const tools = new Map<string, boolean>()
 export async function hasTool(tool: string) {
   let known = tools.get(tool)
