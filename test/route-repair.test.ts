@@ -90,7 +90,20 @@ function binder(ms: number, fail?: (pid: string) => boolean) {
   return { written, state, run }
 }
 
-const pids = (records: AgentRecord[]) => records.map((r) => String(procs.get(paneOf(r.key))!.pid))
+/** the CLI process one agent's pane runs, and what herdr lists for it: both are this test's own, filled by `listed` */
+const procOf = (key: string) => {
+  const p = procs.get(paneOf(key))
+  if (!p) throw new Error(`${key}'s pane was never listed`)
+  return p
+}
+
+const listedOf = (a: Agents, name: string) => {
+  const live = a.live.get(name)
+  if (!live) throw new Error(`herdr does not list ${name}`)
+  return live
+}
+
+const pids = (records: AgentRecord[]) => records.map((r) => String(procOf(r.key).pid))
 
 const until = async (f: () => boolean, ms = 5000) => {
   for (const t0 = Date.now(); !f(); await Bun.sleep(10)) if (Date.now() - t0 > ms) throw new Error('timed out')
@@ -128,7 +141,9 @@ describe('the route repair pass', () => {
       // its assertion is loose enough for a busy machine
       expect(parallel).toBeLessThan(serial)
     } finally {
-      a.stop(); info.mockRestore(); b.run.mockRestore()
+      a.stop()
+      info.mockRestore()
+      b.run.mockRestore()
     }
   })
 
@@ -142,7 +157,7 @@ describe('the route repair pass', () => {
     const inner = a as unknown as Pass
     inner.starting.set(starting.key, Promise.resolve(null))
     inner.stopping.add(restarting.key)
-    a.live.get(launching.name)!.launch_pending = true
+    listedOf(a, launching.name).launch_pending = true
     const info = processInfo()
     const b = binder(0)
     try {
@@ -160,12 +175,14 @@ describe('the route repair pass', () => {
       // their own flow is over: the next pass binds those and writes nothing a second time
       inner.starting.clear()
       inner.stopping.clear()
-      a.live.get(launching.name)!.launch_pending = false
+      listedOf(a, launching.name).launch_pending = false
       await inner.repairRoutes()
       expect(b.written).toEqual(pids([one, pending, starting, restarting, launching]))
       expect(Object.keys(records).every((k) => a.routed(k))).toBe(true)
     } finally {
-      a.stop(); info.mockRestore(); b.run.mockRestore()
+      a.stop()
+      info.mockRestore()
+      b.run.mockRestore()
     }
   })
 
@@ -175,18 +192,23 @@ describe('the route repair pass', () => {
     const [one, broken, three] = Object.values(records)
     // the helper cannot write its route, and the file really is not there: a routing failure of its own
     const info = processInfo()
-    const b = binder(0, (pid) => pid === String(procs.get(paneOf(broken.key))!.pid))
+    const b = binder(0, (pid) => pid === String(procOf(broken.key).pid))
     const said: string[] = []
-    const err = spyOn(console, 'error').mockImplementation(((...m: unknown[]) => { said.push(m.join(' ')) }) as never)
+    const err = spyOn(console, 'error').mockImplementation(((...m: unknown[]) => {
+      said.push(m.join(' '))
+    }) as never)
     try {
       await (a as unknown as Pass).repairRoutes()
       expect(said).toEqual([`shepherdr: routing ${broken.key}: ${ROUTING_FAILURE}`])
-      expect(b.written.filter((p) => p === String(procs.get(paneOf(broken.key))!.pid))).toHaveLength(3) // one write, two retries
+      expect(b.written.filter((p) => p === String(procOf(broken.key).pid))).toHaveLength(3) // one write, two retries
       expect(a.routed(one.key)).toBe(true)
       expect(a.routed(three.key)).toBe(true)
       expect(a.routed(broken.key)).toBe(false)
     } finally {
-      err.mockRestore(); a.stop(); info.mockRestore(); b.run.mockRestore()
+      err.mockRestore()
+      a.stop()
+      info.mockRestore()
+      b.run.mockRestore()
     }
   })
 
@@ -200,7 +222,9 @@ describe('the route repair pass', () => {
     }) as never)
     const b = binder(0)
     const said: string[] = []
-    const err = spyOn(console, 'error').mockImplementation(((...m: unknown[]) => { said.push(m.join(' ')) }) as never)
+    const err = spyOn(console, 'error').mockImplementation(((...m: unknown[]) => {
+      said.push(m.join(' '))
+    }) as never)
     try {
       await (a as unknown as Pass).repairRoutes()
       expect(said).toEqual([`shepherdr: routing ${broken.key}: herdr went away`])
@@ -209,7 +233,10 @@ describe('the route repair pass', () => {
       expect(a.routed(three.key)).toBe(true)
       expect(a.routed(broken.key)).toBe(false)
     } finally {
-      err.mockRestore(); a.stop(); info.mockRestore(); b.run.mockRestore()
+      err.mockRestore()
+      a.stop()
+      info.mockRestore()
+      b.run.mockRestore()
     }
   })
 
@@ -233,7 +260,9 @@ describe('the route repair pass', () => {
       await inner.repairRoutes()
       expect(b.written).toEqual([])
     } finally {
-      a.stop(); info.mockRestore(); b.run.mockRestore()
+      a.stop()
+      info.mockRestore()
+      b.run.mockRestore()
     }
   })
 
@@ -257,7 +286,10 @@ describe('the route repair pass', () => {
       expect(b.written.sort()).toEqual(pids(Object.values(records)).sort())
       expect(Date.now() - t0).toBeLessThan(5000) // the 30 s wait this used to sit behind
     } finally {
-      a.stop(); agents.mockRestore(); info.mockRestore(); b.run.mockRestore()
+      a.stop()
+      agents.mockRestore()
+      info.mockRestore()
+      b.run.mockRestore()
     }
   })
 
@@ -277,7 +309,10 @@ describe('the route repair pass', () => {
       expect(b.written).toEqual(pids([only]))
       expect(a.records[only.key].pendingLaunch).toBe(false)
     } finally {
-      a.stop(); agents.mockRestore(); info.mockRestore(); b.run.mockRestore()
+      a.stop()
+      agents.mockRestore()
+      info.mockRestore()
+      b.run.mockRestore()
     }
   })
 })

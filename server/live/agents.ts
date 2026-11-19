@@ -877,8 +877,11 @@ export class Agents extends Emitter<Events> {
   private async repairRoute(r: AgentRecord) {
     const a = this.live.get(r.name)
     if (!a || this.itsOwnBind(r)) return
-    try { await this.bindRoute(r, a.pane_id, false, ROUTE_REPAIR_MS) }
-    catch (e) { console.error(`shepherdr: routing ${r.key}: ${(e as Error).message}`) }
+    try {
+      await this.bindRoute(r, a.pane_id, false, ROUTE_REPAIR_MS)
+    } catch (e) {
+      console.error(`shepherdr: routing ${r.key}: ${(e as Error).message}`)
+    }
   }
 
   /**
