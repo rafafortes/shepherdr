@@ -7,7 +7,7 @@ bun run dev           # the screen with hot reload, on :5173, talking to the ser
 bun run typecheck     # types, in seconds warm (tsc's incremental cache in node_modules/.cache): what to run while you work; it runs the whole tree's config and then the strict island (tsconfig.strict.json: noUncheckedIndexedAccess, for the directories that already pass it)
 bun run test changed  # the tests that reach what you changed from the default branch
 bun run test          # every test, in parallel, a quarter of the cores as the check does (but no lock)
-bun run check:local   # the whole check: dependencies, dependency audit, secrets, scripts, docs, version, types, language, every test with the browser ones, the coverage ratchet, the build (about 2 minutes warm on a quiet machine; 5m34s under load); what the merge gate, the weekly sweep and a release run
+bun run check:local   # the whole check: dependencies, dependency audit, secrets, scripts, docs, version, types, language, lint, format, every test with the browser ones, the coverage ratchet, the build (about 2 minutes warm on a quiet machine; 5m34s under load); what the merge gate, the weekly sweep and a release run
 bun run check:local --quick  # a task's pre-ready run: incremental types + changed tests + build, no coverage (see below)
 bun run check:local --reuse  # the merge gate's cheap ask: answers at once when this tree already passed (see below)
 ```
@@ -28,8 +28,8 @@ with a long timeout or in the background, where its verdict waits in
 
 A run is two phases, split by the check's number. Everything below `30` is worktree-local — its own `node_modules`, its
 own files, no browser — and runs before the lock: `10-dependencies`, `12-audit`, `15-secrets`, `17-scripts`, `18-docs`,
-`19-version`, `20-types` and `21-language`, so a broken type, script, doc, version or language scan fails in seconds
-instead of after a queue for the tests. `30-tests`, `40-coverage`, `50-build` and `60-dist-budget` share the machine's
+`19-version`, `20-types`, `21-language`, `22-lint` and `23-format`, so a broken type, script, doc, version, language
+scan, lint finding or unformatted file fails in seconds instead of after a queue for the tests. `30-tests`, `40-coverage`, `50-build` and `60-dist-budget` share the machine's
 browsers and cores with every other worktree and go under the lock, one run at a time; dependencies stay first because a
 fresh worktree has none and the types need them. A new check that needs the machine to itself is numbered 30 or more.
 On a machine where herdr runs as a systemd user service, give it (and the server and agents it holds) the CPU first:
@@ -93,16 +93,16 @@ overlap to use is a `--quick` run beside a full one.
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe, and runs the
 checks in the two phases above; each step is one executable file in `scripts/checks/`, named `<number>-<name>` with the
 numbers spaced by ten (`10-dependencies`, `12-audit`, `15-secrets`, `17-scripts`, `18-docs`, `19-version`, `20-types`,
-`21-language`, `30-tests`, `40-coverage`, `50-build`, `60-dist-budget`). A number below 30 is worktree-local and runs
-before the lock, one of 30 or more runs in the shared phase under it. The runner discovers the executable
-files by sorted file name, so adding a check is adding one file and no later task edits a shared list: a `.ts` file
+`21-language`, `22-lint`, `23-format`, `30-tests`, `40-coverage`, `50-build`, `60-dist-budget`). A number below 30 is
+worktree-local and runs before the lock, one of 30 or more runs in the shared phase under it. The runner discovers the
+executable files by sorted file name, so adding a check is adding one file and no later task edits a shared list: a `.ts` file
 beside them is a check's own logic, not a check (e.g. `secrets.ts`), and the order is reviewed because it is the file
 name. A check file:
 
 - gets its shared context in `SHEPHERDR_CHECK_*` environment variables, never positional arguments:
   `SHEPHERDR_CHECK_ROOT`, `SHEPHERDR_CHECK_LOGS`, `SHEPHERDR_CHECK_COVER`, `SHEPHERDR_CHECK_MAP` and
-  `SHEPHERDR_CHECK_RECORD` (the last two are `1` only on the default branch, for the screen map and the coverage and
-  dist baselines, and both empty in a `--quick` run), `SHEPHERDR_CHECK_QUICK` (`1` in a quick run), plus its own
+  `SHEPHERDR_CHECK_RECORD` (the last two are `1` only on the default branch, for the screen map and the coverage, dist
+  and lint baselines, and both empty in a `--quick` run), `SHEPHERDR_CHECK_QUICK` (`1` in a quick run), plus its own
   `SHEPHERDR_CHECK_NAME`, `SHEPHERDR_CHECK_LOG`, `SHEPHERDR_CHECK_NOTE` and `SHEPHERDR_CHECK_SKIP`;
 - exits 0 on pass and non-zero on failure (the runner maps 124/137 to timed out or killed, and stops at the first
   failure, so a later check never reads a half-finished world);
@@ -154,6 +154,29 @@ sentence cannot be committed on a reviewer's notice alone. Em dash, curly quotes
 and are never flagged; test fixtures, the emoji keyword table and a `language-allow: <why>` marker (for quoted sources
 and user-facing strings) are the explicit allowlist. `SHEPHERDR_LANGUAGE_SCOPE=tree` scans the whole tree instead —
 that is the weekly run.
+
+The lint step (`22-lint`, whose logic is `scripts/checks/lint.ts`) runs the pinned Biome (`@biomejs/biome`, an exact
+version in `package.json`) over the whole tree: one Rust binary and one `biome.json` instead of an ESLint stack
+with its plugins kept in step, and lint and format from the same tool. Biome and not ESLint because the rules this
+finding asks for are in it — `noFloatingPromises`, `noUnusedVariables`, `noExplicitAny`,
+`useExhaustiveDependencies` — plus its recommended set and the React domain, in about a second over this tree. It is a
+ratchet like the coverage one: the counts are kept per file and rule in the repo's `.git`
+(`shepherdr-lint/baseline.json`), recorded by the check on the default branch, and a file fails only when it carries
+MORE findings of a rule than at the baseline; a file the baseline does not know (a new one, or one moved with
+`git mv`, since a move keeps no identity) may carry none. A finding is fixed, or let off with a
+`biome-ignore <rule>: <why>` comment on the line above it, never in one mass rewrite. Record the baseline by hand on
+the default branch with `bun scripts/checks/lint.ts --record` (a clean tree only; the check there does it too). A
+tool or rules upgrade can raise the counts everywhere at once and leave nothing to record over, since the step never
+records findings that grew: delete the repo's `.git/shepherdr-lint/baseline.json`, record again, and commit or fix
+what that accepts. A host without the binary, or with a wrapper that cannot run (`bun` but no `node`), skips the step
+with `bun install`.
+
+The format step (`23-format`, whose logic is `scripts/checks/format.ts`) runs `biome format` (the check; only
+`--write` rewrites) over the code files the diff from the default branch touches, so an old file is formatted when it
+is next edited and no whole-tree reformat lands in one pull request; a file the branch adds is checked too, so it comes
+in formatted. A file the branch did not touch may stay unformatted, and the weekly run on the default branch has no
+diff, so it checks nothing. Nothing is ever written by the check. The style is the tree's own, in `biome.json`: two
+spaces, single quotes, no semicolons, trailing commas, and a 200-column line close to how the files already wrap.
 
 The dist-budget step (`60-dist-budget`, whose logic is `scripts/checks/dist-budget.ts`) runs after the build and only
 reads the files in `dist/`: total JS may grow by 1% or 5 KB (whichever is larger) since the baseline, and an asset over

@@ -72,10 +72,10 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
 
 - The whole check runs here: `bun run check:local` (`scripts/check-local.sh`) — `bun run typecheck`, every test with
   the browser tests (`scripts/test.ts`), and the build. Its worktree-local steps (dependencies, dependency audit,
-  secrets, scripts, docs, version, types, language) run first and without waiting for anybody, so a broken type or
-  script fails in seconds; its shared steps (tests, coverage, build, dist budget) run last in line for the CPU (nice 19,
-  idle disk), one run at a time across every
-  worktree of the repo (a lock file under `$XDG_RUNTIME_DIR` or `~/.cache`, never in the repo and never in
+  secrets, scripts, docs, version, types, language, lint, format) run first and without waiting for anybody, so a broken
+  type, script, lint finding or unformatted file fails in seconds; its shared steps (tests, coverage, build, dist budget)
+  run last in line for the CPU (nice 19, idle disk), one run at a time across every worktree of the repo (a lock file
+  under `$XDG_RUNTIME_DIR` or `~/.cache`, never in the repo and never in
   `~/.shepherdr`), and the test files are capped at `SHEPHERDR_TEST_JOBS` workers (a quarter of the cores by default) so
   herdr, the live server and the agents keep the CPU; a `--quick` run has a lock of its own and never waits behind a
   full one. It prints one line per step, the failing tests' names

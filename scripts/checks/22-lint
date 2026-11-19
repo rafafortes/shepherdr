@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Check after the language scan (audit 2026-11-18, QG-02): Biome lints the tree, held to the baseline per file and rule
+# (scripts/checks/lint.ts). The logic and its fixture tests live in the lint.ts module beside this shim; the runner runs
+# whichever executable files it finds.
+set -uo pipefail
+root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
+cd "$root" || exit 1
+exec bun "$root/scripts/checks/lint.ts"
