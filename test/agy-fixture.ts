@@ -3,7 +3,7 @@
 // rows the mirror reads, and the summaries database the finder reads.
 import { Database } from 'bun:sqlite'
 
-type Node = Map<number, Node | Leaf>
+type Node = Map<number, Node | Leaf | Leaf[]>
 export type Leaf = string | number | Uint8Array
 
 /** a varint's bytes, appended to out */
@@ -16,8 +16,8 @@ function varint(n: number, out: number[]) {
   out.push(v)
 }
 
-/** sets a leaf at a path of field numbers, making the messages on the way */
-function put(node: Node, path: number[], v: Leaf) {
+/** sets a leaf at a path of field numbers, making the messages on the way (an array is that field, repeated) */
+function put(node: Node, path: number[], v: Leaf | Leaf[]) {
   const [head, ...rest] = path
   if (!rest.length) return void node.set(head, v)
   let child = node.get(head)
@@ -31,21 +31,23 @@ function put(node: Node, path: number[], v: Leaf) {
 /** a message's bytes: numbers as varints, strings and bytes length-delimited, nested messages length-delimited */
 function encode(node: Node, out: number[] = []): number[] {
   for (const [f, v] of node) {
-    if (typeof v === 'number') {
-      varint(f * 8, out)
-      varint(v, out)
-      continue
+    for (const one of Array.isArray(v) ? v : [v]) {
+      if (typeof one === 'number') {
+        varint(f * 8, out)
+        varint(one, out)
+        continue
+      }
+      const body = one instanceof Map ? encode(one) : typeof one === 'string' ? [...new TextEncoder().encode(one)] : [...one]
+      varint(f * 8 + 2, out)
+      varint(body.length, out)
+      out.push(...body)
     }
-    const body = v instanceof Map ? encode(v) : typeof v === 'string' ? [...new TextEncoder().encode(v)] : [...v]
-    varint(f * 8 + 2, out)
-    varint(body.length, out)
-    out.push(...body)
   }
   return out
 }
 
-/** a protobuf message from dotted field paths: { '5.1.1': 1700000000, '19.2': 'hello' } */
-export function pb(paths: Record<string, Leaf>): Uint8Array {
+/** a protobuf message from dotted field paths: { '5.1.1': 1700000000, '19.2': 'hello' }; an array repeats its field */
+export function pb(paths: Record<string, Leaf | Leaf[]>): Uint8Array {
   const root: Node = new Map()
   for (const [p, v] of Object.entries(paths)) put(root, p.split('.').map(Number), v)
   return Uint8Array.from(encode(root))
@@ -73,14 +75,31 @@ export const toolPayload = (o: { tool: string; args: string; output?: string; se
 /** a system notice's payload */
 export const noticePayload = (text: string, sec = 1700000003) => pb({ ...stepAt(sec), '114.4.4': text })
 
-/** a generation row: its model label and id (where it keeps one) and its usage */
-export const genRow = (o: { label?: string; id?: string; tokensIn?: number; tokensOut?: number }) =>
+/** a generation row's own metadata: the step it answers (the one before its model response) and the conversation it
+ *  belongs to (a subagent's rows sit in the same table); the store's rows carry other named pairs too, which the mirror
+ *  reads past (a trajectory id, and flags as plain numbers) */
+export const genMeta = (o: { lastStep?: number; cascade?: string }) =>
   pb({
-    ...(o.label === undefined ? {} : { '1.21': o.label }),
-    ...(o.id === undefined ? {} : { '3.28': o.id }),
-    ...(o.tokensIn === undefined ? {} : { '1.4.2': o.tokensIn }),
-    ...(o.tokensOut === undefined ? {} : { '1.4.3': o.tokensOut }),
+    '1.20': [
+      ...(o.lastStep === undefined ? [] : [pb({ '1': 'last_step_index', '2': String(o.lastStep) })]),
+      ...(o.cascade === undefined ? [] : [pb({ '1': 'cascade_id', '2': o.cascade })]),
+      pb({ '1': 'trajectory_id', '2': 'a-trajectory' }),
+      pb({ '1': 'used_claude', '2': 0 }),
+    ],
   })
+
+/** a generation row: its model label and id (where it keeps one), its usage, and the metadata naming its step (the row's
+ *  fields simply follow each other, as the store writes them) */
+export const genRow = (o: { label?: string; id?: string; tokensIn?: number; tokensOut?: number; lastStep?: number; cascade?: string }) =>
+  Uint8Array.from([
+    ...pb({
+      ...(o.label === undefined ? {} : { '1.21': o.label }),
+      ...(o.id === undefined ? {} : { '3.28': o.id }),
+      ...(o.tokensIn === undefined ? {} : { '1.4.2': o.tokensIn }),
+      ...(o.tokensOut === undefined ? {} : { '1.4.3': o.tokensOut }),
+    }),
+    ...genMeta(o),
+  ])
 
 export interface StepRow {
   idx: number

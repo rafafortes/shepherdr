@@ -50,6 +50,8 @@ export class LogTail {
   private ino = -1
   /** the last read stopped at its limit, short of the file's end */
   private more = false
+  /** how many times the file was read from its start again after it had been read (replaced, or cut shorter) */
+  private reread = 0
 
   constructor(
     readonly file: string,
@@ -64,6 +66,12 @@ export class LogTail {
   /** more is written than read so far: a read with a limit stopped short */
   get behind(): boolean {
     return this.more
+  }
+
+  /** how many times this log was read again from its start: a file replaced or cut shorter under the reader (a store's
+   *  mirror written again whole, a log rotated). Everything it said is said again, so a reader of the whole log starts over */
+  get restarts(): number {
+    return this.reread
   }
 
   /** events of the complete lines written since the last read, or of about `max` bytes more of the file (a line it
@@ -155,6 +163,8 @@ export class LogTail {
   }
 
   private restart(ino: number) {
+    // the first read is the log's start, not a reading again
+    if (this.ino !== -1) this.reread++
     this.offset = 0
     this.pos = 0
     this.carry = []

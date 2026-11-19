@@ -414,7 +414,18 @@ export class Chats {
     return changed
   }
 
-  private read(key: string): { changed: boolean; behind: boolean } {
+  /** put a chat's events away and have its logs read again from their start: a log was replaced under the reader, so what it
+   *  said must not join what it said before */
+  private startOver(key: string, logs: string[]) {
+    this.events.delete(key)
+    this.where.delete(key)
+    this.acts.delete(key)
+    // the revision grows, so a chat built before is built again from the events read now
+    this.revs.set(key, (this.revs.get(key) ?? 0) + 1)
+    for (const f of logs) this.tails.delete(f)
+  }
+
+  private read(key: string, again = 0): { changed: boolean; behind: boolean } {
     const r = this.agents.record(key)
     if (!r) return { changed: false, behind: false }
     let changed = false
@@ -433,7 +444,17 @@ export class Chats {
         this.tails.set(f, t)
       }
       const was = t.done
+      const starts = t.restarts
       const ev = t.read(left)
+      // read from its start again under us (agy's and OpenCode's logs are copies of a store, which a newer Shepherdr writes
+      // again whole; a log cut or replaced): the chat is built again from its start, never with what it said twice
+      if (t.restarts !== starts) {
+        if (!again) {
+          this.startOver(key, r.logs)
+          return this.read(key, again + 1)
+        }
+        t = this.tails.get(f) ?? t
+      }
       left -= Math.max(0, t.done - was)
       for (const e of ev) {
         // a reply read in two pieces comes again with the same id and the full text: it replaces the first

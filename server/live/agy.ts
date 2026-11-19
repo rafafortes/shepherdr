@@ -221,9 +221,11 @@ export function headlessOutcome(out: string, code: number): { ok: boolean; said:
 
 /* ---------- mirror ---------- */
 
-/** the mirror's format, its first line: a mirror without it was written by an older Shepherdr, which read some steps
- *  otherwise (a provider's cut-off, step 17, as nothing), and is rebuilt once, whole (mirrorConversation) */
-export const MIRROR_HEAD = JSON.stringify({ mirror: 2 })
+/** the mirror's format, its first line: a mirror without it, or of another number, was written by an older Shepherdr,
+ *  which read some steps otherwise (a provider's cut-off, step 17, as nothing; a model response agy had not committed yet as
+ *  an empty line), and is rebuilt once, whole (mirrorConversation). 3: a model response's line waits until agy has committed
+ *  it, and its model and tokens come from the generation row that answers its step, not from where it falls among them */
+export const MIRROR_HEAD = JSON.stringify({ mirror: 3 })
 
 /** whether a mirror is of the current format: its first line is MIRROR_HEAD */
 function current(file: string): boolean {
@@ -343,13 +345,82 @@ function lineOf(s: { idx: number; step_type: number; step_payload: Uint8Array | 
 /** the steps still running: a step with one of these statuses is not final, and the mirror stops before it */
 const NOT_FINAL = new Set([0, 1, 2])
 
-/** the generation rows of `count` model responses, from the one after the `from` responses before them: the k-th model
- *  response of the store has the k-th generation row */
-function genRows(handle: Database, from: number, count: number): Uint8Array[] {
-  return handle
-    .query<{ data: Uint8Array }, [number, number]>('SELECT data FROM gen_metadata ORDER BY idx LIMIT ? OFFSET ?')
-    .all(count, from)
-    .map((r) => r.data)
+const EMPTY = new Uint8Array(0)
+
+/** one row of the steps table, as the mirror reads it */
+interface Step {
+  idx: number
+  step_type: number
+  status: number
+  step_payload: Uint8Array | null
+  error_details: Uint8Array | null
+}
+
+/**
+ * A model response agy has not finished writing: it carries no output tokens yet (5.9.3). The store writes a model
+ * response's row before its payload and fills the payload in as it goes — the time, then the reply's words, and the usage
+ * with the last write — so a response that has words and no usage is still growing (no response in a real store has words
+ * without its usage), and the usage is the mark of a response agy is done with.
+ */
+function pending(p: Uint8Array): boolean {
+  return field(p, '5.9.3') === undefined
+}
+
+/** how well a generation row fits a conversation: its own (a cascade_id of this conversation's), one of an older store (no
+ *  cascade_id at all), or another conversation's (a subagent's rows sit in the same table), which is never used */
+function genRank(cascade: string | undefined, id: string): number {
+  if (cascade === undefined) return 1
+  return cascade === id ? 2 : 0
+}
+
+/** a generation row's own metadata: the step it answers and the conversation it belongs to (named pairs of the row: the
+ *  last_step_index it was made after, and its cascade_id) */
+function genMeta(data: Uint8Array): { prev?: number; cascade?: string } {
+  let prev: number | undefined
+  let cascade: string | undefined
+  for (const f of fields(data) ?? []) {
+    if (f.field !== 1 || f.wire !== 2) continue
+    for (const e of fields(f.value as Uint8Array) ?? []) {
+      if (e.field !== 20 || e.wire !== 2) continue
+      const kv = fields(e.value as Uint8Array) ?? []
+      const key = text(kv.find((x) => x.field === 1)?.value)
+      if (key !== 'last_step_index' && key !== 'cascade_id') continue
+      const value = text(kv.find((x) => x.field === 2)?.value)
+      if (value === undefined) continue
+      if (key === 'last_step_index') {
+        const n = Number(value)
+        if (Number.isInteger(n)) prev = n
+      } else cascade = value
+    }
+  }
+  return { prev, cascade }
+}
+
+/**
+ * The generation row that answers each of these model responses: a row names the step before its response in its own
+ * metadata (last_step_index), so a row is found by that name, never by its place among the rows — a subagent's rows sit in
+ * the same table, and an extra or missing one shifts every count after it. Rows are read from the newest back, so a
+ * conversation with many of them reads only the few it needs.
+ */
+function gensFor(handle: Database, id: string, prevs: Set<number>): Map<number, Uint8Array> {
+  const found = new Map<number, { rank: number; data: Uint8Array }>()
+  let before = Number.MAX_SAFE_INTEGER
+  while (found.size < prevs.size) {
+    const rows = handle
+      .query<{ idx: number; data: Uint8Array }, [number]>('SELECT idx, data FROM gen_metadata WHERE idx < ? ORDER BY idx DESC LIMIT 32')
+      .all(before)
+    if (!rows.length) break
+    for (const row of rows) {
+      before = row.idx
+      const meta = genMeta(row.data)
+      if (meta.prev === undefined || !prevs.has(meta.prev)) continue
+      const rank = genRank(meta.cascade, id)
+      const had = found.get(meta.prev)
+      if (!rank || (had && had.rank >= rank)) continue
+      found.set(meta.prev, { rank, data: row.data })
+    }
+  }
+  return new Map([...found].map(([prev, g]) => [prev, g.data]))
 }
 
 /** a JSON line's object, or undefined when it is not one */
@@ -364,9 +435,11 @@ function parseLine(text: string): Record<string, unknown> | undefined {
 
 /**
  * Copies the conversation's final steps that outFile does not have yet (idx above its last line's) as JSONL lines, in
- * idx order, stopping at the first step still running, after the format's head (MIRROR_HEAD) in a new file. A mirror of
- * an older format is written again whole, as a new file that replaces it (the chat then reads it from its start). Returns
- * the number of step lines written; 0 and nothing created when there is no database.
+ * idx order, after the format's head (MIRROR_HEAD) in a new file. A step agy is still writing is not copied at all: the
+ * copy stops before it (a step still running, or a model response whose payload it has not committed yet), so every line is
+ * written once, whole, and comes in a later pass. A mirror of an older format, or one holding a line agy has filled in since
+ * it was copied, is written again whole, as a new file that replaces it (the chat then reads it from its start). Returns the
+ * number of step lines written; 0 and nothing created when there is no database.
  */
 export function mirrorConversation(id: string, outFile: string): number {
   const db = agyDb(id)
@@ -411,34 +484,41 @@ function stamps(db: string, out: string): { sig: string; newest: number } {
 }
 
 function mirrorAgy(id: string, outFile: string, db: string): number {
-  const anew = !existsSync(outFile) || !current(outFile)
-  const after = anew ? -1 : (lastIdx(outFile) ?? -1)
+  const whole = !existsSync(outFile) || !current(outFile)
+  const after = whole ? -1 : (lastIdx(outFile) ?? -1)
   const handle = new Database(db, { readonly: true })
   let lines: string[]
   try {
     const steps = handle
-      .query<{ idx: number; step_type: number; status: number; step_payload: Uint8Array | null; error_details: Uint8Array | null }, [number]>(
-        'SELECT idx, step_type, status, step_payload, error_details FROM steps WHERE idx > ? ORDER BY idx',
-      )
+      .query<Step, [number]>('SELECT idx, step_type, status, step_payload, error_details FROM steps WHERE idx > ? ORDER BY idx')
       .all(after)
-    const before = handle.query<{ n: number }, [number]>('SELECT COUNT(*) AS n FROM steps WHERE step_type = 15 AND idx <= ?').get(after)?.n ?? 0
-    const ids = agyIds()
-    const final = steps.findIndex((s) => NOT_FINAL.has(s.status))
+    const final = steps.findIndex((s, i) => unsettled(s, i === steps.length - 1))
     const done = final === -1 ? steps : steps.slice(0, final)
-    const gens = genRows(handle, before, done.filter((s) => s.step_type === 15).length)
-    let k = 0
-    lines = done.map((s) => JSON.stringify(lineOf(s, s.step_type === 15 ? gens[k++] : undefined, ids)))
+    const gens = gensFor(handle, id, new Set(done.filter((s) => s.step_type === 15).map((s) => s.idx - 1)))
+    const ids = agyIds()
+    lines = done.map((s) => JSON.stringify(lineOf(s, s.step_type === 15 ? gens.get(s.idx - 1) : undefined, ids)))
   } finally {
     handle.close()
   }
   mkdirSync(dirname(outFile), { recursive: true })
-  if (anew) {
+  if (whole) {
     // whole, under a name of its own, then in place of the old one: a reader never sees half of it
     const tmp = `${outFile}.tmp`
     writeFileSync(tmp, [MIRROR_HEAD, ...lines].join('\n') + '\n')
     renameSync(tmp, outFile)
   } else if (lines.length) appendFileSync(outFile, lines.join('\n') + '\n')
   return lines.length
+}
+
+/**
+ * Whether agy is still writing this step: one that runs, or the conversation's last step when it is a model response without
+ * its usage yet. agy appends a conversation's steps in order and writes a response's usage with its last write, so only the
+ * last step can be on its way; an empty response an abandoned run left stays uncopied until another step follows it, which
+ * costs the chat nothing (an empty model response shows nothing) and ends the moment the conversation goes on.
+ */
+function unsettled(s: Step, last: boolean): boolean {
+  if (NOT_FINAL.has(s.status)) return true
+  return last && s.step_type === 15 && !s.error_details?.length && pending(s.step_payload ?? EMPTY)
 }
 
 /** the newest conversation of a folder for this CLI: its mirror's path, or nothing; a failure is never thrown */

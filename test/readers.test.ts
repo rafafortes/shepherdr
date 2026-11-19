@@ -615,6 +615,18 @@ describe('LogTail', () => {
     expect(brief(tail.read(64 << 10))).toEqual(['user:not yet whole'])
   })
 
+  test('a line a CLI is still writing waits for its newline: codex, as it writes its log a piece at a time', () => {
+    const f = join(dir, 'codex-partial.jsonl')
+    const head = JSON.stringify(sessionMeta('/work/app')) + '\n'
+    const next = JSON.stringify(cxmsg('msg_u1', 'user', [{ type: 'input_text', text: 'Add a dark mode' }], ['user.text'])) + '\n'
+    writeFileSync(f, head + next.slice(0, 40))
+    const tail = new LogTail(f, readerFor('codex')!)
+    // the half line says nothing yet: it is joined once its newline is there
+    expect(brief(tail.read())).toEqual([`session:session-${T}`])
+    appendFileSync(f, next.slice(40))
+    expect(brief(tail.read())).toEqual(['user:Add a dark mode'])
+  })
+
   test('a missing file reads as nothing', () => {
     expect(new LogTail(join(dir, 'none.jsonl'), readerFor('claude')!).read()).toEqual([])
   })
