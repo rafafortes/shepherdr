@@ -7,7 +7,7 @@ bun run dev           # the screen with hot reload, on :5173, talking to the ser
 bun run typecheck     # types, in seconds warm (tsc's incremental cache in node_modules/.cache): what to run while you work
 bun run test changed  # the tests that reach what you changed from the default branch
 bun run test          # every test, in parallel, a quarter of the cores as the check does (but no lock)
-bun run check:local   # the whole check: dependencies, secrets, scripts, docs, version, types, language, every test with the browser ones, the coverage ratchet, the build (about 2 minutes)
+bun run check:local   # the whole check: dependencies, dependency audit, secrets, scripts, docs, version, types, language, every test with the browser ones, the coverage ratchet, the build (about 2 minutes)
 bun run check:local --quick  # opt-in: incremental types + changed tests + build, no coverage (see below)
 ```
 
@@ -37,8 +37,8 @@ registries still match what it wrote keep a shared cache safe; neither weakens w
 
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe; each step is
 one executable file in `scripts/checks/`, named `<number>-<name>` with the numbers spaced by ten (`10-dependencies`,
-`15-secrets`, `17-scripts`, `18-docs`, `19-version`, `20-types`, `21-language`, `30-tests`, `40-coverage`, `50-build`).
-The runner discovers the executable
+`12-audit`, `15-secrets`, `17-scripts`, `18-docs`, `19-version`, `20-types`, `21-language`, `30-tests`, `40-coverage`,
+`50-build`). The runner discovers the executable
 files by sorted file name, so adding a check is adding one file and no later task edits a shared list: a `.ts` file
 beside them is a check's own logic, not a check (e.g. `secrets.ts`), and the order is reviewed because it is the file
 name. A check file:
@@ -62,6 +62,16 @@ the run's log folder, never the repo, and only a finding's file, line and rule a
 that predates the step is baselined in `.gitleaksignore` as one fingerprint per line, with a `#` line above saying why
 it is a false positive or a revoked token; a new fingerprint fails the step. A host without gitleaks skips it with the
 install command, and the verdict names the part that did not run.
+
+The audit step (`12-audit`, whose logic is `scripts/checks/audit.ts`) runs `bun audit --json` right after dependencies:
+Bun reads `bun.lock` and asks the npm advisory database, with no second binary to pin. Advisory ids that are already
+accepted are kept in the repo's `.git` (`shepherdr-audit/accepted.json`, recorded by the check on the default branch as
+the coverage baseline is); a new id fails the step with its package, severity, affected range and advisory link, while
+an accepted one is only a comment. The same script checks each locked package's installed licence against an allowlist
+of permissive licences (including MPL-2.0 and OFL-1.1, which the tree already uses); an unknown licence fails naming
+its package, including packages installed under a parent; packages not installed here (other platforms, say) are
+counted, not failed. A registry that cannot be reached is a note on a green step and a skip reason in the verdict:
+offline work is never blocked by it.
 
 The scripts step (`17-scripts`, whose logic is `scripts/checks/scripts.ts`) runs `shellcheck -S warning` over
 `scripts/*.sh`, `bin/shepherdr` and `bin/agent-browser`, and `perl -c` over `helper/*.pl` and `helper/shepherdr`. A

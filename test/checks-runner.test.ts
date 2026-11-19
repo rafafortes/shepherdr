@@ -127,10 +127,12 @@ describe('the check files themselves', () => {
     // a .ts module beside the checks is not a check; a check without its executable bit would still be discovered
     expect(statSync(join(dir, 'secrets.ts')).mode & 0o111, 'secrets.ts is a module, not a check').toBe(0)
     expect(statSync(join(dir, 'scripts.ts')).mode & 0o111, 'scripts.ts is a module, not a check').toBe(0)
+    expect(statSync(join(dir, 'audit.ts')).mode & 0o111, 'audit.ts is a module, not a check').toBe(0)
     const names = readdirSync(dir).filter((n) => !n.endsWith('.ts')).sort()
-    expect(names).toEqual(['10-dependencies', '15-secrets', '17-scripts', '18-docs', '19-version', '20-types', '21-language', '30-tests', '40-coverage', '50-build'])
+    expect(names).toEqual(['10-dependencies', '12-audit', '15-secrets', '17-scripts', '18-docs', '19-version', '20-types', '21-language', '30-tests', '40-coverage', '50-build'])
     const text = Object.fromEntries(names.map((n) => [n, readFileSync(join(dir, n), 'utf8')])) as Record<string, string>
     expect(text['10-dependencies']).toContain('bun install --frozen-lockfile')
+    expect(text['12-audit']).toContain('scripts/checks/audit.ts')
     expect(text['15-secrets']).toContain('scripts/checks/secrets.ts')
     expect(text['17-scripts']).toContain('scripts/checks/scripts.ts')
     expect(text['18-docs']).toContain('scripts/checks/docs.ts')
