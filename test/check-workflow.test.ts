@@ -67,14 +67,17 @@ describe('the check itself', () => {
       .filter((l) => l.trim() && !l.trim().startsWith('#'))
     // the cheap merge gate (QG-10): the tree the check read, in a folder every worktree of the repo shares
     expect(lines).toContain('verdicts="$HOME/.cache/shepherdr/check-local/verdicts"')
-    expect(lines).toContain(`tree=$(git -C "$root" rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null)`)
+    expect(lines).toContain(`  tree=$(git -C "$root" rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null)`)
     expect(lines).toContain('for arg in "$@"; do [ "$arg" = --reuse ] && reuse=1; done')
-    // a quick run is no full verdict in either direction: it reuses none and keeps none
-    expect(lines).toContain('[ "$quick" = 1 ] && reuse=0')
-    // a run is kept only once it passed whole: right before the line that says it did
-    const call = lines.indexOf('  record')
+    // a quick run answers nothing and keeps nothing, and the gate question is asked after the lock wait too (the run
+    // it waited behind may have just kept this very tree)
+    expect(lines).toContain(`if [ "$quick" = 1 ] && [ "$reuse" = 1 ]; then`)
+    expect(lines.filter((l) => l === 'reuse_answer && exit 0')).toHaveLength(2)
+    // a tree's verdict is written only once the run passed whole, and taken away when it fails
+    const call = lines.indexOf('  record 1')
     expect(call).toBeGreaterThan(-1)
     expect(lines[call + 1]).toStartWith('  say "PASSED in')
+    expect(lines).toContain('record 0')
   })
 
   test('whose runner discovers the checks, one run at a time, last in line for the CPU', () => {

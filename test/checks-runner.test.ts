@@ -21,7 +21,7 @@ exit ${exit}
 
 /** a fixture repo holding a copy of the real runner, the given checks, a stand-in browser probe and a HOME of its own
  *  (outside the repo: a file left in the worktree would change the tree a verdict is kept by) */
-function fixture(checks: Record<string, string>, branch = 'herdr-tui') {
+function fixture(checks: Record<string, string>, branch = 'herdr-tui', commit = true) {
   const dir = tmp('checks-runner')
   const home = tmp('checks-runner-home')
   mkdirSync(join(dir, 'scripts', 'checks'), { recursive: true })
@@ -41,8 +41,10 @@ function fixture(checks: Record<string, string>, branch = 'herdr-tui') {
     chmodSync(file, 0o755)
   }
   // the scaffolding is committed with the fixture: a worktree with a file of its own is no clean tree
-  git('add', '-A')
-  git('-c', 'user.name=CI', '-c', 'user.email=ci@localhost', 'commit', '-qm', 'init')
+  if (commit) {
+    git('add', '-A')
+    git('-c', 'user.name=CI', '-c', 'user.email=ci@localhost', 'commit', '-qm', 'init')
+  }
   const logs = join(home, '.cache', 'shepherdr', 'check-local', basename(dir))
   const kept = join(home, '.cache', 'shepherdr', 'check-local', 'verdicts')
   return {
@@ -169,36 +171,74 @@ describe('the verdict a tree already passed (--reuse)', () => {
     expect(f.calls()).toEqual(['one'])
   })
 
-  test('an uncommitted tree, a quick run, a skipped part and a failure keep no verdict', () => {
+  test('a dirty worktree and one with no commit are named, checked, and kept for no tree', () => {
     // uncommitted: HEAD's tree is not what the run read
-    const uncommitted = fixture(passing)
-    writeFileSync(join(uncommitted.dir, 'extra.txt'), 'not committed\n')
-    expect(uncommitted.run().code).toBe(0)
-    expect(existsSync(uncommitted.kept)).toBe(false)
-    // a quick run is no full verdict
-    const quick = fixture(passing)
-    expect(quick.run('--quick').code).toBe(0)
-    expect(existsSync(quick.kept)).toBe(false)
-    // a run with a part skipped did not check everything
-    const skipped = fixture({ '10-one': check(`printf 'the tool is missing\\n' > "$SHEPHERDR_CHECK_SKIP"`) })
-    const partial = skipped.run()
-    expect(partial.code).toBe(0)
-    expect(partial.out).toContain('with parts of it not run:')
-    expect(existsSync(skipped.kept)).toBe(false)
-    // a failure is no verdict either
-    const failed = fixture({ '10-one': check('', 1) })
-    expect(failed.run().code).toBe(1)
-    expect(existsSync(failed.kept)).toBe(false)
+    const dirty = fixture(passing)
+    writeFileSync(join(dirty.dir, 'extra.txt'), 'not committed\n')
+    const d = dirty.run('--reuse')
+    expect(d.code).toBe(0)
+    expect(d.out).toContain('the worktree has uncommitted changes')
+    expect(dirty.calls()).toEqual(['one'])
+    expect(existsSync(dirty.kept)).toBe(false)
+    // a repository with no commit has no tree to name either
+    const bare = fixture(passing, 'herdr-tui', false)
+    const b = bare.run('--reuse')
+    expect(b.code).toBe(0)
+    expect(b.out).toContain('no commit yet')
+    expect(bare.calls()).toEqual(['one'])
+    expect(existsSync(bare.kept)).toBe(false)
   })
 
-  test('a quick run never answers from a verdict a full run kept', () => {
-    const f = fixture({ '10-one': check(), '40-coverage': check() })
-    expect(f.run().code).toBe(0)
-    rmSync(join(f.home, 'calls.txt'))
-    expect(f.run('--quick', '--reuse').code).toBe(0)
-    // the quick run runs its own checks, coverage left out, and writes its own verdict
+  test('a record that cannot be read is no verdict: the check runs again', () => {
+    const f = fixture(passing)
+    mkdirSync(f.kept, { recursive: true })
+    writeFileSync(join(f.kept, f.tree()), 'tree whatever\nat nope\n')
+    const r = f.run('--reuse')
+    expect(r.code).toBe(0)
+    expect(r.out).toContain('unreadable')
     expect(f.calls()).toEqual(['one'])
-    expect(f.verdict('verdict-quick.txt')).toContain('QUICK')
+  })
+
+  test('a part skipped keeps no verdict, and the gate refuses it instead of passing it', () => {
+    const f = fixture({ '10-one': check(`printf 'the tool is missing\\n' > "$SHEPHERDR_CHECK_SKIP"`) })
+    // the pre-ready run stays soft: it passed, saying what did not run
+    const pre = f.run()
+    expect(pre.code).toBe(0)
+    expect(pre.out).toContain('with parts of it not run:')
+    expect(existsSync(f.kept)).toBe(false)
+    // the gate's ask: a tree nothing checked whole is no tree that passed
+    const gate = f.run('--reuse')
+    expect(gate.code).toBe(1)
+    expect(gate.out).toContain('NOT A FULL VERDICT')
+    expect(gate.out).toContain('the tool is missing')
+    expect(existsSync(f.kept)).toBe(false)
+  })
+
+  test('a quick run is refused as a gate question, and a later failure takes the tree\'s verdict away', () => {
+    // the check fails only while the fixture's HOME holds a flag: the same tree, a different host state
+    const f = fixture({ '10-one': check('[ -f "$HOME/fail" ] && exit 1') })
+    expect(f.run().code).toBe(0)
+    const tree = f.tree()
+    expect(existsSync(join(f.kept, tree))).toBe(true)
+    rmSync(join(f.home, 'calls.txt'))
+    const both = f.run('--quick', '--reuse')
+    expect(both.code).toBe(1)
+    expect(both.out).toContain('--quick and --reuse ask different things')
+    expect(f.calls()).toEqual([])
+    // the same tree fails on a later full run: its old verdict is not one to answer from
+    writeFileSync(join(f.home, 'fail'), '')
+    expect(f.run().code).toBe(1)
+    expect(existsSync(join(f.kept, tree))).toBe(false)
+    const after = f.run('--reuse')
+    expect(after.code).toBe(1)
+    expect(after.out).toContain('no full check has passed on this tree yet')
+  })
+
+  test('a tree the branch moved away from while the check ran is never kept', () => {
+    const moved = `printf 'x\\n' >> "$SHEPHERDR_CHECK_ROOT/README.md" && git -C "$SHEPHERDR_CHECK_ROOT" -c user.name=CI -c user.email=ci@localhost commit -qam moved`
+    const f = fixture({ '10-one': check(moved) })
+    expect(f.run().code).toBe(0)
+    expect(existsSync(f.kept)).toBe(false)
   })
 })
 
