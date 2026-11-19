@@ -665,7 +665,7 @@ describe('the shepherdr command', () => {
   })
 })
 
-/** a link to another machine, as test/source.test.ts stands one in: owner() names it, fetch() answers for it */
+/** a link to another machine, as test/source-chat.test.ts stands one in: owner() names it, fetch() answers for it */
 function peerLink(reply: (path: string, init?: RequestInit) => Response | Promise<Response>, o: { reachable?: boolean; url?: string } = {}) {
   const peers = src.peers as unknown as { owner: (k: string) => unknown; fetch: (l: unknown, p: string, init?: RequestInit) => Promise<Response> }
   const was = { owner: peers.owner, fetch: peers.fetch }

@@ -1,5 +1,5 @@
 // Send now on a message Claude Code holds in its own queue: the line under your bubble, and what a tap asks for, in a
-// real browser (layout.ts). The press itself, read off the pane, is source.test.ts's with a fake pane.
+// real browser (layout.ts). The press itself, read off the pane, is source-chat.test.ts's with a fake pane.
 import { describe, expect, test } from 'bun:test'
 import { layout } from './layout.ts'
 import type { Action } from '../shared/types.ts'
