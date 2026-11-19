@@ -3403,15 +3403,29 @@ export class Engine extends Emitter<Events> {
    * one at a time (merge), so the others wait while it runs; the base moved meanwhile anyway (a commit on GitHub, say),
    * the branch is rebased on it and the gate runs again, at most GATE_ROUNDS times. `on` is the ref it lands on — main
    * here, `origin/<base>` for a merge through a pull request — and `refresh` fetches that ref before each read, since
-   * GitHub's main moves where this machine can only see it through a fetch.
+   * GitHub's main moves where this machine can only see it through a fetch. The branch is on the base before each run,
+   * not only after: a base that moved since the caller put it there (or while the gate ran) is rebased under it, so what
+   * the gate checks is always what will land.
    */
   private async gate(t: TaskRec, repo: string, space: string, wt: string, on = `refs/heads/${t.base}`, refresh?: () => Promise<void>): Promise<{ ok: true; line?: string; at?: string } | { ok: false; error: string; stopped?: true }> {
     const cmd = this.gateOf(t, space)
     if (!cmd) return { ok: true }
     const tip = async () => (await G.git(repo, 'rev-parse', '--verify', '--quiet', on)).out
+    let at = ''
+    /** the branch on the base as it is now: the error that stopped it, or nothing when it is */
+    const onto = async () => {
+      if ((await G.git(wt, 'merge-base', '--is-ancestor', at, 'HEAD')).ok) return
+      if (!(await G.rebase(wt, on)).ok) {
+        this.land(t, 'rebase')
+        return `Conflict with ${t.base}, which moved while the merge gate ran: rebase ${t.branch} on ${t.base} by hand, commit, then run shepherdr merge ${t.id} again.`
+      }
+      return
+    }
     for (let round = 1; round <= GATE_ROUNDS; round++) {
       if (refresh) await refresh()
-      const at = await tip()
+      at = await tip()
+      const behind = await onto()
+      if (behind) return { ok: false, error: behind }
       const head = (await G.git(wt, 'rev-parse', 'HEAD')).out
       this.land(t, 'gate')
       const ran = await this.runGate(t, cmd, wt, head, at)
@@ -3427,13 +3441,12 @@ export class Engine extends Emitter<Events> {
         return { ok: false, error: `${t.id}'s merge gate (${cmd}) ${why}: nothing was merged, and ${t.base} is as it was.${said ? ` Its output ends:\n${said}` : ''}\n${GATE_AGAIN}` }
       }
       if (refresh) await refresh()
-      if ((await tip()) === at) return { ok: true, line: r.out.split('\n').filter((l) => l.trim()).at(-1)?.trim(), at }
+      const now = await tip()
+      if (now === at) return { ok: true, line: r.out.split('\n').filter((l) => l.trim()).at(-1)?.trim(), at }
       // the base moved while it ran: on top of it again, and the gate once more
-      const rb = await G.rebase(wt, on)
-      if (!rb.ok) {
-        this.land(t, 'rebase')
-        return { ok: false, error: `Conflict with ${t.base}, which moved while the merge gate ran: rebase ${t.branch} on ${t.base} by hand, commit, then run shepherdr merge ${t.id} again.` }
-      }
+      at = now
+      const moved = await onto()
+      if (moved) return { ok: false, error: moved }
     }
     return { ok: false, error: `${t.base} kept moving while ${t.id}'s merge gate ran (${GATE_ROUNDS} times): nothing was merged. Run shepherdr merge ${t.id} again.` }
   }

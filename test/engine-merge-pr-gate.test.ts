@@ -150,6 +150,29 @@ describe('shepherdr merge through a pull request, with a merge gate', () => {
     expect(g.gh().prs[0].state).toBe('MERGED')
   })
 
+  test('the base moved before the merge starts: the branch is rebased on it and the gate runs on the new commit', async () => {
+    const w = world()
+    const g = onGitHub({ checks: [{ name: 'test', bucket: 'pass' }] })
+    const runs = join(tmp('pr-gate-behind-runs'), 'runs')
+    const { t } = await started(w, g.dir, 'pr-gate-behind')
+    writeFileSync(join(t.worktree!, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm "add hello"', t.worktree!)
+    expect((await w.engine.openPr(t.id)).ok).toBe(true)
+    // it does not conflict with what GitHub's main gets, but the branch is behind it: onto it before the gate
+    const logged = `echo "$(git rev-parse HEAD) $(test -f other.txt && echo with-other || echo without)" >> ${runs}`
+    expect(w.settings.set('merge.gate', `${logged}; echo "Gate: green"`, { space: spaceOf(w, t) }).ok).toBe(true)
+    commitOnGitHub(g)
+    await w.engine.done(t.id, 'Added hello.txt.')
+    w.agentIs(`${t.id}/Agent`, 'idle')
+    expect((await w.engine.merge(t.id)).ok).toBe(true)
+    const gated = readFileSync(runs, 'utf8').trim().split('\n').map((l) => l.split(' '))
+    // one run, on the branch rebased on what moved, and that is the commit GitHub merged
+    expect(gated.map(([, on]) => on)).toEqual(['with-other'])
+    expect(g.gh().prs[0].at).toBe(gated[0][0])
+    expect(sh(`git log --format=%s -n 3 ${gated[0][0]}`, g.dir).split('\n')).toEqual(['add hello', 'other', 'init'])
+    expect(sh('git log --format=%s -n 2 main', g.bare).split('\n')).toEqual([`${t.id}: Say hello (#1)`, 'other'])
+  })
+
   test('a base that keeps moving while the gate runs: after a few rounds the merge gives up for now', async () => {
     const w = world()
     const g = onGitHub({ checks: [{ name: 'test', bucket: 'pass' }] })
