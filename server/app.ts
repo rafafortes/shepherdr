@@ -26,7 +26,8 @@ const SNAP_MAX = 2000
 
 /**
  * The app's own origin holds the x-shepherdr write capability and all its data, so its pages get their own wall too:
- * only this origin for code, styles, media and API calls, and nothing can frame it or turn it into a plugin's host.
+ * only this origin for code, styles, media and API calls (plus data URLs for the browser panel's own frames), and
+ * nothing can frame it or turn it into a plugin's host.
  * Artifacts and attachments keep their much stricter sandbox in frame.ts and file()'s siblings; they are not this app.
  * Inline styles are still allowed (React's style props and the libraries' own injected CSS); scripts are not — the
  * theme's first-paint script lives in public/theme.js for that reason.
@@ -38,7 +39,8 @@ export const APP_CSP = [
   "img-src 'self' data: blob:",
   "media-src 'self' blob:",
   "font-src 'self'",
-  "connect-src 'self'",
+  // data: is for the browser panel's streamed frames: it turns a base64 data URL into a Blob before drawing it.
+  "connect-src 'self' data:",
   "worker-src 'self'",
   "frame-src 'self'",
   "frame-ancestors 'self'",

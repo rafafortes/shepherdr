@@ -47,8 +47,9 @@ describe('the app pages', () => {
     expect(by.get('img-src')).toBe("img-src 'self' data: blob:")
     expect(by.get('media-src')).toBe("media-src 'self' blob:")
     expect(by.get('font-src')).toBe("font-src 'self'")
-    // the socket, the API and push registration stay here; the service worker and artifact frames do too
-    expect(by.get('connect-src')).toBe("connect-src 'self'")
+    // the socket, the API and push registration stay here; the service worker and artifact frames do too. The browser
+    // panel's streamed frames are decoded from a data URL (plugins/browser/client.tsx), so data: is needed as well.
+    expect(by.get('connect-src')).toBe("connect-src 'self' data:")
     expect(by.get('worker-src')).toBe("worker-src 'self'")
     expect(by.get('frame-src')).toBe("frame-src 'self'")
     expect(by.get('frame-ancestors')).toBe("frame-ancestors 'self'")

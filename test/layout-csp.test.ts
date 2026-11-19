@@ -35,6 +35,22 @@ describe.skipIf(!browser)('the app under its own CSP', () => {
     await page.close()
   })
 
+  test('the browser panel can decode a frame from a data URL (plugins/browser/client.tsx)', async () => {
+    const { page, violations } = await open()
+    // the exact call the browser panel makes to turn a streamed frame into a bitmap
+    const decoded = await page.evaluate(async () => {
+      try {
+        const blob = await (await fetch('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')).blob()
+        return !!(await createImageBitmap(blob))
+      } catch {
+        return false
+      }
+    })
+    expect(decoded).toBe(true)
+    expect(await violations()).toEqual([])
+    await page.close()
+  })
+
   test('the service worker registers and the push endpoints answer from the page', async () => {
     const { page, violations } = await open()
     const got = await page.evaluate(async () => ({
