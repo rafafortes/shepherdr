@@ -5,8 +5,6 @@ import { closeSync, openSync, readdirSync, readlinkSync, readSync, statSync } fr
 import { join } from 'node:path'
 import { glance, rowsOf } from '../../shared/activity.ts'
 import type { Job, Step, TurnActivity } from '../../shared/types.ts'
-import { home, readJson } from '../store.ts'
-import { agyLogPath, mirrorConversation } from './agy.ts'
 import type { Headless } from './readers/background.ts'
 import { claudeHome, claudeProjectDir, codexHome, findAgyLog, findOpencodeLog, findPiLog, logKind } from './readers/find.ts'
 import { ClaudeReader, LogTail, readerFor } from './readers/index.ts'
@@ -310,8 +308,10 @@ function headlessBin(argv: string[]): { at: number; cli: string } {
  * The log a headless CLI writes. Claude Code and Codex write a jsonl under their own home: the one held open, else
  * (Claude writes and closes it) the newest in its project folder since it started that isn't its agent's own. pi writes
  * one file per run under its sessions folder; OpenCode's run is a row in its database, mirrored into ours; agy's is a
- * conversation in its store, mirrored too. Where a store holds nothing for this run, the job's row has no steps to show.
- * The proc root is a parameter so a test can give the run a fake one.
+ * conversation in its store, mirrored too. agy's kept ids (headless.json) are written only when one of Shepherdr's own
+ * headless runs finishes (agy.ts keepHeadless), so a run still going has no id there and its cwd conversation is the
+ * only one findable; where a store holds nothing for this run, the job's row has no steps to show. The proc root is a
+ * parameter so a test can give the run a fake one.
  */
 function headlessLog(h: Headless, own: string[], proc = '/proc'): string | undefined {
   if (!h.pid) return undefined
@@ -320,7 +320,7 @@ function headlessLog(h: Headless, own: string[], proc = '/proc'): string | undef
     const cwd = () => readlinkSync(`${proc}/${h.pid}/cwd`)
     if (cli === 'pi') return findPiLog(cwd(), h.at)
     if (cli === 'opencode') return findOpencodeLog(cwd(), h.at)
-    if (cli === 'agy') return findAgyLog(cwd(), h.at) ?? headlessAgyLog()
+    if (cli === 'agy') return findAgyLog(cwd(), h.at)
     const ours = (f: string) => f.endsWith('.jsonl') && (f.startsWith(join(codexHome(), 'sessions')) || f.startsWith(join(claudeHome(), 'projects')))
     for (const fd of readdirSync(`${proc}/${h.pid}/fd`)) {
       try {
@@ -342,24 +342,6 @@ function headlessLog(h: Headless, own: string[], proc = '/proc'): string | undef
   } catch {
     return undefined
   }
-}
-
-/** a headless agy run's conversation: its id is kept in headless.json when it answers (agy.ts keepHeadless), and its
- *  steps live in its database. The newest kept id that can be mirrored is the reviewer's; where none can, the row
- *  carries no steps (agy has no jsonl of its own to find). */
-function headlessAgyLog(): string | undefined {
-  const ids = readJson<unknown>('agy/headless.json', [], home())
-  for (const id of Array.isArray(ids) ? ids.slice().reverse() : []) {
-    if (typeof id !== 'string') continue
-    const file = agyLogPath(home(), id)
-    try {
-      mirrorConversation(id, file)
-    } catch {
-      continue // a conversation that cannot be mirrored has no steps to show
-    }
-    if (statSync(file, { throwIfNoEntry: false })) return file
-  }
-  return undefined
 }
 
 /** what it is in a few words: "codex exec: Review this change…", "opencode run: …", "pi -p: …" */

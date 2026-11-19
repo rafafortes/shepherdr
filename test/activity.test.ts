@@ -13,7 +13,7 @@ import { ClaudeReader, readerFor } from '../server/live/readers/index.ts'
 import { logKind, piSessionDir } from '../server/live/readers/find.ts'
 import { notices } from '../server/live/readers/claude.ts'
 import { claudeStep, codexItem, commandSay, commandWords } from '../server/live/readers/steps.ts'
-import { home, readJson, writeJson } from '../server/store.ts'
+import { home } from '../server/store.ts'
 import type { Step } from '../shared/types.ts'
 import type { LogEvent } from '../server/live/readers/types.ts'
 import { makeConversation, makeSummaries, toolPayload } from './agy-fixture.ts'
@@ -521,9 +521,8 @@ describe('a headless reviewer’s own steps', () => {
     }
   })
 
-  test('a headless agy run is found by its cwd conversation, or by the id it kept, and mirrored', () => {
+  test('a headless agy run is found by its cwd conversation, with no steps where the store has none', () => {
     const savedAgy = process.env.SHEPHERDR_AGY_HOME
-    const savedKept = readJson<unknown>('agy/headless.json', [], home())
     const dir = tmp('act-headless-agy')
     process.env.SHEPHERDR_AGY_HOME = join(dir, 'store')
     mkdirSync(join(process.env.SHEPHERDR_AGY_HOME, 'conversations'), { recursive: true })
@@ -531,30 +530,19 @@ describe('a headless reviewer’s own steps', () => {
     mkdirSync(cwd, { recursive: true })
     const now = Date.now()
     const recent = new Date(now).toISOString().replace('T', ' ').replace('Z', '+00:00')
-    const step = () => [{ idx: 1, step_type: 132, payload: toolPayload({ tool: 'run_command', args: JSON.stringify({ CommandLine: 'bun test' }), output: 'pass' }) }]
     try {
       // a reviewer the task agent started: an ordinary conversation of this cwd
       makeSummaries(join(process.env.SHEPHERDR_AGY_HOME, 'conversation_summaries.db'), [{ id: 'conv-review', uris: JSON.stringify([`file://${cwd}`]), last: recent }])
-      makeConversation(agyDb('conv-review'), step())
+      makeConversation(agyDb('conv-review'), [{ idx: 1, step_type: 132, payload: toolPayload({ tool: 'run_command', args: JSON.stringify({ CommandLine: 'bun test' }), output: 'pass' }) }])
       const job = headlessJob({ argv: ['agy', '-p', review], at: now - 10_000, pid: 82 }, [], headlessProc(82, cwd))
       expect(job).toMatchObject({ kind: 'headless', title: 'agy -p: Review this change in detail', more: 'steps' })
       expect(job.log).toBe(agyLogPath(home(), 'conv-review'))
       expect(new JobLogs().steps(job.log!).steps.map((s) => s.title)).toEqual(['Ran tests'])
-      // a run Shepherdr itself kept: the newest kept id that mirrors, past a broken one and a stray value
-      writeJson('agy/headless.json', ['conv-kept', 42, 'conv-broken'], home())
-      makeConversation(agyDb('conv-kept'), step())
-      mkdirSync(dirname(agyDb('conv-broken')), { recursive: true })
-      writeFileSync(agyDb('conv-broken'), 'not a database')
+      // a cwd with no conversation in the store: no log, so no steps (headless.json ids are written only after a run ends)
       const other = join(dir, 'other')
       mkdirSync(other, { recursive: true })
-      const kept = headlessJob({ argv: ['agy', '-p', review], at: now - 10_000, pid: 83 }, [], headlessProc(83, other))
-      expect(kept.log).toBe(agyLogPath(home(), 'conv-kept'))
-      expect(new JobLogs().steps(kept.log!).steps.map((s) => s.title)).toEqual(['Ran tests'])
-      // nothing to mirror: no conversation here and no kept id, so the row carries no steps
-      writeJson('agy/headless.json', [], home())
-      expect(headlessJob({ argv: ['agy', '-p', review], at: now - 10_000, pid: 84 }, [], headlessProc(84, other)).log).toBeUndefined()
+      expect(headlessJob({ argv: ['agy', '-p', review], at: now - 10_000, pid: 83 }, [], headlessProc(83, other)).log).toBeUndefined()
     } finally {
-      writeJson('agy/headless.json', savedKept, home())
       if (savedAgy === undefined) delete process.env.SHEPHERDR_AGY_HOME
       else process.env.SHEPHERDR_AGY_HOME = savedAgy
     }
