@@ -178,5 +178,7 @@ describe('the screen fallback', () => {
     expect(crash.count).toBeGreaterThanOrEqual(CRASH_RELOADS)
     // a repeat without a Reload keeps the count: React can call the error lifecycle twice for one break
     expect(nextCrash(crash, 'boom', at + 99).count).toBe(crash.count)
+    // a break much later in the same tab starts over, even with a reload still remembered
+    expect(nextCrash({ ...crash, reloaded: true }, 'boom', at + 120_000).count).toBe(1)
   })
 })

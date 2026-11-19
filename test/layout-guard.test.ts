@@ -42,6 +42,8 @@ describe.skipIf(!browser)('the guard on every plugin', () => {
       const card = page.locator('[data-screen-crash]')
       await card.waitFor()
       expect(await card.getAttribute('role')).toBe('alert')
+      // the fallback stands alone, without App's data-device: it names the phone itself so touch sizes still apply
+      expect(await card.getAttribute('data-device')).toBe('phone')
       expect(await card.textContent()).toContain('Something on the screen broke')
       expect(await card.locator('details').count()).toBe(1)
       // reload: the same break comes back, and the card still offers a way out

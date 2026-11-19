@@ -102,7 +102,9 @@ export function setupGuarded<R extends object>(name: string, registry: R, setup:
 /* ---------- a break outside any plugin: a way out instead of a blank screen ---------- */
 
 const CRASH_KEY = 'shepherdr.screen-crash'
-/** how many tries of the same break, each right after a Reload, before the card says to restart instead */
+/** how long after a Reload a repeat still counts as another try of the same break */
+const RELOAD_WINDOW = 60_000
+/** how many tries of the same break (the first, then each Reload) before the card says to restart instead */
 export const CRASH_RELOADS = 3
 
 export interface ScreenCrash {
@@ -113,10 +115,10 @@ export interface ScreenCrash {
   at: number
 }
 
-/** The count on this screen: a repeat of the same break right after a Reload is another try. React can call the
- *  error lifecycle twice for one break, so a repeat without a Reload keeps the count instead of starting over. */
+/** The count on this screen: a repeat of the same break within a minute of a Reload is another try. React can call
+ *  the error lifecycle twice for one break, so a repeat without a Reload keeps the count instead of starting over. */
 export function nextCrash(prev: ScreenCrash | null, message: string, now = Date.now()): ScreenCrash {
-  if (prev && prev.message === message) return { message, count: prev.reloaded ? prev.count + 1 : prev.count, reloaded: false, at: now }
+  if (prev && prev.message === message && now - prev.at < RELOAD_WINDOW) return { message, count: prev.reloaded ? prev.count + 1 : prev.count, reloaded: false, at: now }
   return { message, count: 1, reloaded: false, at: now }
 }
 
@@ -158,8 +160,9 @@ function reloadScreen() {
 
 /** a small card with nothing of its own: it draws before the first snapshot and with no registry or plugin loaded */
 function Crashed({ crash }: { crash: ScreenCrash }) {
+  // App is gone, so its data-device is too: name it here for the phone/coarse sizes (the same cut-offs as kernel)
   return (
-    <div data-screen-crash role="alert" className="grid h-full place-items-center bg-bg px-6 font-sans text-sm/5 text-fg antialiased phone:text-base/6">
+    <div data-screen-crash data-device={innerWidth < 800 ? 'phone' : innerWidth < 1024 ? 'tablet' : 'desktop'} role="alert" className="grid h-full place-items-center bg-bg px-6 font-sans text-sm/5 text-fg antialiased phone:text-base/6">
       <div className="flex max-w-md flex-col items-center gap-3 text-center">
         <h1 className="text-base font-semibold">Something on the screen broke.</h1>
         <p className="text-fg2">
