@@ -425,7 +425,16 @@ export class Chats {
     for (const f of logs) this.tails.delete(f)
   }
 
-  private read(key: string, again = 0): { changed: boolean; behind: boolean } {
+  /** read a chat's logs on: when one was read again from its start under us, the chat's events are put away and the logs are
+   *  read again from their start, in the same pass (each turn of the loop costs a log actually replaced under the reader) */
+  private read(key: string): { changed: boolean; behind: boolean } {
+    for (;;) {
+      const out = this.readOnce(key)
+      if (out !== 'again') return out
+    }
+  }
+
+  private readOnce(key: string): { changed: boolean; behind: boolean } | 'again' {
     const r = this.agents.record(key)
     if (!r) return { changed: false, behind: false }
     let changed = false
@@ -449,11 +458,8 @@ export class Chats {
       // read from its start again under us (agy's and OpenCode's logs are copies of a store, which a newer Shepherdr writes
       // again whole; a log cut or replaced): the chat is built again from its start, never with what it said twice
       if (t.restarts !== starts) {
-        if (!again) {
-          this.startOver(key, r.logs)
-          return this.read(key, again + 1)
-        }
-        t = this.tails.get(f) ?? t
+        this.startOver(key, r.logs)
+        return 'again'
       }
       left -= Math.max(0, t.done - was)
       for (const e of ev) {
