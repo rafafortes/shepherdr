@@ -28,7 +28,7 @@ if (push && 'devices' in source && 'pushWarnings' in source) {
 }
 // a worker for another machine (machines.ts) serves only its main machine, which pushes alerts itself
 const worker = !!process.env.SHEPHERDR_BOX
-const server = startApp({ source, dist: join(root, 'dist'), push: worker ? undefined : push, port, updates: worker ? undefined : join(HOME, 'update.json') })
+const server = startApp({ source, dist: join(root, 'dist'), push: worker ? undefined : push, port, hosts: () => source.hosts?.() ?? [], updates: worker ? undefined : join(HOME, 'update.json') })
 // a worker says which code it runs: the main server keeps it across its own restart while that is the same
 if (kind === 'live') writeJson('server.json', { port: server.port, pid: process.pid, code: worker ? (await import('./live/machines.ts')).codeVersion() : undefined })
 let tunnel: { stop(): void } | undefined

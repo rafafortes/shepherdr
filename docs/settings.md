@@ -8,7 +8,7 @@
   or default for the CLI's own; effort: default, lowest, low, medium, high, xhigh or max, each CLI taking it its own
   way, and in words on screen — Extra high for xhigh) and the backup agents that take over when a task's or a
   coordinator's agent can't go on, whether one of those is told when its primary answers again, when Done tasks archive
-  themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, each space's cap on its working tasks and the most agents at once per provider or model, the idle browser, dictation, Notifications
+  themselves, Autopilot's heartbeat (its trigger) and checklist, the time zone of every schedule, each machine's limits, each space's cap on its working tasks and the most agents at once per provider or model, the host names the app answers to (`app.hosts`), the idle browser, dictation, Notifications
   and Voice. Notifications gathers scoped delivery rules and device enrolment; device delivery is Everywhere. Space menus still offer Notify. Its
   defaults are set Everywhere, for a machine or for a space (`shepherdr set <key> <value> [--machine | --space NAME]`, from any machine);
   the most specific one set wins. Editing above the content names the scope; its searchable hierarchy handles many machines and spaces. Values set here are highlighted, with their inherited value, source and Reset beside them. And, kept on each device, its Appearance: System (the device's own light

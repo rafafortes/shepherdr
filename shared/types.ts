@@ -147,6 +147,8 @@ export interface MachineHealth {
   heldWhy?: string
   /** when it was sampled ("08:41") */
   at: string
+  /** the app.hosts setting is missing: only loopback works until it is set, with the command to set it */
+  hostWarning?: string
 }
 
 /** The most characters a task's title may have: with its id it fits one line of the tasks list on a 390 px phone. */

@@ -3,6 +3,7 @@ import { afterAll, describe, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { startApp } from '../server/app.ts'
+import { refusedHosts } from '../server/hosts.ts'
 import type { Push } from '../server/push.ts'
 import type { Alert, UpdateStatus } from '../shared/types.ts'
 import { Emitter, type Source, type SourceEvents } from '../server/source.ts'
@@ -62,8 +63,64 @@ const server = startApp({ source: source as unknown as Source, dist: '/nonexiste
 const base = `http://127.0.0.1:${server.port}`
 afterAll(() => server.stop(true))
 
-const post = (headers: Record<string, string>) =>
-  fetch(`${base}/api/action`, { method: 'POST', headers: { 'content-type': 'text/plain', ...headers }, body: JSON.stringify({ type: 'mode', place: 'all', mode: 'autopilot' }) })
+const postAt = (at: string, headers: Record<string, string>) =>
+  fetch(`${at}/api/action`, { method: 'POST', headers: { 'content-type': 'text/plain', ...headers }, body: JSON.stringify({ type: 'mode', place: 'all', mode: 'autopilot' }) })
+const post = (headers: Record<string, string>) => postAt(base, headers)
+
+// a second server with a published name, as the app behaves once app.hosts is set
+const published = startApp({ source: new Stub() as unknown as Source, dist: '/nonexistent', port: 0, hosts: () => ['app.example.com'] })
+afterAll(() => published.stop(true))
+
+describe('the Host header', () => {
+  test('a rebound Host is refused with 421 on every API route, with or without Origin', async () => {
+    const n = acted.length
+    const host = `evil.example:${server.port}`
+    for (const path of ['/api/snapshot', '/api/action', '/api/ws', '/api/file?chat=c&path=/inbox/c/x.png']) {
+      const r = await fetch(`${base}${path}`, { headers: { host, origin: `http://${host}` } })
+      expect(r.status).toBe(421)
+      expect(await r.text()).toContain(`shepherdr set app.hosts ${host}`)
+    }
+    expect((await post({ host, 'x-shepherdr': '1' })).status).toBe(421)
+    expect(acted.length).toBe(n)
+  })
+
+  test('loopback and the configured host are accepted, with and without Origin', async () => {
+    const allowed: [string, string][] = [
+      [`127.0.0.1:${server.port}`, base],
+      [`localhost:${server.port}`, base],
+      [`[::1]:${server.port}`, base],
+      ['app.example.com', `http://127.0.0.1:${published.port}`],
+    ]
+    for (const [host, at] of allowed) {
+      expect((await fetch(`${at}/api/snapshot`, { headers: { host } })).status).toBe(200)
+      expect((await fetch(`${at}/api/snapshot`, { headers: { host, origin: `https://${host}` } })).status).toBe(200)
+    }
+    // the app's own page still writes with its header, on loopback and through the published name alike
+    expect((await postAt(base, { host: `127.0.0.1:${server.port}`, origin: `http://127.0.0.1:${server.port}`, 'x-shepherdr': '1', 'sec-fetch-site': 'same-origin' })).status).toBe(200)
+    expect((await postAt(`http://127.0.0.1:${published.port}`, { host: 'app.example.com', origin: 'https://app.example.com', 'x-shepherdr': '1', 'sec-fetch-site': 'same-origin' })).status).toBe(200)
+  })
+
+  test('the shepherdr command reaches /api/cli on loopback', async () => {
+    const r = await fetch(`${base}/api/cli`, { method: 'POST', headers: { host: `127.0.0.1:${server.port}` }, body: JSON.stringify({ args: ['status'] }) })
+    expect(r.status).toBe(200)
+    expect((await r.text())).toContain('does not accept shepherdr commands')
+  })
+
+  test('a refused host is logged once, and the list stays bounded', async () => {
+    const errors: string[] = []
+    const log = console.error
+    console.error = (...a: unknown[]) => void errors.push(a.join(' '))
+    try {
+      for (let i = 0; i < 2; i++) expect((await fetch(`${base}/api/snapshot`, { headers: { host: 'once.example:7787' } })).status).toBe(421)
+      for (let i = 0; i < 25; i++) await fetch(`${base}/api/snapshot`, { headers: { host: `many-${i}.example:7787` } })
+    } finally {
+      console.error = log
+    }
+    expect(errors.filter((e) => e.includes('once.example'))).toHaveLength(1)
+    expect(refusedHosts.size).toBeLessThanOrEqual(20)
+    refusedHosts.clear()
+  })
+})
 
 describe('who may act', () => {
   test('another website is refused, with or without content type tricks', async () => {

@@ -897,6 +897,21 @@ describe('settings', () => {
     // default is no model at all: a backup set to it starts on its CLI's own, and nothing is said
     expect(row(new Settings({ everywhere: {}, machine: {}, spaces: {} }), 'backup.model').warn).toBeUndefined()
   })
+  test('app.hosts names the published hosts, and its row says how to set it while it is empty', () => {
+    const s = new Settings({ everywhere: {}, machine: {}, spaces: {} })
+    const pages = s.sections([], [], null, 'vm', ['web'])
+    const row = (l: string) => pages.find((x) => x.level === l && x.name === 'App')!.rows.find((r) => r.key === 'app.hosts')!
+    expect(row('all').value).toBe('')
+    expect(row('all').warn).toContain('shepherdr set app.hosts <host>')
+    // a machine's or Everywhere's setting, never a space's
+    expect(pages.some((x) => x.level === 'p:vm:web' && x.name === 'App')).toBe(false)
+    expect(s.set('app.hosts', 'x', { space: 'web' }).ok).toBe(false)
+    expect(s.set('app.hosts', 'app.example.com').ok).toBe(true)
+    expect(s.get('app.hosts')).toBe('app.example.com')
+    // shepherdr show prints every setting's value and source, this one included
+    expect(s.lines()).toContain('app.hosts')
+    expect(s.sections([], [], null, 'vm', ['web']).find((x) => x.level === 'all' && x.name === 'App')!.rows.find((r) => r.key === 'app.hosts')!.warn).toBeUndefined()
+  })
   test("a model set Everywhere is checked against this machine's backups too, and the spaces'", () => {
     // a world of its own: this test writes no settings file
     const s = new Settings({ everywhere: {}, machine: {}, spaces: {} })
