@@ -948,3 +948,97 @@
 [data-device="phone"] .attention-badge-split { width: 36px; height: 36px; }
 /* Keep the circle inside the existing segmented control's outline. */
 [role="group"]:has(> button .attention-badge-split) > button { min-height: 32px; }
+
+/* Windows High Contrast and friends (forced-colors): the browser drops every box-shadow and every fill, so the
+   state the screen draws with them — a dot's ring, a picked tab's ring, a focus ring drawn as a shadow — vanishes.
+   State that is only colour needs a mark of its own, so here it gets one, in the system's own colours. Nothing
+   outside these two queries moves. */
+@media (forced-colors: active) {
+  /* the line primitives become the system's, so a hairline drawn as a border from them reads as a line at all. The
+     wash tokens (--hover, --sel) keep their own values: the browser forces every wash to a shade of the page
+     anyway, so a remap could not help, and the picked states it washes are drawn by their outlines below */
+  :root,
+  :root[data-theme=dark] {
+    --line: GrayText;
+    --line2: GrayText;
+  }
+  /* a status dot: a real border for the ring an inset shadow drew, in the system's own colours, and each kind a
+     mark of its own — need is a solid disc, done a disc with the check, work a ring with a disc, ready a ring
+     with the check, merging a gapped ring, queued and scheduled a ring with the clock, off a dashed ring — so the
+     kinds still tell apart where the colour went */
+  .dot {
+    forced-color-adjust: auto;
+    box-shadow: none;
+    border: 1.5px solid;
+  }
+  .dot.need,
+  .dot.done {
+    background: CanvasText;
+  }
+  .dot.off {
+    border-style: dashed;
+  }
+  /* merging: a gapped ring. A solid base border would fill the gap the mask cuts, so the ring is the masked one
+     alone, and the gap is the page */
+  .dot.merging {
+    border: none;
+  }
+  .dot.merging::after {
+    box-shadow: none;
+    border: 1.5px solid CanvasText;
+  }
+  /* a working dot's pie is a conic gradient, which the forced colours drop with it: a solid disc in its place, so
+     the working dot still reads as more than an idle ring */
+  .dot.work::after {
+    background: CanvasText;
+  }
+  /* the check and the clock sit on the page's own ground, where Canvas would be invisible: the system's text
+     colour — and the check on the done dot's disc, where the disc is the ground: the page */
+  .dot.ready::after,
+  .dot.queued::after,
+  .dot.scheduled::after {
+    border-color: CanvasText;
+  }
+  .dot.done::after {
+    border-color: Canvas;
+  }
+  /* what is picked: the system's own outline, where a shadow ring drew it (a segment of a tab or toggle, a chip,
+     a row or menu item that is current or checked); a pressed icon button is its background alone, so it is drawn
+     as a pressed state, not a picked one */
+  [aria-pressed=true]:not(.dot),
+  [aria-checked=true]:not(.dot),
+  [aria-current]:not(.dot):not([aria-current=false]) {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+  /* the message box and the find bar draw their edge as a shadow (shadow-box), so they get the picked state's
+     outline */
+  .shadow-box {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+  /* the focus ring: a row and a field draw it as an inset shadow and take outline-none, so the shadow dies here
+     and the base outline is gone with it. One system outline wins over every outline-none, so the keyboard focus
+     always shows, in the system's own colours */
+  :focus-visible {
+    outline: 2px solid CanvasText !important;
+    outline-offset: 2px;
+  }
+}
+
+/* the person asked for more contrast (Windows' slider, macOS' display setting): the quiet words and the lines go
+   up a shade, so the page's quietest text keeps reading. Only the tokens move, never a layout. */
+@media (prefers-contrast: more) {
+  :root {
+    --fg2: #3f3f46;
+    --fg3: #55555e;
+    --line: rgb(9 9 11 / 0.16);
+    --line2: rgb(9 9 11 / 0.26);
+  }
+  :root[data-theme=dark] {
+    --fg2: #c4c4cc;
+    --fg3: #a2a2ab;
+    --line: rgb(255 255 255 / 0.17);
+    --line2: rgb(255 255 255 / 0.28);
+  }
+}
