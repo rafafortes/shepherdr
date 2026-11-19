@@ -4,7 +4,7 @@
 bun install
 bun run demo          # the server with fictional data (the prototype's world), on :7787
 bun run dev           # the screen with hot reload, on :5173, talking to the server above
-bun run typecheck     # types, in seconds warm (tsc's incremental cache in node_modules/.cache): what to run while you work
+bun run typecheck     # types, in seconds warm (tsc's incremental cache in node_modules/.cache): what to run while you work; it runs the whole tree's config and then the strict island (tsconfig.strict.json: noUncheckedIndexedAccess, for the directories that already pass it)
 bun run test changed  # the tests that reach what you changed from the default branch
 bun run test          # every test, in parallel, a quarter of the cores as the check does (but no lock)
 bun run check:local   # the whole check: dependencies, dependency audit, secrets, scripts, docs, version, types, language, every test with the browser ones, the coverage ratchet, the build (about 2 minutes warm on a quiet machine; 5m34s under load); what the merge gate, the weekly sweep and a release run

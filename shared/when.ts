@@ -24,7 +24,8 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 export function wall(at: number, zone: string): Date {
   const f = formatter(zone)
   const p = Object.fromEntries(f.formatToParts(new Date(at)).map((x) => [x.type, Number(x.value)]))
-  return new Date(Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second))
+  const field = (type: string) => Number(p[type])
+  return new Date(Date.UTC(field('year'), field('month') - 1, field('day'), field('hour'), field('minute'), field('second')))
 }
 
 // one formatter per zone: a task waiting for a time reads its zone on every snapshot
@@ -106,7 +107,7 @@ export function parseAt(text: string, zone: string, now = Date.now()): number {
   }
   const m = /^(?:((?:next |this )?[a-z]+) )?(.+)$/.exec(t)!
   const dayWord = m[1]
-  const clock = m[2]
+  const clock = m[2] ?? ''
   const w = wall(now, zone)
   const weekday = (w.getUTCDay() + 6) % 7
   if (!dayWord && dayOf(t, weekday) !== undefined) throw new Error(`Give a time of day too, like "${t} 9:00". ${AT_HOW}`)
@@ -131,9 +132,10 @@ export function parseIn(text: string): number {
   let pos = 0
   const re = /\s*(\d+(?:\.\d+)?)\s*([a-z]+)\s*/g
   for (let m = re.exec(t); m; m = re.exec(t)) {
-    if (m.index !== pos || !Object.hasOwn(UNITS, m[2])) throw new Error(`Unknown span "${text.trim()}". ${IN_HOW}`)
-    total += Number(m[1]) * UNITS[m[2]]
-    pos = m.index + m[0].length
+    const unit = m[2]
+    if (m.index !== pos || !unit || !Object.hasOwn(UNITS, unit)) throw new Error(`Unknown span "${text.trim()}". ${IN_HOW}`)
+    total += Number(m[1] ?? 0) * (UNITS[unit] ?? 0)
+    pos = m.index + (m[0]?.length ?? 0)
   }
   if (pos !== t.length || total <= 0) throw new Error(`Unknown span "${text.trim()}". ${IN_HOW}`)
   return Math.round(total * MINUTE)

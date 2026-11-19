@@ -22,14 +22,14 @@ export * from './settings-parts.tsx'
 
 /** a page body that fails to load (a new build replaced its chunk under an open tab) leaves Settings usable */
 class PageLoadBoundary extends Component<{ children?: ReactNode }, { failed: boolean }> {
-  state = { failed: false }
+  override state = { failed: false }
   static getDerivedStateFromError() {
     return { failed: true }
   }
-  componentDidCatch(e: unknown) {
+  override componentDidCatch(e: unknown) {
     console.error('a Settings page failed to load:', e)
   }
-  render() {
+  override render() {
     if (!this.state.failed) return this.props.children
     return (
       <div role="alert" className="flex flex-col gap-2">

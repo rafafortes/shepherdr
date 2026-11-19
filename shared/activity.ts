@@ -55,10 +55,10 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 export function say(words: string): { title: string; doing: string } {
   const t = words.replace(/\s+/g, ' ').trim().replace(/[.…]+$/, '')
   const m = /^([A-Za-z]+)\b(.*)$/.exec(t)
-  const v = m?.[1].toLowerCase()
+  const v = m?.[1]?.toLowerCase()
   if (!m || !v || !VERBS.has(v)) return { title: cap(t), doing: cap(t) }
   // a second action after "and" goes the same way: "Clone the repo and find the code"
-  const rest = (f: (v: string) => string) => m[2].replace(/\b(and(?: then)?) ([a-z]+)\b/g, (x, and: string, w: string) => (VERBS.has(w) ? `${and} ${f(w)}` : x))
+  const rest = (f: (v: string) => string) => (m[2] ?? '').replace(/\b(and(?: then)?) ([a-z]+)\b/g, (x, and: string, w: string) => (VERBS.has(w) ? `${and} ${f(w)}` : x))
   return { title: cap(past(v)) + rest(past), doing: cap(ing(v)) + rest(ing) }
 }
 
@@ -116,7 +116,7 @@ export function rowsOf(steps: Step[]): StepRow[] {
     const files = new Map(group.map((s) => [s.detail || s.target, s.target]))
     const targets = [...files.values()]
     if (r.key === 'search') return { ...r, text: `Searched for ${names([...new Set(targets)])}`, failed }
-    if (targets.length === 1) return { ...r, text: group[0].title, failed, ...lines(group) }
+    if (targets.length === 1) return { ...r, text: group[0]?.title ?? '', failed, ...lines(group) }
     const what = `${r.key === 'read' ? 'Read' : 'Edited'} ${plural(targets.length, 'file')}: ${names(targets)}`
     return { ...r, text: what, failed, ...lines(group) }
   })
@@ -124,7 +124,7 @@ export function rowsOf(steps: Step[]): StepRow[] {
 
 /** an edit row's lines added and removed, summed */
 function lines(group: Step[]): Pick<StepRow, 'added' | 'removed'> {
-  if (group[0].kind !== 'edit') return {}
+  if (group[0]?.kind !== 'edit') return {}
   const added = group.reduce((n, s) => n + (s.added ?? 0), 0)
   const removed = group.reduce((n, s) => n + (s.removed ?? 0), 0)
   return added || removed ? { added, removed } : {}
@@ -164,6 +164,6 @@ export function jobsWords(c: JobCounts) {
   ] as const
   const shown = parts.filter(([n]) => n)
   if (shown.length !== 1) return shown.map(([n, w]) => plural(n, w)).join(' · ')
-  const [n, w] = shown[0]
-  return `${plural(n, w)} ${w === 'subagent' ? 'working' : 'running'}`
+  const [only] = shown
+  return only ? `${plural(only[0], only[1])} ${only[1] === 'subagent' ? 'working' : 'running'}` : ''
 }
