@@ -108,10 +108,16 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
   let snapEnd = 0
   let snapCost = 0
   source.on('snapshot', () => {
-    if (snapTimer) return
+    // nothing to send it to: no screen and no other machine's link is open, so nothing is built for nobody (an idle
+    // server with the phone closed pays nothing per change and per half minute). The sockets of `live` are the ones
+    // that get it; a screen that opens gets its own at once (websocket.open), and /api/snapshot and the alert handler
+    // build theirs when they need one. A link counts as one: it mirrors this machine (machines.ts keeps its snapshot).
+    if (snapTimer || !live.size) return
     const wait = Math.min(SNAP_MAX, Math.max(30, snapEnd + snapCost * 4 - Date.now()))
     snapTimer = setTimeout(() => {
       snapTimer = null
+      // the last screen left while it waited: this one is for nobody either
+      if (!live.size) return
       const began = Date.now()
       const snapshot = timed('snapshot', () => source.snapshot())
       snapEnd = Date.now()
