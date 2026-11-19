@@ -24,7 +24,7 @@ case "$FAKE_MODE" in
   ok) echo 'all good' ;;
   fail) echo 'some words' ; echo '402 Insufficient account funds' >&2 ; exit 3 ;;
   hang) exec sleep 30 ;;
-  held) sleep 30 & exec sleep 30 ;;
+  held) sleep 2 & exec sleep 30 ;;
 esac
 `,
   )
