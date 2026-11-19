@@ -140,10 +140,14 @@
   ran, the branch is rebased on it and the gate runs again (three times at most). It is never a git hook: a hook that
   refuses an update leaves what it would write in the space's checkout. The gate runs detached, its words and exit code
   in files of their own, so a restart of Shepherdr (an update) leaves it running: the Shepherdr that comes back goes on
-  from it and merges once it passes. A merge that only waited in line takes its place in line again by itself, in the
-  order it had, and its agent hears how it went. A merge a restart cut short with nothing left of it (a gate that was
-  stopped, or the merge itself halfway) is back at its turn, its row reading `Merge gate interrupted by a restart: run
-  shepherdr merge again` and its agent told so.
+  from it and merges once it passes. It has a limit of its own inside the command (45 minutes, under `timeout` where
+  that binary exists, exiting 124), so it ends even if Shepherdr never comes back; it is also stopped when a newer run
+  replaces it (a stale run must never go on in the worktree) or when its task is closed, stopped, archived or deleted.
+  On startup a gate past its limit, or one whose task is gone or no longer waits for it, is stopped too; a young gate of
+  a task that still wants it survives and is found again. A merge that only waited in line takes its place in line again
+  by itself, in the order it had, and its agent hears how it went. A merge a restart cut short with nothing left of it
+  (a gate that was stopped, or the merge itself halfway) is back at its turn, its row reading `Merge gate interrupted by
+  a restart: run shepherdr merge again` and its agent told so.
 - A space with a merge gate may also take **merge trains** (Settings → How tasks work → Merge train, `merge.train`: off
   by default, or 2 to 5, the most merges one train takes, the head included). When several merges wait in line here,
   the first one in line runs the gate once for them all: their changes are stacked on main, one on top of the other,

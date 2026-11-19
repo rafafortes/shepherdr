@@ -23,6 +23,7 @@ import * as fs from 'node:fs'
 import { home, readJson, writeJson } from '../../store.ts'
 import { ROOT } from '../../root.ts'
 import { has } from '../../plugins.ts'
+import { killGroup, processes } from '../../procs.ts'
 import { browserEnv } from '../browser.ts'
 import { hidden, ROUTING_FAILURE, type Agents, type Spec } from '../agents.ts'
 import { launchesAgents, refusedLaunch } from '../launch-policy.ts'
@@ -426,19 +427,41 @@ const alive = (pid: number) => {
   }
 }
 
+/** the quoting the gate's shell line uses for the paths it writes */
+const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
+
+/** whether `timeout` is on PATH now: Bun.which caches its answer, so look again for a run that hides the binary */
+const timeoutOnPath = () => (process.env.PATH ?? '').split(':').some((dir) => {
+  const path = join(dir, 'timeout')
+  try {
+    return fs.statSync(path).isFile() && (fs.statSync(path).mode & 0o111) !== 0
+  } catch {
+    return false
+  }
+})
+
+/** the shell line a gate runs: with a `timeout` binary the command has its own hard limit, so it ends even when Shepherdr
+ *  never comes back (a timeout exits 124, as waitGate does); without one the plain line is the fallback and waitGate's
+ *  limit is all there is. The words and exit code still go to the same files, named for this run alone. */
+export function gateCommand(cmd: string, log: string, exit: string, seconds: number, hasTimeout = timeoutOnPath()) {
+  const body = hasTimeout ? `timeout -s KILL ${seconds} sh -c ${q(cmd)}` : cmd
+  return `(${body}) > ${q(log)} 2>&1; echo $? > ${q(exit)}.tmp && mv ${q(exit)}.tmp ${q(exit)}`
+}
+
 /** a merge gate's command, in a session of its own (detached): a restart of Shepherdr, which ends its own process group,
  *  leaves it running, and the Shepherdr that comes back reads its words and exit code from their files. The files are
  *  named for this run (its task, its start and a random part): a stale run of the same task, still going after a newer
- *  one began, writes its exit code to its own files, never over the newer run's */
-export function startGate(cmd: string, wt: string, env: Record<string, string>, dir: string, id: string, at: { head: string; tip: string }): GateRun {
+ *  one began, writes its exit code to its own files, never over the newer run's. `limitMs` is the hard limit inside the
+ *  command itself; `hasTimeout` is a seam for the fallback where no `timeout` binary exists. */
+export function startGate(cmd: string, wt: string, env: Record<string, string>, dir: string, id: string, at: { head: string; tip: string }, limitMs = GATE_TIMEOUT, hasTimeout = timeoutOnPath()): GateRun {
   fs.mkdirSync(dir, { recursive: true })
   const start = Date.now()
   const name = `${id}-${start}-${randomUUID().slice(0, 8)}`
   const log = join(dir, `${name}.log`)
   const exit = join(dir, `${name}.exit`)
   for (const f of [log, exit]) fs.rmSync(f, { force: true })
-  const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
-  const c = spawn('/bin/sh', ['-c', `(${cmd}) > ${q(log)} 2>&1; echo $? > ${q(exit)}.tmp && mv ${q(exit)}.tmp ${q(exit)}`], { cwd: wt, env: { ...process.env, ...env }, detached: true, stdio: 'ignore' })
+  const line = gateCommand(cmd, log, exit, Math.max(1, Math.ceil(limitMs / 1000)), hasTimeout)
+  const c = spawn('/bin/sh', ['-c', line], { cwd: wt, env: { ...process.env, ...env }, detached: true, stdio: 'ignore' })
   c.unref()
   return { pid: c.pid ?? 0, log, exit, at: start, ...at }
 }
@@ -448,13 +471,13 @@ function forgetGate(run: GateRun) {
   for (const f of [run.log, run.exit, `${run.exit}.tmp`]) fs.rmSync(f, { force: true })
 }
 
-/** a gate run thrown away (a newer one replaces it, or a restart left it dead): its files go now, and again each second
- *  while its process still goes on, since it writes its exit code as it ends. Never killed here; the polling stops at the
- *  gate's own limit */
+/** a gate run thrown away (a newer one replaces it, a restart left it dead, or its task is gone): its whole process
+ *  group is killed, as at its limit, and its files go now and once more after a moment for an exit code written as the
+ *  kill landed. A stale run of the same task is by definition unwanted: it must never go on forking sleep. */
 function dropGate(run: GateRun) {
-  const going = alive(run.pid)
+  killGroup(run.pid)
   forgetGate(run)
-  if (going && Date.now() - run.at < GATE_TIMEOUT) setTimeout(() => dropGate(run), 1000).unref()
+  setTimeout(() => forgetGate(run), 1000).unref()
 }
 
 /** a gate's end: its exit code and words; past timeoutMs from its start, its process group is killed (124); gone with no
@@ -469,12 +492,7 @@ export async function waitGate(run: GateRun, timeoutMs: number, every = 250): Pr
       return fs.existsSync(run.exit) ? { code: Number(fs.readFileSync(run.exit, 'utf8').trim()), out: read().trimEnd() } : { code: GATE_GONE, out: read().trimEnd() }
     }
     if (Date.now() - run.at > timeoutMs) {
-      try {
-        process.kill(-run.pid, 'SIGKILL')
-        // coverage-exempt: the group ended between the alive check above and this kill, a race no test can time
-      } catch {
-        /* gone meanwhile */
-      }
+      killGroup(run.pid)
       return { code: 124, out: read().trimEnd() }
     }
     await Bun.sleep(every)
@@ -679,6 +697,7 @@ export class Engine extends Emitter<Events> {
    * so the task is back at its turn, its row and its agent saying to merge again.
    */
   resumeMerges() {
+    this.sweepGates()
     const cut = this.tasks.filter((x) => !ended(x) && !this.landings.has(x.id) && x.landing && ['gate', 'merge', 'queue'].includes(x.landing.step))
     // the gate that goes on is first in its repo's line, then those that waited, as they stood
     const rank = (x: TaskRec) => (x.landing!.step === 'gate' ? 0 : x.landing!.step === 'queue' ? 1 : 2)
@@ -698,6 +717,52 @@ export class Engine extends Emitter<Events> {
       this.settle(t)
       void this.agents.send(this.key(t), hidden(`Shepherdr restarted while your merge ran${gate ? ' (its gate was stopped)' : ''}: nothing was merged. Run shepherdr merge ${t.id} again.`, 'merge')).catch(() => undefined)
     }
+  }
+
+  /**
+   * Gates a restart found that nothing waits for: a run past its limit, one whose task is gone or no longer merging, or
+   * one left by a run that never came back. Their process groups are killed. A gate younger than its limit, of a task
+   * that still wants it, is left alone: resumeMerges finds it again and the merge goes on from it.
+   */
+  sweepGates() {
+    const dir = join(this.dir, 'gates')
+    const live = new Set(this.tasks
+      .filter((t) => t.gateRun && !ended(t) && !t.stopped && !t.archived && t.landing?.step === 'gate' && Date.now() - t.gateRun.at <= GATE_TIMEOUT)
+      .map((t) => t.gateRun!.exit))
+    // the command's exit-file path names the run, even when no task record for it is left: '<dir>/<name>.exit'.
+    // No gate files: no process of this home's can be a gate, so do not walk /proc at all.
+    let files: string[] = []
+    try {
+      files = fs.readdirSync(dir)
+    } catch {
+      /* no gate has run here yet */
+    }
+    if (files.length) {
+      const here = dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      for (const p of processes()) {
+        const name = p.cmd.match(new RegExp(`${here}/([^\\s']+?)\\.exit`))?.[1]
+        if (name && !live.has(join(dir, `${name}.exit`))) killGroup(p.pid)
+      }
+    }
+    let changed = false
+    for (const t of this.tasks) {
+      const g = t.gateRun
+      if (g && (ended(t) || t.stopped || t.archived || Date.now() - g.at > GATE_TIMEOUT || t.landing?.step !== 'gate')) {
+        dropGate(g)
+        t.gateRun = undefined
+        changed = true
+      }
+    }
+    if (changed) this.save()
+  }
+
+  /** a task going away (closed, stopped, archived or deleted) must not leave its gate running in its worktree */
+  private dropTaskGate(t: TaskRec) {
+    const g = t.gateRun
+    if (!g) return
+    dropGate(g)
+    t.gateRun = undefined
+    this.save()
   }
 
   /** the task whose merge runs in each repo now: one asked meanwhile waits behind it (merge) */
@@ -3074,6 +3139,7 @@ export class Engine extends Emitter<Events> {
   }
 
   private markClosed(t: TaskRec) {
+    this.dropTaskGate(t)
     Object.assign(t, { closed: true, doneAt: Date.now(), reported: true, landing: undefined, trouble: undefined, stopped: undefined, todo: undefined, scheduled: undefined })
     clearTimeout(this.later.get(t.id))
     this.settle(t)
@@ -3249,8 +3315,8 @@ export class Engine extends Emitter<Events> {
       return { code: r.code, out: [r.out, r.err].filter(Boolean).join('\n') }
     }
     const g = t.gateRun
-    const run = g && g.head === head && g.tip === at && (fs.existsSync(g.exit) || alive(g.pid)) ? g : startGate(cmd, wt, env, join(home(), 'gates'), t.id, { head, tip: at })
-    // an earlier run this one does not pick up is thrown away: its files go, its process is left to end
+    const run = g && g.head === head && g.tip === at && (fs.existsSync(g.exit) || alive(g.pid)) ? g : startGate(cmd, wt, env, join(this.dir, 'gates'), t.id, { head, tip: at }, this.gateTimeout)
+    // an earlier run this one does not pick up is unwanted: it is stopped, and its files (including a late exit) go
     if (g && g !== run) dropGate(g)
     t.gateRun = run
     this.save()
@@ -4227,6 +4293,7 @@ export class Engine extends Emitter<Events> {
    */
   async stopTask(id: string): Promise<string[]> {
     const t = this.req(id)
+    this.dropTaskGate(t)
     t.stopped = true
     this.endReview(t.id)
     // To do, as task pause leaves it: its agent is closed, and writing to it is how it starts again. A start that failed
@@ -4285,6 +4352,7 @@ export class Engine extends Emitter<Events> {
       if (held.length) throw Object.assign(new Error(`Not deleted: ${t.id} holds ${held.join(', ')}.${stopped} Merge or save that work first, or delete with --force to lose it.`), { held, stopped: !!stopped })
     }
     await holds()
+    this.dropTaskGate(t)
     this.cleaning.add(t.id)
     try {
       await this.agents.interrupt(key)
@@ -4321,6 +4389,7 @@ export class Engine extends Emitter<Events> {
   async archive(id: string): Promise<{ kept: string[]; stopped: boolean }> {
     const t = this.req(id)
     if (t.archived) return { kept: [], stopped: false }
+    this.dropTaskGate(t)
     t.archived = Date.now()
     t.pinned = undefined
     clearTimeout(this.later.get(t.id))
