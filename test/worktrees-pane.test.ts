@@ -90,6 +90,20 @@ describe("a task's agent pane", () => {
     }
   })
 
+  test('an agent or a tab herdr does not know is no closed space: nothing is reopened', async () => {
+    const { fake, wt, home, made } = await setup()
+    const createTab = fake.h.createTab
+    fake.h.createTab = async () => {
+      throw new HerdrError('agent_not_found', 'agent shep-t-1 not found')
+    }
+    try {
+      await expect(wt.agentPane({ home, wt: made.path, label: LABEL, tab: 'Agent', env: {} })).rejects.toThrow('not found')
+      expect(spaceOf(fake, made.path)?.workspace_id).toBe(made.workspace)
+    } finally {
+      fake.h.createTab = createTab
+    }
+  })
+
   test('any other failure from the tab is not mistaken for a closed space', async () => {
     const { fake, wt, home, made } = await setup()
     const createTab = fake.h.createTab

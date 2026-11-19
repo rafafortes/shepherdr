@@ -135,31 +135,36 @@ describe('a chat whose space closed anyway (a coordinator, whose spec has no pan
 })
 
 describe("a start that failed puts the chat's record back", () => {
-  test('the retry resumes the session the chat had, not the one the failed start wrote over it', async () => {
-    const s = spies()
-    try {
-      chat(CASES[0])
-      const a = new Agents()
+  for (const c of CASES) {
+    test(`${c.kind}: the same CLI starts again on its own session, not on the one the failed start wrote`, async () => {
+      const s = spies()
       try {
-        await a.refresh()
-        const before = { ...a.record(KEY)! }
-        // the backup's CLI never came up (no pane for it): its kind, and a session it never ran, went over the record
-        await expect(a.restart({ key: KEY, name: NAME, kind: 'codex', cwd, workspace: 'T-166: keep the space', tab: 'Agent', env: {}, pane: async () => Promise.reject(new Error('no pane for it')) })).rejects.toThrow('no pane')
-        expect(a.record(KEY)?.kind).toBe('codex')
-        a.restore(KEY, before)
-        expect(a.record(KEY)).toMatchObject({ kind: 'claude', sessionId: 'sess-1' })
-        // and the same CLI starts again on its own session
-        started.length = 0
-        events.length = 0
-        await a.restart({ key: KEY, name: NAME, kind: 'claude', cwd, workspace: 'T-166: keep the space', tab: 'Agent', env: {}, pane: async () => NEW })
-        expect(started[0].args.join(' ')).toContain('--resume sess-1')
+        chat(c)
+        const a = new Agents()
+        try {
+          await a.refresh()
+          const before = { ...a.record(KEY)! }
+          // the backup's CLI never came up (no pane for it): its kind, and a session it never ran, went over the record
+          await expect(a.restart({ key: KEY, name: NAME, kind: c.kind === 'codex' ? 'pi' : 'codex', cwd, workspace: 'T-166: keep the space', tab: 'Agent', env: {}, pane: async () => Promise.reject(new Error('no pane for it')) })).rejects.toThrow('no pane')
+          expect(a.record(KEY)?.kind).not.toBe(c.kind)
+          expect(a.record(KEY)?.startError).toContain('no pane')
+          a.restore(KEY, before)
+          // back to what it was, with why the start failed kept for the screen and no stale hooks
+          expect(a.record(KEY)).toMatchObject({ kind: c.kind, startError: expect.stringContaining('no pane'), sessionId: before.sessionId })
+          expect('hooks' in a.record(KEY)!).toBe(false)
+          // and the run that comes after is the chat's own CLI on its own session
+          started.length = 0
+          events.length = 0
+          await a.restart({ key: KEY, name: NAME, kind: c.kind, cwd, workspace: 'T-166: keep the space', tab: 'Agent', env: {}, pane: async () => NEW })
+          expect(started[0].args.join(' ')).toContain(c.resume.join(' '))
+        } finally {
+          a.stop()
+        }
       } finally {
-        a.stop()
+        for (const spy of Object.values(s)) spy.mockRestore()
       }
-    } finally {
-      for (const spy of Object.values(s)) spy.mockRestore()
-    }
-  })
+    })
+  }
 })
 
 describe('a restart opens the new pane before it ends the run it takes over from', () => {

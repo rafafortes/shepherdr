@@ -269,8 +269,9 @@ const NOT_FOUND = /not[_ ]found/i
 
 /** herdr answering that the workspace or the pane it was asked about is not there any more: it closed meanwhile (a
  *  hand-over closes an agent's pane, and herdr closes the space with it). Not a call herdr failed, so nothing is tried
- *  again, and never a command herdr could not find ("not found" in what a shell said) */
-export const missing = (e: unknown) => e instanceof HerdrError && (NOT_FOUND.test(e.code) || /(workspace|pane)[^.]*not[_ ]found/i.test(e.message))
+ *  again; never an agent or a tab herdr knows nothing of, nor a command it could not run ("not found" in a shell's words) */
+export const missing = (e: unknown) =>
+  e instanceof HerdrError && (/^(workspace|pane)/i.test(e.code) ? NOT_FOUND.test(e.code) : /(workspace|pane)[^.]*not[_ ]found/i.test(e.message))
 
 /** text as the screen shows it, to look for what was typed: no blanks, since the screen wraps lines where it likes */
 const squeeze = (t: string) => t.replace(/\s+/g, '')

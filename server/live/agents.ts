@@ -1391,12 +1391,16 @@ export class Agents extends Emitter<Events> {
   /**
    * A chat's record put back as it was before a start that failed: a start writes its own CLI, and a session it never
    * ran, over the record before it asks herdr for a pane. What comes after starts from what the agent was, so the same
-   * CLI resumes its own session and another CLI is handed the brief and its instructions again. `finished` stays as the
-   * start left it: the run it took over from ended, and that does not come back.
+   * CLI resumes its own session and another CLI is handed the brief and its instructions again. Two things of the
+   * failed start stay: why it failed (start.ts shows it), and whether its run was ended; its hooks were forgotten with
+   * the run it started, so the old ones never come back.
    */
   restore(key: string, record: AgentRecord | undefined) {
     if (!record) return
-    this.records[key] = { ...record, finished: this.records[key]?.finished }
+    const now = this.records[key]
+    const back = { ...record }
+    delete back.hooks
+    this.records[key] = { ...back, finished: now?.finished, ...(now?.startError ? { startError: now.startError } : {}) }
     this.byName.set(record.name, key)
     this.save()
     this.flushRecords()
