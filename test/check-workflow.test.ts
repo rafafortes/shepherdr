@@ -61,21 +61,26 @@ describe('the check itself', () => {
     expect(scripts['check:local']).toBe('bash scripts/check-local.sh')
     expect(scripts.check).toBe('bun run check:local')
   })
-  test('whose script runs the types, the tests and the build, one run at a time, last in line for the CPU', () => {
+  test('whose runner discovers the checks, one run at a time, last in line for the CPU', () => {
     // its comments name these too: what runs is what a line that isn't a comment says
     const lines = readFileSync(join(root, 'scripts', 'check-local.sh'), 'utf8')
       .split('\n')
       .filter((l) => l.trim() && !l.trim().startsWith('#'))
       .join('\n')
-    for (const step of ['bun run typecheck', 'scripts/test.ts', 'bun run build']) expect(lines).toContain(step)
+    // the checks are discovered by sorted file name, not named here; adding one is adding one file
+    expect(lines).toContain('checks_dir="$root/scripts/checks"')
+    expect(lines).toContain("find \"$checks_dir\" -maxdepth 1 -type f")
+    expect(lines).toContain('LC_ALL=C sort')
+    expect(lines).toContain('step "$name" "$checks_dir/$file"')
+    // no command of a check is embedded in the runner any more
+    for (const command of ['bun install', 'bun run typecheck', 'scripts/test.ts', 'scripts/coverage.ts', 'bun run build']) expect(lines).not.toContain(command)
     // the wrapper and the lock that is used, not the words near them
     expect(lines).toContain('prio+=(nice -n 19)')
     expect(lines).toContain('prio+=(ionice -c 3)')
     expect(lines).toContain('exec 9>>"$lock"')
     expect(lines).toContain('flock -w "$wait_timeout" 9')
-    // the step's own processes never keep the lock, and never take a pass at this commit for this one
+    // a check's own processes never keep the lock
     expect(lines).toContain('exec 9>&-')
-    expect(lines).toContain('--force')
   })
 })
 

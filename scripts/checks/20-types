@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Check 2: the types. No note: its own errors are shown by the runner when it fails.
+set -uo pipefail
+root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
+cd "$root" || exit 1
+bun run typecheck

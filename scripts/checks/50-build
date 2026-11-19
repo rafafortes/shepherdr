@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Check 5: the build. The note is its time, read from this check's own log, exactly as the runner used to read it.
+set -uo pipefail
+root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
+cd "$root" || exit 1
+bun run build
+code=$?
+grep -oE 'built in [0-9.]+m?s' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1 >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
+exit "$code"
