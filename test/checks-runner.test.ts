@@ -129,7 +129,7 @@ describe('the check files themselves', () => {
     expect(statSync(join(dir, 'scripts.ts')).mode & 0o111, 'scripts.ts is a module, not a check').toBe(0)
     expect(statSync(join(dir, 'audit.ts')).mode & 0o111, 'audit.ts is a module, not a check').toBe(0)
     const names = readdirSync(dir).filter((n) => !n.endsWith('.ts')).sort()
-    expect(names).toEqual(['10-dependencies', '12-audit', '15-secrets', '17-scripts', '18-docs', '19-version', '20-types', '21-language', '30-tests', '40-coverage', '50-build'])
+    expect(names).toEqual(['10-dependencies', '12-audit', '15-secrets', '17-scripts', '18-docs', '19-version', '20-types', '21-language', '30-tests', '40-coverage', '50-build', '60-dist-budget'])
     const text = Object.fromEntries(names.map((n) => [n, readFileSync(join(dir, n), 'utf8')])) as Record<string, string>
     expect(text['10-dependencies']).toContain('bun install --frozen-lockfile')
     expect(text['12-audit']).toContain('scripts/checks/audit.ts')
@@ -145,6 +145,8 @@ describe('the check files themselves', () => {
     expect(text['40-coverage']).toContain('scripts/coverage.ts')
     expect(text['40-coverage']).toContain('SHEPHERDR_CHECK_RECORD')
     expect(text['50-build']).toContain('bun run build')
+    expect(text['60-dist-budget']).toContain('scripts/checks/dist-budget.ts')
+    expect(text['60-dist-budget']).toContain('SHEPHERDR_CHECK_RECORD')
     for (const name of names) expect(statSync(join(dir, name)).mode & 0o111, name).toBeTruthy()
   })
 
@@ -155,7 +157,7 @@ describe('the check files themselves', () => {
     const stub = join(bin, 'bun')
     writeFileSync(stub, '#!/bin/sh\nprintf "%s\\n" "$@"\n')
     chmodSync(stub, 0o755)
-    for (const [name, script] of [['30-tests', 'scripts/test.ts'], ['40-coverage', 'scripts/coverage.ts']]) {
+    for (const [name, script] of [['30-tests', 'scripts/test.ts'], ['40-coverage', 'scripts/coverage.ts'], ['60-dist-budget', 'scripts/checks/dist-budget.ts']]) {
       const r = Bun.spawnSync(['bash', join(root, 'scripts', 'checks', name)], {
         cwd: root,
         env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },

@@ -38,15 +38,15 @@ registries still match what it wrote keep a shared cache safe; neither weakens w
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe; each step is
 one executable file in `scripts/checks/`, named `<number>-<name>` with the numbers spaced by ten (`10-dependencies`,
 `12-audit`, `15-secrets`, `17-scripts`, `18-docs`, `19-version`, `20-types`, `21-language`, `30-tests`, `40-coverage`,
-`50-build`). The runner discovers the executable
+`50-build`, `60-dist-budget`). The runner discovers the executable
 files by sorted file name, so adding a check is adding one file and no later task edits a shared list: a `.ts` file
 beside them is a check's own logic, not a check (e.g. `secrets.ts`), and the order is reviewed because it is the file
 name. A check file:
 
 - gets its shared context in `SHEPHERDR_CHECK_*` environment variables, never positional arguments:
   `SHEPHERDR_CHECK_ROOT`, `SHEPHERDR_CHECK_LOGS`, `SHEPHERDR_CHECK_COVER`, `SHEPHERDR_CHECK_MAP` and
-  `SHEPHERDR_CHECK_RECORD` (the last two are `1` only on the default branch, for the screen map and the coverage
-  baseline, and both empty in a `--quick` run), `SHEPHERDR_CHECK_QUICK` (`1` in a quick run), plus its own
+  `SHEPHERDR_CHECK_RECORD` (the last two are `1` only on the default branch, for the screen map and the coverage and
+  dist baselines, and both empty in a `--quick` run), `SHEPHERDR_CHECK_QUICK` (`1` in a quick run), plus its own
   `SHEPHERDR_CHECK_NAME`, `SHEPHERDR_CHECK_LOG`, `SHEPHERDR_CHECK_NOTE` and `SHEPHERDR_CHECK_SKIP`;
 - exits 0 on pass and non-zero on failure (the runner maps 124/137 to timed out or killed, and stops at the first
   failure, so a later check never reads a half-finished world);
@@ -96,6 +96,14 @@ sentence cannot be committed on a reviewer's notice alone. Em dash, curly quotes
 and are never flagged; test fixtures, the emoji keyword table and a `language-allow: <why>` marker (for quoted sources
 and user-facing strings) are the explicit allowlist. `SHEPHERDR_LANGUAGE_SCOPE=tree` scans the whole tree instead —
 that is the weekly run.
+
+The dist-budget step (`60-dist-budget`, whose logic is `scripts/checks/dist-budget.ts`) runs after the build and only
+reads the files in `dist/`: total JS may grow by 1% or 5 KB (whichever is larger) since the baseline, and an asset over
+300 KB fails outright unless the baseline already carried it over that size. The baseline keeps the sums by kind and the
+ten largest assets, with Vite's content hashes stripped from their names so a rebuild of the same asset is not a new
+one; the assets that already shipped over the cap, InterVariable's fonts among them, stay exempt because the baseline
+says so. It is the default branch's, kept in the repo's `.git` beside `coverage.json` and recorded by the check there
+from a clean tree, like the coverage baseline.
 
 The tests never touch the Shepherdr on this machine or its herdr: `test/preload.ts` gives each file a home of its own
 under `/tmp`, a socket that isn't there and no inherited pane, tab or workspace id. Every temporary folder a test makes
