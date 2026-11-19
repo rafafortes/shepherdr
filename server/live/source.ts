@@ -5,7 +5,7 @@ import { providerOfKey } from '../../shared/model-caps.ts'
 // only what herdr can't tell it (spaces, tasks, modes, cards, settings). Assembled from the base plugins' parts.
 import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, sep } from 'node:path'
 import { askText, BODY_MAX, clip, lastReply, NOTIFY_KEY, openCards, taskAlert, TITLE_MAX } from '../../shared/alerts.ts'
@@ -19,13 +19,14 @@ import { wrapPage } from '../frame.ts'
 import { Agents, hidden, type Spec } from './agents.ts'
 import { herdr } from './herdr.ts'
 import { followCommand, isCommand } from './commands.ts'
+import { launchesAgents } from './launch-policy.ts'
 import { effortsOf, findModel, knowsModels, modelsOf, nearest } from './models.ts'
 import { picksOf, pinModel, rememberModel } from './model-picks.ts'
 import { HELP, one, parseArgs, summaryOpts, type Parsed } from './args.ts'
 import { Automations, type Automation, type Template } from './automations.ts'
 import { Heartbeats, heartbeatFile, Wakes, wakeProblem } from './heartbeat.ts'
 import { eventRules, eventsText, eventWords, matches, nextWords, runWords, timeRule, timeWords, triggerWords, type Happened, type TriggerEvent } from './trigger.ts'
-import { clockWords, startsWords, whenFrom } from '../../shared/when.ts'
+import { clockWords, span, startsWords, whenFrom } from '../../shared/when.ts'
 import { Browsers, type BrowserBridge, type BrowserClient } from './browser.ts'
 import { end as endOrphans, endDeps, lines as orphanLines, newsLine as orphanNews, proofPids, readRows as readOrphanRows, scan as scanOrphans, scanOpts, systemSource as orphanSystemSource, type Finding, type ScanOpts, type Source as ProcessSource } from './orphans.ts'
 import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
@@ -390,6 +391,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // browsers left idle (Settings, browser.idleClose): looked for once a minute
       this.timers.push(setInterval(() => void this.browsers?.closeIdle().catch(() => undefined), 60_000))
     }
+    if (process.env.NODE_ENV !== 'test') {
+      // coverage-exempt: the timer itself, like the browser sweeps' above (a test never parks this machine's agents);
+      // parkIdleAgents is test/agents-idle-park.test.ts's
+      const park = () => void this.parkIdleAgents().catch(() => undefined)
+      this.timers.push(setTimeout(park, 30_000) as unknown as ReturnType<typeof setInterval>, setInterval(() => this.stall.run('parkIdleAgents', park), 5 * 60_000))
+    }
     this.agents.start()
     // the space the machine's and All machines' coordinators shared is the home space's now; their agents close
     void this.agents.space(HOME_SPACE.label, HOME_SPACE.was).catch(() => undefined)
@@ -459,6 +466,83 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       (id) => !!task(id) && !ended(task(id)!) && !task(id)!.stopped && !task(id)!.archived,
       (id) => !task(id) || ended(task(id)!),
     )
+  }
+
+  /** when an agent was last alive: its newest log's write (a session file grows while its CLI answers, and a mirror
+   *  only when its session did), else when it started. Read the same way after a restart of Shepherdr, so a long idle
+   *  is not counted anew */
+  private lastLife(key: string, now = Date.now()): number {
+    const r = this.agents.record(key)
+    if (!r) return now
+    let at = r.started
+    for (const f of r.logs.slice(-2)) {
+      try {
+        const m = statSync(f).mtimeMs
+        if (m > at) at = m
+      } catch {
+        /* a log gone between the look and the stat */
+      }
+    }
+    return at
+  }
+
+  /** Idle agents past Settings (agents.idleClose, coordinators on their own gate, off by default) parked: their pane
+   *  and CLI close and what they left running is reaped with them, their chat says a message starts them again, and
+   *  the record keeps that they were parked (agents.park). Never one at work, on a menu or its CLI's own question,
+   *  with work it started in the background still running, with a message waiting to go in or one gone in lately, one
+   *  whose task's review round or way into main holds it (the machinery gives it its next word, not the human), or one
+   *  with no session to come back to. Says which agents were parked. */
+  async parkIdleAgents(now = Date.now()): Promise<string[]> {
+    if (!launchesAgents() || !this.agents.reachable) return []
+    const out: string[] = []
+    for (const [key, r] of Object.entries(this.agents.records)) {
+      // a chat of another role (a legacy reviewer): the engine puts it away itself
+      if (key.includes('/') && !key.endsWith('/Agent')) continue
+      if (r.finished || r.fresh || r.handover || this.agents.busy(key)) continue
+      const a = this.agents.info(key)
+      if (!a || a.launch_pending || a.interactive_ready === false) continue
+      const st = this.agents.status(key)
+      if (st !== 'idle' && st !== 'done') continue
+      const held = key.includes('/') ? this.engine.task(key.split('/')[0]) : undefined
+      const ms = key.includes('/')
+        ? this.settings.agentIdleClose(held ? this.levelOf(held.project) : 'machine')
+        : this.places.coordinator(key)
+          ? this.settings.coordinatorIdleClose()
+          : null
+      if (!ms) continue
+      if (this.agents.background(key) || this.agents.waiting(key).length) continue
+      // something went in to it lately (news, a nudge, your words): its answer may be on its way, never counted yet
+      if (this.agents.typedSince(key, now - 10 * 60_000).length) continue
+      if (this.chats.openCard(key) || this.chats.openQuestion(key) || this.chats.startMenuUp(key)) continue
+      if (held && this.engine.machineryHoldsAgent(held)) continue
+      // a parked agent must come back on its session: each CLI resumes by its own id (agents.ts args) — claude and pi
+      // by the session id their record keeps, opencode and agy by the one their mirror is named by, codex by the uuid
+      // in its last log's name — so a record with none to resume by is left as it is
+      const resumable = r.kind === 'codex'
+        ? r.logs.some((f) => /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/.test(f))
+        : !!r.sessionId
+      if (!resumable) continue
+      const idle = now - this.lastLife(key, now)
+      if (idle < ms) continue
+      await this.agents.park(key, now)
+      this.chats.post(key, {
+        id: `parked:${key}:${now}`,
+        card: { id: `parked:${key}:${now}`, text: `Parked: idle ${span(idle)}. Its pane closed to free memory; a message here starts it again on the same session.` },
+      })
+      out.push(key)
+    }
+    if (out.length) this.emit('snapshot')
+    return out
+  }
+
+  /** agents parked now (the idle sweep, SHE-72), still waiting for the message that starts them again: shepherdr
+   *  status counts them. One whose task ended since (its record kept to keep reading its chat) is not waiting */
+  parkedCount(): number {
+    return Object.entries(this.agents.records).filter(([key, r]) => {
+      if (!r.parked) return false
+      const t = key.includes('/') ? this.engine.task(key.split('/')[0]) : undefined
+      return !t || !ended(t)
+    }).length
   }
 
   /** what already escaped the close reap: named in doctor, with a ready kill line. Proof-marked ones may be ended
@@ -4547,7 +4631,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'status': {
         if (a1) return this.reportCommand(a1, rest, p, ctx)
         const kept = this.engine.keptLeftovers()
-        const line = `Shepherdr on ${NAME}: ${this.places.shown().length} spaces, ${this.engine.tasks.filter((t) => !ended(t) && !t.archived).length} open tasks; herdr ${this.agents.reachable ? 'answers' : 'does not answer'}.`
+        const parked = this.parkedCount()
+        const line = `Shepherdr on ${NAME}: ${this.places.shown().length} spaces, ${this.engine.tasks.filter((t) => !ended(t) && !t.archived).length} open tasks; herdr ${this.agents.reachable ? 'answers' : 'does not answer'}${parked ? `; ${parked} agent${parked === 1 ? '' : 's'} parked (a message to their chat starts each again)` : ''}.`
         const text = [line, this.spaceOrderLine()].filter(Boolean).join('\n')
         return kept.length ? `${text}\nDone tasks that kept work (remove it by hand once you're sure):\n${kept.map((k) => `  ${k}`).join('\n')}` : text
       }

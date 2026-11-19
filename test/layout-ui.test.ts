@@ -86,7 +86,8 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
     await settings.getByRole('button', { name: 'Editing: gtm · vm-str' }).waitFor()
     // a space has no Machine page: a machine's capacity is its own
     expect(await list.getByRole('button', { name: 'Machine', exact: true }).count()).toBe(0)
-    await list.getByRole('button', { name: 'Agents' }).click()
+    // exact: 'Idle agents' (SHE-72) matches the same words
+    await list.getByRole('button', { name: 'Agents', exact: true }).click()
     const agents = settings.getByRole('region', { name: 'Agents' })
     await agents.waitFor()
     // where an inherited value comes from, and a reset for one set here
@@ -104,7 +105,7 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
     expect(await section.locator('pre').count()).toBe(0)
     await section.getByRole('button', { name: 'Back', exact: true }).click()
     await section.waitFor({ state: 'detached' })
-    await list.getByRole('button', { name: 'Agents' }).waitFor()
+    await list.getByRole('button', { name: 'Agents', exact: true }).waitFor()
     // the system's Back goes from a section to the list, then out of Settings
     await list.getByRole('button', { name: 'Tasks', exact: true }).click()
     await settings.getByRole('region', { name: 'Tasks' }).waitFor()
