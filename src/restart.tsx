@@ -5,7 +5,7 @@ import type { Place, RestartCli, RestartInfo, RestartRoom } from '@shared/types.
 import { NO_PICKS, orderByPicks, type Picks } from '@shared/picks.ts'
 import { act, setUI, taskOf, useSnap, useStore } from './kernel.ts'
 import { Dialog } from './rowmenu.tsx'
-import { Pick, shown, Switch, TextValue, type Note } from './Settings.tsx'
+import { Pick, shown, Switch, TextValue, type Note } from './settings-parts.tsx'
 import { EffortIcon, ic, MenuItem, ModelIcon, ModeIcon, PlayIcon, Primary, RestartIcon, UpDownIcon } from './ui.tsx'
 
 /* ---------- the sheet ---------- */

@@ -1,9 +1,42 @@
 #!/usr/bin/env bash
-# Check 5: the build. The note is its time, read from this check's own log, exactly as the runner used to read it.
+# Check 5: the build. The note is its time and the first-load chunk's size (SHE-112 keeps an eye on both).
 set -uo pipefail
 root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
 cd "$root" || exit 1
 bun run build
 code=$?
-grep -oE 'built in [0-9.]+m?s' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1 >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
-exit "$code"
+if [ "$code" -ne 0 ]; then exit "$code"; fi
+shopt -s nullglob
+mains=(dist/assets/index-*.js)
+if [ ${#mains[@]} -eq 0 ]; then echo 'build: no main index chunk in dist/assets' >&2; exit 1; fi
+# the first load is the entry plus whatever index.html modulepreloads (a shared chunk can be preloaded too)
+first=("${mains[@]}")
+for pre in $(grep -oE 'href="\./assets/[^"]+\.js"' dist/index.html | sed 's/^href="\.\///; s/"$//'); do first+=("dist/$pre"); done
+# the heavy Settings page bodies must load on demand, not ride in the first load (SHE-112). Each marker is a string
+# of its own page that survives minification; the first check is the one that holds the bundle-size gain.
+for marker in 'Reading every level' 'Waiting now'; do
+  for f in "${first[@]}"; do
+    if grep -q "$marker" "$f"; then
+      echo "build: a first-load chunk still holds a Settings page body ($marker in $f)" >&2
+      exit 1
+    fi
+  done
+  if ! grep -rq "$marker" dist/assets; then
+    echo "build: the lazy Settings page body is missing ($marker)" >&2
+    exit 1
+  fi
+done
+for chunk in ModelsPage LimitsPage; do
+  if ! compgen -G "dist/assets/${chunk}-*.js" >/dev/null; then
+    echo "build: the lazy ${chunk} chunk is missing" >&2
+    exit 1
+  fi
+done
+size=$(wc -c <"${mains[0]}" | tr -d ' ')
+# hold the gain of this finding (898 kB before, 678 kB after); the audit's bundle budget can set a tighter limit later
+if [ "$size" -ge 800000 ]; then
+  echo "build: the first-load chunk grew to $size B, past SHE-112's 800000 B limit" >&2
+  exit 1
+fi
+printf '%s; main chunk %s B\n' "$(grep -oE 'built in [0-9.]+m?s' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1)" "$size" >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
+exit 0

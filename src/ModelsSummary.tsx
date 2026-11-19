@@ -7,7 +7,7 @@
 import clsx from 'clsx'
 import { Fragment, useState, type ReactNode } from 'react'
 import type { ModelsSummary as Summary, QuotaFigure, QuotaRead, QuotaWindow, SummaryConfigured, SummaryNow, SummaryProvider, SummaryRow, SummaryRunOuts, SummaryUsage, SummaryWarning } from '@shared/types.ts'
-import { openPage } from './Settings.tsx'
+import { openPage } from './settings-parts.tsx'
 import { ageWords, shareOf, tokens, windowWords } from '../shared/quota-words.ts'
 import { harnessGroups, inHarness } from '../shared/harness.ts'
 import { CapCell, type CapsText } from './CapCell.tsx'

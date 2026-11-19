@@ -11,7 +11,7 @@ import { askWaitingMany } from './apply-waiting.tsx'
 import { Anchored, OnTop } from './anchored.tsx'
 import { Pop } from './cell-pop.tsx'
 import { ProfilesBar } from './Profiles.tsx'
-import { Control, openPage } from './Settings.tsx'
+import { Control, Editor, Refused, openPage } from './settings-parts.tsx'
 import { Dialog } from './rowmenu.tsx'
 import ModelsSummary from './ModelsSummary.tsx'
 import QuotaSettings from './QuotaSettings.tsx'
@@ -122,43 +122,6 @@ async function writeAt(place: string, writes: Write[]): Promise<{ keys: string[]
     keys.push(key)
   }
   return { keys }
-}
-
-/** an editor: the controls of one cell, a reset to what the level above gives (when a key is set here), what went wrong,
- *  and what else it offers under them */
-export function Editor({ phone, title, controls, reset, error, onSet, onReset, footer }: { phone: boolean; title?: string; controls: SettingRow[]; reset: boolean; error?: string; onSet: (key: string, value: string) => void; onReset: () => void; footer?: ReactNode }) {
-  return (
-    <div className={clsx('flex flex-col gap-2', phone ? 'px-4 pt-1 pb-3' : 'w-72')}>
-      {title ? <Small className="text-pretty font-medium">{title}</Small> : null}
-      <dl className="flex flex-col gap-1.5">
-        {controls.map((row) => (
-          // a limit's three choices are a column of their own under its name (LimitChoice), not a control beside it
-          <div key={row.key} className={clsx('flex min-h-9 gap-3', row.num?.limit ? 'flex-col items-start' : 'items-center justify-between')}>
-            <dt className="shrink-0 text-fg2">{row.label}</dt>
-            <dd className={clsx('flex min-w-0', row.num?.limit ? 'w-full' : 'max-w-[65%] justify-end')}>
-              <Control row={row} phone={phone} set={(v) => onSet(row.key, v)} edit={() => undefined} />
-            </dd>
-          </div>
-        ))}
-      </dl>
-      {error ? <Refused text={error} /> : null}
-      {reset || footer ? (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          {reset ? <Ghost onClick={onReset} className="text-accent">Reset to inherited</Ghost> : <span />}
-          {footer}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-/** what a change refused, under the controls it came from: said once, as a status a screen reader hears */
-export function Refused({ text }: { text: string }) {
-  return (
-    <Small role="status" className="text-pretty text-need-fg!">
-      {text}
-    </Small>
-  )
 }
 
 export default function ModelsPage({ phone }: { phone: boolean }) {

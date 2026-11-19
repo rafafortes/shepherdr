@@ -12,9 +12,13 @@ import { builtScreen } from './web.ts'
 
 const all = (by: 'me' | 'them') => ['👍', '❤️', '😂', '🙌', '👀', '✅'].map((emoji) => ({ emoji, by }))
 
-/** what just opened has finished springing or sliding in (the endless ones, like typing dots, aside) */
-export const settled = (page: Page) =>
-  page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished.catch(() => {}))))
+/** what just opened has finished springing or sliding in (the endless ones, like typing dots, aside), and any page
+ *  body loading behind a Suspense fallback has landed: a lazy Settings page is not there the moment its button is
+ *  pressed, so a test that looks at its content waits for the fallback to go */
+export const settled = async (page: Page) => {
+  await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished.catch(() => {}))))
+  await page.locator('[data-suspense-fallback]').waitFor({ state: 'detached' })
+}
 /** what read() gives once ok() takes it, or its last within the time, for an expect to say what it was: a width that
  *  slides, a value the server sends back */
 export async function until<T>(read: () => Promise<T>, ok: (v: T) => boolean, ms = 5000): Promise<T> {
