@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Check 2, after dependencies and before the secrets scan and the types: audit the locked tree and its licences.
+# The logic and its fixture tests live in the audit.ts module beside this shim; the runner runs whichever executable
+# files it finds in scripts/checks/.
+set -uo pipefail
+root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
+cd "$root" || exit 1
+exec bun "$root/scripts/checks/audit.ts"
