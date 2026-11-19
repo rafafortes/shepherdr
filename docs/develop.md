@@ -81,8 +81,9 @@ A verdict does not expire: it goes away when a full run of that tree fails, or w
 should be checked again.
 
 What two runs of the same worktree still share is safe to share: `50-build` takes a lock of its own
-(`<logs>/build.lock`), because both runs write `dist/` and vite empties it first, so no build ever interleaves with
-another; the plugin registries are written atomically (a run reads the old or the new file, never half of one); and a
+(`<logs>/build.lock`), because both runs write `dist/` and vite empties it first, and `60-dist-budget` holds the same
+lock while it reads `dist/`, so no build ever interleaves with another or with the check over it; the plugin registries
+are written atomically (a run reads the old or the new file, never half of one); and a
 quick run's logs, notes, skips, browser probe and gitleaks report take `-quick`, beside its own verdict. A `tsc` build
 info file one run replaces under the other only costs a rebuild, never a wrong answer. Two runs of the same kind in one
 worktree still report to one `verdict.txt` and one set of step logs, so a worktree runs one full check at a time; the

@@ -425,12 +425,13 @@ echo "tests $2 $(date +%s%N)" >> "$SHEPHERDR_CHECK_ROOT/phases.txt"
     expect(ends[0]).toBeLessThan(starts[1])
   })
 
-  test('one build of a worktree at a time: the build waits for the lock another run holds, and never interleaves', async () => {
+  test('one build of a worktree at a time: the build and the budget over dist wait for the lock another run holds', async () => {
     const dir = tmp('build-lock')
     const logs = join(dir, 'logs')
     mkdirSync(join(dir, 'scripts', 'checks'), { recursive: true })
     mkdirSync(logs, { recursive: true })
-    copyFileSync(join(root, 'scripts', 'checks', '50-build'), join(dir, 'scripts', 'checks', '50-build'))
+    // both read or write dist/, so both take the same lock: the build because vite empties it, the budget because it reads it
+    for (const name of ['50-build', '60-dist-budget']) copyFileSync(join(root, 'scripts', 'checks', name), join(dir, 'scripts', 'checks', name))
     // a bun that only records whether the other run was still building when it ran
     const bin = join(dir, 'bin')
     mkdirSync(bin, { recursive: true })
@@ -441,14 +442,15 @@ echo "tests $2 $(date +%s%N)" >> "$SHEPHERDR_CHECK_ROOT/phases.txt"
     try {
       for (let i = 0; i < 200 && !existsSync(held); i++) await Bun.sleep(25)
       expect(existsSync(held), 'the build lock is held').toBe(true)
-      // it fails on the dist checks below (the fixture builds nothing), which is not what this test is about
-      Bun.spawnSync(['bash', join(dir, 'scripts', 'checks', '50-build')], {
-        cwd: dir,
-        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SHEPHERDR_CHECK_ROOT: dir, SHEPHERDR_CHECK_LOGS: logs },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      })
-      expect(readFileSync(join(dir, 'built.txt'), 'utf8').trim()).toBe('held=no')
+      // the build fails on the dist checks below (the fixture builds nothing), which is not what this test is about
+      for (const name of ['50-build', '60-dist-budget'])
+        Bun.spawnSync(['bash', join(dir, 'scripts', 'checks', name)], {
+          cwd: dir,
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SHEPHERDR_CHECK_ROOT: dir, SHEPHERDR_CHECK_LOGS: logs, SHEPHERDR_CHECK_LOG: join(logs, `${name}.log`) },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        })
+      expect(readFileSync(join(dir, 'built.txt'), 'utf8').trim().split('\n')).toEqual(['held=no', 'held=no'])
     } finally {
       proc.kill()
     }
