@@ -125,9 +125,9 @@
 - **Held for room.** A task waits for room as Queued, with no agent yet, and its row says why: `Waiting for a free slot`
   (the machine's slots are all taken), `Waiting for the machine` (its load, pressure or memory, or a herdr that doesn't
   answer), `Waiting for a free slot of <space>` (that space's own cap, Settings → Space, `space.maxTasks`, is full),
-  `Waiting: every model ran out`, `Waiting: cut-off tasks go back to work first`, or `Waiting for its turn` (a task
-  ahead of it in the line could start; with nothing ahead, the `machine.startEvery` spacing after the last start has not
-  passed). Three more, for a limit set to 0 (see
+  `Waiting: every model ran out`, `Waiting: cut-off tasks go back to work first`, `Waiting for its turn` (a task ahead of
+  it in the line could start, and the row adds what is ahead), or `Waiting for the gap between starts` (nothing is ahead
+  of it: the `machine.startEvery` spacing after the last start has not passed). Three more, for a limit set to 0 (see
   [settings](settings.md)): `This machine is set to 0 tasks` (`machine.maxTasks` 0: this machine starts no
   task), `<space> is set to 0 tasks` (`space.maxTasks` 0 for that space), and `Blocked: every model it may use is 0 allowed`
   (every model of the task's chain is blocked by a `models.maxAtOnce` 0: it starts once a limit changes, never by waiting).

@@ -133,6 +133,9 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
   }
   const places = new Places()
   const settings = new Settings()
+  // no spacing between starts unless a test asks for one: every start Shepherdr makes by itself follows machine.startEvery
+  // (engine.startGate), and its 2 minutes would hold the second task any test starts
+  if (settings.pick('machine.startEvery', 'machine').from === 'default') settings.set('machine.startEvery', '0')
   const engine = new Engine(agents as never, chats as never, places, settings, herdr.h as never)
   const news: string[] = []
   /** the place each news is for: a project's place id, as its coordinator's chat has it */

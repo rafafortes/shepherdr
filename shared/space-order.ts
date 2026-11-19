@@ -3,6 +3,9 @@
 // Spaces table of Settings → Limits and `shepherdr space list` all read it from here, so the three cannot disagree; each
 // space's number is read once per computation, never per comparison (a snapshot sorts the line of every held task).
 
+/** the highest place a space's number may name (space.priority), and the range Settings checks: 1 is first */
+export const PLACE_MAX = 200
+
 /** where a space with no place goes: after every numbered one, and equal among themselves */
 export const NO_PLACE = Number.MAX_SAFE_INTEGER
 

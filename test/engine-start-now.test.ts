@@ -12,7 +12,8 @@ function fresh(limits: Record<string, string> = {}) {
   const w = world()
   w.engine.tasks.splice(0)
   for (const k of ['machine.maxTasks', 'machine.startLoad', 'machine.startMemory', 'machine.startEvery', 'machine.startPressure']) w.settings.set(k, null)
-  for (const [k, v] of Object.entries(limits)) expect(w.settings.set(k, v).ok).toBe(true)
+  // no spacing between starts unless a test asks for one (every start Shepherdr makes by itself follows it, startGate)
+  for (const [k, v] of Object.entries({ 'machine.startEvery': '0', ...limits })) expect(w.settings.set(k, v).ok).toBe(true)
   let m: { busy?: 'cpu' | 'memory'; herdr: boolean } = { herdr: true }
   w.engine.machine = () => m
   const machine = (x: typeof m) => (m = x)

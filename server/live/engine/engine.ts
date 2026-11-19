@@ -1371,8 +1371,16 @@ export class Engine extends Emitter<Events> {
     if (this.checking) return
     this.checking = true
     try {
+      // the line's order (first in line, then the space's place, then how long it waited), so that several tasks freed at
+      // once ask for the machine in the order they would start: the first in line takes the one start machine.startEvery
+      // allows, and the others join the line behind it
+      const byPlace = placeOrder((space) => this.settings.spacePriority(space))
+      const name = (t: TaskRec) => this.nameOf(t) ?? ''
+      const waiting = this.tasks
+        .filter((t) => this.queued(t) && !t.scheduled)
+        .sort((a, b) => Number(!!b.priority) - Number(!!a.priority) || byPlace(name(a), name(b)) || a.created - b.created)
       // a task still waiting for its time is no queued task yet: it starts when it is due, then waits for the machine
-      for (const t of this.tasks.filter((t) => this.queued(t) && !t.scheduled)) {
+      for (const t of waiting) {
         if (!this.open(t).length) this.goWhenRoom(t, goLine(t.after!, this.notes(t.after!)), `${t.after!.join(', ')} ${t.after!.length === 1 ? 'is' : 'are'} done`)
         else if (this.statusOf(t) !== t.told) this.settleOne(t)
       }
@@ -1871,12 +1879,12 @@ export class Engine extends Emitter<Events> {
     }
     const cap = why === 'space' || why === 'spaceZero' ? this.spaceCap(t) : undefined
     if (cap && why === 'spaceZero') return `${cap.shown} is set to 0 tasks`
-    // a wait of its own says its own words, and reads no line: only the shared room and the line name what is ahead
-    if (!cap && !MACHINE_WIDE.has(why) && why !== 'turn') return HELD[why]
+    // a wait of its own says its own words, and names nothing ahead: a task of its space or model is stepped over, so what
+    // is in the line is not what holds it. Only the shared room and the turn name the tasks ahead
+    if (!MACHINE_WIDE.has(why) && why !== 'turn') return cap ? `Waiting for a free slot of ${cap.shown}` : HELD[why]
     // the line this row reads: the one the pass computed, or its own (a row drawn on its own, never a snapshot's)
     const line = read ?? this.startLine()
-    const words = cap ? `Waiting for a free slot of ${cap.shown}` : why === 'turn' && !line.ahead.get(t.id)?.count ? TURN_GAP : HELD[why]
-    return words + this.aheadWords(t, line)
+    return (why === 'turn' && !line.ahead.get(t.id)?.count ? TURN_GAP : HELD[why]) + this.aheadWords(t, line)
   }
 
   /** the name a space of this machine was added under, for a scope that names it: its place id, the name it was added
@@ -2063,11 +2071,17 @@ export class Engine extends Emitter<Events> {
    */
   private startGate(t: TaskRec, now = Date.now()): { why?: HeldWhy } {
     const r = this.room(t)
-    if (r.why || t.priority) return r
-    if (!this.startsNow(now)) return { why: 'turn' }
-    const line = this.startLine(now, t)
-    const at = line.order.indexOf(t)
-    return at > 0 && line.order.slice(0, at).some((h) => !line.own.get(h.id)) ? { why: 'turn' } : {}
+    if (r.why) return r
+    // a task marked first in line passes both the line and the spacing
+    if (!t.priority) {
+      if (!this.startsNow(now)) return { why: 'turn' }
+      const line = this.startLine(now, t)
+      const at = line.order.indexOf(t)
+      if (at > 0 && line.order.slice(0, at).some((h) => !line.own.get(h.id))) return { why: 'turn' }
+    }
+    // it starts now: this is the last start until machine.startEvery is over, as every start release() makes is
+    this.lastStart = now
+    return {}
   }
 
   /** the go, now if this machine has room and its turn came, else once they have */

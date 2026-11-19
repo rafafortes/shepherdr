@@ -3313,10 +3313,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (!all.length) return 'No waiting task holds an agent or a worktree: nothing to park.'
     const go = all.filter((x) => !x.keep)
     const stay = all.filter((x) => x.keep)
+    // one line for all the rows below, as the screen reads one per snapshot
+    const line = this.engine.startLine()
+    const sub = (t: TaskRec) => this.engine.subOf(t, this.engine.statusOf(t), false, line)
     const row = (t: TaskRec, why: string) => `  ${t.id.padEnd(8)} ${t.title}  · ${why}`
     return [
       go.length ? `${go.length} waiting task${go.length === 1 ? '' : 's'} would be parked (its agent and herdr space close, its empty worktree and branch go; it starts fresh on its brief at its turn):` : 'None can be parked.',
-      ...go.map(({ t, notes }) => row(t, `${this.engine.subOf(t)}${notes.length ? ` · ${notes.length === 1 ? 'a note' : `${notes.length} notes`} from another agent go${notes.length === 1 ? 'es' : ''} into its brief` : ''}`)),
+      ...go.map(({ t, notes }) => row(t, `${sub(t)}${notes.length ? ` · ${notes.length === 1 ? 'a note' : `${notes.length} notes`} from another agent go${notes.length === 1 ? 'es' : ''} into its brief` : ''}`)),
       ...(stay.length ? [`${stay.length} kept as ${stay.length === 1 ? 'it is' : 'they are'}:`, ...stay.map(({ t, keep }) => row(t, keep!))] : []),
       go.length ? `Park ${go.length === 1 ? 'it' : 'them'}: shepherdr task park${ids.length ? ` ${ids.join(' ')}` : ''} --yes` : '',
     ].filter(Boolean).join('\n')
@@ -3328,7 +3331,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return {
       slots: `all ${this.settings.machine().max} slots are taken`,
       machine: 'the machine is busy',
-      turn: 'its turn in the line has not come: the tasks ahead of it start first, one at a time',
+      turn: 'its turn in the line has not come: it starts at its turn, one start at a time (machine.startEvery)',
       models: 'every model of its space ran out, so it would only be cut off too, until the primary answers again',
       resume: 'the tasks that were cut off go back to work first',
       space: cap ? `${cap.shown}'s own limit of ${cap.max} tasks is taken` : 'its space is at its own limit',
@@ -5281,14 +5284,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const on = [CLI_NAME[t.agent!.kind] ?? t.agent!.kind, t.agent!.model, t.agent!.effort && `${t.agent!.effort} effort`].filter(Boolean).join(', ')
       if (t.after?.length) return `Added ${t.id}: ${t.title}, queued after ${t.after.join(', ')}. It has no agent, worktree or herdr space while it waits: once ${t.after.length === 1 ? 'that task is' : 'they are all'} done and the machine has room, its agent (${on}) starts on the brief. A message to it (shepherdr task tell ${t.id} …) starts its agent sooner, still queued.`
       if (p.flags.has('later')) return `Added ${t.id}: ${t.title}, for later. Its agent (${on}) reads the brief now and waits for a go (shepherdr task tell ${t.id} "go").`
-      if (t.held) return `Added ${t.id}: ${t.title}, held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : HELD_NAMED.has(t.held.why) ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and its agent (${on}) starts by itself when there's room, oldest first.`
+      if (t.held) return `Added ${t.id}: ${t.title}, held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : HELD_NAMED.has(t.held.why) ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and its agent (${on}) starts by itself when there's room, at its turn in the line (first in line, then each space's place, then oldest first).`
       return `Added ${t.id}: ${t.title}. Its agent (${on}) starts on the brief now.${after.length ? ' What it would wait for is done already.' : ''}`
     }
     if (sub === 'list' || !sub) {
       const pr = one(p, 'space') ? this.projectFor(p, ctx) : null
       // archived tasks only with --archived, and then only they
       const shown = (t: { archived?: unknown }) => !!t.archived === p.flags.has('archived')
-      const ts = this.engine.tasks.filter((t) => (!pr || t.project === placeId.space(pr.name)) && shown(t)).map((t) => this.engine.view(t))
+      // the line read once for every row, as one snapshot reads it: a held row says what is ahead of it
+      const line = this.engine.startLine()
+      const ts = this.engine.tasks.filter((t) => (!pr || t.project === placeId.space(pr.name)) && shown(t)).map((t) => this.engine.view(t, line))
       const others = pr ? [] : (this.peers?.list() ?? []).flatMap((l) => (l.snap?.tasks ?? []).filter(shown).map((t) => ({ ...t, machine: l.rec.machine })))
       const all = doneNewestFirst<(typeof ts)[number] | (typeof others)[number]>([...ts, ...others])
       if (p.flags.has('json')) return JSON.stringify(all.map((t) => ({ id: t.id, title: t.name, status: t.status, sub: statusLine(t), machine: 'machine' in t ? t.machine : undefined, archived: t.archived, pinned: t.pinned, ...(t.scheduled ? { scheduled: t.scheduled } : {}) })), null, 2)
@@ -5320,7 +5325,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // a coordinator's go to a task that waits starts it only when this machine has room; a message an agent's own
         // shell sends says who it came from, so the chat shows it as that agent's and never as the human's words
         const r = await this.engine.tell(t.id, rest.slice(1).join(' '), { gate: !ctx.chat?.includes('/'), from: await this.toldFrom(ctx) })
-        if (r.held) return `${t.id} is held: ${this.heldWords(r.held, t)} (${this.workingLine()}). It shows as Queued and gets your message when there's room, oldest first.`
+        if (r.held) return `${t.id} is held: ${this.heldWords(r.held, t)} (${this.workingLine()}). It shows as Queued and gets your message at its turn in the line.`
         return `Told ${t.id}.`
       }
       case 'start': {
@@ -5348,7 +5353,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           if (within === undefined && /^(none|nothing|off|-|)$/i.test((at ?? '').trim())) {
             const r = this.engine.schedule(t.id, null)
             if (r.queued?.length) return `${t.id} no longer waits for a time: it starts once ${r.queued.join(', ')} ${r.queued.length === 1 ? 'is' : 'are'} done.`
-            if (r.held) return `${t.id} no longer waits for a time, but is held: ${this.heldWords(r.held, t)} (${this.workingLine()}). It starts as soon as there's room, oldest first.`
+            if (r.held) return `${t.id} no longer waits for a time, but is held: ${this.heldWords(r.held, t)} (${this.workingLine()}). It starts at its turn in the line (first in line, then each space's place, then oldest first).`
             return `${t.id} no longer waits for a time: it starts now.`
           }
           const when = whenFrom(at, within, this.settings.zone())

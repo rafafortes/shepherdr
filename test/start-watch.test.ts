@@ -19,6 +19,9 @@ type AgentInfo = import('../server/live/herdr.ts').AgentInfo
 type TaskRec = import('../server/live/engine/engine.ts').TaskRec
 
 const src = new LiveSource()
+// not about the spacing between starts: every start Shepherdr makes by itself follows machine.startEvery now
+// (engine.startGate), and its 2 minutes would hold each task after the first
+src.settings.set('machine.startEvery', '0', 'machine')
 // herdr makes the task worktrees: a stand-in on real git
 const fake = fakeHerdr()
 Object.assign(src.engine, { wt: new Worktrees(fake.h as never) })

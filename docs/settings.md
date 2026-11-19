@@ -96,8 +96,9 @@
    just finished, one whose time came or that got a go joins the line (held as `Waiting for its turn`) instead of passing
    it, and `machine.startEvery` spaces those starts out too. A space with no number comes after every
    numbered space; two spaces with the same number, or with none, are told apart by how long their tasks have waited,
-   exactly as before. With nothing set, nothing changes. Set it at one space only, with `shepherdr set space.priority 1
-   --space lyvora-app`; `shepherdr unset space.priority --space lyvora-app` clears it, `shepherdr show --space NAME`
+   exactly as before. With nothing set the line is by age, as before; what changes even so is that a task arriving now
+   joins it instead of passing it, and a held row still names what is ahead of it. Set it at one space only, with
+   `shepherdr set space.priority 1 --space lyvora-app`; `shepherdr unset space.priority --space lyvora-app` clears it, `shepherdr show --space NAME`
    lists it with where it comes from, `shepherdr space list` shows this machine's spaces in order and `shepherdr status`
    says the order in one line. There is no Everywhere or machine value: an order is only between the spaces of one machine.
    The order is **strict**: while the first space has a task that can start, no later space starts one. Its own **Max

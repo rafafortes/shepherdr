@@ -11,6 +11,7 @@
 import clsx from 'clsx'
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { BLOCKED as BLOCKED_WORDS, parseMaxAtOnce, withEntry, type MaxEntry } from '@shared/model-caps.ts'
+import { PLACE_MAX } from '@shared/space-order.ts'
 import { shareOf } from '@shared/quota-words.ts'
 import type { LimitCell, LimitColumn, LimitKnown, LimitProvider, LimitRow, LimitSpaceRow, LimitTable, LimitsView, QueueTask, SettingRow, WaitingGroup, WaitingNow, WaitingTask } from '@shared/types.ts'
 import { act, openTask, useSnap } from './kernel.ts'
@@ -432,8 +433,12 @@ function moveOf(rows: LimitSpaceRow[], at: number, dir: -1 | 1): Move[] | null {
       return n === null ? [] : [{ place: r.cells['space.priority']!.place, n }]
     })
     .sort((a, b) => a.n - b.n)
-  // no number yet: it goes last among the numbered ones (the first one when nothing is numbered), and no lower
-  if (mine === null) return dir < 0 ? [{ place, value: String((others[others.length - 1]?.n ?? 0) + 1) }] : null
+  // no number yet: it goes last among the numbered ones (the first one when nothing is numbered), and no lower. Past the
+  // range there is no place to give it: the arrow is off rather than refused by the server
+  if (mine === null) {
+    const next = (others[others.length - 1]?.n ?? 0) + 1
+    return dir < 0 && next <= PLACE_MAX ? [{ place, value: String(next) }] : null
+  }
   if (dir < 0) {
     const above = others.filter((o) => o.n < mine).at(-1)
     return above ? [{ place, value: String(above.n) }, { place: above.place, value: String(mine) }] : null
@@ -618,15 +623,25 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
     setMoving(true)
     setMoveError('')
     const r = (await act({ type: 'space-order', moves }).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string }
-    inFlight.current = false
-    setMoving(false)
-    if (!r?.ok) setMoveError(r?.error ?? "That didn't go through.")
+    // written: the arrows stay off until the page has read the rows the write made (the snapshot it brings); refused: no
+    // snapshot comes, so they come back now with the reason
+    if (!r?.ok) {
+      inFlight.current = false
+      setMoving(false)
+      setMoveError(r?.error ?? "That didn't go through.")
+    }
   }
   // every change of Settings is a new snapshot: the page reads again
   useEffect(() => {
     let live = true
     act({ type: 'limits-view' })
-      .then((r) => live && setV(r as LimitsView))
+      .then((r) => {
+        if (!live) return
+        setV(r as LimitsView)
+        // a move's write is in: its arrows come back with the rows the write made, never with the ones before it
+        inFlight.current = false
+        setMoving(false)
+      })
       .catch((e: Error) => live && setFailed(e.message))
     return () => {
       live = false

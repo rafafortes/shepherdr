@@ -3,12 +3,14 @@
 import { describe, expect, test } from 'bun:test'
 import { writeJson, placeId, repo, sh, started, until, world } from './engine-world.ts'
 
-/** a fresh world with nothing from earlier tests, its machine's limits set */
+/** a fresh world with nothing from earlier tests, its machine's limits set: no spacing between starts unless the test asks
+ *  for it, since every start Shepherdr makes by itself follows it now (engine.startGate), and its 2 minutes are the
+ *  default */
 function fresh(limits: Record<string, string>) {
   const w = world()
   w.engine.tasks.splice(0)
   for (const k of ['machine.maxTasks', 'machine.startLoad', 'machine.startMemory', 'machine.startEvery', 'machine.startPressure']) w.settings.set(k, null)
-  for (const [k, v] of Object.entries(limits)) expect(w.settings.set(k, v).ok).toBe(true)
+  for (const [k, v] of Object.entries({ 'machine.startEvery': '0', ...limits })) expect(w.settings.set(k, v).ok).toBe(true)
   return w
 }
 
@@ -159,7 +161,7 @@ describe('room on the machine', () => {
   }, 20_000)
 
   test('a busy machine holds new tasks ("Waiting for the machine") and lets them go one at a time, machine.startEvery apart', async () => {
-    const w = fresh({})
+    const w = fresh({ 'machine.startEvery': '2 min' })
     let m: { busy?: 'cpu' | 'memory'; herdr: boolean } = { busy: 'cpu', herdr: true }
     w.engine.machine = () => m
     const p = await w.places.add(repo(), 'room-load')
@@ -396,15 +398,18 @@ describe('the line holds every start Shepherdr makes by itself', () => {
     // the machine has room, and still its go waits: A's task is ahead of it in the line, as the card it got says
     expect(waiting.held?.why).toBe('turn')
     expect(w.posted.some((x) => x.key === `${waiting.id}/Agent` && x.card?.text === `waiting for its turn · 1 ahead, of ${a.name}`)).toBe(true)
-    // the pass starts A's task, and the spacing holds the later one back in its turn
-    w.engine.release()
+    // the spacing of the start B's task made is still on: nothing starts inside it
+    const t0 = Date.now()
+    w.engine.release(t0)
+    expect(w.started.some((s) => s.key === `${early.id}/Agent`)).toBe(false)
+    // a pass two minutes on starts A's task, and the later one waits for its own turn, a spacing after that
+    w.engine.release(t0 + 120_000)
     await until(() => w.started.some((s) => s.key === `${early.id}/Agent`))
     expect(w.started.some((s) => s.key === `${waiting.id}/Agent`)).toBe(false)
     expect(waiting.held?.why).toBe('turn')
     // nothing ahead of it any more: what holds it now is machine.startEvery
     expect(w.engine.subOf(waiting)).toBe('Waiting for the gap between starts')
-    // its turn comes two minutes later, as machine.startEvery says
-    w.engine.release(Date.now() + 120_000)
+    w.engine.release(t0 + 240_000)
     await until(() => w.started.some((s) => s.key === `${waiting.id}/Agent`))
   })
 
@@ -440,6 +445,43 @@ describe('the line holds every start Shepherdr makes by itself', () => {
     await until(() => w.started.some((s) => s.key === `${early.id}/Agent`))
     expect(w.started.some((s) => s.key === `${later.id}/Agent`)).toBe(false)
     expect(w.engine.subOf(later)).toBe('Waiting for a free slot')
+  })
+
+  test('five tasks whose --after waits end start one at a time, machine.startEvery apart, in the line order', async () => {
+    const w = fresh({ 'machine.maxTasks': '6', 'machine.startEvery': '2 min' })
+    const { a, b } = await twoSpaces(w)
+    expect(w.settings.set('space.priority', '1', { space: b.name }).ok).toBe(true)
+    // a task at work holds one of the six slots; five tasks of two spaces are queued after it, the older ones of the
+    // unnumbered space
+    const blocker = w.engine.add({ project: a.name, title: 'Blocker', by: 'test' })
+    await until(() => w.started.some((s) => s.key === `${blocker.id}/Agent`))
+    w.brief(`${blocker.id}/Agent`)
+    const ts = [0, 1, 2, 3, 4].map((i) => w.engine.add({ project: i < 3 ? a.name : b.name, title: `Q${i}`, by: 'test', after: [blocker.id] }))
+    // its go is what frees them all at once: the line puts B's first (its place is 1), then A's three by age. Its own
+    // start is two minutes behind (the blocker started before that), so the spacing is over when they come
+    const t0 = Date.now()
+    w.engine.noteStart(t0 - 120_000)
+    await w.engine.done(blocker.id, 'Nothing to change.')
+    w.agentIs(`${blocker.id}/Agent`, 'idle')
+    const started = () => w.started.map((s) => s.key)
+    await until(() => started().length === 2)
+    // one start inside the spacing: the one in line, and the rest held for their turn
+    expect(started()).toEqual([`${blocker.id}/Agent`, `${ts[3]!.id}/Agent`])
+    expect(ts.map((t) => t.held?.why)).toEqual(['turn', 'turn', 'turn', undefined, 'turn'])
+    // then one at a time, two minutes apart, in the line's order
+    const one = async (t: { id: string }, at: number) => {
+      w.engine.release(at)
+      await until(() => w.started.some((s) => s.key === `${t.id}/Agent`))
+      expect(started()).toEqual([`${blocker.id}/Agent`, `${ts[3]!.id}/Agent`, `${ts[4]!.id}/Agent`, `${ts[0]!.id}/Agent`, `${ts[1]!.id}/Agent`, `${ts[2]!.id}/Agent`].slice(0, started().length))
+    }
+    w.engine.release(t0 + 60_000)
+    expect(started().length).toBe(2)
+    // a margin past the two minutes: the first start happened a few milliseconds after t0
+    await one(ts[4]!, t0 + 130_000)
+    await one(ts[0]!, t0 + 250_000)
+    await one(ts[1]!, t0 + 370_000)
+    await one(ts[2]!, t0 + 490_000)
+    expect(started()).toEqual([`${blocker.id}/Agent`, `${ts[3]!.id}/Agent`, `${ts[4]!.id}/Agent`, `${ts[0]!.id}/Agent`, `${ts[1]!.id}/Agent`, `${ts[2]!.id}/Agent`])
   })
 
   test('five tasks freed by one merge start one at a time, machine.startEvery apart, in the line order', async () => {

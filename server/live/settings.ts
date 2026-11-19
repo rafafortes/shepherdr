@@ -9,6 +9,7 @@
 import { CHAT_KINDS, chatProblem } from './readers/index.ts'
 import { cpus, totalmem } from 'node:os'
 import { NOTIFY, NOTIFY_DEFAULT, NOTIFY_KEY } from '../../shared/alerts.ts'
+import { PLACE_MAX } from '../../shared/space-order.ts'
 import type { SettingRow, SettingSection, TriggerRow } from '../../shared/types.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { SetBy } from '../../shared/brief.ts'
@@ -103,8 +104,6 @@ type Pair = { cli: string; model: string; effort: string }
  * the brief's Reviewer line, source.ts advise); the way back still asks the primary alone (return.ts).
  */
 export const MAX_BACKUPS = 5
-/** the highest place in a machine's queue a space's own number may name (space.priority): 1 is first */
-export const PLACE_MAX = 200
 export type Chain = 'task' | 'coordinator' | 'reviewer' | 'advisor'
 const CHAINS: Chain[] = ['task', 'coordinator', 'reviewer', 'advisor']
 const EXTRA = [2, 3, 4, 5] as const
