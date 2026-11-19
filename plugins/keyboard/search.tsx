@@ -4,7 +4,7 @@ import { Sheet, SheetClose } from '@client/Stack.tsx'
 import { ic, PlaceIcon, SearchIcon } from '@client/ui.tsx'
 import type { Chat } from '@shared/types.ts'
 import { jumpTo } from '@plugins/chat/reply.ts'
-import { searchChats, searchResults, type SearchHit, type SearchKind, type SearchScope } from './search-data.ts'
+import { searchCapped, searchChats, searchResults, SEARCH_MESSAGE_WINDOW, type SearchHit, type SearchKind, type SearchScope } from './search-data.ts'
 import { loadSearchChats } from './search-load.ts'
 
 const kinds: SearchKind[] = ['Spaces', 'Tasks', 'Messages', 'Artifacts']
@@ -55,11 +55,16 @@ export function Search({ onClose }: { onClose: () => void }) {
     const timer = setTimeout(() => setSettled(q), 120)
     return () => clearTimeout(timer)
   }, [q])
+  // No query, no chats: 'Recent items' lists only what the snapshot already carries. Loading starts once a real
+  // query settles, and is torn down when it is cleared; a new query in the same scope reuses the chats already read.
+  const searching = !!settled.trim()
+  const capped = searching && searchCapped(sources, chats)
   useEffect(() => {
     setChats({})
     setCoverage({ done: 0, missing: [], finished: false })
+    if (!searching) return
     return loadSearchChats(JSON.parse(sourceKeys), chat => setChats(old => ({ ...old, [chat.key]: chat })), (done, missing, finished) => setCoverage({ done, missing, finished }))
-  }, [sourceKeys, retry])
+  }, [sourceKeys, retry, searching])
   const ordered = useMemo(() => ({ ...snap, places: shownPlaces(snap) }), [snap])
   const results = useMemo(() => searchResults(ordered, scope, settled, chats), [ordered, scope, settled, chats])
   const groups = kinds.filter(k => !kind || kind === k).map(k => ({ kind: k, all: results.filter(h => h.kind === k) }))
@@ -95,20 +100,21 @@ export function Search({ onClose }: { onClose: () => void }) {
     <div className="shrink-0 space-y-2 border-b border-line p-3">
       <div role="group" aria-label="Search scope" className="flex gap-2 overflow-x-auto pb-1">{scopeOptions.map(o => <button type="button" key={o.scope.kind} className={chip} aria-pressed={JSON.stringify(o.scope) === JSON.stringify(scope)} onClick={() => changeScope(o.scope)}>{o.label}</button>)}</div>
       <div role="group" aria-label="Result types" className="flex gap-2 overflow-x-auto pb-1">{[null, ...kinds].map(k => <button type="button" key={k ?? 'all'} className={chip} aria-pressed={kind === k} onClick={() => { setKind(k); setSelected(null); setLimit(8) }}>{k ?? 'All types'}</button>)}</div>
-      <p role="status" className="text-xs text-fg2 phone:text-sm">{scopeOptions.find(o => JSON.stringify(o.scope) === JSON.stringify(scope))?.label} · {!q.trim() ? 'Recent items · ' : ''}{q !== settled ? 'Filtering… · ' : ''}{coverage.finished ? `Read ${coverage.done} of ${sources.length} chats` : `Loading messages… ${coverage.done} of ${sources.length} chats`}</p>
+      <p role="status" className="text-xs text-fg2 phone:text-sm">{[scopeOptions.find(o => JSON.stringify(o.scope) === JSON.stringify(scope))?.label, !q.trim() ? 'Recent items' : null, q !== settled ? 'Filtering…' : null, searching ? (coverage.finished ? `Read ${coverage.done} of ${sources.length} chats` : `Loading messages… ${coverage.done} of ${sources.length} chats`) : null].filter(Boolean).join(' · ')}</p>
       {coverage.missing.length > 0 ? <div className="text-xs text-fg2 phone:text-sm">{coverage.missing.length} chats could not be refreshed. Results may be incomplete or out of date. <button type="button" className="min-h-11 underline" onClick={() => setRetry(n => n + 1)}>Retry</button></div> : null}
       {snap.machines.some(m => m.status === 'off' && sources.some(c => snap.places.some(p => p.id === c.place && p.machine === m.machine))) ? <p className="text-xs text-fg2 phone:text-sm">Unavailable machines: {snap.machines.filter(m => m.status === 'off' && sources.some(c => snap.places.some(p => p.id === c.place && p.machine === m.machine))).map(m => m.name).join(', ')}. Saved items may be out of date.</p> : null}
     </div>
-    <div id="search-list" role="listbox" aria-label="Search results" aria-busy={!coverage.finished || q !== settled} className="max-h-[60vh] min-h-0 overflow-y-auto overscroll-contain p-2 phone:max-h-none phone:flex-1 phone:pb-[calc(env(safe-area-inset-bottom)+8px)]">
-      {groups.filter(group => group.all.length || (group.kind === 'Messages' && !coverage.finished)).map(group => <div role="group" aria-label={group.kind} key={group.kind}>
+    <div id="search-list" role="listbox" aria-label="Search results" aria-busy={searching && (!coverage.finished || q !== settled)} className="max-h-[60vh] min-h-0 overflow-y-auto overscroll-contain p-2 phone:max-h-none phone:flex-1 phone:pb-[calc(env(safe-area-inset-bottom)+8px)]">
+      {groups.filter(group => group.all.length || (group.kind === 'Messages' && (searching && !coverage.finished || capped))).map(group => <div role="group" aria-label={group.kind} key={group.kind}>
         <h3 className="px-3 pt-3 pb-1 text-xs font-medium text-fg2 tabular-nums phone:text-sm">{group.kind} · {group.all.length}</h3>
         {group.all.slice(0, limit).map(hit => <div role="option" tabIndex={0} aria-selected={hit.key === current?.key} key={hit.key} id={`search-hit-${hit.key}`} onClick={() => pick(hit)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(hit) } }} className="min-h-14 cursor-pointer rounded-box px-3 py-2 hover:bg-well focus:outline-accent aria-selected:bg-well">
           <p className="flex items-start gap-2 text-sm phone:text-base">{hit.kind === 'Spaces' ? <PlaceIcon level={2} className={`${ic} shrink-0`} /> : null}<span className="line-clamp-2 min-w-0 break-words">{hit.label}</span></p><p className="truncate text-xs text-fg2 phone:text-sm">{hit.context}{hit.at > 1e12 ? ` · ${new Date(hit.at).toLocaleDateString()}` : ''}</p>
         </div>)}
-        {!group.all.length ? <p className="px-3 py-2 text-sm text-fg3">{group.kind === 'Messages' && !coverage.finished ? 'Still loading…' : 'No matches'}</p> : null}
+        {!group.all.length ? <p className="px-3 py-2 text-sm text-fg3">{group.kind === 'Messages' && searching && !coverage.finished ? 'Still loading…' : 'No matches'}</p> : null}
         {group.all.length > limit ? <button type="button" className="min-h-11 px-3 text-sm text-accent" onClick={() => setLimit(n => n + 20)}>Show more {group.kind.toLowerCase()} ({group.all.length - limit})</button> : null}
+        {group.kind === 'Messages' && capped ? <p className="px-3 py-1 text-xs text-fg2 phone:text-sm">Older messages not searched in chats with more than {SEARCH_MESSAGE_WINDOW} messages.</p> : null}
       </div>)}
-      {!list.length && coverage.finished ? <p className="px-3 py-4 text-sm text-fg2">Nothing found in this scope. Try Everywhere or fewer words.</p> : null}
+      {!list.length && (!searching || coverage.finished) ? <p className="px-3 py-4 text-sm text-fg2">Nothing found in this scope. Try Everywhere or fewer words.</p> : null}
     </div>
   </Sheet>
 }

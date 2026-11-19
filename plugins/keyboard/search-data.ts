@@ -4,6 +4,10 @@ import { findIn, messageText } from '../chat/days.ts'
 
 export type SearchScope = { kind: 'all' } | { kind: 'machine' | 'space' | 'chat'; id: string }
 export type SearchKind = 'Spaces' | 'Tasks' | 'Messages' | 'Artifacts'
+/** Only the newest messages of a chat are scanned; older ones stay reachable by jumping to the chat itself. */
+export const SEARCH_MESSAGE_WINDOW = 500
+/** No more than this many hits of one kind are built before sorting, so a wide scope stays bounded. */
+export const SEARCH_HITS_PER_KIND = 200
 export interface SearchHit {
   key: string
   kind: SearchKind
@@ -30,6 +34,11 @@ export function searchChats(snap: Snapshot, scope: SearchScope) {
 
 const words = (q: string, ...s: (string | undefined)[]) => q.toLowerCase().trim().split(/\s+/).every(w => s.some(v => v?.toLowerCase().includes(w)))
 
+/** A chat in scope holds more messages than the search window, so its older ones were not scanned. */
+export function searchCapped(sources: ReturnType<typeof searchChats>, chats: Record<string, Chat>) {
+  return sources.some(c => (chats[c.key]?.messages.length ?? 0) > SEARCH_MESSAGE_WINDOW)
+}
+
 export function searchResults(snap: Snapshot, scope: SearchScope, q: string, chats: Record<string, Chat>): SearchHit[] {
   const sources = searchChats(snap, scope)
   const inPlace = (id: string) => scope.kind === 'all' || (scope.kind === 'space' && id === scope.id) || (scope.kind === 'machine' && snap.places.some(p => p.id === id && p.machine === scope.id))
@@ -38,15 +47,23 @@ export function searchResults(snap: Snapshot, scope: SearchScope, q: string, cha
     return `${p?.name ?? id} · ${snap.machines.find(m => m.machine === p?.machine)?.name ?? p?.machine ?? ''}`
   }
   const hits: SearchHit[] = []
-  for (const p of snap.places) if (inPlace(p.id) && words(q, p.name, context(p.id))) hits.push({ key: `p:${p.id}`, kind: 'Spaces', label: p.name, context: context(p.id), place: p.id, at: 0 })
-  for (const t of snap.tasks) if ((inPlace(t.place) || (scope.kind === 'chat' && sources.some(c => c.key === (t.agent?.chat ?? `${t.id}/Agent`)))) && (q.trim() || !t.archived) && words(q, t.id, t.name, t.sub, t.desc, context(t.place), t.report?.msg)) hits.push({ key: `t:${t.id}`, kind: 'Tasks', label: `${t.id} · ${t.name}`, context: `${t.archived ? 'Archived · ' : ''}${context(t.place)}`, place: t.place, task: t.id, at: Math.max(t.doneAt ?? 0, chats[t.agent?.chat ?? `${t.id}/Agent`]?.messages.reduce((at, m) => Math.max(at, m.at ?? 0), 0) ?? 0) })
-  for (const a of snap.artifacts ?? []) if ((inPlace(a.place) || (scope.kind === 'chat' && (a.chats?.includes(scope.id) || chats[scope.id]?.messages.some(m => m.artifact?.id === a.id)))) && words(q, a.title, a.id, a.by)) hits.push({ key: `a:${a.id}`, kind: 'Artifacts', label: a.title, context: `${context(a.place)} · ${a.by} · v${a.v}`, place: a.place, artifact: a.id, at: a.at })
-  for (const c of sources) {
-    const msgs = chats[c.key]?.messages ?? []
-    const found = q.trim() ? new Set(findIn(msgs, q)) : null
+  const counts: Record<SearchKind, number> = { Spaces: 0, Tasks: 0, Messages: 0, Artifacts: 0 }
+  const add = (hit: SearchHit) => {
+    if (counts[hit.kind] >= SEARCH_HITS_PER_KIND) return
+    counts[hit.kind]++
+    hits.push(hit)
+  }
+  for (const p of snap.places) if (inPlace(p.id) && words(q, p.name, context(p.id))) add({ key: `p:${p.id}`, kind: 'Spaces', label: p.name, context: context(p.id), place: p.id, at: 0 })
+  for (const t of snap.tasks) if ((inPlace(t.place) || (scope.kind === 'chat' && sources.some(c => c.key === (t.agent?.chat ?? `${t.id}/Agent`)))) && (q.trim() || !t.archived) && words(q, t.id, t.name, t.sub, t.desc, context(t.place), t.report?.msg)) add({ key: `t:${t.id}`, kind: 'Tasks', label: `${t.id} · ${t.name}`, context: `${t.archived ? 'Archived · ' : ''}${context(t.place)}`, place: t.place, task: t.id, at: Math.max(t.doneAt ?? 0, chats[t.agent?.chat ?? `${t.id}/Agent`]?.messages.reduce((at, m) => Math.max(at, m.at ?? 0), 0) ?? 0) })
+  for (const a of snap.artifacts ?? []) if ((inPlace(a.place) || (scope.kind === 'chat' && (a.chats?.includes(scope.id) || chats[scope.id]?.messages.some(m => m.artifact?.id === a.id)))) && words(q, a.title, a.id, a.by)) add({ key: `a:${a.id}`, kind: 'Artifacts', label: a.title, context: `${context(a.place)} · ${a.by} · v${a.v}`, place: a.place, artifact: a.id, at: a.at })
+  // An empty query lists Spaces, Tasks and Artifacts only: their own `at` is enough, and no chat needs loading.
+  if (q.trim()) for (const c of sources) {
+    const all = chats[c.key]?.messages ?? []
+    const msgs = all.length > SEARCH_MESSAGE_WINDOW ? all.slice(-SEARCH_MESSAGE_WINDOW) : all
+    const found = new Set(findIn(msgs, q))
     for (const m of msgs) {
-      if (m.waiting || (found ? !found.has(m.id) : !(m.text || m.file || m.question))) continue
-      hits.push({ key: `m:${c.key}:${m.id}`, kind: 'Messages', label: searchExcerpt(messageText(m), q), context: `${c.label} · ${context(c.place)}`, place: c.place, chat: c.key, message: m.id, at: m.at ?? 0 })
+      if (m.waiting || !found.has(m.id)) continue
+      add({ key: `m:${c.key}:${m.id}`, kind: 'Messages', label: searchExcerpt(messageText(m), q), context: `${c.label} · ${context(c.place)}`, place: c.place, chat: c.key, message: m.id, at: m.at ?? 0 })
     }
   }
   return hits.sort((a, b) => b.at - a.at)
