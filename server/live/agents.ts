@@ -411,17 +411,26 @@ export class Agents extends Emitter<Events> {
     this.recordsFlushQueued = true
     queueMicrotask(() => {
       this.recordsFlushQueued = false
-      this.flushRecords()
+      try { this.flushRecords() } catch (e) { this.writeFailed(e) }
     })
   }
 
-  /** a pendingLaunch flip (settleLaunches): harmless to delay, and many happen in one refresh burst, so one timer
-   *  serves all flips until it fires. A save() in the same turn still flushes them at the end of that turn. */
+  /** a pendingLaunch flip (settleLaunches): safe to hold for this short window — herdr drops an unasked launch itself,
+   *  so a flip lost to a hard kill costs at most a leftover pane. Many happen in one refresh burst, so one timer serves
+   *  all flips until it fires; a save() in the same turn still flushes them at the end of that turn. */
   private savePending() {
     this.recordsDirty = true
     if (this.recordsTimer) return
-    this.recordsTimer = setTimeout(() => this.flushRecords(), this.recordsSaveAfter)
+    this.recordsTimer = setTimeout(() => {
+      this.recordsTimer = null
+      try { this.flushRecords() } catch (e) { this.writeFailed(e) }
+    }, this.recordsSaveAfter)
     this.recordsTimer.unref?.()
+  }
+
+  /** a failed write leaves the records dirty for the next flush, and is said rather than thrown on the event loop */
+  private writeFailed(e: unknown) {
+    console.error(`shepherdr: could not write agents.json: ${(e as Error).message}`)
   }
 
   /** write the dirty records once, now; the outbox is never held back */
@@ -431,8 +440,8 @@ export class Agents extends Emitter<Events> {
       this.recordsTimer = null
     }
     if (!this.recordsDirty) return
-    this.recordsDirty = false
     writeJson('agents.json', this.records, home(), true)
+    this.recordsDirty = false
   }
 
   record(key: string) {

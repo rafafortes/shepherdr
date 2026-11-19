@@ -3,7 +3,7 @@
 // the writes: the flips coalesce into one, outbox.json stays immediate, a stop/finish/forget is durable, and the
 // compact write is measured against the old indented one on a synthetic store.
 import { describe, expect, spyOn, test } from 'bun:test'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -147,6 +147,58 @@ describe('agents.json writes are debounced, outbox.json is not', () => {
     }
   })
 
+  test('flushRecords writes compact JSON that parses to the same records', () => {
+    put()
+    const spy = spyOn(store, 'writeJson').mockImplementation((...args: Parameters<typeof store.writeJson>) => realWriteJson(...args))
+    const a = new Agents()
+    try {
+      a.record(KEY)!.model = 'compact'
+      a.save()
+      a.flushRecords()
+      const text = readFileSync(join(home, 'agents.json'), 'utf8')
+      expect(text).not.toContain('\n  ')
+      expect(JSON.parse(text)).toEqual(a.records)
+      const call = spy.mock.calls.find((c: unknown[]) => c[0] === 'agents.json')
+      expect(call?.[3]).toBe(true)
+    } finally {
+      a.stop()
+      spy.mockRestore()
+    }
+  })
+
+  test('a failed record write stays dirty and is said, not thrown, on the event loop', async () => {
+    put()
+    const errors = spyOn(console, 'error').mockImplementation(() => {})
+    let fail = true
+    const spy = spyOn(store, 'writeJson').mockImplementation((...args: Parameters<typeof store.writeJson>) => {
+      if (fail && args[0] === 'agents.json') throw new Error('disk full')
+      return realWriteJson(...args)
+    })
+    const a = new Agents()
+    a.recordsSaveAfter = 5
+    a.pendingFor = 0
+    try {
+      // the microtask path: caught, and the records stay dirty
+      a.record(KEY)!.model = 'retry-me'
+      a.save()
+      await Promise.resolve()
+      expect(errors.mock.calls.some((c: unknown[]) => String(c[0]).includes('could not write agents.json'))).toBe(true)
+      // the timer path: also caught, no uncaught exception on the event loop
+      a.live = new Map([[name, { name, launch_pending: true } as unknown as AgentInfo]])
+      ;(a as unknown as { settleLaunches: () => void }).settleLaunches()
+      await Bun.sleep(30)
+      expect(errors.mock.calls.filter((c: unknown[]) => String(c[0]).includes('could not write agents.json')).length).toBeGreaterThan(1)
+      // the next good flush writes the same records
+      fail = false
+      a.flushRecords()
+      expect(onDisk('agents.json')[KEY].model).toBe('retry-me')
+    } finally {
+      a.stop()
+      spy.mockRestore()
+      errors.mockRestore()
+    }
+  })
+
   test('compact write of a ~3.6 MB store: stringify + write, before and after (ms)', () => {
     // a synthetic store with many small fields, so indentation really costs (a real coordinator record is like this)
     const line = { path: '/w/a-long-project-folder/sessions/2026-11-18/session.jsonl', id: 'a-session-id', kind: 'claude' }
@@ -158,21 +210,21 @@ describe('agents.json writes are debounced, outbox.json is not', () => {
     const count = Math.ceil(3_600_000 / per)
     const records = Object.fromEntries(Array.from({ length: count }, (_, i) => one(i)))
     const bytes = JSON.stringify(records, null, 2).length
-    const measure = (pretty: boolean) => {
-      const file = join(home, `bench-${pretty ? 'pretty' : 'compact'}.json`)
-      writeFileSync(file, pretty ? JSON.stringify(records, null, 2) : JSON.stringify(records)) // warm up the file
+    // the production writer, both ways: its default indentation (before) and compact (after)
+    const measure = (compact: boolean) => {
+      const file = 'bench.json' // one inode for both, so the comparison is stringify + write, not file creation
+      store.writeJson(file, records, home, compact) // warm up the file
       const times: number[] = []
       for (let n = 0; n < 9; n++) {
         const t0 = performance.now()
-        const json = pretty ? JSON.stringify(records, null, 2) : JSON.stringify(records)
-        writeFileSync(file, json)
+        store.writeJson(file, records, home, compact)
         times.push(performance.now() - t0)
       }
       times.sort((a, b) => a - b)
       return times[4] // median, this machine is shared and busy
     }
-    const pretty = measure(true)
-    const compact = measure(false)
+    const pretty = measure(false)
+    const compact = measure(true)
     console.log(`agents-save: ${count} records, ${bytes} bytes; stringify+write indented ${pretty.toFixed(1)} ms, compact ${compact.toFixed(1)} ms`)
     expect(bytes).toBeGreaterThan(3_600_000)
   })
