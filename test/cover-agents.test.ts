@@ -319,6 +319,22 @@ describe('watching herdr', () => {
     for (const r of [restarted, noSession, notRunning]) expect(a.runtime(r.key)).toBeUndefined()
     expect(told.sort()).toEqual([byId.key, byPath.key, byLog.key].sort())
   })
+
+  test('a runtime read that throws says nothing and keeps no half-read state', async () => {
+    const byId = rec('CX-7/Agent', { kind: 'codex' })
+    const a = agentsWith(byId)
+    Object.assign(a, { runtimeAt: Date.now() })
+    await looked(a, info(byId.name, { agent: 'codex', agent_session: { source: 'herdr', agent: 'codex', kind: 'id', value: '55555555-5555-4555-8555-555555555555' } }))
+    // a listener of the table's own that throws: the look carries on, and what it had read is dropped
+    a.on('logs', () => {
+      throw new Error('boom')
+    })
+    Object.assign(a, { runtimeAt: 0 })
+    const inner = a as unknown as { readRuntime(): Promise<void>; runtimeReading: boolean }
+    await inner.readRuntime()
+    expect(a.runtime(byId.key)).toBeUndefined()
+    expect(inner.runtimeReading).toBe(false)
+  })
 })
 
 describe('what a Claude Code agent reports of itself', () => {
@@ -468,7 +484,8 @@ describe('logs a CLI starts on its own', () => {
     const pi = rec('DL-1/Agent', { kind: 'pi', cwd: tmp('cover-agents-dl-pi') })
     const claude = rec('DL-2/Agent', { kind: 'claude', cwd: tmp('cover-agents-dl-claude'), sessionId: UUID })
     const unknown = rec('DL-3/Agent', { kind: 'gemini' })
-    const a = agentsWith(pi, claude, unknown)
+    const codex = rec('DL-4/Agent', { kind: 'codex', cwd: tmp('cover-agents-dl-codex') })
+    const a = agentsWith(pi, claude, unknown, codex)
     const told: string[] = []
     a.on('logs', (k) => told.push(k))
     const piLog = join(piSessionDir(pi.cwd), `2026-11-10T10-00-00-000Z_${UUID}.jsonl`)
@@ -480,9 +497,17 @@ describe('logs a CLI starts on its own', () => {
     expect(a.record(claude.key).logs).toEqual([claudeLogPath(claude.cwd, UUID)])
     expect(a.record(unknown.key).logs).toEqual([])
     expect(told).toEqual([pi.key, claude.key])
+    // Codex's is the rollout whose session_meta names this folder; it resumes by its last log, not by an id
+    const d = new Date()
+    const day = join(codexHome(), 'sessions', String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0'))
+    const rollout = join(day, `rollout-2026-11-10T10-00-00-${UUID}.jsonl`)
+    touch(rollout, `${JSON.stringify({ type: 'session_meta', payload: { cwd: codex.cwd } })}\n`)
+    a.discoverLog(codex.key)
+    expect(a.record(codex.key).logs).toEqual([rollout])
+    expect(told).toEqual([pi.key, claude.key, codex.key])
     // found again: nothing more
     a.discoverLog(pi.key)
-    expect(told).toEqual([pi.key, claude.key])
+    expect(told).toEqual([pi.key, claude.key, codex.key])
   })
 
   test('an agent already running in herdr is adopted as a chat, with the log herdr names', () => {
