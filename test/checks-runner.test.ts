@@ -102,6 +102,10 @@ describe('the discovered checks', () => {
     expect(f.calls()).toEqual(['one', 'two', 'three'])
     expect(r.out).toMatch(/1\/3 one ok \([^)]*\) Ran 7 tests across 2 files/)
     expect(r.out).toContain('2/3 two skipped: the tool is missing')
+    // the verdict says which part did not run, as it does for a browser that could not start
+    expect(r.out).toContain('PASSED in ')
+    expect(r.out).toContain('with parts of it not run:')
+    expect(r.out).toContain('  ! two: the tool is missing')
   })
 
   test('only the default branch gets the record and map flags a baseline needs', () => {

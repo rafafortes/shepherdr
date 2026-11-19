@@ -168,7 +168,9 @@ step() { # <name> <check file>
   fi
   local line="${#what[@]}/$total $name"
   if [ "$code" -eq 0 ] && [ -s "$logs/$name.skip" ]; then
-    say "$line skipped: $(cat "$logs/$name.skip")"
+    skipped_reason=$(cat "$logs/$name.skip")
+    say "$line skipped: $skipped_reason"
+    notes+=("$name: $skipped_reason")
   elif [ "$code" -eq 0 ]; then
     note=$(step_note "$name")
     say "$line ok ($(dur "$secs"))${note:+ $note}"
