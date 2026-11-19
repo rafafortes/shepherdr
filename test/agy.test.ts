@@ -287,25 +287,40 @@ describe('the mirror of a conversation', () => {
     expect(lines(file).map((l) => l.idx)).toEqual([0])
   })
 
-  test('the mirror stops at the first step still running, and goes on when it is final', () => {
+  test('the conversation\'s last step waits while it runs, and is copied once it is over', () => {
     makeConversation(join(convs, 'conv-b.db'), [
       { idx: 0, step_type: 14, payload: userPayload('one') },
       { idx: 1, step_type: 15, status: 1, payload: agentPayload({ text: 'partial' }) },
     ])
     const file = join(folder('partial'), 'conv-b.jsonl')
     expect(mirrorConversation('conv-b', file)).toBe(1)
-    addStep('conv-b', { idx: 2, step_type: 14, payload: userPayload('two'), status: 3 })
-    // step 1 still runs: nothing after it is copied
+    // still running, and nothing after it
     expect(mirrorConversation('conv-b', file)).toBe(0)
     const d = new Database(join(convs, 'conv-b.db'))
-    d.run('UPDATE steps SET status = 3, step_payload = ? WHERE idx = 1', [agentPayload({ text: 'final' })])
+    d.run('UPDATE steps SET status = 3, step_payload = ? WHERE idx = 1', [agentPayload({ text: 'final', tokensIn: 3, tokensOut: 2 })])
     d.close()
-    expect(mirrorConversation('conv-b', file)).toBe(2)
-    expect(lines(file).map((l) => l.idx)).toEqual([0, 1, 2])
+    expect(mirrorConversation('conv-b', file)).toBe(1)
+    expect(lines(file).map((l) => l.idx)).toEqual([0, 1])
     expect(lines(file)[1]).toMatchObject({ kind: 'agent', text: 'final' })
   })
 
-  test('the statuses 0, 1 and 2 are not final; 3 and 6 are', () => {
+  test('a step agy left running is copied as it stands once a step follows it, so the rest of the conversation shows', () => {
+    // agy leaves a tool call's status at 2 when it never comes back: waiting for it would stop the mirror for good (it did
+    // in 9 of this machine's real conversations)
+    makeConversation(join(convs, 'conv-stuck.db'), [
+      { idx: 0, step_type: 14, payload: userPayload('one') },
+      { idx: 1, step_type: 15, status: 3, payload: agentPayload({ text: 'running it', tokensIn: 5, tokensOut: 2 }) },
+      { idx: 2, step_type: 132, status: 2, payload: toolPayload({ tool: 'run_command', args: '{"CommandLine":"sleep"}', sec: 1700000200 }) },
+    ])
+    const file = join(folder('stuck'), 'conv-stuck.jsonl')
+    expect(mirrorConversation('conv-stuck', file)).toBe(2)
+    addStep('conv-stuck', { idx: 3, step_type: 15, payload: agentPayload({ text: 'done', tokensIn: 9, tokensOut: 3 }) })
+    expect(mirrorConversation('conv-stuck', file)).toBe(2)
+    expect(lines(file).map((l) => l.idx)).toEqual([0, 1, 2, 3])
+    expect(lines(file)[2]).toMatchObject({ kind: 'tool', tool: 'run_command' })
+  })
+
+  test('a step\'s status: 0, 1 and 2 are not final while the step is the conversation\'s last; a later step settles it', () => {
     makeConversation(join(convs, 'conv-s.db'), [
       { idx: 0, step_type: 14, status: 3, payload: userPayload('s3') },
       { idx: 1, step_type: 14, status: 6, payload: userPayload('s6') },
@@ -314,12 +329,12 @@ describe('the mirror of a conversation', () => {
       { idx: 4, step_type: 14, status: 0, payload: userPayload('s0') },
     ])
     const file = join(folder('status'), 'conv-s.jsonl')
-    expect(mirrorConversation('conv-s', file)).toBe(2)
-    const d = new Database(join(convs, 'conv-s.db'))
-    d.run('UPDATE steps SET status = 3 WHERE idx IN (2, 3)')
-    d.close()
-    expect(mirrorConversation('conv-s', file)).toBe(2)
+    // the last step runs: it waits, and the three before it are copied
+    expect(mirrorConversation('conv-s', file)).toBe(4)
     expect(lines(file).map((l) => l.idx)).toEqual([0, 1, 2, 3])
+    addStep('conv-s', { idx: 5, step_type: 14, status: 3, payload: userPayload('s5') })
+    expect(mirrorConversation('conv-s', file)).toBe(2)
+    expect(lines(file).map((l) => l.idx)).toEqual([0, 1, 2, 3, 4, 5])
     expect(mirrorConversation('conv-s', file)).toBe(0)
   })
 
@@ -492,8 +507,6 @@ describe('the mirror of a conversation', () => {
       { idx: 1, step_type: 15, payload: pb({ ...stepAt(1700000100), '20': pb({ '12': 2 }) }) },
     ])
     const file = join(folder('dead'), 'conv-dead.jsonl')
-    const long = new Date(Date.now() - 2 * 60 * 60_000)
-    utimesSync(join(convs, 'conv-dead.db'), long, long)
     expect(mirrorConversation('conv-dead', file)).toBe(1)
     addStep('conv-dead', { idx: 2, step_type: 14, payload: userPayload('again', 1700000200) })
     expect(mirrorConversation('conv-dead', file)).toBe(2)

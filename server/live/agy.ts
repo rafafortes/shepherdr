@@ -511,14 +511,17 @@ function mirrorAgy(id: string, outFile: string, db: string): number {
 }
 
 /**
- * Whether agy is still writing this step: one that runs, or the conversation's last step when it is a model response without
- * its usage yet. agy appends a conversation's steps in order and writes a response's usage with its last write, so only the
- * last step can be on its way; an empty response an abandoned run left stays uncopied until another step follows it, which
- * costs the chat nothing (an empty model response shows nothing) and ends the moment the conversation goes on.
+ * Whether agy is still writing this step. Only a conversation's last step can be on its way: agy appends its steps in order
+ * and writes a model response's usage with its last write of it. So the last step waits while it runs, and while it is a
+ * model response without its usage yet (an empty response an abandoned run left thus stays uncopied, which costs the chat
+ * nothing: it shows nothing, and the conversation goes on the moment a step follows it). A step with steps after it is
+ * copied as it stands: agy leaves a tool call's status at 2 when it never comes back, and waiting for it would hide the rest
+ * of the conversation for good.
  */
 function unsettled(s: Step, last: boolean): boolean {
+  if (!last) return false
   if (NOT_FINAL.has(s.status)) return true
-  return last && s.step_type === 15 && !s.error_details?.length && pending(s.step_payload ?? EMPTY)
+  return s.step_type === 15 && !s.error_details?.length && pending(s.step_payload ?? EMPTY)
 }
 
 /** the newest conversation of a folder for this CLI: its mirror's path, or nothing; a failure is never thrown */

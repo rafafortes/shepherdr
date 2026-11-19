@@ -302,7 +302,11 @@ export class JobLogs {
     }
     l.used = Date.now()
     // a piece at a time: a long log is read on over the next looks (the chat looks once a second)
+    const starts = l.tail.restarts
     const fresh = l.tail.read(4 << 20)
+    // a log read again from its start under us (a store's mirror written again whole): its steps are said again, so what was
+    // read of it before goes
+    if (l.tail.restarts !== starts) l.ev = []
     if (fresh.length) l.ev.push(...fresh.filter((e) => e.kind === 'step' || e.kind === 'step-end' || e.kind === 'turn-start' || e.kind === 'turn-end'))
     return l.ev
   }
