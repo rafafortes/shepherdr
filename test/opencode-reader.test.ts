@@ -254,6 +254,11 @@ describe('opencode reader', () => {
     })
   })
 
+  test('a part with a start but no end never ends before it started', () => {
+    const ev = parse([turn('a31', { content: [{ type: 'tool', tool: 'bash', state: { status: 'running', time: { start: 50 } } }], finish: 'tool-calls' })])
+    expect(ev.find((e) => e.kind === 'step')).toMatchObject({ at: 50, end: 50 })
+  })
+
   test('each tool reads in words: shell, files, search, web, subagent and an unknown tool', () => {
     expect(opencodeStep('bash', { command: 'git status' })).toMatchObject({ step: 'run', title: 'Checked git status' })
     expect(opencodeStep('read', { filePath: '/w/a.ts' })).toMatchObject({ step: 'read', title: 'Read a.ts' })

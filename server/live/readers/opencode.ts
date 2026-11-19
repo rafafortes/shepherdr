@@ -132,7 +132,7 @@ export class OpencodeReader implements Reader {
           const said = opencodeStep(tool, state.input ?? part.input)
           // a part keeps its own start and end where OpenCode recorded them; older rows only have the row's time
           const began = typeof state.time?.start === 'number' ? state.time.start : at
-          const over = typeof state.time?.end === 'number' ? state.time.end : at
+          const over = Math.max(began, typeof state.time?.end === 'number' ? state.time.end : at)
           out.push({
             kind: 'step',
             id: `${id}-${index}`,
