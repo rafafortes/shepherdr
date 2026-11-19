@@ -418,14 +418,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     // a profile's schedule that came due while Shepherdr was off: the latest one applies now (profile-schedule.ts)
     this.profileSchedules.tick()
-    // whether a primary that ran out answers again: never at boot, the first look ten minutes after this machine
-    // started, and every minute after that; never beside work on the model it asks (watchReturns)
+    // whether a primary that ran out answers again: never at boot, the first look a minute after this machine started
+    // (an outage kept before a restart, its wait long over, is asked then), and every minute after that; never beside
+    // work on the model it asks (watchReturns)
     if (process.env.NODE_ENV !== 'test')
       this.timers.push(
         setTimeout(() => {
           void this.watchReturns().catch(() => undefined)
           this.timers.push(setInterval(() => void this.watchReturns().catch(() => undefined), 60_000))
-        }, 10 * 60_000) as unknown as ReturnType<typeof setInterval>,
+        }, FIRST_LOOK) as unknown as ReturnType<typeof setInterval>,
       )
     // a question that waited long enough for the human goes to the advisor by itself (watchAdvice)
     if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => void this.watchAdvice().catch(() => undefined), 30_000))
@@ -2728,6 +2729,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.adoptCutOffs(now)
     /** the roles this pass already alerted for: a reviewer set Everywhere is one news, not one per space */
     const alerted = new Set<string>()
+    /** what this pass has already asked a model (the answer the probe gave): a model is this machine's, so a second space
+     *  or role waiting on it reads that answer instead of asking the provider again */
+    const probed = new Map<string, Probe>()
     /** the spaces whose cut-off tasks still wait for a slot, found again each pass: a wait over is never kept */
     const resuming = new Set<string>()
     /** the spaces whose cut-off tasks wait for a slot of their own cap (space.maxTasks): only their new tasks wait too */
@@ -2748,29 +2752,42 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // itself too often today waits for the human: both only hear
       const often = this.returns.tooOften(o, now)
       const moves = mode === 'go back' && o.role !== 'reviewer' && !often
-      // the primary answered a moment ago: what is still on the backup follows, without asking it again
-      if (!(moves && o.ok && now - o.ok < FRESH)) {
+      // the primary answered a moment ago: what is still on the backup follows, without asking it again (an answer
+      // that freed a sibling space says the same here)
+      const fresh = o.ok !== undefined && now - o.ok < FRESH
+      if (!fresh) {
         // an agent of this machine at work on that very model, with no cut-off of its own, and none in this outage for
-        // a while: the primary answers, and nothing needs asking
-        if (now - (o.lastCut ?? o.at) >= QUIET && this.answersNow(to.primary)) this.returns.ok(o.role, o.space, now, false)
+        // a while: the primary answers, and nothing needs asking — for every space waiting on that model too
+        const busy = this.answersNow(to.primary)
+        if (now - (o.lastCut ?? o.at) >= QUIET && busy) this.answeredModel(to.primary, now)
+        // a turn of this machine still runs on it: a probe never asks beside work on the model it asks, and the next pass
+        // asks once that work is over (or the quiet makes it the answer)
+        else if (busy) continue
         else {
           if ((o.due ?? 0) > now) continue
           // a CLI this machine doesn't have, or one Shepherdr has no silent one-shot for, is never asked
           if (!canProbe(to.primary.kind) || !this.engine.installed(to.primary.kind)) continue
-          let probe: Probe
-          try {
-            probe = await this.returns.probe(to.primary)
-          } catch (e) {
-            probe = { ok: false, said: (e as Error).message }
+          const model = keyOf(to.primary.kind, to.primary.model)
+          const askedBefore = probed.has(model)
+          let probe = probed.get(model)
+          if (!probe) {
+            try {
+              probe = await this.returns.probe(to.primary)
+            } catch (e) {
+              probe = { ok: false, said: (e as Error).message }
+            }
+            probed.set(model, probe)
+            // its failure is silent for the human — no card, no alert, nothing to answer — and leaves only the log and a
+            // longer wait; a sibling space waiting on that model hears the same failure from this pass, unasked
+            if (!probe.ok) console.error(`shepherdr: ${to.primary.kind} doesn't answer yet: ${probe.said.slice(0, 160)}`)
           }
-          // its failure is silent for the human — no card, no alert, nothing to answer — and leaves only the log and a
-          // longer wait
           if (!probe.ok) {
-            console.error(`shepherdr: ${to.primary.kind} doesn't answer yet: ${probe.said.slice(0, 160)}`)
             this.returns.failed(o.role, o.space, now)
             continue
           }
-          this.returns.ok(o.role, o.space, now)
+          // the one that asked counts this answer; its siblings hear of it unasked, each on its own schedule
+          this.returns.ok(o.role, o.space, now, !askedBefore)
+          if (!askedBefore) this.answeredModel(to.primary, now, o)
         }
       }
       if (!moves) {
@@ -2807,6 +2824,24 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     await this.coordinatorsWaiting()
     // a wait over (its models answer, or its cut-off tasks went back): the queue goes on, or waits on with its reason
     this.engine.release()
+  }
+
+  /**
+   * That model answers — a probe of it, or an agent of this machine at work on it — and a model is this machine's, not a
+   * space's: every open outage of that very model hears the same answer at once, whichever space or role it belongs to.
+   * So a passing probe in one space unlocks the others without asking the provider again (a probe once serves them all,
+   * and outNow stops holding new starts off it), each going back on its own setting and its own count of returns (never
+   * one whose watch is off, and never one cut off after the answer: that is the primary refusing again, not an answer).
+   * `asker` is the outage whose own probe answered: it counts the answer itself.
+   */
+  private answeredModel(primary: Harness, at: number, asker?: Outage) {
+    const model = keyOf(primary.kind, primary.model)
+    for (const o of this.returns.list()) {
+      if (o === asker || o.back || keyOf(o.primary.kind, o.primary.model) !== model) continue
+      if (returnMode(this.settings.get('backup.watchReturn', o.space || undefined)) === 'off') continue
+      if ((o.lastCut ?? o.at) > at) continue
+      this.returns.ok(o.role, o.space, at, false)
+    }
   }
 
   /**
@@ -5485,6 +5520,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return `Merged ${t.id} into ${t.base}${r.note ? ` (${r.note})` : ''}.${ctx.chat === `${t.id}/Agent` ? ' Your worktree, branch and herdr space close once this turn ends: do nothing more in them.' : ''}`
   }
 }
+
+/** how long after this machine started the way back looks first: an outage kept from before a restart, its wait long over,
+ *  is asked then — not at boot, beside the agents coming up, and not ten minutes on */
+export const FIRST_LOOK = 60_000
 
 /** how long one line of another space's news may be for the main machine's home space */
 const OVERVIEW_MAX = 240
