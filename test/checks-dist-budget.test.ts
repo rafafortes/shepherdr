@@ -161,7 +161,8 @@ describe('the command', () => {
     expect(base.js).toBe(100000)
     expect(base.files).toEqual({ 'assets/index.js': 100000, 'assets/InterVariable.woff2': 400000 })
     expect(base.exempt).toEqual(['assets/InterVariable.woff2'])
-    expect(base.top).toBeUndefined()
+    expect(base.top[0]).toEqual({ name: 'assets/InterVariable.woff2', bytes: 400000, kind: 'font' })
+    expect(base.top.map((a: { name: string }) => a.name)).toContain('assets/index.js')
   })
 
   test('a baseline 10 KB smaller than the fixture dist fails with the delta named; a big new asset fails too', () => {

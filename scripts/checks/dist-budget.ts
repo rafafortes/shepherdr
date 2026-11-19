@@ -33,8 +33,8 @@ export type Snapshot = {
   exempt: string[]
 }
 
-/** what the baseline keeps: a snapshot without its ordered top, plus the commit that recorded it */
-export type Baseline = { commit: string; at: number } & Omit<Snapshot, 'top'>
+/** what the baseline keeps: the whole snapshot, plus the commit that recorded it */
+export type Baseline = { commit: string; at: number } & Snapshot
 
 /** one asset may not arrive over this, unless the baseline already let it (the fonts) */
 export const HARD_CAP = 300 * 1024
@@ -170,9 +170,8 @@ export function main(args: string[], o: { repo?: string; baseline?: string; log?
     const commit = git(repo, 'rev-parse', 'HEAD')?.trim() ?? ''
     if (git(repo, 'status', '--porcelain')?.trim()) log("No dist baseline recorded: the tree holds what is not committed, and a baseline is a commit's.")
     else {
-      const { top: _top, ...kept } = now
       mkdirSync(dirname(file), { recursive: true })
-      writeFileSync(file, JSON.stringify({ commit, at: Date.now(), ...kept } satisfies Baseline))
+      writeFileSync(file, JSON.stringify({ commit, at: Date.now(), ...now } satisfies Baseline))
       log(`Dist baseline of ${commit.slice(0, 7)}: recorded in ${file}.`)
     }
   }
