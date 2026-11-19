@@ -391,6 +391,14 @@ describe('the shepherdr command', () => {
     expect(r.out).toContain('shepherdr set app.hosts <host>')
   })
 
+  test('the app reads app.hosts through the source, fresh on every request', async () => {
+    expect(src.hosts()).toEqual([])
+    expect((await cli(['set', 'app.hosts', 'a.example.com, B.example.com'])).code).toBe(0)
+    expect(src.hosts()).toEqual(['a.example.com', 'b.example.com'])
+    expect((await cli(['unset', 'app.hosts'])).code).toBe(0)
+    expect(src.hosts()).toEqual([])
+  })
+
   test('doctor names the published host, and a refused host only while it stays refused', async () => {
     const { refusedHosts } = await import('../server/hosts.ts')
     refusedHosts.add('evil.example:7787')
