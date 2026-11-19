@@ -169,7 +169,9 @@ describe('the command', () => {
   })
 
   test('a baseline 10 KB smaller than the fixture dist fails with the delta named; a big new asset fails too', () => {
-    const w = worldOf({ 'assets/index-5tkGkQ0q.js': 100000 }, (repo) => { writeFileSync(join(repo, '.gitignore'), 'dist/\n') })
+    const w = worldOf({ 'assets/index-5tkGkQ0q.js': 100000 }, (repo) => {
+      writeFileSync(join(repo, '.gitignore'), 'dist/\n')
+    })
     w.main(w.dir, '--record')
     expect(w.main(w.dir)).toBe(0)
     expect(w.said.at(-1)).toContain('Dist budget held')
@@ -183,7 +185,7 @@ describe('the command', () => {
     expect(w.said.join('\n')).toContain('new asset over the 300.0 KB cap: assets/newbig.js')
   })
 
-  test('where the baseline is kept: the repo\'s own .git, for every worktree; a broken one is none', () => {
+  test("where the baseline is kept: the repo's own .git, for every worktree; a broken one is none", () => {
     const w = worldOf({ 'index.html': 10 })
     expect(D.baselineFile(w.repo)).toBe(join(w.repo, '.git', 'shepherdr-test', 'dist-budget.json'))
     expect(D.baselineFile(tmp('dist-budget-no-git'))).toEndWith(join('node_modules', '.cache', 'shepherdr-test', 'dist-budget.json'))

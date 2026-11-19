@@ -95,7 +95,7 @@ describe('the check itself', () => {
       .join('\n')
     // the checks are discovered by sorted file name, not named here; adding one is adding one file
     expect(lines).toContain('checks_dir="$root/scripts/checks"')
-    expect(lines).toContain("find \"$checks_dir\" -maxdepth 1 -type f")
+    expect(lines).toContain('find "$checks_dir" -maxdepth 1 -type f')
     expect(lines).toContain('LC_ALL=C sort')
     expect(lines).toContain('step "$name" "$checks_dir/$file"')
     // no command of a check is embedded in the runner any more
@@ -115,7 +115,7 @@ describe('what a failing run says', () => {
   // left out, and a file whose error names no test left to the log's end
   const script = readFileSync(join(root, 'scripts', 'check-local.sh'), 'utf8')
   const from = script.indexOf("awk '") + "awk '".length
-  const program = script.slice(from, script.indexOf("' \"$1\"", from))
+  const program = script.slice(from, script.indexOf('\' "$1"', from))
   const run = (log: string) => {
     const dir = tmp('check-log')
     try {

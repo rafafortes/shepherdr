@@ -15,7 +15,10 @@ type Said = import('../server/live/readers/hooks.ts').Said
 
 const SAMPLES = join(import.meta.dir, 'samples')
 /** the captured hook inputs, in the order Claude Code ran them */
-const INPUTS: any[] = readFileSync(join(SAMPLES, 'claude-hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+const INPUTS: any[] = readFileSync(join(SAMPLES, 'claude-hooks.jsonl'), 'utf8')
+  .trim()
+  .split('\n')
+  .map((l) => JSON.parse(l))
 
 /** folds the captured events from..to (1-based lines of the sample), a second apart; returns what it said after each */
 function run(from: number, to: number, start?: Said) {
@@ -121,7 +124,10 @@ describe('folded hook events say what the agent does', () => {
   test('SHE-90: a subagent paused on shells of its own still runs, though Stop lists only the shells; until its last notice', () => {
     // a live re-run of SHE-90's case: a background subagent started a shell of its own and ended its turn; the notice
     // woke the agent and it answered with only <no-reply>; the shell ended, the subagent finished, its notice woke it
-    const paused: any[] = readFileSync(join(SAMPLES, 'claude-paused.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+    const paused: any[] = readFileSync(join(SAMPLES, 'claude-paused.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
     let s: Said | undefined
     const said = paused.map((input, i) => (s = foldHook(s, pickHook(input, 1000 * (i + 1))!)))
     expect(said.map(brief)).toEqual([
@@ -151,23 +157,51 @@ describe('folded hook events say what the agent does', () => {
 
   test('SHE-171: a shell that serves or watches is a server, one that ends (a test run, a review, a wait) is a shell', () => {
     const kind = (command: string, description = '') => pickHook({ hook_event_name: 'Stop', background_tasks: [{ id: 'b', type: 'shell', status: 'running', command, description }] }, 1)!.bg![0]
-    for (const c of ['bun run dev', 'npm start', 'pnpm dev --port 3000', 'npx vite', 'vite preview', 'next dev -p 4000', 'python3 -m http.server 8000', 'uvicorn app:main', 'bun --hot server.ts', 'bun test --watch', 'tail -f /tmp/log', 'npx serve dist'])
+    for (const c of [
+      'bun run dev',
+      'npm start',
+      'pnpm dev --port 3000',
+      'npx vite',
+      'vite preview',
+      'next dev -p 4000',
+      'python3 -m http.server 8000',
+      'uvicorn app:main',
+      'bun --hot server.ts',
+      'bun test --watch',
+      'tail -f /tmp/log',
+      'npx serve dist',
+    ])
       expect([c, kind(c)]).toEqual([c, 'server'])
     expect(kind('bun server/index.ts', 'Start the Shepherdr server')).toBe('server')
     expect(kind('python3 app.py', 'Serve the preview on 8080')).toBe('server')
-    for (const c of ['bun run test', 'node --test test/acceptance.test.mjs; codex review --base main > /tmp/r.txt', 'while pgrep -f "codex review" >/dev/null; do sleep 15; done', 'gh run watch 123', 'vite build', 'npm run build', 'sleep 300', 'tailscale serve status'])
+    for (const c of [
+      'bun run test',
+      'node --test test/acceptance.test.mjs; codex review --base main > /tmp/r.txt',
+      'while pgrep -f "codex review" >/dev/null; do sleep 15; done',
+      'gh run watch 123',
+      'vite build',
+      'npm run build',
+      'sleep 300',
+      'tailscale serve status',
+    ])
       expect([c, kind(c, 'Run the tests then a review')]).toEqual([c, 'shell'])
     expect(pickHook({ hook_event_name: 'Stop', background_tasks: [{ id: 'm', type: 'monitor', status: 'running', command: 'tail -f x' }] }, 1)!.bg).toEqual(['monitor'])
   })
 
   test("only Claude Code's own words pause a subagent, and of one task's notices in a prompt the last counts", () => {
     const notice = (id: string, summary: string, rest = '') => `<task-notification>\n<task-id>${id}</task-id>\n<status>completed</status>\n<summary>${summary}</summary>\n${rest}</task-notification>`
-    const PAUSED = notice('a1', 'Agent "Review" is waiting on its own background work', '<note>This agent stopped with background work of its own still running. It may resume on its own.</note>\n<result>Monitor still watching.</result>\n')
+    const PAUSED = notice(
+      'a1',
+      'Agent "Review" is waiting on its own background work',
+      '<note>This agent stopped with background work of its own still running. It may resume on its own.</note>\n<result>Monitor still watching.</result>\n',
+    )
     const FINISHED = notice('a1', 'Agent "Review" finished', '<result>Done.</result>\n')
     const prompt = (...n: string[]) => pickHook({ hook_event_name: 'UserPromptSubmit', prompt: n.join('\n') }, 1)
     // a shell whose command quotes the words, and a finished subagent whose result does: both are over
     expect(prompt(notice('bk2a9x0qz', `Background command "grep -rn 'waiting on its own background work' server" completed`))).toEqual({ at: 1, event: 'UserPromptSubmit', over: ['bk2a9x0qz'] })
-    expect(prompt(notice('a2', 'Agent "Grep" finished', '<result>Found "is waiting on its own background work" in hooks.ts. This agent stopped with background work of its own still running</result>\n'))).toEqual({ at: 1, event: 'UserPromptSubmit', over: ['a2'] })
+    expect(
+      prompt(notice('a2', 'Agent "Grep" finished', '<result>Found "is waiting on its own background work" in hooks.ts. This agent stopped with background work of its own still running</result>\n')),
+    ).toEqual({ at: 1, event: 'UserPromptSubmit', over: ['a2'] })
     // paused, then finished, in one prompt: over; and the other way round: paused
     expect(prompt(PAUSED, notice('b1', 'Background command "bun test" completed'), FINISHED)).toEqual({ at: 1, event: 'UserPromptSubmit', over: ['b1', 'a1'] })
     expect(prompt(FINISHED, PAUSED)).toEqual({ at: 1, event: 'UserPromptSubmit', paused: ['a1'] })
@@ -266,7 +300,11 @@ function oneAgent(events: string, log: string, herdrSays = 'idle') {
   const key = 'T-9/Agent'
   a.records[key] = { key, name: 't-9', kind: 'claude', cwd: '/x', workspace: 'w', logs: [log], started: 0, hooks: events }
   a.live.set('t-9', { agent: 'claude', agent_status: herdrSays as never, cwd: '/x', name: 't-9', pane_id: 'p', tab_id: 't', workspace_id: 'w' })
-  const chats = new Chats(a, (k) => k, () => 'You')
+  const chats = new Chats(
+    a,
+    (k) => k,
+    () => 'You',
+  )
   a.endedSince = (k, at) => chats.endedSince(k, at)
   return { a, key, chats }
 }
@@ -333,7 +371,11 @@ describe('what it has not read yet', () => {
       waiting: () => waiting,
       typedSince: (_k: string, at: number) => typed.filter((o) => o.at > at),
     }
-    const chats = new Chats(agents as never, (k) => k, () => 'Elias')
+    const chats = new Chats(
+      agents as never,
+      (k) => k,
+      () => 'Elias',
+    )
     // typed in mid-turn, not taken in yet; a reaction and Shepherdr's hidden news don't count
     expect(words(chats.unseen('T-9/Agent'))).toEqual(['Also add a line to the README'])
     // it took it in at its next step: the log has it

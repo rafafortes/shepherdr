@@ -43,7 +43,9 @@ describe('recovered private routing failures', () => {
 
   test('a genuine retry failure remains failed', async () => {
     const { w, t, key } = await failed('route-retry-fails')
-    w.agents.send = async () => { throw new Error(failure) }
+    w.agents.send = async () => {
+      throw new Error(failure)
+    }
     await expect(w.engine.tell(t.id, 'Try again')).rejects.toThrow(failure)
     w.engine.agentStatus(key)
     expect(t.trouble).toBe(failure)
@@ -121,7 +123,9 @@ describe('a task is its brief and one agent', () => {
     expect(sh('git branch --show-current', t.worktree!)).toBe('work/1-say-hello')
     const s = w.started[0]
     // the coordinator's words first, then the default way of working from Settings
-    expect(s.first).toBe(`Say hello\n\nAdd hello.txt. Merge when done.\n\n${settingsBlock(t.id, { ways: w.settings.ways(), reviewer: w.settings.harness('reviewer'), agent: w.settings.harness('task'), by: w.settings.setBy() })}`)
+    expect(s.first).toBe(
+      `Say hello\n\nAdd hello.txt. Merge when done.\n\n${settingsBlock(t.id, { ways: w.settings.ways(), reviewer: w.settings.harness('reviewer'), agent: w.settings.harness('task'), by: w.settings.setBy() })}`,
+    )
     expect(s.first).toContain('Settings: (from shepherdr show; where the brief above says otherwise, it wins)')
     expect(t.desc).toStartWith('Add hello.txt. Merge when done.\n\nSettings:')
     expect(s.cwd).toBe(t.worktree!)
@@ -146,14 +150,20 @@ describe('a task is its brief and one agent', () => {
     // the backup's sentence follows the round's ask (its id is the task's own)
     const everywhere = add('Everywhere')
     expect(everywhere.desc).toContain(
-      reviewerLineFor(CODEX_WORDS, everywhere.id, 'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (its default model, high effort) instead for that round only, and say in your summary that you did.'),
+      reviewerLineFor(
+        CODEX_WORDS,
+        everywhere.id,
+        'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (its default model, high effort) instead for that round only, and say in your summary that you did.',
+      ),
     )
     // a space's own wins over Everywhere's
     w.settings.set('reviewer.fallback', 'pi', { space: p.name })
     expect(add('Space').desc).toContain('review with a headless pi or a pi subagent (its default model, high effort) instead')
     // the coordinator's --set for this one task wins over both, its model and effort included
     const own = add('One task', { 'reviewer.fallback': 'claude', 'reviewer.fallbackModel': 'opus' })
-    expect(own.desc).toContain('review with a headless Claude Code or a Claude Code subagent (model claude-opus-5-5, high effort) instead for that round only, and say in your summary that you did. (set by coordinator for this task)')
+    expect(own.desc).toContain(
+      'review with a headless Claude Code or a Claude Code subagent (model claude-opus-5-5, high effort) instead for that round only, and say in your summary that you did. (set by coordinator for this task)',
+    )
     // what a review is stays as it was: the findings' bar and the rounds its agent counts
     expect(own.desc).toContain('- Must fix: major. Findings are tagged critical/major/minor/trivial; fix critical and major, then review again.')
     expect(own.desc).toContain('- Review rounds: 3. Stop when a round finds none to fix, at most 3 rounds.')
@@ -514,7 +524,9 @@ describe('a task is its brief and one agent', () => {
     busy(29)
     expect(stalled()).toEqual([])
     busy(31)
-    expect(stalled()).toEqual([`${t.id} may have stalled: it has worked 31m since its agent said 10m were left. Its last status: "Building", 50% done, 31m ago; herdr sees no agent CLI running in its pane. Nudge it (shepherdr task tell ${t.id} "…"), stop it, or tell the human`])
+    expect(stalled()).toEqual([
+      `${t.id} may have stalled: it has worked 31m since its agent said 10m were left. Its last status: "Building", 50% done, 31m ago; herdr sees no agent CLI running in its pane. Nudge it (shepherdr task tell ${t.id} "…"), stop it, or tell the human`,
+    ])
     expect(w.cards.filter((c) => c.status === 'work').map((c) => c.sub)).toEqual(['may be stuck: 21m past its time left'])
     busy(60)
     expect(stalled().length).toBe(1)
@@ -531,7 +543,10 @@ describe('a task is its brief and one agent', () => {
   })
 
   test('after a restart, what an open task shows is where it starts, not news', () => {
-    writeJson('tasks.json', { next: { OLD: 2 }, tasks: [{ id: 'OLD-2', n: 2, project: 'p:x:old', title: 'Open', desc: '', by: 'x', created: 1, updated: 1, worktree: '/nowhere', stage: 'needs-you', round: 0, reviews: [], roles: ['Agent'] }] })
+    writeJson('tasks.json', {
+      next: { OLD: 2 },
+      tasks: [{ id: 'OLD-2', n: 2, project: 'p:x:old', title: 'Open', desc: '', by: 'x', created: 1, updated: 1, worktree: '/nowhere', stage: 'needs-you', round: 0, reviews: [], roles: ['Agent'] }],
+    })
     const w = world()
     w.agentIs('OLD-2/Agent', 'blocked')
     expect(w.engine.statusOf(w.engine.task('OLD-2')!)).toBe('need')
@@ -539,7 +554,10 @@ describe('a task is its brief and one agent', () => {
   })
 
   test('a task from before is read in: a finished one is merged', () => {
-    writeJson('tasks.json', { next: { OLD: 1 }, tasks: [{ id: 'OLD-1', n: 1, project: 'p:x:old', title: 'Old', desc: '', by: 'x', created: 1, updated: 1, stage: 'done', round: 0, reviews: [], roles: ['Agent'] }] })
+    writeJson('tasks.json', {
+      next: { OLD: 1 },
+      tasks: [{ id: 'OLD-1', n: 1, project: 'p:x:old', title: 'Old', desc: '', by: 'x', created: 1, updated: 1, stage: 'done', round: 0, reviews: [], roles: ['Agent'] }],
+    })
     const w = world()
     const t = w.engine.task('OLD-1')!
     expect(w.engine.statusOf(t)).toBe('done')
@@ -756,7 +774,7 @@ describe('a turn the provider cut off', () => {
     expect(s).toHaveLength(2)
     // the same CLI, on the backup's model and effort, in the same worktree: no second conversation, its session
     expect(s[1]).toMatchObject({ kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low', cwd: t.worktree })
-    expect(s[1].first).toContain('Your turn was cut off by the model\'s provider (out of allowance until 5pm)')
+    expect(s[1].first).toContain("Your turn was cut off by the model's provider (out of allowance until 5pm)")
     expect(s[1].first).toContain('with your session as it was')
     expect(s[1].first).not.toContain('Taking over')
     expect(t.tookOver).toMatchObject({ from: 'claude', to: 'claude', why: 'out of allowance until 5pm' })
@@ -825,13 +843,16 @@ describe('a turn the provider cut off', () => {
       // Backup 1 isn't installed and Backup 2 is off: Backup 3 goes in
       expect(w.started.filter((x) => x.key === key)[1]).toMatchObject({ kind: 'claude', model: 'claude-sonnet-5-5' })
       expect(t.tookOver).toMatchObject({ step: 3 })
-      expect(w.engine.backupsFor('task').map((p) => [p.n, p.to?.kind, p.why])).toEqual([[1, undefined, "Codex isn't installed on this machine"], [3, 'claude', undefined]])
+      expect(w.engine.backupsFor('task').map((p) => [p.n, p.to?.kind, p.why])).toEqual([
+        [1, undefined, "Codex isn't installed on this machine"],
+        [3, 'claude', undefined],
+      ])
     } finally {
       for (const k of Object.keys(keys)) w.settings.set(k, null)
     }
   })
 
-  test("what one task keeps for itself (task add --set) wins in its chain; a takeover from before chains is Backup 1; back on the primary, it starts from Backup 1 again", async () => {
+  test('what one task keeps for itself (task add --set) wins in its chain; a takeover from before chains is Backup 1; back on the primary, it starts from Backup 1 again', async () => {
     const w = world()
     const retries = cutOff(w)
     w.engine.installed = () => true

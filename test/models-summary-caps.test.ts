@@ -12,11 +12,15 @@ import { tmp } from './tmp.ts'
 
 const NOW = Date.now()
 const HOST = 'box'
-const SPACES = [{ key: '~', name: 'home' }, { key: 'gtm', name: 'gtm' }]
+const SPACES = [
+  { key: '~', name: 'home' },
+  { key: 'gtm', name: 'gtm' },
+]
 const SPARK = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
 /** the key pi's model runs under: pi and its provider in front of the id */
 const KEY = `pi.${SPARK}`
-const settings = (seed: Partial<{ everywhere: Record<string, string>; machine: Record<string, string>; spaces: Record<string, Record<string, string>> }> = {}) => new Settings({ everywhere: {}, machine: {}, spaces: {}, ...seed })
+const settings = (seed: Partial<{ everywhere: Record<string, string>; machine: Record<string, string>; spaces: Record<string, Record<string, string>> }> = {}) =>
+  new Settings({ everywhere: {}, machine: {}, spaces: {}, ...seed })
 const ledger = (name: string) => new UsageLedger(tmp(name), true)
 
 /** the input the summary reads: the agents that run, the tasks held for a model's cap by the entry they wait for */
@@ -75,10 +79,15 @@ describe('the cap of each provider and model row', () => {
       ],
     })
     const inherits = modelsSummary(input(settings({ everywhere: { 'models.maxAtOnce': 'spark=4' } }), ledger('cap-texts-inherit')))
-    expect(inherits.caps).toEqual({ all: 'pi.spark=4', machine: '', place: placeId.machine(HOST), spaces: [
-      { key: '~', name: 'home', place: placeId.home(HOST), text: '' },
-      { key: 'gtm', name: 'gtm', place: placeId.space('gtm', HOST), text: '' },
-    ] })
+    expect(inherits.caps).toEqual({
+      all: 'pi.spark=4',
+      machine: '',
+      place: placeId.machine(HOST),
+      spaces: [
+        { key: '~', name: 'home', place: placeId.home(HOST), text: '' },
+        { key: 'gtm', name: 'gtm', place: placeId.space('gtm', HOST), text: '' },
+      ],
+    })
   })
 
   test("a space's own sub-limit shows on the row it caps: its name, the runs of that space it counts, and where its text is written", () => {
@@ -100,13 +109,15 @@ describe('the cap of each provider and model row', () => {
       { key: 'gtm', name: 'gtm', place: placeId.space('gtm', HOST), text: `pi.spark=2, ${KEY}=1` },
     ])
   })
-  
 
   test('a row says its cap in words: a count of its cap, no cap, or the provider’s that holds it, and what waits', () => {
     expect(atOnceWords({ now: 2, own: { pattern: 'pi.spark', max: 4, from: 'machine' }, held: 0 })).toMatchObject({ words: '2 of 4 at once' })
     expect(atOnceWords({ now: 2, own: { pattern: 'pi.spark', max: 4, from: 'machine' }, held: 3 }).words).toBe('2 of 4 at once · 3 held')
     expect(atOnceWords({ now: 0, held: 0 }).words).toBe('0 at once · no cap')
-    expect(atOnceWords({ now: 1, via: { pattern: 'pi.spark', max: 4, from: 'all' }, held: 0 })).toMatchObject({ words: '1 at once · no cap of its own', title: 'Held by pi · spark=4, set Everywhere. Click to set its own.' })
+    expect(atOnceWords({ now: 1, via: { pattern: 'pi.spark', max: 4, from: 'all' }, held: 0 })).toMatchObject({
+      words: '1 at once · no cap of its own',
+      title: 'Held by pi · spark=4, set Everywhere. Click to set its own.',
+    })
   })
 })
 
@@ -139,14 +150,20 @@ describe('the warnings about a local model without a cap, or at its cap', () => 
 })
 
 describe('0 blocks a row: its cap reads blocked, its running agents go on, and a role with every model blocked is a warning', () => {
-  test("a provider at 0 reads blocked · 0 allowed, its running agents said to keep running, and a model under it reads blocked by it", () => {
+  test('a provider at 0 reads blocked · 0 allowed, its running agents said to keep running, and a model under it reads blocked by it', () => {
     const s = settings({ machine: { 'models.maxAtOnce': 'spark=0' } })
     const sum = modelsSummary(input(s, ledger('blk-rows'), { runs: runsOf(KEY) }))
     expect(provider(sum, 'pi.spark').atOnce).toMatchObject({ now: 1, own: { pattern: 'pi.spark', max: 0, from: 'machine' } })
     // the note is about what runs on it now: a provider's agents, the runs the cap counts
-    expect(atOnceWords(provider(sum, 'pi.spark').atOnce)).toEqual({ words: 'blocked · 0 allowed · 1 still running', title: 'Blocked: pi · spark=0, set this machine. Nothing new starts on it; what runs now goes on. Click to change.', blocked: true })
+    expect(atOnceWords(provider(sum, 'pi.spark').atOnce)).toEqual({
+      words: 'blocked · 0 allowed · 1 still running',
+      title: 'Blocked: pi · spark=0, set this machine. Nothing new starts on it; what runs now goes on. Click to change.',
+      blocked: true,
+    })
     expect(atOnceWords(model(sum, 'pi.spark', KEY).atOnce)).toMatchObject({ words: 'blocked · 0 allowed (by pi.spark) · 1 still running', blocked: true })
-    expect(sum.warnings.filter((w) => w.id === 'blocked-running:pi.spark')).toEqual([expect.objectContaining({ level: 'note', words: 'pi · Spark (local) is blocked (0 allowed), and 1 agent still runs on it: they keep running; nothing new starts on it.' })])
+    expect(sum.warnings.filter((w) => w.id === 'blocked-running:pi.spark')).toEqual([
+      expect.objectContaining({ level: 'note', words: 'pi · Spark (local) is blocked (0 allowed), and 1 agent still runs on it: they keep running; nothing new starts on it.' }),
+    ])
     // not on a row with nothing running: the blocked row still reads so, without the note
     const idle = modelsSummary(input(s, ledger('blk-idle'), { providers: ['pi.spark'] }))
     expect(atOnceWords(provider(idle, 'pi.spark').atOnce)).toMatchObject({ words: 'blocked · 0 allowed', blocked: true })
@@ -187,9 +204,17 @@ describe('0 blocks a row: its cap reads blocked, its running agents go on, and a
 
 describe('0 in words: a row, a space line and the cap of a row that holds nothing', () => {
   test('atOnceWords reads a 0 as blocked, whatever runs, and a space line as blocked too', () => {
-    expect(atOnceWords({ now: 0, own: { pattern: 'pi.spark', max: 0, from: 'all' }, held: 0 })).toEqual({ words: 'blocked · 0 allowed', title: 'Blocked: pi · spark=0, set Everywhere. Nothing new starts on it; what runs now goes on. Click to change.', blocked: true })
+    expect(atOnceWords({ now: 0, own: { pattern: 'pi.spark', max: 0, from: 'all' }, held: 0 })).toEqual({
+      words: 'blocked · 0 allowed',
+      title: 'Blocked: pi · spark=0, set Everywhere. Nothing new starts on it; what runs now goes on. Click to change.',
+      blocked: true,
+    })
     expect(atOnceWords({ now: 1, own: { pattern: 'pi.spark', max: 0, from: 'machine' }, held: 2 }).words).toBe('blocked · 0 allowed · 1 still running · 2 held')
-    expect(atOnceWords({ now: 1, via: { pattern: 'pi.spark', max: 0, from: 'all' }, held: 0 })).toEqual({ words: 'blocked · 0 allowed (by pi.spark) · 1 still running', title: 'Blocked by pi · spark=0, set Everywhere. Nothing new starts on it; what runs now goes on. Click to set its own.', blocked: true })
+    expect(atOnceWords({ now: 1, via: { pattern: 'pi.spark', max: 0, from: 'all' }, held: 0 })).toEqual({
+      words: 'blocked · 0 allowed (by pi.spark) · 1 still running',
+      title: 'Blocked by pi · spark=0, set Everywhere. Nothing new starts on it; what runs now goes on. Click to set its own.',
+      blocked: true,
+    })
     // a provider's sub-limit of its own still reads its count, and a limit of 2 is no block
     expect(atOnceWords({ now: 1, own: { pattern: 'pi.spark', max: 2, from: 'machine' }, held: 0 })).toMatchObject({ words: '1 of 2 at once', blocked: false })
     expect(atOnceWords({ now: 0, held: 0 })).toMatchObject({ words: '0 at once · no cap', blocked: false })

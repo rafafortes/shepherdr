@@ -174,20 +174,36 @@ export function cutOutput(text: string): { output: string; cut?: boolean } {
 /** the last line a shell printed, for a background job's line */
 export function lastLine(file: string): string | undefined {
   const t = tailOf(file, 4096)
-  const l = t?.replace(ANSI, '').split('\n').map((x) => x.trim()).filter(Boolean).at(-1)
+  const l = t
+    ?.replace(ANSI, '')
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .at(-1)
   return l ? (l.length > 120 ? `${l.slice(0, 119)}…` : l) : undefined
 }
 
 type Json = any
 
 const textOf = (c: Json): string =>
-  typeof c === 'string' ? c : Array.isArray(c) ? c.map((b: Json) => (typeof b === 'string' ? b : b?.type === 'text' || b?.type === 'input_text' ? (b.text ?? '') : '')).filter(Boolean).join('\n') : ''
+  typeof c === 'string'
+    ? c
+    : Array.isArray(c)
+      ? c
+          .map((b: Json) => (typeof b === 'string' ? b : b?.type === 'text' || b?.type === 'input_text' ? (b.text ?? '') : ''))
+          .filter(Boolean)
+          .join('\n')
+      : ''
 
 /** an edit's change as a diff, from Claude Code's record of it: its hunks, or a new file's lines */
 function diffOf(r: Json): string | undefined {
   if (Array.isArray(r?.structuredPatch) && r.structuredPatch.length)
     return r.structuredPatch.map((h: Json) => [`@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`, ...(Array.isArray(h.lines) ? h.lines : [])].join('\n')).join('\n')
-  if (r?.type === 'create' && typeof r.content === 'string') return r.content.split('\n').map((x: string) => `+${x}`).join('\n')
+  if (r?.type === 'create' && typeof r.content === 'string')
+    return r.content
+      .split('\n')
+      .map((x: string) => `+${x}`)
+      .join('\n')
   return undefined
 }
 

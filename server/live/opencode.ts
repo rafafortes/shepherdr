@@ -256,9 +256,7 @@ interface Row {
 
 /** the session's rows after seq `after`, in seq order */
 function readRows(handle: Database, sessionId: string, after: number): Row[] {
-  return handle
-    .query<Row, [string, number]>('SELECT id, type, seq, time_created, data FROM session_message WHERE session_id = ? AND seq > ? ORDER BY seq')
-    .all(sessionId, after)
+  return handle.query<Row, [string, number]>('SELECT id, type, seq, time_created, data FROM session_message WHERE session_id = ? AND seq > ? ORDER BY seq').all(sessionId, after)
 }
 
 /**

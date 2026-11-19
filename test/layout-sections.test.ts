@@ -79,8 +79,18 @@ describe.skipIf(!browser)('sections', () => {
       await page.locator('#places li', { hasText: 'lilla-varlden · mac' }).waitFor()
       expect(await rows(page)).toEqual(['Clients', 'lilla-varlden · mac', 'mac', 'home', 'nas', 'home', 'vm-str', 'home', 'herdr-projects', 'Labs', 'gtm'])
       // as Slack's: each space's # under its heading's name; a machine's section one small step in
-      const x = (sel: string) => page.locator(sel).locator('[data-icon]').first().evaluate((e) => Math.round(e.getBoundingClientRect().left))
-      const text = (sel: string) => page.locator(sel).locator('h2 span').first().evaluate((e) => Math.round(e.getBoundingClientRect().left))
+      const x = (sel: string) =>
+        page
+          .locator(sel)
+          .locator('[data-icon]')
+          .first()
+          .evaluate((e) => Math.round(e.getBoundingClientRect().left))
+      const text = (sel: string) =>
+        page
+          .locator(sel)
+          .locator('h2 span')
+          .first()
+          .evaluate((e) => Math.round(e.getBoundingClientRect().left))
       expect(Math.abs((await x('#places li[data-project="p:mac:lilla-varlden"]')) - (await text('#places li[data-heading^="s:"]:not([data-machine])')))).toBeLessThanOrEqual(1)
       expect(Math.abs((await x('#places li[data-project="p:vm-str:gtm"]')) - (await text('#places li[data-heading^="s:"][data-machine]')))).toBeLessThanOrEqual(1)
       expect(await x('#places li[data-project="p:vm-str:gtm"]')).toBe((await x('#places li[data-project="p:vm-str:~"]')) + 12)
@@ -112,7 +122,10 @@ describe.skipIf(!browser)('sections', () => {
       await other.close()
 
       // Alt+↓ walks them as they show: Clients' spaces first, then the machines, a machine's section last
-      await page.locator('#places li[data-project="p:mac:lilla-varlden"]').getByRole('button', { name: /^lilla-varlden/ }).click()
+      await page
+        .locator('#places li[data-project="p:mac:lilla-varlden"]')
+        .getByRole('button', { name: /^lilla-varlden/ })
+        .click()
       await at(page, 'mac/lilla-varlden')
       for (const id of ['vm-str/herdr-projects', 'mac/home', 'nas/home', 'vm-str/home', 'vm-str/gtm']) {
         await page.keyboard.press('Alt+ArrowDown')
@@ -252,7 +265,12 @@ describe.skipIf(!browser)('sections', () => {
       await settled(page)
       expect(await rows(page, nav)).toEqual(['Clients', 'gtm · vm-str', 'mac', 'home', 'lilla-varlden', 'nas', 'home', 'vm-str', 'home', 'herdr-projects'])
       // its name and machine fit, nothing cut short, nothing past the drawer
-      expect(await page.locator(`${nav} li[data-project="p:vm-str:gtm"] button > span`).first().evaluate((s) => s.scrollWidth <= s.clientWidth)).toBe(true)
+      expect(
+        await page
+          .locator(`${nav} li[data-project="p:vm-str:gtm"] button > span`)
+          .first()
+          .evaluate((s) => s.scrollWidth <= s.clientWidth),
+      ).toBe(true)
       const w = await page.locator(nav).evaluate((n) => n.scrollWidth <= n.clientWidth)
       expect(w).toBe(true)
     } finally {

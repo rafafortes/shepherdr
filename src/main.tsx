@@ -72,7 +72,10 @@ function PluginTrouble() {
   const open = () => setUI({ settings: { section: Math.max(0, sectionOf('Plugins', settings ?? [], getState().ui)) }, drawer: false })
   return (
     <div role="status" data-topbar className={topBar}>
-      {names.length === 1 ? `${mine(names[0]) ? 'Your' : 'A built-in'} plugin “${names[0]}” has a problem` : `${names.every(mine) ? 'Your plugins' : 'Plugins'} ${names.map((n) => `“${n}”`).join(', ')} have problems`}.{' '}
+      {names.length === 1
+        ? `${mine(names[0]) ? 'Your' : 'A built-in'} plugin “${names[0]}” has a problem`
+        : `${names.every(mine) ? 'Your plugins' : 'Plugins'} ${names.map((n) => `“${n}”`).join(', ')} have problems`}
+      .{' '}
       <button type="button" className={barButton} onClick={open}>
         Why
       </button>{' '}
@@ -97,7 +100,10 @@ const loaded = await Promise.all(
     }
   }),
 )
-installPlugins(loaded.filter((p) => p !== null), enabled)
+installPlugins(
+  loaded.filter((p) => p !== null),
+  enabled,
+)
 connect()
 watchViewport((keyboard) => setUI({ keyboard }))
 watchScrolling()

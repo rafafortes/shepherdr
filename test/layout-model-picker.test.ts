@@ -23,7 +23,11 @@ describe.skipIf(!browser)('picking a model', () => {
       await page.goto(url())
       const open = async () => {
         await page.locator('[data-composer]:visible button[aria-label="Attach files and more"]').last().click()
-        await page.locator('[data-agent-controls]:visible').last().getByRole('menuitem', { name: /^Model:/ }).click()
+        await page
+          .locator('[data-agent-controls]:visible')
+          .last()
+          .getByRole('menuitem', { name: /^Model:/ })
+          .click()
         const sheet = page.getByRole('alertdialog', { name: 'Restart coordinator?' })
         await sheet.locator('[data-restart]').waitFor()
         // pi reports many providers' models: its list is the long one
@@ -85,7 +89,11 @@ describe.skipIf(!browser)('picking a model', () => {
     try {
       await page.goto(url())
       await page.locator('[data-composer]:visible button[aria-label="Attach files and more"]').last().click()
-      await page.locator('[data-agent-controls]:visible').last().getByRole('menuitem', { name: /^Model:/ }).click()
+      await page
+        .locator('[data-agent-controls]:visible')
+        .last()
+        .getByRole('menuitem', { name: /^Model:/ })
+        .click()
       const sheet = page.getByRole('alertdialog', { name: 'Restart coordinator?' })
       await sheet.locator('[data-restart]').waitFor()
       await sheet.getByRole('button', { name: /^Agent: / }).click()
@@ -129,7 +137,9 @@ describe.skipIf(!browser)('Settings’ per-role model row', () => {
     // the demo's Settings are fiction of its own: this row is a CLI's long list, as a live one has it
     world.sections = before.map((s) => ({
       ...s,
-      rows: s.rows.map((r) => (r.key === 'task.model' ? { ...r, text: false, options, ordered: true, ids: Object.fromEntries(options.slice(1).map((o) => [o, `provider/${o.replace(' ', '-').toLowerCase()}`])) } : r)),
+      rows: s.rows.map((r) =>
+        r.key === 'task.model' ? { ...r, text: false, options, ordered: true, ids: Object.fromEntries(options.slice(1).map((o) => [o, `provider/${o.replace(' ', '-').toLowerCase()}`])) } : r,
+      ),
     }))
     world.emit('snapshot')
     const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } })

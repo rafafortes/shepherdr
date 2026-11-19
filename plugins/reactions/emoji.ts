@@ -64,10 +64,11 @@ export function search(all: Group[], q: string): Emoji[] {
     return 4
   }
   const tiers: Emoji[][] = [[], [], [], [], []]
-  for (const g of all) for (const x of g.list) {
-    const r = rank(x)
-    if (r >= 0) tiers[r].push(x)
-  }
+  for (const g of all)
+    for (const x of g.list) {
+      const r = rank(x)
+      if (r >= 0) tiers[r].push(x)
+    }
   return tiers.flat()
 }
 

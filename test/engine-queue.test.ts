@@ -8,7 +8,7 @@ import { sh, repo, world, until, started, placeId, writeJson, fakeHerdr } from '
 import { tmp } from './tmp.ts'
 
 describe('To do: its agent waits for a go', () => {
-  const later = 'Add hi.txt. Don\'t start yet, wait for a go.'
+  const later = "Add hi.txt. Don't start yet, wait for a go."
 
   test('its agent starts at once on the brief; it shows To do once the agent says so, until it is told to go', async () => {
     const w = world()
@@ -87,7 +87,13 @@ describe('To do: its agent waits for a go', () => {
     const id2 = `${p.key}-2`
     const old = { project: placeId.space(p.name), by: 'x', created: 1, updated: 1, told: 'todo' }
     const says = "Later. Don't start yet, wait for a go."
-    writeJson('tasks.json', { next: { [p.key]: 2 }, tasks: [{ ...old, id, n: 1, title: 'Saved', desc: 'For later.' }, { ...old, id: id2, n: 2, title: 'Says so', desc: says, after: id }] })
+    writeJson('tasks.json', {
+      next: { [p.key]: 2 },
+      tasks: [
+        { ...old, id, n: 1, title: 'Saved', desc: 'For later.' },
+        { ...old, id: id2, n: 2, title: 'Says so', desc: says, after: id },
+      ],
+    })
     const w = world()
     await until(() => w.started.some((s) => s.key === `${id2}/Agent`))
     expect(w.started.find((s) => s.key === `${id}/Agent`)?.first).toBe("Saved\n\nFor later.\n\nDon't start yet: wait for a go.")
@@ -297,7 +303,10 @@ describe('Queued after other tasks', () => {
     expect(existsSync(wt)).toBe(true)
     expect(w.engine.statusOf(b)).toBe('queued')
     // its brief alone in its chat, and its agent's line: nothing to keep. The first task, at work, is no waiting one
-    w.chat.messages = [{ who: 'you', text: `${b.title}\n\nAdd b.txt.` }, { who: 'agent', text: 'I have the brief and wait.' }]
+    w.chat.messages = [
+      { who: 'you', text: `${b.title}\n\nAdd b.txt.` },
+      { who: 'agent', text: 'I have the brief and wait.' },
+    ]
     expect((await w.engine.parkable()).map((x) => [x.t.id, x.keep])).toEqual([[b.id, undefined]])
     // what keeps it as it is: your words to it beyond its brief, an agent past a few replies, its agent at work, work in
     // its worktree
@@ -433,7 +442,7 @@ describe("a task's place in herdr", () => {
     expect(existsSync(join(t.worktree!, 'build'))).toBe(false)
   })
 
-  test("after the merge herdr removes its worktree and space, its branch goes, and the repo space herdr opened closes", async () => {
+  test('after the merge herdr removes its worktree and space, its branch goes, and the repo space herdr opened closes', async () => {
     const w = world()
     const dir = repo()
     const { t, key } = await started(w, dir, 'tidy')
@@ -578,7 +587,7 @@ describe("a task's place in herdr", () => {
     expect(w.engine.task(t.id)).toBeUndefined()
   })
 
-  test("a merged task can be deleted: its commits stay on main", async () => {
+  test('a merged task can be deleted: its commits stay on main', async () => {
     const w = world()
     const dir = repo()
     const { t, key } = await started(w, dir, 'delmerged-engine')
@@ -614,7 +623,20 @@ describe("a task's place in herdr", () => {
     const running = make(3, 'c.txt')
     const yours = make(4, 'd.txt')
     sh('git merge -q --squash work/4-x && git commit -qm "yours"', dir)
-    const rec = (n: number, wt: string, more: object) => ({ id: `${p.key}-${n}`, n, project: placeId.space(p.name), title: 'x', desc: '', by: 'x', created: 1, updated: 1, branch: `work/${n}-x`, worktree: wt, base: 'main', ...more })
+    const rec = (n: number, wt: string, more: object) => ({
+      id: `${p.key}-${n}`,
+      n,
+      project: placeId.space(p.name),
+      title: 'x',
+      desc: '',
+      by: 'x',
+      created: 1,
+      updated: 1,
+      branch: `work/${n}-x`,
+      worktree: wt,
+      base: 'main',
+      ...more,
+    })
     writeJson('tasks.json', { next: { [p.key]: 3 }, tasks: [rec(1, merged, { merged: true, cleaned: true }), rec(2, dirty, { merged: true, cleaned: true }), rec(3, running, { told: 'work' })] })
     const w = world()
     w.herdr.down(true)
@@ -629,7 +651,7 @@ describe("a task's place in herdr", () => {
     expect(existsSync(running) && existsSync(yours)).toBe(true)
   })
 
-  test("a squash merge main never had the tree of, with main moved on over the same lines since: it goes, unless work came after", async () => {
+  test('a squash merge main never had the tree of, with main moved on over the same lines since: it goes, unless work came after', async () => {
     const dir = repo()
     const p = await world().places.add(dir, 'squashed')
     const old = tmp('squashed')
@@ -661,8 +683,26 @@ describe("a task's place in herdr", () => {
     const gone = squashed(5, 'not by name')
     sh(`git checkout -q -b elsewhere ${gone.squash}`, dir)
     sh('git checkout -q main && git reset -q --hard HEAD~2', dir)
-    const rec = (n: number, wt: string, more: object = {}) => ({ id: `${p.key}-${n}`, n, project: placeId.space(p.name), title: 'x', desc: '', by: 'x', created: 1, updated: 1, branch: `work/${n}-x`, worktree: wt, base: 'main', merged: true, cleaned: true, ...more })
-    writeJson('tasks.json', { next: { [p.key]: 3 }, tasks: [rec(1, byName.wt), rec(2, recorded.wt, { squash: recorded.squash }), rec(3, after.wt), rec(4, undone.wt), rec(5, gone.wt, { squash: gone.squash })] })
+    const rec = (n: number, wt: string, more: object = {}) => ({
+      id: `${p.key}-${n}`,
+      n,
+      project: placeId.space(p.name),
+      title: 'x',
+      desc: '',
+      by: 'x',
+      created: 1,
+      updated: 1,
+      branch: `work/${n}-x`,
+      worktree: wt,
+      base: 'main',
+      merged: true,
+      cleaned: true,
+      ...more,
+    })
+    writeJson('tasks.json', {
+      next: { [p.key]: 3 },
+      tasks: [rec(1, byName.wt), rec(2, recorded.wt, { squash: recorded.squash }), rec(3, after.wt), rec(4, undone.wt), rec(5, gone.wt, { squash: gone.squash })],
+    })
     const w = world()
     await w.engine.sweep()
     expect(existsSync(byName.wt) || existsSync(recorded.wt)).toBe(false)
@@ -692,7 +732,7 @@ describe("a task's place in herdr", () => {
     expect(herdr.spaces.map((x) => x.workspace_id)).toEqual(['proj'])
   })
 
-  test("a start herdr finished but whose answer was lost: its worktree is opened, not made twice", async () => {
+  test('a start herdr finished but whose answer was lost: its worktree is opened, not made twice', async () => {
     const herdr = fakeHerdr()
     const create = herdr.h.worktreeCreate
     herdr.h.worktreeCreate = (async (...a: Parameters<typeof create>) => {
@@ -725,7 +765,7 @@ describe("a task's place in herdr", () => {
     expect(w.herdr.spaces.length).toBe(n)
   })
 
-  test("a task started before keeps its plain space: it is closed by its name, and git removes its worktree", async () => {
+  test('a task started before keeps its plain space: it is closed by its name, and git removes its worktree', async () => {
     const herdr = fakeHerdr()
     const dir = repo()
     const p = await world(herdr).places.add(dir, 'plain')
@@ -736,7 +776,10 @@ describe("a task's place in herdr", () => {
     sh('git merge -q --squash work/1-x && git commit -qm "P-1: x"', dir)
     herdr.spaces.push({ workspace_id: 'old', label: `${p.key}-1 x`, tab_count: 1, panes: ['old:p1'] })
     herdr.cwd.set('old:p1', wt)
-    writeJson('tasks.json', { next: { [p.key]: 1 }, tasks: [{ id: `${p.key}-1`, n: 1, project: placeId.space(p.name), title: 'x', desc: '', by: 'x', created: 1, updated: 1, branch: 'work/1-x', worktree: wt, base: 'main', merged: true }] })
+    writeJson('tasks.json', {
+      next: { [p.key]: 1 },
+      tasks: [{ id: `${p.key}-1`, n: 1, project: placeId.space(p.name), title: 'x', desc: '', by: 'x', created: 1, updated: 1, branch: 'work/1-x', worktree: wt, base: 'main', merged: true }],
+    })
     const w = world(herdr)
     await w.engine.sweep()
     expect(existsSync(wt)).toBe(false)
@@ -811,7 +854,10 @@ describe('pinning', () => {
 
   test('a Done task that archives itself drops its pin', () => {
     const now = Date.now()
-    writeJson('tasks.json', { next: { OLD: 1 }, tasks: [{ id: 'OLD-1', n: 1, project: 'p:x:old', title: 'Old', desc: '', by: 'x', created: 1, updated: 1, merged: true, doneAt: now - 30 * 86_400_000, pinned: 5 }] })
+    writeJson('tasks.json', {
+      next: { OLD: 1 },
+      tasks: [{ id: 'OLD-1', n: 1, project: 'p:x:old', title: 'Old', desc: '', by: 'x', created: 1, updated: 1, merged: true, doneAt: now - 30 * 86_400_000, pinned: 5 }],
+    })
     const w = world()
     expect(w.engine.autoArchive(now)).toBe(1)
     expect(w.engine.task('OLD-1')!.pinned).toBeUndefined()
@@ -914,7 +960,17 @@ describe('the line of what waits: the engine lists each kind with its wait and t
     w.agentIs(todo.key, 'idle')
     const later = w.engine.add({ project: p.name, title: 'For later', by: 'test', at: now + 2 * 3_600_000 })
     // a merge waiting behind another task's merge
-    w.engine.tasks.push({ id: 'Q-90', n: 90, project: p.key, title: 'Merge in line', by: 'test', created: now - 600_000, updated: now - 600_000, reported: true, landing: { step: 'queue', behind: root.t.id, at: now - 600_000 } } as never)
+    w.engine.tasks.push({
+      id: 'Q-90',
+      n: 90,
+      project: p.key,
+      title: 'Merge in line',
+      by: 'test',
+      created: now - 600_000,
+      updated: now - 600_000,
+      reported: true,
+      landing: { step: 'queue', behind: root.t.id, at: now - 600_000 },
+    } as never)
 
     const q = w.engine.queueWaiters(now)
     // those whose blockers are all at work come first; the wait lines are the engine's own
@@ -951,7 +1007,7 @@ describe('the line of what waits: the engine lists each kind with its wait and t
     expect(ms).toBeLessThan(2000)
   })
 
-  test("the walk is remembered in both answers: a chain of 100 queued tasks ending at a task at work walks each one once", async () => {
+  test('the walk is remembered in both answers: a chain of 100 queued tasks ending at a task at work walks each one once', async () => {
     const w = world()
     const p = await w.places.add(repo(), 'walk-once')
     // the common shape: the chain ends at a task simply at work, so it names no root at all
@@ -1056,7 +1112,17 @@ describe('the line of what waits: the engine lists each kind with its wait and t
     expect(w.settings.set('space.priority', '1', { space: 'alpha' }).ok).toBe(true)
     expect(w.settings.set('space.priority', '2', { space: 'zeta' }).ok).toBe(true)
     const now = Date.now()
-    const held = (id: string, project: string, since: number, priority = false) => ({ id, n: 1, project, title: id, by: 'test', created: since, updated: since, held: { why: 'slots', since }, ...(priority ? { priority: true as const } : {}) })
+    const held = (id: string, project: string, since: number, priority = false) => ({
+      id,
+      n: 1,
+      project,
+      title: id,
+      by: 'test',
+      created: since,
+      updated: since,
+      held: { why: 'slots', since },
+      ...(priority ? { priority: true as const } : {}),
+    })
     w.engine.tasks.push(
       held('ALPHA-NEW', placeId.space(alpha.name), now - 100) as never,
       held('ZETA-NEW', placeId.space(zeta.name), now - 200) as never,

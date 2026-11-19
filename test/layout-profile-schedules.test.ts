@@ -64,7 +64,9 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a desk
       expect(await dlg.textContent()).toMatch(/Next (Today|Tomorrow) 22:00/)
       expect(await world.act({ type: 'profiles' })).toMatchObject({ next: expect.stringMatching(/^Next: night at 22:00/) })
       // the bar's Next line names it
-      await bar(page).getByText(/^Next: night at 22:00/).waitFor()
+      await bar(page)
+        .getByText(/^Next: night at 22:00/)
+        .waitFor()
       // a second one on weekdays at 8:00, a new one on some days
       await dlg.getByRole('button', { name: 'Add a schedule…' }).first().click()
       const weekdays = dlg.getByRole('form', { name: 'Add a schedule to night' })
@@ -118,13 +120,25 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a desk
     const page = await start([{ name: 'night', rule: 'daily 21:30' }])
     try {
       const dlg = await manage(page)
-      await bar(page).getByText(/^Next: night at 21:30/).waitFor()
+      await bar(page)
+        .getByText(/^Next: night at 21:30/)
+        .waitFor()
       await dlg.getByRole('button', { name: 'Turn off', exact: true }).first().click()
       await dlg.getByText(/Every day at 21:30 \(.+\) · off/).waitFor()
-      expect(await until(() => bar(page).textContent(), (t) => !/Next: night at 21:30/.test(t ?? ''))).not.toMatch(/Next: night at 21:30/)
+      expect(
+        await until(
+          () => bar(page).textContent(),
+          (t) => !/Next: night at 21:30/.test(t ?? ''),
+        ),
+      ).not.toMatch(/Next: night at 21:30/)
       await dlg.getByRole('button', { name: 'Turn on', exact: true }).first().click()
-      await dlg.getByText(/Every day at 21:30 \(.+\)$/).first().waitFor()
-      await bar(page).getByText(/^Next: night at 21:30/).waitFor()
+      await dlg
+        .getByText(/Every day at 21:30 \(.+\)$/)
+        .first()
+        .waitFor()
+      await bar(page)
+        .getByText(/^Next: night at 21:30/)
+        .waitFor()
       await dlg.getByRole('button', { name: 'Done', exact: true }).click()
       await dlg.waitFor({ state: 'detached' })
     } finally {
@@ -155,10 +169,12 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a desk
     }
   })
 
-  test('the bar names the next runs: the soonest of the profile\'s schedules, and the dialog says when it is due', async () => {
+  test("the bar names the next runs: the soonest of the profile's schedules, and the dialog says when it is due", async () => {
     const page = await start([{ name: 'night', rule: 'daily 22:00' }])
     try {
-      await bar(page).getByText(/^Next: night at 22:00/).waitFor()
+      await bar(page)
+        .getByText(/^Next: night at 22:00/)
+        .waitFor()
       expect(await bar(page).textContent()).toMatch(/Next: night at 22:00/)
       const dlg = await manage(page)
       await dlg.getByText(/Every day at 22:00 \(/).waitFor()
@@ -180,16 +196,24 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a desk
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
       await openModels(page)
-      await bar(page).getByText(/^Next: (night|day) at/).waitFor()
+      await bar(page)
+        .getByText(/^Next: (night|day) at/)
+        .waitFor()
       expect(await bar(page).textContent()).toMatch(/Next: (night|day) at \d\d:\d\d, then (night|day) (at|on) /)
       const dlg = await manage(page)
       await dlg.getByText(/Every day at 8:00 \(/).waitFor()
       await dlg.getByText(/Every day at 22:00 \(/).waitFor()
       expect(await dlg.getByRole('button', { name: 'Add a schedule…' }).count()).toBe(2)
       await dlg.getByRole('button', { name: 'Done', exact: true }).click()
-      await world.act({ type: 'profile-schedule-remove', name: 'night', id: ((await world.act({ type: 'profiles' })) as { profiles: { name: string; schedules?: { id: string }[] }[] }).profiles.find((p) => p.name === 'night')!.schedules![0]!.id })
+      await world.act({
+        type: 'profile-schedule-remove',
+        name: 'night',
+        id: ((await world.act({ type: 'profiles' })) as { profiles: { name: string; schedules?: { id: string }[] }[] }).profiles.find((p) => p.name === 'night')!.schedules![0]!.id,
+      })
       world.emit('snapshot')
-      await bar(page).getByText(/^Next: day at 08:00/).waitFor()
+      await bar(page)
+        .getByText(/^Next: day at 08:00/)
+        .waitFor()
     } finally {
       await reset()
       await page.close()
@@ -198,7 +222,7 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a desk
 })
 
 describe.skipIf(!browser)('Settings → Models: a due schedule in the demo', () => {
-  test('a due schedule posts its note as a card in the home space\'s chat (the demo sends no alert)', async () => {
+  test("a due schedule posts its note as a card in the home space's chat (the demo sends no alert)", async () => {
     await reset()
     // a profile of the settings as they are: due, it changes nothing, and says so
     await world.act({ type: 'profile-save', name: 'tick-now' })
@@ -227,11 +251,16 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a phon
       const settings = page.getByRole('region', { name: 'Settings' })
       await settings.getByRole('button', { name: 'Models', exact: true }).tap()
       await settled(page)
-      await bar(page).getByText(/^Next: night/).waitFor()
+      await bar(page)
+        .getByText(/^Next: night/)
+        .waitFor()
       await bar(page).getByRole('button', { name: 'Profiles', exact: true }).tap()
       await page.getByRole('menuitem', { name: 'Manage profiles…', exact: true }).tap()
       const dlg = page.getByRole('alertdialog', { name: 'Manage profiles' })
-      await dlg.getByText(/Saturday and Sunday at 10:00|Weekends/).first().waitFor()
+      await dlg
+        .getByText(/Saturday and Sunday at 10:00|Weekends/)
+        .first()
+        .waitFor()
       expect(await dlg.textContent()).toContain('also the waiting tasks')
       await dlg.getByRole('button', { name: 'Add a schedule…' }).tap()
       const form = dlg.getByRole('form', { name: 'Add a schedule to night' })
@@ -239,7 +268,10 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a phon
       await form.getByLabel('At', { exact: true }).fill('09:15')
       await form.getByRole('button', { name: 'Save', exact: true }).tap()
       await form.waitFor({ state: 'detached' })
-      await dlg.getByText(/at 9:15/).first().waitFor()
+      await dlg
+        .getByText(/at 9:15/)
+        .first()
+        .waitFor()
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
     } finally {
       await reset()

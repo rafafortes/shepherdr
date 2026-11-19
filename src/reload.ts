@@ -18,7 +18,11 @@ export type Kept = Partial<UI> & { text?: Record<string, string>; snap?: Snapsho
 export function keptOf(ui: UI, text: Record<string, string>): Kept {
   return {
     text: Object.fromEntries(Object.entries(text).filter(([, v]) => v)),
-    files: Object.fromEntries(Object.entries(ui.files).map(([k, fs]) => [k, fs.filter((f) => f.path)]).filter(([, fs]) => fs.length)),
+    files: Object.fromEntries(
+      Object.entries(ui.files)
+        .map(([k, fs]) => [k, fs.filter((f) => f.path)])
+        .filter(([, fs]) => fs.length),
+    ),
     reply: ui.reply,
     focus: ui.focus,
     viewer: ui.viewer,
@@ -27,4 +31,3 @@ export function keptOf(ui: UI, text: Record<string, string>): Kept {
     term: ui.term,
   }
 }
-

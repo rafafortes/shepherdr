@@ -70,7 +70,10 @@ export async function readCommandCode(key: string | undefined, now: () => number
   const get = async (path: string, params: Record<string, string> = {}): Promise<{ status: number; body?: unknown }> => {
     const query = new URLSearchParams(params).toString()
     try {
-      const res = await Promise.race([doFetch(`${API}${path}${query ? `?${query}` : ''}`, { method: 'GET', headers: { accept: 'application/json', Authorization: `Bearer ${key}` }, signal: ctl.signal }), deadline])
+      const res = await Promise.race([
+        doFetch(`${API}${path}${query ? `?${query}` : ''}`, { method: 'GET', headers: { accept: 'application/json', Authorization: `Bearer ${key}` }, signal: ctl.signal }),
+        deadline,
+      ])
       if (!res.ok) return { status: res.status }
       return { status: res.status, body: await Promise.race([res.json().catch(() => undefined), deadline]) }
     } catch (e) {

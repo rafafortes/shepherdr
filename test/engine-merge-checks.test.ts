@@ -36,7 +36,6 @@ const waitForChecks = (w: ReturnType<typeof world>) => w.settings.set('brief.mer
 afterEach(() => void new Settings().set('brief.merge', null))
 
 describe('on GitHub: a pull request per task', () => {
-
   test("a token that can't read GitHub's checks reads the Actions jobs of the pull request's commit instead", async () => {
     const w = world()
     const g = onGitHub()
@@ -85,16 +84,34 @@ describe('on GitHub: a pull request per task', () => {
     // a check fails and people write on it; a comment from before it was done is old news
     const pulls = 'repos/acme/app/pulls/1'
     g.set({
-      checks: [{ name: 'test', bucket: 'fail', link: 'https://github.com/acme/app/actions/runs/7/job/9' }, { name: 'lint', bucket: 'pass' }],
+      checks: [
+        { name: 'test', bucket: 'fail', link: 'https://github.com/acme/app/actions/runs/7/job/9' },
+        { name: 'lint', bucket: 'pass' },
+      ],
       // as GitHub logs a whole job: what failed, then the clean-up steps after it
-      logs: { '9': ['ok 1', 'expected 1 to be 2', '##[error]Process completed with exit code 1.', 'Post job cleanup.', 'Cleaning up orphan processes'].map((l) => `2026-10-26T10:00:00.1234567Z ${l}`).join('\n') },
+      logs: {
+        '9': ['ok 1', 'expected 1 to be 2', '##[error]Process completed with exit code 1.', 'Post job cleanup.', 'Cleaning up orphan processes']
+          .map((l) => `2026-10-26T10:00:00.1234567Z ${l}`)
+          .join('\n'),
+      },
       api: {
         [`${pulls}/reviews`]: [
           { id: 1, user: { login: 'ann' }, body: 'Please rename it.', state: 'CHANGES_REQUESTED', html_url: 'https://github.com/acme/app/pull/1#r1', submitted_at: '2099-01-01T00:00:00Z' },
           { id: 2, user: { login: 'bob' }, body: '', state: 'COMMENTED', html_url: 'https://github.com/acme/app/pull/1#r2', submitted_at: '2099-01-01T00:00:01Z' },
         ],
         // drafted long before its review was sent: news all the same
-        [`${pulls}/comments`]: [{ id: 3, pull_request_review_id: 2, user: { login: 'bob' }, body: 'Typo here.', path: 'x.txt', line: 1, html_url: 'https://github.com/acme/app/pull/1#c3', created_at: '2000-01-01T00:00:00Z' }],
+        [`${pulls}/comments`]: [
+          {
+            id: 3,
+            pull_request_review_id: 2,
+            user: { login: 'bob' },
+            body: 'Typo here.',
+            path: 'x.txt',
+            line: 1,
+            html_url: 'https://github.com/acme/app/pull/1#c3',
+            created_at: '2000-01-01T00:00:00Z',
+          },
+        ],
         ['repos/acme/app/issues/1/comments']: [{ id: 4, user: { login: 'cy' }, body: 'Old news.', html_url: 'https://github.com/acme/app/pull/1#i4', created_at: '2000-01-01T00:00:00Z' }],
       },
     })
@@ -103,7 +120,9 @@ describe('on GitHub: a pull request per task', () => {
     const told = w.sent[0]
     expect(told.key).toBe(key)
     expect(told.text).toMatch(/^<shepherdr><github task="[^"]+" pr="1">GitHub news on PR #1 \(https:\/\/github.com\/acme\/app\/pull\/1\)/)
-    expect(told.text).toContain('- Check failed: test (https://github.com/acme/app/actions/runs/7/job/9). Its log ends:\n    ok 1\n    expected 1 to be 2\n    ##[error]Process completed with exit code 1.\n- ')
+    expect(told.text).toContain(
+      '- Check failed: test (https://github.com/acme/app/actions/runs/7/job/9). Its log ends:\n    ok 1\n    expected 1 to be 2\n    ##[error]Process completed with exit code 1.\n- ',
+    )
     expect(told.text).not.toContain('clean')
     expect(told.text).toContain('- Changes requested by ann (https://github.com/acme/app/pull/1#r1):\n    Please rename it.')
     expect(told.text).toContain('- Comment by bob on x.txt:1 (https://github.com/acme/app/pull/1#c3):\n    Typo here.')
@@ -121,7 +140,12 @@ describe('on GitHub: a pull request per task', () => {
     expect(w.sent.length).toBe(1)
     // an agent at work hears news only once it rests
     const notes = g.gh().api!
-    g.set({ api: { ...notes, ['repos/acme/app/issues/1/comments']: [{ id: 5, user: { login: 'cy' }, body: 'Ship it?', html_url: 'https://github.com/acme/app/pull/1#i5', created_at: '2099-01-02T00:00:00Z' }] } })
+    g.set({
+      api: {
+        ...notes,
+        ['repos/acme/app/issues/1/comments']: [{ id: 5, user: { login: 'cy' }, body: 'Ship it?', html_url: 'https://github.com/acme/app/pull/1#i5', created_at: '2099-01-02T00:00:00Z' }],
+      },
+    })
     w.agentIs(key, 'working')
     await w.engine.watchPrs()
     expect(w.sent.length).toBe(1)
@@ -248,7 +272,7 @@ describe('on GitHub: a pull request per task', () => {
     expect(t.desc).toContain("Don't wait for GitHub's checks.")
   })
 
-  test("main going red on GitHub after merges tells its coordinator once, with the run and what merged since green", async () => {
+  test('main going red on GitHub after merges tells its coordinator once, with the run and what merged since green', async () => {
     const w = world()
     const g = onGitHub()
     const { t } = await started(w, g.dir, 'ghred')
@@ -266,7 +290,11 @@ describe('on GitHub: a pull request per task', () => {
     const before = w.news.length
     expect(w.news.length).toBe(before)
     // a newer push cancelled one run; the other failed
-    g.set({ runs: [run(red, 'cancelled', 4), run(red, 'failure', 3), run(green, 'success', 2)], api: { 'repos/acme/app/actions/runs/3/jobs': [9] }, logs: { '9': 'expected 1 to be 2\n##[error]Process completed with exit code 1.' } })
+    g.set({
+      runs: [run(red, 'cancelled', 4), run(red, 'failure', 3), run(green, 'success', 2)],
+      api: { 'repos/acme/app/actions/runs/3/jobs': [9] },
+      logs: { '9': 'expected 1 to be 2\n##[error]Process completed with exit code 1.' },
+    })
     await w.engine.watchMains()
     expect(w.news.length).toBe(before + 1)
     const told = w.news.at(-1)!
@@ -288,7 +316,7 @@ describe('on GitHub: a pull request per task', () => {
     expect(w.news.length).toBe(before + 2)
   })
 
-  test("GitHub stuck on the merge: shepherdr merge still answers by its deadline, and asked again waits for that same merge", async () => {
+  test('GitHub stuck on the merge: shepherdr merge still answers by its deadline, and asked again waits for that same merge', async () => {
     const w = world()
     const g = onGitHub()
     const { t } = await started(w, g.dir, 'mergeslow')
@@ -395,7 +423,7 @@ describe('on GitHub: a pull request per task', () => {
     expect(existsSync(join(g.dir, 'y.txt'))).toBe(true)
   })
 
-  test('main here ahead of GitHub\'s is refused before anything merges; work main has already closes its pull request', async () => {
+  test("main here ahead of GitHub's is refused before anything merges; work main has already closes its pull request", async () => {
     const w = world()
     const g = onGitHub()
     const { t } = await started(w, g.dir, 'ghahead')

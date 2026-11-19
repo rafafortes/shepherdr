@@ -25,7 +25,7 @@ const parse = (objs: object[], reader = new AgyReader(), file = FILE): LogEvent[
 const brief = (ev: LogEvent[]) => ev.filter((e) => e.kind !== 'session').map((e) => (e.kind === 'user' || e.kind === 'agent' ? `${e.kind}:${e.text}` : `${e.kind}:${e.id}`))
 
 describe('agy reader: turns and words', () => {
-  test('the session starts with the first line; a user line starts a turn and carries the human\'s words, trimmed', () => {
+  test("the session starts with the first line; a user line starts a turn and carries the human's words, trimmed", () => {
     const ev = parse([{ idx: 0, at: 100, kind: 'user', text: '  What is it?\n ' }])
     expect(ev).toEqual([
       { ...SESSION, at: 100 },
@@ -36,7 +36,10 @@ describe('agy reader: turns and words', () => {
 
   test('a user line with no words starts the turn and says nothing; a line with no time is at 0', () => {
     const ev = parse([{ idx: 0, kind: 'user' }])
-    expect(ev).toEqual([{ ...SESSION, at: 0 }, { kind: 'turn-start', id: 'start-0', at: 0 }])
+    expect(ev).toEqual([
+      { ...SESSION, at: 0 },
+      { kind: 'turn-start', id: 'start-0', at: 0 },
+    ])
   })
 
   test('a reply with words: its model, its usage, the words, and the end of the turn', () => {
@@ -50,7 +53,10 @@ describe('agy reader: turns and words', () => {
   })
 
   test('a model response with no words asks for a tool: no end of turn; its usage with no model when it has none', () => {
-    const ev = parse([{ idx: 2, at: 120, kind: 'agent', tokensIn: 5, tokensOut: 0 }, { idx: 3, at: 121, kind: 'agent' }])
+    const ev = parse([
+      { idx: 2, at: 120, kind: 'agent', tokensIn: 5, tokensOut: 0 },
+      { idx: 3, at: 121, kind: 'agent' },
+    ])
     expect(ev.slice(1)).toEqual([{ kind: 'usage', id: 'usage-2', at: 120, tokens: 5 }])
   })
 
@@ -76,7 +82,7 @@ describe('agy reader: turns and words', () => {
     expect(parse([{ idx: 8, at: 141, kind: 'error' }]).find((e) => e.kind === 'error')).toMatchObject({ text: 'the step failed' })
   })
 
-  test('an error with its provider\'s HTTP status keeps it, and still ends the turn', () => {
+  test("an error with its provider's HTTP status keeps it, and still ends the turn", () => {
     const ev = parse([{ idx: 9, at: 150, kind: 'error', text: 'RESOURCE_EXHAUSTED (code 429)', status: 429 }])
     expect(ev.slice(1)).toEqual([
       { kind: 'error', id: 'error-9', at: 150, text: 'RESOURCE_EXHAUSTED (code 429)', status: 429 },
@@ -85,10 +91,22 @@ describe('agy reader: turns and words', () => {
   })
 
   test('notices and steps of other kinds stay out; lines that are no mirrored step are skipped', () => {
-    const ev = parse([{ idx: 3, at: 1, kind: 'notice', text: 'All stopped' }, { idx: 4, at: 2, kind: 'other' }, { at: 3, kind: 'user', text: 'no index' }])
+    const ev = parse([
+      { idx: 3, at: 1, kind: 'notice', text: 'All stopped' },
+      { idx: 4, at: 2, kind: 'other' },
+      { at: 3, kind: 'user', text: 'no index' },
+    ])
     expect(brief(ev)).toEqual([])
     const reader = new AgyReader()
-    expect(reader.parse([{ text: 'not json', offset: 0 }, { text: '[1]', offset: 10 }], FILE)).toEqual([])
+    expect(
+      reader.parse(
+        [
+          { text: 'not json', offset: 0 },
+          { text: '[1]', offset: 10 },
+        ],
+        FILE,
+      ),
+    ).toEqual([])
   })
 
   test('reset: a file read again starts from its session line', () => {
@@ -101,7 +119,18 @@ describe('agy reader: turns and words', () => {
 })
 
 describe('agy reader: tool calls as steps', () => {
-  const run = (o: object, offset = 0) => parse([{ idx: 2, at: 102, kind: 'tool', tool: 'run_command', args: '{"CommandLine":"ls -1 | wc -l","toolSummary":"Count directory entries"}', output: 'Command exited with code 0.\n\nCommand output: 6', ...o }]).find((e) => e.kind === 'step')
+  const run = (o: object, offset = 0) =>
+    parse([
+      {
+        idx: 2,
+        at: 102,
+        kind: 'tool',
+        tool: 'run_command',
+        args: '{"CommandLine":"ls -1 | wc -l","toolSummary":"Count directory entries"}',
+        output: 'Command exited with code 0.\n\nCommand output: 6',
+        ...o,
+      },
+    ]).find((e) => e.kind === 'step')
 
   test('a shell command is a step, over at once, with its own summary and its output kept in the line', () => {
     expect(run({})).toMatchObject({ kind: 'step', id: 'tool-2', at: 102, tool: 'run_command', end: 102, step: 'search', title: 'Counted directory entries', out: { file: FILE, offset: 0 } })
@@ -119,7 +148,11 @@ describe('agy reader: tool calls as steps', () => {
   })
 
   test('a test run has its outcome read from its output', () => {
-    expect(run({ args: '{"CommandLine":"bun test test/x.test.ts"}', output: 'Command exited with code 1.\n 2 fail\n 39 pass' })).toMatchObject({ test: true, result: '2 failed, 39 passed', failed: true })
+    expect(run({ args: '{"CommandLine":"bun test test/x.test.ts"}', output: 'Command exited with code 1.\n 2 fail\n 39 pass' })).toMatchObject({
+      test: true,
+      result: '2 failed, 39 passed',
+      failed: true,
+    })
     expect(run({ args: '{"CommandLine":"bun test"}', output: undefined })).toMatchObject({ test: true })
   })
 

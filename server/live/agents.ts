@@ -40,7 +40,7 @@ export function uniqueLogs(logs: string[]): string[] {
   const out: string[] = []
   for (const f of logs) {
     const i = at.get(logName(f))
-    if (i === undefined) (at.set(logName(f), out.length), out.push(f))
+    if (i === undefined) at.set(logName(f), out.length), out.push(f)
     else out[i] = f
   }
   return out
@@ -403,7 +403,11 @@ export class Agents extends Emitter<Events> {
     this.hookWatch?.close()
     this.sub.stop()
     // a failed write at shutdown must not skip the rest of the stop (engine, usage, retries)
-    try { this.flushRecords() } catch (e) { this.writeFailed(e) }
+    try {
+      this.flushRecords()
+    } catch (e) {
+      this.writeFailed(e)
+    }
   }
 
   /** outbox.json goes down at once (a queued message must survive a crash); agents.json is coalesced to one write per
@@ -421,7 +425,11 @@ export class Agents extends Emitter<Events> {
     this.recordsFlushQueued = true
     queueMicrotask(() => {
       this.recordsFlushQueued = false
-      try { this.flushRecords() } catch (e) { this.writeFailed(e) }
+      try {
+        this.flushRecords()
+      } catch (e) {
+        this.writeFailed(e)
+      }
     })
   }
 
@@ -433,7 +441,11 @@ export class Agents extends Emitter<Events> {
     if (this.recordsTimer) return
     this.recordsTimer = setTimeout(() => {
       this.recordsTimer = null
-      try { this.flushRecords() } catch (e) { this.writeFailed(e) }
+      try {
+        this.flushRecords()
+      } catch (e) {
+        this.writeFailed(e)
+      }
     }, this.recordsSaveAfter)
     this.recordsTimer.unref?.()
   }
@@ -554,8 +566,7 @@ export class Agents extends Emitter<Events> {
       for (const [key, r] of Object.entries(this.records)) {
         if (r.kind !== 'codex' || !this.info(key)) continue
         const active = this.info(key)?.agent_session
-        const id = active?.kind === 'id' ? active.value
-          : (active?.kind === 'path' ? active.value : r.logs.at(-1))?.match(/([0-9a-f-]{36})\.jsonl$/)?.[1]
+        const id = active?.kind === 'id' ? active.value : (active?.kind === 'path' ? active.value : r.logs.at(-1))?.match(/([0-9a-f-]{36})\.jsonl$/)?.[1]
         if (id) sessions.set(key, { id, started: r.started })
       }
       const states = await readCodexRuntime([...new Set([...sessions.values()].map((s) => s.id))])
@@ -566,7 +577,11 @@ export class Agents extends Emitter<Events> {
         if (state) this.codexState.set(key, state)
         this.emit('logs', key)
       }
-    } catch { this.codexState.clear() } finally { this.runtimeReading = false }
+    } catch {
+      this.codexState.clear()
+    } finally {
+      this.runtimeReading = false
+    }
   }
 
   /** Runtime fields reported by this launch's main Claude process, never its subagents. */
@@ -639,7 +654,11 @@ export class Agents extends Emitter<Events> {
       // Slow pane reads must not hold up transport health checks.
       if (!this.readingBackground) {
         this.readingBackground = true
-        void this.readBackground().catch(() => undefined).finally(() => { this.readingBackground = false })
+        void this.readBackground()
+          .catch(() => undefined)
+          .finally(() => {
+            this.readingBackground = false
+          })
       }
       this.settleLaunches()
       // learn log files herdr names (its agent integrations report them)
@@ -649,12 +668,7 @@ export class Agents extends Emitter<Events> {
       // what waits goes in as soon as its agent can take it
       for (const key of new Set(this.outbox.map((o) => o.key))) if (!this.heldBy(key)) this.deliver(key)
       this.checkStranded()
-      this.sub.set([
-        { type: 'pane.agent_status_changed' },
-        { type: 'pane.closed' },
-        { type: 'pane.created' },
-        ...[...this.watchedPanes].map((pane_id) => ({ type: 'pane.output_changed', pane_id })),
-      ])
+      this.sub.set([{ type: 'pane.agent_status_changed' }, { type: 'pane.closed' }, { type: 'pane.created' }, ...[...this.watchedPanes].map((pane_id) => ({ type: 'pane.output_changed', pane_id }))])
     } catch {
       if (BOX) this.retryAt = Date.now() + this.recovery.fail()
       if (this.reachable) {
@@ -755,13 +769,26 @@ export class Agents extends Emitter<Events> {
     }
     const p = await herdr.processInfo(pane)
     const proc = p.foreground_processes?.find((x) => x.pid && isAgentProcess(r.kind, x.argv))
-    if (!proc?.pid || r.finished || this.records[r.key]?.finished || (!own && this.stopping.has(r.key))) { this.routes.delete(r.key); this.secretAccess.revoke(r.key); return }
+    if (!proc?.pid || r.finished || this.records[r.key]?.finished || (!own && this.stopping.has(r.key))) {
+      this.routes.delete(r.key)
+      this.secretAccess.revoke(r.key)
+      return
+    }
     const env = agentEnv(r.key, ROOT)
     const chain = this.secretScope(r.key)
     const capability = chain ? this.secretAccess.issue(r.key, `${proc.pid}:${r.started}`, chain) : undefined
-    const route = { chat: r.key, cwd: r.cwd, capability, credentialFile: this.records[r.key]?.env?.SHEPHERDR_SECRET_FILE ?? r.env?.SHEPHERDR_SECRET_FILE ?? env.SHEPHERDR_SECRET_FILE, ...(BOX ? { helper: env.SHEPHERDR_COMMAND } : { url: env.SHEPHERDR_URL }) }
+    const route = {
+      chat: r.key,
+      cwd: r.cwd,
+      capability,
+      credentialFile: this.records[r.key]?.env?.SHEPHERDR_SECRET_FILE ?? r.env?.SHEPHERDR_SECRET_FILE ?? env.SHEPHERDR_SECRET_FILE,
+      ...(BOX ? { helper: env.SHEPHERDR_COMMAND } : { url: env.SHEPHERDR_URL }),
+    }
     const signature = JSON.stringify([proc.pid, route])
-    if (this.routes.get(r.key) === signature) { this.emit('routed', r.key); return }
+    if (this.routes.get(r.key) === signature) {
+      this.emit('routed', r.key)
+      return
+    }
     const router = BOX ? join(helperDir(BOX.home), 'route.pl') : join(ROOT, 'helper', 'route.pl')
     // the box's own Shepherdr home, said rather than left to what its login shell exports: the credential file it writes
     // is the box's, whether or not that shell sets SHEPHERDR_HOME as well
@@ -775,7 +802,10 @@ export class Agents extends Emitter<Events> {
       throw new Error(ROUTING_FAILURE)
     }
     // A stop may have raced the asynchronous provisioning write. Never restore its authority.
-    if (this.records[r.key]?.finished || (!own && this.stopping.has(r.key))) { this.secretAccess.revoke(r.key); return }
+    if (this.records[r.key]?.finished || (!own && this.stopping.has(r.key))) {
+      this.secretAccess.revoke(r.key)
+      return
+    }
     this.routes.set(r.key, signature)
     this.emit('routed', r.key)
   }
@@ -810,7 +840,9 @@ export class Agents extends Emitter<Events> {
         const a = this.live.get(r.name)
         if (a) await this.bindRoute(r, a.pane_id, false, ROUTE_REPAIR_MS).catch((e) => console.error(`shepherdr: routing ${r.key}: ${e.message}`))
       }
-    } finally { this.routing = false }
+    } finally {
+      this.routing = false
+    }
   }
 
   /**
@@ -905,7 +937,7 @@ export class Agents extends Emitter<Events> {
       this.stranded.set(key, since)
       if (now - since < this.strandAfter) continue
       this.stranded.delete(key)
-      this.fail(key, this.reachable ? 'The agent stopped before it went in.' : "Lost herdr before it went in.")
+      this.fail(key, this.reachable ? 'The agent stopped before it went in.' : 'Lost herdr before it went in.')
     }
   }
 
@@ -996,7 +1028,24 @@ export class Agents extends Emitter<Events> {
     if (!r) return
     const since = r.started - 5000
     const cwds = this.logCwds(key)
-    const f = r.kind === 'claude' ? (r.sessionId ? claudeLogPath(cwds, r.sessionId) : findClaudeLog(cwds, since)) : r.kind === 'codex' ? findCodexLog(cwds, since) : r.kind === 'pi' ? findPiLog(cwds, since) : r.kind === 'opencode' ? (r.sessionId ? mirrorOpencode(r.sessionId) : findOpencodeLog(cwds, since)) : r.kind === 'agy' ? (r.sessionId ? mirrorAgy(r.sessionId) : findAgyLog(cwds, since)) : undefined
+    const f =
+      r.kind === 'claude'
+        ? r.sessionId
+          ? claudeLogPath(cwds, r.sessionId)
+          : findClaudeLog(cwds, since)
+        : r.kind === 'codex'
+          ? findCodexLog(cwds, since)
+          : r.kind === 'pi'
+            ? findPiLog(cwds, since)
+            : r.kind === 'opencode'
+              ? r.sessionId
+                ? mirrorOpencode(r.sessionId)
+                : findOpencodeLog(cwds, since)
+              : r.kind === 'agy'
+                ? r.sessionId
+                  ? mirrorAgy(r.sessionId)
+                  : findAgyLog(cwds, since)
+                : undefined
     // agy names its conversation by the log's name: that id is what --conversation resumes
     if (f && r.kind === 'agy') r.sessionId = logName(f).replace(/\.jsonl$/, '')
     if (f && addLog(r, f)) {
@@ -1109,7 +1158,9 @@ export class Agents extends Emitter<Events> {
     if (running) return this.bindRoute({ ...this.records[spec.key], ...spec } as AgentRecord, running.pane_id).then(() => running)
     const p0 = this.starting.get(spec.key)
     if (p0) return p0
-    const p = this.launch(spec).catch((e) => this.startedWrongly(spec.key, e)).finally(() => this.starting.delete(spec.key))
+    const p = this.launch(spec)
+      .catch((e) => this.startedWrongly(spec.key, e))
+      .finally(() => this.starting.delete(spec.key))
     this.starting.set(spec.key, p)
     return p
   }
@@ -1135,7 +1186,21 @@ export class Agents extends Emitter<Events> {
     const r: AgentRecord = old ?? { ...spec, logs: [], started: Date.now() }
     const changedPrompt = old?.system !== spec.system
     const from = old?.cwd
-    Object.assign(r, { name: spec.name, kind: spec.kind, cwd: spec.cwd, workspace: spec.workspace, tab: spec.tab ?? r.tab, env: spec.env ?? r.env, access: spec.access ?? r.access, model: spec.model ?? r.model, effort: spec.effort ?? r.effort, system: spec.system ?? r.system, set: spec.set ?? r.set, finished: false, parked: undefined })
+    Object.assign(r, {
+      name: spec.name,
+      kind: spec.kind,
+      cwd: spec.cwd,
+      workspace: spec.workspace,
+      tab: spec.tab ?? r.tab,
+      env: spec.env ?? r.env,
+      access: spec.access ?? r.access,
+      model: spec.model ?? r.model,
+      effort: spec.effort ?? r.effort,
+      system: spec.system ?? r.system,
+      set: spec.set ?? r.set,
+      finished: false,
+      parked: undefined,
+    })
     this.codexState.delete(spec.key)
     r.started = Date.now()
     r.resumed = !!resume
@@ -1214,14 +1279,18 @@ export class Agents extends Emitter<Events> {
   /** `f` again after each wait of startDelays() while herdr fails it in a passing way (isPassing); said in the log */
   private again<T>(r: AgentRecord, f: () => Promise<T>) {
     let n = 0
-    return retrying(async () => {
-      try {
-        return await f()
-      } catch (e) {
-        if (isPassing(e)) console.error(`shepherdr: ${r.name}'s start met a passing herdr error (${(e as Error).message}); trying again (${++n})`)
-        throw e
-      }
-    }, startDelays(), dropped)
+    return retrying(
+      async () => {
+        try {
+          return await f()
+        } catch (e) {
+          if (isPassing(e)) console.error(`shepherdr: ${r.name}'s start met a passing herdr error (${(e as Error).message}); trying again (${++n})`)
+          throw e
+        }
+      },
+      startDelays(),
+      dropped,
+    )
   }
 
   /**
@@ -1273,7 +1342,12 @@ export class Agents extends Emitter<Events> {
       // Codex tools have their own environment policy. Set the owner explicitly even on resume;
       // do not depend on the pane's login shell or its stale inherited environment.
       const env = { ...r.env, ...agentEnv(r.key, ROOT) }
-      a.push('-c', `shell_environment_policy.set={${Object.entries(env).map(([k, v]) => `${JSON.stringify(k)}=${JSON.stringify(v)}`).join(',')}}`)
+      a.push(
+        '-c',
+        `shell_environment_policy.set={${Object.entries(env)
+          .map(([k, v]) => `${JSON.stringify(k)}=${JSON.stringify(v)}`)
+          .join(',')}}`,
+      )
       // its own last log: a task it took over keeps the logs of the agent before it too
       const id = resume ? r.logs.findLast((f) => (logKind(f) ?? 'codex') === 'codex')?.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/)?.[1] : undefined
       if (id) a.unshift('resume', id)
@@ -1477,7 +1551,10 @@ export class Agents extends Emitter<Events> {
     this.outbox.push(item)
     this.save()
     const st = this.status(key)
-    if (st === 'gone' && ensure) ensure().then(() => this.deliver(key)).catch(() => undefined)
+    if (st === 'gone' && ensure)
+      ensure()
+        .then(() => this.deliver(key))
+        .catch(() => undefined)
     else this.deliver(key)
     return { waiting: true, waitsFor: hold ?? this.whyWaits(key), item }
   }
@@ -1658,7 +1735,8 @@ export class Agents extends Emitter<Events> {
    *  they are ours to end only because their ancestry ran through this shell. A live task's agent-browser Chrome is
    *  left to browser.ts, and another user's process is never in the table (orphans.ts). */
   async reapPane(pane: string) {
-    const caught = await herdr.processInfo(pane)
+    const caught = await herdr
+      .processInfo(pane)
       .then((p) => (p.shell_pid ? capture(readTree(this.reaper.source), p.shell_pid) : []))
       .catch(() => [] as number[])
     await herdr.closePane(pane).catch(() => undefined)

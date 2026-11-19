@@ -31,7 +31,9 @@ describe('private launch prompt delivery', () => {
           await a.ensure({ ...old, system, first: 'Resume the work.', pane: async () => 'fake-pane' })
           expect(queued).toEqual([system === old.system ? ['Resume the work.'] : [hidden(system), 'Resume the work.']])
           expect(a.record(key)?.system).toBe(system)
-        } finally { a.stop() }
+        } finally {
+          a.stop()
+        }
       }
       expect(start).toHaveBeenCalledTimes(3)
     } finally {
@@ -43,14 +45,27 @@ describe('private launch prompt delivery', () => {
   test('Claude and pi append a private prompt file outside the repository, on fresh and resumed starts', () => {
     const a = new Agents()
     try {
-      for (const kind of ['claude', 'pi']) for (const resume of [false, true]) {
-        const r = { key: 'PRIVATE-2/Agent', name: `private-test-${kind}`, kind, cwd: '/unused-repo', workspace: 'test', logs: [], started: 0, sessionId: 'old-session', system: 'Synthetic personal rule.' }
-        const args = a.args(r, resume)
-        const flag = kind === 'claude' ? '--append-system-prompt-file' : '--append-system-prompt'
-        const path = args[args.indexOf(flag) + 1]
-        expect(path).not.toStartWith(r.cwd)
-        expect(readFileSync(path, 'utf8')).toBe(r.system)
-      }
-    } finally { a.stop() }
+      for (const kind of ['claude', 'pi'])
+        for (const resume of [false, true]) {
+          const r = {
+            key: 'PRIVATE-2/Agent',
+            name: `private-test-${kind}`,
+            kind,
+            cwd: '/unused-repo',
+            workspace: 'test',
+            logs: [],
+            started: 0,
+            sessionId: 'old-session',
+            system: 'Synthetic personal rule.',
+          }
+          const args = a.args(r, resume)
+          const flag = kind === 'claude' ? '--append-system-prompt-file' : '--append-system-prompt'
+          const path = args[args.indexOf(flag) + 1]
+          expect(path).not.toStartWith(r.cwd)
+          expect(readFileSync(path, 'utf8')).toBe(r.system)
+        }
+    } finally {
+      a.stop()
+    }
   })
 })

@@ -154,7 +154,10 @@ describe('choice cards', () => {
     const chat = placeId.home()
     await src.cli(['ask', 'First?', '--choice', 'A', '--choice', 'B'], { chat })
     await src.cli(['ask', 'Second?', '--choice', 'C', '--choice', 'D'], { chat })
-    const open = src.chats.log(chat).posted.filter((p) => p.question?.id.startsWith('ask:') && p.question.sent === undefined).slice(-2)
+    const open = src.chats
+      .log(chat)
+      .posted.filter((p) => p.question?.id.startsWith('ask:') && p.question.sent === undefined)
+      .slice(-2)
     const [first, second] = open.map((p) => p.question!.id)
     const send = src.agents.send
     src.agents.send = (async () => ({ waiting: false })) as never
@@ -194,7 +197,7 @@ describe('choice cards', () => {
 })
 
 describe("a coordinator's question", () => {
-  test('sends no alert of its own (the main machine\'s home space picks what buzzes); a second answer is refused', async () => {
+  test("sends no alert of its own (the main machine's home space picks what buzzes); a second answer is refused", async () => {
     const chat = placeId.home()
     const alerts: import('../shared/types.ts').Alert[] = []
     const off = src.on('alert', (a) => void alerts.push(a))
@@ -228,7 +231,7 @@ describe("an alert's button", () => {
 })
 
 describe("a coordinator's alert about a task", () => {
-  test('says what the task needs, then the why, in place of the task\'s own alert', async () => {
+  test("says what the task needs, then the why, in place of the task's own alert", async () => {
     const { t } = await workedTask('alerted')
     await until(() => src.engine.statusOf(t) === 'need', 8000, `${t.id} to need you`)
     expect(src.engine.statusOf(t)).toBe('need')
@@ -295,7 +298,11 @@ describe("a task's question on its needs-you card in its space's chat", () => {
     } finally {
       off()
     }
-    expect(card().ask).toMatchObject({ open: false, answered: { where: 'space', dismissed: true }, questions: [{ sent: -1, dismissed: true, elsewhere: { label: 'Dismissed ·', chat: key, name: `${t.id} chat` } }] })
+    expect(card().ask).toMatchObject({
+      open: false,
+      answered: { where: 'space', dismissed: true },
+      questions: [{ sent: -1, dismissed: true, elsewhere: { label: 'Dismissed ·', chat: key, name: `${t.id} chat` } }],
+    })
     expect(src.chats.chat(key).messages.find((m) => m.question?.id === qid)?.question).toMatchObject({ sent: -1, dismissed: true, elsewhere: { label: 'Dismissed in' } })
     // the space's coordinator hears the person declined it, never that they answered
     expect(said.join('\n')).toContain('dismissed')
@@ -496,7 +503,10 @@ describe('attachments', () => {
     const ev = (src.chats as unknown as { events: Map<string, unknown[]> }).events
     ev.get(chat)!.push({ kind: 'agent', id: 'a3', at: Date.now(), text: `<react emoji="👀" file="shot.png" path="${first.file!.path}"/>\nLooking.` })
     const msgs = src.chats.chat(chat).messages
-    expect(msgs.find((x) => x.id === 'u1:0')?.reactions).toEqual([{ emoji: '❤️', by: 'me' }, { emoji: '👀', by: 'them' }])
+    expect(msgs.find((x) => x.id === 'u1:0')?.reactions).toEqual([
+      { emoji: '❤️', by: 'me' },
+      { emoji: '👀', by: 'them' },
+    ])
     expect(msgs.find((x) => x.id === 'u2')?.reactions).toBeUndefined()
     // a line naming only the file (an older one) goes to the latest of that name
     said('u3c', '[Elias reacted 🎉 to "notes.pdf"]')
@@ -614,7 +624,7 @@ describe('what you send shows at once', () => {
     ev.set(chat, [...(ev.get(chat) ?? []), { kind: 'user', id, at, text }])
   }
   /** the agent's state for a while, as herdr would say it */
-  const as = async <T,>(st: string, fn: () => Promise<T>) => {
+  const as = async <T>(st: string, fn: () => Promise<T>) => {
     const status = src.agents.status
     src.agents.status = () => st as ReturnType<typeof status>
     try {
@@ -728,10 +738,14 @@ describe('what you send shows at once', () => {
         await restarted.deliver(chat)
         expect((await restarted.send(chat, item.text, { cid })).waiting).toBe(false)
         expect(restarted.waiting(chat).some((o) => o.cid === cid)).toBe(false)
-      } finally { restarted.stop() }
+      } finally {
+        restarted.stop()
+      }
       agents.outbox = agents.outbox.filter((o) => o !== item)
       agents.save()
-    } finally { agents.reachable = reachable }
+    } finally {
+      agents.reachable = reachable
+    }
   })
   test('sent again while the first is still on its way, it goes in once', async () => {
     const agents = src.agents
@@ -880,7 +894,12 @@ describe('what you send shows at once', () => {
   test('its files carry the id too', async () => {
     const shot = await src.upload(chat, 'shot.png', new Uint8Array([1]))
     await as('blocked', () => src.act({ type: 'send', chat, text: '', attachments: [shot], cid: 'c2' }))
-    expect(src.chats.chat(chat).messages.filter((m) => m.cid === 'c2').map((m) => m.file?.path)).toEqual([shot])
+    expect(
+      src.chats
+        .chat(chat)
+        .messages.filter((m) => m.cid === 'c2')
+        .map((m) => m.file?.path),
+    ).toEqual([shot])
   })
 })
 

@@ -69,15 +69,13 @@ describe('a server that keeps crashing', () => {
     for (let i = 0; i < CRASHES - 1; i++) s.crash()
     expect(s.sent).toEqual([])
     s.crash()
-    expect(s.sent).toEqual([{
-      command: 'notify-me',
-      args: [
-        'Shepherdr is not staying up',
-        `(${CRASHES} restarts in ${WINDOW / 60_000} min); see ${join(s.home, 'run', 'server.log')}`,
-        LOOP_KEY,
-      ],
-      env: expect.objectContaining({ [ALERT_ENV]: 'crash-loop' }),
-    }])
+    expect(s.sent).toEqual([
+      {
+        command: 'notify-me',
+        args: ['Shepherdr is not staying up', `(${CRASHES} restarts in ${WINDOW / 60_000} min); see ${join(s.home, 'run', 'server.log')}`, LOOP_KEY],
+        env: expect.objectContaining({ [ALERT_ENV]: 'crash-loop' }),
+      },
+    ])
     expect(s.lines.at(-1)).toContain('told the operator')
     for (let i = 0; i < 3; i++) s.crash()
     expect(s.sent).toHaveLength(1)

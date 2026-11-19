@@ -16,7 +16,11 @@ const space = (name: string, key: string): Space => ({ name, key, path: `/repos/
 const id = (name: string) => `p:machine:${name}`
 
 /** the copies of a store beside it, oldest first */
-const copies = (dir: string, kind: 'corrupt' | 'before-empty') => fs.readdirSync(dir).filter((n) => n.includes(`.${kind}-`)).sort()
+const copies = (dir: string, kind: 'corrupt' | 'before-empty') =>
+  fs
+    .readdirSync(dir)
+    .filter((n) => n.includes(`.${kind}-`))
+    .sort()
 
 /** what a copy of a file that cannot be read says: its file, the bytes it was, and where the copy is */
 const said = (page: ReturnType<typeof spyOn>, i = 0) => String(page.mock.calls[i]?.[0])
@@ -199,7 +203,7 @@ describe('a write that would leave a store with nothing in it', () => {
     }
   })
 
-  test("the empty state of tasks.json ({ next: {}, tasks: [] }) is kept off a file that has tasks in it", () => {
+  test('the empty state of tasks.json ({ next: {}, tasks: [] }) is kept off a file that has tasks in it', () => {
     const dir = tmp('store-tasks-empty')
     const page = spyOn(console, 'error').mockImplementation(() => {})
     try {
@@ -214,7 +218,7 @@ describe('a write that would leave a store with nothing in it', () => {
     }
   })
 
-  test("the empty state of the usage ledger ({ version: 2, usage: {}, … }) is kept off a file with rows in it", () => {
+  test('the empty state of the usage ledger ({ version: 2, usage: {}, … }) is kept off a file with rows in it', () => {
     const dir = tmp('store-usage-empty')
     const page = spyOn(console, 'error').mockImplementation(() => {})
     const fresh = { version: 2, usage: {}, seen: {}, runOuts: [], quotas: {}, alerts: {}, files: {} }

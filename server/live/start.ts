@@ -30,10 +30,12 @@ export const RESUME_SETTLE = 2 * 60_000
 
 /** what a CLI prints when the session it was told to resume is gone. Claude Code 2.1.318: "No conversation found with
  *  session ID: …"; Codex: "ERROR: No saved session found with ID …" */
-export const LOST_SESSION = /\bno (?:saved )?(?:conversation|session|rollout)\b[^\n]{0,40}\b(?:found|exists)\b|\b(?:conversation|session)\b[^\n]{0,40}\bnot found\b|\bcould(?: not|n't) find (?:the |your )?session\b/i
+export const LOST_SESSION =
+  /\bno (?:saved )?(?:conversation|session|rollout)\b[^\n]{0,40}\b(?:found|exists)\b|\b(?:conversation|session)\b[^\n]{0,40}\bnot found\b|\bcould(?: not|n't) find (?:the |your )?session\b/i
 
 /** words that say a CLI stopped on something, rather than still starting: a slow start says none of them */
-const STOPPED = /\b(?:error|failed|failure|cannot|can't|could not|couldn't|unable to|invalid|denied|refused|expired|unauthori[sz]ed|logged out|not signed in|sign in|sign-in|\/login|usage limit|out of allowance|exceeded|no such)\b/i
+const STOPPED =
+  /\b(?:error|failed|failure|cannot|can't|could not|couldn't|unable to|invalid|denied|refused|expired|unauthori[sz]ed|logged out|not signed in|sign in|sign-in|\/login|usage limit|out of allowance|exceeded|no such)\b/i
 
 /** one look at a start */
 export interface StartLook {

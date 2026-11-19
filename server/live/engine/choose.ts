@@ -76,8 +76,10 @@ function capIn<H>(list: MaxEntry[], scope: 'machine' | 'space', input: ChooseInp
 
 /** the entries that hold a model key, the blocked ones first: a machine's entry, then a space's own. Blocked (0) beats
  *  full, and full beats having room */
-const holdOf = <H>(input: ChooseInput<H>, key: string) =>
-  ({ blocked: capIn(input.machine, 'machine', input, key, true) ?? capIn(input.own, 'space', input, key, true), full: capIn(input.machine, 'machine', input, key, false) ?? capIn(input.own, 'space', input, key, false) })
+const holdOf = <H>(input: ChooseInput<H>, key: string) => ({
+  blocked: capIn(input.machine, 'machine', input, key, true) ?? capIn(input.own, 'space', input, key, true),
+  full: capIn(input.machine, 'machine', input, key, false) ?? capIn(input.own, 'space', input, key, false),
+})
 
 /**
  * The decision, in order, for each harness of the chain: a machine's or a space's entry that covers it is 0 → skipped as
@@ -91,7 +93,12 @@ export function choose<H>(input: ChooseInput<H>): Choice<H> {
   for (const [index, o] of input.options.entries()) {
     const { blocked, full } = holdOf(input, o.key)
     if (blocked) {
-      skipped.push({ harness: o.harness, why: 'blocked', name: blocked.pattern, cap: { scope: blocked.scope, ...(blocked.scope === 'space' ? { space: input.space } : {}), count: blocked.count, max: 0 } })
+      skipped.push({
+        harness: o.harness,
+        why: 'blocked',
+        name: blocked.pattern,
+        cap: { scope: blocked.scope, ...(blocked.scope === 'space' ? { space: input.space } : {}), count: blocked.count, max: 0 },
+      })
       continue
     }
     if (o.out) {
@@ -114,7 +121,10 @@ export function choose<H>(input: ChooseInput<H>): Choice<H> {
  *  covers it (it has no limit) */
 export function roomLeft<H>(input: ChooseInput<H>, key: string): { scope: 'machine' | 'space'; count: number; max: number; pattern: string } | undefined {
   let best: { scope: 'machine' | 'space'; count: number; max: number; pattern: string } | undefined
-  for (const [scope, list] of [['machine', input.machine], ['space', input.own]] as const)
+  for (const [scope, list] of [
+    ['machine', input.machine],
+    ['space', input.own],
+  ] as const)
     for (const e of list) {
       if (e.max === 0 || !covers(e.pattern, key)) continue
       const count = input.runs.filter((r) => covers(e.pattern, r.key) && (scope === 'machine' || r.space === input.space)).length

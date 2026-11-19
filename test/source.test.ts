@@ -190,45 +190,41 @@ describe('merging from the command', () => {
     expect((await src.cli(['merge', b.t.id], {})).out).toContain('Merged')
     expect(existsSync(join(b.dir, 'x.txt'))).toBe(true)
   })
-  test(
-    'task list shows Done tasks newest finished first, after the rest',
-    async () => {
-      // Three tasks in one place: the list is the whole home's, and every place of its own is another real repo with
-      // its worktrees and its merge's git calls, on a runner that runs the browser tests beside this one (SHE-9 met a
-      // shard six times slower than its rerun). This test made three before.
-      const dir = tmp('src-repo')
-      run(REPO, dir)
-      const p = await src.places.add(dir, 'listed')
-      const a = await worked(p, 'first.txt')
-      const b = await worked(p, 'second.txt')
-      const open = src.engine.add({ project: p.name, title: 'Open', by: 'test' })
-      // it is never merged, so it gets no work; its place is made all the same, and nothing here races that
-      await worktree(open)
-      /**
-       * Merged, and Done on record before the next one starts — what the list's order is made of. The merge answers
-       * only once it is Done (markMerged sets its finish time before it answers), so there is nothing left to wait for.
-       */
-      const merged = async (t: { id: string }) => {
-        expect((await src.cli(['merge', t.id], {})).out).toContain('Merged')
-        expect(typeof src.engine.view(src.engine.task(t.id)!).doneAt).toBe('number')
-      }
-      await merged(a)
-      await merged(b)
-      const ids = [a.id, b.id, open.id]
-      const listed = (JSON.parse((await src.cli(['task', 'list', '--json'], {})).out) as { id: string }[]).map((t) => t.id).filter((id) => ids.includes(id))
-      expect(listed).toEqual([open.id, b.id, a.id])
-      expect(b.doneAt!).toBeGreaterThan(a.doneAt!)
-      expect(src.engine.view(b).doneAt).toBe(b.doneAt!)
-      expect(src.engine.view(open).doneAt).toBeUndefined()
-    },
+  test('task list shows Done tasks newest finished first, after the rest', async () => {
+    // Three tasks in one place: the list is the whole home's, and every place of its own is another real repo with
+    // its worktrees and its merge's git calls, on a runner that runs the browser tests beside this one (SHE-9 met a
+    // shard six times slower than its rerun). This test made three before.
+    const dir = tmp('src-repo')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'listed')
+    const a = await worked(p, 'first.txt')
+    const b = await worked(p, 'second.txt')
+    const open = src.engine.add({ project: p.name, title: 'Open', by: 'test' })
+    // it is never merged, so it gets no work; its place is made all the same, and nothing here races that
+    await worktree(open)
+    /**
+     * Merged, and Done on record before the next one starts — what the list's order is made of. The merge answers
+     * only once it is Done (markMerged sets its finish time before it answers), so there is nothing left to wait for.
+     */
+    const merged = async (t: { id: string }) => {
+      expect((await src.cli(['merge', t.id], {})).out).toContain('Merged')
+      expect(typeof src.engine.view(src.engine.task(t.id)!).doneAt).toBe('number')
+    }
+    await merged(a)
+    await merged(b)
+    const ids = [a.id, b.id, open.id]
+    const listed = (JSON.parse((await src.cli(['task', 'list', '--json'], {})).out) as { id: string }[]).map((t) => t.id).filter((id) => ids.includes(id))
+    expect(listed).toEqual([open.id, b.id, a.id])
+    expect(b.doneAt!).toBeGreaterThan(a.doneAt!)
+    expect(src.engine.view(b).doneAt).toBe(b.doneAt!)
+    expect(src.engine.view(open).doneAt).toBeUndefined()
     // Real git: three worktrees, two commits in them, a rebase and two merges into one repo. It takes under 2 s on a
     // quiet runner, and it was its 20 s it ran out of in run 42083009810, shard 3, whose log says only "timed out": which
     // step stalled is unknown (a sibling test in the same shard was then at its usual 330 ms, and the shard ran the
     // browser tests' 3 to 10 s swipes beside it). What this test asks of git itself is bounded and named — 30 s, in
     // run() and herdr's stand-in — and the engine's own merge steps are not: a stall in one of those still ends as
     // bun's timeout here. 60 s leaves a slow runner the room the 20 s it had did not.
-    60_000,
-  )
+  }, 60_000)
   test('the old task settings and their flags are gone', async () => {
     expect((await src.cli(['set', 'merge.by', 'by itself'], {})).code).toBe(1)
     expect((await src.cli(['review', 'X-1', '--verdict', 'pass'], {})).code).toBe(1)
@@ -304,7 +300,7 @@ describe('closing from the command', () => {
 })
 
 describe('deleting a task from the command', () => {
-  test("only a coordinator deletes; work main lacks is refused unless --force; then it is gone from every list", async () => {
+  test('only a coordinator deletes; work main lacks is refused unless --force; then it is gone from every list', async () => {
     const { t, dir, place } = await workedTask('deleting')
     const key = `${t.id}/Agent`
     const no = await src.cli(['task', 'delete', t.id], { chat: key })
@@ -518,7 +514,9 @@ describe('Settings changed: the waiting tasks take it, from the screen and the c
       expect([src.engine.task(a)!.agent, src.engine.task(b)!.agent]).toEqual([{ kind: 'pi' }, { kind: 'pi' }])
       expect(await src.act({ type: 'apply-to-waiting', key: 'task.agent', place, dry: true })).toMatchObject({ changed: 0, same: 2 })
       // the command twin: a line says what it did; the flag goes with a task agent key only
-      expect((await src.cli(['set', 'space.maxTasks', '3', '--space', p.name, '--apply-waiting'], { chat: place })).out).toContain('--apply-waiting goes with shepherdr set task.agent, task.model, task.effort or a reviewer.* key')
+      expect((await src.cli(['set', 'space.maxTasks', '3', '--space', p.name, '--apply-waiting'], { chat: place })).out).toContain(
+        '--apply-waiting goes with shepherdr set task.agent, task.model, task.effort or a reviewer.* key',
+      )
       const cli = await src.cli(['set', 'task.agent', 'Claude Code', '--space', p.name, '--apply-waiting'], { chat: place })
       expect(cli.code).toBe(0)
       expect(cli.out).toContain('2 waiting tasks in ' + p.name + ' will start on Claude Code when their turn comes.')
@@ -549,7 +547,14 @@ describe("Settings reviewer changed: the waiting tasks' reviewer, from the scree
       expect(codex).toContain(reviewerLineFor(CODEX_WORDS, a))
       expect(await src.act({ type: 'setting', key: 'reviewer.agent', value: 'pi', place })).toEqual({ ok: true })
       // the question first: what would change, and nothing does
-      expect(await src.act({ type: 'apply-to-waiting', key: 'reviewer.agent', place, dry: true })).toMatchObject({ ok: true, changed: 2, same: 0, running: 0, kept: [], spaces: [{ name: p.name, words: 'pi', changed: 2 }] })
+      expect(await src.act({ type: 'apply-to-waiting', key: 'reviewer.agent', place, dry: true })).toMatchObject({
+        ok: true,
+        changed: 2,
+        same: 0,
+        running: 0,
+        kept: [],
+        spaces: [{ name: p.name, words: 'pi', changed: 2 }],
+      })
       expect(src.engine.task(a)!.desc).toBe(codex)
       // yes: the Reviewer line of each brief says pi, and nothing else of it moves
       expect(await src.act({ type: 'apply-to-waiting', key: 'reviewer.agent', place })).toMatchObject({ ok: true, changed: 2 })
@@ -572,7 +577,10 @@ describe("Settings reviewer changed: the waiting tasks' reviewer, from the scree
       expect(refused.out).toContain('Set it without --apply-waiting.')
       expect(src.settings.get('advisor.agent', p.name)).toBe(advisorBefore)
       // a key that is neither: refused, as before
-      expect(await src.act({ type: 'apply-to-waiting', key: 'reviewer.instructions', place, dry: true })).toEqual({ ok: false, error: 'reviewer.instructions is not a task agent or reviewer setting.' })
+      expect(await src.act({ type: 'apply-to-waiting', key: 'reviewer.instructions', place, dry: true })).toEqual({
+        ok: false,
+        error: 'reviewer.instructions is not a task agent or reviewer setting.',
+      })
     } finally {
       engine.machine = was
     }
@@ -584,7 +592,12 @@ describe("Settings reviewer changed: the waiting tasks' reviewer, from the scree
     const rows = new Set(CATALOG.flatMap((s) => s.rows.map((r) => r.key)))
     for (const key of [...REVIEWER_KEYS, ...TASK_AGENT_KEYS]) expect([key, rows.has(key)]).toEqual([key, true])
     expect(REVIEWER_KEYS).toHaveLength(18)
-    expect([waitingKind('reviewer.fallback4Effort'), waitingKind('task.model'), waitingKind('advisor.agent'), waitingKind('reviewer.instructions')]).toEqual(['reviewer', 'agent', undefined, undefined])
+    expect([waitingKind('reviewer.fallback4Effort'), waitingKind('task.model'), waitingKind('advisor.agent'), waitingKind('reviewer.instructions')]).toEqual([
+      'reviewer',
+      'agent',
+      undefined,
+      undefined,
+    ])
   })
 })
 
@@ -730,7 +743,9 @@ describe("a task's CLI, model and effort", () => {
     expect(bad.code).toBe(1)
     expect(bad.out).toContain('--set merge: Pick one of')
     const id = (out: string) => out.match(/([A-Z]+-\d+)/)![1]
-    const t = src.engine.task(id((await src.cli(['task', 'add', 'One round', '--desc', 'x', '--set', 'review.rounds=1', '--set', 'merge=after GitHub checks', '--set', 'reviewer=claude'], { chat: place })).out))!
+    const t = src.engine.task(
+      id((await src.cli(['task', 'add', 'One round', '--desc', 'x', '--set', 'review.rounds=1', '--set', 'merge=after GitHub checks', '--set', 'reviewer=claude'], { chat: place })).out),
+    )!
     // shepherdr merge waits for GitHub's checks, as the brief says, whatever Settings say later
     expect(t.waitChecks).toBe(true)
     expect(t.reviewer?.kind).toBe('claude')

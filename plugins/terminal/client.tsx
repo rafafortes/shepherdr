@@ -98,8 +98,22 @@ function Screen({ screen, className, ...p }: { screen: TermScreen | undefined } 
           background: css('--term'),
           foreground: css('--term-fg'),
           selectionBackground: 'rgb(255 255 255 / 0.25)',
-          black, red, green, yellow, blue, magenta, cyan, white,
-          brightBlack, brightRed, brightGreen, brightYellow, brightBlue, brightMagenta, brightCyan, brightWhite,
+          black,
+          red,
+          green,
+          yellow,
+          blue,
+          magenta,
+          cyan,
+          white,
+          brightBlack,
+          brightRed,
+          brightGreen,
+          brightYellow,
+          brightBlue,
+          brightMagenta,
+          brightCyan,
+          brightWhite,
         },
       })
       made.loadAddon(new Unicode11Addon())
@@ -180,14 +194,7 @@ function Screen({ screen, className, ...p }: { screen: TermScreen | undefined } 
   }, [term, screen, cols])
 
   return (
-    <div
-      ref={box}
-      {...p}
-      data-cols={cols}
-      data-font={font}
-      className={clsx('term-screen min-h-0 flex-1 touch-pan-x touch-pan-y overflow-auto bg-term', className)}
-      style={{ padding: PAD }}
-    >
+    <div ref={box} {...p} data-cols={cols} data-font={font} className={clsx('term-screen min-h-0 flex-1 touch-pan-x touch-pan-y overflow-auto bg-term', className)} style={{ padding: PAD }}>
       <div ref={host} className="w-max" />
       {screen ? null : <div className="text-[0.75rem] text-(--ansi-0b) phone:text-[0.8125rem]">Reading the terminal…</div>}
     </div>
@@ -305,7 +312,7 @@ export default definePlugin({
           e.preventDefault()
           // a task's: its panel opens on the terminal, which takes the focus; pressed in it, back to the chat
           if (task && !ui.term) {
-            if (focused) return toChat(task), true
+            if (focused) return (toChat(task), true)
             openItem('terminal')
             requestAnimationFrame(() => document.querySelector<HTMLElement>(SCREEN)?.focus())
             return true

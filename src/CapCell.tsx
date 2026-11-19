@@ -41,7 +41,27 @@ export const capId = (pattern: string, space?: string) => (space === undefined ?
  *  phone: under the line, the same controls) */
 export { atOnceWords }
 
-export function CapCell({ name, harness, pattern: raw, atOnce, caps, phone, openId, onOpen, onSaved }: { name: string; harness?: string; pattern: string; atOnce: SummaryAtOnce; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void; onSaved?: () => void }) {
+export function CapCell({
+  name,
+  harness,
+  pattern: raw,
+  atOnce,
+  caps,
+  phone,
+  openId,
+  onOpen,
+  onSaved,
+}: {
+  name: string
+  harness?: string
+  pattern: string
+  atOnce: SummaryAtOnce
+  caps: CapsText
+  phone: boolean
+  openId: string | null
+  onOpen: (id: string | null) => void
+  onSaved?: () => void
+}) {
   // a cap's pattern is lowercase, as its text holds it: a model id with capitals (Qwen3.8-27B) is capped by its lowercase
   const pattern = raw.toLowerCase()
   const id = capId(pattern)
@@ -52,7 +72,17 @@ export function CapCell({ name, harness, pattern: raw, atOnce, caps, phone, open
   const editor = <CapEditor name={title} pattern={pattern} caps={caps} phone={phone} onClose={() => onOpen(null)} onSaved={onSaved} />
   return (
     <span className="relative block min-w-0">
-      <button type="button" data-cell={id} data-blocked={w.blocked || undefined} aria-haspopup={phone ? undefined : 'dialog'} aria-expanded={open} aria-label={`${name}: ${w.words}`} title={w.title} onClick={() => onOpen(open ? null : id)} className={`press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel${w.blocked ? ' font-medium text-need-fg' : ''}`}>
+      <button
+        type="button"
+        data-cell={id}
+        data-blocked={w.blocked || undefined}
+        aria-haspopup={phone ? undefined : 'dialog'}
+        aria-expanded={open}
+        aria-label={`${name}: ${w.words}`}
+        title={w.title}
+        onClick={() => onOpen(open ? null : id)}
+        className={`press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel${w.blocked ? ' font-medium text-need-fg' : ''}`}
+      >
         {w.words}
       </button>
       {open ? phone ? <div className="pt-1">{editor}</div> : <Pop onClose={() => onOpen(null)}>{editor}</Pop> : null}
@@ -64,14 +94,44 @@ export function CapCell({ name, harness, pattern: raw, atOnce, caps, phone, open
 }
 
 /** one space's sub-limit under a row: its line, which opens the editor with that space chosen */
-function SpaceCap({ name, title, pattern, space, caps, phone, openId, onOpen, onSaved }: { name: string; title: string; pattern: string; space: NonNullable<SummaryAtOnce['spaces']>[number]; caps: CapsText; phone: boolean; openId: string | null; onOpen: (id: string | null) => void; onSaved?: () => void }) {
+function SpaceCap({
+  name,
+  title,
+  pattern,
+  space,
+  caps,
+  phone,
+  openId,
+  onOpen,
+  onSaved,
+}: {
+  name: string
+  title: string
+  pattern: string
+  space: NonNullable<SummaryAtOnce['spaces']>[number]
+  caps: CapsText
+  phone: boolean
+  openId: string | null
+  onOpen: (id: string | null) => void
+  onSaved?: () => void
+}) {
   const id = capId(pattern, space.key)
   const open = openId === id
   const words = spaceCapWords(space)
   const editor = <CapEditor name={title} pattern={pattern} caps={caps} phone={phone} space={space.key} onClose={() => onOpen(null)} onSaved={onSaved} />
   return (
     <span className="relative mt-0.5 block min-w-0">
-      <button type="button" data-cell={id} data-blocked={space.max === 0 || undefined} aria-haspopup={phone ? undefined : 'dialog'} aria-expanded={open} aria-label={`${name} in ${words}`} title={`Set by ${space.name}: ${pattern}=${space.max}. Click to change it.`} onClick={() => onOpen(open ? null : id)} className={`press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 pl-3 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel${space.max === 0 ? ' font-medium text-need-fg' : ' text-fg2'}`}>
+      <button
+        type="button"
+        data-cell={id}
+        data-blocked={space.max === 0 || undefined}
+        aria-haspopup={phone ? undefined : 'dialog'}
+        aria-expanded={open}
+        aria-label={`${name} in ${words}`}
+        title={`Set by ${space.name}: ${pattern}=${space.max}. Click to change it.`}
+        onClick={() => onOpen(open ? null : id)}
+        className={`press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 pl-3 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel${space.max === 0 ? ' font-medium text-need-fg' : ' text-fg2'}`}
+      >
         {words}
       </button>
       {open ? phone ? <div className="pt-1">{editor}</div> : <Pop onClose={() => onOpen(null)}>{editor}</Pop> : null}
@@ -81,7 +141,23 @@ function SpaceCap({ name, title, pattern, space, caps, phone, openId, onOpen, on
 
 /** the editor of one cap: its three choices (no cap = its entry taken out at the level, blocked = 0, or a number from 1 to 200) at
  *  this machine, Everywhere, or one space (`space`: the one it opens for, else the first space), saved at that level */
-export function CapEditor({ name, pattern, caps, phone, space, onClose, onSaved }: { name: string; pattern: string; caps: CapsText; phone: boolean; space?: string; onClose: () => void; onSaved?: () => void }) {
+export function CapEditor({
+  name,
+  pattern,
+  caps,
+  phone,
+  space,
+  onClose,
+  onSaved,
+}: {
+  name: string
+  pattern: string
+  caps: CapsText
+  phone: boolean
+  space?: string
+  onClose: () => void
+  onSaved?: () => void
+}) {
   const spaces = caps.spaces
   const [scope, setScope] = useState<'machine' | 'all' | 'space'>(space === undefined ? 'machine' : 'space')
   const [spaceKey, setSpaceKey] = useState(space ?? spaces[0]?.key ?? '')
@@ -148,7 +224,12 @@ export function CapEditor({ name, pattern, caps, phone, space, onClose, onSaved 
             <input type="radio" name={`cap-scope-${pattern}`} checked={scope === 'space'} onChange={() => setScope('space')} />
             This space
             {scope === 'space' ? (
-              <select aria-label="Which space" value={spaceKey} onChange={(e) => setSpaceKey(e.target.value)} className="min-w-0 truncate rounded-row bg-bg px-1.5 py-0.5 text-[0.8125rem] shadow-[inset_0_0_0_1px_var(--line2)] outline-none focus:shadow-box-focus dark:bg-bubble">
+              <select
+                aria-label="Which space"
+                value={spaceKey}
+                onChange={(e) => setSpaceKey(e.target.value)}
+                className="min-w-0 truncate rounded-row bg-bg px-1.5 py-0.5 text-[0.8125rem] shadow-[inset_0_0_0_1px_var(--line2)] outline-none focus:shadow-box-focus dark:bg-bubble"
+              >
                 {spaces.map((s) => (
                   <option key={s.key} value={s.key}>
                     {s.name}
@@ -159,8 +240,19 @@ export function CapEditor({ name, pattern, caps, phone, space, onClose, onSaved 
           </label>
         ) : null}
       </fieldset>
-      <LimitChoice label={`Most ${name} at once, ${scope === 'all' ? 'Everywhere' : scope === 'space' ? `in ${shown?.name ?? 'this space'}` : 'this machine'}`} value={draft} max={MAX_CAP} zero={BLOCKED_CHOICE} phone={phone} onChange={(v) => setDraft(v)} />
-      {inherited !== undefined ? <Small className="text-pretty">{above} sets {inherited} here. Saving makes this {scope === 'space' ? 'space' : 'machine'}'s own value.</Small> : null}
+      <LimitChoice
+        label={`Most ${name} at once, ${scope === 'all' ? 'Everywhere' : scope === 'space' ? `in ${shown?.name ?? 'this space'}` : 'this machine'}`}
+        value={draft}
+        max={MAX_CAP}
+        zero={BLOCKED_CHOICE}
+        phone={phone}
+        onChange={(v) => setDraft(v)}
+      />
+      {inherited !== undefined ? (
+        <Small className="text-pretty">
+          {above} sets {inherited} here. Saving makes this {scope === 'space' ? 'space' : 'machine'}'s own value.
+        </Small>
+      ) : null}
       {lowered.length ? (
         <Small data-lowered className="text-pretty">
           Saving lowers {loweredWords(lowered)}.

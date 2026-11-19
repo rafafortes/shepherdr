@@ -21,13 +21,41 @@ import { fitToProviders, formatMaxAtOnce, loweredWords, parseMaxAtOnce, toHarnes
 import { eventRules, eventsText, eventWords, nextWords, OWN_ZONE, timeRule, timeWords, validZone, type EventRule } from './trigger.ts'
 
 /** every agent kind herdr can start (interactive chat requires runtime log discovery and a reader) */
-const FALLBACK_KINDS = ['pi', 'claude', 'codex', 'gemini', 'cursor', 'devin', 'agy', 'cline', 'omp', 'mastracode', 'opencode', 'copilot', 'kimi', 'kiro', 'droid', 'amp', 'grok', 'hermes', 'kilo', 'qodercli', 'qwen', 'letta', 'maki', 'muse']
+const FALLBACK_KINDS = [
+  'pi',
+  'claude',
+  'codex',
+  'gemini',
+  'cursor',
+  'devin',
+  'agy',
+  'cline',
+  'omp',
+  'mastracode',
+  'opencode',
+  'copilot',
+  'kimi',
+  'kiro',
+  'droid',
+  'amp',
+  'grok',
+  'hermes',
+  'kilo',
+  'qodercli',
+  'qwen',
+  'letta',
+  'maki',
+  'muse',
+]
 
 function herdrKinds(): string[] {
   try {
     const r = Bun.spawnSync(['herdr', 'agent', 'start', '--help'], { stdout: 'pipe', stderr: 'pipe', timeout: 3000 })
     const m = `${r.stdout}${r.stderr}`.match(/possible values: ([^\]]+)\]/)
-    const kinds = m?.[1].split(',').map((k) => k.trim()).filter(Boolean)
+    const kinds = m?.[1]
+      .split(',')
+      .map((k) => k.trim())
+      .filter(Boolean)
     if (kinds?.length) return kinds
   } catch {
     /* herdr not on PATH */
@@ -36,7 +64,17 @@ function herdrKinds(): string[] {
 }
 
 // GitHub Copilot by its full name, not to be taken for the Copilot mode
-const NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', pi: 'pi', opencode: 'OpenCode', qodercli: 'Qoder', agy: 'Antigravity', omp: 'Oh My Pi', mastracode: 'Mastra Code', copilot: 'GitHub Copilot' }
+const NAMES: Record<string, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  pi: 'pi',
+  opencode: 'OpenCode',
+  qodercli: 'Qoder',
+  agy: 'Antigravity',
+  omp: 'Oh My Pi',
+  mastracode: 'Mastra Code',
+  copilot: 'GitHub Copilot',
+}
 const nameOf = (kind: string) => NAMES[kind] ?? kind[0].toUpperCase() + kind.slice(1)
 const KINDS = herdrKinds()
 // chat-readable kinds first, then the rest as herdr lists them
@@ -189,7 +227,24 @@ export interface Num {
   limit?: boolean
 }
 
-type Row = { label: string; key: string; value: string; options?: string[]; ordered?: boolean; ids?: Record<string, string>; text?: boolean; multiline?: boolean; fixed?: boolean; group?: string; sub?: string; num?: Num; hint?: string; warn?: string; chain?: SettingRow['chain']; /** levels this row alone may be set at, narrower than its section's (a space's own order) */ levels?: LevelKind[] }
+type Row = {
+  label: string
+  key: string
+  value: string
+  options?: string[]
+  ordered?: boolean
+  ids?: Record<string, string>
+  text?: boolean
+  multiline?: boolean
+  fixed?: boolean
+  group?: string
+  sub?: string
+  num?: Num
+  hint?: string
+  warn?: string
+  chain?: SettingRow['chain'] /** levels this row alone may be set at, narrower than its section's (a space's own order) */
+  levels?: LevelKind[]
+}
 
 /** the small heading of a role's backups, under the role's own rows: its chain sits in a sub-block of that name */
 const BACKUPS = 'Backups'
@@ -288,7 +343,8 @@ export const CATALOG: Section[] = [
   {
     name: 'Private instructions',
     prompt: true,
-    about: 'Personal rules kept outside your repos. Each role follows space → machine → Everywhere; an empty value means no private rules. Adds to team rules; explicit human instructions win. New starts or restarts only. No secrets here.',
+    about:
+      'Personal rules kept outside your repos. Each role follows space → machine → Everywhere; an empty value means no private rules. Adds to team rules; explicit human instructions win. New starts or restarts only. No secrets here.',
     rows: [
       { label: 'Coordinators', key: 'coordinator.instructions', value: '', multiline: true },
       { label: 'Task agents', key: 'task.instructions', value: '', multiline: true },
@@ -314,9 +370,21 @@ export const CATALOG: Section[] = [
       // a command of the space's own, run in the task's worktree after its rebase and before it goes into main
       // (engine.gate): exit 0 lets it in, anything else stops it. Never a git hook: a hook refusing an update leaves
       // what it would write in the space's checkout, which may be a live service's folder
-      { label: 'Merge gate', key: 'merge.gate', value: 'off', text: true, hint: "A command run in the task's worktree after its rebase, before its change goes into its base (here, or through its pull request): exit 0 lets it in, with its last line in the merge commit; anything else stops the merge, with its output, and the base stays as it was. Off: none." },
+      {
+        label: 'Merge gate',
+        key: 'merge.gate',
+        value: 'off',
+        text: true,
+        hint: "A command run in the task's worktree after its rebase, before its change goes into its base (here, or through its pull request): exit 0 lets it in, with its last line in the merge commit; anything else stops the merge, with its output, and the base stays as it was. Off: none.",
+      },
       // with a merge gate, the first merges in line go in together on one gate run (engine.train)
-      { label: 'Merge train', key: 'merge.train', value: 'off', options: ['off', '2', '3', '4', '5'], hint: "With a merge gate, for merges made here (not through a pull request): when several merges wait in line, the first ones, up to this many, go in together on one gate run, each as its own commit with the gate's line. One that conflicts with those before it waits for its own turn. A refusal makes each merge of the train go alone once. Off: one at a time." },
+      {
+        label: 'Merge train',
+        key: 'merge.train',
+        value: 'off',
+        options: ['off', '2', '3', '4', '5'],
+        hint: "With a merge gate, for merges made here (not through a pull request): when several merges wait in line, the first ones, up to this many, go in together on one gate run, each as its own commit with the gate's line. One that conflicts with those before it waits for its own turn. A refusal makes each merge of the train go alone once. Off: one at a time.",
+      },
       // only words in the brief's Reviewer line: the task's agent has its change reviewed however it sees fit
       ...agentRows('Reviewer', 'reviewer', [...REVIEWERS], 'default', 'default'),
       // a reviewer that cannot run at all (out of allowance, signed out, its model is gone) leaves its task's agent
@@ -338,7 +406,8 @@ export const CATALOG: Section[] = [
   {
     // which agent (CLI), model and effort each kind of agent starts with, and each role's backups under it
     name: 'Agents',
-    about: "What each kind of agent starts with. Default is the agent's own model or effort. Each role's backups sit under its own rows: a backup takes over when an agent can't go on, the same CLI again on its backup's model and effort (keeping its session), or another CLI taking over. Each backup has its own model and effort; the coordinators' backup follows the tasks' one until you set its own. When the primary is back applies to every backup. Chat choices need a chat log reader; other installed CLIs cannot show replies here. Headless review is separate.",
+    about:
+      "What each kind of agent starts with. Default is the agent's own model or effort. Each role's backups sit under its own rows: a backup takes over when an agent can't go on, the same CLI again on its backup's model and effort (keeping its session), or another CLI taking over. Each backup has its own model and effort; the coordinators' backup follows the tasks' one until you set its own. When the primary is back applies to every backup. Chat choices need a chat log reader; other installed CLIs cannot show replies here. Headless review is separate.",
     rows: [
       ...agentRows('Tasks', 'task', [...CHAT_CLIS], 'default', 'default'),
       // a backup takes over where a task's or a coordinator's agent can't go on (engine.ts cantGoOn, source.ts
@@ -369,7 +438,14 @@ export const CATALOG: Section[] = [
       // the advisor: a question a task or a coordinator opens for the human can go to it (Ask the advisor on its card),
       // and goes by itself once it has waited this long; it answers questions and choices, never a permission, a plan
       // or what only the human decides (source.ts advise, advisor.ts). One headless run per question, read-only
-      { group: 'Advisor', label: 'Advisor', key: 'advisor.agent', value: 'off', options: ['off', ...REVIEWERS], hint: 'Off: no advisor. Answers the questions tasks and coordinators open for you, when you ask it or once one has waited.' },
+      {
+        group: 'Advisor',
+        label: 'Advisor',
+        key: 'advisor.agent',
+        value: 'off',
+        options: ['off', ...REVIEWERS],
+        hint: 'Off: no advisor. Answers the questions tasks and coordinators open for you, when you ask it or once one has waited.',
+      },
       { group: 'Advisor', label: 'Model', key: 'advisor.model', value: 'default', text: true },
       { group: 'Advisor', label: 'Effort', key: 'advisor.effort', value: 'default', options: [...EFFORTS] },
       ...chainRows(
@@ -382,12 +458,26 @@ export const CATALOG: Section[] = [
         ],
         REVIEWERS,
       ),
-      { group: 'Advisor', label: 'Answers for you after', key: 'advisor.after', value: '2 min', options: [...ADVISOR_AFTER], hint: 'A question nobody answered goes to the advisor by itself after this long. Never a permission, a plan, or what only you decide.' },
+      {
+        group: 'Advisor',
+        label: 'Answers for you after',
+        key: 'advisor.after',
+        value: '2 min',
+        options: [...ADVISOR_AFTER],
+        hint: 'A question nobody answered goes to the advisor by itself after this long. Never a permission, a plan, or what only you decide.',
+      },
       // the way back from a backup: the primary is asked, now and then, whether it answers again (source.ts
       // watchReturns, return.ts); go back starts each agent still on the backup again on what Settings name once it is
       // idle, tell me only says so in their chats. A probe is one tiny request of one CLI, never beside work on that model.
       // It applies to every backup above, so it sits under a group of its own, named for what it does
-      { group: 'Back to the primary', label: 'When the primary is back', key: 'backup.watchReturn', value: 'go back', options: ['go back', 'tell me', 'off'], hint: 'Applies to every backup above. Asks the primary model now and then whether it answers again. Go back: each agent still on a backup starts again on it once idle, never mid-turn. Tell me: only says so in their chats. Off: never asks.' },
+      {
+        group: 'Back to the primary',
+        label: 'When the primary is back',
+        key: 'backup.watchReturn',
+        value: 'go back',
+        options: ['go back', 'tell me', 'off'],
+        hint: 'Applies to every backup above. Asks the primary model now and then whether it answers again. Go back: each agent still on a backup starts again on it once idle, never mid-turn. Tell me: only says so in their chats. Off: never asks.',
+      },
     ],
   },
   {
@@ -397,7 +487,13 @@ export const CATALOG: Section[] = [
     levels: ['all', 'machine'],
     about: "The OpenCode models the menus offer. OpenCode lists every model it has, and this machine's OpenCode may be set to a few of them.",
     rows: [
-      { label: 'Models shown', key: 'opencode.models', value: 'all', text: true, hint: "Glob patterns on provider/model or on the model alone, any case, comma or space separated: *-free, or opencode/*-free, opencode-go/longcat-*. all (or empty): every model OpenCode lists. The others stay usable by id." },
+      {
+        label: 'Models shown',
+        key: 'opencode.models',
+        value: 'all',
+        text: true,
+        hint: 'Glob patterns on provider/model or on the model alone, any case, comma or space separated: *-free, or opencode/*-free, opencode-go/longcat-*. all (or empty): every model OpenCode lists. The others stay usable by id.',
+      },
     ],
   },
   {
@@ -409,9 +505,27 @@ export const CATALOG: Section[] = [
     about: "What Shepherdr reads of each provider's quota, and when it warns. Shown on Settings → Models, above the summary.",
     rows: [
       { label: 'Claude Code', key: 'quota.claude', value: 'on', options: ['on', 'off'], hint: "Claude Code's own /usage, read in a sealed run that changes nothing (needs bubblewrap). Off: no read." },
-      { label: 'Command Code', key: 'quota.commandcode', value: 'on', options: ['on', 'off'], hint: 'Command Code\'s own account API, with the key COMMANDCODE_API_KEY from Secrets. Off, or no key: no read.' },
-      { label: 'OpenCode Go (estimate)', key: 'quota.opencodeGo', value: 'on', options: ['on', 'off'], hint: "Not read from OpenCode: an estimate from Shepherdr's own ledger, with the lowest limit its run-outs show. Off: no estimate." },
-      { label: 'Warn when a provider is at', key: 'quota.alertAt', value: '80%', num: { min: 50, max: 95, unit: '%', off: true }, hint: 'Once a window of a provider reaches this share of its quota, one alert; again once it has refilled. Off: only a run-out alerts.' },
+      {
+        label: 'Command Code',
+        key: 'quota.commandcode',
+        value: 'on',
+        options: ['on', 'off'],
+        hint: "Command Code's own account API, with the key COMMANDCODE_API_KEY from Secrets. Off, or no key: no read.",
+      },
+      {
+        label: 'OpenCode Go (estimate)',
+        key: 'quota.opencodeGo',
+        value: 'on',
+        options: ['on', 'off'],
+        hint: "Not read from OpenCode: an estimate from Shepherdr's own ledger, with the lowest limit its run-outs show. Off: no estimate.",
+      },
+      {
+        label: 'Warn when a provider is at',
+        key: 'quota.alertAt',
+        value: '80%',
+        num: { min: 50, max: 95, unit: '%', off: true },
+        hint: 'Once a window of a provider reaches this share of its quota, one alert; again once it has refilled. Off: only a run-out alerts.',
+      },
     ],
   },
   {
@@ -419,22 +533,42 @@ export const CATALOG: Section[] = [
     // that matters more may have more of them running. Off: only the machine's limit. Set at any of the three levels,
     // the most specific one that sets it wins (pick)
     name: 'Space',
-    about: "The order of a space's tasks in this machine's queue, how many of them work at once here, and how many agents of one model or provider it may run at once. They work together with the machine's limits (Machine → Max tasks working at once, and Most at once per model or provider at this machine): a task starts only when every one has room. Off: only the machine's limits.",
+    about:
+      "The order of a space's tasks in this machine's queue, how many of them work at once here, and how many agents of one model or provider it may run at once. They work together with the machine's limits (Machine → Max tasks working at once, and Most at once per model or provider at this machine): a task starts only when every one has room. Off: only the machine's limits.",
     rows: [
       // a space's own order in the shared queue, at this machine's spaces only: no Everywhere or machine default, since
       // an order is only meaningful between the spaces of one machine (engine.heldTasks and engine.retryReviews)
-      { label: 'Priority order of this space', key: 'space.priority', value: 'off', num: { min: 1, max: PLACE_MAX, off: true }, levels: ['space'], hint: "1 is first, 2 next, and so on; a space with no number comes after every numbered one, and spaces with the same number go by how long their tasks waited. Strict: while the first space has a task that can start, no later space starts one — give it a Max tasks cap to leave room for the others, e.g. set space.priority 1 on lyvora-app and cap its working tasks at 2. A task marked first in line still goes ahead of every space. A task held behind one of another space's says how many are ahead of it and of which spaces. Set with shepherdr set space.priority 1 --space lyvora-app. The home space holds no tasks of its own, so it has no place in this order. Off: the order by age as before." },
-      { label: 'Max tasks of this space working at once', key: 'space.maxTasks', value: 'off', num: { min: 0, max: 200, off: true, limit: true }, hint: "Caps this space's working tasks within the machine's own limit, so a space that matters more can have more of them running than the others. 0: the space starts no task (its tasks wait, held). No cap: only the machine's limit." },
+      {
+        label: 'Priority order of this space',
+        key: 'space.priority',
+        value: 'off',
+        num: { min: 1, max: PLACE_MAX, off: true },
+        levels: ['space'],
+        hint: "1 is first, 2 next, and so on; a space with no number comes after every numbered one, and spaces with the same number go by how long their tasks waited. Strict: while the first space has a task that can start, no later space starts one — give it a Max tasks cap to leave room for the others, e.g. set space.priority 1 on lyvora-app and cap its working tasks at 2. A task marked first in line still goes ahead of every space. A task held behind one of another space's says how many are ahead of it and of which spaces. Set with shepherdr set space.priority 1 --space lyvora-app. The home space holds no tasks of its own, so it has no place in this order. Off: the order by age as before.",
+      },
+      {
+        label: 'Max tasks of this space working at once',
+        key: 'space.maxTasks',
+        value: 'off',
+        num: { min: 0, max: 200, off: true, limit: true },
+        hint: "Caps this space's working tasks within the machine's own limit, so a space that matters more can have more of them running than the others. 0: the space starts no task (its tasks wait, held). No cap: only the machine's limit.",
+      },
       // per provider or per model. Read at two levels, both applied (model-caps.ts, choose.ts): the machine's own value (Machine,
       // or Everywhere) is the machine's total, and a space's own value (pick: its own, else the machine's) is that space's
       // sub-limit inside it. A space's value never replaces the machine's total.
-      { label: 'Most at once per model or provider', key: 'models.maxAtOnce', value: 'off', text: true, hint: `Most agents of one provider or model at once: pi.spark=4 caps every model of pi's spark provider, claude/claude-opus-5-5=2 one model (a model's own entry wins). Set at this machine or Everywhere it is the machine's total, for every space together; set for a space, that space's own sub-limit inside it (its own runs only). A task waits for a free slot of its model, and the others start past it. 0 blocks a model: nothing new starts on it, in any role, and a task whose every model is blocked is held until a limit changes. Agents already running on it keep running. Counts this machine's tasks and coordinators on it; requests from other apps on the same server are not seen. No entry: no cap per model (unlimited). Off: no caps at all.` },
+      {
+        label: 'Most at once per model or provider',
+        key: 'models.maxAtOnce',
+        value: 'off',
+        text: true,
+        hint: `Most agents of one provider or model at once: pi.spark=4 caps every model of pi's spark provider, claude/claude-opus-5-5=2 one model (a model's own entry wins). Set at this machine or Everywhere it is the machine's total, for every space together; set for a space, that space's own sub-limit inside it (its own runs only). A task waits for a free slot of its model, and the others start past it. 0 blocks a model: nothing new starts on it, in any role, and a task whose every model is blocked is held until a limit changes. Agents already running on it keep running. Counts this machine's tasks and coordinators on it; requests from other apps on the same server are not seen. No entry: no cap per model (unlimited). Off: no caps at all.`,
+      },
     ],
   },
   {
     // Done tasks put themselves in their place's Archived view this long after they finished (engine.autoArchive)
     name: 'Tasks',
-    about: 'Done tasks move to their place\'s Archived list after this long.',
+    about: "Done tasks move to their place's Archived list after this long.",
     rows: [{ label: 'Archive Done after', key: 'tasks.archiveAfter', value: '7 days', num: { min: 1, max: 3650, unit: 'days', one: 'day', off: true } }],
   },
   {
@@ -442,7 +576,8 @@ export const CATALOG: Section[] = [
     // and the news that wakes it at once (event rules; the rest waits for the heartbeat), then the checklist itself (a
     // row of its own at each level, sections). Any limit the human wants is words in the checklist
     name: AUTOPILOT,
-    about: 'On Autopilot, a coordinator works on its own within what you asked for, and asks you when unsure. Each heartbeat, it goes through its checklist; the news you pick wakes it at once. Want a limit, such as 5 new tasks a day? Write it in the checklist.',
+    about:
+      'On Autopilot, a coordinator works on its own within what you asked for, and asks you when unsure. Each heartbeat, it goes through its checklist; the news you pick wakes it at once. Want a limit, such as 5 new tasks a day? Write it in the checklist.',
     rows: [
       { label: 'Heartbeat', key: 'heartbeat.when', value: HEARTBEAT_RULE },
       { label: 'Wakes at once on', key: 'heartbeat.on', value: 'all news' },
@@ -453,9 +588,16 @@ export const CATALOG: Section[] = [
     // operator names it here (upstream 3.x's service/auth.ts). Never the operator's host name in the repository.
     name: 'App',
     levels: ['all', 'machine'],
-    about: 'The host names this app answers to, besides its own loopback address. Set the name your phone uses before the release that refuses unknown hosts: until then only the loopback page works. Nothing of this machine goes in the repository.',
+    about:
+      'The host names this app answers to, besides its own loopback address. Set the name your phone uses before the release that refuses unknown hosts: until then only the loopback page works. Nothing of this machine goes in the repository.',
     rows: [
-      { label: 'Allowed hosts', key: 'app.hosts', value: '', text: true, hint: 'Comma-separated host names your published page uses, e.g. app.example.com. Loopback addresses always work, including through a local port forward. On this machine: shepherdr set app.hosts <host>. Read at once; no restart needed.' },
+      {
+        label: 'Allowed hosts',
+        key: 'app.hosts',
+        value: '',
+        text: true,
+        hint: 'Comma-separated host names your published page uses, e.g. app.example.com. Loopback addresses always work, including through a local port forward. On this machine: shepherdr set app.hosts <host>. Read at once; no restart needed.',
+      },
     ],
   },
   {
@@ -465,16 +607,37 @@ export const CATALOG: Section[] = [
     levels: ['all', 'machine'],
     about: "When a machine starts more tasks, and when its coordinator hears that it struggles. Set one machine's own to fit its cores and memory.",
     rows: [
-      { group: 'Working tasks', label: 'Max tasks working at once', key: 'machine.maxTasks', value: '10', num: { min: 0, max: 200, off: true, limit: true }, hint: 'Tasks that work on this machine at once. 0: this machine starts no task (they wait, held). No cap: unlimited.' },
+      {
+        group: 'Working tasks',
+        label: 'Max tasks working at once',
+        key: 'machine.maxTasks',
+        value: '10',
+        num: { min: 0, max: 200, off: true, limit: true },
+        hint: 'Tasks that work on this machine at once. 0: this machine starts no task (they wait, held). No cap: unlimited.',
+      },
       // the 5-minute load: the 1-minute one swings between a tenth and three times the cores within minutes while builds
       // come and go, so it let tasks start in every lull. CPU pressure (Linux PSI) is the share of time some task waited
       // for a CPU: off unless set (health.ts busy)
       { group: 'Working tasks', label: 'Wait while CPU load is over', key: 'machine.startLoad', value: '1× cores', num: CORES, hint: 'The 5-minute load average, against the cores.' },
-      { group: 'Working tasks', label: 'Wait while CPU pressure is over', key: 'machine.startPressure', value: 'off', num: { ...PCT, off: true }, hint: 'The share of the last minute some task spent waiting for a CPU (Linux pressure, /proc/pressure/cpu).' },
+      {
+        group: 'Working tasks',
+        label: 'Wait while CPU pressure is over',
+        key: 'machine.startPressure',
+        value: 'off',
+        num: { ...PCT, off: true },
+        hint: 'The share of the last minute some task spent waiting for a CPU (Linux pressure, /proc/pressure/cpu).',
+      },
       { group: 'Working tasks', label: 'Wait while memory is over', key: 'machine.startMemory', value: '80%', num: PCT },
       // the load averages take minutes to show what a start adds: tasks Shepherdr starts by itself go one at a time
       // (engine.release, source.goBack); one you or a coordinator add starts at once when there is room
-      { group: 'Working tasks', label: 'Start one task at most every', key: 'machine.startEvery', value: '2 min', num: { min: 0, max: 30, step: 0.5, unit: 'min', zero: true }, hint: "The tasks Shepherdr starts by itself (held ones, the way back's) go this far apart, so each one's load shows before the next. 0: as many at once as there's room for." },
+      {
+        group: 'Working tasks',
+        label: 'Start one task at most every',
+        key: 'machine.startEvery',
+        value: '2 min',
+        num: { min: 0, max: 30, step: 0.5, unit: 'min', zero: true },
+        hint: "The tasks Shepherdr starts by itself (held ones, the way back's) go this far apart, so each one's load shows before the next. 0: as many at once as there's room for.",
+      },
       { group: 'Tell its coordinator when', label: 'CPU load stays over (2 min)', key: 'machine.alertLoad', value: '1.5× cores', num: { ...CORES, off: true } },
       { group: 'Tell its coordinator when', label: 'Memory is over', key: 'machine.alertMemory', value: '90%', num: { ...PCT, off: true } },
       { group: 'Tell its coordinator when', label: 'Disk is over', key: 'machine.alertDisk', value: '90%', num: { ...PCT, off: true } },
@@ -485,7 +648,8 @@ export const CATALOG: Section[] = [
     // a task's shared browser closes after this long with no agent command and no one watching it in its Browser panel
     // (browser.ts closeIdle); its sign-ins stay, and the next command or a look starts it again
     name: 'Browser',
-    about: "A task's browser closes after this long with no agent using it and no one watching it, so it stops using CPU. Sign-ins stay; the agent's next command or opening the Browser panel starts it again.",
+    about:
+      "A task's browser closes after this long with no agent using it and no one watching it, so it stops using CPU. Sign-ins stay; the agent's next command or opening the Browser panel starts it again.",
     rows: [{ label: 'Close idle browser after', key: 'browser.idleClose', value: '10 min', num: { min: 1, max: 1440, unit: 'min', off: true } }],
   },
   {
@@ -494,16 +658,30 @@ export const CATALOG: Section[] = [
     // answers whether they are parked too
     name: 'Idle agents',
     levels: ['all', 'machine'],
-    about: "An agent idle this long has its pane and CLI closed, so it stops using memory: its chat keeps its session, and a message there starts it again on the same session. Off: agents run until their task ends or you restart them.",
+    about:
+      'An agent idle this long has its pane and CLI closed, so it stops using memory: its chat keeps its session, and a message there starts it again on the same session. Off: agents run until their task ends or you restart them.',
     rows: [
-      { label: 'Park idle agents after', key: 'agents.idleClose', value: '120 min', num: { min: 1, max: 1440, unit: 'min', off: true }, hint: "A task's agent idle this long is parked. Never one at work, on a menu, asking you something, with background work of its own still counting, with a message waiting to go in, or while its task's review or merge holds it." },
-      { label: 'Park idle coordinators after', key: 'agents.idleCloseCoordinators', value: 'off', num: { min: 1, max: 1440, unit: 'min', off: true }, hint: "A space's coordinator too, on the same rule. Off: a coordinator runs until you restart it, whatever it idles." },
+      {
+        label: 'Park idle agents after',
+        key: 'agents.idleClose',
+        value: '120 min',
+        num: { min: 1, max: 1440, unit: 'min', off: true },
+        hint: "A task's agent idle this long is parked. Never one at work, on a menu, asking you something, with background work of its own still counting, with a message waiting to go in, or while its task's review or merge holds it.",
+      },
+      {
+        label: 'Park idle coordinators after',
+        key: 'agents.idleCloseCoordinators',
+        value: 'off',
+        num: { min: 1, max: 1440, unit: 'min', off: true },
+        hint: "A space's coordinator too, on the same rule. Off: a coordinator runs until you restart it, whatever it idles.",
+      },
     ],
   },
   {
     // what buzzes from each place's coordinator chat (shared/alerts.ts notifies); a machine's or space's own is set from its row's menu
     name: 'Notify',
-    about: "Which alerts a place's coordinator chat sends you. All: every new message too. Needs me: its questions and alerts. Off: none, and its row stays quiet. Tasks alert you either way. A place can set its own from its menu in the sidebar.",
+    about:
+      "Which alerts a place's coordinator chat sends you. All: every new message too. Needs me: its questions and alerts. Off: none, and its row stays quiet. Tasks alert you either way. A place can set its own from its menu in the sidebar.",
     rows: [{ label: 'Notify', key: NOTIFY_KEY, value: NOTIFY_DEFAULT, options: [...NOTIFY] }],
   },
   {
@@ -514,9 +692,21 @@ export const CATALOG: Section[] = [
     about:
       "A command of yours told what waits for you here: each question, plan, choice, permission or task that needs you, once it has waited this long without an answer; one answered sooner runs nothing. A question the advisor will answer by itself is held until it hands back, fails, waits for room or runs out of time, and tells nothing if it answers; Done command marks one you were told about when it ends. It runs through sh as <command> <title> <message> <key> (a key of its own for each wait), so ~ and words of your own work. A coordinator whose Notify is Off is left out; tasks are told either way. While it is set, Shepherdr's agents start with SHEPHERDR_NOTIFIES=1, so a notifier of their CLI's own can stand aside. Off: none.",
     rows: [
-      { label: 'Alert command', key: 'alerts.command', value: 'off', text: true, hint: 'A command of yours told what waits for you: each question, plan, choice, permission or task that needs you, of an agent of any CLI, once it has waited the time below; one answered sooner runs nothing. It runs through sh as <command> <title> <message> <key>. Off: none.' },
+      {
+        label: 'Alert command',
+        key: 'alerts.command',
+        value: 'off',
+        text: true,
+        hint: 'A command of yours told what waits for you: each question, plan, choice, permission or task that needs you, of an agent of any CLI, once it has waited the time below; one answered sooner runs nothing. It runs through sh as <command> <title> <message> <key>. Off: none.',
+      },
       { label: 'Tell it after', key: 'alerts.after', value: '10 s', options: [...ALERT_AFTER] },
-      { label: 'Done command', key: 'alerts.doneCommand', value: 'off', text: true, hint: 'A command of yours told when a wait you were alerted about ends, as <command> <key> <how it ended>, with the same key the alert got so a notifier can mark the message it sent (answer, relay, advisor, or the task moved on). Off: none.' },
+      {
+        label: 'Done command',
+        key: 'alerts.doneCommand',
+        value: 'off',
+        text: true,
+        hint: 'A command of yours told when a wait you were alerted about ends, as <command> <key> <how it ended>, with the same key the alert got so a notifier can mark the message it sent (answer, relay, advisor, or the task moved on). Off: none.',
+      },
     ],
   },
   {
@@ -731,7 +921,14 @@ export class Settings {
     if (!KEYS.includes(key)) return { ok: false, error: `No setting ${key}` }
     if (!levelsOf(key).includes(kindOfLevel(l))) {
       const levels = levelsOf(key)
-      return { ok: false, error: !levels.includes('space') ? (levels.includes('machine') ? `${key} is set Everywhere or for one machine, not a space.` : `${key} is set Everywhere only.`) : `${key} is a space's own setting: add --space NAME.` }
+      return {
+        ok: false,
+        error: !levels.includes('space')
+          ? levels.includes('machine')
+            ? `${key} is set Everywhere or for one machine, not a space.`
+            : `${key} is set Everywhere only.`
+          : `${key} is a space's own setting: add --space NAME.`,
+      }
     }
     /** what the human is told of a value kept otherwise than written (a model's limit lowered to its provider's) */
     let note: string | undefined
@@ -866,7 +1063,9 @@ export class Settings {
       if (!listed.length || listed.some((k) => findModel(k, value))) return undefined
       const labels = [...new Set(listed.flatMap((k) => modelsOf(k)!.models.map((m) => m.label)))]
       const them = listed.map((k) => CLI_NAME[k]).join(' nor ')
-      return listed.length === 1 ? `${CLI_NAME[listed[0]]} has no model ${value}. Pick one of: default · ${labels.join(' · ')}.` : `Neither ${them} has a model ${value}. Pick one of: default · ${labels.join(' · ')}.`
+      return listed.length === 1
+        ? `${CLI_NAME[listed[0]]} has no model ${value}. Pick one of: default · ${labels.join(' · ')}.`
+        : `Neither ${them} has a model ${value}. Pick one of: default · ${labels.join(' · ')}.`
     }
     const model = pairValue((k) => this.pick(k, l).value, own.pair, 'model')
     const levels = [...new Set(kinds.flatMap((kind) => effortsOf(kind, model)))]
@@ -905,14 +1104,26 @@ export class Settings {
   private setByAt(l: Level, set: Values = {}): Partial<Record<Said, SetBy>> {
     const by = (...keys: string[]): SetBy | undefined => {
       if (keys.some((k) => k in set)) return 'task'
-      const froms = keys.map((k) => ({ ...this.pick(k, l), key: k })).filter((p) => p.from !== 'default' && p.value !== defaultOf(p.key)).map((p) => p.from)
+      const froms = keys
+        .map((k) => ({ ...this.pick(k, l), key: k }))
+        .filter((p) => p.from !== 'default' && p.value !== defaultOf(p.key))
+        .map((p) => p.from)
       return (['space', 'machine', 'all'] as const).find((f) => froms.includes(f))
     }
     const all: Record<Said, SetBy | undefined> = {
       review: by('brief.review'),
       // a backup reviewer's three keys mark the line only where the line shows one: with it off, and with Review off,
       // the Reviewer line reads as the plain one
-      reviewer: by('reviewer.agent', 'reviewer.model', 'reviewer.effort', ...(this.waysAt(l, set).review ? chainNames('reviewer').filter((n) => kindOf((set[PAIRS[n].cli] ?? this.pick(PAIRS[n].cli, l).value))).flatMap((n) => Object.values(PAIRS[n])) : [])),
+      reviewer: by(
+        'reviewer.agent',
+        'reviewer.model',
+        'reviewer.effort',
+        ...(this.waysAt(l, set).review
+          ? chainNames('reviewer')
+              .filter((n) => kindOf(set[PAIRS[n].cli] ?? this.pick(PAIRS[n].cli, l).value))
+              .flatMap((n) => Object.values(PAIRS[n]))
+          : []),
+      ),
       mustFix: by('review.mustFix'),
       rounds: by('review.rounds'),
       merge: by('brief.merge'),
@@ -991,7 +1202,7 @@ export class Settings {
     const v = this.pick(key, l).value.trim().toLowerCase()
     const n = Number.parseFloat(v)
     // off is no cap; a value no longer readable (the settings never write one) reads as the row's default, never as 0
-    return v === 'off' ? null : Number.isFinite(n) && n >= 0 ? Math.round(n) : (defaultOf(key)?.trim().toLowerCase() === 'off' ? null : Math.round(Number.parseFloat(defaultOf(key) ?? '0')))
+    return v === 'off' ? null : Number.isFinite(n) && n >= 0 ? Math.round(n) : defaultOf(key)?.trim().toLowerCase() === 'off' ? null : Math.round(Number.parseFloat(defaultOf(key) ?? '0'))
   }
 
   /** how many of one space's tasks may work on this machine at once (space.maxTasks, inside the machine's own limit): the
@@ -1135,14 +1346,18 @@ export class Settings {
     const name = { space: 'this space', machine: host, all: 'Everywhere', default: 'default' }
     const keys = (told: boolean) =>
       // a chain's 2nd to 5th backups only once they are on: the rest say nothing
-      CATALOG.filter((s) => !!(s.told || s.prompt) === told).flatMap((s) => s.rows.filter((r) => r.key !== 'alerts' && !(r.chain && r.chain.n > 1 && !kindOf(this.readAt(extraPair(r.chain.of as Chain, r.chain.n).cli, l).value))).map((r) => {
-        const p = this.readAt(r.key, l)
-        // a backup's own key at default reads the tasks' pair's, which the line says
-        const from = `${name[p.from]}${p.follows ? `, the tasks' backup's ${p.follows === 'backup.model' ? 'model' : 'effort'}` : ''}`
-        // a trigger in words, as the human hears it; the rule as kept under it, for an agent to change
-        const words = this.words(r.key, p.value)
-        return words ? `${r.key.padEnd(26)} ${words.trim()}  (${from})\n${''.padEnd(27)}as written: ${p.value}` : `${r.key.padEnd(26)} ${p.value}  (${from})`
-      }))
+      CATALOG.filter((s) => !!(s.told || s.prompt) === told).flatMap((s) =>
+        s.rows
+          .filter((r) => r.key !== 'alerts' && !(r.chain && r.chain.n > 1 && !kindOf(this.readAt(extraPair(r.chain.of as Chain, r.chain.n).cli, l).value)))
+          .map((r) => {
+            const p = this.readAt(r.key, l)
+            // a backup's own key at default reads the tasks' pair's, which the line says
+            const from = `${name[p.from]}${p.follows ? `, the tasks' backup's ${p.follows === 'backup.model' ? 'model' : 'effort'}` : ''}`
+            // a trigger in words, as the human hears it; the rule as kept under it, for an agent to change
+            const words = this.words(r.key, p.value)
+            return words ? `${r.key.padEnd(26)} ${words.trim()}  (${from})\n${''.padEnd(27)}as written: ${p.value}` : `${r.key.padEnd(26)} ${p.value}  (${from})`
+          }),
+      )
     return `What agents are told (private launch instructions and new briefs):\n${keys(true).join('\n')}\n\nHow Shepherdr runs:\n${keys(false).join('\n')}`
   }
 
@@ -1165,12 +1380,17 @@ export class Settings {
   /** the pages of every level this machine holds: Everywhere (the main machine's, which its others share), this
    *  machine, and each of its spaces. `checklist`: the HEARTBEAT.md of a level's place (its id), shown last under
    *  Autopilot */
-  sections(devices: string[], machines: { name: string; state: string }[], plugins: SettingSection | null, host = 'this machine', spaces: string[] = [], name = host, checklist?: (place: string) => string, pushWarnings: string[] = []): SettingSection[] {
-    const levels: { l: Level; id: string }[] = [
-      { l: 'all', id: 'all' },
-      { l: 'machine', id: `m:${host}` },
-      ...spaces.map((space) => ({ l: { space } as Level, id: `p:${host}:${space}` })),
-    ]
+  sections(
+    devices: string[],
+    machines: { name: string; state: string }[],
+    plugins: SettingSection | null,
+    host = 'this machine',
+    spaces: string[] = [],
+    name = host,
+    checklist?: (place: string) => string,
+    pushWarnings: string[] = [],
+  ): SettingSection[] {
+    const levels: { l: Level; id: string }[] = [{ l: 'all', id: 'all' }, { l: 'machine', id: `m:${host}` }, ...spaces.map((space) => ({ l: { space } as Level, id: `p:${host}:${space}` }))]
     const fromName = (f: LevelKind | 'default') => (f === 'machine' ? name : 'Everywhere')
     // a value that reads another key's at this same level is this space's, not Everywhere's
     const fromPeer = (f: LevelKind | 'default') => (f === 'space' ? 'this space' : fromName(f))
@@ -1180,38 +1400,65 @@ export class Settings {
       const told = s.told ? settingsLines('<id>', { ways: this.waysAt(l), reviewer: this.harnessAt('reviewer', l), fallback: this.reviewerBackupsAt(l), by: this.setByAt(l) }) : []
       const text = (said: Said) => told.find((x) => x.said === said)?.text
       const lines: Record<string, string | undefined> = s.told
-        ? { 'brief.review': text('review'), 'reviewer.agent': text('reviewer'), ...Object.fromEntries(REVIEWER_BACKUP_KEYS.map((k) => [k, text('reviewer')])), 'review.mustFix': text('mustFix'), 'review.rounds': text('rounds'), 'brief.merge': text('merge') }
+        ? {
+            'brief.review': text('review'),
+            'reviewer.agent': text('reviewer'),
+            ...Object.fromEntries(REVIEWER_BACKUP_KEYS.map((k) => [k, text('reviewer')])),
+            'review.mustFix': text('mustFix'),
+            'review.rounds': text('rounds'),
+            'brief.merge': text('merge'),
+          }
         : {}
-      return s.rows.filter((r) => levelsOf(r.key).includes(kindOfLevel(l))).map((r) => {
-        if (r.key === 'alerts') return { ...r, value: devices.length ? devices.join(', ') : 'No device yet', warn: pushWarnings.length ? `${pushWarnings.length} device${pushWarnings.length === 1 ? '' : 's'} could not receive the last alert.\n${pushWarnings.slice(0, 3).join('\n')}${pushWarnings.length > 3 ? '\nMore details: shepherdr doctor' : ''}` : undefined }
-        const p = this.pick(r.key, l)
-        // its value as it is read: a backup's own key at default reads the tasks' pair's (readAt), and says so
-        const read = this.readAt(r.key, l)
-        const here = p.from === kindOfLevel(l)
-        const up = above(l)
-        // set here: what a reset goes back to; not set here: where its value comes from
-        const back = up ? this.resetTo(r.key, l, up) : { value: defaultOf(r.key) ?? '', from: 'default' as const }
-        const warn = this.modelProblem(r.key, read, l)
-        const hostWarn = r.key === 'app.hosts' && !read.value.trim() ? 'Only the loopback page works until this is set. On this machine run: shepherdr set app.hosts <host>.' : undefined
-        return {
-          ...agentRow({ ...r, value: read.value }, (k) => this.readAt(k, l).value, (kind) => this.picksAt(kind)),
-          ...(lines[r.key] ? { line: lines[r.key] } : {}),
-          ...this.triggerRow(r.key, p.value),
-          ...(here ? { inherits: { value: back.value, from: back.from === 'default' && l === 'all' ? 'Default' : fromPeer(back.from) } } : l === 'all' ? {} : { from: read.follows ? `the tasks' backup (${fromPeer(read.from)})` : fromName(read.from) }),
-          ...(warn ? { warn } : hostWarn ? { warn: hostWarn } : {}),
-        }
-      })
+      return s.rows
+        .filter((r) => levelsOf(r.key).includes(kindOfLevel(l)))
+        .map((r) => {
+          if (r.key === 'alerts')
+            return {
+              ...r,
+              value: devices.length ? devices.join(', ') : 'No device yet',
+              warn: pushWarnings.length
+                ? `${pushWarnings.length} device${pushWarnings.length === 1 ? '' : 's'} could not receive the last alert.\n${pushWarnings.slice(0, 3).join('\n')}${pushWarnings.length > 3 ? '\nMore details: shepherdr doctor' : ''}`
+                : undefined,
+            }
+          const p = this.pick(r.key, l)
+          // its value as it is read: a backup's own key at default reads the tasks' pair's (readAt), and says so
+          const read = this.readAt(r.key, l)
+          const here = p.from === kindOfLevel(l)
+          const up = above(l)
+          // set here: what a reset goes back to; not set here: where its value comes from
+          const back = up ? this.resetTo(r.key, l, up) : { value: defaultOf(r.key) ?? '', from: 'default' as const }
+          const warn = this.modelProblem(r.key, read, l)
+          const hostWarn = r.key === 'app.hosts' && !read.value.trim() ? 'Only the loopback page works until this is set. On this machine run: shepherdr set app.hosts <host>.' : undefined
+          return {
+            ...agentRow(
+              { ...r, value: read.value },
+              (k) => this.readAt(k, l).value,
+              (kind) => this.picksAt(kind),
+            ),
+            ...(lines[r.key] ? { line: lines[r.key] } : {}),
+            ...this.triggerRow(r.key, p.value),
+            ...(here
+              ? { inherits: { value: back.value, from: back.from === 'default' && l === 'all' ? 'Default' : fromPeer(back.from) } }
+              : l === 'all'
+                ? {}
+                : { from: read.follows ? `the tasks' backup (${fromPeer(read.from)})` : fromName(read.from) }),
+            ...(warn ? { warn } : hostWarn ? { warn: hostWarn } : {}),
+          }
+        })
     }
     const note = (s: Section, l: Level) =>
       s.name === 'Private instructions'
-        ? { noteTitle: 'When rules take effect', note: 'Used at the next start or restart. Saving leaves running agents alone. A resumed session may remember old rules: the new snapshot replaces those private rules. Task agents pass the reviewer snapshot from their own latest start to each review; restart the task agent to refresh it.' }
+        ? {
+            noteTitle: 'When rules take effect',
+            note: 'Used at the next start or restart. Saving leaves running agents alone. A resumed session may remember old rules: the new snapshot replaces those private rules. Task agents pass the reviewer snapshot from their own latest start to each review; restart the task agent to refresh it.',
+          }
         : s.name === 'How tasks work'
           ? { note: settingsBlock('<id>', { ways: this.waysAt(l), reviewer: this.harnessAt('reviewer', l), fallback: this.reviewerBackupsAt(l), by: this.setByAt(l) }) }
-        : s.name === AUTOPILOT
-          ? autopilotNote()
-          : s.name === 'Machine'
-            ? machineNote(this.machine(l === 'all' ? 'all' : 'machine'))
-            : {}
+          : s.name === AUTOPILOT
+            ? autopilotNote()
+            : s.name === 'Machine'
+              ? machineNote(this.machine(l === 'all' ? 'all' : 'machine'))
+              : {}
     // each space's own HEARTBEAT.md, after the heartbeat's rows: a file, not a default its levels pass down
     const withChecklist = (s: Section, list: SettingSection['rows'], id: string): SettingSection['rows'] =>
       s.name === AUTOPILOT && checklist && id.startsWith('p:') ? [...list, { label: 'Checklist', key: 'heartbeat.md', value: checklist(id), doc: true }] : list
@@ -1283,7 +1530,9 @@ const AUTOPILOT_NEVER = ['Deletes tasks', 'Changes Settings', 'Starts work nobod
 /** under Autopilot's rows: what it does on its own, and never does */
 export const autopilotNote = () => ({
   noteTitle: 'On its own it',
-  note: `${AUTOPILOT_DOES.map((x) => `- ${x}`).join('\n')}\n\nIt never ${AUTOPILOT_NEVER.map((x) => x.charAt(0).toLowerCase() + x.slice(1)).join(', ').replace(/, ([^,]+)$/, ' or $1')}.`,
+  note: `${AUTOPILOT_DOES.map((x) => `- ${x}`).join('\n')}\n\nIt never ${AUTOPILOT_NEVER.map((x) => x.charAt(0).toLowerCase() + x.slice(1))
+    .join(', ')
+    .replace(/, ([^,]+)$/, ' or $1')}.`,
 })
 
 /** under a machine's rows: why the defaults are what they are, in this machine's own numbers */
@@ -1349,13 +1598,14 @@ export function refuse(key: string, value: string): string | undefined {
   if (key === 'time.zone' && !validZone(value.trim())) return `${value} is no time zone: write one like Europe/Stockholm.`
   const options = ROWS.find((r) => r.key === key)?.options
   // a dictation language by name or by its whisper code (es, pt): whisper knows more of them than Settings lists
-  if (key === 'dictate.language' && !options?.includes(value) && !/^(auto|[a-z]{2,3})$/i.test(value.trim()))
-    return 'Pick a language, or write its whisper code (en, pt, es).'
-  if (num && numValue(num, value) === undefined) return `Write a number from ${num.min} to ${num.max}${num.step ? '' : ' (whole)'}${num.unit ? `, in ${num.unit}` : ''}${num.off ? ', or off' : num.zero ? ' (0 is off)' : ''}.`
+  if (key === 'dictate.language' && !options?.includes(value) && !/^(auto|[a-z]{2,3})$/i.test(value.trim())) return 'Pick a language, or write its whisper code (en, pt, es).'
+  if (num && numValue(num, value) === undefined)
+    return `Write a number from ${num.min} to ${num.max}${num.step ? '' : ' (whole)'}${num.unit ? `, in ${num.unit}` : ''}${num.off ? ', or off' : num.zero ? ' (0 is off)' : ''}.`
   // an effort word is checked against the levels its model takes (unfit): OpenCode's variants are its own lowercase words
   // (thinking, none…), not LEVELS, so only a word that is not lowercase is refused here
   const variant = pairOfKey(key)?.what === 'effort' && value === value.trim().toLowerCase()
-  if (options && !cli && key !== 'reviewer.agent' && !isBackupCli(key) && key !== 'alerts' && key !== 'dictate.language' && !variant && !options.includes(value)) return `Pick one of: ${options.join(' · ')}.`
+  if (options && !cli && key !== 'reviewer.agent' && !isBackupCli(key) && key !== 'alerts' && key !== 'dictate.language' && !variant && !options.includes(value))
+    return `Pick one of: ${options.join(' · ')}.`
   return undefined
 }
 
@@ -1363,7 +1613,14 @@ const numOf = (key: string) => ROWS.find((r) => r.key === key)?.num
 
 /** task add's --set for one task: a How tasks work key by its Settings key or its short name, and the flag of task
  *  add's own the agent and reviewer keys stand for */
-const ONE_TASK: Record<string, string> = { review: 'brief.review', merge: 'brief.merge', mustfix: 'review.mustFix', 'must-fix': 'review.mustFix', rounds: 'review.rounds', 'review-rounds': 'review.rounds' }
+const ONE_TASK: Record<string, string> = {
+  review: 'brief.review',
+  merge: 'brief.merge',
+  mustfix: 'review.mustFix',
+  'must-fix': 'review.mustFix',
+  rounds: 'review.rounds',
+  'review-rounds': 'review.rounds',
+}
 /** the backup settings one task keeps for itself, its own fallback and pair, as engine.ts cantGoOn reads them first */
 const ONE_BACKUP: Record<string, string> = {
   'task.fallback': 'task.fallback',
@@ -1373,14 +1630,24 @@ const ONE_BACKUP: Record<string, string> = {
   // the rest of its chain, by their own keys
   ...Object.fromEntries(EXTRA.flatMap((n) => Object.values(extraPair('task', n)).map((k) => [k.toLowerCase(), k]))),
 }
-const FLAG_OF: Record<string, string> = { 'task.agent': 'agent', 'task.model': 'model', 'task.effort': 'effort', 'reviewer.agent': 'reviewer', 'reviewer.model': 'reviewer-model', 'reviewer.effort': 'reviewer-effort' }
+const FLAG_OF: Record<string, string> = {
+  'task.agent': 'agent',
+  'task.model': 'model',
+  'task.effort': 'effort',
+  'reviewer.agent': 'reviewer',
+  'reviewer.model': 'reviewer-model',
+  'reviewer.effort': 'reviewer-effort',
+}
 
 /** one --set key=value: a How tasks work setting for this task as Settings keeps it, the task add flag it stands for
  *  (agent, model, effort, reviewer…), a backup value this one task keeps for itself, or why it can't be */
 export function setForTask(pair: string): { key: string; value: string } | { flag: string; value: string } | { error: string } {
   const eq = pair.indexOf('=')
   const name = pair.slice(0, eq).trim()
-  const value = pair.slice(eq + 1).trim().replace(/^(['"])(.*)\1$/, '$2')
+  const value = pair
+    .slice(eq + 1)
+    .trim()
+    .replace(/^(['"])(.*)\1$/, '$2')
   const told = CATALOG.filter((x) => x.told).flatMap((x) => x.rows.map((r) => r.key))
   const short = name.toLowerCase()
   const key =
@@ -1389,7 +1656,10 @@ export function setForTask(pair: string): { key: string; value: string } | { fla
     ONE_BACKUP[short] ??
     (FLAG_OF[`task.${short}`] && `task.${short}`) ??
     (short === 'reviewer' ? 'reviewer.agent' : Object.keys(FLAG_OF).find((k) => k.toLowerCase() === short))
-  if (eq < 1 || !key) return { error: `--set takes key=value, a key of: ${[...told.filter((k) => !FLAG_OF[k]), ...Object.keys(ONE_BACKUP), 'agent', 'model', 'effort', 'reviewer', 'reviewer.model', 'reviewer.effort'].join(', ')} (shepherdr show has them)` }
+  if (eq < 1 || !key)
+    return {
+      error: `--set takes key=value, a key of: ${[...told.filter((k) => !FLAG_OF[k]), ...Object.keys(ONE_BACKUP), 'agent', 'model', 'effort', 'reviewer', 'reviewer.model', 'reviewer.effort'].join(', ')} (shepherdr show has them)`,
+    }
   if (FLAG_OF[key]) return { flag: FLAG_OF[key], value }
   const err = refuse(key, value)
   if (err) return { error: `--set ${name}: ${err}` }
@@ -1414,6 +1684,8 @@ export function numValue(n: Num, value: string): string | undefined {
 
 /** A repository's own destination; it has no machine or Everywhere fallback. */
 export const repositorySection = (level: string, machine: string, base: string): SettingSection => ({
-  name: 'Repository', machine, level,
+  name: 'Repository',
+  machine,
+  level,
   rows: [{ key: 'space.base', label: 'Base branch', value: base, text: true, hint: 'New tasks start from and merge into this branch. Existing tasks keep their target.' }],
 })

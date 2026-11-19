@@ -288,7 +288,13 @@ export function Choices({
                   aria-label={(at && at.name !== show(o)) || n?.words ? show(o) : undefined}
                   aria-description={n?.words || undefined}
                   icon={o === value ? <CheckIcon className={ic} /> : null}
-                  hint={n?.words ? <span data-note={n.off ? 'off' : n.warn ? 'warn' : 'on'} className={clsx('tabular-nums', (n.off || n.warn) && 'text-need-fg')}>{n.words}</span> : undefined}
+                  hint={
+                    n?.words ? (
+                      <span data-note={n.off ? 'off' : n.warn ? 'warn' : 'on'} className={clsx('tabular-nums', (n.off || n.warn) && 'text-need-fg')}>
+                        {n.words}
+                      </span>
+                    ) : undefined
+                  }
                   onClick={() => onPick(o)}
                   // the pin's room at the row's end, wider where it is (a phone's own padding would cover it otherwise)
                   className={pin ? 'pr-10 coarse:pr-12 phone:pr-12' : undefined}
@@ -309,7 +315,10 @@ export function Choices({
                     aria-checked={pin.pinned.includes(o)}
                     aria-label={`${pin.pinned.includes(o) ? 'Unpin' : 'Pin'} ${show(o)}`}
                     onClick={() => pin.toggle(o)}
-                    className={clsx('absolute right-0.5 grid size-7 shrink-0 place-items-center rounded-full text-fg3 hover:text-fg coarse:size-10 phone:size-10', pin.pinned.includes(o) ? 'text-fg' : 'opacity-60')}
+                    className={clsx(
+                      'absolute right-0.5 grid size-7 shrink-0 place-items-center rounded-full text-fg3 hover:text-fg coarse:size-10 phone:size-10',
+                      pin.pinned.includes(o) ? 'text-fg' : 'opacity-60',
+                    )}
                   >
                     <PinIcon className={ic} />
                   </button>
@@ -324,7 +333,8 @@ export function Choices({
 }
 
 /** a number as the screen says it: "7 days", "1.5× cores", "Off" */
-export const numShown = (v: string, num: NonNullable<SettingRow['num']>) => (v === 'off' ? 'Off' : v.replace(/^(\d+(?:\.\d+)?)(\s*).*$/, (_, n, sp) => `${n}${num.unit ? `${sp}${Number(n) === 1 && num.one ? num.one : num.unit}` : ''}`))
+export const numShown = (v: string, num: NonNullable<SettingRow['num']>) =>
+  v === 'off' ? 'Off' : v.replace(/^(\d+(?:\.\d+)?)(\s*).*$/, (_, n, sp) => `${n}${num.unit ? `${sp}${Number(n) === 1 && num.one ? num.one : num.unit}` : ''}`)
 
 /** a value you type: a box as wide as its words, saved when you leave it (Enter too) */
 export function TextValue({ value, onSave, onEdit, label }: { value: string; onSave: (v: string) => void; onEdit: () => void; label: string }) {
@@ -418,8 +428,10 @@ export function NumberValue({ value, num, onSave, onEdit, label }: { value: stri
     const s = num.step ?? 1 // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
     const x = Number.parseFloat(v) // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
     let next: string // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
-    if (!Number.isFinite(x)) next = by > 0 ? String(num.min) : v // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
-    else { // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+    if (!Number.isFinite(x))
+      next = by > 0 ? String(num.min) : v // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+    else {
+      // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
       const to = Math.round((x + by * s) / s) * s // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
       next = to < num.min - 1e-9 ? (offable ? '' : String(num.min)) : String(+Math.min(num.max, to).toFixed(4)) // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
     } // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
@@ -453,7 +465,8 @@ export function NumberValue({ value, num, onSave, onEdit, label }: { value: stri
             onBlur={() => save()}
             onKeyDown={(e) => {
               if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-              else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
+              else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
                 e.preventDefault() // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
                 step(e.key === 'ArrowUp' ? 1 : -1) // coverage-exempt: exercised in layout-settings-controls.test.ts; minified browser coverage leaves this line unattributed
               }
@@ -490,7 +503,21 @@ export function TriggerValue({ row, phone, onPick }: { row: SettingRow & { trigg
 
 /** a whole file's words (a coordinator's HEARTBEAT.md): an editor as wide as the page that grows with them, its
  *  name on top; Save (⌘S, Ctrl+S) and Undo show once it changed, Undo putting back what is saved */
-export function DocValue({ value, onSave, label, file, phone, privateRules = false }: { value: string; onSave: (v: string) => void; label: string; file: string; phone: boolean; privateRules?: boolean }) {
+export function DocValue({
+  value,
+  onSave,
+  label,
+  file,
+  phone,
+  privateRules = false,
+}: {
+  value: string
+  onSave: (v: string) => void
+  label: string
+  file: string
+  phone: boolean
+  privateRules?: boolean
+}) {
   const [v, setV] = useState(value)
   useEffect(() => setV(value), [value])
   const changed = v !== value
@@ -520,7 +547,12 @@ export function DocValue({ value, onSave, label, file, phone, privateRules = fal
             if (changed) onSave(v)
           }
         }}
-        className={clsx('w-full bg-transparent outline-none', privateRules ? 'min-h-24 px-3 py-2.5 font-mono text-[0.8125rem]/5 phone:text-[0.875rem]/[1.375rem]' : 'min-h-40 whitespace-pre-wrap wrap-anywhere text-base/6 focus-visible:rounded-row focus-visible:outline-2 focus-visible:outline-box-focus')}
+        className={clsx(
+          'w-full bg-transparent outline-none',
+          privateRules
+            ? 'min-h-24 px-3 py-2.5 font-mono text-[0.8125rem]/5 phone:text-[0.875rem]/[1.375rem]'
+            : 'min-h-40 whitespace-pre-wrap wrap-anywhere text-base/6 focus-visible:rounded-row focus-visible:outline-2 focus-visible:outline-box-focus',
+        )}
       />
     </div>
   )
@@ -547,7 +579,8 @@ export const APPEARANCE: Page = { name: 'Appearance', device: true, about: 'How 
  *  no level of its own */
 export const MODELS: Page = {
   name: 'Models',
-  about: "Every level's agent settings in one table: each space's tasks, coordinator, reviewer and advisor, with their backups, and this machine's and Everywhere's. Click a cell to change it; a value set in that row is drawn strong, one it inherits faint with where it comes from.",
+  about:
+    "Every level's agent settings in one table: each space's tasks, coordinator, reviewer and advisor, with their backups, and this machine's and Everywhere's. Click a cell to change it; a value set in that row is drawn strong, one it inherits faint with where it comes from.",
   rows: [],
   matrix: true,
   View: ModelsPage,
@@ -556,7 +589,8 @@ export const MODELS: Page = {
 /** Settings → Limits: every limit of this machine in one place (LimitsPage.tsx), beside Models; the same settings */
 export const LIMITS: Page = {
   name: 'Limits',
-  about: 'Every limit of this machine in one place: its tasks at once and when it waits, each space\'s Max tasks, Merge train and sub-limit per provider or model, each provider\'s cap and what waits now. Click a value to change it, at its level. The numbers beside a value are read now.',
+  about:
+    "Every limit of this machine in one place: its tasks at once and when it waits, each space's Max tasks, Merge train and sub-limit per provider or model, each provider's cap and what waits now. Click a value to change it, at its level. The numbers beside a value are read now.",
   rows: [],
   matrix: true,
   View: LimitsPage,
@@ -629,22 +663,40 @@ export function groupsOf(sections: SettingSection[], ui: UI): { name: string; pa
   // (a space's is its machine's) and writes there, so it is found where alerts are, never on a page of its own
   const commandLevel = level === 'all' ? 'all' : `m:${level.split(':')[1]}`
   const command = sections.find((x) => x.name === ALERT_COMMAND && x.level === commandLevel)
-  const scoped = sections.filter((x) => x.level === level && !x.global && x.name !== ALERT_COMMAND).map((x): Page => x.name === 'Notify' ? {
-    ...x, name: 'Notifications',
-    targets: Object.fromEntries([
-      ...(delivery?.rows.filter((r) => !r.key.startsWith('voice.')) ?? []).map((r) => [r.key, delivery!.level ?? 'all']),
-      ...(command?.rows ?? []).map((r) => [r.key, commandLevel]),
-    ]),
-    about: `All: every new coordinator message, question and alert. Needs me: questions and alerts. Off: none, and the space stays quiet. Task alerts reach you either way. Spaces can override the delivery rule here or from their sidebar menu. Device delivery below applies Everywhere.${command ? ` The alert command runs a command of yours (a Telegram notifier, say) for what waits on you, ${commandLevel === 'all' ? 'Everywhere' : 'on this machine'}.` : ''}`,
-    rows: [
-      ...x.rows.map((r) => ({ ...r, group: 'Delivery rules' })),
-      ...(command?.rows.map((r) => ({ ...r, group: commandLevel === 'all' ? 'Alert command · Everywhere' : level === commandLevel ? 'Alert command' : 'Alert command · its machine' })) ?? []),
-      ...(delivery?.rows.filter((r) => !r.key.startsWith('voice.')).map((r) => ({ ...r, group: 'Devices · Everywhere' })) ?? []),
-    ],
-  } : x)
-  const globals = sections.filter((x) => x.global && x.name !== QUOTAS).map((x): Page => x === delivery ? {
-    ...x, name: 'Voice', rows: x.rows.filter((r) => r.key.startsWith('voice.')),
-  } : x)
+  const scoped = sections
+    .filter((x) => x.level === level && !x.global && x.name !== ALERT_COMMAND)
+    .map(
+      (x): Page =>
+        x.name === 'Notify'
+          ? {
+              ...x,
+              name: 'Notifications',
+              targets: Object.fromEntries([
+                ...(delivery?.rows.filter((r) => !r.key.startsWith('voice.')) ?? []).map((r) => [r.key, delivery!.level ?? 'all']),
+                ...(command?.rows ?? []).map((r) => [r.key, commandLevel]),
+              ]),
+              about: `All: every new coordinator message, question and alert. Needs me: questions and alerts. Off: none, and the space stays quiet. Task alerts reach you either way. Spaces can override the delivery rule here or from their sidebar menu. Device delivery below applies Everywhere.${command ? ` The alert command runs a command of yours (a Telegram notifier, say) for what waits on you, ${commandLevel === 'all' ? 'Everywhere' : 'on this machine'}.` : ''}`,
+              rows: [
+                ...x.rows.map((r) => ({ ...r, group: 'Delivery rules' })),
+                ...(command?.rows.map((r) => ({ ...r, group: commandLevel === 'all' ? 'Alert command · Everywhere' : level === commandLevel ? 'Alert command' : 'Alert command · its machine' })) ??
+                  []),
+                ...(delivery?.rows.filter((r) => !r.key.startsWith('voice.')).map((r) => ({ ...r, group: 'Devices · Everywhere' })) ?? []),
+              ],
+            }
+          : x,
+    )
+  const globals = sections
+    .filter((x) => x.global && x.name !== QUOTAS)
+    .map(
+      (x): Page =>
+        x === delivery
+          ? {
+              ...x,
+              name: 'Voice',
+              rows: x.rows.filter((r) => r.key.startsWith('voice.')),
+            }
+          : x,
+    )
   const own = registry.settingsPages.filter((x) => x.when(ui)).map(({ name, about, Icon, View }): Page => ({ name, about, Icon, View, device: true, rows: [] }))
   // the Models table comes right after Agents, the settings it is the one table of
   const running = scoped.filter((x) => !x.told)
@@ -719,7 +771,25 @@ export const SEGMENTS = new Set(['notify', 'review.mustFix'])
 
 /** an editor: the controls of one cell, a reset to what the level above gives (when a key is set here), what went wrong,
  *  and what else it offers under them */
-export function Editor({ phone, title, controls, reset, error, onSet, onReset, footer }: { phone: boolean; title?: string; controls: SettingRow[]; reset: boolean; error?: string; onSet: (key: string, value: string) => void; onReset: () => void; footer?: ReactNode }) {
+export function Editor({
+  phone,
+  title,
+  controls,
+  reset,
+  error,
+  onSet,
+  onReset,
+  footer,
+}: {
+  phone: boolean
+  title?: string
+  controls: SettingRow[]
+  reset: boolean
+  error?: string
+  onSet: (key: string, value: string) => void
+  onReset: () => void
+  footer?: ReactNode
+}) {
   return (
     <div className={clsx('flex flex-col gap-2', phone ? 'px-4 pt-1 pb-3' : 'w-72')}>
       {title ? <Small className="text-pretty font-medium">{title}</Small> : null}
@@ -737,7 +807,13 @@ export function Editor({ phone, title, controls, reset, error, onSet, onReset, f
       {error ? <Refused text={error} /> : null}
       {reset || footer ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
-          {reset ? <Ghost onClick={onReset} className="text-accent">Reset to inherited</Ghost> : <span />}
+          {reset ? (
+            <Ghost onClick={onReset} className="text-accent">
+              Reset to inherited
+            </Ghost>
+          ) : (
+            <span />
+          )}
           {footer}
         </div>
       ) : null}

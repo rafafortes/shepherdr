@@ -21,7 +21,8 @@ const SPACES = [
 const SPARK = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
 /** the key pi's model runs under: pi and its provider in front of the id */
 const KEY = `pi.${SPARK}`
-const settings = (seed: Partial<{ everywhere: Record<string, string>; machine: Record<string, string>; spaces: Record<string, Record<string, string>> }> = {}) => new Settings({ everywhere: {}, machine: {}, spaces: {}, ...seed })
+const settings = (seed: Partial<{ everywhere: Record<string, string>; machine: Record<string, string>; spaces: Record<string, Record<string, string>> }> = {}) =>
+  new Settings({ everywhere: {}, machine: {}, spaces: {}, ...seed })
 const ledger = (name: string) => new UsageLedger(tmp(name), true)
 /** a 4-core machine at 6 on its 5-minute load (over its 1× cores start limit), 85% of its memory in use */
 const sample: Sample = { at: NOW, cores: 4, load: 6, load5: 6, memTotal: 100, memUsed: 85, disks: [{ path: '/', pct: 40, freeGb: 10, dev: 1 }], gpus: [] }
@@ -29,9 +30,39 @@ const sample: Sample = { at: NOW, cores: 4, load: 6, load5: 6, memTotal: 100, me
 /** the whole input of a view: the settings, the matrix and summary they make, and what runs and waits, with what a test changes */
 function input(s: Settings, over: Partial<LimitsInput> = {}): LimitsInput {
   const matrix = modelsMatrix(s, { host: HOST, name: HOST }, SPACES)
-  const summaryInput: SummaryInput = { now: NOW, settings: s, host: HOST, spaces: SPACES, rows: matrix.rows.map((r) => r.id), usage: new UsageLedger(tmp(`lv-${Math.random()}`), true), agents: [], tasks: [], watch: [], runs: over.runs ?? [], providers: over.summary ? undefined : [] }
+  const summaryInput: SummaryInput = {
+    now: NOW,
+    settings: s,
+    host: HOST,
+    spaces: SPACES,
+    rows: matrix.rows.map((r) => r.id),
+    usage: new UsageLedger(tmp(`lv-${Math.random()}`), true),
+    agents: [],
+    tasks: [],
+    watch: [],
+    runs: over.runs ?? [],
+    providers: over.summary ? undefined : [],
+  }
   const summary = over.summary ?? modelsSummary(summaryInput)
-  return { now: NOW, settings: s, host: HOST, machineName: HOST, matrix, summary, runs: [], held: [], working: 0, waitingOnYou: 0, workingIn: {}, herdr: true, advisor: [], reviews: [], queue: { queued: [], scheduled: [], todo: [], merges: [] }, known: knownOf(matrix, summary), ...over }
+  return {
+    now: NOW,
+    settings: s,
+    host: HOST,
+    machineName: HOST,
+    matrix,
+    summary,
+    runs: [],
+    held: [],
+    working: 0,
+    waitingOnYou: 0,
+    workingIn: {},
+    herdr: true,
+    advisor: [],
+    reviews: [],
+    queue: { queued: [], scheduled: [], todo: [], merges: [] },
+    known: knownOf(matrix, summary),
+    ...over,
+  }
 }
 
 const held = (over: Partial<HeldFact> & Pick<HeldFact, 'id' | 'why'>): HeldFact => ({ space: '~', spaceName: 'home', words: `${over.id} waits`, ...over })
@@ -96,7 +127,13 @@ describe('the spaces: Max tasks and Merge train, and one sub-limit per provider 
       { key: KEY, space: '~', role: 'coordinator' as const },
       { key: 'claude/claude-opus-5-5', space: 'gtm', role: 'task' as const },
     ]
-    const view = limitsView(input(s, { runs, workingIn: { gtm: 2, '~': 1 }, held: [held({ id: 'GTM-9', why: 'space', space: 'gtm', spaceName: 'gtm' }), held({ id: 'GTM-10', why: 'slots', space: 'gtm', spaceName: 'gtm' })] }))
+    const view = limitsView(
+      input(s, {
+        runs,
+        workingIn: { gtm: 2, '~': 1 },
+        held: [held({ id: 'GTM-9', why: 'space', space: 'gtm', spaceName: 'gtm' }), held({ id: 'GTM-10', why: 'slots', space: 'gtm', spaceName: 'gtm' })],
+      }),
+    )
     // home has no own value: no row for it (its settings are not in Settings → Limits); gtm has one
     expect(view.spaces.rows.map((r) => r.key)).toEqual(['gtm'])
     const gtm = view.spaces.rows[0]!
@@ -116,7 +153,13 @@ describe('the spaces: Max tasks and Merge train, and one sub-limit per provider 
       machine: { 'models.maxAtOnce': 'spark=4' },
       spaces: { alpha: { 'space.priority': '1' }, gtm: { 'space.priority': '2' }, zeta: { 'space.priority': '2' }, beta: {} },
     })
-    const places = [{ key: '~', name: 'home' }, { key: 'beta', name: 'beta' }, { key: 'alpha', name: 'alpha' }, { key: 'gtm', name: 'gtm' }, { key: 'zeta', name: 'zeta' }]
+    const places = [
+      { key: '~', name: 'home' },
+      { key: 'beta', name: 'beta' },
+      { key: 'alpha', name: 'alpha' },
+      { key: 'gtm', name: 'gtm' },
+      { key: 'zeta', name: 'zeta' },
+    ]
     const view = limitsView(input(s, { matrix: modelsMatrix(s, { host: HOST, name: HOST }, places) }))
     // numbered spaces by their number; the two with 2 keep their listed order; the unset one comes last
     expect(view.spaces.rows.map((r) => r.key)).toEqual(['alpha', 'gtm', 'zeta', 'beta'])
@@ -163,11 +206,14 @@ describe('the spaces: Max tasks and Merge train, and one sub-limit per provider 
     expect(view.spaces.totals['pi.spark']).toEqual({ pattern: 'pi.spark', max: 4 })
   })
 
-  test("home has a row only when it sets one of these keys itself: its own sub-limit makes one, with its runs counted", () => {
+  test('home has a row only when it sets one of these keys itself: its own sub-limit makes one, with its runs counted', () => {
     const quiet = limitsView(input(settings({ spaces: { gtm: { 'space.maxTasks': '2' } } })))
     expect(quiet.spaces.rows.map((r) => r.key)).toEqual(['gtm'])
     const home = limitsView(input(settings({ spaces: { '~': { 'models.maxAtOnce': 'spark=1' } } }), { runs: [{ key: KEY, space: '~', role: 'task' }] }))
-    expect(home.spaces.rows.map((r) => [r.key, r.name, r.id])).toEqual([['~', 'home', `p:${HOST}:~`], ['gtm', 'gtm', `p:${HOST}:gtm`]])
+    expect(home.spaces.rows.map((r) => [r.key, r.name, r.id])).toEqual([
+      ['~', 'home', `p:${HOST}:~`],
+      ['gtm', 'gtm', `p:${HOST}:gtm`],
+    ])
     expect(home.spaces.rows[0]!.caps).toEqual({ 'pi.spark': { max: 1, now: 1 } })
     expect(home.spaces.patterns).toEqual(['pi.spark'])
   })
@@ -182,12 +228,41 @@ describe('the spaces: Max tasks and Merge train, and one sub-limit per provider 
 describe('the providers: every provider with an entry, an agent, a run or usage, each with its models and what runs by role', () => {
   test('a provider with an entry and nothing else shows; runs count by role on the provider and on its model', () => {
     const s = settings({ machine: { 'models.maxAtOnce': 'pi.avell=1' } })
-    const summary = modelsSummary({ now: NOW, settings: s, host: HOST, spaces: SPACES, rows: [], usage: new UsageLedger(tmp('lv-prov'), true), agents: [], tasks: [], watch: [], runs: [], providers: ['pi.avell'] } as SummaryInput)
-    const view = limitsView(input(s, { summary, runs: [{ key: KEY, space: '~', role: 'task' }, { key: KEY, space: 'gtm', role: 'advisor' }, { key: 'pi.spark/other', space: '~', role: 'reviewer' }] }))
+    const summary = modelsSummary({
+      now: NOW,
+      settings: s,
+      host: HOST,
+      spaces: SPACES,
+      rows: [],
+      usage: new UsageLedger(tmp('lv-prov'), true),
+      agents: [],
+      tasks: [],
+      watch: [],
+      runs: [],
+      providers: ['pi.avell'],
+    } as SummaryInput)
+    const view = limitsView(
+      input(s, {
+        summary,
+        runs: [
+          { key: KEY, space: '~', role: 'task' },
+          { key: KEY, space: 'gtm', role: 'advisor' },
+          { key: 'pi.spark/other', space: '~', role: 'reviewer' },
+        ],
+      }),
+    )
     // the provider with an entry shows, with the configured ones of the defaults beside it (the summary's own rows)
     expect(view.providers.map((p) => p.provider)).toContain('pi.avell')
     expect(view.providers.find((p) => p.provider === 'pi.avell')).toMatchObject({ name: 'Avell (local)', local: true, atOnce: { own: { pattern: 'pi.avell', max: 1, from: 'machine' } } })
-    const spark = limitsView(input(s, { runs: [{ key: KEY, space: '~', role: 'task' }, { key: KEY, space: 'gtm', role: 'advisor' }, { key: 'pi.spark/other', space: '~', role: 'reviewer' }] })).providers.find((p) => p.provider === 'pi.spark')
+    const spark = limitsView(
+      input(s, {
+        runs: [
+          { key: KEY, space: '~', role: 'task' },
+          { key: KEY, space: 'gtm', role: 'advisor' },
+          { key: 'pi.spark/other', space: '~', role: 'reviewer' },
+        ],
+      }),
+    ).providers.find((p) => p.provider === 'pi.spark')
     expect(spark!.byRole).toEqual({ task: 1, advisor: 1, reviewer: 1 })
     expect(spark!.models.find((m) => m.key === KEY)!.byRole).toEqual({ task: 1, advisor: 1 })
   })
@@ -276,11 +351,7 @@ describe('the whole line of waiting tasks: held order, queued groups, the other 
     const inputVal = input(s(), {
       matrix: matrix(),
       workingIn: { gtm: 1, zeta: 0 },
-      held: [
-        held({ id: 'H-1', why: 'slots', words: 'first' }),
-        held({ id: 'H-2', why: 'machine', words: 'second' }),
-        held({ id: 'H-3', why: 'slots', words: 'third' }),
-      ],
+      held: [held({ id: 'H-1', why: 'slots', words: 'first' }), held({ id: 'H-2', why: 'machine', words: 'second' }), held({ id: 'H-3', why: 'slots', words: 'third' })],
       queue: {
         queued: [
           { id: 'Q-2', space: 'gtm', spaceName: 'gtm', words: 'After H-1' },
@@ -384,7 +455,24 @@ describe('the whole queue is built only on request, not on every snapshot', () =
   test('the snapshot keeps its old shape: no waiting queue rides along with it', async () => {
     const { DemoWorld } = await import('../server/demo/world.ts')
     const snap = new DemoWorld().snapshot()
-    expect(Object.keys(snap).sort()).toEqual(['artifacts', 'asks', 'attentionRequests', 'automations', 'demo', 'host', 'last', 'machines', 'name', 'needs', 'places', 'read', 'sections', 'settings', 'tasks', 'user'])
+    expect(Object.keys(snap).sort()).toEqual([
+      'artifacts',
+      'asks',
+      'attentionRequests',
+      'automations',
+      'demo',
+      'host',
+      'last',
+      'machines',
+      'name',
+      'needs',
+      'places',
+      'read',
+      'sections',
+      'settings',
+      'tasks',
+      'user',
+    ])
     expect(JSON.stringify(snap)).not.toContain('queued after other tasks')
     expect(JSON.stringify(snap)).not.toContain('QP-')
   })
@@ -448,7 +536,11 @@ describe('0 in the waiting groups: blocked, set to 0 tasks, and the rest unchang
     )
     const ids = w.groups.map((g) => g.id)
     expect(ids).toEqual(['zero', 'spaceZero:gtm', 'model:radeon', 'blocked'])
-    expect(w.groups.find((g) => g.id === 'zero')).toMatchObject({ title: 'This machine is set to 0 tasks', limit: '0 tasks', tasks: [{ id: 'Z-1', space: 'home', words: 'waiting: this machine is set to 0 tasks' }] })
+    expect(w.groups.find((g) => g.id === 'zero')).toMatchObject({
+      title: 'This machine is set to 0 tasks',
+      limit: '0 tasks',
+      tasks: [{ id: 'Z-1', space: 'home', words: 'waiting: this machine is set to 0 tasks' }],
+    })
     expect(w.groups.find((g) => g.id === 'spaceZero:gtm')).toMatchObject({ title: 'Space set to 0 tasks · gtm', limit: '0 tasks', tasks: [{ id: 'Z-2' }] })
     expect(w.groups.find((g) => g.id === 'blocked')).toMatchObject({ title: 'Every model blocked (0 allowed)', tasks: [{ id: 'B-1' }] })
     expect(w.held).toBe(4)

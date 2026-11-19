@@ -31,7 +31,6 @@ afterEach(() => {
 
 describe('shepherdr merge', () => {
   describe("the space's merge gate", () => {
-
     /** `n` tasks of one repo, each with a file of its own committed and reported done; its gate waits for `go-<id>` */
     async function line(name: string, n: number) {
       const w = world()
@@ -81,7 +80,13 @@ describe('shepherdr merge', () => {
         // their agents at rest, as told while their merges wait
         for (const t of l.ts) l.w.agentIs(`${t.id}/Agent`, 'idle')
         mine = l.ts.map((t) => t.id)
-        const logged = () => (existsSync(runs) ? readFileSync(runs, 'utf8').trim().split('\n').map((x) => x.split(' ')) : [])
+        const logged = () =>
+          existsSync(runs)
+            ? readFileSync(runs, 'utf8')
+                .trim()
+                .split('\n')
+                .map((x) => x.split(' '))
+            : []
         // the task each run gated, in order, and the commit it gated (short): a train's run gates its stack's top
         const ran = () => logged().map(([task]) => task)
         const heads = () => logged().map(([, head]) => head)
@@ -125,7 +130,7 @@ describe('shepherdr merge', () => {
         ])
       })
 
-      test("one that conflicts stays out for its own turn; a refusal goes back to one at a time", async () => {
+      test('one that conflicts stays out for its own turn; a refusal goes back to one at a time', async () => {
         // the gate refuses whenever 4.txt (the last task's) is in the tree it checks
         const { w, dir, ts, go, ran, heads } = await train('train-red', 4, '4', 'test -f 4.txt && { echo "4.txt is not wanted"; exit 1; }; ')
         const [x, a, b, c] = ts
@@ -214,7 +219,7 @@ describe('shepherdr merge', () => {
         ])
       })
 
-      test('a refused train\'s members keep their turn alone across a restart: the Shepherdr that comes back reads the marks', async () => {
+      test("a refused train's members keep their turn alone across a restart: the Shepherdr that comes back reads the marks", async () => {
         const { w, ts, go, ran } = await train('train-mark', 4, '3', REFUSE_BAD)
         const [x, a, b, c] = ts
         writeFileSync(join(c.worktree!, 'bad.txt'), 'bad\n')
@@ -324,7 +329,7 @@ describe('shepherdr merge', () => {
         expect(ran()).toEqual([x.id, a.id])
       })
 
-      test('a restart while the train\'s gate runs: the head re-attaches to its run, the riders resume in line, and the train lands', async () => {
+      test("a restart while the train's gate runs: the head re-attaches to its run, the riders resume in line, and the train lands", async () => {
         const { w, dir, ts, go, ran } = await train('train-restart', 3, '3')
         const [a, b, c] = ts
         const space = w.engine.view(a).place.split(':').pop()!
@@ -340,7 +345,10 @@ describe('shepherdr merge', () => {
         // with the mark of the train they ride
         sh(`git checkout -q --detach ${top}`, a.worktree!)
         a.landing = { step: 'gate', at: 1, cars: 3 }
-        a.gateRun = await gate(w.settings.get('merge.gate', space), a.worktree!, { SHEPHERDR_TASK: a.id, SHEPHERDR_BASE: 'main' }, join(process.env.SHEPHERDR_HOME!, 'gates'), a.id, { head: top, tip: at })
+        a.gateRun = await gate(w.settings.get('merge.gate', space), a.worktree!, { SHEPHERDR_TASK: a.id, SHEPHERDR_BASE: 'main' }, join(process.env.SHEPHERDR_HOME!, 'gates'), a.id, {
+          head: top,
+          tip: at,
+        })
         b.landing = { step: 'queue', at: 2, behind: a.id, gate: true, train: a.id }
         c.landing = { step: 'queue', at: 3, behind: a.id, gate: true, train: a.id }
         await until(() => ran().length === 1, 20_000)

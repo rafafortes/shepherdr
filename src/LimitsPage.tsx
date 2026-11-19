@@ -160,7 +160,8 @@ export function quotaWords(quota?: LimitProvider['quota'], read?: LimitProvider[
 }
 
 /** when a provider is out now, in words: until its known reset, or now */
-const outWords = (r: LimitProvider['runOuts']) => (r.out ? (r.until !== undefined ? `out until ${new Date(r.until).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : 'out now') : '—')
+const outWords = (r: LimitProvider['runOuts']) =>
+  r.out ? (r.until !== undefined ? `out until ${new Date(r.until).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : 'out now') : '—'
 
 /** a task's id as a button that opens it */
 function TaskButton({ id }: { id: string }) {
@@ -230,7 +231,8 @@ export function Waiting({ w, phone }: { w: WaitingNow; phone: boolean }) {
           <WaitSection id="queued" title="Queued after other tasks" open={shown} toggle={toggle}>
             {w.behindYou.tasks ? (
               <Small className="text-pretty">
-                {w.behindYou.tasks} {w.behindYou.tasks === 1 ? 'task waits' : 'tasks wait'} behind {w.behindYou.roots.length} {w.behindYou.roots.length === 1 ? 'task that needs' : 'tasks that need'} you:{' '}
+                {w.behindYou.tasks} {w.behindYou.tasks === 1 ? 'task waits' : 'tasks wait'} behind {w.behindYou.roots.length} {w.behindYou.roots.length === 1 ? 'task that needs' : 'tasks that need'}{' '}
+                you:{' '}
                 {w.behindYou.roots.map((id, i) => (
                   <Fragment key={id}>
                     <TaskButton id={id} />
@@ -297,24 +299,58 @@ export function Waiting({ w, phone }: { w: WaitingNow; phone: boolean }) {
 /** one collapsible section of Waiting now: Held for room starts open, the rest closed; what the viewer opened is kept.
  *  Its title is a heading and the button inside it (a button holds no heading: assistive technology would lose it), and
  *  the button says whether it is open and which region it controls */
-function WaitSection({ id, title, byDefault = false, open, toggle, children }: { id: string; title: string; byDefault?: boolean; open: (id: string, byDefault: boolean) => boolean; toggle: (id: string, byDefault: boolean) => void; children: ReactNode }) {
+function WaitSection({
+  id,
+  title,
+  byDefault = false,
+  open,
+  toggle,
+  children,
+}: {
+  id: string
+  title: string
+  byDefault?: boolean
+  open: (id: string, byDefault: boolean) => boolean
+  toggle: (id: string, byDefault: boolean) => void
+  children: ReactNode
+}) {
   const isOpen = open(id, byDefault)
   const content = `waiting-${id}`
   return (
     <section aria-label={title} className="flex flex-col gap-2">
       <h3 className="font-medium">
-        <button type="button" aria-expanded={isOpen} aria-controls={content} onClick={() => toggle(id, byDefault)} className="press-dim flex w-full items-center justify-between gap-2 rounded-row py-0.5 text-left hover:bg-hover">
+        <button
+          type="button"
+          aria-expanded={isOpen}
+          aria-controls={content}
+          onClick={() => toggle(id, byDefault)}
+          className="press-dim flex w-full items-center justify-between gap-2 rounded-row py-0.5 text-left hover:bg-hover"
+        >
           {title}
-          <span aria-hidden="true" className="text-fg3">{isOpen ? '−' : '+'}</span>
+          <span aria-hidden="true" className="text-fg3">
+            {isOpen ? '−' : '+'}
+          </span>
         </button>
       </h3>
-      <div id={content} className={isOpen ? 'flex flex-col gap-2' : 'hidden'}>{isOpen ? children : null}</div>
+      <div id={content} className={isOpen ? 'flex flex-col gap-2' : 'hidden'}>
+        {isOpen ? children : null}
+      </div>
     </section>
   )
 }
 
 /** one group in Waiting now: its count and at most its first rows, with Show all N for the rest */
-function WaitGroup({ g, numbered = false, open, toggle }: { g: WaitingGroup; numbered?: boolean; open: (id: string, byDefault: boolean) => boolean; toggle: (id: string, byDefault: boolean) => void }) {
+function WaitGroup({
+  g,
+  numbered = false,
+  open,
+  toggle,
+}: {
+  g: WaitingGroup
+  numbered?: boolean
+  open: (id: string, byDefault: boolean) => boolean
+  toggle: (id: string, byDefault: boolean) => void
+}) {
   const id = `group:${g.id}`
   const all = open(id, false)
   const rows = all ? g.tasks : g.tasks.slice(0, WAIT_ROWS)
@@ -333,9 +369,7 @@ function WaitGroup({ g, numbered = false, open, toggle }: { g: WaitingGroup; num
             <TaskButton id={t.id} />
             <span className="min-w-0 text-pretty">
               {t.space} · {t.words}
-              {t.need ? (
-                <span className="text-need-fg">{t.words === `After ${t.need.id}` ? `, which ${t.need.words}` : ` · ${t.need.id} ${t.need.words}`}</span>
-              ) : null}
+              {t.need ? <span className="text-need-fg">{t.words === `After ${t.need.id}` ? `, which ${t.need.words}` : ` · ${t.need.id} ${t.need.words}`}</span> : null}
             </span>
           </li>
         ))}
@@ -350,7 +384,21 @@ function WaitGroup({ g, numbered = false, open, toggle }: { g: WaitingGroup; num
 }
 
 /** the flat kinds of Waiting now (scheduled, To do, merges): one group card, with its count and its first rows */
-function WaitList({ id, title, tasks, phone, open, toggle }: { id: string; title: string; tasks: QueueTask[]; phone: boolean; open: (id: string, byDefault: boolean) => boolean; toggle: (id: string, byDefault: boolean) => void }) {
+function WaitList({
+  id,
+  title,
+  tasks,
+  phone,
+  open,
+  toggle,
+}: {
+  id: string
+  title: string
+  tasks: QueueTask[]
+  phone: boolean
+  open: (id: string, byDefault: boolean) => boolean
+  toggle: (id: string, byDefault: boolean) => void
+}) {
   if (!tasks.length) return <Small className="text-pretty">Nothing here now.</Small>
   const key = `group:${id}`
   const all = open(key, false)
@@ -419,7 +467,10 @@ export function LimitValue({ title, cell, machine, phone }: { title: string; cel
         aria-label={`${title}: ${words}${cell.now ? `, ${cell.now}` : ''}`}
         title={`${words}${cell.now ? `, ${cell.now}` : ''}`}
         onClick={() => (open ? close() : setOpen(true))}
-        className={clsx('press-dim block max-w-full rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel', lim?.tone === 'zero' ? 'font-medium text-need-fg' : lim?.tone === 'none' || !cell.set ? 'text-fg3' : 'font-medium text-fg')}
+        className={clsx(
+          'press-dim block max-w-full rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel',
+          lim?.tone === 'zero' ? 'font-medium text-need-fg' : lim?.tone === 'none' || !cell.set ? 'text-fg3' : 'font-medium text-fg',
+        )}
       >
         <span className="block truncate">{words}</span>
         {cell.now ? <span className="block truncate text-[0.75rem] font-normal text-fg3">{cell.now}</span> : null}
@@ -466,11 +517,21 @@ function moveOf(rows: LimitSpaceRow[], at: number, dir: -1 | 1): Move[] | null {
   }
   if (dir < 0) {
     const above = others.filter((o) => o.n < mine).at(-1)
-    return above ? [{ place, value: String(above.n) }, { place: above.place, value: String(mine) }] : null
+    return above
+      ? [
+          { place, value: String(above.n) },
+          { place: above.place, value: String(mine) },
+        ]
+      : null
   }
   const below = others.find((o) => o.n > mine)
   // the last numbered one goes back to by age
-  return below ? [{ place, value: String(below.n) }, { place: below.place, value: String(mine) }] : [{ place, value: null }]
+  return below
+    ? [
+        { place, value: String(below.n) },
+        { place: below.place, value: String(mine) },
+      ]
+    : [{ place, value: null }]
 }
 
 /** a space's Priority in this machine's queue, with the buttons that move it up or down. They are real buttons, so a Tab
@@ -504,7 +565,27 @@ function PriorityCell({ row, rows, machine, phone, moving, onMove }: { row: Limi
 
 /** a space's sub-limit for one pattern: its own entry (strong: its runs now, of its max), or none (faint: the machine's total
  *  applies, or no sub-limit). Either opens the cap editor at this space: a number, or Clear here */
-function SpaceCapCell({ name, pattern, space, caps, total, phone, openId, onOpen, onSaved }: { name: string; pattern: string; space: LimitSpaceRow; caps: Caps; total?: number; phone: boolean; openId: string | null; onOpen: (id: string | null) => void; onSaved?: () => void }) {
+function SpaceCapCell({
+  name,
+  pattern,
+  space,
+  caps,
+  total,
+  phone,
+  openId,
+  onOpen,
+  onSaved,
+}: {
+  name: string
+  pattern: string
+  space: LimitSpaceRow
+  caps: Caps
+  total?: number
+  phone: boolean
+  openId: string | null
+  onOpen: (id: string | null) => void
+  onSaved?: () => void
+}) {
   // its own id: a provider's cap (CapCell) names the same space's line as cap|<pattern>|<space>, which must not open with this one
   const id = `space-cap|${pattern}|${space.key}`
   const mine = space.caps[pattern]
@@ -520,7 +601,10 @@ function SpaceCapCell({ name, pattern, space, caps, total, phone, openId, onOpen
         aria-expanded={open}
         aria-label={`${name} in ${space.name}: ${words}`}
         onClick={() => onOpen(open ? null : id)}
-        className={clsx('press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel', mine?.max === 0 ? 'font-medium text-need-fg' : mine ? 'font-medium text-fg' : 'text-fg3')}
+        className={clsx(
+          'press-dim block max-w-full truncate rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel',
+          mine?.max === 0 ? 'font-medium text-need-fg' : mine ? 'font-medium text-fg' : 'text-fg3',
+        )}
       >
         {words}
       </button>
@@ -608,7 +692,14 @@ function MachineTable({ table, label, machine, phone }: { table: LimitTable; lab
 function More({ id, label, menu, setMenu, items }: { id: string; label: string; menu: string | null; setMenu: (m: string | null) => void; items: ReactNode }) {
   return (
     <span className="relative inline-flex">
-      <button type="button" aria-label={label} aria-haspopup="menu" aria-expanded={menu === id} onClick={() => setMenu(menu === id ? null : id)} className="press-dim grid size-6 place-items-center rounded-full text-fg3 hover:bg-sel hover:text-fg aria-expanded:bg-sel aria-expanded:text-fg">
+      <button
+        type="button"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={menu === id}
+        onClick={() => setMenu(menu === id ? null : id)}
+        className="press-dim grid size-6 place-items-center rounded-full text-fg3 hover:bg-sel hover:text-fg aria-expanded:bg-sel aria-expanded:text-fg"
+      >
         <MoreIcon className={ic} />
       </button>
       {menu === id ? (
@@ -725,10 +816,13 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
     }
     r.dirty = true
     if (r.timer || document.visibilityState === 'hidden') return
-    r.timer = setTimeout(() => {
-      r.timer = null
-      go()
-    }, Math.max(0, r.at + LIMITS_EVERY - Date.now()))
+    r.timer = setTimeout(
+      () => {
+        r.timer = null
+        go()
+      },
+      Math.max(0, r.at + LIMITS_EVERY - Date.now()),
+    )
   }
   const askNow = useRef(() => ask(true))
   askNow.current = () => ask(true)
@@ -846,7 +940,19 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
           <Fragment key={g.harness}>
             {g.single ? null : <HarnessRow name={g.name} cols={6} />}
             {g.list.map((p) => (
-              <ProviderRows key={p.provider} p={p} v={v} nested={!g.single} capOpen={capOpen} setCapOpen={setCapOpen} menu={menu} setMenu={setMenu} hasSubs={hasSubs(p.provider)} onClear={() => setBulk({ kind: 'clear', pattern: p.provider, name: inHarness(p.harnessName, p.name) })} onSaved={() => askNow.current()} />
+              <ProviderRows
+                key={p.provider}
+                p={p}
+                v={v}
+                nested={!g.single}
+                capOpen={capOpen}
+                setCapOpen={setCapOpen}
+                menu={menu}
+                setMenu={setMenu}
+                hasSubs={hasSubs(p.provider)}
+                onClear={() => setBulk({ kind: 'clear', pattern: p.provider, name: inHarness(p.harnessName, p.name) })}
+                onSaved={() => askNow.current()}
+              />
             ))}
           </Fragment>
         ))}
@@ -862,7 +968,10 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
       <section aria-label="Machine limits" className="flex flex-col gap-2">
         <div className="flex flex-col">
           <h2 className="font-medium">Machine · {v.machine.name}</h2>
-          <Small className="text-pretty">How many of this machine's tasks work at once, and when it holds new ones. The numbers beside each value are read now. Everywhere is the default for every machine; this machine's own value wins.</Small>
+          <Small className="text-pretty">
+            How many of this machine's tasks work at once, and when it holds new ones. The numbers beside each value are read now. Everywhere is the default for every machine; this machine's own value
+            wins.
+          </Small>
         </div>
         <MachineTable table={v.machineTable} label="Machine limits" machine={v.machine.name} phone={phone} />
         <details className="flex flex-col gap-2">
@@ -875,7 +984,11 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
       <section aria-label="Spaces" className="flex flex-col gap-2">
         <div className="flex flex-col">
           <h2 className="font-medium">Spaces</h2>
-          <Small className="text-pretty">Each space's own limits, listed in queue order. Priority puts a space ahead of the others: while it has a task that can start, no later space starts one, so give it a Max tasks cap to leave room. Max tasks is a cap inside the machine's. A column is one provider's or model's sub-limit for each space: its own runs, inside the machine's total for that row. An empty cell has none of its own.</Small>
+          <Small className="text-pretty">
+            Each space's own limits, listed in queue order. Priority puts a space ahead of the others: while it has a task that can start, no later space starts one, so give it a Max tasks cap to
+            leave room. Max tasks is a cap inside the machine's. A column is one provider's or model's sub-limit for each space: its own runs, inside the machine's total for that row. An empty cell
+            has none of its own.
+          </Small>
         </div>
         {phone ? (
           <div className="flex flex-col gap-3">
@@ -883,13 +996,25 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
               <section key={row.id} aria-label={`Space ${row.name}`} className="rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble">
                 <div className="flex items-center gap-2 px-4 pt-3 pb-1">
                   <h3 className="min-w-0 flex-1 truncate font-medium">{row.name}</h3>
-                  <Small>{row.working} working{row.held ? ` · ${row.held} held` : ''}</Small>
+                  <Small>
+                    {row.working} working{row.held ? ` · ${row.held} held` : ''}
+                  </Small>
                 </div>
                 <ul className="flex flex-col px-4 pb-2">
-                  {([['space.priority', 'Priority'], ['space.maxTasks', 'Max tasks'], ['merge.train', 'Merge train']] as const).map(([key, title]) => (
+                  {(
+                    [
+                      ['space.priority', 'Priority'],
+                      ['space.maxTasks', 'Max tasks'],
+                      ['merge.train', 'Merge train'],
+                    ] as const
+                  ).map(([key, title]) => (
                     <li key={key} className="flex flex-col gap-1 border-t border-line py-2">
                       <Small className="text-fg2">{title}</Small>
-                      {key === 'space.priority' ? <PriorityCell row={row} rows={spaceRows} machine={v.machine.name} phone moving={moving} onMove={(next) => void move(next)} /> : <LimitValue title={`${row.name} · ${title}`} cell={row.cells[key]!} machine={v.machine.name} phone />}
+                      {key === 'space.priority' ? (
+                        <PriorityCell row={row} rows={spaceRows} machine={v.machine.name} phone moving={moving} onMove={(next) => void move(next)} />
+                      ) : (
+                        <LimitValue title={`${row.name} · ${title}`} cell={row.cells[key]!} machine={v.machine.name} phone />
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -914,19 +1039,40 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
                   <th scope="col" className="sticky top-0 left-0 z-30 min-w-44 bg-bg pr-4 pb-2 text-left align-bottom font-medium text-fg3">
                     Space
                   </th>
-                  <th scope="col" title="Lower numbers start first. While the first space has a task that can start, no later space starts one: cap its Max tasks to leave room. A task marked first in line still goes ahead." className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium whitespace-nowrap text-fg3">
+                  <th
+                    scope="col"
+                    title="Lower numbers start first. While the first space has a task that can start, no later space starts one: cap its Max tasks to leave room. A task marked first in line still goes ahead."
+                    className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium whitespace-nowrap text-fg3"
+                  >
                     Priority
                   </th>
                   <th scope="col" className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium whitespace-nowrap text-fg3">
                     <span className="inline-flex items-center gap-1">
                       Max tasks
-                      <More id="col:space.maxTasks" label="More for Max tasks" menu={menu} setMenu={setMenu} items={spaceColumn('space.maxTasks', 'Max tasks', { label: 'Max tasks of this space working at once', key: 'space.maxTasks', value: 'off', num: { min: 0, max: 200, off: true, limit: true } })} />
+                      <More
+                        id="col:space.maxTasks"
+                        label="More for Max tasks"
+                        menu={menu}
+                        setMenu={setMenu}
+                        items={spaceColumn('space.maxTasks', 'Max tasks', {
+                          label: 'Max tasks of this space working at once',
+                          key: 'space.maxTasks',
+                          value: 'off',
+                          num: { min: 0, max: 200, off: true, limit: true },
+                        })}
+                      />
                     </span>
                   </th>
                   <th scope="col" className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium whitespace-nowrap text-fg3">
                     <span className="inline-flex items-center gap-1">
                       Merge train
-                      <More id="col:merge.train" label="More for Merge train" menu={menu} setMenu={setMenu} items={spaceColumn('merge.train', 'Merge train', { label: 'Merge train', key: 'merge.train', value: 'off', options: ['off', '2', '3', '4', '5'] })} />
+                      <More
+                        id="col:merge.train"
+                        label="More for Merge train"
+                        menu={menu}
+                        setMenu={setMenu}
+                        items={spaceColumn('merge.train', 'Merge train', { label: 'Merge train', key: 'merge.train', value: 'off', options: ['off', '2', '3', '4', '5'] })}
+                      />
                     </span>
                   </th>
                   {patterns.map((p) => (
@@ -967,7 +1113,13 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
                   ))}
                   <th scope="col" className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium text-fg3">
                     <span className="relative inline-flex">
-                      <button type="button" aria-haspopup="menu" aria-expanded={picker} onClick={() => setPicker(!picker)} className="press-dim rounded-row px-1.5 py-0.5 font-medium whitespace-nowrap text-accent hover:bg-hover">
+                      <button
+                        type="button"
+                        aria-haspopup="menu"
+                        aria-expanded={picker}
+                        onClick={() => setPicker(!picker)}
+                        className="press-dim rounded-row px-1.5 py-0.5 font-medium whitespace-nowrap text-accent hover:bg-hover"
+                      >
                         + column
                       </button>
                       {picker ? (
@@ -1006,7 +1158,17 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
                     ))}
                     {patterns.map((p) => (
                       <td key={p} className="relative py-1.5 pr-3 align-top">
-                        <SpaceCapCell name={nameOf(v, p)} pattern={p} space={row} caps={v.caps} total={machineTotal(p)} phone={false} openId={capOpen} onOpen={setCapOpen} onSaved={() => askNow.current()} />
+                        <SpaceCapCell
+                          name={nameOf(v, p)}
+                          pattern={p}
+                          space={row}
+                          caps={v.caps}
+                          total={machineTotal(p)}
+                          phone={false}
+                          openId={capOpen}
+                          onOpen={setCapOpen}
+                          onSaved={() => askNow.current()}
+                        />
                       </td>
                     ))}
                     <td />
@@ -1022,14 +1184,17 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
           </Small>
         ) : null}
         <Small className="text-pretty">A space with no number goes by age, after the numbered ones.</Small>
-        <Small className="text-pretty">Strong: set at that space. Faint: inherited, or none. A sub-limit is written at its space; the machine's total is written at this machine or Everywhere, in the table of the providers below.</Small>
+        <Small className="text-pretty">
+          Strong: set at that space. Faint: inherited, or none. A sub-limit is written at its space; the machine's total is written at this machine or Everywhere, in the table of the providers below.
+        </Small>
       </section>
 
       <section aria-label="Providers and models" className="flex flex-col gap-2">
         <div className="flex flex-col">
           <h2 className="font-medium">Providers and models</h2>
           <Small className="text-pretty">
-            Every provider with a cap, an agent, a run or usage, and its models under it; the others a CLI offers are under Other providers, where a cap can be set before they are used. Max at once is the machine's total for the row, set at this machine or Everywhere (the sub-limits of the spaces show under it). The quota and the run-outs are read from each provider; the details are in{' '}
+            Every provider with a cap, an agent, a run or usage, and its models under it; the others a CLI offers are under Other providers, where a cap can be set before they are used. Max at once is
+            the machine's total for the row, set at this machine or Everywhere (the sub-limits of the spaces show under it). The quota and the run-outs are read from each provider; the details are in{' '}
             <button type="button" onClick={() => openPage('Models', 'all')} className="press-dim rounded-row font-medium text-accent hover:underline">
               Models
             </button>
@@ -1048,10 +1213,16 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
         ) : (
           <div className="max-h-[min(70vh,44rem)] max-w-full overflow-auto overscroll-contain">
             {providerGrid('Providers and models', used)}
-            {idle.length ? <OtherProviders count={idle.length} open>{providerGrid('Other providers', idle)}</OtherProviders> : null}
+            {idle.length ? (
+              <OtherProviders count={idle.length} open>
+                {providerGrid('Other providers', idle)}
+              </OtherProviders>
+            ) : null}
           </div>
         )}
-        <Small className="text-pretty">Local servers (spark, radeon, avell, dell) have no quota. A cap counts this machine's agents only: a request from another app on the same server is not seen.</Small>
+        <Small className="text-pretty">
+          Local servers (spark, radeon, avell, dell) have no quota. A cap counts this machine's agents only: a request from another app on the same server is not seen.
+        </Small>
       </section>
 
       <OnTop>
@@ -1064,7 +1235,21 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
 }
 
 /** a provider's or a model's facts beside its cap: what runs by role, what is held, whether it is out, and its quota */
-function ProviderFacts({ byRole, tasks, held, runOuts, quota, read }: { byRole: LimitProvider['byRole']; tasks?: string[]; held: number; runOuts: LimitProvider['runOuts']; quota?: LimitProvider['quota']; read?: LimitProvider['quotaRead'] }) {
+function ProviderFacts({
+  byRole,
+  tasks,
+  held,
+  runOuts,
+  quota,
+  read,
+}: {
+  byRole: LimitProvider['byRole']
+  tasks?: string[]
+  held: number
+  runOuts: LimitProvider['runOuts']
+  quota?: LimitProvider['quota']
+  read?: LimitProvider['quotaRead']
+}) {
   return (
     <dl className="flex flex-col gap-0.5 text-fg2">
       <div className="flex gap-2">
@@ -1093,8 +1278,42 @@ function ProviderFacts({ byRole, tasks, held, runOuts, quota, read }: { byRole: 
 
 /** a provider's row and its models' rows, as the desktop table draws them: the cap (its row's ⋯ clears the spaces' sub-limits),
  *  what runs by role, what is held, whether it is out, and its quota (a provider's only; a details link to Models) */
-function ProviderRows({ p, v, nested, capOpen, setCapOpen, menu, setMenu, hasSubs, onClear, onSaved }: { p: LimitProvider; v: LimitsView; nested: boolean; capOpen: string | null; setCapOpen: (id: string | null) => void; menu: string | null; setMenu: (m: string | null) => void; hasSubs: boolean; onClear: () => void; onSaved?: () => void }) {
-  const cells = (name: string, pattern: string, atOnce: LimitProvider['atOnce'], byRole: LimitProvider['byRole'], tasks: string[] | undefined, runOuts: LimitProvider['runOuts'], held: number, quota?: LimitProvider['quota'], read?: LimitProvider['quotaRead'], clear?: boolean, harness?: string) => (
+function ProviderRows({
+  p,
+  v,
+  nested,
+  capOpen,
+  setCapOpen,
+  menu,
+  setMenu,
+  hasSubs,
+  onClear,
+  onSaved,
+}: {
+  p: LimitProvider
+  v: LimitsView
+  nested: boolean
+  capOpen: string | null
+  setCapOpen: (id: string | null) => void
+  menu: string | null
+  setMenu: (m: string | null) => void
+  hasSubs: boolean
+  onClear: () => void
+  onSaved?: () => void
+}) {
+  const cells = (
+    name: string,
+    pattern: string,
+    atOnce: LimitProvider['atOnce'],
+    byRole: LimitProvider['byRole'],
+    tasks: string[] | undefined,
+    runOuts: LimitProvider['runOuts'],
+    held: number,
+    quota?: LimitProvider['quota'],
+    read?: LimitProvider['quotaRead'],
+    clear?: boolean,
+    harness?: string,
+  ) => (
     <>
       <td className="relative py-1.5 pr-3 align-top">
         <span className="flex items-start gap-1">
@@ -1127,11 +1346,13 @@ function ProviderRows({ p, v, nested, capOpen, setCapOpen, menu, setMenu, hasSub
       <td className="py-1.5 pr-3 align-top text-fg2 tabular-nums">{held || '—'}</td>
       <td className="py-1.5 pr-3 align-top text-fg2">{outWords(runOuts)}</td>
       <td className="py-1.5 pr-3 align-top text-fg2 tabular-nums">
-        {read || quota ? quotaLines(quota, read).map((l) => (
-          <span key={l} className="block">
-            {l}
-          </span>
-        )) : '—'}
+        {read || quota
+          ? quotaLines(quota, read).map((l) => (
+              <span key={l} className="block">
+                {l}
+              </span>
+            ))
+          : '—'}
       </td>
     </>
   )
@@ -1140,7 +1361,9 @@ function ProviderRows({ p, v, nested, capOpen, setCapOpen, menu, setMenu, hasSub
       <tr>
         <th scope="row" className={clsx('sticky left-0 z-10 bg-bg pr-4 py-1.5 text-left align-top font-normal', nested && 'pl-5')}>
           <span className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate font-medium text-fg" title={p.name}>{p.name}</span>
+            <span className="truncate font-medium text-fg" title={p.name}>
+              {p.name}
+            </span>
             {p.local ? <span className="shrink-0 text-[0.75rem] text-fg3">local</span> : null}
           </span>
         </th>
@@ -1149,7 +1372,9 @@ function ProviderRows({ p, v, nested, capOpen, setCapOpen, menu, setMenu, hasSub
       {p.models.map((m) => (
         <tr key={m.key}>
           <th scope="row" className={clsx('sticky left-0 z-10 bg-bg py-1 pr-4 text-left align-top font-normal', nested ? 'pl-10' : 'pl-6')}>
-            <span className="block truncate text-fg2" title={m.key}>{m.label}</span>
+            <span className="block truncate text-fg2" title={m.key}>
+              {m.label}
+            </span>
           </th>
           {cells(m.label, m.key, m.atOnce, m.byRole, m.tasks, m.runOuts, m.atOnce.held)}
         </tr>
@@ -1208,7 +1433,9 @@ function SetForSpaces({ bulk, rows, caps, phone, onClose }: { bulk: Extract<Bulk
             <span>Everywhere, and reset the spaces to it: each space loses its own value, so every space reads Everywhere's.</span>
           </label>
         </fieldset>
-        <Small className="text-pretty">{mode === 'each' ? 'Each space gets this value at its own level.' : 'Everywhere gets this value. Each space and this machine lose their own, and what they set there is lost.'}</Small>
+        <Small className="text-pretty">
+          {mode === 'each' ? 'Each space gets this value at its own level.' : 'Everywhere gets this value. Each space and this machine lose their own, and what they set there is lost.'}
+        </Small>
         {error ? <Refused text={error} /> : null}
       </div>
     </Dialog>
@@ -1249,7 +1476,10 @@ function SetPatternForSpaces({ pattern, name, spaces, onClose }: { pattern: stri
     >
       <div className="flex flex-col gap-3">
         <LimitChoice label={`Most ${name} at once in each space`} value={draft} max={200} zero="Blocked · 0 allowed" onChange={(v) => setDraft(v)} />
-        <Small className="text-pretty">Each space's sub-limit for {name} becomes this choice: no cap takes its own out, blocked (0) starts none of {name} there, a number caps it inside the machine's total. Its other entries stay as they are.</Small>
+        <Small className="text-pretty">
+          Each space's sub-limit for {name} becomes this choice: no cap takes its own out, blocked (0) starts none of {name} there, a number caps it inside the machine's total. Its other entries stay
+          as they are.
+        </Small>
         {error ? <Refused text={error} /> : null}
       </div>
     </Dialog>
@@ -1293,4 +1523,3 @@ function ClearSubLimits({ pattern, name, spaces, onClose }: { pattern: string; n
     </Dialog>
   )
 }
-

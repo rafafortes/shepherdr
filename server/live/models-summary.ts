@@ -5,7 +5,23 @@
 // `now` as a parameter so a test gives it the clock it needs. A provider's quota is its last good read (the ledger holds
 // it, quotas.ts sets it), or OpenCode Go's estimate built for this look; the warning share and each read's state come in
 // with the input (quota), and a window at or over the share is a warning here.
-import type { MatrixRole, ModelsSummary, QuotaFigure, QuotaRead, QuotaWindow, SummaryAtOnce, SummaryConfigured, SummarySpaceCap, SummaryModel, SummaryNow, SummaryProvider, SummaryRow, SummaryRunOuts, SummaryUsage, SummaryWarning } from '../../shared/types.ts'
+import type {
+  MatrixRole,
+  ModelsSummary,
+  QuotaFigure,
+  QuotaRead,
+  QuotaWindow,
+  SummaryAtOnce,
+  SummaryConfigured,
+  SummarySpaceCap,
+  SummaryModel,
+  SummaryNow,
+  SummaryProvider,
+  SummaryRow,
+  SummaryRunOuts,
+  SummaryUsage,
+  SummaryWarning,
+} from '../../shared/types.ts'
 import { shareOf } from '../../shared/quota-words.ts'
 import { parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
 import type { Harness } from './engine/engine.ts'
@@ -18,7 +34,8 @@ import { HOUR, harnessOf, modelKey, modelOf, providerOf, providerPart, type RunO
 
 /** a provider in words: a single-account CLI's is its harness's name; a pi or OpenCode provider's is its own name where the
  *  map below has one, else its id title-cased (see titled) */
-export const providerName = (provider: string) => (provider.includes('.') ? (Object.hasOwn(NAMES, providerPart(provider)) ? NAMES[providerPart(provider)]! : titled(providerPart(provider))) : harnessName(provider))
+export const providerName = (provider: string) =>
+  provider.includes('.') ? (Object.hasOwn(NAMES, providerPart(provider)) ? NAMES[providerPart(provider)]! : titled(providerPart(provider))) : harnessName(provider)
 
 /** a CLI (harness) in words: Claude Code, Codex and Antigravity are single-account; pi and OpenCode run several providers */
 export const harnessName = (harness: string) => (Object.hasOwn(HARNESS_NAMES, harness) ? HARNESS_NAMES[harness]! : titled(harness))
@@ -324,7 +341,17 @@ export function modelsSummary(f: SummaryInput): ModelsSummary {
   const d7 = f.usage.byKey(f.now - WEEK)
   // every provider that has a slot, runs, waits, used something in the week, or ran out in it; and each provider a CLI offers
   const capped = (f.capped ?? []).filter((p) => p.includes('/') && !/[*?]/.test(p))
-  const keys = new Set<string>([...conf.map((c) => c.key), ...f.agents.filter((a) => a.status !== 'gone').map((a) => keyOf(a.kind, a.model)), ...(f.runs ?? []).map((r) => r.key), ...d7.keys(), ...f.usage.runOuts(() => true).filter((r) => r.at >= f.now - WEEK).map((r) => r.key), ...capped])
+  const keys = new Set<string>([
+    ...conf.map((c) => c.key),
+    ...f.agents.filter((a) => a.status !== 'gone').map((a) => keyOf(a.kind, a.model)),
+    ...(f.runs ?? []).map((r) => r.key),
+    ...d7.keys(),
+    ...f.usage
+      .runOuts(() => true)
+      .filter((r) => r.at >= f.now - WEEK)
+      .map((r) => r.key),
+    ...capped,
+  ])
   const offered = offeredKeys()
   const providers = [...new Set([...[...keys].map(providerOf), ...(f.providers ?? []), ...offered.map(providerOf)])]
   const totalDay = [...f.usage.byKey(f.now - 24 * HOUR).values()].reduce((n, t) => n + t.tokens, 0)
@@ -460,10 +487,20 @@ function warningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): 
     // what runs on it now (the runs the cap counts, atOnce.now), and the words for it
     const running = (n: number) => `${n} ${n === 1 ? 'agent still runs' : 'agents still run'}`
     if (r.atOnce.own?.max === 0 && r.atOnce.now > 0)
-      out.push({ id: `blocked-running:${r.provider}`, level: 'note', words: `${providerWords(r.provider)} is blocked (0 allowed), and ${running(r.atOnce.now)} on it: they keep running; nothing new starts on it.`, go: { row: 'cap', slot: r.provider } })
+      out.push({
+        id: `blocked-running:${r.provider}`,
+        level: 'note',
+        words: `${providerWords(r.provider)} is blocked (0 allowed), and ${running(r.atOnce.now)} on it: they keep running; nothing new starts on it.`,
+        go: { row: 'cap', slot: r.provider },
+      })
     for (const m of r.models) {
       if (m.atOnce.own?.max === 0 && m.atOnce.now > 0)
-        out.push({ id: `blocked-running:${m.key}`, level: 'note', words: `${m.label} is blocked (0 allowed), and ${running(m.atOnce.now)} on it: they keep running; nothing new starts on it.`, go: { row: 'cap', slot: m.key } })
+        out.push({
+          id: `blocked-running:${m.key}`,
+          level: 'note',
+          words: `${m.label} is blocked (0 allowed), and ${running(m.atOnce.now)} on it: they keep running; nothing new starts on it.`,
+          go: { row: 'cap', slot: m.key },
+        })
     }
   }
   for (const r of rows) {
@@ -481,17 +518,33 @@ function warningsOf(f: SummaryInput, conf: ConfRec[], rows: SummaryProvider[]): 
   for (const r of rows) {
     if (!r.local) continue
     if (r.atOnce.own && r.atOnce.held) {
-      out.push({ id: `held:${r.provider}`, level: 'note', words: `Held tasks wait for ${r.name.replace(' (local)', '')}: its cap of ${r.atOnce.own.max} at once is full (${r.atOnce.now} running).`, go: { row: 'cap', slot: r.provider } })
+      out.push({
+        id: `held:${r.provider}`,
+        level: 'note',
+        words: `Held tasks wait for ${r.name.replace(' (local)', '')}: its cap of ${r.atOnce.own.max} at once is full (${r.atOnce.now} running).`,
+        go: { row: 'cap', slot: r.provider },
+      })
     }
     for (const m of r.models) {
       const cap = m.atOnce.own ?? m.atOnce.via
       if (!cap) {
         if (m.now.working < 2) continue
-        out.push({ id: `shared:${m.key}`, level: 'note', words: `${m.now.working} agents on ${r.name.replace(' (local)', '')} now (${m.label}), and no cap holds them: set a cap for it.`, fix: 'A cap says how many run at once; the others wait for a free slot.', go: { row: 'cap', slot: m.key } })
+        out.push({
+          id: `shared:${m.key}`,
+          level: 'note',
+          words: `${m.now.working} agents on ${r.name.replace(' (local)', '')} now (${m.label}), and no cap holds them: set a cap for it.`,
+          fix: 'A cap says how many run at once; the others wait for a free slot.',
+          go: { row: 'cap', slot: m.key },
+        })
         continue
       }
       if (m.atOnce.own && m.atOnce.held) {
-        out.push({ id: `held:${m.key}`, level: 'note', words: `Held tasks wait for ${m.label}: ${cap.pattern} takes ${cap.max} at once and ${m.atOnce.now} run there now.`, go: { row: 'cap', slot: m.key } })
+        out.push({
+          id: `held:${m.key}`,
+          level: 'note',
+          words: `Held tasks wait for ${m.label}: ${cap.pattern} takes ${cap.max} at once and ${m.atOnce.now} run there now.`,
+          go: { row: 'cap', slot: m.key },
+        })
       }
     }
   }

@@ -1,6 +1,20 @@
 // Fictional data for the demo source: the same world the frozen prototype shows, so a reviewer can put the
 // build and the prototype side by side. Nothing here is real.
-import { apart, type Artifact, type Automation, type Chat, type LimitsQueue, type Machine, type MachineHealth, type Message, type Place, type QueueTask, type SettingSection, type Task, type TaskAgent } from '../../shared/types.ts'
+import {
+  apart,
+  type Artifact,
+  type Automation,
+  type Chat,
+  type LimitsQueue,
+  type Machine,
+  type MachineHealth,
+  type Message,
+  type Place,
+  type QueueTask,
+  type SettingSection,
+  type Task,
+  type TaskAgent,
+} from '../../shared/types.ts'
 import { startsLine } from '../../shared/when.ts'
 import { firstChecklist } from '../live/heartbeat.ts'
 import { nextWords, timeRule, timeWords } from '../live/trigger.ts'
@@ -42,7 +56,6 @@ export const HEALTH: Record<string, MachineHealth> = {
     at: '14:31',
   },
 }
-
 
 export function places(): Place[] {
   return [
@@ -274,7 +287,16 @@ const lastFriday = timeRule('FREQ=MONTHLY;BYDAY=-1FR;BYHOUR=8;BYMINUTE=0')
 
 export const AUTOMATIONS: Record<string, Automation[]> = {
   [GTM]: [
-    { name: 'Flaky tests', when: timeWords(daily7, DEMO_ZONE), what: 'Rerun the flaky test suite', brief: 'Run the suite three times and fix or skip any test that fails only some of the time.', on: true, time: daily7, next: nextWords(daily7, DEMO_ZONE), runs: [{ at: Date.now() - 5 * 3_600_000, task: 'GTM-41' }] },
+    {
+      name: 'Flaky tests',
+      when: timeWords(daily7, DEMO_ZONE),
+      what: 'Rerun the flaky test suite',
+      brief: 'Run the suite three times and fix or skip any test that fails only some of the time.',
+      on: true,
+      time: daily7,
+      next: nextWords(daily7, DEMO_ZONE),
+      runs: [{ at: Date.now() - 5 * 3_600_000, task: 'GTM-41' }],
+    },
     { name: 'Changelog', when: 'When a task is merged', what: 'Update the changelog', on: true, events: 'merged', next: [], runs: [] },
     { name: 'Dependency bump', when: timeWords(lastFriday, DEMO_ZONE), what: 'Bump dependencies', on: false, time: lastFriday, next: [], runs: [] },
   ],
@@ -331,11 +353,25 @@ export const FILES: Record<string, () => Blob> = {
   // what an agent sends into its chat (shepherdr attach): a shot of the screen it fixed, and a short clip of it, each
   // taken into the chat's own inbox as the person's own attachments are
   '~/inbox/lv/mf1a2d-upload-page.png': () =>
-    new Blob([bytes('iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAnUlEQVR4nO3QMQ3AIAAAQUjQUydYwf9YBc2PdLhT8Pn5nD34tm4H/J1BwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCi/mOgHnyr1VqQAAAABJRU5ErkJggg==')], { type: 'image/png' }),
+    new Blob(
+      [
+        bytes(
+          'iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAnUlEQVR4nO3QMQ3AIAAAQUjQUydYwf9YBc2PdLhT8Pn5nD34tm4H/J1BwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCgYFg4JBwaBgUDAoGBQMCi/mOgHnyr1VqQAAAABJRU5ErkJggg==',
+        ),
+      ],
+      { type: 'image/png' },
+    ),
   '~/inbox/lv/mf1a2e-upload-page.mp4': () => new Blob([bytes(DEMO_CLIP)], { type: 'video/mp4' }),
   // the still a video's tile shows, which the machine's own ffmpeg would make once
   '~/inbox/lv/mf1a2e-upload-page.mp4.poster.jpg': () =>
-    new Blob([bytes('/9j/4AAQSkZJRgABAgAAAQABAAD//gAQTGF2YzYyLjExLjEwMAD/2wBDAAgODhAOEBMTExMTExYVFhcXFxYWFhYXFxcZGRkdHR0ZGRkXFxkZHBwdHSAhIB4eHR4hISMjIyoqKCgxMTI8PEj/xABNAAEBAAAAAAAAAAAAAAAAAAAABgEBAQEAAAAAAAAAAAAAAAAAAAMFEAEAAAAAAAAAAAAAAAAAAAAAEQEAAAAAAAAAAAAAAAAAAAAA/8AAEQgAQABgAwEiAAIRAAMRAP/aAAwDAQACEQMRAD8AlwEWCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//9k=')], { type: 'image/jpeg' }),
+    new Blob(
+      [
+        bytes(
+          '/9j/4AAQSkZJRgABAgAAAQABAAD//gAQTGF2YzYyLjExLjEwMAD/2wBDAAgODhAOEBMTExMTExYVFhcXFxYWFhYXFxcZGRkdHR0ZGRkXFxkZHBwdHSAhIB4eHR4hISMjIyoqKCgxMTI8PEj/xABNAAEBAAAAAAAAAAAAAAAAAAAABgEBAQEAAAAAAAAAAAAAAAAAAAMFEAEAAAAAAAAAAAAAAAAAAAAAEQEAAAAAAAAAAAAAAAAAAAAA/8AAEQgAQABgAwEiAAIRAAMRAP/aAAwDAQACEQMRAD8AlwEWCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//9k=',
+        ),
+      ],
+      { type: 'image/jpeg' },
+    ),
 }
 
 /** bytes of a small file written down as base64, so the demo needs no picture or video of its own */
@@ -344,7 +380,6 @@ const bytes = (b64: string) => new Uint8Array(Buffer.from(b64, 'base64'))
 /** a second of a flat green frame, 96×64: the demo's clip */
 const DEMO_CLIP =
   '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'
-
 
 let mid = 0
 const m = (msg: Omit<Message, 'id'>): Message => ({ id: `m${++mid}`, ...msg })
@@ -489,7 +524,13 @@ export function chats(): Record<string, Chat> {
         m({ who: 'agent', text: 'Got it: dark pages, plan first. I’ll wait for your go.' }),
       ]),
       c('HP-203/Agent', 'Claude Code', [
-        m({ who: 'you', text: 'Release 1.2.27\n\n' + (tasks().find((t) => t.id === 'HP-203')?.desc ?? '') + '\n\nQueued: this task waits for HP-202 to be done. Don’t start the work yet: reply in one line that you have the brief, and end your turn.' }),
+        m({
+          who: 'you',
+          text:
+            'Release 1.2.27\n\n' +
+            (tasks().find((t) => t.id === 'HP-203')?.desc ?? '') +
+            '\n\nQueued: this task waits for HP-202 to be done. Don’t start the work yet: reply in one line that you have the brief, and end your turn.',
+        }),
         m({ who: 'agent', text: 'Got it: release 1.2.27 once HP-202 is done.' }),
       ]),
       c('GTM-17/Agent', 'Claude Code', [
@@ -558,11 +599,16 @@ export function demoSample(): Sample {
 
 /** what holds the demo's tasks for Settings → Limits' Waiting now: a fiction like the rest of the demo, in the shape the
  *  live engine holds them. A space's group reads its settings (gtm's cap) and its working tasks */
-export function heldFor(s: Settings, workingIn: Record<string, number>): { held: HeldFact[]; advisor: { chat: string; task?: string; words: string }[]; reviews: { task: string; space: string; words: string }[] } {
+export function heldFor(
+  s: Settings,
+  workingIn: Record<string, number>,
+): { held: HeldFact[]; advisor: { chat: string; task?: string; words: string }[]; reviews: { task: string; space: string; words: string }[] } {
   const cap = s.spaceMax('gtm')
   const held: HeldFact[] = [
     { id: 'HP-204', space: 'herdr-projects', spaceName: 'herdr-projects', why: 'machine', words: 'Waiting for the machine' },
-    ...(cap === null ? [] : [{ id: 'GTM-17', space: 'gtm', spaceName: 'gtm', why: 'space' as const, words: 'Waiting for a free slot of gtm', entry: { name: 'gtm', count: workingIn.gtm ?? 0, max: cap } }]),
+    ...(cap === null
+      ? []
+      : [{ id: 'GTM-17', space: 'gtm', spaceName: 'gtm', why: 'space' as const, words: 'Waiting for a free slot of gtm', entry: { name: 'gtm', count: workingIn.gtm ?? 0, max: cap } }]),
   ]
   return {
     held,
@@ -621,7 +667,11 @@ export function settingStores() {
  *  one of the human's own, and a stand-up plugin of theirs (none failing: the screen would say so at its top, over
  *  every screen the tests measure) */
 export const DEMO_PLUGINS: PluginEntry[] = [
-  ...['places', 'coordinators', 'tasks', 'chat', 'reactions', 'artifacts', 'terminal', 'worktree', 'browser', 'health', 'alerts', 'keyboard', 'autopilot'].map((name) => ({ name, from: 'base' as const, on: true })),
+  ...['places', 'coordinators', 'tasks', 'chat', 'reactions', 'artifacts', 'terminal', 'worktree', 'browser', 'health', 'alerts', 'keyboard', 'autopilot'].map((name) => ({
+    name,
+    from: 'base' as const,
+    on: true,
+  })),
   { name: 'voice', from: 'user', overrides: true, on: true },
   { name: 'standup', from: 'user', on: true },
 ]
@@ -634,7 +684,10 @@ export function settings(stores = settingStores(), checklists: Record<string, st
   return [
     ...stores['vm-str'].sections(devices, [], null, 'vm-str', ['~', 'gtm', 'herdr-projects'], 'vm-str', checklist).filter(own),
     ...stores.mac.sections(devices, [], null, 'mac', ['~', 'lilla-varlden'], 'mac', checklist).filter((x) => own(x) && x.machine === 'mac'),
-    pluginsPage((pluginCatalog.some((p) => p.from === 'user') ? pluginCatalog : DEMO_PLUGINS).map((p) => ({ ...p, on: p.on && !pluginsOff.includes(p.name) })), pluginsOff),
+    pluginsPage(
+      (pluginCatalog.some((p) => p.from === 'user') ? pluginCatalog : DEMO_PLUGINS).map((p) => ({ ...p, on: p.on && !pluginsOff.includes(p.name) })),
+      pluginsOff,
+    ),
     {
       name: 'Machines',
       about: 'Every machine Shepherdr reaches, and how it is now.',

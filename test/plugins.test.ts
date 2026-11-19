@@ -57,7 +57,11 @@ describe('a build with the human’s own plugins', () => {
     const { dir, home } = fixture()
     file(join(home, 'plugins.json'), JSON.stringify({ off: ['a', 'c'] }))
     stageUserPlugins(dir, home)
-    expect(pluginCatalog(dir).filter((p) => p.on).map((p) => p.name)).toEqual(['b'])
+    expect(
+      pluginCatalog(dir)
+        .filter((p) => p.on)
+        .map((p) => p.name),
+    ).toEqual(['b'])
     expect(writeRegistries(dir)).toEqual(['b'])
   })
 
@@ -152,7 +156,11 @@ describe('on the screen', () => {
   test('a view added by a built-in is wrapped: it says the name when it throws', () => {
     const reg = { messageEdge: [] as { View: () => never }[] }
     setupGuarded('reactions', reg, (r) => {
-      r.messageEdge.push({ View: () => { throw new Error('bad reaction') } })
+      r.messageEdge.push({
+        View: () => {
+          throw new Error('bad reaction')
+        },
+      })
     })
     expect((reg.messageEdge[0].View as unknown as { displayName?: string }).displayName).toMatch(/^reactions\(/)
   })
@@ -160,8 +168,15 @@ describe('on the screen', () => {
   test('what it adds is wrapped: its functions give a safe answer once they throw', async () => {
     const reg = { keys: [] as { order: number; handle: () => boolean }[], settingActions: {} as Record<string, () => Promise<string>> }
     setupGuarded('keys', reg, (r) => {
-      r.keys.push({ order: 1, handle: () => { throw new Error('nope') } })
-      r.settingActions.go = async () => { throw new Error('nope') }
+      r.keys.push({
+        order: 1,
+        handle: () => {
+          throw new Error('nope')
+        },
+      })
+      r.settingActions.go = async () => {
+        throw new Error('nope')
+      }
     })
     expect(reg.keys[0].order).toBe(1)
     expect(reg.keys[0].handle()).toBe(false)

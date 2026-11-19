@@ -46,7 +46,7 @@ const HUMANS_ONLY = [
   'deleting a task, a branch or files, or losing work',
   'force-pushing, or rewriting history that others have',
   'changing Shepherdr Settings, secrets or credentials',
-  "merging past a brief's \"ask me first\"",
+  'merging past a brief\'s "ask me first"',
   'spending money, buying, or using up a paid plan',
   'anything that touches a live site, production, or other people',
 ]
@@ -65,7 +65,9 @@ export function advisorPrompt(o: { question: AdviceQuestion; asker: string; brie
     `Leave the question to ${who} ("decide": "human") when you are not sure, or when the answer would decide any of: ${HUMANS_ONLY.join('; ')}. Say why in "why".`,
     o.brief ? `The brief:\n${o.brief}` : '',
     o.chat ? `The chat so far, latest last:\n\n${o.chat}` : '',
-    q.kind === 'choice' ? `The question: ${q.title}${q.plan ? ' (a plan to approve)' : ''}\nThe options:\n${choices}${q.multi ? '\nMore than one may be picked.' : ''}` : `The question, in the agent's own words:\n${q.title}`,
+    q.kind === 'choice'
+      ? `The question: ${q.title}${q.plan ? ' (a plan to approve)' : ''}\nThe options:\n${choices}${q.multi ? '\nMore than one may be picked.' : ''}`
+      : `The question, in the agent's own words:\n${q.title}`,
     // asked with a note: what the human wants weighs more than your own reading
     o.note ? `${who} asked you to answer it, with this note for you; where it and your own reading differ, the note wins:\n${o.note}` : '',
     `End your answer with one line of JSON and nothing after it: ${shape}`,
@@ -87,10 +89,22 @@ export function adviceArgs(h: Harness, prompt: string): { cmd: string[]; stdin?:
   const effort = h.effort && h.effort !== 'default' ? h.effort : undefined
   if (h.kind === 'claude')
     return {
-      cmd: ['claude', '-p', '--no-session-persistence', '--strict-mcp-config', '--allowedTools', 'Read,Grep,Glob', '--disallowedTools', NO_CHANGE, ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])],
+      cmd: [
+        'claude',
+        '-p',
+        '--no-session-persistence',
+        '--strict-mcp-config',
+        '--allowedTools',
+        'Read,Grep,Glob',
+        '--disallowedTools',
+        NO_CHANGE,
+        ...(model ? ['--model', model] : []),
+        ...(effort ? ['--effort', effort] : []),
+      ],
       stdin: prompt,
     }
-  if (h.kind === 'pi') return { cmd: ['pi', '-p', '--no-session', '--no-mcp', '--no-skills', '--tools', 'read,grep,find,ls', ...(model ? ['--model', model] : []), ...(effort ? ['--thinking', effort] : []), prompt] }
+  if (h.kind === 'pi')
+    return { cmd: ['pi', '-p', '--no-session', '--no-mcp', '--no-skills', '--tools', 'read,grep,find,ls', ...(model ? ['--model', model] : []), ...(effort ? ['--thinking', effort] : []), prompt] }
   if (h.kind === 'codex') return { cmd: ['codex', 'exec', '--sandbox', 'read-only', '--skip-git-repo-check', ...(model ? ['--model', model] : []), prompt] }
   // OpenCode's plan agent is its read-only one; its answer is the text of its default output
   if (h.kind === 'opencode')
@@ -207,7 +221,10 @@ export function adviceWords(a: Omit<Advice, 'by'>, q: AdviceQuestion): string {
   if (a.human) return `leaves it to you: ${a.human}`
   if (a.reply) return a.reply
   if (a.other) return a.other
-  return (a.choices ?? [a.choice ?? -1]).map((i) => q.choices?.[i]?.label ?? '').filter(Boolean).join(', ')
+  return (a.choices ?? [a.choice ?? -1])
+    .map((i) => q.choices?.[i]?.label ?? '')
+    .filter(Boolean)
+    .join(', ')
 }
 
 /** one question's advice: asked, answered (and how), or left to the human */
@@ -240,7 +257,9 @@ export class Advices {
 
   /** the questions that wait for a harness with room, oldest first */
   waiting(): AdviceRec[] {
-    return Object.values(this.data).filter((r) => r.state === 'waiting').sort((a, b) => a.at - b.at)
+    return Object.values(this.data)
+      .filter((r) => r.state === 'waiting')
+      .sort((a, b) => a.at - b.at)
   }
 
   byCard(card: string): AdviceRec | undefined {

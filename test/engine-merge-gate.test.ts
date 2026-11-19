@@ -35,15 +35,13 @@ const groupAlive = (pid: number) => {
 }
 /** a gate is gone only when no process still runs its command: `timeout` may lead a group of its own, so the leader's
  *  pid alone cannot tell (LEAD-01). Its log path is unique to this run and survives in the command line. */
-const gateGone = (run: { log: string; exit: string }) =>
-  !processes().some((p) => p.cmd.includes(run.log) || p.cmd.includes(run.exit))
+const gateGone = (run: { log: string; exit: string }) => !processes().some((p) => p.cmd.includes(run.log) || p.cmd.includes(run.exit))
 afterEach(() => {
   for (const pid of gatesStarted.splice(0)) killGroup(pid)
 })
 
 describe('shepherdr merge', () => {
   describe("the space's merge gate", () => {
-
     /** a task with a commit of its own, reported done, and its space's gate set to `cmd` */
     async function gated(name: string, cmd: string) {
       const w = world()
@@ -70,7 +68,9 @@ describe('shepherdr merge', () => {
       const main = sh('git rev-parse main', dir)
       const r = await w.engine.merge(t.id, { self: true })
       expect(r.ok).toBe(false)
-      expect(r.error).toBe(`${t.id}'s merge gate (echo building; echo "2 tests failed" >&2; exit 3) failed (exit 3): nothing was merged, and main is as it was. Its output ends:\nbuilding\n2 tests failed\nThe merge gate is the merge's full check: fix what its lines name, prove the fix with targeted tests, then run shepherdr merge again; no full check of your own first.`)
+      expect(r.error).toBe(
+        `${t.id}'s merge gate (echo building; echo "2 tests failed" >&2; exit 3) failed (exit 3): nothing was merged, and main is as it was. Its output ends:\nbuilding\n2 tests failed\nThe merge gate is the merge's full check: fix what its lines name, prove the fix with targeted tests, then run shepherdr merge again; no full check of your own first.`,
+      )
       expect(sh('git rev-parse main', dir)).toBe(main)
       expect(sh('git status --porcelain', dir)).toBe('')
       expect(t.merged).toBeFalsy()
@@ -138,7 +138,10 @@ describe('shepherdr merge', () => {
 
     test('main moved while it ran: the branch is rebased on it and the gate runs again; a conflict then stops it', async () => {
       const mark = join(tmp('gate-mark'), 'ran')
-      const { w, dir, t } = await gated('gate-moved', `echo run >> ${mark}; if [ $(wc -l < ${mark}) = 1 ]; then (cd ${'$'}MAIN && echo other > other.txt && git add -A && git commit -qm "moved meanwhile"); fi; echo "gate ok"`)
+      const { w, dir, t } = await gated(
+        'gate-moved',
+        `echo run >> ${mark}; if [ $(wc -l < ${mark}) = 1 ]; then (cd ${'$'}MAIN && echo other > other.txt && git add -A && git commit -qm "moved meanwhile"); fi; echo "gate ok"`,
+      )
       process.env.MAIN = dir
       expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
       expect(readFileSync(mark, 'utf8').trim().split('\n')).toHaveLength(2)
@@ -249,7 +252,7 @@ describe('shepherdr merge', () => {
       expect(w.engine.subOf(t)).toBe('Merge gate interrupted by a restart: run shepherdr merge again')
     })
 
-    test('a stale run of the same task, still going after a newer one began, never writes over the newer run\'s exit code', async () => {
+    test("a stale run of the same task, still going after a newer one began, never writes over the newer run's exit code", async () => {
       const { waitGate } = await import('../server/live/engine/engine.ts')
       const dir = tmp('gate-stale')
       const goOld = join(dir, 'go-old')
@@ -383,7 +386,7 @@ describe('shepherdr merge', () => {
       expect((await Promise.all(runs)).map((r) => r.ok)).toEqual([true, true, true])
     })
 
-    test("written to after it reported, its own merge still puts it on its way into main: never Needs you while it waits", async () => {
+    test('written to after it reported, its own merge still puts it on its way into main: never Needs you while it waits', async () => {
       // a coordinator's "rebase on main and run shepherdr merge" makes it work again, not done; its agent then merges
       const { w, ts, go } = await line('gate-asked', 3)
       const [a, b, c] = ts

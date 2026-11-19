@@ -15,7 +15,14 @@ const alertOf = (id: string) => {
   const t = task(id)
   return taskAlert(t.rec, t.status, t.sub, { task: t.chat })
 }
-const q = (over: Partial<Question>): Question => ({ id: 'ask:1', title: 'Rerun CI on main?', kind: 'Form', choices: [{ label: 'Rerun it' }, { label: 'Skip the flaky test' }, { label: 'Leave it for now' }], to: 'x', ...over })
+const q = (over: Partial<Question>): Question => ({
+  id: 'ask:1',
+  title: 'Rerun CI on main?',
+  kind: 'Form',
+  choices: [{ label: 'Rerun it' }, { label: 'Skip the flaky test' }, { label: 'Leave it for now' }],
+  to: 'x',
+  ...over,
+})
 
 describe('what an alert says', () => {
   test('a plan: the task and what it needs, over the choices in short', () => {
@@ -37,9 +44,13 @@ describe('what an alert says', () => {
   })
   test('ready, waiting for a reply, gone wrong', () => {
     expect(alertOf('GTM-15').title).toBe('GTM-15 · Merge GTM-15?')
-    const ready = taskAlert({ id: 'X-1', title: 'Fix the webhook', project: 'p' }, 'ready', 'Ready to merge', { task: { key: 'X-1/Agent', cli: 'Claude Code', messages: [{ id: 'm1', who: 'agent', text: 'All done.' }] } })
+    const ready = taskAlert({ id: 'X-1', title: 'Fix the webhook', project: 'p' }, 'ready', 'Ready to merge', {
+      task: { key: 'X-1/Agent', cli: 'Claude Code', messages: [{ id: 'm1', who: 'agent', text: 'All done.' }] },
+    })
     expect(ready).toMatchObject({ title: 'X-1 · Ready to merge', body: 'Fix the webhook', go: { place: 'p', task: 'X-1', focus: 'm1' }, tag: 'X-1' })
-    const reply = taskAlert({ id: 'X-1', title: 'Fix', project: 'p' }, 'need', 'Waits for your reply', { task: { key: 'X-1/Agent', cli: 'Claude Code', messages: [{ id: 'm1', who: 'agent', text: 'Ready to start; say go when the last fix is merged.' }] } })
+    const reply = taskAlert({ id: 'X-1', title: 'Fix', project: 'p' }, 'need', 'Waits for your reply', {
+      task: { key: 'X-1/Agent', cli: 'Claude Code', messages: [{ id: 'm1', who: 'agent', text: 'Ready to start; say go when the last fix is merged.' }] },
+    })
     expect(reply).toMatchObject({ title: 'X-1 · Waits for your reply', body: 'Ready to start; say go when the last fix is merged.' })
     const wrong = taskAlert({ id: 'X-1', title: 'Fix', project: 'p' }, 'need', 'Went wrong: the worktree could not be made', {})
     expect(wrong).toMatchObject({ title: 'X-1 · Went wrong', body: 'the worktree could not be made' })
@@ -60,17 +71,34 @@ describe('which card an alert is about', () => {
   const chat = (messages: Chat['messages']): Chat => ({ key: 'X/Agent', cli: 'Claude Code', messages })
   const about = (c: Chat, sub = 'Waits for your reply: ok') => taskAlert({ id: 'X', title: 'x', project: 'p' }, 'need', sub, { task: c })
   test('a plan answered by typing is no longer it: what came after is', () => {
-    const a = about(chat([{ id: 'm1', who: 'agent', text: 'Here is my plan.', question: q({ id: 'plan:X:1', kind: 'Plan', title: 'Plan for X' }) }, { id: 'y1', who: 'you', text: 'Go ahead' }, { id: 'm2', who: 'agent', text: 'Done, have a look.' }]))
+    const a = about(
+      chat([
+        { id: 'm1', who: 'agent', text: 'Here is my plan.', question: q({ id: 'plan:X:1', kind: 'Plan', title: 'Plan for X' }) },
+        { id: 'y1', who: 'you', text: 'Go ahead' },
+        { id: 'm2', who: 'agent', text: 'Done, have a look.' },
+      ]),
+    )
     expect(a).toMatchObject({ title: 'X · Waits for your reply', body: 'Done, have a look.', go: { focus: 'm2' } })
     expect(a.card).toBeUndefined()
   })
-  test("a form of several questions: its first unanswered one, answered in the app (no buttons)", () => {
-    const a = about(chat([{ id: 't#0', who: 'agent', question: q({ id: 't:0', title: 'First?', sent: 1 }) }, { id: 't#1', who: 'agent', question: q({ id: 't:1', title: 'Second?' }) }, { id: 't#2', who: 'agent', question: q({ id: 't:2', title: 'Third?' }) }]))
+  test('a form of several questions: its first unanswered one, answered in the app (no buttons)', () => {
+    const a = about(
+      chat([
+        { id: 't#0', who: 'agent', question: q({ id: 't:0', title: 'First?', sent: 1 }) },
+        { id: 't#1', who: 'agent', question: q({ id: 't:1', title: 'Second?' }) },
+        { id: 't#2', who: 'agent', question: q({ id: 't:2', title: 'Third?' }) },
+      ]),
+    )
     expect(a).toMatchObject({ title: 'X · Second?', go: { focus: 't:1' } })
     expect(a.card).toBeUndefined()
   })
   test('a terminal menu: no buttons, its first choices all say yes', () => {
-    const a = about(chat([{ id: 'menu:X/Agent', who: 'agent', question: q({ id: 'menu:X/Agent', title: 'Allow: rm -rf x?', choices: [{ label: 'Yes' }, { label: "Yes, and don't ask again" }, { label: 'No' }] }) }, { id: 'w', who: 'you', text: 'hi', waiting: true }]))
+    const a = about(
+      chat([
+        { id: 'menu:X/Agent', who: 'agent', question: q({ id: 'menu:X/Agent', title: 'Allow: rm -rf x?', choices: [{ label: 'Yes' }, { label: "Yes, and don't ask again" }, { label: 'No' }] }) },
+        { id: 'w', who: 'you', text: 'hi', waiting: true },
+      ]),
+    )
     expect(a).toMatchObject({ title: 'X · Allow: rm -rf x?', go: { focus: 'menu:X/Agent' } })
     expect(a.card).toBeUndefined()
   })
@@ -105,7 +133,11 @@ describe('where a tap opens', () => {
     expect(alertUrl(a.go)).toBe(`./?place=p%3Avm-str%3Agtm&task=GTM-16&focus=${encodeURIComponent(plan.question!.id)}`)
   })
   test("a done task: its card in the project's chat", () => {
-    const project: Chat = { key: 'p', cli: 'Claude Code', messages: [{ id: 'card:X-1:done|Merged', who: 'agent', text: 'X-1 is done', card: { id: 'card:X-1:done|Merged', task: 'X-1', status: 'done', text: 'is done' } }] }
+    const project: Chat = {
+      key: 'p',
+      cli: 'Claude Code',
+      messages: [{ id: 'card:X-1:done|Merged', who: 'agent', text: 'X-1 is done', card: { id: 'card:X-1:done|Merged', task: 'X-1', status: 'done', text: 'is done' } }],
+    }
     const a = taskAlert({ id: 'X-1', title: 'Fix', project: 'p', said: 'Fixed the webhook' }, 'done', 'Fixed the webhook', { project })
     expect(a).toMatchObject({ title: 'X-1 · Done', body: 'Fixed the webhook', go: { place: 'p', focus: 'card:X-1:done|Merged' } })
     expect(a.go.task).toBeUndefined()
@@ -127,7 +159,7 @@ describe('what goes to the device', () => {
     expect(p.waits).toBeUndefined()
     expect(p.actions).toBeUndefined()
   })
-  test("buttons answer the card: its first two choices, never one that needs a note or a pick of several", () => {
+  test('buttons answer the card: its first two choices, never one that needs a note or a pick of several', () => {
     const plan = pushPayload({ id: 'u', from: 'Shepherdr', ...alertOf('GTM-16') }, waiting(snap))
     expect(plan.actions).toEqual([{ action: '0', title: 'Approve the plan' }])
     expect(plan.answer).toEqual({ chat: 'GTM-16/Agent', question: task('GTM-16').chat.messages.find((m) => m.question?.kind === 'Plan')!.question!.id })
@@ -140,7 +172,9 @@ describe('what goes to the device', () => {
     expect(multi.card).toBeUndefined()
   })
   test('an answered card is no longer the one an alert opens on', () => {
-    const answered = taskAlert({ id: 'X', title: 'x', project: 'p' }, 'need', 'Waits for your reply: ok', { task: { key: 'X/Agent', cli: 'Claude Code', messages: [{ id: 'm', who: 'agent', text: 'Pick one', question: q({ sent: 0 }) }] } })
+    const answered = taskAlert({ id: 'X', title: 'x', project: 'p' }, 'need', 'Waits for your reply: ok', {
+      task: { key: 'X/Agent', cli: 'Claude Code', messages: [{ id: 'm', who: 'agent', text: 'Pick one', question: q({ sent: 0 }) }] },
+    })
     expect(answered).toMatchObject({ title: 'X · Waits for your reply', go: { focus: 'm' } })
     expect(answered.card).toBeUndefined()
   })

@@ -105,7 +105,14 @@ describe('starting an agy agent', () => {
     try {
       const r = { ...base(), logs: [], started: 0 } as unknown as AgentRecord
       const settings = ['--settings', JSON.stringify({ trustedWorkspaces: [cwd] })]
-      expect(h.a.args({ ...r, model: 'gemini-3.8-flash', effort: 'high', sessionId: 'conv-9' }, true)).toEqual([...settings, '--conversation', 'conv-9', '--model', 'gemini-3.8-flash', '--dangerously-skip-permissions'])
+      expect(h.a.args({ ...r, model: 'gemini-3.8-flash', effort: 'high', sessionId: 'conv-9' }, true)).toEqual([
+        ...settings,
+        '--conversation',
+        'conv-9',
+        '--model',
+        'gemini-3.8-flash',
+        '--dangerously-skip-permissions',
+      ])
       expect(h.a.args({ ...r, sessionId: 'conv-9' }, false)).toEqual([...settings, '--dangerously-skip-permissions'])
       expect(h.a.args({ ...r, sessionId: undefined }, true)).toEqual([...settings, '--dangerously-skip-permissions'])
       expect(h.a.args({ ...r, access: 'ask', model: 'default' }, false)).toEqual(settings)
@@ -128,8 +135,8 @@ describe('starting an agy agent', () => {
   })
 })
 
-describe('reading an agy agent\'s log', () => {
-  test('discoverLog: the newest conversation of its folder, its id taken from the log\'s name', () => {
+describe("reading an agy agent's log", () => {
+  test("discoverLog: the newest conversation of its folder, its id taken from the log's name", () => {
     const h = harness()
     try {
       h.a.adopt(key, { name: 'shep-agy-found', cwd } as never, 'agy', 'test')

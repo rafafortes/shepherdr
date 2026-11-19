@@ -6,7 +6,25 @@ import clsx from 'clsx'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { definePlugin, setUI, useStore } from '@client/kernel.ts'
 import { escapeHtml, highlighter, HIGHLIGHT_MAX, highlightLine, highlightLines, languageOf, loadHighlighter } from '@client/highlight.ts'
-import { BackIcon, CheckCircleIcon, ClockIcon, DiffIcon, FileIcon, FolderIcon, FolderOpenIcon, ic, IconButton, MinusCircleIcon, NextIcon, OpenIcon, PrIcon, ReloadIcon, SearchIcon, Small, XCircleIcon } from '@client/ui.tsx'
+import {
+  BackIcon,
+  CheckCircleIcon,
+  ClockIcon,
+  DiffIcon,
+  FileIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  ic,
+  IconButton,
+  MinusCircleIcon,
+  NextIcon,
+  OpenIcon,
+  PrIcon,
+  ReloadIcon,
+  SearchIcon,
+  Small,
+  XCircleIcon,
+} from '@client/ui.tsx'
 import type { Diff, DiffFile, FileText, Patch, PrCheck, PullRequest, Task, TreeFiles } from '@shared/types.ts'
 
 /* ---------- asking the server ---------- */
@@ -126,7 +144,10 @@ function Tree({
   const rows = rowsOf(nodes, open)
   const [cur, setCur] = useState(picked ?? rows[0]?.node.path)
   const ref = useRef<HTMLDivElement>(null)
-  const at = Math.max(0, rows.findIndex((r) => r.node.path === cur))
+  const at = Math.max(
+    0,
+    rows.findIndex((r) => r.node.path === cur),
+  )
   const focus = (i: number) => {
     const r = rows[Math.max(0, Math.min(rows.length - 1, i))]
     if (!r) return
@@ -171,11 +192,7 @@ function Tree({
           style={{ '--depth': depth } as CSSProperties}
           className="press mx-1.5 flex h-8 w-[calc(100%---spacing(3))] items-center gap-1.5 rounded-row pr-2 pl-[calc(--spacing(1.5)+var(--depth)*--spacing(3.5))] text-left text-[0.8125rem] text-fg hover:bg-hover focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] focus-visible:outline-none aria-selected:bg-sel aria-selected:hover:bg-sel coarse:h-11 phone:h-11 phone:text-[0.9375rem]"
         >
-          {n.kids ? (
-            <NextIcon className={clsx('size-3.5 shrink-0 text-fg3 motion-safe:transition-transform', open.has(n.path) && 'rotate-90')} />
-          ) : (
-            <span className="size-3.5 shrink-0" />
-          )}
+          {n.kids ? <NextIcon className={clsx('size-3.5 shrink-0 text-fg3 motion-safe:transition-transform', open.has(n.path) && 'rotate-90')} /> : <span className="size-3.5 shrink-0" />}
           {n.kids ? open.has(n.path) ? <FolderOpenIcon className={clsx(ic, 'text-fg3')} /> : <FolderIcon className={clsx(ic, 'text-fg3')} /> : <FileIcon className={clsx(ic, 'text-fg3')} />}
           <span className="min-w-0 flex-1 truncate">{n.name}</span>
           {meta?.(n.path)}
@@ -219,7 +236,9 @@ const Back = createContext<{ label: string; go: () => void } | null>(null)
 function Bar({ children, onReload, loading }: { children: ReactNode; onReload?: () => void; loading?: boolean }) {
   const back = useContext(Back)
   return (
-    <div className={clsx('flex min-h-9 shrink-0 items-center gap-2 border-b border-line pr-1.5 text-[0.75rem] text-fg2 phone:min-h-11 phone:text-[0.875rem]', back ? 'pl-1.5 @[40rem]/pane:pl-3' : 'pl-3')}>
+    <div
+      className={clsx('flex min-h-9 shrink-0 items-center gap-2 border-b border-line pr-1.5 text-[0.75rem] text-fg2 phone:min-h-11 phone:text-[0.875rem]', back ? 'pl-1.5 @[40rem]/pane:pl-3' : 'pl-3')}
+    >
       {back ? (
         <IconButton label={`Back to ${back.label.toLowerCase()}`} onClick={back.go} className="@[40rem]/pane:hidden">
           <BackIcon className={ic} />
@@ -318,7 +337,17 @@ function FilesView({ task }: { task: Task }) {
   const tree = useAsk<TreeFiles>(task.id, { what: 'files' })
   const [picked, pick] = usePicked(task.id, 'files')
   const [q, setQ] = useState('')
-  const [open, setOpen] = useState(() => new Set<string>(picked ? picked.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/')) : []))
+  const [open, setOpen] = useState(
+    () =>
+      new Set<string>(
+        picked
+          ? picked
+              .split('/')
+              .slice(0, -1)
+              .map((_, i, a) => a.slice(0, i + 1).join('/'))
+          : [],
+      ),
+  )
   const files = tree.data?.files ?? []
   const nodes = useMemo(() => treeOf(files), [files])
   const found = q.trim() ? files.filter((f) => f.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 300) : null
@@ -420,7 +449,14 @@ function DiffView({ task }: { task: Task }) {
   const d = useAsk<Diff>(task.id, { what: 'diff' }, 15_000)
   const [picked, pick] = usePicked(task.id, 'diff')
   const files = d.data?.files ?? []
-  const nodes = useMemo(() => treeOf(files.map((f) => f.path), true), [files])
+  const nodes = useMemo(
+    () =>
+      treeOf(
+        files.map((f) => f.path),
+        true,
+      ),
+    [files],
+  )
   const byPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files])
   // every folder of a diff shows open: it is the changed files you came to see
   const [shut, setShut] = useState(new Set<string>())
@@ -475,7 +511,9 @@ function DiffView({ task }: { task: Task }) {
             }}
           />
         ) : (
-          <Note>{task.id} hasn't changed anything against {d.data.base} yet.</Note>
+          <Note>
+            {task.id} hasn't changed anything against {d.data.base} yet.
+          </Note>
         )}
       </div>
     </>

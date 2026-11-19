@@ -75,7 +75,11 @@ async function space(name: string) {
 }
 
 /** the chat's cards, as their words */
-const cards = (key: string) => src.chats.chat(key).messages.filter((m) => m.card).map((m) => m.card!.text)
+const cards = (key: string) =>
+  src.chats
+    .chat(key)
+    .messages.filter((m) => m.card)
+    .map((m) => m.card!.text)
 
 /** a coordinator's first start, as the source makes it (a private method: the test drives it the way a restart does) */
 const startCoordinator = (id: string) => (src as unknown as { coordinator(id: string): Promise<unknown> }).coordinator(id).catch((e: Error) => e)
@@ -146,7 +150,14 @@ describe('a coordinator’s takeover, and its way back, leave the blocked models
     src.settings.set('models.maxAtOnce', `${CODEX}=0`, 'machine')
     const { id } = await space('blk-take-none')
     src.agents.records[id] = { key: id, name: 'take', kind: 'pi', logs: [], started: Date.now() } as never
-    await (src as unknown as { coordinatorCantGoOn(key: string, r: unknown): Promise<void> }).coordinatorCantGoOn(id, { cut: 'c1', tries: 1, reason: 'Out of allowance until 5pm', words: 'out', over: true, lasting: true })
+    await (src as unknown as { coordinatorCantGoOn(key: string, r: unknown): Promise<void> }).coordinatorCantGoOn(id, {
+      cut: 'c1',
+      tries: 1,
+      reason: 'Out of allowance until 5pm',
+      words: 'out',
+      over: true,
+      lasting: true,
+    })
     expect(starts.some((s) => s.key === id)).toBe(false)
     expect(src.agents.tookOver(id)).toBeUndefined()
   })
@@ -157,7 +168,14 @@ describe('a coordinator’s takeover, and its way back, leave the blocked models
     src.settings.set('coordinator.fallback2', 'pi', 'all')
     const { id } = await space('blk-take-skip')
     src.agents.records[id] = { key: id, name: 'take', kind: 'pi', logs: [], started: Date.now() } as never
-    await (src as unknown as { coordinatorCantGoOn(key: string, r: unknown): Promise<void> }).coordinatorCantGoOn(id, { cut: 'c2', tries: 1, reason: 'Out of allowance until 5pm', words: 'out', over: true, lasting: true })
+    await (src as unknown as { coordinatorCantGoOn(key: string, r: unknown): Promise<void> }).coordinatorCantGoOn(id, {
+      cut: 'c2',
+      tries: 1,
+      reason: 'Out of allowance until 5pm',
+      words: 'out',
+      over: true,
+      lasting: true,
+    })
     // the primary is pi, which runs out: Codex is blocked, and the next backup is pi on another model: not Codex
     expect(starts.some((s) => s.kind === 'codex')).toBe(false)
   })
@@ -186,7 +204,11 @@ describe('the advisor whose every model is blocked is not asked', () => {
     const dir = tmp('blk-advisor-repo')
     execSync(REPO, { cwd: dir, shell: '/bin/sh' })
     const p = await src.places.add(dir, 'blk-advisor')
-    for (const [k, v] of [['advisor.agent', 'pi'], ['advisor.model', 'opencode-go/deepseek-v4.1-flash'], ['advisor.fallback', 'Codex']])
+    for (const [k, v] of [
+      ['advisor.agent', 'pi'],
+      ['advisor.model', 'opencode-go/deepseek-v4.1-flash'],
+      ['advisor.fallback', 'Codex'],
+    ])
       expect(src.settings.set(k, v, { space: p.name }).ok).toBe(true)
     const asked: string[] = []
     const was = src.runAdvisor

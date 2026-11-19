@@ -22,7 +22,10 @@ export interface SettingLine {
 export function readBrief(text: string): { before: string; lines: SettingLine[]; after: string } | null {
   const at = [SETTINGS_HEAD, ...OLD_HEADS].map((h) => [text.lastIndexOf(h), h.length] as const).find(([i]) => i >= 0)
   if (!at) return null
-  const rest = text.slice(at[0] + at[1]).replace(/^\n/, '').split('\n')
+  const rest = text
+    .slice(at[0] + at[1])
+    .replace(/^\n/, '')
+    .split('\n')
   const n = rest.findIndex((l) => !l.startsWith('- '))
   const block = n < 0 ? rest : rest.slice(0, n)
   const marks = Object.values(SET_BY)

@@ -94,7 +94,11 @@ export async function probe(target: string): Promise<Probe> {
       .filter((m): m is RegExpMatchArray => !!m)
       .map((m) => [m[1], m[2]]),
   )
-  const tools = Object.fromEntries(Object.entries(kv).filter(([k]) => k.startsWith('tool.')).map(([k, v]) => [k.slice(5), !!v]))
+  const tools = Object.fromEntries(
+    Object.entries(kv)
+      .filter(([k]) => k.startsWith('tool.'))
+      .map(([k, v]) => [k.slice(5), !!v]),
+  )
   return { home: kv.home, os: kv.os, arch: kv.arch, path: kv.path, herdr: kv['tool.herdr'] ?? 'herdr', tools, helper: kv.helper ?? '', browser: kv.browser ?? '', oldInstall: kv.old === '1' }
 }
 
@@ -176,7 +180,12 @@ function tarOf(files: [string, string][], version: string, browser: string) {
     b.write('0000000\0', 108)
     b.write('0000000\0', 116)
     b.write(`${size.toString(8).padStart(11, '0')}\0`, 124)
-    b.write(`${Math.floor(Date.now() / 1000).toString(8).padStart(11, '0')}\0`, 136)
+    b.write(
+      `${Math.floor(Date.now() / 1000)
+        .toString(8)
+        .padStart(11, '0')}\0`,
+      136,
+    )
     b.write('        ', 148)
     b.write('0', 156)
     b.write('ustar\0', 257)
@@ -203,7 +212,11 @@ export async function installHelper(target: string, p: Probe) {
   const browser = browserVersion(p.os, p.arch)
   const keep = !!browser && p.browser === browser
   const dir = helperDir(p.home)
-  const tar = tarOf(helperFiles(p.os, p.arch).filter(([to]) => !(keep && to === 'bin/agent-browser-bin')), version, browser)
+  const tar = tarOf(
+    helperFiles(p.os, p.arch).filter(([to]) => !(keep && to === 'bin/agent-browser-bin')),
+    version,
+    browser,
+  )
   const clear = keep ? '"$d/skill" "$d/bin/shepherdr" "$d/bin/agent-browser"' : '"$d/skill" "$d/bin"'
   const r = await onMachine(target, `set -e; d=${q(dir)}; mkdir -p "$d"; rm -rf ${clear}; tar xf - -C "$d"; mkdir -p "$d/hooks" "$d/inbox" "$d/prompts"`, { stdin: tar, timeoutMs: 180_000 })
   if (r.code !== 0) throw new Error(`Could not put the helper on the machine: ${r.err || `exit ${r.code}`}`)

@@ -104,7 +104,10 @@ export function pickHook(input: any, at: number): HookEvent | undefined {
       if (!id) continue
       const tag = (t: string) => new RegExp(`<${t}>([\\s\\S]*?)</${t}>`).exec(body)?.[1] ?? ''
       last.delete(id)
-      last.set(id, /is waiting on its own background work$/.test(tag('summary').trim()) || /^This agent stopped with background work of its own still running\b/.test(tag('note').trim()) ? 'paused' : 'over')
+      last.set(
+        id,
+        /is waiting on its own background work$/.test(tag('summary').trim()) || /^This agent stopped with background work of its own still running\b/.test(tag('note').trim()) ? 'paused' : 'over',
+      )
     }
     for (const [id, k] of last) (e[k] ??= []).push(id)
   }
@@ -151,11 +154,7 @@ function writeScript(dir: string, name: string, text: string): string {
 /** the settings file that makes one Claude Code record its hooks to `events`, and run its own shepherdr command without
  *  a prompt (`command`, this launch's; see own-commands.ts); returns its path. Starting over: what an earlier run
  *  recorded is gone. */
-export function hookSettings(
-  dir: string,
-  name: string,
-  o: { command?: string; chat?: string; runtime?: string } = {},
-): { settings: string; events: string } {
+export function hookSettings(dir: string, name: string, o: { command?: string; chat?: string; runtime?: string } = {}): { settings: string; events: string } {
   const runtime = o.runtime ?? process.execPath
   task.mkdirSync(dir, { recursive: true })
   const events = join(dir, `${name}.jsonl`)
@@ -238,19 +237,20 @@ export function foldHook(s: Said | undefined, e: HookEvent): Said | undefined {
 }
 
 export const parseHookLines = (text: string, file?: string): HookEvent[] =>
-  text
-    .split('\n')
-    .flatMap((l) => {
-      try {
-        const e = l.trim() && JSON.parse(l)
-        // as another machine's helper writes it: the hook's whole input and when it came, cut down here
-        if (e && typeof e.raw === 'object' && typeof e.at === 'number') {
-          const picked = pickHook(e.raw, e.at)
-          return picked ? [picked] : []
-        }
-        return e && typeof e.event === 'string' && typeof e.at === 'number' ? [e as HookEvent] : []
-      } catch (e) { swallow('hook event line', e, 'claude', file); return [] }
-    })
+  text.split('\n').flatMap((l) => {
+    try {
+      const e = l.trim() && JSON.parse(l)
+      // as another machine's helper writes it: the hook's whole input and when it came, cut down here
+      if (e && typeof e.raw === 'object' && typeof e.at === 'number') {
+        const picked = pickHook(e.raw, e.at)
+        return picked ? [picked] : []
+      }
+      return e && typeof e.event === 'string' && typeof e.at === 'number' ? [e as HookEvent] : []
+    } catch (e) {
+      swallow('hook event line', e, 'claude', file)
+      return []
+    }
+  })
 
 /** the CLI session an agent is in now, as its hooks last said: its id, and its transcript where it said */
 export interface HookSession {
@@ -296,7 +296,14 @@ export class HookLogs {
       for (const e of parseHookLines(cut < 0 ? '' : fresh.slice(0, cut), file)) {
         if (!e.agent) {
           if (e.event === 'SessionStart' && e.type !== 'compact') f.runtime = undefined
-          if (e.model || e.effort) f.runtime = { ...(e.model && f.runtime?.model && e.model !== f.runtime.model ? {} : f.runtime), ...(e.model ? { model: e.model } : {}), ...(e.effort ? { effort: e.effort } : {}), at: e.at, session: e.session ?? f.session?.id }
+          if (e.model || e.effort)
+            f.runtime = {
+              ...(e.model && f.runtime?.model && e.model !== f.runtime.model ? {} : f.runtime),
+              ...(e.model ? { model: e.model } : {}),
+              ...(e.effort ? { effort: e.effort } : {}),
+              at: e.at,
+              session: e.session ?? f.session?.id,
+            }
         }
         f.said = foldHook(f.said, e)
         f.seen = true

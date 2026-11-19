@@ -67,7 +67,8 @@ export function fakeAgentBrowser() {
     },
   })
 
-  const state = (s: Record<string, unknown> = {}) => writeFileSync(join(dir, 'state.json'), JSON.stringify({ connected: false, port: stream.port, cdp: `ws://127.0.0.1:${cdp.port}/devtools/browser/x`, sessions: [], ...s }))
+  const state = (s: Record<string, unknown> = {}) =>
+    writeFileSync(join(dir, 'state.json'), JSON.stringify({ connected: false, port: stream.port, cdp: `ws://127.0.0.1:${cdp.port}/devtools/browser/x`, sessions: [], ...s }))
   const calls = () =>
     existsSync(join(dir, 'calls.log'))
       ? readFileSync(join(dir, 'calls.log'), 'utf8')

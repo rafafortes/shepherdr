@@ -28,11 +28,17 @@ const done = (page: Page) => page.context().close()
 
 /** what a finger lands on at a spot, as the element's own (or one inside it) */
 const lands = (page: Page, sel: string, dx: number, dy: number) =>
-  page.locator(sel).first().evaluate((e, [dx, dy]) => {
-    const r = e.getBoundingClientRect()
-    const at = document.elementFromPoint(r.x + r.width / 2 + dx, (dy < 0 ? r.top : r.bottom) + dy)
-    return !!at && e.contains(at)
-  }, [dx, dy])
+  page
+    .locator(sel)
+    .first()
+    .evaluate(
+      (e, [dx, dy]) => {
+        const r = e.getBoundingClientRect()
+        const at = document.elementFromPoint(r.x + r.width / 2 + dx, (dy < 0 ? r.top : r.bottom) + dy)
+        return !!at && e.contains(at)
+      },
+      [dx, dy],
+    )
 
 describe.skipIf(!browser)('an iPhone', () => {
   for (const phone of Object.keys(PHONES) as Phone[])
@@ -116,13 +122,17 @@ describe.skipIf(!browser)('an iPhone', () => {
     }
   }, 30_000)
 
-  test("an artifact full screen keeps its title whole, its version and age on the line under it", async () => {
+  test('an artifact full screen keeps its title whole, its version and age on the line under it', async () => {
     const page = await open('iPhone SE (3rd gen)', 'place=vm-str/gtm&tab=artifacts')
     await page.getByText('Onboarding deck').first().click()
     const title = page.locator('[role=dialog] .font-semibold, .font-semibold').filter({ hasText: 'Onboarding deck' }).last()
     await title.waitFor()
     await settled(page)
-    const t = await title.evaluate((e) => ({ whole: e.scrollWidth <= e.clientWidth, under: e.nextElementSibling!.getBoundingClientRect().top >= e.getBoundingClientRect().bottom - 1, meta: e.nextElementSibling!.textContent }))
+    const t = await title.evaluate((e) => ({
+      whole: e.scrollWidth <= e.clientWidth,
+      under: e.nextElementSibling!.getBoundingClientRect().top >= e.getBoundingClientRect().bottom - 1,
+      meta: e.nextElementSibling!.textContent,
+    }))
     expect(t).toMatchObject({ whole: true, under: true })
     expect(t.meta).toMatch(/^v1 · /)
     await done(page)
@@ -171,7 +181,9 @@ describe('the launch screen', () => {
     for (const [w, h, r] of SCREENS)
       for (const theme of ['light', 'dark'] as const) {
         const file = splashName(w, h, r, theme)
-        expect(html).toContain(`media="(device-width: ${w}px) and (device-height: ${h}px) and (-webkit-device-pixel-ratio: ${r}) and (orientation: portrait) and (prefers-color-scheme: ${theme})" href="${file}"`)
+        expect(html).toContain(
+          `media="(device-width: ${w}px) and (device-height: ${h}px) and (-webkit-device-pixel-ratio: ${r}) and (orientation: portrait) and (prefers-color-scheme: ${theme})" href="${file}"`,
+        )
         const png = join(root, 'public', file)
         expect(existsSync(png)).toBe(true)
         const b = readFileSync(png)

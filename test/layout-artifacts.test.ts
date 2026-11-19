@@ -13,7 +13,17 @@ describe.skipIf(!browser)('artifacts', () => {
   test("a page speaks for you only after you touched it; its Send goes to its keeper's chat", async () => {
     // a page that takes the focus and sends on its own, with nobody touching it
     ARTIFACT_HTML.zz1 = { 1: `<input id="i"><script>document.getElementById('i').focus(); setTimeout(function(){ shepherdr.send('Spoken for you') }, 400)</script>` }
-    world.artifacts.push({ id: 'zz1', title: 'Pushy page', place: 'p:vm-str:herdr-projects', at: 1, v: 1, when: 'now', by: 'HP-201 agent', keeper: 'HP-201 agent', versions: [{ n: 1, when: 'now', by: 'HP-201 agent', html: 1 }] })
+    world.artifacts.push({
+      id: 'zz1',
+      title: 'Pushy page',
+      place: 'p:vm-str:herdr-projects',
+      at: 1,
+      v: 1,
+      when: 'now',
+      by: 'HP-201 agent',
+      keeper: 'HP-201 agent',
+      versions: [{ n: 1, when: 'now', by: 'HP-201 agent', html: 1 }],
+    })
     world.chat('HP-201/Agent').messages.push({ id: 'pushy', who: 'agent', text: 'A pushy page.', artifact: { id: 'zz1', v: 1 }, at: 0 })
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
     const before = world.chat('HP-201/Agent').messages.length
@@ -36,7 +46,17 @@ describe.skipIf(!browser)('artifacts', () => {
   const posted: string[] = []
   const post = (id: string, title: string, html: string, who: 'agent' | 'you' = 'agent') => {
     ARTIFACT_HTML[id] = { 1: html }
-    world.artifacts.push({ id, title, place: 'p:vm-str:herdr-projects', at: 1, v: 1, when: 'now', by: 'HP-201 agent', keeper: 'HP-201 agent', versions: [{ n: 1, when: 'now', by: 'HP-201 agent', html: 1 }] })
+    world.artifacts.push({
+      id,
+      title,
+      place: 'p:vm-str:herdr-projects',
+      at: 1,
+      v: 1,
+      when: 'now',
+      by: 'HP-201 agent',
+      keeper: 'HP-201 agent',
+      versions: [{ n: 1, when: 'now', by: 'HP-201 agent', html: 1 }],
+    })
     world.chat('HP-201/Agent').messages.push({ id: `post-${id}`, who, text: title, artifact: { id, v: 1 }, at: 0 })
     posted.push(id)
   }
@@ -68,7 +88,10 @@ describe.skipIf(!browser)('artifacts', () => {
 
   test('a card spans the chat column, and a fixed-size design is scaled to its width, keeping its shape', async () => {
     post('zz2', 'Wide poster', `<meta name="shepherdr-size" content="1200x600"><style>body{background:#c2410c}</style>`)
-    for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 }]) {
+    for (const viewport of [
+      { width: 390, height: 844 },
+      { width: 1280, height: 800 },
+    ]) {
       const page = await browser!.newPage({ viewport })
       await page.goto(at('place=p%3Avm-str%3Aherdr-projects&task=HP-201'))
       const card = page.locator('[data-card]').filter({ hasText: 'Wide poster' })
@@ -129,7 +152,10 @@ describe.skipIf(!browser)('artifacts', () => {
     const story = await frameOf(page, 'Story')
     expect(story.height).toBe(Math.round(844 * 0.7))
     expect(story.scroll).toBeLessThanOrEqual(story.client)
-    const shown = await page.frameLocator('[data-card] iframe[title="Story"]').locator('body').evaluate((b) => b.getBoundingClientRect().toJSON())
+    const shown = await page
+      .frameLocator('[data-card] iframe[title="Story"]')
+      .locator('body')
+      .evaluate((b) => b.getBoundingClientRect().toJSON())
     expect(Math.abs(shown.height - story.height)).toBeLessThanOrEqual(1)
     expect(Math.abs(shown.left - (story.width - shown.width) / 2)).toBeLessThanOrEqual(1)
     await page.close()
@@ -149,19 +175,25 @@ describe.skipIf(!browser)('artifacts', () => {
     const margins = await frameOf(page, 'Margins')
     expect(Math.abs(margins.height - (margins.width * 630) / 1200)).toBeLessThanOrEqual(1)
     expect(margins.scroll).toBeLessThanOrEqual(margins.client)
-    const body = await page.frameLocator('[data-card] iframe[title="Margins"]').locator('body').evaluate((b) => b.getBoundingClientRect().toJSON())
+    const body = await page
+      .frameLocator('[data-card] iframe[title="Margins"]')
+      .locator('body')
+      .evaluate((b) => b.getBoundingClientRect().toJSON())
     expect(Math.abs(body.top)).toBeLessThanOrEqual(1)
     expect(Math.abs(body.left)).toBeLessThanOrEqual(1)
     expect(Math.abs(body.width - margins.width)).toBeLessThanOrEqual(1)
     // not scaled: the words keep their size, the line scrolls
-    const line = await page.frameLocator('[data-card] iframe[title="Long line"]').locator('html').evaluate((h) => ({ t: document.body.style.transform, wide: h.scrollWidth > h.clientWidth }))
+    const line = await page
+      .frameLocator('[data-card] iframe[title="Long line"]')
+      .locator('html')
+      .evaluate((h) => ({ t: document.body.style.transform, wide: h.scrollWidth > h.clientWidth }))
     expect(line).toEqual({ t: '', wide: true })
     expect((await frameOf(page, 'Held page')).height).toBe(324)
     await page.close()
     unpost()
   }, 40_000)
 
-  test("full screen, a fixed-size design fits the screen whole, centred; a card says whose it is like a bubble does", async () => {
+  test('full screen, a fixed-size design fits the screen whole, centred; a card says whose it is like a bubble does', async () => {
     post('zz7', 'Tall story', `<meta name="shepherdr-size" content="1080x1920"><style>body{background:#2563eb}</style>`)
     post('zz8', 'Mine', `<p>Mine</p>`, 'you')
     const page = await browser!.newPage({ viewport: { width: 1280, height: 800 } })
@@ -172,7 +204,11 @@ describe.skipIf(!browser)('artifacts', () => {
         .locator('[data-card]')
         .filter({ hasText: t })
         .evaluate((c) => ({ head: getComputedStyle(c.firstElementChild!).backgroundColor, right: getComputedStyle(c).borderBottomRightRadius, left: getComputedStyle(c).borderBottomLeftRadius }))
-    const bubble = (sel: string) => page.locator(sel).first().evaluate((b) => getComputedStyle(b).backgroundColor)
+    const bubble = (sel: string) =>
+      page
+        .locator(sel)
+        .first()
+        .evaluate((b) => getComputedStyle(b).backgroundColor)
     // and its header names who sent it
     expect(await page.locator('[data-card]').filter({ hasText: 'Mine' }).locator('> div').first().textContent()).toContain('You · v1')
     const mine = await look('Mine')
@@ -185,7 +221,10 @@ describe.skipIf(!browser)('artifacts', () => {
     await page.frameLocator('[role=dialog] iframe').locator('html.shepherdr-fixed').waitFor()
     await page.waitForTimeout(300)
     const box = (await frame.boundingBox())!
-    const shown = await page.frameLocator('[role=dialog] iframe').locator('body').evaluate((b) => b.getBoundingClientRect().toJSON())
+    const shown = await page
+      .frameLocator('[role=dialog] iframe')
+      .locator('body')
+      .evaluate((b) => b.getBoundingClientRect().toJSON())
     expect(Math.abs(shown.height - box.height)).toBeLessThanOrEqual(1)
     expect(Math.abs(shown.width - (1080 * box.height) / 1920)).toBeLessThanOrEqual(1)
     expect(Math.abs(shown.left - (box.width - shown.width) / 2)).toBeLessThanOrEqual(1)
@@ -204,10 +243,18 @@ describe.skipIf(!browser)('artifacts', () => {
       `<style>.shot{width:100%;border:1px solid var(--line)}</style><img id="tall" src="${pic(1000, 3000)}"><img id="wide" class="shot" src="${pic(1920, 1080)}"><canvas id="c" width="1200" height="600"></canvas><svg id="s" width="800" height="400" viewBox="0 0 800 400"></svg><img id="icon" style="width:40px;height:40px;object-fit:cover" src="${pic(100, 50)}">`,
     )
     const sizes = (page: Page, frame: string) =>
-      page.frameLocator(frame).locator('html').evaluate((h) => ({
-        w: h.clientWidth,
-        media: Object.fromEntries([...h.querySelectorAll('img,canvas,svg')].map((e) => [e.id, { w: Math.round(e.getBoundingClientRect().width), h: Math.round(e.getBoundingClientRect().height), right: e.getBoundingClientRect().right }])),
-      }))
+      page
+        .frameLocator(frame)
+        .locator('html')
+        .evaluate((h) => ({
+          w: h.clientWidth,
+          media: Object.fromEntries(
+            [...h.querySelectorAll('img,canvas,svg')].map((e) => [
+              e.id,
+              { w: Math.round(e.getBoundingClientRect().width), h: Math.round(e.getBoundingClientRect().height), right: e.getBoundingClientRect().right },
+            ]),
+          ),
+        }))
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
     await page.goto(at('place=p%3Avm-str%3Aherdr-projects&task=HP-201'))
     await page.locator('[data-card] iframe[title="Media"]').scrollIntoViewIfNeeded()
@@ -237,7 +284,12 @@ describe.skipIf(!browser)('artifacts', () => {
 
   test("the check names media that doesn't fit the page", async () => {
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
-    await page.setContent(wrapPage(`<img style="max-width:none;width:800px;height:100px" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='1'/%3E"><video style="max-height:none;height:2000px"></video>`, { check: true, phone: true }))
+    await page.setContent(
+      wrapPage(
+        `<img style="max-width:none;width:800px;height:100px" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='1'/%3E"><video style="max-height:none;height:2000px"></video>`,
+        { check: true, phone: true },
+      ),
+    )
     const said = await page.evaluate(() => ((window as unknown as { __shepherdrMedia: () => void }).__shepherdrMedia(), (window as unknown as { __shepherdrCheck: string[] }).__shepherdrCheck))
     expect(said).toEqual(['media: img 1 (800×100 px) is wider than the page (390 px)', 'media: video 1 (300×2000 px) is taller than the screen (844 px)'])
     await page.close()
@@ -269,7 +321,14 @@ describe.skipIf(!browser)('artifacts', () => {
     const dialog = page.getByRole('dialog', { name: 'Disk use on vm-str' })
     await dialog.waitFor()
     // it pushes in like a page: measured once it has landed
-    await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished.catch(() => {}))))
+    await page.evaluate(() =>
+      Promise.all(
+        document
+          .getAnimations()
+          .filter((a) => a.effect?.getTiming().iterations !== Infinity)
+          .map((a) => a.finished.catch(() => {})),
+      ),
+    )
     // full screen: as wide and tall as the phone
     const box = (await dialog.boundingBox())!
     expect(box.width).toBeCloseTo(390, 0)
@@ -332,7 +391,6 @@ describe.skipIf(!browser)('artifacts', () => {
     await page.close()
   }, 30_000)
 })
-
 
 describe.skipIf(!browser)('compact artifact tools', () => {
   test('phone tools retain a readable version and named touch controls', async () => {

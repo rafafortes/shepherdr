@@ -59,7 +59,9 @@ function procSource(rows: Row[], uid = UID) {
     ps: () => '',
     now: () => 1000,
     /** one process ended by a signal */
-    remove: (pid: number) => { byPid.delete(pid) },
+    remove: (pid: number) => {
+      byPid.delete(pid)
+    },
     /** herdr's close: the shell and its CLI go, their children reparent to init — the real mechanism behind the diff */
     closePane: (gone: number[]) => {
       for (const pid of gone) {
@@ -96,7 +98,10 @@ describe('reading the process table', () => {
       { pid: 12, ppid: 1, cmd: '', cwd: '' },
     ])
     const rows = O.readRows(source)
-    expect(rows).toEqual([{ pid: 10, ppid: 1, cmd: 'node server/main.ts', cwd: '/work', home: '/tmp/proof-1', uid: UID }, { pid: 12, ppid: 1, cmd: '', cwd: '', uid: UID }])
+    expect(rows).toEqual([
+      { pid: 10, ppid: 1, cmd: 'node server/main.ts', cwd: '/work', home: '/tmp/proof-1', uid: UID },
+      { pid: 12, ppid: 1, cmd: '', cwd: '', uid: UID },
+    ])
     expect(source.reads).toBeGreaterThan(0) // one table read, not one ps per process
   })
 
@@ -132,7 +137,11 @@ describe('reading the process table', () => {
       expect(ended).toEqual([])
       expect(O.endDeps.alive(child.pid)).toBe(false)
     } finally {
-      try { child.kill() } catch { /* gone */ }
+      try {
+        child.kill()
+      } catch {
+        /* gone */
+      }
     }
   }, 10_000)
 
@@ -144,7 +153,7 @@ describe('reading the process table', () => {
 })
 
 describe('reaping a closing pane', () => {
-  test('all five CLIs\' descendants are caught; a live task\'s agent-browser Chrome and a stranger are not', async () => {
+  test("all five CLIs' descendants are caught; a live task's agent-browser Chrome and a stranger are not", async () => {
     const caught = O.capture(rows, shell).sort((a, b) => a - b)
     expect(caught).toEqual([201, 202, 203, 204, 205, 206, 207, 208])
     // the live task's Chrome (300) and its zygote and crashpad children stay for browser.ts; 400 is not under the shell
@@ -170,7 +179,11 @@ describe('reaping a closing pane', () => {
       },
     }
     expect(await O.end([101, 102], d, 10)).toEqual([])
-    expect(spy.signals).toEqual([{ pid: 101, sig: 'SIGTERM' }, { pid: 102, sig: 'SIGTERM' }, { pid: 102, sig: 'SIGKILL' }])
+    expect(spy.signals).toEqual([
+      { pid: 101, sig: 'SIGTERM' },
+      { pid: 102, sig: 'SIGTERM' },
+      { pid: 102, sig: 'SIGKILL' },
+    ])
   })
 
   test('a pane with no shell pid, or a bad one, captures nothing', () => {
@@ -203,7 +216,13 @@ describe('finish closes the pane and ends what survived it', () => {
     agents.records['SHE-70/Agent'] = { key: 'SHE-70/Agent', name: 'agent-one', kind: 'claude', cwd: '/work', workspace: 'w', started: 0, logs: [], finished: false } as never
     agents.live.set('agent-one', { pane_id: 'pane-1', name: 'agent-one' } as never)
     const ended: number[][] = []
-    agents.reaper = { source: procSource(rows), end: async (pids) => { ended.push([...pids].sort((a, b) => a - b)); return [] } }
+    agents.reaper = {
+      source: procSource(rows),
+      end: async (pids) => {
+        ended.push([...pids].sort((a, b) => a - b))
+        return []
+      },
+    }
     const refresh = spyOn(agents, 'refresh').mockResolvedValue(undefined as never)
     const info = spyOn(herdr, 'processInfo').mockResolvedValue({ shell_pid: shell } as never)
     const close = spyOn(herdr, 'closePane').mockResolvedValue(undefined as never)
@@ -213,7 +232,9 @@ describe('finish closes the pane and ends what survived it', () => {
       expect(ended).toEqual([[201, 202, 203, 204, 205, 206, 207, 208]]) // not the live task's Chrome
       expect(agents.records['SHE-70/Agent'].finished).toBe(true)
     } finally {
-      refresh.mockRestore(); info.mockRestore(); close.mockRestore()
+      refresh.mockRestore()
+      info.mockRestore()
+      close.mockRestore()
     }
   })
 
@@ -226,11 +247,19 @@ describe('finish closes the pane and ends what survived it', () => {
     agents.reaper = {
       source,
       // the production ender, with liveness read from the table: herdr's close already removed some pids
-      end: (pids) => O.end(pids, {
-        signal: (pid) => { signalled.push(pid); source.remove(pid) },
-        alive: (pid) => source.pids().includes(String(pid)),
-        wait: async () => undefined,
-      }, 10),
+      end: (pids) =>
+        O.end(
+          pids,
+          {
+            signal: (pid) => {
+              signalled.push(pid)
+              source.remove(pid)
+            },
+            alive: (pid) => source.pids().includes(String(pid)),
+            wait: async () => undefined,
+          },
+          10,
+        ),
     }
     const refresh = spyOn(agents, 'refresh').mockResolvedValue(undefined as never)
     const info = spyOn(herdr, 'processInfo').mockResolvedValue({ shell_pid: shell } as never)
@@ -240,7 +269,9 @@ describe('finish closes the pane and ends what survived it', () => {
       // capture must have run before the close: afterwards every survivor's ppid is 1, and none would be found
       expect(signalled.sort((a, b) => a - b)).toEqual([203, 204, 205, 206, 207, 208])
     } finally {
-      refresh.mockRestore(); info.mockRestore(); close.mockRestore()
+      refresh.mockRestore()
+      info.mockRestore()
+      close.mockRestore()
     }
   })
 
@@ -249,7 +280,13 @@ describe('finish closes the pane and ends what survived it', () => {
     agents.records['SHE-70/Agent'] = { key: 'SHE-70/Agent', name: 'agent-two', kind: 'pi', cwd: '/work', workspace: 'w', started: 0, logs: [], finished: false } as never
     agents.live.set('agent-two', { pane_id: 'pane-2' } as never)
     const ended: number[][] = []
-    agents.reaper = { source: procSource(rows), end: async (pids) => { ended.push(pids); return [] } }
+    agents.reaper = {
+      source: procSource(rows),
+      end: async (pids) => {
+        ended.push(pids)
+        return []
+      },
+    }
     const refresh = spyOn(agents, 'refresh').mockResolvedValue(undefined as never)
     const info = spyOn(herdr, 'processInfo').mockRejectedValue(new Error('pane gone') as never)
     const close = spyOn(herdr, 'closePane').mockResolvedValue(undefined as never)
@@ -258,8 +295,9 @@ describe('finish closes the pane and ends what survived it', () => {
       expect(close).toHaveBeenCalledWith('pane-2')
       expect(ended).toEqual([])
     } finally {
-      refresh.mockRestore(); info.mockRestore(); close.mockRestore()
+      refresh.mockRestore()
+      info.mockRestore()
+      close.mockRestore()
     }
   })
 })
-

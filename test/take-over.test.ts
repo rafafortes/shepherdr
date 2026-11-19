@@ -62,7 +62,10 @@ function world() {
     reload: () => {},
     sleep: () => {},
   }
-  const snapshot = () => readdirSync(join(home, '.herdr-projects'), { recursive: true }).map((f) => `${f}`).sort()
+  const snapshot = () =>
+    readdirSync(join(home, '.herdr-projects'), { recursive: true })
+      .map((f) => `${f}`)
+      .sort()
   return { home, root, env: { ...env, SHEPHERDR_HOME: join(home, '.shepherdr') }, sys, killed, ts, snapshot, config: join(cfg, 'herdr', 'config.toml') }
 }
 

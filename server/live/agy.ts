@@ -128,7 +128,11 @@ export function stepTime(payload: Uint8Array): number {
 
 /** the summaries' time as ms: '2026-11-13 19:55:57.91895555+00:00' (nanoseconds cut to ms); 0 when it is none */
 export function summaryTime(s: unknown): number {
-  const ms = Date.parse(String(s ?? '').replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1'))
+  const ms = Date.parse(
+    String(s ?? '')
+      .replace(' ', 'T')
+      .replace(/(\.\d{3})\d+/, '$1'),
+  )
   return Number.isNaN(ms) ? 0 : ms
 }
 
@@ -316,7 +320,14 @@ function lineOf(s: { idx: number; step_type: number; step_payload: Uint8Array | 
     case 15: {
       const tin = field(p, '5.9.2') ?? (gen ? field(gen, '1.4.2') : undefined)
       const tout = field(p, '5.9.3') ?? (gen ? field(gen, '1.4.3') : undefined)
-      return { ...base, kind: 'agent', text: text(field(p, '20.1')), model: genModel(gen, ids), tokensIn: typeof tin === 'number' ? tin : undefined, tokensOut: typeof tout === 'number' ? tout : undefined }
+      return {
+        ...base,
+        kind: 'agent',
+        text: text(field(p, '20.1')),
+        model: genModel(gen, ids),
+        tokensIn: typeof tin === 'number' ? tin : undefined,
+        tokensOut: typeof tout === 'number' ? tout : undefined,
+      }
     }
     case 132:
       return { ...base, kind: 'tool', tool: text(field(p, '5.4.2')), args: text(field(p, '5.4.3')), output: text(field(p, '140.2.1')) }
@@ -335,7 +346,10 @@ const NOT_FINAL = new Set([0, 1, 2])
 /** the generation rows of `count` model responses, from the one after the `from` responses before them: the k-th model
  *  response of the store has the k-th generation row */
 function genRows(handle: Database, from: number, count: number): Uint8Array[] {
-  return handle.query<{ data: Uint8Array }, [number, number]>('SELECT data FROM gen_metadata ORDER BY idx LIMIT ? OFFSET ?').all(count, from).map((r) => r.data)
+  return handle
+    .query<{ data: Uint8Array }, [number, number]>('SELECT data FROM gen_metadata ORDER BY idx LIMIT ? OFFSET ?')
+    .all(count, from)
+    .map((r) => r.data)
 }
 
 /** a JSON line's object, or undefined when it is not one */

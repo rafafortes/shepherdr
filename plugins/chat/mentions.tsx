@@ -32,8 +32,7 @@ export function mentionItems(snap: Snapshot | null | undefined, text: string, ca
 export const inBox = (i: Item) => (i.kind === 'space' ? `#${i.place.name} ` : `@${i.task.id} `)
 
 /** what its mention says at Send, kept until then */
-export const pickOf = (i: Item) =>
-  i.kind === 'space' ? ({ kind: 'space', id: i.place.id, name: i.place.name } as const) : ({ kind: 'task', id: i.task.id, ref: i.task.id } as const)
+export const pickOf = (i: Item) => (i.kind === 'space' ? ({ kind: 'space', id: i.place.id, name: i.place.name } as const) : ({ kind: 'task', id: i.task.id, ref: i.task.id } as const))
 
 /** The # or @ list over the message box: a tap takes one; the arrows, Enter and Escape are the box's own (client.tsx).
     `id` is its chat's own, so two boxes open at once (a split) never name each other's list */
@@ -160,11 +159,7 @@ function renderChip(s: Shown) {
 /** the person's words, each mention among them as a chip */
 export function Mentions({ text }: { text: string }) {
   if (!hasMention(text)) return <>{text}</>
-  return (
-    <>
-      {split(text).map((p, i) => ('text' in p ? <Fragment key={i}>{p.text}</Fragment> : <Chip key={i} mention={p.mention} />))}
-    </>
-  )
+  return <>{split(text).map((p, i) => ('text' in p ? <Fragment key={i}>{p.text}</Fragment> : <Chip key={i} mention={p.mention} />))}</>
 }
 
 /** a mention as an element for an agent's reply, which is drawn from markdown (markdown.tsx) */

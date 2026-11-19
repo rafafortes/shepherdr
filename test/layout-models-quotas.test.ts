@@ -106,7 +106,7 @@ describe.skipIf(!browser)('the Quota column of the Summary on a desktop', () => 
     }
   })
 
-  test("a provider whose key is not in Secrets says what to add, and Open Secrets opens that page", async () => {
+  test('a provider whose key is not in Secrets says what to add, and Open Secrets opens that page', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
       const table = await summaryTable(page)

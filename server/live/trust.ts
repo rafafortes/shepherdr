@@ -15,14 +15,21 @@ export function codexTrust(text: string, path: string): string {
     return out
   }
   const lines = text.split('\n')
-  let first = -1, end = lines.length
+  let first = -1,
+    end = lines.length
   for (let i = 0; i < lines.length; i++) {
     const h = lines[i].match(/^\s*\[\s*projects\s*\.\s*("(?:[^"\\]|\\.)*"|'[^']*')\s*\]\s*(?:#.*)?$/)
     if (h) {
       const key = h[1].startsWith('"') ? JSON.parse(h[1]) : h[1].slice(1, -1)
-      if (key === path) { first = i; continue }
+      if (key === path) {
+        first = i
+        continue
+      }
     }
-    if (first >= 0 && /^\s*\[/.test(lines[i])) { end = i; break }
+    if (first >= 0 && /^\s*\[/.test(lines[i])) {
+      end = i
+      break
+    }
   }
   if (first < 0) throw new Error('Cannot safely edit this Codex projects table')
   const at = lines.findIndex((l, i) => i > first && i < end && /^\s*trust_level\s*=/.test(l))
@@ -37,9 +44,7 @@ export function trustWorktree(path: string, kind: string, env: Record<string, st
   if (kind !== 'claude' && kind !== 'codex') return
   const ownEnv = BOX ? env : { ...process.env, ...env }
   if (process.env.NODE_ENV === 'test' && !(kind === 'claude' ? ownEnv.CLAUDE_CONFIG_DIR : ownEnv.CODEX_HOME)) return
-  const file = kind === 'claude'
-    ? join(ownEnv.CLAUDE_CONFIG_DIR || boxHome(), '.claude.json')
-    : join(ownEnv.CODEX_HOME || join(boxHome(), '.codex'), 'config.toml')
+  const file = kind === 'claude' ? join(ownEnv.CLAUDE_CONFIG_DIR || boxHome(), '.claude.json') : join(ownEnv.CODEX_HOME || join(boxHome(), '.codex'), 'config.toml')
   let tmp: string | undefined
   try {
     path = realpathSync(path)

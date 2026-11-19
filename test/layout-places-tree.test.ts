@@ -198,7 +198,16 @@ describe.skipIf(!browser)('places, calm like Slack', () => {
           const name = l.querySelector('button > span')!
           const icon = l.querySelector('[data-icon]')!
           const [i, n] = [icon.getBoundingClientRect(), name.getBoundingClientRect()]
-          return { name: name.textContent, icon: icon.getAttribute('data-icon'), size: i.width, gap: n.left - i.right, color: getComputedStyle(icon).color, nameColor: getComputedStyle(name).color, bold: Number(getComputedStyle(name).fontWeight) >= 600, sel: l.classList.contains('bg-sel') }
+          return {
+            name: name.textContent,
+            icon: icon.getAttribute('data-icon'),
+            size: i.width,
+            gap: n.left - i.right,
+            color: getComputedStyle(icon).color,
+            nameColor: getComputedStyle(name).color,
+            bold: Number(getComputedStyle(name).fontWeight) >= 600,
+            sel: l.classList.contains('bg-sel'),
+          }
         }),
       )
       // each machine's server on its heading (no emoji given), each space's # (its home space first); no level over them
@@ -244,7 +253,12 @@ describe.skipIf(!browser)('places, calm like Slack', () => {
         const first = list.getByRole('option').first().locator('[data-icon]')
         expect(await first.getAttribute('data-icon')).toBe('hash')
         // lit on the row the arrow keys are on, as the sidebar's open row
-        expect(await first.evaluate((e) => getComputedStyle(e).color)).toBe(await list.getByRole('option').first().evaluate((e) => getComputedStyle(e).color))
+        expect(await first.evaluate((e) => getComputedStyle(e).color)).toBe(
+          await list
+            .getByRole('option')
+            .first()
+            .evaluate((e) => getComputedStyle(e).color),
+        )
         expect(await list.getByRole('option', { name: /^gtm/ }).locator('[data-icon]').getAttribute('data-icon')).toBe('hash')
         await page.keyboard.press('Escape')
       }
@@ -257,7 +271,14 @@ describe.skipIf(!browser)('places, calm like Slack', () => {
       expect(await pick.locator('[data-icon]').getAttribute('data-icon')).toBe('hash')
       await pick.click()
       const menu = page.getByRole('menu', { name: 'Choices' })
-      expect(await menu.getByRole('menuitemradio').evaluateAll((ms) => ms.slice(0, 6).map((m) => m.querySelector('[data-icon]')?.getAttribute('data-icon')))).toEqual(['layers', 'server', 'hash', 'hash', 'server', 'hash'])
+      expect(await menu.getByRole('menuitemradio').evaluateAll((ms) => ms.slice(0, 6).map((m) => m.querySelector('[data-icon]')?.getAttribute('data-icon')))).toEqual([
+        'layers',
+        'server',
+        'hash',
+        'hash',
+        'server',
+        'hash',
+      ])
       await ctx.close()
     }, 30_000)
 })
@@ -268,7 +289,11 @@ describe.skipIf(!browser)('the places tree', () => {
     unquiet = await quietProject()
   })
   afterAll(() => unquiet())
-  const box = (page: Page, sel: string) => page.locator(sel).first().evaluate((n) => n.getBoundingClientRect().toJSON() as Box)
+  const box = (page: Page, sel: string) =>
+    page
+      .locator(sel)
+      .first()
+      .evaluate((n) => n.getBoundingClientRect().toJSON() as Box)
   const row = (page: Page, name: string) => page.locator('#places li', { has: page.getByText(name, { exact: true }) }).first()
 
   test('each machine heading its own + on hover, opening New space on it; a chevron or a tap folds its spaces, remembered; it opens nothing (desktop)', async () => {
@@ -369,7 +394,12 @@ describe.skipIf(!browser)('the places tree', () => {
     expect(await left('vm-str')).toBeLessThan(await left('gtm'))
     // a space's # under its machine's name, as a Slack channel's sits under its section's (SHE-225); the chevron near
     // the edge
-    const icon = (sel: string) => page.locator(sel).locator('[data-icon]').first().evaluate((i) => Math.round(i.getBoundingClientRect().left))
+    const icon = (sel: string) =>
+      page
+        .locator(sel)
+        .locator('[data-icon]')
+        .first()
+        .evaluate((i) => Math.round(i.getBoundingClientRect().left))
     const name = await page.locator('#places li[data-heading="m:vm-str"] h2 span').evaluate((n) => Math.round(n.getBoundingClientRect().left))
     expect(Math.abs((await icon('#places li[data-project="p:vm-str:gtm"]')) - name)).toBeLessThanOrEqual(1)
     const side = await page.locator('#places').evaluate((n) => n.getBoundingClientRect().left)

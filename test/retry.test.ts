@@ -40,10 +40,14 @@ describe("each CLI's log says what cut its turn off", () => {
     const words = '503 provider returned: request could not be completed at this time'
     expect(providerError(words)).toEqual({ passing: false, reason: 'Provider error' })
     const line = {
-      type: 'message', id: 'e1', timestamp: '2026-11-18T10:00:00.000Z',
+      type: 'message',
+      id: 'e1',
+      timestamp: '2026-11-18T10:00:00.000Z',
       message: { role: 'assistant', content: [], usage: {}, stopReason: 'error', errorMessage: words },
     }
-    const e = readerFor('pi')!.parse([{ text: JSON.stringify(line), offset: 0 }], '/logs/pi-reworded.jsonl').find((x) => x.kind === 'error')
+    const e = readerFor('pi')!
+      .parse([{ text: JSON.stringify(line), offset: 0 }], '/logs/pi-reworded.jsonl')
+      .find((x) => x.kind === 'error')
     if (e?.kind !== 'error') throw new Error('pi reworded: no error read')
     expect(e.status).toBe(503)
     expect(providerError(e.text, e.code, e.status)).toEqual({ passing: true, reason: 'Provider server error' })
@@ -52,8 +56,12 @@ describe("each CLI's log says what cut its turn off", () => {
   test("pi's recovered status leaves every pinned sample's classification unchanged", () => {
     const cut = (name: string) => {
       const lines = readFileSync(join(import.meta.dir, 'samples', 'endings', `${name}.jsonl`), 'utf8')
-        .split('\n').filter(Boolean).map((text, i) => ({ text, offset: i * 1000 }))
-      const e = readerFor('pi')!.parse(lines, `/logs/${name}.jsonl`).find((x) => x.kind === 'error')
+        .split('\n')
+        .filter(Boolean)
+        .map((text, i) => ({ text, offset: i * 1000 }))
+      const e = readerFor('pi')!
+        .parse(lines, `/logs/${name}.jsonl`)
+        .find((x) => x.kind === 'error')
       if (e?.kind !== 'error') throw new Error(`${name}: no error read`)
       return e
     }
@@ -161,7 +169,7 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(ending('opencode-free-limit-made').reason).toStartWith('Out of allowance until ')
   })
 
-  test('a reset given as an ISO time is shown in this machine\'s time, with its zone name', () => {
+  test("a reset given as an ISO time is shown in this machine's time, with its zone name", () => {
     const iso = '2026-11-11T20:44:33Z'
     const shown = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }).format(new Date(iso))
     expect(providerError(`Command Code: out of credit, resets at ${iso}`, '', 402)).toEqual({ passing: false, reason: `Out of credit until ${shown}` })
@@ -262,7 +270,17 @@ describe('waits and tries', () => {
   test('a filter refusal hands only this chat to its backup: no wait, no outage to watch', () => {
     const runs: string[] = []
     const over: { cut: string; tries: number; reason: string; words: string; over?: boolean; lasting?: boolean; blocked?: boolean }[] = []
-    const r = new Retries({ nudge: () => undefined, over: (_k: string, x: { cut: string; tries: number; reason: string; words: string; over?: boolean; lasting?: boolean; blocked?: boolean }) => { over.push(x) }, changed: () => undefined, runOut: (k) => runs.push(k) }, WAITS)
+    const r = new Retries(
+      {
+        nudge: () => undefined,
+        over: (_k: string, x: { cut: string; tries: number; reason: string; words: string; over?: boolean; lasting?: boolean; blocked?: boolean }) => {
+          over.push(x)
+        },
+        changed: () => undefined,
+        runOut: (k) => runs.push(k),
+      },
+      WAITS,
+    )
     r.seen('F', { id: 'e1', at: Date.now(), text: 'Provider blocked the response', code: 'provider.content-filter' })
     expect(over).toEqual([{ cut: 'e1', tries: 1, reason: "Response blocked by the provider's filter", words: 'Provider blocked the response', over: true, blocked: true }])
     expect(over[0].lasting).toBeUndefined()

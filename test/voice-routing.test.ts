@@ -19,13 +19,21 @@ function fixture() {
   const peer = { rec: { machine: 'remote', url: 'http://unused' }, reachable: true, snap: { places: [remote], tasks: [task] }, chats: new Map(), watching: { chats: [] as string[], term: null } }
   const peers = Object.assign(new Emitter(), {
     list: () => [peer],
-    owner: (key: string) => key === remote.chat || key === 'ABC-1/Agent' ? peer : undefined,
-    act: async (_p: unknown, a: Action) => { sent.push(a); return result },
+    owner: (key: string) => (key === remote.chat || key === 'ABC-1/Agent' ? peer : undefined),
+    act: async (_p: unknown, a: Action) => {
+      sent.push(a)
+      return result
+    },
     fetch: async (_p: unknown, path: string) => Response.json({ chat: history(new URL(path, 'http://fake').searchParams.get('chat')!), status: 'working' }),
     subscribeChat: (_p: unknown, key: string, fn: (c: Chat) => void) => {
       watched.add(key)
-      const off = events.on('chat', (k, c) => { if (k === key) fn(c) })
-      return () => { watched.delete(key); off() }
+      const off = events.on('chat', (k, c) => {
+        if (k === key) fn(c)
+      })
+      return () => {
+        watched.delete(key)
+        off()
+      }
     },
   })
   const events = new Emitter<{ chat: [string, Chat] }>()
@@ -34,14 +42,32 @@ function fixture() {
   const watched = new Set<string>()
   // Skip LiveSource's constructor: none of its timers, disk writes or real machine links runs.
   const src = Object.assign(Object.create(LiveSource.prototype), {
-    peers, user: 'Human', engine: { tasks: [] },
+    peers,
+    user: 'Human',
+    engine: { tasks: [] },
     placeList: () => [local, remote],
     snapshot: () => ({ places: [local, remote], tasks: [task] }) as Snapshot,
     chats: { chat: (key: string) => history(key), lastReply: () => 'old' },
-    agents: { status: () => 'idle' }, replyFns: new Map(), lastAgentMsg: new Map(),
-    actLocal: async (a: Action) => { sent.push(a); return result },
+    agents: { status: () => 'idle' },
+    replyFns: new Map(),
+    lastAgentMsg: new Map(),
+    actLocal: async (a: Action) => {
+      sent.push(a)
+      return result
+    },
   }) as InstanceType<typeof LiveSource>
-  return { src, peer, sent, events, watched, local, remote, setResult: (r: object) => { result = r } }
+  return {
+    src,
+    peer,
+    sent,
+    events,
+    watched,
+    local,
+    remote,
+    setResult: (r: object) => {
+      result = r
+    },
+  }
 }
 
 describe('voice routes', () => {
@@ -49,7 +75,10 @@ describe('voice routes', () => {
     const f = fixture()
     await f.src.voiceTools(f.remote.chat).send('hello')
     await f.src.voiceTools('ABC-1/Agent').send('task hello')
-    expect(f.sent).toEqual([{ type: 'send', chat: f.remote.chat, text: 'hello' }, { type: 'send', chat: 'ABC-1/Agent', text: 'task hello' }])
+    expect(f.sent).toEqual([
+      { type: 'send', chat: f.remote.chat, text: 'hello' },
+      { type: 'send', chat: 'ABC-1/Agent', text: 'task hello' },
+    ])
   })
   test('read uses owning chat history and state; overview includes remote places and tasks', async () => {
     const f = fixture()
@@ -122,7 +151,13 @@ describe('voice routes', () => {
   })
   test('peer watch pins survive screen changes, remain machine scoped and are released', () => {
     const f = fixture()
-    const machines = Object.assign(new Emitter(), { links: new Map([['remote', f.peer]]), voiceWatches: new Map(), screenWatch: { chats: [], term: null }, owner: () => f.peer, watch: Machines.prototype.watch }) as unknown as InstanceType<typeof Machines>
+    const machines = Object.assign(new Emitter(), {
+      links: new Map([['remote', f.peer]]),
+      voiceWatches: new Map(),
+      screenWatch: { chats: [], term: null },
+      owner: () => f.peer,
+      watch: Machines.prototype.watch,
+    }) as unknown as InstanceType<typeof Machines>
     const seen: string[] = []
     const off = Machines.prototype.subscribeChat.call(machines, f.peer as never, 'ABC-1/Agent', (c) => seen.push(c.key))
     machines.watch([], null)
@@ -150,16 +185,31 @@ test('provider close and explicit call end both release the reply subscription o
     onopen?: () => void
     onclose?: () => void
     onmessage?: (e: { data: string }) => void
-    constructor() { socket = this }
+    constructor() {
+      socket = this
+    }
     send() {}
-    close() { this.onclose?.() }
+    close() {
+      this.onclose?.()
+    }
   }
   try {
     globalThis.fetch = (async () => Response.json({ signed_url: 'ws://fake' })) as unknown as typeof fetch
     globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket
     for (const providerEnds of [false, true]) {
       let unsubscriptions = 0
-      const call = startVoice({ name: 'remote:test', send: async () => '', read: async () => '', overview: async () => '', onReply: () => () => { unsubscriptions++ } }, { send() {}, close() {} })
+      const call = startVoice(
+        {
+          name: 'remote:test',
+          send: async () => '',
+          read: async () => '',
+          overview: async () => '',
+          onReply: () => () => {
+            unsubscriptions++
+          },
+        },
+        { send() {}, close() {} },
+      )
       await Bun.sleep(0)
       socket!.onopen?.()
       if (providerEnds) socket!.onclose?.()
@@ -189,9 +239,13 @@ test('final transcripts become display-only captions; a service that sends none 
     onopen?: () => void
     onclose?: () => void
     onmessage?: (e: { data: string }) => void
-    constructor() { socket = this }
+    constructor() {
+      socket = this
+    }
     send() {}
-    close() { this.onclose?.() }
+    close() {
+      this.onclose?.()
+    }
   }
   const messages: Record<string, unknown>[] = []
   try {
@@ -199,7 +253,12 @@ test('final transcripts become display-only captions; a service that sends none 
     globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket
     const call = startVoice(
       { name: 'remote:test', send: async () => '', read: async () => '', overview: async () => '', onReply: () => () => {} },
-      { send(d) { if (typeof d === 'string') messages.push(JSON.parse(d)) }, close() {} },
+      {
+        send(d) {
+          if (typeof d === 'string') messages.push(JSON.parse(d))
+        },
+        close() {},
+      },
     )
     await Bun.sleep(0)
     socket!.onopen?.()

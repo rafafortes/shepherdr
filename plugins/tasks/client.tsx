@@ -553,7 +553,7 @@ function TaskFilter({ listKey, order }: { listKey: string; order: Task[] }) {
   return (
     <FilterBox
       label="Filter tasks"
-        hint={keys ? 'F' : undefined}
+      hint={keys ? 'F' : undefined}
       value={value}
       onChange={(q) => setFilter(listKey, 'tasks', q)}
       onKey={(e) => {
@@ -653,13 +653,7 @@ function TasksMenu(_: { place: Place }) {
   const B = phone ? RoundButton : IconButton
   return (
     <div className="relative">
-      <B
-        label="Group tasks"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={clsx('rounded-full!', phone ? 'aria-expanded:bg-line2' : 'aria-expanded:bg-hover')}
-        onClick={() => setOpen(!open)}
-      >
+      <B label="Group tasks" aria-haspopup="menu" aria-expanded={open} className={clsx('rounded-full!', phone ? 'aria-expanded:bg-line2' : 'aria-expanded:bg-hover')} onClick={() => setOpen(!open)}>
         <MoreIcon className={ic} />
       </B>
       {open ? (

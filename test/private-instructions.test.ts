@@ -25,7 +25,8 @@ describe('private instructions', () => {
   })
 
   test('remote adoption carries only Everywhere and preserves machine/space rules', () => {
-    const main = settings(), remote = settings()
+    const main = settings(),
+      remote = settings()
     main.set('task.instructions', 'Use plain words.\nKeep it short.')
     remote.set('task.instructions', 'Remote only.', 'machine')
     remote.set('reviewer.instructions', 'Review local data paths.', { space: 'one' })
@@ -52,7 +53,7 @@ describe('private instructions', () => {
     expect(s.set('task.instructions', 'bad\0text').ok).toBe(false)
   })
 
-  test('a backup reviewer changes no rule of its own: one role\'s private rules still never reach the other', () => {
+  test("a backup reviewer changes no rule of its own: one role's private rules still never reach the other", () => {
     const s = settings()
     s.set('task.instructions', 'Task only.')
     s.set('reviewer.instructions', 'Reviewer only.')

@@ -27,7 +27,12 @@ const codes = (e: E) => [(slack[e.hexcode as keyof typeof slack] as string | str
 
 /** its tags, less the words its name or shortcodes already have */
 const words = (e: E) => {
-  const have = new Set([e.label, ...codes(e)].join(' ').toLowerCase().split(/[\s_]+/))
+  const have = new Set(
+    [e.label, ...codes(e)]
+      .join(' ')
+      .toLowerCase()
+      .split(/[\s_]+/),
+  )
   return [...new Set((e.tags ?? []).join(' ').toLowerCase().split(/\s+/))].filter((w) => !have.has(w)).join(' ')
 }
 

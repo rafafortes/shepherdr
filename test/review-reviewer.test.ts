@@ -58,7 +58,20 @@ function task(set?: Record<string, string>) {
 function taskIn(place: string, set?: Record<string, string>) {
   const id = `RV-${++n}`
   const now = Date.now()
-  const t = { id, n, project: place, base: 'main', title: 'Reviewed change', desc: 'Add b.txt.', by: 'test', created: now, updated: now, told: 'work', agent: { kind: 'claude' }, ...(set ? { set } : {}) }
+  const t = {
+    id,
+    n,
+    project: place,
+    base: 'main',
+    title: 'Reviewed change',
+    desc: 'Add b.txt.',
+    by: 'test',
+    created: now,
+    updated: now,
+    told: 'work',
+    agent: { kind: 'claude' },
+    ...(set ? { set } : {}),
+  }
   src.engine.tasks.push(t as never)
   return src.engine.task(id)!
 }
@@ -79,7 +92,9 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     const t = task()
     const r = await review(t)
     expect(r.code).toBe(0)
-    expect(r.out).toBe(`Round 1 of 3 counted for ${t.id}. Review with a headless Codex or a Codex subagent (its default model and effort) this round. Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`)
+    expect(r.out).toBe(
+      `Round 1 of 3 counted for ${t.id}. Review with a headless Codex or a Codex subagent (its default model and effort) this round. Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
+    )
     expect(t.reviews).toBe(1)
     // the lease counts toward the caps: the reviewer's run is on its model, of this space
     expect(reviewLeases()).toEqual([expect.objectContaining({ key: 'codex/unknown', space: space.name, id: `review:${t.id}` })])
@@ -119,7 +134,9 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     hold('advisor:b', 'pi/unknown')
     const started = Date.now()
     const r = await review(t)
-    expect(r.out).toBe(`Every reviewer ${t.id} may use is full or out: ${CODEX} (1 of 1 at once), ${PI} (1 of 1 at once). End your turn now; Shepherdr wakes you here when one is free, with the reviewer to use.`)
+    expect(r.out).toBe(
+      `Every reviewer ${t.id} may use is full or out: ${CODEX} (1 of 1 at once), ${PI} (1 of 1 at once). End your turn now; Shepherdr wakes you here when one is free, with the reviewer to use.`,
+    )
     // it waited for the slot (its deadline), and only then answered
     expect(Date.now() - started).toBeGreaterThanOrEqual(src.engine.reviewDeadline - 5)
     // nothing is counted or leased while every reviewer is full
@@ -137,7 +154,9 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     await Bun.sleep(25)
     src.engine.unlease('advisor:b')
     const r = await pending
-    expect(r.out).toBe(`Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`)
+    expect(r.out).toBe(
+      `Round 1 of 3 counted for ${t.id}. Review with a headless pi or a pi subagent (its default model and effort) this round (${CODEX} is at its limit, 1 of 1 at once). Run \`shepherdr review ${t.id} --done\` when the round's review has finished.`,
+    )
     expect(t.reviews).toBe(1)
     expect(t.reviewWait).toBeUndefined()
   })
@@ -415,7 +434,13 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
 describe('the brief and the skill say how a round asks its reviewer', () => {
   test("the brief's Reviewer line asks shepherdr review <id> for each round, and --done after it", () => {
     const block = settingsBlock('RV-9', { ways: { review: true, mustFix: 'major', rounds: 3, merge: 'on its own', waitChecks: false }, reviewer: { kind: 'codex' }, fallback: [{ kind: 'pi' }] })
-    expect(block).toContain(reviewerLineFor(CODEX_WORDS, 'RV-9', 'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless pi or a pi subagent (its default model and effort) instead for that round only, and say in your summary that you did.'))
+    expect(block).toContain(
+      reviewerLineFor(
+        CODEX_WORDS,
+        'RV-9',
+        'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless pi or a pi subagent (its default model and effort) instead for that round only, and say in your summary that you did.',
+      ),
+    )
     expect(ASK('RV-9')).toContain('`shepherdr review RV-9` first')
     expect(ASK('RV-9')).toContain('`shepherdr review RV-9 --done`')
   })

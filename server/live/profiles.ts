@@ -33,7 +33,13 @@ export const keysOf = (limits: boolean) => (limits ? [...MODEL_KEYS, ...LIMIT_KE
 
 /** a setting's name on the Models page: "Tasks · Primary · Agent", "Max tasks" */
 const LABELS: Record<string, string> = {
-  ...Object.fromEntries(matrixSlots().flatMap((x) => [[x.cli, `${x.title} · ${x.name} · Agent`], [x.model, `${x.title} · ${x.name} · Model`], [x.effort, `${x.title} · ${x.name} · Effort`]])),
+  ...Object.fromEntries(
+    matrixSlots().flatMap((x) => [
+      [x.cli, `${x.title} · ${x.name} · Agent`],
+      [x.model, `${x.title} · ${x.name} · Model`],
+      [x.effort, `${x.title} · ${x.name} · Effort`],
+    ]),
+  ),
   'space.maxTasks': 'Max tasks',
   'models.maxAtOnce': 'Max at once per model',
   'merge.train': 'Merge train',
@@ -174,11 +180,7 @@ export interface Plan {
 export function planOf(site: Site, p: Pick<Profile, 'limits' | 'values' | 'names'>): Plan {
   const saved = p.values.spaces
   const here = site.spaces.filter((sp) => sp.key in saved)
-  const levels: { at: Level; rec: Rec }[] = [
-    { at: 'all', rec: p.values.all },
-    { at: 'machine', rec: p.values.machine },
-    ...here.map((sp) => ({ at: { space: sp.key } as Level, rec: saved[sp.key]! })),
-  ]
+  const levels: { at: Level; rec: Rec }[] = [{ at: 'all', rec: p.values.all }, { at: 'machine', rec: p.values.machine }, ...here.map((sp) => ({ at: { space: sp.key } as Level, rec: saved[sp.key]! }))]
   const changes: Change[] = []
   for (const { at, rec } of levels)
     for (const key of keysOf(p.limits)) {
@@ -406,7 +408,9 @@ export class Profiles {
     if (!p) throw new Error(`No profile called ${cleanName(raw)}.`)
     const site = this.site()
     const block = (title: string, rec: Rec) => {
-      const rows = keysOf(p.limits).filter((k) => rec[k] !== null && rec[k] !== undefined).map((k) => `  ${labelOf(k)}: ${rec[k]}`)
+      const rows = keysOf(p.limits)
+        .filter((k) => rec[k] !== null && rec[k] !== undefined)
+        .map((k) => `  ${labelOf(k)}: ${rec[k]}`)
       return [title, ...(rows.length ? rows : ['  nothing set here'])]
     }
     const spaces = Object.keys(p.values.spaces).flatMap((key) => {
@@ -428,7 +432,6 @@ export class Profiles {
     const rows = v.profiles.map((p) => `${p.name.padEnd(24)} ${holds(p).padEnd(20)} saved ${agoWords(p.saved)}${p.applied ? `, applied ${agoWords(p.applied)}` : ''}`)
     return [...rows, `In force: ${v.active}${v.undo ? `. Undo: ${v.undo.label}` : ''}`].join('\n')
   }
-
 }
 
 /** why a worker keeps no profiles: the main machine keeps them, as it keeps Secrets */

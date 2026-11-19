@@ -170,7 +170,10 @@ export const SUMMARY_MAX = 160
 export function splitFacts(said: string, facts?: string): { said: string; facts?: string } {
   const at = said.search(/(^|\s)Facts:\s/)
   if (at < 0) return { said: said.trim(), facts: facts?.trim() || undefined }
-  const tail = said.slice(at).replace(/^\s*Facts:\s*/, '').trim()
+  const tail = said
+    .slice(at)
+    .replace(/^\s*Facts:\s*/, '')
+    .trim()
   return { said: said.slice(0, at).trim(), facts: facts?.trim() || tail || undefined }
 }
 
@@ -384,7 +387,12 @@ export const apart = (msgs: Message[]): Message[] =>
     const { artifact, question, ...words } = m
     const card = { id: `${m.id}:art`, who: m.who, at: m.at, artifact }
     if (!question) return [words, card]
-    return words.text || words.file ? [words, card, { id: `${m.id}:q`, who: m.who, at: m.at, question }] : [{ ...card, id: m.id }, { id: `${m.id}:q`, who: m.who, at: m.at, question }]
+    return words.text || words.file
+      ? [words, card, { id: `${m.id}:q`, who: m.who, at: m.at, question }]
+      : [
+          { ...card, id: m.id },
+          { id: `${m.id}:q`, who: m.who, at: m.at, question },
+        ]
   })
 
 export interface Reaction {
@@ -633,8 +641,10 @@ export interface Need {
 /** a machine's name as the human reads it ("Mac mini"), from its key, a place's machine ("Mac") */
 export const machineName = (machines: Machine[] | undefined, machine?: string) => machines?.find((m) => m.machine === machine)?.name ?? machine ?? ''
 
-export const doneNewestFirst = <T extends Pick<Task, 'status' | 'doneAt'>>(ts: T[]): T[] =>
-  [...ts.filter((t) => t.status !== 'done'), ...ts.filter((t) => t.status === 'done').sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0))]
+export const doneNewestFirst = <T extends Pick<Task, 'status' | 'doneAt'>>(ts: T[]): T[] => [
+  ...ts.filter((t) => t.status !== 'done'),
+  ...ts.filter((t) => t.status === 'done').sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0)),
+]
 
 /** a mode's name: "Autopilot" */
 export const modeName = (mode: Mode) => MODES.find(([m]) => m === mode)?.[1] ?? mode

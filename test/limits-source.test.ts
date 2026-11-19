@@ -27,7 +27,10 @@ describe('the Limits action', () => {
     expect(v.waiting.groups[0]!.tasks.map((t) => t.id)).toEqual(['LIM-1'])
     expect(v.waiting.groups[0]!.limit).toMatch(/working$/)
     expect(v.known.length).toBeGreaterThan(5)
-    src.engine.tasks.splice(src.engine.tasks.findIndex((t) => t.id === 'LIM-1'), 1)
+    src.engine.tasks.splice(
+      src.engine.tasks.findIndex((t) => t.id === 'LIM-1'),
+      1,
+    )
   })
 
   test('a review round that waits for a reviewer is listed with the reviewers that are full, and its task opens from there', async () => {
@@ -40,7 +43,10 @@ describe('the Limits action', () => {
       expect(v.waiting.reviews).toEqual([{ task: 'LIM-2', space: expect.any(String), words: expect.stringContaining('Waits for a reviewer: Codex') }])
     } finally {
       src.engine.unlease('busy-review')
-      src.engine.tasks.splice(src.engine.tasks.findIndex((t) => t.id === 'LIM-2'), 1)
+      src.engine.tasks.splice(
+        src.engine.tasks.findIndex((t) => t.id === 'LIM-2'),
+        1,
+      )
       expect(src.settings.set('models.maxAtOnce', null, 'machine').ok).toBe(true)
     }
   })
@@ -97,7 +103,10 @@ describe('the view kept between asks (SHE-165)', () => {
       expect(withHeld.builds).toBe(1)
       expect(withHeld.v.waiting.held).toBe(1)
     } finally {
-      src.engine.tasks.splice(src.engine.tasks.findIndex((t) => t.id === 'LIM-KEEP'), 1)
+      src.engine.tasks.splice(
+        src.engine.tasks.findIndex((t) => t.id === 'LIM-KEEP'),
+        1,
+      )
     }
     expect((await look()).builds).toBe(1)
     // and nothing held it past its interval
@@ -144,7 +153,11 @@ describe('the view kept between asks (SHE-165)', () => {
       expect(src.stall.tick()?.ran.map((p) => p.label)).toContain('limits-view')
     } finally {
       src.engine.statusOf = statusOf
-      for (const id of ['LIM-WORK', ...Array.from({ length: 300 }, (_, i) => `LIM-W-${i}`)]) src.engine.tasks.splice(src.engine.tasks.findIndex((t) => t.id === id), 1)
+      for (const id of ['LIM-WORK', ...Array.from({ length: 300 }, (_, i) => `LIM-W-${i}`)])
+        src.engine.tasks.splice(
+          src.engine.tasks.findIndex((t) => t.id === id),
+          1,
+        )
       await src.act({ type: 'setting', key: 'machine.maxTasks', value: null, place: await here() })
     }
   })

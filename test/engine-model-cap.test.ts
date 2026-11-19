@@ -52,7 +52,14 @@ describe('models.maxAtOnce: a model at its cap holds its next task, and the othe
     const s3 = addOn(w, s1.p, 'S3', SPARK)
     expect(s3.held?.why).toBe('model')
     expect(w.engine.subOf(s3)).toBe('Waiting: pi · spark 2/2')
-    expect(w.posted.some((x) => x.key === `${s3.id}/Agent` && x.id.startsWith('held:') && x.card?.text === 'waiting: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (2 of 2 at once) — every model it may use is full or out')).toBe(true)
+    expect(
+      w.posted.some(
+        (x) =>
+          x.key === `${s3.id}/Agent` &&
+          x.id.startsWith('held:') &&
+          x.card?.text === 'waiting: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (2 of 2 at once) — every model it may use is full or out',
+      ),
+    ).toBe(true)
     expect(startedOf(w, s3.id)).toBe(false)
     expect(w.engine.room(s3)).toEqual({ why: 'model' })
     // another provider's task starts past it: the machine has room for it (two of three slots)

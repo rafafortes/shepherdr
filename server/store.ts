@@ -58,7 +58,10 @@ export function pruneCopies(file: string, kind: CopyKind) {
   const head = `${basename(file)}.${kind}-`
   let found: string[] = []
   try {
-    found = fs.readdirSync(dir).filter((n) => n.startsWith(head)).sort()
+    found = fs
+      .readdirSync(dir)
+      .filter((n) => n.startsWith(head))
+      .sort()
   } catch {
     /* the folder went with the store: nothing to go through */
   }

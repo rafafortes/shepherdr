@@ -20,7 +20,23 @@ describe('room on the machine', () => {
     const dir = repo()
     sh('git branch develop', dir)
     const p = await w.places.add(dir, 'legacy-base')
-    writeJson('tasks.json', { next: { [p.key]: 1 }, tasks: [{ id: `${p.key}-1`, n: 1, project: placeId.space(p.name), title: 'Old queued task', desc: '', by: 'test', created: Date.now(), updated: Date.now(), told: 'queued', held: { why: 'slots', since: Date.now() } }] })
+    writeJson('tasks.json', {
+      next: { [p.key]: 1 },
+      tasks: [
+        {
+          id: `${p.key}-1`,
+          n: 1,
+          project: placeId.space(p.name),
+          title: 'Old queued task',
+          desc: '',
+          by: 'test',
+          created: Date.now(),
+          updated: Date.now(),
+          told: 'queued',
+          held: { why: 'slots', since: Date.now() },
+        },
+      ],
+    })
     const first = world()
     expect(first.engine.task(`${p.key}-1`)!.base).toBe('main')
     await first.places.setBase(p.name, 'develop')
@@ -88,7 +104,7 @@ describe('room on the machine', () => {
     expect(c.worktree).toBeUndefined()
   })
 
-  test("a task waiting on you keeps its slot, so answering it never goes past the limit; one cut off for good holds none", async () => {
+  test('a task waiting on you keeps its slot, so answering it never goes past the limit; one cut off for good holds none', async () => {
     const w = fresh({ 'machine.maxTasks': '2' })
     const a = await started(w, repo(), 'room-wait', 'First', 'Add a.txt.')
     w.brief(a.key)

@@ -6,7 +6,19 @@
 // is, a failed read's reason, and the hint that asks for a key (QuotaView). A phone shows one card per provider.
 import clsx from 'clsx'
 import { Fragment, useState, type ReactNode } from 'react'
-import type { ModelsSummary as Summary, QuotaFigure, QuotaRead, QuotaWindow, SummaryConfigured, SummaryNow, SummaryProvider, SummaryRow, SummaryRunOuts, SummaryUsage, SummaryWarning } from '@shared/types.ts'
+import type {
+  ModelsSummary as Summary,
+  QuotaFigure,
+  QuotaRead,
+  QuotaWindow,
+  SummaryConfigured,
+  SummaryNow,
+  SummaryProvider,
+  SummaryRow,
+  SummaryRunOuts,
+  SummaryUsage,
+  SummaryWarning,
+} from '@shared/types.ts'
 import { openPage } from './settings-parts.tsx'
 import { ageWords, shareOf, tokens, windowWords } from '../shared/quota-words.ts'
 import { harnessGroups, inHarness } from '../shared/harness.ts'
@@ -33,8 +45,12 @@ function readHidden(): string[] {
 export function configuredWords(c: SummaryConfigured) {
   const slots = c.primary + c.backup
   if (!slots) return { words: '—', title: 'Not configured in any space' }
-  const roles = Object.entries(c.roles).map(([r, n]) => `${r} ${n}`).join(' · ')
-  const spaces = Object.entries(c.spaces).map(([s, n]) => `${s} ${n}`).join(' · ')
+  const roles = Object.entries(c.roles)
+    .map(([r, n]) => `${r} ${n}`)
+    .join(' · ')
+  const spaces = Object.entries(c.spaces)
+    .map(([s, n]) => `${s} ${n}`)
+    .join(' · ')
   return {
     words: `${plural(c.primary, 'primary', 'primary')}${c.backup ? `, ${c.backup} ${c.backup === 1 ? 'backup' : 'backups'}` : ''}`,
     title: `Roles: ${roles}. Spaces: ${spaces}.`,
@@ -43,11 +59,7 @@ export function configuredWords(c: SummaryConfigured) {
 
 /** what runs and waits on a row now, in words */
 export function nowWords(n: SummaryNow): string {
-  const parts = [
-    n.agents ? `${n.agents} live${n.working ? `, ${n.working} working` : ''}` : '',
-    n.starts ? `${n.starts} to start` : '',
-    n.reviews ? `${n.reviews} to review` : '',
-  ].filter(Boolean)
+  const parts = [n.agents ? `${n.agents} live${n.working ? `, ${n.working} working` : ''}` : '', n.starts ? `${n.starts} to start` : '', n.reviews ? `${n.reviews} to review` : ''].filter(Boolean)
   return parts.join(' · ') || '—'
 }
 
@@ -142,7 +154,21 @@ function Warnings({ list, go }: { list: SummaryWarning[]; go: (row: string, slot
 
 /** the summary: the warnings, then the providers and their models. `capOpen`: the cap cell open (its id, cap|<pattern>), which a
  *  warning's Change… opens too */
-export default function ModelsSummary({ s, phone, go, extra, capOpen, onCapOpen }: { s: Summary; phone: boolean; go: (row: string, slot: string) => void; extra?: ReactNode; capOpen: string | null; onCapOpen: (id: string | null) => void }) {
+export default function ModelsSummary({
+  s,
+  phone,
+  go,
+  extra,
+  capOpen,
+  onCapOpen,
+}: {
+  s: Summary
+  phone: boolean
+  go: (row: string, slot: string) => void
+  extra?: ReactNode
+  capOpen: string | null
+  onCapOpen: (id: string | null) => void
+}) {
   const caps: CapsText = s.caps
   const cap = { caps, open: capOpen, onOpen: onCapOpen }
   return (
@@ -151,7 +177,15 @@ export default function ModelsSummary({ s, phone, go, extra, capOpen, onCapOpen 
       <Warnings list={s.warnings} go={go} />
       {extra}
       {s.backfilled === undefined ? <Small className="text-pretty">Reading the logs once from their start: the numbers grow until it is done.</Small> : null}
-      {s.providers.length ? (phone ? <Cards providers={s.providers} now={s.at} cap={cap} /> : <Table providers={s.providers} now={s.at} cap={cap} />) : <Small className="text-pretty">Nothing configured, run or used yet.</Small>}
+      {s.providers.length ? (
+        phone ? (
+          <Cards providers={s.providers} now={s.at} cap={cap} />
+        ) : (
+          <Table providers={s.providers} now={s.at} cap={cap} />
+        )
+      ) : (
+        <Small className="text-pretty">Nothing configured, run or used yet.</Small>
+      )}
       <Small className="text-pretty">
         Usage is read from the logs of this machine's agents, and kept 35 days. Cost is pi's own estimate, not a bill. Quota is each provider's last read, or an estimate, as Quotas says.
       </Small>
@@ -221,7 +255,20 @@ function Grid({ label, providers, now, cap, idle }: { label: string; providers: 
             {g.single ? null : <HarnessRow name={g.name} cols={5} />}
             {g.list.map((p) => (
               <Fragment key={p.provider}>
-                <Line name={p.name} harness={p.harnessName} local={p.local} row={p} quota={p.quota} read={p.quotaRead} now={now} shares={<Shares row={p} />} bold depth={g.single ? 0 : 1} cap={{ ...cap, pattern: p.provider }} idle={idle} />
+                <Line
+                  name={p.name}
+                  harness={p.harnessName}
+                  local={p.local}
+                  row={p}
+                  quota={p.quota}
+                  read={p.quotaRead}
+                  now={now}
+                  shares={<Shares row={p} />}
+                  bold
+                  depth={g.single ? 0 : 1}
+                  cap={{ ...cap, pattern: p.provider }}
+                  idle={idle}
+                />
                 {p.models.map((m) => (
                   <Line key={m.key} name={m.label} title={m.key} row={m} now={now} depth={g.single ? 1 : 2} cap={{ ...cap, pattern: m.key }} idle={idle} />
                 ))}
@@ -248,7 +295,9 @@ function UsedLines({ row }: { row: SummaryRow }) {
         <li
           key={k}
           className={u.calls ? 'text-fg' : 'text-fg3'}
-          title={u.calls ? [`${k}: ${tokens(u.tokens)} tokens`, plural(u.calls, 'call', 'calls'), u.cost !== undefined ? `≈ $${u.cost.toFixed(2)} est.` : ''].filter(Boolean).join(' · ') : `${k}: no calls`}
+          title={
+            u.calls ? [`${k}: ${tokens(u.tokens)} tokens`, plural(u.calls, 'call', 'calls'), u.cost !== undefined ? `≈ $${u.cost.toFixed(2)} est.` : ''].filter(Boolean).join(' · ') : `${k}: no calls`
+          }
         >
           <span className="text-fg3">{k}</span> {u.calls ? `${tokens(u.tokens)} · ${u.calls}` : '—'}
         </li>
@@ -273,7 +322,35 @@ export function HarnessRow({ name, cols }: { name: string; cols: number }) {
 }
 
 /** one table row: a provider or a model, its numbers in the columns (`harness`: the provider's harness, for its cap's editor) */
-function Line({ name, harness, title, local, row, quota, read, now, shares, bold, depth = 0, cap, idle }: { name: string; harness?: string; title?: string; local?: boolean; row: SummaryRow; quota?: QuotaFigure; read?: QuotaRead; now: number; shares?: ReactNode; bold?: boolean; depth?: number; cap: CapState & { pattern: string }; idle?: boolean }) {
+function Line({
+  name,
+  harness,
+  title,
+  local,
+  row,
+  quota,
+  read,
+  now,
+  shares,
+  bold,
+  depth = 0,
+  cap,
+  idle,
+}: {
+  name: string
+  harness?: string
+  title?: string
+  local?: boolean
+  row: SummaryRow
+  quota?: QuotaFigure
+  read?: QuotaRead
+  now: number
+  shares?: ReactNode
+  bold?: boolean
+  depth?: number
+  cap: CapState & { pattern: string }
+  idle?: boolean
+}) {
   const conf = configuredWords(row.configured)
   const runs = runWords(row.runOuts, idle)
   return (
@@ -334,7 +411,11 @@ function WindowLine({ w, estimate }: { w: QuotaWindow; estimate: boolean }) {
           <span className={clsx('absolute inset-y-0 left-0 rounded-full', share >= 100 ? 'bg-need' : 'bg-accent')} style={{ width: `${Math.min(100, Math.max(1, Math.round(share)))}%` }} />
         </span>
       ) : null}
-      {w.resetAt !== undefined ? <span className="text-[0.75rem] text-fg3">refills {when(w.resetAt)}</span> : estimate ? <span className="text-[0.75rem] text-fg3">rolling: drains as calls leave the window</span> : null}
+      {w.resetAt !== undefined ? (
+        <span className="text-[0.75rem] text-fg3">refills {when(w.resetAt)}</span>
+      ) : estimate ? (
+        <span className="text-[0.75rem] text-fg3">rolling: drains as calls leave the window</span>
+      ) : null}
       {w.learned?.slice(0, 3).map((l) => (
         <span key={l.at} className="text-[0.75rem] text-fg3 tabular-nums">
           ran out at ~{tokens(l.tokens)} tokens{l.cost !== undefined ? ` · ≈ $${l.cost.toFixed(2)} est.` : ''} in {w.name} on {when(l.at)}

@@ -33,7 +33,7 @@ describe('one agent per task', () => {
 })
 
 describe('To do', () => {
-  test("a To do task has its agent and chat; writing changes its brief, and a go sets it to work", async () => {
+  test('a To do task has its agent and chat; writing changes its brief, and a go sets it to work', async () => {
     const w = new DemoWorld()
     const todo = () => w.snapshot().tasks.find((x) => x.id === 'HP-204')!
     expect(todo().status).toBe('todo')
@@ -148,7 +148,12 @@ describe('archiving', () => {
   test('archived tasks stay in the snapshot, marked; archiving a working one stops it, and unarchive brings it back', async () => {
     const w = new DemoWorld()
     const t = () => w.snapshot().tasks.find((x) => x.id === 'HP-202')!
-    expect(w.snapshot().tasks.filter((x) => x.archived).map((x) => x.id)).toEqual(['GTM-9', 'GTM-11'])
+    expect(
+      w
+        .snapshot()
+        .tasks.filter((x) => x.archived)
+        .map((x) => x.id),
+    ).toEqual(['GTM-9', 'GTM-11'])
     expect(t().status).toBe('work')
     expect(await w.act({ type: 'archive', chat: 'HP-202/Agent', on: true })).toMatchObject({ ok: true })
     expect(t().archived).toBeNumber()
@@ -182,7 +187,7 @@ describe("a row's menu", () => {
 })
 
 describe('a reviewer changed in Settings, and the demo tasks waiting for it', () => {
-  test("the question counts a waiting brief as changed, a scheduled one as following Settings, a started one apart; Apply rewrites the Reviewer lines of both", async () => {
+  test('the question counts a waiting brief as changed, a scheduled one as following Settings, a started one apart; Apply rewrites the Reviewer lines of both', async () => {
     const w = new DemoWorld()
     const place = 'p:vm-str:herdr-projects'
     const task = (id: string) => w.tasks.find((t) => t.id === id)!
@@ -197,7 +202,9 @@ describe('a reviewer changed in Settings, and the demo tasks waiting for it', ()
     // a dry run changes nothing
     expect(task('HP-203').desc).toBe(queued)
     expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place })).toMatchObject({ ok: true, changed: 1, started: 2 })
-    expect(task('HP-203').desc).toBe(queued.replace(reviewerLineFor(CODEX_WORDS, 'HP-203'), reviewerLineFor('a headless Codex or a Codex subagent (model gpt-6-sol, its default effort).', 'HP-203', '', "(this space's setting)")))
+    expect(task('HP-203').desc).toBe(
+      queued.replace(reviewerLineFor(CODEX_WORDS, 'HP-203'), reviewerLineFor('a headless Codex or a Codex subagent (model gpt-6-sol, its default effort).', 'HP-203', '', "(this space's setting)")),
+    )
     expect(task('HP-202').desc).not.toBe(running)
     expect(task('HP-202').desc).toContain('a headless Codex or a Codex subagent (model gpt-6-sol, its default effort).')
     // the next answer finds them the same
@@ -214,7 +221,13 @@ describe('a reviewer changed in Settings, and the demo tasks waiting for it', ()
     w.tasks.find((t) => t.id === 'HP-204')!.status = 'scheduled'
     expect(await w.act({ type: 'rename', id: place, name: 'hp-shown' })).toMatchObject({ ok: true })
     w.stores['vm-str'].set('reviewer.model', 'GPT-6-Sol', { space: 'herdr-projects' })
-    expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place, dry: true })).toMatchObject({ ok: true, changed: 1, follow: 1, started: 2, spaces: [{ name: 'hp-shown', words: 'Codex (GPT-6-Sol)', changed: 3 }] })
+    expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place, dry: true })).toMatchObject({
+      ok: true,
+      changed: 1,
+      follow: 1,
+      started: 2,
+      spaces: [{ name: 'hp-shown', words: 'Codex (GPT-6-Sol)', changed: 3 }],
+    })
     // the place id is what the dialog sends, and the same space answers
     expect(await w.act({ type: 'apply-to-waiting', key: 'reviewer.model', place: 'p:vm-str:herdr-projects', dry: true })).toMatchObject({ changed: 1 })
   })

@@ -107,4 +107,10 @@ export class StallWatch {
 
 const seconds = (ms: number) => (ms / 1000).toFixed(1)
 
-const words = (ran: Stall['ran']) => (ran.length ? `slowest passes: ${ran.slice(0, 3).map((r) => `${r.label} ${Math.round(r.ms)} ms`).join(', ')}` : 'no pass it times was slow (something else held it: garbage collection, a blocking read or write, the host)')
+const words = (ran: Stall['ran']) =>
+  ran.length
+    ? `slowest passes: ${ran
+        .slice(0, 3)
+        .map((r) => `${r.label} ${Math.round(r.ms)} ms`)
+        .join(', ')}`
+    : 'no pass it times was slow (something else held it: garbage collection, a blocking read or write, the host)'

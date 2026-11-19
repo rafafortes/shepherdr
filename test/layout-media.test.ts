@@ -7,10 +7,7 @@ import { layout, settled, until } from './layout.ts'
 
 const { browser, world, url } = await layout()
 
-const png = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==',
-  'base64',
-)
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==', 'base64')
 
 /** the agent's own messages, as `shepherdr attach` posts them: the caption, then each file a message of its own */
 function sent(id: string) {
@@ -36,7 +33,7 @@ const open = async (width = 390) => {
 }
 
 describe.skipIf(!browser)("an agent's pictures and videos in its chat", () => {
-  test('a picture shows in place, with the agent\'s caption above it, at a thumbnail a phone can afford', async () => {
+  test("a picture shows in place, with the agent's caption above it, at a thumbnail a phone can afford", async () => {
     sent('pic')
     const page = await open()
     const tile = page.locator('[data-msg="pic-shot"], [data-msg="pic-shot:0"]').first()

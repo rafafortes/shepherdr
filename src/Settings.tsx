@@ -15,7 +15,28 @@ import { askWaiting } from './apply-waiting.tsx'
 import { Stack } from './Stack.tsx'
 import { APPEARANCES, setAppearance, useAppearance } from './theme.ts'
 import { BackIcon, CheckIcon, Empty, Ghost, Head, IconButton, NextIcon, PhoneTop, PlaceIcon, PlusIcon, RoundButton, SecretField, Small, Who, XIcon, field, ic } from './ui.tsx'
-import { APPEARANCE, Control, DocValue, LOOKS, Pick, SEGMENTS, TriggerValue, card, groupsOf, heading, iconOf, levelHint, levelName, levelsOf, levelOf, numShown, rowLook, shown, subHeading, type Page } from './settings-parts.tsx'
+import {
+  APPEARANCE,
+  Control,
+  DocValue,
+  LOOKS,
+  Pick,
+  SEGMENTS,
+  TriggerValue,
+  card,
+  groupsOf,
+  heading,
+  iconOf,
+  levelHint,
+  levelName,
+  levelsOf,
+  levelOf,
+  numShown,
+  rowLook,
+  shown,
+  subHeading,
+  type Page,
+} from './settings-parts.tsx'
 
 // the shared names keep the old import path too: main.tsx and the human's own plugins import pieces from here
 export * from './settings-parts.tsx'
@@ -43,11 +64,7 @@ class PageLoadBoundary extends Component<{ children?: ReactNode }, { failed: boo
 /** Settings → Plugins with what failed on this screen too: a plugin of the human's own that threw here */
 export function withPluginErrors(sections: SettingSection[], errors: Record<string, string>): SettingSection[] {
   if (!Object.keys(errors).length) return sections
-  return sections.map((x) =>
-    x.name !== 'Plugins'
-      ? x
-      : { ...x, rows: x.rows.map((r) => (errors[r.label] && !r.warn ? { ...r, warn: `Stopped on this screen: it threw:\n${errors[r.label]}` } : r)) },
-  )
+  return sections.map((x) => (x.name !== 'Plugins' ? x : { ...x, rows: x.rows.map((r) => (errors[r.label] && !r.warn ? { ...r, warn: `Stopped on this screen: it threw:\n${errors[r.label]}` } : r)) }))
 }
 /** Appearance: System, Light or Dark, kept on this device */
 function AppearancePick({ phone }: { phone: boolean }) {
@@ -137,7 +154,21 @@ function SubBlock({ name, phone, children }: { name: string; phone: boolean; chi
 }
 
 /** a page's settings: its rows under their group's heading (Tasks, Coordinators, Reviewer), and what it notes under them */
-function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phone: boolean; set: (key: string, value: string | null) => void; refused: (key: string) => string | undefined; clear: (key: string) => void; hint?: string }) {
+function PageBody({
+  page,
+  phone,
+  set,
+  refused,
+  clear,
+  hint,
+}: {
+  page: Page
+  phone: boolean
+  set: (key: string, value: string | null) => void
+  refused: (key: string) => string | undefined
+  clear: (key: string) => void
+  hint?: string
+}) {
   // Autopilot's Run now on a space's page: what its chat's pill offers, where the heartbeat is set
   const snap = useSnap()
   const woken = page.name === 'Autopilot' && page.level?.startsWith('p:') ? snap?.places.find((p) => p.id === page.level) : undefined
@@ -170,21 +201,54 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
       {row.key in registry.settingActions ? <Small className="text-pretty">{row.value}</Small> : null}
       {row.hint ? <Small className="text-pretty">{row.hint}</Small> : null}
       {/* the exact words it adds to every new brief, as it is set now */}
-      {row.line ? <details className="text-[0.8125rem] text-fg2"><summary className="cursor-pointer">Brief wording</summary><p className="text-pretty">Adds: “{row.line}”</p></details> : null}
+      {row.line ? (
+        <details className="text-[0.8125rem] text-fg2">
+          <summary className="cursor-pointer">Brief wording</summary>
+          <p className="text-pretty">Adds: “{row.line}”</p>
+        </details>
+      ) : null}
       {row.from ? <Small className="text-pretty">From {row.from}</Small> : null}
       {row.inherits ? (
         // set here: Reset, back to what it would be (its title says where that comes from)
         <Small className="text-pretty">
           <span className="font-medium text-accent">Set here</span>
-          <span className="block">Inherits {row.multiline ? (row.inherits.value ? 'private rules' : 'no private rules') : row.num ? numShown(row.inherits.value, row.num) : row.trigger ? (row.trigger.presets.find((p) => p.value === row.inherits!.value)?.label ?? 'Custom rule') : shown(row.inherits.value)} · {row.inherits.from}</span>
-          {row.trigger && !row.trigger.presets.some((p) => p.value === row.inherits!.value) ? <details><summary className="cursor-pointer">Inherited rule</summary><span className="[overflow-wrap:anywhere]">{row.inherits.value}</span></details> : null}
+          <span className="block">
+            Inherits{' '}
+            {row.multiline
+              ? row.inherits.value
+                ? 'private rules'
+                : 'no private rules'
+              : row.num
+                ? numShown(row.inherits.value, row.num)
+                : row.trigger
+                  ? (row.trigger.presets.find((p) => p.value === row.inherits!.value)?.label ?? 'Custom rule')
+                  : shown(row.inherits.value)}{' '}
+            · {row.inherits.from}
+          </span>
+          {row.trigger && !row.trigger.presets.some((p) => p.value === row.inherits!.value) ? (
+            <details>
+              <summary className="cursor-pointer">Inherited rule</summary>
+              <span className="[overflow-wrap:anywhere]">{row.inherits.value}</span>
+            </details>
+          ) : null}
           <button
             type="button"
             title={`Set here. Back to ${row.inherits.from === 'Default' ? 'the default' : row.inherits.from}'s`}
             onClick={() => set(row.key, null)}
             className="press-dim relative font-medium text-accent after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:after:-inset-y-3"
           >
-            Reset to {row.multiline ? (row.inherits.value ? 'private rules' : 'no private rules') : row.num ? numShown(row.inherits.value, row.num) : row.trigger ? (row.inherits.from === 'Default' ? 'the default' : `${row.inherits.from}'s`) : shown(row.inherits.value)}
+            Reset to{' '}
+            {row.multiline
+              ? row.inherits.value
+                ? 'private rules'
+                : 'no private rules'
+              : row.num
+                ? numShown(row.inherits.value, row.num)
+                : row.trigger
+                  ? row.inherits.from === 'Default'
+                    ? 'the default'
+                    : `${row.inherits.from}'s`
+                  : shown(row.inherits.value)}
           </button>
         </Small>
       ) : null}
@@ -224,7 +288,14 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
             {under(row)}
           </dt>
           <dd>
-            <DocValue label={row.label} file={row.multiline ? 'Private · this role only' : 'HEARTBEAT.md'} privateRules={row.multiline} phone={phone} value={row.value} onSave={(x) => set(row.key, row.multiline ? follows(row, x) : x)} />
+            <DocValue
+              label={row.label}
+              file={row.multiline ? 'Private · this role only' : 'HEARTBEAT.md'}
+              privateRules={row.multiline}
+              phone={phone}
+              value={row.value}
+              onSave={(x) => set(row.key, row.multiline ? follows(row, x) : x)}
+            />
           </dd>
         </div>
       )
@@ -263,7 +334,9 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
     </dl>
   )
   return (
-    <div className={clsx('flex w-full flex-col', phone ? 'gap-6 px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+--spacing(8))]' : page.matrix ? 'gap-4 pt-5 pb-0' : 'max-w-[720px] gap-6 px-6 pt-5 pb-8')}>
+    <div
+      className={clsx('flex w-full flex-col', phone ? 'gap-6 px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+--spacing(8))]' : page.matrix ? 'gap-4 pt-5 pb-0' : 'max-w-[720px] gap-6 px-6 pt-5 pb-8')}
+    >
       <div className={clsx('flex flex-col gap-1', phone ? 'px-4' : page.matrix && 'max-w-[720px] px-6')}>
         {phone ? null : <h2 className="text-[0.9375rem] font-semibold">{page.name}</h2>}
         {page.about ? <p className={clsx('text-pretty text-fg2', phone ? 'text-[0.9375rem]' : 'text-[0.8125rem]')}>{page.about}</p> : null}
@@ -274,7 +347,13 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
       {page.secrets && page.level ? <SecretsList level={page.level} secrets={page.secrets} phone={phone} /> : null}
       {page.View ? (
         <PageLoadBoundary>
-          <Suspense fallback={<div role="status" aria-live="polite" data-suspense-fallback><Empty>Loading…</Empty></div>}>
+          <Suspense
+            fallback={
+              <div role="status" aria-live="polite" data-suspense-fallback>
+                <Empty>Loading…</Empty>
+              </div>
+            }
+          >
             <page.View phone={phone} />
           </Suspense>
         </PageLoadBoundary>
@@ -284,7 +363,13 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
           {name ? <h3 className={heading(phone)}>{name}</h3> : null}
           {runsOf(rows).map((run, i) => (
             <Fragment key={i}>
-              {run.sub ? <SubBlock name={run.sub} phone={phone}>{list(run.rows)}</SubBlock> : list(run.rows, i > 0)}
+              {run.sub ? (
+                <SubBlock name={run.sub} phone={phone}>
+                  {list(run.rows)}
+                </SubBlock>
+              ) : (
+                list(run.rows, i > 0)
+              )}
             </Fragment>
           ))}
         </div>
@@ -292,7 +377,9 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
       {page.note ? (
         <figure className="w-full">
           <figcaption className={heading(phone)}>{page.noteTitle ?? 'Every new brief ends with'}</figcaption>
-          <blockquote className={clsx('text-pretty whitespace-pre-wrap text-fg2', phone ? clsx(card, 'px-4 py-3 text-[0.9375rem]') : 'rounded-box bg-hover px-3 py-2.5 text-[0.8125rem]')}>{page.note}</blockquote>
+          <blockquote className={clsx('text-pretty whitespace-pre-wrap text-fg2', phone ? clsx(card, 'px-4 py-3 text-[0.9375rem]') : 'rounded-box bg-hover px-3 py-2.5 text-[0.8125rem]')}>
+            {page.note}
+          </blockquote>
         </figure>
       ) : null}
     </div>
@@ -350,7 +437,11 @@ function SecretsList({ level, secrets, phone }: { level: string; secrets: { name
     <div className="flex w-full flex-col gap-2">
       <SecretField label={n ? `New value for ${n}` : 'Value'} value={value} onChange={setValue} onEnter={() => (n || name) && value && save(n || name.trim(), value)} autoFocus={!!n} />
       <div className="flex items-center justify-end gap-2">
-        {err ? <span role="status" className="mr-auto text-[0.75rem] text-need-fg phone:text-[0.8125rem]">{err}</span> : null}
+        {err ? (
+          <span role="status" className="mr-auto text-[0.75rem] text-need-fg phone:text-[0.8125rem]">
+            {err}
+          </span>
+        ) : null}
         <Ghost onClick={close}>Cancel</Ghost>
         <Ghost disabled={busy || !value || (!n && !name.trim())} onClick={() => save(n || name.trim(), value)} className="bg-fg text-bg! shadow-none! enabled:hover:bg-fg">
           Save
@@ -405,7 +496,10 @@ function SecretsList({ level, secrets, phone }: { level: string; secrets: { name
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))}
-              className={clsx('min-h-10 w-full min-w-0 rounded-row bg-transparent px-3 py-[9px] font-mono placeholder:font-sans placeholder:text-fg3 coarse:min-h-11 phone:min-h-11 phone:text-[1rem]', field)}
+              className={clsx(
+                'min-h-10 w-full min-w-0 rounded-row bg-transparent px-3 py-[9px] font-mono placeholder:font-sans placeholder:text-fg3 coarse:min-h-11 phone:min-h-11 phone:text-[1rem]',
+                field,
+              )}
             />
             {box('')}
           </div>
@@ -425,7 +519,11 @@ function SecretsList({ level, secrets, phone }: { level: string; secrets: { name
           </div>
         )}
       </dl>
-      {err && open === null ? <Small role="status" className="text-need-fg!">{err}</Small> : null}
+      {err && open === null ? (
+        <Small role="status" className="text-need-fg!">
+          {err}
+        </Small>
+      ) : null}
       <p className={clsx('text-pretty text-fg3', phone ? 'px-4 text-[0.8125rem]' : 'text-[0.75rem]')}>
         Agents run commands with them by name (shepherdr secret run), and ask for one in their chat when they need it.
       </p>
@@ -496,7 +594,11 @@ export default function Settings() {
       return
     }
     // set at the page's level: a machine's or a space's goes to that machine
-    const r = (await act({ type: 'setting', key, value, ...((page.targets?.[key] ?? page.level) ? { place: page.targets?.[key] ?? page.level } : {}) })) as { ok?: boolean; error?: string; waiting?: boolean }
+    const r = (await act({ type: 'setting', key, value, ...((page.targets?.[key] ?? page.level) ? { place: page.targets?.[key] ?? page.level } : {}) })) as {
+      ok?: boolean
+      error?: string
+      waiting?: boolean
+    }
     setRefused((x) => ({ ...x, [at(key)]: r?.ok === false ? (r.error ?? 'Refused.') : r?.waiting ? `Set once ${machineName(snap.machines, page.machine)} is back.` : '' }))
     // a task's agent or reviewer saved: the tasks already waiting may take it too, asked first (none asked when none would change)
     if (r?.ok && !r.waiting) void askWaiting(key, page.targets?.[key] ?? page.level)
@@ -509,12 +611,33 @@ export default function Settings() {
     requestAnimationFrame(() => scroller.current && (scroller.current.scrollTop = 0))
   }
   const clear = (key: string) => refused[at(key)] && setRefused((r) => ({ ...r, [at(key)]: '' }))
-  const body = <>
-    <div className={clsx('flex min-w-0 flex-wrap items-center gap-2 border-b border-line px-6 py-3', phone && 'px-4')}>
-      <span className="text-fg2">Editing:</span>
-      {page.device ? <span>This device</span> : page.matrix ? <span>Every level</span> : page.global || !page.level ? <span>Everywhere</span> : levelPick(phone ? 'phone' : 'content') ?? <span>{name(level)}</span>}
-    </div>
-    <PageBody key={`${page.level ?? ''}|${page.name}`} page={page} phone={phone} set={set} refused={(key) => refused[at(key)]} clear={clear} hint={page.rows.some((r) => r.key === 'space.base') ? 'This repository’s branch for new tasks.' : page.level && !page.global && page.name !== 'Task IDs' ? levelHint(page.level, snap) : undefined} /></>
+  const body = (
+    <>
+      <div className={clsx('flex min-w-0 flex-wrap items-center gap-2 border-b border-line px-6 py-3', phone && 'px-4')}>
+        <span className="text-fg2">Editing:</span>
+        {page.device ? (
+          <span>This device</span>
+        ) : page.matrix ? (
+          <span>Every level</span>
+        ) : page.global || !page.level ? (
+          <span>Everywhere</span>
+        ) : (
+          (levelPick(phone ? 'phone' : 'content') ?? <span>{name(level)}</span>)
+        )}
+      </div>
+      <PageBody
+        key={`${page.level ?? ''}|${page.name}`}
+        page={page}
+        phone={phone}
+        set={set}
+        refused={(key) => refused[at(key)]}
+        clear={clear}
+        hint={
+          page.rows.some((r) => r.key === 'space.base') ? 'This repository’s branch for new tasks.' : page.level && !page.global && page.name !== 'Task IDs' ? levelHint(page.level, snap) : undefined
+        }
+      />
+    </>
+  )
 
   if (phone) {
     const list = (
@@ -543,7 +666,10 @@ export default function Settings() {
                   {g.pages.map((p) => {
                     const Icon = iconOf(p)
                     return (
-                      <li key={p.name} className="relative not-first:before:absolute not-first:before:top-0 not-first:before:right-0 not-first:before:left-11 not-first:before:h-px not-first:before:bg-line">
+                      <li
+                        key={p.name}
+                        className="relative not-first:before:absolute not-first:before:top-0 not-first:before:right-0 not-first:before:left-11 not-first:before:h-px not-first:before:bg-line"
+                      >
                         <button type="button" onClick={() => go(pages.indexOf(p))} className="press flex min-h-12 w-full items-center gap-3 px-4 text-left">
                           <Icon className={clsx(ic, 'text-fg2')} />
                           <span className="min-w-0 flex-1 truncate">{p.name}</span>

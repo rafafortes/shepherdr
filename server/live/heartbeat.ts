@@ -32,7 +32,18 @@ export function firstChecklist(role: 'space' | 'home' | 'main') {
       : role === 'home'
         ? machine
         : [...machine, 'Anything waiting on the human across machines: alert only what can’t wait.', 'A machine whose herdr stopped answering, or whose home space went quiet.']
-  return ['# Heartbeat', '', 'What to check each heartbeat. Edit it in Settings → Autopilot, or ask your coordinator to.', '', ...items.map((x) => `- ${x}`), '', '## Goals', '', '- (this place’s goals, for the coordinator to keep in mind)', ''].join('\n')
+  return [
+    '# Heartbeat',
+    '',
+    'What to check each heartbeat. Edit it in Settings → Autopilot, or ask your coordinator to.',
+    '',
+    ...items.map((x) => `- ${x}`),
+    '',
+    '## Goals',
+    '',
+    '- (this place’s goals, for the coordinator to keep in mind)',
+    '',
+  ].join('\n')
 }
 
 interface Beat {

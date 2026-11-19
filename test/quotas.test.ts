@@ -141,7 +141,7 @@ describe('a read that fails keeps the last good figure, and says why', () => {
     const w = world()
     w.answers['pi.commandcode'] = async () => ({ figure: FIG([{ name: 'Credits', left: 9 }], { source: "from Command Code's API" }) })
     await w.q.tick(T)
-    w.answers['pi.commandcode'] = async () => ({ hint: 'Add COMMANDCODE_API_KEY in Settings → Secrets to read Command Code\'s quota.' })
+    w.answers['pi.commandcode'] = async () => ({ hint: "Add COMMANDCODE_API_KEY in Settings → Secrets to read Command Code's quota." })
     await w.q.tick(T + EVERY)
     expect(w.q.status('pi.commandcode')).toEqual({ on: true, hint: "Add COMMANDCODE_API_KEY in Settings → Secrets to read Command Code's quota.", tried: T + EVERY })
     expect(w.usage.quota('pi.commandcode')?.windows).toEqual([{ name: 'Credits', left: 9 }])
@@ -164,7 +164,12 @@ describe('a read that fails keeps the last good figure, and says why', () => {
 describe('the warning share: each window alerts once, and again only after it refilled, a new window came, or it fell under', () => {
   test('a window at or over the share alerts once with what is left and when it refills; the others do not', async () => {
     const w = world()
-    w.answers.claude = async () => ({ figure: FIG([{ name: '5 h', usedPct: 85, resetAt: T + 2 * HOUR }, { name: 'Week', usedPct: 41, resetAt: T + 72 * HOUR }]) })
+    w.answers.claude = async () => ({
+      figure: FIG([
+        { name: '5 h', usedPct: 85, resetAt: T + 2 * HOUR },
+        { name: 'Week', usedPct: 41, resetAt: T + 72 * HOUR },
+      ]),
+    })
     await w.q.tick(T)
     expect(w.alerts).toHaveLength(1)
     expect(w.alerts[0]).toMatchObject({ provider: 'claude', window: '5 h', title: 'Claude Code is at 85%' })
@@ -257,7 +262,13 @@ describe("OpenCode Go's figure as the summary asks for it", () => {
   test('on, it is the estimate of the ledger; off, none', () => {
     const w = world()
     w.usage.count('T-1/Agent', 'opencode.opencode-go/deepseek-v4.1-flash', { id: 'a', at: T - HOUR, tokens: 300 }, T)
-    expect(w.q.figure('opencode.opencode-go', T)).toMatchObject({ estimate: true, windows: [{ name: '5 h', used: 300 }, { name: 'Week', used: 300 }] })
+    expect(w.q.figure('opencode.opencode-go', T)).toMatchObject({
+      estimate: true,
+      windows: [
+        { name: '5 h', used: 300 },
+        { name: 'Week', used: 300 },
+      ],
+    })
     const off = world({ off: ['quota.opencodeGo'] })
     off.usage.count('T-1/Agent', 'opencode.opencode-go/deepseek-v4.1-flash', { id: 'a', at: T - HOUR, tokens: 300 }, T)
     expect(off.q.figure('opencode.opencode-go', T)).toBeUndefined()
@@ -286,7 +297,13 @@ describe('the rows of the quotas: each switch, and OpenCode Go on both of its ro
     w.usage.count('T-1/Agent', 'pi.opencode-go/deepseek-v4.1-flash', { id: 'p1', at: T - HOUR, tokens: 200 }, T)
     w.usage.count('T-2/Agent', 'opencode.opencode-go/deepseek-v4.1-flash', { id: 'o1', at: T - HOUR, tokens: 100 }, T)
     const pi = w.q.figure('pi.opencode-go', T)
-    expect(pi).toMatchObject({ estimate: true, windows: [{ name: '5 h', used: 300 }, { name: 'Week', used: 300 }] })
+    expect(pi).toMatchObject({
+      estimate: true,
+      windows: [
+        { name: '5 h', used: 300 },
+        { name: 'Week', used: 300 },
+      ],
+    })
     expect(w.q.figure('opencode.opencode-go', T)).toEqual(pi)
     expect(Object.keys(w.q.summary(T).figures).sort()).toEqual(['opencode.opencode-go', 'pi.opencode-go'])
     expect(w.q.summary(T).figures['pi.opencode-go']).toEqual(w.q.summary(T).figures['opencode.opencode-go'])

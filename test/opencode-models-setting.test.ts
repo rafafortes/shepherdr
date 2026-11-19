@@ -14,7 +14,7 @@ const list = opencodeList([
 const ids = () => modelsOf('opencode')!.models.map((m) => m.id)
 
 describe('the OpenCode models setting (opencode.models)', () => {
-  test("its row sits in the OpenCode section, all by default, set Everywhere or for one machine but not a space", () => {
+  test('its row sits in the OpenCode section, all by default, set Everywhere or for one machine but not a space', () => {
     const section = CATALOG.find((x) => x.name === 'OpenCode')!
     expect(section.levels).toEqual(['all', 'machine'])
     expect(section.rows).toEqual([expect.objectContaining({ key: 'opencode.models', value: 'all', text: true })])

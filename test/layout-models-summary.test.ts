@@ -71,7 +71,11 @@ describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => 
       await s.scrollIntoViewIfNeeded()
       const table = s.getByRole('table', { name: 'Providers and models' })
       // the providers, by their names, then the models under them
-      for (const name of ['Claude Code', 'Codex', 'OpenCode Go']) await table.getByRole('rowheader', { name: new RegExp(`^${name}`) }).first().waitFor()
+      for (const name of ['Claude Code', 'Codex', 'OpenCode Go'])
+        await table
+          .getByRole('rowheader', { name: new RegExp(`^${name}`) })
+          .first()
+          .waitFor()
       expect(await table.getByRole('rowheader', { name: /^Opus 5\.5/ }).count()).toBeGreaterThan(0)
       // a bar per provider: its share of the tokens in a day and in a week
       expect(await s.getByRole('img', { name: /^24 h: \d+% of the tokens$/ }).count()).toBeGreaterThan(0)
@@ -174,7 +178,10 @@ describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => 
       const s = await openModels(page)
       await s.scrollIntoViewIfNeeded()
       const shown = await warnings(page).count()
-      await warnings(page).first().getByRole('button', { name: /^Hide for this session/ }).click()
+      await warnings(page)
+        .first()
+        .getByRole('button', { name: /^Hide for this session/ })
+        .click()
       expect(await warnings(page).count()).toBe(shown - 1)
       // the same tab, reloaded: still hidden
       const again = await openModels(page)
@@ -185,8 +192,15 @@ describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => 
       await other.scrollIntoViewIfNeeded()
       expect(await warnings(fresh).count()).toBe(shown)
       // hidden one by one, the last one takes the list with it
-      for (let left = shown - 1; left > 0; left--) await warnings(fresh).first().getByRole('button', { name: /^Hide for this session/ }).click()
-      await warnings(fresh).first().getByRole('button', { name: /^Hide for this session/ }).click()
+      for (let left = shown - 1; left > 0; left--)
+        await warnings(fresh)
+          .first()
+          .getByRole('button', { name: /^Hide for this session/ })
+          .click()
+      await warnings(fresh)
+        .first()
+        .getByRole('button', { name: /^Hide for this session/ })
+        .click()
       expect(await fresh.locator('section[aria-label="Warnings"]').count()).toBe(0)
     } finally {
       await page.close()
@@ -216,7 +230,10 @@ describe.skipIf(!browser)('a browser that keeps no session storage for the hidde
       await s.scrollIntoViewIfNeeded()
       const shown = await warnings(page).count()
       expect(shown).toBeGreaterThan(0)
-      await warnings(page).first().getByRole('button', { name: /^Hide for this session/ }).click()
+      await warnings(page)
+        .first()
+        .getByRole('button', { name: /^Hide for this session/ })
+        .click()
       expect(await warnings(page).count()).toBe(shown - 1)
     } finally {
       await page.close()
@@ -265,7 +282,10 @@ describe.skipIf(!browser)('Settings → Models → Summary on a phone', () => {
       await s.locator('h4', { hasText: 'NVIDIA API' }).waitFor()
       // a warning's Change is under its words on a phone, and it opens the cell's editor under its line
       await warnings(page).first().getByRole('button', { name: 'Change…', exact: true }).tap()
-      await page.getByText(/· Tasks · Backup \d/).first().waitFor()
+      await page
+        .getByText(/· Tasks · Backup \d/)
+        .first()
+        .waitFor()
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
     } finally {
       await page.close()

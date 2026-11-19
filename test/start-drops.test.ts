@@ -19,7 +19,10 @@ const bin = join(dir, 'fake-opencode')
 const calls = join(dir, 'opencode-calls')
 const saved = process.env.SHEPHERDR_OPENCODE_BIN
 beforeAll(() => {
-  writeFileSync(bin, `#!${process.execPath}\nimport { appendFileSync } from 'node:fs'\nappendFileSync(${JSON.stringify(calls)}, process.argv.slice(2).join(' ') + '\\n')\nprocess.stdout.write(JSON.stringify({ data: { id: 'ses_fake1' } }))\n`)
+  writeFileSync(
+    bin,
+    `#!${process.execPath}\nimport { appendFileSync } from 'node:fs'\nappendFileSync(${JSON.stringify(calls)}, process.argv.slice(2).join(' ') + '\\n')\nprocess.stdout.write(JSON.stringify({ data: { id: 'ses_fake1' } }))\n`,
+  )
   chmodSync(bin, 0o755)
   process.env.SHEPHERDR_OPENCODE_BIN = bin
 })
@@ -56,7 +59,12 @@ const spec = (kind: string, n: number) => {
   return { key, name: Agents.nameFor(key), kind, cwd: tmp(`start-drops-${kind}`), workspace: `shep-dr-${kind}` }
 }
 
-const opencodeSessions = () => (existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter((l) => l.includes('session.create')).length : 0)
+const opencodeSessions = () =>
+  existsSync(calls)
+    ? readFileSync(calls, 'utf8')
+        .split('\n')
+        .filter((l) => l.includes('session.create')).length
+    : 0
 
 describe.each(KINDS)('a start of %s that meets drops', (kind) => {
   test('makes one workspace, one agent and no failure: the work herdr did is found, not done twice', async () => {

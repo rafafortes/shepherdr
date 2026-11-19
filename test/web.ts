@@ -14,7 +14,9 @@ export const INPUTS = ['index.html', 'vite.config.ts', 'tsconfig.json', 'package
 function files(path: string): string[] {
   if (!existsSync(path)) return []
   if (!statSync(path).isDirectory()) return [path]
-  return readdirSync(path).sort().flatMap((n) => files(join(path, n)))
+  return readdirSync(path)
+    .sort()
+    .flatMap((n) => files(join(path, n)))
 }
 
 function key() {
@@ -30,14 +32,18 @@ export async function builtScreen(): Promise<string> {
   const k = key()
   const dist = join(cache, `dist-${k}`)
   mkdirSync(cache, { recursive: true })
-  await once(`${dist}.lock`, () => existsSync(join(dist, 'index.html')), async () => {
-    const tmp = `${dist}.${process.pid}`
-    const { build } = await import('vite')
-    await build({ root, logLevel: 'silent', build: { outDir: tmp, emptyOutDir: true, sourcemap: 'hidden' } })
-    renameSync(tmp, dist)
-    // builds no one has made for a day go
-    for (const n of readdirSync(cache))
-      if (n.startsWith('dist-') && !n.startsWith(`dist-${k}`) && Date.now() - statSync(join(cache, n)).mtimeMs > 86_400_000) rmSync(join(cache, n), { recursive: true, force: true })
-  })
+  await once(
+    `${dist}.lock`,
+    () => existsSync(join(dist, 'index.html')),
+    async () => {
+      const tmp = `${dist}.${process.pid}`
+      const { build } = await import('vite')
+      await build({ root, logLevel: 'silent', build: { outDir: tmp, emptyOutDir: true, sourcemap: 'hidden' } })
+      renameSync(tmp, dist)
+      // builds no one has made for a day go
+      for (const n of readdirSync(cache))
+        if (n.startsWith('dist-') && !n.startsWith(`dist-${k}`) && Date.now() - statSync(join(cache, n)).mtimeMs > 86_400_000) rmSync(join(cache, n), { recursive: true, force: true })
+    },
+  )
   return dist
 }

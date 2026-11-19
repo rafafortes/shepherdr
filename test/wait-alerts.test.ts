@@ -51,7 +51,11 @@ describe('the alert command is told what waits on you', () => {
     again.w.look([wait('a'), wait('b'), wait('c')], ON, 12_000)
     again.w.look([wait('a'), wait('b'), wait('c')], ON, 22_000)
     expect(again.ran.map((r) => r.args[0])).toEqual(['asks c'])
-    expect(readJson<{ waits: Record<string, unknown> }>('wait-alerts.json', { waits: {} }).waits).toEqual({ a: { seen: 0, told: true, sent: true }, b: { seen: 0, told: true, sent: true }, c: { seen: 12_000, told: true, sent: true } })
+    expect(readJson<{ waits: Record<string, unknown> }>('wait-alerts.json', { waits: {} }).waits).toEqual({
+      a: { seen: 0, told: true, sent: true },
+      b: { seen: 0, told: true, sent: true },
+      c: { seen: 12_000, told: true, sent: true },
+    })
   })
 
   test('while it is off nothing runs and every wait counts as told: turning it on tells only what comes next', () => {

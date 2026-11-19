@@ -14,22 +14,36 @@ export class Tunnel {
   private timer?: ReturnType<typeof setTimeout>
   private recovery = new LinkBackoff()
   constructor(private launch: (track: (p: TunnelProcess) => void, stopped: () => boolean) => Promise<void>) {}
-  start() { if (!this.timer) void this.open() }
+  start() {
+    if (!this.timer) void this.open()
+  }
   private opening = false
   private async open() {
     if (this.stopped || this.opening) return
     this.opening = true
     try {
-      await this.launch((p) => { this.proc = p; if (this.stopped) p.kill() }, () => this.stopped)
+      await this.launch(
+        (p) => {
+          this.proc = p
+          if (this.stopped) p.kill()
+        },
+        () => this.stopped,
+      )
     } catch {
       // Failure to spawn is retried just like DNS/SSH failure.
     } finally {
       this.opening = false
       this.proc = undefined
-      if (!this.stopped) this.timer = setTimeout(() => { this.timer = undefined; void this.open() }, this.recovery.fail())
+      if (!this.stopped)
+        this.timer = setTimeout(() => {
+          this.timer = undefined
+          void this.open()
+        }, this.recovery.fail())
     }
   }
-  connected() { this.recovery.success() }
+  connected() {
+    this.recovery.success()
+  }
   stop() {
     this.stopped = true
     if (this.timer) clearTimeout(this.timer)

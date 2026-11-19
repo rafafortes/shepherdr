@@ -126,7 +126,8 @@ export function groupTasks(places: Place[], machineList: Machine[], ts: Task[], 
   const machineOf = new Map(places.map((p) => [p.id, p.machine]))
   const machines = machineList
   const onMachine = (m: Machine) => rest.filter((t) => machineOf.get(t.place) === m.machine)
-  if (by === 'status') return [...top, ...GROUPS.map(([s, label]) => ({ key: s, label, tasks: rest.filter((t) => t.status === s), names: namesFor(level) })).filter((g) => g.tasks.length || g.key === 'todo')]
+  if (by === 'status')
+    return [...top, ...GROUPS.map(([s, label]) => ({ key: s, label, tasks: rest.filter((t) => t.status === s), names: namesFor(level) })).filter((g) => g.tasks.length || g.key === 'todo')]
   if (by === 'machine' && level === 0) {
     // one on no machine in the list (none should be) still shows, last, as by status
     const lost = rest.filter((t) => !machines.some((m) => m.machine === machineOf.get(t.place)))
@@ -140,7 +141,12 @@ export function groupTasks(places: Place[], machineList: Machine[], ts: Task[], 
     return [
       ...top,
       ...machines.flatMap((m) => projectGroups(places, machines, onMachine(m), 1).map((g) => ({ ...g, key: `${m.id}|${g.key}`, machine: { id: m.id, name: m.name } }))),
-      ...projectGroups(places, machines, rest.filter((t) => !machines.some((m) => m.machine === machineOf.get(t.place))), 1),
+      ...projectGroups(
+        places,
+        machines,
+        rest.filter((t) => !machines.some((m) => m.machine === machineOf.get(t.place))),
+        1,
+      ),
     ]
   return [...top, ...projectGroups(places, machines, rest, level)]
 }

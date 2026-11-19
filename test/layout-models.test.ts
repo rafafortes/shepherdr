@@ -46,7 +46,8 @@ async function reset() {
   const store = world.stores['vm-str']
   const chain = ['reviewer.fallback', 'reviewer.fallback2', 'reviewer.fallback3', 'reviewer.fallback4', 'reviewer.fallback5']
   for (const space of ['gtm', 'herdr-projects']) {
-    for (const k of ['task.agent', 'task.model', 'task.effort', 'space.maxTasks', 'merge.train', 'task.fallback2', 'task.fallback2Model', 'task.fallback2Effort', ...chain]) store.set(k, null, { space })
+    for (const k of ['task.agent', 'task.model', 'task.effort', 'space.maxTasks', 'merge.train', 'task.fallback2', 'task.fallback2Model', 'task.fallback2Effort', ...chain])
+      store.set(k, null, { space })
   }
   for (const k of ['task.agent', 'task.model', 'task.effort', 'task.fallback2', 'task.fallback2Model', 'task.fallback2Effort', 'space.maxTasks', ...chain]) store.set(k, null, 'all')
   // the demo's own: gtm runs Codex
@@ -65,7 +66,20 @@ describe.skipIf(!browser)('Settings → Models on a desktop', () => {
       expect(await table.locator('tbody th[scope="row"] span.truncate').allTextContents()).toEqual(['Everywhere', 'vm-str', 'gtm', 'herdr-projects'])
       expect(await table.locator('thead th[scope="colgroup"]').allTextContents()).toEqual(['Tasks', 'Coordinators', 'Reviewer', 'Advisor'])
       // each role's columns: Primary, Backup 1 and the "+" that adds the next, then the two plain columns
-      expect(await table.locator('thead tr').nth(1).locator('th').allTextContents()).toEqual(['Primary', 'Backup 1', '+', 'Primary', 'Backup 1', '+', 'Primary', 'Backup 1', '+', 'Primary', 'Backup 1', '+'])
+      expect(await table.locator('thead tr').nth(1).locator('th').allTextContents()).toEqual([
+        'Primary',
+        'Backup 1',
+        '+',
+        'Primary',
+        'Backup 1',
+        '+',
+        'Primary',
+        'Backup 1',
+        '+',
+        'Primary',
+        'Backup 1',
+        '+',
+      ])
       expect(await table.locator('thead tr').nth(0).locator('th').allTextContents()).toEqual(['Level', 'Tasks', 'Coordinators', 'Reviewer', 'Advisor', 'Max tasks', 'Merge train'])
       // a value the row sets is strong; one it inherits is faint, its words and where it comes from
       const gtm = await cell(page, 'gtm · Tasks · Primary').evaluate((el) => getComputedStyle(el).fontWeight)
@@ -274,7 +288,7 @@ describe.skipIf(!browser)('Settings → Models on a desktop', () => {
     }
   })
 
-  test('Set for every space, each space\'s own: written at each space; Everywhere and reset: the spaces and this machine lose their own', async () => {
+  test("Set for every space, each space's own: written at each space; Everywhere and reset: the spaces and this machine lose their own", async () => {
     await reset()
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {

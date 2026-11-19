@@ -90,7 +90,7 @@ describe("a coordinator's backup agent", () => {
       expect(s.started).toHaveLength(1)
       // another CLI, on its own default model (backup.model is default)
       expect(s.started[0]).toMatchObject({ kind: 'codex', model: '' })
-      expect(s.started[0].first).toContain('Taking over: Claude Code ran this chat\'s coordinator until now and can\'t go on (signed out)')
+      expect(s.started[0].first).toContain("Taking over: Claude Code ran this chat's coordinator until now and can't go on (signed out)")
       // its tasks go on as they are, and it hears the chat so far
       expect(s.started[0].first).toContain(`${t.id} Say hello`)
       expect(s.started[0].first).toContain('Handle the tasks while I am away.')
@@ -143,7 +143,12 @@ describe("a coordinator's backup agent", () => {
       // a backup that can't go on either waits for you, its chat saying the backup went in once already
       await s.cut('Signed out')
       expect(s.started).toHaveLength(1)
-      expect(s.cards().map((m) => m.card!.text).at(-1)).toContain('Its backup agent (Claude Code) already went in once')
+      expect(
+        s
+          .cards()
+          .map((m) => m.card!.text)
+          .at(-1),
+      ).toContain('Its backup agent (Claude Code) already went in once')
       // you start it again yourself: a backup may go in once more the next time it can't go on
       await (s.src as unknown as { restart(key: string, to: object): Promise<string> }).restart(s.key, {})
       expect(s.src.agents.tookOver(s.key)).toBeUndefined()
@@ -155,10 +160,15 @@ describe("a coordinator's backup agent", () => {
     }
   })
 
-  test("a chain of coordinator backups: each takes the chat over in turn, then it waits for you, its card naming the last", async () => {
+  test('a chain of coordinator backups: each takes the chat over in turn, then it waits for you, its card naming the last', async () => {
     const s = await place('chain')
     try {
-      for (const [k, v] of [['coordinator.fallback', 'claude'], ['coordinator.fallback2', 'off'], ['coordinator.fallback3', 'codex']]) expect(s.src.settings.set(k, v, { space: s.p.name }).ok).toBe(true)
+      for (const [k, v] of [
+        ['coordinator.fallback', 'claude'],
+        ['coordinator.fallback2', 'off'],
+        ['coordinator.fallback3', 'codex'],
+      ])
+        expect(s.src.settings.set(k, v, { space: s.p.name }).ok).toBe(true)
       await s.cut('Out of allowance until 5pm')
       expect(s.started.map((x) => x.kind)).toEqual(['claude'])
       expect(s.src.agents.tookOver(s.key)).toMatchObject({ from: 'claude', to: 'claude', step: 1 })
@@ -170,7 +180,12 @@ describe("a coordinator's backup agent", () => {
       // past the last one: no loop, the human hears it
       await s.cut('Signed out again')
       expect(s.started).toHaveLength(2)
-      expect(s.cards().map((m) => m.card!.text).at(-1)).toContain('Its backup agent (Codex) already went in once, the last of its backups')
+      expect(
+        s
+          .cards()
+          .map((m) => m.card!.text)
+          .at(-1),
+      ).toContain('Its backup agent (Codex) already went in once, the last of its backups')
       expect(s.alerts.length).toBeGreaterThan(0)
       // a start that fails keeps its place in the chain: the one before it stays marked, and the next cut tries it again
       s.src.agents.markTookOver(s.key, { from: 'claude', to: 'claude', why: 'x', at: Date.now(), step: 1 })
@@ -207,7 +222,8 @@ describe("a coordinator's backup agent", () => {
       expect(s.src.engine.backupFor('coordinator', s.p.name)).toEqual({ to: { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'medium' } })
       expect(s.src.engine.backupFor('task', s.p.name)).toEqual({ to: { kind: 'codex', model: 'gpt-6-sol', effort: 'low' } })
     } finally {
-      for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model', 'backup.effort', 'coordinator.fallbackModel', 'coordinator.fallbackEffort']) s.src.settings.set(k, null, { space: s.p.name })
+      for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model', 'backup.effort', 'coordinator.fallbackModel', 'coordinator.fallbackEffort'])
+        s.src.settings.set(k, null, { space: s.p.name })
       s.done()
     }
   })
@@ -234,7 +250,7 @@ describe("a coordinator's backup agent", () => {
     }
   })
 
-  test("a coordinator backup model its CLI does not have is no takeover, and the card names the row it is set in", async () => {
+  test('a coordinator backup model its CLI does not have is no takeover, and the card names the row it is set in', async () => {
     const s = await place('ownbadmodel')
     try {
       // the model was picked for a Codex backup; its coordinator's backup moved to Claude Code, which has no such model
@@ -300,9 +316,7 @@ describe("a coordinator's backup agent", () => {
       await s.cut('Out of allowance until 5pm')
       expect(s.started).toHaveLength(0)
       expect(s.src.agents.tookOver(s.key)).toBeUndefined()
-      expect(s.cards().map((m) => m.card!.text)).toEqual([
-        "Cut off by its provider: out of allowance until 5pm. No backup agent took over: Codex isn't installed on this machine. Write to carry on.",
-      ])
+      expect(s.cards().map((m) => m.card!.text)).toEqual(["Cut off by its provider: out of allowance until 5pm. No backup agent took over: Codex isn't installed on this machine. Write to carry on."])
       expect(s.alerts).toHaveLength(1)
     } finally {
       src.engine.installed = () => true

@@ -16,7 +16,14 @@ const all = (by: 'me' | 'them') => ['👍', '❤️', '😂', '🙌', '👀', '�
  *  body loading behind a Suspense fallback has landed: a lazy Settings page is not there the moment its button is
  *  pressed, so a test that looks at its content waits for the fallback to go */
 export const settled = async (page: Page) => {
-  await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished.catch(() => {}))))
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => {})),
+    ),
+  )
   await page.locator('[data-suspense-fallback]').waitFor({ state: 'detached' })
 }
 /** what read() gives once ok() takes it, or its last within the time, for an expect to say what it was: a width that
@@ -121,7 +128,13 @@ export async function layout({ everything: wide = false, webkit = false } = {}) 
     { id: 'code-agent', who: 'agent', text: 'Run `bun test` first, then see [the docs](https://example.com/docs):\n\n```sh\nbun run check\n```', at: now - 10 },
     { id: 'tall-agent', who: 'agent', text: Array.from({ length: 40 }, (_, i) => `Line ${i + 1} of a reply far taller than the screen.`).join('\n\n'), at: now - 3 },
     { id: 'long-you', who: 'you', text: 'Can you look at the flaky test on main and tell me whether it is the network mock or the clock?', at: now - 2, reactions: [{ emoji: '👍', by: 'them' }] },
-    { id: 'long-agent', who: 'agent', text: 'It is the clock. The test waits 50 ms for a timer the mock never advances, so a slow runner times out.', at: now - 1, reactions: [{ emoji: '❤️', by: 'both' }] },
+    {
+      id: 'long-agent',
+      who: 'agent',
+      text: 'It is the clock. The test waits 50 ms for a timer the mock never advances, so a slow runner times out.',
+      at: now - 1,
+      reactions: [{ emoji: '❤️', by: 'both' }],
+    },
     { id: 'short-you', who: 'you', text: 'Go', at: now, reactions: all('them') },
     { id: 'short-agent', who: 'agent', text: 'OK', at: now + 1, reactions: all('me') },
     // a picture this browser can't show: a file tile that keeps its reaction

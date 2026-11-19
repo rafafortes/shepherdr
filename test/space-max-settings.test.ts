@@ -53,7 +53,11 @@ describe('the space limit on tasks working at once (space.maxTasks)', () => {
     const s = fresh()
     s.set('space.maxTasks', '4', 'all')
     s.set('space.maxTasks', '2', { space: 'web' })
-    const row = (level: string) => s.sections([], [], null, 'host', ['web', 'api']).find((x) => x.level === level && x.name === 'Space')!.rows.find((r) => r.key === 'space.maxTasks')!
+    const row = (level: string) =>
+      s
+        .sections([], [], null, 'host', ['web', 'api'])
+        .find((x) => x.level === level && x.name === 'Space')!
+        .rows.find((r) => r.key === 'space.maxTasks')!
     expect(row('p:host:web')).toMatchObject({ value: '2', inherits: { value: '4', from: 'Everywhere' } })
     expect(row('p:host:api')).toMatchObject({ value: '4', from: 'Everywhere' })
   })

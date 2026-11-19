@@ -77,7 +77,10 @@ export function helpVerbs(help: string = HELP): Verbs {
       const cut = ex.search(/ {2,}/)
       const part = cut > 0 ? ex.slice(0, cut) : ex
       const ts = tokens(part.slice('shepherdr '.length))
-      const seq = ts.filter((t) => !t.arg).map((t) => t.text).join(' ')
+      const seq = ts
+        .filter((t) => !t.arg)
+        .map((t) => t.text)
+        .join(' ')
       if (!seq) continue
       const takesArg = ts.some((t) => t.arg)
       const prev = commands.get(seq)
@@ -98,7 +101,9 @@ export function commandMentions(text: string): Mention[] {
   const out: Mention[] = []
   const re = /(?:`|(?:^|\n)[ \t]*(?:[-*+>]|\d+\.)?[ \t]*?)shepherdr\s+([^`]*)/g
   for (const m of text.matchAll(re)) {
-    const seq = tokens(m[1]).filter((t) => !t.arg).map((t) => t.text)
+    const seq = tokens(m[1])
+      .filter((t) => !t.arg)
+      .map((t) => t.text)
     if (!seq.length) continue
     // count to `shepherdr`, not the match's start: the line-start branch of the regex consumes the preceding newline
     const at = m.index + m[0].indexOf('shepherdr')

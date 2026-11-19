@@ -15,8 +15,7 @@ const SLOP = 8
 // was there as the touch began (and isn't passive) can stop that, so this one always is; it does nothing until a
 // swipe is taken.
 let held = false
-if (typeof addEventListener === 'function')
-  addEventListener('touchmove', (e) => held && e.cancelable && e.preventDefault(), { capture: true, passive: false })
+if (typeof addEventListener === 'function') addEventListener('touchmove', (e) => held && e.cancelable && e.preventDefault(), { capture: true, passive: false })
 
 /** what keeps sideways swipes to itself: boxes you type in, frames, messages (useHold marks them) and anything the
  *  app gives every touch to */
@@ -29,8 +28,7 @@ export function mayPanX(target: EventTarget | null, x: number) {
   if (!el) return true
   if (el.closest(OWN)) return false
   // anything under the finger that scrolls sideways (a code block, a table, a row of tabs) keeps the swipe
-  for (let n: Element | null = el; n && n !== document.body; n = n.parentElement)
-    if (n.scrollWidth > n.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(n).overflowX)) return false
+  for (let n: Element | null = el; n && n !== document.body; n = n.parentElement) if (n.scrollWidth > n.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(n).overflowX)) return false
   return true
 }
 
@@ -58,10 +56,7 @@ export interface Pan {
  * across (a swipe from the screen's edge, a thumb's arc, may lean more). Once taken it follows the finger from where
  * it went down, and the page doesn't scroll under it. A mouse is left alone. The tap a swipe ends with clicks nothing.
  */
-export function follow(
-  e: PointerEvent,
-  o: { axis: 'x' | 'y'; sign: 1 | -1; lean?: number; start?: () => boolean | void; move: (d: number) => void; end: (p: Pan) => void; cancel?: () => void },
-) {
+export function follow(e: PointerEvent, o: { axis: 'x' | 'y'; sign: 1 | -1; lean?: number; start?: () => boolean | void; move: (d: number) => void; end: (p: Pan) => void; cancel?: () => void }) {
   if (e.pointerType === 'mouse' || !e.isPrimary) return
   const id = e.pointerId
   const x0 = e.clientX

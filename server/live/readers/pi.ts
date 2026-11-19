@@ -90,7 +90,9 @@ export class PiReader implements Reader {
         this.sessions.add(file)
         out.push({ kind: 'session', file, id: `session-${l.id}`, at: t, sessionId: l.id })
       } else if (l.type === 'model_change' || l.type === 'thinking_level_change') {
-        const runtime = { source: 'session' as const, at: t,
+        const runtime = {
+          source: 'session' as const,
+          at: t,
           ...(l.type === 'model_change' && typeof l.modelId === 'string' ? { model: l.modelId } : {}),
           ...(l.type === 'thinking_level_change' && typeof l.thinkingLevel === 'string' ? { effort: l.thinkingLevel } : {}),
         }

@@ -80,7 +80,7 @@ describe("a space's own cap inside the machine's limit", () => {
     expect(w.engine.room(a2)).toEqual({ why: 'slots' })
   })
 
-  test('off, at every level, is the machine\'s limit alone: two tasks of one space work at once on a machine of two', async () => {
+  test("off, at every level, is the machine's limit alone: two tasks of one space work at once on a machine of two", async () => {
     const w = fresh({ 'machine.maxTasks': '2' })
     const a = await started(w, repo(), 'cap-off', 'A1', 'Add a1.txt.')
     expect(w.engine.spaceCap(a.t)).toBeUndefined()

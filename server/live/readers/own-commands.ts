@@ -46,8 +46,7 @@ export function ownCall(text: unknown, command: string, chat: string | undefined
   if (typeof text !== 'string') return false
   // One plain word: no expansion, redirect, separator or line break can sit outside a quote, or $ and ` inside one.
   const WORD = /(?:[\w@%+=:,./-]+|'[^']*'|"(?:[^"\\$`]|\\["\\])*")+/y
-  const unquote = (word: string) =>
-    word.replace(/'([^']*)'|"((?:[^"\\]|\\.)*)"/g, (_all: string, one?: string, two?: string) => one ?? two!.replace(/\\(.)/g, '$1'))
+  const unquote = (word: string) => word.replace(/'([^']*)'|"((?:[^"\\]|\\.)*)"/g, (_all: string, one?: string, two?: string) => one ?? two!.replace(/\\(.)/g, '$1'))
   const line = text.trim()
   const words: string[] = []
   for (let at = 0; at < line.length; ) {

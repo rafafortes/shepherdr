@@ -78,6 +78,9 @@ export function jumpTo(chat: string, id: string, { card = false } = {}) {
   void anchor.offsetWidth
   anchor.setAttribute('data-flash', '')
   clearTimeout(lit.get(anchor))
-  lit.set(anchor, setTimeout(() => anchor.removeAttribute('data-flash'), 1600))
+  lit.set(
+    anchor,
+    setTimeout(() => anchor.removeAttribute('data-flash'), 1600),
+  )
   return true
 }

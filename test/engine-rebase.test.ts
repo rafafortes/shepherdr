@@ -92,7 +92,9 @@ describe('back to work on a base that moved', () => {
     expect(sh('git status --porcelain', a.t.worktree!)).toBe('')
     expect(sh('git rev-parse --verify --quiet REBASE_HEAD >/dev/null && echo mid || echo none', a.t.worktree!)).toBe('none')
     const first = w.started.filter((s) => s.key === a.key).at(-1)!.first!
-    expect(first).toContain('Rebasing your branch on it conflicts, so Shepherdr left your worktree as it was: at your next good point, rebase on main (git rebase main), resolve the conflicts and run the checks.')
+    expect(first).toContain(
+      'Rebasing your branch on it conflicts, so Shepherdr left your worktree as it was: at your next good point, rebase on main (git rebase main), resolve the conflicts and run the checks.',
+    )
     expect(w.posted.some((p) => p.card?.text === 'Not rebased (it conflicts): 1 new commit in main; its agent rebases at a good point')).toBe(true)
   })
 

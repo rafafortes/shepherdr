@@ -31,7 +31,9 @@ if (import.meta.main) {
   for (const [w, h, r] of SCREENS)
     for (const theme of ['light', 'dark'] as const) {
       const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: r })
-      await page.setContent(`<body style="margin:0;height:100vh;display:grid;place-items:center;background:${BG[theme]}"><div style="width:96px;height:96px">${icon.replace('<svg ', '<svg width="96" height="96" ')}</div></body>`)
+      await page.setContent(
+        `<body style="margin:0;height:100vh;display:grid;place-items:center;background:${BG[theme]}"><div style="width:96px;height:96px">${icon.replace('<svg ', '<svg width="96" height="96" ')}</div></body>`,
+      )
       await page.screenshot({ path: join(root, 'public', splashName(w, h, r, theme)) })
       await page.close()
     }

@@ -75,7 +75,11 @@ interface Conn {
 
 function open(path: string): Conn {
   if (!BOX || path !== socketPath()) return connect(path)
-  const p = Bun.spawn(sshArgs(BOX.target, script(BOX, [BOX.herdr, '--session', BOX.session, 'remote-api-bridge']), { extra: ['-o', 'ControlPath=none'] }), { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' })
+  const p = Bun.spawn(sshArgs(BOX.target, script(BOX, [BOX.herdr, '--session', BOX.session, 'remote-api-bridge']), { extra: ['-o', 'ControlPath=none'] }), {
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'ignore',
+  })
   const fns: Record<string, ((x?: unknown) => void)[]> = { connect: [], data: [], error: [], close: [] }
   const fire = (e: string, x?: unknown) => fns[e].forEach((f) => f(x))
   let closed = false
@@ -134,7 +138,6 @@ export async function rpc<T = unknown>(method: string, params: Record<string, un
   return READS.has(method) ? retrying(() => once<T>(method, params, timeoutMs, path)) : once<T>(method, params, timeoutMs, path)
 }
 
-
 /** a call to herdr, tried once: what a failure says tells herdr down from a connection herdr closed */
 export async function once<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs = 10_000, path = socketPath()): Promise<T> {
   const id = `shep-${Date.now().toString(36)}-${++n}`
@@ -167,7 +170,17 @@ export async function once<T = unknown>(method: string, params: Record<string, u
     // its socket refusing, or gone: herdr stopped or is starting again. Said plainly, never "connect ECONNREFUSED …"
     // a connection reset is herdr closing it (it did not get the request in time, or restarted): a passing failure, said as
     // one, and not the words for herdr down
-    sock.on('error', (e) => finish(() => reject(!e || gone(e) ? new HerdrError('unreachable', "herdr isn't answering") : ['ECONNRESET', 'EPIPE'].includes((e as Error & { code?: string }).code ?? '') ? new HerdrError('dropped', `herdr dropped the connection during ${method}`) : new HerdrError('unreachable', e.message))))
+    sock.on('error', (e) =>
+      finish(() =>
+        reject(
+          !e || gone(e)
+            ? new HerdrError('unreachable', "herdr isn't answering")
+            : ['ECONNRESET', 'EPIPE'].includes((e as Error & { code?: string }).code ?? '')
+              ? new HerdrError('dropped', `herdr dropped the connection during ${method}`)
+              : new HerdrError('unreachable', e.message),
+        ),
+      ),
+    )
     sock.on('close', () => finish(() => reject(new HerdrError('closed', `herdr closed the connection during ${method}`))))
   })
 }
@@ -240,7 +253,6 @@ export interface WorktreeSpace {
   already_open?: boolean
 }
 
-
 /**
  * A call that changes something, asked again after a passing failure (see PASSING) only once `took` has looked at what
  * the first try may have done: it gives that effect when it is there (the workspace, the tab, the agent), and the call
@@ -270,8 +282,7 @@ const NOT_FOUND = /not[_ ]found/i
 /** herdr answering that the workspace or the pane it was asked about is not there any more: it closed meanwhile (a
  *  hand-over closes an agent's pane, and herdr closes the space with it). Not a call herdr failed, so nothing is tried
  *  again; never an agent or a tab herdr knows nothing of, nor a command it could not run ("not found" in a shell's words) */
-export const missing = (e: unknown) =>
-  e instanceof HerdrError && (/^(workspace|pane)/i.test(e.code) ? NOT_FOUND.test(e.code) : /(workspace|pane)[^.]*not[_ ]found/i.test(e.message))
+export const missing = (e: unknown) => e instanceof HerdrError && (/^(workspace|pane)/i.test(e.code) ? NOT_FOUND.test(e.code) : /(workspace|pane)[^.]*not[_ ]found/i.test(e.message))
 
 /** text as the screen shows it, to look for what was typed: no blanks, since the screen wraps lines where it likes */
 const squeeze = (t: string) => t.replace(/\s+/g, '')
@@ -346,8 +357,7 @@ export const herdr = {
     }),
   panes: (workspace_id: string) => rpc<{ panes: PaneInfo[] }>('pane.list', { workspace_id }).then((r) => r.panes),
   /** what runs in a pane: its shell, and the processes in its foreground with their command lines */
-  processInfo: (pane_id: string) =>
-    rpc<{ process_info: ProcessInfo }>('pane.process_info', { pane_id }).then((r) => r.process_info),
+  processInfo: (pane_id: string) => rpc<{ process_info: ProcessInfo }>('pane.process_info', { pane_id }).then((r) => r.process_info),
   /** the shell sits at its prompt: nothing runs in the foreground */
   paneIdle: (pane_id: string) =>
     rpc<{ process_info: { shell_pid?: number; foreground_process_group_id?: number } }>('pane.process_info', { pane_id }).then(
@@ -420,7 +430,9 @@ export class Subscription {
     previous?.destroy()
     if (this.stopped || !this.wanted.length) return
     let sock: Conn
-    try { sock = this.connect() } catch {
+    try {
+      sock = this.connect()
+    } catch {
       this.retry = setTimeout(() => this.reopen(), this.recovery.fail())
       return
     }
@@ -441,7 +453,10 @@ export class Subscription {
         if (!line) continue
         try {
           const f = JSON.parse(line)
-          if (f.error) { again(); return }
+          if (f.error) {
+            again()
+            return
+          }
           if (!opened && ('result' in f || f.event)) {
             opened = true
             if (this.handshake) clearTimeout(this.handshake)

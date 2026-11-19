@@ -49,8 +49,17 @@ describe('moving to spaces, once', () => {
       'm:far': { key: 'm:far', name: 'shep-machine-far', kind: 'claude', cwd: '/c/far', workspace: 'Coordinators', logs: [farLog], started: 3 },
       'p:main:web': { key: 'p:main:web', name: 'shep-web', kind: 'claude', cwd: '/x/web', workspace: 'web', logs: [], started: 4 },
     })
-    put('outbox.json', [{ key: 'all', text: 'queued' }, { key: 'p:main:web', text: 'stays' }])
-    put('chatlog/all.json', { posted: [{ id: 'a1', at: 30 }, { id: 'a2', at: 10 }], answers: { 'ask:a': 1 } })
+    put('outbox.json', [
+      { key: 'all', text: 'queued' },
+      { key: 'p:main:web', text: 'stays' },
+    ])
+    put('chatlog/all.json', {
+      posted: [
+        { id: 'a1', at: 30 },
+        { id: 'a2', at: 10 },
+      ],
+      answers: { 'ask:a': 1 },
+    })
     put('chatlog/m_main.json', { posted: [{ id: 'm1', at: 20 }], answers: { 'ask:m': 0 } })
     put('unread.json', { last: { all: 50, 'm:main': 70, 'p:main:web': 5 }, read: { '*': 1, all: 40, 'm:main': 30 } })
     put('heartbeat/all.md', '- Anything waiting across machines')
@@ -79,7 +88,10 @@ describe('moving to spaces, once', () => {
     expect(recs[HOME_ID]).toMatchObject({ key: HOME_ID, name: 'shepherdr-home', kind: 'codex', cwd: '/c/machine', logs: [mLog, allLog] })
     expect(recs['p:far:~']).toMatchObject({ key: 'p:far:~', name: 'shepherdr-home', logs: [farLog] })
     expect(recs['p:main:web'].name).toBe('shep-web')
-    expect(read('outbox.json')).toEqual([{ key: HOME_ID, text: 'queued' }, { key: 'p:main:web', text: 'stays' }])
+    expect(read('outbox.json')).toEqual([
+      { key: HOME_ID, text: 'queued' },
+      { key: 'p:main:web', text: 'stays' },
+    ])
     // what Shepherdr posted in both chats, by time, in one
     expect(existsSync(join(home, 'chatlog', 'all.json'))).toBe(false)
     expect(existsSync(join(home, 'chatlog', 'm_main.json'))).toBe(false)

@@ -10,12 +10,16 @@ type Watch = { type: string; chats: string[]; term: unknown; visible: boolean }
 
 const watchFrames = (page: Page) => {
   const watches: Watch[] = []
-  page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
-    try {
-      const m = JSON.parse(String(payload))
-      if (m.type === 'watch' && m.visible === false) watches.push(m)
-    } catch { /* other socket traffic */ }
-  }))
+  page.on('websocket', (socket) =>
+    socket.on('framesent', ({ payload }) => {
+      try {
+        const m = JSON.parse(String(payload))
+        if (m.type === 'watch' && m.visible === false) watches.push(m)
+      } catch {
+        /* other socket traffic */
+      }
+    }),
+  )
   return watches
 }
 
@@ -47,8 +51,15 @@ describe.skipIf(!browser)('bounded search chat loads', () => {
 
       // a settled query does start the load, and clearing it drops the chats again without another watch
       await search.fill(needle)
-      await until(() => Promise.resolve(watches.length), n => n > 0, 10_000)
-      await page.getByRole('option', { name: new RegExp(needle) }).first().waitFor()
+      await until(
+        () => Promise.resolve(watches.length),
+        (n) => n > 0,
+        10_000,
+      )
+      await page
+        .getByRole('option', { name: new RegExp(needle) })
+        .first()
+        .waitFor()
       const before = watches.length
       await search.fill('')
       await page.waitForTimeout(300)
@@ -56,7 +67,10 @@ describe.skipIf(!browser)('bounded search chat loads', () => {
       expect(await page.getByRole('group', { name: 'Messages', exact: true }).getByRole('option').count()).toBe(0)
       await page.keyboard.press('Escape')
       expect(watches.length).toBe(before)
-    } finally { source.messages = old; await page.close() }
+    } finally {
+      source.messages = old
+      await page.close()
+    }
   }, 90_000)
 
   test('a long chat shows the capped footer and its newest hit still jumps to the message', async () => {
@@ -83,7 +97,15 @@ describe.skipIf(!browser)('bounded search chat loads', () => {
       expect(page.url()).toContain('task=LV-3')
       const target = page.locator('[data-msg="cap-inside"]')
       await target.waitFor()
-      expect(await until(() => target.locator('[data-flash]').count(), n => n > 0)).toBeGreaterThan(0)
-    } finally { source.messages = old; await page.close() }
+      expect(
+        await until(
+          () => target.locator('[data-flash]').count(),
+          (n) => n > 0,
+        ),
+      ).toBeGreaterThan(0)
+    } finally {
+      source.messages = old
+      await page.close()
+    }
   }, 120_000)
 })

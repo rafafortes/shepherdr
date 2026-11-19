@@ -107,7 +107,12 @@ describe('swallow', () => {
     const dir = tmp('debug-pi-missing')
     const restore = env('PI_CODING_AGENT_DIR', dir)
     const file = join(dir, 'settings.json')
-    const count = () => Number(swallowedReport().find((l) => l.includes('pi reader'))?.match(/ignored (\d+)/)?.[1] ?? 0)
+    const count = () =>
+      Number(
+        swallowedReport()
+          .find((l) => l.includes('pi reader'))
+          ?.match(/ignored (\d+)/)?.[1] ?? 0,
+      )
     try {
       // an absent settings file is ordinary: a file an earlier test read may be said once, but no lookup piles up
       expect(piEnabled()).toBeUndefined()
@@ -177,8 +182,7 @@ describe('swallow', () => {
   test('a Codex rollout that vanishes between listing and stat is counted for codex', () => {
     const root = tmp('debug-codex-log')
     const dirs = new Set<string>()
-    for (const t of [Date.now(), Date.now() - 86_400_000])
-      for (const utc of [false, true]) dirs.add(day(root, t, utc))
+    for (const t of [Date.now(), Date.now() - 86_400_000]) for (const utc of [false, true]) dirs.add(day(root, t, utc))
     for (const dir of dirs) {
       mkdirSync(dir, { recursive: true })
       symlinkSync(join(root, 'gone'), join(dir, 'rollout-gone.jsonl'))
@@ -271,7 +275,7 @@ describe('the hook recorder', () => {
 
   test('its own gated line names the reason without the event text', async () => {
     const script = recorderScript()
-    expect(script).toContain("if (process.env.SHEPHERDR_DEBUG) console.error")
+    expect(script).toContain('if (process.env.SHEPHERDR_DEBUG) console.error')
     expect(script).toContain("note('hook event parse', e)")
     expect(script).toContain("note('hook log rotate', e)")
     const dir = tmp('debug-recorder')

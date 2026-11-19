@@ -11,7 +11,7 @@ const FILES: Record<string, string> = {
   'src/webhooks/signature.ts':
     "import { createHmac, timingSafeEqual } from 'node:crypto'\n\n/** the body exactly as it came, signed with the shared secret; compared in constant time */\nexport function verifySignature(raw: string, sig: string, secret: string) {\n  const want = Buffer.from(createHmac('sha256', secret).update(raw).digest('hex'))\n  const got = Buffer.from(sig)\n  return got.length === want.length && timingSafeEqual(got, want)\n}\n",
   'src/enrich/company.ts':
-    "export interface Company {\n  domain: string\n  name?: string\n  employees?: number\n}\n\nexport async function enrich(domain: string): Promise<Company> {\n  return { domain }\n}\n",
+    'export interface Company {\n  domain: string\n  name?: string\n  employees?: number\n}\n\nexport async function enrich(domain: string): Promise<Company> {\n  return { domain }\n}\n',
   'test/signature.test.ts':
     "import { expect, test } from 'bun:test'\nimport { createHmac } from 'node:crypto'\nimport { verifySignature } from '../src/webhooks/signature.ts'\n\nconst sign = (b: string) => createHmac('sha256', 's3cret').update(b).digest('hex')\n\ntest('a body signed with the secret passes', () => {\n  expect(verifySignature('{\"a\":1}', sign('{\"a\":1}'), 's3cret')).toBe(true)\n})\n\ntest('a re-encoded body fails', () => {\n  expect(verifySignature('{ \"a\": 1 }', sign('{\"a\":1}'), 's3cret')).toBe(false)\n})\n",
   'docs/logo.png': '\0PNG',

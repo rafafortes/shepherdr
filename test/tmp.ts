@@ -123,10 +123,12 @@ export type Left = { path: string; why: string; pid?: number }
 /** what one run left behind: its folders whose process is gone, and any process of this run still alive in its folders.
  *  A process of another suite, or one whose folder is gone, belongs to that run's own check (or to sweep()). */
 export function leftBy(runID: string): Left[] {
-  const left: Left[] = entries().filter((name) => {
-    const owner = ownerOf(name)
-    return owner?.run === runID && !alive(owner.pid)
-  }).map((name) => ({ path: join(tmpdir(), name), why: 'a folder whose process is gone' }))
+  const left: Left[] = entries()
+    .filter((name) => {
+      const owner = ownerOf(name)
+      return owner?.run === runID && !alive(owner.pid)
+    })
+    .map((name) => ({ path: join(tmpdir(), name), why: 'a folder whose process is gone' }))
   for (const p of processes()) {
     if (p.pid === process.pid) continue
     // the folder itself may be gone already (its process removed it on the way out): the name still says whose it was

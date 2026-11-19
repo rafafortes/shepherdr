@@ -2,7 +2,36 @@
 import { describe, expect, test } from 'bun:test'
 import { chmodSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { offers, agyFrom, claudeFrom, codexFrom, effortFor, effortsOf, findModel, helpLevels, installOf, knowsModels, modelArg, modelsOf, nearest, opencodeFrom, opencodeList, parseClaude, parseCodex, parsePi, piEnabled, piFrom, read, scopeModels, scopeOpencodeText, scopePatterns, scopePi, setModels, setOpencodeScope, stillHolds } from '../server/live/models.ts'
+import {
+  offers,
+  agyFrom,
+  claudeFrom,
+  codexFrom,
+  effortFor,
+  effortsOf,
+  findModel,
+  helpLevels,
+  installOf,
+  knowsModels,
+  modelArg,
+  modelsOf,
+  nearest,
+  opencodeFrom,
+  opencodeList,
+  parseClaude,
+  parseCodex,
+  parsePi,
+  piEnabled,
+  piFrom,
+  read,
+  scopeModels,
+  scopeOpencodeText,
+  scopePatterns,
+  scopePi,
+  setModels,
+  setOpencodeScope,
+  stillHolds,
+} from '../server/live/models.ts'
 import { opencodeConfigDir, opencodeDataDir } from '../server/live/opencode.ts'
 import { tmp } from './tmp.ts'
 
@@ -41,7 +70,13 @@ describe('reading what each CLI takes', () => {
   test("Codex's catalog: the models its picker lists, hidden ones still taken, levels lowest first", () => {
     const json = JSON.stringify({
       models: [
-        { slug: 'gpt-6-sol', display_name: 'GPT-6-Sol', visibility: 'list', default_reasoning_level: 'medium', supported_reasoning_levels: [{ effort: 'ultra' }, { effort: 'low' }, { effort: 'high' }] },
+        {
+          slug: 'gpt-6-sol',
+          display_name: 'GPT-6-Sol',
+          visibility: 'list',
+          default_reasoning_level: 'medium',
+          supported_reasoning_levels: [{ effort: 'ultra' }, { effort: 'low' }, { effort: 'high' }],
+        },
         { slug: 'auto-review', display_name: 'Auto Review', visibility: 'hide', supported_reasoning_levels: [{ effort: 'low' }] },
       ],
     })
@@ -52,7 +87,12 @@ describe('reading what each CLI takes', () => {
     expect(parseCodex('not json')).toBeUndefined()
   })
   test("pi's list: provider/model ids and names, levels only where it thinks", () => {
-    const list = ['provider  model            context  thinking  images', 'openai    gpt-6@x          1M       yes       yes', 'anthro    claude@x         1M       no        yes', 'other     gpt-6@x          1M       yes       no'].join('\n')
+    const list = [
+      'provider  model            context  thinking  images',
+      'openai    gpt-6@x          1M       yes       yes',
+      'anthro    claude@x         1M       no        yes',
+      'other     gpt-6@x          1M       yes       no',
+    ].join('\n')
     const help = '  --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh, max\n'
     expect(helpLevels(help, '--thinking')).toEqual(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
     const c = parsePi(list, help)!
@@ -289,12 +329,15 @@ describe('OpenCode: its own models and variants', () => {
       { id: 'old', providerID: 'opencode', name: 'Old', variants: [{ id: 'max' }], enabled: false },
     ]
     // a stand-in for `opencode api --standalone model.list` (and model.default): prints the answer and nothing else
-    writeFileSync(bin, `#!/bin/sh
+    writeFileSync(
+      bin,
+      `#!/bin/sh
 case "$*" in
   *model.default*) printf '%s' '${JSON.stringify({ data: data[0] })}' ;;
   *) printf '%s' '${JSON.stringify({ data })}' ;;
 esac
-`)
+`,
+    )
     chmodSync(bin, 0o755)
     const saved = process.env.SHEPHERDR_OPENCODE_BIN
     process.env.SHEPHERDR_OPENCODE_BIN = bin
@@ -316,10 +359,13 @@ esac
   })
 
   test('a model takes its own variants as its efforts, found by id or name; a model with none takes none', () => {
-    setModels('opencode', opencodeList([
-      { id: 'opencode/m', label: 'M', efforts: ['thinking', 'high'] },
-      { id: 'nvidia/g', label: 'G', efforts: [] },
-    ]))
+    setModels(
+      'opencode',
+      opencodeList([
+        { id: 'opencode/m', label: 'M', efforts: ['thinking', 'high'] },
+        { id: 'nvidia/g', label: 'G', efforts: [] },
+      ]),
+    )
     try {
       expect(effortsOf('opencode', 'opencode/m')).toEqual(['thinking', 'high'])
       expect(effortsOf('opencode', 'M')).toEqual(['thinking', 'high'])
@@ -420,8 +466,20 @@ describe("OpenCode's models scoped by opencode.models", () => {
 
 describe('which harnesses offer a provider', () => {
   test('offers: pi and OpenCode, by their own lists (not scoped), those with a model of the provider', () => {
-    setModels('pi', { models: [{ id: 'spark/qwen3', label: 'qwen3', efforts: [] }, { id: 'anthropic/claude-opus-5-5', label: 'x', efforts: [] }], efforts: [] })
-    setModels('opencode', { models: [{ id: 'opencode/minimax-m3', label: 'm', efforts: [] }, { id: 'anthropic/claude-haiku-5-5', label: 'h', efforts: [] }], efforts: [] })
+    setModels('pi', {
+      models: [
+        { id: 'spark/qwen3', label: 'qwen3', efforts: [] },
+        { id: 'anthropic/claude-opus-5-5', label: 'x', efforts: [] },
+      ],
+      efforts: [],
+    })
+    setModels('opencode', {
+      models: [
+        { id: 'opencode/minimax-m3', label: 'm', efforts: [] },
+        { id: 'anthropic/claude-haiku-5-5', label: 'h', efforts: [] },
+      ],
+      efforts: [],
+    })
     try {
       expect(offers('spark')).toEqual(['pi'])
       expect(offers('anthropic')).toEqual(['pi', 'opencode'])

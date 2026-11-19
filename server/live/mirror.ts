@@ -34,8 +34,8 @@ export class Mirror {
   follow(dirs: string[], files: string[]) {
     const kept: string[] = []
     const lines: string[] = []
-    for (const d of dirs) if (!this.dirs.has(d)) (this.dirs.add(d), kept.push(...this.kept(d, true)), lines.push(`D ${d}`))
-    for (const f of files) if (!this.files.has(f)) (this.files.add(f), kept.push(...this.kept(f, false)), lines.push(`F ${f}`))
+    for (const d of dirs) if (!this.dirs.has(d)) this.dirs.add(d), kept.push(...this.kept(d, true)), lines.push(`D ${d}`)
+    for (const f of files) if (!this.files.has(f)) this.files.add(f), kept.push(...this.kept(f, false)), lines.push(`F ${f}`)
     if (lines.length) this.write([...kept, ...lines])
   }
 
@@ -67,7 +67,9 @@ export class Mirror {
   start() {
     if (this.stopped || this.proc) return
     let p: Proc
-    try { p = this.run() } catch {
+    try {
+      p = this.run()
+    } catch {
       this.timer = setTimeout(() => this.start(), this.recovery.fail())
       return
     }
@@ -89,8 +91,8 @@ export class Mirror {
 
   private write(lines: string[]) {
     try {
-      ;(this.proc?.stdin as import("bun").FileSink | undefined)?.write(`${lines.join('\n')}\n`)
-      ;(this.proc?.stdin as import("bun").FileSink | undefined)?.flush()
+      ;(this.proc?.stdin as import('bun').FileSink | undefined)?.write(`${lines.join('\n')}\n`)
+      ;(this.proc?.stdin as import('bun').FileSink | undefined)?.flush()
     } catch {
       /* it starts again and is told everything */
     }
@@ -128,7 +130,10 @@ export class Mirror {
         want = null
         wrote = true
       }
-      if (wrote) { this.recovery.success(); this.onData() }
+      if (wrote) {
+        this.recovery.success()
+        this.onData()
+      }
     }
   }
 

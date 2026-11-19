@@ -89,7 +89,22 @@ describe('a provider run-out in a chat', () => {
 describe('the summary action', () => {
   test('reads the providers, their usage fed by the logs of the records, and the run-out in them', async () => {
     const log = join(process.env.SHEPHERDR_HOME!, 'T-905.jsonl')
-    writeFileSync(log, JSON.stringify({ type: 'message', id: 'sum-1', timestamp: new Date(Date.now() - HOUR).toISOString(), message: { role: 'assistant', provider: 'opencode-go', model: 'deepseek-v4.1-flash', content: [{ type: 'text', text: 'ok' }], stopReason: 'stop', usage: { totalTokens: 250, cost: { total: 0.002 } } } }) + '\n')
+    writeFileSync(
+      log,
+      JSON.stringify({
+        type: 'message',
+        id: 'sum-1',
+        timestamp: new Date(Date.now() - HOUR).toISOString(),
+        message: {
+          role: 'assistant',
+          provider: 'opencode-go',
+          model: 'deepseek-v4.1-flash',
+          content: [{ type: 'text', text: 'ok' }],
+          stopReason: 'stop',
+          usage: { totalTokens: 250, cost: { total: 0.002 } },
+        },
+      }) + '\n',
+    )
     agent('T-905/Agent', [log])
     type Sum = { at: number; providers: { provider: string; usage: { h24: { tokens: number; calls: number; cost?: number } }; runOuts: { out: boolean; count7d: number } }[]; warnings: unknown[] }
     const read = async () => (await src.act({ type: 'models-summary' })) as Sum

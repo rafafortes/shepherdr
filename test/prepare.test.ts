@@ -19,7 +19,9 @@ function fixture(mode = '') {
   writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: { example: '1.0.0' } }))
   writeFileSync(join(root, 'mode'), mode)
   const bun = join(root, 'bun')
-  writeFileSync(bun, `#!${process.execPath}\n
+  writeFileSync(
+    bun,
+    `#!${process.execPath}\n
 import { appendFileSync, existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 appendFileSync('calls', args.join(' ') + '\\n');
@@ -37,9 +39,10 @@ if (args[0] === 'install') {
   if (mode !== 'no screen') { mkdirSync('dist', { recursive: true }); writeFileSync('dist/index.html', 'screen'); }
 } else if (mode === 'nested missing' && !existsSync('installed')) { console.error('missing nested import'); process.exit(1);
 } else if (mode === 'server fails') { console.error('missing server import'); process.exit(1); }
-`)
+`,
+  )
   chmodSync(bun, 0o755)
-  const calls = () => existsSync(join(root, 'calls')) ? readFileSync(join(root, 'calls'), 'utf8') : ''
+  const calls = () => (existsSync(join(root, 'calls')) ? readFileSync(join(root, 'calls'), 'utf8') : '')
   return { root, bun, calls }
 }
 
@@ -75,11 +78,12 @@ for (const [mode, message] of [
   ['build fails', 'broken screen'],
   ['no screen', 'the build failed'],
   ['server fails', "server code doesn't load"],
-]) test(mode + ' stops preparation clearly', async () => {
-  const f = fixture(mode)
-  expect(await prepare(f.root, f.bun)).toContain(message)
-  if (mode.startsWith('install')) expect(f.calls()).toBe('install --frozen-lockfile\n')
-})
+])
+  test(mode + ' stops preparation clearly', async () => {
+    const f = fixture(mode)
+    expect(await prepare(f.root, f.bun)).toContain(message)
+    if (mode.startsWith('install')) expect(f.calls()).toBe('install --frozen-lockfile\n')
+  })
 
 test('a missing installer is a clear failure', async () => {
   const f = fixture()
@@ -101,9 +105,12 @@ test('failed preparation leaves an existing server answering and reports failure
   // Real lifecycle command with a scratch checkout; a separate disposable process represents the old server.
   writeFileSync(join(f.root, 'package.json'), JSON.stringify({ version: 'new', scripts: { build: 'echo broken-checkout >&2; exit 1' } }))
   const server = join(f.root, 'old-server.ts')
-  writeFileSync(server, `const s = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
+  writeFileSync(
+    server,
+    `const s = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
     return Response.json(req.url.endsWith('/api/version') ? { root: '/old-checkout', version: 'old', supervisor: process.pid } : {});
-  } }); console.log(s.port);`)
+  } }); console.log(s.port);`,
+  )
   const old = Bun.spawn([process.execPath, server], { stdout: 'pipe', stderr: 'pipe' })
   try {
     const reader = old.stdout.getReader()
@@ -111,9 +118,17 @@ test('failed preparation leaves an existing server answering and reports failure
     const port = Number(new TextDecoder().decode(first.value).trim())
     reader.releaseLock()
     const command = Bun.spawn([process.execPath, join(import.meta.dir, '../scripts/plugin.ts'), 'start'], {
-      env: { ...process.env, HOME: f.root, SHEPHERDR_HOME: join(f.root, 'home'), HERDR_PLUGIN_ROOT: f.root,
-        HERDR_PLUGIN_STATE_DIR: join(f.root, 'state'), HERDR_PLUGIN_ID: '', SHEPHERDR_PORT: String(port) },
-      stdout: 'pipe', stderr: 'pipe',
+      env: {
+        ...process.env,
+        HOME: f.root,
+        SHEPHERDR_HOME: join(f.root, 'home'),
+        HERDR_PLUGIN_ROOT: f.root,
+        HERDR_PLUGIN_STATE_DIR: join(f.root, 'state'),
+        HERDR_PLUGIN_ID: '',
+        SHEPHERDR_PORT: String(port),
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
     })
     const [code, stderr] = await Promise.all([command.exited, new Response(command.stderr).text()])
     expect(code).toBe(1)
@@ -139,9 +154,12 @@ async function busyWorld(sameCheckout: boolean) {
   mkdirSync(join(f.root, 'server'))
   writeFileSync(join(f.root, 'server/main.ts'), 'export {}\n')
   mkdirSync(join(f.root, 'scripts'))
-  writeFileSync(join(f.root, 'scripts/supervise.ts'), `Bun.serve({ hostname: '127.0.0.1', port: Number(process.env.SHEPHERDR_PORT), fetch() {
+  writeFileSync(
+    join(f.root, 'scripts/supervise.ts'),
+    `Bun.serve({ hostname: '127.0.0.1', port: Number(process.env.SHEPHERDR_PORT), fetch() {
     return Response.json({ root: ${JSON.stringify(f.root)}, version: 'new', supervisor: process.pid });
-  } });\n`)
+  } });\n`,
+  )
   // holds the port and never answers; stops a second after SIGTERM
   const holder = `const l = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } }); console.log(l.port);
 process.on('SIGTERM', () => setTimeout(() => process.exit(0), 1000)); setInterval(() => {}, 1000);\n`
@@ -173,9 +191,17 @@ process.on('SIGTERM', () => setTimeout(() => process.exit(0), 1000)); setInterva
   writeFileSync(join(f.root, 'state/supervisor.pid'), String(old.pid))
   const start = () =>
     Bun.spawn([process.execPath, join(import.meta.dir, '../scripts/plugin.ts'), 'start'], {
-      env: { ...process.env, HOME: f.root, SHEPHERDR_HOME: join(f.root, 'home'), HERDR_PLUGIN_ROOT: f.root,
-        HERDR_PLUGIN_STATE_DIR: join(f.root, 'state'), HERDR_PLUGIN_ID: '', SHEPHERDR_PORT: String(port) },
-      stdout: 'pipe', stderr: 'pipe',
+      env: {
+        ...process.env,
+        HOME: f.root,
+        SHEPHERDR_HOME: join(f.root, 'home'),
+        HERDR_PLUGIN_ROOT: f.root,
+        HERDR_PLUGIN_STATE_DIR: join(f.root, 'state'),
+        HERDR_PLUGIN_ID: '',
+        SHEPHERDR_PORT: String(port),
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
     })
   return { f, old, port, start }
 }

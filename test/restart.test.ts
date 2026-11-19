@@ -88,7 +88,9 @@ describe('visible launch settings and supported restart choices', () => {
       expect(info.clis[0]!.models).toContainEqual({ id: old.id, label: old.label, efforts: old.efforts, defaultEffort: 'high' })
       expect(info.clis[0]!.models!.find((m) => m.id === 'claude-fable-5-1')?.defaultEffort).toBe('high')
       expect(harnessProblem({ kind: 'claude', model: old.id })).toBeUndefined()
-    } finally { setModels('claude', undefined) }
+    } finally {
+      setModels('claude', undefined)
+    }
   })
   test('unavailable models, cross-CLI models, and unsupported effort are refused instead of rounded', () => {
     expect(harnessProblem({ kind: 'codex', model: 'retired-model' })).toContain('no available model')

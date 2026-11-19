@@ -38,7 +38,21 @@ export function limitValue(mode: LimitMode, n: string, max: number): string {
 
 /** the three choices. `onChange(value, final)`: a radio is final at once, a typed number when it is left (Enter or blur), so a
  *  Settings row saves a number once and not per key; a draft (the cap editor) takes every change as it comes */
-export function LimitChoice({ label, value, max, zero = '0 · starts none', onChange, phone = false }: { label: string; value: string; max: number; zero?: string; onChange: (value: string, final: boolean) => void; phone?: boolean }) {
+export function LimitChoice({
+  label,
+  value,
+  max,
+  zero = '0 · starts none',
+  onChange,
+  phone = false,
+}: {
+  label: string
+  value: string
+  max: number
+  zero?: string
+  onChange: (value: string, final: boolean) => void
+  phone?: boolean
+}) {
   const id = useId()
   const [mode, setMode] = useState<LimitMode>(() => limitMode(value).mode)
   const [n, setN] = useState(() => limitMode(value).n)

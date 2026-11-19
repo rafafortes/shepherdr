@@ -117,9 +117,10 @@ export function modelsMatrix(s: Settings, machine: { host: string; name: string 
   })
   const catalog: Record<string, MatrixCatalog> = {}
   // keyed by the CLI's name, as a cell's value and the choices of its row are
-  for (const x of slots) for (const c of x.clis) {
-    const kind = kindOf(c)
-    if (kind && !catalog[CLI_NAME[kind] ?? kind]) catalog[CLI_NAME[kind] ?? kind] = catalogOf(s, kind)
-  }
+  for (const x of slots)
+    for (const c of x.clis) {
+      const kind = kindOf(c)
+      if (kind && !catalog[CLI_NAME[kind] ?? kind]) catalog[CLI_NAME[kind] ?? kind] = catalogOf(s, kind)
+    }
   return { machine: { id: placeId.machine(machine.host), name: machine.name }, slots, plain, rows, catalog }
 }

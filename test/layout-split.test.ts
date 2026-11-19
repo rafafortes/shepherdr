@@ -28,7 +28,11 @@ describe.skipIf(!browser)('split view', () => {
     expect(await current()).toBe('gtm')
 
     // a task Ctrl-clicked in the list: a third pane with its own chat and box
-    await page.getByRole('region', { name: 'Tasks', exact: true }).getByRole('button', { name: /GTM-14/ }).first().click({ modifiers: ['Control'] })
+    await page
+      .getByRole('region', { name: 'Tasks', exact: true })
+      .getByRole('button', { name: /GTM-14/ })
+      .first()
+      .click({ modifiers: ['Control'] })
     await page.getByRole('textbox', { name: 'Message GTM-14…' }).waitFor()
     expect(await panes.count()).toBe(3)
 

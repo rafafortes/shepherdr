@@ -35,12 +35,23 @@ function summaryOf(machine: Record<string, string>) {
   const s = new Settings({ everywhere: {}, machine, spaces: {} })
   // as the server reads it: the cap patterns of the machine and its spaces, the providers and models they name
   const capped = entryPatterns(s, ['~'])
-  const input: SummaryInput = { now: NOW, settings: s, host: HOST, spaces: SPACES, rows: [placeId.machine(HOST)], usage: new UsageLedger(tmp('opencode-scope-lists'), true), agents: [], tasks: [], watch: [], capped }
+  const input: SummaryInput = {
+    now: NOW,
+    settings: s,
+    host: HOST,
+    spaces: SPACES,
+    rows: [placeId.machine(HOST)],
+    usage: new UsageLedger(tmp('opencode-scope-lists'), true),
+    agents: [],
+    tasks: [],
+    watch: [],
+    capped,
+  }
   return { s, sum: modelsSummary(input), input }
 }
 
 describe('opencode.models in the lists a machine shows', () => {
-  test("Other providers and their models follow the setting; a model with a cap shows where it is filtered out, and its provider is in use", () => {
+  test('Other providers and their models follow the setting; a model with a cap shows where it is filtered out, and its provider is in use', () => {
     setModels('opencode', list)
     try {
       scopeOpencodeText('*-free')
@@ -66,7 +77,7 @@ describe('opencode.models in the lists a machine shows', () => {
     }
   })
 
-  test("the + column and the Models catalog offer the models the setting keeps, plus the capped one; the others are not offered", () => {
+  test('the + column and the Models catalog offer the models the setting keeps, plus the capped one; the others are not offered', () => {
     setModels('opencode', list)
     try {
       scopeOpencodeText('*-free')

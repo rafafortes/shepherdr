@@ -17,7 +17,10 @@ export function processes(): Proc[] {
       try {
         const status = readFileSync(join('/proc', name, 'status'), 'utf8')
         if (me !== null && !new RegExp(`^Uid:\\s*${me}\\b`, 'm').test(status)) continue
-        const cmd = readFileSync(join('/proc', name, 'cmdline'), 'utf8').split('\0').filter(Boolean).join(' ')
+        const cmd = readFileSync(join('/proc', name, 'cmdline'), 'utf8')
+          .split('\0')
+          .filter(Boolean)
+          .join(' ')
         let cwd = ''
         try {
           cwd = readlinkSync(join('/proc', name, 'cwd'))
@@ -34,7 +37,13 @@ export function processes(): Proc[] {
   // coverage-exempt: this host is Linux; the fallback is for a platform without /proc
   const ps = Bun.spawnSync(['ps', '-axo', 'pid=,command='], { stdout: 'pipe', stderr: 'ignore' })
   // coverage-exempt: same
-  return ps.stdout.toString().split('\n').flatMap((line) => { const m = line.match(/^\s*(\d+)\s+(.*)$/); return m ? [{ pid: Number(m[1]), cmd: m[2], cwd: '' }] : [] })
+  return ps.stdout
+    .toString()
+    .split('\n')
+    .flatMap((line) => {
+      const m = line.match(/^\s*(\d+)\s+(.*)$/)
+      return m ? [{ pid: Number(m[1]), cmd: m[2], cwd: '' }] : []
+    })
 }
 
 /** the parent of each process: a gate's `timeout` wrapper leads a process group of its own, so a kill of just the
@@ -57,7 +66,10 @@ function parents(): Map<number, number> {
   // coverage-exempt: this host is Linux; the fallback is for a platform without /proc
   const ps = Bun.spawnSync(['ps', '-axo', 'pid=,ppid='], { stdout: 'pipe', stderr: 'ignore' })
   // coverage-exempt: same
-  for (const line of ps.stdout.toString().split('\n')) { const m = line.match(/^\s*(\d+)\s+(\d+)/); if (m) out.set(Number(m[1]), Number(m[2])) }
+  for (const line of ps.stdout.toString().split('\n')) {
+    const m = line.match(/^\s*(\d+)\s+(\d+)/)
+    if (m) out.set(Number(m[1]), Number(m[2]))
+  }
   // coverage-exempt: same
   return out
 }

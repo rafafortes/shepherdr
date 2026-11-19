@@ -143,7 +143,11 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
       expect(names.slice(0, 8)).toEqual(['Everywhere', 'mac', 'home · mac', 'lilla-varlden · mac', 'vm-str', 'home · vm-str', 'gtm · vm-str', 'herdr-projects · vm-str'])
       expect(names.slice(-8)).toEqual(more.map((n) => `${n} · vm-str`))
       // each name after its place's icon, as the sidebar's (SHE-207)
-      const textX = (name: string) => menu.getByRole('menuitemradio', { name, exact: true }).locator('span span span').evaluate((el) => el.getBoundingClientRect().left)
+      const textX = (name: string) =>
+        menu
+          .getByRole('menuitemradio', { name, exact: true })
+          .locator('span span span')
+          .evaluate((el) => el.getBoundingClientRect().left)
       const [allX, machineX, projectX] = [await textX('Everywhere'), await textX('vm-str'), await textX('gtm · vm-str')]
       expect(machineX).toBeGreaterThan(allX)
       expect(projectX).toBeGreaterThan(machineX)
@@ -212,7 +216,18 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
     await pilot.waitFor()
     const text = (await pilot.textContent())!
     // the rule in words with its next runs, never as written; the news that wakes it at once
-    for (const words of ['Heartbeat', 'Every 30 minutes (Stockholm)', 'Next: ', 'Wakes at once on', 'All news', 'Ask the coordinator for anything else', 'Checklist', 'HEARTBEAT.md', 'Write it in the checklist']) expect(text).toContain(words)
+    for (const words of [
+      'Heartbeat',
+      'Every 30 minutes (Stockholm)',
+      'Next: ',
+      'Wakes at once on',
+      'All news',
+      'Ask the coordinator for anything else',
+      'Checklist',
+      'HEARTBEAT.md',
+      'Write it in the checklist',
+    ])
+      expect(text).toContain(words)
     for (const words of ['FREQ=', 'RRULE', 'Quiet hours', 'Heartbeat every', 'Max new tasks']) expect(text).not.toContain(words)
     // a preset: picked, it is the rule in words at once, set here with a Reset back to the default
     const presets = pilot.getByRole('group', { name: 'Heartbeat' })
@@ -331,7 +346,12 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
     // a reload paints dark from the start: the page's first script sets it, before the app's code
     const seen: string[] = []
     await page.exposeFunction('seenTheme', (t: string) => seen.push(t))
-    await page.addInitScript(() => document.addEventListener('readystatechange', () => document.readyState === 'interactive' && (window as unknown as { seenTheme: (t: string) => void }).seenTheme(document.documentElement.dataset.theme ?? '')))
+    await page.addInitScript(() =>
+      document.addEventListener(
+        'readystatechange',
+        () => document.readyState === 'interactive' && (window as unknown as { seenTheme: (t: string) => void }).seenTheme(document.documentElement.dataset.theme ?? ''),
+      ),
+    )
     await page.reload()
     await page.getByRole('button', { name: 'Places' }).waitFor()
     expect(seen[0]).toBe('dark')
@@ -347,7 +367,12 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
     await page.reload()
     await page.emulateMedia({ colorScheme: 'dark' })
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark')
-    expect(await page.locator('iframe').first().evaluate((f: HTMLIFrameElement) => f.src)).toContain('&theme=')
+    expect(
+      await page
+        .locator('iframe')
+        .first()
+        .evaluate((f: HTMLIFrameElement) => f.src),
+    ).toContain('&theme=')
     await ctx.close()
   }, 30_000)
 })

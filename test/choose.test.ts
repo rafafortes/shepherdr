@@ -35,12 +35,26 @@ describe('the cap-aware choice: the chain in order', () => {
 
   test('the primary and backup 1 are full: backup 2 starts', () => {
     const c = pick([opt('primary', SPARK), opt('b1', CODE), opt('b2', CODEX)], { machine: [e('spark', 1), e('commandcode', 1)], runs: [run(SPARK), run(CODE)] })
-    expect(c).toMatchObject({ harness: 'b2', index: 2, skipped: [{ harness: 'primary', why: 'full' }, { harness: 'b1', why: 'full', name: 'commandcode' }] })
+    expect(c).toMatchObject({
+      harness: 'b2',
+      index: 2,
+      skipped: [
+        { harness: 'primary', why: 'full' },
+        { harness: 'b1', why: 'full', name: 'commandcode' },
+      ],
+    })
   })
 
   test('a backup out of quota is skipped for the next one, whatever its caps', () => {
     const c = pick([opt('primary', SPARK), opt('b1', CODE, { until: '17:00' }), opt('b2', CODEX)], { machine: [e('spark', 1)], runs: [run(SPARK)] })
-    expect(c).toMatchObject({ harness: 'b2', index: 2, skipped: [{ harness: 'primary', why: 'full' }, { harness: 'b1', why: 'out', name: 'commandcode', until: '17:00' }] })
+    expect(c).toMatchObject({
+      harness: 'b2',
+      index: 2,
+      skipped: [
+        { harness: 'primary', why: 'full' },
+        { harness: 'b1', why: 'out', name: 'commandcode', until: '17:00' },
+      ],
+    })
   })
 
   test('an out primary is passed over the same way (its backup starts on a free slot)', () => {
@@ -93,7 +107,7 @@ describe('the cap-aware choice: the two scopes', () => {
     expect(pick([opt('p', SPARK)], { machine: [e('spark', 2)], own: [e('spark', 2)], runs, space: 'c' })).toMatchObject({ wait: [{ cap: { scope: 'machine' } }] })
   })
 
-  test('the space sub-limit is the space\'s own value: with none of its own, the machine entry is all there is', () => {
+  test("the space sub-limit is the space's own value: with none of its own, the machine entry is all there is", () => {
     expect(pick([opt('p', SPARK)], { machine: [e('spark', 1)], own: [], runs: [run(SPARK)] })).toMatchObject({ wait: [{ cap: { scope: 'machine' } }] })
   })
 })
@@ -222,7 +236,9 @@ describe('0 blocks a model: skipped as blocked, never waited for', () => {
   test('the words: blocked reads as blocked · 0 allowed in a wait, and in one short line as blocked', () => {
     const c = pick([opt('primary', SPARK), opt('backup', CODE)], { machine: [e('spark', 0), e('commandcode', 1)], runs: [run(CODE)] })
     if (!('skipped' in c) && !('wait' in c)) throw new Error('expected a wait')
-    expect(waitWords([{ harness: 'a', why: 'blocked', name: 'spark', cap: { scope: 'space', space: 'app', count: 0, max: 0 } }], { words: (h) => h, shown: (s) => `${s}!` })).toBe('a in app! (blocked · 0 allowed)')
+    expect(waitWords([{ harness: 'a', why: 'blocked', name: 'spark', cap: { scope: 'space', space: 'app', count: 0, max: 0 } }], { words: (h) => h, shown: (s) => `${s}!` })).toBe(
+      'a in app! (blocked · 0 allowed)',
+    )
     expect(waitWords([{ harness: 'a', why: 'blocked', name: 'spark', cap: { scope: 'machine', count: 0, max: 0 } }], { words: (h) => h })).toBe('a (blocked · 0 allowed)')
     expect(waitShort([{ harness: 'a', why: 'blocked', name: SPARK, cap: { scope: 'machine', count: 0, max: 0 } }])).toBe('qwen3.8-flash-next-mlx4-mtp-tensorfold blocked')
     expect(waitShort([{ harness: 'a', why: 'blocked', name: 'spark', cap: { scope: 'space', space: 'app', count: 0, max: 0 } }], (s) => `${s}!`)).toBe('spark blocked in app!')

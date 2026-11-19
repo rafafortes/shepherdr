@@ -189,7 +189,8 @@ export async function pullRequest(wt: string, branch: string): Promise<{ pr: Pul
   const remote = await git(wt, 'remote', 'get-url', 'origin')
   const gh = remote.ok ? ghRepo(remote.out) : null
   if (!gh) return { pr: null, why: 'This space has no GitHub remote.' }
-  const view = (fields: string) => sh(['gh', 'pr', 'view', branch, '-R', gh.repo, '--json', `number,title,state,isDraft,url,${fields}`], wt, { env: { GH_HOST: gh.host }, timeoutMs: 15_000 }).catch(() => null)
+  const view = (fields: string) =>
+    sh(['gh', 'pr', 'view', branch, '-R', gh.repo, '--json', `number,title,state,isDraft,url,${fields}`], wt, { env: { GH_HOST: gh.host }, timeoutMs: 15_000 }).catch(() => null)
   let r = await view('statusCheckRollup')
   // a token that can't read checks: the pull request without them, and its Actions jobs instead
   const actions = !!r && !r.ok && noChecksAccess(r.err)
@@ -199,5 +200,7 @@ export async function pullRequest(wt: string, branch: string): Promise<{ pr: Pul
   const j = JSON.parse(r.out) as { number: number; title: string; state: string; isDraft: boolean; url: string; statusCheckRollup?: Rollup[]; headRefOid?: string }
   const state = j.state === 'MERGED' ? 'merged' : j.state === 'CLOSED' ? 'closed' : j.isDraft ? 'draft' : 'open'
   const jobs = actions && j.headRefOid ? await actionJobs(gh, wt, j.headRefOid) : null
-  return { pr: { number: j.number, title: j.title, state, url: j.url, checks: jobs ? jobs.map((c) => ({ name: c.name, state: BUCKET[c.bucket] ?? 'fail', url: c.link })) : checksOf(j.statusCheckRollup) } }
+  return {
+    pr: { number: j.number, title: j.title, state, url: j.url, checks: jobs ? jobs.map((c) => ({ name: c.name, state: BUCKET[c.bucket] ?? 'fail', url: c.link })) : checksOf(j.statusCheckRollup) },
+  }
 }

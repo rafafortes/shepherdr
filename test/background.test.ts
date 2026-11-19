@@ -30,7 +30,7 @@ const REVIEWER = screen(
   ['✻ Sautéed for 19m 18s · done 10:04 PM · 1 shell, 1 monitor still running'],
   '  ⏵⏵ bypass permissions on · 1 shell, 1 monitor · ← 4 agents · ↓ to manage',
   ['  ● main', '  ◯ general-purpose  Waiting on Bun fetch timeout probe                                                         3m 14s · ↓ 104.7k tokens'],
-  '❯ ok, merge when the review\'s done',
+  "❯ ok, merge when the review's done",
 )
 
 /** it launched a background agent and ended its turn at once */
@@ -42,7 +42,15 @@ const WAITING_AGENT = screen(
 
 /** the agent finished, woke it, and it answered: the old waiting line is still up in the scrollback */
 const WOKE_AND_DONE = screen(
-  ['✻ Waiting for 1 background agent to finish', '', '● Agent "Run python sleep 100 and reply ok" finished · 1m 43s', '', '● The agent finished and replied "ok."', '', '✻ Brewed for 1m 46s · done 10:13 PM'],
+  [
+    '✻ Waiting for 1 background agent to finish',
+    '',
+    '● Agent "Run python sleep 100 and reply ok" finished · 1m 43s',
+    '',
+    '● The agent finished and replied "ok."',
+    '',
+    '✻ Brewed for 1m 46s · done 10:13 PM',
+  ],
   '  ⏵⏵ bypass permissions on (shift+tab to cycle) · /tasks to see subagents · ← 4 agents',
 )
 
@@ -52,11 +60,14 @@ const SHELLS = screen(
   '  ⏵⏵ bypass permissions on · 2 shells · ← 4 agents · ↓ to manage',
 )
 
-const MONITOR = screen(['  ⎿  Monitor started · task b7csavm37 · timeout 60s', '', '● waiting', '', '✻ Crunched for 3s · done 10:14 PM · 1 monitor still running'], '  ⏵⏵ bypass permissions on · 1 monitor · ← 4 agents · ↓ to manage')
+const MONITOR = screen(
+  ['  ⎿  Monitor started · task b7csavm37 · timeout 60s', '', '● waiting', '', '✻ Crunched for 3s · done 10:14 PM · 1 monitor still running'],
+  '  ⏵⏵ bypass permissions on · 1 monitor · ← 4 agents · ↓ to manage',
+)
 
 /** SHE-63: its turn ended with a question and nothing in the background */
 const NOTHING = screen(
-  ['  writing them each time. That way they\'re never forgotten and always match Settings.', '', '✻ Sautéed for 5m 24s · done 10:06 PM'],
+  ["  writing them each time. That way they're never forgotten and always match Settings.", '', '✻ Sautéed for 5m 24s · done 10:06 PM'],
   '  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 4 agents',
   [],
   '❯ Yes, build it',
@@ -67,10 +78,7 @@ const AGY_RULE = '─'.repeat(78)
 const agyScreen = (rows: string[], footer: string) => ['', AGY_RULE, '>', AGY_RULE, ...rows, footer].join('\n')
 const AGY_FOOT = '? for shortcuts                                         Gemini 4 Hydrogen · high'
 const AGY_TASKS = '? for shortcuts                                         Gemini 4 Hydrogen · high · 2 task(s) · /tasks'
-const AGY_ROWS = [
-  '  ● [06:57:43] SHEPHERDR_CHAT="WEB-108/Agent" /home/…/bin/shepherdr review WEB-108 running',
-  '  ● [06:57:31] git add CLAUDE.md && git commit --amend --no-edit && … running',
-]
+const AGY_ROWS = ['  ● [06:57:43] SHEPHERDR_CHAT="WEB-108/Agent" /home/…/bin/shepherdr review WEB-108 running', '  ● [06:57:31] git add CLAUDE.md && git commit --amend --no-edit && … running']
 /** the agent's turn ended, and a test run of its own runs in the background (its row cut at the screen's width) */
 const AGY_RUNNING = agyScreen([AGY_ROWS[0], AGY_ROWS[1].replace(' running', '')], AGY_TASKS)
 const AGY_IDLE = agyScreen([], AGY_FOOT)
@@ -164,7 +172,10 @@ describe("Claude Code's session file", () => {
       mkdirSync(real, { recursive: true })
       symlinkSync(real, link)
       const me = process.pid
-      writeFileSync(join(dir, `${me}.json`), JSON.stringify({ pid: me, version: '2.1.310', peerProtocol: 1, kind: 'interactive', name: 'x', sessionId: 'sym-ses', cwd: real, status: 'busy', updatedAt: 1792966090908 }))
+      writeFileSync(
+        join(dir, `${me}.json`),
+        JSON.stringify({ pid: me, version: '2.1.310', peerProtocol: 1, kind: 'interactive', name: 'x', sessionId: 'sym-ses', cwd: real, status: 'busy', updatedAt: 1792966090908 }),
+      )
       const s = new ClaudeSessions(() => dir)
       // callers pass the candidate cwds (the remembered link and the real path) as agents.logCwds does
       expect(s.status(undefined, [link, real], 1_000_000)).toBe('busy')
@@ -191,7 +202,16 @@ describe('an agent whose turn ended', () => {
       const agent = (name: string, pane_id: string, kind = 'claude') => ({ agent: kind, agent_status: 'done', name, pane_id, tab_id: 't', workspace_id: 'w', cwd: null, interactive_ready: true })
       const result =
         method === 'agent.list'
-          ? { agents: [agent('shep-t-1', 'p1'), agent('shep-t-2', 'p2'), agent('shep-t-3', 'p3', 'agy'), agent('shep-t-4', 'p4', 'opencode'), agent('shep-t-5', 'p5', 'codex'), agent('shep-t-6', 'p6', 'pi')] }
+          ? {
+              agents: [
+                agent('shep-t-1', 'p1'),
+                agent('shep-t-2', 'p2'),
+                agent('shep-t-3', 'p3', 'agy'),
+                agent('shep-t-4', 'p4', 'opencode'),
+                agent('shep-t-5', 'p5', 'codex'),
+                agent('shep-t-6', 'p6', 'pi'),
+              ],
+            }
           : method === 'pane.read'
             ? { read: { text: screens[params.pane_id] ?? '' } }
             : {}
@@ -202,7 +222,8 @@ describe('an agent whose turn ended', () => {
 
   const sessions = join(process.env.CLAUDE_CONFIG_DIR!, 'sessions')
   mkdirSync(sessions, { recursive: true })
-  const session = (status: string) => writeFileSync(join(sessions, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 's1', cwd: '/w/1', kind: 'interactive', status, updatedAt: Date.now() }))
+  const session = (status: string) =>
+    writeFileSync(join(sessions, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 's1', cwd: '/w/1', kind: 'interactive', status, updatedAt: Date.now() }))
   const rec = (key: string, name: string, cwd: string, sessionId: string) => ({ key, name, kind: 'claude', cwd, workspace: 'w', logs: [], sessionId, started: 0 })
   writeJson('agents.json', {
     'T-1/Agent': rec('T-1/Agent', 'shep-t-1', '/w/1', 's1'),
@@ -260,7 +281,10 @@ describe('an agent whose turn ended', () => {
   /** its pty daemon: a child of its server, as `/proc` shows one */
   const ptyDaemon = () => {
     mkdirSync(join(proc, String(DAEMON)), { recursive: true })
-    writeFileSync(join(proc, String(DAEMON), 'cmdline'), `${['/home/u/.cache/opencode/bin/opencode-pty/0.5.2-bc9cb0fa/opencode-pty', 'daemon', '--runtime-dir', '/home/u/.local/state/opencode/pty'].join('\0')}\0`)
+    writeFileSync(
+      join(proc, String(DAEMON), 'cmdline'),
+      `${['/home/u/.cache/opencode/bin/opencode-pty/0.5.2-bc9cb0fa/opencode-pty', 'daemon', '--runtime-dir', '/home/u/.local/state/opencode/pty'].join('\0')}\0`,
+    )
     writeFileSync(join(proc, String(DAEMON), 'environ'), 'HOME=/h\0')
     writeFileSync(join(proc, String(DAEMON), 'stat'), `${DAEMON} (opencode-pty) S 1 0 0 0\n`)
   }
@@ -355,7 +379,7 @@ describe('an agent whose turn ended', () => {
     a.stop()
   })
 
-  test("shells alone keep it at work only so long: a server it started for you never wakes it", async () => {
+  test('shells alone keep it at work only so long: a server it started for you never wakes it', async () => {
     session('shell')
     const a = new Agents()
     await a.refresh()
@@ -374,7 +398,10 @@ describe('an agent whose turn ended', () => {
   test('SHE-90: a subagent paused on shells of its own keeps it at work past the shells alone, and so does a session file that says busy', async () => {
     // its subagent stopped to wait on a shell of its own; it ended its turn with only <no-reply>. Stop lists only the
     // subagent's shell, and the session file says "shell" (a live re-run of SHE-90's case)
-    const inputs: any[] = readFileSync(join(import.meta.dir, 'samples', 'claude-paused.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+    const inputs: any[] = readFileSync(join(import.meta.dir, 'samples', 'claude-paused.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
     const events = join(tmp('bg-hooks'), 'e.jsonl')
     inputs.slice(0, 4).forEach((input, i) => record(events, input, Date.now() - 1000 + i))
     session('shell')
@@ -412,12 +439,28 @@ describe('an agent whose turn ended', () => {
     const stop = (tasks: object[]) => {
       const events = join(tmp('bg-hooks'), 'e.jsonl')
       record(events, { hook_event_name: 'UserPromptSubmit', prompt: 'what do you need?', session_id: 's1' }, Date.now() - 3000)
-      record(events, { hook_event_name: 'Stop', last_assistant_message: "Nothing from you right now. I'm only waiting on the final test run and Codex's last review pass.", background_tasks: tasks }, Date.now() - 1000)
+      record(
+        events,
+        { hook_event_name: 'Stop', last_assistant_message: "Nothing from you right now. I'm only waiting on the final test run and Codex's last review pass.", background_tasks: tasks },
+        Date.now() - 1000,
+      )
       return events
     }
     const REV4 = [
-      { id: 'bs5jno4fa', type: 'shell', status: 'running', description: 'Wait for third Codex review to finish', command: 'while pgrep -f "codex review --base main" >/dev/null; do sleep 15; done; tail -c 2500 /tmp/codex-review3.txt' },
-      { id: 'b8g1hkavz', type: 'shell', status: 'running', description: 'Rerun acceptance tests then Codex review', command: 'node --test test/acceptance.test.mjs > /tmp/accept2.log 2>&1; codex review --base main > /tmp/codex-review5.txt 2>&1' },
+      {
+        id: 'bs5jno4fa',
+        type: 'shell',
+        status: 'running',
+        description: 'Wait for third Codex review to finish',
+        command: 'while pgrep -f "codex review --base main" >/dev/null; do sleep 15; done; tail -c 2500 /tmp/codex-review3.txt',
+      },
+      {
+        id: 'b8g1hkavz',
+        type: 'shell',
+        status: 'running',
+        description: 'Rerun acceptance tests then Codex review',
+        command: 'node --test test/acceptance.test.mjs > /tmp/accept2.log 2>&1; codex review --base main > /tmp/codex-review5.txt 2>&1',
+      },
     ]
     session('shell')
     const a = new Agents()
@@ -450,7 +493,11 @@ describe('an agent whose turn ended', () => {
     const events = join(tmp('bg-hooks'), 'e.jsonl')
     const turn = (at: number) => {
       record(events, { hook_event_name: 'UserPromptSubmit', prompt: 'status?', session_id: 's1' }, at)
-      record(events, { hook_event_name: 'Stop', last_assistant_message: 'Still waiting on the tests.', background_tasks: [{ id: 'b1', type: 'shell', status: 'running', command: 'bun test' }] }, at + 1)
+      record(
+        events,
+        { hook_event_name: 'Stop', last_assistant_message: 'Still waiting on the tests.', background_tasks: [{ id: 'b1', type: 'shell', status: 'running', command: 'bun test' }] },
+        at + 1,
+      )
     }
     turn(Date.now() - 5000)
     session('shell')
@@ -623,7 +670,11 @@ describe('headless reviewers', () => {
     expect(r.runs('T-1/Agent')).toBe(true)
     expect(r.runs('T-2/Agent')).toBe(false)
     expect(r.runs('T-3/Agent')).toBe(false)
-    expect(new Procs('/no/proc/here', () => { throw new Error('no ps') }).runs('T-1/Agent')).toBe(false)
+    expect(
+      new Procs('/no/proc/here', () => {
+        throw new Error('no ps')
+      }).runs('T-1/Agent'),
+    ).toBe(false)
   })
 })
 

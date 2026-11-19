@@ -26,7 +26,38 @@ import clsx from 'clsx'
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
 import { act, counts, definePlugin, getState, goPlace, manyMachines, openSplit, placeOf, removeSpace, setUI, splitClick, useSnap, useUI, type Pane, type UI } from '@client/kernel.ts'
 import { and, Dialog, RowMenu, RowMenuButton, useRowMenu } from '@client/rowmenu.tsx'
-import { BackIcon, BellIcon, BellSlashIcon, AttentionBadge, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
+import {
+  BackIcon,
+  BellIcon,
+  BellSlashIcon,
+  AttentionBadge,
+  DeleteIcon,
+  DownIcon,
+  HashIcon,
+  ic,
+  IconButton,
+  List,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  MenuSetting,
+  Meta,
+  NextIcon,
+  PinnedIcon,
+  PinTaskIcon,
+  PlusIcon,
+  Primary,
+  ReadIcon,
+  RemoveProjectIcon,
+  RenameIcon,
+  rowClass,
+  RowText,
+  SectionIcon,
+  ServerIcon,
+  SplitIcon,
+  TasksIcon,
+  UnpinIcon,
+} from '@client/ui.tsx'
 import { MarkRead, markPlaceRead, muted, placeUnread } from '@client/unread.ts'
 import { RestartAllItem, RestartItem } from '@client/restart.tsx'
 import { NOTIFY, NOTIFY_KEY, notifyOf, notifyRow } from '@shared/alerts.ts'
@@ -300,7 +331,17 @@ const indent = {
 /** a section's heading (Pinned, a machine): its chevron, its icon (Pinned's pin; a machine's emoji or server) and its word. A tap anywhere on it folds
  *  what is under it, as its chevron does; it goes nowhere, as Slack's sections don't. What it adds (a machine's +, ⋯
  *  and how it is) comes after its name. */
-function Heading({ id, label, folds, icon: mark, shut, held, className, children, ...rest }: { id: string; label: string; folds: string; icon: ReactNode; shut: boolean; held?: () => boolean; className?: string; children?: ReactNode } & Omit<LiHTMLAttributes<HTMLLIElement>, 'children'>) {
+function Heading({
+  id,
+  label,
+  folds,
+  icon: mark,
+  shut,
+  held,
+  className,
+  children,
+  ...rest
+}: { id: string; label: string; folds: string; icon: ReactNode; shut: boolean; held?: () => boolean; className?: string; children?: ReactNode } & Omit<LiHTMLAttributes<HTMLLIElement>, 'children'>) {
   return (
     <li data-heading={id} className={clsx(rowClass(false, false, true), 'group gap-1.5 select-none [-webkit-touch-callout:none]', className)} {...rest}>
       <Fold label={`${shut ? 'Show' : 'Hide'} ${folds}`} id={id} shut={shut} />
@@ -322,7 +363,7 @@ function Heading({ id, label, folds, icon: mark, shut, held, className, children
 }
 
 const NOTIFY_HINT: Record<(typeof NOTIFY)[number], string> = {
-  All: "every new message from its coordinator",
+  All: 'every new message from its coordinator',
   'Needs me': "its coordinator's questions and alerts",
   Off: 'nothing from its coordinator, and its row stays quiet',
 }
@@ -487,7 +528,13 @@ function useRename(p: Place, snap: Snapshot) {
       () => setTyped(null),
     )
   }
-  const problem = (v: string) => (v ? nameProblem(v, snap.places.filter((x) => x.machine === p.machine && x.id !== p.id).map((x) => x.name)) : undefined)
+  const problem = (v: string) =>
+    v
+      ? nameProblem(
+          v,
+          snap.places.filter((x) => x.machine === p.machine && x.id !== p.id).map((x) => x.name),
+        )
+      : undefined
   return {
     editing,
     start: () => setEditing(true),
@@ -753,7 +800,9 @@ function MachineHeading({ m, snap, shut, spaces, sort, className }: { m: Machine
       data-machine={m.id}
       data-drop={m.id}
       className={clsx(dragged, dropHeading, className, menu.open && 'bg-hover')}
-      onPointerDown={(e) => press(e, { id: m.id, siblings: sort.ids, level: 'machine', drop: (ids) => reorder(sort.under, ids), ...(off ? {} : { hold: menu.hold, lift: menu.close, release: menu.release }) })}
+      onPointerDown={(e) =>
+        press(e, { id: m.id, siblings: sort.ids, level: 'machine', drop: (ids) => reorder(sort.under, ids), ...(off ? {} : { hold: menu.hold, lift: menu.close, release: menu.release }) })
+      }
       // a keyboard moves it as a drag does, from its name's button (the keys bubble up to it)
       onKeyDown={(e) => moveKey(e, m.id, sort)}
       aria-keyshortcuts={sort.ids.length > 1 ? 'Alt+Shift+ArrowUp Alt+Shift+ArrowDown' : undefined}
@@ -824,7 +873,9 @@ function SectionHeading({ g, snap, sort, keep, at, className }: { g: Group; snap
       data-drop={s.id}
       className={clsx(dragged, dropHeading, at === 'inner' && 'pl-5 phone:pl-6', className, menu.open && 'bg-hover')}
       // Pinned out of sight while it holds nothing keeps its place among them
-      onPointerDown={(e) => press(e, { id: s.id, siblings: sort.ids, level: 'section', drop: (ids) => reorder(sort.under, keep ? kept(keep, ids) : ids), hold: menu.hold, lift: menu.close, release: menu.release })}
+      onPointerDown={(e) =>
+        press(e, { id: s.id, siblings: sort.ids, level: 'section', drop: (ids) => reorder(sort.under, keep ? kept(keep, ids) : ids), hold: menu.hold, lift: menu.close, release: menu.release })
+      }
       // as a machine's: the keys move it, its spaces along, from its name's button
       onKeyDown={(e) => moveKey(e, s.id, keep ? { ...sort, keep } : sort)}
       aria-keyshortcuts={sort.ids.length > 1 ? 'Alt+Shift+ArrowUp Alt+Shift+ArrowDown' : undefined}
@@ -844,15 +895,15 @@ function SectionHeading({ g, snap, sort, keep, at, className }: { g: Group; snap
             Rename section…
           </MenuItem>
           {pinned ? null : (
-          <MenuItem
-            icon={<DeleteIcon className={ic} />}
-            onClick={() => {
-              menu.close()
-              setTimeout(() => openDeleteSection(s.id))
-            }}
-          >
-            Delete section…
-          </MenuItem>
+            <MenuItem
+              icon={<DeleteIcon className={ic} />}
+              onClick={() => {
+                menu.close()
+                setTimeout(() => openDeleteSection(s.id))
+              }}
+            >
+              Delete section…
+            </MenuItem>
           )}
         </RowMenu>
       ) : null}

@@ -10,8 +10,7 @@ import type { CliQuestionItem, LogEvent, Reader } from './types.ts'
 type Json = any
 
 // text Codex puts in a user message that the human did not type (for logs without content_item_kinds)
-const INJECTED =
-  /^\s*(# AGENTS\.md instructions|<(environment_context|user_instructions|user_shell_command|turn_aborted|subagent_notification|skill|INSTRUCTIONS)\b)/
+const INJECTED = /^\s*(# AGENTS\.md instructions|<(environment_context|user_instructions|user_shell_command|turn_aborted|subagent_notification|skill|INSTRUCTIONS)\b)/
 
 // Codex's question tools. The sync one answers through its output; the async one returns {"accepted":true} at once
 // and the human answers later, so a question of it stays open until the human next types.
@@ -70,9 +69,7 @@ function assistantText(p: Json): string {
 function questionItems(args: Json): CliQuestionItem[] {
   const qs: Json[] = Array.isArray(args?.questions) ? args.questions : []
   return qs.map((q) => {
-    const options = (Array.isArray(q?.options) ? q.options : []).map((o: Json) =>
-      typeof o === 'string' ? { label: o } : { label: String(o?.label ?? ''), description: o?.description },
-    )
+    const options = (Array.isArray(q?.options) ? q.options : []).map((o: Json) => (typeof o === 'string' ? { label: o } : { label: String(o?.label ?? ''), description: o?.description }))
     return {
       header: typeof q?.header === 'string' ? q.header : undefined,
       question: String(q?.question ?? q?.title ?? ''),
@@ -106,7 +103,11 @@ export class CodexReader implements Reader {
     const out: LogEvent[] = []
     for (const { text, offset } of lines) {
       // skip token counts, reasoning and tool runs without parsing them
-      if (!/"type":\s*"(turn_context|session_meta|message|function_call|custom_tool_call|function_call_output|custom_tool_call_output|task_started|task_complete|turn_aborted|token_count|item_completed|thread_settings_applied)"/.test(text))
+      if (
+        !/"type":\s*"(turn_context|session_meta|message|function_call|custom_tool_call|function_call_output|custom_tool_call_output|task_started|task_complete|turn_aborted|token_count|item_completed|thread_settings_applied)"/.test(
+          text,
+        )
+      )
         continue
       const l = parseLine(text)
       const p = l?.payload
@@ -116,19 +117,34 @@ export class CodexReader implements Reader {
       if (l.type === 'turn_context') {
         const effort = p.effort ?? p.reasoning_effort ?? p.collaboration_mode?.settings?.reasoning_effort
         if (typeof p.model === 'string' && p.model !== 'default') s.model = p.model
-        out.push({ kind: 'runtime', file, replace: true, id: `runtime-${offset}`, at: t, runtime: {
-          source: 'session', at: t,
-          ...(typeof p.model === 'string' && p.model !== 'default' ? { model: p.model } : {}),
-          ...(typeof effort === 'string' && effort !== 'default' ? { effort } : {}),
-        } })
+        out.push({
+          kind: 'runtime',
+          file,
+          replace: true,
+          id: `runtime-${offset}`,
+          at: t,
+          runtime: {
+            source: 'session',
+            at: t,
+            ...(typeof p.model === 'string' && p.model !== 'default' ? { model: p.model } : {}),
+            ...(typeof effort === 'string' && effort !== 'default' ? { effort } : {}),
+          },
+        })
       } else if (l.type === 'event_msg' && p.type === 'thread_settings_applied' && p.thread_settings) {
         // a /model pick (and Codex's /fast) says what this thread runs on now, before its next turn says it (SHE-45)
         const ts = p.thread_settings
-        out.push({ kind: 'runtime', file, id: `runtime-${offset}`, at: t, runtime: {
-          source: 'session', at: t,
-          ...(typeof ts.model === 'string' && ts.model !== 'default' ? { model: ts.model } : {}),
-          ...(typeof ts.reasoning_effort === 'string' && ts.reasoning_effort !== 'default' ? { effort: ts.reasoning_effort } : {}),
-        } })
+        out.push({
+          kind: 'runtime',
+          file,
+          id: `runtime-${offset}`,
+          at: t,
+          runtime: {
+            source: 'session',
+            at: t,
+            ...(typeof ts.model === 'string' && ts.model !== 'default' ? { model: ts.model } : {}),
+            ...(typeof ts.reasoning_effort === 'string' && ts.reasoning_effort !== 'default' ? { effort: ts.reasoning_effort } : {}),
+          },
+        })
       } else if (l.type === 'session_meta') {
         const id = p.id ?? p.session_id
         if (s.session || typeof id !== 'string') continue
@@ -170,7 +186,11 @@ export class CodexReader implements Reader {
       } else if (l.type === 'event_msg' && p.type === 'item_completed') {
         const it = p.item
         if (it?.type === 'SubAgentActivity' && typeof it.agent_thread_id === 'string') {
-          const title = String(it.agent_path ?? '').split('/').at(-1)?.replace(/_/g, ' ') || 'Subagent'
+          const title =
+            String(it.agent_path ?? '')
+              .split('/')
+              .at(-1)
+              ?.replace(/_/g, ' ') || 'Subagent'
           if (it.kind === 'started') {
             out.push({ kind: 'step', id: String(it.id ?? it.agent_thread_id), at: t, step: 'agent', tool: 'spawn_agent', ...words(`Ask a subagent: ${title}`), end: t })
             out.push({ kind: 'job', id: it.agent_thread_id, at: t, job: 'agent', title, step: String(it.id ?? '') })
@@ -193,7 +213,8 @@ export class CodexReader implements Reader {
         // a policy refusal arrives here too: codex_error_info names it (cyber_policy, bio_policy, …), and a
         // content_filter stop says so in the message; retry.ts reads both as a filter, not a provider run-out
         const err = p.error
-        if (err && typeof err === 'object') out.push({ kind: 'error', id: `error-${p.turn_id ?? offset}`, at: t, text: String(err.message ?? ''), code: typeof err.codex_error_info === 'string' ? err.codex_error_info : undefined })
+        if (err && typeof err === 'object')
+          out.push({ kind: 'error', id: `error-${p.turn_id ?? offset}`, at: t, text: String(err.message ?? ''), code: typeof err.codex_error_info === 'string' ? err.codex_error_info : undefined })
         out.push({ kind: 'turn-end', id: `turn-${p.turn_id ?? offset}`, at: t })
       }
     }

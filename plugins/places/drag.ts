@@ -148,12 +148,15 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
     for (const x of me.els) Object.assign(x.style, { transition: 'none', transform: `translateY(${at - now}px)` })
     void el.offsetHeight
     for (const x of me.els) Object.assign(x.style, { transition: still() ? 'none' : EASE, transform: '' })
-    setTimeout(() => {
-      for (const x of me.els) {
-        delete x.dataset.dragging
-        x.style.transition = ''
-      }
-    }, still() ? 0 : 170)
+    setTimeout(
+      () => {
+        for (const x of me.els) {
+          delete x.dataset.dragging
+          x.style.transition = ''
+        }
+      },
+      still() ? 0 : 170,
+    )
   }
 
   const move = (ev: PointerEvent) => {

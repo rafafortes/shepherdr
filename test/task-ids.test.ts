@@ -22,7 +22,9 @@ describe('task ID reservations', () => {
       expect(() => ids.set(id('game'), 'taskIds.next', '101')).toThrow('102 or higher')
       ids.set(id('game'), 'taskIds.prefix', 'OLD')
       expect(ids.allocate(id('game')).id).toBe('OLD-102')
-    } finally { ids.close() }
+    } finally {
+      ids.close()
+    }
   })
 
   test('deleted IDs, abandoned reservations and skipped numbers survive restart and stale engines', () => {
@@ -37,13 +39,18 @@ describe('task ID reservations', () => {
       a.set(id('web'), 'taskIds.prefix', 'SITE')
       expect(b.allocate(id('web')).id).toBe('SITE-302')
       expect(() => b.set(id('web'), 'taskIds.next', '250')).toThrow()
-    } finally { a.close(); b.close() }
+    } finally {
+      a.close()
+      b.close()
+    }
     const spaces = [space('web', 'WEB')]
     const restarted = new TaskIds(spaces, stale, id, home)
     try {
       expect(spaces[0].key).toBe('SITE')
       expect(restarted.allocate(id('web')).id).toBe('SITE-303')
-    } finally { restarted.close() }
+    } finally {
+      restarted.close()
+    }
   })
 
   test('active and historical prefixes stay reserved; unknown legacy owners fail closed', () => {
@@ -55,7 +62,9 @@ describe('task ID reservations', () => {
       expect(ids.keys()).toContain('A')
       expect(ids.keys()).toContain('GONE')
       expect(() => ids.ensure(id('c'), 'A')).toThrow('reserved')
-    } finally { ids.close() }
+    } finally {
+      ids.close()
+    }
   })
 
   test('validation rejects malformed prefixes, unsafe numbers and backwards settings', () => {
@@ -67,7 +76,9 @@ describe('task ID reservations', () => {
       ids.set(id('a'), 'taskIds.next', String(MAX_TASK_NUMBER))
       expect(ids.allocate(id('a')).n).toBe(MAX_TASK_NUMBER)
       expect(() => ids.allocate(id('a'))).toThrow('exhausted')
-    } finally { ids.close() }
+    } finally {
+      ids.close()
+    }
   })
 
   test('separate machines can use identical prefixes independently', () => {
@@ -76,7 +87,10 @@ describe('task ID reservations', () => {
     try {
       expect(a.allocate(id('a')).id).toBe('GAME-1')
       expect(b.allocate('p:remote:b').id).toBe('GAME-1')
-    } finally { a.close(); b.close() }
+    } finally {
+      a.close()
+      b.close()
+    }
   })
 
   test('simultaneous processes reserve different numbers on the owning machine', async () => {
@@ -85,13 +99,15 @@ describe('task ID reservations', () => {
     ids.close()
     const module = join(import.meta.dir, '../server/live/task-ids.ts')
     const script = `import { TaskIds } from ${JSON.stringify(module)}; const ids = new TaskIds([], {next:{},tasks:[]}, x=>x, process.argv[1]); console.log(ids.allocate('p:machine:a').id); ids.close();`
-    const results = await Promise.all(Array.from({ length: 6 }, async () => {
-      const proc = Bun.spawn([process.execPath, '-e', script, home], { stdout: 'pipe', stderr: 'pipe' })
-      const out = await new Response(proc.stdout).text()
-      const err = await new Response(proc.stderr).text()
-      expect(await proc.exited, err).toBe(0)
-      return out.trim()
-    }))
+    const results = await Promise.all(
+      Array.from({ length: 6 }, async () => {
+        const proc = Bun.spawn([process.execPath, '-e', script, home], { stdout: 'pipe', stderr: 'pipe' })
+        const out = await new Response(proc.stdout).text()
+        const err = await new Response(proc.stderr).text()
+        expect(await proc.exited, err).toBe(0)
+        return out.trim()
+      }),
+    )
     expect(new Set(results).size).toBe(6)
     expect(results.sort()).toEqual(['A-1', 'A-2', 'A-3', 'A-4', 'A-5', 'A-6'])
   })

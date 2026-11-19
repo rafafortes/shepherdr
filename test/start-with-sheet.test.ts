@@ -27,7 +27,20 @@ async function waiting(name: string, kind: string, model?: string) {
   execSync(REPO, { cwd: dir, shell: '/bin/sh' })
   const p = await src.places.add(dir, name)
   const id = `SW-${Math.random().toString(36).slice(2, 6)}`
-  src.engine.tasks.push({ id, n: 1, project: placeId.space(p.name), base: 'main', branch: 'main', worktree: dir, title: 'Waits', desc: 'Add a.txt.', by: 'test', created: Date.now(), updated: Date.now(), todo: true } as never)
+  src.engine.tasks.push({
+    id,
+    n: 1,
+    project: placeId.space(p.name),
+    base: 'main',
+    branch: 'main',
+    worktree: dir,
+    title: 'Waits',
+    desc: 'Add a.txt.',
+    by: 'test',
+    created: Date.now(),
+    updated: Date.now(),
+    todo: true,
+  } as never)
   const key = `${id}/Agent`
   src.agents.records[key] = { key, name: id, kind, ...(model ? { model } : {}), cwd: dir, workspace: p.name, logs: [], started: Date.now() } as never
   return { id, key }

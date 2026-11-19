@@ -21,7 +21,16 @@ function fresh(caps: string, machine = '3') {
   w.settings.set('machine.startEvery', '0')
   expect(w.settings.set('machine.maxTasks', machine).ok).toBe(true)
   expect(w.settings.set('models.maxAtOnce', caps, 'all').ok).toBe(true)
-  setModels('opencode', { ...opencodeList([{ id: GO, label: GO, efforts: [] }, { id: ZEN, label: ZEN, efforts: [] }], GO), at: Date.now() })
+  setModels('opencode', {
+    ...opencodeList(
+      [
+        { id: GO, label: GO, efforts: [] },
+        { id: ZEN, label: ZEN, efforts: [] },
+      ],
+      GO,
+    ),
+    at: Date.now(),
+  })
   return w
 }
 
@@ -48,7 +57,12 @@ describe('OpenCode under models.maxAtOnce', () => {
       // another OpenCode model (the Zen one, its own provider) is not held by Go's entry
       const z = await startOn(w, dir, 'oc-cap-z', 'OZ1', ZEN)
       expect(z.t.held).toBeUndefined()
-      expect(w.engine.runs().map((r) => r.key).sort()).toEqual([GO_KEY, ZEN_KEY].sort())
+      expect(
+        w.engine
+          .runs()
+          .map((r) => r.key)
+          .sort(),
+      ).toEqual([GO_KEY, ZEN_KEY].sort())
     } finally {
       setModels('opencode', undefined)
     }
@@ -77,6 +91,11 @@ describe('OpenCode under models.maxAtOnce', () => {
     expect(c).toMatchObject({ harness: 'opencode', index: 1, skipped: [{ harness: 'codex', why: 'full' }] })
     // out (its provider's allowance is spent) skips it the same way, and a full OpenCode model waits for both
     const out = choose({ space: 'app', options: [{ ...options[0]!, out: { until: '5pm' } }, options[1]!], runs: [{ key: GO_KEY, space: 'app', role: 'task' }], machine: cap, own: [] })
-    expect(out).toMatchObject({ wait: [{ harness: 'codex', why: 'out' }, { harness: 'opencode', why: 'full', name: 'opencode.opencode-go' }] })
+    expect(out).toMatchObject({
+      wait: [
+        { harness: 'codex', why: 'out' },
+        { harness: 'opencode', why: 'full', name: 'opencode.opencode-go' },
+      ],
+    })
   })
 })

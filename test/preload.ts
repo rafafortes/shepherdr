@@ -58,11 +58,15 @@ const want = createHash('sha256')
   .digest('hex')
 
 mkdirSync(modules, { recursive: true })
-await once(join(modules, '.shepherdr-deps.lock'), () => existsSync(stamp) && readFileSync(stamp, 'utf8') === want, () => {
-  const r = Bun.spawnSync([process.execPath, 'install', '--frozen-lockfile'], { cwd: root, stdout: 'pipe', stderr: 'pipe' })
-  if (!r.success) throw new Error(`bun install failed:\n${r.stderr.toString()}`)
-  writeFileSync(stamp, want)
-})
+await once(
+  join(modules, '.shepherdr-deps.lock'),
+  () => existsSync(stamp) && readFileSync(stamp, 'utf8') === want,
+  () => {
+    const r = Bun.spawnSync([process.execPath, 'install', '--frozen-lockfile'], { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+    if (!r.success) throw new Error(`bun install failed:\n${r.stderr.toString()}`)
+    writeFileSync(stamp, want)
+  },
+)
 
 writeRegistries()
 

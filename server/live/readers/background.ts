@@ -40,7 +40,11 @@ export function screenBackground(screen: string): Background | undefined {
   const rules = lines.flatMap((l, i) => (RULE.test(l) ? [i] : []))
   if (rules.length < 2) return undefined
   const [top, bottom] = rules.slice(-2)
-  const above = lines.slice(0, top).filter((l) => l.trim()).at(-1) ?? ''
+  const above =
+    lines
+      .slice(0, top)
+      .filter((l) => l.trim())
+      .at(-1) ?? ''
   const [footer = '', ...rows] = lines.slice(bottom + 1).filter((l) => l.trim())
   if (/Waiting for \d+ background agents? to finish/.test(above) || rows.some((r) => /^\s*[◯○●◉]\s+(?!main\s*$)\S/.test(r))) return 'agents'
   if (/·.*\bstill running\s*$/.test(above) || /(^|·)\s*\d+ (shells?|monitors?)\b/.test(footer)) return 'shells'
@@ -185,7 +189,9 @@ export function headless(argv: string[]): boolean {
 /** a shell that serves or watches (a dev server, a preview, tail -f) never ends to wake the agent it runs under: a
  *  "server", by what its command says */
 export const servesCommand = (command: string) =>
-  /\b(npm|pnpm|yarn|bun)( run)? (dev|start|serve|preview)\b|\b(vite|next|astro|nuxt|remix|wrangler|vercel|netlify) dev\b|\bvite( preview)?\s*($|[;&|])|http\.server|\b(uvicorn|gunicorn|flask run|rails s(erver)?)\b|\bnpx serve\b|--(watch|hot)\b|\btail -[fF]\b|sleep infinity/.test(command)
+  /\b(npm|pnpm|yarn|bun)( run)? (dev|start|serve|preview)\b|\b(vite|next|astro|nuxt|remix|wrangler|vercel|netlify) dev\b|\bvite( preview)?\s*($|[;&|])|http\.server|\b(uvicorn|gunicorn|flask run|rails s(erver)?)\b|\bnpx serve\b|--(watch|hot)\b|\btail -[fF]\b|sleep infinity/.test(
+    command,
+  )
 
 /** a shell a CLI runs a command with: `/bin/sh -c <command>`, as OpenCode's pty daemon starts its background shells (a
  *  login or interactive one, `-lc` or `-ic`, runs a command just the same) */
@@ -255,7 +261,9 @@ export class Procs {
   /** a process's command line, or nothing when it is gone (a zombie's is empty) */
   private argv(pid: string): string[] {
     try {
-      return readFileSync(join(this.proc, pid, 'cmdline'), 'utf8').split('\0').filter(Boolean)
+      return readFileSync(join(this.proc, pid, 'cmdline'), 'utf8')
+        .split('\0')
+        .filter(Boolean)
     } catch {
       return []
     }
@@ -265,7 +273,12 @@ export class Procs {
    *  and its shells after it) */
   private chatOf(pid: string): string | undefined {
     try {
-      return readFileSync(join(this.proc, pid, 'environ'), 'utf8').split('\0').find((v) => v.startsWith(CHAT))?.slice(CHAT.length) || undefined
+      return (
+        readFileSync(join(this.proc, pid, 'environ'), 'utf8')
+          .split('\0')
+          .find((v) => v.startsWith(CHAT))
+          ?.slice(CHAT.length) || undefined
+      )
     } catch {
       return undefined
     }
@@ -275,7 +288,11 @@ export class Procs {
   private underDaemon(pid: string): boolean {
     let ppid: string
     try {
-      ppid = readFileSync(join(this.proc, pid, 'stat'), 'utf8').split(') ').at(-1)!.split(' ')[1] ?? ''
+      ppid =
+        readFileSync(join(this.proc, pid, 'stat'), 'utf8')
+          .split(') ')
+          .at(-1)!
+          .split(' ')[1] ?? ''
     } catch {
       return false
     }

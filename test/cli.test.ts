@@ -68,10 +68,16 @@ describe('every shepherdr call ends with words when the server gives no answer',
   /** a server that accepts the call and answers after a delay, or never when the delay is 0 */
   const slow = (ms: number) =>
     Bun.serve({
-      hostname: '127.0.0.1', port: 0, idleTimeout: 0,
-      fetch: ms === 0
-        ? () => new Promise<Response>(() => {})
-        : async () => { await Bun.sleep(ms); return Response.json({ out: 'ok\n', code: 0 }) },
+      hostname: '127.0.0.1',
+      port: 0,
+      idleTimeout: 0,
+      fetch:
+        ms === 0
+          ? () => new Promise<Response>(() => {})
+          : async () => {
+              await Bun.sleep(ms)
+              return Response.json({ out: 'ok\n', code: 0 })
+            },
     })
 
   test('status here: bounded, one line, exit 1, and a two-word verb keeps both words', async () => {
@@ -85,7 +91,9 @@ describe('every shepherdr call ends with words when the server gives no answer',
       const told = await run([process.execPath, join(root, 'server', 'cli.ts'), 'task', 'tell', 'SHE-9', 'hi'], env)
       expect(told.code).toBe(1)
       expect(told.err).toContain('shepherdr task tell got no answer')
-    } finally { server.stop(true) }
+    } finally {
+      server.stop(true)
+    }
   })
 
   test('the long verbs keep their own bounds, not the short default', async () => {
@@ -99,24 +107,38 @@ describe('every shepherdr call ends with words when the server gives no answer',
       const never = slow(0)
       try {
         const base = { SHEPHERDR_URL: `http://127.0.0.1:${never.port}` }
-        const bounds = [['checks', { SHEPHERDR_CHECKS_WAIT: '1000' }], ['pr', { SHEPHERDR_PR_WAIT: '1000' }], ['review', { SHEPHERDR_REVIEW_WAIT: '1000' }]] as const
+        const bounds = [
+          ['checks', { SHEPHERDR_CHECKS_WAIT: '1000' }],
+          ['pr', { SHEPHERDR_PR_WAIT: '1000' }],
+          ['review', { SHEPHERDR_REVIEW_WAIT: '1000' }],
+        ] as const
         for (const [verb, env] of bounds) {
           const r = await run([process.execPath, join(root, 'server', 'cli.ts'), verb, 'SHE-1'], { ...base, ...env })
           expect(r.code).toBe(1)
           for (const w of words(verb)) expect(r.err).toContain(w)
         }
-      } finally { never.stop(true) }
-    } finally { served.stop(true) }
+      } finally {
+        never.stop(true)
+      }
+    } finally {
+      served.stop(true)
+    }
   })
 
   test('merge keeps its own wait and words, whatever the default is set to', async () => {
     const server = slow(0)
     try {
-      const r = await run([process.execPath, join(root, 'server', 'cli.ts'), 'merge', 'SHE-9'], { SHEPHERDR_URL: `http://127.0.0.1:${server.port}`, SHEPHERDR_CLI_WAIT: '1000', SHEPHERDR_MERGE_WAIT: '2000' })
+      const r = await run([process.execPath, join(root, 'server', 'cli.ts'), 'merge', 'SHE-9'], {
+        SHEPHERDR_URL: `http://127.0.0.1:${server.port}`,
+        SHEPHERDR_CLI_WAIT: '1000',
+        SHEPHERDR_MERGE_WAIT: '2000',
+      })
       expect(r.code).toBe(1)
       expect(r.err).toContain('got no answer from Shepherdr in 2 s')
       expect(r.err).toContain('run shepherdr merge SHE-9 again')
-    } finally { server.stop(true) }
+    } finally {
+      server.stop(true)
+    }
   })
 
   test('a slow but answering server still succeeds, with no override for the shipped default', async () => {
@@ -134,7 +156,9 @@ describe('every shepherdr call ends with words when the server gives no answer',
         expect(b.code).toBe(0)
         expect(b.out).toBe('ok\n')
       }
-    } finally { server.stop(true) }
+    } finally {
+      server.stop(true)
+    }
   })
 
   test.if(perl)('on another machine: the dropped tunnel ends it with the same words', async () => {
@@ -149,7 +173,11 @@ describe('every shepherdr call ends with words when the server gives no answer',
       for (const w of words('status')) expect(r.err).toContain(w)
       expect(r.ms).toBeLessThan(8000)
       // the helper's long verbs keep their own bounds too, not the short default
-      for (const [verb, env] of [['checks', { SHEPHERDR_CHECKS_WAIT: '1000' }], ['pr', { SHEPHERDR_PR_WAIT: '1000' }], ['review', { SHEPHERDR_REVIEW_WAIT: '1000' }]] as const) {
+      for (const [verb, env] of [
+        ['checks', { SHEPHERDR_CHECKS_WAIT: '1000' }],
+        ['pr', { SHEPHERDR_PR_WAIT: '1000' }],
+        ['review', { SHEPHERDR_REVIEW_WAIT: '1000' }],
+      ] as const) {
         const long = await run(['perl', helper, verb, 'SHE-1'], { ...env })
         expect(long.code).toBe(1)
         expect(long.err).toContain(`shepherdr ${verb} got no answer`)
@@ -157,7 +185,9 @@ describe('every shepherdr call ends with words when the server gives no answer',
       const told = await run(['perl', helper, 'task', 'tell', 'SHE-9', 'hi'], { SHEPHERDR_CLI_WAIT: '1000' })
       expect(told.code).toBe(1)
       expect(told.err).toContain('shepherdr task tell got no answer')
-    } finally { server.stop(true) }
+    } finally {
+      server.stop(true)
+    }
   })
 })
 
@@ -268,10 +298,16 @@ describe.if(perl)('session-owned command routing', () => {
     `
     try {
       return await run([process.execPath, '-e', code], {
-        HOME: home, SHEPHERDR_HOME: join(home, '.shepherdr'),
-        SHEPHERDR_CHAT: 'ST-1/Reviewer', SHEPHERDR_URL: 'http://127.0.0.1:7787', HERDR_PANE_ID: 'another-pane', ...extra,
+        HOME: home,
+        SHEPHERDR_HOME: join(home, '.shepherdr'),
+        SHEPHERDR_CHAT: 'ST-1/Reviewer',
+        SHEPHERDR_URL: 'http://127.0.0.1:7787',
+        HERDR_PANE_ID: 'another-pane',
+        ...extra,
       })
-    } finally { socket.stop(true) }
+    } finally {
+      socket.stop(true)
+    }
   }
 
   test('repo command before helper, stale URL/chat and login shell all reach the remote owner', async () => {
@@ -279,16 +315,23 @@ describe.if(perl)('session-owned command routing', () => {
     const r = await session({ helper: 'installed', chat: 'SHE-9/Agent' }, [
       [command, 'show'],
       ['/bin/bash', '-lc', `PATH=${JSON.stringify(join(root, 'bin'))}:$PATH shepherdr show`],
-      ['rebind', 'space-key'], [command, 'show'],
-      ['rebind', 'SHE-10/Reviewer'], [command, 'show'],
+      ['rebind', 'space-key'],
+      [command, 'show'],
+      ['rebind', 'SHE-10/Reviewer'],
+      [command, 'show'],
     ])
     expect(r.code).toBe(0)
     expect(r.err).toBe('')
-    expect(r.out.trim().split('\n').map((l) => JSON.parse(l).chat)).toEqual(['SHE-9/Agent', 'SHE-9/Agent', 'space-key', 'SHE-10/Reviewer'])
+    expect(
+      r.out
+        .trim()
+        .split('\n')
+        .map((l) => JSON.parse(l).chat),
+    ).toEqual(['SHE-9/Agent', 'SHE-9/Agent', 'space-key', 'SHE-10/Reviewer'])
   })
 
   test('local live owner replaces a stale demo URL, while explicit dev/demo targets stay selected', async () => {
-    const live = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async (req) => Response.json({ out: 'live ' + (await req.json() as { chat: string }).chat + '\n', code: 0 }) })
+    const live = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async (req) => Response.json({ out: 'live ' + ((await req.json()) as { chat: string }).chat + '\n', code: 0 }) })
     const demo = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json({ out: 'explicit demo\n', code: 0 }) })
     const url = `http://127.0.0.1:${demo.port}`
     const command = join(root, 'bin', 'shepherdr')
@@ -302,18 +345,21 @@ describe.if(perl)('session-owned command routing', () => {
       ])
       expect(r.code).toBe(0)
       expect(r.out).toBe('live SHE-9/Agent\nexplicit demo\nexplicit demo\nexplicit demo\nlive SHE-9/Reviewer\n')
-    } finally { live.stop(true); demo.stop(true) }
+    } finally {
+      live.stop(true)
+      demo.stop(true)
+    }
   })
 
   test('explicit unrelated URL is never redirected to the remote helper', async () => {
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json({ out: 'explicit local\n', code: 0 }) })
     try {
-      const r = await session({ helper: 'installed', chat: 'space-key' }, [
-        ['env', `SHEPHERDR_URL=http://127.0.0.1:${server.port}`, join(root, 'bin', 'shepherdr'), 'show'],
-      ])
+      const r = await session({ helper: 'installed', chat: 'space-key' }, [['env', `SHEPHERDR_URL=http://127.0.0.1:${server.port}`, join(root, 'bin', 'shepherdr'), 'show']])
       expect(r.code).toBe(0)
       expect(r.out).toBe('explicit local\n')
-    } finally { server.stop(true) }
+    } finally {
+      server.stop(true)
+    }
   })
 
   test('shared executor tools use the live owning folder, ignoring another session’s env and pane id', async () => {
@@ -322,7 +368,7 @@ describe.if(perl)('session-owned command routing', () => {
     mkdirSync(folder)
     const other = join(home, 'coordinator')
     mkdirSync(other)
-    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async (req) => Response.json({ out: (await req.json() as { chat: string }).chat + '\n', code: 0 }) })
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async (req) => Response.json({ out: ((await req.json()) as { chat: string }).chat + '\n', code: 0 }) })
     const code = `
       // This owner is a sibling, not an ancestor of the tool subprocess.
       const owner = Bun.spawn(['/bin/sleep', '20'], { env: { ...process.env, SHEPHERDR_CHAT: 'SHE-9/Agent', SHEPHERDR_URL: '' } });
@@ -350,10 +396,17 @@ describe.if(perl)('session-owned command routing', () => {
         const p = Bun.spawnSync(['/bin/bash', '-c', 'exec -a codex "$@"', 'daemon', process.execPath, '-e', ${JSON.stringify(code)}, 'app-server']);
         process.stdout.write(p.stdout); process.stderr.write(p.stderr); process.exit(p.exitCode);
       `
-      const r = await run(['/bin/bash', '-c', 'exec -a codex "$@"', 'original-cli', process.execPath, '-e', parentCode], { HOME: home, SHEPHERDR_CHAT: 'ST-1/Reviewer', SHEPHERDR_URL: 'http://127.0.0.1:7787', HERDR_PANE_ID: 'stale-pane' })
+      const r = await run(['/bin/bash', '-c', 'exec -a codex "$@"', 'original-cli', process.execPath, '-e', parentCode], {
+        HOME: home,
+        SHEPHERDR_CHAT: 'ST-1/Reviewer',
+        SHEPHERDR_URL: 'http://127.0.0.1:7787',
+        HERDR_PANE_ID: 'stale-pane',
+      })
       expect(r.code).toBe(0)
       expect(r.out).toBe('SHE-9/Agent\nSHE-9/Agent\nSHE-9/Agent\n')
-    } finally { server.stop(true) }
+    } finally {
+      server.stop(true)
+    }
   })
 
   test('a reused pid with another start time does not inherit a route', async () => {
@@ -370,7 +423,9 @@ describe.if(perl)('session-owned command routing', () => {
       const r = await run([process.execPath, '-e', code], { HOME: home, SHEPHERDR_URL: `http://127.0.0.1:${server.port}` })
       expect(r.code).toBe(0)
       expect(r.out).toBe('explicit local\n')
-    } finally { server.stop(true) }
+    } finally {
+      server.stop(true)
+    }
   })
 })
 
@@ -384,7 +439,9 @@ describe('a long answer through a pipe', () => {
       const r = await run(['sh', '-c', `"${process.execPath}" "${join(root, 'server', 'cli.ts')}" task list --json | wc -c`], env)
       expect(r.out.trim()).toBe(String(big.length))
       expect((await run([process.execPath, join(root, 'server', 'cli.ts'), 'task', 'list', '--json'], env)).code).toBe(3)
-    } finally { server.stop(true) }
+    } finally {
+      server.stop(true)
+    }
   })
 })
 
@@ -403,7 +460,9 @@ describe('who a task tell comes from', () => {
       expect(bodies.at(-1)).toMatchObject({ args: ['task', 'tell', 'SHE-1', 'Plain words'] })
       expect(bodies.at(-1)!.chat).toBeFalsy()
       expect(bodies.at(-1)!.pane).toBeFalsy()
-    } finally { server.stop(true) }
+    } finally {
+      server.stop(true)
+    }
   })
 
   test('the server hands that pane to the command, with the chat and the folder', async () => {
@@ -425,6 +484,8 @@ describe('who a task tell comes from', () => {
       })
       expect(await r.json()).toEqual({ out: 'Told SHE-1.\n', code: 0 })
       expect(seen.at(-1)).toMatchObject({ chat: 'SHE-17/Agent', pane: 'w7R:p2', cwd: '/work/x' })
-    } finally { app.stop(true) }
+    } finally {
+      app.stop(true)
+    }
   })
 })

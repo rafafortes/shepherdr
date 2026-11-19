@@ -17,7 +17,11 @@ function world(main = true) {
   const s = new Settings({ everywhere: { 'time.zone': ZONE, 'task.agent': 'Codex' }, machine: {}, spaces: {} })
   const store = new ProfileStore(true)
   const spaces = [{ key: 'gtm', name: 'gtm' }]
-  const profiles = new Profiles(store, () => ({ settings: s, machine: { host: 'box', name: 'box' }, spaces }), () => undefined)
+  const profiles = new Profiles(
+    store,
+    () => ({ settings: s, machine: { host: 'box', name: 'box' }, spaces }),
+    () => undefined,
+  )
   const retuned: Change[][] = []
   const reports: { text: string; failed: boolean; profile: string }[] = []
   const env: ScheduleEnv = {

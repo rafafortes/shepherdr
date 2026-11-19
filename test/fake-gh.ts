@@ -132,7 +132,16 @@ if (import.meta.main) {
     }
   }
   const url = (n: number) => `https://github.com/${st.repo}/pull/${n}`
-  const json = (p: FakePr) => ({ number: p.number, url: url(p.number), state: p.state, isDraft: p.isDraft, headRefOid: p.state === 'OPEN' ? headOf(p.head) : p.at, title: p.title, body: p.body, baseRefName: p.base })
+  const json = (p: FakePr) => ({
+    number: p.number,
+    url: url(p.number),
+    state: p.state,
+    isDraft: p.isDraft,
+    headRefOid: p.state === 'OPEN' ? headOf(p.head) : p.at,
+    title: p.title,
+    body: p.body,
+    baseRefName: p.base,
+  })
   const out = (s: string, code = 0) => {
     save()
     process.stdout.write(`${s}\n`)

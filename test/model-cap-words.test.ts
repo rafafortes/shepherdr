@@ -21,7 +21,11 @@ const SPARK = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
 const REPO = 'git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init'
 
 /** the cards a chat holds, as their words */
-const cards = (key: string) => src.chats.chat(key).messages.filter((m) => m.card).map((m) => m.card!.text)
+const cards = (key: string) =>
+  src.chats
+    .chat(key)
+    .messages.filter((m) => m.card)
+    .map((m) => m.card!.text)
 
 describe("a model's cap in words: the row, the card and the replies name the entry that holds the task", () => {
   test('a harness in a chain is named as the chain names it, never by its model key', async () => {
@@ -41,7 +45,19 @@ describe("a model's cap in words: the row, the card and the replies name the ent
     // no backup takes the task: its words are about the held row alone (the backups' own start is in engine-model-cap)
     expect(src.settings.set('task.fallback', 'off', 'machine').ok).toBe(true)
     // one spark agent of this machine is at work
-    const busy = src.engine.tasks.push({ id: 'WRD-1', n: 1, project: chat, base: 'main', title: 'Busy', desc: 'Add b.txt.', by: 'test', created: Date.now(), updated: Date.now(), told: 'work', agent: { kind: 'pi', model: SPARK } } as never)
+    const busy = src.engine.tasks.push({
+      id: 'WRD-1',
+      n: 1,
+      project: chat,
+      base: 'main',
+      title: 'Busy',
+      desc: 'Add b.txt.',
+      by: 'test',
+      created: Date.now(),
+      updated: Date.now(),
+      told: 'work',
+      agent: { kind: 'pi', model: SPARK },
+    } as never)
     void busy
     const key = 'WRD-1/Agent'
     src.agents.records[key] = { key, name: 'WRD-1', kind: 'pi', model: SPARK, cwd: dir, logs: [], started: Date.now() } as never
@@ -69,7 +85,10 @@ describe('models.maxAtOnce from the command line: set, show, unset', () => {
   test('shepherdr set takes the list at this machine, shows it as kept, refuses a bad entry, and unset takes it back', async () => {
     const set = await src.cli(['set', 'models.maxAtOnce', 'Spark=4, radeon=1', '--machine'], {})
     expect(set.code).toBe(0)
-    expect(src.settings.maxAtOnce()).toEqual([{ pattern: 'pi.spark', max: 4 }, { pattern: 'pi.radeon', max: 1 }])
+    expect(src.settings.maxAtOnce()).toEqual([
+      { pattern: 'pi.spark', max: 4 },
+      { pattern: 'pi.radeon', max: 1 },
+    ])
     expect((await src.cli(['show'], {})).out).toMatch(/^models\.maxAtOnce\s+pi\.spark=4, pi\.radeon=1\s+\(.+\)$/m)
     const bad = await src.cli(['set', 'models.maxAtOnce', 'spark=201', '--machine'], {})
     expect(bad.code).toBe(1)

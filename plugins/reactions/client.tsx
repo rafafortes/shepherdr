@@ -152,14 +152,7 @@ function Backdrop({ dim, z }: { dim?: boolean; z: string }) {
   // the sheets' shade, fading in and out with it
   useMotion(ref, 'fade')
   return (
-    <div
-      ref={ref}
-      aria-hidden="true"
-      className={clsx('fixed inset-0', z, dim && 'bg-black/35')}
-      onPointerDown={() => (down.current = true)}
-      onClick={() => down.current && close()}
-      onWheel={close}
-    />
+    <div ref={ref} aria-hidden="true" className={clsx('fixed inset-0', z, dim && 'bg-black/35')} onPointerDown={() => (down.current = true)} onClick={() => down.current && close()} onWheel={close} />
   )
 }
 
@@ -301,12 +294,30 @@ function Lifted({ msg, chat }: { msg: Message; chat: string }) {
     } else {
       // from where it sat, pressed down, up into place; the bar and menu grow out of its side
       l.animate([{ transform: `translateY(${moved.current}px) scale(.96)` }, { transform: 'none' }], { duration: 420, easing: SPRING })
-      b.animate([{ opacity: 0, transform: 'scale(.5)' }, { opacity: 1, transform: 'none' }], { duration: 360, easing: SPRING })
+      b.animate(
+        [
+          { opacity: 0, transform: 'scale(.5)' },
+          { opacity: 1, transform: 'none' },
+        ],
+        { duration: 360, easing: SPRING },
+      )
       b.querySelectorAll('button').forEach((e, i) =>
-        e.animate([{ opacity: 0, transform: 'scale(.3)' }, { opacity: 1, transform: 'none' }], { duration: 320, delay: 30 + i * 20, easing: SPRING, fill: 'backwards' }),
+        e.animate(
+          [
+            { opacity: 0, transform: 'scale(.3)' },
+            { opacity: 1, transform: 'none' },
+          ],
+          { duration: 320, delay: 30 + i * 20, easing: SPRING, fill: 'backwards' },
+        ),
       )
       // the menu springs out like every menu
-      m?.animate([{ opacity: 0, transform: 'scale(.9)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: SPRING })
+      m?.animate(
+        [
+          { opacity: 0, transform: 'scale(.9)' },
+          { opacity: 1, transform: 'none' },
+        ],
+        { duration: 280, easing: SPRING },
+      )
     }
     // the screen changing under it (turned, the keyboard): it would point at the wrong place
     const gone = () => close()
@@ -602,7 +613,12 @@ export function EmojiChooser({ onPick, chosen, focus, hint }: { onPick: (e: stri
         </div>
       ) : null}
       {/* dragging the emoji puts the keyboard away, like a list on iOS: the sheet grows back to show more */}
-      <div ref={grid} onScroll={follow} onTouchMove={() => document.activeElement === input.current && input.current?.blur()} className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-2">
+      <div
+        ref={grid}
+        onScroll={follow}
+        onTouchMove={() => document.activeElement === input.current && input.current?.blur()}
+        className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-2"
+      >
         {!groups ? (
           <div className="p-6 text-center text-[0.8125rem] text-fg2 phone:text-[0.9375rem]">Loading emoji…</div>
         ) : found ? (

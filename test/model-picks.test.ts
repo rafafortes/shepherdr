@@ -10,7 +10,14 @@ import { setModels } from '../server/live/models.ts'
 import { restartClis } from '../server/live/restart.ts'
 import { agentRow, Settings } from '../server/live/settings.ts'
 
-const PI = { models: ['alpha/one', 'alpha/two', 'beta/three', 'beta/four', 'gamma/five', 'delta/six', 'epsilon/seven', 'zeta/eight', 'eta/nine', 'theta/ten'].map((id) => ({ id, label: id, efforts: ['low', 'high'] })), efforts: ['off', 'low', 'high'] }
+const PI = {
+  models: ['alpha/one', 'alpha/two', 'beta/three', 'beta/four', 'gamma/five', 'delta/six', 'epsilon/seven', 'zeta/eight', 'eta/nine', 'theta/ten'].map((id) => ({
+    id,
+    label: id,
+    efforts: ['low', 'high'],
+  })),
+  efforts: ['off', 'low', 'high'],
+}
 /** nothing pinned or picked, in the file and the memory of it */
 const clear = () => {
   writeJson(PICKS_FILE, NO_PICKS, home())

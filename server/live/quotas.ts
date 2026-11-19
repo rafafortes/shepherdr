@@ -174,7 +174,7 @@ export class Quotas {
       if (armed === (w.resetAt ?? 0)) continue
       if (armed !== undefined && w.resetAt === undefined) continue
       this.d.usage.setAlerted(key, w.resetAt ?? 0)
-      const refill = w.resetAt !== undefined ? `it refills ${clock(w.resetAt)}` : f.estimate ? "it drains as its calls leave the window" : "it has no refill time"
+      const refill = w.resetAt !== undefined ? `it refills ${clock(w.resetAt)}` : f.estimate ? 'it drains as its calls leave the window' : 'it has no refill time'
       this.d.alert(provider, w.name, `${providerWords(provider)} is at ${Math.round(pct)}%`, `${w.name} window: ${leftWords(pct)}, and ${refill}.`)
     }
   }

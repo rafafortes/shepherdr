@@ -243,7 +243,11 @@ export function Drawer({ open, onOpen, can, panel, label, children }: { open: bo
   return (
     <div ref={root} inert={!open} onPointerDown={shut} className="absolute inset-0 z-5 touch-pan-y overflow-hidden">
       <button ref={shade} type="button" aria-label="Close" tabIndex={-1} className="absolute inset-0 bg-black/30" onClick={() => onOpen(false)} />
-      <nav ref={side} aria-label={label} className={clsx('absolute inset-y-0 left-0 flex min-h-0 touch-pan-y flex-col overflow-y-auto overscroll-contain bg-well shadow-drawer will-change-transform', panel)}>
+      <nav
+        ref={side}
+        aria-label={label}
+        className={clsx('absolute inset-y-0 left-0 flex min-h-0 touch-pan-y flex-col overflow-y-auto overscroll-contain bg-well shadow-drawer will-change-transform', panel)}
+      >
         {/* drawn all along, hidden while shut: a swipe doesn't wait for the list to be drawn under the finger */}
         {children}
       </nav>
@@ -312,7 +316,11 @@ export function Sheet({ label, onClose, children, panel, z = 'z-8', full }: { la
   return (
     <div
       ref={ref}
-      className={clsx('absolute inset-0 flex bg-black/35', z, phone ? clsx('flex-col', !full && 'pt-[calc(env(safe-area-inset-top)+10px)]') : clsx('justify-center', full ? 'items-stretch tablet:p-4 desktop:p-6' : 'items-start px-6 py-12'))}
+      className={clsx(
+        'absolute inset-0 flex bg-black/35',
+        z,
+        phone ? clsx('flex-col', !full && 'pt-[calc(env(safe-area-inset-top)+10px)]') : clsx('justify-center', full ? 'items-stretch tablet:p-4 desktop:p-6' : 'items-start px-6 py-12'),
+      )}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
@@ -323,7 +331,11 @@ export function Sheet({ label, onClose, children, panel, z = 'z-8', full }: { la
         aria-label={label}
         tabIndex={-1}
         onPointerDown={down}
-        className={clsx('flex min-h-0 min-w-0 touch-pinch-zoom flex-col overflow-hidden bg-bg shadow-dialog outline-none', phone ? clsx('flex-1', !full && 'rounded-t-box') : 'max-h-full w-full rounded-box', panel)}
+        className={clsx(
+          'flex min-h-0 min-w-0 touch-pinch-zoom flex-col overflow-hidden bg-bg shadow-dialog outline-none',
+          phone ? clsx('flex-1', !full && 'rounded-t-box') : 'max-h-full w-full rounded-box',
+          panel,
+        )}
       >
         {/* iOS's grabber: a sheet can be dragged down */}
         {phone && !full ? (

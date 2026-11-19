@@ -256,7 +256,10 @@ export function ArtifactFrame({
       // which no script can make; at most once every two seconds, and on one line (it can't write a chat line of its own)
       if (d.shepherdr === 'send' && typeof d.text === 'string' && d.text.trim() && touchedNow(ref.current) && Date.now() - last.current > 2000) {
         last.current = Date.now()
-        const text = d.text.replace(/\s*[\r\n]+\s*/g, ' ').trim().slice(0, 2000)
+        const text = d.text
+          .replace(/\s*[\r\n]+\s*/g, ' ')
+          .trim()
+          .slice(0, 2000)
         act({ type: 'artifact-send', place: art.place, artifact: art.id, v, text })
           .then((r: { to?: string }) => ref.current?.contentWindow?.postMessage({ shepherdr: 'sent', text, to: r?.to }, '*'))
           .catch(() => undefined)
@@ -354,7 +357,11 @@ function ArtifactPanel({ art, you, from, className }: { art: Artifact; you: bool
     >
       <div className={clsx('flex items-center gap-2 py-1 pr-1 pl-3 text-[0.75rem] text-fg2 phone:py-0 phone:text-[0.8125rem]', you ? 'bg-reply' : 'bg-bubble')}>
         <PageIcon className={ic} />
-        <button type="button" onClick={(e) => (splitClick(e) ? openSplit({ kind: 'artifact', id: art.id }) : openArtifact(art.id))} className="min-w-0 flex-1 self-stretch truncate text-left font-medium text-fg">
+        <button
+          type="button"
+          onClick={(e) => (splitClick(e) ? openSplit({ kind: 'artifact', id: art.id }) : openArtifact(art.id))}
+          className="min-w-0 flex-1 self-stretch truncate text-left font-medium text-fg"
+        >
           {art.title}
         </button>
         <span className="max-w-[55%] shrink-0 truncate tabular-nums">
@@ -436,7 +443,9 @@ function Viewer() {
     if (!t) return
     const last = pick?.selector.split(' > ').pop() ?? ''
     const target = pick ? `${pick.text ? `"${pick.text.slice(0, 60)}" ` : ''}(${last}${pick.component ? ` in ${pick.component}` : ''})` : undefined
-    const r = (await act(pick ? { type: 'artifact-note', place: art.place, artifact: art.id, v: shown, note: t, target } : { type: 'artifact-say', place: art.place, artifact: art.id, v: shown, text: t }).catch(() => ({ ok: false }))) as {
+    const r = (await act(
+      pick ? { type: 'artifact-note', place: art.place, artifact: art.id, v: shown, note: t, target } : { type: 'artifact-say', place: art.place, artifact: art.id, v: shown, text: t },
+    ).catch(() => ({ ok: false }))) as {
       ok?: boolean
       to?: string
       error?: string
@@ -473,8 +482,16 @@ function Viewer() {
             </div>
           </div>
           <div className="relative">
-            <IconButton label="Versions" aria-haspopup="menu" aria-expanded={menu === 'versions'} className={clsx(barBtn, 'w-auto! px-2 gap-1 inline-flex!')} onClick={() => setMenu(menu === 'versions' ? null : 'versions')}>
-              <ClockIcon className={ic} /><span className="phone:hidden">Version </span><span>v{shown}</span>
+            <IconButton
+              label="Versions"
+              aria-haspopup="menu"
+              aria-expanded={menu === 'versions'}
+              className={clsx(barBtn, 'w-auto! px-2 gap-1 inline-flex!')}
+              onClick={() => setMenu(menu === 'versions' ? null : 'versions')}
+            >
+              <ClockIcon className={ic} />
+              <span className="phone:hidden">Version </span>
+              <span>v{shown}</span>
             </IconButton>
             {menu === 'versions' ? (
               <Popover onClose={() => setMenu(null)} label="Versions">
@@ -511,7 +528,8 @@ function Viewer() {
               if (markup) setPick(null)
             }}
           >
-            <MarkUpIcon /><span className="phone:hidden">{markup ? 'Done' : 'Mark up'}</span>
+            <MarkUpIcon />
+            <span className="phone:hidden">{markup ? 'Done' : 'Mark up'}</span>
           </IconButton>
           <div className="relative">
             <IconButton label="More" aria-haspopup="menu" aria-expanded={menu === 'more' || menu === 'delete'} className={barBtn} onClick={() => setMenu(menu ? null : 'more')}>
@@ -555,7 +573,9 @@ function Viewer() {
           <div className="shrink-0 bg-well px-4 py-1.5 text-[0.8125rem] text-fg2 phone:text-[0.9375rem]">v{v.v} is no longer kept, only the last 20 versions are. This is the latest.</div>
         ) : v.v && v.v !== art.v ? (
           <div className="flex shrink-0 items-center gap-2 bg-well px-4 py-1.5 text-[0.8125rem] text-fg2 phone:text-[0.9375rem]">
-            <span className="min-w-0 flex-1 truncate">An older version: v{v.v} of {art.v}.</span>
+            <span className="min-w-0 flex-1 truncate">
+              An older version: v{v.v} of {art.v}.
+            </span>
             <button type="button" className="shrink-0 font-medium text-focus hover:underline" onClick={() => openArtifact(art.id)}>
               Show the latest
             </button>
@@ -747,8 +767,7 @@ function ArtifactList(_: { placeId: string }) {
                 <RowText
                   sub={
                     <>
-                      {where ? <span className="text-fg3">{where} · </span> : null}
-                      v{a.v} · {a.by} · {a.when}
+                      {where ? <span className="text-fg3">{where} · </span> : null}v{a.v} · {a.by} · {a.when}
                     </>
                   }
                 >

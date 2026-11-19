@@ -28,7 +28,14 @@ export interface MachineRec {
   lastSeen: number
 }
 
-type Events = { peerChat: [machine: string, key: string, chat: Chat]; snapshot: []; chat: [key: string, chat: Chat]; terminal: [key: string, screen: TermScreen]; alert: [alert: Alert]; news: [machine: string, news: Overview] }
+type Events = {
+  peerChat: [machine: string, key: string, chat: Chat]
+  snapshot: []
+  chat: [key: string, chat: Chat]
+  terminal: [key: string, screen: TermScreen]
+  alert: [alert: Alert]
+  news: [machine: string, news: Overview]
+}
 
 interface Link {
   rec: MachineRec
@@ -187,7 +194,18 @@ export class Machines extends Emitter<Events> {
   }
 
   private link(m: Saved): Link {
-    const l: Link = { rec: { machine: m.label, url: '', lastSeen: 0 }, saved: m, chats: new Map(), watching: { chats: [], term: null }, reachable: false, waiting: [], state: 'Connecting…', lacks: [], connecting: true, health: new WorkerHealth() }
+    const l: Link = {
+      rec: { machine: m.label, url: '', lastSeen: 0 },
+      saved: m,
+      chats: new Map(),
+      watching: { chats: [], term: null },
+      reachable: false,
+      waiting: [],
+      state: 'Connecting…',
+      lacks: [],
+      connecting: true,
+      health: new WorkerHealth(),
+    }
     this.links.set(m.label, l)
     setTimeout(() => {
       if (!this.active(l) || !l.connecting) return
@@ -281,7 +299,9 @@ export class Machines extends Emitter<Events> {
           rmSync(join(machineHome(label), 'last.json'), { force: true })
           this.emit('snapshot')
         }
-    } finally { this.syncing = false }
+    } finally {
+      this.syncing = false
+    }
   }
 
   /** a worker that already runs, at this address (tests) */
@@ -378,7 +398,10 @@ export class Machines extends Emitter<Events> {
       const to = Bun.spawn(['tar', 'xf', '-', '-C', home], { stdin: from.stdout, stdout: 'ignore', stderr: 'ignore' })
       await Promise.all([from.exited, to.exited])
     }
-    await onMachine(l.saved.target, `PATH=${q(l.probe?.path ?? '/usr/bin:/bin')}; herdr --session ${q(l.saved.session)} plugin disable shepherdr >/dev/null 2>&1; mv "$HOME/.shepherdr/config.json" "$HOME/.shepherdr/config.json.before-one-install" 2>/dev/null; true`)
+    await onMachine(
+      l.saved.target,
+      `PATH=${q(l.probe?.path ?? '/usr/bin:/bin')}; herdr --session ${q(l.saved.session)} plugin disable shepherdr >/dev/null 2>&1; mv "$HOME/.shepherdr/config.json" "$HOME/.shepherdr/config.json.before-one-install" 2>/dev/null; true`,
+    )
   }
 
   private active(l: Link) {
@@ -390,7 +413,10 @@ export class Machines extends Emitter<Events> {
     const box = boxInfo(l.saved, p)
     // a worker left from before (another version of the code): one worker per machine
     const prior = running(readJson<{ pid?: number }>(join('machines', dirOf(l.saved.label), 'server.json'), {}).pid)
-    if (prior) { prior.kill(); await prior.exited }
+    if (prior) {
+      prior.kill()
+      await prior.exited
+    }
     if (!this.active(l)) return
     rmSync(join(home, 'server.json'), { force: true })
     l.rec.url = ''
@@ -489,10 +515,18 @@ export class Machines extends Emitter<Events> {
     try {
       w.kill()
       // Do not spawn beside a draining worker, even if it takes longer than expected.
-      const force = setTimeout(() => { if (l.worker === w) w.kill('SIGKILL') }, MERGE_DEADLINE + 30_000)
-      try { await w.exited } finally { clearTimeout(force) }
+      const force = setTimeout(() => {
+        if (l.worker === w) w.kill('SIGKILL')
+      }, MERGE_DEADLINE + 30_000)
+      try {
+        await w.exited
+      } finally {
+        clearTimeout(force)
+      }
       if (l.worker === w) l.worker = undefined
-    } finally { l.busy = false }
+    } finally {
+      l.busy = false
+    }
     if (this.active(l)) await this.start(l)
   }
 
@@ -518,7 +552,9 @@ export class Machines extends Emitter<Events> {
     url.protocol = url.protocol.replace('http', 'ws')
     const ws = new WebSocket(url)
     l.ws = ws
-    ws.onopen = () => { if (this.active(l) && l.ws === ws) ws.send(JSON.stringify({ type: 'watch', ...l.watching, link: true })) }
+    ws.onopen = () => {
+      if (this.active(l) && l.ws === ws) ws.send(JSON.stringify({ type: 'watch', ...l.watching, link: true }))
+    }
     ws.onmessage = (e) => {
       if (!this.active(l) || l.ws !== ws) return
       const m = JSON.parse(String(e.data))
@@ -583,7 +619,9 @@ export class Machines extends Emitter<Events> {
     const keys = this.voiceWatches.get(l) ?? new Map<string, number>()
     keys.set(key, (keys.get(key) ?? 0) + 1)
     this.voiceWatches.set(l, keys)
-    const off = this.on('peerChat', (machine, k, chat) => { if (machine === l.rec.machine && k === key) fn(chat) })
+    const off = this.on('peerChat', (machine, k, chat) => {
+      if (machine === l.rec.machine && k === key) fn(chat)
+    })
     this.watch(this.screenWatch.chats, this.screenWatch.term)
     let active = true
     return () => {
@@ -635,20 +673,29 @@ export class Machines extends Emitter<Events> {
       await this.start(l, true)
       const p = l.probe
       const missing = p ? [!p.tools.gh && 'gh (pull requests of GitHub repos)', !p.tools.claude && 'Claude Code', !p.tools.codex && 'Codex'].filter(Boolean) : []
-      out.push(`${l.rec.machine} (${l.saved.target}): ${l.lacks.length ? `needs ${l.lacks.join(', ')}` : l.state.startsWith("Can't") || l.state.startsWith('herdr') ? l.state : 'helper put there again, worker started again'}${missing.length ? `; not there: ${missing.join(', ')}` : ''}${l.chrome ? `; ${l.chrome}` : ''}`)
+      out.push(
+        `${l.rec.machine} (${l.saved.target}): ${l.lacks.length ? `needs ${l.lacks.join(', ')}` : l.state.startsWith("Can't") || l.state.startsWith('herdr') ? l.state : 'helper put there again, worker started again'}${missing.length ? `; not there: ${missing.join(', ')}` : ''}${l.chrome ? `; ${l.chrome}` : ''}`,
+      )
     }
     return out.length ? out : ['No other machines saved in herdr (herdr machine add <ssh target> adds one).']
   }
 
   /** each machine's line for Settings → Machines */
   rows() {
-    return [...this.links.values()].map((l) => ({ name: l.rec.machine, state: l.reachable && l.state === 'Ready' ? `Ready · ${l.saved.target}` : l.reachable ? l.state : l.connecting ? 'Connecting…' : l.down && l.rec.url ? `Can't reach since ${clock(l.down)}` : l.state }))
+    return [...this.links.values()].map((l) => ({
+      name: l.rec.machine,
+      state:
+        l.reachable && l.state === 'Ready' ? `Ready · ${l.saved.target}` : l.reachable ? l.state : l.connecting ? 'Connecting…' : l.down && l.rec.url ? `Can't reach since ${clock(l.down)}` : l.state,
+    }))
   }
 
   /** the worker's own log, for the doctor */
   log(label: string) {
     try {
-      return readFileSync(join(machineHome(label), 'worker.log'), 'utf8').split('\n').slice(-20).join('\n')
+      return readFileSync(join(machineHome(label), 'worker.log'), 'utf8')
+        .split('\n')
+        .slice(-20)
+        .join('\n')
     } catch {
       return ''
     }

@@ -58,9 +58,8 @@ describe('one design across the screen', () => {
     // the accents themselves are dots and fills: byte-for-byte unchanged, with darker twins for text
     expect([light['--work'], light['--ready'], light['--need']]).toEqual(['#e2a336', '#30a46c', '#e5484d'])
     expect([dark['--work'], dark['--ready'], dark['--need']]).toEqual(['#f5b544', '#3dd68c', '#ff6369'])
-    for (const token of ['work', 'ready', 'need'])
-      // dark maps the twin to the accent, so changing the utility cannot change dark
-      expect(dark[`--${token}-fg`]).toBe(dark[`--${token}`])
+    // dark maps the twin to the accent, so changing the utility cannot change dark
+    for (const token of ['work', 'ready', 'need']) expect(dark[`--${token}-fg`]).toBe(dark[`--${token}`])
     // italic code comments are deliberately quiet: light now sits beside dark's ~3.9:1 instead of 2.46:1;
     // the residual is reported for the axe allowlist (A11Y-07), not gamed into passing. This floor leaves
     // room for a later change to make comments fully readable instead of locking today's number in place
@@ -76,9 +75,7 @@ describe('one design across the screen', () => {
     expect(source['plugins/artifacts/client.tsx'].match(/className="text-need-fg!"/g)?.length).toBe(2)
   })
   test('every button says whether it submits', () => {
-    const bare = files.flatMap((f) =>
-      [...source[f].matchAll(/<button\b([^>]*)>/g)].filter((m) => !/\btype=/.test(m[1])).map(() => f),
-    )
+    const bare = files.flatMap((f) => [...source[f].matchAll(/<button\b([^>]*)>/g)].filter((m) => !/\btype=/.test(m[1])).map(() => f))
     expect(bare).toEqual([])
   })
   test('a task id is text, not a counter: no fixed-width digits that space out its dash', () => {
@@ -95,7 +92,9 @@ describe('one design across the screen', () => {
     // corners of half the one-line height: its 6px padding around a 34px (phone 44px) round button
     expect(box).toContain('p-1.5')
     const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
-    expect(css).toMatch(/@utility round-box \{\s+--round-pad: --spacing\(1\.5\);\s+--round-btn: 34px;\s+border-radius: calc\(var\(--round-pad\) \+ var\(--round-btn\) \/ 2\);\s+\[data-device="phone"\] & \{\s+--round-btn: 44px;/)
+    expect(css).toMatch(
+      /@utility round-box \{\s+--round-pad: --spacing\(1\.5\);\s+--round-btn: 34px;\s+border-radius: calc\(var\(--round-pad\) \+ var\(--round-btn\) \/ 2\);\s+\[data-device="phone"\] & \{\s+--round-btn: 44px;/,
+    )
     // typing in it darkens its edge a little, never a bright ring
     expect(box).toContain('has-[textarea:focus]:shadow-box-focus')
     expect(box).not.toContain('--focus')
@@ -135,7 +134,7 @@ describe('one design across the screen', () => {
     // inline code shows on either bubble's shade
     expect(css).toMatch(/& code \{[^}]*background: var\(--sel\)/)
   })
-  test('a hold, the keyboard or a smiley beside it reacts, and reactions sit on the bubble\'s right corner', () => {
+  test("a hold, the keyboard or a smiley beside it reacts, and reactions sit on the bubble's right corner", () => {
     const chat = source['plugins/chat/client.tsx']
     // a finger holds the bubble; a mouse gets the smiley; the keyboard presses Enter on it
     expect(chat).toMatch(/data-anchor\s+\{\.\.\.keys\}\s+\{\.\.\.hold\}/)

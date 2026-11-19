@@ -32,7 +32,13 @@ const drop = (p: BrowserPick) => {
 
 /** a note's shot, into the task chat's inbox on the task's machine (where it goes in as an attached file) */
 async function upload(chatKey: string, blob: Blob, element: string) {
-  const slug = element.replace(/"[^"]*"?/g, '').trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24) || 'element'
+  const slug =
+    element
+      .replace(/"[^"]*"?/g, '')
+      .trim()
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 24) || 'element'
   const body = new FormData()
   body.append('chat', chatKey)
   body.append('file', new File([blob], `note-${slug}.png`, { type: 'image/png' }))
@@ -84,8 +90,7 @@ function useLink(task: string, onFrame: (data: string, meta: FrameMeta) => void,
             gone = true
             setEnded(true)
           }
-        }
-        else if (m.type === 'picked') picked.current(m)
+        } else if (m.type === 'picked') picked.current(m)
         else if (m.type === 'hover') setHover(m.box)
       }
       s.onclose = () => {
@@ -206,9 +211,7 @@ function useCanvas() {
       width.current = m.deviceWidth
       decode()
       // the overlay only moves when the page scrolls or changes size
-      setMeta((was) =>
-        was && was.deviceWidth === m.deviceWidth && was.deviceHeight === m.deviceHeight && was.scrollOffsetX === m.scrollOffsetX && was.scrollOffsetY === m.scrollOffsetY ? was : m,
-      )
+      setMeta((was) => (was && was.deviceWidth === m.deviceWidth && was.deviceHeight === m.deviceHeight && was.scrollOffsetX === m.scrollOffsetX && was.scrollOffsetY === m.scrollOffsetY ? was : m))
     },
     [decode],
   )
@@ -594,9 +597,7 @@ export function BrowserView({ task, chatKey }: { task: Task; chatKey: string }) 
           <div className="absolute inset-0 grid place-items-center bg-well p-6 text-center">
             <div className="flex max-w-xs flex-col items-center gap-3">
               <Small className={clsx('text-pretty', link.error ? 'text-need-fg' : 'text-fg3')}>{link.error ?? (st && !st.connected ? 'The browser is closed.' : 'Starting the browser…')}</Small>
-              {!link.ended && (link.error || (st && !st.connected)) ? (
-                <Ghost onClick={link.retry}>{link.error ? 'Try again' : 'Open it again'}</Ghost>
-              ) : null}
+              {!link.ended && (link.error || (st && !st.connected)) ? <Ghost onClick={link.retry}>{link.error ? 'Try again' : 'Open it again'}</Ghost> : null}
             </div>
           </div>
         ) : null}
@@ -691,7 +692,9 @@ function Notes({
         <ol className="flex flex-col gap-1.5" role="list">
           {notes.map((n, i) => (
             <li key={i} className="flex items-start gap-2 text-[0.8125rem]/5 phone:text-[0.875rem]/5">
-              <span className="grid h-[18px] min-w-[18px] shrink-0 place-items-center rounded-full bg-focus px-[5px] text-[0.6875rem] font-semibold text-white tabular-nums phone:mt-px phone:h-[22px] phone:min-w-[22px] phone:text-[0.8125rem]">{i + 1}</span>
+              <span className="grid h-[18px] min-w-[18px] shrink-0 place-items-center rounded-full bg-focus px-[5px] text-[0.6875rem] font-semibold text-white tabular-nums phone:mt-px phone:h-[22px] phone:min-w-[22px] phone:text-[0.8125rem]">
+                {i + 1}
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-fg2">{n.pick.element}</div>
                 <div className="text-fg">{n.comment}</div>
@@ -712,7 +715,9 @@ function Notes({
           ) : (
             <>
               <div className="flex items-start gap-2.5">
-                {draft.pick.thumb ? <img src={draft.pick.thumb} alt="" className="max-h-16 max-w-24 shrink-0 rounded-[calc(var(--box-radius)-var(--spacing)*2.5)] object-contain shadow-[0_0_0_1px_var(--line2)]" /> : null}
+                {draft.pick.thumb ? (
+                  <img src={draft.pick.thumb} alt="" className="max-h-16 max-w-24 shrink-0 rounded-[calc(var(--box-radius)-var(--spacing)*2.5)] object-contain shadow-[0_0_0_1px_var(--line2)]" />
+                ) : null}
                 <div className="min-w-0 flex-1 text-[0.8125rem]/5 phone:text-[0.875rem]/5">
                   <div className="truncate font-medium text-fg">{draft.pick.element}</div>
                   <div className="truncate font-mono text-[0.75rem] text-fg3">{draft.pick.selector}</div>

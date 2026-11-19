@@ -61,7 +61,9 @@ function newestLog(dirs: string | string[], reader: string, sinceMs = 0): string
       try {
         const m = statSync(f).mtimeMs
         if (m >= sinceMs && (!best || m > best.m)) best = { f, m }
-      } catch (e) { swallow('log stat', e, reader, f) }
+      } catch (e) {
+        swallow('log stat', e, reader, f)
+      }
     }
     if (best) return best.f
   }
@@ -83,7 +85,9 @@ export function claudeProjectDir(cwd: string): string {
   try {
     const hit = readdirSync(root).find((n) => n.startsWith(name.slice(0, MAX_NAME)))
     if (hit) return join(root, hit)
-  } catch (e) { swallow('claude project dirs', e, 'claude', root) }
+  } catch (e) {
+    swallow('claude project dirs', e, 'claude', root)
+  }
   return dir
 }
 
@@ -138,10 +142,7 @@ function firstLine(f: string, max = 1 << 20): string | undefined {
   }
 }
 
-const ymd = (d: Date, utc: boolean) =>
-  utc
-    ? [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()]
-    : [d.getFullYear(), d.getMonth() + 1, d.getDate()]
+const ymd = (d: Date, utc: boolean) => (utc ? [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()] : [d.getFullYear(), d.getMonth() + 1, d.getDate()])
 
 /** the day folders a session started since sinceMs can be in: today, yesterday and sinceMs's day, local and UTC */
 function codexDayDirs(sinceMs?: number): string[] {
@@ -176,7 +177,9 @@ export function findCodexLog(cwd: LogCwd, sinceMs = 0): string | undefined {
       try {
         const m = statSync(f).mtimeMs
         if (m >= sinceMs) files.push({ f, m })
-      } catch (e) { swallow('codex log stat', e, 'codex', f) }
+      } catch (e) {
+        swallow('codex log stat', e, 'codex', f)
+      }
     }
   }
   files.sort((a, b) => b.m - a.m)
@@ -199,7 +202,9 @@ export function findCodexLog(cwd: LogCwd, sinceMs = 0): string | undefined {
 
 /** pi names a session folder "--<cwd without its leading slash, / \ and : turned into ->--" */
 export function piSessionDir(cwd: string): string {
-  const name = `--${trimSlash(cwd).replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`
+  const name = `--${trimSlash(cwd)
+    .replace(/^[/\\]/, '')
+    .replace(/[/\\:]/g, '-')}--`
   return join(piHome(), 'sessions', name)
 }
 
@@ -233,7 +238,9 @@ export function findOpencodeLog(cwd: LogCwd, sinceMs?: number): string | undefin
     const file = opencodeLogPath(home(), id)
     try {
       mirrorSession(id, file)
-    } catch (e) { swallow('opencode log mirror', e, 'opencode', file) }
+    } catch (e) {
+      swallow('opencode log mirror', e, 'opencode', file)
+    }
     return file
   }
   return undefined

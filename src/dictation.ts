@@ -147,13 +147,6 @@ export function dictate(end: (text: string | null, failure?: string) => void): D
         return close(null, "This browser couldn't record your voice.")
       }
     })
-    .catch((e: Error) =>
-      close(
-        null,
-        e?.name === 'NotAllowedError'
-          ? 'The microphone is off for Shepherdr: allow it in the browser to talk to type.'
-          : "This browser couldn't open the microphone.",
-      ),
-    )
+    .catch((e: Error) => close(null, e?.name === 'NotAllowedError' ? 'The microphone is off for Shepherdr: allow it in the browser to talk to type.' : "This browser couldn't open the microphone."))
   return self
 }

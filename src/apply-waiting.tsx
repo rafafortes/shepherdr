@@ -124,7 +124,9 @@ export function waitingWords(w: Waiting, kind: WaitingKind = 'agent') {
   return [
     start,
     reviewer ? started : 'Running tasks keep their agent.',
-    w.pinned ? `${w.pinned} of them ${w.pinned === 1 ? 'was' : 'were'} given ${w.pinned === 1 ? 'its' : 'their'} own ${reviewer ? 'reviewer' : 'worker'} when added, and ${w.pinned === 1 ? 'changes' : 'change'} too.` : '',
+    w.pinned
+      ? `${w.pinned} of them ${w.pinned === 1 ? 'was' : 'were'} given ${w.pinned === 1 ? 'its' : 'their'} own ${reviewer ? 'reviewer' : 'worker'} when added, and ${w.pinned === 1 ? 'changes' : 'change'} too.`
+      : '',
     w.kept.length ? `${w.kept.join(', ')} ${w.kept.length === 1 ? 'keeps' : 'keep'} its own setting.` : '',
   ].filter(Boolean)
 }
@@ -163,7 +165,9 @@ function Question({ ask }: { ask: Ask }) {
   const apply = async () => {
     setBusy(true)
     setFailed(null)
-    const replies = await Promise.all(ask.picks.map((p) => act({ type: 'apply-to-waiting', key: p.key, place: p.place }).catch((e: Error) => ({ ok: false, error: e.message })))) as (Partial<Waiting> & { ok?: boolean; error?: string })[]
+    const replies = (await Promise.all(
+      ask.picks.map((p) => act({ type: 'apply-to-waiting', key: p.key, place: p.place }).catch((e: Error) => ({ ok: false, error: e.message }))),
+    )) as (Partial<Waiting> & { ok?: boolean; error?: string })[]
     setBusy(false)
     const bad = replies.find((r) => !r.ok)
     if (bad) return setFailed(bad.error || 'It could not be applied.')

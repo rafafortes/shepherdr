@@ -56,12 +56,25 @@ const codex = (id: string, label: string, effort: string, ultra = true): Model =
 /** what each CLI takes when it can't be asked (kept up to date by hand; the CLI's own answer wins) */
 export const TABLE: Record<string, CliModels> = {
   claude: {
-    models: [claude('claude-fable-5-1', 'Fable 5.1', 'high'), claude('claude-opus-5-5', 'Opus 5.5', 'medium'), claude('claude-sonnet-5-5', 'Sonnet 5.5', 'medium'), claude('claude-haiku-5-5', 'Haiku 5.5', 'medium')],
+    models: [
+      claude('claude-fable-5-1', 'Fable 5.1', 'high'),
+      claude('claude-opus-5-5', 'Opus 5.5', 'medium'),
+      claude('claude-sonnet-5-5', 'Sonnet 5.5', 'medium'),
+      claude('claude-haiku-5-5', 'Haiku 5.5', 'medium'),
+    ],
     efforts: CLAUDE_LEVELS,
     default: 'claude-opus-5-5',
   },
   codex: {
-    models: [codex('gpt-6.1-sol', 'GPT-6.1-Sol', 'low'), codex('gpt-6-astra', 'GPT-6-Astra', 'medium'), codex('gpt-6-sol', 'GPT-6-Sol', 'medium'), codex('gpt-6-luna', 'GPT-6-Luna', 'medium', false), codex('gpt-5.6-sol', 'GPT-5.6-Sol', 'low'), codex('gpt-5.6-terra', 'GPT-5.6-Terra', 'medium'), codex('gpt-5.6-luna', 'GPT-5.6-Luna', 'medium', false)],
+    models: [
+      codex('gpt-6.1-sol', 'GPT-6.1-Sol', 'low'),
+      codex('gpt-6-astra', 'GPT-6-Astra', 'medium'),
+      codex('gpt-6-sol', 'GPT-6-Sol', 'medium'),
+      codex('gpt-6-luna', 'GPT-6-Luna', 'medium', false),
+      codex('gpt-5.6-sol', 'GPT-5.6-Sol', 'low'),
+      codex('gpt-5.6-terra', 'GPT-5.6-Terra', 'medium'),
+      codex('gpt-5.6-luna', 'GPT-5.6-Luna', 'medium', false),
+    ],
     efforts: [...CLAUDE_LEVELS, 'ultra'],
   },
   // pi reaches many providers' models: only pi itself can list them
@@ -141,7 +154,10 @@ export function scopeOpencodeText(text: string) {
 /** the patterns of a list written as text (opencode.models): commas or spaces between them, any case; `all` or empty is
  *  every model (undefined). Throws on a pattern that is no model id or glob. */
 export function scopePatterns(text: string): string[] | undefined {
-  const list = text.split(/[\s,]+/).filter(Boolean).map((p) => p.toLowerCase())
+  const list = text
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .map((p) => p.toLowerCase())
   if (!list.length || (list.length === 1 && list[0] === 'all')) return undefined
   if (list.includes('all')) throw new Error('Write all on its own, or the patterns without it.')
   for (const p of list) if (!/^[a-z0-9._\-/*?]+$/.test(p)) throw new Error(`${p} is not a model pattern: use letters, digits, . - _ / and the wildcards * ?`)
@@ -151,8 +167,7 @@ export function scopePatterns(text: string): string[] | undefined {
 /** pi's models named with their provider, as parsePi names them now: a list read before it did named most without */
 const bare = (m: Model) => m.label === m.id.slice(m.id.indexOf('/') + 1)
 const named = (m: Model) => (bare(m) ? { ...m, label: m.id } : m)
-const withProvider = (c: CliModels): CliModels =>
-  [...c.models, ...(c.others ?? [])].some(bare) ? { ...c, models: c.models.map(named), others: c.others?.map(named) } : c
+const withProvider = (c: CliModels): CliModels => ([...c.models, ...(c.others ?? [])].some(bare) ? { ...c, models: c.models.map(named), others: c.others?.map(named) } : c)
 
 /** pi's enabledModels (its global settings), read again only when the file changes; nothing when it names none */
 let enabled: { at: string; patterns?: string[] } = { at: '' }
@@ -170,7 +185,9 @@ export function piEnabled(): string[] | undefined {
     try {
       const list = at ? JSON.parse(readFileSync(file, 'utf8'))?.enabledModels : undefined
       if (Array.isArray(list)) patterns = list.filter((p): p is string => typeof p === 'string' && !!p.trim())
-    } catch (e) { swallow('pi settings parse', e, 'pi', file) }
+    } catch (e) {
+      swallow('pi settings parse', e, 'pi', file)
+    }
     enabled = { at, patterns: patterns?.length ? patterns : undefined }
   }
   return enabled.patterns
@@ -183,7 +200,13 @@ export function scopePi(c: CliModels, patterns?: string[]): CliModels {
     c,
     patterns?.map((p) => {
       const colon = p.lastIndexOf(':')
-      return colon > 0 && p.slice(colon + 1).trim().toLowerCase() in RANK ? p.slice(0, colon) : p
+      return colon > 0 &&
+        p
+          .slice(colon + 1)
+          .trim()
+          .toLowerCase() in RANK
+        ? p.slice(0, colon)
+        : p
     }),
   )
 }
@@ -375,7 +398,10 @@ export async function read(kind: string, from?: string): Promise<CliModels | und
   if (kind === 'agy') return readAgy()
   if (kind === 'claude' && from) {
     const bin = from.slice(0, from.lastIndexOf('@'))
-    const [catalog, help] = await Promise.all([run(['grep', '-aoE', '\\{id:"claude-[a-z0-9-]+",family:"[a-z]+",display_name:"[^"]+"|capabilities:\\[[^]]*\\]|default_effort:"[a-z]+"', bin]), run([bin, '--help'])])
+    const [catalog, help] = await Promise.all([
+      run(['grep', '-aoE', '\\{id:"claude-[a-z0-9-]+",family:"[a-z]+",display_name:"[^"]+"|capabilities:\\[[^]]*\\]|default_effort:"[a-z]+"', bin]),
+      run([bin, '--help']),
+    ])
     return parseClaude(catalog, help)
   }
   if (kind === 'codex') return parseCodex(await run(['codex', 'debug', 'models']))
@@ -434,7 +460,10 @@ export function parseCodex(json: string): CliModels | undefined {
   }
   if (!Array.isArray(raw)) return undefined
   const model = (m: Raw): Model => {
-    const efforts = (m.supported_reasoning_levels ?? []).map((l) => l.effort ?? '').filter((l) => l in RANK).sort((a, b) => RANK[a] - RANK[b])
+    const efforts = (m.supported_reasoning_levels ?? [])
+      .map((l) => l.effort ?? '')
+      .filter((l) => l in RANK)
+      .sort((a, b) => RANK[a] - RANK[b])
     return { id: m.slug!, label: m.display_name || m.slug!, efforts, ...(m.default_reasoning_level && efforts.includes(m.default_reasoning_level) ? { effort: m.default_reasoning_level } : {}) }
   }
   const ok = raw.filter((m) => m.slug)
@@ -454,7 +483,10 @@ export function parseAgy(out: string): CliModels | undefined {
     if (tab < 0 || !id) continue
     const base = agyBaseId(id)
     const effort = base === id ? undefined : id.slice(base.length + 1)
-    const label = line.slice(tab + 1).trim().replace(/\s*\((low|medium|high|xhigh|max)\)$/i, '')
+    const label = line
+      .slice(tab + 1)
+      .trim()
+      .replace(/\s*\((low|medium|high|xhigh|max)\)$/i, '')
     const g = groups.get(base) ?? { id: base, label, efforts: [] }
     if (effort && !g.efforts.includes(effort)) g.efforts.push(effort)
     groups.set(base, g)

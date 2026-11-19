@@ -8,7 +8,14 @@
 export function parseHosts(text: string): string[] {
   return text
     .split(',')
-    .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/\.$/, ''))
+    .map((s) =>
+      s
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .replace(/\/.*$/, '')
+        .replace(/\.$/, ''),
+    )
     .filter(Boolean)
 }
 

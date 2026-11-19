@@ -360,7 +360,7 @@ describe('what a Claude Code agent reports of itself', () => {
   })
 })
 
-describe("a route to the CLI process a pane runs", () => {
+describe('a route to the CLI process a pane runs', () => {
   const key = 'RT-1/Agent'
   const spec = () => ({ key, name: Agents.nameFor(key), kind: 'claude', cwd, workspace: 'w' })
   /** herdr runs the agent, a claude CLI in its pane's foreground */
@@ -464,7 +464,7 @@ describe('logs a CLI starts on its own', () => {
     expect(a.record(codex.key).sessionId).toBe('kept')
   })
 
-  test("a log its CLI started since the agent did is found where herdr named none", () => {
+  test('a log its CLI started since the agent did is found where herdr named none', () => {
     const pi = rec('DL-1/Agent', { kind: 'pi', cwd: tmp('cover-agents-dl-pi') })
     const claude = rec('DL-2/Agent', { kind: 'claude', cwd: tmp('cover-agents-dl-claude'), sessionId: UUID })
     const unknown = rec('DL-3/Agent', { kind: 'gemini' })
@@ -505,7 +505,17 @@ describe('logs a CLI starts on its own', () => {
 
 describe('a start herdr turns down', () => {
   const key = 'ST-1/Agent'
-  const spec = (o: Record<string, unknown> = {}) => ({ key, name: Agents.nameFor(key), kind: 'codex', cwd: tmp('cover-agents-st'), workspace: 'w', system: 'private rules', first: 'the brief', pane: async () => 'p-st', ...o })
+  const spec = (o: Record<string, unknown> = {}) => ({
+    key,
+    name: Agents.nameFor(key),
+    kind: 'codex',
+    cwd: tmp('cover-agents-st'),
+    workspace: 'w',
+    system: 'private rules',
+    first: 'the brief',
+    pane: async () => 'p-st',
+    ...o,
+  })
 
   test('is tried again after a moment, and its instructions and first message go ahead of what was sent meanwhile', async () => {
     const a = agentsWith()
@@ -629,7 +639,7 @@ describe('a slash command you typed', () => {
     expect(s.paneKeys).not.toHaveBeenCalled()
   })
 
-  test("still in the input, a menu took its Enter: Enter goes again", async () => {
+  test('still in the input, a menu took its Enter: Enter goes again', async () => {
     const a = await ready()
     // both looks of the first try find it still there; the next finds it gone
     s.read.mockResolvedValueOnce(atPrompt).mockResolvedValueOnce(atPrompt).mockResolvedValue('')

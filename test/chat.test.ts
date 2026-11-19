@@ -61,7 +61,12 @@ const agentsForChat = () => {
     procs: { list: () => [] },
   }
 }
-const chatWith = (agents = agentsForChat()) => new Chats(agents as never, (k) => k, () => 'You')
+const chatWith = (agents = agentsForChat()) =>
+  new Chats(
+    agents as never,
+    (k) => k,
+    () => 'You',
+  )
 
 /** what a CLI's reader left in the log, with the revision a real read would have bumped */
 const reached = (chats: InstanceType<typeof Chats>, key: string, ...ev: object[]) => {
@@ -181,9 +186,11 @@ describe('the built chat is cached per revision', () => {
     const ev: object[] = []
     for (let i = 0; i < 2000; i++) {
       const kind = i % 3 === 0 ? 'peer' : i % 3 === 1 ? 'agent' : 'question'
-      ev.push(kind === 'question'
-        ? { kind, id: `e${i}`, at: at + i, items: [{ question: 'Pick?', options: [{ label: 'A' }], multiSelect: false }] }
-        : { kind, id: `e${i}`, at: at + i, text: kind === 'peer' ? 'Relayed: go.' : 'A reply.' })
+      ev.push(
+        kind === 'question'
+          ? { kind, id: `e${i}`, at: at + i, items: [{ question: 'Pick?', options: [{ label: 'A' }], multiSelect: false }] }
+          : { kind, id: `e${i}`, at: at + i, text: kind === 'peer' ? 'Relayed: go.' : 'A reply.' },
+      )
     }
     reached(chats, key, ...ev)
     for (let i = 0; i < 200; i++) chats.post(key, { id: `ask:${i}`, at: at + i * 10, question: question(`ask:${i}`) })

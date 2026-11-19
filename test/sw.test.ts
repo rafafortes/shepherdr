@@ -142,7 +142,15 @@ describe('a tap', () => {
 })
 
 describe('buttons', () => {
-  const card = { tag: 'SHE-63', waits: true as const, answer: { chat: 'SHE-63/Agent', question: 'ask:1' }, actions: [{ action: '0', title: 'Rerun it' }, { action: '1', title: 'Skip it' }] }
+  const card = {
+    tag: 'SHE-63',
+    waits: true as const,
+    answer: { chat: 'SHE-63/Agent', question: 'ask:1' },
+    actions: [
+      { action: '0', title: 'Rerun it' },
+      { action: '1', title: 'Skip it' },
+    ],
+  }
   test('an iPhone has none: the alert shows without them', async () => {
     const w = worker({ maxActions: 0 })
     await w.push(card)

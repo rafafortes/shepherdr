@@ -84,8 +84,7 @@ export function restartAllWords(rows: RestartAllRow[], otherMachines: string[] =
   const tasks = "Tasks are not restarted: a running task's brief was written when it started, and restarting its agent is its own choice (shepherdr restart <id>)."
   const others = otherMachines.length ? `Another machine's spaces are not touched here: ${otherMachines.join(', ')}.` : ''
   const tail = [tasks, others].filter(Boolean)
-  if (!restarted.length && !failed.length)
-    return [`Nothing new in the Settings of this machine's coordinators (${same.length}): nothing was restarted.`, ...tail].join('\n')
+  if (!restarted.length && !failed.length) return [`Nothing new in the Settings of this machine's coordinators (${same.length}): nothing was restarted.`, ...tail].join('\n')
   return [
     ...restarted.map((r) => `${r.name}: restarted on ${r.on}${r.interrupted ? ', its working turn interrupted first' : ''}`),
     ...same.map((r) => (r.idle ? `${r.name}: nothing running yet, so its next start is on ${r.on}` : `${r.name}: already on ${r.on}, left alone`)),
@@ -100,24 +99,26 @@ export function restartAllWords(rows: RestartAllRow[], otherMachines: string[] =
  *  offer while it is pinned or was picked: a pin never drops out of the list it belongs to. picksOfKind: this machine's
  *  picks (model-picks.ts), or the ones of a world of its own (the demo's) */
 export function restartClis(kinds: string[], picksOfKind: (kind: string) => { pinned: string[]; recent: string[] } = picksOf): RestartCli[] {
-  return kinds.filter((kind) => !chatProblem(kind)).map((kind) => {
-    const c = modelsOf(kind)
-    if (!c) return { kind, name: name(kind) }
-    const picks = picksOfKind(kind)
-    const saved = (c.others ?? []).filter((m) => picks.pinned.includes(m.id) || picks.recent.includes(m.id))
-    const models = orderByPicks([...c.models, ...saved], picks)
-    const listed = new Set(models.map((m) => m.id))
-    return {
-      kind,
-      name: name(kind),
-      models: models.map((m) => ({ id: m.id, label: m.label, efforts: m.efforts, defaultEffort: m.effort })),
-      efforts: effortsOf(kind),
-      defaultModel: c.default,
-      defaultEffort: findModel(kind, c.default)?.effort,
-      pinned: picks.pinned.filter((id) => listed.has(id)),
-      recent: picks.recent.filter((id) => listed.has(id)),
-    }
-  })
+  return kinds
+    .filter((kind) => !chatProblem(kind))
+    .map((kind) => {
+      const c = modelsOf(kind)
+      if (!c) return { kind, name: name(kind) }
+      const picks = picksOfKind(kind)
+      const saved = (c.others ?? []).filter((m) => picks.pinned.includes(m.id) || picks.recent.includes(m.id))
+      const models = orderByPicks([...c.models, ...saved], picks)
+      const listed = new Set(models.map((m) => m.id))
+      return {
+        kind,
+        name: name(kind),
+        models: models.map((m) => ({ id: m.id, label: m.label, efforts: m.efforts, defaultEffort: m.effort })),
+        efforts: effortsOf(kind),
+        defaultModel: c.default,
+        defaultEffort: findModel(kind, c.default)?.effort,
+        pinned: picks.pinned.filter((id) => listed.has(id)),
+        recent: picks.recent.filter((id) => listed.has(id)),
+      }
+    })
 }
 
 /** what the restart sheet shows: what it runs on now, what Settings say (what it restarts with unless changed), the
@@ -133,8 +134,7 @@ export function restartInfo(o: { role: 'task' | 'coordinator'; space?: string; o
     if (m && cli?.models && !cli.models.some((x) => x.id === m.id)) cli.models.push({ id: m.id, label: m.label, efforts: m.efforts, defaultEffort: m.effort })
   }
   const on = launchHarness(o.on)
-  return { role: o.role, space: o.space, onKnown: o.onKnown, on, onWords: harnessWords(on), want: fitHarness(o.want), clis, working: o.working,
-    live: !o.working && liveOK(o.on.kind) }
+  return { role: o.role, space: o.space, onKnown: o.onKnown, on, onWords: harnessWords(on), want: fitHarness(o.want), clis, working: o.working, live: !o.working && liveOK(o.on.kind) }
 }
 
 /** a chat's last words, latest last, for an agent taking over: yours, another agent's (named as it declared itself) and

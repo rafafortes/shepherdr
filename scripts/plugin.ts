@@ -127,7 +127,7 @@ async function start(): Promise<boolean> {
       return true
     }
     console.log(`Shepherdr from ${root} holds the port without answering in time: restarting it on ${VERSION} from ${ROOT}`)
-    replace = { root, version: 'that doesn\'t answer', supervisor: sup }
+    replace = { root, version: "that doesn't answer", supervisor: sup }
   }
   const error = await prepare(ROOT)
   if (error) {
@@ -195,7 +195,11 @@ async function open() {
   console.log(say)
   // an action's own output shows nowhere in herdr: a small pane says it until Enter closes it
   const text = `${say}\n\nOpen it in a browser. To use it from your phone, run the action "Share Shepherdr on my tailnet".`
-  spawnSync(process.env.HERDR_BIN_PATH || 'herdr', ['plugin', 'pane', 'open', '--plugin', process.env.HERDR_PLUGIN_ID ?? 'herdr-projects', '--entrypoint', 'link', '--env', `SHEPHERDR_LINK_TEXT=${text}`], { stdio: 'ignore' })
+  spawnSync(
+    process.env.HERDR_BIN_PATH || 'herdr',
+    ['plugin', 'pane', 'open', '--plugin', process.env.HERDR_PLUGIN_ID ?? 'herdr-projects', '--entrypoint', 'link', '--env', `SHEPHERDR_LINK_TEXT=${text}`],
+    { stdio: 'ignore' },
+  )
 }
 
 /** private to the tailnet only (tailscale serve), never funnel */
@@ -206,8 +210,9 @@ function share() {
 }
 
 const cmd = process.argv[2]
-if (cmd === 'start') { if (!(await start())) process.exitCode = 1 }
-else if (cmd === 'open') await open()
+if (cmd === 'start') {
+  if (!(await start())) process.exitCode = 1
+} else if (cmd === 'open') await open()
 else if (cmd === 'stop') await stop()
 else if (cmd === 'status') await status()
 else if (cmd === 'share') share()

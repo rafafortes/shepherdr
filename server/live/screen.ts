@@ -29,7 +29,10 @@ export interface ScreenMenu {
 export function menuId(key: string, m: ScreenMenu) {
   const shown = m.all ?? m.screen
   const screen = shown === undefined ? undefined : screenText(shown, m)
-  return `menu:${key}:${createHash('sha256').update(JSON.stringify([m.title, m.choices, screen])).digest('hex').slice(0, 16)}`
+  return `menu:${key}:${createHash('sha256')
+    .update(JSON.stringify([m.title, m.choices, screen]))
+    .digest('hex')
+    .slice(0, 16)}`
 }
 
 export function menuKeys(m: ScreenMenu, choice: number, choices?: number[]): string[] | undefined {
@@ -39,8 +42,16 @@ export function menuKeys(m: ScreenMenu, choice: number, choices?: number[]): str
     if (choices.some((i) => !Number.isInteger(i) || i < 0 || i >= m.choices.length)) return
     const keys: string[] = []
     let cursor = m.cursor
-    const move = (to: number) => { const d = to - cursor; keys.push(...Array(Math.abs(d)).fill(d > 0 ? 'down' : 'up')); cursor = to }
-    for (let i = 0; i < m.choices.length; i++) if (choices.includes(i) !== !!m.selected?.includes(i)) { move(i); keys.push('space') }
+    const move = (to: number) => {
+      const d = to - cursor
+      keys.push(...Array(Math.abs(d)).fill(d > 0 ? 'down' : 'up'))
+      cursor = to
+    }
+    for (let i = 0; i < m.choices.length; i++)
+      if (choices.includes(i) !== !!m.selected?.includes(i)) {
+        move(i)
+        keys.push('space')
+      }
     move(m.choices.length)
     keys.push('enter')
     return keys
@@ -52,7 +63,12 @@ export function menuKeys(m: ScreenMenu, choice: number, choices?: number[]): str
 
 /** Drop shell startup and old output above the prompt's separator. Keep all of the consent text. */
 function promptScreen(lines: string[], first: number) {
-  for (let i = first - 1; i >= 0; i--) if (/^\s*[╭┌│|]?[─━─]{5,}/.test(lines[i])) return lines.slice(i + 1).join('\n').trim()
+  for (let i = first - 1; i >= 0; i--)
+    if (/^\s*[╭┌│|]?[─━─]{5,}/.test(lines[i]))
+      return lines
+        .slice(i + 1)
+        .join('\n')
+        .trim()
   return lines.join('\n').trim()
 }
 
@@ -66,14 +82,24 @@ function startupMenu(lines: string[]): ScreenMenu | null {
     const rows = lines.slice(first).filter((l) => /^\s*[❯›>▶]?\s*\[[✔✓x ]\]\s+/.test(l))
     if (first >= 0 && rows.length) {
       const cursor = rows.findIndex((l) => /[❯›>▶]/.test(l))
-      return { title: lines.find((l) => /new MCP servers found in this project/i.test(l))!.trim(), choices: rows.map((l) => l.replace(/^\s*[❯›>▶]?\s*\[[✔✓x ]\]\s+/, '').trim()), cursor: cursor < 0 ? rows.length : cursor, multi: true, selected: rows.flatMap((l, i) => (/\[[✔✓x]\]/.test(l) ? [i] : [])), reject: 'Reject all', screen: promptScreen(lines, first) }
+      return {
+        title: lines.find((l) => /new MCP servers found in this project/i.test(l))!.trim(),
+        choices: rows.map((l) => l.replace(/^\s*[❯›>▶]?\s*\[[✔✓x ]\]\s+/, '').trim()),
+        cursor: cursor < 0 ? rows.length : cursor,
+        multi: true,
+        selected: rows.flatMap((l, i) => (/\[[✔✓x]\]/.test(l) ? [i] : [])),
+        reject: 'Reject all',
+        screen: promptScreen(lines, first),
+      }
     }
   }
   const cursor = lines.findLastIndex((l) => /^\s*[❯›>▶]\s+\S/.test(l))
   if (cursor >= 0 && /enter.*(?:confirm|select|continue)|[↑↓]|arrow keys/i.test(screen)) {
     const col = lines[cursor].search(/[❯›>▶]/) + 2
-    const isOption = (i: number) => i === cursor || (!!lines[i]?.trim() && lines[i].search(/\S/) === col && !/^(?:enter|esc|press |[↑↓]|arrow keys).*?(?:confirm|select|continue|cancel|navigate|back)/i.test(lines[i].trim()))
-    let first = cursor, last = cursor
+    const isOption = (i: number) =>
+      i === cursor || (!!lines[i]?.trim() && lines[i].search(/\S/) === col && !/^(?:enter|esc|press |[↑↓]|arrow keys).*?(?:confirm|select|continue|cancel|navigate|back)/i.test(lines[i].trim()))
+    let first = cursor,
+      last = cursor
     while (first > 0 && isOption(first - 1)) first--
     while (last + 1 < lines.length && isOption(last + 1)) last++
     if (last > first) {
@@ -84,7 +110,17 @@ function startupMenu(lines: string[]): ScreenMenu | null {
     }
   }
   const yn = screen.match(/([^\n]*?)(?:\[y\/n\]|\(y\/n\)|\[yes\/no\]|\(yes\/no\))\s*[:?]?\s*$/i)
-  if (yn) return { title: yn[1].trim() || 'Continue?', choices: ['Yes', 'No'], cursor: 0, keys: [['y', 'enter'], ['n', 'enter']], screen }
+  if (yn)
+    return {
+      title: yn[1].trim() || 'Continue?',
+      choices: ['Yes', 'No'],
+      cursor: 0,
+      keys: [
+        ['y', 'enter'],
+        ['n', 'enter'],
+      ],
+      screen,
+    }
   // a numbered picker the CLI ends on a footer ("Choose the text style:", "Select login method:") asks no question, so the
   // numbered reading above found nothing to go by; its footer is what says it is a menu and not a list in a transcript
   if (!menuFooter(screen)) return null
@@ -156,7 +192,10 @@ export function parseMenu(screen: string): ScreenMenu | null {
   // a question that wraps: its lines above, while each goes on from the one before (starts in lower case)
   let top = qi
   while (top > 0 && /^[a-z]/.test(clean(lines[top])) && clean(lines[top - 1])) top--
-  const qline = lines.slice(top, qi + 1).map(clean).join(' ')
+  const qline = lines
+    .slice(top, qi + 1)
+    .map(clean)
+    .join(' ')
   const qmark = qline.indexOf('?')
   const question = qline.slice(Math.max(qline.lastIndexOf('. ', qmark) + 1, 0), qmark + 1).trim()
   // the command being asked about, when the CLI shows one between the question and the list
@@ -165,11 +204,32 @@ export function parseMenu(screen: string): ScreenMenu | null {
     .map(clean)
     .filter(Boolean)
   const at = shown.findIndex((l) => l.startsWith('$ '))
-  const cmd = (at >= 0 ? shown.slice(at).filter((l, k) => k === 0 || !/[?:]$/.test(l)).join(' ').slice(2) : undefined) ?? lines.slice(Math.max(0, qi - 4), qi).map(clean).filter((l) => l && !/[.:]$/.test(l) && !/^(Bash|Edit|Write|Read)( command)?$/i.test(l)).at(-1)
+  const cmd =
+    (at >= 0
+      ? shown
+          .slice(at)
+          .filter((l, k) => k === 0 || !/[?:]$/.test(l))
+          .join(' ')
+          .slice(2)
+      : undefined) ??
+    lines
+      .slice(Math.max(0, qi - 4), qi)
+      .map(clean)
+      .filter((l) => l && !/[.:]$/.test(l) && !/^(Bash|Edit|Write|Read)( command)?$/i.test(l))
+      .at(-1)
   const asksToRun = asks.test(question)
   const title = asksToRun && cmd ? `Allow: ${cmd.replace(/\?$/, '')}?` : question
   const descriptions = opts.some((o) => o.description) ? opts.map((o) => o.description) : undefined
-  return { title, screen: promptScreen(lines, first), choices: opts.map((o) => o.label), ...(descriptions ? { descriptions } : {}), cursor: Math.max(0, opts.findIndex((o) => o.on)) }
+  return {
+    title,
+    screen: promptScreen(lines, first),
+    choices: opts.map((o) => o.label),
+    ...(descriptions ? { descriptions } : {}),
+    cursor: Math.max(
+      0,
+      opts.findIndex((o) => o.on),
+    ),
+  }
 }
 
 /** A frame of the usual Braille spinner or Claude Code's, starting a line, in a box or not: any other symbol there may
@@ -240,5 +300,8 @@ export function lastWords(text: string, lines = 3) {
     .filter((l) => l.trim() && !/^\s*\S*[$#](\s|$)/.test(l))
     .map((l) => l.trim())
     .slice(-lines)
-  return kept.join(' ').replace(/\s{2,}/g, ' ').trim()
+  return kept
+    .join(' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
 }

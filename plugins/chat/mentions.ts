@@ -62,7 +62,9 @@ export function expand(text: string, picks: Picked[]): string {
   // "a sentence ends at #gtm.": the pick is the word less the punctuation the sentence added, and that stays after it
   const word = (w: string) => [w, w.replace(/[.-]+$/, '')]
   const withSpaces = text.replace(/(^|[\s(])#([\w.-]+)(?![\w.-]|\]\()/g, (all, before: string, w: string) => {
-    const p = word(w).map((x) => spaces.get(x)).find(Boolean)
+    const p = word(w)
+      .map((x) => spaces.get(x))
+      .find(Boolean)
     return p ? `${before}${spaceToken(p)}${w.slice(p.name.length)}` : all
   })
   return withSpaces.replace(/(^|[\s(])@([\w.-]+)(?![\w.-]|\]\()/g, (all, before: string, w: string) => {
@@ -190,12 +192,10 @@ const pickable = (t: Task) => !t.archived && /^[\w.-]+$/.test(t.id)
 export const placeOf = (snap: Snapshot | null | undefined, id: string) => snap?.places.find((p) => p.id === id)
 
 /** is the space or task a mention names still here (one removed since it was picked is only its words) */
-export const known = (snap: Snapshot | null | undefined, p: Picked) =>
-  !snap || (p.kind === 'space' ? !!placeOf(snap, p.id) : !!taskOf(snap, p.id))
+export const known = (snap: Snapshot | null | undefined, p: Picked) => !snap || (p.kind === 'space' ? !!placeOf(snap, p.id) : !!taskOf(snap, p.id))
 
 /** a task by its id, the way a mention names it */
-export const taskOf = (snap: Snapshot | null | undefined, id: string) =>
-  snap?.tasks.find((t) => t.id === id || t.id.toLowerCase() === id.toLowerCase())
+export const taskOf = (snap: Snapshot | null | undefined, id: string) => snap?.tasks.find((t) => t.id === id || t.id.toLowerCase() === id.toLowerCase())
 
 /** the spaces for what is typed: names that start with it first, then names or machines that hold it */
 export function matchSpaces(places: Place[], word: string, n = 6): Place[] {
@@ -213,9 +213,7 @@ export function matchTasks(tasks: Task[], word: string, n = 8): Task[] {
   const live = tasks.filter(pickable)
   const rank = (a: Task, b: Task) => Number(b.id.toLowerCase() === w) - Number(a.id.toLowerCase() === w) || RANK[a.status] - RANK[b.status]
   const starts = live.filter((t) => t.id.toLowerCase().startsWith(w)).sort(rank)
-  const has = live
-    .filter((t) => !t.id.toLowerCase().startsWith(w) && (t.id.toLowerCase().includes(w) || t.name.toLowerCase().includes(w)))
-    .sort(rank)
+  const has = live.filter((t) => !t.id.toLowerCase().startsWith(w) && (t.id.toLowerCase().includes(w) || t.name.toLowerCase().includes(w))).sort(rank)
   return [...starts, ...has].slice(0, n)
 }
 

@@ -35,7 +35,7 @@ describe.skipIf(!browser)('swipes back (phone)', () => {
     await ctx.close()
   }, 30_000)
 
-  test('settings and a task\'s side panel screens swipe back too, from across them or their very edge', async () => {
+  test("settings and a task's side panel screens swipe back too, from across them or their very edge", async () => {
     const { ctx, page, swipe } = await phone()
     await page.goto(at('place=vm-str/home'))
     await page.getByRole('button', { name: 'Places' }).click()
@@ -72,5 +72,4 @@ describe.skipIf(!browser)('swipes back (phone)', () => {
     expect(query(page).get('task')).toBe('GTM-14')
     await ctx.close()
   }, 30_000)
-
 })

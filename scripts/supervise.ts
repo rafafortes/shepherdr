@@ -132,7 +132,10 @@ async function renew() {
   let up = false
   for (let i = 0; i < 60 && !gone && !up; i++) {
     await Bun.sleep(1000)
-    up = await fetch(`http://127.0.0.1:${PORT}/api/snapshot`, { signal: AbortSignal.timeout(1500) }).then((r) => r.ok, () => false)
+    up = await fetch(`http://127.0.0.1:${PORT}/api/snapshot`, { signal: AbortSignal.timeout(1500) }).then(
+      (r) => r.ok,
+      () => false,
+    )
   }
   if (!up) {
     console.log("the supervisor's new code didn't start Shepherdr; it goes on as it was")

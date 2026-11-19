@@ -12,8 +12,9 @@ export function toggleCall(chatKey: string) {
   const ui = getState().ui
   if (ui.call === chatKey) return endCall()
   if (ui.call) endCall()
-  if (ui.dict) cancelDictation()
-  // the box turns into the call: nothing to type, so the keyboard goes down
+  if (ui.dict)
+    cancelDictation()
+    // the box turns into the call: nothing to type, so the keyboard goes down
   ;(document.activeElement as HTMLElement | null)?.blur?.()
   setUI({ call: chatKey, callStarted: Date.now(), callMuted: false, callError: null, focus: null, plus: null })
   act({ type: 'call', chat: chatKey, on: true })
@@ -86,12 +87,7 @@ function CallBox({ chatKey }: { chatKey: string }) {
     // the controls keep their row: the captions, when there are any, get a whole line of their own beneath it
     <div className="flex w-full flex-wrap items-center gap-1">
       {/* a call control, not the talk to type mic: filled, and struck through and dark while muted */}
-      <IconButton
-        label={ui.callMuted ? 'Unmute' : 'Mute'}
-        pressed={ui.callMuted}
-        className={clsx(roundBtn, 'bg-bubble! text-fg! aria-pressed:bg-fg! aria-pressed:text-bg!')}
-        onClick={toggleMute}
-      >
+      <IconButton label={ui.callMuted ? 'Unmute' : 'Mute'} pressed={ui.callMuted} className={clsx(roundBtn, 'bg-bubble! text-fg! aria-pressed:bg-fg! aria-pressed:text-bg!')} onClick={toggleMute}>
         {ui.callMuted ? <MicOffIcon className={ic} /> : <MicIcon className={ic} />}
       </IconButton>
       <LiveWave sample={callSample} label={`Voice call with ${chatName(snap, chatKey)}`} className="ml-1.5 min-w-10 flex-1" />
@@ -114,7 +110,8 @@ function CallBox({ chatKey }: { chatKey: string }) {
         <p data-captions role="status" aria-live="polite" aria-atomic="false" className="w-full px-2 text-[0.8125rem] leading-snug text-fg2">
           {captions.map((c) => (
             <span key={c.id} className="block">
-              {c.who === 'you' ? 'You: ' : ''}{c.text}
+              {c.who === 'you' ? 'You: ' : ''}
+              {c.text}
             </span>
           ))}
         </p>
@@ -125,7 +122,8 @@ function CallBox({ chatKey }: { chatKey: string }) {
 
 const callBtn = 'press-dim relative h-8 shrink-0 rounded-full px-3.5 text-[0.8125rem] font-medium after:absolute after:-inset-y-1.5 after:-inset-x-0.5 coarse:h-11 phone:h-11 phone:text-[0.9375rem]'
 /** a bar at the top about the call: the call's own pill shape, in its words' size */
-const callPill = 'mx-3 mt-2 flex shrink-0 [[data-device=phone]>&:first-child]:mt-[calc(env(safe-area-inset-top)+8px)] items-center gap-2.5 rounded-full py-1.5 pr-1.5 pl-4 text-[0.8125rem] font-medium phone:text-[0.9375rem]'
+const callPill =
+  'mx-3 mt-2 flex shrink-0 [[data-device=phone]>&:first-child]:mt-[calc(env(safe-area-inset-top)+8px)] items-center gap-2.5 rounded-full py-1.5 pr-1.5 pl-4 text-[0.8125rem] font-medium phone:text-[0.9375rem]'
 
 function CallBar() {
   // a call in a chat not on screen; its clock ticks only while it shows

@@ -92,7 +92,8 @@ async function task(o: { title: string; kind?: string; screen: string; resumed?:
   for (let i = 0; !t.worktree && i < 200; i++) await Bun.sleep(20)
   if (!t.worktree) throw new Error(`${t.id} got no worktree: ${t.trouble}`)
   started = []
-  const key = `${t.id}/Agent`, name = `shep-${t.id.toLowerCase()}`
+  const key = `${t.id}/Agent`,
+    name = `shep-${t.id.toLowerCase()}`
   const at = Date.now()
   screen = o.screen
   exited = !!o.exit
@@ -127,8 +128,16 @@ async function look(at: number, times = 2) {
   }
 }
 
-const cards = (key: string) => src.chats.chat(key).messages.filter((m) => m.card).map((m) => m.card!.text)
-const spaceCards = (t: TaskRec) => src.chats.chat(t.project).messages.filter((m) => m.card).map((m) => m.card!.text)
+const cards = (key: string) =>
+  src.chats
+    .chat(key)
+    .messages.filter((m) => m.card)
+    .map((m) => m.card!.text)
+const spaceCards = (t: TaskRec) =>
+  src.chats
+    .chat(t.project)
+    .messages.filter((m) => m.card)
+    .map((m) => m.card!.text)
 
 describe('an agent stopped on its startup screen', () => {
   test('comes to the chat as a card with the choices it reads, and the task counts as needs you', async () => {

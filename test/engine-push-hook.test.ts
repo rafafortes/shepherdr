@@ -19,7 +19,10 @@ function onGitHub() {
   sh('git init -q --bare -b main', bare)
   sh(`git push -q ${bare} main`, repo())
   const dir = tmp('gh-clone-hook')
-  sh(`git clone -q ${bare} . && git config user.email t@t && git config user.name T && git remote set-url origin https://github.com/acme/app.git && git config url.${bare}.insteadOf https://github.com/acme/app.git`, dir)
+  sh(
+    `git clone -q ${bare} . && git config user.email t@t && git config user.name T && git remote set-url origin https://github.com/acme/app.git && git config url.${bare}.insteadOf https://github.com/acme/app.git`,
+    dir,
+  )
   const file = join(tmp('gh-state-hook'), 'github.json')
   writeFileSync(file, JSON.stringify({ origin: bare, repo: 'acme/app', prs: [], calls: [], checks: [] }))
   process.env.FAKE_GH_STATE = file
@@ -29,11 +32,7 @@ function onGitHub() {
 /** a pre-push hook that refuses with its reason on one stream and the secret it found alongside it */
 function refusingHook(wt: string, stream: 'stdout' | 'stderr' = 'stdout') {
   const to = stream === 'stderr' ? ' >&2' : ''
-  const lines = [
-    `echo 'gitleaks: 1 finding'${to}`,
-    `echo '  File: src/config.ts:42'${to}`,
-    `echo '  Secret: AKIAIOSFODNN7EXAMPLE'${to}`,
-  ].join('\n')
+  const lines = [`echo 'gitleaks: 1 finding'${to}`, `echo '  File: src/config.ts:42'${to}`, `echo '  Secret: AKIAIOSFODNN7EXAMPLE'${to}`].join('\n')
   // a task works in a linked worktree: its .git is a file, and hooks come from the repo's common git dir
   const common = sh('git rev-parse --git-common-dir', wt)
   const hook = join(resolve(wt, common), 'hooks', 'pre-push')
@@ -64,7 +63,12 @@ test('a hook that refuses a push puts its own words in the agent output and the 
   expect(w.engine.subOf(t)).not.toContain('AKIAIOSFODNN7EXAMPLE')
   // no other task's row or chat carries it
   expect(w.engine.subOf(other.t)).not.toContain('gitleaks')
-  expect(w.sent.filter((s) => s.key !== `${t.id}/Agent`).map((s) => s.text).join()).not.toContain('gitleaks')
+  expect(
+    w.sent
+      .filter((s) => s.key !== `${t.id}/Agent`)
+      .map((s) => s.text)
+      .join(),
+  ).not.toContain('gitleaks')
 })
 
 test('a hook that refuses on stderr reaches the merge caller and the agent, redacted', async () => {

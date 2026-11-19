@@ -19,7 +19,13 @@ function tree(snap: Snapshot) {
 function Mark({ snap, chip }: { snap: Snapshot; chip: string }) {
   if (!chip.startsWith('m:')) return <HashIcon className={clsx(ic, 'text-fg3')} />
   const e = snap.machines?.find((m) => m.id === chip)?.emoji
-  return e ? <span aria-hidden className="grid size-4 shrink-0 place-items-center text-[0.875rem] leading-none">{e}</span> : <ServerIcon className={clsx(ic, 'text-fg3')} />
+  return e ? (
+    <span aria-hidden className="grid size-4 shrink-0 place-items-center text-[0.875rem] leading-none">
+      {e}
+    </span>
+  ) : (
+    <ServerIcon className={clsx(ic, 'text-fg3')} />
+  )
 }
 
 /** The lists' chips and + Filter: alone (a list with nothing to filter) it brings the filter box's room with it */
@@ -38,7 +44,11 @@ export function ListChips({ alone }: { alone?: boolean }) {
           chips.map((c) => {
             const name = chipName(snap, c)
             return (
-              <div key={c} data-chip={c} className="flex h-7 shrink-0 items-center gap-1 rounded-full bg-bubble py-1 pr-0.5 pl-1.5 text-[0.8125rem] text-fg phone:h-9 phone:pr-0 phone:pl-2.5 phone:text-[0.9375rem]">
+              <div
+                key={c}
+                data-chip={c}
+                className="flex h-7 shrink-0 items-center gap-1 rounded-full bg-bubble py-1 pr-0.5 pl-1.5 text-[0.8125rem] text-fg phone:h-9 phone:pr-0 phone:pl-2.5 phone:text-[0.9375rem]"
+              >
                 <Mark snap={snap} chip={c} />
                 <span className="max-w-48 truncate whitespace-nowrap">{name}</span>
                 <button
@@ -100,7 +110,13 @@ function AddChip({ snap, chips }: { snap: Snapshot; chips: string[] }) {
               <div key={m.chip} role="group" aria-label={m.name}>
                 <MenuItem role="menuitemcheckbox" aria-checked={chips.includes(m.chip)} icon={check(chips.includes(m.chip))} onClick={() => pick(m.chip)}>
                   <span className="flex items-center gap-2 font-medium">
-                    {m.emoji ? <span aria-hidden className="grid size-4 place-items-center leading-none">{m.emoji}</span> : <ServerIcon className={clsx(ic, 'text-fg3')} />}
+                    {m.emoji ? (
+                      <span aria-hidden className="grid size-4 place-items-center leading-none">
+                        {m.emoji}
+                      </span>
+                    ) : (
+                      <ServerIcon className={clsx(ic, 'text-fg3')} />
+                    )}
                     {m.name}
                   </span>
                 </MenuItem>

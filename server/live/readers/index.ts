@@ -149,7 +149,9 @@ export class LogTail {
     try {
       if (this.reader.cli === 'opencode') mirrorSession(id, this.file)
       else if (this.reader.cli === 'agy') mirrorConversation(id, this.file)
-    } catch (e) { swallow(`${this.reader.cli} log refresh`, e, this.reader.cli, this.file) }
+    } catch (e) {
+      swallow(`${this.reader.cli} log refresh`, e, this.reader.cli, this.file)
+    }
   }
 
   private restart(ino: number) {

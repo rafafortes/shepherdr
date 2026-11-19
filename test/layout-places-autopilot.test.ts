@@ -30,7 +30,13 @@ describe.skipIf(!browser)("a place's Autopilot", () => {
       const pop = page.getByRole('menu', { name: 'Menu' })
       const sw = pop.getByRole('menuitemcheckbox', { name: 'Autopilot' })
       await sw.waitFor()
-      expect(await pop.getByRole('menuitem').allTextContents()).toEqual([expect.stringContaining('Search in this chat'), 'Search this chat and beyond', 'Restart agent…', expect.stringContaining('Terminal'), 'Artifacts'])
+      expect(await pop.getByRole('menuitem').allTextContents()).toEqual([
+        expect.stringContaining('Search in this chat'),
+        'Search this chat and beyond',
+        'Restart agent…',
+        expect.stringContaining('Terminal'),
+        'Artifacts',
+      ])
       expect(await pop.locator('[role=group]').count()).toBe(0)
       expect(await sw.getAttribute('aria-checked')).toBe('false')
       expect(await pop.getByText('Off: does what you ask').count()).toBe(1)
@@ -81,7 +87,13 @@ describe.skipIf(!browser)("a place's Autopilot", () => {
             const m = mark?.getBoundingClientRect()
             // the place's icon, between the mark and the name (SHE-207)
             const icon = mark?.nextElementSibling?.getBoundingClientRect()
-            return { said: go.getAttribute('aria-label')!, name: go.getBoundingClientRect().left, fold: fold?.right, icon: icon && { left: icon.left, right: icon.right }, mark: m && { left: m.left, right: m.right, w: m.width, h: m.height, round: parseFloat(getComputedStyle(mark!).borderRadius) >= m.width / 2, hidden: mark!.getAttribute('aria-hidden') } }
+            return {
+              said: go.getAttribute('aria-label')!,
+              name: go.getBoundingClientRect().left,
+              fold: fold?.right,
+              icon: icon && { left: icon.left, right: icon.right },
+              mark: m && { left: m.left, right: m.right, w: m.width, h: m.height, round: parseFloat(getComputedStyle(mark!).borderRadius) >= m.width / 2, hidden: mark!.getAttribute('aria-hidden') },
+            }
           }),
         )
       const before = await rows()
@@ -104,7 +116,12 @@ describe.skipIf(!browser)("a place's Autopilot", () => {
         expect(r.said).toContain(', on Autopilot')
       }
       expect(after.filter((r) => r.mark).length).toBe(on.length)
-      expect(await page.locator(`${side} [data-autopilot]`).first().evaluate((e) => getComputedStyle(e, '::before').backgroundColor)).not.toBe('rgba(0, 0, 0, 0)')
+      expect(
+        await page
+          .locator(`${side} [data-autopilot]`)
+          .first()
+          .evaluate((e) => getComputedStyle(e, '::before').backgroundColor),
+      ).not.toBe('rgba(0, 0, 0, 0)')
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       for (const [i, id] of on.entries()) await world.act({ type: 'mode', place: id, mode: was[i] })
       // each switch left a card in its chat: read, for the tests after
@@ -196,7 +213,13 @@ describe.skipIf(!browser)('Autopilot Run now', () => {
     await run.click()
     // its coordinator wakes: one quiet line in the chat behind the page
     await page.waitForFunction(() => !document.querySelector('[aria-label*="Run now: wake"]')?.hasAttribute('disabled'))
-    expect(world.chat(p.chat).messages.slice(before).filter((m) => m.pilot).map((m) => m.pilot)).toEqual([line])
+    expect(
+      world
+        .chat(p.chat)
+        .messages.slice(before)
+        .filter((m) => m.pilot)
+        .map((m) => m.pilot),
+    ).toEqual([line])
     await world.act({ type: 'mode', place: p.id, mode: was })
     await page.close()
   }, 40_000)

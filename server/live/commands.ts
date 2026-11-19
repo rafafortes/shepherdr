@@ -33,7 +33,11 @@ export const startsSession = (kind: string, text: string) => (SESSION[kind] ?? [
 /** does the command still sit in the CLI's input, not run: its Enter went to the list of commands it shows as you
  *  type, or never came. The input is the last line with a prompt mark (❯ › >) near the bottom: what ran shows above. */
 export function leftAtPrompt(screen: string, command: string): boolean {
-  const lines = screen.split('\n').map((l) => l.replace(/\s+$/, '')).filter(Boolean).slice(-25)
+  const lines = screen
+    .split('\n')
+    .map((l) => l.replace(/\s+$/, ''))
+    .filter(Boolean)
+    .slice(-25)
   const input = lines.findLast((l) => /^\s*[❯›>](\s|$)/.test(l))
   if (!input) return false
   const name = command.trim().split(/\s/)[0]

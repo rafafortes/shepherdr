@@ -100,8 +100,17 @@ const noteOf = (r?: RestartRoom): Note | undefined => (r?.short ? { words: r.sho
 function roomNext(r: RestartRoom, start?: 'now' | 'later'): string {
   if (r.state === 'room') return ''
   if (start === 'later') return r.state === 'blocked' ? ' It never starts on it while it is blocked: its backups may.' : ' When its turn comes, the limits decide again.'
-  if (start) return r.state === 'blocked' ? ' It starts on a backup with room, never on this one.' : r.state === 'out' ? ' It starts on a backup with room, or waits until its provider is back.' : ' It starts on a backup with room, or waits first in line for a free slot.'
-  return r.state === 'out' ? ' It may stop again at once.' : r.state === 'blocked' ? ' It can’t restart on it: pick another model, or change the limit in Settings → Limits.' : ' It can’t restart on it until a slot frees up: pick one with room.'
+  if (start)
+    return r.state === 'blocked'
+      ? ' It starts on a backup with room, never on this one.'
+      : r.state === 'out'
+        ? ' It starts on a backup with room, or waits until its provider is back.'
+        : ' It starts on a backup with room, or waits first in line for a free slot.'
+  return r.state === 'out'
+    ? ' It may stop again at once.'
+    : r.state === 'blocked'
+      ? ' It can’t restart on it: pick another model, or change the limit in Settings → Limits.'
+      : ' It can’t restart on it until a slot frees up: pick one with room.'
 }
 
 function Sheet({ chat, name, current, start }: Opening) {
@@ -150,7 +159,15 @@ function Sheet({ chat, name, current, start }: Opening) {
   const go = async (live = false) => {
     setBusy(true)
     setError(null)
-    const r = await act(start === 'later' ? { type: 'start-with', chat, kind, model, effort } : start ? { type: 'start-now', chat, kind, model, effort } : live && canLive ? { type: 'live-switch', chat, kind, model, effort } : { type: 'restart', chat, kind, model, effort, save }).catch((e: Error) => ({ ok: false, error: e.message }))
+    const r = await act(
+      start === 'later'
+        ? { type: 'start-with', chat, kind, model, effort }
+        : start
+          ? { type: 'start-now', chat, kind, model, effort }
+          : live && canLive
+            ? { type: 'live-switch', chat, kind, model, effort }
+            : { type: 'restart', chat, kind, model, effort, save },
+    ).catch((e: Error) => ({ ok: false, error: e.message }))
     setBusy(false)
     if (r.ok === false) return setError(r.error || (live ? 'It could not be switched.' : 'It could not be restarted.'))
     close()
@@ -162,7 +179,9 @@ function Sheet({ chat, name, current, start }: Opening) {
   // different CLI, a working agent or one whose CLI has no switch keeps the restart (the server decides too).
   const canLive = !start && !!info?.live && !other && (model !== (info.on.model ?? '') || effort !== (info.on.effort ?? ''))
   // the save row is hidden while a switch is offered; a stale checked value must not save on a later Restart
-  useEffect(() => { if (canLive) setSave(false) }, [canLive])
+  useEffect(() => {
+    if (canLive) setSave(false)
+  }, [canLive])
   const label = (id: string) => (id ? (modelsOf(cli).find((m) => m.id === id)?.label ?? id) : DEFAULT)
   // the model list: pinned first, then the recent ones, then the CLI's own order, each under its heading
   const pickedHere = picks[kind] ?? NO_PICKS
@@ -192,7 +211,11 @@ function Sheet({ chat, name, current, start }: Opening) {
         <>
           {/* an explicit path: the same CLI's own switch keeps the turn, session, worktree and branch. Restart stays
               the other button, and the only one where this CLI has no switch or the agent is busy. */}
-          {canLive ? <Primary autoFocus disabled={!info || busy || unavailable || held} onClick={() => go(true)}>{busy ? 'Switching…' : 'Switch to'}</Primary> : null}
+          {canLive ? (
+            <Primary autoFocus disabled={!info || busy || unavailable || held} onClick={() => go(true)}>
+              {busy ? 'Switching…' : 'Switch to'}
+            </Primary>
+          ) : null}
           <Primary autoFocus={!canLive} disabled={!info || busy || unavailable || held} onClick={() => go(false)}>
             {start === 'later' ? (busy ? 'Saving…' : 'Save') : start ? (busy ? 'Starting…' : 'Start now') : busy ? 'Restarting…' : 'Restart'}
           </Primary>
@@ -203,7 +226,13 @@ function Sheet({ chat, name, current, start }: Opening) {
         <div data-restart className="flex flex-col gap-4">
           <div className="flex flex-col gap-2.5 text-fg">
             <Line label="Agent">
-              <Pick label="Agent" value={cli?.name ?? kind} options={info.clis.map((c) => c.name)} note={(n) => noteOf(info.clis.find((c) => c.name === n)?.room)} onPick={(n) => pickKind(info.clis.find((c) => c.name === n)!.kind)} />
+              <Pick
+                label="Agent"
+                value={cli?.name ?? kind}
+                options={info.clis.map((c) => c.name)}
+                note={(n) => noteOf(info.clis.find((c) => c.name === n)?.room)}
+                onPick={(n) => pickKind(info.clis.find((c) => c.name === n)!.kind)}
+              />
             </Line>
             <Line label="Model">
               {cli?.models ? (
@@ -225,13 +254,19 @@ function Sheet({ chat, name, current, start }: Opening) {
                 ) : (
                   <TextValue label="Model" value={model || DEFAULT} onEdit={() => undefined} onSave={(v) => pickModel(v.trim() === DEFAULT ? '' : v.trim())} />
                 )
-              ) : <span className="text-fg3">Default</span>}
+              ) : (
+                <span className="text-fg3">Default</span>
+              )}
             </Line>
             {cli?.models && levels.length ? (
               <Line label="Effort">
                 <Pick label="Effort" value={effort || DEFAULT} options={[DEFAULT, ...levels]} ordered onPick={(v) => setEffort(v === DEFAULT ? '' : v)} />
               </Line>
-            ) : <Line label="Effort"><span className="text-fg3">Default</span></Line>}
+            ) : (
+              <Line label="Effort">
+                <span className="text-fg3">Default</span>
+              </Line>
+            )}
             {unavailable ? <p className="text-need-fg">{model} is unavailable. Choose Default or an available model before restarting.</p> : null}
             {room?.words ? (
               <p data-room={room.state} className={clsx('text-sm', room.state === 'room' && !room.warn ? 'text-fg3' : 'text-need-fg')}>
@@ -249,10 +284,17 @@ function Sheet({ chat, name, current, start }: Opening) {
           {start === 'later' ? (
             <p className="text-sm text-fg3">Only this task's agent runs on it, when its turn comes; it stays in line as it is. Its reviewer and backups stay as Settings say.</p>
           ) : start ? (
-            <p className="text-sm text-fg3">Only this task's agent runs on it; its reviewer and backups stay as Settings say. It no longer waits for the tasks it was queued after, and goes ahead of the machine's load, within its slots.</p>
+            <p className="text-sm text-fg3">
+              Only this task's agent runs on it; its reviewer and backups stay as Settings say. It no longer waits for the tasks it was queued after, and goes ahead of the machine's load, within its
+              slots.
+            </p>
           ) : canLive ? (
             <p className="text-sm text-fg3">Switch in place: the turn, session, worktree and branch stay as they are. The chat shows what the agent reports before this finishes.</p>
-          ) : other ? <p className="text-sm text-fg3">{cli?.name ?? shown(kind)} starts a new session with this chat{task ? ', the brief and branch' : ''}.</p> : null}
+          ) : other ? (
+            <p className="text-sm text-fg3">
+              {cli?.name ?? shown(kind)} starts a new session with this chat{task ? ', the brief and branch' : ''}.
+            </p>
+          ) : null}
           {error ? <p className="text-need-fg">{error}</p> : null}
         </div>
       ) : (
@@ -331,13 +373,25 @@ export function AgentControls({ chatKey, cli }: { chatKey: string; cli: string }
     setUI({ plus: null })
     openRestart(chatKey, chatKey.includes('/') ? chatKey.split('/')[0] : 'this space', true)
   }
-  return <div data-agent-controls>
-    {([['Agent', agent ? cli : `${cli} · unknown`, ModeIcon], ['Model', model, ModelIcon], ['Effort', effort, EffortIcon]] as const).map(([label, value, Icon]) =>
-      <MenuItem key={label} icon={<Icon className={ic} />} aria-label={`${label}: ${value}. Select and restart`} onClick={open}>
-        <span className="flex min-w-0 items-center justify-between gap-4">
-          <span>{label}</span>
-          <span className="flex min-w-0 items-center gap-1 text-fg2"><span className="truncate">{value}</span><UpDownIcon className={`${ic} shrink-0`} /></span>
-        </span>
-      </MenuItem>)}
-  </div>
+  return (
+    <div data-agent-controls>
+      {(
+        [
+          ['Agent', agent ? cli : `${cli} · unknown`, ModeIcon],
+          ['Model', model, ModelIcon],
+          ['Effort', effort, EffortIcon],
+        ] as const
+      ).map(([label, value, Icon]) => (
+        <MenuItem key={label} icon={<Icon className={ic} />} aria-label={`${label}: ${value}. Select and restart`} onClick={open}>
+          <span className="flex min-w-0 items-center justify-between gap-4">
+            <span>{label}</span>
+            <span className="flex min-w-0 items-center gap-1 text-fg2">
+              <span className="truncate">{value}</span>
+              <UpDownIcon className={`${ic} shrink-0`} />
+            </span>
+          </span>
+        </MenuItem>
+      ))}
+    </div>
+  )
 }

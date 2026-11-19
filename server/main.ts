@@ -23,7 +23,7 @@ const source = await makeSource()
 if (kind === 'live') source.snapshot()
 const push = kind === 'live' && !process.env.SHEPHERDR_BOX ? new Push() : undefined
 if (push && 'devices' in source && 'pushWarnings' in source) {
-  (source as { devices: () => string[] }).devices = () => push.devices.map(deviceName)
+  ;(source as { devices: () => string[] }).devices = () => push.devices.map(deviceName)
   ;(source as { pushWarnings: () => string[] }).pushWarnings = () => push.warnings(deviceName)
 }
 // a worker for another machine (machines.ts) serves only its main machine, which pushes alerts itself

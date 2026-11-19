@@ -132,4 +132,3 @@ export function fakeHerdr() {
     drop: (method: keyof typeof h, ...how: ('before' | 'after')[]) => drops.set(method, [...(drops.get(method) ?? []), ...how]),
   }
 }
-

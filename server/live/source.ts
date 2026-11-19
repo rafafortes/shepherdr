@@ -10,7 +10,38 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, sep } from 'node:path'
 import { askText, BODY_MAX, clip, lastReply, NOTIFY_KEY, openCards, taskAlert, TITLE_MAX } from '../../shared/alerts.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, sortPlaces } from '../../shared/order.ts'
-import { asEmoji, doneNewestFirst, modeCard, NAME_MAX, nameProblem, slugify, STATUS_MAX, type Action, type ActivityAnswer, type ActivityAsk, type AddSpace, type Alert, type Artifact, type CardAsk, type Chat, type RestartInfo, type Peer, type Question, type Folders, type LimitsView, type Machine, type ModelsSummary, type Need, type Place, type Section, type Snapshot, type Task, type TaskStatus, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
+import {
+  asEmoji,
+  doneNewestFirst,
+  modeCard,
+  NAME_MAX,
+  nameProblem,
+  slugify,
+  STATUS_MAX,
+  type Action,
+  type ActivityAnswer,
+  type ActivityAsk,
+  type AddSpace,
+  type Alert,
+  type Artifact,
+  type CardAsk,
+  type Chat,
+  type RestartInfo,
+  type Peer,
+  type Question,
+  type Folders,
+  type LimitsView,
+  type Machine,
+  type ModelsSummary,
+  type Need,
+  type Place,
+  type Section,
+  type Snapshot,
+  type Task,
+  type TaskStatus,
+  type UpdateCard,
+  type WorktreeAsk,
+} from '../../shared/types.ts'
 import { Emitter, type Overview, type Source, type SourceEvents } from '../source.ts'
 import { parseHosts, refusedHosts } from '../hosts.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
@@ -28,12 +59,41 @@ import { Heartbeats, heartbeatFile, Wakes, wakeProblem } from './heartbeat.ts'
 import { eventRules, eventsText, eventWords, matches, nextWords, runWords, timeRule, timeWords, triggerWords, type Happened, type TriggerEvent } from './trigger.ts'
 import { clockWords, span, startsWords, whenFrom } from '../../shared/when.ts'
 import { Browsers, type BrowserBridge, type BrowserClient } from './browser.ts'
-import { end as endOrphans, endDeps, lines as orphanLines, newsLine as orphanNews, proofPids, readRows as readOrphanRows, scan as scanOrphans, scanOpts, systemSource as orphanSystemSource, type Finding, type ScanOpts, type Source as ProcessSource } from './orphans.ts'
+import {
+  end as endOrphans,
+  endDeps,
+  lines as orphanLines,
+  newsLine as orphanNews,
+  proofPids,
+  readRows as readOrphanRows,
+  scan as scanOrphans,
+  scanOpts,
+  systemSource as orphanSystemSource,
+  type Finding,
+  type ScanOpts,
+  type Source as ProcessSource,
+} from './orphans.ts'
 import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
 import { DISMISSED, dismissKind, dismissWords } from './dismiss.ts'
 import { dictate as dictation } from './dictate.ts'
-import { age, askOf, backupHarness, capWords, checkTitle, ended, Engine, fitStatus, retuneLine, reviewRetuneLine, type BackupPlan, type HeldWhy, type Retune, type StartLine, type TaskRec } from './engine/engine.ts'
+import {
+  age,
+  askOf,
+  backupHarness,
+  capWords,
+  checkTitle,
+  ended,
+  Engine,
+  fitStatus,
+  retuneLine,
+  reviewRetuneLine,
+  type BackupPlan,
+  type HeldWhy,
+  type Retune,
+  type StartLine,
+  type TaskRec,
+} from './engine/engine.ts'
 import { allBlocked, blockedOnly, waitWords, type Blocked, type Run } from './engine/choose.ts'
 import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { listFolders, makeRepo, resolveInHome } from './folders.ts'
@@ -49,7 +109,19 @@ import { claudeHome, claudeProjectDirs, piSessionDirs } from './readers/find.ts'
 import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
-import { privatePrompt, coordinatorPrompt, backupCardWords, wentBackCardWords, type BackWhy, backupKeptLine, coordinatorHandOverLine, relaunchedLine, restartLine, resumedLine, settingsBlock } from './prompts.ts'
+import {
+  privatePrompt,
+  coordinatorPrompt,
+  backupCardWords,
+  wentBackCardWords,
+  type BackWhy,
+  backupKeptLine,
+  coordinatorHandOverLine,
+  relaunchedLine,
+  restartLine,
+  resumedLine,
+  settingsBlock,
+} from './prompts.ts'
 import { chainWords, fitHarness, harnessProblem, harnessWords, recentChat, restartAllWords, restartHint, restartInfo, sameHarness, type Harness, type RestartAllRow } from './restart.ts'
 import { liveOK, switchLive, type SwitchIO } from './live-switch.ts'
 import { withRooms, type RoomInput } from './rooms.ts'
@@ -100,7 +172,6 @@ function userName(): string {
   const u = process.env.USER ?? 'You'
   return u[0].toUpperCase() + u.slice(1)
 }
-
 
 export class LiveSource extends Emitter<SourceEvents> implements Source {
   readonly kind = 'live' as const
@@ -165,7 +236,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     readers: { claude: () => this.claudeRead(Date.now), 'pi.commandcode': () => this.readCommandCode() },
     on: (key) => this.settings.get(key) !== 'off',
     alertAt: () => alertShare(this.settings.get('quota.alertAt')),
-    alert: (provider, window, title, body) => this.alert({ id: randomUUID(), from: 'Shepherdr', title: clip(title, TITLE_MAX), body: clip(body, BODY_MAX), go: { place: placeId.home() }, tag: `quota:${provider}:${window}` }),
+    alert: (provider, window, title, body) =>
+      this.alert({ id: randomUUID(), from: 'Shepherdr', title: clip(title, TITLE_MAX), body: clip(body, BODY_MAX), go: { place: placeId.home() }, tag: `quota:${provider}:${window}` }),
     emit: () => this.emit('snapshot'),
     main: !BOX,
   })
@@ -225,7 +297,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   mirror = BOX ? new Mirror(BOX) : null
   /** Settings → Models → profiles (profiles.ts): this machine's named settings, kept in profiles.json */
   private profileStore = new ProfileStore()
-  profiles = new Profiles(this.profileStore, () => this.profileSite(), (changes) => this.profilesWritten(changes))
+  profiles = new Profiles(
+    this.profileStore,
+    () => this.profileSite(),
+    (changes) => this.profilesWritten(changes),
+  )
   /** the profiles' schedules (profile-schedule.ts): applied when due, on the main machine only */
   profileSchedules = new ProfileSchedules(this.profileStore, this.profiles, {
     zone: () => this.settings.zone(),
@@ -319,7 +395,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         this.reseat(key)
       }
       this.emit('snapshot')
-      this.chats.readMenu(key).then(() => this.emit('chat', key)).catch(() => {})
+      this.chats
+        .readMenu(key)
+        .then(() => this.emit('chat', key))
+        .catch(() => {})
     })
     this.agents.on('logs', (key) => this.watched.includes(key) && this.emit('chat', key))
     this.agents.on('sent', (item) => {
@@ -372,7 +451,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     )
     // a turn cut short (Esc, a prompt turned down) runs no hook: its log says it is over
     this.agents.endedSince = (key, at) => this.chats.endedSince(key, at)
-    this.agents.beforeInput = async (key) => { if (!['working', 'gone'].includes(this.agents.status(key)) && await this.chats.readMenu(key, true)) this.emit('chat', key) }
+    this.agents.beforeInput = async (key) => {
+      if (!['working', 'gone'].includes(this.agents.status(key)) && (await this.chats.readMenu(key, true))) this.emit('chat', key)
+    }
     // a card of a start's screen with nothing to choose holds nothing: typing cannot pick what is not there
     this.agents.menuUp = (key) => this.menuAnswers.has(key) || !!this.chats.menu(key)?.choices.length
     this.engine.on('card', (t, status, sub) => this.onCard(t, status, sub))
@@ -395,7 +476,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const sweep = () => void this.sweepBrowsers().catch(() => undefined)
       this.timers.push(setTimeout(sweep, 20_000) as unknown as ReturnType<typeof setInterval>, setInterval(sweep, 600_000))
       // processes a finished task left running: the same cadence, named in doctor (RES-03)
-      this.timers.push(setTimeout(() => void this.sweepOrphans().catch(() => undefined), 20_000) as unknown as ReturnType<typeof setInterval>, setInterval(() => void this.sweepOrphans().catch(() => undefined), 3_600_000))
+      this.timers.push(
+        setTimeout(() => void this.sweepOrphans().catch(() => undefined), 20_000) as unknown as ReturnType<typeof setInterval>,
+        setInterval(() => void this.sweepOrphans().catch(() => undefined), 3_600_000),
+      )
       // browsers left idle (Settings, browser.idleClose): looked for once a minute
       this.timers.push(setInterval(() => void this.browsers?.closeIdle().catch(() => undefined), 60_000))
     }
@@ -403,7 +487,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // coverage-exempt: the timer itself, like the browser sweeps' above (a test never parks this machine's agents);
       // parkIdleAgents is test/agents-idle-park.test.ts's
       const park = () => void this.parkIdleAgents().catch(() => undefined)
-      this.timers.push(setTimeout(park, 30_000) as unknown as ReturnType<typeof setInterval>, setInterval(() => this.stall.run('parkIdleAgents', park), 5 * 60_000))
+      this.timers.push(
+        setTimeout(park, 30_000) as unknown as ReturnType<typeof setInterval>,
+        setInterval(() => this.stall.run('parkIdleAgents', park), 5 * 60_000),
+      )
     }
     this.agents.start()
     // the space the machine's and All machines' coordinators shared is the home space's now; their agents close
@@ -513,11 +600,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const st = this.agents.status(key)
       if (st !== 'idle' && st !== 'done') continue
       const held = key.includes('/') ? this.engine.task(key.split('/')[0]) : undefined
-      const ms = key.includes('/')
-        ? this.settings.agentIdleClose(held ? this.levelOf(held.project) : 'machine')
-        : this.places.coordinator(key)
-          ? this.settings.coordinatorIdleClose()
-          : null
+      const ms = key.includes('/') ? this.settings.agentIdleClose(held ? this.levelOf(held.project) : 'machine') : this.places.coordinator(key) ? this.settings.coordinatorIdleClose() : null
       if (!ms) continue
       if (this.agents.background(key) || this.agents.waiting(key).length) continue
       // something went in to it lately (news, a nudge, your words): its answer may be on its way, never counted yet
@@ -527,9 +610,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // a parked agent must come back on its session: each CLI resumes by its own id (agents.ts args) — claude and pi
       // by the session id their record keeps, opencode and agy by the one their mirror is named by, codex by the uuid
       // in its last log's name — so a record with none to resume by is left as it is
-      const resumable = r.kind === 'codex'
-        ? r.logs.some((f) => /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/.test(f))
-        : !!r.sessionId
+      const resumable = r.kind === 'codex' ? r.logs.some((f) => /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/.test(f)) : !!r.sessionId
       if (!resumable) continue
       const idle = now - this.lastLife(key, now)
       if (idle < ms) continue
@@ -642,7 +723,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const provider = providerOf(model)
     // the reason says the reset when the provider gave one ("out of credit until 11 Nov, 17:44 GMT-3")
     const body = `${this.chatName(key)} was cut off: ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.`
-    this.alert({ id: randomUUID(), from: 'Shepherdr', title: clip(`${providerWords(provider)} ran out`, TITLE_MAX), body: clip(body, BODY_MAX), go: { place: key }, tag: `runout:${provider}`, ...(key.includes('/') ? { task: true as const } : {}) })
+    this.alert({
+      id: randomUUID(),
+      from: 'Shepherdr',
+      title: clip(`${providerWords(provider)} ran out`, TITLE_MAX),
+      body: clip(body, BODY_MAX),
+      go: { place: key },
+      tag: `runout:${provider}`,
+      ...(key.includes('/') ? { task: true as const } : {}),
+    })
   }
 
   /** Command Code's read: its key from Shepherdr's Secrets, the Everywhere level (the main machine's vault), never logged */
@@ -659,7 +748,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    *  run-outs, the warnings. Both read it from the same inputs: a provider or model a cap entry names shows even with no
    *  agent or usage yet, and a capped model shows even where opencode.models filters it out of the menus */
   private summaryNow(): ModelsSummary {
-    const patterns = entryPatterns(this.settings, this.matrixSpaces().map((x) => x.key))
+    const patterns = entryPatterns(
+      this.settings,
+      this.matrixSpaces().map((x) => x.key),
+    )
     return modelsSummary(this.summaryInput(patterns.map(providerOf), patterns))
   }
 
@@ -675,7 +767,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const now = Date.now()
     // what counts toward models.maxAtOnce now, and the entry each task held for a model's cap waits for
     const runs = this.engine.runs().map((r) => ({ key: r.key, space: r.space }))
-    const heldBy = this.engine.heldTasks().filter((t) => t.held?.why === 'model' || t.held?.why === 'blocked').flatMap((t) => this.engine.waitingFor(t))
+    const heldBy = this.engine
+      .heldTasks()
+      .filter((t) => t.held?.why === 'model' || t.held?.why === 'blocked')
+      .flatMap((t) => this.engine.waitingFor(t))
     return { now, settings: this.settings, host: HOST, spaces, rows, usage: this.usage, agents, tasks, watch, quota: this.quotas.summary(now), runs, heldBy, providers, capped }
   }
 
@@ -818,7 +913,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     const peers = this.peers?.list() ?? []
     const up = this.agents.reachable
-    const machines: Machine[] = [{ id: placeId.machine(), machine: HOST, name: NAME, status: up ? 'idle' : 'off', unreachableSince: up ? undefined : clock(this.agents.lastReach), health: this.healthView(line), herdrDown: up ? undefined : clock(this.agents.lastReach) }]
+    const machines: Machine[] = [
+      {
+        id: placeId.machine(),
+        machine: HOST,
+        name: NAME,
+        status: up ? 'idle' : 'off',
+        unreachableSince: up ? undefined : clock(this.agents.lastReach),
+        health: this.healthView(line),
+        herdrDown: up ? undefined : clock(this.agents.lastReach),
+      },
+    ]
     const places: Place[] = this.places.shown().map(({ id, name, space }) => ({
       id,
       name,
@@ -826,7 +931,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       ...(space ? {} : { home: true }),
       // what its lists show: a home space its machine's, the main machine's every machine's
       level: space ? 2 : peers.length ? 0 : 1,
-      status: space ? status([id], [id]) : status(this.places.spaces.map((p) => placeId.space(p.name)), [id]),
+      status: space
+        ? status([id], [id])
+        : status(
+            this.places.spaces.map((p) => placeId.space(p.name)),
+            [id],
+          ),
       mode: this.places.mode(id),
       chat: id,
       ...(space ? { githubRemote: !!space.github } : {}),
@@ -842,7 +952,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const away = !l.reachable ? (l.connecting ? { connecting: true } : { status: 'off' as const, unreachableSince: clock(l.down ?? l.rec.lastSeen) }) : {}
       machines.push({ ...m, ...away })
       // a machine never reached yet still has its home space, to come back to
-      const theirs = l.snap?.places ?? [{ id: placeId.home(l.rec.machine), name: 'home', machine: l.rec.machine, home: true, level: 1 as const, status: 'off' as const, mode: 'regular' as const, chat: placeId.home(l.rec.machine) }]
+      const theirs = l.snap?.places ?? [
+        { id: placeId.home(l.rec.machine), name: 'home', machine: l.rec.machine, home: true, level: 1 as const, status: 'off' as const, mode: 'regular' as const, chat: placeId.home(l.rec.machine) },
+      ]
       for (const p of theirs) places.push({ ...p, mode: asMode(p.mode) ?? 'regular', ...(p.home ? { level: 1 as const } : {}), ...away, runNow: undefined })
     }
     // the names the human gave them: a space's by the space rules (another on its machine with it keeps its own)
@@ -918,7 +1030,28 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const key = `${t.id}/Agent`
       const cards = [...open(key).values()]
       const menu = this.chats.startMenuUp(key) && !cards.length ? this.chats.menu(key) : undefined
-      if (menu) out.push({ id: menuId(key, menu), chat: key, place: t.project, task: t.id, at: t.updated, question: { id: menuId(key, menu), kind: 'Form', title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: t.id, asks: 'Its screen waits', noDismiss: true } })
+      if (menu)
+        out.push({
+          id: menuId(key, menu),
+          chat: key,
+          place: t.project,
+          task: t.id,
+          at: t.updated,
+          question: {
+            id: menuId(key, menu),
+            kind: 'Form',
+            title: menu.title,
+            screen: menu.screen,
+            terminal: true,
+            noNote: true,
+            multi: menu.multi,
+            reject: menu.reject,
+            choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })),
+            to: t.id,
+            asks: 'Its screen waits',
+            noDismiss: true,
+          },
+        })
       else if (cards.length) for (const m of cards) out.push({ id: m.question.id, chat: key, place: t.project, task: t.id, at: m.question.terminal || !m.at ? t.updated : m.at, question: m.question })
       // a plain question or a failed start has no card: its row says what it waits with
       else out.push({ id: 'attention', chat: key, place: t.project, task: t.id, at: t.updated, text: this.engine.subOf(t, 'need') })
@@ -969,24 +1102,30 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         last: Object.assign({}, ...peers.map((l) => l.snap?.last ?? {}), this.unread.last),
         read: this.unread.read,
         sections,
-        settings: this.settings.sections(
-          this.devices(),
-          [
-            { name: NAME, state: `${BOX ? `Run from the main machine over SSH (${BOX.target})` : 'Main'} · ${this.agents.reachable ? 'reachable' : 'herdr not answering'}` },
-            ...(this.peers?.rows() ?? []),
-          ],
-          pluginSection(),
-          HOST,
-          ['~', ...this.places.spaces.map((p) => p.name)],
-          NAME,
-          (id) => this.heartbeats.read(id, this.roleOf(id)),
-          this.pushWarnings(),
-        ).concat(this.places.spaces.map((p) => {
-          const id = placeId.space(p.name)
-          this.engine.taskIds.ensure(id, p.key)
-          const seq = this.engine.taskIds.get(id)
-          return taskIdsSection(id, HOST, seq.prefix, seq.last + 1)
-        })).concat(this.places.spaces.map((p) => repositorySection(placeId.space(p.name), HOST, p.base))).concat(peers.flatMap((l) => (l.snap?.settings ?? []).filter((x) => x.machine === l.rec.machine))),
+        settings: this.settings
+          .sections(
+            this.devices(),
+            [
+              { name: NAME, state: `${BOX ? `Run from the main machine over SSH (${BOX.target})` : 'Main'} · ${this.agents.reachable ? 'reachable' : 'herdr not answering'}` },
+              ...(this.peers?.rows() ?? []),
+            ],
+            pluginSection(),
+            HOST,
+            ['~', ...this.places.spaces.map((p) => p.name)],
+            NAME,
+            (id) => this.heartbeats.read(id, this.roleOf(id)),
+            this.pushWarnings(),
+          )
+          .concat(
+            this.places.spaces.map((p) => {
+              const id = placeId.space(p.name)
+              this.engine.taskIds.ensure(id, p.key)
+              const seq = this.engine.taskIds.get(id)
+              return taskIdsSection(id, HOST, seq.prefix, seq.last + 1)
+            }),
+          )
+          .concat(this.places.spaces.map((p) => repositorySection(placeId.space(p.name), HOST, p.base)))
+          .concat(peers.flatMap((l) => (l.snap?.settings ?? []).filter((x) => x.machine === l.rec.machine))),
         user: this.user,
       })
     } finally {
@@ -1016,7 +1155,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   private withAdvice(c: Chat): Chat {
     // nothing open here: no need of any task to look at (a chat is drawn often, and a cold start draws hundreds)
     if (!openCards(c).length) return c
-    const open = new Set(this.advisable(c.key).filter((x) => x.need.question).map((x) => x.qid))
+    const open = new Set(
+      this.advisable(c.key)
+        .filter((x) => x.need.question)
+        .map((x) => x.qid),
+    )
     if (!open.size) return c
     return { ...c, messages: c.messages.map((m) => (m.question && open.has(m.question.id) ? { ...m, question: { ...m.question, advise: true } } : m)) }
   }
@@ -1118,7 +1261,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const x = n.question
         // a permission, or a terminal's own screen: the human's alone; and the advisor's own suggestion, the human's to send
         if (x.id.startsWith('menu:') || x.id.startsWith('advice:') || x.terminal || x.screen) continue
-        q = { kind: 'choice', title: x.title, choices: x.choices.map((c) => ({ label: c.label, description: c.description })), multi: x.multi, other: x.other, plan: x.kind === 'Plan' || x.id.startsWith('plan:') }
+        q = {
+          kind: 'choice',
+          title: x.title,
+          choices: x.choices.map((c) => ({ label: c.label, description: c.description })),
+          multi: x.multi,
+          other: x.other,
+          plan: x.kind === 'Plan' || x.id.startsWith('plan:'),
+        }
         qid = x.id
       } else {
         // a task's plain question: its last words ask something, and nothing else holds it (a cut-off, a start, a login)
@@ -1170,7 +1320,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.advices.set(rec)
     this.emit('chat', chat)
     try {
-      const prompt = advisorPrompt({ question: x.q, asker: x.asker, brief: x.brief, chat: recentChat(this.chats.chat(chat).messages, x.asker), folder: x.cwd, human: this.user, note: note?.trim() || undefined })
+      const prompt = advisorPrompt({
+        question: x.q,
+        asker: x.asker,
+        brief: x.brief,
+        chat: recentChat(this.chats.chat(chat).messages, x.asker),
+        folder: x.cwd,
+        human: this.user,
+        note: note?.trim() || undefined,
+      })
       let advice: Advice | undefined
       let said = ''
       let wait: Blocked<{ n: number; h: Harness }>[] | undefined
@@ -1249,7 +1407,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // asked by the human, they are looking at it: an alert only for one that went by itself
         if (!auto) return { ok: true }
         const t = x.need.task
-        this.alert({ id: randomUUID(), from: 'Shepherdr', title: `The advisor answered ${t ?? this.chatName(chat)}`, body: `${x.q.kind === 'choice' ? x.q.title : 'Its question'}: ${words}`.slice(0, 200), go: { place: chat }, tag: `advice:${chat}`, ...(t ? { task: true as const } : {}) })
+        this.alert({
+          id: randomUUID(),
+          from: 'Shepherdr',
+          title: `The advisor answered ${t ?? this.chatName(chat)}`,
+          body: `${x.q.kind === 'choice' ? x.q.title : 'Its question'}: ${words}`.slice(0, 200),
+          go: { place: chat },
+          tag: `advice:${chat}`,
+          ...(t ? { task: true as const } : {}),
+        })
         return { ok: true }
       }
       // a plan: a card the human sends or not
@@ -1257,7 +1423,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const words = adviceWords(advice, x.q)
       this.chats.post(chat, {
         id: card,
-        question: { id: card, title: `The advisor suggests: “${words.slice(0, 300)}”`, kind: 'Question', choices: [{ label: 'Send it', description: `${advice.why} (${advice.by})` }, { label: "I'll answer myself" }], to: this.chatName(chat), noNote: true },
+        question: {
+          id: card,
+          title: `The advisor suggests: “${words.slice(0, 300)}”`,
+          kind: 'Question',
+          choices: [{ label: 'Send it', description: `${advice.why} (${advice.by})` }, { label: "I'll answer myself" }],
+          to: this.chatName(chat),
+          noNote: true,
+        },
       })
       this.advices.set({ ...rec, state: 'suggested', advice, card })
       this.emit('chat', chat)
@@ -1371,7 +1544,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     const q: AdviceQuestion = x.question ? { kind: 'choice', title: x.question.title, choices: x.question.choices, multi: x.question.multi, other: x.question.other } : { kind: 'words', title: '' }
     // sent on the human's word: their answer, the advisor's words
-    const sent = q.kind === 'words' ? (await this.send(r.chat, r.advice.reply ?? '', [], true), { ok: true }) : ((await this.answer({ type: 'answer', chat: r.chat, question: r.question, choice: r.advice.choice ?? 0, choices: r.advice.choices, other: r.advice.other })) as { ok?: boolean; error?: string })
+    const sent =
+      q.kind === 'words'
+        ? (await this.send(r.chat, r.advice.reply ?? '', [], true), { ok: true })
+        : ((await this.answer({ type: 'answer', chat: r.chat, question: r.question, choice: r.advice.choice ?? 0, choices: r.advice.choices, other: r.advice.other })) as {
+            ok?: boolean
+            error?: string
+          })
     this.advices.set({ ...r, state: sent.ok ? 'sent' : 'failed' })
     this.emit('chat', r.chat)
     return sent.ok ? { ok: true } : { ok: false, error: (sent as { error?: string }).error ?? 'The question no longer takes that answer.' }
@@ -1522,7 +1701,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       keeper: this.chatName(this.keeperOf(a)),
       thumb: a.thumb,
       chats: [...new Set(a.versions.flatMap((v) => (v.chat ? [v.chat] : [])))],
-      versions: [...a.versions].reverse().map((v) => ({ n: v.n, when: age(v.at), by: v.by, note: v.note, html: v.html, what: v.html === v.n ? undefined : v.data === v.n ? ('data' as const) : ('title' as const) })),
+      versions: [...a.versions]
+        .reverse()
+        .map((v) => ({ n: v.n, when: age(v.at), by: v.by, note: v.note, html: v.html, what: v.html === v.n ? undefined : v.data === v.n ? ('data' as const) : ('title' as const) })),
     }
   }
 
@@ -1710,7 +1891,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     const t = this.engine.tasks.find((x) => x.id === ask.task && this.places.space(x.project))
     if (!t) throw new Error(`No task ${ask.task}.`)
-    if (!t.worktree || !task.existsSync(t.worktree)) throw new Error(ended(t) ? `${t.id} is Done (${t.closed ? 'nothing to merge' : 'merged'}): its worktree was put away.` : `${t.id} has no worktree yet.`)
+    if (!t.worktree || !task.existsSync(t.worktree))
+      throw new Error(ended(t) ? `${t.id} is Done (${t.closed ? 'nothing to merge' : 'merged'}): its worktree was put away.` : `${t.id} has no worktree yet.`)
     const base = t.base ?? this.places.space(t.project)!.base
     if (ask.what === 'files') return listFiles(t.worktree)
     if (ask.what === 'file') return readFile(t.worktree, ask.path)
@@ -1780,7 +1962,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   async folders(machine: string, path: string): Promise<Folders> {
     const l = this.peerFor(machine)
     if (l) return this.onPeer(l, `/api/folders?machine=${encodeURIComponent(machine)}&path=${encodeURIComponent(path)}`)
-    return listFolders(path, this.places.spaces.map((p) => p.path))
+    return listFolders(
+      path,
+      this.places.spaces.map((p) => p.path),
+    )
   }
 
   async addSpace(req: AddSpace): Promise<{ place: string }> {
@@ -1850,7 +2035,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const id = `profile-schedule:${randomUUID().slice(0, 8)}`
     this.chats.post(home, { id, card: { id, text } })
     if (this.watched.includes(home)) this.emit('chat', home)
-    if (failed) this.alert({ id: randomUUID(), from: 'Shepherdr', title: clip(`${name} was not applied`, TITLE_MAX), body: clip(text, BODY_MAX), go: { place: home, focus: id }, tag: `profile-schedule:${name}` })
+    if (failed)
+      this.alert({
+        id: randomUUID(),
+        from: 'Shepherdr',
+        title: clip(`${name} was not applied`, TITLE_MAX),
+        body: clip(text, BODY_MAX),
+        go: { place: home, focus: id },
+        tag: `profile-schedule:${name}`,
+      })
     this.emit('snapshot')
   }
 
@@ -1910,7 +2103,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       workspace: c.workspace,
       was: (c as { was?: string }).was,
       tab: c.tab,
-      system: coordinatorPrompt({ role: this.roleOf(id), name: c.label, path: c.path, machine: NAME, chat: id }, this.places.mode(id)) + '\n\n' + privatePrompt(this.settings.instructions('coordinator', this.spaceKey(id))),
+      system:
+        coordinatorPrompt({ role: this.roleOf(id), name: c.label, path: c.path, machine: NAME, chat: id }, this.places.mode(id)) +
+        '\n\n' +
+        privatePrompt(this.settings.instructions('coordinator', this.spaceKey(id))),
       env: agentEnv(id, ROOT),
     }
     const go = o.restart ? this.agents.restart(spec, o.restart) : this.agents.ensure(spec)
@@ -2124,7 +2320,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (from === h.kind) return hidden(backupKeptLine({ on: words, why: backup }), 'restart')
         return hidden(coordinatorHandOverLine({ from: them, why: backup, tasks: this.openTasks(id), chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
       }
-      return from === h.kind ? hidden(resumedLine(words, back), 'restart') : hidden(restartLine({ from: them, to: words, back: !!back, room: back === 'room', chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
+      return from === h.kind
+        ? hidden(resumedLine(words, back), 'restart')
+        : hidden(restartLine({ from: them, to: words, back: !!back, room: back === 'room', chat: recentChat(this.chats.chat(id).messages, them) }), 'restart')
     }
     await this.coordinator(id, { as: h, restart: first })
     // it runs again: whatever it waited for under the caps is over
@@ -2248,7 +2446,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (hold) throw new Error(this.engine.capRefusal('Not restarted', hold))
     if (save) {
       const at = x.space ? { space: x.space } : ('machine' as const)
-      for (const [k, v] of [['agent', CLI_NAME[h.kind] ?? h.kind], ['model', h.model ?? 'default'], ['effort', h.effort ?? 'default']])
+      for (const [k, v] of [
+        ['agent', CLI_NAME[h.kind] ?? h.kind],
+        ['model', h.model ?? 'default'],
+        ['effort', h.effort ?? 'default'],
+      ])
         if (this.settings.pick(`${x.role}.${k}`, at).value !== v) {
           const r = this.settings.set(`${x.role}.${k}`, v, at)
           if (!r.ok) throw new Error(r.error ?? `Couldn't save ${x.role}.${k}`)
@@ -2327,28 +2529,30 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (st === 'working') throw new Error("It's busy with a turn. Switch once it's done, or stop it first.")
     if (st === 'blocked') throw new Error("It's waiting on a question. Answer it, then switch.")
     if (st === 'gone') throw new Error("Its agent isn't running. Start it, then switch.")
-    const io: SwitchIO = injected ?? (() => {
-      const pane = this.agents.info(key)?.pane_id
-      if (!pane) throw new Error("Its terminal isn't there any more. Restart it instead.")
-      return {
-        send: async (text) => {
-          const r = await this.agents.send(key, text, { command: true })
-          if (r.waiting) throw new Error("It couldn't take the command now.")
-        },
-        keys: async (...keys) => this.agents.keys(key, keys),
-        screen: async () => herdr.read(pane, 'text', 300).catch(() => ''),
-        // the chat window's own read: new lines through the CLI's reader, then the launch's runtime from sessionRuntime
-        chat: async () => {
-          this.chats.pull(key)
-          const runtime = this.chats.chat(key).agent?.runtime
-          return { model: runtime?.model, effort: runtime?.effort }
-        },
-        sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-        // the CLI saves /model and /effort as defaults for new sessions too: read and put back only what it touched
-        readFile: (rel) => this.readAgentFile(rel),
-        writeFile: (rel, text) => this.writeAgentFile(rel, text),
-      }
-    })()
+    const io: SwitchIO =
+      injected ??
+      (() => {
+        const pane = this.agents.info(key)?.pane_id
+        if (!pane) throw new Error("Its terminal isn't there any more. Restart it instead.")
+        return {
+          send: async (text) => {
+            const r = await this.agents.send(key, text, { command: true })
+            if (r.waiting) throw new Error("It couldn't take the command now.")
+          },
+          keys: async (...keys) => this.agents.keys(key, keys),
+          screen: async () => herdr.read(pane, 'text', 300).catch(() => ''),
+          // the chat window's own read: new lines through the CLI's reader, then the launch's runtime from sessionRuntime
+          chat: async () => {
+            this.chats.pull(key)
+            const runtime = this.chats.chat(key).agent?.runtime
+            return { model: runtime?.model, effort: runtime?.effort }
+          },
+          sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+          // the CLI saves /model and /effort as defaults for new sessions too: read and put back only what it touched
+          readFile: (rel) => this.readAgentFile(rel),
+          writeFile: (rel, text) => this.writeAgentFile(rel, text),
+        }
+      })()
     const names = Object.fromEntries((modelsOf(to.kind)?.models ?? []).map((m) => [m.id, m.label]))
     const changed = await switchLive(io, to.kind, from, to, names)
     // proof first, record second: nothing moves if the chat did not report the new model and effort
@@ -2482,7 +2686,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a relaunch may have begun while herdr answered: that is a new launch, and the next look reads it
     if (this.agents.record(key)?.started !== r.started) return
     const card = this.chats.startMenuUp(key)
-    const step = this.starts.look(key, { started: r.started, wrong, pending, begun, prior: !!r.resumed, screen, resumed: !!r.resumed, waits: this.agents.waiting(key).length > 0, card, error: r.startError }, now)
+    const step = this.starts.look(
+      key,
+      { started: r.started, wrong, pending, begun, prior: !!r.resumed, screen, resumed: !!r.resumed, waits: this.agents.waiting(key).length > 0, card, error: r.startError },
+      now,
+    )
     await this.startStep(key, step)
   }
 
@@ -2557,7 +2765,14 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const what = why === 'stale' ? 'keeps running on outdated settings' : 'stopped'
     this.chats.post(key, { id, card: { id, text: `Its agent ${what}, and starting it again didn't help. Restart it from ⋯ → Restart agent.` } })
     if (this.watched.includes(key)) this.emit('chat', key)
-    this.alert({ id: randomUUID(), from: 'Shepherdr', title: `${this.chatName(key)} stopped`, body: `Its agent ${what}, and Shepherdr couldn't start it again.`, go: { place: key, focus: id }, tag: `revive:${key}` })
+    this.alert({
+      id: randomUUID(),
+      from: 'Shepherdr',
+      title: `${this.chatName(key)} stopped`,
+      body: `Its agent ${what}, and Shepherdr couldn't start it again.`,
+      go: { place: key, focus: id },
+      tag: `revive:${key}`,
+    })
   }
 
   /** what cut off an agent's last turn, if its log says the provider did */
@@ -2649,7 +2864,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return this.cutOff(key, r, `its backup, ${CLI_NAME[plan.to.kind] ?? plan.to.kind}, couldn't start: ${(e as Error).message}`)
       }
     }
-    const also = took ? `its backup agent (${CLI_NAME[took.to] ?? took.to}) already went in once${chain.length > 1 ? ', the last of its backups' : ''}` : candidates.length && !free.length ? 'no backup agent took over: every backup is blocked (0 allowed)' : plan.why ? `no backup agent took over: ${plan.why}` : undefined
+    const also = took
+      ? `its backup agent (${CLI_NAME[took.to] ?? took.to}) already went in once${chain.length > 1 ? ', the last of its backups' : ''}`
+      : candidates.length && !free.length
+        ? 'no backup agent took over: every backup is blocked (0 allowed)'
+        : plan.why
+          ? `no backup agent took over: ${plan.why}`
+          : undefined
     this.coordinatorStuck(key, r, backups)
     this.cutOff(key, r, also)
   }
@@ -2840,7 +3061,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         alerted.add(o.role)
         const names = moved.map((k) => this.chatName(k))
         const more = waiting ? `; ${waiting} more as slots free up` : ''
-        this.alert({ id: randomUUID(), from: 'Shepherdr', title: 'Back to work on the primary model', body: `${harnessWords(to.primary)} answers again: ${names.join(', ')} started again on it${more}.`.slice(0, 200), go: { place: moved[0] }, tag: `back:${o.role}:${o.space}:${o.at}`, ...(moved[0].includes('/') ? { task: true as const } : {}) })
+        this.alert({
+          id: randomUUID(),
+          from: 'Shepherdr',
+          title: 'Back to work on the primary model',
+          body: `${harnessWords(to.primary)} answers again: ${names.join(', ')} started again on it${more}.`.slice(0, 200),
+          go: { place: moved[0] },
+          tag: `back:${o.role}:${o.space}:${o.at}`,
+          ...(moved[0].includes('/') ? { task: true as const } : {}),
+        })
       }
     }
     this.resuming = resuming
@@ -3176,7 +3405,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     const first = to.chats[0]
     if (!alert) return
-    this.alert({ id: randomUUID(), from: 'Shepherdr', title: 'The primary model answers again', body: words(first).slice(0, 200), go: { place: first.key, focus: id }, tag: `back:${o.role}:${o.space}:${o.at}`, ...(first.task ? { task: true as const } : {}) })
+    this.alert({
+      id: randomUUID(),
+      from: 'Shepherdr',
+      title: 'The primary model answers again',
+      body: words(first).slice(0, 200),
+      go: { place: first.key, focus: id },
+      tag: `back:${o.role}:${o.space}:${o.at}`,
+      ...(first.task ? { task: true as const } : {}),
+    })
   }
 
   /** news for coordinators: they act on it when the human asked them to, and on Autopilot on their own. News the human
@@ -3252,8 +3489,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           await this.agents.send(n.to, hidden(words, 'news', { task: n.task, event: n.event }), { cid: `requested-news:${n.id}`, ensure: this.starter(n.to) })
         },
       )
-    } catch { /* keep it on disk until herdr/the coordinator can receive it */ }
-    finally { this.drainingNews = false }
+    } catch {
+      /* keep it on disk until herdr/the coordinator can receive it */
+    } finally {
+      this.drainingNews = false
+    }
   }
 
   /** news for the main machine's home space from another space, on any machine: its first line only, since that
@@ -3263,7 +3503,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (n.kind === 'added' && this.places.mode(home) === 'regular') return
     const line = clip(n.line.split('\n')[0].replace(/\.$/, ''), OVERVIEW_MAX)
     if (!this.wakes(home, n.kind === 'health' ? { event: 'health' } : this.happened(n.kind, n.place, n.line, (n.about as { task?: string } | undefined)?.task), `${from}: ${line}`)) return
-    const tail = ' Its own coordinator has the whole of it. If it can’t wait, alert the human with shepherdr alert (--task <id> when it is about a task) and say why; otherwise reply with only <no-reply>reason</no-reply>.'
+    const tail =
+      ' Its own coordinator has the whole of it. If it can’t wait, alert the human with shepherdr alert (--task <id> when it is about a task) and say why; otherwise reply with only <no-reply>reason</no-reply>.'
     this.agents.send(home, hidden(`${from}: ${line}.${tail}`, n.kind === 'health' ? 'health' : 'news', n.about), { ensure: this.starter(home) }).catch(() => undefined)
   }
 
@@ -3387,7 +3628,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (ctx.chat?.includes('/')) throw new Error("A task's agent doesn't park tasks: its coordinator or the human does.")
     if (yes) {
       const r = await this.engine.park(ids.length ? ids : undefined)
-      return [`Parked ${r.parked.length}${r.parked.length ? `: ${r.parked.join(', ')}` : ''}. Each waits as before, with no agent, worktree or herdr space, and starts on its brief at its turn.`, ...(r.kept.length ? [`Left as they were: ${r.kept.join('; ')}.`] : [])].join('\n')
+      return [
+        `Parked ${r.parked.length}${r.parked.length ? `: ${r.parked.join(', ')}` : ''}. Each waits as before, with no agent, worktree or herdr space, and starts on its brief at its turn.`,
+        ...(r.kept.length ? [`Left as they were: ${r.kept.join('; ')}.`] : []),
+      ].join('\n')
     }
     const want = ids.map((i) => i.toUpperCase())
     const all = (await this.engine.parkable()).filter(({ t }) => !want.length || want.includes(t.id.toUpperCase()))
@@ -3399,11 +3643,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const sub = (t: TaskRec) => this.engine.subOf(t, this.engine.statusOf(t), false, line)
     const row = (t: TaskRec, why: string) => `  ${t.id.padEnd(8)} ${t.title}  · ${why}`
     return [
-      go.length ? `${go.length} waiting task${go.length === 1 ? '' : 's'} would be parked (its agent and herdr space close, its empty worktree and branch go; it starts fresh on its brief at its turn):` : 'None can be parked.',
-      ...go.map(({ t, notes }) => row(t, `${sub(t)}${notes.length ? ` · ${notes.length === 1 ? 'a note' : `${notes.length} notes`} from another agent go${notes.length === 1 ? 'es' : ''} into its brief` : ''}`)),
+      go.length
+        ? `${go.length} waiting task${go.length === 1 ? '' : 's'} would be parked (its agent and herdr space close, its empty worktree and branch go; it starts fresh on its brief at its turn):`
+        : 'None can be parked.',
+      ...go.map(({ t, notes }) =>
+        row(t, `${sub(t)}${notes.length ? ` · ${notes.length === 1 ? 'a note' : `${notes.length} notes`} from another agent go${notes.length === 1 ? 'es' : ''} into its brief` : ''}`),
+      ),
       ...(stay.length ? [`${stay.length} kept as ${stay.length === 1 ? 'it is' : 'they are'}:`, ...stay.map(({ t, keep }) => row(t, keep!))] : []),
       go.length ? `Park ${go.length === 1 ? 'it' : 'them'}: shepherdr task park${ids.length ? ` ${ids.join(' ')}` : ''} --yes` : '',
-    ].filter(Boolean).join('\n')
+    ]
+      .filter(Boolean)
+      .join('\n')
   }
 
   private heldWords(why: HeldWhy, t: TaskRec) {
@@ -3489,14 +3739,21 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (e.kind === 'herdr' && e.what === 'over') return
     // browsers that finished tasks left open go first: a web game in one takes a core or two for nothing
     const swept = e.what === 'over' && (e.kind === 'cpu' || e.kind === 'memory') ? await this.sweepBrowsers().catch(() => []) : []
-    const procs = e.kind === 'cpu' || e.kind === 'memory' ? procLines(await topProcs(e.kind), this.engine.tasks.filter((t) => !ended(t)), e.kind) : []
+    const procs =
+      e.kind === 'cpu' || e.kind === 'memory'
+        ? procLines(
+            await topProcs(e.kind),
+            this.engine.tasks.filter((t) => !ended(t)),
+            e.kind,
+          )
+        : []
     const what =
       e.what === 'back'
         ? e.kind === 'herdr'
           ? 'Agents it ran may have stopped with it: check which tasks need writing to again (shepherdr task list).'
           : 'If you paused or held tasks for it, they may go on now.'
         : e.kind === 'disk'
-          ? 'Decide what to do: clean up (finished tasks\' leftovers, caches, /tmp), pause tasks, or tell the human.'
+          ? "Decide what to do: clean up (finished tasks' leftovers, caches, /tmp), pause tasks, or tell the human."
           : 'Decide what to do: pause tasks (shepherdr task pause <id>; a message to one lets it go on), queue them after others (shepherdr task queue <id> --after <ids>), or tell the human.'
     const closed = swept.length ? [`Shepherdr closed ${swept.length} shared browser${swept.length > 1 ? 's' : ''} that finished tasks left open (${swept.join(', ')}).`] : []
     const text = [`Machine ${NAME}: ${words}.`, summary(s), `Tasks: ${this.workingLine()}.`, ...closed, ...procs, what].join('\n')
@@ -3558,7 +3815,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** a space's automation: added (by the command only), paused or on again, run now, removed */
-  private automation(place: string, op: 'add' | 'pause' | 'resume' | 'run' | 'remove', name: string | undefined, to?: { name: string; when?: string; on?: string; title: string; brief?: string; agent?: Template['agent'] }) {
+  private automation(
+    place: string,
+    op: 'add' | 'pause' | 'resume' | 'run' | 'remove',
+    name: string | undefined,
+    to?: { name: string; when?: string; on?: string; title: string; brief?: string; agent?: Template['agent'] },
+  ) {
     if (!this.places.space(place)) throw new Error('Automations add tasks to a space with a repo: pick one (--space NAME)')
     if (op === 'add') {
       const t = to!
@@ -3649,7 +3911,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (!this.browsers || !a.notes?.length) return { ok: false }
         // a shot goes in only from this chat's own inbox, where Mark up saved it
         const inbox = join(boxDir(), 'inbox', chatDir(a.chat))
-        const notes = a.notes.map((n) => ({ comment: String(n.comment ?? ''), pick: { ...n.pick, shot: n.pick.shot && dirname(n.pick.shot) === inbox && /^[\w-]+-note-[\w-]+\.png$/.test(n.pick.shot.split('/').pop()!) ? n.pick.shot : undefined } }))
+        const notes = a.notes.map((n) => ({
+          comment: String(n.comment ?? ''),
+          pick: { ...n.pick, shot: n.pick.shot && dirname(n.pick.shot) === inbox && /^[\w-]+-note-[\w-]+\.png$/.test(n.pick.shot.split('/').pop()!) ? n.pick.shot : undefined },
+        }))
         const shots = notes.map((n) => n.pick.shot).filter((x): x is string => !!x)
         await this.send(a.chat, line.browserNotes(this.user, { url: a.url, title: a.title, viewport: a.viewport }, notes), shots, true)
         return {}
@@ -3676,7 +3941,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const id = `mode:${mode}:${Date.now()}`
         this.chats.post(a.place, { id, card: modeCard(id, mode) })
         if (this.watched.includes(a.place)) this.emit('chat', a.place)
-        if (this.agents.status(a.place) !== 'gone') await this.agents.send(a.place, hidden(`Autopilot is now ${mode === 'autopilot' ? 'on: you also work on your own, by your Autopilot rules, and get a heartbeat while idle' : 'off: do what the human asks, nothing on your own, and no more heartbeats'}. A card in this chat already tells the human: don't announce it, reply with only <no-reply>reason</no-reply>.`, 'mode', { mode }))
+        if (this.agents.status(a.place) !== 'gone')
+          await this.agents.send(
+            a.place,
+            hidden(
+              `Autopilot is now ${mode === 'autopilot' ? 'on: you also work on your own, by your Autopilot rules, and get a heartbeat while idle' : 'off: do what the human asks, nothing on your own, and no more heartbeats'}. A card in this chat already tells the human: don't announce it, reply with only <no-reply>reason</no-reply>.`,
+              'mode',
+              { mode },
+            ),
+          )
         this.emit('snapshot')
         return {}
       }
@@ -3709,7 +3982,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
             this.places.save()
             this.emit('snapshot')
             return { ok: true }
-          } catch (e) { return { ok: false, error: (e as Error).message } }
+          } catch (e) {
+            return { ok: false, error: (e as Error).message }
+          }
         }
         if (a.key === 'space.base') {
           if (!a.place || !a.value) return { ok: false, error: 'Choose a repository space and branch.' }
@@ -3717,7 +3992,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
             await this.places.setBase(a.place, a.value)
             this.emit('snapshot')
             return { ok: true }
-          } catch (e) { return { ok: false, error: (e as Error).message } }
+          } catch (e) {
+            return { ok: false, error: (e as Error).message }
+          }
         }
         // a plugin's switch: the human's own list, on the main machine
         if (a.key.startsWith(PLUGIN_KEY)) {
@@ -3857,7 +4134,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'restart-info': {
         try {
           const x = this.restartable(a.chat)
-          const info = restartInfo({ role: x.role, space: x.space, on: x.on, onKnown: !!this.agents.record(a.chat), want: x.want, kinds: Object.keys(CLI_NAME).filter(this.engine.installed), working: this.agents.status(a.chat) === 'working' })
+          const info = restartInfo({
+            role: x.role,
+            space: x.space,
+            on: x.on,
+            onKnown: !!this.agents.record(a.chat),
+            want: x.want,
+            kinds: Object.keys(CLI_NAME).filter(this.engine.installed),
+            working: this.agents.status(a.chat) === 'working',
+          })
           // a task that waits to start: what its go starts it on (engine.ts taskChain), Start with…'s pick among them
           const starts = x.t && ['queued', 'todo', 'scheduled'].includes(this.engine.statusOf(x.t)) ? this.engine.taskChain(x.t)[0]?.h : undefined
           return { ok: true, info: { ...info, ...(starts ? { starts: fitHarness(starts) } : {}), clis: withRooms(info.clis, this.roomInput(x.space ?? '', x.t ? x.t.id : a.chat)) } }
@@ -3985,7 +4270,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (name.length > NAME_MAX) return { ok: false, error: `A name fits ${NAME_MAX} characters.` }
         if (m && name && machines.some((x) => x.id !== m.id && x.name.toLowerCase() === name.toLowerCase())) return { ok: false, error: `A machine is called ${name} already.` }
         // a space's name follows the space rules, its own on its machine
-        const bad = p && name ? nameProblem(name, places.filter((x) => x.machine === p.machine && x.id !== p.id).map((x) => x.name)) : undefined
+        const bad =
+          p && name
+            ? nameProblem(
+                name,
+                places.filter((x) => x.machine === p.machine && x.id !== p.id).map((x) => x.name),
+              )
+            : undefined
         if (bad) return { ok: false, error: bad }
         this.places.rename(a.id, name)
         if (emoji !== undefined) this.places.setEmoji(a.id, emoji)
@@ -4050,7 +4341,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    *  typed answers them all) */
   private async send(key: string, text: string, files: string[], fromScreen = false, cid?: string, opts: { keepAsks?: boolean } = {}) {
     const at = Date.now()
-    const lines = files.map((p) => line.attach(this.user, p.split('/').pop()!.replace(/^[a-z0-9]+-/, ''), p))
+    const lines = files.map((p) =>
+      line.attach(
+        this.user,
+        p
+          .split('/')
+          .pop()!
+          .replace(/^[a-z0-9]+-/, ''),
+        p,
+      ),
+    )
     const full = [text, ...lines].filter(Boolean).join('\n')
     if (!full) return {}
     // whatever you send answers the choice cards still open there: the place's dot no longer waits on them
@@ -4211,7 +4511,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       }
       // the last question of a form: the CLI asks to submit
       if (Number(idx ?? 0) >= open.items.length - 1 && open.items.length > 1) setTimeout(() => this.agents.keys(key, ['enter']), 600)
-      const label = a.other || (a.choices ?? [a.choice]).map((i) => item?.options[i]?.label).filter(Boolean).join(', ')
+      const label =
+        a.other ||
+        (a.choices ?? [a.choice])
+          .map((i) => item?.options[i]?.label)
+          .filter(Boolean)
+          .join(', ')
       this.chats.post(key, { id: `cli-answer:${qid}`, who: 'you', answered: answered(item?.question ?? ''), elsewhere: space ? this.chats.answeredIn(space) : undefined, text: label })
       if (space) this.answeredHere(space, key, item?.question ?? '', label)
       this.engine.youWrote(key, { go: false })
@@ -4360,7 +4665,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const t = this.engine.tasks.find((x) => x.id === task)
     // a stopped task's browser stays closed until the task is talked to again
     if (!this.browsers || !t || ended(t) || t.stopped) {
-      out.send(JSON.stringify({ type: 'error', gone: true, message: !this.browsers ? 'The browser is not in the plugin list.' : t?.stopped ? 'The browser closed when the task was stopped.' : 'No such task here.' }))
+      out.send(
+        JSON.stringify({
+          type: 'error',
+          gone: true,
+          message: !this.browsers ? 'The browser is not in the plugin list.' : t?.stopped ? 'The browser closed when the task was stopped.' : 'No such task here.',
+        }),
+      )
       out.close()
       return { message() {}, end() {} }
     }
@@ -4384,11 +4695,24 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** Voice uses the same actions and chat views as the screen; the owner stays attached to a target. */
   voiceTools(chat: string): import('./voice.ts').VoiceTools {
     const targets = () => {
-      const local = this.placeList().filter((p) => !this.peers?.owner(p.chat)).map((p) => ({ key: p.chat, name: p.name, machine: HOST, peer: undefined as ReturnType<Machines['owner']> }))
-      local.push(...this.engine.tasks.flatMap((t) => ['Agent', 'Reviewer'].map((role) => ({ key: `${t.id}/${role}`, name: role === 'Agent' ? t.id : `${t.id} reviewer`, machine: HOST, peer: undefined }))))
+      const local = this.placeList()
+        .filter((p) => !this.peers?.owner(p.chat))
+        .map((p) => ({ key: p.chat, name: p.name, machine: HOST, peer: undefined as ReturnType<Machines['owner']> }))
+      local.push(
+        ...this.engine.tasks.flatMap((t) => ['Agent', 'Reviewer'].map((role) => ({ key: `${t.id}/${role}`, name: role === 'Agent' ? t.id : `${t.id} reviewer`, machine: HOST, peer: undefined }))),
+      )
       for (const peer of this.peers?.list() ?? []) {
         local.push(...(peer.snap?.places ?? []).map((p) => ({ key: p.chat, name: this.chatName(p.chat), machine: peer.rec.machine, peer })))
-        local.push(...(peer.snap?.tasks ?? []).flatMap((t) => ['Agent', 'Reviewer'].map((role) => ({ key: role === 'Agent' ? t.agent?.chat ?? `${t.id}/Agent` : `${t.id}/Reviewer`, name: role === 'Agent' ? t.id : `${t.id} reviewer`, machine: peer.rec.machine, peer }))))
+        local.push(
+          ...(peer.snap?.tasks ?? []).flatMap((t) =>
+            ['Agent', 'Reviewer'].map((role) => ({
+              key: role === 'Agent' ? (t.agent?.chat ?? `${t.id}/Agent`) : `${t.id}/Reviewer`,
+              name: role === 'Agent' ? t.id : `${t.id} reviewer`,
+              machine: peer.rec.machine,
+              peer,
+            })),
+          ),
+        )
       }
       return local
     }
@@ -4404,7 +4728,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (!t.peer.reachable) throw new Error(`${t.machine} is unavailable; its chat may be stale.`)
       const r = await this.peers!.fetch(t.peer, `/api/chat?chat=${encodeURIComponent(t.key)}`, { signal: AbortSignal.timeout(4000) })
       if (!r.ok) throw new Error(`${t.machine} could not read the chat.`)
-      const view = await r.json() as { chat: Chat | null; status?: string }
+      const view = (await r.json()) as { chat: Chat | null; status?: string }
       if (!view.chat || view.chat.key !== t.key || !view.status) throw new Error('The owning machine did not return this chat.')
       return { chat: view.chat, status: view.status }
     }
@@ -4424,15 +4748,23 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       read: async (to) => {
         const t = resolve(to)
         const { chat: c, status: state } = await load(t)
-        return `${t.machine}:${t.name} is ${state === 'gone' ? 'not running' : state}.\n${c.messages.slice(-8).map((m) => `${m.who === 'you' ? this.user : m.peer ? `${m.peer.name} (another agent)` : t.name}: ${excerpt(m.text ?? m.question?.title ?? (m.artifact ? tag('artifact', { id: m.artifact.id, title: this.snapshot().artifacts.find((a) => a.id === m.artifact!.id)?.title ?? 'deleted' }) : ''), 300)}`).join('\n')}`
+        return `${t.machine}:${t.name} is ${state === 'gone' ? 'not running' : state}.\n${c.messages
+          .slice(-8)
+          .map(
+            (m) =>
+              `${m.who === 'you' ? this.user : m.peer ? `${m.peer.name} (another agent)` : t.name}: ${excerpt(m.text ?? m.question?.title ?? (m.artifact ? tag('artifact', { id: m.artifact.id, title: this.snapshot().artifacts.find((a) => a.id === m.artifact!.id)?.title ?? 'deleted' }) : ''), 300)}`,
+          )
+          .join('\n')}`
       },
       overview: async () => {
         const s = this.snapshot()
         const places = s.places.map((p) => `${p.id} (${p.machine}:${p.name}): ${p.unreachableSince || p.connecting ? 'unavailable; last known ' : ''}${p.status}`)
-        const tasks = s.tasks.filter((t) => !t.archived).map((t) => {
-          const p = s.places.find((p) => p.id === t.place)
-          return `${p?.machine ?? t.place}:${t.id} ${t.name}: ${p?.unreachableSince || p?.connecting ? 'unavailable; last known ' : ''}${t.state}${statusLine(t) ? ` (${statusLine(t)})` : ''}`
-        })
+        const tasks = s.tasks
+          .filter((t) => !t.archived)
+          .map((t) => {
+            const p = s.places.find((p) => p.id === t.place)
+            return `${p?.machine ?? t.place}:${t.id} ${t.name}: ${p?.unreachableSince || p?.connecting ? 'unavailable; last known ' : ''}${t.state}${statusLine(t) ? ` (${statusLine(t)})` : ''}`
+          })
         return [...places, ...tasks].join('\n') || 'No tasks.'
       },
       onReply: (fn) => {
@@ -4442,7 +4774,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           set.add(fn)
           this.replyFns.set(t.key, set)
           this.lastAgentMsg.set(t.key, this.chats.lastReply(t.key) ?? '')
-          return () => { set.delete(fn); if (!set.size) { this.replyFns.delete(t.key); this.lastAgentMsg.delete(t.key) } }
+          return () => {
+            set.delete(fn)
+            if (!set.size) {
+              this.replyFns.delete(t.key)
+              this.lastAgentMsg.delete(t.key)
+            }
+          }
         }
         let active = true
         let ready = false
@@ -4453,22 +4791,35 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           for (const m of replies) seen.set(m.id, m.text!)
           ready = true
         }
-        const off = this.peers!.subscribeChat(t.peer, t.key, (c) => { if (active) accept(c) })
-        void load(t).then((view) => { if (active && !ready) accept(view.chat) }).catch(() => {})
-        return () => { active = false; off() }
+        const off = this.peers!.subscribeChat(t.peer, t.key, (c) => {
+          if (active) accept(c)
+        })
+        void load(t)
+          .then((view) => {
+            if (active && !ready) accept(view.chat)
+          })
+          .catch(() => {})
+        return () => {
+          active = false
+          off()
+        }
       },
     }
   }
 
   /* ---------- the shepherdr command ---------- */
 
-  async cli(args: string[], ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string }): Promise<{ out: string; code: number; secrets?: Record<string, string> }> {
+  async cli(
+    args: string[],
+    ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string },
+  ): Promise<{ out: string; code: number; secrets?: Record<string, string> }> {
     try {
       // the values themselves, for the shepherdr command to put in a command's environment or a file: never printed,
       // only with a worker-issued capability whose stored scope selects the secret chain
       if (args[0] === 'secret' && (args[1] === 'run' || args[1] === 'env')) {
         const owner = this.agents.secretAccess.authenticate(ctx.proof)
-        if (!owner || this.agents.record(owner.chat)?.finished) throw new Error('Secret access needs a current agent credential. Use the owning session command; older sessions must wait for route provisioning. No unauthenticated fallback.')
+        if (!owner || this.agents.record(owner.chat)?.finished)
+          throw new Error('Secret access needs a current agent credential. Use the owning session command; older sessions must wait for route provisioning. No unauthenticated fallback.')
         if (JSON.stringify(this.agents.secretScope(owner.chat)) !== JSON.stringify(owner.chain)) throw new Error('Secret credential scope is no longer valid.')
         return { out: '', code: 0, secrets: this.secretValues(parseArgs(args).words.slice(2), owner.chain) }
       }
@@ -4603,7 +4954,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   private profileCommand(op: string | undefined, rest: string[], p: Parsed): string {
     if (BOX) throw new Error(PROFILES_ON_MAIN)
     const name = rest.join(' ')
-    const usage = 'shepherdr profile list | save <name> [--limits] [--force] | show <name> | preview <name> | apply <name> [--apply-waiting] | undo [--apply-waiting] | rename <name> <new-name> | delete <name> | schedule <name> "<rule>" [--waiting] | schedules | schedule-on|schedule-off <name> [<n>] | unschedule <name> [<n>]'
+    const usage =
+      'shepherdr profile list | save <name> [--limits] [--force] | show <name> | preview <name> | apply <name> [--apply-waiting] | undo [--apply-waiting] | rename <name> <new-name> | delete <name> | schedule <name> "<rule>" [--waiting] | schedules | schedule-on|schedule-off <name> [<n>] | unschedule <name> [<n>]'
     const refusals = (r: { error?: string; refused: { where: string; label: string; error: string }[] }) => [r.error, ...r.refused.map((x) => `  ${x.where} · ${x.label}: ${x.error}`)].join('\n')
     switch (op) {
       case undefined:
@@ -4684,7 +5036,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return [
           ...rows.flatMap((x) => [
             x.name,
-            ...(x.schedules ?? []).map((s, i) => `  ${i + 1}  ${s.words}${s.waiting ? ' · also the waiting tasks' : ''}${s.on ? '' : ' · off'}${s.next ? ` · next ${s.next}` : ''}${s.last ? ` · ${s.last}` : ''}`),
+            ...(x.schedules ?? []).map(
+              (s, i) => `  ${i + 1}  ${s.words}${s.waiting ? ' · also the waiting tasks' : ''}${s.on ? '' : ' · off'}${s.next ? ` · next ${s.next}` : ''}${s.last ? ` · ${s.last}` : ''}`,
+            ),
           ]),
           ...(v.next ? [v.next] : []),
         ].join('\n')
@@ -4696,7 +5050,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (!found.name) throw new Error(rest.length ? `No profile called ${rest[0]}.` : usage)
         const id = this.scheduleRef(found.name, found.words[0])
         // the row as it reads now, and again once changed (a switch on has its next run then)
-        const rowOf = () => this.profiles.view().profiles.find((x) => x.name === found.name)?.schedules?.find((s) => s.id === id)
+        const rowOf = () =>
+          this.profiles
+            .view()
+            .profiles.find((x) => x.name === found.name)
+            ?.schedules?.find((s) => s.id === id)
         const what = `${found.name}: ${rowOf()?.words ?? 'its schedule'}`
         if (op === 'unschedule') {
           const r = this.profileSchedules.remove(found.name, id)
@@ -4805,7 +5163,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'review': {
         const t = this.engine.task(a1 ?? '')
         if (!t) throw new Error(`No task ${a1 ?? ''}; shepherdr review <id>`)
-        if (ctx.chat !== `${t.id}/Agent`) throw new Error(`${t.id}'s own agent counts its review rounds, not ${ctx.chat ? 'this chat' : 'you at the command'}; a coordinator adds one with shepherdr task review-more ${t.id}`)
+        if (ctx.chat !== `${t.id}/Agent`)
+          throw new Error(`${t.id}'s own agent counts its review rounds, not ${ctx.chat ? 'this chat' : 'you at the command'}; a coordinator adds one with shepherdr task review-more ${t.id}`)
         if (p.flags.has('done')) return this.engine.reviewDone(t.id) ? `Review of ${t.id} is done: its reviewer is free again.` : `No review of ${t.id} is running: nothing to release.`
         const r = await this.engine.reviewRound(t.id)
         return 'wait' in r ? this.engine.reviewWaitWords(t.id, r.wait) : this.engine.reviewWords(t.id, r)
@@ -4818,8 +5177,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const { said, facts } = summaryOpts(p, rest)
         const r = await this.engine.done(t.id, said ?? '', facts)
         if (r.state === 'ended') return `Noted. ${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'}).`
-        if (r.state === 'merged') return `Noted: ${r.note}, so ${t.id} is Done (merged): there is nothing to merge, and no pull request to open.${ctx.chat === `${t.id}/Agent` ? ' Your worktree, branch and herdr space close once this turn ends: do nothing more in them.' : ''}`
-        if (r.state === 'closed') return `Noted: ${t.branch} has no changes, so there is nothing to merge: ${t.id} is Done.${ctx.chat === `${t.id}/Agent` ? ' Your worktree, branch and herdr space close once this turn ends: do nothing more in them.' : ''}`
+        if (r.state === 'merged')
+          return `Noted: ${r.note}, so ${t.id} is Done (merged): there is nothing to merge, and no pull request to open.${ctx.chat === `${t.id}/Agent` ? ' Your worktree, branch and herdr space close once this turn ends: do nothing more in them.' : ''}`
+        if (r.state === 'closed')
+          return `Noted: ${t.branch} has no changes, so there is nothing to merge: ${t.id} is Done.${ctx.chat === `${t.id}/Agent` ? ' Your worktree, branch and herdr space close once this turn ends: do nothing more in them.' : ''}`
         return `Noted: ${t.id} shows as Ready to merge (not merged yet). Merge only when your brief or the human says so (shepherdr merge ${t.id}).`
       }
       case 'todo': {
@@ -4855,7 +5216,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const id = `ask:${randomUUID().slice(0, 8)}`
         this.chats.post(ctx.chat, {
           id,
-          question: { id, title, ordinary: p.flags.has('ordinary') || undefined, kind: Object.keys(desc).length || p.flags.has('other') ? 'Question' : 'Form', choices: labels.map((label) => ({ label, description: desc[label] })), multi: p.flags.has('multi'), other: p.flags.has('other'), to: this.chatName(ctx.chat) },
+          question: {
+            id,
+            title,
+            ordinary: p.flags.has('ordinary') || undefined,
+            kind: Object.keys(desc).length || p.flags.has('other') ? 'Question' : 'Form',
+            choices: labels.map((label) => ({ label, description: desc[label] })),
+            multi: p.flags.has('multi'),
+            other: p.flags.has('other'),
+            to: this.chatName(ctx.chat),
+          },
         })
         this.emit('chat', ctx.chat)
         this.emit('snapshot')
@@ -4867,13 +5237,21 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return this.artifactCommand(a1, rest, p, ctx)
       case 'render':
       case 'preview':
-        throw new Error(`shepherdr ${a0} is gone: pages are artifacts now. shepherdr artifact new <file.html> --title "…" shows one (checked at phone width first), shepherdr artifact check <file.html> only looks; shepherdr help has the rest.`)
+        throw new Error(
+          `shepherdr ${a0} is gone: pages are artifacts now. shepherdr artifact new <file.html> --title "…" shows one (checked at phone width first), shepherdr artifact check <file.html> only looks; shepherdr help has the rest.`,
+        )
       case 'alert': {
         if (!a1) throw new Error('shepherdr alert "<title>" --body "<why>"')
         const t = one(p, 'task') ? this.engine.task(one(p, 'task')!) : undefined
         // another machine's task (the main machine's home space keeps every machine's overview): it opens on that task,
         // and while it waits on you it buzzes as the task's own alert would
-        const far = one(p, 'task') && !t ? this.peers?.list().flatMap((l) => l.snap?.tasks ?? []).find((x) => x.id.toUpperCase() === one(p, 'task')!.toUpperCase()) : undefined
+        const far =
+          one(p, 'task') && !t
+            ? this.peers
+                ?.list()
+                .flatMap((l) => l.snap?.tasks ?? [])
+                .find((x) => x.id.toUpperCase() === one(p, 'task')!.toUpperCase())
+            : undefined
         const waits = far && (far.status === 'need' || far.status === 'ready') ? { tag: far.id, task: true as const } : {}
         // about a task: it opens on its card. While the task waits on you, it says what the task needs as its own alert
         // does (the choices first, then the coordinator's why) and takes that alert's place
@@ -4882,7 +5260,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const from = ctx.chat ? this.chatName(ctx.chat) : 'Shepherdr'
         if (t && about && ['need', 'ready'].includes(this.engine.statusOf(t))) this.alert({ id: randomUUID(), from: 'Shepherdr', ...about, body: `${about.body}\n${from}: ${why}` })
         else if (far) this.alert({ id: randomUUID(), from, title: a1, body: one(p, 'body') ?? '', go: { place: far.place, task: far.id }, ...waits })
-        else this.alert({ id: randomUUID(), from, title: a1, body: one(p, 'body') ?? '', go: about?.go ?? { place: ctx.chat && !ctx.chat.includes('/') ? ctx.chat : placeId.home() }, ...(ctx.chat?.includes('/') ? { task: true as const } : {}) })
+        else
+          this.alert({
+            id: randomUUID(),
+            from,
+            title: a1,
+            body: one(p, 'body') ?? '',
+            go: about?.go ?? { place: ctx.chat && !ctx.chat.includes('/') ? ctx.chat : placeId.home() },
+            ...(ctx.chat?.includes('/') ? { task: true as const } : {}),
+          })
         return 'Alert sent.'
       }
       case 'show': {
@@ -4894,7 +5280,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const h = this.settings.heartbeat(pr ? { space: pr } : 'machine')
         const next = nextWords(h.time, h.zone)
         const beat = `\n\nHeartbeat on Autopilot: ${timeWords(h.time, h.zone)}${next.length ? ` (next ${next.join(', ')})` : ''}; news that wakes it at once: ${eventWords(h.on).toLowerCase()}, the rest waits for the heartbeat. Each brings the place's HEARTBEAT.md, its standing checklist: shepherdr heartbeat [<place>] shows it, shepherdr heartbeat set [<place>] < file changes it.`
-        const block = settingsBlock('<id>', { ways: this.settings.ways(pr), reviewer: this.settings.harness('reviewer', pr), fallback: this.settings.reviewerBackups(pr), agent: this.settings.harness('task', pr), by: this.settings.setBy(pr) })
+        const block = settingsBlock('<id>', {
+          ways: this.settings.ways(pr),
+          reviewer: this.settings.harness('reviewer', pr),
+          fallback: this.settings.reviewerBackups(pr),
+          agent: this.settings.harness('task', pr),
+          by: this.settings.setBy(pr),
+        })
         const repo = pr ? this.places.byName(pr) : undefined
         const folder = repo ? `\nFolder: ${this.places.folderLine(repo)}${repo.repoId ? ` (found again by its repo's id ${shortId(repo.repoId)} if its folder is renamed or moved)` : ''}` : ''
         return `${head}${repo ? `${folder}\nBase branch: ${repo.base} (new tasks; per-task override: --base <branch>)` : ''}\n${this.settings.lines(pr, NAME)}${beat}${now}\n\nEvery new task's brief${pr ? ` in ${this.places.shownName(pr)}` : ''} ends with:\n${block}\n\nFor one task, set any of these with task add: --set review.rounds=1 --set merge="ask me first" (--set agent=codex, model, effort, reviewer, reviewer.model, reviewer.effort, reviewer.fallback, reviewer.fallbackModel, reviewer.fallbackEffort, task.fallback, coordinator.fallback, backup.model, backup.effort too, and a chain's 2nd to 5th backups by their own keys: task.fallback2, task.fallback2Model, task.fallback2Effort, reviewer.fallback2…), or say so in its brief, which wins.`
@@ -4964,14 +5356,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const agent = one(p, 'agent') || one(p, 'model') || one(p, 'effort') ? harnessOf(p, this.settings) : undefined
         const brief = one(p, 'brief') ?? one(p, 'desc')
         const zone = this.settings.zone()
-        const runs = (x: Automation) => x.runs?.at(-1) ? `last ran ${age(x.runs.at(-1)!.at)} ago: ${x.runs.at(-1)!.task ?? `failed (${x.runs.at(-1)!.error})`}` : 'not run yet'
+        const runs = (x: Automation) => (x.runs?.at(-1) ? `last ran ${age(x.runs.at(-1)!.at)} ago: ${x.runs.at(-1)!.task ?? `failed (${x.runs.at(-1)!.error})`}` : 'not run yet')
         // its trigger in words, its next runs, and as kept (for an edit)
         const told = (x: Automation) => {
           const next = x.on ? nextWords(x.trigger.time, zone) : []
           return `${triggerWords(x.trigger, zone)}${next.length ? `; next ${next.join(', ')}` : ''} [${[x.trigger.time && `--when "${x.trigger.time}"`, x.trigger.on?.length && `--on "${eventsText(x.trigger.on)}"`].filter(Boolean).join(' ')}]`
         }
         if (op === 'add') {
-          if (!name || !one(p, 'task') || (!one(p, 'when') && !one(p, 'on'))) throw new Error('shepherdr automation add "<name>" --task "<title>" [--brief "<brief>"] [--when "<time rule>"] [--on "<events>"] (one or both)')
+          if (!name || !one(p, 'task') || (!one(p, 'when') && !one(p, 'on')))
+            throw new Error('shepherdr automation add "<name>" --task "<title>" [--brief "<brief>"] [--when "<time rule>"] [--on "<events>"] (one or both)')
           const x = this.automation(place, 'add', undefined, { name, when: one(p, 'when'), on: one(p, 'on'), title: one(p, 'task')!, brief, agent }) as Automation
           return `Automation “${x.name}” is on: ${told(x)}. It adds the task “${x.task.title}” to ${this.places.shownName(pr!.name)}, with a fresh agent. Tell the human when it runs in these words.`
         }
@@ -4979,7 +5372,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           if (!name) throw new Error('shepherdr automation edit "<name>" [--name "<new name>"] [--task …] [--brief …] [--when "<time rule>" | off] [--on "<events>" | none] [--agent …]')
           const when = one(p, 'when')
           const on = one(p, 'on')
-          const x = this.automations.edit(place, name, { name: one(p, 'name'), time: when !== undefined ? timeRule(when) : undefined, on: on !== undefined ? eventRules(on) : undefined, task: { ...(one(p, 'task') ? { title: checkTitle(one(p, 'task')!) } : {}), ...(brief !== undefined ? { desc: brief || undefined } : {}), ...(agent ? { agent } : {}) } })
+          const x = this.automations.edit(place, name, {
+            name: one(p, 'name'),
+            time: when !== undefined ? timeRule(when) : undefined,
+            on: on !== undefined ? eventRules(on) : undefined,
+            task: { ...(one(p, 'task') ? { title: checkTitle(one(p, 'task')!) } : {}), ...(brief !== undefined ? { desc: brief || undefined } : {}), ...(agent ? { agent } : {}) },
+          })
           this.emit('snapshot')
           return `Automation “${x.name}” changed: ${told(x)}.`
         }
@@ -4993,7 +5391,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return (
           this.automations.list
             .filter((x) => !place || x.place === place)
-            .map((x) => `${x.name} · ${told(x)} · adds “${x.task.title}”${x.task.agent?.kind ? ` (${[x.task.agent.kind, x.task.agent.model, x.task.agent.effort].filter(Boolean).join(', ')})` : ''} · ${this.places.space(x.place) ? this.places.nameOf(x.place) : x.place}${x.on ? '' : ' · paused'} · ${runs(x)}`)
+            .map(
+              (x) =>
+                `${x.name} · ${told(x)} · adds “${x.task.title}”${x.task.agent?.kind ? ` (${[x.task.agent.kind, x.task.agent.model, x.task.agent.effort].filter(Boolean).join(', ')})` : ''} · ${this.places.space(x.place) ? this.places.nameOf(x.place) : x.place}${x.on ? '' : ' · paused'} · ${runs(x)}`,
+            )
             .join('\n') || 'No automations.'
         )
       }
@@ -5005,15 +5406,21 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const name = set || run ? rest[0] : a1
         const named = name ? this.placeList().find((x) => x.name === name || x.id === name) : undefined
         if (name && !named) throw new Error(`No place ${name}`)
-        const at = named ?? this.placeList().find((x) => x.id === ctx.chat) ?? this.placeList().find((x) => this.placeOfCommand(p, ctx) && x.id === placeId.space(this.placeOfCommand(p, ctx)!.name)) ?? this.placeList().find((x) => x.id === placeId.home())!
+        const at =
+          named ??
+          this.placeList().find((x) => x.id === ctx.chat) ??
+          this.placeList().find((x) => this.placeOfCommand(p, ctx) && x.id === placeId.space(this.placeOfCommand(p, ctx)!.name)) ??
+          this.placeList().find((x) => x.id === placeId.home())!
         if (this.peers?.owner(at.id)) throw new Error(`${at.name} is on another machine: ask there`)
         // Run now: one heartbeat at once, the same as the pill's Run now and Settings' (refused while one wakes)
         if (run) {
           const r = this.wake(at.id)
-          return r.queued ? `${r.name}'s coordinator is busy: it wakes once its turn is over, and says in the chat whether it found anything.` : `Woke ${r.name}'s coordinator: one heartbeat now. It says in the chat whether it found anything.`
+          return r.queued
+            ? `${r.name}'s coordinator is busy: it wakes once its turn is over, and says in the chat whether it found anything.`
+            : `Woke ${r.name}'s coordinator: one heartbeat now. It says in the chat whether it found anything.`
         }
         if (set) {
-          if (ctx.stdin === undefined) throw new Error("Give the whole new HEARTBEAT.md on stdin: shepherdr heartbeat set [<place>] < file, or with a heredoc. Empty stops the heartbeat.")
+          if (ctx.stdin === undefined) throw new Error('Give the whole new HEARTBEAT.md on stdin: shepherdr heartbeat set [<place>] < file, or with a heredoc. Empty stops the heartbeat.')
           this.heartbeats.write(at.id, ctx.stdin.trim() ? ctx.stdin : '')
           this.emit('snapshot')
           return ctx.stdin.trim() ? `${at.name}'s HEARTBEAT.md is saved: the next heartbeat goes through it.` : `${at.name}'s HEARTBEAT.md is empty now: no heartbeat until it has a checklist again.`
@@ -5037,13 +5444,24 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (BOX) throw new Error(`shepherdr doctor checks every machine from the main one: run it there (${HOST} is run from it over SSH).`)
         const own = `${NAME} (this machine, the main one): herdr ${this.agents.reachable ? 'answers' : 'does not answer'}${this.browsers ? `; shared browser ${this.browsers.status().ready ? 'ready' : this.browsers.status().hint}` : ''}`
         const named = this.settings.get('app.hosts').trim()
-        const hosts = named
-          ? `app.hosts: ${named}`
-          : 'app.hosts is unset: only the loopback page works. On this machine run: shepherdr set app.hosts <host> (the host your phone uses).'
+        const hosts = named ? `app.hosts: ${named}` : 'app.hosts is unset: only the loopback page works. On this machine run: shepherdr set app.hosts <host> (the host your phone uses).'
         const allowed = parseHosts(named)
         const still = [...refusedHosts].filter((h) => !allowed.includes(h) && !allowed.includes(h.replace(/:\d+$/, '')))
         const refused = still.length ? `Refused Host headers: ${still.join(', ')}. To allow one on this machine run: shepherdr set app.hosts <host>.` : ''
-        return [own, hosts, refused, ...this.stall.report(), ...swallowedReport(), ...this.pushWarnings().map((warning) => `Alerts: ${warning}`), ...this.agents.unreadableLogs(), ...orphanLines(this.orphansFound), ...((await this.peers?.doctor()) ?? []), ...(await this.places.doctor())].filter(Boolean).join('\n')
+        return [
+          own,
+          hosts,
+          refused,
+          ...this.stall.report(),
+          ...swallowedReport(),
+          ...this.pushWarnings().map((warning) => `Alerts: ${warning}`),
+          ...this.agents.unreadableLogs(),
+          ...orphanLines(this.orphansFound),
+          ...((await this.peers?.doctor()) ?? []),
+          ...(await this.places.doctor()),
+        ]
+          .filter(Boolean)
+          .join('\n')
       }
       case 'secret': {
         if (a1 !== 'elevenlabs') return this.secretCommand(a1, rest, p, ctx)
@@ -5062,7 +5480,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** the levels a command's secrets come from, most specific first: its space (the asking agent's, or the folder's),
    *  this machine, Everywhere */
   private secretChain(ctx: { chat?: string; cwd?: string }) {
-    const space = ctx.chat?.includes('/') ? this.engine.task(ctx.chat.split('/')[0])?.project : ctx.chat?.startsWith('p:') ? ctx.chat : ctx.cwd ? this.places.forPath(ctx.cwd) && placeId.space(this.places.forPath(ctx.cwd)!.name) : undefined
+    const space = ctx.chat?.includes('/')
+      ? this.engine.task(ctx.chat.split('/')[0])?.project
+      : ctx.chat?.startsWith('p:')
+        ? ctx.chat
+        : ctx.cwd
+          ? this.places.forPath(ctx.cwd) && placeId.space(this.places.forPath(ctx.cwd)!.name)
+          : undefined
     return [...(space ? [space] : []), placeId.machine(), 'all']
   }
 
@@ -5081,7 +5505,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** each name's value, for shepherdr secret run and env (names may come comma-separated) */
   private secretValues(words: string[], chain: string[]) {
-    const names = words.flatMap((w) => w.split(',')).map((w) => w.trim()).filter(Boolean)
+    const names = words
+      .flatMap((w) => w.split(','))
+      .map((w) => w.trim())
+      .filter(Boolean)
     if (!names.length) throw new Error('shepherdr secret run NAME [NAME …] -- <command>, or shepherdr secret env NAME [NAME …] [--file .env]')
     const bad = names.filter((n) => !SECRET_NAME.test(n))
     if (bad.length) throw new Error(`Not a secret's name: ${bad.join(', ')} (letters, digits and _, like GITHUB_TOKEN)`)
@@ -5172,7 +5599,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * names, and the file goes away with the chat's inbox.
    */
   private attachCommand(paths: string[], p: Parsed, ctx: { chat?: string; cwd?: string }): string {
-    if (!ctx.chat) throw new Error('shepherdr attach works from an agent Shepherdr started: it sends into that agent\'s own chat.')
+    if (!ctx.chat) throw new Error("shepherdr attach works from an agent Shepherdr started: it sends into that agent's own chat.")
     const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => f !== 'caption' && f !== 'text')
     if (odd.length) throw new Error(`shepherdr attach takes no --${odd[0]}: shepherdr attach <file> [<file> …] [--caption "…"]`)
     const caption = (one(p, 'caption') ?? one(p, 'text'))?.trim().replace(/\s*\n\s*/g, ' ') || undefined
@@ -5181,13 +5608,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const here = (ctx.cwd ?? HOME).replace(/^~(?=\/)/, boxHome())
       let found: string[] = []
       try {
-        found = task.readdirSync(here).filter((n) => isMedia(n)).sort().slice(0, 20)
+        found = task
+          .readdirSync(here)
+          .filter((n) => isMedia(n))
+          .sort()
+          .slice(0, 20)
       } catch {
         found = []
       }
-      throw new Error(
-        `shepherdr attach <file> [<file> …] [--caption "…"]: a picture or a video, shown in your chat where the person reads.${found.length ? `\nHere: ${found.join(' · ')}` : ''}`,
-      )
+      throw new Error(`shepherdr attach <file> [<file> …] [--caption "…"]: a picture or a video, shown in your chat where the person reads.${found.length ? `\nHere: ${found.join(' · ')}` : ''}`)
     }
     const dir = join(boxDir(), 'inbox', chatDir(ctx.chat))
     // every file is checked before one is copied, so a refusal leaves nothing behind in the inbox
@@ -5202,8 +5631,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (!st.isFile()) throw new Error(`${path} is not a file`)
       const name = real.split('/').pop()!
       if (!isMedia(name))
-        throw new Error(`${name} is neither a picture nor a video: shepherdr attach shows one of those in your chat (any picture the chat draws, and mp4, m4v, webm, mov or ogv). Anything else is words and a path.`)
-      if (st.size > ATTACH_MAX) throw new Error(`${name} is ${Math.round(st.size / 1024 / 1024)} MB: the chat takes a picture or a video up to ${ATTACH_MAX / 1024 / 1024} MB (crop it, or make it shorter first).`)
+        throw new Error(
+          `${name} is neither a picture nor a video: shepherdr attach shows one of those in your chat (any picture the chat draws, and mp4, m4v, webm, mov or ogv). Anything else is words and a path.`,
+        )
+      if (st.size > ATTACH_MAX)
+        throw new Error(`${name} is ${Math.round(st.size / 1024 / 1024)} MB: the chat takes a picture or a video up to ${ATTACH_MAX / 1024 / 1024} MB (crop it, or make it shorter first).`)
       // the bytes, never a link: a copy that is a link leads out of the inbox, and the chat would refuse to serve it
       return { real: task.realpathSync(real), name }
     })
@@ -5222,7 +5654,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const videos = files.filter((f) => isVideo(f.name)).length
     const pics = files.length - videos
     const what =
-      files.length === 1 ? (videos ? 'a video' : 'a picture') : !videos ? `${files.length} pictures` : !pics ? `${files.length} videos` : `${files.length} files (${pics} ${pics === 1 ? 'picture' : 'pictures'}, ${videos} ${videos === 1 ? 'video' : 'videos'})`
+      files.length === 1
+        ? videos
+          ? 'a video'
+          : 'a picture'
+        : !videos
+          ? `${files.length} pictures`
+          : !pics
+            ? `${files.length} videos`
+            : `${files.length} files (${pics} ${pics === 1 ? 'picture' : 'pictures'}, ${videos} ${videos === 1 ? 'video' : 'videos'})`
     return `Posted ${what} in your chat${caption ? ', under your words' : ''}: the person sees ${files.length > 1 ? 'them' : 'it'} there in place.`
   }
 
@@ -5292,7 +5732,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case undefined: {
         const pr = one(p, 'space') ? placeId.space(this.projectFor(p, ctx).name) : null
         const all = Object.values(this.artifacts.list).filter((a) => !pr || a.place === pr)
-        return all.sort((a, b) => b.at - a.at).map((a) => `${a.id}  v${this.artifacts.latest(a).n}  ${a.title}  · ${this.chatName(a.place)} · ${age(a.at)}`).join('\n') || 'No artifacts here yet.'
+        return (
+          all
+            .sort((a, b) => b.at - a.at)
+            .map((a) => `${a.id}  v${this.artifacts.latest(a).n}  ${a.title}  · ${this.chatName(a.place)} · ${age(a.at)}`)
+            .join('\n') || 'No artifacts here yet.'
+        )
       }
       case 'rm':
       case 'remove':
@@ -5310,8 +5755,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (sub === 'add') {
       if (!rest[0]?.trim()) throw new Error('shepherdr task add "<title>" --desc "<the whole brief>"')
       if (p.flags.has('after')) throw new Error('--after needs the tasks it waits for: --after SHE-12,SHE-13')
-      const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => !['brief', 'desc', 'space', 'base', 'after', 'at', 'in', 'later', 'priority', 'agent', 'model', 'effort', 'reviewer', 'reviewer-model', 'reviewer-effort', 'set'].includes(f))
-      if (odd.length) throw new Error(`Task add takes no --${odd[0]}: only --desc, --space, --base, --after, --at, --in, --later, --priority, --set, --agent, --model, --effort, --reviewer, --reviewer-model and --reviewer-effort`)
+      const odd = [...Object.keys(p.opts), ...p.flags].filter(
+        (f) => !['brief', 'desc', 'space', 'base', 'after', 'at', 'in', 'later', 'priority', 'agent', 'model', 'effort', 'reviewer', 'reviewer-model', 'reviewer-effort', 'set'].includes(f),
+      )
+      if (odd.length)
+        throw new Error(
+          `Task add takes no --${odd[0]}: only --desc, --space, --base, --after, --at, --in, --later, --priority, --set, --agent, --model, --effort, --reviewer, --reviewer-model and --reviewer-effort`,
+        )
       // --set key=value: a How tasks work setting for this task, or what --agent, --reviewer and the like set
       const set: Record<string, string> = {}
       for (const pair of p.opts.set ?? []) {
@@ -5329,11 +5779,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (BOX && process.env.SHEPHERDR_MAIN_HOME) {
           const server = JSON.parse(readFileSync(join(process.env.SHEPHERDR_MAIN_HOME, 'server.json'), 'utf8')) as { port: number }
           const r = await fetch(`http://127.0.0.1:${server.port}/api/cli`, {
-            method: 'POST', headers: { 'content-type': 'application/json' },
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ args: taskAddArgs(rest, p), chat: this.requestedNews.known(ctx.chat) }),
             signal: AbortSignal.timeout(20_000),
           })
-          const result = await r.json() as { out: string; code: number }
+          const result = (await r.json()) as { out: string; code: number }
           if (result.code) throw new Error(result.out.trim())
           return result.out.trim()
         }
@@ -5343,7 +5794,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           const { l, x } = targets[0]
           const args = taskAddArgs(rest, p, x.id.split(':').slice(2).join(':'))
           const result = await this.onPeer<{ out: string; code: number }>(l, '/api/cli', {
-            method: 'POST', headers: { 'content-type': 'application/json' },
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ args, chat: this.requestedNews.known(ctx.chat) }),
           })
           if (result.code) throw new Error(result.out.trim())
@@ -5359,7 +5811,21 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const after = p.opts.after ?? []
       const agent = harnessOf(p, this.settings)
       const reviewer = reviewerOf(p, this.settings)
-      const t = this.engine.add({ project: pr.name, base: one(p, 'base'), title, desc: one(p, 'brief') ?? one(p, 'desc'), by: this.byWho(ctx), requester: this.requestedNews.known(ctx.chat), after, later: p.flags.has('later'), at: when, agent, reviewer, set, priority: p.flags.has('priority') })
+      const t = this.engine.add({
+        project: pr.name,
+        base: one(p, 'base'),
+        title,
+        desc: one(p, 'brief') ?? one(p, 'desc'),
+        by: this.byWho(ctx),
+        requester: this.requestedNews.known(ctx.chat),
+        after,
+        later: p.flags.has('later'),
+        at: when,
+        agent,
+        reviewer,
+        set,
+        priority: p.flags.has('priority'),
+      })
       // one added for a time has no agent yet: nothing of Settings is read until it starts
       if (t.scheduled) {
         const starts = startsWords(t.scheduled.at, Date.now(), this.settings.zone())
@@ -5367,9 +5833,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return `Added ${t.id}: ${t.title}, ${starts.toLowerCase()}. It has no agent yet: it starts by itself then, once ${waits}, on the Settings as they are then.${p.flags.has('later') ? ` Its agent then reads the brief and waits for a go (shepherdr task tell ${t.id} "go").` : ''}`
       }
       const on = [CLI_NAME[t.agent!.kind] ?? t.agent!.kind, t.agent!.model, t.agent!.effort && `${t.agent!.effort} effort`].filter(Boolean).join(', ')
-      if (t.after?.length) return `Added ${t.id}: ${t.title}, queued after ${t.after.join(', ')}. It has no agent, worktree or herdr space while it waits: once ${t.after.length === 1 ? 'that task is' : 'they are all'} done and the machine has room, its agent (${on}) starts on the brief. A message to it (shepherdr task tell ${t.id} …) starts its agent sooner, still queued.`
+      if (t.after?.length)
+        return `Added ${t.id}: ${t.title}, queued after ${t.after.join(', ')}. It has no agent, worktree or herdr space while it waits: once ${t.after.length === 1 ? 'that task is' : 'they are all'} done and the machine has room, its agent (${on}) starts on the brief. A message to it (shepherdr task tell ${t.id} …) starts its agent sooner, still queued.`
       if (p.flags.has('later')) return `Added ${t.id}: ${t.title}, for later. Its agent (${on}) reads the brief now and waits for a go (shepherdr task tell ${t.id} "go").`
-      if (t.held) return `Added ${t.id}: ${t.title}, held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : HELD_NAMED.has(t.held.why) ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and its agent (${on}) starts by itself when there's room, at its turn in the line (first in line, then each space's place, then oldest first).`
+      if (t.held)
+        return `Added ${t.id}: ${t.title}, held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : HELD_NAMED.has(t.held.why) ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and its agent (${on}) starts by itself when there's room, at its turn in the line (first in line, then each space's place, then oldest first).`
       return `Added ${t.id}: ${t.title}. Its agent (${on}) starts on the brief now.${after.length ? ' What it would wait for is done already.' : ''}`
     }
     if (sub === 'list' || !sub) {
@@ -5381,8 +5849,24 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const ts = this.engine.tasks.filter((t) => (!pr || t.project === placeId.space(pr.name)) && shown(t)).map((t) => this.engine.view(t, line))
       const others = pr ? [] : (this.peers?.list() ?? []).flatMap((l) => (l.snap?.tasks ?? []).filter(shown).map((t) => ({ ...t, machine: l.rec.machine })))
       const all = doneNewestFirst<(typeof ts)[number] | (typeof others)[number]>([...ts, ...others])
-      if (p.flags.has('json')) return JSON.stringify(all.map((t) => ({ id: t.id, title: t.name, status: t.status, sub: statusLine(t), machine: 'machine' in t ? t.machine : undefined, archived: t.archived, pinned: t.pinned, ...(t.scheduled ? { scheduled: t.scheduled } : {}) })), null, 2)
-      const rows = all.map((t) => `${t.id.padEnd(8)} ${t.status.padEnd(5)} ${t.name}${t.pinned ? '  (pinned)' : ''}${statusLine(t) ? `  · ${statusLine(t)}` : ''}${'machine' in t ? `  (on ${t.machine})` : ''}`)
+      if (p.flags.has('json'))
+        return JSON.stringify(
+          all.map((t) => ({
+            id: t.id,
+            title: t.name,
+            status: t.status,
+            sub: statusLine(t),
+            machine: 'machine' in t ? t.machine : undefined,
+            archived: t.archived,
+            pinned: t.pinned,
+            ...(t.scheduled ? { scheduled: t.scheduled } : {}),
+          })),
+          null,
+          2,
+        )
+      const rows = all.map(
+        (t) => `${t.id.padEnd(8)} ${t.status.padEnd(5)} ${t.name}${t.pinned ? '  (pinned)' : ''}${statusLine(t) ? `  · ${statusLine(t)}` : ''}${'machine' in t ? `  (on ${t.machine})` : ''}`,
+      )
       const archived = p.flags.has('archived') ? 0 : this.engine.tasks.filter((t) => t.archived && (!pr || t.project === placeId.space(pr.name))).length
       const tail = archived ? `\n(${archived} archived: shepherdr task list --archived)` : ''
       return (rows.join('\n') || (p.flags.has('archived') ? 'No archived tasks.' : 'No tasks.')) + tail
@@ -5404,7 +5888,17 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (p.flags.has('json')) return JSON.stringify(v, null, 2)
         // the rounds its agent counted, and the one its coordinator may have added
         const rounds = t.reviews === undefined ? undefined : `Review rounds: ${t.reviews} of ${this.engine.roundsOf(t)} used${t.reviewsAdded ? ', one added by its coordinator' : ''}`
-        return [`${v.id} ${v.name}`, `State: ${v.state}${statusLine(v) ? ` · ${statusLine(v)}` : ''}${v.pinned ? ' · pinned' : ''}`, `Added: ${v.created}`, v.branch ? `Branch: ${v.branch}` : '', v.base ? `Merges into: ${v.base}` : '', rounds, v.desc ? `\n${v.desc}` : ''].filter(Boolean).join('\n')
+        return [
+          `${v.id} ${v.name}`,
+          `State: ${v.state}${statusLine(v) ? ` · ${statusLine(v)}` : ''}${v.pinned ? ' · pinned' : ''}`,
+          `Added: ${v.created}`,
+          v.branch ? `Branch: ${v.branch}` : '',
+          v.base ? `Merges into: ${v.base}` : '',
+          rounds,
+          v.desc ? `\n${v.desc}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
       }
       case 'tell': {
         // a coordinator's go to a task that waits starts it only when this machine has room; a message an agent's own
@@ -5419,14 +5913,18 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const on = harnessOf(p, this.settings)
         const r = await this.engine.startNow(t.id, on.kind ? (on as Harness) : undefined)
         this.emit('snapshot')
-        return r.held ? `${t.id} is first in line: ${this.heldWords(r.held, t)} (${this.workingLine()}). It starts as soon as there's room, ahead of the others.` : `Started ${t.id} now${on.kind ? ` on ${harnessWords(fitHarness(on as Harness))}` : ''}.`
+        return r.held
+          ? `${t.id} is first in line: ${this.heldWords(r.held, t)} (${this.workingLine()}). It starts as soon as there's room, ahead of the others.`
+          : `Started ${t.id} now${on.kind ? ` on ${harnessWords(fitHarness(on as Harness))}` : ''}.`
       }
       case 'priority': {
         if (ctx.chat?.includes('/')) throw new Error("A task's agent doesn't set priorities: its coordinator or the human does.")
         const off = /^(off|no|none)$/i.test(rest[1] ?? '')
         this.engine.setPriority(t.id, !off)
         this.emit('snapshot')
-        return off ? `${t.id} is back in line by its age.` : `${t.id} is first in line: it starts at the next free slot, past the machine's load, pressure and spacing (never past its ${this.settings.machine().max ?? 'unlimited'} slots)${t.after?.length ? `, once ${t.after.join(', ')} ${t.after.length === 1 ? 'is' : 'are'} done` : ''}.`
+        return off
+          ? `${t.id} is back in line by its age.`
+          : `${t.id} is first in line: it starts at the next free slot, past the machine's load, pressure and spacing (never past its ${this.settings.machine().max ?? 'unlimited'} slots)${t.after?.length ? `, once ${t.after.join(', ')} ${t.after.length === 1 ? 'is' : 'are'} done` : ''}.`
       }
       case 'queue': {
         const refs = p.opts.after ?? []
@@ -5438,7 +5936,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           if (within === undefined && /^(none|nothing|off|-|)$/i.test((at ?? '').trim())) {
             const r = this.engine.schedule(t.id, null)
             if (r.queued?.length) return `${t.id} no longer waits for a time: it starts once ${r.queued.join(', ')} ${r.queued.length === 1 ? 'is' : 'are'} done.`
-            if (r.held) return `${t.id} no longer waits for a time, but is held: ${this.heldWords(r.held, t)} (${this.workingLine()}). It starts at its turn in the line (first in line, then each space's place, then oldest first).`
+            if (r.held)
+              return `${t.id} no longer waits for a time, but is held: ${this.heldWords(r.held, t)} (${this.workingLine()}). It starts at its turn in the line (first in line, then each space's place, then oldest first).`
             return `${t.id} no longer waits for a time: it starts now.`
           }
           const when = whenFrom(at, within, this.settings.zone())
@@ -5446,10 +5945,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           const after = this.engine.view(t).after ?? []
           return `${t.id} starts ${startsWords(when, Date.now(), this.settings.zone()).replace(/^Starts /, '')}. It waits for the machine's room like any queued task${after.length ? `, and for ${after.join(', ')}` : ''}; its Settings are read when it starts, not before.`
         }
-        if (!refs.length)
-          throw new Error(
-            'shepherdr task queue <id> --after SHE-12[,SHE-13]  (--after none clears it), or --at "tomorrow 9:00" / --in 6h  (--at none clears a time and starts it now)',
-          )
+        if (!refs.length) throw new Error('shepherdr task queue <id> --after SHE-12[,SHE-13]  (--after none clears it), or --at "tomorrow 9:00" / --in 6h  (--at none clears a time and starts it now)')
         const none = refs.length === 1 && /^(none|nothing|-)$/i.test(refs[0].trim())
         const r = this.engine.queue(t.id, none ? [] : refs, { self: ctx.chat === `${t.id}/Agent` })
         // one waiting for a time has no agent to tell: what it waits for is looked at once its time comes
@@ -5458,8 +5954,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           if (!r.queued.length) return `${t.id} waits for no task now; it keeps its time (${starts}) and starts then.`
           return `${t.id} waits for ${r.queued.join(', ')} once its time comes (${starts}).`
         }
-        if (r.queued.length) return `${t.id} is queued after ${r.queued.join(', ')}. ${ctx.chat === `${t.id}/Agent` ? 'Stop at a clean point, reply in one line and end your turn: Shepherdr tells you to go.' : 'Its agent is told to wait; Shepherdr tells it to go once they are done.'}`
-        if (r.went) return t.held ? `${t.id} waits for no task now, but is held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : HELD_NAMED.has(t.held.why) ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). Its agent gets the go when there's room.` : `${t.id} waits for nothing more: its agent is told to go.`
+        if (r.queued.length)
+          return `${t.id} is queued after ${r.queued.join(', ')}. ${ctx.chat === `${t.id}/Agent` ? 'Stop at a clean point, reply in one line and end your turn: Shepherdr tells you to go.' : 'Its agent is told to wait; Shepherdr tells it to go once they are done.'}`
+        if (r.went)
+          return t.held
+            ? `${t.id} waits for no task now, but is held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : HELD_NAMED.has(t.held.why) ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). Its agent gets the go when there's room.`
+            : `${t.id} waits for nothing more: its agent is told to go.`
         return none ? `${t.id} was not queued.` : `${t.id} isn't queued: what it would wait for is done already.`
       }
       case 'stop': {
@@ -5467,7 +5967,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         return `Stopped ${t.id}: its agent is closed${kept.length ? `; kept ${kept.join(', ')}` : ''}. Writing to it starts it again.`
       }
       case 'close': {
-        if (ctx.chat?.includes('/')) throw new Error(`Coordinators close tasks. A task's agent reports with shepherdr ready ${ctx.chat.split('/')[0]} (with no changes on its branch, that is Done at once).`)
+        if (ctx.chat?.includes('/'))
+          throw new Error(`Coordinators close tasks. A task's agent reports with shepherdr ready ${ctx.chat.split('/')[0]} (with no changes on its branch, that is Done at once).`)
         const { said, facts } = summaryOpts(p)
         const { kept } = await this.engine.close(t.id, said, facts)
         return `Closed ${t.id}: it is Done, with nothing to merge, and its agent is closed${kept.length ? `; kept ${kept.join(', ')}` : t.worktree ? '; its working folder and branch are gone' : ''}.`
@@ -5516,8 +6017,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (p.flags.has('all')) {
       const extra = [...Object.keys(p.opts), ...[...p.flags].filter((f) => f !== 'all')]
       if (target) throw new Error(`--all restarts every coordinator of this machine's spaces on what its Settings say, so it takes no space or task, not ${target}: shepherdr restart --all`)
-      if (extra.length)
-        throw new Error(`--all restarts every coordinator of this machine's spaces on what its Settings say, so it takes no --${extra[0]} of its own: shepherdr restart --all`)
+      if (extra.length) throw new Error(`--all restarts every coordinator of this machine's spaces on what its Settings say, so it takes no --${extra[0]} of its own: shepherdr restart --all`)
       if (ctx.chat?.includes('/')) throw new Error("A task's agent restarts only its own agent; ask your coordinator or the human for --all.")
       const r = (await this.act({ type: 'restart-all' })) as { ok: boolean; error?: string; out?: string }
       if (!r.ok || !r.out) throw new Error(r.error ?? 'The coordinators could not be restarted.')
@@ -5612,7 +6112,10 @@ const heldWords = (h: string) => /\(([^)]*)\)$/.exec(h)?.[1] ?? h
 
 /** a time left as minutes: "5m", "5 min", "90", "1h", "1h20m", "1.5h"; null when it is none of those */
 export function minutesOf(text: string): number | null {
-  const m = text.trim().toLowerCase().match(/^(?:(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*(?:m|mins?|minutes?)?)?$/)
+  const m = text
+    .trim()
+    .toLowerCase()
+    .match(/^(?:(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*(?:m|mins?|minutes?)?)?$/)
   if (!m || (m[1] === undefined && m[2] === undefined)) return null
   return Math.round(Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0))
 }
@@ -5673,7 +6176,12 @@ function fit(p: Parsed, flag: '' | 'reviewer-', kind: string, model?: string): {
   const on = m === undefined ? model : m === 'default' ? undefined : (found?.id ?? m)
   if (e !== undefined && e !== 'default') {
     const levels = effortsOf(kind, on)
-    if (!levels.includes(e)) throw new Error(levels.length ? `--${flag}effort takes default, ${levels.join(', ')}${on ? ` on ${findModel(kind, on)?.label ?? on}` : ` on ${name}`}` : `--${flag}effort: ${findModel(kind, on)?.label ?? on} takes no effort level`)
+    if (!levels.includes(e))
+      throw new Error(
+        levels.length
+          ? `--${flag}effort takes default, ${levels.join(', ')}${on ? ` on ${findModel(kind, on)?.label ?? on}` : ` on ${name}`}`
+          : `--${flag}effort: ${findModel(kind, on)?.label ?? on} takes no effort level`,
+      )
   }
   const pick = (v?: string) => (v === undefined ? undefined : v === 'default' ? '' : v)
   return Object.fromEntries(Object.entries({ model: pick(m === undefined ? undefined : (found?.id ?? m)), effort: pick(e) }).filter(([, v]) => v !== undefined))
@@ -5703,5 +6211,11 @@ function sharedEverywhere(): Record<string, string> | null {
 
 /** Preserve all task options when a helper asks for a task on another machine. */
 function taskAddArgs(rest: string[], p: Parsed, space?: string): string[] {
-  return ['task', 'add', ...rest, ...Object.entries(p.opts).flatMap(([key, values]) => (key === 'space' && space ? [space] : values).flatMap((value) => [`--${key}`, value])), ...[...p.flags].map((key) => `--${key}`)]
+  return [
+    'task',
+    'add',
+    ...rest,
+    ...Object.entries(p.opts).flatMap(([key, values]) => (key === 'space' && space ? [space] : values).flatMap((value) => [`--${key}`, value])),
+    ...[...p.flags].map((key) => `--${key}`),
+  ]
 }

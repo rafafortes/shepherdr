@@ -224,9 +224,7 @@ export function runAudit(o: Options): number {
   for (const line of bad) log(`licence not allowed: ${line}`)
   for (const line of fresh) log(`new advisory: ${line}`)
   const offlineReason = `bun audit could not reach the registry: advisories not checked; licences checked in ${checked} packages (${missing} not installed here)`
-  note(offline
-    ? offlineReason
-    : `${fresh.length} new, ${known.length} accepted advisories; licences: ${checked} checked, ${missing} not installed here`)
+  note(offline ? offlineReason : `${fresh.length} new, ${known.length} accepted advisories; licences: ${checked} checked, ${missing} not installed here`)
   // the verdict names a part that did not run, as it does for a browser that could not start
   if (offline) skip(offlineReason)
   return fresh.length || bad.length ? 1 : 0

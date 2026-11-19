@@ -5,7 +5,20 @@ import { Database } from 'bun:sqlite'
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync, appendFileSync, mkdirSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { api, closeOpencodeDbs, createSession, defaultModel, listModels, mirrorCount, mirrorSession, opencodeDb, opencodeLogPath, parseModel, putInstructions, switchModel } from '../server/live/opencode.ts'
+import {
+  api,
+  closeOpencodeDbs,
+  createSession,
+  defaultModel,
+  listModels,
+  mirrorCount,
+  mirrorSession,
+  opencodeDb,
+  opencodeLogPath,
+  parseModel,
+  putInstructions,
+  switchModel,
+} from '../server/live/opencode.ts'
 import { tmp } from './tmp.ts'
 
 let dir = ''
@@ -31,13 +44,27 @@ function fixtureRows() {
     row('ses_A', 1, 'user', { time: { created: 100 }, text: 'What is the project word? One word.', files: [] }),
     row('ses_A', 2, 'system', { metadata: { notice: 'instructions' }, text: '<context key="shepherdr">be brief</context>', description: 'x' }),
     row('ses_A', 3, 'assistant', {
-      time: done(110), agent: 'build', model: { id: 'm1', providerID: 'opencode', variant: 'high' },
-      content: [{ type: 'reasoning', text: 'think' }, { type: 'tool', name: 'read' }], finish: 'tool-calls', rawFinish: 'tool-calls', cost: 0,
+      time: done(110),
+      agent: 'build',
+      model: { id: 'm1', providerID: 'opencode', variant: 'high' },
+      content: [
+        { type: 'reasoning', text: 'think' },
+        { type: 'tool', name: 'read' },
+      ],
+      finish: 'tool-calls',
+      rawFinish: 'tool-calls',
+      cost: 0,
       tokens: { input: 10, output: 2, reasoning: 1, cache: { read: 3, write: 4 } },
     }),
     row('ses_A', 4, 'assistant', {
-      time: done(120), agent: 'build', model: { id: 'm1', providerID: 'opencode', variant: 'high' },
-      content: [{ type: 'text', text: 'HERON' }], finish: 'stop', rawFinish: 'stop', cost: 0.5, tokens: { input: 5, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: done(120),
+      agent: 'build',
+      model: { id: 'm1', providerID: 'opencode', variant: 'high' },
+      content: [{ type: 'text', text: 'HERON' }],
+      finish: 'stop',
+      rawFinish: 'stop',
+      cost: 0.5,
+      tokens: { input: 5, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
     }),
     row('ses_A', 5, 'user', { time: { created: 130 }, text: 'second', files: [] }),
     // still streaming: the mirror stops here
@@ -64,7 +91,11 @@ beforeAll(() => {
   setEnv('SHEPHERDR_OPENCODE_DB', db)
 })
 
-const seqs = (file: string) => readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l).seq)
+const seqs = (file: string) =>
+  readFileSync(file, 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l).seq)
 
 describe('session mirror', () => {
   test('copies the final rows in seq order and stops at the first streaming reply', () => {
@@ -90,7 +121,7 @@ describe('session mirror', () => {
     expect(readFileSync(out, 'utf8')).not.toContain('B says')
   })
 
-  test('another session\'s rows never appear in this one', () => {
+  test("another session's rows never appear in this one", () => {
     const out = join(dir, 'mirror', 'b.jsonl')
     expect(mirrorSession('ses_B', out)).toBe(2)
     const text = readFileSync(out, 'utf8')
@@ -102,7 +133,15 @@ describe('session mirror', () => {
   test('a pass that finds nothing changed asks the database nothing; a row another connection wrote is found', () => {
     // a session of its own: the other tests read B's rows as they are
     const d0 = new Database(db)
-    d0.run('INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)', ['ses_Q-1', 'ses_Q', 'user', 1, 1, 1, JSON.stringify({ time: { created: 100 }, text: 'first', files: [] })])
+    d0.run('INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)', [
+      'ses_Q-1',
+      'ses_Q',
+      'user',
+      1,
+      1,
+      1,
+      JSON.stringify({ time: { created: 100 }, text: 'first', files: [] }),
+    ])
     d0.close()
     const out = join(dir, 'mirror', 'quiet.jsonl')
     expect(mirrorSession('ses_Q', out)).toBe(1)
@@ -113,7 +152,15 @@ describe('session mirror', () => {
     expect(mirrorCount.asked).toBe(asked)
     // a commit by another connection (OpenCode's own) is what makes the next pass ask again
     const d = new Database(db)
-    d.run('INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)', ['ses_Q-2', 'ses_Q', 'user', 2, 1, 1, JSON.stringify({ time: { created: 120 }, text: 'later', files: [] })])
+    d.run('INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)', [
+      'ses_Q-2',
+      'ses_Q',
+      'user',
+      2,
+      1,
+      1,
+      JSON.stringify({ time: { created: 120 }, text: 'later', files: [] }),
+    ])
     d.close()
     expect(mirrorSession('ses_Q', out)).toBe(1)
     expect(mirrorCount.asked).toBe(asked + 1)
@@ -252,7 +299,11 @@ function answer(data: unknown, opts: { code?: number; err?: string; raw?: string
 /** the calls the fake got since the last reset: argv and cwd */
 function calls(): { argv: string[]; cwd: string }[] {
   if (!existsSync(log)) return []
-  return readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  return readFileSync(log, 'utf8')
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l))
 }
 function reset() {
   rmSync(log, { force: true })
@@ -267,7 +318,7 @@ describe('opencode api client', () => {
     expect(calls()).toEqual([{ argv: ['api', '--standalone', 'some.op', '--param', 'a=b'], cwd: app }])
   })
 
-  test('a non-zero exit is an error with the CLI\'s stderr', async () => {
+  test("a non-zero exit is an error with the CLI's stderr", async () => {
     answer(null, { code: 3, err: 'service down\n' })
     await expect(api(['x.y'], { cwd: dir })).rejects.toThrow('opencode api x.y exited with 3: service down')
   })
@@ -380,7 +431,15 @@ describe('opencode api client', () => {
     await switchModel('ses_9', 'opencode-go/deepseek-v4.1-flash', 'max', app)
     await switchModel('ses_9', 'opencode-go/deepseek-v4.1-flash', undefined, app)
     const [a, b] = calls().map((c) => c.argv)
-    expect(a).toEqual(['api', '--standalone', 'session.switchModel', '--param', 'sessionID=ses_9', '--data', JSON.stringify({ model: { providerID: 'opencode-go', id: 'deepseek-v4.1-flash', variant: 'max' } })])
+    expect(a).toEqual([
+      'api',
+      '--standalone',
+      'session.switchModel',
+      '--param',
+      'sessionID=ses_9',
+      '--data',
+      JSON.stringify({ model: { providerID: 'opencode-go', id: 'deepseek-v4.1-flash', variant: 'max' } }),
+    ])
     expect(JSON.parse(b[6])).toEqual({ model: { providerID: 'opencode-go', id: 'deepseek-v4.1-flash' } })
   })
 

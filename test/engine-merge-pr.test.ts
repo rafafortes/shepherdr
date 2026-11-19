@@ -43,7 +43,10 @@ afterEach(() => void new Settings().set('brief.merge', null))
 function mergedByHand(g: ReturnType<typeof onGitHub>, branch: string, subject = 'Say hello (#1)') {
   const tip = sh(`git rev-parse refs/heads/${branch}`, g.bare)
   const dir = tmp('gh-byhand')
-  sh(`git clone -q ${g.bare} . && git config user.email t@t && git config user.name T && git fetch -q origin ${branch} && git merge -q --squash FETCH_HEAD && git commit -qm "${subject}" && git push -q origin main`, dir)
+  sh(
+    `git clone -q ${g.bare} . && git config user.email t@t && git config user.name T && git fetch -q origin ${branch} && git merge -q --squash FETCH_HEAD && git commit -qm "${subject}" && git push -q origin main`,
+    dir,
+  )
   g.set({ prs: g.gh().prs.map((p) => (p.head === branch ? { ...p, state: 'MERGED' as const, at: tip } : p)) })
   return tip
 }
@@ -52,8 +55,7 @@ function mergedByHand(g: ReturnType<typeof onGitHub>, branch: string, subject = 
 const opened = (g: ReturnType<typeof onGitHub>) => g.gh().calls.filter((c) => c.args[0] === 'pr' && c.args[1] === 'create').length
 
 describe('on GitHub: a pull request per task', () => {
-
-  test("its origin is read as written and as git rewrites it: github.com mapped to github.localhost talks to github.localhost", async () => {
+  test('its origin is read as written and as git rewrites it: github.com mapped to github.localhost talks to github.localhost', async () => {
     const dir = repo()
     sh('git remote add origin https://github.com/acme/app.git && git config url.http://github.localhost/.insteadOf https://github.com/', dir)
     expect(await G.github(dir)).toEqual({ host: 'github.localhost', repo: 'acme/app' })
@@ -328,7 +330,7 @@ describe('on GitHub: a pull request per task', () => {
     expect(opened(g)).toBe(1)
   })
 
-  test("the watch sees a pull request merged on GitHub by hand: Done (merged), never Ready for ever", async () => {
+  test('the watch sees a pull request merged on GitHub by hand: Done (merged), never Ready for ever', async () => {
     const w = world()
     const g = onGitHub({ checks: [{ name: 'test', bucket: 'pass' }] })
     const { t, key } = await started(w, g.dir, 'ghwatch')

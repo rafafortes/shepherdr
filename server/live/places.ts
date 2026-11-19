@@ -189,7 +189,12 @@ export class Places {
 
   /** why a space of this machine can't be called so (other than the one renamed), or undefined */
   nameProblem(name: string, except?: string) {
-    return nameProblem(name, this.shown().filter((x) => x.id !== except).map((x) => x.name))
+    return nameProblem(
+      name,
+      this.shown()
+        .filter((x) => x.id !== except)
+        .map((x) => x.name),
+    )
   }
 
   /** a space's GitHub repo, read again (it may have gained or lost its remote since it was added) */
@@ -284,7 +289,15 @@ export class Places {
     // told apart, so this one gets an id of its own (its own checkout, never a worktree's)
     const carried = ident?.own ? ident.id : null
     const own = (carried && !this.spaces.some((x) => x.repoId === carried) ? ident : await freshRepoId(top))?.id ?? undefined
-    const p: Space = { name: key, path: top, key: keyFor(nm, [...this.spaces.map((x) => x.key), ...(this.takenTaskKeys?.() ?? [])]), github: await githubRemote(top), base: await defaultBranch(top), added: Date.now(), ...(own ? { repoId: own } : {}) }
+    const p: Space = {
+      name: key,
+      path: top,
+      key: keyFor(nm, [...this.spaces.map((x) => x.key), ...(this.takenTaskKeys?.() ?? [])]),
+      github: await githubRemote(top),
+      base: await defaultBranch(top),
+      added: Date.now(),
+      ...(own ? { repoId: own } : {}),
+    }
     this.spaces.push(p)
     if (key !== nm) this.rename(placeId.space(key), nm)
     this.save()
@@ -363,8 +376,7 @@ export class Places {
         )
         continue
       }
-      if (!ident.own)
-        out.push(`${name}: ${p.path} is a worktree of a repo, not a repo of its own, so it keeps the folder it was added with`)
+      if (!ident.own) out.push(`${name}: ${p.path} is a worktree of a repo, not a repo of its own, so it keeps the folder it was added with`)
       else if (p.was && p.was !== p.path) out.push(`${name}: found again at ${p.path} (it was ${p.was})${p.repoId ? `, by its repo's id ${shortId(p.repoId)}` : ''}`)
       else if (p.repoId) out.push(`${name}: ${p.path}, found again by its repo's id ${shortId(p.repoId)} wherever the repo goes`)
       else out.push(`${name}: ${p.path}, whose .git/config could not be written with an id, so it keeps the folder it was added with`)
@@ -379,7 +391,8 @@ export class Places {
 
   /** the herdr agent each space's coordinator is */
   coordinator(id: string) {
-    if (id === placeId.home()) return { key: id, name: HOME_AGENT, cwd: boxHome(), workspace: HOME_SPACE.label, was: HOME_SPACE.was, tab: 'coordinator', home: true, label: this.nameOf(id) ?? 'home', path: boxHome() }
+    if (id === placeId.home())
+      return { key: id, name: HOME_AGENT, cwd: boxHome(), workspace: HOME_SPACE.label, was: HOME_SPACE.was, tab: 'coordinator', home: true, label: this.nameOf(id) ?? 'home', path: boxHome() }
     const p = this.space(id)
     if (!p) return null
     return { key: id, name: Agents.nameFor(`shep-${p.name}`), cwd: p.path, workspace: p.name, tab: 'coordinator', home: false, label: this.nameOf(id) ?? p.name, path: p.path }

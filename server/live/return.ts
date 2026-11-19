@@ -118,8 +118,7 @@ export function oneShot(h: Harness): string[] | undefined {
     ]
   if (h.kind === 'codex') return ['codex', 'exec', '--sandbox', 'read-only', '--skip-git-repo-check', ...(model ? ['--model', model] : []), ASK]
   // no flag for a system prompt in `opencode run`: the question alone is the probe; its plan agent is read only
-  if (h.kind === 'opencode')
-    return ['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-probe', ...(model ? ['-m', effort ? `${model}#${effort}` : model] : []), ASK]
+  if (h.kind === 'opencode') return ['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-probe', ...(model ? ['-m', effort ? `${model}#${effort}` : model] : []), ASK]
   // agy's headless run is read only (plan mode) and answers in JSON: its status says whether the provider answered
   if (h.kind === 'agy') return ['agy', '-p', ASK, ...(model ? ['--model', agyModelId(model, effort, agyIds())] : []), '--output-format', 'json', '--mode', 'plan']
   if (h.kind === 'pi')
@@ -232,7 +231,16 @@ export class Returns {
     const was = this.get(o.role, o.space)
     // the returns of the day before it stay: a primary that runs out again right after going back counts
     const returned = (was?.returned ?? []).filter((at) => o.at - at < DAY)
-    const fresh: Outage = { ...o, primary: fitHarness(o.primary), to: fitHarness(o.to), lastCut: o.at, tries: 0, due: o.at + wait(0), ...(returned.length ? { returned } : {}), ...(also.allOut ? { allOut: true } : {}) }
+    const fresh: Outage = {
+      ...o,
+      primary: fitHarness(o.primary),
+      to: fitHarness(o.to),
+      lastCut: o.at,
+      tries: 0,
+      due: o.at + wait(0),
+      ...(returned.length ? { returned } : {}),
+      ...(also.allOut ? { allOut: true } : {}),
+    }
     // one more cut-off of an outage still open keeps its schedule: a night of cut-offs never puts its question off
     // again and again (one that answered or is over starts a new count)
     if (was && !was.back && !was.ok) {
@@ -362,10 +370,14 @@ export function backCard(o: { role: ReturnRole; primary: Harness; to: Harness; t
   // it went back by itself as often as it may in a day and ran out again each time: this one is the human's
   const back = `The primary model answers again: ${harnessWords(o.primary)}.${o.often ? ` It went back by itself ${MAX_RETURNS} times today and ran out again each time, so this time it waits for you.` : ''}`
   // cut off on the primary itself (no backup, or one that couldn't go in): it waits, on the model that answers again
-  if (o.stuck && o.role === 'task') return `${back} ${o.task} was cut off and waits for you: restart it to carry on — shepherdr restart ${o.task}, or ⋯ → Restart agent in its chat. Nothing was restarted.`
-  if (o.stuck && o.role === 'coordinator') return `${back} ${o.space}'s coordinator was cut off and waits for you: restart it to carry on — shepherdr restart ${o.space}, or ⋯ → Restart agent in its chat. Nothing was restarted.`
-  if (o.role === 'task') return `${back} ${o.task} still runs on its backup (${name(o.to.kind)}): restart it to go back — shepherdr restart ${o.task}, or ⋯ → Restart agent in its chat. Nothing was switched.`
-  if (o.role === 'coordinator') return `${back} ${o.space}'s coordinator still runs on its backup (${name(o.to.kind)}): restart it to go back — shepherdr restart ${o.space}, or ⋯ → Restart agent in its chat. Nothing was switched.`
+  if (o.stuck && o.role === 'task')
+    return `${back} ${o.task} was cut off and waits for you: restart it to carry on — shepherdr restart ${o.task}, or ⋯ → Restart agent in its chat. Nothing was restarted.`
+  if (o.stuck && o.role === 'coordinator')
+    return `${back} ${o.space}'s coordinator was cut off and waits for you: restart it to carry on — shepherdr restart ${o.space}, or ⋯ → Restart agent in its chat. Nothing was restarted.`
+  if (o.role === 'task')
+    return `${back} ${o.task} still runs on its backup (${name(o.to.kind)}): restart it to go back — shepherdr restart ${o.task}, or ⋯ → Restart agent in its chat. Nothing was switched.`
+  if (o.role === 'coordinator')
+    return `${back} ${o.space}'s coordinator still runs on its backup (${name(o.to.kind)}): restart it to go back — shepherdr restart ${o.space}, or ⋯ → Restart agent in its chat. Nothing was switched.`
   const model = o.primary.model && o.primary.model !== 'default' ? o.primary.model : 'default'
   // the space's own, never Everywhere's: a plain set would change every space's reviewer
   const where = o.space ? ` --space ${o.space}` : ''

@@ -162,7 +162,12 @@ describe('the check', () => {
       async (args) => {
         seen.push(args)
         for (const a of args) if (a.startsWith('screenshot ')) writeFileSync(a.slice('screenshot '.length), 'png')
-        const kept = ['script error: Uncaught ReferenceError: x is not defined (line 3)', 'blocked: https://cdn.example/chart.js (artifacts load nothing: put it inline)', 'console: careful', 'media: img 1 (800×400 px) is wider than the page (390 px)']
+        const kept = [
+          'script error: Uncaught ReferenceError: x is not defined (line 3)',
+          'blocked: https://cdn.example/chart.js (artifacts load nothing: put it inline)',
+          'console: careful',
+          'media: img 1 (800×400 px) is wider than the page (390 px)',
+        ]
         return { ok: true, out: `✓ Done\n${JSON.stringify(JSON.stringify(kept))}`, err: '' }
       },
       (html, data) => wrapPage(html, { check: true, phone: true, data }),
@@ -178,7 +183,7 @@ describe('the check', () => {
     expect(seen[0]).toContain('set viewport 390 844')
     expect(seen[0]).toContain('set media dark')
   })
-  test('two at once take turns in the one browser, so neither gets the other one\'s pictures or errors', async () => {
+  test("two at once take turns in the one browser, so neither gets the other one's pictures or errors", async () => {
     let busy = false
     let overlapped = false
     const check = browserChecker(
@@ -201,7 +206,10 @@ describe('the check', () => {
     expect(red.shots!.light).not.toBe(blue.shots!.light)
   })
   test('no browser here: it says so and does not refuse', async () => {
-    const check = browserChecker(async () => ({ ok: false, out: '', err: 'agent-browser: not found' }), (h) => h)
+    const check = browserChecker(
+      async () => ({ ok: false, out: '', err: 'agent-browser: not found' }),
+      (h) => h,
+    )
     const r = await check('<p>hi</p>')
     expect(r.errors).toEqual([])
     expect(r.skipped).toContain('not found')
@@ -244,4 +252,3 @@ describe('the frame', () => {
     expect(wrapPage('<p>x</p>', { data: { s: "$' $& $1" } })).toContain(`data = {"s":"$' $& $1"}`)
   })
 })
-

@@ -69,7 +69,13 @@ export function ProfilesBar({ phone, limits = false }: { phone: boolean; limits?
     )
   const { last, undo } = view
   const matched = last && last.name === view.active
-  const status = matched ? `Applied ${since(last.at)}` : view.active === 'Custom' && last ? `Changed since ${last.name} was applied` : view.profiles.length ? '' : 'Save the settings as a profile to switch them in one step.'
+  const status = matched
+    ? `Applied ${since(last.at)}`
+    : view.active === 'Custom' && last
+      ? `Changed since ${last.name} was applied`
+      : view.profiles.length
+        ? ''
+        : 'Save the settings as a profile to switch them in one step.'
   const close = () => setOpen(null)
   const pick = (next: Open) => {
     setMenu(false)
@@ -114,7 +120,11 @@ export function ProfilesBar({ phone, limits = false }: { phone: boolean; limits?
           </Anchored>
         ) : null}
       </span>
-      {note ? <Small role="status" className="w-full text-pretty">{note}</Small> : null}
+      {note ? (
+        <Small role="status" className="w-full text-pretty">
+          {note}
+        </Small>
+      ) : null}
       <OnTop>
         {open?.kind === 'preview' ? <PreviewDialog name={open.name} onClose={close} onNote={setNote} /> : null}
         {open?.kind === 'save' ? <SaveDialog onClose={close} onNote={setNote} limits={limits} /> : null}
@@ -145,7 +155,12 @@ function PreviewDialog({ name, onClose, onNote }: { name: string; onClose: () =>
   const apply = async () => {
     setBusy(true)
     setError('')
-    const r = (await act({ type: 'profile-apply', name }).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok: boolean; error?: string; changes?: ProfileChange[]; refused?: ProfileRefusal[] }
+    const r = (await act({ type: 'profile-apply', name }).catch((e: Error) => ({ ok: false, error: e.message }))) as {
+      ok: boolean
+      error?: string
+      changes?: ProfileChange[]
+      refused?: ProfileRefusal[]
+    }
     setBusy(false)
     if (!r.ok) {
       setError(r.error ?? "That didn't apply.")
@@ -291,7 +306,15 @@ function UndoDialog({ name, label, onClose, onNote }: { name: string; label: str
     void askWaitingMany(waitingOf(changes))
   }
   return (
-    <Dialog title="Undo the last apply?" onCancel={onClose} buttons={<Primary autoFocus disabled={busy} onClick={undo}>{busy ? 'Undoing…' : 'Undo'}</Primary>}>
+    <Dialog
+      title="Undo the last apply?"
+      onCancel={onClose}
+      buttons={
+        <Primary autoFocus disabled={busy} onClick={undo}>
+          {busy ? 'Undoing…' : 'Undo'}
+        </Primary>
+      }
+    >
       <div className="flex flex-col gap-2">
         <p className="text-pretty">{`Puts back what the apply of ${name} changed, where it still reads as that apply left it. A setting changed since is left as it is.`}</p>
         <Small>{label}</Small>
@@ -341,7 +364,16 @@ function ScheduleForm({ name, row, onNote, onDone, onCancel }: { name: string; r
   const [error, setError] = useState('')
   const chosen = days === 'some' ? picked : days === 'every' ? null : days === 'weekdays' ? [0, 1, 2, 3, 4] : [5, 6]
   const kept = !!row?.form && row.form.time === time && sameDays(row.form.days, chosen)
-  const words = `${days === 'some' ? (picked.length ? [...picked].sort((a, b) => a - b).map((d) => DAY_NAMES[d]).join(', ') : 'Some days') : DAYS_LABEL[days]} at ${time || '—'}${waiting ? ' · also the waiting tasks' : ''}`
+  const words = `${
+    days === 'some'
+      ? picked.length
+        ? [...picked]
+            .sort((a, b) => a - b)
+            .map((d) => DAY_NAMES[d])
+            .join(', ')
+        : 'Some days'
+      : DAYS_LABEL[days]
+  } at ${time || '—'}${waiting ? ' · also the waiting tasks' : ''}`
   const toggleDay = (d: number) => setPicked(picked.includes(d) ? picked.filter((x) => x !== d) : [...picked, d])
   const save = async () => {
     if (!time) return setError('Give the time, like 22:00.')
@@ -467,7 +499,14 @@ function ManageDialog({ onClose, onNote }: { onClose: () => void; onNote: (s: st
                     void change({ type: 'profile-rename', name: p.name, to: edit.to })
                   }}
                 >
-                  <input aria-label={`New name for ${p.name}`} className={clsx('h-9 min-w-0 flex-1 rounded-full px-3 text-fg', field)} value={edit.to} maxLength={40} autoFocus onChange={(e) => setEdit({ ...edit, to: e.target.value })} />
+                  <input
+                    aria-label={`New name for ${p.name}`}
+                    className={clsx('h-9 min-w-0 flex-1 rounded-full px-3 text-fg', field)}
+                    value={edit.to}
+                    maxLength={40}
+                    autoFocus
+                    onChange={(e) => setEdit({ ...edit, to: e.target.value })}
+                  />
                   <Primary type="submit" disabled={!edit.to.trim()}>
                     Rename
                   </Primary>

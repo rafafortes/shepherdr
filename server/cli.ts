@@ -24,7 +24,7 @@ if (secret === 'run' && !command.length) {
   process.exit(1)
 }
 // the words that take a text on stdin: a secret to keep, a new HEARTBEAT.md (never secret run's: that is its command's)
-const stdin = ((secret === 'set' || secret === 'elevenlabs') || (args[0] === 'heartbeat' && args[1] === 'set')) && !process.stdin.isTTY ? await Bun.stdin.text() : undefined
+const stdin = (secret === 'set' || secret === 'elevenlabs' || (args[0] === 'heartbeat' && args[1] === 'set')) && !process.stdin.isTTY ? await Bun.stdin.text() : undefined
 
 // Every call must end with words when Shepherdr gives no answer: a stalled server (1452 event-loop stalls of 1 s or
 // more on 2026-11-18, worst 20.1 s) otherwise hangs an agent's turn for ever. The long verbs have their own deadlines
@@ -38,11 +38,14 @@ const envWait = (name: string, fallback: number) => {
 const merge = args[0] === 'merge' || (args[0] === 'task' && args[1] === 'merge')
 const wait = merge
   ? envWait('SHEPHERDR_MERGE_WAIT', 110_000)
-  : args[0] === 'checks' ? envWait('SHEPHERDR_CHECKS_WAIT', 9 * 60_000 + 120_000 + 30_000)
-    : args[0] === 'pr' ? envWait('SHEPHERDR_PR_WAIT', 2 * 120_000 + 30_000)
-      : args[0] === 'review' ? envWait('SHEPHERDR_REVIEW_WAIT', 100_000)
+  : args[0] === 'checks'
+    ? envWait('SHEPHERDR_CHECKS_WAIT', 9 * 60_000 + 120_000 + 30_000)
+    : args[0] === 'pr'
+      ? envWait('SHEPHERDR_PR_WAIT', 2 * 120_000 + 30_000)
+      : args[0] === 'review'
+        ? envWait('SHEPHERDR_REVIEW_WAIT', 100_000)
         : envWait('SHEPHERDR_CLI_WAIT', 30_000)
-const verb = args[0] === 'task' ? `task ${args[1] ?? ''}`.trim() : args[0] ?? '<verb>'
+const verb = args[0] === 'task' ? `task ${args[1] ?? ''}`.trim() : (args[0] ?? '<verb>')
 
 let j: { out: string; code: number; secrets?: Record<string, string> }
 try {
@@ -93,7 +96,7 @@ async function run(command: string[], secrets: Record<string, string>) {
   const values = Object.values(secrets).filter((v) => v.length >= MASKED_MIN)
   await Promise.all([masked(c.stdout, process.stdout, values), masked(c.stderr, process.stderr, values)])
   const code = await c.exited
-  return c.signalCode ? 128 + (({ SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGKILL: 9, SIGTERM: 15 }) as Record<string, number>)[c.signalCode] || 1 : code
+  return c.signalCode ? 128 + ({ SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGKILL: 9, SIGTERM: 15 } as Record<string, number>)[c.signalCode] || 1 : code
 }
 
 /** a stream as it comes, each value masked; what may be the start of one waits for what follows */
@@ -127,12 +130,15 @@ function envFile(args: string[], secrets: Record<string, string>) {
   const git = (...a: string[]) => spawnSync('git', ['-C', dirname(file), ...a], { stdio: 'ignore' })
   const repo = git('rev-parse', '--is-inside-work-tree')
   if (repo.error) return { out: `git isn't here to check that it ignores ${name}: nothing written.\n`, code: 1 }
-  if (repo.status === 0 && git('check-ignore', '-q', file).status !== 0)
-    return { out: `${name} is not ignored by git: add it to .gitignore first, so the secret never lands in git.\n`, code: 1 }
+  if (repo.status === 0 && git('check-ignore', '-q', file).status !== 0) return { out: `${name} is not ignored by git: add it to .gitignore first, so the secret never lands in git.\n`, code: 1 }
   // a link (or a second name of another file) would carry it into that file
   if (existsSync(file) && (lstatSync(file).isSymbolicLink() || lstatSync(file).nlink > 1)) return { out: `${name} is a link: name a plain file, so the secret lands nowhere else.\n`, code: 1 }
   const names = Object.keys(secrets)
-  const old = existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter((l, n, a) => !(n === a.length - 1 && !l) && !names.some((k) => new RegExp(`^\\s*(export\\s+)?${k}\\s*=`).test(l))) : []
+  const old = existsSync(file)
+    ? readFileSync(file, 'utf8')
+        .split('\n')
+        .filter((l, n, a) => !(n === a.length - 1 && !l) && !names.some((k) => new RegExp(`^\\s*(export\\s+)?${k}\\s*=`).test(l)))
+    : []
   // readable by you only before a value goes in: a new file from the start, an old one first
   const text = [...old, ...names.map((k) => `${k}=${envValue(secrets[k])}`)].join('\n') + '\n'
   if (existsSync(file)) {

@@ -171,7 +171,7 @@ describe('a worker for another machine', () => {
     expect((await check('<h1>Board</h1>', undefined, [])).report).toContain('the main machine could not open its browser')
   })
 
-  test("a merge gate runs on that machine over its link, and its failure there refuses the merge", async () => {
+  test('a merge gate runs on that machine over its link, and its failure there refuses the merge', async () => {
     // (it is not left running detached, as on the main machine: there it ends with this worker, as every command does)
     const t = { id: 'FA-1', title: 'Gate there', base: 'main', set: { 'merge.gate': 'tools/far-gate.sh' } }
     const gate = (src.engine as unknown as Record<string, (...a: unknown[]) => Promise<{ ok: boolean; error?: string }>>).gate.bind(src.engine)
@@ -206,8 +206,9 @@ describe('a worker for another machine', () => {
       { type: 'profile-delete', name: 'x' },
       { type: 'profile-schedule', name: 'x', rule: 'daily 22:00' },
       { type: 'profile-schedule-remove', name: 'x', id: 'x' },
-    ] as const) expect(await src.act(a as never)).toEqual({ ok: false, error: PROFILES_ON_MAIN })
-    // a worker's scheduler applies nothing, even when a rule is due
+    ] as const)
+      expect(await src.act(a as never)).toEqual({ ok: false, error: PROFILES_ON_MAIN })
+      // a worker's scheduler applies nothing, even when a rule is due
     ;(src as unknown as { profileSchedules: { tick(now: number): void } }).profileSchedules.tick(Date.now() + 10 * 86_400_000)
     expect(await src.cli(['profile', 'list'], {})).toEqual({ out: `${PROFILES_ON_MAIN}\n`, code: 1 })
   })

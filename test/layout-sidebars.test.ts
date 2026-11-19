@@ -115,7 +115,11 @@ describe.skipIf(!browser)('sidebars', () => {
           tasks: Math.round(document.querySelector('section[aria-label="Tasks"]')!.getBoundingClientRect().left),
         }
       })
-    for (const [name, dx] of [['Resize tasks', -300], ['Resize tasks', 60], ['Resize places', 120]] as const) {
+    for (const [name, dx] of [
+      ['Resize tasks', -300],
+      ['Resize tasks', 60],
+      ['Resize places', 120],
+    ] as const) {
       const b = (await page.getByRole('separator', { name }).boundingBox())!
       await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2)
       await page.mouse.down()
@@ -141,7 +145,12 @@ describe.skipIf(!browser)('sidebars', () => {
       const docked = w >= 1180
       expect(await page.getByRole('button', { name: 'Hide Places', exact: true }).count()).toBe(docked ? 1 : 0)
       expect(await page.getByRole('button', { name: 'Places', exact: true }).count()).toBe(docked ? 0 : 1)
-      expect(await page.locator('[data-messages]').first().evaluate((e) => e.getBoundingClientRect().width)).toBeGreaterThanOrEqual(480)
+      expect(
+        await page
+          .locator('[data-messages]')
+          .first()
+          .evaluate((e) => e.getBoundingClientRect().width),
+      ).toBeGreaterThanOrEqual(480)
       if (!docked) {
         await page.getByRole('button', { name: 'Places', exact: true }).click()
         // the drawer, over the docked one the screen behind still holds
@@ -153,7 +162,12 @@ describe.skipIf(!browser)('sidebars', () => {
     await page.setViewportSize({ width: 1180, height: 850 })
     await settled(page)
     expect(await page.getByRole('button', { name: 'Places', exact: true }).count()).toBe(1)
-    expect(await page.locator('[data-messages]').first().evaluate((e) => e.getBoundingClientRect().width)).toBeGreaterThanOrEqual(480)
+    expect(
+      await page
+        .locator('[data-messages]')
+        .first()
+        .evaluate((e) => e.getBoundingClientRect().width),
+    ).toBeGreaterThanOrEqual(480)
     await page.reload()
     await page.getByRole('button', { name: 'Places', exact: true }).waitFor()
     await page.setViewportSize({ width: 1920, height: 850 })

@@ -21,7 +21,10 @@ describe.skipIf(!browser)('files in the message box', () => {
       const page = await browser!.newPage({ viewport, hasTouch: name === 'phone' })
       await page.goto(`http://127.0.0.1:${server!.port}/?place=vm-str/home`)
       await page.getByRole('button', { name: 'Attach files and more' }).click()
-      const files = [...Array.from({ length: 7 }, (_, i) => ({ name: `shot${i}.png`, mimeType: 'image/png', buffer: png })), { name: 'notes.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF') }]
+      const files = [
+        ...Array.from({ length: 7 }, (_, i) => ({ name: `shot${i}.png`, mimeType: 'image/png', buffer: png })),
+        { name: 'notes.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF') },
+      ]
       await page.setInputFiles('input[name="file"]', files)
       const row = page.getByRole('list', { name: 'Attached files' })
       await row.getByRole('listitem').nth(7).waitFor()
@@ -139,8 +142,15 @@ describe.skipIf(!browser)('pictures sent in the chat', () => {
       await page.goto(url())
       await page.getByRole('button', { name: 'Attach files and more' }).click()
       const names = Array.from({ length: count }, (_, i) => `${name}-pic${i}.png`)
-      await page.setInputFiles('input[name="file"]', names.map((n) => ({ name: n, mimeType: 'image/png', buffer: png })))
-      await page.getByRole('list', { name: 'Attached files' }).getByRole('listitem').nth(count - 1).waitFor()
+      await page.setInputFiles(
+        'input[name="file"]',
+        names.map((n) => ({ name: n, mimeType: 'image/png', buffer: png })),
+      )
+      await page
+        .getByRole('list', { name: 'Attached files' })
+        .getByRole('listitem')
+        .nth(count - 1)
+        .waitFor()
       await page.waitForFunction(() => [...document.querySelectorAll('[aria-label="Attached files"] img')].every((i) => (i as HTMLImageElement).naturalWidth > 0))
       await page.getByRole('button', { name: 'Send' }).click()
       const album = page.getByRole('group', { name: `${count} pictures` }).last()
@@ -362,10 +372,13 @@ describe.skipIf(!browser)('a long message in the box', () => {
       // typing or moving the caret in the middle: its line comes into full view, the words past it fading at the edge
       const rows = Array.from({ length: 20 }, (_, i) => `line ${i + 1} gjpqy`).join('\n')
       await text.fill(rows)
-      await text.evaluate((el, at) => {
-        el.scrollTop = 0
-        ;(el as HTMLTextAreaElement).setSelectionRange(at, at)
-      }, rows.indexOf('\n', rows.indexOf('line 10 ')))
+      await text.evaluate(
+        (el, at) => {
+          el.scrollTop = 0
+          ;(el as HTMLTextAreaElement).setSelectionRange(at, at)
+        },
+        rows.indexOf('\n', rows.indexOf('line 10 ')),
+      )
       await text.press('Z')
       expect(await shows(9)).toBe(true)
       expect(await box()).toMatchObject({ up: true, down: true })
@@ -535,20 +548,34 @@ describe.skipIf(!browser)('the keyboard, like iMessage and Slack', () => {
       await keeps()
       const y0 = box.bottom - 120
       await touch('touchStart', 4, y0)
-      for (const [dx, dy] of [[12, 16], [18, 28], [76, 80], [216, 135]]) await touch('touchMove', 4 + dx, y0 + dy)
+      for (const [dx, dy] of [
+        [12, 16],
+        [18, 28],
+        [76, 80],
+        [216, 135],
+      ])
+        await touch('touchMove', 4 + dx, y0 + dy)
       await touch('touchEnd')
       // the drawer is out once it has stopped sliding and the app has it open (until then a swipe can't shut it)
-      await page.waitForFunction(() => {
-        const nav = document.querySelector('nav[aria-label=Places]')!
-        return Math.round(nav.getBoundingClientRect().left) === 0 && !nav.closest('[inert]')
-      }, null, { polling: 50 })
+      await page.waitForFunction(
+        () => {
+          const nav = document.querySelector('nav[aria-label=Places]')!
+          return Math.round(nav.getBoundingClientRect().left) === 0 && !nav.closest('[inert]')
+        },
+        null,
+        { polling: 50 },
+      )
       expect(await focused(page)).toBe('message')
       // (a swipe left shuts the drawer again: gone, and shut in the app too, or its shade still takes the next touch)
       await slide([300, y0], [20, y0])
-      await page.waitForFunction(() => {
-        const nav = document.querySelector('nav[aria-label=Places]')!
-        return nav.getBoundingClientRect().right <= 0 && !!nav.closest('[inert]')
-      }, null, { polling: 50 })
+      await page.waitForFunction(
+        () => {
+          const nav = document.querySelector('nav[aria-label=Places]')!
+          return nav.getBoundingClientRect().right <= 0 && !!nav.closest('[inert]')
+        },
+        null,
+        { polling: 50 },
+      )
       expect(await focused(page)).toBe('message')
       await ctx.close()
     }, 30_000)
@@ -570,7 +597,7 @@ describe.skipIf(!browser)('the keyboard, like iMessage and Slack', () => {
       await ctx.close()
     }, 30_000)
   }
-  test('a long message in a phone\'s box keeps its big round buttons, round in the corners', async () => {
+  test("a long message in a phone's box keeps its big round buttons, round in the corners", async () => {
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     await page.goto(url())
     const text = page.locator('textarea[name=message]').first()
@@ -598,22 +625,25 @@ describe.skipIf(!browser)('the keyboard, like iMessage and Slack', () => {
     const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
     const list = () => document.querySelector('[data-msg]')!.closest('.overflow-y-auto') as HTMLElement
     // a little up from the bottom (still following it), then on its way down as a picture loads and grows the list
-    await page.evaluate(async ([f, l]) => {
-      const frames = eval(f) as () => Promise<void>
-      const el = (eval(l) as () => HTMLElement)()
-      el.scrollTop = el.scrollHeight - el.clientHeight - 40
-      await frames()
-      // the picture grows just before the chat hears of the scroll (as a slow one does, between two frames)
-      const grow = () => {
-        const grown = document.createElement('div')
-        grown.style.height = '300px'
-        el.firstElementChild!.appendChild(grown)
-      }
-      document.addEventListener('scroll', grow, { capture: true, once: true })
-      el.scrollTop += 20
-      await frames()
-      await frames()
-    }, [frames.toString(), list.toString()])
+    await page.evaluate(
+      async ([f, l]) => {
+        const frames = eval(f) as () => Promise<void>
+        const el = (eval(l) as () => HTMLElement)()
+        el.scrollTop = el.scrollHeight - el.clientHeight - 40
+        await frames()
+        // the picture grows just before the chat hears of the scroll (as a slow one does, between two frames)
+        const grow = () => {
+          const grown = document.createElement('div')
+          grown.style.height = '300px'
+          el.firstElementChild!.appendChild(grown)
+        }
+        document.addEventListener('scroll', grow, { capture: true, once: true })
+        el.scrollTop += 20
+        await frames()
+        await frames()
+      },
+      [frames.toString(), list.toString()],
+    )
     const left = await page.evaluate((l) => {
       const el = (eval(l) as () => HTMLElement)()
       return el.scrollHeight - el.scrollTop - el.clientHeight
@@ -648,68 +678,72 @@ describe.skipIf(!browser)('typing in the message box', () => {
   test.each([
     ['phone', { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }],
     ['desktop', { viewport: { width: 1600, height: 1000 } }],
-  ] as const)('each letter redraws only the box: not the messages, the frame or the lists (%s)', async (_, size) => {
-    const ctx = await browser!.newContext(size)
-    // React tells a devtools hook about every commit: note the parts that ran, each by the element it draws (or sits in)
-    await ctx.addInitScript(() => {
-      const w = window as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__: object; drawn: Element[] | null }
-      w.drawn = null
-      type Fiber = { tag: number; flags: number; child: Fiber | null; sibling: Fiber | null; return: Fiber | null; alternate: Fiber | null; stateNode: unknown }
-      const parts = new Set([0, 1, 11, 14, 15])
-      const host = (f: Fiber) => {
-        for (let c: Fiber | null = f; c; c = c.child) if (c.tag === 5) return c.stateNode as Element
-        for (let r = f.return; r; r = r.return) if (r.tag === 5) return r.stateNode as Element
-        return document.body
-      }
-      w.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
-        supportsFiber: true,
-        renderers: new Map(),
-        inject: () => 1,
-        checkDCE: () => {},
-        onScheduleFiberRoot: () => {},
-        onCommitFiberUnmount: () => {},
-        onPostCommitFiberRoot: () => {},
-        onCommitFiberRoot: (_: number, root: { current: Fiber }) => {
-          if (!w.drawn) return
-          // as React's devtools do: a part ran if it did work this commit; a subtree it didn't touch keeps its children
-          const stack: Fiber[] = [root.current]
-          while (stack.length) {
-            const f = stack.pop()!
-            if (parts.has(f.tag) && f.alternate && f.flags & 1) w.drawn.push(host(f))
-            if (f.alternate && f.child === f.alternate.child) continue
-            for (let c = f.child; c; c = c.sibling) stack.push(c)
-          }
-        },
-      }
-    })
-    const page = await ctx.newPage()
-    await page.goto(url())
-    const box = page.locator('textarea[name=message]')
-    await box.waitFor()
-    await page.waitForFunction(() => document.querySelectorAll('[data-messages] [data-msg]').length >= 6)
-    await box.click()
-    await page.waitForTimeout(300)
-    await page.evaluate(() => ((window as unknown as { drawn: Element[] }).drawn = []))
-    await box.pressSequentially('Run the tests', { delay: 20 })
-    await page.waitForTimeout(200)
-    const out = await page.evaluate(() => {
-      const drawn = (window as unknown as { drawn: Element[] }).drawn
-      const composer = document.querySelector('[data-composer]')!.parentElement!
-      const say = (el: Element) => `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 3).join('.')}`
-      return {
-        n: drawn.length,
-        messages: drawn.filter((el) => el.closest('[data-messages]')).map(say),
-        outside: [...new Set(drawn.filter((el) => !composer.contains(el)).map(say))],
-      }
-    })
-    expect(await box.inputValue()).toBe('Run the tests')
-    // the box itself redrew, letter by letter
-    expect(out.n).toBeGreaterThanOrEqual(13)
-    expect(out.messages).toEqual([])
-    expect(out.outside).toEqual([])
-    await box.fill('')
-    await ctx.close()
-  }, 30_000)
+  ] as const)(
+    'each letter redraws only the box: not the messages, the frame or the lists (%s)',
+    async (_, size) => {
+      const ctx = await browser!.newContext(size)
+      // React tells a devtools hook about every commit: note the parts that ran, each by the element it draws (or sits in)
+      await ctx.addInitScript(() => {
+        const w = window as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__: object; drawn: Element[] | null }
+        w.drawn = null
+        type Fiber = { tag: number; flags: number; child: Fiber | null; sibling: Fiber | null; return: Fiber | null; alternate: Fiber | null; stateNode: unknown }
+        const parts = new Set([0, 1, 11, 14, 15])
+        const host = (f: Fiber) => {
+          for (let c: Fiber | null = f; c; c = c.child) if (c.tag === 5) return c.stateNode as Element
+          for (let r = f.return; r; r = r.return) if (r.tag === 5) return r.stateNode as Element
+          return document.body
+        }
+        w.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+          supportsFiber: true,
+          renderers: new Map(),
+          inject: () => 1,
+          checkDCE: () => {},
+          onScheduleFiberRoot: () => {},
+          onCommitFiberUnmount: () => {},
+          onPostCommitFiberRoot: () => {},
+          onCommitFiberRoot: (_: number, root: { current: Fiber }) => {
+            if (!w.drawn) return
+            // as React's devtools do: a part ran if it did work this commit; a subtree it didn't touch keeps its children
+            const stack: Fiber[] = [root.current]
+            while (stack.length) {
+              const f = stack.pop()!
+              if (parts.has(f.tag) && f.alternate && f.flags & 1) w.drawn.push(host(f))
+              if (f.alternate && f.child === f.alternate.child) continue
+              for (let c = f.child; c; c = c.sibling) stack.push(c)
+            }
+          },
+        }
+      })
+      const page = await ctx.newPage()
+      await page.goto(url())
+      const box = page.locator('textarea[name=message]')
+      await box.waitFor()
+      await page.waitForFunction(() => document.querySelectorAll('[data-messages] [data-msg]').length >= 6)
+      await box.click()
+      await page.waitForTimeout(300)
+      await page.evaluate(() => ((window as unknown as { drawn: Element[] }).drawn = []))
+      await box.pressSequentially('Run the tests', { delay: 20 })
+      await page.waitForTimeout(200)
+      const out = await page.evaluate(() => {
+        const drawn = (window as unknown as { drawn: Element[] }).drawn
+        const composer = document.querySelector('[data-composer]')!.parentElement!
+        const say = (el: Element) => `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 3).join('.')}`
+        return {
+          n: drawn.length,
+          messages: drawn.filter((el) => el.closest('[data-messages]')).map(say),
+          outside: [...new Set(drawn.filter((el) => !composer.contains(el)).map(say))],
+        }
+      })
+      expect(await box.inputValue()).toBe('Run the tests')
+      // the box itself redrew, letter by letter
+      expect(out.n).toBeGreaterThanOrEqual(13)
+      expect(out.messages).toEqual([])
+      expect(out.outside).toEqual([])
+      await box.fill('')
+      await ctx.close()
+    },
+    30_000,
+  )
 
   test('in a long chat on a desktop, a letter costs a few ms of layout, not a pass over every message', async () => {
     // a coordinator's chat after a long day, of its own so the other tests keep their chats
@@ -717,12 +751,15 @@ describe.skipIf(!browser)('typing in the message box', () => {
     const gtm = long.places.find((p) => p.name === 'gtm')!
     const now = Date.now()
     long.chats[gtm.chat].messages.unshift(
-      ...Array.from({ length: 400 }, (_, i): Message => ({
-        id: `long-${i}`,
-        who: i % 2 ? 'agent' : 'you',
-        text: i % 2 ? `A reply with **bold**, \`code\` and a [link](https://example.com), number ${i}.\n\n- one\n- two` : `Question number ${i}`,
-        at: now - (400 - i) * 60_000,
-      })),
+      ...Array.from(
+        { length: 400 },
+        (_, i): Message => ({
+          id: `long-${i}`,
+          who: i % 2 ? 'agent' : 'you',
+          text: i % 2 ? `A reply with **bold**, \`code\` and a [link](https://example.com), number ${i}.\n\n- one\n- two` : `Question number ${i}`,
+          at: now - (400 - i) * 60_000,
+        }),
+      ),
     )
     const app = startApp({ source: long as unknown as Source, dist: await builtScreen(), port: 0 })
     const ctx = await browser!.newContext({ viewport: { width: 1600, height: 1000 } })

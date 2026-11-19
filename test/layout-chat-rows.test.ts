@@ -11,10 +11,12 @@ const KEY = 'p:vm-str:~'
 const emit = () => (world as unknown as { emit(e: string, k: string): void }).emit('chat', KEY)
 
 type Counts = Record<string, number>
-const counts = (page: { evaluate<T>(f: () => T): Promise<T> }) =>
-  page.evaluate(() => ({ ...(window as unknown as { shepRenderCount: Counts }).shepRenderCount }))
+const counts = (page: { evaluate<T>(f: () => T): Promise<T> }) => page.evaluate(() => ({ ...(window as unknown as { shepRenderCount: Counts }).shepRenderCount }))
 /** what redrew since the last reading, by row key */
-const drawn = (now: Counts, before: Counts) => Object.entries(now).filter(([k, n]) => n > (before[k] ?? 0)).map(([k]) => k)
+const drawn = (now: Counts, before: Counts) =>
+  Object.entries(now)
+    .filter(([k, n]) => n > (before[k] ?? 0))
+    .map(([k]) => k)
 
 describe.skipIf(!browser)('chat rows redraw only when their message changes', () => {
   test('a 300-message chat redraws only the new row, then only the row that reacted or changed', async () => {
@@ -38,26 +40,37 @@ describe.skipIf(!browser)('chat rows redraw only when their message changes', ()
       await page.goto(url())
       await page.locator('[data-msg="pic-2"]').waitFor()
       await page.locator('[data-msg="row-waiting"]').getByRole('button', { name: 'Go to question' }).waitFor()
-      await page.evaluate(() => { (window as unknown as { shepRenderCount: Counts }).shepRenderCount = {} })
+      await page.evaluate(() => {
+        ;(window as unknown as { shepRenderCount: Counts }).shepRenderCount = {}
+      })
 
       // one new message: only its row draws, not the old last one, the album, or any of the 300 before it
       chat.messages.push({ id: 'row-new', who: 'agent', text: 'A new message', at: base + 303_000 })
       emit()
-      await until(() => counts(page), (c) => c[`${KEY}:row-new`] === 1)
+      await until(
+        () => counts(page),
+        (c) => c[`${KEY}:row-new`] === 1,
+      )
       const added = await counts(page)
       expect(drawn(added, {})).toEqual([`${KEY}:row-new`])
 
       // a reaction on one message redraws that message alone
       chat.messages.find((m) => m.id === 'row-10')!.reactions = [{ emoji: '👍', by: 'them' }]
       emit()
-      await until(() => counts(page), (c) => c[`${KEY}:row-10`] === 1)
+      await until(
+        () => counts(page),
+        (c) => c[`${KEY}:row-10`] === 1,
+      )
       const reacted = await counts(page)
       expect(drawn(reacted, added)).toEqual([`${KEY}:row-10`])
 
       // an edit to one message redraws that message alone
       chat.messages.find((m) => m.id === 'row-20')!.text = 'An edited message'
       emit()
-      await until(() => counts(page), (c) => c[`${KEY}:row-20`] === 1)
+      await until(
+        () => counts(page),
+        (c) => c[`${KEY}:row-20`] === 1,
+      )
       const edited = await counts(page)
       expect(drawn(edited, reacted)).toEqual([`${KEY}:row-20`])
 

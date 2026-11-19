@@ -24,7 +24,9 @@ export const askTag = (place: string) => `ask:${place}`
 export function waiting(snap: Pick<Snapshot, 'places' | 'tasks' | 'asks'>): { count: number; tags: string[] } {
   const places = new Set(snap.places.map((p) => p.id))
   const tasks = snap.tasks.filter((t) => places.has(t.place) && !t.archived && (t.status === 'need' || t.status === 'ready')).map((t) => t.id)
-  const asks = Object.keys(snap.asks).filter((p) => places.has(p) && snap.asks[p]).map(askTag)
+  const asks = Object.keys(snap.asks)
+    .filter((p) => places.has(p) && snap.asks[p])
+    .map(askTag)
   return { count: tasks.length + asks.length, tags: [...tasks, ...asks] }
 }
 
@@ -154,7 +156,11 @@ export type Notify = (typeof NOTIFY)[number]
 export const NOTIFY_DEFAULT: Notify = 'Needs me'
 
 /** a place's Notify row in Settings: its value there, and where it comes from or what it would be unset */
-export const notifyRow = (snap: Pick<Snapshot, 'settings'>, place: string) => snap.settings.filter((s) => s.level === place).flatMap((s) => s.rows).find((r) => r.key === NOTIFY_KEY)
+export const notifyRow = (snap: Pick<Snapshot, 'settings'>, place: string) =>
+  snap.settings
+    .filter((s) => s.level === place)
+    .flatMap((s) => s.rows)
+    .find((r) => r.key === NOTIFY_KEY)
 
 /** a place's Notify, as Settings has it at that place's level */
 export function notifyOf(snap: Pick<Snapshot, 'settings'>, place: string): Notify {
@@ -200,7 +206,12 @@ export interface PushPayload {
 /** cut to n characters, keeping its lines, never through an emoji */
 const cut = (text: string, n: number) => {
   const chars = Array.from(text)
-  return chars.length > n ? `${chars.slice(0, n - 1).join('').trimEnd()}…` : text
+  return chars.length > n
+    ? `${chars
+        .slice(0, n - 1)
+        .join('')
+        .trimEnd()}…`
+    : text
 }
 
 export function pushPayload(a: Alert, w: { count: number; tags: string[] }): PushPayload {

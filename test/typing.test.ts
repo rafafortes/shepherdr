@@ -23,7 +23,14 @@ describe('typing dots', () => {
     expect(typing(chat(true, [{ id: '1', who: 'agent', question: q() }]))).toBe(false)
     expect(typing(chat(true, [{ id: '1', who: 'agent', question: q(0) }]))).toBe(true)
     // what you write while its menu is up waits under the card: still waiting on you
-    expect(typing(chat(true, [{ id: '1', who: 'agent', question: q() }, { id: '2', who: 'you', text: 'hm', waiting: true }]))).toBe(false)
+    expect(
+      typing(
+        chat(true, [
+          { id: '1', who: 'agent', question: q() },
+          { id: '2', who: 'you', text: 'hm', waiting: true },
+        ]),
+      ),
+    ).toBe(false)
   })
   test('off while no message you will see is on its way', () => {
     const done = [{ id: '1', who: 'agent' as const, text: 'Research is running.' }]
@@ -42,9 +49,7 @@ describe('is a message you will see on its way (the log, and the screen in its o
   }
   const ev = (...kinds: K[]): LogEvent[] =>
     kinds.map((k, i) =>
-      k === 'turn-start' || k === 'turn-end'
-        ? { kind: k, id: `${i}`, at: i * 10 }
-        : { kind: k === 'agent' || k === 'noted' ? 'agent' : 'user', id: `${i}`, at: i * 10, text: TEXT[k] },
+      k === 'turn-start' || k === 'turn-end' ? { kind: k, id: `${i}`, at: i * 10 } : { kind: k === 'agent' || k === 'noted' ? 'agent' : 'user', id: `${i}`, at: i * 10, text: TEXT[k] },
     )
   const on = (e: LogEvent[], shown = false, sent: { at: number }[] = []) => replying(turnOf(e, sent), shown, e)
 

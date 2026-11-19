@@ -46,7 +46,12 @@ function writeRealRoute(key: string, cwd: string, url = 'http://127.0.0.1:7787')
 function agent() {
   const a = new Agents()
   const queued: string[][] = []
-  Object.assign(a, { refresh: async () => undefined, queue: (_key: string, texts: string[]) => { queued.push(texts) } })
+  Object.assign(a, {
+    refresh: async () => undefined,
+    queue: (_key: string, texts: string[]) => {
+      queued.push(texts)
+    },
+  })
   return { a, queued }
 }
 
@@ -82,10 +87,16 @@ describe('a route write that answers late', () => {
       // the old decision fed the very late-bind result this test just produced refuses the same world: the fix is what
       // changed the outcome. This is the bug reproduced, not a stand-in assertion.
       const late = await lateBind(['perl', 'route.pl', '--bind', String(process.pid)], { stdin: '{}' })
-      const refused = (code: number) => { if (code) throw new Error(ROUTING_FAILURE) }
+      const refused = (code: number) => {
+        if (code) throw new Error(ROUTING_FAILURE)
+      }
       expect(() => refused(late.code)).toThrow(ROUTING_FAILURE)
     } finally {
-      a.stop(); info.mockRestore(); start.mockRestore(); close.mockRestore(); run.mockRestore()
+      a.stop()
+      info.mockRestore()
+      start.mockRestore()
+      close.mockRestore()
+      run.mockRestore()
     }
   })
 
@@ -98,22 +109,37 @@ describe('a route write that answers late', () => {
     const close = spyOn(herdr, 'closePane').mockResolvedValue(undefined as never)
     let binds = 0
     const run = spyOn(box, 'run').mockImplementation(((argv: string[], o: Parameters<typeof realRun>[1]) => {
-      if (argv.includes('--bind')) { binds++; return Promise.resolve({ code: 124, out: '', err: 'timed out' }) }
+      if (argv.includes('--bind')) {
+        binds++
+        return Promise.resolve({ code: 124, out: '', err: 'timed out' })
+      }
       return realRun(argv, o)
     }) as never)
     const { a, queued } = agent()
     // the agent is already up in herdr when the start fails: finish() must close that pane, not just mark it finished
-    Object.assign(a, { refresh: async () => { a.live.set(s.name, { pane_id: 'pane-1', name: s.name, agent: 'claude', agent_status: 'idle' } as never) } })
+    Object.assign(a, {
+      refresh: async () => {
+        a.live.set(s.name, { pane_id: 'pane-1', name: s.name, agent: 'claude', agent_status: 'idle' } as never)
+      },
+    })
     try {
       // no route file for this pid: --check really answers "not there"
       let error: unknown
-      try { await a.ensure(s) } catch (e) { error = e }
+      try {
+        await a.ensure(s)
+      } catch (e) {
+        error = e
+      }
       expect((error as Error)?.message).toBe(ROUTING_FAILURE)
       expect(binds).toBe(3) // one write, then two retries with backoff before giving up
       expect(queued).toEqual([]) // no brief to an agent that cannot act on it
       expect(close).toHaveBeenCalled() // no idle agent left with no brief and no card saying so
     } finally {
-      a.stop(); info.mockRestore(); start.mockRestore(); close.mockRestore(); run.mockRestore()
+      a.stop()
+      info.mockRestore()
+      start.mockRestore()
+      close.mockRestore()
+      run.mockRestore()
     }
   })
 
@@ -171,7 +197,11 @@ describe('a route write that answers late', () => {
       expect(watch.count).toBe(0)
       expect(watch.report()).toEqual([])
     } finally {
-      a.stop(); watch.stop(); info.mockRestore(); start.mockRestore(); run.mockRestore()
+      a.stop()
+      watch.stop()
+      info.mockRestore()
+      start.mockRestore()
+      run.mockRestore()
     }
   })
 
@@ -197,7 +227,8 @@ describe('a route write that answers late', () => {
       await Bun.sleep(40)
       expect(await inner.provisionRoute(process.pid, key, router, opts, true, 30)).toBe(false)
     } finally {
-      a.stop(); run.mockRestore()
+      a.stop()
+      run.mockRestore()
     }
   })
 
@@ -211,7 +242,9 @@ describe('a route write that answers late', () => {
     const run = spyOn(box, 'run').mockImplementation(lateBind as never)
     const { a, queued } = agent()
     let routed = false
-    a.on('routed', (k) => { if (k === key) routed = true })
+    a.on('routed', (k) => {
+      if (k === key) routed = true
+    })
     try {
       await a.restart(s)
       // before the fix the stopping flag a restart holds made bindRoute skip silently: no route, the brief left
@@ -219,7 +252,11 @@ describe('a route write that answers late', () => {
       expect(routed).toBe(true)
       expect(queued.at(-1)).toContain('The brief.')
     } finally {
-      a.stop(); info.mockRestore(); start.mockRestore(); close.mockRestore(); run.mockRestore()
+      a.stop()
+      info.mockRestore()
+      start.mockRestore()
+      close.mockRestore()
+      run.mockRestore()
     }
   })
 
@@ -235,15 +272,26 @@ describe('a route write that answers late', () => {
       return realRun(argv, o)
     }) as never)
     const { a, queued } = agent()
-    Object.assign(a, { refresh: async () => { a.live.set(s.name, { pane_id: 'pane-1', name: s.name, agent: 'claude', agent_status: 'idle' } as never) } })
+    Object.assign(a, {
+      refresh: async () => {
+        a.live.set(s.name, { pane_id: 'pane-1', name: s.name, agent: 'claude', agent_status: 'idle' } as never)
+      },
+    })
     try {
       // the restart holds its stopping flag for the whole flow: the launch inside it must still provision and fail
-      const error = await a.restart(s).then(() => undefined, (e) => e)
+      const error = await a.restart(s).then(
+        () => undefined,
+        (e) => e,
+      )
       expect((error as Error)?.message).toBe(ROUTING_FAILURE)
       expect(queued).toEqual([])
       expect(close).toHaveBeenCalled() // no idle agent left with no brief
     } finally {
-      a.stop(); info.mockRestore(); start.mockRestore(); close.mockRestore(); run.mockRestore()
+      a.stop()
+      info.mockRestore()
+      start.mockRestore()
+      close.mockRestore()
+      run.mockRestore()
     }
   })
 
@@ -269,7 +317,10 @@ describe('a route write that answers late', () => {
       await a.ensure(s)
       expect(records[s.key]?.startError).toBeUndefined()
     } finally {
-      a.stop(); info.mockRestore(); start.mockRestore(); run.mockRestore()
+      a.stop()
+      info.mockRestore()
+      start.mockRestore()
+      run.mockRestore()
     }
   })
 })

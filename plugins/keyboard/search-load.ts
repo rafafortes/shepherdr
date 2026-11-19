@@ -40,10 +40,12 @@ export function loadSearchChats(keys: string[], receive: (chat: Chat) => void, p
   timer = setTimeout(failed, 8000)
   socket.onopen = () => {
     clearTimeout(timer)
-    heartbeat = setInterval(() => { if (!stopped) socket.send(JSON.stringify({ type: 'ping' })) }, 30_000)
+    heartbeat = setInterval(() => {
+      if (!stopped) socket.send(JSON.stringify({ type: 'ping' }))
+    }, 30_000)
     batch()
   }
-  socket.onmessage = e => {
+  socket.onmessage = (e) => {
     if (stopped) return
     try {
       const msg = JSON.parse(e.data)
@@ -53,10 +55,20 @@ export function loadSearchChats(keys: string[], receive: (chat: Chat) => void, p
       receive(msg.chat)
       const wasPending = pending.delete(msg.chat.key)
       report()
-      if (wasPending && !pending.size) { clearTimeout(timer); timer = setTimeout(batch, 0) }
-    } catch { /* an invalid update cannot claim coverage */ }
+      if (wasPending && !pending.size) {
+        clearTimeout(timer)
+        timer = setTimeout(batch, 0)
+      }
+    } catch {
+      /* an invalid update cannot claim coverage */
+    }
   }
   socket.onerror = failed
   socket.onclose = failed
-  return () => { stopped = true; clearTimeout(timer); clearInterval(heartbeat); socket.close() }
+  return () => {
+    stopped = true
+    clearTimeout(timer)
+    clearInterval(heartbeat)
+    socket.close()
+  }
 }

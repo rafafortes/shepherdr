@@ -235,7 +235,12 @@ function JobRow({ j, chat, deep }: { j: Job; chat: string; deep: (j: Job) => voi
   const I = j.kind === 'shell' || j.kind === 'monitor' ? CommandLineIcon : CpuChipIcon
   return (
     <li>
-      <button type="button" disabled={!j.more} onClick={() => deep(j)} className={clsx('flex w-full min-w-0 items-start gap-2 rounded-row px-2 py-2 text-left', j.more && 'cursor-pointer hover:bg-hover')}>
+      <button
+        type="button"
+        disabled={!j.more}
+        onClick={() => deep(j)}
+        className={clsx('flex w-full min-w-0 items-start gap-2 rounded-row px-2 py-2 text-left', j.more && 'cursor-pointer hover:bg-hover')}
+      >
         <I aria-hidden className="size-4 h-lh shrink-0 fill-[var(--fg3)]" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-[0.9375rem]/[1.375rem] text-fg phone:text-base/6">{j.title}</span>
@@ -272,7 +277,12 @@ export function JobsSheet() {
     <Sheet label={title} onClose={close} panel="max-w-[560px]">
       <div className="flex shrink-0 items-center gap-1 px-4 pt-3 pb-2">
         {o.job ? (
-          <button type="button" aria-label="Back" onClick={() => openJobs({ chat: o.chat })} className="-ml-1.5 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full hover:bg-hover">
+          <button
+            type="button"
+            aria-label="Back"
+            onClick={() => openJobs({ chat: o.chat })}
+            className="-ml-1.5 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full hover:bg-hover"
+          >
             <ChevronLeftIcon aria-hidden className="size-4 fill-[var(--fg2)]" />
           </button>
         ) : null}
@@ -306,7 +316,13 @@ export function TurnLine({ a, chat }: { a: TurnActivity; chat: string }) {
     <div data-activity={a.id} className="flex w-full max-w-[560px] flex-col border-l-2 border-line pl-1.5">
       {all ? <AllRows chat={chat} what="turn" id={a.id} fallback={a.rows} /> : <Rows rows={a.rows} chat={chat} what="turn" id={a.id} />}
       {a.more ? (
-        <button type="button" data-more aria-expanded={all} onClick={() => setAll(!all)} className={clsx('flex cursor-pointer items-start gap-2 self-start rounded-row px-1.5 py-0.5 text-left hover:bg-hover hover:text-fg2 phone:py-2', quiet)}>
+        <button
+          type="button"
+          data-more
+          aria-expanded={all}
+          onClick={() => setAll(!all)}
+          className={clsx('flex cursor-pointer items-start gap-2 self-start rounded-row px-1.5 py-0.5 text-left hover:bg-hover hover:text-fg2 phone:py-2', quiet)}
+        >
           <Chevron on={all} />
           <span>{all ? 'Show less' : `${a.more} more · ${took((a.end ?? a.at) - a.at, false)}`}</span>
         </button>

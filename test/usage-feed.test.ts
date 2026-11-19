@@ -146,12 +146,20 @@ describe('the feed reads the logs of the records it is given, once each', () => 
     const codex = join(dir, 'codex.jsonl')
     writeFileSync(
       claude,
-      JSON.stringify({ type: 'assistant', sessionId: 's', uuid: 'u1', timestamp: new Date(NOW - HOUR).toISOString(), message: { id: 'msg_1', model: 'claude-opus-5-5', role: 'assistant', content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5 } } }) + '\n',
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 's',
+        uuid: 'u1',
+        timestamp: new Date(NOW - HOUR).toISOString(),
+        message: { id: 'msg_1', model: 'claude-opus-5-5', role: 'assistant', content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5 } },
+      }) + '\n',
     )
     writeFileSync(
       codex,
-      JSON.stringify({ timestamp: new Date(NOW - HOUR).toISOString(), type: 'turn_context', payload: { model: 'gpt-6-sol' } }) + '\n' +
-        JSON.stringify({ timestamp: new Date(NOW - HOUR).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { total_tokens: 33 } } } }) + '\n',
+      JSON.stringify({ timestamp: new Date(NOW - HOUR).toISOString(), type: 'turn_context', payload: { model: 'gpt-6-sol' } }) +
+        '\n' +
+        JSON.stringify({ timestamp: new Date(NOW - HOUR).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { total_tokens: 33 } } } }) +
+        '\n',
     )
     const ledger = new UsageLedger(dir, true)
     new UsageFeed(ledger, () => ({ ...rec('C-1/Agent', [claude], 'claude'), ...rec('X-1/Agent', [codex], 'codex') })).pass(NOW)

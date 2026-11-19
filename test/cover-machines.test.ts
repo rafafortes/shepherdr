@@ -116,7 +116,17 @@ function looks(o: { home: string; path?: string; tools?: Record<string, boolean>
   for (const [t, has] of Object.entries(tools)) if (has) lines.push(t === 'jsonpp' ? 'tool.jsonpp=1' : `tool.${t}=/usr/bin/${t}`)
   if (o.helper) lines.push(`helper=${o.helper}`)
   if (o.old) lines.push('old=1')
-  const probe: Probe = { home: o.home, os: OS, arch: ARCH, path: p, herdr: tools.herdr ? '/usr/bin/herdr' : 'herdr', tools: Object.fromEntries(Object.entries(tools).filter(([, v]) => v)), helper: o.helper ?? '', browser: '', oldInstall: !!o.old }
+  const probe: Probe = {
+    home: o.home,
+    os: OS,
+    arch: ARCH,
+    path: p,
+    herdr: tools.herdr ? '/usr/bin/herdr' : 'herdr',
+    tools: Object.fromEntries(Object.entries(tools).filter(([, v]) => v)),
+    helper: o.helper ?? '',
+    browser: '',
+    oldInstall: !!o.old,
+  }
   return { text: lines.join('\n') + '\n', probe }
 }
 
@@ -132,10 +142,19 @@ const remoteHome = (label: string) => {
   return h
 }
 
-const jsonl = <T>(f: string): T[] => (existsSync(f) ? readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as T) : [])
+const jsonl = <T>(f: string): T[] =>
+  existsSync(f)
+    ? readFileSync(f, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as T)
+    : []
 const calls = (label: string) => jsonl<{ target: string; kind: string; script: string; stdin: number }>(join(dir, 'calls.jsonl')).filter((c) => c.target === `${label}.test`)
 const kinds = (label: string) => calls(label).map((c) => c.kind)
-const workers = (label: string) => jsonl<{ pid: number; argv: string[]; box: { label: string; target: string; path: string; home: string }; env: Record<string, string> }>(join(dir, 'workers.jsonl')).filter((w) => w.box.label === label)
+const workers = (label: string) =>
+  jsonl<{ pid: number; argv: string[]; box: { label: string; target: string; path: string; home: string }; env: Record<string, string> }>(join(dir, 'workers.jsonl')).filter(
+    (w) => w.box.label === label,
+  )
 
 // a fake worker is a bun process of its own: on a loaded machine (load ~50) it can take longer than 15 s to answer
 async function until(what: string, f: () => boolean, ms = 45_000) {
@@ -188,7 +207,13 @@ afterEach(async () => {
   for (const m of made.splice(0)) m.stop()
   const fake = join(dir, 'fake-worker.ts')
   for (const w of jsonl<{ pid: number }>(join(dir, 'workers.jsonl')))
-    if (alive(w.pid) && Bun.spawnSync(['ps', '-o', 'command=', '-p', String(w.pid)]).stdout.toString().includes(fake)) process.kill(w.pid, 'SIGKILL')
+    if (
+      alive(w.pid) &&
+      Bun.spawnSync(['ps', '-o', 'command=', '-p', String(w.pid)])
+        .stdout.toString()
+        .includes(fake)
+    )
+      process.kill(w.pid, 'SIGKILL')
   for (const p of olds.splice(0)) if (p.exitCode === null && p.signalCode === null) p.kill('SIGKILL')
   rmSync(join(HOME, 'machines'), { recursive: true, force: true })
 })
@@ -304,10 +329,14 @@ describe('a machine herdr saves', () => {
     await until('the machine to show', () => !!m.byName('twice'))
     const l = linkOf(m, 'twice')
     let beside = false
-    await until('the new worker to be reached', () => {
-      if (alive(old.pid) && l.worker) beside = true
-      return l.state === 'Ready'
-    }, 20_000)
+    await until(
+      'the new worker to be reached',
+      () => {
+        if (alive(old.pid) && l.worker) beside = true
+        return l.state === 'Ready'
+      },
+      20_000,
+    )
     expect(beside).toBe(false)
     expect(alive(old.pid)).toBe(false)
     expect(l.worker?.pid).not.toBe(old.pid)
@@ -386,7 +415,11 @@ describe('a restart of the main server', () => {
 
 describe('shepherdr doctor', () => {
   test('checks every machine again: the helper and worker again, and what each lacks or why it is out of reach', async () => {
-    machine('doc-chrome.test', { probe: looks({ home: remoteHome('doc-chrome'), tools: { herdr: true, git: true, perl: true, jsonpp: true, tar: true, pi: true } }).text, chromeCode: 1, chromeErr: 'downloading\nno space left on device\n' })
+    machine('doc-chrome.test', {
+      probe: looks({ home: remoteHome('doc-chrome'), tools: { herdr: true, git: true, perl: true, jsonpp: true, tar: true, pi: true } }).text,
+      chromeCode: 1,
+      chromeErr: 'downloading\nno space left on device\n',
+    })
     machine('doc-out.test', { probe: looks({ home: remoteHome('doc-out') }).text, chromeCode: 1, chromeOut: 'fetching\ndone badly\n' })
     machine('doc-short.test', { probe: looks({ home: remoteHome('doc-short'), tools: { herdr: true, perl: true } }).text })
     machine('doc-gone.test', { probeCode: 255, probeErr: 'ssh: connect to host doc-gone.test port 22: Connection refused' })

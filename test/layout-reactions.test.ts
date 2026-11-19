@@ -6,7 +6,7 @@ import { layout, pills, settled, type Box } from './layout.ts'
 const { browser, world, url } = await layout()
 
 describe.skipIf(!browser)('reactions on a phone', () => {
-  test('reactions sit on the bubble\'s bottom right corner and stay on screen, yours and the agent\'s', async () => {
+  test("reactions sit on the bubble's bottom right corner and stay on screen, yours and the agent's", async () => {
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
     await page.goto(url())
     await page.waitForFunction((sel) => document.querySelectorAll(sel).length >= 6, pills('short-agent'))
@@ -448,7 +448,10 @@ describe.skipIf(!browser)('an artifact card', () => {
     await dialog.$('button[aria-label="React 👀"]').then((b) => b!.tap())
     await page.waitForSelector(`${sel} button[aria-label="👀 from you"]`)
     expect(card().reactions).toEqual([{ emoji: '👀', by: 'me' }])
-    const [box, pill] = await Promise.all([page.$eval(`${sel} [data-card]`, (b) => b.getBoundingClientRect().toJSON() as Box), page.$eval(`${sel} button[aria-label="👀 from you"]`, (b) => b.getBoundingClientRect().toJSON() as Box)])
+    const [box, pill] = await Promise.all([
+      page.$eval(`${sel} [data-card]`, (b) => b.getBoundingClientRect().toJSON() as Box),
+      page.$eval(`${sel} button[aria-label="👀 from you"]`, (b) => b.getBoundingClientRect().toJSON() as Box),
+    ])
     expect(pill.top).toBeLessThan(box.bottom)
     expect(pill.bottom).toBeGreaterThan(box.bottom)
     expect(Math.abs(box.right - 10 - pill.right)).toBeLessThan(3)

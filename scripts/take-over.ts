@@ -44,10 +44,12 @@ const live: Sys = {
   },
   list() {
     const r = spawnSync('ps', ['-u', String(process.getuid?.() ?? ''), '-o', 'pid=,args='], { encoding: 'utf8' })
-    return r.status !== 0 ? [] : r.stdout.split('\n').flatMap((l) => {
-      const m = l.trim().match(/^(\d+)\s+(.*)$/)
-      return m ? [{ pid: Number(m[1]), args: m[2] }] : []
-    })
+    return r.status !== 0
+      ? []
+      : r.stdout.split('\n').flatMap((l) => {
+          const m = l.trim().match(/^(\d+)\s+(.*)$/)
+          return m ? [{ pid: Number(m[1]), args: m[2] }] : []
+        })
   },
   kill(pid, sig) {
     try {
@@ -147,7 +149,12 @@ function stopOld(old: string, plugins: string, sys: Sys): string[] {
   for (let i = 0; i < 30 && [...pids.keys()].some((p) => sys.args(p)); i++) sys.sleep(100)
   for (const pid of pids.keys()) if (sys.args(pid)) sys.kill(pid, 'SIGKILL')
   // by what each was running as, in this order
-  const as = new Map([['keeper', 'keeper'], ['keeper-work', 'keeper'], ['serve', 'page server'], ['board', 'board']])
+  const as = new Map([
+    ['keeper', 'keeper'],
+    ['keeper-work', 'keeper'],
+    ['serve', 'page server'],
+    ['board', 'board'],
+  ])
   const kinds = new Set([...pids.values()].map((a) => as.get(a.split(/\s+/)[1]) ?? 'helpers'))
   return ['keeper', 'page server', 'board', 'helpers'].filter((k) => kinds.has(k))
 }

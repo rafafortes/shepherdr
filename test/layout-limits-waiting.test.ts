@@ -87,7 +87,11 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await queued.getByText('2 tasks wait behind 1 task that needs you: HP-201').waitFor()
       await queued.getByText('After HP-201, which waits for your reply').waitFor()
       await queued.getByText('After HP-205 · HP-201 waits for your reply').waitFor()
-      for (const [name, text] of [['Scheduled', 'Starts'], ['Waiting for a go', 'Added'], ['Merges waiting', "Waiting for GTM-18's merge"]] as const) {
+      for (const [name, text] of [
+        ['Scheduled', 'Starts'],
+        ['Waiting for a go', 'Added'],
+        ['Merges waiting', "Waiting for GTM-18's merge"],
+      ] as const) {
         const sec = page.getByRole('region', { name })
         await sec.getByRole('button', { name }).click()
         await sec.getByText(text, { exact: false }).first().waitFor()

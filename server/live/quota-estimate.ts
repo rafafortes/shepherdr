@@ -35,7 +35,16 @@ export function opencodeEstimate(usage: UsageLedger, now: number): QuotaFigure |
       name,
       used: used.tokens,
       ...(used.cost !== undefined ? { cost: used.cost } : {}),
-      ...(cap !== undefined ? { cap, usedPct: (used.tokens / cap) * 100, learned: learned.slice(-LEARNED).reverse().map(({ run, t }) => learnedOf(run, t)) } : {}),
+      ...(cap !== undefined
+        ? {
+            cap,
+            usedPct: (used.tokens / cap) * 100,
+            learned: learned
+              .slice(-LEARNED)
+              .reverse()
+              .map(({ run, t }) => learnedOf(run, t)),
+          }
+        : {}),
     }
   })
   return { windows, source: "estimate from Shepherdr's ledger", at: now, estimate: true }

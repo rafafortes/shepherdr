@@ -14,14 +14,21 @@ describe.skipIf(!browser)('answer cards', () => {
   test('ordinary choice buttons send once; Add a note keeps a draft and explicit Send', async () => {
     const chat = world.chats['p:vm-str:~']
     const q = { id: 'fast:q', title: 'Which colour?', kind: 'Form' as const, ordinary: true, choices: [{ label: 'Blue' }, { label: 'Green' }], to: 'LV-3 agent' }
-    chat.messages.push({ id: 'fast-copy', who: 'agent', at: Date.now(), card: { id: 'fast-copy', task: 'LV-3', status: 'need', text: 'needs you', ask: { chat: 'LV-3/Agent', open: true, questions: [q] } } })
+    chat.messages.push({
+      id: 'fast-copy',
+      who: 'agent',
+      at: Date.now(),
+      card: { id: 'fast-copy', task: 'LV-3', status: 'need', text: 'needs you', ask: { chat: 'LV-3/Agent', open: true, questions: [q] } },
+    })
     const sent: Action[] = []
     const act = world.act
     let finish: (() => void) | undefined
     world.act = async (a: Action) => {
       if (a.type !== 'answer') return act(a)
       sent.push(a)
-      await new Promise<void>((resolve) => { finish = resolve })
+      await new Promise<void>((resolve) => {
+        finish = resolve
+      })
       return { ok: true }
     }
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
@@ -80,8 +87,17 @@ describe.skipIf(!browser)('answer cards', () => {
     const chat = world.chats['p:vm-str:~']
     const q = { id: 'adv:q', title: 'Which store?', kind: 'Question' as const, choices: [{ label: 'SQLite' }, { label: 'Postgres' }], to: 'LV-3 agent', advise: true }
     const fast = { ...q, id: 'adv:fast', kind: 'Form' as const, ordinary: true }
-    const copy = (id: string, ask: object, at: number) => ({ id, who: 'agent' as const, at, card: { id, task: 'LV-3', status: 'need' as const, text: 'needs you', ask: { chat: 'LV-3/Agent', open: true, ...ask } } })
-    chat.messages.push(copy('adv-copy', { questions: [q] }, Date.now()), copy('adv-fast', { questions: [fast] }, Date.now() + 1), copy('adv-words', { reply: { id: 'r1', text: 'Which port should it use?' }, advise: true }, Date.now() + 2))
+    const copy = (id: string, ask: object, at: number) => ({
+      id,
+      who: 'agent' as const,
+      at,
+      card: { id, task: 'LV-3', status: 'need' as const, text: 'needs you', ask: { chat: 'LV-3/Agent', open: true, ...ask } },
+    })
+    chat.messages.push(
+      copy('adv-copy', { questions: [q] }, Date.now()),
+      copy('adv-fast', { questions: [fast] }, Date.now() + 1),
+      copy('adv-words', { reply: { id: 'r1', text: 'Which port should it use?' }, advise: true }, Date.now() + 2),
+    )
     const asked: Action[] = []
     const act = world.act
     world.act = async (a: Action) => (a.type === 'advise' || a.type === 'answer' ? (asked.push(a), { ok: true }) : act(a))
@@ -144,7 +160,7 @@ describe.skipIf(!browser)('answer cards', () => {
     chat.messages.push(...cases.map((c, i) => ({ id: `safe-${i}`, who: 'agent' as const, at: Date.now() + i, question: { ...base, id: `safe:${i}`, ...c } })))
     const sent: Action[] = []
     const act = world.act
-    world.act = async (a: Action) => a.type === 'answer' ? (sent.push(a), { ok: true }) : act(a)
+    world.act = async (a: Action) => (a.type === 'answer' ? (sent.push(a), { ok: true }) : act(a))
     const page = await browser!.newPage({ viewport: { width: 820, height: 1180 }, hasTouch: true })
     try {
       await page.goto(url())
@@ -171,7 +187,12 @@ describe.skipIf(!browser)('answer cards', () => {
 
   test('an unreadable startup prompt keeps its screen and offers the terminal without a dead Send button', async () => {
     const chat = world.chats['p:vm-str:~']
-    chat.messages.push({ id: 'startup-fallback', who: 'agent', at: Date.now(), question: { id: 'menu:fallback', title: 'The terminal is waiting for you', screen: 'A CLI asks for your input', terminal: true, noNote: true, kind: 'Form', choices: [], to: 'home' } })
+    chat.messages.push({
+      id: 'startup-fallback',
+      who: 'agent',
+      at: Date.now(),
+      question: { id: 'menu:fallback', title: 'The terminal is waiting for you', screen: 'A CLI asks for your input', terminal: true, noNote: true, kind: 'Form', choices: [], to: 'home' },
+    })
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
     try {
       await page.goto(url())
@@ -192,10 +213,47 @@ describe.skipIf(!browser)('answer cards', () => {
     const now = Date.now()
     const q = { id: 'ask:copy', title: 'Which colour?', kind: 'Form' as const, choices: [{ label: 'Blue' }, { label: 'Green' }], to: 'LV-3 agent' }
     chat.messages.push(
-      { id: 'ask-done', who: 'agent', at: now - 2, card: { id: 'ask-done', task: 'LV-3', status: 'need', text: 'needs you: Question for you', ask: { chat: 'LV-3/Agent', answered: { where: 'space' }, questions: [{ ...q, id: 'ask:old', sent: 0, elsewhere: { label: 'Answered here ·', chat: 'LV-3/Agent', name: 'LV-3 chat' } }] } } },
-      { id: 'ask-reply', who: 'agent', at: now - 1, card: { id: 'ask-reply', task: 'LV-3', status: 'need', text: 'needs you: Waits for your reply', ask: { chat: 'LV-3/Agent', open: true, reply: { id: 'lv3-q', text: 'Keep the old API around?' } } } },
+      {
+        id: 'ask-done',
+        who: 'agent',
+        at: now - 2,
+        card: {
+          id: 'ask-done',
+          task: 'LV-3',
+          status: 'need',
+          text: 'needs you: Question for you',
+          ask: { chat: 'LV-3/Agent', answered: { where: 'space' }, questions: [{ ...q, id: 'ask:old', sent: 0, elsewhere: { label: 'Answered here ·', chat: 'LV-3/Agent', name: 'LV-3 chat' } }] },
+        },
+      },
+      {
+        id: 'ask-reply',
+        who: 'agent',
+        at: now - 1,
+        card: {
+          id: 'ask-reply',
+          task: 'LV-3',
+          status: 'need',
+          text: 'needs you: Waits for your reply',
+          ask: { chat: 'LV-3/Agent', open: true, reply: { id: 'lv3-q', text: 'Keep the old API around?' } },
+        },
+      },
       { id: 'ask-open', who: 'agent', at: now, card: { id: 'ask-open', task: 'LV-3', status: 'need', text: 'needs you: Question for you', ask: { chat: 'LV-3/Agent', open: true, questions: [q] } } },
-      { id: 'ask-dismissed', who: 'agent', at: now + 1, card: { id: 'ask-dismissed', task: 'LV-3', status: 'need', text: 'needs you: Question for you', ask: { chat: 'LV-3/Agent', answered: { where: 'space', dismissed: true }, questions: [{ ...q, id: 'ask:gone', sent: -1, dismissed: true, elsewhere: { label: 'Dismissed ·', chat: 'LV-3/Agent', name: 'LV-3 chat' } }] } } },
+      {
+        id: 'ask-dismissed',
+        who: 'agent',
+        at: now + 1,
+        card: {
+          id: 'ask-dismissed',
+          task: 'LV-3',
+          status: 'need',
+          text: 'needs you: Question for you',
+          ask: {
+            chat: 'LV-3/Agent',
+            answered: { where: 'space', dismissed: true },
+            questions: [{ ...q, id: 'ask:gone', sent: -1, dismissed: true, elsewhere: { label: 'Dismissed ·', chat: 'LV-3/Agent', name: 'LV-3 chat' } }],
+          },
+        },
+      },
     )
     const sent: Action[] = []
     const act = world.act
@@ -247,12 +305,22 @@ describe.skipIf(!browser)('answer cards', () => {
       const chat = world.chats['p:vm-str:~']
       const q = { id: 'source:permission', title: 'Allow writing the upload route?', kind: 'Question' as const, choices: [{ label: 'Allow once' }, { label: 'Deny' }], to: 'LV-3 agent' }
       chat.messages.push(
-        { id: 'source-permission', who: 'agent', at: Date.now(), card: { id: 'source-permission', task: 'LV-3', status: 'need', text: 'needs you: Asks permission', ask: { chat: 'LV-3/Agent', open: true, questions: [q] } } },
-        { id: 'source-missing', who: 'agent', at: Date.now() + 1, card: { id: 'source-missing', task: 'MISSING-1', status: 'need', text: 'needs you', ask: { chat: 'MISSING-1/Agent', questions: [{ ...q, id: 'source:missing' }] } } },
+        {
+          id: 'source-permission',
+          who: 'agent',
+          at: Date.now(),
+          card: { id: 'source-permission', task: 'LV-3', status: 'need', text: 'needs you: Asks permission', ask: { chat: 'LV-3/Agent', open: true, questions: [q] } },
+        },
+        {
+          id: 'source-missing',
+          who: 'agent',
+          at: Date.now() + 1,
+          card: { id: 'source-missing', task: 'MISSING-1', status: 'need', text: 'needs you', ask: { chat: 'MISSING-1/Agent', questions: [{ ...q, id: 'source:missing' }] } },
+        },
       )
       const sent: Action[] = []
       const act = world.act
-      world.act = async (a: Action) => a.type === 'answer' ? (sent.push(a), { ok: true }) : act(a)
+      world.act = async (a: Action) => (a.type === 'answer' ? (sent.push(a), { ok: true }) : act(a))
       const page = await browser!.newPage({ viewport: { width, height: 900 } })
       try {
         await page.goto(url())
@@ -316,7 +384,17 @@ describe.skipIf(!browser)('answer cards', () => {
         id: 'long-q',
         who: 'agent',
         at: Date.now(),
-        question: { id: 'menu:long-q', title, kind: 'Form', to: 'home', asks: 'Claude Code asks', choices: [{ label: 'Company page only', description: 'Same as before: just the company page' }, { label: 'Company page and founders', description: "Also read each founder's profile" }] },
+        question: {
+          id: 'menu:long-q',
+          title,
+          kind: 'Form',
+          to: 'home',
+          asks: 'Claude Code asks',
+          choices: [
+            { label: 'Company page only', description: 'Same as before: just the company page' },
+            { label: 'Company page and founders', description: "Also read each founder's profile" },
+          ],
+        },
       })
       const page = await browser!.newPage({ viewport, hasTouch: name === 'phone' })
       await page.goto(url())
@@ -325,7 +403,13 @@ describe.skipIf(!browser)('answer cards', () => {
       const head = card.locator('[data-card-title]')
       // all of it, over more than one line
       expect(await head.textContent()).toBe(title)
-      const t = await head.evaluate((el) => ({ lines: el.getClientRects().length, h: el.getBoundingClientRect().height, lh: parseFloat(getComputedStyle(el).lineHeight), top: el.getBoundingClientRect().top, cut: el.scrollWidth > el.clientWidth }))
+      const t = await head.evaluate((el) => ({
+        lines: el.getClientRects().length,
+        h: el.getBoundingClientRect().height,
+        lh: parseFloat(getComputedStyle(el).lineHeight),
+        top: el.getBoundingClientRect().top,
+        cut: el.scrollWidth > el.clientWidth,
+      }))
       expect(t.h).toBeGreaterThan(t.lh * 1.5)
       expect(t.cut).toBe(false)
       // the ? sits in the middle of the first line
@@ -333,7 +417,9 @@ describe.skipIf(!browser)('answer cards', () => {
       expect(Math.abs(icon.top + icon.height / 2 - (t.top + t.lh / 2))).toBeLessThan(1.5)
       // the label on its line, the description in grey below it
       const choice = card.getByRole('button', { name: /^Company page only/ })
-      const [label, desc] = await choice.evaluate((b) => [...b.querySelectorAll('span > span')].map((s) => ({ bottom: s.getBoundingClientRect().bottom, top: s.getBoundingClientRect().top, color: getComputedStyle(s).color })))
+      const [label, desc] = await choice.evaluate((b) =>
+        [...b.querySelectorAll('span > span')].map((s) => ({ bottom: s.getBoundingClientRect().bottom, top: s.getBoundingClientRect().top, color: getComputedStyle(s).color })),
+      )
       expect(desc.top).toBeGreaterThanOrEqual(label.bottom - 1)
       expect(desc.color).not.toBe(label.color)
       world.chats['p:vm-str:~'].messages = world.chats['p:vm-str:~'].messages.filter((m) => m.id !== 'long-q')
@@ -351,10 +437,52 @@ describe.skipIf(!browser)('answer cards', () => {
       const now = Date.now()
       chat.messages.push(
         { id: 'dis-ask', who: 'agent', at: now, question: { id: 'ask:dis', title: 'Which colour?', kind: 'Form', choices: [{ label: 'Blue' }, { label: 'Green' }], to: 'LV-3 agent' } },
-        { id: 'dis-plan', who: 'agent', at: now + 1, question: { id: 'plan:dis', title: 'Plan for LV-3', kind: 'Plan', steps: ['Build it'], choices: [{ label: 'Approve the plan' }, { label: 'Send it back with a note' }], noteRequiredFor: 1, to: 'LV-3 agent' } },
-        { id: 'dis-perm', who: 'agent', at: now + 2, question: { id: 'menu:dis-perm', title: 'Allow writing files?', kind: 'Form', terminal: true, noNote: true, choices: [{ label: 'Yes' }, { label: 'No' }], to: 'LV-3 agent', asks: 'Claude Code asks' } },
+        {
+          id: 'dis-plan',
+          who: 'agent',
+          at: now + 1,
+          question: {
+            id: 'plan:dis',
+            title: 'Plan for LV-3',
+            kind: 'Plan',
+            steps: ['Build it'],
+            choices: [{ label: 'Approve the plan' }, { label: 'Send it back with a note' }],
+            noteRequiredFor: 1,
+            to: 'LV-3 agent',
+          },
+        },
+        {
+          id: 'dis-perm',
+          who: 'agent',
+          at: now + 2,
+          question: {
+            id: 'menu:dis-perm',
+            title: 'Allow writing files?',
+            kind: 'Form',
+            terminal: true,
+            noNote: true,
+            choices: [{ label: 'Yes' }, { label: 'No' }],
+            to: 'LV-3 agent',
+            asks: 'Claude Code asks',
+          },
+        },
         { id: 'dis-note', who: 'agent', at: now + 3, question: { id: 'ask:dis-note', title: 'Which branch?', kind: 'Question', choices: [{ label: 'main' }, { label: 'next' }], to: 'LV-3 agent' } },
-        { id: 'dis-start', who: 'agent', at: now + 4, question: { id: 'menu:dis-start', title: 'Choose a login method:', kind: 'Form', terminal: true, noNote: true, choices: [{ label: 'Log in' }, { label: 'Skip' }], to: 'LV-3 agent', asks: 'Its screen waits', noDismiss: true } },
+        {
+          id: 'dis-start',
+          who: 'agent',
+          at: now + 4,
+          question: {
+            id: 'menu:dis-start',
+            title: 'Choose a login method:',
+            kind: 'Form',
+            terminal: true,
+            noNote: true,
+            choices: [{ label: 'Log in' }, { label: 'Skip' }],
+            to: 'LV-3 agent',
+            asks: 'Its screen waits',
+            noDismiss: true,
+          },
+        },
       )
       const sent: Action[] = []
       const act = world.act
@@ -396,7 +524,8 @@ describe.skipIf(!browser)('answer cards', () => {
         expect(sent.length).toBe(2)
         // dismissed: the card says so, and asks nothing more
         for (const m of chat.messages)
-          if (m.question && ['ask:dis', 'plan:dis', 'menu:dis-perm'].includes(m.question.id)) m.question = { ...m.question, sent: -1, dismissed: true, said: 'The person dismissed this without answering.' }
+          if (m.question && ['ask:dis', 'plan:dis', 'menu:dis-perm'].includes(m.question.id))
+            m.question = { ...m.question, sent: -1, dismissed: true, said: 'The person dismissed this without answering.' }
         await page.reload()
         const done = page.locator('[data-whole="dis-ask"] [data-card]')
         await done.waitFor()
@@ -419,7 +548,21 @@ describe.skipIf(!browser)('answer cards', () => {
   test('Esc on a pressed card is the card’s, not the app’s own back', async () => {
     const key = 'LV-3/Agent'
     const chat = world.chats[key]
-    chat.messages.push({ id: 'dis-in-task', who: 'agent', at: Date.now(), question: { id: 'menu:dis-in-task', title: 'Allow writing the upload route?', kind: 'Form', terminal: true, noNote: true, choices: [{ label: 'Yes' }, { label: 'No' }], to: 'LV-3 agent', asks: 'Claude Code asks' } })
+    chat.messages.push({
+      id: 'dis-in-task',
+      who: 'agent',
+      at: Date.now(),
+      question: {
+        id: 'menu:dis-in-task',
+        title: 'Allow writing the upload route?',
+        kind: 'Form',
+        terminal: true,
+        noNote: true,
+        choices: [{ label: 'Yes' }, { label: 'No' }],
+        to: 'LV-3 agent',
+        asks: 'Claude Code asks',
+      },
+    })
     const sent: Action[] = []
     const act = world.act
     world.act = async (a: Action) => (a.type === 'answer' ? (sent.push(a), { ok: true }) : act(a))
@@ -437,7 +580,11 @@ describe.skipIf(!browser)('answer cards', () => {
       expect(await page.locator('[data-whole="dis-in-task"]').count()).toBe(1)
       expect(await page.evaluate(() => location.search)).toContain('task=LV-3')
       // a choice holds the focus: Esc there is the app's own (back to the list), never a second dismissal
-      await page.locator('[data-card]').filter({ hasText: 'Which upload limit?' }).getByRole('button', { name: /^50 MB per file/ }).click()
+      await page
+        .locator('[data-card]')
+        .filter({ hasText: 'Which upload limit?' })
+        .getByRole('button', { name: /^50 MB per file/ })
+        .click()
       await page.keyboard.press('Escape')
       await page.locator('[data-whole="dis-in-task"]').waitFor({ state: 'detached' })
       expect(sent).toHaveLength(1)

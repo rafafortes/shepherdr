@@ -41,7 +41,7 @@ describe('a task that starts by itself at a time', () => {
     expect(t.rounds).toBe(1)
   })
 
-  test("its time comes while the machine has no room: it waits as Queued with no agent, and starts when one frees", async () => {
+  test('its time comes while the machine has no room: it waits as Queued with no agent, and starts when one frees', async () => {
     const w = world()
     expect(w.settings.set('machine.maxTasks', '1').ok).toBe(true)
     const a = await started(w, repo(), 'sched-room', 'First', 'Add a.txt.')

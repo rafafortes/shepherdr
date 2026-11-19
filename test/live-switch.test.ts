@@ -5,8 +5,20 @@ import { DemoWorld } from '../server/demo/world.ts'
 import { VM } from '../server/demo/data.ts'
 import { Agents } from '../server/live/agents.ts'
 import {
-  CLAUDE_SETTINGS, claudeRestore, claudeSteps, codexEffortRow, codexModelRow, codexPicker, codexRows, liveChanges, liveOK,
-  moveTo, piSteps, switchLive, type ChatState, type SwitchIO,
+  CLAUDE_SETTINGS,
+  claudeRestore,
+  claudeSteps,
+  codexEffortRow,
+  codexModelRow,
+  codexPicker,
+  codexRows,
+  liveChanges,
+  liveOK,
+  moveTo,
+  piSteps,
+  switchLive,
+  type ChatState,
+  type SwitchIO,
 } from '../server/live/live-switch.ts'
 
 const MODELS = `  Select Model and Effort
@@ -35,13 +47,21 @@ class FakeTerm {
   onKey?: (key: string, t: FakeTerm) => void
   files: Record<string, string> = {}
   io: SwitchIO = {
-    send: async (text) => { this.sent.push(text); this.onSend?.(text, this) },
-    keys: async (...k) => { this.keys.push(...k); for (const key of k) this.onKey?.(key, this) },
+    send: async (text) => {
+      this.sent.push(text)
+      this.onSend?.(text, this)
+    },
+    keys: async (...k) => {
+      this.keys.push(...k)
+      for (const key of k) this.onKey?.(key, this)
+    },
     screen: async () => this.screen,
     chat: async () => ({ ...this.chatState }),
     sleep: async () => {},
     readFile: async (rel) => this.files[rel] ?? null,
-    writeFile: async (rel, text) => { this.files[rel] = text },
+    writeFile: async (rel, text) => {
+      this.files[rel] = text
+    },
   }
 }
 
@@ -120,19 +140,21 @@ describe('Claude Code: typed and read back from its chat', () => {
 
   test('its own answer is the proof: a written command the chat does not report fails', async () => {
     const t = new FakeTerm()
-    await expect(switchLive(t.io, 'claude', { kind: 'claude', effort: 'high' }, { kind: 'claude', effort: 'low' })).rejects.toThrow('/effort didn\'t take')
+    await expect(switchLive(t.io, 'claude', { kind: 'claude', effort: 'high' }, { kind: 'claude', effort: 'low' })).rejects.toThrow("/effort didn't take")
     expect(t.sent).toEqual(['/effort low', '/effort high'])
   })
 
   test("a refusal in the command's own answer says why, without waiting for the chat", async () => {
     const t = new FakeTerm()
-    t.onSend = (text) => { t.screen = `❯ ${text}\n  ⎿ Invalid effort: pick one of low, medium, high` }
+    t.onSend = (text) => {
+      t.screen = `❯ ${text}\n  ⎿ Invalid effort: pick one of low, medium, high`
+    }
     await expect(switchLive(t.io, 'claude', { kind: 'claude', effort: 'high' }, { kind: 'claude', effort: 'ultra' })).rejects.toThrow('Invalid effort')
   })
 
   test('unrelated scrollback is not a refusal: the command must have said it itself', async () => {
     const t = new FakeTerm()
-    t.screen = 'tool: 404 Not Found\nerror: that isn\'t available\nerror: unknown option\n'
+    t.screen = "tool: 404 Not Found\nerror: that isn't available\nerror: unknown option\n"
     t.onSend = (text, t) => {
       t.screen += `❯ ${text}\n⎿ Set effort level to low\n`
       t.chatState.effort = 'low'
@@ -147,7 +169,10 @@ describe('Claude Code: typed and read back from its chat', () => {
     t.onSend = (text, t) => {
       if (text.startsWith('/model')) {
         t.screen = `❯ ${text}\n   Switch model?\n   ❯ 1. Yes, switch to Sonnet 5.5\n     2. No, go back\n`
-        t.onKey = () => { t.chatState.model = 'claude-sonnet-5-5'; t.screen += '  ⎿ Set model to Sonnet 5.5\n' }
+        t.onKey = () => {
+          t.chatState.model = 'claude-sonnet-5-5'
+          t.screen += '  ⎿ Set model to Sonnet 5.5\n'
+        }
       } else {
         t.screen = `❯ ${text}\n  ⎿ Set effort level to high\n`
       }
@@ -165,7 +190,9 @@ describe('Claude Code: typed and read back from its chat', () => {
       if (text === '/effort low') t.screen = `❯ ${text}\n  ⎿ Invalid effort: no such level`
       if (text === '/model claude-opus-5-5') t.chatState.model = 'claude-opus-5-5'
     }
-    await expect(switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow('Invalid effort')
+    await expect(switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow(
+      'Invalid effort',
+    )
     // both fields are re-stated: a level a model switch may have moved on its own is restored too
     expect(t.sent).toEqual(['/model claude-sonnet-5-5', '/effort low', '/model claude-opus-5-5', '/effort high'])
     expect(t.chatState).toEqual({ model: 'claude-opus-5-5', effort: 'high' })
@@ -174,7 +201,9 @@ describe('Claude Code: typed and read back from its chat', () => {
   test('an unnamed value is never guessed: a default target, or an unreported start, is refused before typing', async () => {
     const t = new FakeTerm()
     t.chatState = { model: 'claude-sonnet-5-5', effort: 'high' }
-    t.onSend = () => { t.chatState.model = 'claude-opus-5-5' }
+    t.onSend = () => {
+      t.chatState.model = 'claude-opus-5-5'
+    }
     await expect(switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: '', effort: 'high' })).rejects.toThrow("CLI's own default")
     await expect(switchLive(t.io, 'claude', { kind: 'claude', model: '', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow('not reported')
     expect(t.sent).toEqual([])
@@ -196,7 +225,9 @@ describe('Claude Code: typed and read back from its chat', () => {
       if (reads >= 4) t.chatState = { model: 'claude-fable-5-1', effort: 'medium' }
       return { ...t.chatState }
     }
-    await expect(switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow('could not be put back on model and effort')
+    await expect(switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow(
+      'could not be put back on model and effort',
+    )
   })
 
   test('a failed rollback says which field it could not put back', async () => {
@@ -206,7 +237,9 @@ describe('Claude Code: typed and read back from its chat', () => {
       if (text === '/model claude-sonnet-5-5') t.chatState.model = 'claude-sonnet-5-5'
       if (text === '/effort low' || text === '/model claude-opus-5-5') t.screen = 'Invalid: the CLI would not take it'
     }
-    await expect(switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow('could not be put back on model')
+    await expect(switchLive(t.io, 'claude', { kind: 'claude', model: 'claude-opus-5-5', effort: 'high' }, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow(
+      'could not be put back on model',
+    )
   })
 
   test('pi: when the effort step fails, both fields are put back, not just the model', async () => {
@@ -270,7 +303,10 @@ describe('Codex: its picker, read off the screen and confirmed by the chat', () 
     t.screen = MODELS
     t.onKey = (k, t) => {
       if (k === 'enter') t.screen = LEVELS
-      if (k === 's') { t.screen = DONE; t.chatState = { model: 'gpt-6.1-sol', effort: 'medium' } }
+      if (k === 's') {
+        t.screen = DONE
+        t.chatState = { model: 'gpt-6.1-sol', effort: 'medium' }
+      }
     }
     await switchLive(t.io, 'codex', { kind: 'codex', model: 'gpt-6-luna', effort: 'high' }, { kind: 'codex', model: 'gpt-6.1-sol', effort: 'medium' }, { 'gpt-6.1-sol': 'GPT-6.1-Sol' })
     expect(t.sent).toEqual(['/model'])
@@ -284,7 +320,10 @@ describe('Codex: its picker, read off the screen and confirmed by the chat', () 
     t.onKey = (k, t) => {
       if (k === 'enter' && codexPicker(t.screen) === 'model') t.screen = LEVELS
       else if (k === 'enter' && codexPicker(t.screen) === 'effort') t.screen = DEEP
-      else if (k === 's') { t.screen = DONE; t.chatState = { model: 'gpt-6.1-sol', effort: 'ultra' } }
+      else if (k === 's') {
+        t.screen = DONE
+        t.chatState = { model: 'gpt-6.1-sol', effort: 'ultra' }
+      }
     }
     await switchLive(t.io, 'codex', { kind: 'codex', model: 'gpt-6-luna', effort: 'high' }, { kind: 'codex', model: 'gpt-6.1-sol', effort: 'ultra' }, { 'gpt-6.1-sol': 'GPT-6.1-Sol' })
     expect(t.keys.slice(-1)).toEqual(['s'])
@@ -295,8 +334,12 @@ describe('Codex: its picker, read off the screen and confirmed by the chat', () 
     const t = new FakeTerm()
     t.screen = MODELS
     t.chatState = { model: 'gpt-6-luna', effort: 'high' }
-    t.onSend = (text, t) => { if (t.sent.filter((x) => x === text).length === 1) t.screen = MODELS }
-    t.onKey = (k, t) => { if (k === 'esc') t.screen = DONE }
+    t.onSend = (text, t) => {
+      if (t.sent.filter((x) => x === text).length === 1) t.screen = MODELS
+    }
+    t.onKey = (k, t) => {
+      if (k === 'esc') t.screen = DONE
+    }
     await expect(switchLive(t.io, 'codex', { kind: 'codex', model: 'gpt-6-luna', effort: 'high' }, { kind: 'codex', model: 'gpt-9-new', effort: 'high' })).rejects.toThrow("isn't in Codex's list")
   })
 
@@ -304,12 +347,16 @@ describe('Codex: its picker, read off the screen and confirmed by the chat', () 
     const t = new FakeTerm()
     t.screen = MODELS
     t.chatState = { model: 'gpt-6-luna', effort: 'high' }
-    t.onSend = () => { t.screen = MODELS }
+    t.onSend = () => {
+      t.screen = MODELS
+    }
     t.onKey = (k, t) => {
       if (k === 'enter') t.screen = LEVELS.replace(/  5\. More reasoning….*\n/, '')
       else if (k === 'esc') t.screen = DONE
     }
-    await expect(switchLive(t.io, 'codex', { kind: 'codex', model: 'gpt-6-luna', effort: 'high' }, { kind: 'codex', model: 'gpt-6.1-sol', effort: 'ultra' }, { 'gpt-6.1-sol': 'GPT-6.1-Sol' })).rejects.toThrow("doesn't offer")
+    await expect(
+      switchLive(t.io, 'codex', { kind: 'codex', model: 'gpt-6-luna', effort: 'high' }, { kind: 'codex', model: 'gpt-6.1-sol', effort: 'ultra' }, { 'gpt-6.1-sol': 'GPT-6.1-Sol' }),
+    ).rejects.toThrow("doesn't offer")
   })
 
   test('a failed switch whose rollback took reports the original failure, not a mix', async () => {
@@ -319,25 +366,37 @@ describe('Codex: its picker, read off the screen and confirmed by the chat', () 
     t.screen = MODELS
     t.chatState = { model: 'gpt-6-luna', effort: 'high' }
     let sends = 0
-    t.onSend = () => { sends++; t.screen = MODELS }
+    t.onSend = () => {
+      sends++
+      t.screen = MODELS
+    }
     t.onKey = (k, t) => {
       if (k === 'enter' && codexPicker(t.screen) === 'model') t.screen = sends === 1 ? BAD : GOOD
       else if (k === 's') t.chatState = { model: sends === 1 ? 'gpt-6.1-sol' : 'gpt-6-luna', effort: sends === 1 ? 'medium' : 'high' }
       else if (k === 'esc') t.screen = DONE
     }
-    await expect(switchLive(t.io, 'codex', { kind: 'codex', model: 'gpt-6-luna', effort: 'high' }, { kind: 'codex', model: 'gpt-6.1-sol', effort: 'ultra' }, { 'gpt-6.1-sol': 'GPT-6.1-Sol' })).rejects.toThrow("doesn't offer")
+    await expect(
+      switchLive(t.io, 'codex', { kind: 'codex', model: 'gpt-6-luna', effort: 'high' }, { kind: 'codex', model: 'gpt-6.1-sol', effort: 'ultra' }, { 'gpt-6.1-sol': 'GPT-6.1-Sol' }),
+    ).rejects.toThrow("doesn't offer")
     expect(t.chatState).toEqual({ model: 'gpt-6-luna', effort: 'high' })
     expect(t.sent).toEqual(['/model', '/model'])
   })
 
   test('no picker, or no answer in the chat, is never taken as a success', async () => {
     const silent = new FakeTerm()
-    await expect(switchLive(silent.io, 'codex', { kind: 'codex', model: 'gpt-6-luna', effort: 'high' }, { kind: 'codex', model: 'gpt-6.1-sol', effort: 'high' })).rejects.toThrow("didn't open its model list")
+    await expect(switchLive(silent.io, 'codex', { kind: 'codex', model: 'gpt-6-luna', effort: 'high' }, { kind: 'codex', model: 'gpt-6.1-sol', effort: 'high' })).rejects.toThrow(
+      "didn't open its model list",
+    )
 
     const t = new FakeTerm()
     t.screen = MODELS
-    t.onKey = (k, t) => { if (k === 'enter') t.screen = LEVELS; if (k === 's') t.screen = DONE }
-    await expect(switchLive(t.io, 'codex', { kind: 'codex', model: 'gpt-6-luna', effort: 'high' }, { kind: 'codex', model: 'gpt-6.1-sol', effort: 'medium' }, { 'gpt-6.1-sol': 'GPT-6.1-Sol' })).rejects.toThrow("didn't confirm")
+    t.onKey = (k, t) => {
+      if (k === 'enter') t.screen = LEVELS
+      if (k === 's') t.screen = DONE
+    }
+    await expect(
+      switchLive(t.io, 'codex', { kind: 'codex', model: 'gpt-6-luna', effort: 'high' }, { kind: 'codex', model: 'gpt-6.1-sol', effort: 'medium' }, { 'gpt-6.1-sol': 'GPT-6.1-Sol' }),
+    ).rejects.toThrow("didn't confirm")
   })
 })
 

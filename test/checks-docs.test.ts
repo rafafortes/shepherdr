@@ -74,7 +74,8 @@ describe('the command verb list', () => {
 
 describe('command mentions in prose', () => {
   test('finds inline code, line starts and line-wrapped spans, not noun uses of the word', () => {
-    const text = 'the shepherdr skill and eliasstravik/shepherdr without OK\n' +
+    const text =
+      'the shepherdr skill and eliasstravik/shepherdr without OK\n' +
       'Use `shepherdr task review-more SHE-89` here.\n' +
       '- `shepherdr task\n  review-more SHE-89` wraps.\n' +
       'shepherdr checks SHE-89\n' +

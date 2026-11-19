@@ -70,7 +70,11 @@ export function stageUserPlugins(dir: string, home = userHome()) {
 /** the human's own plugins staged in a build */
 export function stagedPlugins(dir = root): string[] {
   const into = join(dir, 'user-plugins')
-  return existsSync(into) ? readdirSync(into).filter((n) => NAME.test(n) && isPlugin(join(into, n))).sort() : []
+  return existsSync(into)
+    ? readdirSync(into)
+        .filter((n) => NAME.test(n) && isPlugin(join(into, n)))
+        .sort()
+    : []
 }
 
 export interface PluginEntry {
@@ -127,7 +131,11 @@ function inputsHash(dir: string): string {
   const h = createHash('sha256')
   const add = (p: string, name: string) => {
     h.update(name)
-    try { h.update(readFileSync(p)) } catch { h.update('-') }
+    try {
+      h.update(readFileSync(p))
+    } catch {
+      h.update('-')
+    }
   }
   add(join(dir, 'plugins.json'), 'plugins.json')
   add(join(dir, 'user-plugins.json'), 'user-plugins.json')
@@ -136,7 +144,8 @@ function inputsHash(dir: string): string {
     const walk = (d: string, prefix: string) => {
       for (const n of existsSync(d) ? readdirSync(d).sort() : []) {
         if (n === '.git') continue
-        const p = join(d, n), name = `${folder}/${prefix}${n}`
+        const p = join(d, n),
+          name = `${folder}/${prefix}${n}`
         if (statSync(p).isDirectory()) walk(p, `${prefix}${n}/`)
         else add(p, name)
       }
@@ -149,7 +158,14 @@ function inputsHash(dir: string): string {
 /** a hash of what a build wrote, so a deleted or edited registry is written again even when the inputs did not change */
 function outputHash(files: string[]): string {
   const h = createHash('sha256')
-  for (const f of files) { h.update(f); try { h.update(readFileSync(f)) } catch { h.update('-') } }
+  for (const f of files) {
+    h.update(f)
+    try {
+      h.update(readFileSync(f))
+    } catch {
+      h.update('-')
+    }
+  }
   return h.digest('hex')
 }
 
@@ -184,7 +200,7 @@ export function writeRegistries(dir = root) {
   const has = (p: PluginEntry, file: string) => existsSync(join(dir, folder(p).slice(3), file))
   const client = on.filter((p) => has(p, 'client.tsx'))
   const server = on.filter((p) => has(p, 'server.ts'))
-  const head = '// Written by scripts/build-plugins.ts from plugins.json and the human\'s own plugins. Do not edit.\n'
+  const head = "// Written by scripts/build-plugins.ts from plugins.json and the human's own plugins. Do not edit.\n"
   mkdirSync(join(dir, 'generated'), { recursive: true })
   put(
     join(dir, 'generated', 'client-plugins.ts'),

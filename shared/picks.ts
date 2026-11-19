@@ -65,5 +65,8 @@ export function orderByPicks<T extends { id: string }>(models: T[], p: { pinned:
     const recent = p.recent.indexOf(m.id)
     return recent >= 0 ? 1000 + recent : 2000
   }
-  return models.map((m, i) => ({ m, i, r: rank(m) })).sort((a, b) => a.r - b.r || a.i - b.i).map(({ m }) => m)
+  return models
+    .map((m, i) => ({ m, i, r: rank(m) }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map(({ m }) => m)
 }

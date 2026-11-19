@@ -280,7 +280,7 @@ describe('terminal menus', () => {
       '  $ npm test',
       '› 1. Yes, proceed (y)',
       "  2. Yes, and don't ask again for commands that start with `npm",
-      "     test` (p)",
+      '     test` (p)',
       '  3. No, and tell Codex what to do differently (esc)',
       '  Press enter to confirm or esc to cancel',
     ].join('\n')
@@ -355,7 +355,9 @@ describe('triggers', () => {
     expect(words('FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;BYHOUR=16;BYMINUTE=0')).toBe('Every other week, Friday at 16:00 (Stockholm)')
     expect(words('FREQ=MONTHLY;BYDAY=-1FR;BYHOUR=9;BYMINUTE=0')).toBe('The last Friday of the month at 9:00 (Stockholm)')
     expect(words('FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1;BYHOUR=17;BYMINUTE=0')).toBe('The last weekday of the month at 17:00 (Stockholm)')
-    expect(words('DTSTART:20261201T000000 RRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0;UNTIL=20261231T000000 EXDATE:20261224T090000')).toBe('Every day at 9:00, from 1 Dec 2026, until 31 Dec 2026, except 24 Dec (Stockholm)')
+    expect(words('DTSTART:20261201T000000 RRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0;UNTIL=20261231T000000 EXDATE:20261224T090000')).toBe(
+      'Every day at 9:00, from 1 Dec 2026, until 31 Dec 2026, except 24 Dec (Stockholm)',
+    )
     expect(words('once 2026-11-02 9:00')).toBe('Once, Monday 2 Nov 2026 at 9:00 (Stockholm)')
     // 10:40 in Stockholm: the next half hour is 11:00 there, not UTC's
     expect(T.nextWords(rule('FREQ=MINUTELY;INTERVAL=30'), Z, now)).toEqual(['Today 11:00', 'Today 11:30', 'Today 12:00'])
@@ -429,7 +431,16 @@ describe('automations', () => {
     a.pause('p:x:gtm', 'Changelog', false)
     const now = at('2026-10-28T09:40:00Z')
     expect(a.view('p:x:gtm', Z, now)).toEqual([
-      { name: 'Flaky tests', when: 'Every day at 7:00 (Stockholm)', what: 'Rerun the flaky test suite', brief: 'Three times.', on: true, time: 'DTSTART:20260101T000000 RRULE:FREQ=DAILY;BYHOUR=7;BYMINUTE=0', next: ['Tomorrow 7:00', 'Fri 30 Oct 7:00', 'Sat 31 Oct 7:00'], runs: [] },
+      {
+        name: 'Flaky tests',
+        when: 'Every day at 7:00 (Stockholm)',
+        what: 'Rerun the flaky test suite',
+        brief: 'Three times.',
+        on: true,
+        time: 'DTSTART:20260101T000000 RRULE:FREQ=DAILY;BYHOUR=7;BYMINUTE=0',
+        next: ['Tomorrow 7:00', 'Fri 30 Oct 7:00', 'Sat 31 Oct 7:00'],
+        runs: [],
+      },
       { name: 'Changelog', when: 'When a task is merged', what: 'Update the changelog', on: false, events: 'merged', next: [], runs: [] },
     ])
     expect(() => a.add({ place: 'p:x:gtm', name: 'x', trigger: {}, task: { title: 'y' } })).toThrow('--when')
@@ -630,7 +641,7 @@ describe('heartbeat', () => {
     for (const k of ['heartbeat.every', 'heartbeat.quiet']) expect(s.set(k, '30').ok).toBe(false)
     for (const k of ['heartbeat.when', 'heartbeat.on', 'time.zone']) s.set(k, null)
   })
-  test("Settings → Autopilot shows the rule in words, its next runs and presets, never the rule; shepherdr show too", () => {
+  test('Settings → Autopilot shows the rule in words, its next runs and presets, never the rule; shepherdr show too', () => {
     const s = new Settings()
     s.set('time.zone', 'Europe/Stockholm')
     const page = s.sections([], [], null).find((x) => x.name === 'Autopilot' && x.level === 'all')!
@@ -654,7 +665,18 @@ describe('settings', () => {
     // Autopilot has no limits of its own: a limit the human wants is words in its HEARTBEAT.md
     expect(CATALOG.find((x) => x.name === 'Autopilot')!.rows.map((r) => r.key)).toEqual(['heartbeat.when', 'heartbeat.on'])
     // what the model judges for itself is no setting: tasks a day, retries, time per task, when to hand back, tasks at once
-    for (const k of ['autopilot.tasksPerDay', 'autopilot.hours', 'autopilot.when', 'autopilot.atOnce', 'autopilot.retries', 'autopilot.pauseAfter', 'autopilot.brakeAfter', 'brief.waitChecks', 'machine.limitBy']) expect(s.set(k, 'any').ok).toBe(false)
+    for (const k of [
+      'autopilot.tasksPerDay',
+      'autopilot.hours',
+      'autopilot.when',
+      'autopilot.atOnce',
+      'autopilot.retries',
+      'autopilot.pauseAfter',
+      'autopilot.brakeAfter',
+      'brief.waitChecks',
+      'machine.limitBy',
+    ])
+      expect(s.set(k, 'any').ok).toBe(false)
     for (const k of ['check.command', 'merge.by', 'plan.approve', 'worker.agent', 'limit.tokens', 'agent']) expect(s.set(k, 'x').ok).toBe(false)
   })
   test('a value that makes no sense is refused with the reason', () => {
@@ -695,7 +717,7 @@ describe('settings', () => {
     s.set('task.agent', null)
     s.set('coordinator.agent', null)
   })
-  test('tasks and coordinators each start on their own CLI, model and effort; default is the CLI\'s own', () => {
+  test("tasks and coordinators each start on their own CLI, model and effort; default is the CLI's own", () => {
     const s = new Settings()
     expect(s.harness('task')).toEqual({ kind: 'claude', model: undefined, effort: undefined })
     s.set('coordinator.agent', 'pi')
@@ -712,10 +734,12 @@ describe('settings', () => {
     expect(s.get('reviewer.agent')).toBe('Claude Code')
     s.set('reviewer.effort', 'high')
     expect(s.harness('reviewer')).toEqual({ kind: 'claude', model: undefined, effort: 'high' })
-    expect(s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note).toContain(reviewerLineFor('a headless Claude Code or a Claude Code subagent (its default model, high effort).', '<id>', '', '(your setting for every machine)'))
+    expect(s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note).toContain(
+      reviewerLineFor('a headless Claude Code or a Claude Code subagent (its default model, high effort).', '<id>', '', '(your setting for every machine)'),
+    )
     for (const k of ['reviewer.agent', 'reviewer.effort']) s.set(k, null)
   })
-  test("each CLI and model takes its own levels: one it lacks goes in as the nearest it has", () => {
+  test('each CLI and model takes its own levels: one it lacks goes in as the nearest it has', () => {
     expect(effortFor('claude', 'lowest')).toBe('low')
     expect(effortFor('claude', 'Max')).toBe('max')
     expect(effortFor('claude', 'ultra', 'Opus 5.5')).toBe('max')
@@ -731,7 +755,11 @@ describe('settings', () => {
     setPicks(NO_PICKS)
     const s = new Settings()
     // the Reviewer's rows sit in How tasks work (its Settings block), the rest in Agents
-    const rows = () => s.sections([], [], null).filter((x) => x.name === 'Agents' || x.name === 'How tasks work').flatMap((x) => x.rows)
+    const rows = () =>
+      s
+        .sections([], [], null)
+        .filter((x) => x.name === 'Agents' || x.name === 'How tasks work')
+        .flatMap((x) => x.rows)
     const row = (group: string, label: string) => rows().find((r) => r.group === group && r.label === label)!
     expect(row('Tasks', 'Model').options).toEqual(['default', 'Fable 5.1', 'Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5'])
     expect(row('Tasks', 'Effort').options).toEqual(['default', 'low', 'medium', 'high', 'xhigh', 'max'])
@@ -768,7 +796,9 @@ describe('settings', () => {
     s.set('reviewer.fallbackEffort', 'high')
     expect(s.reviewerBackup()).toEqual({ kind: 'claude', model: 'claude-opus-5-5', effort: 'high' })
     expect(s.harness('reviewer')).toEqual({ kind: 'codex', model: 'gpt-6-sol', effort: undefined })
-    expect(s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note).toContain('review with a headless Claude Code or a Claude Code subagent (model claude-opus-5-5, high effort) instead')
+    expect(s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note).toContain(
+      'review with a headless Claude Code or a Claude Code subagent (model claude-opus-5-5, high effort) instead',
+    )
     // Everywhere, this machine, a space: the most specific one set wins
     expect(s.set('reviewer.fallback', 'pi', 'machine').ok).toBe(true)
     expect(s.set('reviewer.fallback', 'codex', { space: 'web' }).ok).toBe(true)
@@ -776,7 +806,11 @@ describe('settings', () => {
     expect(s.reviewerBackup('web')).toMatchObject({ kind: 'codex' })
     expect(s.reviewerBackup('api')).toMatchObject({ kind: 'pi' })
     // where a space's own is set, the screen says where it comes from and what a reset goes back to
-    const row = (level: string) => s.sections([], [], null, 'vm', ['web']).find((x) => x.level === level && x.name === 'How tasks work')!.rows.find((r) => r.key === 'reviewer.fallback')!
+    const row = (level: string) =>
+      s
+        .sections([], [], null, 'vm', ['web'])
+        .find((x) => x.level === level && x.name === 'How tasks work')!
+        .rows.find((r) => r.key === 'reviewer.fallback')!
     expect(row('p:vm:web')).toMatchObject({ value: 'Codex', inherits: { value: 'pi', from: 'vm' } })
     expect(row('m:vm')).toMatchObject({ value: 'pi', inherits: { value: 'Claude Code', from: 'Everywhere' } })
     // off again: nothing anywhere
@@ -786,7 +820,11 @@ describe('settings', () => {
     expect(s.get('reviewer.fallback')).toBe('off')
   })
   test("Autopilot's old limits and wake picks leave the saved file as soon as it is read", () => {
-    writeJson('settings.json', { everywhere: { 'autopilot.tasksPerDay': '3', 'wake.merged': 'now', 'heartbeat.every': '45 min' }, machine: { 'wake.health': 'next heartbeat' }, projects: { gtm: { 'wake.added': 'now', 'heartbeat.quiet': '22:00-07:00' } } })
+    writeJson('settings.json', {
+      everywhere: { 'autopilot.tasksPerDay': '3', 'wake.merged': 'now', 'heartbeat.every': '45 min' },
+      machine: { 'wake.health': 'next heartbeat' },
+      projects: { gtm: { 'wake.added': 'now', 'heartbeat.quiet': '22:00-07:00' } },
+    })
     const s = new Settings()
     // the old interval and quiet hours are a time rule now: every 45 minutes; in gtm, Everywhere's 45 outside 22:00-07:00
     expect(readJson('settings.json', {})).toEqual({
@@ -798,8 +836,11 @@ describe('settings', () => {
     s.set('heartbeat.when', null)
     s.set('heartbeat.when', null, { space: 'gtm' })
   })
-  test('an older settings file keeps its app settings; its one CLI becomes the tasks\' and the coordinators\'', () => {
-    writeJson('settings.json', { all: { 'coordinator.agent': 'Codex', 'check.command': 'npm test', 'autopilot.hours': '9-18', 'autopilot.tasksPerDay': '3', 'wake.merged': 'now', 'heartbeat.every': '45 min' }, 'task:X-1': { 'merge.by': 'by itself' } })
+  test("an older settings file keeps its app settings; its one CLI becomes the tasks' and the coordinators'", () => {
+    writeJson('settings.json', {
+      all: { 'coordinator.agent': 'Codex', 'check.command': 'npm test', 'autopilot.hours': '9-18', 'autopilot.tasksPerDay': '3', 'wake.merged': 'now', 'heartbeat.every': '45 min' },
+      'task:X-1': { 'merge.by': 'by itself' },
+    })
     let s = new Settings()
     expect(s.get('task.agent')).toBe('Codex')
     expect(s.get('coordinator.agent')).toBe('Codex')
@@ -816,14 +857,18 @@ describe('settings', () => {
     s.set('task.agent', null)
     s.set('coordinator.agent', null)
   })
-  test('a Merge setting kept under its old words reads as today\'s', () => {
+  test("a Merge setting kept under its old words reads as today's", () => {
     writeJson('settings.json', { 'brief.merge': 'after your yes' })
     expect(new Settings().get('brief.merge')).toBe('ask me first')
     writeJson('settings.json', { 'brief.merge': 'by itself' })
     expect(new Settings().get('brief.merge')).toBe('on its own')
   })
   test('review rounds read as on, and waiting for GitHub checks as a way to merge', () => {
-    writeJson('settings.json', { everywhere: { 'brief.review': '2 rounds', 'brief.waitChecks': 'on' }, machine: {}, spaces: { web: { 'brief.review': 'off', 'brief.merge': 'ask me first', 'brief.waitChecks': 'on' } } })
+    writeJson('settings.json', {
+      everywhere: { 'brief.review': '2 rounds', 'brief.waitChecks': 'on' },
+      machine: {},
+      spaces: { web: { 'brief.review': 'off', 'brief.merge': 'ask me first', 'brief.waitChecks': 'on' } },
+    })
     const s = new Settings()
     expect(s.get('brief.review')).toBe('on')
     expect(s.get('brief.merge')).toBe('after GitHub checks')
@@ -851,7 +896,12 @@ describe('settings', () => {
     // a machine's capacity has no project level; alerts and voice are one for all
     expect(s.set('machine.maxTasks', '2', { space: 'web' }).ok).toBe(false)
     expect(s.set('voice.service', 'ElevenLabs', 'machine').ok).toBe(false)
-    expect(readJson<Record<string, unknown>>('settings.json', {})).toEqual({ capsFormat: 2, everywhere: { 'brief.review': 'off' }, machine: { 'machine.maxTasks': '8', 'task.agent': 'Codex' }, spaces: { web: { 'task.agent': 'pi', 'brief.review': 'on' } } })
+    expect(readJson<Record<string, unknown>>('settings.json', {})).toEqual({
+      capsFormat: 2,
+      everywhere: { 'brief.review': 'off' },
+      machine: { 'machine.maxTasks': '8', 'task.agent': 'Codex' },
+      spaces: { web: { 'task.agent': 'pi', 'brief.review': 'on' } },
+    })
     // the screen's rows say where an inherited value comes from, and what a reset goes back to
     const rows = (level: string, name: string) => s.sections([], [], null, 'vm', ['web']).find((x) => x.level === level && x.name === name)!.rows
     const agent = (level: string) => rows(level, 'Agents').find((r) => r.key === 'task.agent')!
@@ -873,13 +923,17 @@ describe('settings', () => {
     expect(s.everywhere()).toEqual({ 'brief.review': 'on' })
     writeJson('settings.json', {})
   })
-  test("a backup model its own CLI has not is said where it is read, its own or the one it follows", () => {
+  test('a backup model its own CLI has not is said where it is read, its own or the one it follows', () => {
     // worlds of its own: these write no settings file
     const s = new Settings({ everywhere: {}, machine: {}, spaces: {} })
     s.set('task.fallback', 'Codex')
     s.set('coordinator.fallback', 'Claude Code')
     expect(s.set('backup.model', 'GPT-6-Sol').ok).toBe(true)
-    const row = (x: InstanceType<typeof Settings>, key: string) => x.sections([], [], null, 'host').find((y) => y.level === 'm:host' && y.name === 'Agents')!.rows.find((r) => r.key === key)!
+    const row = (x: InstanceType<typeof Settings>, key: string) =>
+      x
+        .sections([], [], null, 'host')
+        .find((y) => y.level === 'm:host' && y.name === 'Agents')!
+        .rows.find((r) => r.key === key)!
     // it follows the tasks' pair, whose model Claude Code has not: the row says why its backup won't go in
     expect(row(s, 'coordinator.fallbackModel').value).toBe('default')
     expect(row(s, 'coordinator.fallbackModel').warn).toBe("GPT-6-Sol is no model Claude Code has: this backup doesn't go in until you set one here.")
@@ -910,7 +964,12 @@ describe('settings', () => {
     expect(s.get('app.hosts')).toBe('app.example.com')
     // shepherdr show prints every setting's value and source, this one included
     expect(s.lines()).toContain('app.hosts')
-    expect(s.sections([], [], null, 'vm', ['web']).find((x) => x.level === 'all' && x.name === 'App')!.rows.find((r) => r.key === 'app.hosts')!.warn).toBeUndefined()
+    expect(
+      s
+        .sections([], [], null, 'vm', ['web'])
+        .find((x) => x.level === 'all' && x.name === 'App')!
+        .rows.find((r) => r.key === 'app.hosts')!.warn,
+    ).toBeUndefined()
   })
   test("a model set Everywhere is checked against this machine's backups too, and the spaces'", () => {
     // a world of its own: this test writes no settings file
@@ -954,10 +1013,18 @@ describe('settings', () => {
     const rowOf = (key: string) => CATALOG.flatMap((x) => x.rows).find((r) => r.key === key)!
     // each row offers the models of its own CLI: the tasks' a Codex's, the coordinators' a Claude Code's, and the
     // coordinators' row shows the model it reads from the tasks' pair while its own is at default
-    const tasksRow = agentRow(rowOf('backup.model'), (k: string) => s.get(k), () => NO_PICKS)
+    const tasksRow = agentRow(
+      rowOf('backup.model'),
+      (k: string) => s.get(k),
+      () => NO_PICKS,
+    )
     expect(tasksRow.options).toContain('GPT-6-Sol')
     expect(tasksRow.options).not.toContain('Sonnet 5.5')
-    const coordRow = agentRow(rowOf('coordinator.fallbackModel'), (k: string) => s.get(k), () => NO_PICKS)
+    const coordRow = agentRow(
+      rowOf('coordinator.fallbackModel'),
+      (k: string) => s.get(k),
+      () => NO_PICKS,
+    )
     expect(coordRow.options).toContain('Sonnet 5.5')
     expect(coordRow.options).not.toContain('GPT-6-Sol')
     expect(coordRow.value).toBe('Sonnet 5.5')
@@ -997,9 +1064,13 @@ describe('settings', () => {
     expect(backupModelOf('coordinator', (k) => s.get(k, 'web'))).toEqual({ model: 'Opus 5.5', row: 'Coordinators → Backup model' })
     expect(backupModelOf('task', (k) => s.get(k))).toEqual({ model: 'Sonnet 5.5', row: 'Tasks → Backup model' })
     // shepherdr show says it too: each key on its own line, with its level
-    const line = (space?: string) => s.lines(space, 'host').split('\n').filter((x) => x.startsWith('coordinator.fallback'))
-    expect(line()).toContain('coordinator.fallbackModel  Sonnet 5.5  (Everywhere, the tasks\' backup\'s model)')
-    expect(line()).toContain('coordinator.fallbackEffort low  (Everywhere, the tasks\' backup\'s effort)')
+    const line = (space?: string) =>
+      s
+        .lines(space, 'host')
+        .split('\n')
+        .filter((x) => x.startsWith('coordinator.fallback'))
+    expect(line()).toContain("coordinator.fallbackModel  Sonnet 5.5  (Everywhere, the tasks' backup's model)")
+    expect(line()).toContain("coordinator.fallbackEffort low  (Everywhere, the tasks' backup's effort)")
     expect(line('web')).toContain('coordinator.fallbackModel  Opus 5.5  (this space)')
     for (const k of ['task.fallback', 'coordinator.fallback', 'backup.model', 'backup.effort', 'coordinator.fallbackModel']) for (const l of ['all', { space: 'web' }] as const) s.set(k, null, l)
     writeJson('settings.json', {})
@@ -1016,7 +1087,7 @@ describe('settings', () => {
     setPicks(NO_PICKS)
     writeJson('settings.json', {})
   })
-  test("the Settings screen shows what every new brief ends with, as it is now", () => {
+  test('the Settings screen shows what every new brief ends with, as it is now', () => {
     const s = new Settings()
     const note = () => s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note!
     expect(note()).toContain('- Reviewer: a headless Codex or a Codex subagent (its default model and effort).')
@@ -1024,7 +1095,21 @@ describe('settings', () => {
     const section = () => s.sections([], [], null).find((x) => x.name === 'How tasks work')!
     // a backup chain's 2nd to 5th, each with its own three keys
     const extra = (c: string) => [2, 3, 4, 5].flatMap((n) => [`${c}.fallback${n}`, `${c}.fallback${n}Model`, `${c}.fallback${n}Effort`])
-    expect(section().rows.map((r) => r.key)).toEqual(['brief.review', 'review.mustFix', 'review.rounds', 'brief.merge', 'merge.gate', 'merge.train', 'reviewer.agent', 'reviewer.model', 'reviewer.effort', 'reviewer.fallback', 'reviewer.fallbackModel', 'reviewer.fallbackEffort', ...extra('reviewer')])
+    expect(section().rows.map((r) => r.key)).toEqual([
+      'brief.review',
+      'review.mustFix',
+      'review.rounds',
+      'brief.merge',
+      'merge.gate',
+      'merge.train',
+      'reviewer.agent',
+      'reviewer.model',
+      'reviewer.effort',
+      'reviewer.fallback',
+      'reviewer.fallbackModel',
+      'reviewer.fallbackEffort',
+      ...extra('reviewer'),
+    ])
     // only words in prompts: What agents are told, each row with the line it adds
     expect(section().told).toBe(true)
     expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.told).toBeUndefined()
@@ -1040,8 +1125,20 @@ describe('settings', () => {
     s.set('brief.review', null)
     const n = (group: string, times: number) => Array<string>(times).fill(group)
     // each role's chain sits under its own rows, in its Backups sub-block; the way back is a group of its own, last
-    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.map((r) => r.group)).toEqual([...n('Tasks', 3 + 15), ...n('Coordinators', 3 + 15), ...n('Advisor', 3 + 15 + 1), ...n('Back to the primary', 1)])
-    expect(s.sections([], [], null).find((x) => x.name === 'Agents')!.rows.filter((r) => r.sub).map((r) => r.sub).every((x) => x === 'Backups')).toBe(true)
+    expect(
+      s
+        .sections([], [], null)
+        .find((x) => x.name === 'Agents')!
+        .rows.map((r) => r.group),
+    ).toEqual([...n('Tasks', 3 + 15), ...n('Coordinators', 3 + 15), ...n('Advisor', 3 + 15 + 1), ...n('Back to the primary', 1)])
+    expect(
+      s
+        .sections([], [], null)
+        .find((x) => x.name === 'Agents')!
+        .rows.filter((r) => r.sub)
+        .map((r) => r.sub)
+        .every((x) => x === 'Backups'),
+    ).toBe(true)
     const agents = s.sections([], [], null).find((x) => x.name === 'Agents')!.rows
     // the way back from a backup: its agents go back to the primary once it answers again
     expect(agents.find((r) => r.key === 'backup.watchReturn')).toMatchObject({ label: 'When the primary is back', value: 'go back', options: ['go back', 'tell me', 'off'] })
@@ -1051,7 +1148,7 @@ describe('settings', () => {
     expect(agents.at(-1)).toMatchObject({ key: 'backup.watchReturn', group: 'Back to the primary' })
   })
 
-  test("when the primary is back: on, its only other value before going back by itself came, reads as tell me", () => {
+  test('when the primary is back: on, its only other value before going back by itself came, reads as tell me', () => {
     // kept in settings.json at any level, and handed over by a main machine that runs older code
     const s = new Settings({ everywhere: { 'backup.watchReturn': 'on' }, machine: {}, spaces: { web: { 'backup.watchReturn': 'off' } } })
     expect(s.get('backup.watchReturn')).toBe('tell me')
@@ -1082,7 +1179,9 @@ describe("this project's own numbers, for a task's time left", () => {
     )
   })
   test('the latest ones when none reads like it; nothing while too few are done', () => {
-    expect(pastTimes(done, { id: 'X-9', project: 'p', title: 'Voice calls', desc: '' })).toContain('The latest ones: X-5 "Fix laggy chat input" 39m, X-4 "Rename task groups" 6m, X-3 "Archive tasks" 30m.')
+    expect(pastTimes(done, { id: 'X-9', project: 'p', title: 'Voice calls', desc: '' })).toContain(
+      'The latest ones: X-5 "Fix laggy chat input" 39m, X-4 "Rename task groups" 6m, X-3 "Archive tasks" 30m.',
+    )
     expect(pastTimes(done.slice(1), { id: 'X-9', project: 'p', title: 'Voice', desc: '' })).toBe('')
   })
   test('times read short', () => {
@@ -1090,9 +1189,9 @@ describe("this project's own numbers, for a task's time left", () => {
   })
 })
 
-describe('the brief\'s default way of working', () => {
+describe("the brief's default way of working", () => {
   test("a task's agent is told who it is, its task's facts and which skills to read; the rules are in the skills", () => {
-    const p = taskPrompt({ id: 'X-1', branch: 'work/1-x', base: 'main' }, 'How long this space\'s tasks really took: 20m.')
+    const p = taskPrompt({ id: 'X-1', branch: 'work/1-x', base: 'main' }, "How long this space's tasks really took: 20m.")
     expect(p).toContain('the agent of task X-1')
     expect(p).toContain('skill/shepherdr/SKILL.md first')
     expect(p).toContain('skill/shepherdr-agent/SKILL.md')
@@ -1114,29 +1213,44 @@ ${reviewerLineFor(CODEX_WORDS, 'X-1')}
     const how = settingsBlock('X-1', { ways })
     expect(splitBrief(`Fix it.\n\n${how}`)).toEqual(['Fix it.', how])
     expect(splitBrief('Fix it.')).toEqual(['Fix it.', ''])
-    for (const old of ["How to work (Shepherdr's defaults; where the brief above says otherwise, it wins):\n- Review: none.", 'How tasks work (from Settings; where the brief above says otherwise, it wins):\n- Review: none.'])
+    for (const old of [
+      "How to work (Shepherdr's defaults; where the brief above says otherwise, it wins):\n- Review: none.",
+      'How tasks work (from Settings; where the brief above says otherwise, it wins):\n- Review: none.',
+    ])
       expect(splitBrief(`Fix it.\n\n${old}`)).toEqual(['Fix it.', old])
   })
   test('each setting changes its line', () => {
     expect(settingsBlock('X-1', { ways: { ...ways, merge: 'ask me first' } })).toContain('- Merge: ask me first. Ask the human first, and merge (shepherdr merge X-1) once they say yes.')
-    expect(settingsBlock('X-1', { ways: { ...ways, waitChecks: true } })).toContain("- Merge: after GitHub checks. Merge it yourself once it works and GitHub's checks pass (shepherdr checks X-1, then shepherdr merge X-1).")
+    expect(settingsBlock('X-1', { ways: { ...ways, waitChecks: true } })).toContain(
+      "- Merge: after GitHub checks. Merge it yourself once it works and GitHub's checks pass (shepherdr checks X-1, then shepherdr merge X-1).",
+    )
     // review off still shows every line, an override among them
     const off = settingsBlock('X-1', { ways: { ...ways, review: false, rounds: 1 }, reviewer: { kind: 'codex' }, by: { review: 'task', rounds: 'task' } })
     expect(off).toContain("- Review: off. No review; the lines on reviewing below don't apply. (set by coordinator for this task)")
     expect(off).toContain('- Reviewer: a headless Codex')
     expect(off).toContain('- Review rounds: 1. One round, no review again. (set by coordinator for this task)')
-    expect(settingsBlock('X-1', { ways: { ...ways, mustFix: 'critical', rounds: 5 } })).toContain('- Must fix: critical. Findings are tagged critical/major/minor/trivial; fix critical, then review again.\n- Review rounds: 5. Stop when a round finds none to fix, at most 5 rounds.')
+    expect(settingsBlock('X-1', { ways: { ...ways, mustFix: 'critical', rounds: 5 } })).toContain(
+      '- Must fix: critical. Findings are tagged critical/major/minor/trivial; fix critical, then review again.\n- Review rounds: 5. Stop when a round finds none to fix, at most 5 rounds.',
+    )
     expect(settingsBlock('X-1', { ways: { ...ways, mustFix: 'trivial' } })).toContain('fix all of them, then review again')
   })
   test('the Reviewer line names the reviewer, its model and effort; the Agent line what it runs on, only so it knows', () => {
-    expect(settingsBlock('X-1', { ways, reviewer: { kind: 'claude', model: 'opus', effort: 'high' } })).toContain(reviewerLineFor('a headless Claude Code or a Claude Code subagent (model opus, high effort).', 'X-1'))
-    expect(settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: '' } })).toContain(reviewerLineFor('a headless pi or a pi subagent (model openai/gpt-5.5, its default effort).', 'X-1'))
+    expect(settingsBlock('X-1', { ways, reviewer: { kind: 'claude', model: 'opus', effort: 'high' } })).toContain(
+      reviewerLineFor('a headless Claude Code or a Claude Code subagent (model opus, high effort).', 'X-1'),
+    )
+    expect(settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: '' } })).toContain(
+      reviewerLineFor('a headless pi or a pi subagent (model openai/gpt-5.5, its default effort).', 'X-1'),
+    )
     expect(settingsBlock('X-1', { ways, agent: { kind: 'claude', effort: 'high' } })).toContain('- Agent: Claude Code (its default model, high effort). Only so you know what you run on.')
   })
   test('with a backup reviewer the same line says who reviews instead, where that reviewer cannot run at all', () => {
     const block = settingsBlock('X-1', { ways, reviewer: { kind: 'pi', model: 'openai/gpt-5.5', effort: 'high' }, fallback: { kind: 'claude', model: 'opus', effort: 'high' } })
     expect(block).toContain(
-      reviewerLineFor('a headless pi or a pi subagent (model openai/gpt-5.5, high effort).', 'X-1', 'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (model opus, high effort) instead for that round only, and say in your summary that you did.'),
+      reviewerLineFor(
+        'a headless pi or a pi subagent (model openai/gpt-5.5, high effort).',
+        'X-1',
+        'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (model opus, high effort) instead for that round only, and say in your summary that you did.',
+      ),
     )
     // one line, still: the finding of a review, what to fix and the rounds are untouched
     expect(block.split('\n').find((l) => l.startsWith('- Reviewer'))).not.toContain('\n')
@@ -1153,7 +1267,12 @@ ${reviewerLineFor(CODEX_WORDS, 'X-1')}
     const read = readBrief(`Fix it.\n\n${block}\n\nQueued: wait.`)!
     expect(read.before).toBe('Fix it.')
     expect(read.after).toBe('Queued: wait.')
-    expect(read.lines.map((l) => [l.label, l.by])).toEqual([['Review', undefined], ['Must fix', undefined], ['Review rounds', 'set by coordinator for this task'], ['Merge', "this space's setting"]])
+    expect(read.lines.map((l) => [l.label, l.by])).toEqual([
+      ['Review', undefined],
+      ['Must fix', undefined],
+      ['Review rounds', 'set by coordinator for this task'],
+      ['Merge', "this space's setting"],
+    ])
     expect(readBrief('Fix it.')).toBeNull()
   })
   test("Settings say who changed each line: a space's own, a machine's, every machine's, or the coordinator for one task", () => {
@@ -1166,7 +1285,12 @@ ${reviewerLineFor(CODEX_WORDS, 'X-1')}
     expect(s.setBy('web')).toEqual({ rounds: 'machine', merge: 'space' })
     expect(s.setBy('web', { 'review.mustFix': 'critical' })).toEqual({ rounds: 'machine', merge: 'space', mustFix: 'task' })
     expect(s.ways('web', { 'brief.merge': 'after GitHub checks' })).toMatchObject({ merge: 'on its own', waitChecks: true, rounds: 2 })
-    for (const [k, l] of [['review.rounds', 'machine'], ['brief.merge', { space: 'web' }], ['review.mustFix', 'all']] as const) s.set(k, null, l)
+    for (const [k, l] of [
+      ['review.rounds', 'machine'],
+      ['brief.merge', { space: 'web' }],
+      ['review.mustFix', 'all'],
+    ] as const)
+      s.set(k, null, l)
     // a backup reviewer marks the Reviewer line only where one is set: its model or effort alone changes no line
     expect(s.set('reviewer.fallbackModel', 'opus').ok).toBe(true)
     expect(s.setBy()).toEqual({})
@@ -1286,7 +1410,11 @@ describe('interactive chat capabilities', () => {
     const spec = { key: 'unsupported-chat', name: 'unsupported-chat', kind: 'cursor', cwd: '/tmp', workspace: 'test' }
     let stopped = false
     await expect(agents.ensure(spec)).rejects.toThrow('no chat log reader')
-    await expect(agents.restart(spec, async () => { stopped = true })).rejects.toThrow('no chat log reader')
+    await expect(
+      agents.restart(spec, async () => {
+        stopped = true
+      }),
+    ).rejects.toThrow('no chat log reader')
     expect(stopped).toBe(false)
     expect(agents.record(spec.key)).toBeUndefined()
     agents.stop()
@@ -1317,15 +1445,27 @@ describe('a chain of backups in Settings', () => {
     const s = new Settings()
     const v: Record<string, string> = { 'task.fallback': 'off', 'coordinator.fallback': 'off', 'task.fallback3': 'Claude Code', 'coordinator.fallback2': 'Codex' }
     expect(fallbackKinds((k) => v[k] ?? 'off').sort()).toEqual(['claude', 'codex'])
-    for (const [k, x] of [['reviewer.fallback', 'codex'], ['reviewer.fallback2', 'off'], ['reviewer.fallback3', 'claude'], ['reviewer.fallback3Model', 'Sonnet 5.5']]) expect(s.set(k, x, 'all').ok).toBe(true)
-    expect(s.reviewerBackups().map((r) => [r.kind, r.model])).toEqual([['codex', undefined], ['claude', 'claude-sonnet-5-5']])
+    for (const [k, x] of [
+      ['reviewer.fallback', 'codex'],
+      ['reviewer.fallback2', 'off'],
+      ['reviewer.fallback3', 'claude'],
+      ['reviewer.fallback3Model', 'Sonnet 5.5'],
+    ])
+      expect(s.set(k, x, 'all').ok).toBe(true)
+    expect(s.reviewerBackups().map((r) => [r.kind, r.model])).toEqual([
+      ['codex', undefined],
+      ['claude', 'claude-sonnet-5-5'],
+    ])
     // what one task keeps for itself is read first
     expect(s.reviewerBackups(undefined, { 'reviewer.fallback2': 'pi' }).map((r) => r.kind)).toEqual(['codex', 'pi', 'claude'])
     expect(s.set('advisor.agent', 'pi', 'all').ok && s.set('advisor.fallback', 'off', 'all').ok && s.set('advisor.fallback2', 'codex', 'all').ok).toBe(true)
     expect([0, 1, 2, 5, 6].map((n) => s.advisor(undefined, n)?.kind)).toEqual(['pi', undefined, 'codex', undefined, undefined])
     expect(s.advisor(undefined, true)).toBeUndefined()
     // the model row of a 2nd backup lists its own CLI's models
-    const row = s.sections([], [], null).find((x) => x.name === 'How tasks work')!.rows.find((r) => r.key === 'reviewer.fallback3Model')!
+    const row = s
+      .sections([], [], null)
+      .find((x) => x.name === 'How tasks work')!
+      .rows.find((r) => r.key === 'reviewer.fallback3Model')!
     expect(row.value).toBe('Sonnet 5.5')
     expect(row.options).toContain('Haiku 5.5')
     expect(row.chain).toEqual({ of: 'reviewer', n: 3 })
@@ -1337,7 +1477,13 @@ describe('a chain of backups in Settings', () => {
     const agents = () => s.sections([], [], null).find((x) => x.name === 'Agents')!.rows
     expect(agents().find((r) => r.key === 'task.fallback')).toMatchObject({ label: 'Backup', group: 'Tasks', sub: 'Backups', chain: { of: 'task', n: 1, cli: true, add: 'Add a backup' } })
     expect(agents().find((r) => r.key === 'backup.model')!.chain).toEqual({ of: 'task', n: 1 })
-    expect(agents().find((r) => r.key === 'coordinator.fallback4')).toMatchObject({ label: 'Backup 4', group: 'Coordinators', sub: 'Backups', value: 'off', chain: { of: 'coordinator', n: 4, cli: true, add: 'Add a backup' } })
+    expect(agents().find((r) => r.key === 'coordinator.fallback4')).toMatchObject({
+      label: 'Backup 4',
+      group: 'Coordinators',
+      sub: 'Backups',
+      value: 'off',
+      chain: { of: 'coordinator', n: 4, cli: true, add: 'Add a backup' },
+    })
     expect(agents().find((r) => r.key === 'coordinator.fallback4Model')).toMatchObject({ label: 'Backup 4 model', group: 'Coordinators', sub: 'Backups' })
     expect(s.lines()).not.toContain('task.fallback2')
     expect(s.set('task.fallback2', 'codex', 'all').ok).toBe(true)
@@ -1370,7 +1516,9 @@ describe('a chain of backups in Settings', () => {
     expect(reviewerLine(r, { kind: 'codex' }, 'X-1')).toContain('instead for that round only, and say in your summary that you did')
     expect(reviewerLine(r, undefined, 'X-1')).toBe(reviewerLineFor('a headless Claude Code or a Claude Code subagent (its default model and effort).', 'X-1').slice('- '.length))
     const chain = reviewerLine(r, [{ kind: 'codex' }, { kind: 'pi' }, { kind: 'claude', model: 'claude-haiku-5-5' }], 'X-1')
-    expect(chain).toContain('review with a headless Codex or a Codex subagent (its default model and effort) instead for that round only; where that one cannot run either, the next of, in turn: a headless pi or a pi subagent (its default model and effort); a headless Claude Code or a Claude Code subagent (model claude-haiku-5-5, its default effort), and say in your summary that you did.')
+    expect(chain).toContain(
+      'review with a headless Codex or a Codex subagent (its default model and effort) instead for that round only; where that one cannot run either, the next of, in turn: a headless pi or a pi subagent (its default model and effort); a headless Claude Code or a Claude Code subagent (model claude-haiku-5-5, its default effort), and say in your summary that you did.',
+    )
     // the line asks the command first, and names it again after the review: one line, and each round asks it anew
     expect(chain).toContain('run `shepherdr review X-1` first')
     expect(chain).toContain('run `shepherdr review X-1 --done`.')

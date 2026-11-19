@@ -132,7 +132,17 @@ export function sample(): Sample {
   const avg = read('/proc/loadavg')
   const load5 = parseLoad5(avg)
   const cpuSome = parsePressure(read('/proc/pressure/cpu'))
-  return { at: Date.now(), cores: cpus().length || 1, load: parseLoad(avg), ...(load5 !== undefined ? { load5 } : {}), ...(cpuSome !== undefined ? { cpuSome } : {}), memTotal: mem.total, memUsed: mem.used, disks, gpus: gpus() }
+  return {
+    at: Date.now(),
+    cores: cpus().length || 1,
+    load: parseLoad(avg),
+    ...(load5 !== undefined ? { load5 } : {}),
+    ...(cpuSome !== undefined ? { cpuSome } : {}),
+    memTotal: mem.total,
+    memUsed: mem.used,
+    disks,
+    gpus: gpus(),
+  }
 }
 
 export const cpuPct = (s: Sample) => Math.round((s.load / s.cores) * 100)
@@ -207,7 +217,12 @@ export function meters(s: Sample, l: MachineLimits, told: Partial<Record<Kind, W
   const level = (kind: Kind, start: boolean): HealthLevel => (told[kind]?.told ? 'over' : start ? 'busy' : 'ok')
   const disk = s.disks.reduce<Disk | undefined>((a, d) => (!a || d.pct > a.pct ? d : a), undefined)
   return [
-    { name: 'CPU', pct: cpuPct(s), detail: `load ${s.load.toFixed(1)}${s.load5 !== undefined ? ` (5 min ${s.load5.toFixed(1)})` : ''} on ${s.cores} cores${s.cpuSome !== undefined ? ` · pressure ${Math.round(s.cpuSome)}%` : ''}`, level: level('cpu', cpuOver(s, l)) },
+    {
+      name: 'CPU',
+      pct: cpuPct(s),
+      detail: `load ${s.load.toFixed(1)}${s.load5 !== undefined ? ` (5 min ${s.load5.toFixed(1)})` : ''} on ${s.cores} cores${s.cpuSome !== undefined ? ` · pressure ${Math.round(s.cpuSome)}%` : ''}`,
+      level: level('cpu', cpuOver(s, l)),
+    },
     { name: 'Memory', pct: memPct(s), detail: `${gb(s.memUsed)} of ${gb(s.memTotal)}`, level: level('memory', l.startMemory !== null && memPct(s) > l.startMemory) },
     ...(disk ? [{ name: 'Disk', pct: disk.pct, detail: s.disks.map((d) => `${tilde(d.path)} ${d.pct}%`).join(' · '), level: level('disk', false) }] : []),
     ...s.gpus.map((g, i) => ({ name: s.gpus.length > 1 ? `GPU ${i + 1}` : 'GPU', pct: g.util, detail: `${g.name} · memory ${g.memPct}%`, level: 'ok' as const })),
@@ -296,7 +311,12 @@ export function procLines(procs: Proc[], tasks: { id: string; worktree?: string 
 
 /** the numbers in one line: "CPU 170% (load 27.2 on 16 cores) · Memory 62% (19 of 31 GB) · Disk home 22%" */
 export function summary(s: Sample) {
-  return [`CPU ${cpuPct(s)}% (load ${s.load.toFixed(1)} on ${s.cores} cores)`, `Memory ${memPct(s)}% (${gb(s.memUsed)} of ${gb(s.memTotal)})`, `Disk ${s.disks.map((d) => `${tilde(d.path)} ${d.pct}% (${Math.round(d.freeGb)} GB free)`).join(', ')}`, ...s.gpus.map((g) => `GPU ${g.util}% (${g.name})`)].join(' · ')
+  return [
+    `CPU ${cpuPct(s)}% (load ${s.load.toFixed(1)} on ${s.cores} cores)`,
+    `Memory ${memPct(s)}% (${gb(s.memUsed)} of ${gb(s.memTotal)})`,
+    `Disk ${s.disks.map((d) => `${tilde(d.path)} ${d.pct}% (${Math.round(d.freeGb)} GB free)`).join(', ')}`,
+    ...s.gpus.map((g) => `GPU ${g.util}% (${g.name})`),
+  ].join(' · ')
 }
 
 /* ---------- the watch ---------- */

@@ -16,7 +16,10 @@ test('valid contact, stable keys and per-instance signing options', async () => 
   expect(pushContact('mailto:admin@example.com')).toBe('mailto:admin@example.com')
   expect(pushContact('https://example.com/contact')).toBe('https://example.com/contact')
   const calls: webpush.RequestOptions[] = []
-  const sender: typeof webpush.sendNotification = async (_s, _b, opts) => { calls.push(opts!); return response }
+  const sender: typeof webpush.sendNotification = async (_s, _b, opts) => {
+    calls.push(opts!)
+    return response
+  }
   const a = new Push('mailto:shepherdr@localhost', sender)
   a.subscribe(sub('a'), 'private browser user agent')
   const keys = readJson('vapid.json', {})
@@ -47,15 +50,19 @@ test('partial success, private errors, quiet repeats, skipped devices and recove
     fail = false
     await push.send(alert, new Set([sub('a').endpoint]))
     expect(push.warnings(name)).toHaveLength(1)
-    const rows = new Settings().sections(push.devices, [], null, undefined, [], undefined, undefined, push.warnings(name)).flatMap(s => s.rows)
-    expect(rows.find(r => r.key === 'alerts')?.warn).toContain('1 device could not receive')
+    const rows = new Settings().sections(push.devices, [], null, undefined, [], undefined, undefined, push.warnings(name)).flatMap((s) => s.rows)
+    expect(rows.find((r) => r.key === 'alerts')?.warn).toContain('1 device could not receive')
     await push.send(alert)
     expect(push.warnings(name)).toEqual([])
-  } finally { log.mockRestore() }
+  } finally {
+    log.mockRestore()
+  }
 })
 
 test('404/410 remove expired subscriptions, other failures stay until same device succeeds or resubscribes', async () => {
-  const push = new Push(undefined, async (s) => { throw { statusCode: s.endpoint.endsWith('/a') ? 404 : s.endpoint.endsWith('/b') ? 410 : 503 } })
+  const push = new Push(undefined, async (s) => {
+    throw { statusCode: s.endpoint.endsWith('/a') ? 404 : s.endpoint.endsWith('/b') ? 410 : 503 }
+  })
   for (const id of ['a', 'b', 'c']) push.subscribe(sub(id), 'phone')
   await push.send(alert)
   expect(push.devices).toEqual(['phone'])
@@ -69,7 +76,12 @@ test('old in-flight failures cannot remove a renewed subscription or overwrite a
   let reject!: (e: unknown) => void
   let first = true
   const push = new Push(undefined, async () => {
-    if (first) { first = false; return new Promise((_resolve, no) => { reject = no }) }
+    if (first) {
+      first = false
+      return new Promise((_resolve, no) => {
+        reject = no
+      })
+    }
     return response
   })
   push.subscribe(sub('a'), 'phone')
@@ -126,7 +138,10 @@ test('a batched expiry cannot delete a device after a newer send succeeds', asyn
   let first = true
   const push = new Push(undefined, async (s) => {
     if (first && s.endpoint.endsWith('/a')) throw { statusCode: 410 }
-    if (first && s.endpoint.endsWith('/b')) return new Promise(resolve => { release = () => resolve(response) })
+    if (first && s.endpoint.endsWith('/b'))
+      return new Promise((resolve) => {
+        release = () => resolve(response)
+      })
     return response
   })
   push.subscribe(sub('a'), 'phone')

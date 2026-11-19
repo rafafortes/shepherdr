@@ -61,9 +61,18 @@ describe.skipIf(!browser)('a message from another agent', () => {
         expect(shade).not.toBe(await token('--reply'))
         expect(shade).not.toBe(await token('--bubble'))
         // this agent's own bubbles and the human's are drawn as they were
-        const own = page.locator('[data-whole]').filter({ has: page.locator('[data-you]') }).first().locator('[data-anchor]')
+        const own = page
+          .locator('[data-whole]')
+          .filter({ has: page.locator('[data-you]') })
+          .first()
+          .locator('[data-anchor]')
         expect(await own.evaluate((b) => getComputedStyle(b).backgroundColor)).toBe(await token('--reply'))
-        const theirs = page.locator('[data-whole]').filter({ hasNot: page.locator('[data-you], [data-peer]') }).filter({ has: page.locator('[data-anchor]') }).last().locator('[data-anchor]')
+        const theirs = page
+          .locator('[data-whole]')
+          .filter({ hasNot: page.locator('[data-you], [data-peer]') })
+          .filter({ has: page.locator('[data-anchor]') })
+          .last()
+          .locator('[data-anchor]')
         expect(await theirs.evaluate((b) => getComputedStyle(b).backgroundColor)).toBe(await token('--bubble'))
         // and the words wrap inside the screen rather than pushing it wide
         expect(await bubble.locator('[data-text]').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)

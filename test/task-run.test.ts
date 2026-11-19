@@ -24,7 +24,7 @@ describe('a task says what its agent runs on', () => {
     expect(w.engine.view(t).agent?.run).toEqual({ provider: 'pi.spark', providerName: 'Spark (local)', model: 'qwen3.8-flash-next-mlx4-mtp-tensorfold', effort: 'high' })
   })
 
-  test("a CLI that picks its own model says default, and no effort when none was set", async () => {
+  test('a CLI that picks its own model says default, and no effort when none was set', async () => {
     const { w, t, key } = await started()
     delete (w.records[key] as { model?: string }).model
     expect(w.engine.view(t).agent?.run).toMatchObject({ provider: 'pi', model: 'default' })

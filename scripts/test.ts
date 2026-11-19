@@ -303,7 +303,9 @@ if (left.length) {
   const folders = left.filter((l) => !l.pid)
   const procs = left.filter((l) => l.pid)
   if (folders.length) {
-    console.error(`\nThis run left ${folders.length} temporary folder${folders.length === 1 ? '' : 's'} in /tmp. A test makes one through test/tmp.ts's tmp(), which removes it when its process ends: these outlived theirs.`)
+    console.error(
+      `\nThis run left ${folders.length} temporary folder${folders.length === 1 ? '' : 's'} in /tmp. A test makes one through test/tmp.ts's tmp(), which removes it when its process ends: these outlived theirs.`,
+    )
     for (const l of folders.slice(0, 20)) console.error(`  ${l.path}`)
     if (folders.length > 20) console.error(`  … and ${folders.length - 20} more`)
   }

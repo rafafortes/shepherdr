@@ -103,7 +103,10 @@ function Details({ m, h, onClose }: { m: Machine; h: MachineHealth; onClose: () 
               <div className={clsx('h-full w-(--fill) rounded-full', FILL[m.level])} style={{ '--fill': `${Math.max(2, Math.min(100, m.pct))}%` } as CSSProperties} />
             </dd>
             <dd className={clsx('text-right tabular-nums', m.level === 'ok' ? 'text-fg2' : WORD[m.level])}>{m.pct}%</dd>
-            <dd className="col-start-2 col-end-4 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]">{m.detail}{m.level === 'over' ? ' · Alert limit crossed' : m.level === 'busy' ? ' · New tasks wait for room' : ''}</dd>
+            <dd className="col-start-2 col-end-4 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]">
+              {m.detail}
+              {m.level === 'over' ? ' · Alert limit crossed' : m.level === 'busy' ? ' · New tasks wait for room' : ''}
+            </dd>
           </div>
         ))}
       </dl>

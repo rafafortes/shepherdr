@@ -76,11 +76,14 @@ describe('a menu or view it opened', () => {
     expect(viewOnScreen(MODEL, '/model')).toBe(
       'Select model\nSwitch between Claude models. Your pick becomes the default for new sessions.\n\n❯ 1.  Default (recommended) ✔  Opus 5.5 · Best for everyday, complex tasks\n  2.  Opus 5.5                 For complex work and everyday tasks\n  3.  Sonnet 5.5               Most efficient for simpler tasks\n\n● High effort ←/→ to adjust',
     )
-    expect(viewOnScreen(USAGE, '/usage')).toBe('Current session\n██████▌                                            13% used\nResets 3:49pm (UTC)\n\nUsage credits are off · /usage-credits to turn them on')
+    expect(viewOnScreen(USAGE, '/usage')).toBe(
+      'Current session\n██████▌                                            13% used\nResets 3:49pm (UTC)\n\nUsage credits are off · /usage-credits to turn them on',
+    )
   })
 
   test("Codex's menu under its transcript: only the menu, not the messages above it", () => {
-    const codex = '  >_ OpenAI Codex (v0.163.0)\n\n› Reply with only the word: two\n\n• two\n\n  Worked for 1s • 13:57\n\n  Select Model and Effort\n\n› 1. GPT-6.1-Sol (current)  Latest workhorse model.\n  2. GPT-6-Luna             Fast and affordable.\n\n  Press enter to select, or esc to go back\n'
+    const codex =
+      '  >_ OpenAI Codex (v0.163.0)\n\n› Reply with only the word: two\n\n• two\n\n  Worked for 1s • 13:57\n\n  Select Model and Effort\n\n› 1. GPT-6.1-Sol (current)  Latest workhorse model.\n  2. GPT-6-Luna             Fast and affordable.\n\n  Press enter to select, or esc to go back\n'
     expect(viewOnScreen(codex, '/model')).toBe('  Select Model and Effort\n\n› 1. GPT-6.1-Sol (current)  Latest workhorse model.\n  2. GPT-6-Luna             Fast and affordable.')
   })
 

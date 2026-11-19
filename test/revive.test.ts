@@ -20,7 +20,7 @@ describe('what is wrong with a pane', () => {
     expect(paneWrong('claude', running(['claude', '--resume', 'abc']), want)).toBe('stale')
   })
 
-  test('OpenCode runs with its own flags and none of Shepherdr\'s files: not stale, not wrong', () => {
+  test("OpenCode runs with its own flags and none of Shepherdr's files: not stale, not wrong", () => {
     const argv = ['/home/u/.opencode/bin/opencode', '--standalone', '--session', 'ses_x', '--auto']
     expect(paneWrong('opencode', running(argv), {})).toBeUndefined()
     expect(paneWrong('opencode', running(argv), { '--session': 'ses_x' })).toBeUndefined()

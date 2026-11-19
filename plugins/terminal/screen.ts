@@ -21,7 +21,14 @@ export function colsOf(screen: TermScreen) {
 /** herdr's lines as one write: from a clear screen, no cursor (the CLI draws its own), rows joined as a terminal moves */
 export function frame(ansi: string) {
   const lines = ansi.replace(/\r/g, '').split('\n')
-  while (lines.length > 1 && !lines.at(-1)!.replace(/\x1b\[[0-9;:]*m/g, '').trim()) lines.pop()
+  while (
+    lines.length > 1 &&
+    !lines
+      .at(-1)!
+      .replace(/\x1b\[[0-9;:]*m/g, '')
+      .trim()
+  )
+    lines.pop()
   return { rows: lines.length, data: `\x1b[?25l\x1b[0m\x1b[H\x1b[2J${lines.join('\r\n')}` }
 }
 

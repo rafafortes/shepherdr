@@ -87,7 +87,10 @@ describe.skipIf(!browser)('renaming spaces and machines', () => {
       // search finds it by its new name
       await page.keyboard.press('Control+k')
       await page.keyboard.type('go to')
-      await page.getByRole('option', { name: /go-to-market/ }).first().waitFor()
+      await page
+        .getByRole('option', { name: /go-to-market/ })
+        .first()
+        .waitFor()
       await page.keyboard.press('Escape')
     } finally {
       await world.act({ type: 'rename', id: 'p:vm-str:gtm', name: '' })

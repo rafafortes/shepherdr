@@ -36,7 +36,6 @@ const waitForChecks = (w: ReturnType<typeof world>) => w.settings.set('brief.mer
 afterEach(() => void new Settings().set('brief.merge', null))
 
 describe('on GitHub: a pull request per task', () => {
-
   test('merge opens the pull request itself when the agent never did, and merges it at the commit here', async () => {
     const w = world()
     const g = onGitHub({ checks: [{ name: 'test', bucket: 'pass' }] })
@@ -73,7 +72,10 @@ describe('on GitHub: a pull request per task', () => {
     expect(m).toEqual({ ok: true, note: 'merged PR #1 on GitHub' })
     // not rebased: GitHub merged the very commit its checks passed on
     expect(sh('git rev-parse HEAD', t.worktree!)).toBe(head)
-    const merge = g.gh().calls.slice(pushes).find((c) => c.args[1] === 'merge')!.args
+    const merge = g
+      .gh()
+      .calls.slice(pushes)
+      .find((c) => c.args[1] === 'merge')!.args
     expect(merge[merge.indexOf('--match-head-commit') + 1]).toBe(head)
     expect(sh('git log --format=%s -n 3 main', g.dir).split('\n')).toEqual([`${t.id}: Say hello (#1)`, 'other', 'init'])
     expect(existsSync(join(g.dir, 'other.txt')) && existsSync(join(g.dir, 'mine.txt'))).toBe(true)
@@ -90,7 +92,10 @@ describe('on GitHub: a pull request per task', () => {
     const head = sh('git rev-parse HEAD', t.worktree!)
     // main took this very change, then changed the line again: merging conflicts, but a rebase drops the change it has
     const other = tmp('gh-other')
-    sh(`git clone -q ${g.bare} . && git config user.email t@t && git config user.name T && git fetch -q origin ${t.branch} && git cherry-pick -x FETCH_HEAD >/dev/null && echo again > README.md && git commit -qam again && git push -q origin main`, other)
+    sh(
+      `git clone -q ${g.bare} . && git config user.email t@t && git config user.name T && git fetch -q origin ${t.branch} && git cherry-pick -x FETCH_HEAD >/dev/null && echo again > README.md && git commit -qam again && git push -q origin main`,
+      other,
+    )
     writeFileSync(join(t.worktree!, 'new.txt'), 'new\n')
     sh('git add -A && git commit -qm new', t.worktree!)
     g.set({ checks: [{ name: 'test', bucket: 'pending' }] })
@@ -119,7 +124,12 @@ describe('on GitHub: a pull request per task', () => {
 
   test("failed checks go back to the agent; merging waits while they run, and never on what it can't read", async () => {
     const w = world()
-    const g = onGitHub({ checks: [{ name: 'test', bucket: 'fail', link: 'https://github.com/acme/app/actions/runs/7' }, { name: 'lint', bucket: 'pass' }] })
+    const g = onGitHub({
+      checks: [
+        { name: 'test', bucket: 'fail', link: 'https://github.com/acme/app/actions/runs/7' },
+        { name: 'lint', bucket: 'pass' },
+      ],
+    })
     waitForChecks(w)
     const { t, key } = await started(w, g.dir, 'ghfail')
     writeFileSync(join(t.worktree!, 'x.txt'), 'x\n')
@@ -146,7 +156,7 @@ describe('on GitHub: a pull request per task', () => {
     expect((await w.engine.checks(t.id, 0)).text).toContain('still run')
     // fixed and passed
     g.set({ checks: [{ name: 'test', bucket: 'pass' }] })
-    expect((await w.engine.checks(t.id, 0)).text).toContain("checks passed on PR #1")
+    expect((await w.engine.checks(t.id, 0)).text).toContain('checks passed on PR #1')
     expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
     expect(t.merged).toBe(true)
   })

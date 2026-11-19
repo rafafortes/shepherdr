@@ -117,13 +117,22 @@ describe('the answer in words', () => {
   test('one space, with what stays as it is', () => {
     expect(
       retuneLine({ ...base, changed: 2, same: 1, pinned: 1, running: 1, follow: 1, kept: ['lyvora-app'], spaces: [{ name: 'lyvora-site', on: { kind: 'pi', model: 'spark/qwen' }, changed: 2 }] }),
-    ).toBe('2 waiting tasks in lyvora-site will start on pi (spark/qwen) when their turn comes; 1 of them had a worker of its own from task add, and changes too; 1 already on it; 1 start on Settings at their turn anyway; 1 running task keeps its agent; lyvora-app keeps its own setting.')
+    ).toBe(
+      '2 waiting tasks in lyvora-site will start on pi (spark/qwen) when their turn comes; 1 of them had a worker of its own from task add, and changes too; 1 already on it; 1 start on Settings at their turn anyway; 1 running task keeps its agent; lyvora-app keeps its own setting.',
+    )
   })
 
   test('several spaces, and nothing to change', () => {
-    expect(retuneLine({ ...base, changed: 3, spaces: [{ name: 'a', on: { kind: 'pi' }, changed: 1 }, { name: 'b', on: { kind: 'codex' }, changed: 2 }] })).toBe(
-      '3 waiting tasks in 2 spaces will start on what Settings name for each (a on pi; b on Codex).',
-    )
+    expect(
+      retuneLine({
+        ...base,
+        changed: 3,
+        spaces: [
+          { name: 'a', on: { kind: 'pi' }, changed: 1 },
+          { name: 'b', on: { kind: 'codex' }, changed: 2 },
+        ],
+      }),
+    ).toBe('3 waiting tasks in 2 spaces will start on what Settings name for each (a on pi; b on Codex).')
     expect(retuneLine({ ...base, same: 2 })).toBe('no waiting task changes; 2 already on it.')
     expect(retuneLine({ ...base, changed: 1, spaces: [{ name: 'a', on: { kind: 'pi' }, changed: 1 }] })).toBe('1 waiting task in a will start on pi when its turn comes.')
   })

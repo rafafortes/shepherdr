@@ -66,10 +66,7 @@ export const releasesOf = (root: string) => join(root, '.releases')
  * when forced); `force` makes a release of the same commit (a plugin or a plugin list changed); `home` holds the
  * human's own plugins. Returns null when there is nothing to do.
  */
-export async function update(
-  root: string,
-  o: { built: string | null; release?: string; skip?: string; force?: boolean; bun?: string; home?: string },
-): Promise<Omit<UpdateStatus, 'at'> | null> {
+export async function update(root: string, o: { built: string | null; release?: string; skip?: string; force?: boolean; bun?: string; home?: string }): Promise<Omit<UpdateStatus, 'at'> | null> {
   const { built, bun = process.execPath } = o
   const commit = await head(root)
   if (!commit || (!o.force && (commit === built || commit === o.skip))) return null

@@ -166,7 +166,10 @@ describe.skipIf(!browser)('the order of places', () => {
       expect(await order(page)).toEqual(['vm-str', 'herdr-projects', 'home', 'gtm', 'mac', 'home', 'lilla-varlden', 'nas', 'home'])
       expect(world.order['m:vm-str']).toEqual(['p:vm-str:herdr-projects', 'p:vm-str:~', 'p:vm-str:gtm'])
       // the keyboard: Alt+Shift+↓ on a focused space moves it one down
-      await page.locator('#places li', { hasText: 'herdr-projects' }).getByRole('button', { name: /^herdr-projects/ }).focus()
+      await page
+        .locator('#places li', { hasText: 'herdr-projects' })
+        .getByRole('button', { name: /^herdr-projects/ })
+        .focus()
       await page.keyboard.press('Alt+Shift+ArrowDown')
       await page.waitForFunction(() => [...document.querySelectorAll('#places li')][2]?.textContent?.includes('herdr-projects'))
       expect(await order(page)).toEqual(['vm-str', 'home', 'herdr-projects', 'gtm', 'mac', 'home', 'lilla-varlden', 'nas', 'home'])
@@ -217,7 +220,13 @@ describe.skipIf(!browser)('the order of places', () => {
       expect(await headings()).toEqual(['m:mac', 'm:vm-str', 'm:nas'])
 
       // sections: two at the top beside a Pinned that holds nothing, two in a machine, and one alone in another
-      world.groups = { 's:cli': { name: 'Clients' }, 's:lab': { name: 'Labs' }, 's:ops': { name: 'Ops', machine: 'vm-str' }, 's:qa': { name: 'QA', machine: 'vm-str' }, 's:solo': { name: 'Solo', machine: 'mac' } }
+      world.groups = {
+        's:cli': { name: 'Clients' },
+        's:lab': { name: 'Labs' },
+        's:ops': { name: 'Ops', machine: 'vm-str' },
+        's:qa': { name: 'QA', machine: 'vm-str' },
+        's:solo': { name: 'Solo', machine: 'mac' },
+      }
       world.order = { ...world.order, sections: ['pinned', 's:cli', 's:lab'], 'sections:m:vm-str': ['s:ops', 's:qa'] }
       world.emit('snapshot')
       await page.locator('#places li[data-heading="s:qa"]').waitFor()
@@ -226,7 +235,13 @@ describe.skipIf(!browser)('the order of places', () => {
       expect(await keys('s:cli')).toBe('Alt+Shift+ArrowUp Alt+Shift+ArrowDown')
       await folder('s:cli').focus()
       await page.keyboard.press('Alt+Shift+ArrowDown')
-      await page.waitForFunction(() => [...document.querySelectorAll('#places li[data-heading]')].slice(0, 2).map((l) => l.getAttribute('data-heading')).join() === 's:lab,s:cli')
+      await page.waitForFunction(
+        () =>
+          [...document.querySelectorAll('#places li[data-heading]')]
+            .slice(0, 2)
+            .map((l) => l.getAttribute('data-heading'))
+            .join() === 's:lab,s:cli',
+      )
       expect(world.order.sections).toEqual(['pinned', 's:lab', 's:cli'])
       // and one in a machine, among the sections there
       expect(await keys('s:ops')).toBe('Alt+Shift+ArrowUp Alt+Shift+ArrowDown')

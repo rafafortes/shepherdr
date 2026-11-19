@@ -63,14 +63,16 @@ describe.skipIf(!browser)("the agent's status line, % done and minutes left", ()
       expect(Math.abs(e.y + e.height / 2 - (line.y + line.height / 2))).toBeLessThan(3)
       expect(e.height).toBeLessThan(line.height + 1)
       const work = await dot.evaluate((x) => getComputedStyle(x).getPropertyValue('--work-fg').trim())
-      expect(await eta.evaluate((x, c) => {
-        const probe = document.createElement('span')
-        probe.style.color = c
-        document.body.append(probe)
-        const same = getComputedStyle(probe).color === getComputedStyle(x).color
-        probe.remove()
-        return same
-      }, work)).toBe(true)
+      expect(
+        await eta.evaluate((x, c) => {
+          const probe = document.createElement('span')
+          probe.style.color = c
+          document.body.append(probe)
+          const same = getComputedStyle(probe).color === getComputedStyle(x).color
+          probe.remove()
+          return same
+        }, work),
+      ).toBe(true)
       expect(wtext).toContain(', about 12 min left')
       // the dot's column keeps its width: the title starts where the other rows' titles do
       const left = (row: import('playwright-core').Locator) => row.evaluate((r) => r.querySelector(':scope > span.flex-1')!.getBoundingClientRect().left)
@@ -108,7 +110,7 @@ describe.skipIf(!browser)("the agent's status line, % done and minutes left", ()
       await page.close()
     }, 30_000)
 
-  test('a narrow tasks sidebar keeps the age whole at the row\'s end and the minutes whole under the dot, in the readable work text colour (light and dark)', async () => {
+  test("a narrow tasks sidebar keeps the age whole at the row's end and the minutes whole under the dot, in the readable work text colour (light and dark)", async () => {
     for (const scheme of ['light', 'dark'] as const) {
       const page = await browser!.newPage({ viewport: { width: 1440, height: 800 }, colorScheme: scheme })
       await page.goto(`http://127.0.0.1:${server!.port}/?place=vm-str/home`)
@@ -139,14 +141,16 @@ describe.skipIf(!browser)("the agent's status line, % done and minutes left", ()
       // in the readable work text colour, apart from what it does, in either theme
       const color = (l: import('playwright-core').Locator) => l.evaluate((e) => getComputedStyle(e).color)
       expect(await color(end)).not.toBe(await color(working.getByText('Tracing why mute ends the call', { exact: true })))
-      expect(await color(end)).toBe(await working.getByRole('img', { name: /Working/ }).evaluate((d) => {
-        const probe = document.createElement('span')
-        probe.style.color = getComputedStyle(d).getPropertyValue('--work-fg')
-        document.body.append(probe)
-        const c = getComputedStyle(probe).color
-        probe.remove()
-        return c
-      }))
+      expect(await color(end)).toBe(
+        await working.getByRole('img', { name: /Working/ }).evaluate((d) => {
+          const probe = document.createElement('span')
+          probe.style.color = getComputedStyle(d).getPropertyValue('--work-fg')
+          document.body.append(probe)
+          const c = getComputedStyle(probe).color
+          probe.remove()
+          return c
+        }),
+      )
       await page.close()
     }
   }, 30_000)
@@ -154,7 +158,12 @@ describe.skipIf(!browser)("the agent's status line, % done and minutes left", ()
 
 /** the Tasks list's headings (machines, groups), top to bottom, but Automations (and the sidebar's own) */
 const headings = (page: Page, within = '') =>
-  page.$$eval(`${within}[data-heading]`, (els) => els.filter((el) => !el.closest('#places, nav')).map((el) => (el as HTMLElement).dataset.heading!).filter((l) => l !== 'Automations'))
+  page.$$eval(`${within}[data-heading]`, (els) =>
+    els
+      .filter((el) => !el.closest('#places, nav'))
+      .map((el) => (el as HTMLElement).dataset.heading!)
+      .filter((l) => l !== 'Automations'),
+  )
 const pick = async (page: Page, name: string) => {
   await page.getByRole('button', { name: 'Group tasks' }).click()
   await page.getByRole('menuitemradio', { name: new RegExp(`^${name}$`) }).click()
@@ -168,11 +177,11 @@ function macChip() {
   localStorage.setItem('shepherdr.lists', JSON.stringify({ pinned: false, chips: ['m:mac'], at: 'p:mac:~' }))
 }
 
-describe.skipIf(!browser)('grouping a machine\'s tasks', () => {
+describe.skipIf(!browser)("grouping a machine's tasks", () => {
   const labels = (page: Page) => headings(page, 'section[aria-label="Tasks"] ')
   const phoneLabels = (page: Page) => headings(page)
 
-  test('a machine\'s chip: Status or Space from the Tasks header\'s ⋯, kept on this device; a space has no ⋯', async () => {
+  test("a machine's chip: Status or Space from the Tasks header's ⋯, kept on this device; a space has no ⋯", async () => {
     const ctx = await browser!.newContext({ viewport: { width: 1440, height: 800 } })
     await ctx.addInitScript(macChip)
     const page = await ctx.newPage()
@@ -189,7 +198,9 @@ describe.skipIf(!browser)('grouping a machine\'s tasks', () => {
     await pick(page, 'Space')
     expect(await labels(page)).toEqual(['lilla-varlden'])
     // the first space's tasks, Needs you first
-    const dots = await page.$$eval('section[aria-label="Tasks"] .overflow-y-auto > div:not([data-filter]) > div:first-child li .dot', (d) => d.map((x) => [...x.classList].find((c) => ['need', 'ready', 'merging', 'work', 'todo', 'done'].includes(c))))
+    const dots = await page.$$eval('section[aria-label="Tasks"] .overflow-y-auto > div:not([data-filter]) > div:first-child li .dot', (d) =>
+      d.map((x) => [...x.classList].find((c) => ['need', 'ready', 'merging', 'work', 'todo', 'done'].includes(c))),
+    )
     expect(dots).toEqual(['need', 'need'])
     // kept: after a reload
     await page.reload()
@@ -234,7 +245,11 @@ describe.skipIf(!browser)('grouping a machine\'s tasks', () => {
     expect(await labels(page)).toEqual(['mac', 'lilla-varlden', 'vm-str', 'gtm', 'herdr-projects'])
     expect((await subs(page))['GTM-14']).toBe('→ main · Asks permission')
     // the machine's name a step above its groups' labels
-    const weight = (name: string) => page.locator(`[data-heading="${name}"] button > :not(svg)`).first().evaluate((e) => Number(getComputedStyle(e).fontWeight))
+    const weight = (name: string) =>
+      page
+        .locator(`[data-heading="${name}"] button > :not(svg)`)
+        .first()
+        .evaluate((e) => Number(getComputedStyle(e).fontWeight))
     expect(await weight('vm-str')).toBeGreaterThan(await weight('gtm'))
     // a machine's chip keeps its own choice: still by status there, its rows naming only their space
     await ctx.addInitScript(macChip)
@@ -432,7 +447,9 @@ describe.skipIf(!browser)('a change moves only its own row', () => {
           w.rows = new Map(rows.map((r) => [r.dataset.flip!, r]))
           w.box = box
           const view = box.getBoundingClientRect()
-          const seen = rows.filter((r) => r.getBoundingClientRect().top >= view.top && r.getBoundingClientRect().bottom <= view.bottom).map((r) => [r.dataset.flip!, r.getBoundingClientRect().top] as const)
+          const seen = rows
+            .filter((r) => r.getBoundingClientRect().top >= view.top && r.getBoundingClientRect().bottom <= view.bottom)
+            .map((r) => [r.dataset.flip!, r.getBoundingClientRect().top] as const)
           return { scrolled: box.scrollTop, seen }
         })
         expect(before.scrolled).toBeGreaterThan(0)
@@ -478,7 +495,12 @@ describe.skipIf(!browser)('To do always shows; Automations only once there is on
     const tablet = await browser!.newPage({ viewport: { width: 900, height: 800 } })
     await tablet.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:mac:lilla-varlden')}`)
     await tablet.getByText('No tasks to do yet. Ask a coordinator to add one.', { exact: true }).waitFor()
-    expect(await tablet.locator('section[aria-label="Tasks"]').getByText(/automations/i).count()).toBe(0)
+    expect(
+      await tablet
+        .locator('section[aria-label="Tasks"]')
+        .getByText(/automations/i)
+        .count(),
+    ).toBe(0)
     await tablet.close()
     // and on a phone's Tasks tab
     const ctx = await browser!.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, colorScheme: 'light' })
@@ -490,7 +512,10 @@ describe.skipIf(!browser)('To do always shows; Automations only once there is on
   }, 30_000)
 
   test('a place with automations shows the heading, under To do (desktop, tablet, phone)', async () => {
-    for (const viewport of [{ width: 1440, height: 800 }, { width: 900, height: 800 }]) {
+    for (const viewport of [
+      { width: 1440, height: 800 },
+      { width: 900, height: 800 },
+    ]) {
       const page = await browser!.newPage({ viewport })
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
       const tasks = page.locator('section[aria-label="Tasks"]')
@@ -732,7 +757,10 @@ describe.skipIf(!browser)("an alert's link", () => {
     await page.evaluate(() => ((window as unknown as { kept: number }).kept = 1))
     const t = world.snapshot().tasks.find((x) => x.id === 'HP-201')!
     const q = world.chat('HP-201/Agent').messages.find((m) => m.question)!
-    await page.evaluate((u) => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'open', url: u } })), `./?place=${encodeURIComponent(t.place)}&task=HP-201&focus=${encodeURIComponent(q.question!.id)}`)
+    await page.evaluate(
+      (u) => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'open', url: u } })),
+      `./?place=${encodeURIComponent(t.place)}&task=HP-201&focus=${encodeURIComponent(q.question!.id)}`,
+    )
     const f = await (await flashed(page)).jsonValue()
     expect(f).toMatchObject({ card: true, inView: true })
     expect(new URL(page.url()).searchParams.get('task')).toBe('HP-201')

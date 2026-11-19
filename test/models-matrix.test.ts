@@ -20,9 +20,7 @@ const row = (m: ModelsMatrix, id: string) => m.rows.find((r) => r.id === id)!
 describe('the models matrix: slots and rows', () => {
   test('each role has its primary and five backups, in the keys Settings writes them to', () => {
     const slots = matrixSlots()
-    expect(slots.map((x) => x.id)).toEqual(
-      ['task', 'coordinator', 'reviewer', 'advisor'].flatMap((r) => [0, 1, 2, 3, 4, 5].map((n) => `${r}.${n}`)),
-    )
+    expect(slots.map((x) => x.id)).toEqual(['task', 'coordinator', 'reviewer', 'advisor'].flatMap((r) => [0, 1, 2, 3, 4, 5].map((n) => `${r}.${n}`)))
     const task = slots.filter((x) => x.role === 'task')
     expect(task.map((x) => x.name)).toEqual(['Primary', 'Backup 1', 'Backup 2', 'Backup 3', 'Backup 4', 'Backup 5'])
     expect(task[0]).toMatchObject({ title: 'Tasks', cli: 'task.agent', model: 'task.model', effort: 'task.effort', n: 0 })
@@ -53,7 +51,11 @@ describe('the models matrix: slots and rows', () => {
   })
 
   test('every value says where it comes from: its own level strong, one above it faint, the default last', () => {
-    const s = fresh({ everywhere: { 'task.agent': 'Codex', 'task.model': 'gpt-6-sol', 'merge.train': '3' }, machine: { 'task.effort': 'high', 'space.maxTasks': '4' }, spaces: { gtm: { 'task.model': 'Opus 5.5', 'space.maxTasks': '1' } } })
+    const s = fresh({
+      everywhere: { 'task.agent': 'Codex', 'task.model': 'gpt-6-sol', 'merge.train': '3' },
+      machine: { 'task.effort': 'high', 'space.maxTasks': '4' },
+      spaces: { gtm: { 'task.model': 'Opus 5.5', 'space.maxTasks': '1' } },
+    })
     const m = matrix(s)
     const all = row(m, 'all').values
     expect(all['task.agent']).toEqual({ value: 'Codex', from: 'all', set: true })

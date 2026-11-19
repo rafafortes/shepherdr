@@ -5,7 +5,24 @@ import { describe, expect, test } from 'bun:test'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { placeId } from '../server/live/places.ts'
-import { configuredOf, harnessName, isLocal, keyOf, keyWords, labelOf, LOCAL, modelsSummary, patternName, providerName, providerWords, roleOfChat, titled, type LiveAgent, type SummaryInput, type TaskFact } from '../server/live/models-summary.ts'
+import {
+  configuredOf,
+  harnessName,
+  isLocal,
+  keyOf,
+  keyWords,
+  labelOf,
+  LOCAL,
+  modelsSummary,
+  patternName,
+  providerName,
+  providerWords,
+  roleOfChat,
+  titled,
+  type LiveAgent,
+  type SummaryInput,
+  type TaskFact,
+} from '../server/live/models-summary.ts'
 import { opencodeList, setModels, type CliModels } from '../server/live/models.ts'
 import { Settings } from '../server/live/settings.ts'
 import { HOUR, UsageLedger, type RunOut } from '../server/live/usage-ledger.ts'
@@ -26,11 +43,14 @@ const OC_GO = `opencode.${GO_ID}`
 const CLAUDE = 'claude-opus-5-5'
 
 /** a Settings world of its own: the values as written at each level */
-const settings = (seed: Partial<{ everywhere: Record<string, string>; machine: Record<string, string>; spaces: Record<string, Record<string, string>> }> = {}) => new Settings({ everywhere: {}, machine: {}, spaces: {}, ...seed })
+const settings = (seed: Partial<{ everywhere: Record<string, string>; machine: Record<string, string>; spaces: Record<string, Record<string, string>> }> = {}) =>
+  new Settings({ everywhere: {}, machine: {}, spaces: {}, ...seed })
 const ledger = (name: string) => new UsageLedger(tmp(name), true)
 /** a call of a model, h hours ago */
-const call = (l: UsageLedger, key: string, h: number, tokens = 100, cost?: number, chat = 'T-1/Agent') => l.count(chat, key, { id: `${key}-${h}-${tokens}-${chat}`, at: NOW - h * HOUR + 1000, tokens, ...(cost !== undefined ? { cost } : {}) }, NOW)
-const runOut = (l: UsageLedger, key: string, h: number, extra: Partial<RunOut> = {}) => l.runOut({ at: NOW - h * HOUR, key, chat: 'T-1/Agent', role: 'task', reason: 'Out of allowance', words: '', ...extra }, NOW)
+const call = (l: UsageLedger, key: string, h: number, tokens = 100, cost?: number, chat = 'T-1/Agent') =>
+  l.count(chat, key, { id: `${key}-${h}-${tokens}-${chat}`, at: NOW - h * HOUR + 1000, tokens, ...(cost !== undefined ? { cost } : {}) }, NOW)
+const runOut = (l: UsageLedger, key: string, h: number, extra: Partial<RunOut> = {}) =>
+  l.runOut({ at: NOW - h * HOUR, key, chat: 'T-1/Agent', role: 'task', reason: 'Out of allowance', words: '', ...extra }, NOW)
 
 /** the input the summary reads, from the parts a test sets */
 function input(s: Settings, u: UsageLedger, over: Partial<SummaryInput> = {}): SummaryInput {
@@ -53,7 +73,16 @@ const warn = (sum: ReturnType<typeof modelsSummary>, prefix: string) => sum.warn
 describe('what is configured, read at each space', () => {
   test('each slot counts where its settings read it: a space that inherits counts too, an off backup does not', () => {
     const s = settings({
-      everywhere: { 'task.agent': 'pi', 'task.model': GO_ID, 'task.fallback': 'Claude Code', 'task.fallbackModel': 'default', 'coordinator.agent': 'Claude Code', 'coordinator.model': CLAUDE, 'reviewer.agent': 'Codex', 'reviewer.model': 'gpt-6-sol' },
+      everywhere: {
+        'task.agent': 'pi',
+        'task.model': GO_ID,
+        'task.fallback': 'Claude Code',
+        'task.fallbackModel': 'default',
+        'coordinator.agent': 'Claude Code',
+        'coordinator.model': CLAUDE,
+        'reviewer.agent': 'Codex',
+        'reviewer.model': 'gpt-6-sol',
+      },
       spaces: { gtm: { 'task.agent': 'pi', 'task.model': 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold', 'task.fallback': 'off' } },
     })
     const conf = configuredOf(s, SPACES)
@@ -82,7 +111,9 @@ describe('what is configured, read at each space', () => {
 
 describe('the summary: providers, models, usage, run-outs, what runs now', () => {
   test('a provider row counts its slots, its agents and its waiting tasks, its usage in each window, and its share', () => {
-    const s = settings({ everywhere: { 'task.agent': 'pi', 'task.model': GO_ID, 'coordinator.agent': 'Claude Code', 'coordinator.model': CLAUDE, 'task.fallback': 'off', 'coordinator.fallback': 'off' } })
+    const s = settings({
+      everywhere: { 'task.agent': 'pi', 'task.model': GO_ID, 'coordinator.agent': 'Claude Code', 'coordinator.model': CLAUDE, 'task.fallback': 'off', 'coordinator.fallback': 'off' },
+    })
     const u = ledger('sum-rows')
     call(u, GO, 2, 300, 0.25)
     call(u, GO, 20, 100)
@@ -216,7 +247,7 @@ describe('the warnings: what the rules raise, with its fix', () => {
     expect(sum.warnings.some((w) => w.id.startsWith('same:'))).toBe(false)
   })
 
-  test('a backup that is the primary\'s model on a cloud provider is a note, with its slot; a local one is not', () => {
+  test("a backup that is the primary's model on a cloud provider is a note, with its slot; a local one is not", () => {
     const s = settings({
       everywhere: { 'task.agent': 'Claude Code', 'task.model': CLAUDE, 'task.fallback': 'Claude Code', 'backup.model': 'Opus 5.5' },
       spaces: { docs: { 'task.agent': 'pi', 'task.model': 'spark/q', 'task.fallback': 'pi', 'backup.model': 'spark/q' } },
@@ -233,7 +264,16 @@ describe('the warnings: what the rules raise, with its fix', () => {
 
   test('two or more roles on one cloud provider, with no backup elsewhere, is a note; a local server is not', () => {
     const s = settings({
-      everywhere: { 'task.agent': 'Claude Code', 'task.model': CLAUDE, 'coordinator.agent': 'Claude Code', 'coordinator.model': CLAUDE, 'reviewer.agent': 'Claude Code', 'reviewer.model': CLAUDE, 'task.fallback': 'off', 'coordinator.fallback': 'off' },
+      everywhere: {
+        'task.agent': 'Claude Code',
+        'task.model': CLAUDE,
+        'coordinator.agent': 'Claude Code',
+        'coordinator.model': CLAUDE,
+        'reviewer.agent': 'Claude Code',
+        'reviewer.model': CLAUDE,
+        'task.fallback': 'off',
+        'coordinator.fallback': 'off',
+      },
       spaces: { docs: { 'task.agent': 'pi', 'task.model': 'spark/q', 'coordinator.agent': 'pi', 'coordinator.model': 'spark/q', 'reviewer.agent': 'pi', 'reviewer.model': 'spark/q' } },
     })
     const sum = modelsSummary(input(s, ledger('warn-single')))
@@ -290,14 +330,24 @@ describe('the warnings: what the rules raise, with its fix', () => {
 describe('the quota side: a provider shows its figure and its read, and a window at the share is a warning', () => {
   const at = NOW + 2 * HOUR
   /** a figure of one window, as a read gave it */
-  const fig = (windows: { name: string; usedPct?: number; used?: number; cap?: number; resetAt?: number; left?: number }[], extra: { estimate?: boolean } = {}) => ({ windows, source: 'a read', at: NOW, ...extra })
+  const fig = (windows: { name: string; usedPct?: number; used?: number; cap?: number; resetAt?: number; left?: number }[], extra: { estimate?: boolean } = {}) => ({
+    windows,
+    source: 'a read',
+    at: NOW,
+    ...extra,
+  })
   // Claude Code runs the gtm space's tasks and coordinators only: that space's two slots are the cells the warning names
-  const claudeHome = settings({ everywhere: { 'task.agent': 'pi', 'task.model': GO_ID, 'coordinator.agent': 'pi' }, spaces: { gtm: { 'task.agent': 'Claude Code', 'task.model': 'default', 'coordinator.agent': 'Claude Code' } } })
+  const claudeHome = settings({
+    everywhere: { 'task.agent': 'pi', 'task.model': GO_ID, 'coordinator.agent': 'pi' },
+    spaces: { gtm: { 'task.agent': 'Claude Code', 'task.model': 'default', 'coordinator.agent': 'Claude Code' } },
+  })
 
   test('the figure set for this look wins over the ledger; a read gives its state; no quota side, no read', () => {
     const u = ledger('quota-side')
     u.setQuota('claude', fig([{ name: '5 h', usedPct: 12 }]))
-    const sum = modelsSummary(input(claudeHome, u, { quota: { figures: { claude: fig([{ name: '5 h', usedPct: 40, resetAt: at }]) }, reads: { claude: { on: true, tried: NOW, failed: 'not signed in' } } } }))
+    const sum = modelsSummary(
+      input(claudeHome, u, { quota: { figures: { claude: fig([{ name: '5 h', usedPct: 40, resetAt: at }]) }, reads: { claude: { on: true, tried: NOW, failed: 'not signed in' } } } }),
+    )
     expect(provider(sum, 'claude').quota).toMatchObject({ windows: [{ name: '5 h', usedPct: 40 }] })
     expect(provider(sum, 'claude').quotaRead).toEqual({ on: true, tried: NOW, failed: 'not signed in' })
     const bare = modelsSummary(input(claudeHome, u))
@@ -307,7 +357,20 @@ describe('the quota side: a provider shows its figure and its read, and a window
 
   test('a window at the share is a note, with what is left, when it refills, and the cells that use the provider most', () => {
     const u = ledger('quota-warn')
-    const sum = modelsSummary(input(claudeHome, u, { quota: { figures: { claude: fig([{ name: '5 h', usedPct: 85, resetAt: at }, { name: 'Week', usedPct: 41, resetAt: at + 24 * HOUR }]) }, reads: {}, alertAt: 80 } }))
+    const sum = modelsSummary(
+      input(claudeHome, u, {
+        quota: {
+          figures: {
+            claude: fig([
+              { name: '5 h', usedPct: 85, resetAt: at },
+              { name: 'Week', usedPct: 41, resetAt: at + 24 * HOUR },
+            ]),
+          },
+          reads: {},
+          alertAt: 80,
+        },
+      }),
+    )
     const w = warn(sum, 'quota:')
     expect(w).toHaveLength(1)
     expect(w[0]).toMatchObject({ id: 'quota:claude', level: 'note' })
@@ -344,7 +407,11 @@ describe('the quota side: a provider shows its figure and its read, and a window
     expect(w[0]!.words).toMatch(/^OpenCode Go: 5 h is at 90%/)
     expect(w[0]!.go).toBeUndefined()
     expect(w[0]!.fix).toBe('Give its roles a backup on another provider, or let the window refill before the work does.')
-    const local = modelsSummary(input(settings({ everywhere: { 'task.agent': 'pi', 'task.model': 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold' } }), u, { quota: { figures: { 'pi.spark': fig([{ name: '5 h', usedPct: 99, resetAt: at }]) }, reads: {}, alertAt: 80 } }))
+    const local = modelsSummary(
+      input(settings({ everywhere: { 'task.agent': 'pi', 'task.model': 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold' } }), u, {
+        quota: { figures: { 'pi.spark': fig([{ name: '5 h', usedPct: 99, resetAt: at }]) }, reads: {}, alertAt: 80 },
+      }),
+    )
     expect(warn(local, 'quota:')).toEqual([])
   })
 
@@ -352,14 +419,28 @@ describe('the quota side: a provider shows its figure and its read, and a window
     const u = ledger('quota-shared')
     u.count('T-1/Agent', GO, { id: 'q2', at: NOW - HOUR, tokens: 100 }, NOW)
     u.count('T-2/Agent', OC_GO, { id: 'q3', at: NOW - HOUR, tokens: 100 }, NOW)
-    const est = fig([{ name: '5 h', usedPct: 148 }, { name: 'Week', usedPct: 143 }], { estimate: true })
+    const est = fig(
+      [
+        { name: '5 h', usedPct: 148 },
+        { name: 'Week', usedPct: 143 },
+      ],
+      { estimate: true },
+    )
     const shared = modelsSummary(input(settings(), u, { quota: { figures: { 'pi.opencode-go': est, 'opencode.opencode-go': est }, reads: {}, alertAt: 80 } }))
     const w = warn(shared, 'quota:')
     expect(w).toHaveLength(1)
     expect(w[0]).toMatchObject({ id: 'quota:opencode.opencode-go+pi.opencode-go', level: 'risk' })
     expect(w[0]!.words).toBe('OpenCode Go (pi and OpenCode): 5 h is at 148%: over its limit; Week is at 143%: over its limit.')
     // the same plan, read twice (two objects): each row is its own figure, so two warnings
-    const apart = modelsSummary(input(settings(), u, { quota: { figures: { 'pi.opencode-go': fig([{ name: '5 h', usedPct: 90 }], { estimate: true }), 'opencode.opencode-go': fig([{ name: '5 h', usedPct: 90 }], { estimate: true }) }, reads: {}, alertAt: 80 } }))
+    const apart = modelsSummary(
+      input(settings(), u, {
+        quota: {
+          figures: { 'pi.opencode-go': fig([{ name: '5 h', usedPct: 90 }], { estimate: true }), 'opencode.opencode-go': fig([{ name: '5 h', usedPct: 90 }], { estimate: true }) },
+          reads: {},
+          alertAt: 80,
+        },
+      }),
+    )
     expect(warn(apart, 'quota:').map((x) => x.words)).toEqual(['OpenCode Go: 5 h is at 90%: 10% left.', 'OpenCode Go: 5 h is at 90%: 10% left.'])
   })
 
@@ -409,7 +490,15 @@ describe('the providers a CLI offers, nothing uses yet: listed under Other provi
     withPi([NV_ID, AMD_ID], () => {
       const sum = modelsSummary(input(used, ledger('offer-idle')))
       const nv = provider(sum, 'pi.nvidia')
-      expect(nv).toMatchObject({ name: 'NVIDIA API', idle: true, local: false, configured: { primary: 0, backup: 0, roles: {}, spaces: {} }, now: { agents: 0 }, runOuts: { count7d: 0, out: false }, usage: { h24: { tokens: 0, calls: 0 }, d7: { tokens: 0, calls: 0 } } })
+      expect(nv).toMatchObject({
+        name: 'NVIDIA API',
+        idle: true,
+        local: false,
+        configured: { primary: 0, backup: 0, roles: {}, spaces: {} },
+        now: { agents: 0 },
+        runOuts: { count7d: 0, out: false },
+        usage: { h24: { tokens: 0, calls: 0 }, d7: { tokens: 0, calls: 0 } },
+      })
       // its models are the ones pi lists, named as the rows name them (the provider in front is already said)
       expect(nv.models.map((m) => [m.key, m.label])).toEqual([[NV, 'mistralai/mistral-large-4-1t-a52b']])
       expect(nv.models[0]!.configured.primary).toBe(0)
@@ -445,7 +534,11 @@ describe('the providers a CLI offers, nothing uses yet: listed under Other provi
     setModels('opencode', opencodeList([{ id: 'opencode/minimax-m3.1-flash-free', label: 'opencode/minimax-m3.1-flash-free', efforts: [] }], undefined))
     try {
       const sum = modelsSummary(input(used, ledger('offer-zen')))
-      expect(provider(sum, 'opencode.opencode')).toMatchObject({ name: 'OpenCode Zen (free)', idle: true, models: [{ key: 'opencode.opencode/minimax-m3.1-flash-free', label: 'minimax-m3.1-flash-free' }] })
+      expect(provider(sum, 'opencode.opencode')).toMatchObject({
+        name: 'OpenCode Zen (free)',
+        idle: true,
+        models: [{ key: 'opencode.opencode/minimax-m3.1-flash-free', label: 'minimax-m3.1-flash-free' }],
+      })
     } finally {
       setModels('opencode', undefined)
     }
@@ -470,7 +563,7 @@ describe('the providers a CLI offers, nothing uses yet: listed under Other provi
     })
   })
 
-  test("a provider in use by its slot lists the model in use; with a cap of its own it lists every model its CLI offers", () => {
+  test('a provider in use by its slot lists the model in use; with a cap of its own it lists every model its CLI offers', () => {
     // Claude Code runs the task agent on its Opus only: anthropic is in use, and its list is that one model
     const claude = { 'task.agent': 'Claude Code', 'task.model': 'Opus 5.5', 'task.fallback': 'off', 'coordinator.agent': 'pi', 'coordinator.model': GO, 'reviewer.agent': 'pi', 'reviewer.model': GO }
     const plain = modelsSummary(input(settings({ everywhere: claude }), ledger('offer-used')))

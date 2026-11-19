@@ -155,7 +155,11 @@ export class Browsers {
       /* not there at all */
     }
     this.ok = ok
-    this.why = ok ? '' : BOX ? `agent-browser is missing on ${this.o.host}: shepherdr doctor on the main machine puts it there again` : `agent-browser is missing on ${this.o.host}: run bun install in ${ROOT}`
+    this.why = ok
+      ? ''
+      : BOX
+        ? `agent-browser is missing on ${this.o.host}: shepherdr doctor on the main machine puts it there again`
+        : `agent-browser is missing on ${this.o.host}: run bun install in ${ROOT}`
     return ok
   }
 
@@ -198,7 +202,23 @@ export class Browsers {
   private hub(task: string): Hub {
     let h = this.hubs.get(task)
     if (!h) {
-      h = { task, clients: new Set(), driver: 'agent', told: false, url: '', title: '', target: '', connected: false, viewport: { w: 1280, h: 720 }, agentAt: 0, own: 0, ownUntil: 0, hovering: false, direct: new Set(), seenAt: 0 }
+      h = {
+        task,
+        clients: new Set(),
+        driver: 'agent',
+        told: false,
+        url: '',
+        title: '',
+        target: '',
+        connected: false,
+        viewport: { w: 1280, h: 720 },
+        agentAt: 0,
+        own: 0,
+        ownUntil: 0,
+        hovering: false,
+        direct: new Set(),
+        seenAt: 0,
+      }
       this.hubs.set(task, h)
     }
     return h
@@ -273,7 +293,8 @@ export class Browsers {
 
   /** an error said plainly, with what to do */
   private hint(e: string) {
-    if (CLASH.test(e)) return `Another agent-browser (another version, or other settings) is using this browser, so it keeps restarting. The agent should run ${this.bin}, the version Shepherdr pins, without --session or --profile.`
+    if (CLASH.test(e))
+      return `Another agent-browser (another version, or other settings) is using this browser, so it keeps restarting. The agent should run ${this.bin}, the version Shepherdr pins, without --session or --profile.`
     if (/chrome|chromium|executable|no browser|install/i.test(e)) return `Chrome is missing on ${this.o.host}: run ${this.bin} install there. (${e.split('\n')[0]})`
     return `The browser could not start: ${e.split('\n')[0]}`
   }
@@ -340,7 +361,11 @@ export class Browsers {
     h.sharing = true
     try {
       const b = BOX
-      const p = Bun.spawn(sshArgs(b.target, script(b, ['perl', join(helperDir(b.home), 'relay.pl'), String(port)]), { extra: ['-o', 'ControlPath=none'] }), { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' })
+      const p = Bun.spawn(sshArgs(b.target, script(b, ['perl', join(helperDir(b.home), 'relay.pl'), String(port)]), { extra: ['-o', 'ControlPath=none'] }), {
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'ignore',
+      })
       const first = await Promise.race([readLine(p.stdout), Bun.sleep(15_000).then(() => '')])
       const relay = Number(first)
       if (!relay) throw new Error('no relay')
@@ -392,7 +417,16 @@ export class Browsers {
   }
 
   private state(h: Hub): BrowserDown {
-    return { type: 'state', driver: h.driver, url: h.url, title: h.title, connected: h.connected && !!h.up, viewport: h.viewport, agentAgo: h.agentAt ? Date.now() - h.agentAt : undefined, direct: h.share?.url }
+    return {
+      type: 'state',
+      driver: h.driver,
+      url: h.url,
+      title: h.title,
+      connected: h.connected && !!h.up,
+      viewport: h.viewport,
+      agentAgo: h.agentAt ? Date.now() - h.agentAt : undefined,
+      direct: h.share?.url,
+    }
   }
 
   private stateSoon(h: Hub) {
@@ -494,7 +528,11 @@ export class Browsers {
   private handBack(h: Hub) {
     if (h.driver === 'agent') return
     h.driver = 'agent'
-    if (h.told) this.o.tell(h.task, `${this.o.user()} handed the shared browser back; the page may have changed, so snapshot again before you act. Nothing else to say: reply with only <no-reply>browser handed back</no-reply>.`)
+    if (h.told)
+      this.o.tell(
+        h.task,
+        `${this.o.user()} handed the shared browser back; the page may have changed, so snapshot again before you act. Nothing else to say: reply with only <no-reply>browser handed back</no-reply>.`,
+      )
     h.told = false
     this.broadcast(h, this.state(h))
   }
@@ -561,7 +599,9 @@ export class Browsers {
     // it takes page (document) coordinates: the point on screen plus how far the page is scrolled
     const sc = (await s.cdp.call('Runtime.evaluate', { expression: '[scrollX, scrollY]', returnByValue: true }, s.id)) as { result: { value?: [number, number] } }
     const [sx, sy] = sc.result.value ?? [0, 0]
-    const n = (await s.cdp.call('DOM.getNodeForLocation', { x: Math.round(x + sx), y: Math.round(y + sy), includeUserAgentShadowDOM: false, ignorePointerEventsNone: true }, s.id)) as { backendNodeId?: number }
+    const n = (await s.cdp.call('DOM.getNodeForLocation', { x: Math.round(x + sx), y: Math.round(y + sy), includeUserAgentShadowDOM: false, ignorePointerEventsNone: true }, s.id)) as {
+      backendNodeId?: number
+    }
     if (!n.backendNodeId) return null
     const r = (await s.cdp.call('DOM.resolveNode', { backendNodeId: n.backendNodeId }, s.id)) as { object?: { objectId?: string } }
     const objectId = r.object?.objectId

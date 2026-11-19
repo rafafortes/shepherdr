@@ -10,7 +10,11 @@ import { tmp } from './tmp.ts'
 
 const root = join(import.meta.dir, '..')
 const runner = join(root, 'scripts', 'check-local.sh')
-const notComments = (p: string) => readFileSync(p, 'utf8').split('\n').filter((l) => l.trim() && !l.trim().startsWith('#')).join('\n')
+const notComments = (p: string) =>
+  readFileSync(p, 'utf8')
+    .split('\n')
+    .filter((l) => l.trim() && !l.trim().startsWith('#'))
+    .join('\n')
 
 describe('what --quick composes', () => {
   test('the runner keeps the lock, cap and timeout, filters coverage and writes a verdict of its own', () => {
@@ -19,7 +23,7 @@ describe('what --quick composes', () => {
     expect(lines).toContain('V="$logs/verdict-quick.txt"')
     expect(lines).toContain('[ "${file#*-}" = coverage ] || kept+=("$file")')
     expect(lines).toContain('export SHEPHERDR_CHECK_QUICK="$quick"')
-    expect(lines).toContain('[ "$quick" = 1 ] && { map_flag=\'\'; record_flag=\'\'; }')
+    expect(lines).toContain("[ \"$quick\" = 1 ] && { map_flag=''; record_flag=''; }")
     // the first line says what kind of run it was and what it did not run
     expect(lines).toContain('check:local QUICK')
     expect(lines).toContain('NOT run: coverage, screen map and baseline')
@@ -84,7 +88,10 @@ function fixture(checks: Record<string, string>, branch = 'herdr-tui', opts: { c
   }
   for (const [name, body] of Object.entries(checks)) {
     const f = join(dir, 'scripts', 'checks', name)
-    writeFileSync(f, `#!/usr/bin/env bash\nset -uo pipefail\necho "$SHEPHERDR_CHECK_NAME $SHEPHERDR_CHECK_QUICK" >> "$SHEPHERDR_CHECK_ROOT/calls.txt"\necho "$SHEPHERDR_CHECK_NAME map=\${SHEPHERDR_CHECK_MAP:-} record=\${SHEPHERDR_CHECK_RECORD:-}" >> "$SHEPHERDR_CHECK_ROOT/flags.txt"\n${body}\nexit 0\n`)
+    writeFileSync(
+      f,
+      `#!/usr/bin/env bash\nset -uo pipefail\necho "$SHEPHERDR_CHECK_NAME $SHEPHERDR_CHECK_QUICK" >> "$SHEPHERDR_CHECK_ROOT/calls.txt"\necho "$SHEPHERDR_CHECK_NAME map=\${SHEPHERDR_CHECK_MAP:-} record=\${SHEPHERDR_CHECK_RECORD:-}" >> "$SHEPHERDR_CHECK_ROOT/flags.txt"\n${body}\nexit 0\n`,
+    )
     chmodSync(f, 0o755)
   }
   const logs = join(home, '.cache', 'shepherdr', 'check-local', basename(dir))
@@ -269,7 +276,7 @@ describe('a quick run beside a full one', () => {
     const f = fixture(checks, 'herdr-tui', { cores: 32 })
     // what a full run of this worktree left behind, while it was running
     mkdirSync(f.logs, { recursive: true })
-    writeFileSync(join(f.logs, 'tests.log'), "Ran 3057 tests across 234 files\n")
+    writeFileSync(join(f.logs, 'tests.log'), 'Ran 3057 tests across 234 files\n')
     writeFileSync(join(f.logs, 'tests.note'), 'Ran 3057 tests across 234 files\n')
     const holder = await f.holdFullLock()
     try {

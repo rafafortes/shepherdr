@@ -123,7 +123,14 @@ describe.skipIf(!browser)('the place header', () => {
       const bar = title.closest('.border-b')!
       // the place's icon (SHE-207) before its name: on a phone the two are centred together
       const icon = title.querySelector('svg')?.getBoundingClientRect()
-      return { reading: (bar.querySelector("[data-conversation-head]") ?? bar).getBoundingClientRect().toJSON() as Box, dots: bar.querySelectorAll('.dot').length, icon: icon?.toJSON() as Box | undefined, bar: bar.getBoundingClientRect().toJSON() as Box, title: title.getBoundingClientRect().toJSON() as Box, name: (title.querySelector('span') ?? title).getBoundingClientRect().toJSON() as Box }
+      return {
+        reading: (bar.querySelector('[data-conversation-head]') ?? bar).getBoundingClientRect().toJSON() as Box,
+        dots: bar.querySelectorAll('.dot').length,
+        icon: icon?.toJSON() as Box | undefined,
+        bar: bar.getBoundingClientRect().toJSON() as Box,
+        title: title.getBoundingClientRect().toJSON() as Box,
+        name: (title.querySelector('span') ?? title).getBoundingClientRect().toJSON() as Box,
+      }
     })
 
   test('no status dot before the place name, the title still sits right', async () => {
@@ -224,7 +231,10 @@ describe.skipIf(!browser)('the Tasks header', () => {
             return c ? (c.getBoundingClientRect().toJSON() as Box) : null
           })
           expect(still).toEqual(t.count)
-          await page.getByRole('button', { name: /^Tasks/ }).first().click()
+          await page
+            .getByRole('button', { name: /^Tasks/ })
+            .first()
+            .click()
         }
         await page.close()
       }
@@ -382,7 +392,12 @@ describe.skipIf(!browser)('a mode card', () => {
     const p = world.snapshot().places.find((x) => !x.home)!
     await world.act({ type: 'mode', place: p.id, mode: 'autopilot' })
     await world.act({ type: 'mode', place: p.id, mode: 'regular' })
-    for (const [phone, scheme] of [[true, 'light'], [true, 'dark'], [false, 'light'], [false, 'dark']] as const) {
+    for (const [phone, scheme] of [
+      [true, 'light'],
+      [true, 'dark'],
+      [false, 'light'],
+      [false, 'dark'],
+    ] as const) {
       const width = phone ? 390 : 1280
       const ctx = await browser!.newContext({ viewport: { width, height: 844 }, hasTouch: phone, isMobile: phone, colorScheme: scheme })
       const page = await ctx.newPage()
@@ -428,7 +443,6 @@ describe.skipIf(!browser)('a coordinator working in the background', () => {
   }, 30_000)
 })
 
-
 describe.skipIf(!browser)('clear phone task titles', () => {
   test('a long task name can be expanded while its ID and progress stay visible', async () => {
     const task = world.tasks.find((t) => t.id === 'GTM-14')!
@@ -461,21 +475,28 @@ describe.skipIf(!browser)('conversation header alignment', () => {
     const page = await browser!.newPage({ viewport: { width: 2560, height: 1000 } })
     await page.goto(`http://127.0.0.1:${server!.port}/?place=vm-str/gtm`)
     await page.getByRole('textbox', { name: 'Message gtm…' }).waitFor()
-    const aligned = async () => page.locator('[data-conversation-head]').first().evaluate((head) => {
-      const messages = head.closest('section')!.querySelector('[data-messages]')!
-      const h = head.getBoundingClientRect(), m = messages.getBoundingClientRect()
-      return Math.abs(h.left - m.left) < 1 && Math.abs(h.width - m.width) < 1
-    })
+    const aligned = async () =>
+      page
+        .locator('[data-conversation-head]')
+        .first()
+        .evaluate((head) => {
+          const messages = head.closest('section')!.querySelector('[data-messages]')!
+          const h = head.getBoundingClientRect(),
+            m = messages.getBoundingClientRect()
+          return Math.abs(h.left - m.left) < 1 && Math.abs(h.width - m.width) < 1
+        })
     expect(await aligned()).toBe(true)
     await page.goto(`http://127.0.0.1:${server!.port}/?place=vm-str/gtm&task=GTM-14`)
     await page.getByRole('textbox', { name: 'Message GTM-14…' }).waitFor()
     await page.getByRole('button', { name: 'Hide gtm', exact: true }).click()
     await page.getByRole('button', { name: 'Show gtm', exact: true }).waitFor()
     const taskHead = page.locator('section:has(textarea[aria-label="Message GTM-14…"]) > [data-chrome] [data-conversation-head]').last()
-    expect(await taskHead.evaluate((head) => {
-      const messages = head.closest('section')!.querySelector('[data-messages]')!
-      return Math.abs(head.getBoundingClientRect().left - messages.getBoundingClientRect().left) < 1
-    })).toBe(true)
+    expect(
+      await taskHead.evaluate((head) => {
+        const messages = head.closest('section')!.querySelector('[data-messages]')!
+        return Math.abs(head.getBoundingClientRect().left - messages.getBoundingClientRect().left) < 1
+      }),
+    ).toBe(true)
     await page.close()
   })
 })

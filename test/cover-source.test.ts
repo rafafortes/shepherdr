@@ -87,7 +87,21 @@ let n = 0
 /** a task of that space as the engine keeps one, with no agent started (none can be here) */
 function task(sp: { p: { name: string }; dir: string }, extra: Record<string, unknown> = {}) {
   const id = `COV-${++n}`
-  const t = { id, n, project: placeId.space(sp.p.name), base: 'main', branch: `cov-${n}`, worktree: sp.dir, title: `Task ${n}`, desc: 'Do it.', by: 'test', created: Date.now(), updated: Date.now(), told: 'work', ...extra }
+  const t = {
+    id,
+    n,
+    project: placeId.space(sp.p.name),
+    base: 'main',
+    branch: `cov-${n}`,
+    worktree: sp.dir,
+    title: `Task ${n}`,
+    desc: 'Do it.',
+    by: 'test',
+    created: Date.now(),
+    updated: Date.now(),
+    told: 'work',
+    ...extra,
+  }
   src.engine.tasks.push(t as never)
   return src.engine.task(id)!
 }
@@ -244,19 +258,51 @@ describe('the screen acts', () => {
     const one = await space('order-one')
     const two = await space('order-two')
     // the move the arrows send: both numbers at once
-    expect(await src.act({ type: 'space-order', moves: [{ place: one.place, value: '1' }, { place: two.place, value: '2' }] } as never)).toEqual({ ok: true })
+    expect(
+      await src.act({
+        type: 'space-order',
+        moves: [
+          { place: one.place, value: '1' },
+          { place: two.place, value: '2' },
+        ],
+      } as never),
+    ).toEqual({ ok: true })
     expect([src.settings.spacePriority(one.p.name), src.settings.spacePriority(two.p.name)]).toEqual([1, 2])
     // a move that names no space of this machine, or the home space, is refused whole: nothing of it is written
     const refused = { ok: false, error: 'A move names a space of this machine, and never the home space.' }
-    expect(await src.act({ type: 'space-order', moves: [{ place: one.place, value: '5' }, { place: 'p:here:none', value: '6' }] } as never)).toEqual(refused)
+    expect(
+      await src.act({
+        type: 'space-order',
+        moves: [
+          { place: one.place, value: '5' },
+          { place: 'p:here:none', value: '6' },
+        ],
+      } as never),
+    ).toEqual(refused)
     expect(await src.act({ type: 'space-order', moves: [{ place: placeId.home(), value: '5' }] } as never)).toEqual(refused)
     expect(await src.act({ type: 'space-order', moves: [] } as never)).toEqual(refused)
     expect(src.settings.spacePriority(one.p.name)).toBe(1)
     // a value the setting refuses refuses the whole move (settings.ts setMany tries them on a copy first)
-    expect(await src.act({ type: 'space-order', moves: [{ place: two.place, value: '0' }, { place: one.place, value: '7' }] } as never)).toMatchObject({ ok: false })
+    expect(
+      await src.act({
+        type: 'space-order',
+        moves: [
+          { place: two.place, value: '0' },
+          { place: one.place, value: '7' },
+        ],
+      } as never),
+    ).toMatchObject({ ok: false })
     expect([src.settings.spacePriority(one.p.name), src.settings.spacePriority(two.p.name)]).toEqual([1, 2])
     // and one clearing them, as ↓ on the last numbered space sends it, writes none
-    expect(await src.act({ type: 'space-order', moves: [{ place: one.place, value: null }, { place: two.place, value: null }] } as never)).toEqual({ ok: true })
+    expect(
+      await src.act({
+        type: 'space-order',
+        moves: [
+          { place: one.place, value: null },
+          { place: two.place, value: null },
+        ],
+      } as never),
+    ).toEqual({ ok: true })
     expect([src.settings.spacePriority(one.p.name), src.settings.spacePriority(two.p.name)]).toEqual([null, null])
     // a move is a setting the Limits view shows: its kept view is dropped, so the next ask reads the rows it made (SHE-165)
     const kept = await src.act({ type: 'limits-view' } as never)
@@ -324,7 +370,7 @@ describe('the screen acts', () => {
     }
   })
 
-  test("a secret an agent asked for is kept: its card says where, and its agent is told by name", async () => {
+  test('a secret an agent asked for is kept: its card says where, and its agent is told by name', async () => {
     const chat = placeId.home()
     const asked = await src.cli(['secret', 'ask', 'COVER_TOKEN', '--why', 'for the test'], { chat })
     expect(asked.code).toBe(0)
@@ -447,7 +493,14 @@ describe('the shepherdr command', () => {
     try {
       expect((await cli(['doctor'])).out).not.toContain('Event loop')
       src.stall.count = 2
-      src.stall.stalls.push({ at: Date.now(), late: 2300, ran: [{ label: 'snapshot', ms: 900 }, { label: 'pollChats', ms: 400 }] })
+      src.stall.stalls.push({
+        at: Date.now(),
+        late: 2300,
+        ran: [
+          { label: 'snapshot', ms: 900 },
+          { label: 'pollChats', ms: 400 },
+        ],
+      })
       const out = (await cli(['doctor'])).out
       expect(out).toContain('Event loop: 2 stalls of 1.0 s or more since this server started (worst 2.3 s at')
       expect(out).toContain('2.3 s late; slowest passes: snapshot 900 ms, pollChats 400 ms')
@@ -488,7 +541,7 @@ describe('the shepherdr command', () => {
     expect(got).toEqual([[t.id, ['one', 'two']]])
   })
 
-  test("an alert about nothing in particular opens the chat it came from, or the home space", async () => {
+  test('an alert about nothing in particular opens the chat it came from, or the home space', async () => {
     expect((await cli(['alert', 'Heads up', '--body', 'the build is slow'])).out).toBe('Alert sent.\n')
     expect(alerts.at(-1)).toMatchObject({ title: 'Heads up', body: 'the build is slow', go: { place: placeId.home() } })
     await cli(['alert', 'From a task'], { chat: 'COVX-1/Agent' })
@@ -646,7 +699,7 @@ describe('the shepherdr command', () => {
       expect((await cli(['restart', sp.p.name, '--agent', 'pi', '--save'])).out).toContain(`Restarted ${sp.p.name} on Claude Code, sonnet, now its space's Settings too.`)
       expect(restarts.at(-1)).toMatchObject({ chat: sp.place, kind: 'pi', model: undefined, effort: undefined, save: true })
       done = { ok: false, waiting: true }
-      expect((await cli(['restart', t.id])).out).toContain("machine is out of reach: it restarts once it is back")
+      expect((await cli(['restart', t.id])).out).toContain('machine is out of reach: it restarts once it is back')
       done = { ok: false }
       expect((await cli(['restart', t.id])).out).toBe('It could not be restarted.\n')
       done = { ok: false, error: 'it broke' }
@@ -877,7 +930,10 @@ describe("the CLI's own question tool", () => {
     const key = 'COVQ-3/Agent'
     logged(key, { kind: 'question', id: 'q3', tool: 'AskUserQuestion', items })
     const status = src.agents.status
-    expect(await src.act({ type: 'answer', chat: key, question: 'q3:0', choice: 0, dismiss: true } as never)).toEqual({ ok: false, error: 'The CLI no longer waits on this question: read the chat again.' })
+    expect(await src.act({ type: 'answer', chat: key, question: 'q3:0', choice: 0, dismiss: true } as never)).toEqual({
+      ok: false,
+      error: 'The CLI no longer waits on this question: read the chat again.',
+    })
     src.agents.status = (() => 'blocked') as never
     try {
       expect(await src.act({ type: 'answer', chat: key, question: 'q3:1', choice: 0, dismiss: true } as never)).toEqual({ ok: true })
@@ -1016,7 +1072,7 @@ describe('who and where a command comes from', () => {
     }
   })
 
-  test("a message from another agent names it as we do, with its pane and the space or task it works in", () => {
+  test('a message from another agent names it as we do, with its pane and the space or task it works in', () => {
     const sp = { p: { name: 'peers' }, dir: home }
     const t = task(sp)
     const tkey = `${t.id}/Agent`
@@ -1065,46 +1121,59 @@ describe('agents Shepherdr keeps running', () => {
     const error = console.error
     console.error = (m: string) => void errors.push(m)
     try {
-      await swap(src.agents, { reachable: true, lastReach: Date.now(), wrong: async (k: string) => wrong[k], wasWorking: () => true, relaunch: async (k: string, close: boolean, start: () => Promise<unknown>) => (relaunched.push([k, close]), await start().catch(() => undefined)) }, async () => {
-        await swap(src.revivals, { seen: () => seen }, async () => {
-          await swap(src.engine, { mayRetry: () => true }, async () => {
-            await swap(src as never, { coordinator: async () => undefined } as never, async () => {
-              await src.revive()
-              await Bun.sleep(10)
-              expect(relaunched).toEqual([[key, false]])
-              // it was at work: it is told it started again
-              expect(sent.at(-1)).toMatchObject({ key })
-              expect(errors.some((m) => m.includes(`${key}'s agent stopped: starting it again`))).toBe(true)
-              // runs on outdated settings, and starting it fails
-              wrong = { [key]: 'stale' }
-              src.agents.relaunch = (async () => {
-                throw new Error('herdr said no')
-              }) as never
-              await src.revive()
-              await Bun.sleep(10)
-              expect(errors.some((m) => m.includes("couldn't start") && m.includes('herdr said no'))).toBe(true)
-              // fine now: its tries are forgotten in time
-              wrong = { [key]: undefined }
-              await src.revive()
-              // given up on
-              wrong = { [key]: 'stale' }
-              seen = 'give-up'
-              await src.revive()
-              // the card's id carries the millisecond it was posted in, and the log keeps one card per id: a second
-              // give-up in that same millisecond would take the first one's place, so let the clock move on
-              await Bun.sleep(2)
-              wrong = { [key]: 'gone' }
-              await src.revive()
+      await swap(
+        src.agents,
+        {
+          reachable: true,
+          lastReach: Date.now(),
+          wrong: async (k: string) => wrong[k],
+          wasWorking: () => true,
+          relaunch: async (k: string, close: boolean, start: () => Promise<unknown>) => (relaunched.push([k, close]), await start().catch(() => undefined)),
+        },
+        async () => {
+          await swap(src.revivals, { seen: () => seen }, async () => {
+            await swap(src.engine, { mayRetry: () => true }, async () => {
+              await swap(src as never, { coordinator: async () => undefined } as never, async () => {
+                await src.revive()
+                await Bun.sleep(10)
+                expect(relaunched).toEqual([[key, false]])
+                // it was at work: it is told it started again
+                expect(sent.at(-1)).toMatchObject({ key })
+                expect(errors.some((m) => m.includes(`${key}'s agent stopped: starting it again`))).toBe(true)
+                // runs on outdated settings, and starting it fails
+                wrong = { [key]: 'stale' }
+                src.agents.relaunch = (async () => {
+                  throw new Error('herdr said no')
+                }) as never
+                await src.revive()
+                await Bun.sleep(10)
+                expect(errors.some((m) => m.includes("couldn't start") && m.includes('herdr said no'))).toBe(true)
+                // fine now: its tries are forgotten in time
+                wrong = { [key]: undefined }
+                await src.revive()
+                // given up on
+                wrong = { [key]: 'stale' }
+                seen = 'give-up'
+                await src.revive()
+                // the card's id carries the millisecond it was posted in, and the log keeps one card per id: a second
+                // give-up in that same millisecond would take the first one's place, so let the clock move on
+                await Bun.sleep(2)
+                wrong = { [key]: 'gone' }
+                await src.revive()
+              })
             })
           })
-        })
-      })
+        },
+      )
     } finally {
       console.error = error
       delete src.agents.records[key]
       delete src.agents.records[tkey]
     }
-    const cards = src.chats.log(key).posted.filter((p) => p.id.startsWith('revive:')).map((p) => p.card?.text)
+    const cards = src.chats
+      .log(key)
+      .posted.filter((p) => p.id.startsWith('revive:'))
+      .map((p) => p.card?.text)
     expect(cards).toEqual([
       "Its agent keeps running on outdated settings, and starting it again didn't help. Restart it from ⋯ → Restart agent.",
       "Its agent stopped, and starting it again didn't help. Restart it from ⋯ → Restart agent.",
@@ -1142,7 +1211,7 @@ describe('agents Shepherdr keeps running', () => {
       await swap(src.agents, { relaunch: async () => Promise.reject(new Error('no pane')), save: () => undefined }, async () => {
         await swap(src.engine, { startFailed: (k: string, why: string) => void failed.push([k, why]) }, () => priv.startStep(key, { do: 'error', fresh: true, why: '' }))
       })
-      expect(failed).toEqual([[key, 'Claude Code couldn\'t start: no pane']])
+      expect(failed).toEqual([[key, "Claude Code couldn't start: no pane"]])
       const looked: string[] = []
       await swap(src.agents, { reachable: true, lastReach: Date.now(), busy: () => false }, async () => {
         await swap(src as never, { lookStart: async (k: string) => (looked.push(k), Promise.reject(new Error('screen gone'))) } as never, async () => {
@@ -1166,18 +1235,42 @@ describe('when a provider cuts an agent off', () => {
     const key = 'p:here:cut'
     src.agents.records[key] = { key, name: 'cut', kind: 'claude', model: 'opus', cwd: home, logs: [], started: Date.now() } as never
     try {
-      await swap(src.settings, { harness: () => { throw new Error('settings unreadable') } }, () => priv.coordinatorStuck(key, { lasting: true, reason: 'Out of credit' }, []))
+      await swap(
+        src.settings,
+        {
+          harness: () => {
+            throw new Error('settings unreadable')
+          },
+        },
+        () => priv.coordinatorStuck(key, { lasting: true, reason: 'Out of credit' }, []),
+      )
       expect(errors.at(-1)).toContain("couldn't keep that a coordinator of this machine waits for its provider: settings unreadable")
       // its backup went in, and the note that it runs on one can't be written
       await swap(src.engine, { backupsFor: () => [{ n: 1, to: { kind: 'pi' } }] }, async () => {
         await swap(src.settings, { harness: () => ({ kind: 'claude', model: 'opus' }) }, async () => {
-          await swap(src.returns, { note: () => { throw new Error('disk full') } }, async () => {
-            await swap(src as never, { restartCoordinator: async () => 'pi' } as never, () => priv.coordinatorCantGoOn(key, { lasting: true, reason: 'Out of credit', cut: 1, words: '' }))
-          })
+          await swap(
+            src.returns,
+            {
+              note: () => {
+                throw new Error('disk full')
+              },
+            },
+            async () => {
+              await swap(src as never, { restartCoordinator: async () => 'pi' } as never, () => priv.coordinatorCantGoOn(key, { lasting: true, reason: 'Out of credit', cut: 1, words: '' }))
+            },
+          )
         })
       })
       expect(errors.at(-1)).toContain(`couldn't keep that ${key} runs on a backup: disk full`)
-      await swap(src.returns, { list: () => { throw new Error('returns unreadable') } }, () => priv.refreshGoingBack())
+      await swap(
+        src.returns,
+        {
+          list: () => {
+            throw new Error('returns unreadable')
+          },
+        },
+        () => priv.refreshGoingBack(),
+      )
       expect(errors.at(-1)).toContain("couldn't tell which tasks go back to work: returns unreadable")
     } finally {
       console.error = error
@@ -1185,7 +1278,7 @@ describe('when a provider cuts an agent off', () => {
     }
   })
 
-  test("a probe of the primary that throws is a failed probe: silent, and a longer wait", async () => {
+  test('a probe of the primary that throws is a failed probe: silent, and a longer wait', async () => {
     const errors: string[] = []
     const error = console.error
     console.error = (m: string) => void errors.push(m)
@@ -1232,7 +1325,7 @@ describe("this machine's health", () => {
 })
 
 describe('restarting from the screen', () => {
-  test('a restart saved as its space\'s Settings sets what differs; one Settings refuse is not made', async () => {
+  test("a restart saved as its space's Settings sets what differs; one Settings refuse is not made", async () => {
     const sp = await space('saves')
     const set: unknown[] = []
     await swap(src.engine, { installed: () => true }, async () => {
@@ -1251,11 +1344,19 @@ describe('restarting from the screen', () => {
   })
 
   test('restart --all names a coordinator it could not read as failed, and goes on', async () => {
-    await swap(src as never, { restartable: () => { throw new Error('unreadable') } } as never, async () => {
-      const r = (await src.act({ type: 'restart-all' } as never)) as { ok: boolean; failed: number }
-      expect(r.ok).toBe(true)
-      expect(r.failed).toBeGreaterThan(0)
-    })
+    await swap(
+      src as never,
+      {
+        restartable: () => {
+          throw new Error('unreadable')
+        },
+      } as never,
+      async () => {
+        const r = (await src.act({ type: 'restart-all' } as never)) as { ok: boolean; failed: number }
+        expect(r.ok).toBe(true)
+        expect(r.failed).toBeGreaterThan(0)
+      },
+    )
   })
 })
 
@@ -1276,7 +1377,9 @@ describe('the rest', () => {
     expect(o.idleClose(t.id)).toBe(src.settings.idleClose({ space: sp.p.name }))
     expect(o.idleClose('NOPE-9')).toBe(src.settings.idleClose('machine'))
     const kept: unknown[] = []
-    await swap(src.browsers!, { sweep: async (keep: (id: string) => boolean, forget: (id: string) => boolean) => (kept.push([keep(t.id), forget(t.id), forget('NOPE-9')]), []) }, () => src.sweepBrowsers())
+    await swap(src.browsers!, { sweep: async (keep: (id: string) => boolean, forget: (id: string) => boolean) => (kept.push([keep(t.id), forget(t.id), forget('NOPE-9')]), []) }, () =>
+      src.sweepBrowsers(),
+    )
     expect(kept).toEqual([[true, false, true]])
   })
 })
@@ -1285,7 +1388,11 @@ describe('the advisor, while the human may still answer', () => {
   /** a space with its advisor set, and a task of it, as test/advisor.test.ts makes one */
   async function world(name: string) {
     const sp = await space(name)
-    for (const [k, v] of [['advisor.agent', 'pi'], ['advisor.model', 'opencode-go/deepseek-v4.1-flash']]) expect(src.settings.set(k, v, { space: sp.p.name }).ok).toBe(true)
+    for (const [k, v] of [
+      ['advisor.agent', 'pi'],
+      ['advisor.model', 'opencode-go/deepseek-v4.1-flash'],
+    ])
+      expect(src.settings.set(k, v, { space: sp.p.name }).ok).toBe(true)
     const t = task(sp, { updated: Date.now() - 3_600_000 })
     const key = `${t.id}/Agent`
     src.agents.records[key] = { key, name: t.id, kind: 'pi', cwd: sp.dir, workspace: sp.p.name, logs: [], started: Date.now() } as never

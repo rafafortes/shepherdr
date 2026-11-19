@@ -40,7 +40,8 @@ async function running(w: ReturnType<typeof world>, dir: string, name: string, t
 }
 
 /** a task added on a pi model: it starts or is held as the limits say */
-const add = (w: ReturnType<typeof world>, p: { name: string }, title: string, model = SPARK) => w.engine.add({ project: p.name, title, desc: `Add ${title}.txt.`, by: 'test', agent: { kind: 'pi', model } })
+const add = (w: ReturnType<typeof world>, p: { name: string }, title: string, model = SPARK) =>
+  w.engine.add({ project: p.name, title, desc: `Add ${title}.txt.`, by: 'test', agent: { kind: 'pi', model } })
 
 const ALL_BLOCKED = 'waiting: every model it may use is blocked (0 allowed): change its agent or a limit'
 

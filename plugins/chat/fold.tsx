@@ -51,11 +51,7 @@ export function Fold({ id, children }: { id: string; children: ReactNode }) {
   }
   return (
     <>
-      <div
-        ref={box}
-        data-folded={folded ? '' : undefined}
-        className={folded ? 'max-h-75 overflow-hidden [mask-image:linear-gradient(#000_calc(100%-64px),transparent)]' : undefined}
-      >
+      <div ref={box} data-folded={folded ? '' : undefined} className={folded ? 'max-h-75 overflow-hidden [mask-image:linear-gradient(#000_calc(100%-64px),transparent)]' : undefined}>
         <div ref={inner}>{children}</div>
       </div>
       {tall ? (

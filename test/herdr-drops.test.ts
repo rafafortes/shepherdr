@@ -189,7 +189,7 @@ describe('a change dropped is asked again only if it did not happen', () => {
     expect(h.count('agent.start')).toBe(1)
   })
 
-  test('a start whose look afterwards fails for a reason of herdr\'s own fails as the first try did, once', async () => {
+  test("a start whose look afterwards fails for a reason of herdr's own fails as the first try did, once", async () => {
     const w = h.space('w', '/x')
     h.fail('agent.start', 'drop-after')
     h.fail('agent.get', 'error')
@@ -231,10 +231,14 @@ describe('a change dropped is asked again only if it did not happen', () => {
     // nor does a start retry on it, nor a worktree
     let n = 0
     await expect(
-      retrying(async () => {
-        n++
-        throw new HerdrError('timeout', 'x')
-      }, [1, 1], dropped),
+      retrying(
+        async () => {
+          n++
+          throw new HerdrError('timeout', 'x')
+        },
+        [1, 1],
+        dropped,
+      ),
     ).rejects.toThrow('x')
     expect(n).toBe(1)
   })

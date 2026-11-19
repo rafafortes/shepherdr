@@ -21,15 +21,27 @@ describe.skipIf(!browser)('the controls shared by Settings and its pages', () =>
       const less = settings.getByRole('button', { name: 'Less: Review rounds', exact: true })
       const box = settings.getByRole('textbox', { name: 'Review rounds (rounds)', exact: true })
       await more.click()
-      await until(async () => (await box.inputValue()) === '4', (v) => v)
+      await until(
+        async () => (await box.inputValue()) === '4',
+        (v) => v,
+      )
       await box.press('ArrowDown')
-      await until(async () => (await box.inputValue()) === '3', (v) => v)
+      await until(
+        async () => (await box.inputValue()) === '3',
+        (v) => v,
+      )
       await less.click()
-      await until(async () => (await box.inputValue()) === '2', (v) => v)
+      await until(
+        async () => (await box.inputValue()) === '2',
+        (v) => v,
+      )
       // a value that is not a number steps to the least the setting takes
       await box.fill('many')
       await more.click()
-      await until(async () => (await box.inputValue()) === '1', (v) => v)
+      await until(
+        async () => (await box.inputValue()) === '1',
+        (v) => v,
+      )
       // a picker with no scrolling ancestor still opens: roomFor's window fallback
       await page.addStyleTag({ content: '* { overflow: visible !important; }' })
       await settings.getByRole('button', { name: /^Editing:/ }).click()
@@ -42,7 +54,10 @@ describe.skipIf(!browser)('the controls shared by Settings and its pages', () =>
       const doc = settings.getByRole('textbox', { name: 'Task agents', exact: true })
       await doc.fill('Saved with a shortcut.')
       await doc.press('Control+s')
-      await until(async () => (await store.get('task.instructions', '~')) === 'Saved with a shortcut.', (v) => v)
+      await until(
+        async () => (await store.get('task.instructions', '~')) === 'Saved with a shortcut.',
+        (v) => v,
+      )
     } finally {
       store.set('review.rounds', rounds)
       store.set('task.instructions', instructions, { space: '~' })

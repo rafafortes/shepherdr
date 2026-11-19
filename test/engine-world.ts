@@ -76,7 +76,13 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
       }
       started.push({ ...s, pane })
       // a real start keeps the session its CLI was handed, which its own CLI resumes (agents.ts launch)
-      records[s.key] = { kind: s.kind, ...(s.model && s.model !== 'default' ? { model: s.model } : {}), started: Date.now(), sessionId: `${s.key}-session`, logs: [`/tmp/${s.key}.jsonl`] } as (typeof records)[string]
+      records[s.key] = {
+        kind: s.kind,
+        ...(s.model && s.model !== 'default' ? { model: s.model } : {}),
+        started: Date.now(),
+        sessionId: `${s.key}-session`,
+        logs: [`/tmp/${s.key}.jsonl`],
+      } as (typeof records)[string]
       status[s.key] = o.boot ?? 'working'
       if (o.boot) outbox.push(s.key)
       return null
@@ -122,7 +128,8 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
   const stopped: string[] = []
   const posted: { key: string; id: string; question?: { kind: string; steps?: string[] }; card?: { text: string; restart?: boolean } }[] = []
   /** what the agent's chat holds: its last reply, an open card of Shepherdr's, its CLI's own question */
-  const chat: { reply?: string; card?: 'plan' | 'ask'; cardTitle?: string; question?: boolean; unseen?: string[]; messages?: { who: string; text?: string; card?: object }[]; askedInTurn?: boolean } = { reply: 'Which name do you want?' }
+  const chat: { reply?: string; card?: 'plan' | 'ask'; cardTitle?: string; question?: boolean; unseen?: string[]; messages?: { who: string; text?: string; card?: object }[]; askedInTurn?: boolean } =
+    { reply: 'Which name do you want?' }
   const chats = {
     post: (key: string, p: { id: string; question?: { kind: string } }) => posted.push({ key, ...p }),
     lastReply: () => chat.reply,

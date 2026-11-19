@@ -15,20 +15,44 @@ describe.skipIf(!browser)("a task's side panel", () => {
     const page = await browser!.newPage({ viewport: { width: 1024, height: 850 } })
     await page.addInitScript(() => {
       localStorage.setItem('shepherdr.sidebars', JSON.stringify({ panelOpen: true, focus: false }))
-      localStorage.setItem('shepherdr.panes', JSON.stringify({ panes: [{ kind: 'place', id: 'p:vm-str:~' }, { kind: 'place', id: 'p:vm-str:gtm' }], pane: -1, sizes: [1, 1] }))
+      localStorage.setItem(
+        'shepherdr.panes',
+        JSON.stringify({
+          panes: [
+            { kind: 'place', id: 'p:vm-str:~' },
+            { kind: 'place', id: 'p:vm-str:gtm' },
+          ],
+          pane: -1,
+          sizes: [1, 1],
+        }),
+      )
     })
     const watches: string[][] = []
-    page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
-      try {
-        const message = JSON.parse(String(payload))
-        if (message.type === 'watch') watches.push(message.chats)
-      } catch { /* other socket traffic */ }
-    }))
+    page.on('websocket', (socket) =>
+      socket.on('framesent', ({ payload }) => {
+        try {
+          const message = JSON.parse(String(payload))
+          if (message.type === 'watch') watches.push(message.chats)
+        } catch {
+          /* other socket traffic */
+        }
+      }),
+    )
     await page.goto(task('GTM-14'))
     await page.getByRole('button', { name: 'Show gtm', exact: true }).waitFor()
-    expect(await until(() => Promise.resolve(watches.at(-1)?.length), (n) => n === 1)).toBe(1)
+    expect(
+      await until(
+        () => Promise.resolve(watches.at(-1)?.length),
+        (n) => n === 1,
+      ),
+    ).toBe(1)
     await page.setViewportSize({ width: 1920, height: 1000 })
-    expect(await until(() => Promise.resolve(watches.at(-1)?.length), (n) => n === 3)).toBe(3)
+    expect(
+      await until(
+        () => Promise.resolve(watches.at(-1)?.length),
+        (n) => n === 3,
+      ),
+    ).toBe(3)
     await page.close()
   })
 
@@ -106,8 +130,18 @@ describe.skipIf(!browser)("a task's side panel", () => {
     expect(await page.$eval(coordinator, (s) => s.parentElement!.inert)).toBe(true)
     // its toggle shows it is on, as the panel's does
     expect(await page.getByRole('button', { name: 'Show gtm' }).getAttribute('aria-pressed')).toBe('true')
-    expect(await until(() => page.$eval('#places', (n) => Math.round(n.parentElement!.getBoundingClientRect().width)), (w) => w === 0)).toBe(0)
-    expect(await until(() => width(page, 'section:has(textarea[aria-label^="Message GTM-15"])'), (w) => w === 1440 - 560)).toBe(1440 - 560)
+    expect(
+      await until(
+        () => page.$eval('#places', (n) => Math.round(n.parentElement!.getBoundingClientRect().width)),
+        (w) => w === 0,
+      ),
+    ).toBe(0)
+    expect(
+      await until(
+        () => width(page, 'section:has(textarea[aria-label^="Message GTM-15"])'),
+        (w) => w === 1440 - 560,
+      ),
+    ).toBe(1440 - 560)
     // widened, the panel takes all but the chat's least, and stays so after a reload
     await page.getByRole('button', { name: 'Widen the task panel' }).click()
     expect(await until(panelWidth, (w) => w === 1440 - 360)).toBe(1440 - 360)
@@ -132,7 +166,12 @@ describe.skipIf(!browser)("a task's side panel", () => {
     await page.setViewportSize({ width: 900, height: 800 })
     await page.getByRole('button', { name: 'Hide gtm' }).click()
     expect(await until(shown, (w) => w === 0)).toBe(0)
-    expect(await until(() => width(page, 'section:has(textarea[aria-label^="Message GTM-15"])'), (w) => w === 900)).toBe(900)
+    expect(
+      await until(
+        () => width(page, 'section:has(textarea[aria-label^="Message GTM-15"])'),
+        (w) => w === 900,
+      ),
+    ).toBe(900)
     await page.getByRole('button', { name: 'Show gtm' }).click()
     expect(await until(shown, (w) => w > 300)).toBeGreaterThan(300)
     await page.close()
@@ -148,7 +187,14 @@ describe.skipIf(!browser)("a task's side panel", () => {
     expect(await panel.getByText('+23').first().isVisible()).toBe(true)
     // folders show open, a lone folder joined with its folder
     const rows = panel.getByRole('tree', { name: 'Changed files' }).getByRole('treeitem')
-    expect(await rows.evaluateAll((rs) => rs.map((r) => r.textContent))).toEqual(['src/webhooks', 'handler.ts+4−3M (Changed)', 'legacy.ts−3D (Deleted)', 'signature.ts+6−3M (Changed)', 'test', 'signature.test.ts+13A (Added)'])
+    expect(await rows.evaluateAll((rs) => rs.map((r) => r.textContent))).toEqual([
+      'src/webhooks',
+      'handler.ts+4−3M (Changed)',
+      'legacy.ts−3D (Deleted)',
+      'signature.ts+6−3M (Changed)',
+      'test',
+      'signature.test.ts+13A (Added)',
+    ])
     await rows.filter({ hasText: 'signature.ts' }).first().click()
     const diff = panel.getByRole('table', { name: 'Changes in src/webhooks/signature.ts' })
     await diff.waitFor()
@@ -161,7 +207,10 @@ describe.skipIf(!browser)("a task's side panel", () => {
       await page.emulateMedia({ colorScheme: scheme })
       // the app follows the device's mode a moment later, from its own listener
       await page.waitForFunction((s) => document.documentElement.dataset.theme === s, scheme)
-      const bg = await diff.locator('tr[data-line=add]').first().evaluate((r) => getComputedStyle(r).backgroundColor)
+      const bg = await diff
+        .locator('tr[data-line=add]')
+        .first()
+        .evaluate((r) => getComputedStyle(r).backgroundColor)
       expect(bg).toMatch(scheme === 'light' ? /rgba\(48, 164, 108/ : /rgba\(61, 214, 140/)
     }
     // the keyboard walks the tree (a narrow panel shows the list or a file: back to the list first)
@@ -212,7 +261,7 @@ describe.skipIf(!browser)("a task's side panel", () => {
     await page.close()
   }, 30_000)
 
-  test("Terminal is an item: a click puts the keys into it, Ctrl+` opens it and goes back to the chat (desktop)", async () => {
+  test('Terminal is an item: a click puts the keys into it, Ctrl+` opens it and goes back to the chat (desktop)', async () => {
     const page = await browser!.newPage({ viewport: { width: 1600, height: 900 } })
     await page.goto(task('GTM-14'))
     const box = page.getByRole('textbox', { name: /Message GTM-14/ })
@@ -307,7 +356,7 @@ describe.skipIf(!browser)("a task's side panel", () => {
     await page.close()
   }, 30_000)
 
-  test("on a phone it pans sideways where the font would be too small, and two fingers zoom it", async () => {
+  test('on a phone it pans sideways where the font would be too small, and two fingers zoom it', async () => {
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     await page.goto(`${task('GTM-14')}&item=terminal`)
     const sel = '[role=dialog] [role=log][aria-label=Terminal]'
@@ -350,11 +399,30 @@ describe.skipIf(!browser)("a task's side panel", () => {
     await page.getByRole('button', { name: 'More', exact: true }).click()
     const menu = page.getByRole('menu', { name: 'More' })
     // like a coordinator's: Search in this chat first, then the items; no search button of its own in the header
-    expect(await menu.getByRole('menuitem').allTextContents()).toEqual(['Search in this chat', 'Search this chat and beyond', 'Terminal', 'Files', 'Diff', 'Pull request', 'Browser', 'Artifacts', 'Pin', 'Restart agent…', 'Stop…', 'Done', 'Archive', 'Delete…'])
+    expect(await menu.getByRole('menuitem').allTextContents()).toEqual([
+      'Search in this chat',
+      'Search this chat and beyond',
+      'Terminal',
+      'Files',
+      'Diff',
+      'Pull request',
+      'Browser',
+      'Artifacts',
+      'Pin',
+      'Restart agent…',
+      'Stop…',
+      'Done',
+      'Archive',
+      'Delete…',
+    ])
     expect(await page.getByRole('button', { name: 'Search in this chat' }).count()).toBe(0)
     // no PR: greyed out; opened, it says why
     await menu.locator('[role=menuitem][data-off]', { hasText: 'Pull request' }).click()
-    await page.getByRole('dialog', { name: 'Pull request · GTM-14' }).getByText(/pull request/i).first().waitFor()
+    await page
+      .getByRole('dialog', { name: 'Pull request · GTM-14' })
+      .getByText(/pull request/i)
+      .first()
+      .waitFor()
     await page.getByRole('button', { name: 'Back to the chat' }).click()
     await page.getByRole('dialog').waitFor({ state: 'detached' })
     await page.getByRole('button', { name: 'More', exact: true }).click()
@@ -447,7 +515,14 @@ describe.skipIf(!browser)("a task's side panel", () => {
   test('the Browser panel: watch the agent, take over and click, mark it up with a pin, send the note into the chat', async () => {
     const fake = fakeAgentBrowser()
     const was = world.browsers
-    const b = new Browsers({ bin: fake.bin, env: (t) => ({ ...browserEnv(t), AGENT_BROWSER_NAMESPACE: 'layout-test', ...fake.env }), host: 'vm-str', user: () => 'Elias', working: () => false, tell: () => undefined })
+    const b = new Browsers({
+      bin: fake.bin,
+      env: (t) => ({ ...browserEnv(t), AGENT_BROWSER_NAMESPACE: 'layout-test', ...fake.env }),
+      host: 'vm-str',
+      user: () => 'Elias',
+      working: () => false,
+      tell: () => undefined,
+    })
     world.browsers = b
     const until = async (f: () => boolean) => {
       for (let i = 0; !f(); i++) {
@@ -503,7 +578,14 @@ describe.skipIf(!browser)("a task's side panel", () => {
   test('the Browser panel when it won’t start: the message covers the last page in the theme’s colours (no white box in dark), and Try again starts it', async () => {
     const fake = fakeAgentBrowser()
     const was = world.browsers
-    const b = new Browsers({ bin: fake.bin, env: (t) => ({ ...browserEnv(t), AGENT_BROWSER_NAMESPACE: 'layout-test', ...fake.env }), host: 'vm-str', user: () => 'Elias', working: () => false, tell: () => undefined })
+    const b = new Browsers({
+      bin: fake.bin,
+      env: (t) => ({ ...browserEnv(t), AGENT_BROWSER_NAMESPACE: 'layout-test', ...fake.env }),
+      host: 'vm-str',
+      user: () => 'Elias',
+      working: () => false,
+      tell: () => undefined,
+    })
     world.browsers = b
     const until = async (f: () => boolean) => {
       for (let i = 0; !f(); i++) {

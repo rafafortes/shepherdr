@@ -13,8 +13,7 @@ export const currentChat = (key: string): Chat => current.get(key)!
 
 export const sameMessage = (a: Message, b: Message): boolean => a === b || JSON.stringify(a) === JSON.stringify(b)
 
-const sameMsgs = (a: Message[] | undefined, b: Message[] | undefined): boolean =>
-  a === b || (!!a && !!b && a.length === b.length && a.every((m, i) => sameMessage(m, b[i])))
+const sameMsgs = (a: Message[] | undefined, b: Message[] | undefined): boolean => a === b || (!!a && !!b && a.length === b.length && a.every((m, i) => sameMessage(m, b[i])))
 
 /** Wrap a chat row so a push redraws it only when its message changes. Everything else it gets is a key, a string, a
  *  flag or an outbox entry, compared by identity. The chat itself is not a prop at all (see currentChat). */

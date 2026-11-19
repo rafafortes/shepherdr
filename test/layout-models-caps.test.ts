@@ -24,7 +24,10 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
       const s = await openModels(page)
       await s.scrollIntoViewIfNeeded()
       const table = s.getByRole('table', { name: 'Providers and models' })
-      const spark = table.getByRole('row').filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) }).first()
+      const spark = table
+        .getByRole('row')
+        .filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) })
+        .first()
       await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
       // the three choices: No cap, Blocked · 0 allowed, and Limit with its number
@@ -50,7 +53,10 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
       const s = await openModels(page)
       await s.scrollIntoViewIfNeeded()
       const table = s.getByRole('table', { name: 'Providers and models' })
-      const spark = table.getByRole('row').filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) }).first()
+      const spark = table
+        .getByRole('row')
+        .filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) })
+        .first()
       await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
       await pop.getByRole('radio', { name: /This space/ }).check()
@@ -80,7 +86,10 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
       const s = await openModels(page)
       await s.scrollIntoViewIfNeeded()
       const table = s.getByRole('table', { name: 'Providers and models' })
-      const spark = table.getByRole('row').filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) }).first()
+      const spark = table
+        .getByRole('row')
+        .filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) })
+        .first()
       await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
       // the three choices of a cap: No cap, Blocked · 0 allowed, and a Limit with its number
@@ -175,7 +184,10 @@ describe.skipIf(!browser)('the cap on a provider or model, in the Summary', () =
       const s = await openModels(page)
       await s.scrollIntoViewIfNeeded()
       const table = s.getByRole('table', { name: 'Providers and models' })
-      const spark = table.getByRole('row').filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) }).first()
+      const spark = table
+        .getByRole('row')
+        .filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) })
+        .first()
       // the cell as it reads before (the demo world is shared by this file's tests: an earlier one may have set it)
       const labels = () => spark.getByRole('button').evaluateAll((b) => b.map((x) => x.getAttribute('aria-label')))
       const before = await labels()

@@ -67,7 +67,13 @@ const IMAGE_TYPES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg
 function isImage(b: Buffer, ext: string) {
   const head = b.subarray(0, 12).toString('latin1')
   if (ext === 'svg') return /<svg[\s>]/i.test(b.subarray(0, 4096).toString('utf8'))
-  return head.startsWith('\x89PNG') || head.startsWith('\xff\xd8\xff') || head.startsWith('GIF8') || (head.startsWith('RIFF') && head.slice(8, 12) === 'WEBP') || /^ftyp(avif|avis|mif1)$/.test(head.slice(4, 12))
+  return (
+    head.startsWith('\x89PNG') ||
+    head.startsWith('\xff\xd8\xff') ||
+    head.startsWith('GIF8') ||
+    (head.startsWith('RIFF') && head.slice(8, 12) === 'WEBP') ||
+    /^ftyp(avif|avis|mif1)$/.test(head.slice(4, 12))
+  )
 }
 
 /** Imports must never publish the vault or private process routing (including via symlinks). */
@@ -76,7 +82,11 @@ export function publicArtifactInput(path: string) {
   const roots = [HOME, process.env.SHEPHERDR_MAIN_HOME, join(boxHome(), '.shepherdr')].filter((x): x is string => !!x)
   for (const root of roots) {
     let base = resolve(root)
-    try { base = task.realpathSync(root) } catch { /* a missing remote/local root has no files */ }
+    try {
+      base = task.realpathSync(root)
+    } catch {
+      /* a missing remote/local root has no files */
+    }
     if (real === base || real.startsWith(base + sep)) {
       if (['inbox', 'artifacts'].some((dir) => real.startsWith(join(base, dir) + sep))) continue
       throw new Error('Private Shepherdr files cannot be imported into artifacts.')
@@ -229,8 +239,7 @@ export class Artifacts {
     if (a.versions.length <= KEEP_VERSIONS) return
     const gone = a.versions.splice(0, a.versions.length - KEEP_VERSIONS)
     const used = new Set(a.versions.flatMap((v) => [`${v.html}.html`, v.data ? `${v.data}.json` : '']))
-    for (const v of gone)
-      for (const f of [`${v.n}.html`, `${v.n}.json`]) if (!used.has(f)) rmSync(join(this.dir, a.id, f), { force: true })
+    for (const v of gone) for (const f of [`${v.n}.html`, `${v.n}.json`]) if (!used.has(f)) rmSync(join(this.dir, a.id, f), { force: true })
   }
 
   html(a: ArtifactRec, n?: number) {
@@ -291,7 +300,14 @@ export class Artifacts {
       if (!existsSync(f) || this.list[p.id]) continue
       mkdirSync(join(this.dir, p.id), { recursive: true })
       writeFileSync(this.file(p.id, 1, 'html'), readFileSync(f))
-      this.list[p.id] = { id: p.id, title: p.title, place: placeOf(p.chat), at: p.at, versions: [{ n: 1, at: p.at, by: p.by, chat: p.chat, html: 1 }], sent: p.sent ? { html: 1, text: p.sent } : undefined }
+      this.list[p.id] = {
+        id: p.id,
+        title: p.title,
+        place: placeOf(p.chat),
+        at: p.at,
+        versions: [{ n: 1, at: p.at, by: p.by, chat: p.chat, html: 1 }],
+        sent: p.sent ? { html: 1, text: p.sent } : undefined,
+      }
       repost(p.chat, p.id)
     }
     if (Object.keys(old).length || existsSync(pagesDir)) {
@@ -314,7 +330,12 @@ export function browserChecker(run: (args: string[]) => Promise<{ ok: boolean; o
   }
 }
 
-async function checkOne(run: (args: string[]) => Promise<{ ok: boolean; out: string; err: string }>, wrap: (html: string, data?: unknown) => string, html: string, data: unknown): Promise<CheckResult> {
+async function checkOne(
+  run: (args: string[]) => Promise<{ ok: boolean; out: string; err: string }>,
+  wrap: (html: string, data?: unknown) => string,
+  html: string,
+  data: unknown,
+): Promise<CheckResult> {
   const dir = join(HOME, 'checks')
   mkdirSync(dir, { recursive: true })
   // the pictures are for the agent to look at now: a day later they go
@@ -367,4 +388,3 @@ async function checkOne(run: (args: string[]) => Promise<{ ok: boolean; out: str
 
 /** for the check: what the page itself reports, written into it before anything else runs */
 export const CHECK_PROBE = `<script>(function(){var k=window.__shepherdrCheck=[];addEventListener('error',function(e){if(e.message)k.push('script error: '+e.message+(e.lineno?' (line '+e.lineno+')':''))});addEventListener('unhandledrejection',function(e){k.push('script error: '+(e.reason&&e.reason.message||e.reason))});addEventListener('securitypolicyviolation',function(e){k.push('blocked: '+(e.blockedURI||e.violatedDirective)+' (artifacts load nothing: put it inline)')});window.__shepherdrMedia=function(){var de=document.documentElement,W=de.clientWidth,H=innerHeight,n={};[].forEach.call(document.querySelectorAll('img,video,canvas,svg,iframe,embed,object'),function(el){var t=el.tagName.toLowerCase();n[t]=(n[t]||0)+1;if(el.ownerSVGElement)return;var r=el.getBoundingClientRect(),why=[];if(!r.width||!r.height)return;if(r.right>W+1||r.left<-1)why.push('wider than the page ('+W+' px)');if(r.height>H+1)why.push('taller than the screen ('+H+' px)');if(why.length)k.push('media: '+t+' '+n[t]+' ('+Math.round(r.width)+'×'+Math.round(r.height)+' px) is '+why.join(' and '))})};var ce=console.error;console.error=function(){k.push('console: '+[].map.call(arguments,String).join(' '));return ce.apply(console,arguments)}})()</script>`
-

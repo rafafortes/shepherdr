@@ -31,7 +31,23 @@ function place(tag: string) {
 function logLines(cwd: string) {
   const base = { isSidechain: false, userType: 'external', entrypoint: 'cli', cwd, sessionId: S, version: '2.1.283' }
   const user = { parentUuid: null, ...base, promptId: 'p-1', type: 'user', message: { role: 'user', content: 'Desligamos o reasoning?' }, uuid: 'u1', timestamp: '2026-11-18T17:47:00.000Z' }
-  const agent = { parentUuid: 'u1', ...base, message: { model: 'claude-opus-5-5', id: 'msg_r', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'Sim, desligamos.' }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }, type: 'assistant', uuid: 'a1', timestamp: '2026-11-18T17:47:38.000Z' }
+  const agent = {
+    parentUuid: 'u1',
+    ...base,
+    message: {
+      model: 'claude-opus-5-5',
+      id: 'msg_r',
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Sim, desligamos.' }],
+      stop_reason: 'end_turn',
+      stop_sequence: null,
+      usage: { input_tokens: 1, output_tokens: 1 },
+    },
+    type: 'assistant',
+    uuid: 'a1',
+    timestamp: '2026-11-18T17:47:38.000Z',
+  }
   return [user, agent].map((o) => JSON.stringify(o)).join('\n') + '\n'
 }
 
@@ -55,7 +71,7 @@ function agentsWith(key: string, cwd: string, liveCwd: string | null, started = 
 }
 
 describe('a symlinked space reads the agent where it runs', () => {
-  test('discovery prefers herdr\'s live cwd and finds the log under the real path', () => {
+  test("discovery prefers herdr's live cwd and finds the log under the real path", () => {
     const { real, link } = place('discover')
     const now = Date.now()
     const live = session(claudeProjectDir(real), S, logLines(real), now - 1000)
@@ -84,7 +100,11 @@ describe('a symlinked space reads the agent where it runs', () => {
     const a = agentsWith(KEY, link, real)
     try {
       a.discoverLog(KEY)
-      const chats = new Chats(a, () => 'coordinator', () => 'Elias')
+      const chats = new Chats(
+        a,
+        () => 'coordinator',
+        () => 'Elias',
+      )
       const chat = chats.chat(KEY)
       const said = chat.messages.filter((m) => m.text).map((m) => m.text)
       expect(said).toContain('Desligamos o reasoning?')
@@ -111,7 +131,11 @@ describe('a symlinked space reads the agent where it runs', () => {
       a.discoverLog(KEY)
       ;(a as unknown as { learnSession(k: string, info: { agent_session: unknown }): void }).learnSession(KEY, { agent_session: { source: 'herdr', agent: NAME, kind: 'id', value: S } })
       expect(a.record(KEY)!.logs).toEqual([live])
-      const chat = new Chats(a, () => 'coordinator', () => 'Elias').chat(KEY)
+      const chat = new Chats(
+        a,
+        () => 'coordinator',
+        () => 'Elias',
+      ).chat(KEY)
       expect(chat.messages.map((m) => m.text).filter(Boolean)).toEqual(['Desligamos o reasoning?', 'Sim, desligamos.'])
       expect(chat.unreadable).toBeUndefined()
     } finally {
@@ -126,7 +150,11 @@ describe('a symlinked space reads the agent where it runs', () => {
       // both candidate folders exist, but neither holds a log
       expect(a.unreadable(KEY)).toMatch(/can't be read right now/)
       expect(a.unreadableLogs()).toEqual([`${KEY}: ${a.unreadable(KEY)}`])
-      const chats = new Chats(a, () => 'coordinator', () => 'Elias')
+      const chats = new Chats(
+        a,
+        () => 'coordinator',
+        () => 'Elias',
+      )
       const chat = chats.chat(KEY)
       expect(chat.messages).toHaveLength(0)
       expect(chat.unreadable).toBe(a.unreadable(KEY))
@@ -169,7 +197,7 @@ describe('a symlinked space reads the agent where it runs', () => {
     }
   })
 
-  test('every CLI\'s own session file name is recognised as readable', () => {
+  test("every CLI's own session file name is recognised as readable", () => {
     const dir = tmp('unreadable-names')
     mkdirSync(dir, { recursive: true })
     // pi prefixes its log with a timestamp; the others name it after the session id

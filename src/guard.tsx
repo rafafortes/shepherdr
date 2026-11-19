@@ -60,9 +60,7 @@ const VIEWS = new Set(['View', 'Icon'])
 /** Run a plugin's setup: on an error the registry is as it was before, and each part it added is wrapped. */
 export function setupGuarded<R extends object>(name: string, registry: R, setup: (r: R) => void) {
   const reg = registry as Record<string, unknown>
-  const before: Record<string, unknown> = Object.fromEntries(
-    Object.entries(reg).map(([k, v]) => [k, Array.isArray(v) ? [...v] : v && typeof v === 'object' ? { ...v } : v]),
-  )
+  const before: Record<string, unknown> = Object.fromEntries(Object.entries(reg).map(([k, v]) => [k, Array.isArray(v) ? [...v] : v && typeof v === 'object' ? { ...v } : v]))
   try {
     setup(registry)
   } catch (e) {
@@ -80,9 +78,7 @@ export function setupGuarded<R extends object>(name: string, registry: R, setup:
   const item = (x: unknown): unknown => {
     if (typeof x === 'function') return guardView(name, x as FC)
     if (!x || typeof x !== 'object') return x
-    return Object.fromEntries(
-      Object.entries(x).map(([k, v]) => [k, typeof v !== 'function' ? v : VIEWS.has(k) ? guardView(name, v as FC) : guardFn(name, v as () => unknown, fallback(k))]),
-    )
+    return Object.fromEntries(Object.entries(x).map(([k, v]) => [k, typeof v !== 'function' ? v : VIEWS.has(k) ? guardView(name, v as FC) : guardFn(name, v as () => unknown, fallback(k))]))
   }
   for (const [k, v] of Object.entries(reg)) {
     const was = before[k]
@@ -162,13 +158,16 @@ function reloadScreen() {
 function Crashed({ crash }: { crash: ScreenCrash }) {
   // App is gone, so its data-device is too: name it here for the phone/coarse sizes (the same cut-offs as kernel)
   return (
-    <div data-screen-crash data-device={innerWidth < 800 ? 'phone' : innerWidth < 1024 ? 'tablet' : 'desktop'} role="alert" className="grid h-full place-items-center bg-bg px-6 font-sans text-sm/5 text-fg antialiased phone:text-base/6">
+    <div
+      data-screen-crash
+      data-device={innerWidth < 800 ? 'phone' : innerWidth < 1024 ? 'tablet' : 'desktop'}
+      role="alert"
+      className="grid h-full place-items-center bg-bg px-6 font-sans text-sm/5 text-fg antialiased phone:text-base/6"
+    >
       <div className="flex max-w-md flex-col items-center gap-3 text-center">
         <h1 className="text-base font-semibold">Something on the screen broke.</h1>
         <p className="text-fg2">
-          {crash.count >= CRASH_RELOADS
-            ? `Reloading hasn't fixed this after ${crash.count} tries. Restart Shepherdr from herdr, or check for an update.`
-            : 'Reload to try again.'}
+          {crash.count >= CRASH_RELOADS ? `Reloading hasn't fixed this after ${crash.count} tries. Restart Shepherdr from herdr, or check for an update.` : 'Reload to try again.'}
         </p>
         <button type="button" onClick={reloadScreen} className="press-dim inline-flex h-[34px] shrink-0 items-center rounded-full bg-fg px-3.5 font-medium text-bg coarse:h-11 phone:h-11">
           Reload

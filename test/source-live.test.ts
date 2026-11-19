@@ -93,7 +93,19 @@ describe('a turn the provider cut off, end to end', () => {
       const id = `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`
       const line = (o: object) => `${JSON.stringify(o)}\n`
       appendFileSync(f, line({ type: 'user', isSidechain: false, uuid: `u-${id}`, timestamp: at, sessionId: 's', message: { role: 'user', content: 'go on' } }))
-      appendFileSync(f, line({ type: 'assistant', isSidechain: false, uuid: id, timestamp: at, error: 'server_error', isApiErrorMessage: true, apiErrorStatus: 529, message: { id: `m-${id}`, role: 'assistant', model: '<synthetic>', stop_reason: 'stop_sequence', content: [{ type: 'text', text: 'API Error: 529 Overloaded.' }] } }))
+      appendFileSync(
+        f,
+        line({
+          type: 'assistant',
+          isSidechain: false,
+          uuid: id,
+          timestamp: at,
+          error: 'server_error',
+          isApiErrorMessage: true,
+          apiErrorStatus: 529,
+          message: { id: `m-${id}`, role: 'assistant', model: '<synthetic>', stop_reason: 'stop_sequence', content: [{ type: 'text', text: 'API Error: 529 Overloaded.' }] },
+        }),
+      )
     }
     return { f, cut }
   }
@@ -179,15 +191,51 @@ describe('a turn the provider cut off, end to end', () => {
     const t0 = Date.now() - 60_000
     // its turn ended well, and its log has no failure yet: nothing to see when its status changes
     row({ id: 'u1', type: 'user', seq: 1, time: t0, data: { text: 'Go on', time: { created: t0 } } })
-    row({ id: 'a1', type: 'assistant', seq: 2, time: t0 + 1000, data: { agent: 'build', model: { providerID: 'opencode', id: 'hy4-flash-free' }, content: [{ type: 'text', text: 'Running the check.' }], finish: 'stop', time: { created: t0 + 1000, completed: t0 + 1100 } } })
+    row({
+      id: 'a1',
+      type: 'assistant',
+      seq: 2,
+      time: t0 + 1000,
+      data: {
+        agent: 'build',
+        model: { providerID: 'opencode', id: 'hy4-flash-free' },
+        content: [{ type: 'text', text: 'Running the check.' }],
+        finish: 'stop',
+        time: { created: t0 + 1000, completed: t0 + 1100 },
+      },
+    })
     src.agents.records[key] = { key, name: 'shep-oc-137-test', kind: 'opencode', cwd: '/w/137', workspace: 'web', logs: [f], started: 0 }
     Object.assign(src.retries, { waits: [30, 30, 30, 30] })
     try {
       src.agents.emit('status', key, 'idle')
       expect(src.retries.get(key)).toBeUndefined()
       // seconds later the mirror copies the failure: its provider's free models ran out for ~41 minutes
-      row({ id: 'a2', type: 'assistant', seq: 3, time: t0 + 5000, data: { agent: 'build', model: { providerID: 'opencode', id: 'hy4-flash-free' }, content: [], finish: 'error', error: { type: 'provider.free-limit', message: 'Free usage limit reached. Connect a provider or subscribe to OpenCode Go to keep going, or switch models.', status: 429, retryAfterMs: 2_447_000 }, time: { created: t0 + 5000, completed: t0 + 5100 } } })
-      row({ id: 'i2', type: 'idle', seq: 4, time: t0 + 5200, data: { time: { created: t0 + 5200 }, outcome: 'failed', error: { type: 'provider.free-limit', message: 'Free usage limit reached.', status: 429, retryAfterMs: 2_447_000 } } })
+      row({
+        id: 'a2',
+        type: 'assistant',
+        seq: 3,
+        time: t0 + 5000,
+        data: {
+          agent: 'build',
+          model: { providerID: 'opencode', id: 'hy4-flash-free' },
+          content: [],
+          finish: 'error',
+          error: {
+            type: 'provider.free-limit',
+            message: 'Free usage limit reached. Connect a provider or subscribe to OpenCode Go to keep going, or switch models.',
+            status: 429,
+            retryAfterMs: 2_447_000,
+          },
+          time: { created: t0 + 5000, completed: t0 + 5100 },
+        },
+      })
+      row({
+        id: 'i2',
+        type: 'idle',
+        seq: 4,
+        time: t0 + 5200,
+        data: { time: { created: t0 + 5200 }, outcome: 'failed', error: { type: 'provider.free-limit', message: 'Free usage limit reached.', status: 429, retryAfterMs: 2_447_000 } },
+      })
       await until(() => src.retries.get(key) !== undefined, 8000, 'the late cut')
       // nothing waits on a limit that is out: it is the backup's, or the human's, at once, and its reset is known
       expect(src.retries.get(key)).toMatchObject({ over: true, lasting: true, reason: `Out of allowance until ${momentOf(t0 + 5000 + 2_447_000)}` })
@@ -265,12 +313,16 @@ describe('machine health', () => {
       const card = src.chats.chat(machine).messages.find((m) => m.card?.health)
       expect(card?.card).toMatchObject({ text: 'memory is 96% used', health: { level: 'over', machine: HOST } })
       const news = sent.find((s) => s.key === machine && s.text.includes('<health '))!.text
-      expect(news).toStartWith(`<shepherdr><health kind="memory" what="over">Machine ${HOST}: memory is over 90%: 96% in use.\nCPU 13% (load 2.0 on 16 cores) · Memory 96% (96 GB of 100 GB) · Disk /tmp 40% (60 GB free)\nTasks: `)
+      expect(news).toStartWith(
+        `<shepherdr><health kind="memory" what="over">Machine ${HOST}: memory is over 90%: 96% in use.\nCPU 13% (load 2.0 on 16 cores) · Memory 96% (96 GB of 100 GB) · Disk /tmp 40% (60 GB free)\nTasks: `,
+      )
       expect(news).toContain('Using it most now:')
       expect(news).toContain('Shepherdr closed 2 shared browsers that finished tasks left open (TG-4, TG-5).')
       expect(keep!('TG-4')).toBe(false)
       expect(news).toContain('shepherdr task pause <id>')
-      expect(news).toContain('Act on it if the human asked you to handle such things. If it can’t wait, alert the human with shepherdr alert and say why. A card in this chat already shows the human the news: reply after it in one or two short lines')
+      expect(news).toContain(
+        'Act on it if the human asked you to handle such things. If it can’t wait, alert the human with shepherdr alert and say why. A card in this chat already shows the human the news: reply after it in one or two short lines',
+      )
       // only the home space hears it: no coordinator of All machines any more
       expect(sent.filter((s) => s.text.includes('<health ')).map((s) => s.key)).toEqual([machine])
       expect(news).toContain('Never <no-reply> to it.')
@@ -352,7 +404,10 @@ describe('startup menus before the first message', () => {
     src.agents.status = (() => 'blocked') as typeof src.agents.status
     herdr.visible = async () => screen
     src.agents.refresh = async () => {}
-    src.agents.keys = async () => { sent++; screen = 'Ready for your message' }
+    src.agents.keys = async () => {
+      sent++
+      screen = 'Ready for your message'
+    }
     try {
       await src.chats.readMenu(key, true)
       const fallback = src.chats.chat(key).messages.find((m) => m.question)?.question
@@ -374,7 +429,9 @@ describe('startup menus before the first message', () => {
       src.agents.status = (() => 'idle') as typeof src.agents.status
       expect(await src.agents.send(key, 'Wait until MCP consent closes')).toMatchObject({ waiting: true, waitsFor: 'menu' })
       src.agents.outbox = src.agents.outbox.filter((o) => o.key !== key)
-      src.agents.keys = async () => { screen = screen.replace('[✔] one', '[ ] one') }
+      src.agents.keys = async () => {
+        screen = screen.replace('[✔] one', '[ ] one')
+      }
       expect(await src.act({ type: 'answer', chat: key, question: checkboxes!.id, choice: 1, choices: [1] })).toMatchObject({ ok: false, error: expect.stringContaining('still shows this prompt') })
       expect(src.chats.log(key).posted.some((m) => m.answered)).toBe(false)
     } finally {
@@ -513,7 +570,10 @@ describe('a live switch', () => {
         expect(src.agents.records[key]).toMatchObject({ model: 'claude-opus-5-5', effort: 'high' })
         ;(src.agents as { send: unknown }).send = async () => ({ waiting: true, item: {} })
         await expect(liveSwitch(key, { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).rejects.toThrow("couldn't take the command")
-        expect(await src.act({ type: 'live-switch', chat: key, kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).toMatchObject({ ok: false, error: expect.stringContaining("couldn't take the command") })
+        expect(await src.act({ type: 'live-switch', chat: key, kind: 'claude', model: 'claude-sonnet-5-5', effort: 'low' })).toMatchObject({
+          ok: false,
+          error: expect.stringContaining("couldn't take the command"),
+        })
         // "Default" is resolved to a concrete id/level before proof; no switch is needed when it is what runs now
         ;(src.agents.records[key] as { effort?: string }).effort = 'medium'
         expect(await liveSwitch(key, { kind: 'claude', model: '', effort: '' })).toMatchObject({ live: true })
@@ -531,7 +591,11 @@ describe('a live switch', () => {
         herdr.read = realRead
       }
       // a turn under way, a question, or no agent at all: no switch, no stopped turn
-      for (const [status, word] of [['working', 'busy with a turn'], ['blocked', 'waiting on a question'], ['gone', "isn't running"]] as const) {
+      for (const [status, word] of [
+        ['working', 'busy with a turn'],
+        ['blocked', 'waiting on a question'],
+        ['gone', "isn't running"],
+      ] as const) {
         src.agents.live.set(name, { ...live, agent_status: status } as never)
         await expect(liveSwitch(key, { kind: 'claude', model: 'claude-sonnet-5-5' }, io)).rejects.toThrow(word)
       }
@@ -580,7 +644,7 @@ describe('visible launch controls', () => {
         delete src.agents.records[key].model
         delete src.agents.records[key].effort
         expect(src.chat(key)?.agent).toEqual({ kind: 'codex' })
-        const info = await src.act({ type: 'restart-info', chat: key }) as { info: { on: unknown; want: unknown } }
+        const info = (await src.act({ type: 'restart-info', chat: key })) as { info: { on: unknown; want: unknown } }
         expect(info.info.on).toEqual({ kind: 'codex' })
         expect(info.info.want).toMatchObject({ kind: 'claude' })
         const bad = await src.act({ type: 'restart', chat: key, kind: 'codex', model: 'no-longer-available', save: true })
@@ -616,7 +680,12 @@ describe('Settings → Models: the table of this machine, read and written by th
     const m = (await src.act({ type: 'models-matrix' })) as import('../shared/types.ts').ModelsMatrix
     expect(m.machine).toEqual({ id: placeId.machine(), name: NAME })
     expect(m.rows.slice(0, 2).map((r) => r.id)).toEqual(['all', placeId.machine()])
-    expect(m.rows.map((r) => r.kind).slice(2).every((k) => k === 'space')).toBe(true)
+    expect(
+      m.rows
+        .map((r) => r.kind)
+        .slice(2)
+        .every((k) => k === 'space'),
+    ).toBe(true)
     expect(at(m, place)!.name).toBe(p.name)
     expect(at(m, place)!.values['space.maxTasks']).toEqual({ value: 'off', from: 'default', set: false })
     expect(await src.act({ type: 'setting', key: 'space.maxTasks', value: '5', place })).toEqual({ ok: true })
@@ -677,18 +746,54 @@ describe('chatName, needs and withAsks avoid rebuilding unrelated chats', () => 
     // 3) archived task with plain-reply ask, and 4) archived task whose background log read is still in flight (must not persist yet)
     const baseAt = Date.now() - 20_000
     const mkTask = (tid: string) => {
-      src.engine.tasks.push({ id: tid, n: 1, project: coord, base: 'main', branch: 'main', worktree: dir, title: `Task ${tid}`, desc: 'Done.', by: 'test', created: baseAt, updated: baseAt + 5000, merged: true, archived: true } as never)
+      src.engine.tasks.push({
+        id: tid,
+        n: 1,
+        project: coord,
+        base: 'main',
+        branch: 'main',
+        worktree: dir,
+        title: `Task ${tid}`,
+        desc: 'Done.',
+        by: 'test',
+        created: baseAt,
+        updated: baseAt + 5000,
+        merged: true,
+        archived: true,
+      } as never)
       return `${tid}/Agent`
     }
     const k1 = mkTask('FA-1')
     src.chats.post(k1, { id: 'ask:fa', at: baseAt + 1000, question: { id: 'ask:fa', title: 'Which?', kind: 'Question', choices: [{ label: 'A' }], to: k1 } } as never)
     src.chats.answer(k1, 'ask:fa', 0)
-    src.chats.post(coord, { id: 'need:FA-1:1', at: baseAt + 2000, card: { id: 'need:FA-1:1', task: 'FA-1', title: 'Task FA-1', status: 'need', text: 'needs you', ask: { chat: k1, questions: [{ id: 'ask:fa', title: 'Which?', kind: 'Question', choices: [{ label: 'A' }], to: k1 }] } } } as never)
+    src.chats.post(coord, {
+      id: 'need:FA-1:1',
+      at: baseAt + 2000,
+      card: {
+        id: 'need:FA-1:1',
+        task: 'FA-1',
+        title: 'Task FA-1',
+        status: 'need',
+        text: 'needs you',
+        ask: { chat: k1, questions: [{ id: 'ask:fa', title: 'Which?', kind: 'Question', choices: [{ label: 'A' }], to: k1 }] },
+      },
+    } as never)
 
     const k2 = mkTask('FA-2')
     src.chats.post(k2, { id: 'ask:fa2', at: baseAt + 1000, question: { id: 'ask:fa2', title: 'Keep?', kind: 'Question', choices: [{ label: 'Y' }], to: k2 } } as never)
     src.chats.post(k2, { id: 'you:fa2', at: baseAt + 1500, who: 'you', text: 'Skip it' })
-    src.chats.post(coord, { id: 'need:FA-2:1', at: baseAt + 2000, card: { id: 'need:FA-2:1', task: 'FA-2', title: 'Task FA-2', status: 'need', text: 'needs you', ask: { chat: k2, questions: [{ id: 'ask:fa2', title: 'Keep?', kind: 'Question', choices: [{ label: 'Y' }], to: k2 }] } } } as never)
+    src.chats.post(coord, {
+      id: 'need:FA-2:1',
+      at: baseAt + 2000,
+      card: {
+        id: 'need:FA-2:1',
+        task: 'FA-2',
+        title: 'Task FA-2',
+        status: 'need',
+        text: 'needs you',
+        ask: { chat: k2, questions: [{ id: 'ask:fa2', title: 'Keep?', kind: 'Question', choices: [{ label: 'Y' }], to: k2 }] },
+      },
+    } as never)
 
     // also verify hostFor does not attach a posted card to an agent reply across a hidden browser note
     const eventsMap = (src.chats as unknown as { events: Map<string, unknown[]> }).events
@@ -711,10 +816,18 @@ describe('chatName, needs and withAsks avoid rebuilding unrelated chats', () => 
     expect(src.chats.openCardsQuick(k2)).toEqual([])
 
     const k3 = mkTask('FA-3')
-    src.chats.post(coord, { id: 'need:FA-3:1', at: baseAt + 2000, card: { id: 'need:FA-3:1', task: 'FA-3', title: 'Task FA-3', status: 'need', text: 'needs you', ask: { chat: k3, reply: { id: 'r-3', text: 'Ready?' } } } } as never)
+    src.chats.post(coord, {
+      id: 'need:FA-3:1',
+      at: baseAt + 2000,
+      card: { id: 'need:FA-3:1', task: 'FA-3', title: 'Task FA-3', status: 'need', text: 'needs you', ask: { chat: k3, reply: { id: 'r-3', text: 'Ready?' } } },
+    } as never)
 
     const k4 = mkTask('FA-4')
-    src.chats.post(coord, { id: 'need:FA-4:1', at: baseAt + 2000, card: { id: 'need:FA-4:1', task: 'FA-4', title: 'Task FA-4', status: 'need', text: 'needs you', ask: { chat: k4, reply: { id: 'r-4', text: 'Still reading?' } } } } as never)
+    src.chats.post(coord, {
+      id: 'need:FA-4:1',
+      at: baseAt + 2000,
+      card: { id: 'need:FA-4:1', task: 'FA-4', title: 'Task FA-4', status: 'need', text: 'needs you', ask: { chat: k4, reply: { id: 'r-4', text: 'Still reading?' } } },
+    } as never)
     const readingSet = (src.chats as unknown as { reading: Set<string> }).reading
     readingSet.add(k4)
     try {

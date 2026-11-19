@@ -3,7 +3,27 @@
 // or tablet (on a desktop the ⋯ lists them too, opening their tab). A coordinator chat has none.
 import clsx from 'clsx'
 import { Fragment, useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react'
-import { agentChat, closeSheet, focusHere, openItem, openSplit, panesHere, paneToPanel, placeOf, registry, setUI, taskInMiddle, taskOf, toggleFocus, togglePanel, toggleWide, useSnap, useStore, useUI, type PanelItem } from './kernel.ts'
+import {
+  agentChat,
+  closeSheet,
+  focusHere,
+  openItem,
+  openSplit,
+  panesHere,
+  paneToPanel,
+  placeOf,
+  registry,
+  setUI,
+  taskInMiddle,
+  taskOf,
+  toggleFocus,
+  togglePanel,
+  toggleWide,
+  useSnap,
+  useStore,
+  useUI,
+  type PanelItem,
+} from './kernel.ts'
 import type { Task } from '@shared/types.ts'
 import { Pushed } from './Stack.tsx'
 import { BackIcon, Head, ic, IconButton, Menu, MenuItem, MenuSeparator, MoreIcon, NarrowIcon, PanelIcon, PhoneTop, RoundButton, SidebarIcon, Small, SplitIcon, Who, WidenIcon, XIcon } from './ui.tsx'
@@ -162,7 +182,11 @@ export function TaskMenu({ task, chatKey, pane }: { task: Task; chatKey: string;
         <MoreIcon className={ic} />
       </B>
       {open ? (
-        <Menu label="More" onClose={() => setUI({ taskMenu: false })} className="absolute top-full right-0 z-21 mt-1.5 max-h-[calc(100dvh-5rem)] max-w-[calc(100vw-24px)] origin-top-right overflow-y-auto">
+        <Menu
+          label="More"
+          onClose={() => setUI({ taskMenu: false })}
+          className="absolute top-full right-0 z-21 mt-1.5 max-h-[calc(100dvh-5rem)] max-w-[calc(100vw-24px)] origin-top-right overflow-y-auto"
+        >
           {registry.agentMenu.map(({ View }, i) => (
             <Fragment key={i}>
               <View chatKey={chatKey} />
@@ -196,7 +220,12 @@ export function TaskMenu({ task, chatKey, pane }: { task: Task; chatKey: string;
 function TaskMenuRow({ item, task, pane }: { item: PanelItem; task: Task; pane?: number }) {
   const off = item.useOff?.(task) ?? null
   return (
-    <MenuItem icon={<item.Icon className={ic} />} data-off={off ? '' : undefined} className={clsx(off && 'text-fg3')} onClick={() => (pane === undefined ? openItem(item.id) : paneToPanel(pane, item.id))}>
+    <MenuItem
+      icon={<item.Icon className={ic} />}
+      data-off={off ? '' : undefined}
+      className={clsx(off && 'text-fg3')}
+      onClick={() => (pane === undefined ? openItem(item.id) : paneToPanel(pane, item.id))}
+    >
       {item.label}
     </MenuItem>
   )

@@ -29,10 +29,7 @@ export interface RepoIdentity {
 export async function repoIdentity(path: string): Promise<RepoIdentity | null> {
   const top = await topLevel(path)
   if (!top) return null
-  const [common, here] = await Promise.all([
-    git(top, 'rev-parse', '--path-format=absolute', '--git-common-dir'),
-    git(top, 'rev-parse', '--path-format=absolute', '--git-dir'),
-  ])
+  const [common, here] = await Promise.all([git(top, 'rev-parse', '--path-format=absolute', '--git-common-dir'), git(top, 'rev-parse', '--path-format=absolute', '--git-dir')])
   const real = (r: { ok: boolean; out: string }) => {
     if (!r.ok || !r.out) return null
     try {

@@ -64,7 +64,23 @@ export function SectionDialogs() {
   return s ? <NameDialog key={s.id} snap={snap} kind="section" id={s.id} name={s.name} emoji={s.emoji} machine={s.machine} /> : null
 }
 
-function NameDialog({ snap, kind, id, own, name: was = '', emoji: had = '', machine }: { snap: Snapshot; kind: 'machine' | 'section' | 'new'; id?: string; own?: string; name?: string; emoji?: string; machine?: string }) {
+function NameDialog({
+  snap,
+  kind,
+  id,
+  own,
+  name: was = '',
+  emoji: had = '',
+  machine,
+}: {
+  snap: Snapshot
+  kind: 'machine' | 'section' | 'new'
+  id?: string
+  own?: string
+  name?: string
+  emoji?: string
+  machine?: string
+}) {
   const [name, setName] = useState(was)
   const [emoji, setEmoji] = useState(had)
   const [picking, setPicking] = useState(false)
@@ -132,17 +148,23 @@ function NameDialog({ snap, kind, id, own, name: was = '', emoji: had = '', mach
           void save()
         }}
       >
-        <div className={clsx('flex h-10 shrink-0 items-center gap-1 rounded-row bg-bg pr-1.5 pl-1 shadow-[inset_0_0_0_1px_var(--line2)] focus-within:shadow-[inset_0_0_0_1.5px_var(--focus)] coarse:h-11 phone:h-12', problem && 'shadow-[inset_0_0_0_1.5px_var(--color-need-fg)]!', pinned && 'pl-3')}>
+        <div
+          className={clsx(
+            'flex h-10 shrink-0 items-center gap-1 rounded-row bg-bg pr-1.5 pl-1 shadow-[inset_0_0_0_1px_var(--line2)] focus-within:shadow-[inset_0_0_0_1.5px_var(--focus)] coarse:h-11 phone:h-12',
+            problem && 'shadow-[inset_0_0_0_1.5px_var(--color-need-fg)]!',
+            pinned && 'pl-3',
+          )}
+        >
           {pinned ? null : (
-          <button
-            type="button"
-            aria-label={emoji ? `Emoji ${emoji}: change it` : 'Pick an emoji'}
-            aria-expanded={picking}
-            onClick={() => setPicking(!picking)}
-            className="grid size-8 shrink-0 place-items-center rounded-full text-[1.125rem] leading-none text-fg3 hover:bg-hover hover:text-fg aria-expanded:bg-sel phone:size-10 phone:text-[1.25rem]"
-          >
-            {emoji || <SmileIcon className={ic} />}
-          </button>
+            <button
+              type="button"
+              aria-label={emoji ? `Emoji ${emoji}: change it` : 'Pick an emoji'}
+              aria-expanded={picking}
+              onClick={() => setPicking(!picking)}
+              className="grid size-8 shrink-0 place-items-center rounded-full text-[1.125rem] leading-none text-fg3 hover:bg-hover hover:text-fg aria-expanded:bg-sel phone:size-10 phone:text-[1.25rem]"
+            >
+              {emoji || <SmileIcon className={ic} />}
+            </button>
           )}
           <input
             ref={input}
@@ -178,7 +200,11 @@ function NameDialog({ snap, kind, id, own, name: was = '', emoji: had = '', mach
         {picking ? (
           <div className="flex h-[320px] min-h-0 shrink flex-col overflow-hidden rounded-box shadow-[inset_0_0_0_1px_var(--line)] phone:h-[300px]">
             {emoji ? (
-              <button type="button" onClick={() => pick('')} className="flex h-9 shrink-0 items-center gap-2 border-b border-line px-3 text-left text-[0.8125rem] text-fg2 hover:bg-hover hover:text-fg coarse:h-11 phone:text-[0.9375rem]">
+              <button
+                type="button"
+                onClick={() => pick('')}
+                className="flex h-9 shrink-0 items-center gap-2 border-b border-line px-3 text-left text-[0.8125rem] text-fg2 hover:bg-hover hover:text-fg coarse:h-11 phone:text-[0.9375rem]"
+              >
                 <Plain className={ic} />
                 Remove emoji: show a {isMachine ? 'server' : 'folder'}
               </button>
@@ -245,7 +271,11 @@ function DeleteBox({ id, name, snap }: { id: string; name: string; snap: Snapsho
         </Primary>
       }
     >
-      <p>{n ? `${n > 1 ? `Its ${n} spaces go` : 'Its space goes'} back under ${n > 1 ? 'their machines' : 'its machine'}, where ${n > 1 ? 'they were' : 'it was'}. Nothing else changes.` : 'It is empty. Nothing else changes.'}</p>
+      <p>
+        {n
+          ? `${n > 1 ? `Its ${n} spaces go` : 'Its space goes'} back under ${n > 1 ? 'their machines' : 'its machine'}, where ${n > 1 ? 'they were' : 'it was'}. Nothing else changes.`
+          : 'It is empty. Nothing else changes.'}
+      </p>
       {error ? <p className="mt-1.5 text-need-fg">{error}</p> : null}
     </Dialog>
   )

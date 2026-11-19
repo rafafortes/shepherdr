@@ -34,7 +34,11 @@ const asked: string[] = []
 /** whether the primary answers */
 let answers = true
 /** what was posted into a chat, by key: the cards, oldest first */
-const cards = (key: string) => src.chats.chat(key).messages.filter((m) => m.card).map((m) => m.card!.text)
+const cards = (key: string) =>
+  src.chats
+    .chat(key)
+    .messages.filter((m) => m.card)
+    .map((m) => m.card!.text)
 /** the alerts this source raised */
 let alerts: { title: string; body: string }[] = []
 
@@ -76,7 +80,19 @@ let n = 0
 /** a task of that space, as its start leaves it: its agent running `on`, and — after a lasting takeover — on a backup */
 function task(project: string, on: string, tookOver?: { from: string; why?: string }) {
   const id = `RTN-${++n}`
-  src.engine.tasks.push({ id, n, project: placeId.space(project), base: 'main', title: `Say hello ${n}`, desc: 'Add hello.txt.', by: 'test', created: Date.now(), updated: Date.now(), told: 'work', ...(tookOver ? { tookOver: { from: tookOver.from, to: on, why: tookOver.why ?? 'out of allowance until 5pm', at: Date.now() } } : {}) } as never)
+  src.engine.tasks.push({
+    id,
+    n,
+    project: placeId.space(project),
+    base: 'main',
+    title: `Say hello ${n}`,
+    desc: 'Add hello.txt.',
+    by: 'test',
+    created: Date.now(),
+    updated: Date.now(),
+    told: 'work',
+    ...(tookOver ? { tookOver: { from: tookOver.from, to: on, why: tookOver.why ?? 'out of allowance until 5pm', at: Date.now() } } : {}),
+  } as never)
   const key = `${id}/Agent`
   src.agents.records[key] = { key, name: id, kind: on, cwd: tmp('return-wt'), workspace: project, logs: [], started: Date.now() } as never
   return { t: src.engine.tasks.find((x) => x.id === id)!, id, key }
@@ -91,7 +107,8 @@ function coordinator(key: string, on: string) {
 const later = () => Date.now() + 2 * 3_600_000
 
 /** what cut a coordinator off, as retry.ts hands it over */
-const cut = (key: string, reason: string, lasting: boolean) => sides.coordinatorCantGoOn(key, { cut: `e-${reason}`, tries: 1, reason, words: `${reason} (the provider's words)`, over: true, ...(lasting ? { lasting: true } : {}) })
+const cut = (key: string, reason: string, lasting: boolean) =>
+  sides.coordinatorCantGoOn(key, { cut: `e-${reason}`, tries: 1, reason, words: `${reason} (the provider's words)`, over: true, ...(lasting ? { lasting: true } : {}) })
 
 describe('what ran out is remembered', () => {
   test('retry.ts decides what is lasting: an error that passes by itself never is', () => {
@@ -155,7 +172,7 @@ describe('what ran out is remembered', () => {
 })
 
 describe('what a takeover of its own is not', () => {
-  test("a task on its own agent is no primary coming back, and is never recorded", async () => {
+  test('a task on its own agent is no primary coming back, and is never recorded', async () => {
     const s = await space('own-agent')
     try {
       expect(s.src.settings.set('task.fallback', 'codex', { space: s.p.name }).ok).toBe(true)
@@ -176,7 +193,7 @@ describe('what a takeover of its own is not', () => {
 })
 
 describe('when the primary answers again', () => {
-  test("one card per chat still on the backup, each naming its own way back, and none the second time", async () => {
+  test('one card per chat still on the backup, each naming its own way back, and none the second time', async () => {
     const s = await space('back-tasks')
     try {
       expect(s.src.settings.set('task.fallback', 'codex', { space: s.p.name }).ok).toBe(true)
@@ -192,9 +209,15 @@ describe('when the primary answers again', () => {
       // the primary was asked once, and answered for the task and the coordinator alike: a model is this machine's, not a
       // space's or a role's
       expect(asked).toEqual(['claude'])
-      expect(cards(a.key)).toEqual([`The primary model answers again: Claude Code. ${a.id} still runs on its backup (Codex): restart it to go back — shepherdr restart ${a.id}, or ⋯ → Restart agent in its chat. Nothing was switched.`])
-      expect(cards(b.key)).toEqual([`The primary model answers again: Claude Code. ${b.id} still runs on its backup (Codex): restart it to go back — shepherdr restart ${b.id}, or ⋯ → Restart agent in its chat. Nothing was switched.`])
-      expect(cards(s.key)).toEqual([`The primary model answers again: Claude Code. ${s.p.name}'s coordinator still runs on its backup (Codex): restart it to go back — shepherdr restart ${s.p.name}, or ⋯ → Restart agent in its chat. Nothing was switched.`])
+      expect(cards(a.key)).toEqual([
+        `The primary model answers again: Claude Code. ${a.id} still runs on its backup (Codex): restart it to go back — shepherdr restart ${a.id}, or ⋯ → Restart agent in its chat. Nothing was switched.`,
+      ])
+      expect(cards(b.key)).toEqual([
+        `The primary model answers again: Claude Code. ${b.id} still runs on its backup (Codex): restart it to go back — shepherdr restart ${b.id}, or ⋯ → Restart agent in its chat. Nothing was switched.`,
+      ])
+      expect(cards(s.key)).toEqual([
+        `The primary model answers again: Claude Code. ${s.p.name}'s coordinator still runs on its backup (Codex): restart it to go back — shepherdr restart ${s.p.name}, or ⋯ → Restart agent in its chat. Nothing was switched.`,
+      ])
       // the one that went back already hears nothing
       expect(cards(c.key)).toEqual([])
       expect(alerts.map((a) => a.title)).toEqual(['The primary model answers again', 'The primary model answers again'])
@@ -371,8 +394,18 @@ describe('going back by itself', () => {
       expect(s.started[0].first).toContain('Shepherdr moved this task back to its primary model, which answers again: Claude Code. Codex, its backup, ran it until now')
       expect(s.started[1].first).toContain('Shepherdr moved this chat back to its primary model, which answers again: Claude Code.')
       // the card in each chat says so; nothing of "the human restarted" in it
-      expect(s.src.chats.chat(a.key).messages.filter((m) => m.card?.restart).map((m) => m.card!.text)).toEqual(['Back on the primary model, which answers again: Claude Code'])
-      expect(s.src.chats.chat(s.key).messages.filter((m) => m.card?.restart).map((m) => m.card!.text)).toEqual(['Back on the primary model, which answers again: Claude Code'])
+      expect(
+        s.src.chats
+          .chat(a.key)
+          .messages.filter((m) => m.card?.restart)
+          .map((m) => m.card!.text),
+      ).toEqual(['Back on the primary model, which answers again: Claude Code'])
+      expect(
+        s.src.chats
+          .chat(s.key)
+          .messages.filter((m) => m.card?.restart)
+          .map((m) => m.card!.text),
+      ).toEqual(['Back on the primary model, which answers again: Claude Code'])
       expect(alerts.map((x) => x.title)).toEqual(['Back to work on the primary model', 'Back to work on the primary model'])
       // the backup's one go is given back: the next time the primary runs out, it takes over again
       expect(a.t.tookOver).toBeUndefined()
@@ -563,7 +596,6 @@ async function nightWorld(name: string, max = 4) {
 }
 
 describe('the night every model ran out', () => {
-
   test('its backup cut off too: a new task waits instead of being cut off as well, until the primary answers', async () => {
     const s = await nightWorld('night-out', 4)
     try {
@@ -646,7 +678,12 @@ describe('the night every model ran out', () => {
       ])
       expect(s.started[1].first).toContain("Your model's provider cut your turn off, and it answers again: Shepherdr started you again on Claude Code, with your session as it was.")
       expect(b.t.trouble).toBeUndefined()
-      expect(s.src.chats.chat(b.key).messages.filter((m) => m.card?.restart).map((m) => m.card!.text)).toEqual(['Started again on Claude Code: its provider answers again'])
+      expect(
+        s.src.chats
+          .chat(b.key)
+          .messages.filter((m) => m.card?.restart)
+          .map((m) => m.card!.text),
+      ).toEqual(['Started again on Claude Code: its provider answers again'])
       // all of them back: over, and the queue goes on
       expect(s.src.returns.get('task', s.p.name)!.back).toBeDefined()
       expect(s.src.engine.room(next.t)).toEqual({})
@@ -786,7 +823,7 @@ describe('cut off before outages were kept', () => {
     }
   })
 
-  test('one on its own harness (neither the primary nor the backup) is not the primary\'s to bring back', async () => {
+  test("one on its own harness (neither the primary nor the backup) is not the primary's to bring back", async () => {
     const s = await nightWorld('adopt-own')
     try {
       s.cutOff('opencode')
@@ -837,7 +874,12 @@ describe('a chain of backups, and the way back', () => {
       await s.src.watchReturns(Date.now() + 48 * 3_600_000)
       // each one goes back on its own: the second may still be starting when the pass returns
       for (const t0 = Date.now(); s.started.length < 2 && Date.now() - t0 < 5000; ) await Bun.sleep(20)
-      expect(s.started.map((x) => [x.key, x.kind]).sort()).toEqual([[a.key, 'claude'], [fine.key, 'claude']].sort())
+      expect(s.started.map((x) => [x.key, x.kind]).sort()).toEqual(
+        [
+          [a.key, 'claude'],
+          [fine.key, 'claude'],
+        ].sort(),
+      )
       // back on the primary, its chain is whole again for the next time
       expect(a.t.tookOver).toBeUndefined()
     } finally {
@@ -863,7 +905,11 @@ describe('a chain of backups, and the way back', () => {
   test('a coordinator still on its 2nd backup, nothing cut off, is taken in and goes back', async () => {
     const s = await nightWorld('chain-adopt-coord')
     try {
-      for (const [k, v] of [['coordinator.fallback', 'codex'], ['coordinator.fallback2', 'pi']]) expect(s.src.settings.set(k, v, { space: s.p.name }).ok).toBe(true)
+      for (const [k, v] of [
+        ['coordinator.fallback', 'codex'],
+        ['coordinator.fallback2', 'pi'],
+      ])
+        expect(s.src.settings.set(k, v, { space: s.p.name }).ok).toBe(true)
       coordinator(s.key, 'pi')
       s.src.agents.markTookOver(s.key, { from: 'codex', to: 'pi', why: 'signed out', at: Date.now() - 6 * 3_600_000, step: 2 })
       await s.src.watchReturns(Date.now())
@@ -1108,7 +1154,14 @@ describe('OpenCode as the primary: asked and gone back to like the others', () =
       expect(s.src.settings.set('task.model', GO, { space: s.p.name }).ok).toBe(true)
       expect(s.src.settings.set('task.effort', 'thinking', { space: s.p.name }).ok).toBe(true)
       // the takeover: OpenCode's provider ran out for good, and its task went in on the backup (Codex)
-      s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: GO, effort: 'thinking' }, to: { kind: 'codex' }, why: 'Out of allowance until tomorrow', at: Date.now() - FIRST_WAIT * 2 })
+      s.src.returns.note({
+        role: 'task',
+        space: s.p.name,
+        primary: { kind: 'opencode', model: GO, effort: 'thinking' },
+        to: { kind: 'codex' },
+        why: 'Out of allowance until tomorrow',
+        at: Date.now() - FIRST_WAIT * 2,
+      })
       const a = s.cutOff('codex')
       await s.src.watchReturns(later())
       // asked with its own one-shot (opencode run --agent plan), on its model
@@ -1168,7 +1221,9 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
     expect(src.settings.set('task.model', MODEL, { space: name }).ok).toBe(true)
     expect(src.settings.set('task.fallback', 'codex', { space: name }).ok).toBe(true)
   }
-  const forget = (name: string) => { for (const k of ['task.agent', 'task.model', 'task.fallback']) src.settings.set(k, null, { space: name }) }
+  const forget = (name: string) => {
+    for (const k of ['task.agent', 'task.model', 'task.fallback']) src.settings.set(k, null, { space: name })
+  }
 
   test('a content-filter cut on the primary leaves no outage: new tasks in two spaces start on the primary', async () => {
     const { setModels, opencodeList } = await import('../server/live/models.ts')

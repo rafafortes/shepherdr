@@ -36,7 +36,10 @@ export function markRead(snap: Snapshot, keys: string[]) {
 
 /** Mark as read: these spaces' coordinators' chats */
 export function markPlaceRead(snap: Snapshot, ps: Place[]) {
-  markRead(snap, ps.map((p) => p.chat).filter((k): k is string => !!k))
+  markRead(
+    snap,
+    ps.map((p) => p.chat).filter((k): k is string => !!k),
+  )
 }
 
 /** while the app is on screen, the chats it shows are read */

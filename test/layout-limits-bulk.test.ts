@@ -55,7 +55,10 @@ describe.skipIf(!browser)('the bulk actions of the sub-limits', () => {
       await page.getByRole('menuitem', { name: "Clear every space's sub-limit" }).click()
       await page.getByRole('alertdialog', { name: "Clear pi · Spark (local)'s sub-limit in every space" }).getByRole('button', { name: 'Clear in 1 space', exact: true }).click()
       await page.getByRole('alertdialog', { name: "Clear pi · Spark (local)'s sub-limit in every space" }).waitFor({ state: 'detached' })
-      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^pi · Spark \(local\) in gtm: machine's total applies/ }).waitFor()
+      await page
+        .getByRole('table', { name: 'Spaces' })
+        .getByRole('button', { name: /^pi · Spark \(local\) in gtm: machine's total applies/ })
+        .waitFor()
     } finally {
       await restore()
       await page.close()
@@ -69,7 +72,10 @@ describe.skipIf(!browser)('the bulk actions of the sub-limits', () => {
       const spaces = page.getByRole('table', { name: 'Spaces' })
       // a column of Codex, added: no entry yet, so every space shows no sub-limit
       await page.getByRole('button', { name: '+ column', exact: true }).click()
-      await page.getByRole('menuitem', { name: /^Codex/ }).first().click()
+      await page
+        .getByRole('menuitem', { name: /^Codex/ })
+        .first()
+        .click()
       await spaces.getByRole('button', { name: /^Codex in gtm: no sub-limit$/ }).waitFor()
       // Set for every space…: each space gets 3 of its own
       await page.getByRole('button', { name: 'More for Codex', exact: true }).click()

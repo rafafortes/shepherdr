@@ -9,14 +9,20 @@ import { tmp } from './tmp.ts'
 
 const FILE = '/home/me/.shepherdr/opencode/ses_1.jsonl'
 const line = (o: object, offset = 0) => ({ text: JSON.stringify(o), offset })
-const parse = (objs: object[], reader = new OpencodeReader(), file = FILE): LogEvent[] => reader.parse(objs.map((o, i) => line(o, i * 100)), file)
+const parse = (objs: object[], reader = new OpencodeReader(), file = FILE): LogEvent[] =>
+  reader.parse(
+    objs.map((o, i) => line(o, i * 100)),
+    file,
+  )
 const row = (id: string, type: string, data: object, time = 1) => ({ id, type, seq: 1, time, data })
 const turn = (id: string, data: object) => row(id, 'assistant', { time: { created: 10, completed: 12 }, ...data })
 const SESSION = { kind: 'session' as const, file: FILE, id: 'session-ses_1', at: 1, sessionId: 'ses_1' }
 
 /** the events without the session, runtime, usage and turn-start lines, as kind:id */
 const brief = (ev: LogEvent[]) =>
-  ev.filter((e) => e.kind !== 'session' && e.kind !== 'runtime' && e.kind !== 'usage' && e.kind !== 'turn-start').map((e) => (e.kind === 'user' || e.kind === 'agent' ? `${e.kind}:${e.text}` : `${e.kind}:${e.id}`))
+  ev
+    .filter((e) => e.kind !== 'session' && e.kind !== 'runtime' && e.kind !== 'usage' && e.kind !== 'turn-start')
+    .map((e) => (e.kind === 'user' || e.kind === 'agent' ? `${e.kind}:${e.text}` : `${e.kind}:${e.id}`))
 /** the turn starts and ends, in order, as kind:id */
 const turns = (ev: LogEvent[]) => ev.filter((e) => e.kind === 'turn-start' || e.kind === 'turn-end').map((e) => `${e.kind}:${e.id}`)
 
@@ -51,10 +57,16 @@ describe('opencode reader', () => {
     expect(parse([row('u8', 'user', { text: 'b' })], reader)[0]).toMatchObject({ kind: 'session', id: 'session-ses_1' })
   })
 
-  test('the agent\'s reply is its text items only, not reasoning or tool calls', () => {
+  test("the agent's reply is its text items only, not reasoning or tool calls", () => {
     const ev = parse([
       turn('a1', {
-        content: [{ type: 'reasoning', text: 'hmm' }, { type: 'tool', name: 'read' }, { type: 'text', text: ' HERON ' }, { type: 'text', text: 'and more' }, { type: 'text', text: '   ' }],
+        content: [
+          { type: 'reasoning', text: 'hmm' },
+          { type: 'tool', name: 'read' },
+          { type: 'text', text: ' HERON ' },
+          { type: 'text', text: 'and more' },
+          { type: 'text', text: '   ' },
+        ],
         finish: 'stop',
       }),
     ])
@@ -84,7 +96,10 @@ describe('opencode reader', () => {
       turn('a7', { tokens: { input: 1, output: 1, cache: { read: 0 } }, finish: 'stop' }),
       turn('a8', { tokens: { input: 0, output: 0, reasoning: 0 }, finish: 'stop', cost: 0 }),
     ])
-    expect(ev.filter((e) => e.kind === 'usage')).toEqual([{ kind: 'usage', id: 'usage-a6', at: 10, tokens: 20 }, { kind: 'usage', id: 'usage-a7', at: 10, tokens: 2 }])
+    expect(ev.filter((e) => e.kind === 'usage')).toEqual([
+      { kind: 'usage', id: 'usage-a6', at: 10, tokens: 20 },
+      { kind: 'usage', id: 'usage-a7', at: 10, tokens: 2 },
+    ])
   })
 
   test('a free reply with cost 0 keeps its cost; a reply without tokens has no usage', () => {
@@ -107,16 +122,21 @@ describe('opencode reader', () => {
   })
 
   test('an idle row that failed is an error; one that succeeded says nothing', () => {
-    expect(parse([row('i1', 'idle', { time: { created: 5 }, outcome: 'failed', error: { message: 'no key' } })]).slice(1)).toEqual([
-      { kind: 'error' as const, id: 'error-i1', at: 5, text: 'no key' },
-    ])
+    expect(parse([row('i1', 'idle', { time: { created: 5 }, outcome: 'failed', error: { message: 'no key' } })]).slice(1)).toEqual([{ kind: 'error' as const, id: 'error-i1', at: 5, text: 'no key' }])
     expect(parse([row('i2', 'idle', { outcome: 'failed' })])[1]).toEqual({ kind: 'error', id: 'error-i2', at: 1, text: 'the turn failed' })
     expect(parse([row('i3', 'idle', { time: { created: 5 }, outcome: 'succeeded' })])).toEqual([{ ...SESSION, at: 5 }])
   })
 
   test("OpenCode's error keeps its type as the code and its HTTP status, and a failed reply's repeat is not a second error", () => {
     const quota = { type: 'provider.quota', message: 'Go usage limit exceeded', status: 429 }
-    expect(parse([turn('e4', { finish: 'error', error: quota, content: [] })])).toContainEqual({ kind: 'error', id: 'error-e4', at: 10, text: 'Go usage limit exceeded', code: 'provider.quota', status: 429 })
+    expect(parse([turn('e4', { finish: 'error', error: quota, content: [] })])).toContainEqual({
+      kind: 'error',
+      id: 'error-e4',
+      at: 10,
+      text: 'Go usage limit exceeded',
+      code: 'provider.quota',
+      status: 429,
+    })
     // OpenCode writes the failure of a reply again as the idle row after it: one error, and the turn ends once
     const ev = parse([row('u14', 'user', { text: 'go' }), turn('e5', { finish: 'error', error: quota, content: [] }), row('i6', 'idle', { time: { created: 30 }, outcome: 'failed', error: quota })])
     expect(ev.filter((e) => e.kind === 'error').map((e) => e.id)).toEqual(['error-e5'])
@@ -127,13 +147,23 @@ describe('opencode reader', () => {
   })
 
   test('a user abort (Esc in the TUI, "Step interrupted") is no provider cut-off: its turn ends, no error', () => {
-    const ev = parse([row('u16', 'user', { text: 'stop' }), turn('a14', { finish: 'error', error: { type: 'aborted', message: 'Step interrupted' }, content: [] }), row('i7', 'idle', { outcome: 'failed', error: { type: 'aborted', message: 'Aborted' } })])
+    const ev = parse([
+      row('u16', 'user', { text: 'stop' }),
+      turn('a14', { finish: 'error', error: { type: 'aborted', message: 'Step interrupted' }, content: [] }),
+      row('i7', 'idle', { outcome: 'failed', error: { type: 'aborted', message: 'Aborted' } }),
+    ])
     expect(ev.some((e) => e.kind === 'error')).toBe(false)
     expect(turns(ev)).toEqual(['turn-start:start-u16', 'turn-end:turn-a14'])
   })
 
   test('an idle failure with no reply before it is an error with its type', () => {
-    expect(parse([row('i8', 'idle', { time: { created: 40 }, outcome: 'failed', error: { type: 'provider.no-route', message: 'Model unavailable: opencode/x' } })])[1]).toEqual({ kind: 'error', id: 'error-i8', at: 40, text: 'Model unavailable: opencode/x', code: 'provider.no-route' })
+    expect(parse([row('i8', 'idle', { time: { created: 40 }, outcome: 'failed', error: { type: 'provider.no-route', message: 'Model unavailable: opencode/x' } })])[1]).toEqual({
+      kind: 'error',
+      id: 'error-i8',
+      at: 40,
+      text: 'Model unavailable: opencode/x',
+      code: 'provider.no-route',
+    })
   })
 
   test('a failed idle row ends a turn that is still open, after its error', () => {
@@ -176,11 +206,7 @@ describe('opencode reader', () => {
 
   test('system rows and other types are left out', () => {
     expect(
-      parse([
-        row('s1', 'system', { metadata: { notice: 'instructions' }, text: '<context key="shepherdr">x</context>' }),
-        row('m1', 'model-switched', { model: 'x' }),
-        row('c1', 'compaction', {}),
-      ]),
+      parse([row('s1', 'system', { metadata: { notice: 'instructions' }, text: '<context key="shepherdr">x</context>' }), row('m1', 'model-switched', { model: 'x' }), row('c1', 'compaction', {})]),
     ).toEqual([{ ...SESSION, at: 1 }])
   })
 
@@ -196,11 +222,7 @@ describe('opencode reader', () => {
       ],
       FILE,
     )
-    expect(ev).toEqual([
-      SESSION,
-      { kind: 'turn-start', id: 'start-n1', at: 1 },
-      { kind: 'turn-end', id: 'turn-n2', at: 5 },
-    ])
+    expect(ev).toEqual([SESSION, { kind: 'turn-start', id: 'start-n1', at: 1 }, { kind: 'turn-end', id: 'turn-n2', at: 5 }])
   })
 
   test('the time comes from the reply, else the row', () => {
@@ -209,10 +231,7 @@ describe('opencode reader', () => {
   })
 
   test('the same lines read twice give the same ids', () => {
-    const objs = [
-      row('u9', 'user', { text: 'hi' }),
-      turn('a10', { model: { id: 'm', providerID: 'p' }, tokens: { input: 1 }, content: [{ type: 'text', text: 'yo' }], finish: 'stop' }),
-    ]
+    const objs = [row('u9', 'user', { text: 'hi' }), turn('a10', { model: { id: 'm', providerID: 'p' }, tokens: { input: 1 }, content: [{ type: 'text', text: 'yo' }], finish: 'stop' })]
     const ids = (ev: LogEvent[]) => ev.map((e) => e.id)
     expect(ids(parse(objs))).toEqual(ids(parse(objs)))
     expect(ids(parse(objs))).toEqual(['session-ses_1', 'start-u9', 'u9', 'runtime-model-a10', 'a10', 'usage-a10', 'turn-a10'])
@@ -245,12 +264,22 @@ describe('opencode reader', () => {
   test('a tool-only row keeps the turn open until the reply after it; a tool run counts its result', () => {
     const ev = parse([
       row('u11', 'user', { text: 'go' }),
-      turn('a21', { content: [{ type: 'tool', tool: 'bash', state: { status: 'completed', time: { start: 8, end: 12 }, input: { command: 'bun test' }, output: '41 passed' } }], finish: 'tool-calls' }),
+      turn('a21', {
+        content: [{ type: 'tool', tool: 'bash', state: { status: 'completed', time: { start: 8, end: 12 }, input: { command: 'bun test' }, output: '41 passed' } }],
+        finish: 'tool-calls',
+      }),
       turn('a22', { content: [{ type: 'text', text: 'ok' }], finish: 'stop' }),
     ])
     expect(turns(ev)).toEqual(['turn-start:start-u11', 'turn-end:turn-a22'])
     expect(ev.find((e) => e.kind === 'step')).toMatchObject({
-      id: 'a21-0', tool: 'bash', step: 'run', title: 'Ran tests', test: true, result: '41 passed', at: 8, end: 12,
+      id: 'a21-0',
+      tool: 'bash',
+      step: 'run',
+      title: 'Ran tests',
+      test: true,
+      result: '41 passed',
+      at: 8,
+      end: 12,
     })
   })
 
@@ -277,7 +306,10 @@ describe('opencode reader', () => {
   test('outputAt reads a tool part’s raw output from its row', () => {
     const file = join(tmp('opencode-reader-out'), 'ses_1.jsonl')
     const obj = row('a30', 'assistant', {
-      content: [{ type: 'text', text: 'x' }, { type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'ls' }, output: 'a.ts\n' } }],
+      content: [
+        { type: 'text', text: 'x' },
+        { type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'ls' }, output: 'a.ts\n' } },
+      ],
       finish: 'stop',
     })
     writeFileSync(file, JSON.stringify(obj) + '\n')

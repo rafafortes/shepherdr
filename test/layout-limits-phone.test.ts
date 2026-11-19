@@ -143,7 +143,11 @@ describe.skipIf(!browser)('Settings → Limits on a phone', () => {
       await group.getByRole('button', { name: 'Show all 200' }).tap()
       expect(await group.locator('ul > li').count()).toBe(200)
       // each other section opens to its own cards
-      for (const [name, text] of [['Scheduled', 'Starts'], ['Waiting for a go', 'Added'], ['Merges waiting', 'Waiting for other']] as const) {
+      for (const [name, text] of [
+        ['Scheduled', 'Starts'],
+        ['Waiting for a go', 'Added'],
+        ['Merges waiting', 'Waiting for other'],
+      ] as const) {
         const sec = page.getByRole('region', { name })
         await sec.getByRole('button', { name }).tap()
         await sec.getByText(text, { exact: false }).first().waitFor()

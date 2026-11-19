@@ -162,7 +162,10 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await pickLimit(pop, '2')
       await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
-      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^pi · Spark \(local\) in gtm: 0 of 2 at once/ }).waitFor()
+      await page
+        .getByRole('table', { name: 'Spaces' })
+        .getByRole('button', { name: /^pi · Spark \(local\) in gtm: 0 of 2 at once/ })
+        .waitFor()
     } finally {
       await page.close()
     }
@@ -171,7 +174,11 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
       await openLimits(page)
-      const spark = page.getByRole('table', { name: 'Providers and models' }).getByRole('row').filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) }).first()
+      const spark = page
+        .getByRole('table', { name: 'Providers and models' })
+        .getByRole('row')
+        .filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) })
+        .first()
       await spark.scrollIntoViewIfNeeded()
       await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
@@ -199,7 +206,10 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
       await page.getByRole('region', { name: 'Settings' }).getByRole('button', { name: 'Limits', exact: true }).click()
       const table = page.getByRole('table', { name: 'Providers and models' })
-      const spark = table.getByRole('row').filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) }).first()
+      const spark = table
+        .getByRole('row')
+        .filter({ has: page.getByRole('rowheader', { name: /^Spark \(local\)/ }) })
+        .first()
       await spark.scrollIntoViewIfNeeded()
       await spark.getByRole('button', { name: /^Spark \(local\): .* at once/ }).click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
@@ -208,7 +218,10 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
       // the model's own limit is the provider's now
-      await table.getByRole('button', { name: /: 0 of 2 at once$/ }).nth(1).waitFor()
+      await table
+        .getByRole('button', { name: /: 0 of 2 at once$/ })
+        .nth(1)
+        .waitFor()
       expect(((await world.act({ type: 'limits-view' } as never)) as { caps: { machine: string } }).caps.machine).toBe(`${Q}=2, pi.spark=2`)
     } finally {
       await page.close()
@@ -218,7 +231,11 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
       await openLimits(page)
-      const running = page.getByRole('table', { name: 'Providers and models' }).locator('[data-running]').filter({ hasText: /tasks? / }).first()
+      const running = page
+        .getByRole('table', { name: 'Providers and models' })
+        .locator('[data-running]')
+        .filter({ hasText: /tasks? / })
+        .first()
       await running.scrollIntoViewIfNeeded()
       const ids = running.getByRole('button')
       const n = await ids.count()
@@ -241,14 +258,22 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await other.scrollIntoViewIfNeeded()
       // open by default, and NVIDIA API is in it, not in the table of the providers in use
       await other.getByRole('rowheader', { name: /^NVIDIA API/ }).waitFor()
-      expect(await page.getByRole('table', { name: 'Providers and models' }).getByRole('rowheader', { name: /^NVIDIA API/ }).count()).toBe(0)
+      expect(
+        await page
+          .getByRole('table', { name: 'Providers and models' })
+          .getByRole('rowheader', { name: /^NVIDIA API/ })
+          .count(),
+      ).toBe(0)
       await other.getByRole('button', { name: /^NVIDIA API: 0 at once · no cap/ }).click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
       await pickLimit(pop, '2')
       await pop.getByRole('button', { name: 'Save', exact: true }).click()
       await pop.waitFor({ state: 'detached' })
       // capped now: it is one of the providers in use, with its cap
-      await page.getByRole('table', { name: 'Providers and models' }).getByRole('button', { name: /^NVIDIA API: 0 of 2 at once/ }).waitFor()
+      await page
+        .getByRole('table', { name: 'Providers and models' })
+        .getByRole('button', { name: /^NVIDIA API: 0 of 2 at once/ })
+        .waitFor()
     } finally {
       await page.close()
     }
@@ -338,7 +363,10 @@ describe.skipIf(!browser)('Settings → Limits asks for its view less often (SHE
       // nothing asks while it is out of sight, however many changes come
       expect(await readsOf(page)).toBe(0)
       await tab(page, 'visible')
-      await until(() => readsOf(page), (n) => n >= 1)
+      await until(
+        () => readsOf(page),
+        (n) => n >= 1,
+      )
       expect(await readsOf(page)).toBe(1)
       // shown again with nothing changed in between: it catches up once, too
       await tab(page, 'hidden')
@@ -346,7 +374,10 @@ describe.skipIf(!browser)('Settings → Limits asks for its view less often (SHE
       await Bun.sleep(200)
       expect(await readsOf(page)).toBe(0)
       await tab(page, 'visible')
-      await until(() => readsOf(page), (n) => n >= 1)
+      await until(
+        () => readsOf(page),
+        (n) => n >= 1,
+      )
       expect(await readsOf(page)).toBe(1)
     } finally {
       await page.close()

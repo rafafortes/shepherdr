@@ -28,7 +28,11 @@ const askedWaiting = (page: Page) => page.getByRole('alertdialog').filter({ hasT
 /** the demo's machine (vm-str) and its settings */
 const vm = () => world.stores['vm-str']
 /** the profiles as the demo keeps them (a test breaks one on purpose, the way a stored file could be broken) */
-type Kept = { profiles: { name: string; values: { all: Record<string, string | null>; machine: Record<string, string | null>; spaces: Record<string, Record<string, string | null>> } }[]; last?: unknown; undo: unknown[] }
+type Kept = {
+  profiles: { name: string; values: { all: Record<string, string | null>; machine: Record<string, string | null>; spaces: Record<string, Record<string, string | null>> } }[]
+  last?: unknown
+  undo: unknown[]
+}
 const kept = () => (world.profiles as unknown as { store: { f: Kept } }).store.f
 /** until what it checks holds (a write goes through the server, a moment after the key is pressed) */
 async function waitFor(ok: () => boolean, ms = 5000) {

@@ -42,7 +42,18 @@ describe.skipIf(!browser)('pinned spaces', () => {
       expect(await rows(page)).toEqual(['Pinned', 'herdr-projects · vm-str', 'home · mac', 'mac', 'lilla-varlden', 'nas', 'home', 'vm-str', 'home', 'gtm'])
       expect(await pinned(page)).toEqual(['herdr-projects · vm-str', 'home · mac'])
       // Pinned has its pin, each space its #, each machine its server (SHE-207): sections side by side, no level over them
-      expect(await page.locator('#places li [data-icon]').evaluateAll((s) => s.map((x) => x.getAttribute('data-icon')))).toEqual(['pin', 'hash', 'hash', 'server', 'hash', 'server', 'hash', 'server', 'hash', 'hash'])
+      expect(await page.locator('#places li [data-icon]').evaluateAll((s) => s.map((x) => x.getAttribute('data-icon')))).toEqual([
+        'pin',
+        'hash',
+        'hash',
+        'server',
+        'hash',
+        'server',
+        'hash',
+        'server',
+        'hash',
+        'hash',
+      ])
       expect(world.order).toEqual({ pinned: ['p:vm-str:herdr-projects', 'p:mac:~'] })
       await page.locator('#places li[data-heading="m:vm-str"]').hover()
       await page.getByRole('button', { name: 'More for vm-str' }).click()
@@ -72,7 +83,14 @@ describe.skipIf(!browser)('pinned spaces', () => {
           const name = li.querySelector('h2 span')!
           const chev = li.querySelector('button[aria-expanded]')!.getBoundingClientRect()
           const s = getComputedStyle(name)
-          return { size: s.fontSize, weight: s.fontWeight, color: s.color, x: Math.round(name.getBoundingClientRect().left), chev: Math.round(chev.left), h: Math.round(li.getBoundingClientRect().height) }
+          return {
+            size: s.fontSize,
+            weight: s.fontWeight,
+            color: s.color,
+            x: Math.round(name.getBoundingClientRect().left),
+            chev: Math.round(chev.left),
+            h: Math.round(li.getBoundingClientRect().height),
+          }
         })
       expect(await look('#places li[data-heading="pinned"]')).toEqual(await look('#places li[data-heading="m:mac"]'))
 
@@ -157,9 +175,17 @@ describe.skipIf(!browser)('pinned spaces', () => {
       // moved out of the tree; the machines stay, vm-str with the spaces not pinned
       expect(await rows(page, nav)).toEqual(['Pinned', 'lilla-varlden · mac', 'home · vm-str', 'mac', 'home', 'nas', 'home', 'vm-str', 'gtm', 'herdr-projects'])
       // its name and machine fit, nothing cut short
-      expect(await page.locator(`${nav} li[data-pin] button > span`).first().evaluate((s) => s.scrollWidth <= s.clientWidth)).toBe(true)
+      expect(
+        await page
+          .locator(`${nav} li[data-pin] button > span`)
+          .first()
+          .evaluate((s) => s.scrollWidth <= s.clientWidth),
+      ).toBe(true)
       // a tap opens it, there
-      await page.locator(`${nav} li[data-pin="p:mac:lilla-varlden"]`).getByRole('button', { name: /^lilla-varlden on mac/ }).click()
+      await page
+        .locator(`${nav} li[data-pin="p:mac:lilla-varlden"]`)
+        .getByRole('button', { name: /^lilla-varlden on mac/ })
+        .click()
       await at(page, 'mac/lilla-varlden')
     } finally {
       await page.close()

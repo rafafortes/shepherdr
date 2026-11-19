@@ -28,7 +28,12 @@ for (const c of CLIS) {
       const runs = [run(c.other, 'POL-1'), run(c.key, 'POL-2'), run('elsewhere/x', 'POL-3')]
       expect(roomOf(c.key, input({ runs }))).toEqual({ state: 'room', short: '2 running', words: '' })
       const quota = () => ({ windows: [{ name: 'Week', usedPct: 10 }], source: 'read', at: 0 })
-      expect(roomOf(c.key, input({ runs, quota }))).toEqual({ state: 'room', short: '2 running', words: `No limit on ${c.provider.replace('.', ' · ')}; POL-1 and POL-2 run on it now.`, quota: 'Week 10%' })
+      expect(roomOf(c.key, input({ runs, quota }))).toEqual({
+        state: 'room',
+        short: '2 running',
+        words: `No limit on ${c.provider.replace('.', ' · ')}; POL-1 and POL-2 run on it now.`,
+        quota: 'Week 10%',
+      })
       expect(roomOf(c.key, input({ runs: [run(c.key, 'POL-2')], quota })).words).toContain('POL-2 runs on it now.')
       expect(roomOf(c.key, input({ quota })).words).toContain('nothing runs on it now.')
     })
@@ -57,7 +62,7 @@ for (const c of CLIS) {
       expect(roomOf(c.key, input({ out: () => ({}) })).short).toBe('Out')
     })
 
-    test('withRooms: its CLI gets its default model\'s room, each of its models its own', () => {
+    test("withRooms: its CLI gets its default model's room, each of its models its own", () => {
       // a model's id as its CLI names it: pi's and OpenCode's with their provider (spark/qwen…), the others' alone
       const id = (key: string) => (c.provider.includes('.') ? `${c.provider.split('.')[1]}${key.slice(key.indexOf('/'))}` : key.slice(key.indexOf('/') + 1))
       const [cli] = withRooms([{ kind: c.cli, name: c.cli, defaultModel: id(c.key), models: [{ id: id(c.other), label: 'Other', efforts: [] }] }], input({ machine: [e(c.key, 0)] }))
@@ -68,7 +73,7 @@ for (const c of CLIS) {
 }
 
 describe('the room in words', () => {
-  test('the tightest entry is the one shown: a model entry with less room than its provider\'s', () => {
+  test("the tightest entry is the one shown: a model entry with less room than its provider's", () => {
     const r = roomOf('pi.spark/a', input({ machine: [e('pi.spark', 4), e('pi.spark/a', 2)], runs: [run('pi.spark/a', 'T-1'), run('pi.spark/b', 'T-2')] }))
     expect(r).toMatchObject({ state: 'room', short: '1 of 2', words: 'Pi · spark/a: 1 of 2 at once now (T-1); one more fits.' })
   })
@@ -83,12 +88,25 @@ describe('the room in words', () => {
   })
 
   test("its provider's quota: in the line, and in the row with a warning once a window reaches the warning share", () => {
-    const q: QuotaFigure = { windows: [{ name: '5 h', usedPct: 91.6 }, { name: 'Week', usedPct: 40 }, { name: 'Credits', left: 3 }], source: 'read', at: 0 }
+    const q: QuotaFigure = {
+      windows: [
+        { name: '5 h', usedPct: 91.6 },
+        { name: 'Week', usedPct: 40 },
+        { name: 'Credits', left: 3 },
+      ],
+      source: 'read',
+      at: 0,
+    }
     const quota = (p: string) => (p === 'claude' ? q : undefined)
     const r = roomOf('claude/claude-opus-5-5', input({ quota, alertAt: 90 }))
     expect(r).toEqual({ state: 'room', short: '5 h 92%', warn: true, words: 'No limit on claude; nothing runs on it now.', quota: '5 h 92% · Week 40%' })
     // below the share: in the line only; an estimate says so
-    expect(roomOf('claude/claude-opus-5-5', input({ quota: () => ({ ...q, estimate: true }), alertAt: 95, machine: [e('claude', 2)] }))).toEqual({ state: 'room', short: '0 of 2', words: 'Claude: 0 of 2 at once now; 2 more fit.', quota: '5 h 92% · Week 40% (estimate)' })
+    expect(roomOf('claude/claude-opus-5-5', input({ quota: () => ({ ...q, estimate: true }), alertAt: 95, machine: [e('claude', 2)] }))).toEqual({
+      state: 'room',
+      short: '0 of 2',
+      words: 'Claude: 0 of 2 at once now; 2 more fit.',
+      quota: '5 h 92% · Week 40% (estimate)',
+    })
     // with the alert off, a window past its whole share warns
     expect(roomOf('claude/x', input({ quota: () => ({ ...q, windows: [{ name: 'Week', usedPct: 104 }] }), machine: [e('claude', 2)] }))).toMatchObject({ short: '0 of 2 · Week 104%', warn: true })
     // a model that can't take one more: its row says what holds it, its line the quota
@@ -99,7 +117,9 @@ describe('the room in words', () => {
   test('what runs, in words: tasks by id first, the other roles by count', () => {
     expect(runsWords([])).toBe('')
     expect(runsWords([run('k', 'A-1')])).toBe('A-1')
-    expect(runsWords([run('k', 'A-1'), run('k', 'A-2'), run('k', undefined, 'coordinator'), run('k', undefined, 'coordinator'), run('k', 'r1', 'reviewer'), run('k', 'a1', 'advisor'), run('k')])).toBe('A-1, A-2, 1 task, 2 coordinators, 1 reviewer run and 1 advisor run')
+    expect(runsWords([run('k', 'A-1'), run('k', 'A-2'), run('k', undefined, 'coordinator'), run('k', undefined, 'coordinator'), run('k', 'r1', 'reviewer'), run('k', 'a1', 'advisor'), run('k')])).toBe(
+      'A-1, A-2, 1 task, 2 coordinators, 1 reviewer run and 1 advisor run',
+    )
   })
 
   test('a list of CLIs with no model list: its CLI still gets its room', () => {
@@ -113,15 +133,22 @@ describe('roomLeft and capWords (choose.ts)', () => {
   test('the entry with the least room left, the machine first on a tie; none with no entry above 0', () => {
     expect(roomLeft(at({}), 'pi.spark/a')).toBeUndefined()
     expect(roomLeft(at({ machine: [e('pi.spark', 0)] }), 'pi.spark/a')).toBeUndefined()
-    expect(roomLeft(at({ machine: [e('pi.spark', 2)], own: [e('pi.spark', 2)], runs: [run('pi.spark/a', 'T', 'task', 'web')] }), 'pi.spark/a')).toEqual({ scope: 'machine', count: 1, max: 2, pattern: 'pi.spark' })
+    expect(roomLeft(at({ machine: [e('pi.spark', 2)], own: [e('pi.spark', 2)], runs: [run('pi.spark/a', 'T', 'task', 'web')] }), 'pi.spark/a')).toEqual({
+      scope: 'machine',
+      count: 1,
+      max: 2,
+      pattern: 'pi.spark',
+    })
     expect(roomLeft(at({ machine: [e('pi.spark', 4)], own: [e('pi.spark/a', 1)] }), 'pi.spark/a')).toEqual({ scope: 'space', count: 0, max: 1, pattern: 'pi.spark/a' })
     expect(roomLeft(at({ machine: [e('codex', 4)] }), 'pi.spark/a')).toBeUndefined()
   })
 
-  test('capWords says each reason, a space\'s by its shown name', () => {
+  test("capWords says each reason, a space's by its shown name", () => {
     expect(capWords({ harness: null, why: 'out', name: 'pi.opencode-go', until: '17:00' })).toBe('pi · opencode-go is out until 17:00')
     expect(capWords({ harness: null, why: 'out', name: 'codex' })).toBe('codex is out')
-    expect(capWords({ harness: null, why: 'blocked', name: 'pi.spark', cap: { scope: 'space', space: 'app', count: 0, max: 0 } }, (s) => s.toUpperCase())).toBe('pi · spark in APP is blocked (0 allowed)')
+    expect(capWords({ harness: null, why: 'blocked', name: 'pi.spark', cap: { scope: 'space', space: 'app', count: 0, max: 0 } }, (s) => s.toUpperCase())).toBe(
+      'pi · spark in APP is blocked (0 allowed)',
+    )
     expect(capWords({ harness: null, why: 'full', name: 'claude', cap: { scope: 'machine', count: 2, max: 2 } })).toBe('claude is at its limit (2 of 2 at once)')
   })
 })

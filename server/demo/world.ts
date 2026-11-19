@@ -2,7 +2,33 @@
 // the real thing would, so every screen and case can be walked through without touching real agents.
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { apart, asEmoji, artifactQuote, cardMessage, modeCard, nameProblem, slugify, type Action, type ActivityAsk, type AddSpace, type Artifact, type Chat, type FolderEntry, type Folders, type LimitsQueue, type Machine, type Message, type Need, type Place, type Snapshot, type Task, type TaskStatus, type TermScreen, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
+import {
+  apart,
+  asEmoji,
+  artifactQuote,
+  cardMessage,
+  modeCard,
+  nameProblem,
+  slugify,
+  type Action,
+  type ActivityAsk,
+  type AddSpace,
+  type Artifact,
+  type Chat,
+  type FolderEntry,
+  type Folders,
+  type LimitsQueue,
+  type Machine,
+  type Message,
+  type Need,
+  type Place,
+  type Snapshot,
+  type Task,
+  type TaskStatus,
+  type TermScreen,
+  type UpdateCard,
+  type WorktreeAsk,
+} from '../../shared/types.ts'
 import { Emitter, type Source, type SourceEvents } from '../source.ts'
 import { DICTATE_CAP, DICTATE_TOO_LONG } from '../../shared/dictate.ts'
 import * as D from './data.ts'
@@ -21,7 +47,13 @@ import { nextWords } from '../live/trigger.ts'
 import { pilotLine } from '../live/heartbeat.ts'
 import { secretPages, Vault } from '../live/secrets.ts'
 
-const DEFAULT_WAYS = { review: defaultOf('brief.review') !== 'off', mustFix: defaultOf('review.mustFix')!, rounds: Number.parseInt(defaultOf('review.rounds')!, 10), merge: defaultOf('brief.merge')!, waitChecks: defaultOf('brief.merge') === 'after GitHub checks' }
+const DEFAULT_WAYS = {
+  review: defaultOf('brief.review') !== 'off',
+  mustFix: defaultOf('review.mustFix')!,
+  rounds: Number.parseInt(defaultOf('review.rounds')!, 10),
+  merge: defaultOf('brief.merge')!,
+  waitChecks: defaultOf('brief.merge') === 'after GitHub checks',
+}
 const DEFAULT_REVIEWER = { kind: kindOf(defaultOf('reviewer.agent')!)! }
 import { excerpt } from '../live/chatlines.ts'
 import { findModel, TABLE } from '../live/models.ts'
@@ -77,7 +109,11 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   read: Record<string, number> = { '*': Date.now() + 1000 }
   // every brief ends with its Settings block, as a live one does: HP-204's with two lines changed, one by its
   // coordinator and one by its space
-  tasks: Task[] = D.tasks().map((t) => ({ base: 'main', ...(DEMO_PRS[t.id] ? { ...t, pr: DEMO_PRS[t.id] } : t), desc: `${t.desc}\n\n${settingsBlock(t.id, t.id === 'HP-204' ? { ways: { ...DEFAULT_WAYS, rounds: 1, merge: 'ask me first' }, reviewer: DEFAULT_REVIEWER, by: { rounds: 'task', merge: 'space' } } : { ways: DEFAULT_WAYS, reviewer: DEFAULT_REVIEWER })}` }))
+  tasks: Task[] = D.tasks().map((t) => ({
+    base: 'main',
+    ...(DEMO_PRS[t.id] ? { ...t, pr: DEMO_PRS[t.id] } : t),
+    desc: `${t.desc}\n\n${settingsBlock(t.id, t.id === 'HP-204' ? { ways: { ...DEFAULT_WAYS, rounds: 1, merge: 'ask me first' }, reviewer: DEFAULT_REVIEWER, by: { rounds: 'task', merge: 'space' } } : { ways: DEFAULT_WAYS, reviewer: DEFAULT_REVIEWER })}`,
+  }))
   chats: Record<string, Chat> = D.chats()
   asks: Record<string, string> = { ...D.ASKS }
   /** each machine's defaults at their levels, as live */
@@ -93,10 +129,14 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   private profileStore = new ProfileStore(true)
   /** Settings → Models → Summary: a week of usage, in memory (usage.ts) */
   private usage = demoUsage()
-  profiles = new Profiles(this.profileStore, () => this.profileSite(), () => {
-    this.sections = D.settings(this.stores, this.checklists, this.pluginsOff)
-    this.emit('snapshot')
-  })
+  profiles = new Profiles(
+    this.profileStore,
+    () => this.profileSite(),
+    () => {
+      this.sections = D.settings(this.stores, this.checklists, this.pluginsOff)
+      this.emit('snapshot')
+    },
+  )
   /** the profiles' schedules, as the live one keeps them; the demo runs one only when a test ticks it (no clock of its own) */
   profileSchedules = new ProfileSchedules(this.profileStore, this.profiles, {
     zone: () => this.stores[D.DEMO_HOST]!.zone(),
@@ -203,7 +243,10 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   }
 
   async worktree(ask: WorktreeAsk) {
-    return demoWorktree(ask, this.tasks.some((t) => t.id === ask.task && t.agent))
+    return demoWorktree(
+      ask,
+      this.tasks.some((t) => t.id === ask.task && t.agent),
+    )
   }
 
   async folders(machine: string, path: string): Promise<Folders> {
@@ -240,7 +283,10 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       tree.set(at, true)
     }
     const name = (req.name ?? '').trim() || slugify((info.repo ?? at).split('/').pop()!)
-    const bad = nameProblem(name, this.places.filter((p) => p.machine === req.machine).map((p) => p.name))
+    const bad = nameProblem(
+      name,
+      this.places.filter((p) => p.machine === req.machine).map((p) => p.name),
+    )
     if (bad) throw new Error(bad)
     const id = `p:${req.machine}:${name}`
     // the snapshot sorts it among its machine's others
@@ -277,7 +323,9 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         this.order,
         this.groups,
       ),
-      tasks: this.tasks.map((t) => (t.status === 'done' ? t : { ...t, browser: this.browsers?.status() ?? { ready: false, hint: 'The demo has no browser: start it with SHEPHERDR_DEMO_BROWSER=1.' } })),
+      tasks: this.tasks.map((t) =>
+        t.status === 'done' ? t : { ...t, browser: this.browsers?.status() ?? { ready: false, hint: 'The demo has no browser: start it with SHEPHERDR_DEMO_BROWSER=1.' } },
+      ),
       automations: this.automations,
       artifacts: this.artifacts,
       asks: this.asks,
@@ -367,7 +415,9 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     const html = ver && ARTIFACT_HTML[aid]?.[ver.html]
     if (!a || !ver || !html) return undefined
     // its data: the newest at or before that version
-    const data = Object.entries(ARTIFACT_DATA[aid] ?? {}).filter(([n]) => Number(n) <= ver.n).pop()?.[1]
+    const data = Object.entries(ARTIFACT_DATA[aid] ?? {})
+      .filter(([n]) => Number(n) <= ver.n)
+      .pop()?.[1]
     const sent = this.artifactSent[aid]?.html === ver.html ? this.artifactSent[aid].text : undefined
     return { html, data, sent }
   }
@@ -495,7 +545,12 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     const d = (s: string) => `\x1b[38;5;243m${s}\x1b[0m`
     const g = (s: string) => `\x1b[38;2;61;214;140m${s}\x1b[0m`
     const y = (s: string) => `\x1b[38;2;245;181;68m${s}\x1b[0m`
-    const plain = (s = '') => s.replace(/```[\s\S]*?```/g, '').replace(/[`*]/g, '').replace(/\n+/g, ' ').trim()
+    const plain = (s = '') =>
+      s
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/[`*]/g, '')
+        .replace(/\n+/g, ' ')
+        .trim()
     // a long line goes on at the next row, as the terminal wraps it
     const wrap = (first: string, text: string) => {
       const rows: string[] = []
@@ -535,7 +590,6 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     return this.browsers.attach(task, out)
   }
 
-
   /** this machine's levels, as the live one reads them: its Everywhere, machine and spaces (home included) */
   private matrixSpaces() {
     return this.places.filter((p) => p.machine === D.DEMO_HOST).map((p) => ({ key: p.id.split(':')[2]!, name: p.name }))
@@ -549,7 +603,20 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     const agents: LiveAgent[] = this.tasks.filter((t) => t.status === 'work').map((t) => ({ key: `${t.id}/Agent`, kind: kindOf(t.agent?.cli ?? 'Claude Code') ?? 'claude', status: 'working' }))
     const tasks: TaskFact[] = this.tasks.map((t) => ({ status: t.status, ...(t.agent ? { agent: { kind: kindOf(t.agent.cli) ?? 'claude' } } : {}) }))
     const now = Date.now()
-    return modelsSummary({ now, settings: this.stores[D.DEMO_HOST], host: D.DEMO_HOST, spaces, rows, usage: this.usage, agents, tasks, watch: [], quota: demoQuota(this.usage, now), runs: this.runsNow(), providers })
+    return modelsSummary({
+      now,
+      settings: this.stores[D.DEMO_HOST],
+      host: D.DEMO_HOST,
+      spaces,
+      rows,
+      usage: this.usage,
+      agents,
+      tasks,
+      watch: [],
+      quota: demoQuota(this.usage, now),
+      runs: this.runsNow(),
+      providers,
+    })
   }
 
   /** what the restart sheet's rooms are read from (rooms.ts), as the live source has it: the demo's runs without the chat's
@@ -557,7 +624,14 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   private roomInput(space: string, except: string): RoomInput {
     const s = this.stores[D.DEMO_HOST]
     const now = Date.now()
-    const quotas = new Map(this.summaryNow(entryPatterns(s, this.matrixSpaces().map((x) => x.key)).map(providerOf)).providers.map((p) => [p.provider, p.quota]))
+    const quotas = new Map(
+      this.summaryNow(
+        entryPatterns(
+          s,
+          this.matrixSpaces().map((x) => x.key),
+        ).map(providerOf),
+      ).providers.map((p) => [p.provider, p.quota]),
+    )
     return {
       space,
       runs: this.runsNow().filter((r) => r.id !== except),
@@ -574,9 +648,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
 
   /** what counts toward models.maxAtOnce now: each working task, on the model its CLI runs, in its space */
   private runsNow() {
-    return this.tasks
-      .filter((t) => t.status === 'work')
-      .map((t) => ({ key: keyOf(kindOf(t.agent?.cli ?? 'Claude Code') ?? 'claude'), space: t.place.split(':')[2]!, role: 'task' as const, id: t.id }))
+    return this.tasks.filter((t) => t.status === 'work').map((t) => ({ key: keyOf(kindOf(t.agent?.cli ?? 'Claude Code') ?? 'claude'), space: t.place.split(':')[2]!, role: 'task' as const, id: t.id }))
   }
 
   /** Settings → Limits as the live source builds it, over the demo's world: its machine's numbers are the demo's health
@@ -585,10 +657,17 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     const s = this.stores[D.DEMO_HOST]
     const spaces = this.matrixSpaces()
     const matrix = modelsMatrix(s, { host: D.DEMO_HOST, name: D.DEMO_HOST }, spaces)
-    const summary = this.summaryNow(entryPatterns(s, spaces.map((x) => x.key)).map(providerOf))
+    const summary = this.summaryNow(
+      entryPatterns(
+        s,
+        spaces.map((x) => x.key),
+      ).map(providerOf),
+    )
     const working = this.tasks.filter((t) => t.status === 'work')
     const workingIn = Object.fromEntries(spaces.map((x) => [x.key, working.filter((t) => t.place.split(':')[2] === x.key).length]))
-    const held: { held: HeldFact[]; advisor: { chat: string; task?: string; words: string }[]; reviews: { task: string; space: string; words: string }[] } = this.waitingEmpty ? { held: [], advisor: [], reviews: [] } : D.heldFor(s, workingIn)
+    const held: { held: HeldFact[]; advisor: { chat: string; task?: string; words: string }[]; reviews: { task: string; space: string; words: string }[] } = this.waitingEmpty
+      ? { held: [], advisor: [], reviews: [] }
+      : D.heldFor(s, workingIn)
     return limitsView({
       now: Date.now(),
       settings: s,
@@ -631,7 +710,13 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
             : { id: to.id, who: to.who, text: to.text ? excerpt(to.text, 160) : (to.file?.name ?? ''), ...(to.text ? {} : { file: true }) })
         const files = (a.attachments ?? []).map((p, i) => ({
           who: 'you' as const,
-          file: { name: p.split('/').pop()!.replace(/^[a-z0-9]+-/, ''), path: p },
+          file: {
+            name: p
+              .split('/')
+              .pop()!
+              .replace(/^[a-z0-9]+-/, ''),
+            path: p,
+          },
           waiting,
           waitsFor,
           cid,
@@ -854,7 +939,12 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         return modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, this.matrixSpaces())
       case 'models-summary':
         // the same inputs as the live one: a provider a cap entry names shows even with nothing else
-        return this.summaryNow(entryPatterns(this.stores[D.DEMO_HOST], this.matrixSpaces().map((x) => x.key)).map(providerOf))
+        return this.summaryNow(
+          entryPatterns(
+            this.stores[D.DEMO_HOST],
+            this.matrixSpaces().map((x) => x.key),
+          ).map(providerOf),
+        )
       case 'limits-view':
         return this.limitsNow()
       case 'quota-refresh':
@@ -972,7 +1062,20 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const space = (t?.place ?? a.chat).split(':')[2] ?? '~'
         // a task that waits to start: Start with…'s pick, else what its chat's agent runs on (as the live one's go)
         const starts = t && ['queued', 'todo', 'scheduled'].includes(t.status) ? (this.workers.get(t.id) ?? c?.agent ?? { kind: on }) : undefined
-        return { ok: true, info: { role: a.chat.includes('/') ? 'task' : 'coordinator', space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name, on: c?.agent ?? { kind: on }, onWords: harnessWords(c?.agent ?? { kind: on }), want: { kind: want }, ...(starts ? { starts } : {}), clis: withRooms(clis, this.roomInput(space, t?.id ?? a.chat)), working: t?.status === 'work', live: !c?.working && t?.status !== 'work' && liveOK(on) } }
+        return {
+          ok: true,
+          info: {
+            role: a.chat.includes('/') ? 'task' : 'coordinator',
+            space: this.places.find((p) => p.id === (t?.place ?? a.chat))?.name,
+            on: c?.agent ?? { kind: on },
+            onWords: harnessWords(c?.agent ?? { kind: on }),
+            want: { kind: want },
+            ...(starts ? { starts } : {}),
+            clis: withRooms(clis, this.roomInput(space, t?.id ?? a.chat)),
+            working: t?.status === 'work',
+            live: !c?.working && t?.status !== 'work' && liveOK(on),
+          },
+        }
       }
       case 'start-with': {
         // Start with…: the worker a waiting task starts on, for it alone; it stays in line (as the live one's setWorker)
@@ -1103,7 +1206,10 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         } else if (!p) return { ok: false, error: 'Nothing to rename.' }
         else {
           const name = a.name.trim() || (p.home ? 'home' : p.id.split(':').at(-1)!)
-          const bad = nameProblem(name, this.places.filter((x) => x.machine === p.machine && x !== p).map((x) => x.name))
+          const bad = nameProblem(
+            name,
+            this.places.filter((x) => x.machine === p.machine && x !== p).map((x) => x.name),
+          )
           if (bad) return { ok: false, error: bad }
           p.name = name
         }
@@ -1160,7 +1266,11 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       q.dismissed = true
       if (q.asks) c.messages = c.messages.filter((m) => m !== msg)
       const plan = q.kind === 'Plan'
-      this.push(a.chat, { who: 'you', answered: `Dismissed “${q.title}”` }, { who: 'agent', text: plan ? 'Understood: the plan isn’t approved, so I’ll say what I’ll do instead.' : 'Understood. I’ll use my own judgment and say what I assumed.' })
+      this.push(
+        a.chat,
+        { who: 'you', answered: `Dismissed “${q.title}”` },
+        { who: 'agent', text: plan ? 'Understood: the plan isn’t approved, so I’ll say what I’ll do instead.' : 'Understood. I’ll use my own judgment and say what I assumed.' },
+      )
       for (const [pl, qid] of Object.entries(this.asks)) if (qid === q.id) delete this.asks[pl]
       // the task carried on without an answer, as it does when you answer the card (a plan: not carried out)
       if (q.id === 'f5') this.setTask('LV-3', 'work', 'Carrying on with my own judgment')
@@ -1178,7 +1288,11 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       this.push(a.chat, { who: 'you', answered: `Answered “${q.title}”`, text: label, reactions: [{ emoji: '👍', by: 'them' }] }, { who: 'agent', text: D.REPLIES[q.id] ?? 'Thanks.' })
       void waiting
     } else {
-      this.push(a.chat, { who: 'you', answered: `Answered “${q.title}”`, text: label + (a.note ? `\n${a.note}` : ''), reactions: [{ emoji: '👍', by: 'them' }] }, { who: 'agent', text: D.REPLIES[q.id] ?? 'Thanks.' })
+      this.push(
+        a.chat,
+        { who: 'you', answered: `Answered “${q.title}”`, text: label + (a.note ? `\n${a.note}` : ''), reactions: [{ emoji: '👍', by: 'them' }] },
+        { who: 'agent', text: D.REPLIES[q.id] ?? 'Thanks.' },
+      )
     }
     for (const [pl, qid] of Object.entries(this.asks)) if (qid === q.id) delete this.asks[pl]
     if (q.id === 'f2') this.setTask('GTM-15', a.choice === 0 ? 'done' : 'ready', this.task('GTM-15')?.sub ?? '')

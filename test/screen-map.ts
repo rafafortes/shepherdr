@@ -85,7 +85,10 @@ export type Lines = Record<string, Record<number, 0 | 1>>
 function ran(dist: string, e: Coverage, lines: Lines) {
   const m = mapOf(dist, e)
   if (!m) return
-  const counts = countsAt(e.functions.flatMap((f) => f.ranges), m.at)
+  const counts = countsAt(
+    e.functions.flatMap((f) => f.ranges),
+    m.at,
+  )
   for (let i = 0; i < m.at.length; i++) {
     const file = m.files[m.src[i]]
     if (file === null) continue

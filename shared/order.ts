@@ -53,13 +53,26 @@ function machineSpaces(places: Place[], m: Machine, order: PlaceOrder) {
   const mine = places.filter((p) => p.machine === m.machine)
   const saved = order[m.id]
   const home = mine.filter((p) => p.home && !saved?.includes(p.id))
-  return [...home, ...ordered(mine.filter((p) => !home.includes(p)), saved, (p) => p.id, (p) => p.name)]
+  return [
+    ...home,
+    ...ordered(
+      mine.filter((p) => !home.includes(p)),
+      saved,
+      (p) => p.id,
+      (p) => p.name,
+    ),
+  ]
 }
 
 /** the machines in the human's order; the spaces as the sidebar shows them, top to bottom (the sections at the top,
  *  then each machine's own, then its sections'); and every section with its spaces in order, the top ones first */
 export function sortPlaces(places: Place[], machines: Machine[], order: PlaceOrder, defs: SectionDefs = {}): { places: Place[]; machines: Machine[]; sections: Section[] } {
-  const ms = ordered(machines, order.all, (m) => m.id, (m) => m.name)
+  const ms = ordered(
+    machines,
+    order.all,
+    (m) => m.id,
+    (m) => m.name,
+  )
   const known = new Map(places.map((p) => [p.id, p]))
   const taken = new Set<string>()
   const section = (id: string, fits: (p: Place) => boolean): Section => {
@@ -73,7 +86,10 @@ export function sortPlaces(places: Place[], machines: Machine[], order: PlaceOrd
   const sections = listed([PINNED, ...ids.filter((id) => !defs[id]?.machine)], order[TOP]).map((id) => section(id, () => true))
   const out = sections.flatMap((s) => s.spaces.map((x) => known.get(x)!))
   for (const m of ms) {
-    const inside = listed(ids.filter((id) => defs[id]?.machine === m.machine), order[sectionsIn(m.id)]).map((id) => section(id, (p) => p.machine === m.machine))
+    const inside = listed(
+      ids.filter((id) => defs[id]?.machine === m.machine),
+      order[sectionsIn(m.id)],
+    ).map((id) => section(id, (p) => p.machine === m.machine))
     out.push(...machineSpaces(places, m, order).filter((p) => !taken.has(p.id)), ...inside.flatMap((s) => s.spaces.map((x) => known.get(x)!)))
     sections.push(...inside)
   }
@@ -163,5 +179,10 @@ export function moveSpace(order: PlaceOrder, defs: SectionDefs, places: Place[],
     return i < 0 ? [...ids, id] : [...ids.slice(0, i), id, ...ids.slice(i)]
   }
   if (!to.startsWith('m:')) order[to] = put(order[to] ?? [])
-  else if (before && m) order[m.id] = put(machineSpaces(places, m, order).map((x) => x.id).filter((x) => x !== id))
+  else if (before && m)
+    order[m.id] = put(
+      machineSpaces(places, m, order)
+        .map((x) => x.id)
+        .filter((x) => x !== id),
+    )
 }

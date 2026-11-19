@@ -51,10 +51,27 @@ async function world(name: string) {
   const dir = tmp('advisor-repo')
   execSync(REPO, { cwd: dir, shell: '/bin/sh' })
   const p = await src.places.add(dir, name)
-  for (const [k, v] of [['advisor.agent', 'pi'], ['advisor.model', 'opencode-go/deepseek-v4.1-flash'], ['advisor.fallback', 'Codex']])
+  for (const [k, v] of [
+    ['advisor.agent', 'pi'],
+    ['advisor.model', 'opencode-go/deepseek-v4.1-flash'],
+    ['advisor.fallback', 'Codex'],
+  ])
     expect(src.settings.set(k, v, { space: p.name }).ok).toBe(true)
   const id = `ADV-${Math.random().toString(36).slice(2, 6)}`
-  src.engine.tasks.push({ id, n: 1, project: placeId.space(p.name), base: 'main', branch: 'main', worktree: dir, title: 'Pick a store', desc: 'Keep the outbox somewhere.', by: 'test', created: Date.now(), updated: Date.now() - 60 * 60_000, told: 'work' } as never)
+  src.engine.tasks.push({
+    id,
+    n: 1,
+    project: placeId.space(p.name),
+    base: 'main',
+    branch: 'main',
+    worktree: dir,
+    title: 'Pick a store',
+    desc: 'Keep the outbox somewhere.',
+    by: 'test',
+    created: Date.now(),
+    updated: Date.now() - 60 * 60_000,
+    told: 'work',
+  } as never)
   const key = `${id}/Agent`
   src.agents.records[key] = { key, name: id, kind: 'pi', cwd: dir, workspace: p.name, logs: [], started: Date.now() } as never
   const done = () => {
@@ -70,12 +87,23 @@ function card(key: string, id: string, title: string, labels: string[], kind: 'F
 
 /** what one chat's agent was sent (its coordinator also hears the news of its tasks) */
 const to = (key: string) => sent.filter((s) => s.key === key).map((s) => s.text)
-const cards = (key: string) => src.chats.chat(key).messages.filter((m) => m.card).map((m) => m.card!.text)
+const cards = (key: string) =>
+  src.chats
+    .chat(key)
+    .messages.filter((m) => m.card)
+    .map((m) => m.card!.text)
 const advice = (key: string) => src.chats.chat(key).messages.find((m) => m.question?.id.startsWith('advice:'))?.question
 
 describe('what the advisor is asked, and how it answers', () => {
   test('its prompt names what only the human decides, the question and its options, and the one line it ends with', () => {
-    const p = advisorPrompt({ question: { kind: 'choice', title: 'Which store?', choices: [{ label: 'SQLite', description: 'a file' }, { label: 'Postgres' }] }, asker: "POL-1's agent", brief: 'Keep the outbox.', chat: 'agent: which store?', folder: '/w', human: 'Rafael' })
+    const p = advisorPrompt({
+      question: { kind: 'choice', title: 'Which store?', choices: [{ label: 'SQLite', description: 'a file' }, { label: 'Postgres' }] },
+      asker: "POL-1's agent",
+      brief: 'Keep the outbox.',
+      chat: 'agent: which store?',
+      folder: '/w',
+      human: 'Rafael',
+    })
     expect(p).toContain("POL-1's agent is waiting for Rafael's answer")
     expect(p).toContain('read only')
     expect(p).toContain('force-pushing')
@@ -90,7 +118,18 @@ describe('what the advisor is asked, and how it answers', () => {
     expect(claude.stdin).toBe('Q')
     expect(adviceArgs({ kind: 'codex' }, 'Q')!.cmd).toEqual(expect.arrayContaining(['--sandbox', 'read-only']))
     // OpenCode: its plan agent, read only; its model and effort as one id; the question as the last word
-    expect(adviceArgs({ kind: 'opencode', model: 'opencode/minimax-m3.1-flash-free', effort: 'high' }, 'Q')!.cmd).toEqual(['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-advisor', '-m', 'opencode/minimax-m3.1-flash-free#high', 'Q'])
+    expect(adviceArgs({ kind: 'opencode', model: 'opencode/minimax-m3.1-flash-free', effort: 'high' }, 'Q')!.cmd).toEqual([
+      'opencode',
+      'run',
+      '--standalone',
+      '--agent',
+      'plan',
+      '--title',
+      'shepherdr-advisor',
+      '-m',
+      'opencode/minimax-m3.1-flash-free#high',
+      'Q',
+    ])
     expect(adviceArgs({ kind: 'opencode', model: 'default', effort: 'default' }, 'Q')!.cmd).toEqual(['opencode', 'run', '--standalone', '--agent', 'plan', '--title', 'shepherdr-advisor', 'Q'])
     expect(adviceArgs({ kind: 'opencode' }, 'Q')!.stdin).toBeUndefined()
     expect(adviceArgs({ kind: 'gemini' }, 'Q')).toBeUndefined()
@@ -263,7 +302,7 @@ describe('by itself, once a question waited', () => {
       expect(to(w.key)).toHaveLength(1)
       expect(to(w.key)[0]).toContain('from="The advisor"')
       expect(to(w.key)[0]).toContain('SQLite')
-      expect(cards(w.key).at(-1)).toContain('The advisor answered for you, as you didn\'t: “SQLite”. Enough for an outbox.')
+      expect(cards(w.key).at(-1)).toContain("The advisor answered for you, as you didn't: “SQLite”. Enough for an outbox.")
       expect(alerts.map((a) => a.title)).toEqual([`The advisor answered ${w.id}`])
       // once: never asked again about it
       await src.watchAdvice(Date.now() + 10 * 60_000)
@@ -283,7 +322,12 @@ describe('by itself, once a question waited', () => {
       expect(src.chats.log(w.key).answers['ask:t1']).toBe(0)
       // the other card still waits for its own answer, where the human sees it
       expect(src.chats.log(w.key).answers['ask:t2']).toBeUndefined()
-      expect(src.snapshot().needs.filter((n) => n.chat === w.key).map((n) => n.question?.id)).toEqual(['ask:t2'])
+      expect(
+        src
+          .snapshot()
+          .needs.filter((n) => n.chat === w.key)
+          .map((n) => n.question?.id),
+      ).toEqual(['ask:t2'])
       // the human's own pick on it answers it, and nothing else
       card(w.key, 'ask:t3', 'And the README?', ['Now', 'Later'])
       expect(await src.act({ type: 'answer', chat: w.key, question: 'ask:t2', choice: 0 })).toEqual({ ok: true })
@@ -317,7 +361,12 @@ describe('by itself, once a question waited', () => {
       expect(to(w.key)).toEqual([])
       expect(cards(w.key).at(-1)).toContain('The advisor leaves this to you: Deleting a branch is yours to decide.')
       // its note closes nothing: the question still waits, in the task's chat and on its needs-you card
-      expect(src.snapshot().needs.filter((n) => n.chat === w.key).map((n) => n.question?.id)).toEqual(['ask:h1'])
+      expect(
+        src
+          .snapshot()
+          .needs.filter((n) => n.chat === w.key)
+          .map((n) => n.question?.id),
+      ).toEqual(['ask:h1'])
       // and the space's chat, where that card shows, has the note too
       const note = src.chats.chat(w.coord).messages.findLast((m) => m.card)!.card!
       expect(note).toMatchObject({ aside: true, task: w.id, text: 'The advisor leaves this to you: Deleting a branch is yours to decide. (pi (opencode-go/deepseek-v4.1-flash))' })
@@ -343,11 +392,20 @@ describe('by itself, once a question waited', () => {
   test('a chain of advisor backups: each answers in turn where the ones before it can’t; one that is off is passed over', async () => {
     const w = await world('adv-chain')
     try {
-      for (const [k, v] of [['advisor.fallback2', 'off'], ['advisor.fallback3', 'claude'], ['advisor.fallback3Model', 'Haiku 5.5']]) expect(src.settings.set(k, v, { space: w.p.name }).ok).toBe(true)
+      for (const [k, v] of [
+        ['advisor.fallback2', 'off'],
+        ['advisor.fallback3', 'claude'],
+        ['advisor.fallback3Model', 'Haiku 5.5'],
+      ])
+        expect(src.settings.set(k, v, { space: w.p.name }).ok).toBe(true)
       card(w.key, 'ask:c1', 'Which?', ['A', 'B'])
       replies = [{ ok: false, out: '402 Insufficient account funds' }, { ok: false, out: 'Not logged in' }, json({ decide: 'advisor', choice: 1, why: 'A fits.', sure: true })]
       await src.advise(w.key, 'ask:c1')
-      expect(runs.map((r) => [r.kind, r.model])).toEqual([['pi', 'opencode-go/deepseek-v4.1-flash'], ['codex', undefined], ['claude', 'claude-haiku-5-5']])
+      expect(runs.map((r) => [r.kind, r.model])).toEqual([
+        ['pi', 'opencode-go/deepseek-v4.1-flash'],
+        ['codex', undefined],
+        ['claude', 'claude-haiku-5-5'],
+      ])
       expect(cards(w.key).at(-1)).toContain('(Claude Code')
       // none of them answers: the human hears it once
       card(w.key, 'ask:c2', 'Which now?', ['A', 'B'])
@@ -430,7 +488,12 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
     // a test that failed may leave its lease held: none carries over to the next
     ;(src.engine as unknown as { leased: Map<string, unknown> }).leased.clear()
     src.runAdvisor = (async (h: { kind: string; model?: string }, prompt: string, cwd: string) => {
-      heldAt.push(src.engine.runs().filter((r) => r.role === 'advisor').map((r) => r.key))
+      heldAt.push(
+        src.engine
+          .runs()
+          .filter((r) => r.role === 'advisor')
+          .map((r) => r.key),
+      )
       runs.push({ kind: h.kind, model: h.model, prompt, cwd })
       return replies.shift() ?? { ok: false, out: 'nothing to say' }
     }) as never
@@ -470,7 +533,12 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
       expect(heldAt).toEqual([[KEYO, CODEX]])
       expect(to(w.key)[0]).toContain('from="The advisor"')
       expect(cards(w.key).at(-1)).toContain('(Codex')
-      expect(src.engine.runs().filter((r) => r.role === 'advisor').map((r) => r.id)).toEqual(['busy-primary'])
+      expect(
+        src.engine
+          .runs()
+          .filter((r) => r.role === 'advisor')
+          .map((r) => r.id),
+      ).toEqual(['busy-primary'])
       free('busy-primary')
     } finally {
       capped('off')

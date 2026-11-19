@@ -122,7 +122,19 @@ describe('adding a space from the sidebar', () => {
       async fetch(req) {
         const u = new URL(req.url)
         got.push({ path: u.pathname + u.search, body: req.method === 'POST' ? await req.json() : undefined })
-        if (u.pathname === '/api/snapshot') return Response.json({ name: 'S', host: 'far', places: [{ id: 'p:far:~', name: 'home', machine: 'far', home: true, level: 1, status: 'idle', mode: 'manual', chat: 'p:far:~' }], machines: [{ id: 'm:far', machine: 'far', name: 'far', status: 'idle' }], tasks: [], automations: {}, asks: {}, settings: [], overrides: {}, user: 'u' })
+        if (u.pathname === '/api/snapshot')
+          return Response.json({
+            name: 'S',
+            host: 'far',
+            places: [{ id: 'p:far:~', name: 'home', machine: 'far', home: true, level: 1, status: 'idle', mode: 'manual', chat: 'p:far:~' }],
+            machines: [{ id: 'm:far', machine: 'far', name: 'far', status: 'idle' }],
+            tasks: [],
+            automations: {},
+            asks: {},
+            settings: [],
+            overrides: {},
+            user: 'u',
+          })
         if (u.pathname === '/api/folders') return Response.json({ path: u.searchParams.get('path'), exists: true, dir: true, repo: null, entries: [] })
         if (u.pathname === '/api/spaces') return Response.json({ error: 'Another space on far has that name.' }, { status: 500 })
         return new Response('no', { status: 404 })
@@ -130,7 +142,7 @@ describe('adding a space from the sidebar', () => {
     })
     try {
       src.peers!.adopt('far', `http://127.0.0.1:${far.port}`)
-      await until(() => !!src.peers!.list().find((l) => l.rec.machine === 'far')?.reachable, 8000, "the far peer to be reachable")
+      await until(() => !!src.peers!.list().find((l) => l.rec.machine === 'far')?.reachable, 8000, 'the far peer to be reachable')
       // an older helper there still says Manual: read as regular
       expect(src.snapshot().places.find((p) => p.id === 'p:far:~')?.mode).toBe('regular')
       expect(src.snapshot().machines.find((m) => m.id === 'm:far')?.status).toBe('idle')
@@ -174,7 +186,7 @@ describe('removing a space', () => {
     expect(r.code).toBe(0)
     expect(r.out.trim()).toBe(`Removed forgotten from Shepherdr; ${dir} and its code stay on disk. shepherdr space add ${dir} --name forgotten brings it back with its open tasks and chat.`)
   })
-  test("the home space can be renamed, never removed: by the sidebar or the command", async () => {
+  test('the home space can be renamed, never removed: by the sidebar or the command', async () => {
     const home = placeId.home()
     const says = `home is ${NAME}'s home space: it can be renamed, not removed.`
     expect(await src.act({ type: 'space-remove', place: home })).toEqual({ ok: false, error: says })
@@ -212,10 +224,17 @@ describe('the order of places', () => {
     }
     await add('order-zed')
     await add('order-alpha')
-    const mine = () => src.snapshot().places.filter((p) => p.name.startsWith('order-')).map((p) => p.name)
+    const mine = () =>
+      src
+        .snapshot()
+        .places.filter((p) => p.name.startsWith('order-'))
+        .map((p) => p.name)
     expect(mine()).toEqual(['order-alpha', 'order-zed'])
     const machine = placeId.machine()
-    const ids = src.snapshot().places.filter((p) => !p.home && p.machine === HOST).map((p) => p.id)
+    const ids = src
+      .snapshot()
+      .places.filter((p) => !p.home && p.machine === HOST)
+      .map((p) => p.id)
     const dragged = [placeId.space('order-zed'), ...ids.filter((id) => id !== placeId.space('order-zed'))]
     expect(await src.act({ type: 'order', under: machine, ids: dragged })).toEqual({ ok: true })
     expect(mine()).toEqual(['order-zed', 'order-alpha'])
@@ -284,10 +303,14 @@ describe('renaming places', () => {
 })
 
 describe("the home space's herdr space", () => {
-  test('is home: the one the coordinators shared, still called Coordinators, is renamed in place, never a repo\'s, and no second one opens', async () => {
+  test("is home: the one the coordinators shared, still called Coordinators, is renamed in place, never a repo's, and no second one opens", async () => {
     const saved = { ...herdr }
     let spaces = [
-      { workspace_id: 'w1', label: 'Coordinators', worktree: { checkout_path: '/r/Coordinators', is_linked_worktree: false, repo_key: '/r/Coordinators/.git', repo_name: 'Coordinators', repo_root: '/r/Coordinators' } },
+      {
+        workspace_id: 'w1',
+        label: 'Coordinators',
+        worktree: { checkout_path: '/r/Coordinators', is_linked_worktree: false, repo_key: '/r/Coordinators/.git', repo_name: 'Coordinators', repo_root: '/r/Coordinators' },
+      },
       { workspace_id: 'w2', label: 'Coordinators' },
     ]
     const opened: string[] = []
@@ -394,7 +417,7 @@ describe('a renamed space: the replies name it as it shows, and its settings, ca
 })
 
 describe("a renamed space's own cap: the held replies name it as it shows", () => {
-  test("a space added as cap-added and shown as lyvora-cap: its cap holds, and task add, tell and start say lyvora-cap, never the added name", async () => {
+  test('a space added as cap-added and shown as lyvora-cap: its cap holds, and task add, tell and start say lyvora-cap, never the added name', async () => {
     const dir = tmp('src-repo')
     run(REPO, dir)
     const p = await src.places.add(dir, 'cap-added')

@@ -22,7 +22,10 @@ export function short(s: unknown, n = 80): string {
 
 /** a command as it reads: its first line, without a leading cd into the worktree */
 export function commandWords(cmd: unknown): string {
-  const first = String(cmd ?? '').split('\n').find((l) => l.trim()) ?? ''
+  const first =
+    String(cmd ?? '')
+      .split('\n')
+      .find((l) => l.trim()) ?? ''
   return short(first.replace(/^\s*cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*/, ''))
 }
 
@@ -95,11 +98,30 @@ export function commandSay(cmd: string): Said {
   switch (prog) {
     case 'git': {
       const G: Record<string, string> = {
-        status: 'Check git status', diff: 'Look at the changes', log: 'Look at the history', show: 'Look at a commit', commit: 'Commit the changes',
-        push: 'Push the branch', pull: 'Pull the latest', fetch: 'Fetch from the remote', rebase: 'Rebase the branch', merge: 'Merge a branch',
-        checkout: 'Switch branches', switch: 'Switch branches', add: 'Stage the changes', stash: 'Stash the changes', clone: 'Clone a repo',
-        branch: 'Look at the branches', reset: 'Reset the branch', restore: 'Restore files', worktree: 'Look at the worktrees', blame: 'Look at who changed what',
-        'rev-parse': 'Look up a commit', 'cherry-pick': 'Pick a commit', remote: 'Look at the remotes', tag: 'Look at the tags',
+        status: 'Check git status',
+        diff: 'Look at the changes',
+        log: 'Look at the history',
+        show: 'Look at a commit',
+        commit: 'Commit the changes',
+        push: 'Push the branch',
+        pull: 'Pull the latest',
+        fetch: 'Fetch from the remote',
+        rebase: 'Rebase the branch',
+        merge: 'Merge a branch',
+        checkout: 'Switch branches',
+        switch: 'Switch branches',
+        add: 'Stage the changes',
+        stash: 'Stash the changes',
+        clone: 'Clone a repo',
+        branch: 'Look at the branches',
+        reset: 'Reset the branch',
+        restore: 'Restore files',
+        worktree: 'Look at the worktrees',
+        blame: 'Look at who changed what',
+        'rev-parse': 'Look up a commit',
+        'cherry-pick': 'Pick a commit',
+        remote: 'Look at the remotes',
+        tag: 'Look at the tags',
       }
       // what a chain of git commands comes to: "git add -A && git commit" commits
       const last = ['push', 'commit', 'rebase', 'merge', 'pull', 'clone'].find((x) => new RegExp(`\\bgit\\s+(?:-C\\s+\\S+\\s+|-\\S+\\s+)*${x}\\b`).test(cmd))
@@ -110,25 +132,58 @@ export function commandSay(cmd: string): Said {
     case 'gh': {
       const what = `${sub} ${args[1] ?? ''}`.trim()
       const G: Record<string, string> = {
-        'pr view': 'Look at the pull request', 'pr checks': 'Check the pull request’s checks', 'pr create': 'Open a pull request', 'pr merge': 'Merge the pull request',
-        'pr list': 'List the pull requests', 'pr diff': 'Look at the pull request’s changes', 'run list': 'List GitHub’s runs', 'run view': 'Look at a GitHub run',
-        'run watch': 'Watch a GitHub run', 'workflow run': 'Start a GitHub workflow', 'issue view': 'Look at an issue', 'issue list': 'List the issues', 'repo view': 'Look at the repo',
+        'pr view': 'Look at the pull request',
+        'pr checks': 'Check the pull request’s checks',
+        'pr create': 'Open a pull request',
+        'pr merge': 'Merge the pull request',
+        'pr list': 'List the pull requests',
+        'pr diff': 'Look at the pull request’s changes',
+        'run list': 'List GitHub’s runs',
+        'run view': 'Look at a GitHub run',
+        'run watch': 'Watch a GitHub run',
+        'workflow run': 'Start a GitHub workflow',
+        'issue view': 'Look at an issue',
+        'issue list': 'List the issues',
+        'repo view': 'Look at the repo',
       }
       return said('web', G[what] ?? (sub === 'api' ? 'Ask GitHub' : `Use GitHub ${sub}`.trim()))
     }
     case 'shepherdr': {
       const what = `${sub} ${args[1] ?? ''}`.trim()
       const S: Record<string, string> = {
-        'task list': 'Check the task list', 'task show': 'Look at a task', 'task new': 'Make a task', 'task tell': 'Tell a task', 'task queue': 'Queue a task',
-        'artifact new': 'Share an artifact', 'artifact update': 'Update an artifact', 'artifact check': 'Check an artifact', 'artifact list': 'List the artifacts',
+        'task list': 'Check the task list',
+        'task show': 'Look at a task',
+        'task new': 'Make a task',
+        'task tell': 'Tell a task',
+        'task queue': 'Queue a task',
+        'artifact new': 'Share an artifact',
+        'artifact update': 'Update an artifact',
+        'artifact check': 'Check an artifact',
+        'artifact list': 'List the artifacts',
       }
-      const S1: Record<string, string> = { status: 'Report how far it got', ready: 'Mark it ready', merge: 'Merge it', ask: 'Ask you', plan: 'Show you a plan', pr: 'Open the pull request',
-        alert: 'Alert you', show: 'Check the settings', todo: 'Wait for a go', checks: 'Check GitHub’s checks', help: 'Look at shepherdr’s help' }
+      const S1: Record<string, string> = {
+        status: 'Report how far it got',
+        ready: 'Mark it ready',
+        merge: 'Merge it',
+        ask: 'Ask you',
+        plan: 'Show you a plan',
+        pr: 'Open the pull request',
+        alert: 'Alert you',
+        show: 'Check the settings',
+        todo: 'Wait for a go',
+        checks: 'Check GitHub’s checks',
+        help: 'Look at shepherdr’s help',
+      }
       return said('run', S[what] ?? S1[sub] ?? `Use shepherdr ${sub}`.trim())
     }
     case 'agent-browser':
       return said('web', sub === 'open' || sub === 'goto' ? `Open ${host(args[1])} in the browser` : sub === 'screenshot' ? 'Take a screenshot' : 'Use the browser')
-    case 'cat': case 'head': case 'tail': case 'less': case 'bat': case 'nl': {
+    case 'cat':
+    case 'head':
+    case 'tail':
+    case 'less':
+    case 'bat':
+    case 'nl': {
       const f = args.at(-1)
       return f ? said('read', `Read ${baseName(f)}`, baseName(f)) : said('read', 'Read a file')
     }
@@ -142,35 +197,75 @@ export function commandSay(cmd: string): Said {
         return f && args.length > 1 ? said('edit', `Edit ${baseName(f)}`, baseName(f)) : said('edit', 'Edit a file')
       }
       return said('run', 'Run sed')
-    case 'grep': case 'rg': case 'ag': case 'ack': {
+    case 'grep':
+    case 'rg':
+    case 'ag':
+    case 'ack': {
       const pat = args[0]
       return pat ? said('search', `Search for ${quote(pat)}`, quote(pat)) : said('search', 'Search the code')
     }
-    case 'find': case 'fd': case 'ls': case 'tree':
+    case 'find':
+    case 'fd':
+    case 'ls':
+    case 'tree':
       return said('search', prog === 'find' || prog === 'fd' ? 'Look for files' : 'List files')
-    case 'wc': return said('read', 'Count lines')
-    case 'curl': case 'wget': case 'http': {
+    case 'wc':
+      return said('read', 'Count lines')
+    case 'curl':
+    case 'wget':
+    case 'http': {
       const url = a.find((x) => /^https?:\/\//.test(x))
       return url ? said('web', `Fetch ${host(url)}`) : said('web', 'Fetch a page')
     }
-    case 'tailscale': return said('run', 'Use Tailscale')
-    case 'docker': return said('run', `Use Docker${sub ? ` ${sub}` : ''}`)
-    case 'rm': return said('edit', 'Remove files')
-    case 'mv': return said('edit', 'Move files')
-    case 'cp': return said('edit', 'Copy files')
-    case 'kill': case 'pkill': case 'killall': return said('run', 'Stop a process')
-    case 'ps': case 'pgrep': return said('run', 'Look at what runs')
-    case 'jq': return said('run', 'Read some JSON')
-    case 'make': return said('run', `Run make${sub ? ` ${sub}` : ''}`)
-    case 'codex': case 'claude': case 'pi': case 'opencode': case 'agy': return said('agent', 'Ask another agent')
-    case 'bun': case 'npm': case 'pnpm': case 'yarn': case 'npx': case 'bunx': {
+    case 'tailscale':
+      return said('run', 'Use Tailscale')
+    case 'docker':
+      return said('run', `Use Docker${sub ? ` ${sub}` : ''}`)
+    case 'rm':
+      return said('edit', 'Remove files')
+    case 'mv':
+      return said('edit', 'Move files')
+    case 'cp':
+      return said('edit', 'Copy files')
+    case 'kill':
+    case 'pkill':
+    case 'killall':
+      return said('run', 'Stop a process')
+    case 'ps':
+    case 'pgrep':
+      return said('run', 'Look at what runs')
+    case 'jq':
+      return said('run', 'Read some JSON')
+    case 'make':
+      return said('run', `Run make${sub ? ` ${sub}` : ''}`)
+    case 'codex':
+    case 'claude':
+    case 'pi':
+    case 'opencode':
+    case 'agy':
+      return said('agent', 'Ask another agent')
+    case 'bun':
+    case 'npm':
+    case 'pnpm':
+    case 'yarn':
+    case 'npx':
+    case 'bunx': {
       if (['install', 'i', 'add', 'ci'].includes(sub)) return said('run', 'Install packages')
       if (sub === 'run') return said('run', /build/.test(args[1] ?? '') ? 'Build it' : `Run ${args[1] ?? 'a script'}`)
       if (/\.(ts|js|mjs|tsx)$/.test(sub)) return said('run', `Run ${baseName(sub)}`)
       if (sub === 'x' || sub === 'exec' || ['-e', '--eval', '-p', '--print'].some((f) => a.includes(f))) return said('run', 'Run a script')
       return said('run', /build/.test(sub) ? 'Build it' : `Run ${/^[\w.@/-]+$/.test(sub) ? sub : prog}`)
     }
-    case 'node': case 'python': case 'python3': case 'deno': case 'tsx': case 'ruby': case 'perl': case 'bash': case 'sh': case 'zsh':
+    case 'node':
+    case 'python':
+    case 'python3':
+    case 'deno':
+    case 'tsx':
+    case 'ruby':
+    case 'perl':
+    case 'bash':
+    case 'sh':
+    case 'zsh':
       // code given inline (-c, -e) is no name
       return said('run', sub && !a.some((x) => /^-(c|e|p|-eval|-print)$/.test(x)) && /^[\w./~-]+$/.test(sub) ? `Run ${baseName(sub)}` : 'Run a script')
   }
@@ -238,10 +333,18 @@ export function claudeStep(name: string, input: Json): Said | undefined {
     case 'Write':
     case 'NotebookEdit': {
       const edits: Json[] = Array.isArray(i.edits) ? i.edits : name === 'Edit' ? [i] : []
-      const n = name === 'Write' ? lineCounts('', String(i.content ?? '')) : name === 'NotebookEdit' ? lineCounts('', String(i.new_source ?? '')) : edits.reduce((m, e) => {
-        const c = lineCounts(String(e?.old_string ?? ''), String(e?.new_string ?? ''))
-        return { added: m.added + c.added, removed: m.removed + c.removed }
-      }, { added: 0, removed: 0 })
+      const n =
+        name === 'Write'
+          ? lineCounts('', String(i.content ?? ''))
+          : name === 'NotebookEdit'
+            ? lineCounts('', String(i.new_source ?? ''))
+            : edits.reduce(
+                (m, e) => {
+                  const c = lineCounts(String(e?.old_string ?? ''), String(e?.new_string ?? ''))
+                  return { added: m.added + c.added, removed: m.removed + c.removed }
+                },
+                { added: 0, removed: 0 },
+              )
       const f = baseName(path)
       return { step: 'edit', ...words(`${name === 'Write' ? 'Write' : 'Edit'} ${f}`, f, { detail: path, ...n }) }
     }
@@ -291,7 +394,8 @@ export function codexItem(it: Json): (Said & { failed?: boolean; tool: string; r
         const f = baseName(String(p.path ?? p.name ?? ''))
         return { ...c, step: 'read', ...words(`Read ${f}`, f), failed, tool: 'exec_command' }
       }
-      if ((p?.type === 'search' || p?.type === 'list_files') && c.step !== 'search') return { ...c, step: 'search', ...words(p.query ? `Search for ${quote(p.query)}` : 'Look for files', p.query ? quote(p.query) : ''), failed, tool: 'exec_command' }
+      if ((p?.type === 'search' || p?.type === 'list_files') && c.step !== 'search')
+        return { ...c, step: 'search', ...words(p.query ? `Search for ${quote(p.query)}` : 'Look for files', p.query ? quote(p.query) : ''), failed, tool: 'exec_command' }
       return { ...c, failed, tool: 'exec_command', result: c.test ? testResult(String(it.aggregated_output ?? '')) : undefined }
     }
     case 'FileChange': {
@@ -309,9 +413,16 @@ export function codexItem(it: Json): (Said & { failed?: boolean; tool: string; r
       return { step: 'edit', ...words(what, files.length > 1 ? '' : f, { detail: files.join('\n'), ...n }), tool: 'apply_patch' }
     }
     case 'McpToolCall':
-      return { step: 'other', ...words(`Use ${toolWords(String(it.actionName ?? it.tool ?? it.server ?? 'a tool'))}`), tool: short(it.actionName ?? it.tool ?? it.server, 40), failed: it.status === 'failed' || undefined }
+      return {
+        step: 'other',
+        ...words(`Use ${toolWords(String(it.actionName ?? it.tool ?? it.server ?? 'a tool'))}`),
+        tool: short(it.actionName ?? it.tool ?? it.server, 40),
+        failed: it.status === 'failed' || undefined,
+      }
     case 'Extension':
-      return it.kind === 'web.search' ? { step: 'web', ...words(it.query ? `Search the web for ${quote(it.query)}` : `Read ${host(it.action?.url)}`, '', { detail: String(it.query ?? it.action?.url ?? '') }), tool: 'web_search' } : undefined
+      return it.kind === 'web.search'
+        ? { step: 'web', ...words(it.query ? `Search the web for ${quote(it.query)}` : `Read ${host(it.action?.url)}`, '', { detail: String(it.query ?? it.action?.url ?? '') }), tool: 'web_search' }
+        : undefined
     case 'ImageView': {
       const f = baseName(String(it.path ?? ''))
       return { step: 'read', ...words(`Look at ${f}`, f, { detail: String(it.path ?? '') }), tool: 'view_image' }
@@ -329,7 +440,10 @@ export function codexCall(name: string, args: Json): Said {
     const n = diffCounts(patch.replace(/^\*\*\*.*$/gm, ''))
     if (!files.length) return { step: 'edit', ...words('Edit files', '', n) }
     const f = baseName(files[0])
-    return { step: 'edit', ...words(files.length > 1 ? `Edit ${files.length} files: ${files.slice(0, 3).map(baseName).join(', ')}` : `Edit ${f}`, files.length > 1 ? '' : f, { detail: files.join('\n'), ...n }) }
+    return {
+      step: 'edit',
+      ...words(files.length > 1 ? `Edit ${files.length} files: ${files.slice(0, 3).map(baseName).join(', ')}` : `Edit ${f}`, files.length > 1 ? '' : f, { detail: files.join('\n'), ...n }),
+    }
   }
   if (name === 'shell' || name === 'exec_command' || name === 'local_shell' || name === 'exec') {
     const cmd = Array.isArray(a.command) ? a.command.at(-1) : (a.cmd ?? a.command ?? /\bcmd\s*:\s*(["'`])((?:\\.|(?!\1).)*)\1/.exec(String(args ?? ''))?.[2])

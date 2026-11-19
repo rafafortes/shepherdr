@@ -140,10 +140,8 @@ export async function transcribe(audio: Blob, ways: DictateWays, signal?: AbortS
  *  say. Why it can't is said in words the screen can show as they are. */
 export async function dictate(audio: Blob, model: string, language: string, opts: { binary?: string | null; signal?: AbortSignal } = {}): Promise<string> {
   const binary = opts.binary === undefined ? whisperBinary() : opts.binary
-  if (!binary)
-    throw new Error('Talk to type needs whisper.cpp on the machine that serves Shepherdr: run `sudo apt install whisper.cpp` there (its command is whisper-cli).')
+  if (!binary) throw new Error('Talk to type needs whisper.cpp on the machine that serves Shepherdr: run `sudo apt install whisper.cpp` there (its command is whisper-cli).')
   const file = homePath(model)
-  if (!existsSync(file))
-    throw new Error(`Talk to type needs its model file, and ${file} isn't there: download ${MODEL_URL} into ${MODEL_DIR} (Settings → Dictation → Model).`)
+  if (!existsSync(file)) throw new Error(`Talk to type needs its model file, and ${file} isn't there: download ${MODEL_URL} into ${MODEL_DIR} (Settings → Dictation → Model).`)
   return transcribe(audio, { binary, model: file, lang: langOf(language) }, opts.signal)
 }

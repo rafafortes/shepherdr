@@ -57,7 +57,12 @@ describe('the protobuf decoder', () => {
     // field 1 varint 150; field 2 fixed64; field 3 fixed32; field 2 bytes "hi"
     const buf = Uint8Array.from([0x08, 0x96, 0x01, 0x11, 1, 2, 3, 4, 5, 6, 7, 8, 0x1d, 9, 8, 7, 6, 0x12, 0x02, 0x68, 0x69])
     const parts = fields(buf)!
-    expect(parts.map((f) => [f.field, f.wire])).toEqual([[1, 0], [2, 1], [3, 5], [2, 2]])
+    expect(parts.map((f) => [f.field, f.wire])).toEqual([
+      [1, 0],
+      [2, 1],
+      [3, 5],
+      [2, 2],
+    ])
     expect(parts[0].value).toBe(150)
     expect(text(parts[3].value)).toBe('hi')
     expect(fields(new Uint8Array(0))).toEqual([])
@@ -115,7 +120,7 @@ describe('the protobuf decoder', () => {
     expect(stepTime(Uint8Array.from([0x0a, 0x05, 0x61]))).toBe(0)
   })
 
-  test('the summaries\' time as ms, nanoseconds cut; nothing that is no time is 0', () => {
+  test("the summaries' time as ms, nanoseconds cut; nothing that is no time is 0", () => {
     expect(summaryTime('2026-11-13 19:55:57.91895555+00:00')).toBe(Date.UTC(2026, 10, 13, 19, 55, 57, 918))
     expect(summaryTime('soon')).toBe(0)
     expect(summaryTime(undefined)).toBe(0)
@@ -153,7 +158,7 @@ describe('the newest conversation of a folder', () => {
     expect(newestConversation('/w/app', Date.UTC(2026, 10, 13, 12, 30), dir)).toBeUndefined()
   })
 
-  test('subagents, killed conversations and Shepherdr\'s own headless runs are left out', () => {
+  test("subagents, killed conversations and Shepherdr's own headless runs are left out", () => {
     const dir = folder('headless')
     // conv-sub (depth 1) and conv-killed are newer than conv-ours, and still not the answer
     writeJson('agy/headless.json', ['conv-ours', 5], dir)
@@ -206,7 +211,12 @@ const GENS = [
 
 /** the JSON lines of a mirror file, parsed */
 /** a mirror's step lines (its first line is the format's head) */
-const lines = (file: string) => readFileSync(file, 'utf8').trim().split('\n').filter((l) => l !== MIRROR_HEAD).map((l) => JSON.parse(l))
+const lines = (file: string) =>
+  readFileSync(file, 'utf8')
+    .trim()
+    .split('\n')
+    .filter((l) => l !== MIRROR_HEAD)
+    .map((l) => JSON.parse(l))
 
 /** adds a step to a conversation database, as agy would while the turn runs */
 function addStep(id: string, row: StepRow) {
@@ -278,7 +288,10 @@ describe('the mirror of a conversation', () => {
   })
 
   test('the mirror stops at the first step still running, and goes on when it is final', () => {
-    makeConversation(join(convs, 'conv-b.db'), [{ idx: 0, step_type: 14, payload: userPayload('one') }, { idx: 1, step_type: 15, status: 1, payload: agentPayload({ text: 'partial' }) }])
+    makeConversation(join(convs, 'conv-b.db'), [
+      { idx: 0, step_type: 14, payload: userPayload('one') },
+      { idx: 1, step_type: 15, status: 1, payload: agentPayload({ text: 'partial' }) },
+    ])
     const file = join(folder('partial'), 'conv-b.jsonl')
     expect(mirrorConversation('conv-b', file)).toBe(1)
     addStep('conv-b', { idx: 2, step_type: 14, payload: userPayload('two'), status: 3 })
@@ -381,10 +394,14 @@ describe('the mirror of a conversation', () => {
   })
 
   test('a model response with no generation row, or one with no model: the tokens of the row, and no model', () => {
-    makeConversation(join(convs, 'conv-d.db'), [
-      { idx: 0, step_type: 15, payload: agentPayload({ text: 'x' }) },
-      { idx: 1, step_type: 15, payload: agentPayload({ text: 'y' }) },
-    ], [genRow({ tokensIn: 4, tokensOut: 1 })])
+    makeConversation(
+      join(convs, 'conv-d.db'),
+      [
+        { idx: 0, step_type: 15, payload: agentPayload({ text: 'x' }) },
+        { idx: 1, step_type: 15, payload: agentPayload({ text: 'y' }) },
+      ],
+      [genRow({ tokensIn: 4, tokensOut: 1 })],
+    )
     const file = join(folder('gen'), 'conv-d.jsonl')
     expect(mirrorConversation('conv-d', file)).toBe(2)
     expect(lines(file)).toEqual([
@@ -395,7 +412,7 @@ describe('the mirror of a conversation', () => {
 })
 
 describe('agy in the finder and the chat reader', () => {
-  test('a folder\'s conversation is mirrored into Shepherdr\'s home', () => {
+  test("a folder's conversation is mirrored into Shepherdr's home", () => {
     makeConversation(join(convs, 'conv-f.db'), [{ idx: 0, step_type: 14, payload: userPayload('hi there') }])
     const path = findAgyLog('/w/agy-app/')!
     expect(path).toBe(agyLogPath(home(), 'conv-f'))

@@ -46,7 +46,7 @@ describe.skipIf(!browser)('filtering the tasks', () => {
     const box = page.getByRole('searchbox', { name: 'Filter tasks' })
     await box.waitFor()
     expect(await box.evaluate((b) => getComputedStyle(b).fontSize)).toBe('16px')
-    expect((await box.evaluate((b) => b.parentElement!.getBoundingClientRect().height))).toBeGreaterThanOrEqual(44)
+    expect(await box.evaluate((b) => b.parentElement!.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44)
     await box.tap()
     await box.fill('slack')
     expect(await ids(page.locator('li'))).toEqual(['GTM-12'])
@@ -103,7 +103,10 @@ describe.skipIf(!browser)('Home: Needs you beside the unfiltered Tasks list', ()
     await panel.getByText('HP-202', { exact: true }).waitFor()
     expect(await panel.getByText('Everything', { exact: true }).count()).toBe(1)
     // Needs you: one row per card that waits, and the count beside it is those rows, never more
-    await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: /^Needs you/ }).click()
+    await page
+      .getByRole('group', { name: 'Show' })
+      .getByRole('button', { name: /^Needs you/ })
+      .click()
     const needs = page.locator('section[aria-label="Needs you"]')
     await needs.getByText('Waiting on you', { exact: true }).waitFor()
     const rows = await needs.locator('li[data-need]').count()
@@ -120,26 +123,27 @@ describe.skipIf(!browser)('Home: Needs you beside the unfiltered Tasks list', ()
 
 describe.skipIf(!browser)('no chat attention summary and quiet health', () => {
   test('phone and desktop, light and dark: Home and space chats have cards without aggregate disclosures', async () => {
-    for (const width of [390, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
-      const page = await browser!.newPage({ viewport: { width, height: 900 }, colorScheme })
-      try {
-        for (const place of ['vm-str/home', 'p:mac:~', 'p:vm-str:gtm']) {
-          await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent(place)}`)
-          const messages = page.locator('[data-messages]')
-          await messages.waitFor()
-          expect(await messages.locator('[data-attention]').count()).toBe(0)
-          expect(await messages.getByText(/\d+ need you · \d+ ready/).count()).toBe(0)
-          expect(await messages.getByText(/^Task updates ·/).count()).toBe(0)
-          if (place === 'p:vm-str:gtm') {
-            await messages.getByText('Rerun CI on main?', { exact: true }).waitFor()
-            await messages.getByRole('button', { name: /Needs you GTM-14 needs you/ }).waitFor()
-            await messages.getByRole('button', { name: /Ready GTM-15 is ready/ }).waitFor()
+    for (const width of [390, 1440])
+      for (const colorScheme of ['light', 'dark'] as const) {
+        const page = await browser!.newPage({ viewport: { width, height: 900 }, colorScheme })
+        try {
+          for (const place of ['vm-str/home', 'p:mac:~', 'p:vm-str:gtm']) {
+            await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent(place)}`)
+            const messages = page.locator('[data-messages]')
+            await messages.waitFor()
+            expect(await messages.locator('[data-attention]').count()).toBe(0)
+            expect(await messages.getByText(/\d+ need you · \d+ ready/).count()).toBe(0)
+            expect(await messages.getByText(/^Task updates ·/).count()).toBe(0)
+            if (place === 'p:vm-str:gtm') {
+              await messages.getByText('Rerun CI on main?', { exact: true }).waitFor()
+              await messages.getByRole('button', { name: /Needs you GTM-14 needs you/ }).waitFor()
+              await messages.getByRole('button', { name: /Ready GTM-15 is ready/ }).waitFor()
+            }
           }
+        } finally {
+          await page.close()
         }
-      } finally {
-        await page.close()
       }
-    }
   })
 
   test('the health details name the host to allow while app.hosts is unset', async () => {
@@ -190,7 +194,7 @@ describe.skipIf(!browser)('Home on a single machine', () => {
     const machines = world.machines
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
-      world.places = places.filter((p) => p.machine === world.snapshot().host).map((p) => p.home ? { ...p, level: 1 } : p)
+      world.places = places.filter((p) => p.machine === world.snapshot().host).map((p) => (p.home ? { ...p, level: 1 } : p))
       world.machines = machines.filter((m) => m.machine === world.snapshot().host)
       await page.addInitScript(() => localStorage.removeItem('shepherdr.lists'))
       await page.goto(`http://127.0.0.1:${server!.port}/?place=vm-str/home`)

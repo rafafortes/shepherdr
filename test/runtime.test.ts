@@ -30,31 +30,49 @@ describe('CLI runtime observations, independent of launch policy', () => {
   })
 
   test('Pi separately records model and thinking changes, including off', () => {
-    const ev = new PiReader().parse(lines(
-      { type: 'model_change', timestamp: new Date(at).toISOString(), modelId: 'custom/provider-model' },
-      { type: 'thinking_level_change', timestamp: new Date(at).toISOString(), thinkingLevel: 'high' },
-      { type: 'thinking_level_change', timestamp: new Date(at).toISOString(), thinkingLevel: 'off' },
-    ), 'pi')
+    const ev = new PiReader().parse(
+      lines(
+        { type: 'model_change', timestamp: new Date(at).toISOString(), modelId: 'custom/provider-model' },
+        { type: 'thinking_level_change', timestamp: new Date(at).toISOString(), thinkingLevel: 'high' },
+        { type: 'thinking_level_change', timestamp: new Date(at).toISOString(), thinkingLevel: 'off' },
+      ),
+      'pi',
+    )
     expect(sessionRuntime(ev, 'pi', 0)).toMatchObject({ model: 'custom/provider-model', effort: 'off' })
   })
 
   test('resumed Pi cannot reuse old thinking state; a fresh assistant reports the actual model', () => {
-    const ev = new PiReader().parse(lines(
-      { type: 'model_change', timestamp: new Date(at - 10).toISOString(), modelId: 'old-model' },
-      { type: 'thinking_level_change', timestamp: new Date(at - 10).toISOString(), thinkingLevel: 'high' },
-      { type: 'message', timestamp: new Date(at + 10).toISOString(), message: { role: 'assistant', model: 'resumed-model', content: [] } },
-    ), 'pi')
+    const ev = new PiReader().parse(
+      lines(
+        { type: 'model_change', timestamp: new Date(at - 10).toISOString(), modelId: 'old-model' },
+        { type: 'thinking_level_change', timestamp: new Date(at - 10).toISOString(), thinkingLevel: 'high' },
+        { type: 'message', timestamp: new Date(at + 10).toISOString(), message: { role: 'assistant', model: 'resumed-model', content: [] } },
+      ),
+      'pi',
+    )
     expect(sessionRuntime(ev, 'pi', at)).toMatchObject({ model: 'resumed-model' })
     expect(sessionRuntime(ev, 'pi', at)?.effort).toBeUndefined()
   })
 
   test('a /model or /effort run in place is observed at once, without a chat message for its stdout', () => {
     const reader = new ClaudeReader()
-    const ev = reader.parse(lines(
-      { type: 'user', timestamp: new Date(at).toISOString(), message: { role: 'user', content: '<local-command-stdout>Set model to Sonnet 5.5 and saved as your default for new sessions</local-command-stdout>' } },
-      { type: 'system', subtype: 'local_command', timestamp: new Date(at + 1).toISOString(), content: '<local-command-stdout>Set effort level to low (saved as your default)</local-command-stdout>' },
-      { type: 'user', timestamp: new Date(at + 2).toISOString(), message: { role: 'user', content: '<local-command-stdout>Ask a regular question</local-command-stdout>' } },
-    ), 'live')
+    const ev = reader.parse(
+      lines(
+        {
+          type: 'user',
+          timestamp: new Date(at).toISOString(),
+          message: { role: 'user', content: '<local-command-stdout>Set model to Sonnet 5.5 and saved as your default for new sessions</local-command-stdout>' },
+        },
+        {
+          type: 'system',
+          subtype: 'local_command',
+          timestamp: new Date(at + 1).toISOString(),
+          content: '<local-command-stdout>Set effort level to low (saved as your default)</local-command-stdout>',
+        },
+        { type: 'user', timestamp: new Date(at + 2).toISOString(), message: { role: 'user', content: '<local-command-stdout>Ask a regular question</local-command-stdout>' } },
+      ),
+      'live',
+    )
     expect(sessionRuntime(ev, 'live', 0)).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'low' })
     // the switch's own answer is not a message in the chat; an unrelated command's still is
     expect(ev.filter((e) => e.kind === 'agent')).toHaveLength(1)
@@ -62,19 +80,23 @@ describe('CLI runtime observations, independent of launch policy', () => {
   })
 
   test("Codex's thread settings applied by a /model pick are the thread's runtime before its next turn", () => {
-    const ev = new CodexReader().parse(lines(
-      { timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type: 'thread_settings_applied', thread_settings: { model: 'gpt-6.1-sol', reasoning_effort: 'medium' } } },
-    ), 'live')
+    const ev = new CodexReader().parse(
+      lines({ timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type: 'thread_settings_applied', thread_settings: { model: 'gpt-6.1-sol', reasoning_effort: 'medium' } } }),
+      'live',
+    )
     expect(sessionRuntime(ev, 'live', 0)).toMatchObject({ model: 'gpt-6.1-sol', effort: 'medium' })
   })
 
   test('Claude ignores synthetic error models and sidechains', () => {
     const reader = new ClaudeReader()
-    const ev = reader.parse(lines(
-      { type: 'assistant', timestamp: new Date(at).toISOString(), message: { model: 'claude-real', content: [] } },
-      { type: 'assistant', timestamp: new Date(at).toISOString(), message: { model: '<synthetic>', content: [] } },
-      { type: 'assistant', timestamp: new Date(at).toISOString(), isSidechain: true, message: { model: 'subagent-model', content: [] } },
-    ), 'claude')
+    const ev = reader.parse(
+      lines(
+        { type: 'assistant', timestamp: new Date(at).toISOString(), message: { model: 'claude-real', content: [] } },
+        { type: 'assistant', timestamp: new Date(at).toISOString(), message: { model: '<synthetic>', content: [] } },
+        { type: 'assistant', timestamp: new Date(at).toISOString(), isSidechain: true, message: { model: 'subagent-model', content: [] } },
+      ),
+      'claude',
+    )
     expect(sessionRuntime(ev, 'claude', 0)?.model).toBe('claude-real')
   })
 
@@ -91,7 +113,9 @@ describe('CLI runtime observations, independent of launch policy', () => {
       expect(logs.read(file).runtime?.effort).toBe('high')
       appendFileSync(file, JSON.stringify({ at: at + 2, event: 'SessionStart', session: 'resumed' }) + '\n')
       expect(logs.read(file).runtime).toBeUndefined()
-    } finally { rmSync(dir, { recursive: true, force: true }) }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test('replayed session metadata survives server restart; truncated logs replace old runtime', () => {
@@ -104,6 +128,8 @@ describe('CLI runtime observations, independent of launch policy', () => {
       writeFileSync(file, JSON.stringify(context('new', 'low')) + '\n')
       expect(sessionRuntime(tail.read(), file, 0)).toMatchObject({ model: 'new', effort: 'low' })
       expect(sessionRuntime(new LogTail(file, new CodexReader()).read(), file, 0)?.model).toBe('new')
-    } finally { rmSync(dir, { recursive: true, force: true }) }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

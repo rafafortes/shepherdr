@@ -11,7 +11,20 @@ import { hush } from './motion.ts'
 import { closed, loadPanes, MAX_PANES, normal, only, opened, PANE_MIN, replaced, samePane, savePanes, type Pane, type Panes } from './panes.ts'
 import { setupGuarded } from './guard.tsx'
 import { decide, screenOf, screenOfUrl, stepKey, stepsTo, systemSwipe, urlOf, type Entry } from './nav.ts'
-import { machineName, type Action, type Chat, type Message, type Need, type Place, type ReplyQuote, type ServerEvent, type Snapshot, type Task, type TermScreen, type UpdateStatus } from '@shared/types.ts'
+import {
+  machineName,
+  type Action,
+  type Chat,
+  type Message,
+  type Need,
+  type Place,
+  type ReplyQuote,
+  type ServerEvent,
+  type Snapshot,
+  type Task,
+  type TermScreen,
+  type UpdateStatus,
+} from '@shared/types.ts'
 
 /* ---------- slots ---------- */
 
@@ -503,7 +516,12 @@ function putOutbox(out: Outgoing[]) {
 
 // one still sending long after its time didn't go through; one that went in but never came back stops showing
 setInterval(() => {
-  const out = expire(state.outbox, Date.now(), (chat) => !!state.chats[chat]?.working, (chat) => state.chats[chat]?.unreadable)
+  const out = expire(
+    state.outbox,
+    Date.now(),
+    (chat) => !!state.chats[chat]?.working,
+    (chat) => state.chats[chat]?.unreadable,
+  )
   if (out === state.outbox) return
   putOutbox(out)
   emit()
@@ -596,8 +614,18 @@ function startHistory() {
   const phone = state.ui.device === 'phone'
   stepsTo(screenOf(state.ui)).forEach((s, i) => {
     const next: Entry = { shep: 1, key: stepKey(s), prev: entry?.key ?? null, screen: s }
-    if (i) history.pushState(next, '', urlOf(s, phone, location.pathname, (id) => slugOf(state.snap, id)))
-    else history.replaceState(next, '', urlOf(s, phone, location.pathname, (id) => slugOf(state.snap, id)))
+    if (i)
+      history.pushState(
+        next,
+        '',
+        urlOf(s, phone, location.pathname, (id) => slugOf(state.snap, id)),
+      )
+    else
+      history.replaceState(
+        next,
+        '',
+        urlOf(s, phone, location.pathname, (id) => slugOf(state.snap, id)),
+      )
     entry = next
   })
 }
@@ -736,8 +764,7 @@ export function connect() {
     } else if (msg.type === 'chat') {
       state = { ...state, chats: { ...state.chats, [msg.chat.key]: msg.chat } }
       putOutbox(settle(state.outbox, msg.chat))
-    }
-    else if (msg.type === 'terminal') state = { ...state, terms: { ...state.terms, [msg.chat]: { ansi: msg.ansi, cols: msg.cols, rows: msg.rows } } }
+    } else if (msg.type === 'terminal') state = { ...state, terms: { ...state.terms, [msg.chat]: { ansi: msg.ansi, cols: msg.cols, rows: msg.rows } } }
     else if (msg.type === 'update') state = { ...state, update: msg.update }
     else if (msg.type === 'build' && BUILD && msg.id && msg.id !== BUILD) reloadSoon()
     if (msg.type === 'snapshot') watchVisible()
@@ -1044,7 +1071,15 @@ export function counts(snap: Snapshot, placeId: string) {
   const c = attentionCounts(snap, sub)
   const own = attentionCounts(snap, [placeId])
   // Legacy totals remain available for plugins; named categories are separate.
-  return { red: c.need + c.ready, tasks: snap.tasks.filter((t) => sub.includes(t.place) && !t.archived && actionable(t)).length, own: own.need + own.ready, need: c.need, ready: c.ready, ownNeed: own.need, ownReady: own.ready }
+  return {
+    red: c.need + c.ready,
+    tasks: snap.tasks.filter((t) => sub.includes(t.place) && !t.archived && actionable(t)).length,
+    own: own.need + own.ready,
+    need: c.need,
+    ready: c.ready,
+    ownNeed: own.need,
+    ownReady: own.ready,
+  }
 }
 
 /* ---------- a place's tasks, grouped (groups.ts) ---------- */
@@ -1088,7 +1123,10 @@ export function setGroup(level: number, by: GroupBy) {
 /** whether every word typed is in one of these, any case: ⌘K's search and the lists' filters */
 export function matches(q: string, ...fields: (string | number | undefined)[]) {
   const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  const all = fields.filter((f) => f !== undefined && f !== '').join(' ').toLowerCase()
+  const all = fields
+    .filter((f) => f !== undefined && f !== '')
+    .join(' ')
+    .toLowerCase()
   return words.every((w) => all.includes(w))
 }
 

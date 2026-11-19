@@ -14,7 +14,8 @@ import { BOX, script, sshArgs } from './box.ts'
 export function codexRuntime(thread: { model?: unknown; reasoningEffort?: unknown; status?: { type?: string } }, at: number): AgentRuntime | undefined {
   if (!thread.status?.type || thread.status.type === 'notLoaded') return undefined
   return {
-    source: 'session', at,
+    source: 'session',
+    at,
     ...(typeof thread.model === 'string' && thread.model !== 'default' ? { model: thread.model } : {}),
     ...(typeof thread.reasoningEffort === 'string' ? { effort: thread.reasoningEffort } : {}),
   }
@@ -26,14 +27,21 @@ export async function readCodexRuntime(ids: string[]): Promise<Map<string, Agent
   const out = new Map<string, AgentRuntime>()
   if (!ids.length) return out
   const argv = ['codex', 'app-server', 'proxy']
-  const p = BOX ? spawn('ssh', sshArgs(BOX.target, script(BOX, argv)).slice(1), { stdio: ['pipe', 'pipe', 'ignore'] })
-    : spawn(argv[0], argv.slice(1), { stdio: ['pipe', 'pipe', 'ignore'] })
+  const p = BOX ? spawn('ssh', sshArgs(BOX.target, script(BOX, argv)).slice(1), { stdio: ['pipe', 'pipe', 'ignore'] }) : spawn(argv[0], argv.slice(1), { stdio: ['pipe', 'pipe', 'ignore'] })
   const socket = new Duplex({
-    read() { p.stdout?.resume() },
-    write(chunk, encoding, callback) { p.stdin!.write(chunk, encoding, callback) },
-    final(callback) { p.stdin!.end(callback) },
+    read() {
+      p.stdout?.resume()
+    },
+    write(chunk, encoding, callback) {
+      p.stdin!.write(chunk, encoding, callback)
+    },
+    final(callback) {
+      p.stdin!.end(callback)
+    },
   })
-  p.stdout!.on('data', (chunk) => { if (!socket.push(chunk)) p.stdout!.pause() })
+  p.stdout!.on('data', (chunk) => {
+    if (!socket.push(chunk)) p.stdout!.pause()
+  })
   p.stdout!.on('end', () => socket.push(null))
   const capabilities = new Map<string, boolean>()
   return new Promise((resolve) => {
@@ -83,7 +91,9 @@ export async function readCodexRuntime(ids: string[]): Promise<Map<string, Agent
           pending.delete(r.id)
           if (!pending.size) finish()
         }
-      } catch { finish() }
+      } catch {
+        finish()
+      }
     })
   })
 }

@@ -57,7 +57,12 @@ export class Vault {
       return {}
     }
     return Object.fromEntries(
-      Object.entries(this.read()).map(([level, all]) => [level, Object.entries(all).map(([name, k]) => ({ name, at: k.at })).sort((a, b) => a.name.localeCompare(b.name))]),
+      Object.entries(this.read()).map(([level, all]) => [
+        level,
+        Object.entries(all)
+          .map(([name, k]) => ({ name, at: k.at }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      ]),
     )
   }
 

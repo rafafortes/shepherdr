@@ -100,10 +100,14 @@ describe('the helper', () => {
     writeFileSync(join(here, 'blocked'), 'a file')
     const copy = (f: string) => join(here, f)
     let tries = 0
-    const fails = new Mirror({} as BoxInfo, () => {
-      tries++
-      throw new Error('ssh is not there')
-    }, copy)
+    const fails = new Mirror(
+      {} as BoxInfo,
+      () => {
+        tries++
+        throw new Error('ssh is not there')
+      },
+      copy,
+    )
     // following a file with no copy here yet: nothing of it is kept, it is sent whole once the mirror runs
     fails.follow([], ['/there/not-yet.jsonl'])
     fails.start()
@@ -111,7 +115,17 @@ describe('the helper', () => {
     // the start that failed is tried again later, never at once; a stop ends that
     fails.stop()
     // a mirror whose pipe takes nothing: what it is told is dropped, and it is told everything at its next start
-    const proc = { stdin: { write: () => { throw new Error('closed') }, flush: () => undefined }, stdout: new ReadableStream<Uint8Array>(), exited: new Promise<number>(() => undefined), kill: () => undefined }
+    const proc = {
+      stdin: {
+        write: () => {
+          throw new Error('closed')
+        },
+        flush: () => undefined,
+      },
+      stdout: new ReadableStream<Uint8Array>(),
+      exited: new Promise<number>(() => undefined),
+      kill: () => undefined,
+    }
     const deaf = new Mirror({} as BoxInfo, () => proc, copy)
     deaf.start()
     expect(() => deaf.follow([], ['/there/more.jsonl'])).not.toThrow()
@@ -131,7 +145,8 @@ describe('the helper', () => {
 
   test('its files: the command, the scripts and the skills; its version changes with them', () => {
     const files = helperFiles('Linux', 'x86_64').map(([to]) => to)
-    for (const f of ['bin/shepherdr', 'hook.pl', 'mirror.pl', 'health.pl', 'relay.pl', 'skill/shepherdr/SKILL.md', 'skill/shepherdr-coordinator/SKILL.md', 'skill/shepherdr-agent/SKILL.md']) expect(files).toContain(f)
+    for (const f of ['bin/shepherdr', 'hook.pl', 'mirror.pl', 'health.pl', 'relay.pl', 'skill/shepherdr/SKILL.md', 'skill/shepherdr-coordinator/SKILL.md', 'skill/shepherdr-agent/SKILL.md'])
+      expect(files).toContain(f)
     expect(helperVersion('Linux', 'x86_64')).toMatch(/^[0-9a-f]{16}$/)
   })
 
@@ -150,7 +165,10 @@ describe('a machine run from the main one', () => {
     const home = tmp('worker')
     const box: BoxInfo = { label: 'vm-demo', target: 'vm-demo', session: 'default', herdr: 'herdr', home: '/home/exedev', path: '/usr/bin:/bin', os: 'Linux' }
     const code = `const { Places } = await import(${JSON.stringify(join(root, 'server/live/places.ts'))}); const { claudeLogPath } = await import(${JSON.stringify(join(root, 'server/live/readers/find.ts'))}); const c = new Places().coordinator('p:vm-demo:~'); console.log(JSON.stringify({ cwd: c?.cwd, log: claudeLogPath(c?.cwd ?? '', 'abc') }))`
-    const r = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', env: { ...process.env, ...mirrorHomes(home, box), SHEPHERDR_BOX: JSON.stringify(box), SHEPHERDR_HOME: home, SHEPHERDR_MACHINE: 'vm-demo' } })
+    const r = spawnSync(process.execPath, ['-e', code], {
+      encoding: 'utf8',
+      env: { ...process.env, ...mirrorHomes(home, box), SHEPHERDR_BOX: JSON.stringify(box), SHEPHERDR_HOME: home, SHEPHERDR_MACHINE: 'vm-demo' },
+    })
     expect(JSON.parse(r.stdout)).toEqual({ cwd: '/home/exedev', log: `${home}/mirror/home/exedev/.claude/projects/-home-exedev/abc.jsonl` })
   })
 
@@ -158,7 +176,10 @@ describe('a machine run from the main one', () => {
     const home = tmp('worker')
     const box: BoxInfo = { label: 'vm-demo', target: 'vm-demo', session: 'default', herdr: 'herdr', home: '/home/other', path: '/usr/bin:/bin', os: 'Linux' }
     const code = `const { Heartbeats } = await import(${JSON.stringify(join(root, 'server/live/heartbeat.ts'))}); const h = new Heartbeats(); const first = h.beat('p:vm-demo:tor', 'space'); h.write('p:vm-demo:tor', '- Check the ROM builds'); console.log(JSON.stringify([first, h.beat('p:vm-demo:tor', 'space'), h.beat('p:vm-demo:~', 'home')]))`
-    const r = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', env: { ...process.env, ...mirrorHomes(home, box), SHEPHERDR_BOX: JSON.stringify(box), SHEPHERDR_HOME: home, SHEPHERDR_MACHINE: 'vm-demo' } })
+    const r = spawnSync(process.execPath, ['-e', code], {
+      encoding: 'utf8',
+      env: { ...process.env, ...mirrorHomes(home, box), SHEPHERDR_BOX: JSON.stringify(box), SHEPHERDR_HOME: home, SHEPHERDR_MACHINE: 'vm-demo' },
+    })
     const [first, edited, machine] = JSON.parse(r.stdout) as string[]
     for (const text of [first, edited, machine]) {
       expect(text).not.toContain(home)
@@ -196,7 +217,18 @@ describe('a machine run from the main one', () => {
       outs.push((await src.cli(['artifact', 'check', 'board.html'], { cwd })).out)
       console.log(JSON.stringify(outs))
       process.exit(0)`
-    const r = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', env: { ...process.env, ...mirrorHomes(home, box), PATH: `${bin}:${process.env.PATH}`, SHEPHERDR_BOX: JSON.stringify(box), SHEPHERDR_HOME: home, SHEPHERDR_MACHINE: 'vm-demo', HERDR_SOCKET_PATH: join(home, 'no-herdr.sock') } })
+    const r = spawnSync(process.execPath, ['-e', code], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ...mirrorHomes(home, box),
+        PATH: `${bin}:${process.env.PATH}`,
+        SHEPHERDR_BOX: JSON.stringify(box),
+        SHEPHERDR_HOME: home,
+        SHEPHERDR_MACHINE: 'vm-demo',
+        HERDR_SOCKET_PATH: join(home, 'no-herdr.sock'),
+      },
+    })
     const outs = JSON.parse(r.stdout.trim().split('\n').at(-1)!) as string[]
     for (const out of outs) expect(out).not.toContain(home)
     const checks = join(there, '.shepherdr', 'helper', 'checks')
@@ -242,7 +274,21 @@ describe('a machine run from the main one', () => {
       console.log(JSON.stringify(outs))
       process.exit(0)`
     try {
-      const w = Bun.spawn([process.execPath, '-e', code], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, ...mirrorHomes(home, box), PATH: `${bin}:${process.env.PATH}`, SHEPHERDR_BOX: JSON.stringify(box), SHEPHERDR_HOME: home, SHEPHERDR_MACHINE: 'vm-demo', SHEPHERDR_MAIN_HOME: main, SHEPHERDR_SHARED_HOME: main, HERDR_SOCKET_PATH: join(home, 'no-herdr.sock') } })
+      const w = Bun.spawn([process.execPath, '-e', code], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: {
+          ...process.env,
+          ...mirrorHomes(home, box),
+          PATH: `${bin}:${process.env.PATH}`,
+          SHEPHERDR_BOX: JSON.stringify(box),
+          SHEPHERDR_HOME: home,
+          SHEPHERDR_MACHINE: 'vm-demo',
+          SHEPHERDR_MAIN_HOME: main,
+          SHEPHERDR_SHARED_HOME: main,
+          HERDR_SOCKET_PATH: join(home, 'no-herdr.sock'),
+        },
+      })
       const out = await new Response(w.stdout).text()
       const [set, mine, unset, away] = JSON.parse(out.trim().split('\n').at(-1)!) as [number, string, { value: string; from: string }][]
       expect(set).toEqual([0, "brief.review = off (Everywhere's)", { value: 'off', from: 'all' }])
@@ -251,7 +297,10 @@ describe('a machine run from the main one', () => {
       expect(unset[1]).toStartWith("brief.review: Everywhere's own is unset")
       expect(unset[2].from).toBe('default')
       // only Everywhere went to the main machine
-      expect(asked).toEqual([['set', 'brief.review', 'off'], ['unset', 'brief.review']])
+      expect(asked).toEqual([
+        ['set', 'brief.review', 'off'],
+        ['unset', 'brief.review'],
+      ])
       expect(away[0]).toBe(1)
       expect(away[1]).toContain("The main machine's Shepherdr can't be reached right now")
     } finally {
@@ -274,13 +323,14 @@ describe('a machine run from the main one', () => {
       },
     })
     try {
-      const run = (args: string[], input?: string) => new Promise<string>((done) => {
-        const c = spawn('perl', [join(dir, 'bin', 'shepherdr'), ...args], { stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] })
-        let out = ''
-        c.stdout!.on('data', (d) => (out += d))
-        c.on('close', () => done(out))
-        if (input !== undefined) c.stdin!.end(input)
-      })
+      const run = (args: string[], input?: string) =>
+        new Promise<string>((done) => {
+          const c = spawn('perl', [join(dir, 'bin', 'shepherdr'), ...args], { stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] })
+          let out = ''
+          c.stdout!.on('data', (d) => (out += d))
+          c.on('close', () => done(out))
+          if (input !== undefined) c.stdin!.end(input)
+        })
       expect(await run(['heartbeat', 'set'], '- Check the ROM builds\n')).toBe('Saved.\n')
       expect(got).toMatchObject({ args: ['heartbeat', 'set'], stdin: '- Check the ROM builds\n' })
       // other words read no stdin
@@ -358,7 +408,21 @@ describe('a machine run from the main one', () => {
 
 describe('a restart of the main server (an update)', () => {
   const saved = { id: 'far', label: 'far', target: 'far.invalid', session: 'default', enabled: true }
-  const snap = { name: 'S', host: 'far', machines: [{ machine: 'far', status: 'idle' }], places: [{ id: 'm:far', kind: 'machine', level: 1, name: 'far', machine: 'far', status: 'idle', mode: 'regular', chat: 'm:far' }, { id: 'p:far:web', kind: 'project', level: 2, name: 'web', machine: 'far', status: 'need', mode: 'regular', chat: 'p:far:web' }], tasks: [], automations: {}, asks: {}, settings: [], overrides: {}, user: 'u' }
+  const snap = {
+    name: 'S',
+    host: 'far',
+    machines: [{ machine: 'far', status: 'idle' }],
+    places: [
+      { id: 'm:far', kind: 'machine', level: 1, name: 'far', machine: 'far', status: 'idle', mode: 'regular', chat: 'm:far' },
+      { id: 'p:far:web', kind: 'project', level: 2, name: 'web', machine: 'far', status: 'need', mode: 'regular', chat: 'p:far:web' },
+    ],
+    tasks: [],
+    automations: {},
+    asks: {},
+    settings: [],
+    overrides: {},
+    user: 'u',
+  }
 
   /** a worker left running from before the restart: a process of its own, serving its snapshot */
   function oldWorker() {
@@ -382,7 +446,10 @@ describe('a restart of the main server (an update)', () => {
   test('what each machine showed comes back at once, connecting, and its worker on the same code is taken back', async () => {
     const w = await oldWorker()
     const { HOME, Machines } = await before(w, '')
-    const m = new Machines(async () => [saved], async () => ({}))
+    const m = new Machines(
+      async () => [saved],
+      async () => ({}),
+    )
     try {
       const l = m.list().find((x) => x.rec.machine === 'far')!
       // at once: its places and the chats on screen, as before the restart, connecting rather than out of reach
@@ -408,7 +475,10 @@ describe('a restart of the main server (an update)', () => {
   test('a worker started again out of its hands (the doctor, by hand) is followed to its new address', async () => {
     const w = await oldWorker()
     const { Machines, writeJson } = await before(w, '')
-    const m = new Machines(async () => [saved], async () => ({}))
+    const m = new Machines(
+      async () => [saved],
+      async () => ({}),
+    )
     const next = await oldWorker()
     try {
       const l = m.list().find((x) => x.rec.machine === 'far')!
@@ -431,9 +501,14 @@ describe('a restart of the main server (an update)', () => {
   test('cached workers are not adopted while enabled membership is pending, and disabled workers stay off', async () => {
     const w = await oldWorker()
     const { HOME, Machines } = await before(w, '')
-    let resolve!: (value: typeof saved[]) => void
-    const pending = new Promise<typeof saved[]>((r) => { resolve = r })
-    const m = new Machines(() => pending, async () => ({}))
+    let resolve!: (value: (typeof saved)[]) => void
+    const pending = new Promise<(typeof saved)[]>((r) => {
+      resolve = r
+    })
+    const m = new Machines(
+      () => pending,
+      async () => ({}),
+    )
     try {
       const l = m.list().find((x) => x.rec.machine === 'far')!
       await (m as unknown as { pollAll(): Promise<void> }).pollAll()
@@ -455,7 +530,10 @@ describe('a restart of the main server (an update)', () => {
   test('a worker on other code is stopped, not taken back', async () => {
     const w = await oldWorker()
     const { Machines } = await before(w, 'older')
-    const m = new Machines(async () => [saved], async () => ({}))
+    const m = new Machines(
+      async () => [saved],
+      async () => ({}),
+    )
     try {
       for (let i = 0; i < 250 && w.alive(); i++) await Bun.sleep(20)
       expect(w.alive()).toBe(false)

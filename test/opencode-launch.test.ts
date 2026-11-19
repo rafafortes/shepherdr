@@ -66,7 +66,14 @@ afterAll(() => {
 })
 
 /** every call the fake opencode got since the last reset */
-const calls = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as { argv: string[]; cwd: string }) : [])
+const calls = () =>
+  existsSync(log)
+    ? readFileSync(log, 'utf8')
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as { argv: string[]; cwd: string })
+    : []
 const reset = () => {
   writeFileSync(log, '')
   setEnv('FAKE_OUT', JSON.stringify({ data: { id: 'ses_fake1' } }))
@@ -93,16 +100,17 @@ function harness(records: Record<string, unknown> = {}) {
 
 const cwd = join(dir, 'app')
 const key = 'OC-1/Agent'
-const base = (o: Partial<Spec> = {}): Spec => ({
-  key,
-  name: 'shep-oc-test',
-  kind: 'opencode',
-  cwd,
-  workspace: 'test',
-  access: 'full',
-  pane: async () => 'fake-pane',
-  ...o,
-}) as Spec
+const base = (o: Partial<Spec> = {}): Spec =>
+  ({
+    key,
+    name: 'shep-oc-test',
+    kind: 'opencode',
+    cwd,
+    workspace: 'test',
+    access: 'full',
+    pane: async () => 'fake-pane',
+    ...o,
+  }) as Spec
 
 describe('starting an OpenCode agent', () => {
   test('a fresh start creates its session with the folder, title, model and variant, puts its instructions in, and starts the TUI on it', async () => {
@@ -303,7 +311,7 @@ describe('resuming an OpenCode agent', () => {
   })
 })
 
-describe('reading an OpenCode agent\'s log', () => {
+describe("reading an OpenCode agent's log", () => {
   test('discoverLog of a session it has: its mirror; without one, the newest session of its folder', () => {
     const h = harness()
     try {
@@ -362,7 +370,7 @@ describe('reading an OpenCode agent\'s log', () => {
     }
   })
 
-  test('herdr\'s report of an OpenCode session path is never followed', () => {
+  test("herdr's report of an OpenCode session path is never followed", () => {
     const h = harness()
     try {
       h.a.adopt('OC-6/Agent', { name: 'shep-oc-herdr', cwd: join(dir, 'found') } as never, 'opencode', 'test')

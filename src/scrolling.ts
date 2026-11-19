@@ -11,7 +11,10 @@ export function watchScrolling() {
     if (!el) return
     if (!el.hasAttribute('data-scrolling')) el.setAttribute('data-scrolling', '')
     clearTimeout(timers.get(el))
-    timers.set(el, setTimeout(() => el.removeAttribute('data-scrolling'), LINGER))
+    timers.set(
+      el,
+      setTimeout(() => el.removeAttribute('data-scrolling'), LINGER),
+    )
   }
   addEventListener('scroll', moved, { capture: true, passive: true })
 }

@@ -152,8 +152,7 @@ describe.skipIf(!browser)('a voice call lives in the chat box', () => {
     await page.waitForSelector(status)
     // no transcript yet: the pill still just says what the call is doing
     expect(await page.textContent(status)).toBe('Connecting')
-    const caption = (who: string, text: string) =>
-      page.evaluate(([w, t]) => (window as unknown as { caption(w: string, t: string): void }).caption(w, t), [who, text])
+    const caption = (who: string, text: string) => page.evaluate(([w, t]) => (window as unknown as { caption(w: string, t: string): void }).caption(w, t), [who, text])
     await caption('you', 'ship it')
     await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('You: ship it'), lines)
     await caption('agent', 'on it')
@@ -368,8 +367,7 @@ describe.skipIf(!browser)('talk to type records in the chat box', () => {
   }, 30_000)
 
   test('the cursor comes back right after the words: at the end, or where you were typing', async () => {
-    const caret = (page: Page) =>
-      page.$eval(`${box} textarea`, (t) => [document.activeElement === t, (t as HTMLTextAreaElement).selectionStart, (t as HTMLTextAreaElement).selectionEnd])
+    const caret = (page: Page) => page.$eval(`${box} textarea`, (t) => [document.activeElement === t, (t as HTMLTextAreaElement).selectionStart, (t as HTMLTextAreaElement).selectionEnd])
     for (const opts of [{ viewport: { width: 1280, height: 800 } }, { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }]) {
       const { ctx, page, answer } = await open(opts)
       const talk = async (said: string) => {

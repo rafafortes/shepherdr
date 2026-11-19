@@ -94,7 +94,10 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     await box.fill('')
 
     // another space: its chat in the middle, the chips stay
-    await page.locator('li[data-project="p:vm-str:~"]').getByRole('button', { name: /^home\b/ }).click()
+    await page
+      .locator('li[data-project="p:vm-str:~"]')
+      .getByRole('button', { name: /^home\b/ })
+      .click()
     await page.getByRole('textbox', { name: 'Message home…' }).waitFor()
     expect(await chips(page)).toEqual(['p:vm-str:gtm', 'p:mac:lilla-varlden'])
     expect(await lv3.isVisible()).toBe(true)
@@ -176,17 +179,29 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     expect(await page.getByText('gtm · vm-str +3', { exact: true }).isVisible()).toBe(true)
     // another space from the drawer, then its Tasks tab: the pinned chips still
     await page.getByRole('button', { name: 'Places' }).click()
-    await page.locator('li[data-project="p:vm-str:~"]').getByRole('button', { name: /^home\b/ }).click()
+    await page
+      .locator('li[data-project="p:vm-str:~"]')
+      .getByRole('button', { name: /^home\b/ })
+      .click()
     await page.getByRole('textbox', { name: 'Message home…' }).waitFor()
-    await page.getByRole('group', { name: 'View' }).getByRole('button', { name: /^Tasks/ }).click()
+    await page
+      .getByRole('group', { name: 'View' })
+      .getByRole('button', { name: /^Tasks/ })
+      .click()
     await page.getByRole('button', { name: /LV-3 Upload page/ }).waitFor()
     expect(await chips(page)).toEqual(['p:vm-str:gtm', 'm:mac', 'p:vm-str:herdr-projects', 'm:nas'])
     // unpinned, the tab follows the place picked: at the main home space, everything; in a space, its own
     await page.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).click()
     expect(await chips(page)).toEqual([])
     await page.getByRole('button', { name: 'Places' }).click()
-    await page.locator('li[data-project="p:vm-str:herdr-projects"]').getByRole('button', { name: /^herdr-projects/ }).click()
-    await page.getByRole('group', { name: 'View' }).getByRole('button', { name: /^Tasks/ }).click()
+    await page
+      .locator('li[data-project="p:vm-str:herdr-projects"]')
+      .getByRole('button', { name: /^herdr-projects/ })
+      .click()
+    await page
+      .getByRole('group', { name: 'View' })
+      .getByRole('button', { name: /^Tasks/ })
+      .click()
     await page.getByRole('button', { name: /LV-3 Upload page/ }).waitFor({ state: 'detached' })
     expect(await chips(page)).toEqual(['p:vm-str:herdr-projects'])
     await page.close()

@@ -28,9 +28,19 @@ async function until(f: () => Promise<boolean> | boolean, what: string) {
 }
 
 /** a space row's name as it is said: its count, unread, muted (by its name, or its id for a home space) */
-const go = (list: string, name: string) => (name.startsWith('p:') ? `${list} li[data-project="${name}"] button[aria-label]:not([aria-expanded]):not([aria-haspopup])` : `${list} li button[aria-label^="${name}"]`)
-const said = (page: Page, list: string, name: string) => page.locator(go(list, name)).first().getAttribute('aria-label').catch(() => null)
-const weight = (page: Page, list: string, name: string) => page.locator(`${go(list, name)} > span`).first().evaluate((n) => getComputedStyle(n).fontWeight)
+const go = (list: string, name: string) =>
+  name.startsWith('p:') ? `${list} li[data-project="${name}"] button[aria-label]:not([aria-expanded]):not([aria-haspopup])` : `${list} li button[aria-label^="${name}"]`
+const said = (page: Page, list: string, name: string) =>
+  page
+    .locator(go(list, name))
+    .first()
+    .getAttribute('aria-label')
+    .catch(() => null)
+const weight = (page: Page, list: string, name: string) =>
+  page
+    .locator(`${go(list, name)} > span`)
+    .first()
+    .evaluate((n) => getComputedStyle(n).fontWeight)
 /** a heading (Pinned's, a machine's): never bold, never counting */
 const plainHeading = async (page: Page, list: string, id: string) => {
   const h = page.locator(`${list} li[data-heading="${id}"]`)
@@ -64,7 +74,11 @@ describe.skipIf(!browser)('unread and notify', () => {
 
     // folded, the machine hides the space with something new too; its heading isn't bold, with a quiet dot: red where
     // something waits on you in it (gtm's tasks), else grey for unread
-    const dot = (id: string) => desk.locator(`#places li[data-heading="${id}"] [data-inside]`).getAttribute('data-inside', { timeout: 2000 }).catch(() => null)
+    const dot = (id: string) =>
+      desk
+        .locator(`#places li[data-heading="${id}"] [data-inside]`)
+        .getAttribute('data-inside', { timeout: 2000 })
+        .catch(() => null)
     await desk.getByRole('button', { name: "Hide vm-str's spaces" }).click()
     await desk.getByRole('button', { name: "Show vm-str's spaces" }).waitFor()
     await desk.mouse.move(900, 400)
@@ -159,7 +173,12 @@ describe.skipIf(!browser)('unread and notify', () => {
     await plainHeading(desk, '#places', 'm:vm-str')
     await desk.getByRole('button', { name: "Show vm-str's spaces" }).click()
     // a task's alert buzzes even where its project is Off
-    expect(notifies({ settings: [{ name: 'Notify', level: 'p:vm-str:herdr-projects', rows: [{ label: 'Notify', key: 'notify', value: 'Off', options: [] }] }] }, { go: { place: 'p:vm-str:herdr-projects', task: 'HP-202' }, task: true })).toBe(true)
+    expect(
+      notifies(
+        { settings: [{ name: 'Notify', level: 'p:vm-str:herdr-projects', rows: [{ label: 'Notify', key: 'notify', value: 'Off', options: [] }] }] },
+        { go: { place: 'p:vm-str:herdr-projects', task: 'HP-202' }, task: true },
+      ),
+    ).toBe(true)
     await desk.close()
   }, 30_000)
 
@@ -189,7 +208,10 @@ describe.skipIf(!browser)('unread and notify', () => {
     await desk.keyboard.press('Escape')
     await row.hover()
     await row.getByRole('button', { name: 'More for lilla-varlden' }).click()
-    await desk.getByRole('menu').getByRole('button', { name: /^Needs me/ }).click()
+    await desk
+      .getByRole('menu')
+      .getByRole('button', { name: /^Needs me/ })
+      .click()
     await until(async () => (await said(desk, '#places', 'lilla-varlden'))?.endsWith(', unread') ?? false, 'lilla-varlden unmuted')
     expect(world.stores.mac.pick('notify', { space: 'lilla-varlden' }).from).toBe('default')
 

@@ -115,7 +115,9 @@ describe('the caps and the backup chain: held with the chain named, and started 
     expect(w.engine.view(s3).sub).toBe('Waiting: pi · spark 1/1 · codex 1/1')
     expect(w.engine.view(s3).subTitle).toBe('Waiting: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (1 of 1 at once), Codex (default) (1 of 1 at once)')
     expect(w.engine.view(s1.t).subTitle).toBeUndefined()
-    expect(cards(w, `${s3.id}/Agent`)).toContain('waiting: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (1 of 1 at once), Codex (default) (1 of 1 at once) — every model it may use is full or out')
+    expect(cards(w, `${s3.id}/Agent`)).toContain(
+      'waiting: pi · spark/qwen3.8-flash-next-mlx4-mtp-tensorfold (1 of 1 at once), Codex (default) (1 of 1 at once) — every model it may use is full or out',
+    )
     expect(startedOn(w, s3.id)).toBe(false)
     expect(w.engine.waitingFor(s3)).toEqual(['pi.spark', 'codex'])
     // a start that finds the wait (as one a pass races) holds the task again, and starts nothing

@@ -231,13 +231,23 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           const v = Number(q.get('v')) || undefined
           if (part === 'thumb') {
             const b = await source.artifactThumb(id, q.has('dark'))
-            return b ? new Response(b, { headers: { 'content-type': b.type || 'image/png', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' } }) : new Response('no picture', { status: 404 })
+            return b
+              ? new Response(b, { headers: { 'content-type': b.type || 'image/png', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' } })
+              : new Response('no picture', { status: 404 })
           }
           const a = await source.artifact(id, v)
           if (part === 'raw') return a ? json(a) : json({ error: 'No such artifact' }, 404)
           if (part === 'data') return a ? json({ data: a.data ?? null }) : json({ error: 'No such artifact' }, 404)
           if (!a) return new Response('no such artifact', { status: 404 })
-          return frameResponse(wrapPage(a.html, { sent: a.sent, data: a.data, big: q.has('full'), phone: q.get('device') === 'phone', theme: q.get('theme') === 'dark' ? 'dark' : q.get('theme') === 'light' ? 'light' : undefined }))
+          return frameResponse(
+            wrapPage(a.html, {
+              sent: a.sent,
+              data: a.data,
+              big: q.has('full'),
+              phone: q.get('device') === 'phone',
+              theme: q.get('theme') === 'dark' ? 'dark' : q.get('theme') === 'light' ? 'light' : undefined,
+            }),
+          )
         }
         // the app's font, for artifacts in sealed frames (their origin is opaque, so it is fetched cross-origin)
         if (path === '/api/font/InterVariable.woff2')
@@ -290,14 +300,32 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           }
         }
         if (path === '/api/cli' && req.method === 'POST') {
-          const cli = (source as Source & { cli?(a: string[], c: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string }): Promise<{ out: string; code: number }> }).cli
-          if (!cli) return json({ out: source.kind === 'demo' ? 'This demo server does not accept shepherdr commands. Target your owning live server or installed helper.\n' : 'This server does not provide the shepherdr command. Check the target URL or installed helper.\n', code: 1 })
+          const cli = (
+            source as Source & { cli?(a: string[], c: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string }): Promise<{ out: string; code: number }> }
+          ).cli
+          if (!cli)
+            return json({
+              out:
+                source.kind === 'demo'
+                  ? 'This demo server does not accept shepherdr commands. Target your owning live server or installed helper.\n'
+                  : 'This server does not provide the shepherdr command. Check the target URL or installed helper.\n',
+              code: 1,
+            })
           // the caller's shell says which agent it is (its chat) and which herdr pane it writes from: what tells a
           // message from another agent from the human's own words (live/source.ts toldFrom)
           const b = (await req.json()) as { args: string[]; chat?: string; pane?: string; cwd?: string; stdin?: string }
           // some commands wait long (shepherdr checks waits for GitHub's): no idle cut-off for these
           srv.timeout(req, 0)
-          return json(await cli.call(source, b.args ?? [], { chat: b.chat, pane: b.pane, cwd: b.cwd, stdin: b.stdin, local: direct(req), proof: req.headers.get('authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1] }))
+          return json(
+            await cli.call(source, b.args ?? [], {
+              chat: b.chat,
+              pane: b.pane,
+              cwd: b.cwd,
+              stdin: b.stdin,
+              local: direct(req),
+              proof: req.headers.get('authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1],
+            }),
+          )
         }
         if (path === '/api/push/key') return json({ key: push?.publicKey ?? null })
         // what waits on you: the service worker sets the app icon's count with it after a notification button answers
@@ -442,7 +470,19 @@ export function sameSite(req: Request, path: string): boolean {
   if (writes && origin !== null && req.headers.get('x-shepherdr') !== '1') return false
   // fetch metadata: a cross-site request is never let through, Origin or not
   const site = req.headers.get('sec-fetch-site')
-  if (site === 'cross-site' && (writes || path === '/api/ws' || path === '/api/voice' || path === '/api/browser' || path === '/api/file' || path === '/api/folders' || path === '/api/worktree' || path === '/api/activity' || path === '/api/chat')) return false
+  if (
+    site === 'cross-site' &&
+    (writes ||
+      path === '/api/ws' ||
+      path === '/api/voice' ||
+      path === '/api/browser' ||
+      path === '/api/file' ||
+      path === '/api/folders' ||
+      path === '/api/worktree' ||
+      path === '/api/activity' ||
+      path === '/api/chat')
+  )
+    return false
   return true
 }
 

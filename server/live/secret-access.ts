@@ -5,7 +5,9 @@ import { randomBytes, createHash } from 'node:crypto'
 export class SecretAccess {
   private owners = new Map<string, { binding: string; token: string; chain: string[] }>()
   private proofs = new Map<string, string>()
-  private hash(token: string) { return createHash('sha256').update(token).digest('hex') }
+  private hash(token: string) {
+    return createHash('sha256').update(token).digest('hex')
+  }
 
   issue(chat: string, binding: string, chain: string[]) {
     const old = this.owners.get(chat)

@@ -74,7 +74,11 @@ export function migrateToSpaces(home: (machine?: string) => string, homeAgent: s
   writeJson('agents.json', recs)
   for (const f of ['outbox.json', 'typed.json']) {
     const items = readJson<{ key: string }[]>(f, [])
-    if (items.some((x) => old(x.key))) writeJson(f, items.map((x) => (old(x.key) ? { ...x, key: to(x.key) } : x)))
+    if (items.some((x) => old(x.key)))
+      writeJson(
+        f,
+        items.map((x) => (old(x.key) ? { ...x, key: to(x.key) } : x)),
+      )
   }
   const retries = readJson<Record<string, unknown>>('retries.json', {})
   if (Object.keys(retries).some(old)) writeJson('retries.json', Object.fromEntries(Object.entries(retries).filter(([k]) => !old(k))))

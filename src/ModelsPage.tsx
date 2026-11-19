@@ -67,7 +67,14 @@ function controlsOf(m: ModelsMatrix, row: MatrixRow, t: Target): SettingRow[] {
     ? { label: b, key: slot.model, value: 'default', fixed: true }
     : !cat.known
       ? { label: b, key: slot.model, value: model, text: true }
-      : { label: b, key: slot.model, value: model, ordered: true, options: ['default', ...cat.models.map((x) => x.label), ...(model === 'default' || picked ? [] : [model])], ids: Object.fromEntries(cat.models.map((x) => [x.label, x.id])) }
+      : {
+          label: b,
+          key: slot.model,
+          value: model,
+          ordered: true,
+          options: ['default', ...cat.models.map((x) => x.label), ...(model === 'default' || picked ? [] : [model])],
+          ids: Object.fromEntries(cat.models.map((x) => [x.label, x.id])),
+        }
   return [
     { label: a, key: slot.cli, value: cli, options: slot.clis },
     modelRow,
@@ -99,13 +106,21 @@ function writesOf(m: ModelsMatrix, row: MatrixRow, t: Target, key: string, value
     const cat = m.catalog[row.values[slot.cli]!.value]
     const levels = cat?.models.find((x) => x.label === value)?.efforts ?? cat?.efforts ?? []
     const effort = row.values[slot.effort]!.value
-    return effort !== 'default' && !levels.includes(effort) ? [[key, value], [slot.effort, 'default']] : [[key, value]]
+    return effort !== 'default' && !levels.includes(effort)
+      ? [
+          [key, value],
+          [slot.effort, 'default'],
+        ]
+      : [[key, value]]
   }
   return [[key, value]]
 }
 
 /** the reset of a target's keys set in this row: each goes back to what the level above gives */
-const resetOf = (row: MatrixRow, t: Target): Write[] => keysOf(t).filter((k) => row.values[k]?.set).map((k): Write => [k, null])
+const resetOf = (row: MatrixRow, t: Target): Write[] =>
+  keysOf(t)
+    .filter((k) => row.values[k]?.set)
+    .map((k): Write => [k, null])
 
 /** a row with some values changed: the draft a bulk dialog edits */
 const withValues = (row: MatrixRow, writes: Write[]): MatrixRow => ({
@@ -187,18 +202,33 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
         error={open.error}
         onSet={(key, value) => void apply(row, t, writesOf(m, row, t, key, value))}
         onReset={() => void apply(row, t, resetOf(row, t))}
-        footer={'slot' in t ? (
-          <Ghost onClick={() => { setOpen(null); setBulk(t.slot) }} className="text-accent">
-            Set for every space…
-          </Ghost>
-        ) : undefined}
+        footer={
+          'slot' in t ? (
+            <Ghost
+              onClick={() => {
+                setOpen(null)
+                setBulk(t.slot)
+              }}
+              className="text-accent"
+            >
+              Set for every space…
+            </Ghost>
+          ) : undefined
+        }
       />
     )
   }
   /** a ⋯ button and its menu, for a column's header or a space's row */
   const more = (id: string, label: string, items: ReactNode, end = true) => (
     <span className="relative inline-flex">
-      <button type="button" aria-label={label} aria-haspopup="menu" aria-expanded={menu === id} onClick={() => setMenu(menu === id ? null : id)} className="press-dim grid size-6 place-items-center rounded-full text-fg3 hover:bg-sel hover:text-fg aria-expanded:bg-sel aria-expanded:text-fg">
+      <button
+        type="button"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={menu === id}
+        onClick={() => setMenu(menu === id ? null : id)}
+        className="press-dim grid size-6 place-items-center rounded-full text-fg3 hover:bg-sel hover:text-fg aria-expanded:bg-sel aria-expanded:text-fg"
+      >
         <MoreIcon className={ic} />
       </button>
       {menu === id ? (
@@ -233,7 +263,10 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
   /** the "+": the next backup of a row, starting on the CLI of the one before it (Settings' Add a backup does the same),
    *  then its editor open for the rest */
   const add = (row: MatrixRow, slot: MatrixSlot) => {
-    const before = [...m.slots.filter((x) => x.role === slot.role && x.n < slot.n)].reverse().map((x) => row.values[x.cli]!.value).find((v) => v !== OFF)
+    const before = [...m.slots.filter((x) => x.role === slot.role && x.n < slot.n)]
+      .reverse()
+      .map((x) => row.values[x.cli]!.value)
+      .find((v) => v !== OFF)
     void apply(row, { slot }, [[slot.cli, before ?? slot.clis.find((c) => c !== OFF) ?? OFF]])
   }
   const cellOf = (row: MatrixRow, slot: MatrixSlot) => row.cells[slot.id]!
@@ -263,7 +296,13 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
                       const t: Target = { slot }
                       return (
                         <li key={slot.id} className="flex flex-col">
-                          <button type="button" data-cell={idOf(row, t)} aria-expanded={open?.id === idOf(row, t)} onClick={() => toggle(idOf(row, t))} className="press flex min-h-11 w-full items-center justify-between gap-3 text-left">
+                          <button
+                            type="button"
+                            data-cell={idOf(row, t)}
+                            aria-expanded={open?.id === idOf(row, t)}
+                            onClick={() => toggle(idOf(row, t))}
+                            className="press flex min-h-11 w-full items-center justify-between gap-3 text-left"
+                          >
                             <span className="shrink-0 text-fg2">{slot.name}</span>
                             <span className={clsx('min-w-0 truncate text-right', cell.set ? 'text-fg' : 'text-fg3')} title={cell.words}>
                               {cell.words}
@@ -291,7 +330,12 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
                 const t: Target = { plain: p }
                 return (
                   <li key={p.key} className="flex flex-col">
-                    <button type="button" aria-expanded={open?.id === idOf(row, t)} onClick={() => toggle(idOf(row, t))} className="press flex min-h-11 w-full items-center justify-between gap-3 text-left">
+                    <button
+                      type="button"
+                      aria-expanded={open?.id === idOf(row, t)}
+                      onClick={() => toggle(idOf(row, t))}
+                      className="press flex min-h-11 w-full items-center justify-between gap-3 text-left"
+                    >
                       <span className="text-fg2">{p.title}</span>
                       <span className={clsx(plainSet(row, p) ? 'text-fg' : 'text-fg3')}>{plainWords(row, p)}</span>
                     </button>
@@ -324,7 +368,12 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
                 Level
               </th>
               {groups.map((g) => (
-                <th key={g.role} colSpan={g.slots.length + (g.plus ? 1 : 0)} scope="colgroup" className="sticky top-0 z-20 h-7 border-l border-line bg-bg px-2 pt-0.5 pb-1 text-left font-medium text-fg2">
+                <th
+                  key={g.role}
+                  colSpan={g.slots.length + (g.plus ? 1 : 0)}
+                  scope="colgroup"
+                  className="sticky top-0 z-20 h-7 border-l border-line bg-bg px-2 pt-0.5 pb-1 text-left font-medium text-fg2"
+                >
                   {g.title}
                 </th>
               ))}
@@ -345,7 +394,13 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
                     </span>
                   </th>
                 )),
-                ...(g.plus ? [<th key={`${g.role}-plus`} scope="col" className="sticky top-7 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium text-fg3">+</th>] : []),
+                ...(g.plus
+                  ? [
+                      <th key={`${g.role}-plus`} scope="col" className="sticky top-7 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium text-fg3">
+                        +
+                      </th>,
+                    ]
+                  : []),
               ])}
             </tr>
           </thead>
@@ -366,13 +421,20 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
                     const id = idOf(row, t)
                     return (
                       <td key={slot.id} className={clsx('relative py-1.5 pr-3 pl-2 align-top', i === 0 && 'border-l border-line')}>
-                        <button type="button" data-cell={id} aria-label={`${row.name} · ${g.title} · ${slot.name}: ${cell.words}`} aria-haspopup="dialog" aria-expanded={open?.id === id} onClick={() => toggle(id)} title={cell.words} className={clsx('press-dim block max-w-64 truncate rounded-row px-1.5 py-0.5 text-left hover:bg-hover aria-expanded:bg-sel', cell.set ? 'font-medium text-fg' : 'text-fg3')}>
+                        <button
+                          type="button"
+                          data-cell={id}
+                          aria-label={`${row.name} · ${g.title} · ${slot.name}: ${cell.words}`}
+                          aria-haspopup="dialog"
+                          aria-expanded={open?.id === id}
+                          onClick={() => toggle(id)}
+                          title={cell.words}
+                          className={clsx('press-dim block max-w-64 truncate rounded-row px-1.5 py-0.5 text-left hover:bg-hover aria-expanded:bg-sel', cell.set ? 'font-medium text-fg' : 'text-fg3')}
+                        >
                           {cell.words}
                         </button>
                         {cell.set || cell.words === OFF ? null : <span className="block truncate px-1.5 text-[0.75rem] text-fg3">{fromWord(m, cell.from)}</span>}
-                        {open?.id === id ? (
-                          <Pop onClose={() => setOpen(null)}>{editorOf(row, t)}</Pop>
-                        ) : null}
+                        {open?.id === id ? <Pop onClose={() => setOpen(null)}>{editorOf(row, t)}</Pop> : null}
                       </td>
                     )
                   }),
@@ -389,7 +451,14 @@ export default function ModelsPage({ phone }: { phone: boolean }) {
                   const id = idOf(row, t)
                   return (
                     <td key={p.key} className="relative py-1.5 pr-3 align-top">
-                      <button type="button" aria-label={`${row.name} · ${p.title}: ${plainWords(row, p)}`} aria-haspopup="dialog" aria-expanded={open?.id === id} onClick={() => toggle(id)} className={clsx('press-dim rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel', plainSet(row, p) ? 'font-medium text-fg' : 'text-fg3')}>
+                      <button
+                        type="button"
+                        aria-label={`${row.name} · ${p.title}: ${plainWords(row, p)}`}
+                        aria-haspopup="dialog"
+                        aria-expanded={open?.id === id}
+                        onClick={() => toggle(id)}
+                        className={clsx('press-dim rounded-row px-1.5 py-0.5 text-left tabular-nums hover:bg-hover aria-expanded:bg-sel', plainSet(row, p) ? 'font-medium text-fg' : 'text-fg3')}
+                      >
                         {plainWords(row, p)}
                       </button>
                       {open?.id === id ? <Pop onClose={() => setOpen(null)}>{editorOf(row, t)}</Pop> : null}
@@ -425,14 +494,35 @@ function LimitsLink() {
 }
 
 /** the "+" cell of a role: the next backup in the row (the one after its last that is on), its editor under it */
-function PlusCell({ row, group, open, add, onClose, editor }: { row: MatrixRow; group: Group; open: string | null; add: (slot: MatrixSlot) => void; onClose: () => void; editor: (t: Target) => ReactNode }) {
+function PlusCell({
+  row,
+  group,
+  open,
+  add,
+  onClose,
+  editor,
+}: {
+  row: MatrixRow
+  group: Group
+  open: string | null
+  add: (slot: MatrixSlot) => void
+  onClose: () => void
+  editor: (t: Target) => ReactNode
+}) {
   const slot = group.all[topOf(row, group.all) + 1]
   if (!slot) return <span className="text-fg3">—</span>
   const t: Target = { slot }
   const id = idOf(row, t)
   return (
     <>
-      <button type="button" aria-label={`Add ${slot.name} to ${row.name}`} aria-haspopup="dialog" aria-expanded={open === id} onClick={() => add(slot)} className="press-dim inline-flex items-center gap-1 rounded-row px-1.5 py-0.5 font-medium text-accent hover:bg-hover">
+      <button
+        type="button"
+        aria-label={`Add ${slot.name} to ${row.name}`}
+        aria-haspopup="dialog"
+        aria-expanded={open === id}
+        onClick={() => add(slot)}
+        className="press-dim inline-flex items-center gap-1 rounded-row px-1.5 py-0.5 font-medium text-accent hover:bg-hover"
+      >
         <span aria-hidden="true">+</span>
         {slot.name}
       </button>
@@ -481,9 +571,10 @@ function SetForEverySpace({ m, slot, phone, onClose }: { m: ModelsMatrix; slot: 
     if (failed.length) setError(failed.join(' '))
     else close()
   }
-  const ask = mode === 'each'
-    ? `Each of the ${spaces.length} spaces gets this value at its own level, replacing what it sets there. Spaces that inherit it now set it themselves.`
-    : `Everywhere gets this value. ${machine.name} and each of the ${spaces.length} spaces lose their own value for it, so every space reads Everywhere's. What they set there is lost.`
+  const ask =
+    mode === 'each'
+      ? `Each of the ${spaces.length} spaces gets this value at its own level, replacing what it sets there. Spaces that inherit it now set it themselves.`
+      : `Everywhere gets this value. ${machine.name} and each of the ${spaces.length} spaces lose their own value for it, so every space reads Everywhere's. What they set there is lost.`
   return (
     <Dialog
       title={`Set ${slot.title} · ${slot.name} for every space`}
@@ -532,7 +623,10 @@ function CopyModels({ m, from, targets, onClose }: { m: ModelsMatrix; from: Matr
     const failed: string[] = []
     for (const r of targets.filter((x) => picked.includes(x.id))) {
       // what the source reads, slot by slot (the primary first), skipping what the target already sets the same way
-      const writes = m.slots.flatMap((slot) => keysOf({ slot })).map((k): Write => [k, from.values[k]!.value]).filter(([k, v]) => !(r.values[k]!.set && r.values[k]!.value === v))
+      const writes = m.slots
+        .flatMap((slot) => keysOf({ slot }))
+        .map((k): Write => [k, from.values[k]!.value])
+        .filter(([k, v]) => !(r.values[k]!.set && r.values[k]!.value === v))
       const res = await writeAt(r.id, writes)
       asked.current.push(...res.keys.map((key) => ({ key, place: r.id })))
       if (res.error) failed.push(`${r.name}: ${res.error}`)
@@ -552,7 +646,10 @@ function CopyModels({ m, from, targets, onClose }: { m: ModelsMatrix; from: Matr
       }
     >
       <div className="flex flex-col gap-2.5">
-        <p>Every slot of its Tasks, Coordinators, Reviewer and Advisor, with their backups, is written at the level of each chosen space (replacing what it sets there). Max tasks and Merge train stay as they are.</p>
+        <p>
+          Every slot of its Tasks, Coordinators, Reviewer and Advisor, with their backups, is written at the level of each chosen space (replacing what it sets there). Max tasks and Merge train stay
+          as they are.
+        </p>
         {targets.length ? (
           <ul className="flex flex-col gap-1">
             {targets.map((r) => (
@@ -572,4 +669,3 @@ function CopyModels({ m, from, targets, onClose }: { m: ModelsMatrix; from: Matr
     </Dialog>
   )
 }
-

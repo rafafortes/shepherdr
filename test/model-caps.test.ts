@@ -5,7 +5,20 @@ import { describe, expect, spyOn, test } from 'bun:test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { home } from '../server/store.ts'
-import { capFor, fitToProviders, formatMaxAtOnce, harnessTargets, isHarnessPattern, levelText, loweredWords, MAX_CAP_ENTRIES, parseMaxAtOnce, providerOfKey, toHarnessPatterns, withEntry } from '../shared/model-caps.ts'
+import {
+  capFor,
+  fitToProviders,
+  formatMaxAtOnce,
+  harnessTargets,
+  isHarnessPattern,
+  levelText,
+  loweredWords,
+  MAX_CAP_ENTRIES,
+  parseMaxAtOnce,
+  providerOfKey,
+  toHarnessPatterns,
+  withEntry,
+} from '../shared/model-caps.ts'
 import { fitCaps, Settings } from '../server/live/settings.ts'
 import { setModels } from '../server/live/models.ts'
 
@@ -13,7 +26,13 @@ const fresh = () => new Settings({ everywhere: {}, machine: {}, spaces: {} })
 
 describe('the text of models.maxAtOnce', () => {
   test('parses providers and model keys, lowercased, in the order written', () => {
-    expect(parseMaxAtOnce('spark=4, radeon=1')).toEqual({ ok: true, entries: [{ pattern: 'spark', max: 4 }, { pattern: 'radeon', max: 1 }] })
+    expect(parseMaxAtOnce('spark=4, radeon=1')).toEqual({
+      ok: true,
+      entries: [
+        { pattern: 'spark', max: 4 },
+        { pattern: 'radeon', max: 1 },
+      ],
+    })
     expect(parseMaxAtOnce(' Spark = 4 ,anthropic/Claude-Opus-5-5=2 ,commandcode/deepseek/deepseek-v4.1-flash=3')).toEqual({
       ok: true,
       entries: [
@@ -64,7 +83,12 @@ describe('the text of models.maxAtOnce', () => {
   })
 
   test('formats entries back to the text it reads', () => {
-    expect(formatMaxAtOnce([{ pattern: 'spark', max: 4 }, { pattern: 'radeon', max: 1 }])).toBe('spark=4, radeon=1')
+    expect(
+      formatMaxAtOnce([
+        { pattern: 'spark', max: 4 },
+        { pattern: 'radeon', max: 1 },
+      ]),
+    ).toBe('spark=4, radeon=1')
     expect(formatMaxAtOnce([])).toBe('')
   })
 
@@ -87,7 +111,11 @@ describe('the text of models.maxAtOnce', () => {
   test('a model key names its provider; a model entry caps its model, else its provider caps it', () => {
     expect(providerOfKey('spark/qwen3.8-flash')).toBe('spark')
     expect(providerOfKey('pi')).toBe('pi')
-    const entries = [{ pattern: 'spark', max: 4 }, { pattern: 'spark/qwen3.8-flash', max: 2 }, { pattern: 'anthropic/claude-opus-5-5', max: 1 }]
+    const entries = [
+      { pattern: 'spark', max: 4 },
+      { pattern: 'spark/qwen3.8-flash', max: 2 },
+      { pattern: 'anthropic/claude-opus-5-5', max: 1 },
+    ]
     expect(capFor(entries, 'spark/qwen3.8-flash')).toEqual({ pattern: 'spark/qwen3.8-flash', max: 2 })
     expect(capFor(entries, 'spark/other')).toEqual({ pattern: 'spark', max: 4 })
     expect(capFor(entries, 'Spark/Other')).toEqual({ pattern: 'spark', max: 4 })
@@ -102,7 +130,8 @@ describe('models.maxAtOnce in Settings', () => {
   test('its row sits in the Space section, at Everywhere, this machine and each space: the machine total and a space sub-limit', () => {
     const s = fresh()
     const section = (level: string) => s.sections([], [], null, 'host', ['web']).find((x) => x.level === level && x.name === 'Space')
-    for (const level of ['all', 'm:host', 'p:host:web']) expect(section(level)?.rows.find((r) => r.key === 'models.maxAtOnce')).toMatchObject({ label: 'Most at once per model or provider', value: 'off', text: true })
+    for (const level of ['all', 'm:host', 'p:host:web'])
+      expect(section(level)?.rows.find((r) => r.key === 'models.maxAtOnce')).toMatchObject({ label: 'Most at once per model or provider', value: 'off', text: true })
     expect(s.set('models.maxAtOnce', 'pi.spark=4', { space: 'web' }).ok).toBe(true)
   })
 
@@ -131,7 +160,10 @@ describe('models.maxAtOnce in Settings', () => {
     expect(s.maxAtOnce()).toEqual([{ pattern: 'pi.spark', max: 4 }])
     expect(s.set('models.maxAtOnce', 'pi.radeon=1 ,pi.spark/qwen3.8=2', 'machine').ok).toBe(true)
     expect(s.pick('models.maxAtOnce', 'machine')).toEqual({ value: 'pi.radeon=1, pi.spark/qwen3.8=2', from: 'machine' })
-    expect(s.maxAtOnce()).toEqual([{ pattern: 'pi.radeon', max: 1 }, { pattern: 'pi.spark/qwen3.8', max: 2 }])
+    expect(s.maxAtOnce()).toEqual([
+      { pattern: 'pi.radeon', max: 1 },
+      { pattern: 'pi.spark/qwen3.8', max: 2 },
+    ])
     // off at this machine is no cap here, whatever Everywhere says; a reset takes it back to Everywhere's
     expect(s.set('models.maxAtOnce', 'off', 'machine').ok).toBe(true)
     expect(s.maxAtOnce()).toEqual([])
@@ -159,12 +191,23 @@ describe('models.maxAtOnce in Settings', () => {
 describe('0 is a cap of its own: blocked, distinct from no entry (no cap) and from off', () => {
   test('0 parses as an entry; 0 to 200 are the numbers, and no entry or off is no cap', () => {
     expect(parseMaxAtOnce('spark=0')).toEqual({ ok: true, entries: [{ pattern: 'spark', max: 0 }] })
-    expect(parseMaxAtOnce('spark=0, radeon=200')).toEqual({ ok: true, entries: [{ pattern: 'spark', max: 0 }, { pattern: 'radeon', max: 200 }] })
+    expect(parseMaxAtOnce('spark=0, radeon=200')).toEqual({
+      ok: true,
+      entries: [
+        { pattern: 'spark', max: 0 },
+        { pattern: 'radeon', max: 200 },
+      ],
+    })
     expect(parseMaxAtOnce('radeon=2')).toEqual({ ok: true, entries: [{ pattern: 'radeon', max: 2 }] })
     // no entry for a model: nothing caps it at all
     expect(capFor([], SPARK_KEY)).toBeUndefined()
     expect(capFor([{ pattern: 'spark', max: 0 }], SPARK_KEY)).toEqual({ pattern: 'spark', max: 0 })
-    expect(formatMaxAtOnce([{ pattern: 'spark', max: 0 }, { pattern: 'radeon', max: 1 }])).toBe('spark=0, radeon=1')
+    expect(
+      formatMaxAtOnce([
+        { pattern: 'spark', max: 0 },
+        { pattern: 'radeon', max: 1 },
+      ]),
+    ).toBe('spark=0, radeon=1')
   })
 
   test('a 0 is kept through a write, and clearing an entry takes the 0 out (no entry is no cap)', () => {
@@ -191,14 +234,35 @@ describe("a model's own limit never passes its provider's", () => {
   const Q = 'spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
 
   test('fitToProviders lowers a model above its provider to it, in place; a blocked provider, or none, lowers nothing', () => {
-    expect(fitToProviders([{ pattern: Q, max: 3 }, { pattern: 'spark', max: 2 }, { pattern: 'radeon/x', max: 5 }])).toEqual({
-      entries: [{ pattern: Q, max: 2 }, { pattern: 'spark', max: 2 }, { pattern: 'radeon/x', max: 5 }],
+    expect(
+      fitToProviders([
+        { pattern: Q, max: 3 },
+        { pattern: 'spark', max: 2 },
+        { pattern: 'radeon/x', max: 5 },
+      ]),
+    ).toEqual({
+      entries: [
+        { pattern: Q, max: 2 },
+        { pattern: 'spark', max: 2 },
+        { pattern: 'radeon/x', max: 5 },
+      ],
       lowered: [{ pattern: Q, from: 3, to: 2 }],
     })
     // at or under its provider, or blocked itself: as it is
-    expect(fitToProviders([{ pattern: 'spark', max: 2 }, { pattern: Q, max: 2 }, { pattern: 'spark/other', max: 0 }]).lowered).toEqual([])
+    expect(
+      fitToProviders([
+        { pattern: 'spark', max: 2 },
+        { pattern: Q, max: 2 },
+        { pattern: 'spark/other', max: 0 },
+      ]).lowered,
+    ).toEqual([])
     // a blocked provider blocks them all anyway: their own numbers stay, for when it is unblocked
-    expect(fitToProviders([{ pattern: 'spark', max: 0 }, { pattern: Q, max: 3 }]).lowered).toEqual([])
+    expect(
+      fitToProviders([
+        { pattern: 'spark', max: 0 },
+        { pattern: Q, max: 3 },
+      ]).lowered,
+    ).toEqual([])
     expect(loweredWords([{ pattern: `pi.${Q}`, from: 3, to: 2 }])).toBe(`pi · ${Q} from 3 to 2 (pi · spark allows 2 at once)`)
   })
 
@@ -211,7 +275,10 @@ describe("a model's own limit never passes its provider's", () => {
     expect(s.pick('models.maxAtOnce', 'machine').value).toBe(`${HQ}=2, pi.spark=2`)
     // a model set above its provider is kept at the provider's number
     expect(s.set('models.maxAtOnce', withEntry(`${HQ}=2, pi.spark=2`, HQ, 5), 'machine').note).toContain('from 5 to 2')
-    expect(s.maxAtOnce()).toEqual([{ pattern: 'pi.spark', max: 2 }, { pattern: HQ, max: 2 }])
+    expect(s.maxAtOnce()).toEqual([
+      { pattern: 'pi.spark', max: 2 },
+      { pattern: HQ, max: 2 },
+    ])
   })
 })
 
@@ -222,9 +289,27 @@ describe('the harness form of the patterns (harness.provider, or a single-accoun
   const txt = (entries: { pattern: string; max: number }[]) => entries.map((e) => `${e.pattern}=${e.max}`).join(', ')
 
   test('a pattern already in the harness form stays: pi.spark, claude, claude/…, codex, agy', () => {
-    expect(['pi.spark', 'pi.spark/qwen3', 'claude', 'claude/claude-opus-5-5', 'codex', 'agy/gemini-3.8-flash', 'pi', 'pi/unknown'].map(isHarnessPattern)).toEqual([true, true, true, true, true, true, true, true])
+    expect(['pi.spark', 'pi.spark/qwen3', 'claude', 'claude/claude-opus-5-5', 'codex', 'agy/gemini-3.8-flash', 'pi', 'pi/unknown'].map(isHarnessPattern)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+    ])
     expect(['spark', 'anthropic', 'anthropic/claude-opus-5-5', 'opencode', 'openai'].map(isHarnessPattern)).toEqual([false, false, false, false, false])
-    expect(toHarnessPatterns([{ pattern: 'pi.spark', max: 2 }, { pattern: 'claude/claude-opus-5-5', max: 1 }, { pattern: 'codex', max: 3 }], both)).toEqual([
+    expect(
+      toHarnessPatterns(
+        [
+          { pattern: 'pi.spark', max: 2 },
+          { pattern: 'claude/claude-opus-5-5', max: 1 },
+          { pattern: 'codex', max: 3 },
+        ],
+        both,
+      ),
+    ).toEqual([
       { pattern: 'pi.spark', max: 2 },
       { pattern: 'claude/claude-opus-5-5', max: 1 },
       { pattern: 'codex', max: 3 },
@@ -237,7 +322,15 @@ describe('the harness form of the patterns (harness.provider, or a single-accoun
     expect(harnessTargets('anthropic', both)).toEqual(['claude', 'pi.anthropic', 'opencode.anthropic'])
     expect(harnessTargets('openai', none)).toEqual(['codex'])
     expect(harnessTargets('openai', both)).toEqual(['codex', 'pi.openai', 'opencode.openai'])
-    expect(toHarnessPatterns([{ pattern: 'anthropic', max: 2 }, { pattern: 'openai', max: 3 }], pi)).toEqual([
+    expect(
+      toHarnessPatterns(
+        [
+          { pattern: 'anthropic', max: 2 },
+          { pattern: 'openai', max: 3 },
+        ],
+        pi,
+      ),
+    ).toEqual([
       { pattern: 'claude', max: 2 },
       { pattern: 'pi.anthropic', max: 2 },
       { pattern: 'codex', max: 3 },
@@ -269,9 +362,39 @@ describe('the harness form of the patterns (harness.provider, or a single-accoun
   })
 
   test('an entry already in its new form wins over a converted one of the same name, and nothing is listed twice', () => {
-    expect(txt(toHarnessPatterns([{ pattern: 'spark', max: 4 }, { pattern: 'pi.spark', max: 2 }], none))).toBe('pi.spark=2')
-    expect(txt(toHarnessPatterns([{ pattern: 'anthropic', max: 2 }, { pattern: 'claude', max: 5 }], none))).toBe('claude=5')
-    expect(txt(toHarnessPatterns([{ pattern: 'spark', max: 4 }, { pattern: 'radeon', max: 1 }], none))).toBe('pi.spark=4, pi.radeon=1')
+    expect(
+      txt(
+        toHarnessPatterns(
+          [
+            { pattern: 'spark', max: 4 },
+            { pattern: 'pi.spark', max: 2 },
+          ],
+          none,
+        ),
+      ),
+    ).toBe('pi.spark=2')
+    expect(
+      txt(
+        toHarnessPatterns(
+          [
+            { pattern: 'anthropic', max: 2 },
+            { pattern: 'claude', max: 5 },
+          ],
+          none,
+        ),
+      ),
+    ).toBe('claude=5')
+    expect(
+      txt(
+        toHarnessPatterns(
+          [
+            { pattern: 'spark', max: 4 },
+            { pattern: 'radeon', max: 1 },
+          ],
+          none,
+        ),
+      ),
+    ).toBe('pi.spark=4, pi.radeon=1')
     expect(toHarnessPatterns([], none)).toEqual([])
   })
 
@@ -288,7 +411,14 @@ describe('the harness form of the patterns (harness.provider, or a single-accoun
 describe('a settings file from before the harness keys: converted once', () => {
   test('its models.maxAtOnce texts are written in the harness form, each change logged, and the file is marked so it runs once', () => {
     const file = join(home(), 'settings.json')
-    writeFileSync(file, JSON.stringify({ everywhere: { 'models.maxAtOnce': 'spark=4, anthropic=2' }, machine: { 'models.maxAtOnce': 'radeon=1' }, spaces: { web: { 'models.maxAtOnce': 'anthropic/claude-opus-5-5=2' } } }))
+    writeFileSync(
+      file,
+      JSON.stringify({
+        everywhere: { 'models.maxAtOnce': 'spark=4, anthropic=2' },
+        machine: { 'models.maxAtOnce': 'radeon=1' },
+        spaces: { web: { 'models.maxAtOnce': 'anthropic/claude-opus-5-5=2' } },
+      }),
+    )
     const errors = spyOn(console, 'error').mockImplementation(() => {})
     try {
       const s = new Settings()
@@ -334,8 +464,24 @@ describe('an old provider name set while a CLI lists its models', () => {
 
   test('the fit and the cap lookup work on the harness keys: a model’s own limit is held to its provider’s, and the entry of a model is its own', () => {
     const Q = 'pi.spark/qwen3.8-flash-next-mlx4-mtp-tensorfold'
-    expect(fitToProviders([{ pattern: Q, max: 3 }, { pattern: 'pi.spark', max: 2 }]).entries).toEqual([{ pattern: Q, max: 2 }, { pattern: 'pi.spark', max: 2 }])
-    expect(capFor([{ pattern: 'pi.spark', max: 4 }, { pattern: Q, max: 1 }], Q)).toEqual({ pattern: Q, max: 1 })
+    expect(
+      fitToProviders([
+        { pattern: Q, max: 3 },
+        { pattern: 'pi.spark', max: 2 },
+      ]).entries,
+    ).toEqual([
+      { pattern: Q, max: 2 },
+      { pattern: 'pi.spark', max: 2 },
+    ])
+    expect(
+      capFor(
+        [
+          { pattern: 'pi.spark', max: 4 },
+          { pattern: Q, max: 1 },
+        ],
+        Q,
+      ),
+    ).toEqual({ pattern: Q, max: 1 })
     expect(capFor([{ pattern: 'pi.spark', max: 4 }], Q)).toEqual({ pattern: 'pi.spark', max: 4 })
     expect(capFor([{ pattern: 'opencode.opencode-go', max: 0 }], 'opencode.opencode-go/deepseek-v4.1-flash')).toEqual({ pattern: 'opencode.opencode-go', max: 0 })
     expect(capFor([{ pattern: 'pi.spark', max: 4 }], 'spark/qwen')).toBeUndefined()

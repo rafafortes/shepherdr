@@ -73,9 +73,7 @@ export function loadPanes(): Panes {
   try {
     const v = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Partial<Panes> | null
     if (!v || !Array.isArray(v.panes)) return NO_PANES
-    const panes = v.panes
-      .filter((p): p is Pane => !!p && ['place', 'task', 'artifact', 'tasks'].includes(p.kind) && typeof p.id === 'string' && !!p.id)
-      .slice(0, MAX_PANES)
+    const panes = v.panes.filter((p): p is Pane => !!p && ['place', 'task', 'artifact', 'tasks'].includes(p.kind) && typeof p.id === 'string' && !!p.id).slice(0, MAX_PANES)
     const sizes = Array.isArray(v.sizes) ? v.sizes.filter((s) => typeof s === 'number' && s > 0) : []
     return normal({ panes, pane: typeof v.pane === 'number' ? v.pane : 0, sizes })
   } catch {

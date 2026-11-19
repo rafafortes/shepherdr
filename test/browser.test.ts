@@ -32,7 +32,15 @@ async function until(f: () => boolean, ms = 5000) {
 
 function setup(o: { working?: boolean; bin?: string; idleClose?: (task: string) => number | null } = {}) {
   const told: string[] = []
-  const b = new Browsers({ bin: o.bin ?? FAKE, env: (t) => ({ ...browserEnv(t), ...fake.env }), host: 'vm-test', user: () => 'Elias', working: () => !!o.working, tell: (_, t) => told.push(t), idleClose: o.idleClose })
+  const b = new Browsers({
+    bin: o.bin ?? FAKE,
+    env: (t) => ({ ...browserEnv(t), ...fake.env }),
+    host: 'vm-test',
+    user: () => 'Elias',
+    working: () => !!o.working,
+    tell: (_, t) => told.push(t),
+    idleClose: o.idleClose,
+  })
   const got: BrowserDown[] = []
   const raw: string[] = []
   let closed = false
@@ -187,7 +195,9 @@ describe('a task’s browser', () => {
     const s = setup()
     s.panel()
     await until(() => s.last('error') !== undefined)
-    expect(s.last('error')!.message).toBe(`Another agent-browser (another version, or other settings) is using this browser, so it keeps restarting. The agent should run ${FAKE}, the version Shepherdr pins, without --session or --profile.`)
+    expect(s.last('error')!.message).toBe(
+      `Another agent-browser (another version, or other settings) is using this browser, so it keeps restarting. The agent should run ${FAKE}, the version Shepherdr pins, without --session or --profile.`,
+    )
     await s.b.close('SHE-9')
   })
 
@@ -240,7 +250,12 @@ describe('a task’s browser', () => {
       expect(await Promise.race([gpu.exited, wait(3000).then(() => 'running')])).not.toBe('running')
       expect(other.exitCode).toBeNull()
       // the sweep finds it by its process too, and says which tasks it closed
-      expect(await b.sweep((t) => t !== 'SHE-90', () => true)).toEqual(['SHE-90'])
+      expect(
+        await b.sweep(
+          (t) => t !== 'SHE-90',
+          () => true,
+        ),
+      ).toEqual(['SHE-90'])
       expect(await Promise.race([other.exited, wait(3000).then(() => 'running')])).not.toBe('running')
     } finally {
       gpu.kill(9)
@@ -270,7 +285,11 @@ describe('a task’s browser', () => {
       expect(await Promise.race([idle.exited, wait(3000).then(() => 'running')])).not.toBe('running')
       for (const p of [used, off, watched]) expect(p.exitCode).toBeNull()
       // agent-browser was asked to close it first; sign-ins stay
-      expect(calls().filter((c) => c.args[0] === 'close').map((c) => c.session)).toEqual(['SHE-91'])
+      expect(
+        calls()
+          .filter((c) => c.args[0] === 'close')
+          .map((c) => c.session),
+      ).toEqual(['SHE-91'])
       expect(existsSync(profileOf('SHE-91'))).toBe(true)
       // the agent's last command 10 minutes back, the screen gone 10 minutes back: those close too (once the screen's
       // start is over: a browser still starting is kept)
@@ -308,7 +327,12 @@ describe('a task’s browser', () => {
 
   test('ps’s lines: each Chrome in a task’s profile, with how long it has run', () => {
     const flag = '--user-data-dir=/h/.shepherdr/browser/'
-    const ps = ['  11 01:02:03 chrome --user-data-dir=/h/.shepherdr/browser/SHE-1 --x', '12 2-00:00:05 chrome --user-data-dir=/h/.shepherdr/browser/SHE-2', '13 00:07 bash', ' 14 09:59 chrome --user-data-dir=/h/.shepherdr/browser/../x'].join('\n')
+    const ps = [
+      '  11 01:02:03 chrome --user-data-dir=/h/.shepherdr/browser/SHE-1 --x',
+      '12 2-00:00:05 chrome --user-data-dir=/h/.shepherdr/browser/SHE-2',
+      '13 00:07 bash',
+      ' 14 09:59 chrome --user-data-dir=/h/.shepherdr/browser/../x',
+    ].join('\n')
     expect(chromesIn(ps, flag)).toEqual([
       { pid: 11, task: 'SHE-1', age: 3723_000 },
       { pid: 12, task: 'SHE-2', age: (48 * 3600 + 5) * 1000 },
@@ -335,7 +359,11 @@ describe('a task’s browser', () => {
       () => false,
       () => true,
     )
-    expect(calls().filter((c) => c.args[0] === 'close').map((c) => c.session)).toEqual(['SHE-4', '3V-1'])
+    expect(
+      calls()
+        .filter((c) => c.args[0] === 'close')
+        .map((c) => c.session),
+    ).toEqual(['SHE-4', '3V-1'])
     expect(existsSync(join(home, 'tasks.json'))).toBe(true)
     expect(existsSync(profileOf('SHE-4'))).toBe(false)
     await b.close('..', true)
@@ -394,7 +422,11 @@ describe('notes from the browser', () => {
     })
     expect(parseBrowserNotes('[Elias noted on "Page": fix it]')).toBeNull()
     // notes from before tags still read back
-    expect(parseBrowserNotes('[Elias noted in the browser on http://x/ ("X"), viewport 1×1:\n1. p\n   Note: Bigger]')).toEqual({ url: 'http://x/', notes: [{ element: 'p', note: 'Bigger' }], rest: [] })
+    expect(parseBrowserNotes('[Elias noted in the browser on http://x/ ("X"), viewport 1×1:\n1. p\n   Note: Bigger]')).toEqual({
+      url: 'http://x/',
+      notes: [{ element: 'p', note: 'Bigger' }],
+      rest: [],
+    })
   })
 })
 
@@ -428,7 +460,15 @@ describe('the panel’s arithmetic', () => {
   })
 
   test('keys: a character types as text with no key code; a shortcut carries its letter’s code; Enter submits', () => {
-    const k = (key: string, code: string, m: Partial<{ ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }> = {}) => ({ key, code, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...m })
+    const k = (key: string, code: string, m: Partial<{ ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }> = {}) => ({
+      key,
+      code,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      altKey: false,
+      ...m,
+    })
     expect(keyEvent(k('.', 'Period'), 'keyDown')).toEqual({ type: 'input_keyboard', eventType: 'keyDown', key: '.', code: 'Period', modifiers: 0, text: '.' })
     expect(keyEvent(k('.', 'Period'), 'keyUp')).toEqual({ type: 'input_keyboard', eventType: 'keyUp', key: '.', code: 'Period', modifiers: 0 })
     expect(keyEvent(k('a', 'KeyA', { ctrlKey: true }), 'keyDown')).toEqual({ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2 })

@@ -2,10 +2,95 @@
 // a CLI's own menus; what you send shows at once and goes in at once, even mid-turn; only while the CLI shows a menu
 // or is starting does it wait, and the bubble says why.
 import clsx from 'clsx'
-import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
-import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
+import {
+  createContext,
+  Fragment,
+  memo,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ComponentType,
+  type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react'
+import {
+  act,
+  chatName,
+  definePlugin,
+  getDraft,
+  getState,
+  goChat,
+  has,
+  holdReload,
+  openTask,
+  registry,
+  setDraft,
+  setOutbox,
+  setUI,
+  taskOf,
+  useDraft,
+  useSnap,
+  useStore,
+  useUI,
+  type UI,
+} from '@client/kernel.ts'
 import { keyOf, partsOf, priorOf, reasonOf, SEND_TIMEOUT, type Outgoing } from '@client/outbox.ts'
-import { AlertIcon, AutopilotIcon, BackIcon, CameraIcon, ChatIcon, CheckIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
+import {
+  AlertIcon,
+  AutopilotIcon,
+  BackIcon,
+  CameraIcon,
+  ChatIcon,
+  CheckIcon,
+  Count,
+  DeleteIcon,
+  dimmed,
+  Dot,
+  DownIcon,
+  DownloadIcon,
+  Empty,
+  field,
+  FileIcon,
+  ic,
+  IconButton,
+  KeyIcon,
+  LinkButton,
+  LiveWave,
+  MachineIcon,
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  MenuSetting,
+  MicIcon,
+  ModeIcon,
+  MoreIcon,
+  NextIcon,
+  PageIcon,
+  PlanIcon,
+  PlusIcon,
+  Primary,
+  QuestionIcon,
+  ReplyIcon,
+  RestartIcon,
+  roundBtn,
+  SearchIcon,
+  SecretField,
+  Sent,
+  SmileIcon,
+  Tab,
+  Tabs,
+  TextBox,
+  UpIcon,
+  useElapsed,
+  XIcon,
+} from '@client/ui.tsx'
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
 import { extOf, isImage, isVideo } from '@shared/files.ts'
 import { modeName, type CardAsk, type Chat, type Message, type Peer, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
@@ -132,66 +217,91 @@ export const Bubble = memoRow(function Bubble({ msg, chatKey, from, out, last, q
         {/* the chat is with one agent, so its name shows only when someone else asks (the CLI's own question) */}
         {!you && msg.question?.asks ? <From>{`${from} · ${msg.question.asks}`}</From> : null}
         {peer ? <PeerFrom peer={peer} /> : null}
-        {msg.card ? (
-          unit(
-            <Card
-              card={msg.card}
-              chat={chatKey}
-              at={msg.at}
-              press={hold}
-              keys={msg.card.task ? undefined : keys}
-              className={clsx(canReact && !selecting && clsx(pressable, 'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]'), touchFor(replies && !selecting), picked && 'shadow-[inset_0_0_0_1.5px_var(--line2),0_0_0_2px_var(--bg)]')}
-            />,
-          )
-        ) : body
+        {msg.card
+          ? unit(
+              <Card
+                card={msg.card}
+                chat={chatKey}
+                at={msg.at}
+                press={hold}
+                keys={msg.card.task ? undefined : keys}
+                className={clsx(
+                  canReact && !selecting && clsx(pressable, 'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]'),
+                  touchFor(replies && !selecting),
+                  picked && 'shadow-[inset_0_0_0_1.5px_var(--line2),0_0_0_2px_var(--bg)]',
+                )}
+              />,
+            )
+          : body
+            ? unit(
+                <div
+                  data-anchor
+                  {...keys}
+                  {...hold}
+                  className={clsx(
+                    // mirrored round corners: the small one points at whoever wrote it. Slack's 15/22 message text
+                    'relative max-w-full min-w-0 text-[0.9375rem]/[1.375rem] text-pretty px-3.5 py-2 phone:px-4 phone:py-2.5 phone:text-base/6',
+                    // one shade each: yours, the agent's, and another agent's own (ringed, so it never reads as either)
+                    you
+                      ? 'rounded-bubble rounded-br-[6px] bg-reply'
+                      : peer
+                        ? 'rounded-bubble rounded-bl-[6px] bg-peer shadow-[inset_0_0_0_1px_var(--line2)]'
+                        : 'rounded-bubble rounded-bl-[6px] bg-bubble',
+                    you ? 'self-end' : 'self-start',
+                    // on a touch screen a hold reacts (or offers Remove), so it doesn't start selecting text or a link's preview
+                    ((canReact && !selecting) || pending) && clsx(pressable, 'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]'),
+                    // after Select text it selects, though the app's chrome around it doesn't
+                    selecting && 'select-text',
+                    touchFor(replies && !selecting),
+                    picked ? 'shadow-[inset_0_0_0_1.5px_var(--line2),0_0_0_2px_var(--bg)]' : quote && tucks,
+                  )}
+                >
+                  {msg.answered ? (
+                    <div className="text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
+                      <CheckIcon className="inline size-3.5 align-[-2px]" /> {msg.answered}
+                      {/* answered on its copy in the space's chat: a link there */}
+                      {msg.elsewhere ? (
+                        <>
+                          {' in '}
+                          <LinkButton onClick={() => goChat(msg.elsewhere!.chat)}>{msg.elsewhere.name}</LinkButton>
+                        </>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {msg.waiting ? (
+                    <div className="text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
+                      {msg.waitsFor === 'menu' ? (
+                        <>
+                          Waiting for your answer above. <GoToQuestion chatKey={chatKey} />
+                        </>
+                      ) : (
+                        waitLine(msg.waitsFor)
+                      )}
+                    </div>
+                  ) : null}
+                  {queued && body ? <QueueLine chatKey={chatKey} /> : null}
+                  {msg.text ? (
+                    <div ref={text} data-text>
+                      {you ? (
+                        <YourText text={msg.text} />
+                      ) : (
+                        <Fold id={msg.id}>
+                          <Markdown text={msg.text} />
+                        </Fold>
+                      )}
+                    </div>
+                  ) : null}
+                </div>,
+                true,
+              )
+            : null}
+        {msg.file
           ? unit(
               <div
                 data-anchor
-                {...keys}
                 {...hold}
-                className={clsx(
-                  // mirrored round corners: the small one points at whoever wrote it. Slack's 15/22 message text
-                  'relative max-w-full min-w-0 text-[0.9375rem]/[1.375rem] text-pretty px-3.5 py-2 phone:px-4 phone:py-2.5 phone:text-base/6',
-                  // one shade each: yours, the agent's, and another agent's own (ringed, so it never reads as either)
-                  you
-                    ? 'rounded-bubble rounded-br-[6px] bg-reply'
-                    : peer
-                      ? 'rounded-bubble rounded-bl-[6px] bg-peer shadow-[inset_0_0_0_1px_var(--line2)]'
-                      : 'rounded-bubble rounded-bl-[6px] bg-bubble',
-                  you ? 'self-end' : 'self-start',
-                  // on a touch screen a hold reacts (or offers Remove), so it doesn't start selecting text or a link's preview
-                  ((canReact && !selecting) || pending) && clsx(pressable, 'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]'),
-                  // after Select text it selects, though the app's chrome around it doesn't
-                  selecting && 'select-text',
-                  touchFor(replies && !selecting),
-                  picked ? 'shadow-[inset_0_0_0_1.5px_var(--line2),0_0_0_2px_var(--bg)]' : quote && tucks,
-                )}
+                className={clsx('relative max-w-full select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies), you ? 'self-end' : 'self-start')}
               >
-                {msg.answered ? (
-                  <div className="text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
-                    <CheckIcon className="inline size-3.5 align-[-2px]" /> {msg.answered}
-                    {/* answered on its copy in the space's chat: a link there */}
-                    {msg.elsewhere ? (
-                      <>
-                        {' in '}
-                        <LinkButton onClick={() => goChat(msg.elsewhere!.chat)}>{msg.elsewhere.name}</LinkButton>
-                      </>
-                    ) : null}
-                  </div>
-                ) : null}
-                {msg.waiting ? <div className="text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{msg.waitsFor === 'menu' ? <>
-                  Waiting for your answer above.{' '}
-                  <GoToQuestion chatKey={chatKey} />
-                </> : waitLine(msg.waitsFor)}</div> : null}
-                {queued && body ? <QueueLine chatKey={chatKey} /> : null}
-                {msg.text ? <div ref={text} data-text>{you ? <YourText text={msg.text} /> : <Fold id={msg.id}><Markdown text={msg.text} /></Fold>}</div> : null}
-              </div>,
-              true,
-            )
-          : null}
-        {msg.file
-          ? unit(
-              <div data-anchor {...hold} className={clsx('relative max-w-full select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies), you ? 'self-end' : 'self-start')}>
                 {queued && !pending?.text ? <QueueLine chatKey={chatKey} /> : null}
                 {isVideo(msg.file.name) ? (
                   <VideoTile name={msg.file.name} chat={chatKey} path={msg.file.path} tucked={!body && !!quote} />
@@ -297,7 +407,9 @@ function NotSent({ out, className }: { out: Outgoing; className?: string }) {
         <button type="button" className={btn} onClick={() => retry(out.cid)}>
           Retry
         </button>
-        <span aria-hidden="true" className="text-fg3">·</span>
+        <span aria-hidden="true" className="text-fg3">
+          ·
+        </span>
         <button type="button" className={btn} onClick={() => removeOut(out.cid)}>
           Remove
         </button>
@@ -352,7 +464,18 @@ const PEEK = 80
     right replies (swipe), sliding it left shows every message's time while the finger stays; scrolling, a tap on a link or a picture, a swipe from the screen's edge and a mouse are left
     alone */
 function useHold(fn: ((at: At) => void) | null, swipe: (() => void) | null = null) {
-  const r = useRef<{ x: number; y: number; touch: boolean; fired: boolean; last: number; el?: HTMLElement; timer?: ReturnType<typeof setTimeout>; slide?: 'on' | 'peek' | 'off'; dx: number; armed?: boolean }>({
+  const r = useRef<{
+    x: number
+    y: number
+    touch: boolean
+    fired: boolean
+    last: number
+    el?: HTMLElement
+    timer?: ReturnType<typeof setTimeout>
+    slide?: 'on' | 'peek' | 'off'
+    dx: number
+    armed?: boolean
+  }>({
     x: 0,
     y: 0,
     touch: false,
@@ -367,7 +490,8 @@ function useHold(fn: ((at: At) => void) | null, swipe: (() => void) | null = nul
   /** the message the finger slides: its bubble with what hangs off it, or the album a picture is in, and the reply
       arrow beside it */
   const row = () =>
-    (r.current.slide === 'peek' ? r.current.el?.closest<HTMLElement>('[data-messages]') : (r.current.el?.closest<HTMLElement>('[data-slide]') ?? r.current.el?.closest<HTMLElement>('[data-msg]'))) ?? null
+    (r.current.slide === 'peek' ? r.current.el?.closest<HTMLElement>('[data-messages]') : (r.current.el?.closest<HTMLElement>('[data-slide]') ?? r.current.el?.closest<HTMLElement>('[data-msg]'))) ??
+    null
   const slideBack = () => {
     const el = row()
     const dx = r.current.dx
@@ -485,7 +609,11 @@ function PeerFrom({ peer }: { peer: Peer }) {
         <span className="sr-only">Message from </span>
         {peer.name}
       </span>
-      {where ? <span data-peer-where className="min-w-0 truncate text-fg3">{where}</span> : null}
+      {where ? (
+        <span data-peer-where className="min-w-0 truncate text-fg3">
+          {where}
+        </span>
+      ) : null}
     </div>
   )
 }
@@ -511,7 +639,27 @@ function SwipeHint() {
 }
 
 /** with a mouse, a smiley and a reply arrow beside the message (like Slack and WhatsApp on the web) */
-function Beside({ msg, chat, you, picked, react, reply, more, name, over }: { msg: Message; chat: string; you: boolean; picked: boolean; react: boolean; reply: boolean; more?: () => void; name?: string; over?: boolean }) {
+function Beside({
+  msg,
+  chat,
+  you,
+  picked,
+  react,
+  reply,
+  more,
+  name,
+  over,
+}: {
+  msg: Message
+  chat: string
+  you: boolean
+  picked: boolean
+  react: boolean
+  reply: boolean
+  more?: () => void
+  name?: string
+  over?: boolean
+}) {
   if (!react && !reply && !more) return null
   const btn = over
     ? 'grid size-7 place-items-center rounded-full bg-black/55 text-white backdrop-blur-sm hover:bg-black/70'
@@ -613,8 +761,7 @@ const tucks = 'shadow-[0_0_0_2px_var(--bg)]'
 
 /* ---------- attachments: each one a message of its own; pictures as small tiles side by side, anything else as a file tile ---------- */
 
-export const fileUrl = (chat: string, path: string, download = false) =>
-  `api/file?chat=${encodeURIComponent(chat)}&path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`
+export const fileUrl = (chat: string, path: string, download = false) => `api/file?chat=${encodeURIComponent(chat)}&path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`
 
 /** a tile's small copy of a big picture (`thumb`), made once on the machine that holds the file: a phone would
  *  otherwise download the whole picture for each tile. The same file's own path, so nothing else is served */
@@ -631,14 +778,7 @@ export const isPicture = (m: Message) => !!m.file && !m.text && !m.answered && i
 function VideoTile({ name, chat, path, tucked }: { name: string; chat: string; path: string; tucked?: boolean }) {
   return (
     <div className={clsx('w-[280px] max-w-full overflow-hidden rounded-box bg-bubble p-1.5', tucked && tucks)}>
-      <video
-        controls
-        playsInline
-        preload="metadata"
-        poster={posterUrl(chat, path)}
-        aria-label={name}
-        className="block w-full rounded-[calc(var(--bubble-radius)-var(--spacing))] bg-black"
-      >
+      <video controls playsInline preload="metadata" poster={posterUrl(chat, path)} aria-label={name} className="block w-full rounded-[calc(var(--bubble-radius)-var(--spacing))] bg-black">
         <source src={fileUrl(chat, path)} type={extOf(name) === 'webm' ? 'video/webm' : extOf(name) === 'mov' ? 'video/quicktime' : extOf(name) === 'ogv' ? 'video/ogg' : 'video/mp4'} />
       </video>
       <div className="mt-0.5 flex items-center gap-2 px-1 pt-0.5 text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
@@ -679,7 +819,21 @@ export function albumRows(n: number) {
 
 /** pictures sent together: small tiles about the size of the ones in the message box, side by side, the album's outer
  *  corners rounded like a bubble's (the small one points at whoever sent them) */
-export const Album = memoRow(function Album({ msgs, chatKey, from, out, last: lastPart, queued: inQueueNow }: { msgs: Message[]; chatKey: string; from: string; out?: Outgoing; last?: boolean; queued: boolean }) {
+export const Album = memoRow(function Album({
+  msgs,
+  chatKey,
+  from,
+  out,
+  last: lastPart,
+  queued: inQueueNow,
+}: {
+  msgs: Message[]
+  chatKey: string
+  from: string
+  out?: Outgoing
+  last?: boolean
+  queued: boolean
+}) {
   countRender(`${chatKey}:${msgs[0].id}`)
   const chat = currentChat(chatKey)
   const you = msgs[0].who === 'you'
@@ -717,12 +871,7 @@ export const Album = memoRow(function Album({ msgs, chatKey, from, out, last: la
               const m = msgs[i++]
               const last = r === rows.length - 1
               // the album's outer corners are a bubble's; the ones between tiles are small
-              const radius = [
-                !r && !c ? big : small,
-                !r && c === len - 1 ? big : small,
-                last && c === len - 1 ? (you ? '6px' : big) : small,
-                last && !c ? (you ? big : '6px') : small,
-              ].join(' ')
+              const radius = [!r && !c ? big : small, !r && c === len - 1 ? big : small, last && c === len - 1 ? (you ? '6px' : big) : small, last && !c ? (you ? big : '6px') : small].join(' ')
               return <Tile key={keyOf(m)} msg={m} chatKey={chatKey} you={you} radius={radius} single={msgs.length === 1} more={i === 6 ? more : 0} out={out} />
             })}
           </div>
@@ -793,7 +942,14 @@ function Tile({ msg, chatKey, you, radius, single, more, out }: { msg: Message; 
           // one on its way isn't a message yet: it opens on its own, like a file in the message box
           onClick={() => setUI({ photo: out ? { chat: chatKey, file: f } : { chat: chatKey, msg: msg.id } })}
           style={{ borderRadius: radius }}
-          className={clsx(frame, 'select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies), !single && 'size-full', picked && 'outline-2 outline-offset-2 outline-(--line2)')}
+          className={clsx(
+            frame,
+            'select-none [-webkit-touch-callout:none]',
+            (canReact || pending) && pressable,
+            touchFor(replies),
+            !single && 'size-full',
+            picked && 'outline-2 outline-offset-2 outline-(--line2)',
+          )}
         >
           <img
             src={thumbUrl(chatKey, f.path)}
@@ -1025,7 +1181,8 @@ function PhotoView({ shots, at: index, go, chatKey }: { shots: Shot[]; at: numbe
   const own = { onPointerDown: (e: PointerEvent) => e.stopPropagation(), onPointerUp: (e: PointerEvent) => e.stopPropagation() }
   const barBtn = 'grid size-10 shrink-0 place-items-center rounded-full bg-white/12 text-white hover:bg-white/20 phone:size-11'
   // with a mouse, round arrows on either side page through them
-  const sideBtn = 'absolute top-1/2 hidden size-11 -translate-y-1/2 place-items-center rounded-full bg-black/45 text-white shadow-[0_0_0_1px_rgb(255_255_255/0.12)] backdrop-blur-sm hover:bg-black/65 pointer-fine:grid'
+  const sideBtn =
+    'absolute top-1/2 hidden size-11 -translate-y-1/2 place-items-center rounded-full bg-black/45 text-white shadow-[0_0_0_1px_rgb(255_255_255/0.12)] backdrop-blur-sm hover:bg-black/65 pointer-fine:grid'
   const neighbour = (s: Shot | undefined, side: 'left' | 'right') =>
     s ? (
       <div aria-hidden="true" className={clsx('absolute inset-y-0 grid w-full place-items-center', side === 'left' ? 'right-[calc(100%+16px)]' : 'left-[calc(100%+16px)]')}>
@@ -1035,14 +1192,7 @@ function PhotoView({ shots, at: index, go, chatKey }: { shots: Shot[]; at: numbe
   return (
     <div role="dialog" aria-modal="true" aria-label={f.name} className="fixed inset-0 z-50 overflow-hidden text-white">
       <div ref={shade} className="absolute inset-0 bg-black" />
-      <div
-        ref={box}
-        onPointerDown={down}
-        onPointerMove={move}
-        onPointerUp={up}
-        onPointerCancel={up}
-        className="absolute inset-0 touch-none select-none [-webkit-touch-callout:none]"
-      >
+      <div ref={box} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} className="absolute inset-0 touch-none select-none [-webkit-touch-callout:none]">
         <div ref={strip} className="absolute inset-0 will-change-transform">
           {neighbour(prev, 'left')}
           <div className="absolute inset-0 grid place-items-center">
@@ -1129,11 +1279,7 @@ function PilotLine({ text }: { text: string }) {
 }
 
 function DateLine({ at }: { at: number }) {
-  return (
-    <div className="self-center text-[0.75rem] font-medium text-fg3 phone:text-[0.8125rem]">
-      {dayLabel(at)}
-    </div>
-  )
+  return <div className="self-center text-[0.75rem] font-medium text-fg3 phone:text-[0.8125rem]">{dayLabel(at)}</div>
 }
 
 /** where the replies that came in while you read further up begin */
@@ -1148,16 +1294,30 @@ function NewLine() {
 }
 
 /** one message (or album, or card) across the chat's width, its time just past the right edge for a slide to show */
-export const Row = memoRow(function Row({ at, arrive, msg, msgs, chatKey, from, out, last, queued }: {
-  at: number; arrive: string; msg?: Message; msgs?: Message[]; chatKey: string; from: string; out?: Outgoing; last?: boolean; queued: boolean
+export const Row = memoRow(function Row({
+  at,
+  arrive,
+  msg,
+  msgs,
+  chatKey,
+  from,
+  out,
+  last,
+  queued,
+}: {
+  at: number
+  arrive: string
+  msg?: Message
+  msgs?: Message[]
+  chatKey: string
+  from: string
+  out?: Outgoing
+  last?: boolean
+  queued: boolean
 }) {
   return (
     <div data-arrive={arrive} className="relative flex flex-col gap-3.5">
-      {msgs ? (
-        <Album msgs={msgs} chatKey={chatKey} from={from} out={out} last={last} queued={queued} />
-      ) : (
-        <Bubble msg={msg!} chatKey={chatKey} from={from} out={out} last={last} queued={queued} />
-      )}
+      {msgs ? <Album msgs={msgs} chatKey={chatKey} from={from} out={out} last={last} queued={queued} /> : <Bubble msg={msg!} chatKey={chatKey} from={from} out={out} last={last} queued={queued} />}
       {at ? (
         <time
           dateTime={new Date(at).toISOString()}
@@ -1337,12 +1497,10 @@ function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply:
   }
   const a = ask.answered
   return (
-    <CardShell
-      title={`${task} asks`}
-      source={source}
-      dismiss={a ? undefined : () => void dismiss()}
-    >
-      <div data-ask-text className="line-clamp-6 break-words whitespace-pre-wrap">{reply.text}</div>
+    <CardShell title={`${task} asks`} source={source} dismiss={a ? undefined : () => void dismiss()}>
+      <div data-ask-text className="line-clamp-6 break-words whitespace-pre-wrap">
+        {reply.text}
+      </div>
       {a ? (
         <Sent>
           <CheckIcon className={ic} />
@@ -1354,7 +1512,11 @@ function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply:
         <>
           <TextBox name="reply" data-kept label={`Reply to ${task}`} className={noteBox} placeholder="Type something…" value={text} onChange={setText} />
           <div className="flex items-center justify-end gap-2">
-            {err ? <span role="alert" className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
+            {err ? (
+              <span role="alert" className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">
+                {err}
+              </span>
+            ) : null}
             {/* the other answer: the advisor's, with what you typed as a note for it */}
             {ask.advise ? (
               <Primary soft data-ask-advisor disabled={busy || asking} onClick={() => void askAdvisor()}>
@@ -1445,13 +1607,24 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
             {newAt === first ? <NewLine /> : null}
             {/* queued: one you sent that Claude Code holds in its own queue; it takes it now with Ctrl+Enter, which
                 the server presses only while its screen offers it. Another CLI offers nothing, so nothing shows */}
-            <Row at={at} arrive={key} msg={'msg' in it ? it.msg : undefined} msgs={'album' in it ? it.album : undefined}
-              chatKey={chat.key} from={from} out={it.out} last={it.last} queued={it.out ? inQueue(chat, it.out) : false} />
+            <Row
+              at={at}
+              arrive={key}
+              msg={'msg' in it ? it.msg : undefined}
+              msgs={'album' in it ? it.album : undefined}
+              chatKey={chat.key}
+              from={from}
+              out={it.out}
+              last={it.last}
+              queued={it.out ? inQueue(chat, it.out) : false}
+            />
           </Fragment>
         )
       })}
       {chat.unreadable ? (
-        <div role="status" className="self-center text-center text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{chat.unreadable}</div>
+        <div role="status" className="self-center text-center text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
+          {chat.unreadable}
+        </div>
       ) : null}
       {registry.chatTail.map(({ View }, i) => (
         <View key={i} chat={chat} from={from} />
@@ -1485,7 +1658,23 @@ function Typing({ chat, from }: { chat: Chat; from: string }) {
  *  question mark, or a list for a plan. The title wraps onto as many lines as it needs, the mark on its first line */
 type CardSource = { id: string; title?: string }
 
-export function CardShell({ title, plan, icon, action, source, dismiss, children }: { title: string; plan?: boolean; icon?: ComponentType<{ className?: string }>; action?: ReactNode; source?: CardSource; dismiss?: () => void; children: ReactNode }) {
+export function CardShell({
+  title,
+  plan,
+  icon,
+  action,
+  source,
+  dismiss,
+  children,
+}: {
+  title: string
+  plan?: boolean
+  icon?: ComponentType<{ className?: string }>
+  action?: ReactNode
+  source?: CardSource
+  dismiss?: () => void
+  children: ReactNode
+}) {
   const Icon = icon ?? (plan ? PlanIcon : QuestionIcon)
   const box = useRef<HTMLDivElement>(null)
   // Esc closes the card without an answer, as Esc on the CLI's own prompt does: only while the card itself holds the
@@ -1502,21 +1691,34 @@ export function CardShell({ title, plan, icon, action, source, dismiss, children
       ref={box}
       data-card
       tabIndex={dismiss ? -1 : undefined}
-      onPointerDown={dismiss ? (e) => { if (!(e.target as HTMLElement).closest('button, a, input, textarea, select, [role=button]')) box.current?.focus({ preventScroll: true }) } : undefined}
+      onPointerDown={
+        dismiss
+          ? (e) => {
+              if (!(e.target as HTMLElement).closest('button, a, input, textarea, select, [role=button]')) box.current?.focus({ preventScroll: true })
+            }
+          : undefined
+      }
       onKeyDown={key}
       className="mt-2 w-[440px] max-w-full cursor-default overflow-hidden rounded-box bg-bg outline-none shadow-[inset_0_0_0_1px_var(--line2)] focus:shadow-[inset_0_0_0_1.5px_var(--color-focus)]"
     >
       {source ? (
         <div data-card-source className="px-3 pt-2 text-[0.8125rem] break-words text-fg2">
-          <span className="font-semibold">{source.id}</span>{source.title ? ` · ${source.title}` : ''}
+          <span className="font-semibold">{source.id}</span>
+          {source.title ? ` · ${source.title}` : ''}
         </div>
       ) : null}
       <div className="flex items-start gap-2 border-b border-line py-2 pr-2 pl-3 text-[0.9375rem]">
         <Icon className={clsx(ic, 'mt-[3px] text-fg2')} />
-        <b data-card-title className="min-w-0 flex-1 font-semibold text-pretty break-words">{title}</b>
+        <b data-card-title className="min-w-0 flex-1 font-semibold text-pretty break-words">
+          {title}
+        </b>
         {action}
         {/* a finger's reach on a phone: the quiet link keeps the height of a tap */}
-        {dismiss ? <button type="button" className="relative shrink-0 self-start text-[0.8125rem] text-fg3 hover:text-fg hover:underline phone:min-h-11 phone:text-[0.9375rem]" onClick={dismiss}>Dismiss</button> : null}
+        {dismiss ? (
+          <button type="button" className="relative shrink-0 self-start text-[0.8125rem] text-fg3 hover:text-fg hover:underline phone:min-h-11 phone:text-[0.9375rem]" onClick={dismiss}>
+            Dismiss
+          </button>
+        ) : null}
       </div>
       <div className="flex flex-col gap-2 p-3">{children}</div>
     </div>
@@ -1553,7 +1755,17 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
   const [adv, setAdv] = useState(false)
   const picked = sel.length > 0 || !!other.trim() || adv
   // Positive opt-in, plus structural exclusions: unknown kinds and older/plugin cards remain confirmed.
-  const ordinary = q.ordinary === true && (q.kind === 'Form' || q.kind === 'Question') && !q.multi && !q.terminal && !q.screen && !q.steps && !q.reject && !q.noNote && q.noteRequiredFor === undefined && !q.id.startsWith('menu:')
+  const ordinary =
+    q.ordinary === true &&
+    (q.kind === 'Form' || q.kind === 'Question') &&
+    !q.multi &&
+    !q.terminal &&
+    !q.screen &&
+    !q.steps &&
+    !q.reject &&
+    !q.noNote &&
+    q.noteRequiredFor === undefined &&
+    !q.id.startsWith('menu:')
   const immediate = ordinary && !sent && !composing && !note && !other
   const choose = (j: number) => {
     setAdv(false)
@@ -1568,7 +1780,16 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
     setErr('')
     let accepted = false
     try {
-      const r = await act({ type: 'answer', chat: chat.key, question: q.id, choice: reject ? -1 : choice, choices: q.multi ? (reject ? [] : sel) : undefined, note: note.trim() || undefined, other: other.trim() || undefined, space })
+      const r = await act({
+        type: 'answer',
+        chat: chat.key,
+        question: q.id,
+        choice: reject ? -1 : choice,
+        choices: q.multi ? (reject ? [] : sel) : undefined,
+        note: note.trim() || undefined,
+        other: other.trim() || undefined,
+        space,
+      })
       if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
       else {
         accepted = true
@@ -1635,14 +1856,13 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
     if (composing) noteRef.current?.focus()
   }, [composing])
   return (
-    <CardShell
-      title={q.title}
-      plan={q.kind === 'Plan'}
-      source={source}
-      dismiss={sent || q.noDismiss ? undefined : () => void dismiss()}
-    >
+    <CardShell title={q.title} plan={q.kind === 'Plan'} source={source} dismiss={sent || q.noDismiss ? undefined : () => void dismiss()}>
       {q.screen ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-fg2">{q.screen}</pre> : null}
-      {q.terminal && has('terminal') ? <button type="button" className="text-left text-accent" onClick={() => setUI({ term: chat.key, arts: null, kb: true })}>Open terminal</button> : null}
+      {q.terminal && has('terminal') ? (
+        <button type="button" className="text-left text-accent" onClick={() => setUI({ term: chat.key, arts: null, kb: true })}>
+          Open terminal
+        </button>
+      ) : null}
       {q.steps ? (
         <ol className="flex list-decimal flex-col gap-0.5 pl-5">
           {q.steps.map((x) => (
@@ -1667,20 +1887,21 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
             }}
             className="group press relative flex min-h-10 w-full items-center gap-2.5 rounded-row px-3 py-2 text-left shadow-[inset_0_0_0_1px_var(--line2)] enabled:hover:bg-hover disabled:cursor-default disabled:opacity-40 aria-pressed:shadow-[inset_0_0_0_1.5px_var(--fg)] disabled:aria-pressed:opacity-100 coarse:min-h-11 phone:min-h-12"
           >
-            {immediate ? null : <span
-              aria-hidden="true"
-              className={clsx(
-                'size-4 shrink-0 shadow-[inset_0_0_0_1.5px_var(--fg3)] group-aria-pressed:shadow-[inset_0_0_0_5px_var(--fg)]',
-                q.multi ? 'rounded-[4px]' : 'rounded-full',
-              )}
-            />}
+            {immediate ? null : (
+              <span
+                aria-hidden="true"
+                className={clsx('size-4 shrink-0 shadow-[inset_0_0_0_1.5px_var(--fg3)] group-aria-pressed:shadow-[inset_0_0_0_5px_var(--fg)]', q.multi ? 'rounded-[4px]' : 'rounded-full')}
+              />
+            )}
             {c.description ? (
               <span>
                 <span className="block">{immediate ? `Send: ${c.label}` : c.label}</span>
                 <span className="block text-[0.75rem]/[18px] text-fg2 phone:text-[0.8125rem]/5">{c.description}</span>
               </span>
+            ) : immediate ? (
+              `Send: ${c.label}`
             ) : (
-              (immediate ? `Send: ${c.label}` : c.label)
+              c.label
             )}
           </button>
         )
@@ -1703,7 +1924,11 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
           <span>
             <span className="block">{asking ? 'Asking the advisor…' : 'Ask the advisor'}</span>
             <span className="block text-[0.75rem]/[18px] text-fg2 phone:text-[0.8125rem]/5">
-              {q.kind === 'Plan' ? 'It reads the task and the plan and suggests an answer, for you to send or not.' : immediate ? 'It reads the task and answers for you now.' : 'It reads the task and answers for you now, with your note if you add one.'}
+              {q.kind === 'Plan'
+                ? 'It reads the task and the plan and suggests an answer, for you to send or not.'
+                : immediate
+                  ? 'It reads the task and answers for you now.'
+                  : 'It reads the task and answers for you now, with your note if you add one.'}
             </span>
           </span>
         </button>
@@ -1742,7 +1967,9 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
       {sent || (q.terminal && !q.choices.length) ? null : (
         <>
           {immediate ? (
-            <button type="button" disabled={busy} className="min-h-11 text-left text-accent" onClick={() => setComposing(true)}>Add a note</button>
+            <button type="button" disabled={busy} className="min-h-11 text-left text-accent" onClick={() => setComposing(true)}>
+              Add a note
+            </button>
           ) : null}
           {(!q.other || ordinary) && !q.noNote && !immediate ? (
             <TextBox
@@ -1758,12 +1985,26 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
             />
           ) : null}
           <div className="flex items-center justify-end gap-2">
-            {err ? <span role="alert" className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
-            {q.reject ? <button type="button" disabled={busy} onClick={() => send(true)}>{q.reject}</button> : null}
-            {!immediate ? <Primary soft disabled={busy || asking || !picked} onClick={() => void (adv ? askAdvisor() : send())}>
-              Send
-            </Primary> : null}
-            {busy ? <span role="status" className="text-[0.8125rem] text-fg2">Sending…</span> : null}
+            {err ? (
+              <span role="alert" className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">
+                {err}
+              </span>
+            ) : null}
+            {q.reject ? (
+              <button type="button" disabled={busy} onClick={() => send(true)}>
+                {q.reject}
+              </button>
+            ) : null}
+            {!immediate ? (
+              <Primary soft disabled={busy || asking || !picked} onClick={() => void (adv ? askAdvisor() : send())}>
+                Send
+              </Primary>
+            ) : null}
+            {busy ? (
+              <span role="status" className="text-[0.8125rem] text-fg2">
+                Sending…
+              </span>
+            ) : null}
           </div>
         </>
       )}
@@ -1863,7 +2104,21 @@ function retry(cid: string) {
   const s = getState()
   const o = s.outbox.find((x) => x.cid === cid)
   if (!o) return
-  const again: Outgoing = { ...o, cid: o.lost ? newCid() : o.cid, state: 'sending', error: undefined, lost: undefined, waiting: undefined, waitsFor: undefined, queued: undefined, serverAt: undefined, wentAt: undefined, busyAt: undefined, at: Date.now(), prior: priorOf(s.chats[o.chat]) }
+  const again: Outgoing = {
+    ...o,
+    cid: o.lost ? newCid() : o.cid,
+    state: 'sending',
+    error: undefined,
+    lost: undefined,
+    waiting: undefined,
+    waitsFor: undefined,
+    queued: undefined,
+    serverAt: undefined,
+    wentAt: undefined,
+    busyAt: undefined,
+    at: Date.now(),
+    prior: priorOf(s.chats[o.chat]),
+  }
   setOutbox((all) => all.map((x) => (x.cid === cid ? again : x)))
   deliver(again)
 }
@@ -1894,8 +2149,7 @@ function keepPicks() {
   }
 }
 
-const same = (a: Picked, b: Picked) =>
-  a.kind === 'space' && b.kind === 'space' ? a.name === b.name : a.kind === 'task' && b.kind === 'task' ? a.ref.toLowerCase() === b.ref.toLowerCase() : false
+const same = (a: Picked, b: Picked) => (a.kind === 'space' && b.kind === 'space' ? a.name === b.name : a.kind === 'task' && b.kind === 'task' ? a.ref.toLowerCase() === b.ref.toLowerCase() : false)
 
 /** the pick replaces an earlier one of the same name (its id is what Send writes) */
 const rememberPick = (chatKey: string, p: Picked) => {
@@ -2074,12 +2328,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
           ) : (
             <>
               {registry.composerPlus ? (
-                <IconButton
-                  label="Attach files and more"
-                  className={roundBtn}
-                  pressed={plus}
-                  onClick={() => setUI({ plus: plus ? null : chatKey })}
-                >
+                <IconButton label="Attach files and more" className={roundBtn} pressed={plus} onClick={() => setUI({ plus: plus ? null : chatKey })}>
                   <PlusIcon className={ic} />
                 </IconButton>
               ) : null}
@@ -2165,10 +2414,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                   )}
                 />
                 {!text ? (
-                  <span
-                    aria-hidden="true"
-                    className={clsx('pointer-events-none absolute inset-y-0 right-0 flex items-center text-fg3', registry.composerPlus ? 'left-1.5' : 'left-3')}
-                  >
+                  <span aria-hidden="true" className={clsx('pointer-events-none absolute inset-y-0 right-0 flex items-center text-fg3', registry.composerPlus ? 'left-1.5' : 'left-3')}>
                     <span className="truncate">{placeholder}</span>
                   </span>
                 ) : null}
@@ -2218,7 +2464,21 @@ function reveal(el: HTMLTextAreaElement) {
   if (!lh) return
   // which line the caret is on: the words up to it, wrapped as the box wraps them, in a copy nobody sees
   const copy = document.createElement('div')
-  const props = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'wordSpacing', 'lineHeight', 'tabSize', 'textIndent', 'textTransform', 'whiteSpace', 'overflowWrap', 'wordBreak'] as const
+  const props = [
+    'fontFamily',
+    'fontSize',
+    'fontWeight',
+    'fontStyle',
+    'letterSpacing',
+    'wordSpacing',
+    'lineHeight',
+    'tabSize',
+    'textIndent',
+    'textTransform',
+    'whiteSpace',
+    'overflowWrap',
+    'wordBreak',
+  ] as const
   for (const k of props) copy.style[k] = cs[k]
   Object.assign(copy.style, { position: 'absolute', top: '0', left: '-9999px', visibility: 'hidden', width: `${el.clientWidth - pl - pr}px` })
   copy.textContent = el.value.slice(0, el.selectionEnd)
@@ -2245,8 +2505,7 @@ function ReplyStrip({ chatKey }: { chatKey: string }) {
     <div data-reply-strip className="flex h-7 items-center gap-2 pr-0.75 pl-2.25 text-[0.8125rem] phone:h-8 phone:pr-2 phone:pl-3.5 phone:text-[0.875rem]">
       <div {...jumps(chatKey, q, `Replying to ${name}`)} className="min-w-0 flex-1 cursor-pointer truncate text-fg2">
         {/* a long name gives way, so some of the words always show */}
-        Replying to <span className="inline-block max-w-[45%] truncate align-top font-medium text-fg">{name}</span>{' '}
-        {q.file ? <FileIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
+        Replying to <span className="inline-block max-w-[45%] truncate align-top font-medium text-fg">{name}</span> {q.file ? <FileIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
         {q.artifact ? <PageIcon className="mr-1 inline size-3.5 align-[-2px]" /> : null}
         <Quoted text={q.text ?? ''} />
       </div>
@@ -2362,7 +2621,9 @@ async function attach(chatKey: string, list: File[]) {
         const body = new FormData()
         body.append('chat', chatKey)
         body.append('file', f)
-        const r = await fetch('api/upload', { method: 'POST', body, headers: { 'x-shepherdr': '1' } }).then((x) => x.json()).catch(() => null)
+        const r = await fetch('api/upload', { method: 'POST', body, headers: { 'x-shepherdr': '1' } })
+          .then((x) => x.json())
+          .catch(() => null)
         return { name: f.name, path: r?.path as string | undefined }
       }),
     )
@@ -2614,7 +2875,12 @@ function StickToBottom({ chatKey, children }: { chatKey: string; children: React
   const [newAt, setNewAt] = useState<string | null>(null)
   // the agent's messages, and how many of them you had seen at the bottom
   // a wake's quiet line is no reply: it says nothing to read, so it never raises the New marker
-  const replies = useStore((s) => (s.chats[chatKey]?.messages ?? []).filter((m) => m.who === 'agent' && !m.waiting && !m.pilot).map((m) => m.id).join('\n'))
+  const replies = useStore((s) =>
+    (s.chats[chatKey]?.messages ?? [])
+      .filter((m) => m.who === 'agent' && !m.waiting && !m.pilot)
+      .map((m) => m.id)
+      .join('\n'),
+  )
   const ids = replies ? replies.split('\n') : []
   /** the replies you had in view at the bottom: the others came in while you read further up */
   const read = useRef<Set<string> | null>(null)
@@ -2815,9 +3081,11 @@ function FindItem({ chatKey }: { chatKey: string }) {
       <MenuItem icon={<SearchIcon className={ic} />} onClick={() => openFind(chatKey)}>
         Search in this chat
       </MenuItem>
-      {registry.views.search ? <MenuItem icon={<SearchIcon className={ic} />} onClick={() => setUI({ search: true, searchScope: { kind: 'chat', id: chatKey }, menu: false, taskMenu: false })}>
-        Search this chat and beyond
-      </MenuItem> : null}
+      {registry.views.search ? (
+        <MenuItem icon={<SearchIcon className={ic} />} onClick={() => setUI({ search: true, searchScope: { kind: 'chat', id: chatKey }, menu: false, taskMenu: false })}>
+          Search this chat and beyond
+        </MenuItem>
+      ) : null}
     </>
   )
 }
@@ -2859,10 +3127,7 @@ function DropFiles({ chatKey, children }: { chatKey: string; children: ReactNode
     >
       {children}
       {over ? (
-        <div
-          role="status"
-          className="pointer-events-none absolute inset-2 z-20 grid place-items-center rounded-box bg-bg/80 shadow-[inset_0_0_0_1.5px_var(--focus)] backdrop-blur-[2px]"
-        >
+        <div role="status" className="pointer-events-none absolute inset-2 z-20 grid place-items-center rounded-box bg-bg/80 shadow-[inset_0_0_0_1.5px_var(--focus)] backdrop-blur-[2px]">
           <span className="flex items-center gap-2 rounded-full bg-bubble px-3.5 py-2 text-fg2">
             <FileIcon className={ic} />
             Drop to attach

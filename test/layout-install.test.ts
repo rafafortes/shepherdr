@@ -61,22 +61,27 @@ async function until<T>(read: () => Promise<T>, ok: (v: T) => boolean, ms = 5000
 }
 
 test("the manifest link asks for the page's credentials, in index.html and in the screen built from it", () => {
-  for (const file of [join(root, 'index.html'), join(dist, 'index.html')])
-    expect(readFileSync(file, 'utf8')).toMatch(/<link rel="manifest"[^>]*\scrossorigin="use-credentials"/)
+  for (const file of [join(root, 'index.html'), join(dist, 'index.html')]) expect(readFileSync(file, 'utf8')).toMatch(/<link rel="manifest"[^>]*\scrossorigin="use-credentials"/)
 })
 
 describe.skipIf(!browser)('a home-screen install behind the login', () => {
-  test('behind the gate the browser reads the manifest, and a start\'s other requests carry the login too', async () => {
+  test("behind the gate the browser reads the manifest, and a start's other requests carry the login too", async () => {
     const context = await browser!.newContext({ httpCredentials: { username: USER, password: PASS } })
     const page = await context.newPage()
     await page.goto(`http://127.0.0.1:${gate.port}/`)
     // what Add to Home Screen reads: the manifest, with the credentials the person gave the gate
     const cdp = await context.newCDPSession(page)
-    const read = await until(async () => (await cdp.send('Page.getAppManifest')) as { data?: string }, (m) => !!m.data)
+    const read = await until(
+      async () => (await cdp.send('Page.getAppManifest')) as { data?: string },
+      (m) => !!m.data,
+    )
     // (no credentials, the gate's 401 leaves it empty: no manifest, and nothing to install)
     expect(read.data ?? '').toContain('"name": "Shepherdr"')
     // and whole enough to install: the browser finds nothing missing in it (its name, start_url, display, icons)
-    const install = await until(async () => (await cdp.send('Page.getInstallabilityErrors')) as { installabilityErrors: unknown[] }, (e) => !e.installabilityErrors.length)
+    const install = await until(
+      async () => (await cdp.send('Page.getInstallabilityErrors')) as { installabilityErrors: unknown[] },
+      (e) => !e.installabilityErrors.length,
+    )
     expect(install).toEqual({ installabilityErrors: [] })
     // the rest of a start, the same origin's requests that carry the login by themselves: the service worker alerts
     // need, an icon, and the push key and subscription. The first two are asked for here as the app asks for them (the
@@ -84,20 +89,31 @@ describe.skipIf(!browser)('a home-screen install behind the login', () => {
     // what this gate answers does not matter, only that each request got in.
     expect(
       await page.evaluate(async () => ({
-        worker: await navigator.serviceWorker.register('sw.js').then(() => true, () => false),
-        icon: await fetch('icon-180.png?v=2').then((r) => r.status, () => 0),
-        pushKey: await fetch('api/push/key').then(() => true, () => false),
+        worker: await navigator.serviceWorker.register('sw.js').then(
+          () => true,
+          () => false,
+        ),
+        icon: await fetch('icon-180.png?v=2').then(
+          (r) => r.status,
+          () => 0,
+        ),
+        pushKey: await fetch('api/push/key').then(
+          () => true,
+          () => false,
+        ),
         subscribe: await fetch('api/push/subscribe', {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-shepherdr': '1' },
           body: JSON.stringify({ sub: { endpoint: 'https://push.example/1' }, device: 'a test' }),
-        }).then(() => true, () => false),
+        }).then(
+          () => true,
+          () => false,
+        ),
       })),
     ).toEqual({ worker: true, icon: 200, pushKey: true, subscribe: true })
     // every request that reached the gate carried the login, except the one challenge the person answers once
     expect(seen.filter((s) => !s.auth).map((s) => s.path)).toEqual(['/'])
-    for (const path of ['/manifest.webmanifest', '/sw.js', '/icon-180.png', '/api/push/key', '/api/push/subscribe'])
-      expect(seen).toContainEqual({ path, auth: true })
+    for (const path of ['/manifest.webmanifest', '/sw.js', '/icon-180.png', '/api/push/key', '/api/push/subscribe']) expect(seen).toContainEqual({ path, auth: true })
     await context.close()
   }, 30_000)
 })

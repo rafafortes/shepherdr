@@ -11,10 +11,10 @@ export function dependenciesPresent(root: string): boolean {
     return Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).every((name) => {
       const dir = join(root, 'node_modules', name)
       const installed = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
-      const paths = (value: unknown): string[] => typeof value === 'string' ? [value] :
-        value && typeof value === 'object' ? Object.values(value).flatMap(paths) : []
-      const entries = [installed.main, installed.module, installed.types, installed.typings,
-        ...paths(installed.exports), ...paths(installed.bin)].filter((s): s is string => typeof s === 'string' && !s.includes('*'))
+      const paths = (value: unknown): string[] => (typeof value === 'string' ? [value] : value && typeof value === 'object' ? Object.values(value).flatMap(paths) : [])
+      const entries = [installed.main, installed.module, installed.types, installed.typings, ...paths(installed.exports), ...paths(installed.bin)].filter(
+        (s): s is string => typeof s === 'string' && !s.includes('*'),
+      )
       return entries.every((entry) => existsSync(join(dir, entry)))
     })
   } catch {

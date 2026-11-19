@@ -1,7 +1,22 @@
 // Shared pieces every screen is built from. Heroicons Micro (16px) only; the voice wave and the muted
 // microphone are the drawn icons.
 import clsx from 'clsx'
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref, type RefObject, type TextareaHTMLAttributes } from 'react'
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ButtonHTMLAttributes,
+  type CSSProperties,
+  type HTMLAttributes,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  type Ref,
+  type RefObject,
+  type TextareaHTMLAttributes,
+} from 'react'
 import { ChevronUpDownIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/16/solid'
 import type { Status, Task, Report } from '@shared/types.ts'
 import { span } from '@shared/when.ts'
@@ -110,7 +125,11 @@ export function MicOffIcon({ className }: { className?: string }) {
 export function KeyIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true" className={clsx('size-4 shrink-0 fill-current', className)}>
-      <path fillRule="evenodd" d="M14 6a4 4 0 0 1-4.899 3.899l-1.955 1.955a.5.5 0 0 1-.353.146H5v1.5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1-.5-.5v-2.293a.5.5 0 0 1 .146-.353l3.955-3.955A4 4 0 1 1 14 6Zm-4-2a.75.75 0 0 0 0 1.5.5.5 0 0 1 .5.5.75.75 0 0 0 1.5 0 2 2 0 0 0-2-2Z" clipRule="evenodd" />
+      <path
+        fillRule="evenodd"
+        d="M14 6a4 4 0 0 1-4.899 3.899l-1.955 1.955a.5.5 0 0 1-.353.146H5v1.5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1-.5-.5v-2.293a.5.5 0 0 1 .146-.353l3.955-3.955A4 4 0 1 1 14 6Zm-4-2a.75.75 0 0 0 0 1.5.5.5 0 0 1 .5.5.75.75 0 0 0 1.5 0 2 2 0 0 0-2-2Z"
+        clipRule="evenodd"
+      />
     </svg>
   )
 }
@@ -118,7 +137,10 @@ export function KeyIcon({ className }: { className?: string }) {
 export function KeyboardIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true" className={clsx('size-4 shrink-0 fill-current', className)}>
-      <path fillRule="evenodd" d="M3 3.5h10a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2ZM3.5 5.25h1.5v1.25h-1.5ZM6 5.25h1.5v1.25h-1.5ZM8.5 5.25h1.5v1.25h-1.5ZM11 5.25h1.5v1.25h-1.5ZM3.5 7.5h1.5v1.25h-1.5ZM6 7.5h1.5v1.25h-1.5ZM8.5 7.5h1.5v1.25h-1.5ZM11 7.5h1.5v1.25h-1.5ZM5 9.75h6v1.25H5Z" />
+      <path
+        fillRule="evenodd"
+        d="M3 3.5h10a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2ZM3.5 5.25h1.5v1.25h-1.5ZM6 5.25h1.5v1.25h-1.5ZM8.5 5.25h1.5v1.25h-1.5ZM11 5.25h1.5v1.25h-1.5ZM3.5 7.5h1.5v1.25h-1.5ZM6 7.5h1.5v1.25h-1.5ZM8.5 7.5h1.5v1.25h-1.5ZM11 7.5h1.5v1.25h-1.5ZM5 9.75h6v1.25H5Z"
+      />
     </svg>
   )
 }
@@ -127,10 +149,7 @@ export function KeyboardIcon({ className }: { className?: string }) {
 export function SidebarIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true" className={clsx('size-4 shrink-0 fill-current', className)}>
-      <path
-        fillRule="evenodd"
-        d="M4 2.5h8A2.5 2.5 0 0 1 14.5 5v6a2.5 2.5 0 0 1-2.5 2.5H4A2.5 2.5 0 0 1 1.5 11V5A2.5 2.5 0 0 1 4 2.5Zm3 1.5h5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7V4Z"
-      />
+      <path fillRule="evenodd" d="M4 2.5h8A2.5 2.5 0 0 1 14.5 5v6a2.5 2.5 0 0 1-2.5 2.5H4A2.5 2.5 0 0 1 1.5 11V5A2.5 2.5 0 0 1 4 2.5Zm3 1.5h5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7V4Z" />
     </svg>
   )
 }
@@ -139,10 +158,7 @@ export function SidebarIcon({ className }: { className?: string }) {
 export function PanelIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true" className={clsx('size-4 shrink-0 fill-current', className)}>
-      <path
-        fillRule="evenodd"
-        d="M12 2.5H4A2.5 2.5 0 0 0 1.5 5v6A2.5 2.5 0 0 0 4 13.5h8a2.5 2.5 0 0 0 2.5-2.5V5A2.5 2.5 0 0 0 12 2.5ZM9 4H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h5V4Z"
-      />
+      <path fillRule="evenodd" d="M12 2.5H4A2.5 2.5 0 0 0 1.5 5v6A2.5 2.5 0 0 0 4 13.5h8a2.5 2.5 0 0 0 2.5-2.5V5A2.5 2.5 0 0 0 12 2.5ZM9 4H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h5V4Z" />
     </svg>
   )
 }
@@ -390,14 +406,7 @@ export function LiveWave({ sample, label, className }: { sample: () => Sample; l
     frame = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(frame)
   }, [sample])
-  return (
-    <canvas
-      ref={ref}
-      role="img"
-      aria-label={label}
-      className={clsx('h-6 min-w-0 [mask-image:linear-gradient(to_right,transparent,black_--spacing(8))]', className)}
-    />
-  )
+  return <canvas ref={ref} role="img" aria-label={label} className={clsx('h-6 min-w-0 [mask-image:linear-gradient(to_right,transparent,black_--spacing(8))]', className)} />
 }
 
 /** A status mark; a working one with `p` fills its pie that far (the % done its agent reported). `frozen`: the %
@@ -471,7 +480,11 @@ function reportEnd(w: Report, head: boolean, left: boolean) {
  */
 export function ReportLine({ w, head = false, wrap = false }: { w: Report; head?: boolean; wrap?: boolean }) {
   const end = reportEnd(w, head, head && !wrap)
-  const tail = end ? <span className="whitespace-nowrap text-fg3 tabular-nums">{wrap ? ' ' : ''}· {end}</span> : null
+  const tail = end ? (
+    <span className="whitespace-nowrap text-fg3 tabular-nums">
+      {wrap ? ' ' : ''}· {end}
+    </span>
+  ) : null
   if (wrap)
     return (
       <span className={clsx('line-clamp-3 text-balance', w.paused && 'text-fg3')}>
@@ -502,9 +515,7 @@ export function runLine(t: Task): ReactNode {
   const part = r.provider.includes('.') ? r.provider.slice(r.provider.indexOf('.') + 1) : undefined
   return (
     <span data-run>
-      <span aria-hidden>
-        {[t.agent!.cli, part, r.model].filter(Boolean).join(' · ')}
-      </span>
+      <span aria-hidden>{[t.agent!.cli, part, r.model].filter(Boolean).join(' · ')}</span>
       <span className="sr-only">{full}</span>
     </span>
   )
@@ -590,12 +601,19 @@ export function AttentionBadge({ need, ready, scope }: { need: number; ready: nu
   if (!need && !ready) return null
   const split = need > 0 && ready > 0
   const label = `${need} needs you, ${ready} ready · ${scope}`
-  const cap = (n: number) => n > 9 ? '9+' : String(n)
+  const cap = (n: number) => (n > 9 ? '9+' : String(n))
   return (
-    <span role="img" aria-label={label} data-attention-badge={split ? 'both' : need ? 'need' : 'ready'}
-      className={clsx('attention-badge', split && 'attention-badge-split')}>
-      {need > 0 ? <span aria-hidden="true" className="attention-badge-need">{cap(need)}</span> : null}
-      {ready > 0 ? <span aria-hidden="true" className="attention-badge-ready">{cap(ready)}</span> : null}
+    <span role="img" aria-label={label} data-attention-badge={split ? 'both' : need ? 'need' : 'ready'} className={clsx('attention-badge', split && 'attention-badge-split')}>
+      {need > 0 ? (
+        <span aria-hidden="true" className="attention-badge-need">
+          {cap(need)}
+        </span>
+      ) : null}
+      {ready > 0 ? (
+        <span aria-hidden="true" className="attention-badge-ready">
+          {cap(ready)}
+        </span>
+      ) : null}
     </span>
   )
 }
@@ -762,7 +780,8 @@ export function Menu({ label, onClose, tabs, select, className, children }: { la
     const rows = () => [...el.querySelectorAll<HTMLElement>('[role^=menuitem]:not(:disabled)')]
     // opened from the keyboard, the first row takes the focus; a text field (always focus-visible) keeps it, so a tap on
     // + while typing leaves a phone's keyboard up
-    if (opener?.matches(':focus-visible') && !opener.matches('input, textarea')) ((select && rows().find((r) => r.getAttribute('aria-checked') === 'true')) || rows()[0])?.focus({ preventScroll: true })
+    if (opener?.matches(':focus-visible') && !opener.matches('input, textarea'))
+      ((select && rows().find((r) => r.getAttribute('aria-checked') === 'true')) || rows()[0])?.focus({ preventScroll: true })
     const on = (e: KeyboardEvent) => {
       // a picker in it (a menu setting with many choices) takes its own arrow keys
       if (document.activeElement instanceof HTMLSelectElement && el.contains(document.activeElement) && e.key !== 'Escape' && e.key !== 'Tab') return
@@ -819,7 +838,10 @@ export function MenuSeparator() {
  */
 export function MenuSetting({ name, icon, choices, note }: { name: string; icon: ReactNode; choices: { label: string; on: boolean; hint?: string; onClick: () => void }[]; note?: string }) {
   const long = choices.length > 3 || choices.reduce((n, c) => n + c.label.length, 0) > 24
-  const on = Math.max(0, choices.findIndex((c) => c.on))
+  const on = Math.max(
+    0,
+    choices.findIndex((c) => c.on),
+  )
   const row = long ? (
     <label className="press relative flex h-8 items-center gap-2 px-2 whitespace-nowrap hover:bg-hover has-focus-visible:bg-hover coarse:h-11 phone:h-11 phone:gap-3 phone:px-3">
       <span className="grid size-4 shrink-0 place-items-center text-fg2 max-[359px]:hidden">{icon}</span>
@@ -829,7 +851,13 @@ export function MenuSetting({ name, icon, choices, note }: { name: string; icon:
         <ChevronUpDownIcon className={clsx(ic, 'shrink-0')} />
       </span>
       {/* the device's own picker: a wheel on a phone, a list on a desktop; 16px, so a phone doesn't zoom in */}
-      <select name={name} aria-label={name} value={on} onChange={(e) => choices[Number(e.target.value)]?.onClick()} className="absolute inset-0 size-full cursor-pointer appearance-none text-base opacity-0">
+      <select
+        name={name}
+        aria-label={name}
+        value={on}
+        onChange={(e) => choices[Number(e.target.value)]?.onClick()}
+        className="absolute inset-0 size-full cursor-pointer appearance-none text-base opacity-0"
+      >
         {choices.map((c, i) => (
           <option key={c.label} value={i}>
             {c.label}
@@ -839,9 +867,7 @@ export function MenuSetting({ name, icon, choices, note }: { name: string; icon:
     </label>
   ) : (
     <div className="flex h-9 items-center gap-2 px-2 phone:h-11 phone:gap-3 phone:px-3">
-      <span className="grid size-4 shrink-0 place-items-center text-fg2 max-[359px]:hidden">
-        {icon}
-      </span>
+      <span className="grid size-4 shrink-0 place-items-center text-fg2 max-[359px]:hidden">{icon}</span>
       <Tabs label={name} className="min-w-0 flex-1">
         {choices.map((c) => (
           <Tab key={c.label} fill on={c.on} aria-label={c.hint ? `${c.label}: ${c.hint}` : undefined} onClick={c.onClick}>
@@ -878,7 +904,10 @@ export function MenuSwitch({ name, icon, on, note, onClick }: { name: string; ic
         <span className="grid size-4 shrink-0 place-items-center text-fg2 max-[359px]:hidden">{icon}</span>
         <span className="min-w-0 flex-1 truncate">{name}</span>
         {/* the track: grey off, red on; its knob slides across */}
-        <span aria-hidden className="relative inline-flex w-9 shrink-0 rounded-full bg-line2 p-0.5 shadow-[inset_0_0_0_1px_var(--line)] transition-colors duration-200 ease-in-out group-aria-checked:bg-need group-aria-checked:shadow-none phone:w-11">
+        <span
+          aria-hidden
+          className="relative inline-flex w-9 shrink-0 rounded-full bg-line2 p-0.5 shadow-[inset_0_0_0_1px_var(--line)] transition-colors duration-200 ease-in-out group-aria-checked:bg-need group-aria-checked:shadow-none phone:w-11"
+        >
           <span className="aspect-square w-1/2 rounded-full bg-white shadow-xs ring-1 ring-black/5 transition-transform duration-200 ease-in-out group-aria-checked:translate-x-full" />
         </span>
       </button>
@@ -921,15 +950,7 @@ export function rowClass(sel?: boolean, kb?: boolean, dense?: boolean) {
 }
 
 /** A list row: places, tasks, agents */
-export function Row({
-  className,
-  sel,
-  kb,
-  two,
-  children,
-  onActivate,
-  ...p
-}: HTMLAttributes<HTMLLIElement> & { sel?: boolean; kb?: boolean; two?: boolean; onActivate?: () => void }) {
+export function Row({ className, sel, kb, two, children, onActivate, ...p }: HTMLAttributes<HTMLLIElement> & { sel?: boolean; kb?: boolean; two?: boolean; onActivate?: () => void }) {
   return (
     <li
       role="button"
@@ -970,11 +991,7 @@ export function RowText({ children, sub, more, className }: { children: ReactNod
 }
 
 export function Meta({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <span className={clsx('shrink-0 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]', className)}>
-      {children}
-    </span>
-  )
+  return <span className={clsx('shrink-0 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]', className)}>{children}</span>
 }
 
 export function Tag({ children }: { children: ReactNode }) {
@@ -1073,28 +1090,71 @@ export function Small({ children, className, ...p }: HTMLAttributes<HTMLDivEleme
 export function Head({ children, className, conversation }: { children: ReactNode; className?: string; conversation?: boolean }) {
   return (
     <div data-chrome className={clsx('relative flex min-h-[52px] shrink-0 items-center gap-2.5 border-b border-line pr-3 pl-4 [&_.hit]:rounded-full', conversation && 'px-0!', className)}>
-      {conversation ? <div data-conversation-head className="mx-auto flex min-h-[51px] w-full max-w-read min-w-0 items-center gap-2.5 pr-3 pl-5 [&_.hit]:rounded-full">{children}</div> : children}
+      {conversation ? (
+        <div data-conversation-head className="mx-auto flex min-h-[51px] w-full max-w-read min-w-0 items-center gap-2.5 pr-3 pl-5 [&_.hit]:rounded-full">
+          {children}
+        </div>
+      ) : (
+        children
+      )}
     </div>
   )
 }
 
 /** A phone screen's top: round buttons either side, the title centred and as wide as the buttons leave room for; a
  *  mark after the subtitle */
-export function PhoneTop({ left, dot, icon, p, name, kind, mark, right, report, expandName }: { left?: ReactNode; dot?: Status; icon?: ReactNode; p?: number; name: string; kind?: ReactNode; mark?: ReactNode; right?: ReactNode; report?: Report; expandName?: boolean }) {
+export function PhoneTop({
+  left,
+  dot,
+  icon,
+  p,
+  name,
+  kind,
+  mark,
+  right,
+  report,
+  expandName,
+}: {
+  left?: ReactNode
+  dot?: Status
+  icon?: ReactNode
+  p?: number
+  name: string
+  kind?: ReactNode
+  mark?: ReactNode
+  right?: ReactNode
+  report?: Report
+  expandName?: boolean
+}) {
   const [expanded, setExpanded] = useState(false)
   return (
     // under a bar at the top (offline, a call) the notch is already kept clear
-    <div data-kb data-chrome className={clsx('relative grid shrink-0 items-center gap-2 border-b border-line px-3 pt-[calc(env(safe-area-inset-top)+6px)] pb-1.5 [[data-topbar]~*_&]:pt-1.5', expandName ? 'grid-cols-[auto_minmax(0,1fr)_auto]' : 'grid-cols-[1fr_minmax(0,auto)_1fr]')}>
+    <div
+      data-kb
+      data-chrome
+      className={clsx(
+        'relative grid shrink-0 items-center gap-2 border-b border-line px-3 pt-[calc(env(safe-area-inset-top)+6px)] pb-1.5 [[data-topbar]~*_&]:pt-1.5',
+        expandName ? 'grid-cols-[auto_minmax(0,1fr)_auto]' : 'grid-cols-[1fr_minmax(0,auto)_1fr]',
+      )}
+    >
       <div className="flex gap-1">{left}</div>
       <div className="min-w-0 text-center">
         <div className="flex items-center justify-center gap-1.5 font-semibold">
           {dot ? <Dot s={dot} p={p} halo /> : null}
           {icon}
           {expandName ? (
-            <button type="button" aria-label={`${expanded ? 'Collapse' : 'Show full'} task title: ${name}`} aria-expanded={expanded} onClick={() => setExpanded(!expanded)} className={clsx('min-w-0 text-left break-words', !expanded && 'line-clamp-2')}>
+            <button
+              type="button"
+              aria-label={`${expanded ? 'Collapse' : 'Show full'} task title: ${name}`}
+              aria-expanded={expanded}
+              onClick={() => setExpanded(!expanded)}
+              className={clsx('min-w-0 text-left break-words', !expanded && 'line-clamp-2')}
+            >
               {name}
             </button>
-          ) : <span className="truncate">{name}</span>}
+          ) : (
+            <span className="truncate">{name}</span>
+          )}
         </div>
         {mark && !report ? (
           // a mark (a coordinator's mode) ends the subtitle line, whole; the words before it give way first
@@ -1105,7 +1165,11 @@ export function PhoneTop({ left, dot, icon, p, name, kind, mark, right, report, 
         ) : (
           <div className={clsx('text-[0.8125rem]/[18px] text-fg2', !report && 'truncate')}>{expandName ? kind : report ? <ReportLine w={report} head wrap /> : kind}</div>
         )}
-        {expandName && report ? <div className="text-[0.8125rem]/[18px] text-fg2"><ReportLine w={report} head wrap /></div> : null}
+        {expandName && report ? (
+          <div className="text-[0.8125rem]/[18px] text-fg2">
+            <ReportLine w={report} head wrap />
+          </div>
+        ) : null}
       </div>
       <div className="flex justify-end gap-1">{right}</div>
     </div>
@@ -1126,10 +1190,7 @@ export function Kbd({ keys }: { keys: string[] }) {
   return (
     <kbd className="inline-flex gap-1 font-sans">
       {keys.map((k) => (
-        <span
-          key={k}
-          className="inline-grid h-6 min-w-6 place-items-center rounded-md px-1.5 text-xs/none font-medium text-fg shadow-[inset_0_0_0_1px_var(--line2),0_1px_0_var(--line2)]"
-        >
+        <span key={k} className="inline-grid h-6 min-w-6 place-items-center rounded-md px-1.5 text-xs/none font-medium text-fg shadow-[inset_0_0_0_1px_var(--line2),0_1px_0_var(--line2)]">
           {k}
         </span>
       ))}
@@ -1204,7 +1265,21 @@ export function TextBox({
 
 /** A secret's box: masked, never kept as a draft or offered for saving, and Enter saves. Its value lives only in the
  *  page's memory until it is sent */
-export function SecretField({ label, value, onChange, onEnter, className, autoFocus }: { label: string; value: string; onChange: (v: string) => void; onEnter?: () => void; className?: string; autoFocus?: boolean }) {
+export function SecretField({
+  label,
+  value,
+  onChange,
+  onEnter,
+  className,
+  autoFocus,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  onEnter?: () => void
+  className?: string
+  autoFocus?: boolean
+}) {
   return (
     <input
       type="password"
@@ -1220,7 +1295,11 @@ export function SecretField({ label, value, onChange, onEnter, className, autoFo
       value={value}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && onEnter?.()}
-      className={clsx('min-h-10 w-full min-w-0 rounded-row bg-transparent px-3 py-[9px] font-mono placeholder:font-sans placeholder:text-fg3 coarse:min-h-11 phone:min-h-11 phone:text-[1rem]', field, className)}
+      className={clsx(
+        'min-h-10 w-full min-w-0 rounded-row bg-transparent px-3 py-[9px] font-mono placeholder:font-sans placeholder:text-fg3 coarse:min-h-11 phone:min-h-11 phone:text-[1rem]',
+        field,
+        className,
+      )}
     />
   )
 }

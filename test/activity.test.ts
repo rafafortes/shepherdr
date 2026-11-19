@@ -48,7 +48,14 @@ describe('words', () => {
     expect(commandSay('opencode run --standalone "Review this"')).toMatchObject({ step: 'agent', title: 'Asked another agent' })
   })
   test('other tools in words: edits count their lines, searches quote, subagents say what they do', () => {
-    expect(claudeStep('Edit', { file_path: '/w/src/a.ts', old_string: 'a\nb', new_string: 'a\nc\nd' })).toMatchObject({ step: 'edit', title: 'Edited a.ts', target: 'a.ts', added: 2, removed: 1, detail: '/w/src/a.ts' })
+    expect(claudeStep('Edit', { file_path: '/w/src/a.ts', old_string: 'a\nb', new_string: 'a\nc\nd' })).toMatchObject({
+      step: 'edit',
+      title: 'Edited a.ts',
+      target: 'a.ts',
+      added: 2,
+      removed: 1,
+      detail: '/w/src/a.ts',
+    })
     expect(claudeStep('Grep', { pattern: 'review' })).toMatchObject({ step: 'search', title: 'Searched the code for “review”' })
     expect(claudeStep('Read', { file_path: '/w/shot.png' })?.title).toBe('Looked at shot.png')
     expect(claudeStep('Agent', { description: 'Review the signature fix' })?.title).toBe('Asked a subagent to review the signature fix')
@@ -114,7 +121,21 @@ describe('words', () => {
   test('outputAt reads a tool part’s output in an OpenCode row and a tool result in a pi row', () => {
     const dir = tmp('act-output-at')
     const oc = join(dir, 'ses_1.jsonl')
-    writeFileSync(oc, JSON.stringify({ id: 'a1', type: 'assistant', seq: 1, time: 10, data: { content: [{ type: 'text', text: 'hi' }, { type: 'tool', tool: 'read', state: { status: 'completed', output: 'line one\nline two' } }] } }) + '\n')
+    writeFileSync(
+      oc,
+      JSON.stringify({
+        id: 'a1',
+        type: 'assistant',
+        seq: 1,
+        time: 10,
+        data: {
+          content: [
+            { type: 'text', text: 'hi' },
+            { type: 'tool', tool: 'read', state: { status: 'completed', output: 'line one\nline two' } },
+          ],
+        },
+      }) + '\n',
+    )
     expect(outputAt({ file: oc, offset: 0 }, 'a1-1')).toBe('line one\nline two')
     expect(outputAt({ file: oc, offset: 0 }, 'a1-0')).toBeUndefined()
     const pi = join(dir, 'pi.jsonl')
@@ -124,7 +145,17 @@ describe('words', () => {
 })
 
 describe('folding', () => {
-  const step = (id: string, at: number, x: Partial<Extract<LogEvent, { kind: 'step' }>> = {}): LogEvent => ({ kind: 'step', id, at, step: 'run', tool: 'Bash', title: `Ran ${id}`, doing: `Running ${id}`, target: '', ...x })
+  const step = (id: string, at: number, x: Partial<Extract<LogEvent, { kind: 'step' }>> = {}): LogEvent => ({
+    kind: 'step',
+    id,
+    at,
+    step: 'run',
+    tool: 'Bash',
+    title: `Ran ${id}`,
+    doing: `Running ${id}`,
+    target: '',
+    ...x,
+  })
   test('steps fold by turn; a stand-in goes once over; the turn on now shows its step', () => {
     const { turns, open } = activityOf([
       { kind: 'turn-start', id: 't1', at: 0 },
@@ -175,7 +206,13 @@ const typed = { origin: { kind: 'human' }, promptSource: 'typed' }
 const notice = (uuid: string, body: string) => ({
   parentUuid: null,
   ...base,
-  attachment: { type: 'queued_command', prompt: `<task-notification>\n${body}\n</task-notification>`, commandMode: 'task-notification', origin: { kind: 'task-notification', producer: 'session-task' }, timestamp: ts() },
+  attachment: {
+    type: 'queued_command',
+    prompt: `<task-notification>\n${body}\n</task-notification>`,
+    commandMode: 'task-notification',
+    origin: { kind: 'task-notification', producer: 'session-task' },
+    timestamp: ts(),
+  },
   type: 'attachment',
   uuid,
   timestamp: ts(),
@@ -183,7 +220,11 @@ const notice = (uuid: string, body: string) => ({
 const turnEnd = (uuid: string) => ({ parentUuid: null, ...base, type: 'system', subtype: 'turn_duration', durationMs: 1, timestamp: ts(), uuid })
 
 describe('claude reader: steps and background work', () => {
-  const parse = (objs: object[], reader = readerFor('claude')!) => reader.parse(objs.map((o, i) => ({ text: JSON.stringify(o), offset: i * 100 })), '/logs/p/S.jsonl')
+  const parse = (objs: object[], reader = readerFor('claude')!) =>
+    reader.parse(
+      objs.map((o, i) => ({ text: JSON.stringify(o), offset: i * 100 })),
+      '/logs/p/S.jsonl',
+    )
   test('a tool call is a step, its result ends it and says where its output is; the question tool and a subagent’s calls are none', () => {
     const ev = parse([
       user('u1', 'Fix it', typed),
@@ -196,7 +237,18 @@ describe('claude reader: steps and background work', () => {
     ])
     const steps = ev.filter((e) => e.kind === 'step' || e.kind === 'step-end')
     expect(steps).toEqual([
-      { kind: 'step', id: 'toolu_1', at: expect.any(Number), step: 'run', tool: 'Bash', title: 'Ran the tests', doing: 'Running the tests', target: '', test: true, detail: 'cd /work/app && bun test' },
+      {
+        kind: 'step',
+        id: 'toolu_1',
+        at: expect.any(Number),
+        step: 'run',
+        tool: 'Bash',
+        title: 'Ran the tests',
+        doing: 'Running the tests',
+        target: '',
+        test: true,
+        detail: 'cd /work/app && bun test',
+      },
       { kind: 'step-end', id: 'toolu_1', at: expect.any(Number), failed: undefined, out: { file: '/logs/p/S.jsonl', offset: 200 }, result: '3 passed' },
       { kind: 'step', id: 'toolu_2', at: expect.any(Number), step: 'read', tool: 'Read', title: 'Read a.ts', doing: 'Reading a.ts', target: 'a.ts', detail: '/work/app/src/a.ts' },
       { kind: 'step', id: 'toolu_5', at: expect.any(Number), step: 'other', tool: 'get_pr', title: 'Used get pr', doing: 'Using get pr', target: '' },
@@ -211,7 +263,10 @@ describe('claude reader: steps and background work', () => {
       use('a3', 'toolu_3', 'Monitor', { command: 'gh pr checks 3 --watch', description: 'CI' }),
       result('u3', 'toolu_3', 'Monitor started (task bm1).', { taskId: 'bm1' }),
       notice('n1', '<task-id>ag1</task-id>\n<status>completed</status>\n<summary>Agent "Review the fix" is waiting on its own background work</summary>'),
-      notice('n2', '<task-id>bsh1</task-id>\n<output-file>/tmp/c/x/S/tasks/bsh1.output</output-file>\n<status>completed</status>\n<summary>Background command "bun run test" completed (exit code 0)</summary>'),
+      notice(
+        'n2',
+        '<task-id>bsh1</task-id>\n<output-file>/tmp/c/x/S/tasks/bsh1.output</output-file>\n<status>completed</status>\n<summary>Background command "bun run test" completed (exit code 0)</summary>',
+      ),
     ])
     const jobs = ev.filter((e) => e.kind === 'job' || e.kind === 'job-end')
     expect(jobs).toEqual([
@@ -236,8 +291,23 @@ describe('codex reader: steps and background work', () => {
     const ev = readerFor('codex')!.parse(
       [
         codexLine('response_item', { type: 'custom_tool_call', call_id: 'c1', name: 'exec', input: 'text(await tools.exec_command({cmd:"cat src/a.ts"}))' }),
-        codexLine('event_msg', { type: 'item_completed', started_at_ms: 1000, completed_at_ms: 1200, item: { type: 'CommandExecution', id: 'exec-1', command: ['/bin/bash', '-lc', 'cat src/a.ts'], parsed_cmd: [{ type: 'read', cmd: 'cat src/a.ts', name: 'a.ts', path: 'src/a.ts' }], status: 'completed', exit_code: 0 } }),
-        codexLine('event_msg', { type: 'item_completed', item: { type: 'CommandExecution', id: 'exec-2', command: ['/bin/bash', '-lc', 'bun test'], parsed_cmd: [{ type: 'unknown', cmd: 'bun test' }], status: 'completed', exit_code: 1 } }),
+        codexLine('event_msg', {
+          type: 'item_completed',
+          started_at_ms: 1000,
+          completed_at_ms: 1200,
+          item: {
+            type: 'CommandExecution',
+            id: 'exec-1',
+            command: ['/bin/bash', '-lc', 'cat src/a.ts'],
+            parsed_cmd: [{ type: 'read', cmd: 'cat src/a.ts', name: 'a.ts', path: 'src/a.ts' }],
+            status: 'completed',
+            exit_code: 0,
+          },
+        }),
+        codexLine('event_msg', {
+          type: 'item_completed',
+          item: { type: 'CommandExecution', id: 'exec-2', command: ['/bin/bash', '-lc', 'bun test'], parsed_cmd: [{ type: 'unknown', cmd: 'bun test' }], status: 'completed', exit_code: 1 },
+        }),
         codexLine('response_item', { type: 'custom_tool_call_output', call_id: 'c1', output: [{ type: 'input_text', text: 'done' }] }),
         codexLine('event_msg', { type: 'item_completed', item: { type: 'SubAgentActivity', id: 'call_9', kind: 'started', agent_thread_id: 'th-1', agent_path: '/root/review_fix' } }),
         codexLine('event_msg', { type: 'item_completed', item: { type: 'SubAgentActivity', id: 'call_9', kind: 'completed', agent_thread_id: 'th-1', agent_path: '/root/review_fix' } }),
@@ -254,7 +324,12 @@ describe('codex reader: steps and background work', () => {
     expect(steps[0]).toMatchObject({ at: 1000, end: 1200, where: { file: '/codex/r.jsonl', offset: 100 } })
     expect(ev.filter((e) => e.kind === 'job' || e.kind === 'job-end').map((e) => `${e.kind}:${e.id}`)).toEqual(['job:th-1', 'job-end:th-1'])
     expect(jobs).toEqual([])
-    expect(codexItem({ type: 'FileChange', changes: { '/w/a.ts': { unified_diff: '@@\n-x\n+y\n+z' }, '/w/b.ts': {} } })).toMatchObject({ step: 'edit', title: 'Edited 2 files: a.ts, b.ts', added: 2, removed: 1 })
+    expect(codexItem({ type: 'FileChange', changes: { '/w/a.ts': { unified_diff: '@@\n-x\n+y\n+z' }, '/w/b.ts': {} } })).toMatchObject({
+      step: 'edit',
+      title: 'Edited 2 files: a.ts, b.ts',
+      added: 2,
+      removed: 1,
+    })
     expect(codexItem({ type: 'CommandExecution', command: ['bash', '-lc', 'bun test'], aggregated_output: ' 3 pass\n 1 fail' })).toMatchObject({ title: 'Ran tests', result: '1 failed, 3 passed' })
   })
 })
@@ -281,7 +356,11 @@ function world(kind: 'claude' | 'codex', status: () => string, runs: () => strin
     runtime: () => undefined,
     runtimeHook: () => undefined,
   }
-  const chats = new Chats(agents as never, (k) => k, () => 'You')
+  const chats = new Chats(
+    agents as never,
+    (k) => k,
+    () => 'You',
+  )
   const add = (...objs: object[]) => appendFileSync(log, objs.map((o) => `${JSON.stringify(o)}\n`).join(''))
   return { chats, add, dir, log }
 }
@@ -301,7 +380,11 @@ describe('a chat from its log', () => {
     let c = w.chats.chat('T-1/Agent')
     expect(c.live).toMatchObject({ steps: 2, now: { id: 'toolu_2', kind: 'edit', doing: 'Editing a.ts' } })
     expect(c.messages.some((m) => m.activity)).toBe(false)
-    w.add(result('u3', 'toolu_2', 'ok', { structuredPatch: [{ oldStart: 3, oldLines: 1, newStart: 3, newLines: 1, lines: ['-x', '+y'] }] }), said('a4', 'msg_r2', { type: 'text', text: 'Fixed.' }, 'end_turn'), turnEnd('s1'))
+    w.add(
+      result('u3', 'toolu_2', 'ok', { structuredPatch: [{ oldStart: 3, oldLines: 1, newStart: 3, newLines: 1, lines: ['-x', '+y'] }] }),
+      said('a4', 'msg_r2', { type: 'text', text: 'Fixed.' }, 'end_turn'),
+      turnEnd('s1'),
+    )
     st = 'idle'
     c = w.chats.chat('T-1/Agent')
     expect(c.live).toBeUndefined()
@@ -351,9 +434,18 @@ describe('a chat from its log', () => {
     c = w.chats.chat('p:x')
     expect(c.messages.filter((m) => m.pilot).map((m) => m.pilot)).toEqual(['Autopilot woke · on schedule · nothing to report', 'Autopilot woke · Run now · nothing to report'])
     // a wake that says something keeps its why, and its words follow: the line never hides a reply
-    w.add(user('u4', '<shepherdr><heartbeat reason="run now">Heartbeat.</heartbeat></shepherdr>', { origin: { kind: 'human' } }), said('a4', 'msg_r3', { type: 'text', text: 'One task is ready: SHE-4.' }, 'end_turn'), turnEnd('s3'))
+    w.add(
+      user('u4', '<shepherdr><heartbeat reason="run now">Heartbeat.</heartbeat></shepherdr>', { origin: { kind: 'human' } }),
+      said('a4', 'msg_r3', { type: 'text', text: 'One task is ready: SHE-4.' }, 'end_turn'),
+      turnEnd('s3'),
+    )
     c = w.chats.chat('p:x')
-    expect(c.messages.filter((m) => m.pilot).map((m) => m.pilot).at(-1)).toBe('Autopilot woke · Run now')
+    expect(
+      c.messages
+        .filter((m) => m.pilot)
+        .map((m) => m.pilot)
+        .at(-1),
+    ).toBe('Autopilot woke · Run now')
     expect(c.messages.at(-1)?.text).toBe('One task is ready: SHE-4.')
   })
 
@@ -371,7 +463,11 @@ describe('a chat from its log', () => {
 
   test('background work shows while it runs, with what each does now, and opens to its steps or output', () => {
     let runs: string | undefined = 'agents'
-    const w = world('claude', () => 'idle', () => runs)
+    const w = world(
+      'claude',
+      () => 'idle',
+      () => runs,
+    )
     const sub = join(w.dir, S, 'subagents')
     mkdirSync(sub, { recursive: true })
     writeFileSync(join(sub, 'agent-ag1.jsonl'), `${JSON.stringify(use('b1', 'toolu_9', 'Read', { file_path: '/w/call.ts' }, { isSidechain: true }))}\n`)
@@ -460,30 +556,54 @@ describe('a headless reviewer’s own steps', () => {
       process.env.PI_CODING_AGENT_DIR = pi
       const piLog = join(piSessionDir('/w/review'), 'run.jsonl')
       mkdirSync(dirname(piLog), { recursive: true })
-      writeFileSync(piLog, [
-        JSON.stringify({ type: 'session', id: 'p1', cwd: '/w/review', timestamp: t }),
-        JSON.stringify({ type: 'message', id: 'm1', timestamp: t, message: { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'bun test' } }] } }),
-        JSON.stringify({ type: 'message', id: 'm2', timestamp: t, message: { role: 'toolResult', toolCallId: 'c1', content: [{ type: 'text', text: 'pass' }] } }),
-      ].join('\n') + '\n')
+      writeFileSync(
+        piLog,
+        [
+          JSON.stringify({ type: 'session', id: 'p1', cwd: '/w/review', timestamp: t }),
+          JSON.stringify({ type: 'message', id: 'm1', timestamp: t, message: { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'bun test' } }] } }),
+          JSON.stringify({ type: 'message', id: 'm2', timestamp: t, message: { role: 'toolResult', toolCallId: 'c1', content: [{ type: 'text', text: 'pass' }] } }),
+        ].join('\n') + '\n',
+      )
       expect(logKind(piLog)).toBe('pi')
       expect(logs.steps(piLog).steps.map((s) => s.title)).toEqual(['Ran tests'])
       expect(logs.now(piLog)).toBe('Ran tests')
       // OpenCode: a tool part of a mirrored assistant row
       const ocLog = opencodeLogPath(home(), 'ses_headless')
       mkdirSync(dirname(ocLog), { recursive: true })
-      writeFileSync(ocLog, JSON.stringify({ id: 'a1', type: 'assistant', seq: 1, time: 10, data: { time: { created: 320, completed: 325 }, content: [{ type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'bun test' }, output: 'pass' } }], finish: 'stop' } }) + '\n')
+      writeFileSync(
+        ocLog,
+        JSON.stringify({
+          id: 'a1',
+          type: 'assistant',
+          seq: 1,
+          time: 10,
+          data: { time: { created: 320, completed: 325 }, content: [{ type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'bun test' }, output: 'pass' } }], finish: 'stop' },
+        }) + '\n',
+      )
       expect(logKind(ocLog)).toBe('opencode')
       expect(logs.steps(ocLog).steps.map((s) => s.title)).toEqual(['Ran tests'])
       // agy: a tool step of a mirrored conversation
       const agyLog = agyLogPath(home(), 'conv_headless')
       mkdirSync(dirname(agyLog), { recursive: true })
-      writeFileSync(agyLog, `${JSON.stringify({ mirror: 2 })}\n${JSON.stringify({ idx: 1, at: 1_700_000_000_000, kind: 'tool', tool: 'run_command', args: JSON.stringify({ CommandLine: 'bun test' }), output: 'pass' })}\n`)
+      writeFileSync(
+        agyLog,
+        `${JSON.stringify({ mirror: 2 })}\n${JSON.stringify({ idx: 1, at: 1_700_000_000_000, kind: 'tool', tool: 'run_command', args: JSON.stringify({ CommandLine: 'bun test' }), output: 'pass' })}\n`,
+      )
       expect(logKind(agyLog)).toBe('agy')
       expect(logs.steps(agyLog).steps.map((s) => s.title)).toEqual(['Ran tests'])
       // a log outside every CLI's store still reads as a Claude log
       const other = join(tmp('act-other'), 'run.jsonl')
       mkdirSync(dirname(other), { recursive: true })
-      writeFileSync(other, JSON.stringify({ ...base, type: 'assistant', uuid: 'h1', timestamp: ts(), message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_h1', name: 'Bash', input: { command: 'bun test' } }], stop_reason: 'tool_use' } }) + '\n')
+      writeFileSync(
+        other,
+        JSON.stringify({
+          ...base,
+          type: 'assistant',
+          uuid: 'h1',
+          timestamp: ts(),
+          message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_h1', name: 'Bash', input: { command: 'bun test' } }], stop_reason: 'tool_use' },
+        }) + '\n',
+      )
       expect(logKind(other)).toBeUndefined()
       expect(logs.steps(other).steps.map((s) => s.title)).toEqual(['Ran tests'])
     } finally {
@@ -507,7 +627,19 @@ describe('a headless reviewer’s own steps', () => {
     d.run('CREATE TABLE session_message (id text primary key, session_id text, type text, seq integer, time_created integer, time_updated integer, data text)')
     const now = Date.now()
     d.run('INSERT INTO session_v2 VALUES (?, ?, NULL, NULL, ?)', ['ses_review', cwd, now])
-    d.run('INSERT INTO session_message VALUES (?, ?, ?, ?, ?, ?, ?)', ['m1', 'ses_review', 'assistant', 1, now, now, JSON.stringify({ time: { created: now, completed: now }, content: [{ type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'bun test' }, output: 'pass' } }], finish: 'stop' })])
+    d.run('INSERT INTO session_message VALUES (?, ?, ?, ?, ?, ?, ?)', [
+      'm1',
+      'ses_review',
+      'assistant',
+      1,
+      now,
+      now,
+      JSON.stringify({
+        time: { created: now, completed: now },
+        content: [{ type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'bun test' }, output: 'pass' } }],
+        finish: 'stop',
+      }),
+    ])
     d.close()
     process.env.SHEPHERDR_OPENCODE_DB = db
     try {

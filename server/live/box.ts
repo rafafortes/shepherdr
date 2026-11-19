@@ -57,13 +57,20 @@ export function sshArgs(target: string, script: string, opts: { tty?: boolean; e
     'ssh',
     // first: ssh keeps the first value it is given
     ...(opts.extra ?? []),
-    '-o', 'BatchMode=yes',
-    '-o', 'ConnectTimeout=10',
-    '-o', 'ServerAliveInterval=15',
-    '-o', 'ServerAliveCountMax=4',
-    '-o', 'ControlMaster=auto',
-    '-o', 'ControlPersist=600',
-    '-o', `ControlPath=${control()}`,
+    '-o',
+    'BatchMode=yes',
+    '-o',
+    'ConnectTimeout=10',
+    '-o',
+    'ServerAliveInterval=15',
+    '-o',
+    'ServerAliveCountMax=4',
+    '-o',
+    'ControlMaster=auto',
+    '-o',
+    'ControlPersist=600',
+    '-o',
+    `ControlPath=${control()}`,
     opts.tty ? '-tt' : '-T',
     target,
     `/bin/sh -c ${q(script)}`,
@@ -87,7 +94,13 @@ export interface Ran {
 /** run a command on the box (or here, when there is no box) */
 export async function run(argv: string[], o: { cwd?: string; env?: Record<string, string>; stdin?: string | Uint8Array; timeoutMs?: number } = {}): Promise<Ran> {
   const cmd = BOX ? sshArgs(BOX.target, script(BOX, argv, o)) : argv
-  const p = Bun.spawn(cmd, { cwd: BOX ? undefined : o.cwd, stdin: o.stdin === undefined ? 'ignore' : Buffer.from(o.stdin), stdout: 'pipe', stderr: 'pipe', env: BOX ? process.env : { ...process.env, ...o.env } })
+  const p = Bun.spawn(cmd, {
+    cwd: BOX ? undefined : o.cwd,
+    stdin: o.stdin === undefined ? 'ignore' : Buffer.from(o.stdin),
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: BOX ? process.env : { ...process.env, ...o.env },
+  })
   let timedOut = false
   const t = o.timeoutMs ? setTimeout(() => ((timedOut = true), p.kill()), o.timeoutMs) : null
   const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited])
@@ -98,7 +111,14 @@ export async function run(argv: string[], o: { cwd?: string; env?: Record<string
 /** the same, waiting for it: only for the few reads that code expects at once (a file's text, whether it is there) */
 export function runSync(argv: string[], o: { cwd?: string; env?: Record<string, string>; stdin?: string | Uint8Array; timeoutMs?: number } = {}): { code: number; out: Buffer; err: string } {
   const cmd = BOX ? sshArgs(BOX.target, script(BOX, argv, o)) : argv
-  const r = Bun.spawnSync(cmd, { cwd: BOX ? undefined : o.cwd, stdin: o.stdin === undefined ? 'ignore' : Buffer.from(o.stdin), stdout: 'pipe', stderr: 'pipe', timeout: o.timeoutMs ?? 30_000, env: BOX ? process.env : { ...process.env, ...o.env } })
+  const r = Bun.spawnSync(cmd, {
+    cwd: BOX ? undefined : o.cwd,
+    stdin: o.stdin === undefined ? 'ignore' : Buffer.from(o.stdin),
+    stdout: 'pipe',
+    stderr: 'pipe',
+    timeout: o.timeoutMs ?? 30_000,
+    env: BOX ? process.env : { ...process.env, ...o.env },
+  })
   return { code: r.exitCode ?? 1, out: r.stdout ?? Buffer.alloc(0), err: r.stderr?.toString() ?? '' }
 }
 
@@ -110,8 +130,7 @@ export function spawnOn(b: BoxInfo, argv: string[], o: { extra?: string[]; stdin
 /** an agent's credential file: in the current Shepherdr home's helper (SHEPHERDR_HOME included, so a server given a
  *  home of its own never writes into the real ~/.shepherdr), or in the box's helper when this worker runs another
  *  machine, where helper/route.pl writes it */
-const credentialFile = (chat: string) =>
-  BOX ? join(helperDir(BOX.home), 'credentials', secretFileId(chat)) : join(resolve(home(), 'helper', 'credentials'), secretFileId(chat))
+const credentialFile = (chat: string) => (BOX ? join(helperDir(BOX.home), 'credentials', secretFileId(chat)) : join(resolve(home(), 'helper', 'credentials'), secretFileId(chat)))
 
 /** whether Shepherdr tells your alert command what an agent waits on you for (Settings → Notifications → Alert command, wait-alerts.ts):
  *  the live source says, for each chat */
@@ -126,7 +145,13 @@ export function agentEnv(chat: string, root: string): Record<string, string> {
   const credential = { SHEPHERDR_SECRET_FILE: credentialFile(chat), ...(notifies(chat) ? { SHEPHERDR_NOTIFIES: '1' } : {}) }
   if (BOX) return { ...credential, SHEPHERDR_CHAT: chat, SHEPHERDR_URL: '', SHEPHERDR_COMMAND: join(helperDir(BOX.home), 'bin', 'shepherdr'), SHEPHERDR_MACHINE: BOX.label, PATH: BOX.path }
   // The listening live server owns these agents, never an inherited CLI target (which may be a demo).
-  return { ...credential, SHEPHERDR_CHAT: chat, SHEPHERDR_COMMAND: join(root, 'bin', 'shepherdr'), SHEPHERDR_URL: `http://127.0.0.1:${readJson<{ port?: number }>('server.json', {}).port ?? process.env.SHEPHERDR_PORT ?? 7787}`, PATH: `${join(root, 'bin')}:${process.env.PATH ?? ''}` }
+  return {
+    ...credential,
+    SHEPHERDR_CHAT: chat,
+    SHEPHERDR_COMMAND: join(root, 'bin', 'shepherdr'),
+    SHEPHERDR_URL: `http://127.0.0.1:${readJson<{ port?: number }>('server.json', {}).port ?? process.env.SHEPHERDR_PORT ?? 7787}`,
+    PATH: `${join(root, 'bin')}:${process.env.PATH ?? ''}`,
+  }
 }
 
 /** a port on the box, reached here: a local port forwarded over SSH to its 127.0.0.1 (a browser's stream, its
@@ -135,7 +160,11 @@ export async function forward(b: BoxInfo, port: number): Promise<{ port: number;
   const free = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } })
   const local = free.port
   free.stop(true)
-  const p = Bun.spawn(sshArgs(b.target, HOLD, { extra: ['-o', 'ControlPath=none', '-o', 'ExitOnForwardFailure=yes', '-L', `127.0.0.1:${local}:127.0.0.1:${port}`] }), { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
+  const p = Bun.spawn(sshArgs(b.target, HOLD, { extra: ['-o', 'ControlPath=none', '-o', 'ExitOnForwardFailure=yes', '-L', `127.0.0.1:${local}:127.0.0.1:${port}`] }), {
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+  })
   // ready once the port answers
   for (let i = 0; i < 50; i++) {
     const ok = await new Promise<boolean>((res) => {

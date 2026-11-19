@@ -139,9 +139,7 @@ describe.skipIf(!browser)('mentions in the chat', () => {
       const list = spaces(page)
       await list.waitFor()
       // the list fits the phone: never wider than the screen, and no taller than a phone's list may be
-      const size = await page
-        .locator('[data-mentions]')
-        .evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth, height: el.getBoundingClientRect().height, room: innerHeight }))
+      const size = await page.locator('[data-mentions]').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth, height: el.getBoundingClientRect().height, room: innerHeight }))
       expect(size.scroll).toBeLessThanOrEqual(size.client + 1)
       expect(size.height).toBeLessThanOrEqual(size.room * 0.45)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)

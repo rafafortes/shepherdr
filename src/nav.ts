@@ -102,11 +102,15 @@ export function screenOfUrl(search: string, desktop: boolean, tabOf: (t: string 
 // it again when the step back lands. A touch near a screen edge that is on, or just ended, marks such a Back.
 let edge = 0
 if (typeof addEventListener === 'function') {
-  addEventListener('touchstart', (e) => {
-    const t = (e as TouchEvent).touches
-    const x = t[0]?.clientX ?? 100
-    if (t.length === 1 && (x < 30 || x > innerWidth - 30)) edge = Infinity
-  }, { capture: true, passive: true })
+  addEventListener(
+    'touchstart',
+    (e) => {
+      const t = (e as TouchEvent).touches
+      const x = t[0]?.clientX ?? 100
+      if (t.length === 1 && (x < 30 || x > innerWidth - 30)) edge = Infinity
+    },
+    { capture: true, passive: true },
+  )
   const up = () => edge === Infinity && (edge = performance.now())
   addEventListener('touchend', up, { capture: true, passive: true })
   addEventListener('touchcancel', up, { capture: true, passive: true })

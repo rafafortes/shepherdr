@@ -56,7 +56,12 @@ const CLAUDE_KEYS = ['model', 'effortLevel', 'fastMode', 'modelSettings']
 
 export function claudeRestore(before: string | null, now: string | null): string | null {
   let b: Record<string, unknown>, n: Record<string, unknown>
-  try { b = JSON.parse(before || '{}'); n = JSON.parse(now || '{}') } catch { return null }
+  try {
+    b = JSON.parse(before || '{}')
+    n = JSON.parse(now || '{}')
+  } catch {
+    return null
+  }
   if (!b || !n || typeof b !== 'object' || typeof n !== 'object') return null
   let changed = false
   for (const k of CLAUDE_KEYS) {
@@ -158,11 +163,14 @@ async function typed(io: SwitchIO, steps: Step[], from: SwitchTarget): Promise<v
     const back = steps.map((s) => undo(s, from)).filter((s): s is Step => !!s)
     const failed: string[] = []
     for (const step of back) {
-      try { await awaitStep(io, step) }
-      catch { failed.push(step.field) }
+      try {
+        await awaitStep(io, step)
+      } catch {
+        failed.push(step.field)
+      }
     }
     // restoring the level matters even when this switch never typed a level command: changing a model can reset it
-    if (!failed.length && !await awaitChat(io, { model: from.model, effort: from.effort })) failed.push('model and effort')
+    if (!failed.length && !(await awaitChat(io, { model: from.model, effort: from.effort }))) failed.push('model and effort')
     throw new Error(failed.length ? `${(e as Error).message} It could not be put back on ${failed.join(' and ')}.` : (e as Error).message)
   }
 }
@@ -199,7 +207,11 @@ export interface CodexRow {
 export function codexRows(screen: string): CodexRow[] {
   const lines = screen.split('\n')
   let start = -1
-  for (let i = lines.length - 1; i >= 0; i--) if (/^\s*(Select Model|Select Reasoning|Advanced Reasoning)/.test(lines[i]!)) { start = i; break }
+  for (let i = lines.length - 1; i >= 0; i--)
+    if (/^\s*(Select Model|Select Reasoning|Advanced Reasoning)/.test(lines[i]!)) {
+      start = i
+      break
+    }
   if (start < 0) return []
   const rows: CodexRow[] = []
   for (const line of lines.slice(start + 1)) {
@@ -258,7 +270,10 @@ async function pick(io: SwitchIO, rows: CodexRow[], n: number, key: 'enter' | 's
 /** wait for the screen to show one of these picker states */
 async function screenFor(io: SwitchIO, test: (s: string) => boolean): Promise<string> {
   let s = await io.screen()
-  for (let t = 0; t < 8000 && !test(s); t += 250) { await io.sleep(250); s = await io.screen() }
+  for (let t = 0; t < 8000 && !test(s); t += 250) {
+    await io.sleep(250)
+    s = await io.screen()
+  }
   return s
 }
 
@@ -271,7 +286,10 @@ async function codexSwitch(io: SwitchIO, from: SwitchTarget, to: SwitchTarget, n
     if (codexPicker(s) !== 'model') throw new Error("Codex didn't open its model list.")
     const rows = codexRows(s)
     const row = codexModelRow(rows, model, names[model])
-    if (!row) { await io.keys('esc'); throw new Error(`${names[model] ?? (model || 'That model')} isn't in Codex's list.`) }
+    if (!row) {
+      await io.keys('esc')
+      throw new Error(`${names[model] ?? (model || 'That model')} isn't in Codex's list.`)
+    }
     await pick(io, rows, row.n, 'enter')
     const level = await screenFor(io, (x) => codexPicker(x) === 'effort' || count(x, CHANGED) > was)
     if (codexPicker(level) === 'effort') {
@@ -283,7 +301,10 @@ async function codexSwitch(io: SwitchIO, from: SwitchTarget, to: SwitchTarget, n
         rows = codexRows(deeper)
         r = codexEffortRow(rows, effort)
       }
-      if (!r || r === 'more') { await io.keys('esc', 'esc', 'esc'); throw new Error(`Codex doesn't offer ${LEVEL[effort] ?? effort} for that model.`) }
+      if (!r || r === 'more') {
+        await io.keys('esc', 'esc', 'esc')
+        throw new Error(`Codex doesn't offer ${LEVEL[effort] ?? effort} for that model.`)
+      }
       // `s` applies to this session only (Enter would save it as the default too)
       await pick(io, rows, r.n, 's')
     }
@@ -298,8 +319,11 @@ async function codexSwitch(io: SwitchIO, from: SwitchTarget, to: SwitchTarget, n
     await apply(ch.model ?? from.model ?? '', ch.effort ?? from.effort ?? '')
   } catch (e) {
     // put back both fields we set: a half-applied Codex switch is never left behind
-    try { await apply(from.model ?? '', from.effort ?? '') }
-    catch { throw new Error(`${(e as Error).message} It could not be put back.`) }
+    try {
+      await apply(from.model ?? '', from.effort ?? '')
+    } catch {
+      throw new Error(`${(e as Error).message} It could not be put back.`)
+    }
     throw e
   }
 }

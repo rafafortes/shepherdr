@@ -21,10 +21,12 @@ const cwd = tmp('agents-save-cwd')
 
 /** a fresh store of `n` pi task agents, each with one record */
 function put(n = 1) {
-  const records = Object.fromEntries(Array.from({ length: n }, (_, i) => {
-    const key = i === 0 ? KEY : `T-66-${i}/Agent`
-    return [key, { key, name: i === 0 ? name : `shep-t-66-${i}`, kind: 'pi', cwd, workspace: 'w', logs: [], started: 1 }]
-  }))
+  const records = Object.fromEntries(
+    Array.from({ length: n }, (_, i) => {
+      const key = i === 0 ? KEY : `T-66-${i}/Agent`
+      return [key, { key, name: i === 0 ? name : `shep-t-66-${i}`, kind: 'pi', cwd, workspace: 'w', logs: [], started: 1 }]
+    }),
+  )
   realWriteJson('agents.json', records)
   realWriteJson('outbox.json', [])
 }
@@ -256,7 +258,19 @@ describe('agents.json writes are debounced, outbox.json is not', () => {
     const line = { path: '/w/a-long-project-folder/sessions/2026-11-18/session.jsonl', id: 'a-session-id', kind: 'claude' }
     const one = (i: number) => {
       const key = `S-${i}/Agent`
-      return [key, { key, name: `shep-s-${i}`, kind: 'claude', cwd: '/w/project', workspace: 'w', logs: Array.from({ length: 40 }, () => ({ ...line })), started: i, env: { SHEPHERDR_CHAT: key, SHEPHERDR_COMMAND: '/bin/shepherdr' } }] as const
+      return [
+        key,
+        {
+          key,
+          name: `shep-s-${i}`,
+          kind: 'claude',
+          cwd: '/w/project',
+          workspace: 'w',
+          logs: Array.from({ length: 40 }, () => ({ ...line })),
+          started: i,
+          env: { SHEPHERDR_CHAT: key, SHEPHERDR_COMMAND: '/bin/shepherdr' },
+        },
+      ] as const
     }
     const per = JSON.stringify({ [one(0)[0]]: one(0)[1] }, null, 2).length
     const count = Math.ceil(3_600_000 / per)

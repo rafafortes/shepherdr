@@ -42,7 +42,11 @@ const GIT_WRAPPER = /failed to push some refs/i
 export function pushWords(r: Pick<Run, 'out' | 'err'>, lines = 12): string {
   const said = [...r.out.split('\n'), ...r.err.split('\n')].map((s) => s.trim()).filter(Boolean)
   if (!said.some((s) => GIT_WRAPPER.test(s) || /hook failed|hook declined/i.test(s))) {
-    const first = (s: string) => s.split('\n').map((x) => x.trim()).find(Boolean)
+    const first = (s: string) =>
+      s
+        .split('\n')
+        .map((x) => x.trim())
+        .find(Boolean)
     return redact(first(r.err) ?? first(r.out) ?? '') || 'git push failed'
   }
   const kept = said.slice(-lines)
@@ -54,7 +58,10 @@ export function pushWords(r: Pick<Run, 'out' | 'err'>, lines = 12): string {
 /** the two places the refusal is shown (#963): what `shepherdr pr`/`merge` prints to the agent, and the task's own row */
 export function pushRefusal(branch: string, push: Pick<Run, 'out' | 'err'>): { text: string; row: string } {
   const words = pushWords(push)
-  const own = words.split('\n').filter(Boolean).filter((s) => !GIT_WRAPPER.test(s))
+  const own = words
+    .split('\n')
+    .filter(Boolean)
+    .filter((s) => !GIT_WRAPPER.test(s))
   // the row is one line on a phone: the finding or the file it names, not a metadata field
   const reason = own.find((s) => HEADLINE.test(s)) ?? own.find((s) => FILELINE.test(s)) ?? own[0] ?? words
   return { text: `Could not push ${branch} to GitHub: ${words}`, row: `Could not push ${branch}: ${reason}` }
@@ -62,21 +69,26 @@ export function pushRefusal(branch: string, push: Pick<Run, 'out' | 'err'>): { t
 
 /** a hook may print the very secret it found: keep the file and line it names, never the matched value */
 function redact(line: string): string {
-  return line
-    // a labelled value with any prefix: MY_API_KEY=…, AWS_SECRET_ACCESS_KEY=…, Secret: …, "client_secret": …,
-    // Authorization: Bearer … (a scheme word and its value are one value, or the short token would leak)
-    .replace(/(?<![\w-])([A-Za-z0-9_]*(?:secret|token|password|passwd|api[-_]?key|access[-_]?key|credential|private[-_]?key|authorization|bearer)[A-Za-z0-9_]*["']?\s*[:=]\s*)("[^"]*"|'[^']*'|(?:Bearer|Basic|Token)\s+[^\s,;|]+|[^\s,;|]+)/gi, '$1[redacted]')
-    // an unlabelled authorization scheme: Bearer …, Basic …, Token …
-    .replace(/\b(Bearer|Basic|Token)(\s+)[^\s,;]+/gi, (_m, scheme: string, space: string) => `${scheme}${space}[redacted]`)
-    // credentials inside a URL's userinfo: https://token@host, postgres://user:pass@host
-    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi, '$1[redacted]@')
-    // a JWT
-    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted]')
-    // an AWS key id, or its 40-character secret (which may contain / and +)
-    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[redacted]')
-    .replace(/\b[A-Za-z0-9/+]{40}\b/g, (s) => /[A-Z]/.test(s) && /[a-z]/.test(s) && /[0-9/+]/.test(s) ? '[redacted]' : s)
-    // a long token on its own; a path segment, a commit sha and a lowercase word are not secrets
-    .replace(/(?<![/.\w-])[A-Za-z0-9_-]{20,}(?![/.\w-])/g, (s) => /[0-9]/.test(s) && /[A-Za-z]/.test(s) && !/^[0-9a-f]+$/i.test(s) ? '[redacted]' : s)
+  return (
+    line
+      // a labelled value with any prefix: MY_API_KEY=…, AWS_SECRET_ACCESS_KEY=…, Secret: …, "client_secret": …,
+      // Authorization: Bearer … (a scheme word and its value are one value, or the short token would leak)
+      .replace(
+        /(?<![\w-])([A-Za-z0-9_]*(?:secret|token|password|passwd|api[-_]?key|access[-_]?key|credential|private[-_]?key|authorization|bearer)[A-Za-z0-9_]*["']?\s*[:=]\s*)("[^"]*"|'[^']*'|(?:Bearer|Basic|Token)\s+[^\s,;|]+|[^\s,;|]+)/gi,
+        '$1[redacted]',
+      )
+      // an unlabelled authorization scheme: Bearer …, Basic …, Token …
+      .replace(/\b(Bearer|Basic|Token)(\s+)[^\s,;]+/gi, (_m, scheme: string, space: string) => `${scheme}${space}[redacted]`)
+      // credentials inside a URL's userinfo: https://token@host, postgres://user:pass@host
+      .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi, '$1[redacted]@')
+      // a JWT
+      .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted]')
+      // an AWS key id, or its 40-character secret (which may contain / and +)
+      .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[redacted]')
+      .replace(/\b[A-Za-z0-9/+]{40}\b/g, (s) => (/[A-Z]/.test(s) && /[a-z]/.test(s) && /[0-9/+]/.test(s) ? '[redacted]' : s))
+      // a long token on its own; a path segment, a commit sha and a lowercase word are not secrets
+      .replace(/(?<![/.\w-])[A-Za-z0-9_-]{20,}(?![/.\w-])/g, (s) => (/[0-9]/.test(s) && /[A-Za-z]/.test(s) && !/^[0-9a-f]+$/i.test(s) ? '[redacted]' : s))
+  )
 }
 
 export async function isRepo(path: string) {
@@ -97,8 +109,7 @@ export async function defaultBranch(repo: string) {
 
 /** Check a named destination before a task gets a worktree. Never change origin/HEAD. */
 export async function validateBase(repo: string, base: string) {
-  if (!base || base.startsWith('-') || !(await git(repo, 'check-ref-format', `refs/heads/${base}`)).ok)
-    throw new Error('Choose a branch name, like main, develop or feature/login.')
+  if (!base || base.startsWith('-') || !(await git(repo, 'check-ref-format', `refs/heads/${base}`)).ok) throw new Error('Choose a branch name, like main, develop or feature/login.')
   const common = await git(repo, 'rev-parse', '--path-format=absolute', '--git-common-dir')
   if (!common.ok || !(await sh(['test', '-w', common.out], repo)).ok) throw new Error('No permission to write to this repository.')
   const remote = (await git(repo, 'remote', 'get-url', 'origin')).ok
@@ -108,8 +119,7 @@ export async function validateBase(repo: string, base: string) {
     const g = await github(repo)
     if (g) {
       const r = await gh(g, repo, 'repo', 'view', `${g.host}/${g.repo}`, '--json', 'viewerPermission', '--jq', '.viewerPermission')
-      if (!r.ok || !['WRITE', 'MAINTAIN', 'ADMIN'].includes(r.out.trim()))
-        throw new Error(`Cannot confirm permission to merge into ${base} on GitHub. Sign in with repository write access first.`)
+      if (!r.ok || !['WRITE', 'MAINTAIN', 'ADMIN'].includes(r.out.trim())) throw new Error(`Cannot confirm permission to merge into ${base} on GitHub. Sign in with repository write access first.`)
     } else {
       const r = await git(repo, 'push', '--dry-run', 'origin', `refs/remotes/origin/${base}:refs/heads/${base}`)
       if (!r.ok) throw new Error(`Cannot confirm permission to push ${base} to origin: ${(r.err || r.out).split('\n')[0]}`)
@@ -180,8 +190,14 @@ export async function branchExists(repo: string, branch: string) {
 /** the linked worktree `branch` is checked out in, if any (never the repo's own checkout, listed first) */
 export async function worktreeOf(repo: string, branch: string) {
   const r = await git(repo, 'worktree', 'list', '--porcelain')
-  const entry = r.out.split('\n\n').slice(1).find((e) => e.split('\n').includes(`branch refs/heads/${branch}`))
-  return entry?.split('\n').find((l) => l.startsWith('worktree '))?.slice('worktree '.length)
+  const entry = r.out
+    .split('\n\n')
+    .slice(1)
+    .find((e) => e.split('\n').includes(`branch refs/heads/${branch}`))
+  return entry
+    ?.split('\n')
+    .find((l) => l.startsWith('worktree '))
+    ?.slice('worktree '.length)
 }
 
 /** files changed or new in the checkout (ignored ones don't count) */
@@ -206,7 +222,12 @@ export const conflictedPaths = (out: string) => out.split('\n').slice(1).filter(
 /** the commits on `base` a task's squash merge made: by Shepherdr's subject, "<id>: <title>" */
 export async function squashesOf(repo: string, base: string, id: string) {
   const r = await git(repo, 'log', '--format=%H %s', '-n', '5000', base)
-  return r.ok ? r.out.split('\n').filter((l) => l.slice(41).startsWith(`${id}: `)).map((l) => l.slice(0, 40)) : []
+  return r.ok
+    ? r.out
+        .split('\n')
+        .filter((l) => l.slice(41).startsWith(`${id}: `))
+        .map((l) => l.slice(0, 40))
+    : []
 }
 
 /**
@@ -240,7 +261,12 @@ export async function inBase(repo: string, ref: string, base: string) {
 /** git's own pattern match is not needed here: `*` matches anything, and a pattern matches a path or its last part */
 function globMatch(pattern: string, s: string) {
   const p = pattern.replace(/^\/+|\/+$/g, '')
-  const re = new RegExp(`^${p.split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`)
+  const re = new RegExp(
+    `^${p
+      .split('*')
+      .map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+      .join('.*')}$`,
+  )
   return re.test(s)
 }
 
@@ -316,7 +342,8 @@ export async function catchUp(repo: string, base: string, then = 'then merge aga
   const fetched = fetchMs ? await sh(['git', 'fetch', '--quiet', 'origin', base], repo, { timeoutMs: fetchMs }) : await git(repo, 'fetch', '--quiet', 'origin', base)
   // offline: go on with what is here, saying that the base was not brought up (a bounded fetch that did not answer
   // in time is that too, and its code says so)
-  if (!fetched.ok) return { ...ok, code: fetched.code, err: fetched.code === 124 ? `origin did not answer in ${Math.round(fetchMs! / 1000)} s` : fetched.err.split('\n')[0] || 'origin could not be reached' }
+  if (!fetched.ok)
+    return { ...ok, code: fetched.code, err: fetched.code === 124 ? `origin did not answer in ${Math.round(fetchMs! / 1000)} s` : fetched.err.split('\n')[0] || 'origin could not be reached' }
   const remote = `origin/${base}`
   if (!(await git(repo, 'rev-parse', '--verify', '--quiet', remote)).ok) return ok
   if (!(await branchExists(repo, base))) return git(repo, 'branch', '--', base, remote)
@@ -378,7 +405,8 @@ export async function mergeHere(repo: string, branch: string, base: string, mess
   const tree = await git(repo, 'merge-tree', '--write-tree', base, branch)
   const merged = tree.out.split('\n')[0] || ''
   // a conflict writes the tree it could not finish (its id first, then the files); anything else made no merge at all
-  if (!tree.ok) return /^[0-9a-f]{40,64}$/.test(merged) ? { ...tree, err: `conflict: ${tree.out || tree.err}` } : { ...tree, err: `could not build the merge: ${gitReason(`${tree.err}\n${tree.out}`)}` }
+  if (!tree.ok)
+    return /^[0-9a-f]{40,64}$/.test(merged) ? { ...tree, err: `conflict: ${tree.out || tree.err}` } : { ...tree, err: `could not build the merge: ${gitReason(`${tree.err}\n${tree.out}`)}` }
   // a squash merge that would change nothing is no commit at all, not an empty one on the base
   const baseTree = await git(repo, 'rev-parse', '--verify', '--quiet', `${base}^{tree}`)
   if (squash && baseTree.ok && merged === baseTree.out) return { ok: false, code: 0, out: '', err: `${base} already has this work: nothing was merged` }
@@ -395,7 +423,12 @@ export async function mergeHere(repo: string, branch: string, base: string, mess
   // it is: git moves it, and writes only the files the merge changed
   const ff = await git(repo, 'merge', '--ff-only', '--no-autostash', '--no-overwrite-ignore', '--quiet', head)
   const said = `${ff.out}\n${ff.err}`
-  return ff.ok ? ff : { ...ff, err: overwriteRefusal(base, said, 'then merge again') ?? `${base} here could not be brought up to the merge (${gitReason(said)}). Nothing was changed in that checkout: run the merge again.` }
+  return ff.ok
+    ? ff
+    : {
+        ...ff,
+        err: overwriteRefusal(base, said, 'then merge again') ?? `${base} here could not be brought up to the merge (${gitReason(said)}). Nothing was changed in that checkout: run the merge again.`,
+      }
 }
 
 /**
@@ -432,7 +465,14 @@ export async function ghLogin(g: GitHub, cwd: string): Promise<{ state: 'yes' | 
   if (r.ok) return { state: 'yes' }
   const said = `${r.out}\n${r.err}`
   if (/not logged in/i.test(said)) return { state: 'no' }
-  return { state: 'down', said: said.split('\n').map((l) => l.trim().replace(/^[-X✓] /, '')).find((l) => /invalid|fail|error|timeout|could not/i.test(l)) ?? said.trim().split('\n')[0] }
+  return {
+    state: 'down',
+    said:
+      said
+        .split('\n')
+        .map((l) => l.trim().replace(/^[-X✓] /, ''))
+        .find((l) => /invalid|fail|error|timeout|could not/i.test(l)) ?? said.trim().split('\n')[0],
+  }
 }
 
 export interface Pr {
@@ -551,7 +591,10 @@ const FILTERS = ['paths', 'paths-ignore', 'branches', 'branches-ignore', 'types'
  * indentation, as GitHub reads it.
  */
 export function workflowExpect(text: string): ChecksExpect {
-  const lines = text.split('\n').map((l) => l.split(' #')[0].trimEnd()).filter((l) => l.trim() && !l.trim().startsWith('#'))
+  const lines = text
+    .split('\n')
+    .map((l) => l.split(' #')[0].trimEnd())
+    .filter((l) => l.trim() && !l.trim().startsWith('#'))
   const ind = (l: string) => l.length - l.trimStart().length
   const part = (l: string) => {
     const t = l.trim().replace(/^[-*]\s+/, '')
@@ -563,7 +606,10 @@ export function workflowExpect(text: string): ChecksExpect {
     if (ind(lines[i]) || (p.k !== 'on' && p.k !== 'true')) continue
     if (p.v) {
       // exact words: pull_request_review is not pull_request, or a review-only repo would "run" checks for ever
-      const words = p.v.split(/[\s,{}[\]:]+/).map((w) => w.replace(/^['"]|['"]$/g, '')).filter(Boolean)
+      const words = p.v
+        .split(/[\s,{}[\]:]+/)
+        .map((w) => w.replace(/^['"]|['"]$/g, ''))
+        .filter(Boolean)
       if (!words.some((w) => PR_EVENTS.includes(w))) return 'none'
       return words.some((w) => FILTERS.includes(w)) ? 'maybe' : 'yes'
     }
@@ -583,10 +629,12 @@ export function workflowExpect(text: string): ChecksExpect {
       const e = part(block[n])
       const name = e.k || e.v.replace(/^['"]|['"]$/g, '')
       if (PR_EVENTS.includes(name) || PR_EVENTS.some((x) => e.v === x)) {
-        const filtered = FILTERS.some((f) => e.v.includes(f)) || (() => {
-          for (let m = n + 1; m < block.length && ind(block[m]) > at; m++) if (FILTERS.includes(part(block[m]).k)) return true
-          return false
-        })()
+        const filtered =
+          FILTERS.some((f) => e.v.includes(f)) ||
+          (() => {
+            for (let m = n + 1; m < block.length && ind(block[m]) > at; m++) if (FILTERS.includes(part(block[m]).k)) return true
+            return false
+          })()
         if (!filtered) return 'yes'
         say = 'maybe'
       }
@@ -702,13 +750,28 @@ async function items<T>(g: GitHub, cwd: string, path: string): Promise<T[] | nul
   const r = await gh(g, cwd, 'api', '--paginate', '--jq', '.[]', path)
   if (!r.ok) return null
   try {
-    return r.out.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l) as T)
+    return r.out
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l) as T)
   } catch {
     return null
   }
 }
 
-type Raw = { id: number; pull_request_review_id?: number | null; user?: { login?: string }; body?: string; html_url: string; created_at?: string; submitted_at?: string; state?: string; path?: string; line?: number | null; original_line?: number | null }
+type Raw = {
+  id: number
+  pull_request_review_id?: number | null
+  user?: { login?: string }
+  body?: string
+  html_url: string
+  created_at?: string
+  submitted_at?: string
+  state?: string
+  path?: string
+  line?: number | null
+  original_line?: number | null
+}
 
 /** everything written on a pull request (reviews, line comments, comments), oldest first; null when unread */
 export async function prComments(g: GitHub, cwd: string, n: number): Promise<PrComment[] | null> {
@@ -723,7 +786,11 @@ export async function prComments(g: GitHub, cwd: string, n: number): Promise<PrC
   return [
     ...reviews.filter((c) => c.state !== 'PENDING').map((c) => ({ ...of(c, 'r'), state: c.state })),
     // a line comment is stamped when it was drafted: it is news when its review was sent
-    ...lines.map((c) => ({ ...of(c, 'c'), at: reviews.find((r) => r.id === c.pull_request_review_id)?.submitted_at ?? c.created_at ?? '', where: c.path ? `${c.path}${(c.line ?? c.original_line) ? `:${c.line ?? c.original_line}` : ''}` : undefined })),
+    ...lines.map((c) => ({
+      ...of(c, 'c'),
+      at: reviews.find((r) => r.id === c.pull_request_review_id)?.submitted_at ?? c.created_at ?? '',
+      where: c.path ? `${c.path}${(c.line ?? c.original_line) ? `:${c.line ?? c.original_line}` : ''}` : undefined,
+    })),
     ...notes.map((c) => of(c, 'i')),
   ].sort((a, b) => a.at.localeCompare(b.at))
 }
@@ -746,9 +813,19 @@ export async function failedLog(g: GitHub, cwd: string, link: string, lines = 15
   // each line is "time message" (gh run view's: "job<TAB>step<TAB>time message"): the message is what matters
   const said = r.out
     .split('\n')
-    .map((l) => l.split('\t').at(-1)!.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z ?/, '').replace(/\x1b\[[\d;]*m/g, '').trimEnd())
+    .map((l) =>
+      l
+        .split('\t')
+        .at(-1)!
+        .replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z ?/, '')
+        .replace(/\x1b\[[\d;]*m/g, '')
+        .trimEnd(),
+    )
     .filter((l) => l.trim())
   const err = said.findLastIndex((l) => l.includes('##[error]'))
-  const tail = said.slice(0, err < 0 ? undefined : err + 1).slice(-lines).join('\n')
+  const tail = said
+    .slice(0, err < 0 ? undefined : err + 1)
+    .slice(-lines)
+    .join('\n')
   return tail.length > 1500 ? `…${tail.slice(-1500)}` : tail
 }

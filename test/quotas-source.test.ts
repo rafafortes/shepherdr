@@ -65,7 +65,7 @@ describe('Refresh quotas, the action', () => {
     src.vault = vaultWith({})
     const f = commandFetch()
     src.commandFetch = f.fetchImpl
-    await src.act({ type: 'quota-refresh' }) as unknown
+    ;(await src.act({ type: 'quota-refresh' })) as unknown
     // a minute on: the refresh is allowed again
     src.quotas.refresh(NOW + 61_000)
     await src.quotas.settled()
@@ -110,7 +110,13 @@ describe('the warning share reaches the alerts', () => {
     src.quotas.refresh(NOW + 183_000)
     await src.quotas.settled()
     expect(got).toHaveLength(1)
-    expect(got[0]).toMatchObject({ title: 'Claude Code is at 75%', body: expect.stringMatching(/^5 h window: 25% left, and it refills /), from: 'Shepherdr', tag: 'quota:claude:5 h', go: { place: placeId.home() } })
+    expect(got[0]).toMatchObject({
+      title: 'Claude Code is at 75%',
+      body: expect.stringMatching(/^5 h window: 25% left, and it refills /),
+      from: 'Shepherdr',
+      tag: 'quota:claude:5 h',
+      go: { place: placeId.home() },
+    })
     src.claudeRead = claude(76)
     src.quotas.refresh(NOW + 244_000)
     await src.quotas.settled()

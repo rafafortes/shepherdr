@@ -183,9 +183,20 @@ describe('OpenCode values in a profile round-trip: saved as written, applied and
   test('a profile of OpenCode models and variants restores exactly what was saved', () => {
     setModels('opencode', listed(GO))
     try {
-      const s = new Settings({ everywhere: { 'task.agent': 'OpenCode', 'task.model': GO, 'task.effort': 'high' }, machine: {}, spaces: { gtm: { 'reviewer.agent': 'OpenCode', 'reviewer.model': THINK, 'reviewer.effort': 'thinking' } } })
-      const spaces = [{ key: 'gtm', name: 'gtm' }, { key: '~', name: 'home' }]
-      const p = new Profiles(new ProfileStore(true), () => ({ settings: s, machine: { host: 'box', name: 'box' }, spaces }), () => undefined)
+      const s = new Settings({
+        everywhere: { 'task.agent': 'OpenCode', 'task.model': GO, 'task.effort': 'high' },
+        machine: {},
+        spaces: { gtm: { 'reviewer.agent': 'OpenCode', 'reviewer.model': THINK, 'reviewer.effort': 'thinking' } },
+      })
+      const spaces = [
+        { key: 'gtm', name: 'gtm' },
+        { key: '~', name: 'home' },
+      ]
+      const p = new Profiles(
+        new ProfileStore(true),
+        () => ({ settings: s, machine: { host: 'box', name: 'box' }, spaces }),
+        () => undefined,
+      )
       expect(p.save('opencode-day')).toMatchObject({ ok: true })
       // the day moves on: another model and variant everywhere, then the profile is applied back
       expect(s.set('task.model', ZEN).ok).toBe(true)

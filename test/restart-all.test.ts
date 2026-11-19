@@ -20,7 +20,16 @@ type Started = { key: string; kind: string; model?: string; effort?: string; fir
 const REPO = 'git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init'
 
 /** a source of its own for one test, stopped when it is over */
-async function world(run: (w: { src: Src; started: Started[]; space: (name: string, on: { kind: string; model?: string; effort?: string }) => Promise<{ key: string; name: string }>; working: (key: string) => void; without: (kind: string) => void; cards: (key: string) => string[] }) => Promise<void>) {
+async function world(
+  run: (w: {
+    src: Src
+    started: Started[]
+    space: (name: string, on: { kind: string; model?: string; effort?: string }) => Promise<{ key: string; name: string }>
+    working: (key: string) => void
+    without: (kind: string) => void
+    cards: (key: string) => string[]
+  }) => Promise<void>,
+) {
   const src = new LiveSource()
   const started: Started[] = []
   const restart = src.agents.restart
@@ -44,7 +53,11 @@ async function world(run: (w: { src: Src; started: Started[]; space: (name: stri
     src.agents.records[key] = { key, name: `shep-${p.name}`, ...on, cwd: dir, workspace: p.name, logs: [], started: Date.now() }
     return { key, name: p.name }
   }
-  const cards = (key: string) => src.chats.chat(key).messages.filter((m) => m.card?.restart).map((m) => m.card!.text)
+  const cards = (key: string) =>
+    src.chats
+      .chat(key)
+      .messages.filter((m) => m.card?.restart)
+      .map((m) => m.card!.text)
   try {
     await run({
       src,
@@ -85,7 +98,13 @@ describe('restarting every coordinator on new Settings', () => {
       // the two whose Settings now say Codex for their coordinators; the third's already do
       for (const { name } of [moved, also, same]) expect(w.src.settings.set('coordinator.agent', 'Codex', { space: name }).ok).toBe(true)
       // before the run, the snapshot names exactly the two whose chat says Settings moved
-      expect(w.src.snapshot().places.filter((p) => p.restart).map((p) => p.name).sort()).toEqual(['also', 'moved'])
+      expect(
+        w.src
+          .snapshot()
+          .places.filter((p) => p.restart)
+          .map((p) => p.name)
+          .sort(),
+      ).toEqual(['also', 'moved'])
       const r = await w.src.cli(['restart', '--all'], {})
       expect(r.code).toBe(0)
       expect(w.started.map((x) => x.key).sort()).toEqual([moved.key, also.key].sort())

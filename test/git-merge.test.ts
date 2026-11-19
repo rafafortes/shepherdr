@@ -56,7 +56,9 @@ describe('merging into main here', () => {
     writeFileSync(join(dir, 'secret.txt'), 'mine\n')
     const r = await mergeHere(dir, 'work/task', 'main', 'SHE-9: Test', true)
     expect(r.ok).toBe(false)
-    expect(r.err).toBe("main here holds work of its own that would be overwritten: secret.txt. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes it first, then merge again.")
+    expect(r.err).toBe(
+      "main here holds work of its own that would be overwritten: secret.txt. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes it first, then merge again.",
+    )
     expect(readFileSync(join(dir, 'secret.txt'), 'utf8')).toBe('mine\n')
   })
 
@@ -90,7 +92,9 @@ describe('merging into main here', () => {
   })
 
   test('a name git lists in its refusal is read off it, and a refusal about no file gives none', () => {
-    expect(namedFiles('error: Your local changes to the following files would be overwritten by merge:\n\ta.txt\n\tb.txt\nPlease commit your changes or stash them before you merge.\nAborting')).toEqual(['a.txt', 'b.txt'])
+    expect(
+      namedFiles('error: Your local changes to the following files would be overwritten by merge:\n\ta.txt\n\tb.txt\nPlease commit your changes or stash them before you merge.\nAborting'),
+    ).toEqual(['a.txt', 'b.txt'])
     expect(namedFiles('fatal: Not possible to fast-forward, aborting.')).toEqual([])
   })
 })
@@ -107,7 +111,9 @@ describe('catching main up with its remote', () => {
     writeFileSync(join(dir, 'notes.txt'), 'mine\n')
     const r = await catchUp(dir, 'main', 'then merge again')
     expect(r.ok).toBe(false)
-    expect(r.err).toBe("main here holds work of its own that would be overwritten: notes.txt. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes it first, then merge again.")
+    expect(r.err).toBe(
+      "main here holds work of its own that would be overwritten: notes.txt. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes it first, then merge again.",
+    )
     expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe('mine\n')
   })
 })

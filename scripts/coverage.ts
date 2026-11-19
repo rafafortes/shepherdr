@@ -45,7 +45,7 @@ export function readLcov(text: string, into: Cover = new Map()): Cover {
 export function addScreen(lines: Record<string, Record<string, 0 | 1>>, into: Cover = new Map()): Cover {
   for (const [file, ls] of Object.entries(lines)) {
     const own = into.get(file) ?? into.set(file, new Map()).get(file)!
-    for (const [n, ran] of Object.entries(ls)) if (ran || !own.has(+n)) own.set(+n, ran ? 1 : own.get(+n) ?? 0)
+    for (const [n, ran] of Object.entries(ls)) if (ran || !own.has(+n)) own.set(+n, ran ? 1 : (own.get(+n) ?? 0))
   }
   return into
 }
@@ -71,7 +71,10 @@ export function count(cover: Cover, files: string[], read: (f: string) => string
     } catch {
       /* gone since the run: what it said still counts */
     }
-    const missed = [...ls].filter(([n, ran]) => !ran && !exempt(text, n)).map(([n]) => n).sort((a, b) => a - b)
+    const missed = [...ls]
+      .filter(([n, ran]) => !ran && !exempt(text, n))
+      .map(([n]) => n)
+      .sort((a, b) => a - b)
     out[f] = { lines: ls.size, missed, measured: true }
   }
   return out
@@ -106,7 +109,10 @@ export function compare(now: Record<string, FileCount>, base: Baseline): string[
       else if (c.missed.length > leeway) fell.push(`${f}: a new file with ${c.missed.length} line${c.missed.length === 1 ? '' : 's'} no test runs (${lines(c.missed)})`)
     } else if (was !== null && was !== undefined) {
       if (!c.measured) fell.push(`${f}: no test runs it any more (it had ${was} line${was === 1 ? '' : 's'} no test ran)`)
-      else if (c.missed.length > was + leeway) fell.push(`${f}: ${c.missed.length - was} more line${c.missed.length - was === 1 ? '' : 's'} no test runs (${c.missed.length} now, ${was} at the baseline${leeway ? `, ${leeway} allowed for the screen's run-to-run wobble` : ''}; ${lines(c.missed)})`)
+      else if (c.missed.length > was + leeway)
+        fell.push(
+          `${f}: ${c.missed.length - was} more line${c.missed.length - was === 1 ? '' : 's'} no test runs (${c.missed.length} now, ${was} at the baseline${leeway ? `, ${leeway} allowed for the screen's run-to-run wobble` : ''}; ${lines(c.missed)})`,
+        )
     }
   }
   return fell
@@ -118,7 +124,9 @@ export function summary(now: Record<string, FileCount>): string {
     const fs = Object.entries(now).filter(([f, c]) => c.measured && isScreen(f) === screen)
     const lines = fs.reduce((a, [, c]) => a + c.lines, 0)
     const missed = fs.reduce((a, [, c]) => a + c.missed.length, 0)
-    return lines ? `${(((lines - missed) / lines) * 100).toFixed(1)}% of the ${screen ? "screen's" : "server's"} lines (${lines - missed} of ${lines})` : `none of the ${screen ? 'screen' : 'server'} measured`
+    return lines
+      ? `${(((lines - missed) / lines) * 100).toFixed(1)}% of the ${screen ? "screen's" : "server's"} lines (${lines - missed} of ${lines})`
+      : `none of the ${screen ? 'screen' : 'server'} measured`
   }
   const all = Object.values(now)
   const whole = all.filter((c) => c.measured && !c.missed.length).length
@@ -133,7 +141,11 @@ export const isScreen = (f: string) => f.startsWith('src/') || /^plugins\/[^/]+\
 export function report(now: Record<string, FileCount>): string {
   const rows = Object.entries(now).sort(([a, x], [b, y]) => y.missed.length - x.missed.length || (x.measured === y.measured ? a.localeCompare(b) : x.measured ? 1 : -1))
   return rows
-    .map(([f, c]) => (c.measured ? `${f.padEnd(48)} ${(c.lines ? ((c.lines - c.missed.length) / c.lines) * 100 : 100).toFixed(1).padStart(5)}%  ${c.missed.length ? `missed ${c.missed.length}: ${spans(c.missed)}` : 'whole'}` : `${f.padEnd(48)}     -   no test loads it`))
+    .map(([f, c]) =>
+      c.measured
+        ? `${f.padEnd(48)} ${(c.lines ? ((c.lines - c.missed.length) / c.lines) * 100 : 100).toFixed(1).padStart(5)}%  ${c.missed.length ? `missed ${c.missed.length}: ${spans(c.missed)}` : 'whole'}`
+        : `${f.padEnd(48)}     -   no test loads it`,
+    )
     .join('\n')
 }
 
@@ -194,7 +206,9 @@ export function main(args: string[], o: { repo?: string; baseline?: string; log?
   else {
     const fell = compare(now, base)
     if (fell.length) {
-      log(`\nCoverage fell since the baseline (${base.commit.slice(0, 7)}): ${fell.length} file${fell.length === 1 ? '' : 's'}. Test what you added or changed, or mark a line no test can reach here with a coverage-exempt: comment saying why.`)
+      log(
+        `\nCoverage fell since the baseline (${base.commit.slice(0, 7)}): ${fell.length} file${fell.length === 1 ? '' : 's'}. Test what you added or changed, or mark a line no test can reach here with a coverage-exempt: comment saying why.`,
+      )
       for (const f of fell) log(`  ${f}`)
       code = 1
     } else log(`Coverage held: no file has more lines no test runs than at ${base.commit.slice(0, 7)}.`)

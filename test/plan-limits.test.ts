@@ -32,7 +32,7 @@ function fake(over: Partial<{ bins: string[]; paths: Record<string, string>; ans
 }
 
 describe('the words of /usage', () => {
-  test('the session and the week are two windows, named in the screen\'s words, with their shares and their refills', () => {
+  test("the session and the week are two windows, named in the screen's words, with their shares and their refills", () => {
     const got = parseClaude(SAMPLE, NOW)
     expect(got).toEqual({
       state: 'ok',
@@ -140,7 +140,20 @@ describe('one read', () => {
     const [run] = runs
     expect(run!.argv[0]).toBe('/usr/bin/bwrap')
     expect(run!.argv).toContain('--share-net')
-    expect(run!.argv.slice(run!.argv.indexOf('--') + 1)).toEqual(['nice', '-n', '19', '/usr/bin/claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence', '--setting-sources', '', '--strict-mcp-config'])
+    expect(run!.argv.slice(run!.argv.indexOf('--') + 1)).toEqual([
+      'nice',
+      '-n',
+      '19',
+      '/usr/bin/claude',
+      '-p',
+      '/usage',
+      '--output-format',
+      'json',
+      '--no-session-persistence',
+      '--setting-sources',
+      '',
+      '--strict-mcp-config',
+    ])
     expect(run!.env).toMatchObject({ TZ: 'UTC', TMPDIR: '/tmp' })
     expect(run!.timeoutMs).toBe(60_000)
   })
@@ -148,7 +161,17 @@ describe('one read', () => {
   test('without nice the same run goes without it', async () => {
     const { host, runs } = fake({ bins: ['claude', 'bwrap'] })
     await readClaude(() => NOW, host)
-    expect(runs[0]!.argv.slice(runs[0]!.argv.indexOf('--') + 1)).toEqual(['/usr/bin/claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence', '--setting-sources', '', '--strict-mcp-config'])
+    expect(runs[0]!.argv.slice(runs[0]!.argv.indexOf('--') + 1)).toEqual([
+      '/usr/bin/claude',
+      '-p',
+      '/usage',
+      '--output-format',
+      'json',
+      '--no-session-persistence',
+      '--setting-sources',
+      '',
+      '--strict-mcp-config',
+    ])
   })
 
   test('signed out, no plan and an answer with no limits: a reason, a hint, and a reason', async () => {
@@ -170,7 +193,7 @@ describe('one read', () => {
   })
 })
 
-describe('the real machine, on a folder of the test\'s own', () => {
+describe("the real machine, on a folder of the test's own", () => {
   test('which finds a program on the PATH and nothing else; exists and read see a file as it is', async () => {
     expect(HOST.which('sh')).toBeTruthy()
     expect(HOST.which('no-such-program-shepherdr-test')).toBeNull()
@@ -183,7 +206,7 @@ describe('the real machine, on a folder of the test\'s own', () => {
     expect(HOST.read(join(dir, 'missing'))).toBeNull()
   })
 
-  test('run gives a program\'s output, and kills one that is past its time', async () => {
+  test("run gives a program's output, and kills one that is past its time", async () => {
     expect(await HOST.run(['/bin/echo', 'hi'], { env: { PATH: '/bin', TZ: undefined }, timeoutMs: 10_000 })).toEqual({ stdout: 'hi\n', timedOut: false })
     expect((await HOST.run(['sleep', '5'], { env: { PATH: '/bin' }, timeoutMs: 50 })).timedOut).toBe(true)
   })

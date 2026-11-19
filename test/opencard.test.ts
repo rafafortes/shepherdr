@@ -9,7 +9,12 @@ process.env.SHEPHERDR_HOME ??= tmp('card')
 const { Chats, menuId } = await import('../server/live/chats.ts')
 
 const question = (id: string) => ({ id, title: 'x', kind: 'Plan' as const, choices: [{ label: 'Yes' }], to: 'T agent' })
-const chatsWith = (key: string) => new Chats({ record: () => undefined } as never, (k) => k, () => 'You')
+const chatsWith = (key: string) =>
+  new Chats(
+    { record: () => undefined } as never,
+    (k) => k,
+    () => 'You',
+  )
 
 /** what a CLI's reader found in its log, standing in for it */
 const reached = (chats: InstanceType<typeof Chats>, key: string, e: object) =>
@@ -149,7 +154,11 @@ test('the cheap open cards spot menus, posted cards and CLI questions without bu
 test('the cheap open cards Needs you reads are the cards, closed the same way (SHE-56)', async () => {
   const key = 'T-56/Agent'
   const chats = chatsWith(key)
-  const ids = () => chats.openCardsQuick(key).map((m) => m.question.id).sort()
+  const ids = () =>
+    chats
+      .openCardsQuick(key)
+      .map((m) => m.question.id)
+      .sort()
   expect(ids()).toEqual([])
   chats.post(key, { id: 'ask:card', question: question('ask:card') })
   chats.post(key, { id: 'plan:card', question: question('plan:card') })
@@ -171,12 +180,25 @@ test('the cheap open cards Needs you reads are the cards, closed the same way (S
 
 test('SHE-68: repeated chat reads leave the cheap open cards, and so Needs, unchanged', () => {
   const key = 'T-68/Agent'
-  const chats = new Chats({
-    record: () => undefined, sentLately: () => [], waiting: () => [], holdOf: () => undefined,
-    status: () => 'blocked', failedLately: () => [], info: () => undefined, runtime: () => undefined,
-    runtimeHook: () => undefined, background: () => false, unreadable: () => undefined,
-    stillRuns: () => false, procs: { list: () => [] },
-  } as never, (k) => k, () => 'You')
+  const chats = new Chats(
+    {
+      record: () => undefined,
+      sentLately: () => [],
+      waiting: () => [],
+      holdOf: () => undefined,
+      status: () => 'blocked',
+      failedLately: () => [],
+      info: () => undefined,
+      runtime: () => undefined,
+      runtimeHook: () => undefined,
+      background: () => false,
+      unreadable: () => undefined,
+      stillRuns: () => false,
+      procs: { list: () => [] },
+    } as never,
+    (k) => k,
+    () => 'You',
+  )
   const ids = () => chats.openCardsQuick(key).map((m) => m.question.id)
   chats.post(key, { id: 'ask:1', question: question('ask:1') })
   const before = ids()

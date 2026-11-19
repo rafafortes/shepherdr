@@ -18,7 +18,8 @@ const skill = (name: string) => join(SKILLS, name, 'SKILL.md')
 /** how a command is written where its path has a space: as a shell needs it, and as the hook allows it */
 const quoted = (path: string) => (path.includes(' ') ? `"${path}"` : path)
 
-export const commandLine = (chat: string) => `Your authoritative command is SHEPHERDR_CHAT=${JSON.stringify(chat)} ${quoted(join(OWN, 'bin', 'shepherdr'))}.${BOX ? '' : ` Write it out in full each time, as this line does, rather than the bare name shepherdr or $SHEPHERDR_COMMAND: only that form runs without a permission prompt, and a line with anything after the command still asks.`} Use it if a shell finds another shepherdr. Never start a server to repair command routing. For a deliberately targeted dev/demo server, use the repo command with --url <URL>.`
+export const commandLine = (chat: string) =>
+  `Your authoritative command is SHEPHERDR_CHAT=${JSON.stringify(chat)} ${quoted(join(OWN, 'bin', 'shepherdr'))}.${BOX ? '' : ` Write it out in full each time, as this line does, rather than the bare name shepherdr or $SHEPHERDR_COMMAND: only that form runs without a permission prompt, and a line with anything after the command still asks.`} Use it if a shell finds another shepherdr. Never start a server to repair command routing. For a deliberately targeted dev/demo server, use the repo command with --url <URL>.`
 
 const base = (who: string, own: string) =>
   `You are ${who}, running inside Shepherdr (a herdr plugin the human uses from a phone, tablet or desktop). Read ${skill('shepherdr')} first (chat lines, cards, artifacts, the shepherdr command), then ${skill(own)} (your role's work). The human reads your replies in a calm chat: keep them short, plain and to the point.`
@@ -49,7 +50,12 @@ export function reviewerWords(r: Reviewer) {
   const name = REVIEWER_NAME[r.kind] ?? r.kind
   const article = /^[aeiou]/i.test(name) ? 'an' : 'a'
   // OpenCode's headless run is its own command (the plan agent is its read-only one, as the advisor's run is)
-  const headless = r.kind === 'opencode' ? `a headless OpenCode run (opencode run --standalone --agent plan …)` : r.kind === 'agy' ? `a headless Antigravity run (agy -p … --mode plan --model …)` : `a headless ${name}`
+  const headless =
+    r.kind === 'opencode'
+      ? `a headless OpenCode run (opencode run --standalone --agent plan …)`
+      : r.kind === 'agy'
+        ? `a headless Antigravity run (agy -p … --mode plan --model …)`
+        : `a headless ${name}`
   const who = `${headless} or ${article} ${name} subagent`
   if (!r.model && !r.effort) return `${who} (its default model and effort)`
   return `${who} (${[r.model ? `model ${r.model}` : 'its default model', r.effort ? `${r.effort} effort` : 'its default effort'].join(', ')})`
@@ -110,7 +116,10 @@ export function settingsLines(id: string, t: Told): { said: Said; text: string }
   const lines: { said: Said; text: string }[] = [
     { said: 'review', text: w.review ? 'Review: on. Have your change reviewed by fresh eyes before it merges.' : "Review: off. No review; the lines on reviewing below don't apply." },
     ...(t.reviewer ? [{ said: 'reviewer' as const, text: reviewerLine(t.reviewer, w.review ? t.fallback : undefined, id) }] : []),
-    { said: 'mustFix', text: `Must fix: ${w.mustFix}. Findings are tagged ${SEVERITIES.join('/')}; fix ${fix.length === SEVERITIES.length ? 'all of them' : plural(fix)}${w.rounds > 1 ? ', then review again' : ''}.` },
+    {
+      said: 'mustFix',
+      text: `Must fix: ${w.mustFix}. Findings are tagged ${SEVERITIES.join('/')}; fix ${fix.length === SEVERITIES.length ? 'all of them' : plural(fix)}${w.rounds > 1 ? ', then review again' : ''}.`,
+    },
     { said: 'rounds', text: w.rounds > 1 ? `Review rounds: ${w.rounds}. Stop when a round finds none to fix, at most ${w.rounds} rounds.` : 'Review rounds: 1. One round, no review again.' },
   ]
   lines.push({ said: 'merge', text: `Merge: ${merge}` })
@@ -177,7 +186,9 @@ export function reviewerChangedLine(line: string) {
  * and win where they differ, so a wish for one task needs no setting changed.
  */
 export function settingsBlock(id: string, t: Told) {
-  return `${SETTINGS_HEAD}\n${settingsLines(id, t).map((l) => `- ${l.text}`).join('\n')}`
+  return `${SETTINGS_HEAD}\n${settingsLines(id, t)
+    .map((l) => `- ${l.text}`)
+    .join('\n')}`
 }
 
 /** a space's coordinator: its space's work; a home space's also its machine's (health, load and disk news, its
@@ -203,7 +214,9 @@ export function taskPrompt(t: { id: string; branch: string; base: string }, time
     `You work in your own git worktree on branch ${t.branch} (from ${t.base}): commit there, and don't switch branches.`,
     times,
     has('browser') ? browserLine(t.id) : '',
-  ].filter(Boolean).join('\n\n')
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 /** the shared browser, in a task's instructions (the skill says more) */
@@ -229,8 +242,10 @@ export function baseMovedLine(m: BaseMoved) {
   const rules = m.rules.length ? ` ${m.rules.join(' and ')} changed among them: read ${m.rules.length === 1 ? 'it' : 'them'} again before you go on.` : ''
   // a space with a merge gate runs its full check at the merge: an agent proves its own change, never the whole again
   const checks = m.gate ? 'test what you changed (the merge gate runs the full check when you merge)' : 'run the checks'
-  if (m.state === 'rebased') return `Before you went back to work, Shepherdr rebased your branch on ${m.base}: ${came}.${rules} What you build on moved, so ${m.gate ? 'test what you changed again; the merge gate runs the full check when you merge' : 'run the checks again before you report done'}.`
-  if (m.state === 'conflict') return `${came}. Rebasing your branch on it conflicts, so Shepherdr left your worktree as it was: at your next good point, rebase on ${m.base} (git rebase ${m.base}), resolve the conflicts and ${checks}.${rules}`
+  if (m.state === 'rebased')
+    return `Before you went back to work, Shepherdr rebased your branch on ${m.base}: ${came}.${rules} What you build on moved, so ${m.gate ? 'test what you changed again; the merge gate runs the full check when you merge' : 'run the checks again before you report done'}.`
+  if (m.state === 'conflict')
+    return `${came}. Rebasing your branch on it conflicts, so Shepherdr left your worktree as it was: at your next good point, rebase on ${m.base} (git rebase ${m.base}), resolve the conflicts and ${checks}.${rules}`
   return `${came}. Your worktree has changes not committed, so Shepherdr didn't rebase it: at your next good point, commit, rebase on ${m.base} (git rebase ${m.base}) and ${checks}.${rules}`
 }
 
@@ -288,7 +303,9 @@ export function wentBackCardWords(words: string, back: BackWhy = 'backup') {
 export function restartLine(o: { from: string; to: string; chat: string; commits?: string; changes?: string; back?: boolean; room?: boolean }) {
   const task = o.commits !== undefined
   const why = o.room ? ', which has room under its cap now' : ', which answers again'
-  const who = o.back ? `Shepherdr moved this ${task ? 'task' : 'chat'} back to its primary model${why}: ${o.to}. ${o.from}, its backup,` : `the human restarted this ${task ? 'task' : 'chat'} on ${o.to}. ${o.from}`
+  const who = o.back
+    ? `Shepherdr moved this ${task ? 'task' : 'chat'} back to its primary model${why}: ${o.to}. ${o.from}, its backup,`
+    : `the human restarted this ${task ? 'task' : 'chat'} on ${o.to}. ${o.from}`
   return [
     `Restarted: ${who} ran it until now; you carry on from here, in the same ${task ? 'worktree and branch' : 'folder'}. Look at what is there and go on from it, don't start over.`,
     ...(task ? [`Commits on the branch so far:\n${o.commits || 'none'}`, `Uncommitted changes:\n${o.changes || 'none'}`] : []),
@@ -309,9 +326,12 @@ export type BackWhy = 'backup' | 'again' | 'room'
 /** what an agent started again on its own CLI is told, its session resumed (a model or an effort changed). back: it was
  *  Shepherdr, once the primary answered again (return.ts), not the human */
 export function resumedLine(on: string, back?: BackWhy) {
-  if (back === 'backup') return `The primary model answers again, so Shepherdr moved you back to it from your backup: ${on}, with your session as it was. If you were in the middle of something, carry on where you left off; else reply with only <no-reply>back</no-reply>.`
-  if (back === 'room') return `Your primary model has room under its cap again, so Shepherdr moved you back to it from the backup you started on: ${on}, with your session as it was. If you were in the middle of something, carry on where you left off; else reply with only <no-reply>back</no-reply>.`
-  if (back === 'again') return `Your model's provider cut your turn off, and it answers again: Shepherdr started you again on ${on}, with your session as it was. Carry on where you left off; if there is nothing left to do, reply with only <no-reply>back</no-reply>.`
+  if (back === 'backup')
+    return `The primary model answers again, so Shepherdr moved you back to it from your backup: ${on}, with your session as it was. If you were in the middle of something, carry on where you left off; else reply with only <no-reply>back</no-reply>.`
+  if (back === 'room')
+    return `Your primary model has room under its cap again, so Shepherdr moved you back to it from the backup you started on: ${on}, with your session as it was. If you were in the middle of something, carry on where you left off; else reply with only <no-reply>back</no-reply>.`
+  if (back === 'again')
+    return `Your model's provider cut your turn off, and it answers again: Shepherdr started you again on ${on}, with your session as it was. Carry on where you left off; if there is nothing left to do, reply with only <no-reply>back</no-reply>.`
   return `The human restarted you on ${on}, with your session as it was. If you were in the middle of something, carry on where you left off; else reply with only <no-reply>restarted</no-reply>.`
 }
 
@@ -341,9 +361,11 @@ export function privatePrompt(own: string, reviewer?: string): string {
   return [
     'Private instruction snapshot for this start. This replaces earlier private instruction snapshots, including when empty. Read and follow the repository/team AGENTS.md, CLAUDE.md and REVIEW.md alongside these supplemental rules. Never edit, replace or create repository instruction files to install these rules. Explicit human instructions and the task brief win over private rules; if private and team rules conflict, explain and ask rather than silently overriding either. Never copy private instructions into git, briefs, reports or GitHub. These fields are not a secret store.',
     own,
-    ...(reviewer === undefined ? [] : [
-      'Reviewer handoff only: the next block applies to reviewers, not to you as the task agent. Include this reviewer block and the precedence/privacy rules above in every fresh reviewer prompt (headless or subagent), alongside the brief and repository rules. This is the snapshot from your latest start; restart this task agent to refresh it after Settings changes. Do not pass your task-only private rules to reviewers.',
-      reviewer,
-    ]),
+    ...(reviewer === undefined
+      ? []
+      : [
+          'Reviewer handoff only: the next block applies to reviewers, not to you as the task agent. Include this reviewer block and the precedence/privacy rules above in every fresh reviewer prompt (headless or subagent), alongside the brief and repository rules. This is the snapshot from your latest start; restart this task agent to refresh it after Settings changes. Do not pass your task-only private rules to reviewers.',
+          reviewer,
+        ]),
   ].join('\n\n')
 }

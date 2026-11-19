@@ -83,7 +83,13 @@ function roomIn(key: string, i: RoomInput): RestartRoom {
     const now = runsWords(on(tight.pattern, tight.scope))
     const left = tight.max - tight.count
     const short = `${tight.count} of ${tight.max}`
-    return { state: 'room', short: high ? `${short} · ${high}` : short, ...warn, words: `${patternWords(tight.pattern)}${where(tight.scope)}: ${tight.count} of ${tight.max} at once now${now ? ` (${now})` : ''}; ${left === 1 ? 'one more fits' : `${left} more fit`}.`, ...quota }
+    return {
+      state: 'room',
+      short: high ? `${short} · ${high}` : short,
+      ...warn,
+      words: `${patternWords(tight.pattern)}${where(tight.scope)}: ${tight.count} of ${tight.max} at once now${now ? ` (${now})` : ''}; ${left === 1 ? 'one more fits' : `${left} more fit`}.`,
+      ...quota,
+    }
   }
   const running = i.runs.filter((r) => providerOfKey(r.key.toLowerCase()) === provider)
   const now = runsWords(running)

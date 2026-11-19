@@ -2,14 +2,26 @@
 // midnight...) or `--in "6h"` / "1h 30m" / "2 days", one or the other, and how people read them back: "Starts Fri 9:00
 // (in 6h)", "in 45m". Times are wall-clock times in the zone Settings sets (time.zone, Everywhere); a time already
 // passed is refused. Nothing here reads a clock of its own: `now` comes in, so what it says can be tested.
-const AT_HOW =
-  'Write a time like "2026-11-06 09:00", "tomorrow 9:00", "fri 8:15", "today 18:00" or "18:00" (in the time zone Settings sets).'
+const AT_HOW = 'Write a time like "2026-11-06 09:00", "tomorrow 9:00", "fri 8:15", "today 18:00" or "18:00" (in the time zone Settings sets).'
 const IN_HOW = 'Write a span like "6h", "90m", "2 days", "6 hours" or "1h 30m".'
 const UNITS: Record<string, number> = {
-  m: 1, min: 1, mins: 1, minute: 1, minutes: 1,
-  h: 60, hr: 60, hrs: 60, hour: 60, hours: 60,
-  d: 1440, day: 1440, days: 1440,
-  w: 10080, wk: 10080, week: 10080, weeks: 10080,
+  m: 1,
+  min: 1,
+  mins: 1,
+  minute: 1,
+  minutes: 1,
+  h: 60,
+  hr: 60,
+  hrs: 60,
+  hour: 60,
+  hours: 60,
+  d: 1440,
+  day: 1440,
+  days: 1440,
+  w: 10080,
+  wk: 10080,
+  week: 10080,
+  weeks: 10080,
 }
 const DAY = 86_400_000
 const MINUTE = 60_000
@@ -72,7 +84,10 @@ export function parseClock(text: string): { h: number; m: number } {
 /** days ahead of today for a day word ("today" 0, "tomorrow" 1, "fri" the next Friday's, today's when it is Friday),
  *  or undefined for a word that isn't a day */
 export function dayOf(word: string, weekday: number): number | undefined {
-  const w = word.trim().toLowerCase().replace(/^(next|this) /, '')
+  const w = word
+    .trim()
+    .toLowerCase()
+    .replace(/^(next|this) /, '')
   if (w === 'today' || w === 'tonight') return 0
   if (w === 'tomorrow' || w === 'tmrw' || w === 'tmr') return 1
   const i = DAYS.findIndex((n) => (w.length >= 2 && n.startsWith(w)) || w === n.slice(0, 3) || w === `${n.slice(0, 3)}s` || w === n.slice(0, 4))

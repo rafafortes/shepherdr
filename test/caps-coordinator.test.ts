@@ -79,7 +79,11 @@ async function space(name: string) {
 }
 
 /** the chat's cards, as their words */
-const cards = (key: string) => src.chats.chat(key).messages.filter((m) => m.card).map((m) => m.card!.text)
+const cards = (key: string) =>
+  src.chats
+    .chat(key)
+    .messages.filter((m) => m.card)
+    .map((m) => m.card!.text)
 
 /** a coordinator's start, as the source makes it (a private method: the test drives it the way a restart does) */
 const startCoordinator = (id: string) => (src as unknown as { coordinator(id: string): Promise<unknown> }).coordinator(id).catch(() => undefined)
@@ -211,7 +215,15 @@ describe('a coordinator starts on the caps: the first harness with room, or it w
 })
 
 describe("a coordinator's takeover: the first backup with room, or it waits for one", () => {
-  const cantGoOn = (id: string, cut = 'c1') => (src as unknown as { coordinatorCantGoOn(key: string, r: unknown): Promise<void> }).coordinatorCantGoOn(id, { cut, tries: 1, reason: 'Out of allowance until 5pm', words: 'out', over: true, lasting: true })
+  const cantGoOn = (id: string, cut = 'c1') =>
+    (src as unknown as { coordinatorCantGoOn(key: string, r: unknown): Promise<void> }).coordinatorCantGoOn(id, {
+      cut,
+      tries: 1,
+      reason: 'Out of allowance until 5pm',
+      words: 'out',
+      over: true,
+      lasting: true,
+    })
 
   test('its backup is full: no takeover past the cap; the cut-off card says it waits, and it takes over once the backup has room', async () => {
     src.settings.set('models.maxAtOnce', 'codex=1', 'machine')
@@ -245,7 +257,9 @@ describe("a coordinator's takeover: the first backup with room, or it waits for 
     try {
       await cantGoOn(id)
       expect(starts.some((x) => x.key === id)).toBe(false)
-      expect(cards(id)).toContain('Cut off by its provider: out of allowance until 5pm. Its backup waits for room: Codex (default) (out until Today 21:00); it takes over once one has room. Write to carry on.')
+      expect(cards(id)).toContain(
+        'Cut off by its provider: out of allowance until 5pm. Its backup waits for room: Codex (default) (out until Today 21:00); it takes over once one has room. Write to carry on.',
+      )
       expect(cards(id).some((c) => c.includes('past the cap'))).toBe(false)
     } finally {
       s.engine.outNow = was
@@ -286,7 +300,22 @@ describe('a start the caps put on a backup goes back to its primary once it is i
   function pushTask(project: string, kind: string, model: string | undefined, on?: { step: number; kind: string }) {
     const id = `CAP-${++n}`
     const worktree = tmp('caps-wt')
-    src.engine.tasks.push({ id, n, project: placeId.space(project), base: 'main', title: id, desc: 'Add x.', by: 'test', created: Date.now(), updated: Date.now(), told: 'work', worktree, branch: `work/${n}-x`, agent: { kind: 'pi', model: SPARK }, ...(on ? { onBackup: { ...on, at: Date.now() } } : {}) } as never)
+    src.engine.tasks.push({
+      id,
+      n,
+      project: placeId.space(project),
+      base: 'main',
+      title: id,
+      desc: 'Add x.',
+      by: 'test',
+      created: Date.now(),
+      updated: Date.now(),
+      told: 'work',
+      worktree,
+      branch: `work/${n}-x`,
+      agent: { kind: 'pi', model: SPARK },
+      ...(on ? { onBackup: { ...on, at: Date.now() } } : {}),
+    } as never)
     const key = `${id}/Agent`
     src.agents.records[key] = { key, name: id, kind, ...(model ? { model } : {}), cwd: worktree, logs: [], started: Date.now() } as never
     return { t: src.engine.tasks.find((x) => x.id === id)!, key }
@@ -351,7 +380,7 @@ describe('a start the caps put on a backup goes back to its primary once it is i
   })
 })
 
-describe("a coordinator a cap started on a backup goes back too, and a way back that fails is logged", () => {
+describe('a coordinator a cap started on a backup goes back too, and a way back that fails is logged', () => {
   test('its primary has room again and it is idle: it goes back to the primary; a stale mark of a gone place is dropped', async () => {
     src.settings.set('models.maxAtOnce', 'pi/unknown=1', 'machine')
     const busy = await space('caps-cback-busy')
@@ -432,7 +461,6 @@ describe("a coordinator a cap started on a backup goes back too, and a way back 
     expect(starts.at(-1)).toMatchObject({ key: id, kind: 'codex' })
   })
 })
-
 
 describe('a restart by hand, and the way back, never put a coordinator on a full model', () => {
   test('shepherdr restart onto a full model is refused before anything is saved or stopped', async () => {
@@ -529,7 +557,15 @@ describe("a coordinator's takeover that a restart cut short is taken again (resu
   test('a restart finds it: the takeover before comes back and the backup goes in; a gone place or a task is left', async () => {
     const { id } = await space('resume-coord')
     // as a restart leaves it: marked as taken over, its handover kept, the agent still the one cut off
-    src.agents.records[id] = { key: id, name: 'r', kind: 'pi', logs: [], started: Date.now(), tookOver: { from: 'pi', to: 'codex', why: 'out', at: Date.now(), step: 1 }, handover: { r: cut, at: Date.now() } } as never
+    src.agents.records[id] = {
+      key: id,
+      name: 'r',
+      kind: 'pi',
+      logs: [],
+      started: Date.now(),
+      tookOver: { from: 'pi', to: 'codex', why: 'out', at: Date.now(), step: 1 },
+      handover: { r: cut, at: Date.now() },
+    } as never
     src.agents.records['p:gone:nowhere'] = { key: 'p:gone:nowhere', name: 'g', kind: 'pi', logs: [], started: Date.now(), handover: { r: cut, at: Date.now() } } as never
     src.agents.records['T-1/Agent'] = { key: 'T-1/Agent', name: 't', kind: 'pi', logs: [], started: Date.now(), handover: { r: cut, at: Date.now() } } as never
     // as the real launch (agents.ts): the record it had stays, with its marks, and takes the new CLI

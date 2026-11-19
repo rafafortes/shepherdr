@@ -75,7 +75,8 @@ export function rowFromProc(pid: number, s: Source): Row | null {
   const uid = Number(/^Uid:\s*(\d+)/m.exec(s.read(`/proc/${pid}/status`))?.[1])
   const me = s.selfUid()
   if (me !== null && Number.isFinite(uid) && uid !== me) return null
-  const home = s.read(`/proc/${pid}/environ`)
+  const home = s
+    .read(`/proc/${pid}/environ`)
     .split('\0')
     .find((v) => v.startsWith('SHEPHERDR_HOME='))
     ?.slice('SHEPHERDR_HOME='.length)
@@ -141,7 +142,12 @@ export function descendants(rows: Row[], shellPid: number): number[] {
   const queue = [shellPid]
   while (queue.length) {
     const p = queue.shift()!
-    for (const c of kids.get(p) ?? []) if (!seen.has(c)) { seen.add(c); out.push(c); queue.push(c) }
+    for (const c of kids.get(p) ?? [])
+      if (!seen.has(c)) {
+        seen.add(c)
+        out.push(c)
+        queue.push(c)
+      }
   }
   return out
 }
@@ -282,11 +288,7 @@ export function scan(rows: Row[], o: ScanOpts = scanOpts): Finding[] {
     const proof = proofHome(r.home)
     const gone = removedWorktree(cwd, o)
     if (!proof && !gone) continue
-    const why = proof && gone
-      ? `SHEPHERDR_HOME ${r.home} and cwd in a removed worktree ${cwd}`
-      : proof
-        ? `SHEPHERDR_HOME ${r.home}`
-        : `cwd in a removed worktree ${cwd}`
+    const why = proof && gone ? `SHEPHERDR_HOME ${r.home} and cwd in a removed worktree ${cwd}` : proof ? `SHEPHERDR_HOME ${r.home}` : `cwd in a removed worktree ${cwd}`
     out.push({ pid: r.pid, cmd: r.cmd, cwd, ...(r.home ? { home: r.home } : {}), kind: proof ? 'proof' : 'worktree', why, kill: `kill -TERM ${r.pid}` })
   }
   return out
@@ -306,12 +308,11 @@ export function lines(found: Finding[]): string[] {
   const proof = proofPids(found)
   const ready = (proof.length ? proof : found.slice(0, 1).map((f) => f.pid)).slice(0, SHOWN)
   const more = ready.length < (proof.length || 1) ? ` (first ${SHOWN})` : ''
-  const shown = found.slice(0, SHOWN).map((f) => `  pid ${f.pid}: ${f.cmd.slice(0, 90) || '(no command)'} — ${f.why}; end it: ${f.kill}${f.kind === 'proof' ? ' (proof-marked; auto-end is off until the operator decides)' : ''}`)
+  const shown = found
+    .slice(0, SHOWN)
+    .map((f) => `  pid ${f.pid}: ${f.cmd.slice(0, 90) || '(no command)'} — ${f.why}; end it: ${f.kill}${f.kind === 'proof' ? ' (proof-marked; auto-end is off until the operator decides)' : ''}`)
   if (found.length > SHOWN) shown.push(`  ... and ${found.length - SHOWN} more (not shown; each keeps its own ready kill line in the sweep)`)
-  return [
-    `Orphaned processes (RES-03): ${found.length} found at the last hourly look. End ${proof.length ? 'the proof-marked ones' : 'one'} with: kill -TERM ${ready.join(' ')}${more}`,
-    ...shown,
-  ]
+  return [`Orphaned processes (RES-03): ${found.length} found at the last hourly look. End ${proof.length ? 'the proof-marked ones' : 'one'} with: kill -TERM ${ready.join(' ')}${more}`, ...shown]
 }
 
 /** the news when the set changes: each one named, capped, with the ready command */

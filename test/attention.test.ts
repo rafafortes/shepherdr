@@ -40,7 +40,12 @@ test('coordinator questions survive later news, count separately and stop counti
   const q = (id: string): Message => ({ id, who: 'agent', question: { id, kind: 'Question', title: id, choices: [], to: 'you' } })
   const chat = (messages: Message[]): Chat => ({ key: 'p', cli: 'Claude Code', messages })
   const open = (messages: Message[]) => openCards(chat(messages)).map((m) => m.question.id)
-  const posted: Message[] = [q('ask:1'), { id: 'news', who: 'agent', card: { id: 'news', task: 'T-1', status: 'ready', text: 'Ready' } }, q('ask:2'), { id: 'health', who: 'agent', text: 'Disk recovered.' }]
+  const posted: Message[] = [
+    q('ask:1'),
+    { id: 'news', who: 'agent', card: { id: 'news', task: 'T-1', status: 'ready', text: 'Ready' } },
+    q('ask:2'),
+    { id: 'health', who: 'agent', text: 'Disk recovered.' },
+  ]
   // later news from the agent does not close a card that still waits
   expect(open(posted)).toEqual(['ask:1', 'ask:2'])
   expect(coordinatorRequestIds(open(posted), {}, false)).toEqual(['ask:1', 'ask:2'])

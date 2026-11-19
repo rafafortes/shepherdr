@@ -176,8 +176,7 @@ function Resizer({ side, places, panel, frame, now }: { side: 'left' | 'right' |
   const key = (e: KeyboardEvent<HTMLDivElement>) => {
     const step = e.shiftKey ? 64 : 16
     const grow = side === 'left' ? 1 : -1
-    const px =
-      e.key === 'ArrowRight' ? now + step * grow : e.key === 'ArrowLeft' ? now - step * grow : e.key === 'Home' ? span.min : e.key === 'End' ? max : null
+    const px = e.key === 'ArrowRight' ? now + step * grow : e.key === 'ArrowLeft' ? now - step * grow : e.key === 'Home' ? span.min : e.key === 'End' ? max : null
     if (px === null) return
     e.preventDefault()
     e.stopPropagation()
@@ -230,7 +229,7 @@ export function PlacesToggle({ when, drawer = false }: { when: 'open' | 'closed'
     <IconButton
       label={label}
       aria-expanded={docked ? open : drawerOpen}
-      aria-controls={docked ? "places" : undefined}
+      aria-controls={docked ? 'places' : undefined}
       data-places-toggle
       onClick={(e) => {
         const focused = document.activeElement === e.currentTarget

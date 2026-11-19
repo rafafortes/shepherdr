@@ -14,9 +14,14 @@ const step = (id: string, said: Said | undefined, tool: string, at: number, took
 }
 const claude = (id: string, tool: string, input: object, at: number, took?: number | null, x?: Partial<Step>) => step(id, claudeStep(tool, input), tool, at, took, x)
 const codex = (id: string, cmd: string, at: number, took?: number | null, x?: Partial<Step>) => step(id, commandSay(cmd), 'exec_command', at, took, x)
-const read = (id: string, path: string, at: number, took?: number | null) => step(id, codexItem({ type: 'CommandExecution', command: `sed -n 1,200p ${path}`, parsed_cmd: [{ type: 'read', path }] }), 'exec_command', at, took)
+const read = (id: string, path: string, at: number, took?: number | null) =>
+  step(id, codexItem({ type: 'CommandExecution', command: `sed -n 1,200p ${path}`, parsed_cmd: [{ type: 'read', path }] }), 'exec_command', at, took)
 
-const EDIT = { file_path: '/w/gtm/server/webhook.ts', old_string: 'if (sig !== expected) return 401', new_string: "const a = Buffer.from(sig)\nconst b = Buffer.from(expected)\nif (a.length !== b.length || !timingSafeEqual(a, b)) return 401" }
+const EDIT = {
+  file_path: '/w/gtm/server/webhook.ts',
+  old_string: 'if (sig !== expected) return 401',
+  new_string: 'const a = Buffer.from(sig)\nconst b = Buffer.from(expected)\nif (a.length !== b.length || !timingSafeEqual(a, b)) return 401',
+}
 
 const STEPS: Record<string, Step[]> = {
   // GTM-15: the fix, its check and a reviewer subagent
@@ -26,7 +31,13 @@ const STEPS: Record<string, Step[]> = {
     claude('s3', 'Read', { file_path: '/w/gtm/test/webhook.test.ts' }, 893),
     claude('s4', 'Read', { file_path: '/w/gtm/server/crypto.ts' }, 890),
     claude('s5', 'Edit', EDIT, 870, 1),
-    claude('s6', 'Edit', { file_path: '/w/gtm/test/webhook.test.ts', old_string: '', new_string: "test('accepts a re-encoded body', async () => {\n  expect(await post(reencoded)).toBe(200)\n})" }, 850, 1),
+    claude(
+      's6',
+      'Edit',
+      { file_path: '/w/gtm/test/webhook.test.ts', old_string: '', new_string: "test('accepts a re-encoded body', async () => {\n  expect(await post(reencoded)).toBe(200)\n})" },
+      850,
+      1,
+    ),
     claude('s7', 'Bash', { command: 'bun test webhook 2>&1 | tail -20', description: 'Run the webhook tests' }, 840, 9, { failed: true, result: '1 failed, 1 passed' }),
     claude('s8', 'Read', { file_path: '/w/gtm/server/raw-body.ts' }, 820),
     claude('s9', 'Edit', { file_path: '/w/gtm/server/webhook.ts', old_string: 'const body = JSON.stringify(req.body)', new_string: 'const body = await rawBody(req)' }, 800, 1),
@@ -42,12 +53,7 @@ const STEPS: Record<string, Step[]> = {
     claude('c3', 'Read', { file_path: '/w/gtm/HEARTBEAT.md' }, 2990, 1),
   ],
   // HP-202: what it did before this turn
-  'hp202-t1': [
-    codex('h1', 'rg "mute" plugins/voice', 1500),
-    read('h2', 'plugins/voice/call.ts', 1495),
-    read('h3', 'plugins/voice/client.tsx', 1490),
-    read('h4', 'plugins/voice/server.ts', 1485),
-  ],
+  'hp202-t1': [codex('h1', 'rg "mute" plugins/voice', 1500), read('h2', 'plugins/voice/call.ts', 1495), read('h3', 'plugins/voice/client.tsx', 1490), read('h4', 'plugins/voice/server.ts', 1485)],
   // HP-202: the turn that runs now
   'hp202-live': [
     read('l1', 'plugins/voice/call.ts', 300),
@@ -59,12 +65,7 @@ const STEPS: Record<string, Step[]> = {
     read('l7', 'test/mute.test.ts', 14, null),
   ],
   // the reviewer subagent's own steps
-  j1: [
-    read('r1', 'plugins/voice/call.ts', 180),
-    read('r2', 'plugins/voice/voice.ts', 170),
-    codex('r3', 'rg "onended" plugins/voice', 150),
-    read('r4', 'test/call.test.ts', 20, null),
-  ],
+  j1: [read('r1', 'plugins/voice/call.ts', 180), read('r2', 'plugins/voice/voice.ts', 170), codex('r3', 'rg "onended" plugins/voice', 150), read('r4', 'test/call.test.ts', 20, null)],
 }
 
 const OUTPUT: Record<string, string> = {

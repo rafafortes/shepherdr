@@ -103,7 +103,10 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await openLimits(page)
       await page.getByRole('button', { name: '+ column', exact: true }).click()
       await page.getByRole('menuitem', { name: /^pi · Spark \(local\) provider$/ }).click()
-      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^pi · Spark \(local\) in gtm: no sub-limit$/ }).waitFor()
+      await page
+        .getByRole('table', { name: 'Spaces' })
+        .getByRole('button', { name: /^pi · Spark \(local\) in gtm: no sub-limit$/ })
+        .waitFor()
       // opening a Waiting section with no storage still works: its opened state is kept for this page only
       await page.getByRole('region', { name: 'Scheduled' }).getByRole('button', { name: 'Scheduled' }).click()
       await page.getByRole('region', { name: 'Scheduled' }).getByText('Starts', { exact: false }).first().waitFor()
@@ -174,7 +177,7 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await page.close()
     }
   })
-  test('two quick taps cannot take each other\'s place: the arrows are off while a move is written, and the second is dropped', async () => {
+  test("two quick taps cannot take each other's place: the arrows are off while a move is written, and the second is dropped", async () => {
     const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
@@ -291,11 +294,19 @@ describe.skipIf(!browser)('Settings → Limits: a move waits for an answer the w
       // a change asks the page for a read, and the page's fetch is held: the answer is out when the move is written
       await gateViews(page, true)
       world.emit('snapshot')
-      await until(() => heldViews(page), (n) => n >= 1, 10_000)
+      await until(
+        () => heldViews(page),
+        (n) => n >= 1,
+        10_000,
+      )
       await table.getByRole('button', { name: 'Move herdr-projects up' }).click()
       await letViewsGo(page)
       // that answer was sent before the write, so the page asks again, and the arrows stay off until that one lands
-      await until(() => heldViews(page), (n) => n >= 1, 10_000)
+      await until(
+        () => heldViews(page),
+        (n) => n >= 1,
+        10_000,
+      )
       expect(await table.getByRole('button', { name: 'Move herdr-projects down' }).isDisabled()).toBe(true)
       // the one the write asked for: the arrows come back with the rows the move made, never with the ones before it
       await letViewsGo(page)

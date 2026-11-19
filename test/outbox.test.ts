@@ -81,19 +81,35 @@ describe('over time', () => {
     ]
     expect(expire(o, T + 1000)).toBe(o)
     // still on its way after its time (the screen reloaded meanwhile)
-    expect(expire(o, T + SEND_TIMEOUT + 6000).map((x) => [x.cid, x.state])).toEqual([['c1', 'failed'], ['c2', 'sent'], ['c3', 'sent'], ['c4', 'failed'], ['c5', 'sent']])
+    expect(expire(o, T + SEND_TIMEOUT + 6000).map((x) => [x.cid, x.state])).toEqual([
+      ['c1', 'failed'],
+      ['c2', 'sent'],
+      ['c3', 'sent'],
+      ['c4', 'failed'],
+      ['c5', 'sent'],
+    ])
     // in, but never showed in the chat: failed, with its files, and Retry sends it as new
     const later = expire(o, T + 6 * 60_000)
     expect(later[1]).toMatchObject({ state: 'failed', lost: true, files: [{ path: '/in/a.png' }], error: "It went in, but it isn't in the chat I can read." })
     // waiting on a menu the chat shows, it stays however long; waiting unseen (a machine out of reach) fails
     const hour = expire(o, T + 3_600_000)
-    expect(hour.map((x) => [x.cid, x.state])).toEqual([['c1', 'failed'], ['c2', 'failed'], ['c3', 'sent'], ['c4', 'failed'], ['c5', 'failed']])
+    expect(hour.map((x) => [x.cid, x.state])).toEqual([
+      ['c1', 'failed'],
+      ['c2', 'failed'],
+      ['c3', 'sent'],
+      ['c4', 'failed'],
+      ['c5', 'failed'],
+    ])
     expect(hour).toHaveLength(5)
   })
   test('a lost one says why it did not come back: an unreadable chat says so, never "Not delivered"', () => {
     const sent = [out({ state: 'sent', serverAt: T })]
     const why = "This chat's log can't be read right now, so messages here may not show."
-    expect(expire(sent, T + KEEP_SENT + 10_000, undefined, (chat) => (chat === 'gtm' ? why : undefined))[0]).toMatchObject({ state: 'failed', lost: true, error: "It went in, but I can't read this chat's log." })
+    expect(expire(sent, T + KEEP_SENT + 10_000, undefined, (chat) => (chat === 'gtm' ? why : undefined))[0]).toMatchObject({
+      state: 'failed',
+      lost: true,
+      error: "It went in, but I can't read this chat's log.",
+    })
     expect(expire(sent, T + KEEP_SENT + 10_000, undefined, () => undefined)[0].error).toBe("It went in, but it isn't in the chat I can read.")
   })
   test('in while the agent works, it may come back only at its next step: the wait counts from when it last worked', () => {

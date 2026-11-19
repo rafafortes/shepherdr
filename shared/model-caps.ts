@@ -99,7 +99,8 @@ export function fitToProviders(entries: MaxEntry[]): { entries: MaxEntry[]; lowe
 }
 
 /** the models a write lowers to their provider's limit, in words: `pi · spark/qwen… from 3 to 2 (pi · spark allows 2 at once)` */
-export const loweredWords = (lowered: Lowered[]) => lowered.map((l) => `${patternWords(l.pattern)} from ${l.from} to ${l.to} (${patternWords(providerOfKey(l.pattern))} allows ${l.to} at once)`).join(', ')
+export const loweredWords = (lowered: Lowered[]) =>
+  lowered.map((l) => `${patternWords(l.pattern)} from ${l.from} to ${l.to} (${patternWords(providerOfKey(l.pattern))} allows ${l.to} at once)`).join(', ')
 
 /** the entry that caps a model key: its own model entry when there is one, else its provider's; none when neither */
 export function capFor(entries: MaxEntry[], key: string): MaxEntry | undefined {
@@ -119,10 +120,21 @@ export const spaceCapWords = (s: SummarySpaceCap) => `${s.name}: ${s.max === 0 ?
 export function atOnceWords(a: SummaryAtOnce): { words: string; title: string; blocked: boolean } {
   const where = (from: 'all' | 'machine') => (from === 'machine' ? 'this machine' : 'Everywhere')
   const held = a.held ? ` · ${a.held} held` : ''
-  if (a.own?.max === 0) return { words: `${BLOCKED}${a.now ? ` · ${a.now} still running` : ''}${held}`, title: `Blocked: ${patternWords(a.own.pattern)}=0, set ${where(a.own.from)}. Nothing new starts on it; what runs now goes on. Click to change.`, blocked: true }
+  if (a.own?.max === 0)
+    return {
+      words: `${BLOCKED}${a.now ? ` · ${a.now} still running` : ''}${held}`,
+      title: `Blocked: ${patternWords(a.own.pattern)}=0, set ${where(a.own.from)}. Nothing new starts on it; what runs now goes on. Click to change.`,
+      blocked: true,
+    }
   if (a.own) return { words: `${a.now} of ${a.own.max} at once${held}`, title: `Its cap: ${patternWords(a.own.pattern)}=${a.own.max}, set ${where(a.own.from)}. Click to change.`, blocked: false }
-  if (a.via?.max === 0) return { words: `${BLOCKED} (by ${a.via.pattern})${a.now ? ` · ${a.now} still running` : ''}${held}`, title: `Blocked by ${patternWords(a.via.pattern)}=0, set ${where(a.via.from)}. Nothing new starts on it; what runs now goes on. Click to set its own.`, blocked: true }
-  if (a.via) return { words: `${a.now} at once · no cap of its own${held}`, title: `Held by ${patternWords(a.via.pattern)}=${a.via.max}, set ${where(a.via.from)}. Click to set its own.`, blocked: false }
+  if (a.via?.max === 0)
+    return {
+      words: `${BLOCKED} (by ${a.via.pattern})${a.now ? ` · ${a.now} still running` : ''}${held}`,
+      title: `Blocked by ${patternWords(a.via.pattern)}=0, set ${where(a.via.from)}. Nothing new starts on it; what runs now goes on. Click to set its own.`,
+      blocked: true,
+    }
+  if (a.via)
+    return { words: `${a.now} at once · no cap of its own${held}`, title: `Held by ${patternWords(a.via.pattern)}=${a.via.max}, set ${where(a.via.from)}. Click to set its own.`, blocked: false }
   return { words: `${a.now} at once · no cap${held}`, title: 'No cap for this row. Click to set one.', blocked: false }
 }
 

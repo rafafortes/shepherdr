@@ -138,7 +138,10 @@ describe('news for coordinators', () => {
     const send = src.agents.send
     const old = src.agents.records[requester]
     src.agents.records[requester] = { key: requester, name: 'coordinator', kind: 'codex', logs: [], cwd: originDir, workspace: 'origin', started: 1 }
-    src.agents.send = (async (chat: string, text: string) => { sent.push({ chat, text }); return { waiting: false } }) as never
+    src.agents.send = (async (chat: string, text: string) => {
+      sent.push({ chat, text })
+      return { waiting: false }
+    }) as never
     const drain = () => (src as unknown as { drainRequestedNews(): Promise<void> }).drainRequestedNews()
     try {
       t.requester = requester
@@ -177,7 +180,7 @@ describe('news for coordinators', () => {
     const send = src.agents.send
     src.agents.send = (async (k: string) => (k === project || k === home ? sent.push(k) : 0, { waiting: false })) as never
     const modes = { ...src.places.modes }
-    const news = (kind: 'added' | 'ready', at = project) => (sent.length = 0, src.engine.emit('news', at, 'NC-1 is ready', kind, { task: 'NC-1', event: kind }), [...sent].sort())
+    const news = (kind: 'added' | 'ready', at = project) => ((sent.length = 0), src.engine.emit('news', at, 'NC-1 is ready', kind, { task: 'NC-1', event: kind }), [...sent].sort())
     try {
       for (const id of [project, home]) delete src.places.modes[id]
       expect(news('ready')).toEqual([home, project].sort())
@@ -217,7 +220,12 @@ describe('news for coordinators', () => {
       expect(said.get(project)).toContain('reply with only <no-reply>reason</no-reply>')
       // main went red: a one-line card in the project's chat, and the coordinator's reply after it
       engine.emit('news', project, 'main went red on GitHub at 1a2b3c4: Check failed (link).', 'red', { task: '', event: 'main-red' }, { red: 'main', text: 'went red: Check failed' })
-      expect(src.chats.chat(project).messages.filter((m) => m.card?.red).map((m) => m.text)).toEqual(['main went red: Check failed'])
+      expect(
+        src.chats
+          .chat(project)
+          .messages.filter((m) => m.card?.red)
+          .map((m) => m.text),
+      ).toEqual(['main went red: Check failed'])
       expect(said.get(project)).toContain('Never <no-reply> to it.')
     } finally {
       src.agents.send = send
@@ -233,7 +241,18 @@ describe("every machine's news reaches the main machine's home space", () => {
     // the other machine's worker: its app, its news as its LiveSource emits it
     const worker = Object.assign(new Emitter(), {
       kind: 'live',
-      snapshot: () => ({ name: 'S', host: 'faraway', places: [{ id: 'p:faraway:shop', name: 'shop', machine: 'faraway', level: 1, status: 'need', mode: 'regular', chat: 'p:faraway:shop' }], machines: [{ id: 'm:faraway', machine: 'faraway', name: 'faraway', status: 'need' }], tasks: [{ id: 'FS-1', name: 'Colours', status: 'need', place: 'p:faraway:shop', age: '1m', state: '', on: '', created: '' }], automations: {}, asks: {}, settings: [], overrides: {}, user: 'u' }),
+      snapshot: () => ({
+        name: 'S',
+        host: 'faraway',
+        places: [{ id: 'p:faraway:shop', name: 'shop', machine: 'faraway', level: 1, status: 'need', mode: 'regular', chat: 'p:faraway:shop' }],
+        machines: [{ id: 'm:faraway', machine: 'faraway', name: 'faraway', status: 'need' }],
+        tasks: [{ id: 'FS-1', name: 'Colours', status: 'need', place: 'p:faraway:shop', age: '1m', state: '', on: '', created: '' }],
+        automations: {},
+        asks: {},
+        settings: [],
+        overrides: {},
+        user: 'u',
+      }),
       chat: () => undefined,
       watch: () => {},
     })
@@ -395,7 +414,12 @@ describe("Autopilot's heartbeat", () => {
       expect(beats()).toHaveLength(2)
       // an empty HEARTBEAT.md, edited in Settings: no heartbeat
       expect(await src.act({ type: 'setting', key: 'heartbeat.md', value: '', place })).toEqual({ ok: true })
-      expect(src.snapshot().settings.find((x) => x.level === place && x.name === 'Autopilot')!.rows.find((r) => r.key === 'heartbeat.md')).toMatchObject({ value: '', doc: true })
+      expect(
+        src
+          .snapshot()
+          .settings.find((x) => x.level === place && x.name === 'Autopilot')!
+          .rows.find((r) => r.key === 'heartbeat.md'),
+      ).toMatchObject({ value: '', doc: true })
       src.heartbeat(t0 + 93 * min)
       expect(beats()).toHaveLength(2)
       // off Autopilot: no heartbeat however long it waits
@@ -498,7 +522,9 @@ describe('automations add tasks with fresh agents', () => {
     const name = src.places.space(place)!.name
     const tasks = () => src.engine.tasks.filter((x) => x.project === place && x.by.startsWith('the automation'))
     const add = await src.cli(['automation', 'add', 'Nightly', '--task', 'Bump deps', '--brief', 'Bump and test.', '--when', 'FREQ=MINUTELY;INTERVAL=5', '--agent', 'codex'], { chat: place })
-    expect(add.out).toMatch(/^Automation “Nightly” is on: Every 5 minutes \(.+\); next .+ \[--when "DTSTART:20260101T000000 RRULE:FREQ=MINUTELY;INTERVAL=5"\]\. It adds the task “Bump deps” to autos, with a fresh agent/)
+    expect(add.out).toMatch(
+      /^Automation “Nightly” is on: Every 5 minutes \(.+\); next .+ \[--when "DTSTART:20260101T000000 RRULE:FREQ=MINUTELY;INTERVAL=5"\]\. It adds the task “Bump deps” to autos, with a fresh agent/,
+    )
     // its first run is the rule's first after it was made: as if made six minutes ago
     src.automations.find(place, 'Nightly')!.since = Date.now() - 6 * 60_000
     ;(src as unknown as { runSchedules(): void }).runSchedules()
@@ -507,7 +533,14 @@ describe('automations add tasks with fresh agents', () => {
     // the next run is five minutes after the last
     ;(src as unknown as { runSchedules(): void }).runSchedules()
     expect(tasks()).toHaveLength(1)
-    expect(src.snapshot().automations[place][0]).toMatchObject({ name: 'Nightly', when: expect.stringMatching(/^Every 5 minutes \(/), what: 'Bump deps', on: true, next: expect.any(Array), runs: [{ task: tasks()[0].id }] })
+    expect(src.snapshot().automations[place][0]).toMatchObject({
+      name: 'Nightly',
+      when: expect.stringMatching(/^Every 5 minutes \(/),
+      what: 'Bump deps',
+      on: true,
+      next: expect.any(Array),
+      runs: [{ task: tasks()[0].id }],
+    })
     // an event: a task merged adds one; a task an automation added sets off no 'added' automation
     await src.cli(['automation', 'add', 'Notes', '--task', 'Write notes', '--on', 'merged'], { chat: place })
     await src.cli(['automation', 'add', 'Echo', '--task', 'Echo', '--on', 'added'], { chat: place })
@@ -520,7 +553,11 @@ describe('automations add tasks with fresh agents', () => {
     expect(await src.act({ type: 'automation', place, op: 'run', name: 'Nightly' })).toEqual({ ok: true })
     expect(tasks().filter((x) => x.title === 'Bump deps')).toHaveLength(2)
     await src.cli(['automation', 'edit', 'Nightly', '--when', 'FREQ=DAILY;BYHOUR=3;BYMINUTE=0', '--task', 'Bump all deps', '--brief', ''], { chat: place })
-    expect(src.automations.find(place, 'Nightly')).toMatchObject({ trigger: { time: 'DTSTART:20260101T000000 RRULE:FREQ=DAILY;BYHOUR=3;BYMINUTE=0' }, task: { title: 'Bump all deps', agent: { kind: 'codex' } }, on: false })
+    expect(src.automations.find(place, 'Nightly')).toMatchObject({
+      trigger: { time: 'DTSTART:20260101T000000 RRULE:FREQ=DAILY;BYHOUR=3;BYMINUTE=0' },
+      task: { title: 'Bump all deps', agent: { kind: 'codex' } },
+      on: false,
+    })
     expect(src.automations.find(place, 'Nightly')!.task.desc).toBeUndefined()
     expect((await src.cli(['automation', 'add', 'Bad', '--task', 'x', '--when', 'sometimes'], { chat: place })).out).toContain("Can't read the time rule")
     // the old flags are gone
@@ -528,7 +565,9 @@ describe('automations add tasks with fresh agents', () => {
     // the screen adds or changes none
     expect(await src.act({ type: 'automation', place, op: 'save', name: 'Nightly' } as never)).toMatchObject({ ok: false })
     expect(await src.act({ type: 'automation', place, op: 'remove', name: 'Echo' })).toEqual({ ok: true })
-    expect((await src.cli(['automation', 'list', '--space', name], {})).out).toMatch(/Nightly · Every day at 3:00 \(.+\) \[--when "DTSTART:20260101T000000 RRULE:FREQ=DAILY;BYHOUR=3;BYMINUTE=0"\] · adds “Bump all deps” \(codex\) · autos · paused · last ran/)
+    expect((await src.cli(['automation', 'list', '--space', name], {})).out).toMatch(
+      /Nightly · Every day at 3:00 \(.+\) \[--when "DTSTART:20260101T000000 RRULE:FREQ=DAILY;BYHOUR=3;BYMINUTE=0"\] · adds “Bump all deps” \(codex\) · autos · paused · last ran/,
+    )
     // the old kinds are gone
     expect((await src.cli(['automation', 'add', 'Ask', '--ask', 'What waits?', '--when', 'FREQ=DAILY'], { chat: place })).out).toContain('takes no --ask')
   })
@@ -599,7 +638,11 @@ describe('artifacts from the command', () => {
   test('a page whose scripts break or that reaches for the network is refused, with what broke', async () => {
     src.checker = ok
     const id = (await src.cli(['artifact', 'new', 'board.html', '--title', 'Fine'], { cwd: files })).out.match(/artifact (\w+)/)![1]
-    src.checker = async () => ({ errors: ['script error: x is not defined', 'blocked: https://cdn.example/x.js (artifacts load nothing: put it inline)'], warnings: [], shots: { light: '/p.png', dark: '/p-dark.png' } })
+    src.checker = async () => ({
+      errors: ['script error: x is not defined', 'blocked: https://cdn.example/x.js (artifacts load nothing: put it inline)'],
+      warnings: [],
+      shots: { light: '/p.png', dark: '/p-dark.png' },
+    })
     const bad = await src.cli(['artifact', 'update', id, 'board.html'], { cwd: files })
     expect(bad.code).toBe(1)
     expect(bad.out).toContain('Not updated')
@@ -618,7 +661,7 @@ describe('artifacts from the command', () => {
     expect(src.snapshot().artifacts.find((a) => a.id === id)!.keeper).toBe('kept')
   })
 
-  test("one snapshot builds the places list once, however many artifacts name their keeper by it", async () => {
+  test('one snapshot builds the places list once, however many artifacts name their keeper by it', async () => {
     src.checker = ok
     // kept by the coordinator: each one's keeper is a place, named from the places list
     const { t } = await workedTask('many-kept')
@@ -633,7 +676,10 @@ describe('artifacts from the command', () => {
       return build.call(this)
     }
     try {
-      const keepers = src.snapshot().artifacts.filter((a) => a.title.startsWith('Kept ')).map((a) => a.keeper)
+      const keepers = src
+        .snapshot()
+        .artifacts.filter((a) => a.title.startsWith('Kept '))
+        .map((a) => a.keeper)
       expect(keepers).toEqual(Array(5).fill('many-kept'))
       expect(built).toBe(1)
       // outside a snapshot, a name is read directly from places without building the full places list
@@ -664,7 +710,18 @@ describe("another machine's artifacts", () => {
         const u = new URL(req.url)
         got.push({ path: u.pathname + u.search, body: req.method === 'POST' ? await req.json() : undefined })
         if (u.pathname === '/api/snapshot')
-          return Response.json({ name: 'S', host: 'far2', places: [{ id: 'p:far2:~', name: 'home', machine: 'far2', home: true, level: 1, status: 'idle', mode: 'manual', chat: 'p:far2:~' }], machines: [{ id: 'm:far2', machine: 'far2', name: 'far2', status: 'idle' }], tasks: [], automations: {}, artifacts: [art], asks: {}, settings: [], user: 'u' })
+          return Response.json({
+            name: 'S',
+            host: 'far2',
+            places: [{ id: 'p:far2:~', name: 'home', machine: 'far2', home: true, level: 1, status: 'idle', mode: 'manual', chat: 'p:far2:~' }],
+            machines: [{ id: 'm:far2', machine: 'far2', name: 'far2', status: 'idle' }],
+            tasks: [],
+            automations: {},
+            artifacts: [art],
+            asks: {},
+            settings: [],
+            user: 'u',
+          })
         if (u.pathname === '/api/artifacts/farx/raw') return Response.json({ html: `<p>far v${u.searchParams.get('v')}</p>`, data: { n: 1 } })
         if (u.pathname === '/api/artifacts/farx/thumb') return new Response('png', { headers: { 'content-type': 'image/png' } })
         if (u.pathname === '/api/action') return Response.json({ to: 'proj' })
@@ -735,7 +792,8 @@ describe('Autopilot from the command', () => {
       expect((await src.cli(['task', 'add', 'Fix the typo', '--desc', 'Fix it.'], { chat: place })).out).toContain('Added')
       expect((await src.cli(['task', 'add', 'Fix the link', '--desc', 'Fix it.'], { chat: place })).out).toContain('Added')
       // a checklist is a space's own (the home space's too), not a default Everywhere or the machine passes down
-      for (const s of src.snapshot().settings.filter((x) => x.name === 'Autopilot')) expect(s.rows.map((r) => r.label)).toEqual(['Heartbeat', 'Wakes at once on', ...(s.level?.startsWith('p:') ? ['Checklist'] : [])])
+      for (const s of src.snapshot().settings.filter((x) => x.name === 'Autopilot'))
+        expect(s.rows.map((r) => r.label)).toEqual(['Heartbeat', 'Wakes at once on', ...(s.level?.startsWith('p:') ? ['Checklist'] : [])])
       const show = (await src.cli(['show'], {})).out
       expect(show).toContain('heartbeat.when')
       expect(show).toContain('heartbeat.on')

@@ -45,7 +45,9 @@ const reply = (id: string, seq: number, model: { providerID: string; id: string 
   },
 })
 
-const agent = (key: string, log: string, session: string): Record<string, AgentRecord> => ({ [key]: { key, name: key, kind: 'opencode', cwd: '/x', workspace: 'w', logs: [log], started: NOW, sessionId: session } as AgentRecord })
+const agent = (key: string, log: string, session: string): Record<string, AgentRecord> => ({
+  [key]: { key, name: key, kind: 'opencode', cwd: '/x', workspace: 'w', logs: [log], started: NOW, sessionId: session } as AgentRecord,
+})
 
 describe("OpenCode's agents count their calls in the usage ledger", () => {
   test('the first pass makes the log copy and counts each finished reply on its model; a later pass counts the new ones once', () => {
@@ -90,9 +92,19 @@ describe("OpenCode's agents count their calls in the usage ledger", () => {
     database(session, [
       { id: 'a3', type: 'assistant', seq: 1, data: reply('a3', 1, { providerID: 'opencode-go', id: 'deepseek-v4.1-flash' }, 70).data },
       // a provider's quota error: no tokens, the error is in the chat
-      { id: 'a4', type: 'assistant', seq: 2, data: reply('a4', 2, { providerID: 'opencode-go', id: 'deepseek-v4.1-flash' }, 0, { finish: 'error', error: { type: 'provider.quota', message: 'Go usage limit exceeded', status: 429 } }).data },
+      {
+        id: 'a4',
+        type: 'assistant',
+        seq: 2,
+        data: reply('a4', 2, { providerID: 'opencode-go', id: 'deepseek-v4.1-flash' }, 0, { finish: 'error', error: { type: 'provider.quota', message: 'Go usage limit exceeded', status: 429 } }).data,
+      },
       // the user's abort: the same, with its own type
-      { id: 'a5', type: 'assistant', seq: 3, data: reply('a5', 3, { providerID: 'opencode-go', id: 'deepseek-v4.1-flash' }, 0, { finish: 'error', error: { type: 'aborted', message: 'Step interrupted' } }).data },
+      {
+        id: 'a5',
+        type: 'assistant',
+        seq: 3,
+        data: reply('a5', 3, { providerID: 'opencode-go', id: 'deepseek-v4.1-flash' }, 0, { finish: 'error', error: { type: 'aborted', message: 'Step interrupted' } }).data,
+      },
     ])
     new UsageFeed(a, () => agent('T-8/Agent', log, session)).pass(NOW)
     a.flush(NOW)

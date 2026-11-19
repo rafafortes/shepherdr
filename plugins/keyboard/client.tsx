@@ -1,22 +1,6 @@
 import { Search } from './search.tsx'
 // Keyboard: on a desktop everything works without a mouse. ? opens the list of keys in Settings; ⌘K (Ctrl+K off a Mac) searches and jumps.
-import {
-  closeArtifact,
-  definePlugin,
-  getState,
-  panelHere,
-  has,
-  keysChat,
-  listView,
-  orderedTasks,
-  shownPlaces,
-  setUI,
-  taskOf,
-  toggleFocus,
-  togglePlaces,
-  toggleWide,
-  type UI,
-} from '@client/kernel.ts'
+import { closeArtifact, definePlugin, getState, panelHere, has, keysChat, listView, orderedTasks, shownPlaces, setUI, taskOf, toggleFocus, togglePlaces, toggleWide, type UI } from '@client/kernel.ts'
 import { toggleDictation } from '@plugins/chat/client.tsx'
 import { ALT, CTRL, Kbd, KeyboardIcon, MOD, SHIFT } from '@client/ui.tsx'
 import { rowLook, sectionOf } from '@client/Settings.tsx'
@@ -83,7 +67,14 @@ function back(ui: UI, snap: Snapshot): Partial<UI> | null {
   if (ui.viewer) return (closeArtifact(), {})
   if (ui.pick) return { pick: null }
   if (ui.focus) return { focus: null }
-  if (ui.task) return { cur: Math.max(0, orderedTasks(snap, listView(ui, snap)).findIndex((t) => t.id === ui.task)), task: null }
+  if (ui.task)
+    return {
+      cur: Math.max(
+        0,
+        orderedTasks(snap, listView(ui, snap)).findIndex((t) => t.id === ui.task),
+      ),
+      task: null,
+    }
   if (ui.archived) return { archived: null, cur: 0 }
   return null
 }
@@ -92,7 +83,13 @@ export default definePlugin({
   name: 'keyboard',
   setup(reg) {
     // a desktop's, and a tablet's once a key was pressed on it (an iPad with a keyboard)
-    reg.settingsPages.push({ name: SHORTCUTS, about: 'Everything works without a mouse.', Icon: KeyboardIcon, when: (ui) => ui.device === 'desktop' || (ui.device === 'tablet' && ui.kb), View: Shortcuts })
+    reg.settingsPages.push({
+      name: SHORTCUTS,
+      about: 'Everything works without a mouse.',
+      Icon: KeyboardIcon,
+      when: (ui) => ui.device === 'desktop' || (ui.device === 'tablet' && ui.kb),
+      View: Shortcuts,
+    })
     reg.views.search = Search
     reg.keys.push({
       order: 10,

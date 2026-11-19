@@ -74,7 +74,12 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     expect(r).toMatchObject({ changed: 1, started: 1, spaces: [{ name: p.name, changed: 2 }] })
     expect(reviewerOf(first.desc)).toContain('review with a headless Claude Code or a Claude Code subagent')
     expect(reviewerOf(q.desc)).toBe(
-      reviewerLineFor(CODEX_WORDS, q.id, 'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (its default model and effort) instead for that round only, and say in your summary that you did.', "(this space's setting)"),
+      reviewerLineFor(
+        CODEX_WORDS,
+        q.id,
+        'If that reviewer cannot run at all (out of allowance, signed out, its model is gone), review with a headless Claude Code or a Claude Code subagent (its default model and effort) instead for that round only, and say in your summary that you did.',
+        "(this space's setting)",
+      ),
     )
     // the backup's model is a line of the same block too, read where it is set
     expect(w.settings.set('reviewer.fallbackModel', 'claude-sonnet-5-5', { space: p.name }).ok).toBe(true)
@@ -118,7 +123,16 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
     const before = [archived.desc, done.desc]
     const sent = w.sent.length
     expect(w.settings.set('reviewer.agent', 'pi', { space: p.name }).ok).toBe(true)
-    expect(w.engine.retuneReviewers({ space: p.name })).toEqual({ changed: 0, same: 0, follow: 0, pinned: 0, running: 0, started: 2, kept: [], spaces: [{ name: p.name, on: { kind: 'pi' }, changed: 2 }] })
+    expect(w.engine.retuneReviewers({ space: p.name })).toEqual({
+      changed: 0,
+      same: 0,
+      follow: 0,
+      pinned: 0,
+      running: 0,
+      started: 2,
+      kept: [],
+      spaces: [{ name: p.name, on: { kind: 'pi' }, changed: 2 }],
+    })
     expect([archived.desc, done.desc]).toEqual(before)
     expect([work.reviewer?.kind, asking.reviewer?.kind, archived.reviewer?.kind, done.reviewer?.kind]).toEqual(['pi', 'pi', 'codex', 'codex'])
     expect([reviewerOf(work.desc), reviewerOf(asking.desc)]).toEqual([piLine(work.id), piLine(asking.id)])
@@ -287,7 +301,7 @@ describe('Settings reviewer changed: the waiting tasks read it in their brief', 
   })
 })
 
-describe("every CLI as the reviewer: a task already at work reviews with the new one from its next round", () => {
+describe('every CLI as the reviewer: a task already at work reviews with the new one from its next round', () => {
   for (const kind of ['claude', 'codex', 'pi', 'opencode', 'agy'])
     test(`a change to ${kind}: the round counted after it runs on ${kind}; the round counted before ends on the one it had`, async () => {
       const w = fresh()
@@ -318,7 +332,7 @@ describe('the brief helpers', () => {
     // no block: the words come back as they are
     expect(rebriefReviewer('Just words: - Reviewer: nothing here.', r)).toBe('Just words: - Reviewer: nothing here.')
     // a block with no Reviewer line: nothing to say, nothing changed
-    const noLine = 'Words.\n\nSettings: (from shepherdr show; where the brief above says otherwise, it wins)\n- Review: off. No review; the lines on reviewing below don\'t apply.'
+    const noLine = "Words.\n\nSettings: (from shepherdr show; where the brief above says otherwise, it wins)\n- Review: off. No review; the lines on reviewing below don't apply."
     expect(rebriefReviewer(noLine, r)).toBe(noLine)
     // an older block's head is read too
     const old = brief.replace(SETTINGS_HEAD, OLD_HEADS[0]!)
@@ -342,17 +356,42 @@ describe('the brief helpers', () => {
 
   test('the reviewer words in a line: one space, several, and nothing changed', () => {
     const base: Retune = { changed: 0, same: 0, follow: 0, pinned: 0, running: 0, started: 0, kept: [], spaces: [] }
-    expect(reviewRetuneLine({ ...base, changed: 2, same: 1, pinned: 1, started: 1, follow: 1, kept: ['lyvora-app'], spaces: [{ name: 'lyvora-site', on: { kind: 'pi', model: 'opencode-go/deepseek' }, changed: 3 }] })).toBe(
-      '2 waiting tasks in lyvora-site are reviewed by pi (opencode-go/deepseek) when their turn comes; 1 started task in lyvora-site is reviewed by pi (opencode-go/deepseek) from its next review round; 1 of them had a reviewer of its own from task add, and changes too; 1 already on it; 1 takes Settings\' reviewer at its turn anyway; lyvora-app keeps its own setting.',
+    expect(
+      reviewRetuneLine({
+        ...base,
+        changed: 2,
+        same: 1,
+        pinned: 1,
+        started: 1,
+        follow: 1,
+        kept: ['lyvora-app'],
+        spaces: [{ name: 'lyvora-site', on: { kind: 'pi', model: 'opencode-go/deepseek' }, changed: 3 }],
+      }),
+    ).toBe(
+      "2 waiting tasks in lyvora-site are reviewed by pi (opencode-go/deepseek) when their turn comes; 1 started task in lyvora-site is reviewed by pi (opencode-go/deepseek) from its next review round; 1 of them had a reviewer of its own from task add, and changes too; 1 already on it; 1 takes Settings' reviewer at its turn anyway; lyvora-app keeps its own setting.",
     )
-    expect(reviewRetuneLine({ ...base, started: 2, spaces: [{ name: 'a', on: { kind: 'pi' }, changed: 1 }, { name: 'b', on: { kind: 'codex' }, changed: 1 }] })).toBe(
-      '2 started tasks are reviewed by what Settings name for its space from their next review round.',
-    )
-    expect(reviewRetuneLine({ ...base, changed: 3, spaces: [{ name: 'a', on: { kind: 'pi' }, changed: 1 }, { name: 'b', on: { kind: 'codex' }, changed: 2 }] })).toBe(
-      '3 waiting tasks in 2 spaces are reviewed by what Settings name for each (a by pi; b by Codex).',
-    )
+    expect(
+      reviewRetuneLine({
+        ...base,
+        started: 2,
+        spaces: [
+          { name: 'a', on: { kind: 'pi' }, changed: 1 },
+          { name: 'b', on: { kind: 'codex' }, changed: 1 },
+        ],
+      }),
+    ).toBe('2 started tasks are reviewed by what Settings name for its space from their next review round.')
+    expect(
+      reviewRetuneLine({
+        ...base,
+        changed: 3,
+        spaces: [
+          { name: 'a', on: { kind: 'pi' }, changed: 1 },
+          { name: 'b', on: { kind: 'codex' }, changed: 2 },
+        ],
+      }),
+    ).toBe('3 waiting tasks in 2 spaces are reviewed by what Settings name for each (a by pi; b by Codex).')
     expect(reviewRetuneLine({ ...base, changed: 1, spaces: [{ name: 'a', on: { kind: 'pi' }, changed: 1 }] })).toBe('1 waiting task in a is reviewed by pi when its turn comes.')
-    expect(reviewRetuneLine({ ...base, same: 2, follow: 2 })).toBe('no task changes; 2 already on it; 2 take Settings\' reviewer at their turn anyway.')
+    expect(reviewRetuneLine({ ...base, same: 2, follow: 2 })).toBe("no task changes; 2 already on it; 2 take Settings' reviewer at their turn anyway.")
   })
 })
 
@@ -381,6 +420,8 @@ describe('a renamed space: the reviewer answer names it as it shows, and a scope
     expect(w.engine.retuneReviewers({ key: 'reviewer.agent' })).toEqual(everywhere)
     expect(waits.reviewer).toMatchObject({ kind: 'pi' })
     expect(kept.reviewer).toMatchObject({ kind: 'codex' })
-    expect(reviewRetuneLine(everywhere)).toBe('1 waiting task in lyvora-site is reviewed by pi when its turn comes; 1 started task in lyvora-site is reviewed by pi from its next review round; lyvora-app keeps its own setting.')
+    expect(reviewRetuneLine(everywhere)).toBe(
+      '1 waiting task in lyvora-site is reviewed by pi when its turn comes; 1 started task in lyvora-site is reviewed by pi from its next review round; lyvora-app keeps its own setting.',
+    )
   })
 })

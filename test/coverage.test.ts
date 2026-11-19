@@ -13,12 +13,32 @@ const lcov = (file: string, da: [number, number][]) => `TN:\nSF:${file}\n${da.ma
 
 describe('reading what the tests ran', () => {
   test("Bun's lcov: a line any record ran is run; the screen's lines add to it the same way", () => {
-    const cover = C.readLcov(lcov('server/a.ts', [[1, 0], [2, 3], [3, 0]]) + lcov('server/a.ts', [[1, 2]]) + 'DA:9,1\n')
-    expect([...cover.get('server/a.ts')!]).toEqual([[1, 1], [2, 1], [3, 0]])
+    const cover = C.readLcov(
+      lcov('server/a.ts', [
+        [1, 0],
+        [2, 3],
+        [3, 0],
+      ]) +
+        lcov('server/a.ts', [[1, 2]]) +
+        'DA:9,1\n',
+    )
+    expect([...cover.get('server/a.ts')!]).toEqual([
+      [1, 1],
+      [2, 1],
+      [3, 0],
+    ])
     C.addScreen({ 'server/a.ts': { 3: 1, 4: 0 }, 'src/b.tsx': { 10: 0, 11: 1 } }, cover)
     C.addScreen({ 'src/b.tsx': { 10: 0, 11: 0 } }, cover)
-    expect([...cover.get('server/a.ts')!]).toEqual([[1, 1], [2, 1], [3, 1], [4, 0]])
-    expect([...cover.get('src/b.tsx')!]).toEqual([[10, 0], [11, 1]])
+    expect([...cover.get('server/a.ts')!]).toEqual([
+      [1, 1],
+      [2, 1],
+      [3, 1],
+      [4, 0],
+    ])
+    expect([...cover.get('src/b.tsx')!]).toEqual([
+      [10, 0],
+      [11, 1],
+    ])
   })
 
   test('what counts: the code, never the tests, generated files or other kinds of file', () => {
@@ -35,7 +55,14 @@ describe('reading what the tests ran', () => {
   })
 
   test('each file counted: its lines, the ones no test runs past those let off, and the files no test loads', () => {
-    const cover = C.readLcov(lcov('server/a.ts', [[1, 1], [2, 0], [3, 0], [5, 0]]))
+    const cover = C.readLcov(
+      lcov('server/a.ts', [
+        [1, 1],
+        [2, 0],
+        [3, 0],
+        [5, 0],
+      ]),
+    )
     const text: Record<string, string> = { 'server/a.ts': 'a()\nb()\n// coverage-exempt: unreachable here\nc()\nd()' }
     const now = C.count(cover, ['server/a.ts', 'server/never.ts', 'server/gone.ts'], (f) => {
       if (f === 'server/gone.ts') throw new Error('gone')
@@ -94,7 +121,12 @@ describe('the ratchet', () => {
   const c = (missed: number[], measured = true) => ({ lines: 10, missed, measured })
 
   test('held: no file has more lines no test runs, a file no test loaded then may be anything, a covered new file comes in', () => {
-    expect(C.compare({ 'server/a.ts': c([1, 2]), 'server/b.ts': c([]), 'server/c.ts': c([1, 2, 3]), 'server/new.ts': c([]), 'server/d.ts': c([], false) }, { ...base, files: { ...base.files, 'server/d.ts': null } })).toEqual([])
+    expect(
+      C.compare(
+        { 'server/a.ts': c([1, 2]), 'server/b.ts': c([]), 'server/c.ts': c([1, 2, 3]), 'server/new.ts': c([]), 'server/d.ts': c([], false) },
+        { ...base, files: { ...base.files, 'server/d.ts': null } },
+      ),
+    ).toEqual([])
     // fewer is fine: the baseline goes down with it on the default branch
     expect(C.compare({ 'server/a.ts': c([1]) }, base)).toEqual([])
   })
@@ -120,7 +152,10 @@ describe('the ratchet', () => {
       'server/new2.ts: a new file with 2 lines no test runs (lines 1-2)',
       'server/new3.ts: a new file no test runs at all',
     ])
-    expect(C.compare({ 'server/b.ts': c([1, 2]), 'server/gone.ts': c([], false) }, base)).toEqual(['server/b.ts: 2 more lines no test runs (2 now, 0 at the baseline; lines 1-2)', 'server/gone.ts: no test runs it any more (it had 1 line no test ran)'])
+    expect(C.compare({ 'server/b.ts': c([1, 2]), 'server/gone.ts': c([], false) }, base)).toEqual([
+      'server/b.ts: 2 more lines no test runs (2 now, 0 at the baseline; lines 1-2)',
+      'server/gone.ts: no test runs it any more (it had 1 line no test ran)',
+    ])
   })
 })
 
@@ -158,7 +193,14 @@ describe('the command', () => {
 
   test('no baseline yet: it says the counts and compares nothing; --record keeps them for a clean tree only', () => {
     const w = world()
-    w.run([[1, 1], [2, 1], [3, 0]], { 'server/a.ts': { 3: 0 } })
+    w.run(
+      [
+        [1, 1],
+        [2, 1],
+        [3, 0],
+      ],
+      { 'server/a.ts': { 3: 0 } },
+    )
     expect(w.main(w.dir)).toBe(0)
     expect(w.said[0]).toBe("Coverage: 66.7% of the server's lines (2 of 3), none of the screen measured; 0 of 1 files run whole")
     expect(w.said).toContain('No coverage baseline yet: the check on the default branch records one, and from then no file may lose coverage.')
@@ -176,17 +218,25 @@ describe('the command', () => {
 
   test('held against it: the same passes, one more line no test runs fails and names it', () => {
     const w = world()
-    w.run([[1, 1], [2, 1], [3, 0]])
+    w.run([
+      [1, 1],
+      [2, 1],
+      [3, 0],
+    ])
     w.main(w.dir, '--record')
     expect(w.main(w.dir)).toBe(0)
     expect(w.said.at(-1)).toMatch(/^Coverage held: /)
-    w.run([[1, 1], [2, 0], [3, 0]])
+    w.run([
+      [1, 1],
+      [2, 0],
+      [3, 0],
+    ])
     expect(w.main(w.dir)).toBe(1)
     expect(w.said.join('\n')).toContain('Coverage fell since the baseline')
     expect(w.said.at(-1)).toBe('  server/a.ts: 1 more line no test runs (2 now, 1 at the baseline; lines 2-3)')
   })
 
-  test('where the baseline is kept: the repo\'s own .git, for every worktree; a broken one is none', () => {
+  test("where the baseline is kept: the repo's own .git, for every worktree; a broken one is none", () => {
     const w = world()
     expect(C.baselineFile(w.repo)).toBe(join(w.repo, '.git', 'shepherdr-test', 'coverage.json'))
     expect(C.baselineFile(tmp('cov-no-git'))).toEndWith(join('node_modules', '.cache', 'shepherdr-test', 'coverage.json'))

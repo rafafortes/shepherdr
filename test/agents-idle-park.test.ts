@@ -219,7 +219,9 @@ describe('the idle sweep parks', () => {
     } finally {
       src.agents.background = undefined as never
       src.agents.outbox = src.agents.outbox.filter((o) => o.key !== queued.key)
-      ;(src.agents as unknown as { typed: { id: string; key: string; text: string; at: number }[] }).typed = (src.agents as unknown as { typed: { id: string; key: string; text: string; at: number }[] }).typed.filter((o) => o.key !== nudged.key)
+      ;(src.agents as unknown as { typed: { id: string; key: string; text: string; at: number }[] }).typed = (
+        src.agents as unknown as { typed: { id: string; key: string; text: string; at: number }[] }
+      ).typed.filter((o) => o.key !== nudged.key)
     }
   })
 

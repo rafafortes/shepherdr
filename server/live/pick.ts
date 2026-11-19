@@ -15,7 +15,7 @@ export const describe = function (this: Node, tapX: number, tapY: number) {
   }
   const esc = (s: string) => (win.CSS?.escape ? win.CSS.escape(s) : s.replace(/[^\w-]/g, '\\$&'))
   // class names a build made up (css-1x2y3z, sc-AbCdE, _a1b2c3) say nothing about the code
-  const made = (c: string) => c.length > 40 || /^(css|sc|jsx|emotion|svelte)-/.test(c) || /^_?[a-zA-Z]{0,3}[-_]?[a-zA-Z0-9]{5,}$/.test(c) && /\d/.test(c) && !/-\d+$/.test(c)
+  const made = (c: string) => c.length > 40 || /^(css|sc|jsx|emotion|svelte)-/.test(c) || (/^_?[a-zA-Z]{0,3}[-_]?[a-zA-Z0-9]{5,}$/.test(c) && /\d/.test(c) && !/-\d+$/.test(c))
   const classes = (e: Element) => [...e.classList].filter((c) => !made(c) && !c.includes(':') && !c.includes('[') && !c.includes('/'))
   const idOf = (e: Element) => (e.id && !/\d{3,}|^[:«]/.test(e.id) ? e.id : '')
   const seg = (e: Element) => {

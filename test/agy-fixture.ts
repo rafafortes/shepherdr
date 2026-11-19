@@ -93,7 +93,9 @@ export interface StepRow {
 /** a conversation database as agy keeps it: its steps and generation rows (the k-th model response has the k-th row) */
 export function makeConversation(path: string, steps: StepRow[], gens: Uint8Array[] = []) {
   const d = new Database(path, { create: true })
-  d.run('CREATE TABLE steps (idx INTEGER PRIMARY KEY, step_type INTEGER NOT NULL DEFAULT 0, status INTEGER NOT NULL DEFAULT 0, has_subtrajectory NUMERIC NOT NULL DEFAULT false, metadata BLOB, error_details BLOB, permissions BLOB, task_details BLOB, render_info BLOB, step_payload BLOB, step_format INTEGER NOT NULL DEFAULT 0)')
+  d.run(
+    'CREATE TABLE steps (idx INTEGER PRIMARY KEY, step_type INTEGER NOT NULL DEFAULT 0, status INTEGER NOT NULL DEFAULT 0, has_subtrajectory NUMERIC NOT NULL DEFAULT false, metadata BLOB, error_details BLOB, permissions BLOB, task_details BLOB, render_info BLOB, step_payload BLOB, step_format INTEGER NOT NULL DEFAULT 0)',
+  )
   d.run('CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB, size INTEGER NOT NULL DEFAULT 0)')
   const insert = d.prepare('INSERT INTO steps (idx, step_type, status, error_details, step_payload) VALUES (?, ?, ?, ?, ?)')
   for (const s of steps) insert.run(s.idx, s.step_type, s.status ?? 3, s.error ?? null, s.payload ?? null)
@@ -113,8 +115,25 @@ export interface SummaryRow {
 /** agy's summaries database with one row per conversation */
 export function makeSummaries(path: string, rows: SummaryRow[]) {
   const d = new Database(path, { create: true })
-  d.run('CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, step_count INTEGER, last_modified_time TEXT, workspace_uris TEXT, status TEXT, source INTEGER, parent_conversation_id TEXT, nesting_depth INTEGER, killed INTEGER)')
-  const insert = d.prepare('INSERT INTO conversation_summaries (conversation_id, title, preview, step_count, last_modified_time, workspace_uris, status, source, parent_conversation_id, nesting_depth, killed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-  for (const r of rows) insert.run(r.id, 'title', 'preview', 1, r.last === undefined ? '2026-11-13 19:55:57.91895555+00:00' : r.last, r.uris === undefined ? '[]' : r.uris, 'CASCADE_RUN_STATUS_IDLE', 1, null, r.depth === undefined ? 0 : r.depth, r.killed ?? 0)
+  d.run(
+    'CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, step_count INTEGER, last_modified_time TEXT, workspace_uris TEXT, status TEXT, source INTEGER, parent_conversation_id TEXT, nesting_depth INTEGER, killed INTEGER)',
+  )
+  const insert = d.prepare(
+    'INSERT INTO conversation_summaries (conversation_id, title, preview, step_count, last_modified_time, workspace_uris, status, source, parent_conversation_id, nesting_depth, killed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  )
+  for (const r of rows)
+    insert.run(
+      r.id,
+      'title',
+      'preview',
+      1,
+      r.last === undefined ? '2026-11-13 19:55:57.91895555+00:00' : r.last,
+      r.uris === undefined ? '[]' : r.uris,
+      'CASCADE_RUN_STATUS_IDLE',
+      1,
+      null,
+      r.depth === undefined ? 0 : r.depth,
+      r.killed ?? 0,
+    )
   d.close()
 }

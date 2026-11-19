@@ -47,7 +47,9 @@ describe('machine link recovery', () => {
     const dir = tmp('dns-recovery')
     const root = join(import.meta.dir, '..')
     // Executed in an isolated child: never real SSH, DNS, sockets or the live store.
-    writeFileSync(join(dir, 'ssh'), `#!/usr/bin/env bun
+    writeFileSync(
+      join(dir, 'ssh'),
+      `#!/usr/bin/env bun
 import { existsSync, appendFileSync } from 'node:fs'
 appendFileSync(${JSON.stringify(join(dir, 'calls'))}, JSON.stringify(process.argv.slice(2))+'\\n')
 if (!existsSync(${JSON.stringify(join(dir, 'online'))})) { console.error('Could not resolve hostname fake.invalid'); process.exit(255) }
@@ -56,9 +58,12 @@ for await (const line of console) {
  console.log(JSON.stringify({id:f.id,result:f.method==='agent.list'?{agents:[]}:{subscribed:true}}))
  if(f.method !== 'events.subscribe') break
 }
-`)
+`,
+    )
     chmodSync(join(dir, 'ssh'), 0o700)
-    writeFileSync(join(dir, 'verify.ts'), `
+    writeFileSync(
+      join(dir, 'verify.ts'),
+      `
 import { writeFileSync, readFileSync } from 'node:fs'
 import { Agents } from ${JSON.stringify(join(root, 'server/live/agents.ts'))}
 const a = new Agents()
@@ -91,19 +96,31 @@ try {
  await a.refresh()
  if(readFileSync(${JSON.stringify(join(dir, 'calls'))}, 'utf8').trim().split('\\n').length !== beforeStop) throw Error('retried after stop')
 } finally { a.stop(); Date.now = now }
-`)
+`,
+    )
     try {
       const p = Bun.spawn([process.execPath, join(dir, 'verify.ts')], {
-        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, SHEPHERDR_HOME: join(dir, 'state'), SHEPHERDR_BOX: JSON.stringify({ label: 'fake', target: 'fake.invalid', session: 'default', herdr: 'herdr', home: '/fake', path: '/bin', os: 'Linux' }) },
-        stdout: 'pipe', stderr: 'pipe', timeout: 10_000,
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH}`,
+          SHEPHERDR_HOME: join(dir, 'state'),
+          SHEPHERDR_BOX: JSON.stringify({ label: 'fake', target: 'fake.invalid', session: 'default', herdr: 'herdr', home: '/fake', path: '/bin', os: 'Linux' }),
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+        timeout: 10_000,
       })
       const [code, err] = await Promise.all([p.exited, new Response(p.stderr).text()])
       expect({ code, err }).toEqual({ code: 0, err: '' })
-    } finally { rmSync(dir, { recursive: true, force: true }) }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test('a tunnel retries failed setup once, never overlaps, and cancels pending retry', async () => {
-    let attempts = 0, active = 0, max = 0
+    let attempts = 0,
+      active = 0,
+      max = 0
     let finish!: () => void
     const tunnel = new Tunnel(async (track, stopped) => {
       attempts++
@@ -116,10 +133,13 @@ try {
           track({ exited: Promise.resolve(), kill: resolve })
           if (stopped()) resolve()
         })
-      } finally { active-- }
+      } finally {
+        active--
+      }
     })
     try {
-      tunnel.start(); tunnel.start()
+      tunnel.start()
+      tunnel.start()
       await until(() => attempts === 2)
       tunnel.start()
       expect(max).toBe(1)
@@ -128,23 +148,36 @@ try {
       tunnel.stop()
       await Bun.sleep(6100)
       expect(attempts).toBe(2)
-    } finally { tunnel.stop() }
+    } finally {
+      tunnel.stop()
+    }
   }, 15_000)
 
   test('subscription retries a failed lookup, ignores stale close events, and cancels on stop', async () => {
-    let attempts = 0, opened = 0
+    let attempts = 0,
+      opened = 0
     const sockets: (EventEmitter & { write(s: string): void; destroy(): void })[] = []
-    const sub = new Subscription(() => undefined, () => { opened++ }, () => {
-      attempts++
-      if (attempts === 1) throw Error('name lookup failed')
-      const socket = Object.assign(new EventEmitter(), {
-        write() { queueMicrotask(() => socket.emit('data', Buffer.from(JSON.stringify({ result: {} }) + '\n'))) },
-        destroy() { socket.emit('close') },
-      })
-      sockets.push(socket)
-      queueMicrotask(() => socket.emit('connect'))
-      return socket
-    })
+    const sub = new Subscription(
+      () => undefined,
+      () => {
+        opened++
+      },
+      () => {
+        attempts++
+        if (attempts === 1) throw Error('name lookup failed')
+        const socket = Object.assign(new EventEmitter(), {
+          write() {
+            queueMicrotask(() => socket.emit('data', Buffer.from(JSON.stringify({ result: {} }) + '\n')))
+          },
+          destroy() {
+            socket.emit('close')
+          },
+        })
+        sockets.push(socket)
+        queueMicrotask(() => socket.emit('connect'))
+        return socket
+      },
+    )
     try {
       sub.set([{ type: 'pane.closed' }])
       await until(() => opened === 1)
@@ -158,16 +191,24 @@ try {
       sub.stop()
       await Bun.sleep(6100)
       expect(attempts).toBe(3)
-    } finally { sub.stop() }
+    } finally {
+      sub.stop()
+    }
   }, 15_000)
 
   test('shutdown during socket cleanup cannot open a new tunnel', async () => {
-    let release!: () => void, opened = false
+    let release!: () => void,
+      opened = false
     const t = new Tunnel(async (track, stopped) => {
-      await new Promise<void>((resolve) => { release = resolve; track({ exited: Promise.resolve(), kill: resolve }) })
+      await new Promise<void>((resolve) => {
+        release = resolve
+        track({ exited: Promise.resolve(), kill: resolve })
+      })
       if (!stopped()) opened = true
     })
-    t.start(); t.stop(); release()
+    t.start()
+    t.stop()
+    release()
     await Bun.sleep(10)
     expect(opened).toBe(false)
   })
@@ -180,9 +221,21 @@ try {
     // Access lifecycle entry points without running real probes, worker processes or SSH.
     type TestLink = typeof l
     const internals = m as unknown as { poll(link: TestLink): Promise<void>; start(link: TestLink): Promise<void> }
-    let starts = 0, kills = 0, exit!: () => void
-    internals.start = async () => { starts++ }
-    const worker = { pid: -1, kill: () => { kills++ }, exited: new Promise<void>((r) => { exit = r }) }
+    let starts = 0,
+      kills = 0,
+      exit!: () => void
+    internals.start = async () => {
+      starts++
+    }
+    const worker = {
+      pid: -1,
+      kill: () => {
+        kills++
+      },
+      exited: new Promise<void>((r) => {
+        exit = r
+      }),
+    }
     l.worker = worker
     const originalNow = Date.now
     let clock = originalNow()
@@ -217,7 +270,12 @@ try {
       healthy = false
       await internals.poll(l)
       expect(kills).toBe(1)
-    } finally { Date.now = originalNow; exit(); m.stop(); s.stop(true) }
+    } finally {
+      Date.now = originalNow
+      exit()
+      m.stop()
+      s.stop(true)
+    }
   })
   test('removing a machine cancels cached writes and late probes cannot restore it', async () => {
     const { HOME } = await import('../server/store.ts')
@@ -239,7 +297,8 @@ try {
       internal.keep(l)
       expect(internal.keepTimers.has(l.saved.label)).toBe(false)
       expect(existsSync(join(HOME, 'machines', l.saved.label, 'last.json'))).toBe(false)
-    } finally { m.stop() }
+    } finally {
+      m.stop()
+    }
   })
-
 })

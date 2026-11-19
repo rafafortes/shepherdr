@@ -40,9 +40,26 @@ async function world(name: string, kind = 'pi') {
   const dir = tmp('wait-alerts-repo')
   execSync(REPO, { cwd: dir, shell: '/bin/sh' })
   const p = await src.places.add(dir, name)
-  for (const [k, v] of [['advisor.agent', 'pi'], ['advisor.after', '2 min']]) expect(src.settings.set(k, v, { space: p.name }).ok).toBe(true)
+  for (const [k, v] of [
+    ['advisor.agent', 'pi'],
+    ['advisor.after', '2 min'],
+  ])
+    expect(src.settings.set(k, v, { space: p.name }).ok).toBe(true)
   const id = `WA-${Math.random().toString(36).slice(2, 6)}`
-  src.engine.tasks.push({ id, n: 1, project: placeId.space(p.name), base: 'main', branch: 'main', worktree: dir, title: 'Pick a store', desc: 'Keep the outbox somewhere.', by: 'test', created: Date.now(), updated: Date.now() - 60 * 60_000, told: 'work' } as never)
+  src.engine.tasks.push({
+    id,
+    n: 1,
+    project: placeId.space(p.name),
+    base: 'main',
+    branch: 'main',
+    worktree: dir,
+    title: 'Pick a store',
+    desc: 'Keep the outbox somewhere.',
+    by: 'test',
+    created: Date.now(),
+    updated: Date.now() - 60 * 60_000,
+    told: 'work',
+  } as never)
   const key = `${id}/Agent`
   src.agents.records[key] = { key, name: id, kind, cwd: dir, workspace: p.name, logs: [], started: Date.now() } as never
   return { p, id, key, coord: placeId.space(p.name) }
@@ -319,7 +336,7 @@ describe('what your alert command is told', () => {
     expect(ran).toEqual([])
   })
 
-  test("a wait with no card (a task whose agent is not running): what it waits with, under Needs you", async () => {
+  test('a wait with no card (a task whose agent is not running): what it waits with, under Needs you', async () => {
     const w = await world('wa-words')
     src.tellWaits(1000)
     src.tellWaits(11_000)
@@ -339,7 +356,11 @@ describe("every CLI's agent: its waits are told the same way", () => {
       // a question through Shepherdr (shepherdr ask, or Claude Code's and Codex's own question tools, read as cards)
       card(w.key, `ask:${kind}`, 'Which name?', ['A', 'B'], at)
       // its CLI's own screen, read from its terminal as every CLI's is (screen.ts): a permission to grant
-      src.chats.post(w.key, { id: `menu:${kind}`, at, question: { id: `menu:${kind}`, kind: 'Form', title: 'Allow: rm -rf build', terminal: true, choices: [{ label: 'Yes' }, { label: 'No' }], to: w.key } } as never)
+      src.chats.post(w.key, {
+        id: `menu:${kind}`,
+        at,
+        question: { id: `menu:${kind}`, kind: 'Form', title: 'Allow: rm -rf build', terminal: true, choices: [{ label: 'Yes' }, { label: 'No' }], to: w.key },
+      } as never)
       src.tellWaits(at)
       src.tellWaits(at + 10_000)
       src.tellWaits(at + 20_000)

@@ -48,7 +48,7 @@ describe.skipIf(!browser)('notification settings', () => {
     }
   })
 
-  test("the alert command is on Notifications at any level, written for the machine (or Everywhere), never a page of its own", async () => {
+  test('the alert command is on Notifications at any level, written for the machine (or Everywhere), never a page of its own', async () => {
     const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } })
     const store = world.stores['vm-str']
     try {
@@ -83,7 +83,10 @@ describe.skipIf(!browser)('notification settings', () => {
     const machines = Array.from({ length: 20 }, (_, i) => `machine-${i + 1}`)
     world.machines = [...world.machines, ...machines.map((m) => ({ ...world.machines[0], id: `m:${m}`, machine: m, name: m }))]
     world.places = [...world.places, ...machines.map((m) => ({ ...template, id: `p:${m}:~`, machine: m, name: 'home' }))]
-    world.sections = [...world.sections, ...machines.flatMap((m) => before.sections.filter((s) => s.level === 'm:vm-str' || s.level === template.id).map((s) => ({ ...s, machine: m, level: s.level!.replace('vm-str', m) })))]
+    world.sections = [
+      ...world.sections,
+      ...machines.flatMap((m) => before.sections.filter((s) => s.level === 'm:vm-str' || s.level === template.id).map((s) => ({ ...s, machine: m, level: s.level!.replace('vm-str', m) }))),
+    ]
     world.emit('snapshot')
     const page = await browser!.newPage({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })
     try {
@@ -121,7 +124,11 @@ describe.skipIf(!browser)('chat agent choices', () => {
       expect(await settings.textContent()).toContain('other installed CLIs cannot show replies here')
       expect(await settings.textContent()).toContain('Headless review is separate')
       for (const group of ['Tasks', 'Coordinators']) {
-        await settings.getByRole('heading', { name: group, exact: true }).locator('..').getByRole('button', { name: /^Agent:/ }).click()
+        await settings
+          .getByRole('heading', { name: group, exact: true })
+          .locator('..')
+          .getByRole('button', { name: /^Agent:/ })
+          .click()
         const choices = await page.getByRole('menuitemradio').allTextContents()
         // the one it is on leads the list
         expect(choices.map((v) => v.trim())).toEqual(['Claude Code', 'Codex', 'Pi', 'OpenCode', 'Antigravity'])
@@ -133,12 +140,17 @@ describe.skipIf(!browser)('chat agent choices', () => {
         [0, ['Codex', 'Off', 'Claude Code', 'Pi', 'OpenCode', 'Antigravity']],
         [1, ['Off', 'Claude Code', 'Codex', 'Pi', 'OpenCode', 'Antigravity']],
       ] as const) {
-        await backups.nth(i).getByRole('button', { name: /^Backup: / }).click()
+        await backups
+          .nth(i)
+          .getByRole('button', { name: /^Backup: / })
+          .click()
         expect((await page.getByRole('menuitemradio').allTextContents()).map((v) => v.trim())).toEqual([...choices])
         await page.keyboard.press('Escape')
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375)
-    } finally { await page.close() }
+    } finally {
+      await page.close()
+    }
   })
 })
 
@@ -378,7 +390,7 @@ describe.skipIf(!browser)('a task agent saved, and the tasks already waiting', (
   }
   const cli = (id: string) => world.tasks.find((t) => t.id === id)!.agent?.cli
 
-  test('a space\'s agent asks how many waiting tasks take it: Apply moves them, Only new tasks leaves them, and a change that moves none asks nothing', async () => {
+  test("a space's agent asks how many waiting tasks take it: Apply moves them, Only new tasks leaves them, and a change that moves none asks nothing", async () => {
     const tasks = structuredClone(world.tasks)
     const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } })
     try {
@@ -390,7 +402,10 @@ describe.skipIf(!browser)('a task agent saved, and the tasks already waiting', (
       await settings.getByRole('button', { name: 'Editing: herdr-projects · vm-str', exact: true }).waitFor()
       await settings.getByRole('button', { name: 'Agents', exact: true }).click()
       // the Tasks group's Agent row, whatever it reads now
-      const agent = settings.getByRole('heading', { name: 'Tasks', exact: true }).locator('..').getByRole('button', { name: /^Agent: / })
+      const agent = settings
+        .getByRole('heading', { name: 'Tasks', exact: true })
+        .locator('..')
+        .getByRole('button', { name: /^Agent: / })
       // this space's two waiting tasks (HP-203 queued, HP-204 To do) would change; HP-202 is at work and keeps its agent
       await agent.click()
       await page.getByRole('menuitemradio', { name: 'Pi', exact: true }).click()
@@ -484,7 +499,11 @@ describe.skipIf(!browser)('a task agent saved, and the tasks already waiting', (
       await page.getByRole('menuitemradio', { name: 'Everywhere', exact: true }).click()
       await settings.getByRole('button', { name: 'Editing: Everywhere', exact: true }).waitFor()
       await settings.getByRole('button', { name: 'Agents', exact: true }).click()
-      await settings.getByRole('heading', { name: 'Tasks', exact: true }).locator('..').getByRole('button', { name: /^Agent: / }).click()
+      await settings
+        .getByRole('heading', { name: 'Tasks', exact: true })
+        .locator('..')
+        .getByRole('button', { name: /^Agent: / })
+        .click()
       await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).click()
       const ask = page.getByRole('alertdialog')
       await ask.waitFor()
@@ -505,7 +524,7 @@ describe.skipIf(!browser)('a task agent saved, and the tasks already waiting', (
   })
 })
 
-describe.skipIf(!browser)("a reviewer saved, and the tasks already waiting", () => {
+describe.skipIf(!browser)('a reviewer saved, and the tasks already waiting', () => {
   /** the demo's tasks back as they were, and its Settings for the spaces this file changes */
   const reset = async () => {
     for (const store of Object.values(world.stores)) {
@@ -521,7 +540,10 @@ describe.skipIf(!browser)("a reviewer saved, and the tasks already waiting", () 
   }
   const desc = (id: string) => world.tasks.find((t) => t.id === id)!.desc ?? ''
   /** the Reviewer line of a demo task's brief */
-  const reviewerLine = (id: string) => desc(id).split('\n').find((l) => l.startsWith('- Reviewer: '))
+  const reviewerLine = (id: string) =>
+    desc(id)
+      .split('\n')
+      .find((l) => l.startsWith('- Reviewer: '))
   // the Reviewer line as the brief has it: its words, then the ask (shepherdr review <id>, then --done) for each id
   const plain = (id: string) => reviewerLineFor(CODEX_WORDS, id)
 
@@ -565,7 +587,9 @@ describe.skipIf(!browser)("a reviewer saved, and the tasks already waiting", () 
       await ask.getByText('Reviewer applied to 2 waiting tasks and 2 started tasks.', { exact: true }).waitFor()
       expect(await ask.getByRole('button', { name: 'Done', exact: true }).count()).toBe(1)
       // the picker writes the model as it lists it or by its id: either names the same model
-      expect(reviewerLine('HP-203')).toMatch(/model gpt-6-astra, its default effort\)\. Each round.*run `shepherdr review HP-203 --done`\. \(this space's setting\)$|model GPT-6-Astra, its default effort\)\. Each round.*run `shepherdr review HP-203 --done`\. \(this space's setting\)$/)
+      expect(reviewerLine('HP-203')).toMatch(
+        /model gpt-6-astra, its default effort\)\. Each round.*run `shepherdr review HP-203 --done`\. \(this space's setting\)$|model GPT-6-Astra, its default effort\)\. Each round.*run `shepherdr review HP-203 --done`\. \(this space's setting\)$/,
+      )
       // the same words for each task, and its own id in the ask
       expect(reviewerLine('HP-204')).toBe(reviewerLine('HP-203')!.replaceAll('HP-203', 'HP-204'))
       // only the Reviewer line of each brief moved
@@ -577,7 +601,11 @@ describe.skipIf(!browser)("a reviewer saved, and the tasks already waiting", () 
 
       // an advisor's agent asks nothing: it applies at once already
       await settings.getByRole('button', { name: 'Agents', exact: true }).click()
-      await settings.getByRole('heading', { name: 'Advisor', exact: true }).locator('..').getByRole('button', { name: /^Advisor: / }).click()
+      await settings
+        .getByRole('heading', { name: 'Advisor', exact: true })
+        .locator('..')
+        .getByRole('button', { name: /^Advisor: / })
+        .click()
       await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).click()
       await settled(page)
       await Bun.sleep(300)

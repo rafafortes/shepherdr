@@ -4,50 +4,63 @@ import { layout, until } from './layout.ts'
 const { browser, world, url } = await layout({ everything: true })
 
 describe.skipIf(!browser)('unified search', () => {
-  for (const width of [390, 1440]) test(`scopes, paging and exact destination message (${width}px)`, async () => {
-    const source = world.chats['LV-3/Agent']
-    const old = source.messages
-    source.messages = [...old, ...Array.from({ length: 30 }, (_, n) => ({ id: `search-proof-${n}`, who: 'agent' as const, text: `Search paging needle ${n}`, at: Date.now() + n }))]
-    const page = await browser!.newPage({ viewport: { width, height: 900 } })
-    try {
-      await page.goto(url())
-      // the screen takes its keys once mounted
-      await page.locator('textarea[name="message"]').first().waitFor()
-      await page.keyboard.press('Control+k')
-      const search = page.getByRole('combobox', { name: 'Search or jump to' })
-      await search.waitFor()
-      expect(await page.getByRole('button', { name: 'Everywhere', exact: true }).getAttribute('aria-pressed')).toBe('true')
-      await search.fill('search paging needle')
-      // the results fill in as each chat is read (a chat that never answers waits out its batch): the counts below
-      // are the whole search's, so they wait for its own report of what it read
-      await until(() => page.getByRole('status').textContent(), (s) => /Read \d+ of \d+ chats/.test(s ?? ''), 45_000)
-      const group = page.getByRole('group', { name: 'Messages', exact: true })
-      await group.getByRole('option').first().waitFor()
-      expect(await group.getByRole('option').count()).toBe(8)
-      await group.getByRole('button', { name: /Show more messages/ }).click()
-      expect(await group.getByRole('option').count()).toBe(28)
-      const hit = group.getByRole('option', { name: /^Search paging needle 29 / })
-      await hit.click()
-      expect(page.url()).toContain('task=LV-3')
-      const target = page.locator('[data-msg="search-proof-29"]')
-      await target.waitFor()
-      expect(await until(() => target.locator('[data-flash]').count(), n => n > 0)).toBeGreaterThan(0)
-      expect(await page.getByRole('searchbox', { name: 'Search in this chat' }).inputValue()).toBe('search paging needle')
-      // The old exact chat route remains, alongside a scoped entrance to unified search.
-      await page.getByRole('button', { name: 'More', exact: true }).click()
-      expect(await page.getByRole('menuitem', { name: 'Search in this chat', exact: true }).count()).toBe(1)
-      await page.getByRole('menuitem', { name: 'Search this chat and beyond' }).click()
-      await search.waitFor()
-      expect(await page.getByRole('button', { name: 'This chat', exact: true }).getAttribute('aria-pressed')).toBe('true')
-      expect(await page.getByRole('button', { name: 'Space: lilla-varlden', exact: true }).count()).toBe(1)
-      expect(await page.getByRole('button', { name: 'Machine: mac', exact: true }).count()).toBe(1)
-      await search.fill('search paging needle')
-      await group.getByRole('option').first().waitFor()
-      await page.getByRole('button', { name: 'Everywhere', exact: true }).click()
-      expect(await page.getByRole('button', { name: 'Everywhere', exact: true }).getAttribute('aria-pressed')).toBe('true')
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-    } finally { source.messages = old; await page.close() }
-  }, 90_000)
+  for (const width of [390, 1440])
+    test(`scopes, paging and exact destination message (${width}px)`, async () => {
+      const source = world.chats['LV-3/Agent']
+      const old = source.messages
+      source.messages = [...old, ...Array.from({ length: 30 }, (_, n) => ({ id: `search-proof-${n}`, who: 'agent' as const, text: `Search paging needle ${n}`, at: Date.now() + n }))]
+      const page = await browser!.newPage({ viewport: { width, height: 900 } })
+      try {
+        await page.goto(url())
+        // the screen takes its keys once mounted
+        await page.locator('textarea[name="message"]').first().waitFor()
+        await page.keyboard.press('Control+k')
+        const search = page.getByRole('combobox', { name: 'Search or jump to' })
+        await search.waitFor()
+        expect(await page.getByRole('button', { name: 'Everywhere', exact: true }).getAttribute('aria-pressed')).toBe('true')
+        await search.fill('search paging needle')
+        // the results fill in as each chat is read (a chat that never answers waits out its batch): the counts below
+        // are the whole search's, so they wait for its own report of what it read
+        await until(
+          () => page.getByRole('status').textContent(),
+          (s) => /Read \d+ of \d+ chats/.test(s ?? ''),
+          45_000,
+        )
+        const group = page.getByRole('group', { name: 'Messages', exact: true })
+        await group.getByRole('option').first().waitFor()
+        expect(await group.getByRole('option').count()).toBe(8)
+        await group.getByRole('button', { name: /Show more messages/ }).click()
+        expect(await group.getByRole('option').count()).toBe(28)
+        const hit = group.getByRole('option', { name: /^Search paging needle 29 / })
+        await hit.click()
+        expect(page.url()).toContain('task=LV-3')
+        const target = page.locator('[data-msg="search-proof-29"]')
+        await target.waitFor()
+        expect(
+          await until(
+            () => target.locator('[data-flash]').count(),
+            (n) => n > 0,
+          ),
+        ).toBeGreaterThan(0)
+        expect(await page.getByRole('searchbox', { name: 'Search in this chat' }).inputValue()).toBe('search paging needle')
+        // The old exact chat route remains, alongside a scoped entrance to unified search.
+        await page.getByRole('button', { name: 'More', exact: true }).click()
+        expect(await page.getByRole('menuitem', { name: 'Search in this chat', exact: true }).count()).toBe(1)
+        await page.getByRole('menuitem', { name: 'Search this chat and beyond' }).click()
+        await search.waitFor()
+        expect(await page.getByRole('button', { name: 'This chat', exact: true }).getAttribute('aria-pressed')).toBe('true')
+        expect(await page.getByRole('button', { name: 'Space: lilla-varlden', exact: true }).count()).toBe(1)
+        expect(await page.getByRole('button', { name: 'Machine: mac', exact: true }).count()).toBe(1)
+        await search.fill('search paging needle')
+        await group.getByRole('option').first().waitFor()
+        await page.getByRole('button', { name: 'Everywhere', exact: true }).click()
+        expect(await page.getByRole('button', { name: 'Everywhere', exact: true }).getAttribute('aria-pressed')).toBe('true')
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      } finally {
+        source.messages = old
+        await page.close()
+      }
+    }, 90_000)
 
   test('late replies in an earlier batch refresh the open results', async () => {
     const first = world.snapshot().places[0].chat
@@ -59,13 +72,18 @@ describe.skipIf(!browser)('unified search', () => {
       await page.keyboard.press('Control+k')
       await page.getByRole('combobox', { name: 'Search or jump to' }).fill('late-stream-needle')
       await page.getByRole('listbox', { name: 'Search results' }).waitFor()
-      expect(await until(() => page.getByRole('listbox', { name: 'Search results' }).getAttribute('aria-busy'), value => value === 'false')).toBe('false')
+      expect(
+        await until(
+          () => page.getByRole('listbox', { name: 'Search results' }).getAttribute('aria-busy'),
+          (value) => value === 'false',
+        ),
+      ).toBe('false')
       chat.messages.push({ id: 'late-stream-result', who: 'agent', text: 'A late-stream-needle reply', at: Date.now() })
       world.emit('chat', first)
       await page.getByRole('option', { name: /^A late-stream-needle reply/ }).waitFor()
       expect(await page.getByRole('option').count()).toBe(1)
     } finally {
-      chat.messages = chat.messages.filter(m => m.id !== 'late-stream-result')
+      chat.messages = chat.messages.filter((m) => m.id !== 'late-stream-result')
       await page.close()
     }
   }, 90_000)
@@ -92,7 +110,9 @@ describe.skipIf(!browser)('unified search', () => {
       await artifacts.getByRole('option').first().click()
       expect(page.url()).toContain('artifact=')
       expect(page.url()).toContain('mac%2Flilla-varlden')
-    } finally { await page.close() }
+    } finally {
+      await page.close()
+    }
   }, 90_000)
 
   test('a settings row is found by its key and opens its section', async () => {
@@ -112,7 +132,9 @@ describe.skipIf(!browser)('unified search', () => {
       await settings.waitFor()
       expect(await settings.getByRole('button', { name: /^Editing:/ }).getAttribute('aria-label')).toContain('Everywhere')
       expect(await settings.textContent()).toContain('Review rounds')
-    } finally { await page.close() }
+    } finally {
+      await page.close()
+    }
   }, 90_000)
 
   test('a space-level row appears only in its space and opens at that level', async () => {
@@ -131,7 +153,10 @@ describe.skipIf(!browser)('unified search', () => {
       expect(await everywhere.textContent()).toContain('Everywhere')
       await page.getByRole('button', { name: 'Space: home', exact: true }).click()
       const inSpace = group.getByRole('option').filter({ hasText: 'Review rounds' }).first()
-      await until(() => inSpace.textContent(), s => !!s && s.includes('home'))
+      await until(
+        () => inSpace.textContent(),
+        (s) => !!s && s.includes('home'),
+      )
       await inSpace.click()
       const settings = page.getByRole('region', { name: 'Settings' })
       await settings.waitFor()
@@ -154,7 +179,9 @@ describe.skipIf(!browser)('unified search', () => {
       await hit.waitFor()
       await hit.click()
       await page.getByRole('region', { name: 'How tasks work' }).waitFor()
-    } finally { await page.close() }
+    } finally {
+      await page.close()
+    }
   }, 90_000)
 
   test('the four existing result types keep their order with Settings appended last', async () => {
@@ -165,6 +192,8 @@ describe.skipIf(!browser)('unified search', () => {
       await page.keyboard.press('Control+k')
       await page.getByRole('combobox', { name: 'Search or jump to' }).waitFor()
       expect(await page.getByRole('group', { name: 'Result types' }).getByRole('button').allTextContents()).toEqual(['All types', 'Spaces', 'Tasks', 'Messages', 'Artifacts', 'Settings'])
-    } finally { await page.close() }
+    } finally {
+      await page.close()
+    }
   })
 })

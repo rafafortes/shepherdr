@@ -29,7 +29,14 @@ import {
 import { tmp } from './tmp.ts'
 
 /** an advisory straight from bun audit --json */
-const advisory = (id: number, extra: Partial<Advisory> = {}): Advisory => ({ id, title: 'Prototype Pollution', severity: 'high', vulnerable_versions: '>=1.0.0 <1.2.6', url: 'https://github.com/advisories/GHSA-test-0000', ...extra })
+const advisory = (id: number, extra: Partial<Advisory> = {}): Advisory => ({
+  id,
+  title: 'Prototype Pollution',
+  severity: 'high',
+  vulnerable_versions: '>=1.0.0 <1.2.6',
+  url: 'https://github.com/advisories/GHSA-test-0000',
+  ...extra,
+})
 
 /** a fixture repo with a lockfile, one installed MIT package, one for another platform, and a commit of its own */
 function fixture() {

@@ -22,7 +22,9 @@ type ScanOpts = import('../server/live/orphans.ts').ScanOpts
 const src = new LiveSource()
 afterAll(() => src.stop())
 /** the news is sent when the set changes; each test starts with a fresh set */
-const resetSignature = () => { (src as unknown as { orphanSignature: string }).orphanSignature = '' }
+const resetSignature = () => {
+  ;(src as unknown as { orphanSignature: string }).orphanSignature = ''
+}
 
 /** worktree root of this test, with one worktree still live and one gone */
 const opts: ScanOpts = { worktrees: '/wt', exists: (p) => p === '/wt/repo/live' }
@@ -68,7 +70,12 @@ function sourceFor(table: Row[]): Source {
 describe('what the sweep recognises', () => {
   test('a removed worktree is a leftover; a proof home under /tmp is proof-marked; both are named', () => {
     const found = O.scan(rows, opts)
-    expect(found.map((f) => [f.pid, f.kind])).toEqual([[101, 'worktree'], [102, 'proof'], [103, 'proof'], [106, 'worktree']])
+    expect(found.map((f) => [f.pid, f.kind])).toEqual([
+      [101, 'worktree'],
+      [102, 'proof'],
+      [103, 'proof'],
+      [106, 'worktree'],
+    ])
     expect(found[0].why).toBe('cwd in a removed worktree /wt/repo/gone/sub')
     expect(found[1].why).toBe('SHEPHERDR_HOME /tmp/proof-x')
     expect(found[2].why).toContain('cwd in a removed worktree')
@@ -96,7 +103,15 @@ describe('what the sweep recognises', () => {
     expect(O.underHerdr(502, byPid)).toBe(true)
     expect(O.underHerdr(101, byPid)).toBe(false)
     // a corrupt parent chain that loops must end, not spin
-    expect(O.underHerdr(700, new Map([[700, { pid: 700, ppid: 701, cmd: 'x', cwd: '' }], [701, { pid: 701, ppid: 700, cmd: 'y', cwd: '' }]]))).toBe(false)
+    expect(
+      O.underHerdr(
+        700,
+        new Map([
+          [700, { pid: 700, ppid: 701, cmd: 'x', cwd: '' }],
+          [701, { pid: 701, ppid: 700, cmd: 'y', cwd: '' }],
+        ]),
+      ),
+    ).toBe(false)
   })
 
   test('a worktree path in a command is not the herdr daemon: the real orphan stays visible', () => {
@@ -162,7 +177,10 @@ describe('the hourly sweep', () => {
     src.autoKillProof = false
     const ended: number[][] = []
     const realEnd = src.orphanEnd
-    src.orphanEnd = async (pids) => { ended.push(pids); return [] }
+    src.orphanEnd = async (pids) => {
+      ended.push(pids)
+      return []
+    }
     const news = spyOn(src as unknown as { news: (...a: unknown[]) => void }, 'news')
     try {
       const found = await src.sweepOrphans()
@@ -192,7 +210,10 @@ describe('the hourly sweep', () => {
     src.autoKillProof = true
     const ended: number[][] = []
     const realEnd = src.orphanEnd
-    src.orphanEnd = async (pids) => { ended.push(pids); return [] }
+    src.orphanEnd = async (pids) => {
+      ended.push(pids)
+      return []
+    }
     const news = spyOn(src as unknown as { news: (...a: unknown[]) => void }, 'news')
     try {
       await src.sweepOrphans()

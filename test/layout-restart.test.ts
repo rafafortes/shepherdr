@@ -117,7 +117,7 @@ describe.skipIf(!browser)('restarting an agent', () => {
     }
   }, 30_000)
 
-  test('a phone: the same item in the machine\'s menu, one tap, its answer in the row', async () => {
+  test("a phone: the same item in the machine's menu, one tap, its answer in the row", async () => {
     newSettings()
     const ctx = await browser!.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     const page = await ctx.newPage()
@@ -165,7 +165,11 @@ describe.skipIf(!browser)('restarting an agent', () => {
       const box = page.locator(`[data-composer]:has(textarea[data-chat="${chat}"])`)
       for (const save of [false, true]) {
         await box.locator('button[aria-label="Attach files and more"]').click()
-        await page.locator('[data-agent-controls]:visible').last().getByRole('menuitem', { name: /^Model:/ }).click()
+        await page
+          .locator('[data-agent-controls]:visible')
+          .last()
+          .getByRole('menuitem', { name: /^Model:/ })
+          .click()
         const sheet = page.getByRole('alertdialog')
         await sheet.locator('[data-restart]').waitFor()
         // nothing is kept for later unless a pick changes it and the switch says so
@@ -183,7 +187,6 @@ describe.skipIf(!browser)('restarting an agent', () => {
       await page.close()
     }
   }, 30_000)
-
 
   test("a waiting task's ⋯ offers Start now and Start now with…: the sheet picks what it would run on, saves nothing for others", async () => {
     const sent: { type: string; chat?: string; kind?: string; model?: string; effort?: string }[] = []
@@ -296,7 +299,9 @@ describe.skipIf(!browser)('restarting an agent', () => {
       const sonnet = page.getByRole('menuitemradio', { name: /^Sonnet/ })
       expect(await sonnet.locator('[data-note]').textContent()).toBe('Blocked')
       await sonnet.click()
-      expect(await line.textContent()).toMatch(/^Claude\/claude-sonnet-5-5 is blocked \(0 allowed\)\. It can’t restart on it: pick another model, or change the limit in Settings → Limits\. Quota: 5 h \d+%/)
+      expect(await line.textContent()).toMatch(
+        /^Claude\/claude-sonnet-5-5 is blocked \(0 allowed\)\. It can’t restart on it: pick another model, or change the limit in Settings → Limits\. Quota: 5 h \d+%/,
+      )
       expect(await sheet.getByRole('button', { name: 'Restart', exact: true }).isDisabled()).toBe(true)
       // one with room: its count, and it restarts
       await sheet.getByRole('button', { name: /^Model: / }).click()
@@ -337,7 +342,10 @@ describe.skipIf(!browser)('restarting an agent', () => {
       await sheet.getByRole('button', { name: /^Agent: / }).click()
       await page.getByRole('menuitemradio', { name: 'Claude Code', exact: true }).click()
       await sheet.getByRole('button', { name: /^Model: / }).click()
-      const note = (await page.getByRole('menuitemradio', { name: /^Sonnet/ }).locator('[data-note]').boundingBox())!
+      const note = (await page
+        .getByRole('menuitemradio', { name: /^Sonnet/ })
+        .locator('[data-note]')
+        .boundingBox())!
       const pin = (await page.getByRole('menuitemcheckbox', { name: /^(Pin|Unpin) Sonnet/ }).boundingBox())!
       expect(note.x + note.width).toBeLessThanOrEqual(pin.x)
     } finally {
@@ -366,7 +374,11 @@ describe.skipIf(!browser)('restarting an agent', () => {
     await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}&task=GTM-17`)
     const box = page.locator(`[data-composer]:has(textarea[data-chat="${chat}"])`)
     await box.locator('button[aria-label="Attach files and more"]').click()
-    await page.locator('[data-agent-controls]:visible').last().getByRole('menuitem', { name: /^Model:/ }).click()
+    await page
+      .locator('[data-agent-controls]:visible')
+      .last()
+      .getByRole('menuitem', { name: /^Model:/ })
+      .click()
     const sheet = page.getByRole('alertdialog')
     await sheet.locator('[data-restart]').waitFor()
     // no change, no switch button: the Restart path is all there is until a pick differs

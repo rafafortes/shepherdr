@@ -49,12 +49,10 @@ export function moveTo(el: HTMLElement, to: Keyframe, ms: number, easing = IOS):
   for (const a of el.getAnimations()) a.cancel()
   Object.assign(el.style, to)
   if (!ms) return Promise.resolve()
-  return el
-    .animate([from, to], { duration: ms, easing })
-    .finished.then(
-      () => undefined,
-      () => undefined,
-    )
+  return el.animate([from, to], { duration: ms, easing }).finished.then(
+    () => undefined,
+    () => undefined,
+  )
 }
 
 /* ---------- coming in and going out ---------- */
@@ -70,13 +68,27 @@ function enter(el: HTMLElement, m: Motion) {
   if (hushedNow()) return
   if (still()) return void el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' })
   const p = panelOf(el)
-  if (m === 'menu') p.animate([{ opacity: 0, transform: 'scale(.9)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: SPRING })
+  if (m === 'menu')
+    p.animate(
+      [
+        { opacity: 0, transform: 'scale(.9)' },
+        { opacity: 1, transform: 'none' },
+      ],
+      { duration: 280, easing: SPRING },
+    )
   else if (m === 'page') p.animate([{ transform: 'translateX(100%)' }, { transform: 'none' }], { duration: PUSH_MS, easing: IOS })
   else if (m === 'fade') p.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' })
   else {
     if (p !== el) el.animate([{ backgroundColor: 'transparent' }, {}], { duration: m === 'sheet' ? SHEET_MS : 250, easing: 'ease-out' })
     if (m === 'sheet') p.animate([{ transform: 'translateY(100%)' }, { transform: 'none' }], { duration: SHEET_MS, easing: IOS })
-    else p.animate([{ opacity: 0, transform: 'translateY(8px) scale(.97)' }, { opacity: 1, transform: 'none' }], { duration: 300, easing: SPRING })
+    else
+      p.animate(
+        [
+          { opacity: 0, transform: 'translateY(8px) scale(.97)' },
+          { opacity: 1, transform: 'none' },
+        ],
+        { duration: 300, easing: SPRING },
+      )
   }
 }
 
@@ -109,7 +121,17 @@ function ghostOf(el: HTMLElement) {
     box.style.cssText = `width:${f.offsetWidth}px;height:${f.offsetHeight}px`
     f.replaceWith(box)
   }
-  Object.assign(copy.style, { position: 'absolute', inset: 'auto', top: `${r.top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${r.height}px`, margin: '0', transform: 'none', translate: 'none' })
+  Object.assign(copy.style, {
+    position: 'absolute',
+    inset: 'auto',
+    top: `${r.top}px`,
+    left: `${r.left}px`,
+    width: `${r.width}px`,
+    height: `${r.height}px`,
+    margin: '0',
+    transform: 'none',
+    translate: 'none',
+  })
   return { copy, scrolled }
 }
 
@@ -249,14 +271,26 @@ export function useFlip(ref: RefObject<HTMLElement | null>, reset: unknown) {
       const s = at.get(el.dataset.flip!)!
       const from = was.get(el.dataset.flip!)
       if (from === undefined) {
-        el.animate([{ opacity: 0, transform: 'scale(.98)' }, { opacity: 1, transform: 'none' }], { id: 'flip-in', duration: 260, easing: 'ease-out' })
+        el.animate(
+          [
+            { opacity: 0, transform: 'scale(.98)' },
+            { opacity: 1, transform: 'none' },
+          ],
+          { id: 'flip-in', duration: 260, easing: 'ease-out' },
+        )
         continue
       }
       const dy = from.y + (from.el === el ? shown.get(el)! : 0) + lift - s.y
       if (Math.abs(dy) <= 1) continue
       // gliding, a row hides what it passes over; one that changed its group passes over the rest
       const look: Keyframe = { ...(clear(getComputedStyle(el).backgroundColor) && { backgroundColor: ground }), ...(from.el !== el && { zIndex: 1 }) }
-      el.animate([{ transform: `translateY(${dy}px)`, ...look }, { transform: 'none', ...look }], { id: 'flip', duration: FLIP_MS, easing: IOS })
+      el.animate(
+        [
+          { transform: `translateY(${dy}px)`, ...look },
+          { transform: 'none', ...look },
+        ],
+        { id: 'flip', duration: FLIP_MS, easing: IOS },
+      )
     }
     // a row gone (archived, or into a group cut short): a still copy fades where it was
     for (const [k, s] of was) {
@@ -296,7 +330,13 @@ export function useArrive(ref: RefObject<HTMLElement | null>, reset: unknown) {
     if (!was || still()) return
     // only what comes after the last row there was
     for (let i = rows.length - 1; i >= 0 && !was.has(rows[i].dataset.arrive!); i--)
-      rows[i].animate([{ opacity: 0, transform: 'translateY(10px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 300, easing: SPRING })
+      rows[i].animate(
+        [
+          { opacity: 0, transform: 'translateY(10px) scale(.98)' },
+          { opacity: 1, transform: 'none' },
+        ],
+        { duration: 300, easing: SPRING },
+      )
   })
 }
 

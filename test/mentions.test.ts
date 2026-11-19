@@ -53,12 +53,7 @@ describe('what is typed in the box', () => {
   test('what Send wrote is what the log hands back: expanding it again changes nothing', () => {
     const once = expand('ask @SHE-12 about #gtm', [...picked])
     expect(expand(once, [...picked])).toBe(once)
-    expect(split(once)).toEqual([
-      { text: 'ask ' },
-      { mention: { kind: 'task', ref: 'SHE-12', id: 'SHE-12' } },
-      { text: ' about ' },
-      { mention: { kind: 'space', name: 'gtm', id: space.id } },
-    ])
+    expect(split(once)).toEqual([{ text: 'ask ' }, { mention: { kind: 'task', ref: 'SHE-12', id: 'SHE-12' } }, { text: ' about ' }, { mention: { kind: 'space', name: 'gtm', id: space.id } }])
   })
 })
 
@@ -121,8 +116,7 @@ describe('a quote of a message with a mention', () => {
   })
 })
 
-const task = (id: string, status: Task['status'], extra: Partial<Task> = {}): Task =>
-  ({ id, name: `Task ${id}`, status, place: 'p:vm-str:gtm', state: '', on: 'pi', created: '', ...extra }) as Task
+const task = (id: string, status: Task['status'], extra: Partial<Task> = {}): Task => ({ id, name: `Task ${id}`, status, place: 'p:vm-str:gtm', state: '', on: 'pi', created: '', ...extra }) as Task
 
 describe('the lists', () => {
   test('tasks: waiting on you and at work first, Done last, archived never', () => {

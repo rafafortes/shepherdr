@@ -5,7 +5,13 @@
 import { describe, expect, test } from 'bun:test'
 import { repo, until, world } from './engine-world.ts'
 
-interface Started { key: string; kind: string; model?: string; effort?: string; set?: { kind: string; model?: string; effort?: string } }
+interface Started {
+  key: string
+  kind: string
+  model?: string
+  effort?: string
+  set?: { kind: string; model?: string; effort?: string }
+}
 
 function capture(w: ReturnType<typeof world>) {
   const specs: Started[] = []

@@ -6,13 +6,37 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 import * as store from '../server/store.ts'
-import { HOUR, harnessOf, KEEP_RUNOUTS, KEEP_USAGE, modelKey, modelOf, outState, providerOf, providerPart, rekey, SAVE_AFTER_MAX, SAVE_AFTER_MIN, UsageLedger, VERSION, type RunOut } from '../server/live/usage-ledger.ts'
+import {
+  HOUR,
+  harnessOf,
+  KEEP_RUNOUTS,
+  KEEP_USAGE,
+  modelKey,
+  modelOf,
+  outState,
+  providerOf,
+  providerPart,
+  rekey,
+  SAVE_AFTER_MAX,
+  SAVE_AFTER_MIN,
+  UsageLedger,
+  VERSION,
+  type RunOut,
+} from '../server/live/usage-ledger.ts'
 
 // every time is read from the clock, so the windows are the same whenever the suite runs
 const NOW = Date.now()
 const ago = (h: number) => NOW - h * HOUR
 const call = (id: string, h: number, tokens = 100, cost?: number) => ({ id, at: ago(h) + 1000, tokens, ...(cost !== undefined ? { cost } : {}) })
-const runOut = (chat: string, h: number, extra: Partial<RunOut> = {}): RunOut => ({ at: ago(h), key: 'pi.opencode-go/deepseek-v4.1-flash', chat, role: 'task', reason: 'Out of allowance', words: 'x', ...extra })
+const runOut = (chat: string, h: number, extra: Partial<RunOut> = {}): RunOut => ({
+  at: ago(h),
+  key: 'pi.opencode-go/deepseek-v4.1-flash',
+  chat,
+  role: 'task',
+  reason: 'Out of allowance',
+  words: 'x',
+  ...extra,
+})
 
 describe('the provider and the model of a call', () => {
   test('a single-account CLI is its own provider: Claude Code, Codex and agy each keep their own rows', () => {
@@ -328,7 +352,16 @@ describe('a usage.json from before the harness keys', () => {
 
   test('a file that is version 2 keeps its counts and positions, and a new one starts at version 2', () => {
     const dir = tmp('ledger-v2')
-    write(dir, { version: VERSION, usage: { 'claude/claude-opus-5-5': { [Math.floor(NOW / HOUR)]: { tokens: 5, calls: 1 } } }, seen: {}, runOuts: [], quotas: {}, alerts: {}, files: { 'f.jsonl': { ino: 1, offset: 9 } }, backfilled: 5 })
+    write(dir, {
+      version: VERSION,
+      usage: { 'claude/claude-opus-5-5': { [Math.floor(NOW / HOUR)]: { tokens: 5, calls: 1 } } },
+      seen: {},
+      runOuts: [],
+      quotas: {},
+      alerts: {},
+      files: { 'f.jsonl': { ino: 1, offset: 9 } },
+      backfilled: 5,
+    })
     const l = new UsageLedger(dir)
     expect(l.byKey(0).get('claude/claude-opus-5-5')).toEqual({ tokens: 5, calls: 1 })
     expect(l.position('f.jsonl')).toEqual({ ino: 1, offset: 9 })
@@ -430,11 +463,18 @@ describe('writing usage.json: one write per delay under a trickle, compact and c
     const dir = tmp('ledger-compact')
     const recent = Math.floor(NOW / HOUR)
     const oldHour = Math.floor((NOW - 30 * 24 * HOUR) / HOUR) // kept on load (30 days), dropped when flushed 10 days later
-    writeFileSync(join(dir, 'usage.json'), JSON.stringify({
-      version: VERSION,
-      usage: { 'k/old': { [oldHour]: { tokens: 1, calls: 1 } }, 'k/new': { [recent]: { tokens: 2, calls: 1 } } },
-      seen: {}, runOuts: [], quotas: {}, alerts: {}, files: {},
-    }))
+    writeFileSync(
+      join(dir, 'usage.json'),
+      JSON.stringify({
+        version: VERSION,
+        usage: { 'k/old': { [oldHour]: { tokens: 1, calls: 1 } }, 'k/new': { [recent]: { tokens: 2, calls: 1 } } },
+        seen: {},
+        runOuts: [],
+        quotas: {},
+        alerts: {},
+        files: {},
+      }),
+    )
     const l = new UsageLedger(dir)
     l.count('A/Agent', 'k/new', { id: 'fresh', at: NOW + 1000, tokens: 3 }, NOW)
     expect(l.byKey(NOW - HOUR).get('k/new')!.tokens).toBe(5)

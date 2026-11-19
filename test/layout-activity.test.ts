@@ -32,7 +32,12 @@ describe.skipIf(!browser)('activity', () => {
     expect(first.y).toBeLessThan(reply.y)
     // a failed run shows its failure; a tap opens its command and its output at once
     const failed = rows.nth(1)
-    expect(await failed.locator('svg').evaluate((s) => getComputedStyle(s).fill)).not.toBe(await rows.nth(2).locator('svg').evaluate((s) => getComputedStyle(s).fill))
+    expect(await failed.locator('svg').evaluate((s) => getComputedStyle(s).fill)).not.toBe(
+      await rows
+        .nth(2)
+        .locator('svg')
+        .evaluate((s) => getComputedStyle(s).fill),
+    )
     await failed.tap()
     expect(await failed.getAttribute('aria-expanded')).toBe('true')
     await block.getByText('bun test webhook 2>&1 | tail -20').waitFor()
@@ -42,7 +47,12 @@ describe.skipIf(!browser)('activity', () => {
     await block.getByRole('button', { name: /^Edited webhook\.test\.ts/ }).tap()
     const plus = block.locator('pre span', { hasText: "+test('accepts a re-encoded body'" })
     await plus.waitFor()
-    expect(await plus.evaluate((e) => getComputedStyle(e).color)).not.toBe(await block.locator('pre span', { hasText: '@@' }).first().evaluate((e) => getComputedStyle(e).color))
+    expect(await plus.evaluate((e) => getComputedStyle(e).color)).not.toBe(
+      await block
+        .locator('pre span', { hasText: '@@' })
+        .first()
+        .evaluate((e) => getComputedStyle(e).color),
+    )
     // the rest
     await block.locator('[data-more]').tap()
     await block.locator('[data-row] > button', { hasText: 'Asked a subagent to review the signature fix' }).waitFor()

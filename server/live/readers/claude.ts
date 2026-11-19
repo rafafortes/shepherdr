@@ -15,8 +15,7 @@ import type { AgentRuntime } from '../../../shared/types.ts'
 type Json = any
 
 // text Claude Code puts in a user line that the human did not type
-const INJECTED =
-  /^\s*(<(local-command-|system-reminder|bash-|task-notification|user-memory-input|user-prompt-submit-hook)|Caveat: The messages below|\[Request interrupted)/
+const INJECTED = /^\s*(<(local-command-|system-reminder|bash-|task-notification|user-memory-input|user-prompt-submit-hook)|Caveat: The messages below|\[Request interrupted)/
 
 // a reply's message id is on every line of it, so we join split lines by id; a few ids are plenty to remember
 const KEEP_REPLIES = 20
@@ -83,7 +82,10 @@ function slashCommand(t: string): string | undefined {
 function commandOutput(t: string): string | undefined {
   const m = /<local-command-(stdout|stderr)>([\s\S]*?)<\/local-command-\1>/.exec(t)
   if (!m) return undefined
-  const out = m[2].replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\s+$/, '').replace(/^\s*\n/, '')
+  const out = m[2]
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+    .replace(/\s+$/, '')
+    .replace(/^\s*\n/, '')
   if (!out.trim()) return ''
   // a drawing or table keeps its lines and columns
   return out.includes('\n') ? `\`\`\`\n${out}\n\`\`\`` : out.trim()
@@ -97,7 +99,12 @@ function switchedRuntime(c: string, t: number, file: string, offset: number): Lo
   const text = m[1]!.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').trim()
   let runtime: AgentRuntime | undefined
   if (text.startsWith('Set model to ')) {
-    const name = text.slice('Set model to '.length).replace(/\s+and saved.*$/s, '').replace(/`/g, '').replace(/\s*\([^)]*\)\s*$/, '').trim()
+    const name = text
+      .slice('Set model to '.length)
+      .replace(/\s+and saved.*$/s, '')
+      .replace(/`/g, '')
+      .replace(/\s*\([^)]*\)\s*$/, '')
+      .trim()
     const model = findModel('claude', name)
     if (model) runtime = { model: model.id, source: 'session', at: t }
   } else {
@@ -112,11 +119,13 @@ function cleanText(t: string): string {
   const cmd = slashCommand(t)
   if (cmd !== undefined) return cmd
   if (INJECTED.test(t)) return ''
-  return t
-    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
-    // a long paste is kept in tags (the terminal shows "[Pasted text #1]"): show what was pasted
-    .replace(/<\/?pasted_content\b[^>]*>\n?/g, '')
-    .trim()
+  return (
+    t
+      .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+      // a long paste is kept in tags (the terminal shows "[Pasted text #1]"): show what was pasted
+      .replace(/<\/?pasted_content\b[^>]*>\n?/g, '')
+      .trim()
+  )
 }
 
 // Claude Code may show a message the agent writes mid-turn (before a tool call) as a short update in other words
@@ -126,8 +135,7 @@ function cleanText(t: string): string {
 // the only mark trusted: with that flag, a CLI run on a model of another family writes that model's own reasoning as a
 // thinking block with an empty signature, and nobody's reasoning belongs in the chat.
 const NARRATION = /bmFycmF0aW9u|5hcnJhdGlvb|uYXJyYXRpb2/
-const narration = (b: Json): boolean =>
-  b?.type === 'thinking' && typeof b.thinking === 'string' && !!b.thinking.trim() && NARRATION.test(String(b.signature ?? '').slice(0, 80))
+const narration = (b: Json): boolean => b?.type === 'thinking' && typeof b.thinking === 'string' && !!b.thinking.trim() && NARRATION.test(String(b.signature ?? '').slice(0, 80))
 
 /** the text of user content (a string or blocks), or '' when it holds tool results or only injected text */
 function userContent(c: Json): string {
@@ -140,10 +148,7 @@ function userContent(c: Json): string {
     .join('\n\n')
 }
 
-const interrupted = (c: Json) =>
-  (typeof c === 'string' ? [c] : Array.isArray(c) ? c.map((b) => b?.text) : []).some(
-    (t) => typeof t === 'string' && t.startsWith('[Request interrupted'),
-  )
+const interrupted = (c: Json) => (typeof c === 'string' ? [c] : Array.isArray(c) ? c.map((b) => b?.text) : []).some((t) => typeof t === 'string' && t.startsWith('[Request interrupted'))
 
 /** a line the human typed: not meta, not a subagent, not a summary, not something another part wrote */
 function isHumanLine(l: Json): boolean {
@@ -181,9 +186,7 @@ function questionItems(input: Json): CliQuestionItem[] {
   return qs.map((q) => ({
     header: typeof q?.header === 'string' ? q.header : undefined,
     question: String(q?.question ?? ''),
-    options: (Array.isArray(q?.options) ? q.options : []).map((o: Json) =>
-      typeof o === 'string' ? { label: o } : { label: String(o?.label ?? ''), description: o?.description },
-    ),
+    options: (Array.isArray(q?.options) ? q.options : []).map((o: Json) => (typeof o === 'string' ? { label: o } : { label: String(o?.label ?? ''), description: o?.description })),
     multiSelect: !!q?.multiSelect,
     // Claude Code always offers "Other" with a typed answer
     allowCustom: true,
@@ -321,9 +324,7 @@ export class ClaudeReader implements Reader {
         const blocks: Json[] = Array.isArray(m.content) ? m.content : []
         if (!s.replies.has(id)) turnStart(`start-${id}`, t)
         // the reply's words, and an update shown in place of what it wrote before a call, which is its words too
-        const texts = blocks
-          .filter((b) => (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) || narration(b))
-          .map((b) => (b.type === 'text' ? b.text : b.thinking).trim())
+        const texts = blocks.filter((b) => (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) || narration(b)).map((b) => (b.type === 'text' ? b.text : b.thinking).trim())
         if (texts.length) {
           const all = [...(s.replies.get(id) ?? []), ...texts]
           s.replies.set(id, all)
@@ -363,7 +364,14 @@ export class ClaudeReader implements Reader {
         }
         // the API failed for good (Claude Code retried it already): the turn is over
         if (l.isApiErrorMessage) {
-          out.push({ kind: 'error', id: `error-${l.uuid ?? id}`, at: t, text: texts.join('\n'), code: typeof l.error === 'string' ? l.error : undefined, status: typeof l.apiErrorStatus === 'number' ? l.apiErrorStatus : undefined })
+          out.push({
+            kind: 'error',
+            id: `error-${l.uuid ?? id}`,
+            at: t,
+            text: texts.join('\n'),
+            code: typeof l.error === 'string' ? l.error : undefined,
+            status: typeof l.apiErrorStatus === 'number' ? l.apiErrorStatus : undefined,
+          })
           turnEnd(`turn-${id}`, t)
         }
       } else if (l.type === 'system' && l.subtype === 'turn_duration') {

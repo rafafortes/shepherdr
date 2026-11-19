@@ -76,7 +76,8 @@ export function timeRule(text: string): string {
     .map((l) => (/^FREQ=/i.test(l) ? `RRULE:${l}` : l).toUpperCase())
   if (!lines.some((l) => l.startsWith('RRULE:'))) throw new Error(howTo(t))
   if (lines.filter((l) => l.startsWith('RRULE:')).length > 1) throw new Error('One RRULE line only: write the rest as BY… parts of it, or as two automations.')
-  if (lines.some((l) => !/^(DTSTART|RRULE|EXDATE|RDATE)[:;]/.test(l))) throw new Error(`Only DTSTART, RRULE, EXDATE and RDATE lines: ${lines.find((l) => !/^(DTSTART|RRULE|EXDATE|RDATE)[:;]/.test(l))}`)
+  if (lines.some((l) => !/^(DTSTART|RRULE|EXDATE|RDATE)[:;]/.test(l)))
+    throw new Error(`Only DTSTART, RRULE, EXDATE and RDATE lines: ${lines.find((l) => !/^(DTSTART|RRULE|EXDATE|RDATE)[:;]/.test(l))}`)
   // wall-clock times, in time.zone: no Z, no TZID
   lines = lines.map((l) => l.replace(/;TZID=[^:]+/, '').replace(/(\d{8}T\d{6})Z/g, '$1'))
   if (!lines.some((l) => l.startsWith('DTSTART'))) lines.unshift(ANCHOR)
@@ -166,10 +167,23 @@ type Options = ReturnType<typeof parse>['rrules'] extends () => (infer R extends
 /** a rule every so many minutes or hours that keeps only some days (BYDAY, BYMONTHDAY, BYMONTH): rrule gets these
  *  wrong (a weekend-only one never runs, a month goes missing, a DTSTART on a day left out loops for ever), so its days
  *  are kept here and rrule only finds the times */
-const subDaily = (o: Options) => (o.freq === RRule.MINUTELY || o.freq === RRule.HOURLY) && !!(o.byweekday?.length || o.bynweekday?.length || o.bymonthday?.length || o.bynmonthday?.length || o.bymonth?.length)
+const subDaily = (o: Options) =>
+  (o.freq === RRule.MINUTELY || o.freq === RRule.HOURLY) && !!(o.byweekday?.length || o.bynweekday?.length || o.bymonthday?.length || o.bynmonthday?.length || o.bymonth?.length)
 
 /** a rule without its day parts */
-const timesOnly = (kept: string) => kept.split(' ').map((l) => (l.startsWith('RRULE:') ? `RRULE:${l.slice(6).split(';').filter((p) => !/^(BYDAY|BYMONTHDAY|BYMONTH)=/.test(p)).join(';')}` : l)).join(' ')
+const timesOnly = (kept: string) =>
+  kept
+    .split(' ')
+    .map((l) =>
+      l.startsWith('RRULE:')
+        ? `RRULE:${l
+            .slice(6)
+            .split(';')
+            .filter((p) => !/^(BYDAY|BYMONTHDAY|BYMONTH)=/.test(p))
+            .join(';')}`
+        : l,
+    )
+    .join(' ')
 
 /** does a rule's day parts (BYMONTH, BYDAY, BYMONTHDAY) keep this day */
 function dayKept(d: Date, o: Options) {
@@ -239,7 +253,9 @@ export function timeWords(kept: string | undefined, zone: string, now = Date.now
   const r = set.rrules()[0]
   const o = r.options
   const orig = r.origOptions
-  const days = (orig.byweekday ? ([] as (Weekday | number | string)[]).concat(orig.byweekday as Weekday) : []).map((x) => (typeof x === 'number' ? { weekday: x, n: undefined } : typeof x === 'string' ? { weekday: RRule[x as 'MO'].weekday, n: undefined } : { weekday: x.weekday, n: x.n }))
+  const days = (orig.byweekday ? ([] as (Weekday | number | string)[]).concat(orig.byweekday as Weekday) : []).map((x) =>
+    typeof x === 'number' ? { weekday: x, n: undefined } : typeof x === 'string' ? { weekday: RRule[x as 'MO'].weekday, n: undefined } : { weekday: x.weekday, n: x.n },
+  )
   const plain = days.filter((d) => !d.n).map((d) => d.weekday)
   const nth = days.filter((d) => d.n)
   const hours = list(orig.byhour)
@@ -270,8 +286,10 @@ export function timeWords(kept: string | undefined, zone: string, now = Date.now
   } else if (!odd && freq === RRule.MONTHLY) {
     const of = n === 1 ? 'of the month' : n === 2 ? 'of every other month' : `of every ${n} months`
     if (nth.length && !setpos.length && !monthdays.length) words = `The ${and(nth.map((d) => `${ORD(d.n!)} ${DAY_NAMES[d.weekday]}`))} ${of} at ${times()}`
-    else if (setpos.length === 1 && plain.length && !monthdays.length) words = `The ${ORD(setpos[0])} ${plain.length === 5 && daysWords(plain) === 'Monday to Friday' ? 'weekday' : plain.length === 1 ? DAY_NAMES[plain[0]] : `of ${daysWords(plain)}`} ${of} at ${times()}`
-    else if (monthdays.length && !plain.length && !nth.length && !setpos.length) words = `The ${and(monthdays.map((d) => (d < 0 ? (d === -1 ? 'last day' : `${ORD(-d)} last day`) : ORD(d))))} ${of} at ${times()}`
+    else if (setpos.length === 1 && plain.length && !monthdays.length)
+      words = `The ${ORD(setpos[0])} ${plain.length === 5 && daysWords(plain) === 'Monday to Friday' ? 'weekday' : plain.length === 1 ? DAY_NAMES[plain[0]] : `of ${daysWords(plain)}`} ${of} at ${times()}`
+    else if (monthdays.length && !plain.length && !nth.length && !setpos.length)
+      words = `The ${and(monthdays.map((d) => (d < 0 ? (d === -1 ? 'last day' : `${ORD(-d)} last day`) : ORD(d))))} ${of} at ${times()}`
   }
   if (!words) {
     // rrule's own words, with what they leave out: the minutes, and which of each period's matches
@@ -351,25 +369,34 @@ export function eventRules(text: string): EventRule[] {
   const quoted: string[] = []
   const bare = t.replace(/"([^"]*)"|“([^”]*)”/g, (_, a, b) => `\u0000${quoted.push(a ?? b) - 1}\u0000`)
   const back = (x: string) => x.replace(/\u0000(\d+)\u0000/g, (_, i) => quoted[+i])
-  return bare.split(/\s*[,;]\s*|\s+or\s+|\s+and\s+/).filter(Boolean).map((part) => {
-    const filters: Record<string, string> = {}
-    const words: string[] = []
-    for (const m of part.matchAll(/(\w+)=(\S+)|(\S+)/g)) {
-      if (m[1]) filters[m[1].toLowerCase()] = back(m[2])
-      else words.push(back(m[3]))
-    }
-    const name = words.join(' ').toLowerCase()
-    const event = ALIASES[name]
-    if (!event) throw new Error(`No event "${name || part}": pick from all news, ${EVENTS.join(', ')}; each may have space=, branch= and title= filters`)
-    const odd = Object.keys(filters).find((k) => !['space', 'branch', 'title'].includes(k))
-    if (odd) throw new Error(`No filter ${odd}=: only space=, branch= and title=`)
-    return { event, ...filters } as EventRule
-  })
+  return bare
+    .split(/\s*[,;]\s*|\s+or\s+|\s+and\s+/)
+    .filter(Boolean)
+    .map((part) => {
+      const filters: Record<string, string> = {}
+      const words: string[] = []
+      for (const m of part.matchAll(/(\w+)=(\S+)|(\S+)/g)) {
+        if (m[1]) filters[m[1].toLowerCase()] = back(m[2])
+        else words.push(back(m[3]))
+      }
+      const name = words.join(' ').toLowerCase()
+      const event = ALIASES[name]
+      if (!event) throw new Error(`No event "${name || part}": pick from all news, ${EVENTS.join(', ')}; each may have space=, branch= and title= filters`)
+      const odd = Object.keys(filters).find((k) => !['space', 'branch', 'title'].includes(k))
+      if (odd) throw new Error(`No filter ${odd}=: only space=, branch= and title=`)
+      return { event, ...filters } as EventRule
+    })
 }
 
 /** event rules on one line, as eventRules reads them back */
 export const eventsText = (rules: EventRule[] | undefined) =>
-  !rules?.length ? 'none' : rules.map((r) => [r.event === 'news' ? 'all news' : r.event, ...(['space', 'branch', 'title'] as const).filter((k) => r[k]).map((k) => `${k}=${/[\s,;]/.test(r[k]!) ? `"${r[k]}"` : r[k]}`)].join(' ')).join(', ')
+  !rules?.length
+    ? 'none'
+    : rules
+        .map((r) =>
+          [r.event === 'news' ? 'all news' : r.event, ...(['space', 'branch', 'title'] as const).filter((k) => r[k]).map((k) => `${k}=${/[\s,;]/.test(r[k]!) ? `"${r[k]}"` : r[k]}`)].join(' '),
+        )
+        .join(', ')
 
 const EVENT_WORDS: Record<TriggerEvent | 'news', string> = {
   news: 'any news',
@@ -391,7 +418,14 @@ export function eventWords(rules: EventRule[] | undefined): string {
   return `When ${rules.map(one).join(' or ')}`
 }
 
-const glob = (pat: string, s: string) => new RegExp(`^${pat.split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`, 'i').test(s)
+const glob = (pat: string, s: string) =>
+  new RegExp(
+    `^${pat
+      .split('*')
+      .map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+      .join('.*')}$`,
+    'i',
+  ).test(s)
 
 /** does something that happened match one of the rules */
 export function matches(rules: EventRule[] | undefined, h: Happened): boolean {
@@ -425,7 +459,17 @@ export function fromSchedule(schedule: string): string | undefined {
     if (s.match(ONCE)) return timeRule(s)
     if ((m = s.match(/^(daily|weekdays|weekends|[a-z,]+)\s+(\d{1,2}):(\d{2})$/))) {
       const [, d, hh, mm] = m
-      const days = d === 'daily' ? '' : d === 'weekdays' ? 'MO,TU,WE,TH,FR' : d === 'weekends' ? 'SA,SU' : d.split(',').map((x) => DAY_CODES[['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(x.slice(0, 3))]).join(',')
+      const days =
+        d === 'daily'
+          ? ''
+          : d === 'weekdays'
+            ? 'MO,TU,WE,TH,FR'
+            : d === 'weekends'
+              ? 'SA,SU'
+              : d
+                  .split(',')
+                  .map((x) => DAY_CODES[['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(x.slice(0, 3))])
+                  .join(',')
       if (days.includes('undefined')) return undefined
       return timeRule(`FREQ=${days ? 'WEEKLY' : 'DAILY'};${days ? `BYDAY=${days};` : ''}BYHOUR=${+hh};BYMINUTE=${+mm}`)
     }
@@ -452,6 +496,13 @@ function fromCron(expr: string) {
   }
   const [mins, hours, days, months, wdays] = [values(mi, 0, 59), values(h, 0, 23), values(dom, 1, 31), values(mon, 1, 12), values(dow, 0, 7)]
   const freq = !mins ? 'MINUTELY' : !hours ? 'HOURLY' : 'DAILY'
-  const parts = [`FREQ=${freq}`, mins && `BYMINUTE=${mins}`, hours && `BYHOUR=${hours}`, days && `BYMONTHDAY=${days}`, months && `BYMONTH=${months}`, wdays && `BYDAY=${[...new Set(wdays.map((d) => DAY_CODES[d % 7]))].join(',')}`]
+  const parts = [
+    `FREQ=${freq}`,
+    mins && `BYMINUTE=${mins}`,
+    hours && `BYHOUR=${hours}`,
+    days && `BYMONTHDAY=${days}`,
+    months && `BYMONTH=${months}`,
+    wdays && `BYDAY=${[...new Set(wdays.map((d) => DAY_CODES[d % 7]))].join(',')}`,
+  ]
   return timeRule(parts.filter(Boolean).join(';'))
 }

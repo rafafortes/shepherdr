@@ -25,7 +25,13 @@ describe('grouping tasks', () => {
     expect(withScheduled.map((g) => g.label)).toEqual(['Needs you', 'Ready', 'Merging', 'Working', 'Scheduled', 'Queued', 'To do', 'Done'])
     expect(withScheduled.find((g) => g.key === 'scheduled')!.tasks.map((t) => t.id)).toEqual(['HP-205'])
     for (const g of gs) expect(new Set(g.tasks.map((t) => t.status)).size).toBe(1)
-    expect(groupTasks(ps, ts.filter((t) => t.status === 'need'), 'status').map((g) => [g.label, g.tasks.length])).toEqual([
+    expect(
+      groupTasks(
+        ps,
+        ts.filter((t) => t.status === 'need'),
+        'status',
+      ).map((g) => [g.label, g.tasks.length]),
+    ).toEqual([
       ['Needs you', ts.filter((t) => t.status === 'need' && !t.archived).length],
       ['To do', 0],
     ])
@@ -64,7 +70,10 @@ describe('grouping tasks', () => {
       ['vm-str', ['GTM-14', 'GTM-16', 'HP-201', 'GTM-15', 'GTM-18', 'HP-202', 'HP-203', 'GTM-17', 'HP-204', 'GTM-12']],
       ['mac', ['LV-3', 'LV-4']],
     ])
-    expect(gs.map((g) => [g.kind, names(g)])).toEqual([['machine', 'project'], ['machine', 'project']])
+    expect(gs.map((g) => [g.kind, names(g)])).toEqual([
+      ['machine', 'project'],
+      ['machine', 'project'],
+    ])
     // a machine shown by a name of its own ("Mac mini" for the key mac) says that name
     const named = ms.map((m) => (m.id === 'm:mac' ? { ...m, name: 'Mac mini' } : m))
     expect(groupTasks(ps, ts, 'machine', 0, named).at(-1)!.label).toBe('Mac mini')
@@ -111,7 +120,11 @@ describe('grouping tasks', () => {
   test('Done tasks show newest finished first, by status and by project; one without a time goes last', () => {
     const d = (id: string, doneAt?: number) => ({ ...ts[0], id, status: 'done' as const, doneAt })
     const list = [d('D-old', 1), ts[0], d('D-none'), d('D-new', 3), d('D-mid', 2)]
-    expect(groupTasks(ps, list, 'status').find((g) => g.key === 'done')!.tasks.map((t) => t.id)).toEqual(['D-new', 'D-mid', 'D-old', 'D-none'])
+    expect(
+      groupTasks(ps, list, 'status')
+        .find((g) => g.key === 'done')!
+        .tasks.map((t) => t.id),
+    ).toEqual(['D-new', 'D-mid', 'D-old', 'D-none'])
     expect(shape('project', list)).toEqual([['gtm', [ts[0].id, 'D-new', 'D-mid', 'D-old', 'D-none']]])
     expect(shape('machine-project', list, ps, 0)).toEqual([['vm-str', 'gtm', [ts[0].id, 'D-new', 'D-mid', 'D-old', 'D-none']]])
   })
@@ -137,7 +150,8 @@ describe('archived tasks', () => {
   test('are in no group, by status or project, on a machine or All machines', () => {
     const archived = ts.filter((t) => t.archived).map((t) => t.id)
     expect(archived.length).toBeGreaterThan(0)
-    for (const by of ['status', 'machine', 'project', 'machine-project'] as const) for (const level of [0, 1]) for (const g of groupTasks(ps, ts, by, level)) for (const t of g.tasks) expect(archived).not.toContain(t.id)
+    for (const by of ['status', 'machine', 'project', 'machine-project'] as const)
+      for (const level of [0, 1]) for (const g of groupTasks(ps, ts, by, level)) for (const t of g.tasks) expect(archived).not.toContain(t.id)
   })
 })
 
@@ -146,7 +160,14 @@ describe('pinned tasks', () => {
 
   test('show first, in Pinned, by status order, and in no other group; by any grouping', () => {
     const list = pin(['GTM-12', 'HP-201', 'LV-3'])
-    for (const [by, level] of [['status', 1], ['project', 1], ['status', 0], ['machine', 0], ['project', 0], ['machine-project', 0]] as const) {
+    for (const [by, level] of [
+      ['status', 1],
+      ['project', 1],
+      ['status', 0],
+      ['machine', 0],
+      ['project', 0],
+      ['machine-project', 0],
+    ] as const) {
       const [top, ...rest] = groupTasks(ps, list, by, level)
       expect(top.label).toBe('Pinned')
       // the same order the rest go in: Needs you first, Done last

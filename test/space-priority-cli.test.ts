@@ -26,7 +26,10 @@ describe('the order between spaces in shepherdr space list and status', () => {
     expect((await src.cli(['status'], {})).out).not.toContain('Space order here')
     expect(src.settings.set('space.priority', '2', { space: a.name }).ok).toBe(true)
     expect(src.settings.set('space.priority', '1', { space: b.name }).ok).toBe(true)
-    const listed = (await src.cli(['space', 'list'], {})).out.split('\n').filter((l) => l.startsWith('prio-space-')).map((l) => l.split('  ')[0])
+    const listed = (await src.cli(['space', 'list'], {})).out
+      .split('\n')
+      .filter((l) => l.startsWith('prio-space-'))
+      .map((l) => l.split('  ')[0])
     expect(listed).toEqual(['prio-space-b', 'prio-space-a'])
     expect((await src.cli(['status'], {})).out).toContain(`Space order here: ${b.name} (1) · ${a.name} (2); spaces with no priority come after.`)
     // shepherdr unset clears a space's own value; with no numbers left, status says nothing about the order

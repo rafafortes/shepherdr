@@ -152,7 +152,14 @@ describe('limits', () => {
     let kept = {}
     const store = { read: () => kept, write: (w: object) => (kept = w) }
     const told: string[] = []
-    const mon = () => new H.Monitor(limits, () => true, (e) => told.push(`${e.kind} ${e.what}`), () => at(1, 95), store)
+    const mon = () =>
+      new H.Monitor(
+        limits,
+        () => true,
+        (e) => told.push(`${e.kind} ${e.what}`),
+        () => at(1, 95),
+        store,
+      )
     mon().tick(0)
     expect(told).toEqual(['memory over'])
     mon().tick(60_000)
@@ -168,7 +175,15 @@ describe('what uses it most', () => {
       { pid: 3, cpu: 80, rss: 2 ** 28, cmd: 'vite', cwd: '/w/she-2' },
       { pid: 4, cpu: 20, rss: 2 ** 20, cmd: 'sshd', cwd: '/' },
     ]
-    const lines = H.procLines(procs, [{ id: 'SHE-1', worktree: '/w/she-1' }, { id: 'SHE-2', worktree: '/w/she-2' }, { id: 'SHE-3', worktree: '/w/she-1x' }], 'cpu')
+    const lines = H.procLines(
+      procs,
+      [
+        { id: 'SHE-1', worktree: '/w/she-1' },
+        { id: 'SHE-2', worktree: '/w/she-2' },
+        { id: 'SHE-3', worktree: '/w/she-1x' },
+      ],
+      'cpu',
+    )
     expect(lines[0]).toBe('Tasks among them: SHE-1 400% CPU, SHE-2 80% CPU.')
     expect(lines).toContain('  310% CPU  bun test  (SHE-1)')
     expect(lines).toContain('  20% CPU  sshd')

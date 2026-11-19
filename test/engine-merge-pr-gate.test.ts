@@ -115,7 +115,9 @@ describe('shepherdr merge through a pull request, with a merge gate', () => {
       // its branch there is gone, and main here is GitHub's
       expect(sh(`git branch --list ${t.branch}`, g.bare)).toBe('')
       expect(sh('git rev-parse main', g.dir)).toBe(sh('git rev-parse main', g.bare))
-      expect(log.filter((l) => l.startsWith(`shepherdr: ${t.id}'s `))).toEqual([`shepherdr: ${t.id}'s merge goes alone: ${space} merges through a pull request, and a merge train is for merges made here`])
+      expect(log.filter((l) => l.startsWith(`shepherdr: ${t.id}'s `))).toEqual([
+        `shepherdr: ${t.id}'s merge goes alone: ${space} merges through a pull request, and a merge train is for merges made here`,
+      ])
     } finally {
       console.error = stderr
     }
@@ -140,7 +142,10 @@ describe('shepherdr merge through a pull request, with a merge gate', () => {
     commitOnGitHub(g)
     writeFileSync(go, 'go\n')
     expect((await merging).ok).toBe(true)
-    const gated = readFileSync(runs, 'utf8').trim().split('\n').map((l) => l.split(' '))
+    const gated = readFileSync(runs, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => l.split(' '))
     // twice: the first on the branch as it was, the second on it rebased on what moved meanwhile
     expect(gated.map(([head, on]) => on)).toEqual(['without', 'with-other'])
     expect(gated[0][0]).not.toBe(gated[1][0])
@@ -165,7 +170,10 @@ describe('shepherdr merge through a pull request, with a merge gate', () => {
     await w.engine.done(t.id, 'Added hello.txt.')
     w.agentIs(`${t.id}/Agent`, 'idle')
     expect((await w.engine.merge(t.id)).ok).toBe(true)
-    const gated = readFileSync(runs, 'utf8').trim().split('\n').map((l) => l.split(' '))
+    const gated = readFileSync(runs, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => l.split(' '))
     // one run, on the branch rebased on what moved, and that is the commit GitHub merged
     expect(gated.map(([, on]) => on)).toEqual(['with-other'])
     expect(g.gh().prs[0].at).toBe(gated[0][0])
@@ -209,7 +217,9 @@ describe('shepherdr merge through a pull request, with a merge gate', () => {
     commitOnGitHub(g)
     const r = await merging
     expect(r.ok).toBe(false)
-    expect(r.error).toBe(`main moved on GitHub after ${t.id}'s merge gate ran: nothing was merged, since the gate checks the branch on the base it will land on. Run shepherdr merge ${t.id} again, and the gate runs again on the new main.`)
+    expect(r.error).toBe(
+      `main moved on GitHub after ${t.id}'s merge gate ran: nothing was merged, since the gate checks the branch on the base it will land on. Run shepherdr merge ${t.id} again, and the gate runs again on the new main.`,
+    )
     expect(g.gh().prs[0]).toMatchObject({ state: 'OPEN' })
     expect(t.merged).toBeFalsy()
     // with the base still: the next merge gates the branch on it and goes in

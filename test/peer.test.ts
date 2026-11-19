@@ -12,7 +12,7 @@ const { Chats } = await import('../server/live/chats.ts')
 const sender = { name: 'SHE-17 agent', pane: 'w7R:p2', space: 'shepherdr', task: 'SHE-17' }
 
 describe('the envelope a message from another agent arrives in', () => {
-  test("our own task tell writes it, and it reads back: who, the pane, the space and the task it works in", () => {
+  test('our own task tell writes it, and it reads back: who, the pane, the space and the task it works in', () => {
     const line = fromAgentLine({ ...sender, to: 'SHE-18 agent' }, 'Merge it when the checks pass.')
     expect(line).toBe('<agent-message from="SHE-17 agent" to="SHE-18 agent" pane="w7R:p2" space="shepherdr" task="SHE-17">Merge it when the checks pass.</agent-message>')
     expect(fromAgent(line)).toEqual({ ...sender, text: 'Merge it when the checks pass.' })
@@ -22,7 +22,8 @@ describe('the envelope a message from another agent arrives in', () => {
 
   test("herdr's own wrapper and Claude Code's cross-session line read back too, by the name each declares", () => {
     expect(fromAgent('<agent-message from="herdr/explore" to="orchestrator">\nNothing in src/ yet.\n</agent-message>')).toEqual({ name: 'herdr/explore', text: 'Nothing in src/ yet.' })
-    const cross = 'Another Claude session sent a message:\n<cross-session-message from="uds:/run/user/1000/cc-socks/1.sock" from-name="proton-vpn" from-mode="prompting">The proxy is up.</cross-session-message>'
+    const cross =
+      'Another Claude session sent a message:\n<cross-session-message from="uds:/run/user/1000/cc-socks/1.sock" from-name="proton-vpn" from-mode="prompting">The proxy is up.</cross-session-message>'
     expect(fromAgent(cross)).toEqual({ name: 'proton-vpn', text: 'The proxy is up.' })
     // a wrapper with nothing said about itself still names something: never an empty sender
     expect(fromAgent('<agent-message from="">hello</agent-message>')?.name).toBe('Another agent')
@@ -114,7 +115,12 @@ describe('a message another agent sent, in the chat', () => {
   test("a pi agent's own wrapper (herdr's messaging) reads as the agent it names on this machine", () => {
     const chat = chatWith('pi', [
       { type: 'session', id: S, timestamp: '2026-11-06T10:00:00.000Z' },
-      { type: 'message', id: 'p1', timestamp: '2026-11-06T10:00:01.000Z', message: { role: 'user', content: [{ type: 'text', text: '<agent-message from="shep-she-17" to="shep-she-18">\nThe migration is done.\n</agent-message>' }] } },
+      {
+        type: 'message',
+        id: 'p1',
+        timestamp: '2026-11-06T10:00:01.000Z',
+        message: { role: 'user', content: [{ type: 'text', text: '<agent-message from="shep-she-17" to="shep-she-18">\nThe migration is done.\n</agent-message>' }] },
+      },
     ])
     expect(chat.messages).toHaveLength(1)
     expect(chat.messages[0]).toMatchObject({ who: 'peer', text: 'The migration is done.', peer: { name: 'SHE-17 agent', pane: 'w7R:p2', task: 'SHE-17' } })
@@ -131,7 +137,8 @@ describe('a message another agent sent, in the chat', () => {
   })
 
   test("Claude Code's own cross-session message is one; a subagent's hand-back stays out, as before", () => {
-    const cross = 'Another Claude session sent a message:\n<cross-session-message from="uds:/run/user/1000/cc-socks/1.sock" from-name="proton-vpn" from-mode="prompting">The proxy is up.</cross-session-message>'
+    const cross =
+      'Another Claude session sent a message:\n<cross-session-message from="uds:/run/user/1000/cc-socks/1.sock" from-name="proton-vpn" from-mode="prompting">The proxy is up.</cross-session-message>'
     const handBack = '<agent-message from="a75bac740db6f4d10">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to.\n</agent-message>'
     const chat = chatWith('claude', [cuser('u1', cross, { origin: { kind: 'peer' } }), cuser('u2', handBack, { origin: { kind: 'peer' } })])
     expect(chat.messages.map((m) => [m.who, m.peer?.name, m.text])).toEqual([['peer', 'proton-vpn', 'The proxy is up.']])
@@ -153,11 +160,7 @@ describe('shepherdr task tell says who sent it', () => {
     const home = tmp('peer-tell')
     process.env.SHEPHERDR_HOME = home
     process.env.HERDR_SOCKET_PATH = join(home, 'no-herdr.sock')
-    const [{ LiveSource }, { herdr }, { placeId }] = await Promise.all([
-      import('../server/live/source.ts'),
-      import('../server/live/herdr.ts'),
-      import('../server/live/places.ts'),
-    ])
+    const [{ LiveSource }, { herdr }, { placeId }] = await Promise.all([import('../server/live/source.ts'), import('../server/live/herdr.ts'), import('../server/live/places.ts')])
     const src = new LiveSource()
     type Told = { name: string; pane?: string; space?: string; task?: string } | undefined
     const told = (ctx: { chat?: string; pane?: string }) => (src as unknown as { toldFrom(c: { chat?: string; pane?: string }): Promise<Told> }).toldFrom(ctx)

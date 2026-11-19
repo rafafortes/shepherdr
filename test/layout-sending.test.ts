@@ -61,13 +61,20 @@ describe.skipIf(!browser)('what you send shows at once', () => {
     expect(await pending.getAttribute('tabindex')).toBeNull()
     await pending.evaluate((el) => ((el as HTMLElement & { mark?: number }).mark = 1))
     // the chat is scrolled down to it
-    expect(await page.evaluate(() => { const el = document.querySelector('[data-msg]')!.closest('.overflow-y-auto')!; return el.scrollHeight - el.scrollTop - el.clientHeight })).toBeLessThan(2)
+    expect(
+      await page.evaluate(() => {
+        const el = document.querySelector('[data-msg]')!.closest('.overflow-y-auto')!
+        return el.scrollHeight - el.scrollTop - el.clientHeight
+      }),
+    ).toBeLessThan(2)
     release()
     sending.hold = null
     // it settles: the same element, now the real message (it can take a reaction), and only one of it
     await settled(page, 'Ship it today')
     expect(await pending.evaluate((el) => (el as HTMLElement & { mark?: number }).mark)).toBe(1)
-    await page.waitForFunction(() => [...document.querySelectorAll('[data-anchor]')].some((e) => e.textContent === 'Ship it today' && getComputedStyle(e.parentElement!.parentElement!).opacity === '1'))
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll('[data-anchor]')].some((e) => e.textContent === 'Ship it today' && getComputedStyle(e.parentElement!.parentElement!).opacity === '1'),
+    )
     await page.close()
   }, 30_000)
   test('pictures on their way sit in an album at once, and the real ones take their place without loading again', async () => {
@@ -75,7 +82,10 @@ describe.skipIf(!browser)('what you send shows at once', () => {
     await page.goto(url())
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==', 'base64')
     await page.getByRole('button', { name: 'Attach files and more' }).click()
-    await page.setInputFiles('input[name="file"]', ['a', 'b'].map((n) => ({ name: `pic-${n}.png`, mimeType: 'image/png', buffer: png })))
+    await page.setInputFiles(
+      'input[name="file"]',
+      ['a', 'b'].map((n) => ({ name: `pic-${n}.png`, mimeType: 'image/png', buffer: png })),
+    )
     await page.getByRole('list', { name: 'Attached files' }).getByRole('listitem').nth(1).waitFor()
     let release!: () => void
     sending.hold = new Promise((r) => (release = r))
@@ -83,11 +93,21 @@ describe.skipIf(!browser)('what you send shows at once', () => {
     const album = page.getByRole('group', { name: '2 pictures' }).last()
     await album.waitFor()
     expect(await album.locator('[data-msg^="out:"]').count()).toBe(2)
-    await album.locator('img').first().evaluate((el) => ((el as HTMLElement & { mark?: number }).mark = 1))
+    await album
+      .locator('img')
+      .first()
+      .evaluate((el) => ((el as HTMLElement & { mark?: number }).mark = 1))
     release()
     sending.hold = null
     await page.waitForFunction(() => !document.querySelector('[data-msg^="out:"]'))
-    expect(await page.getByRole('group', { name: '2 pictures' }).last().locator('img').first().evaluate((el) => (el as HTMLElement & { mark?: number }).mark)).toBe(1)
+    expect(
+      await page
+        .getByRole('group', { name: '2 pictures' })
+        .last()
+        .locator('img')
+        .first()
+        .evaluate((el) => (el as HTMLElement & { mark?: number }).mark),
+    ).toBe(1)
     await page.close()
   }, 30_000)
   test("one that doesn't go through says so, survives a reload, and can be sent again or taken out", async () => {
@@ -138,7 +158,10 @@ describe.skipIf(!browser)('what you send shows at once', () => {
     // every machine in reach, and this world has one out of reach: outbox.test.ts). Put in as the page loads: the send
     // the reload cuts off saves the outbox as it goes
     await page.addInitScript((o) => {
-      const out = [{ ...o, cid: 'new', text: 'Just now', state: 'failed', error: 'Not sent.', at: Date.now() }, { ...o, cid: 'old', text: 'From yesterday', state: 'sent', at: Date.now() - 25 * 3_600_000 }]
+      const out = [
+        { ...o, cid: 'new', text: 'Just now', state: 'failed', error: 'Not sent.', at: Date.now() },
+        { ...o, cid: 'old', text: 'From yesterday', state: 'sent', at: Date.now() - 25 * 3_600_000 },
+      ]
       localStorage.setItem('shepherdr.outbox', JSON.stringify(out))
     }, saved)
     await page.reload()
@@ -191,7 +214,12 @@ describe.skipIf(!browser)('replies', () => {
     sending.hold = new Promise((r) => (release = r))
     await page.locator('textarea[name=message]').fill('Fix the clock then')
     const r = (sel: string) => page.$eval(sel, (b) => b.getBoundingClientRect().toJSON()) as Promise<Box & { width: number; height: number }>
-    const [line, x, plus, send] = await Promise.all([r(`${strip} [role=button]`), r(`${strip} button`), r('[data-composer] button[aria-label="Attach files and more"] svg'), r('[data-composer] button[aria-label=Send]')])
+    const [line, x, plus, send] = await Promise.all([
+      r(`${strip} [role=button]`),
+      r(`${strip} button`),
+      r('[data-composer] button[aria-label="Attach files and more"] svg'),
+      r('[data-composer] button[aria-label=Send]'),
+    ])
     expect(line.height).toBeLessThanOrEqual(32)
     expect(Math.abs(line.left - plus.left)).toBeLessThanOrEqual(1.5)
     expect(Math.abs((x.left + x.right) / 2 - (send.left + send.right) / 2)).toBeLessThanOrEqual(1)
@@ -202,7 +230,9 @@ describe.skipIf(!browser)('replies', () => {
     await sent.locator('[data-quote][aria-label^="Replying to home"]').waitFor()
     expect(await page.$(strip)).toBeNull()
     // the quote is one line tucked under the top of the reply, and a long one doesn't stretch the short reply
-    const [quote, reply] = await Promise.all([sent.locator('[data-quote]'), sent.locator('[data-anchor]')].map((l) => l.evaluate((el) => el.getBoundingClientRect().toJSON()) as Promise<Box & { width: number; height: number }>))
+    const [quote, reply] = await Promise.all(
+      [sent.locator('[data-quote]'), sent.locator('[data-anchor]')].map((l) => l.evaluate((el) => el.getBoundingClientRect().toJSON()) as Promise<Box & { width: number; height: number }>),
+    )
     expect(quote.height).toBeLessThanOrEqual(46)
     expect(quote.bottom).toBeGreaterThan(reply.top)
     expect(quote.bottom).toBeLessThan(reply.top + 12)
@@ -212,7 +242,11 @@ describe.skipIf(!browser)('replies', () => {
     await page.waitForFunction(() => [...document.querySelectorAll('[data-you]')].some((m) => m.textContent?.includes('Fix the clock then') && !m.getAttribute('data-msg')!.startsWith('out:')))
     // the real one keeps the quote; a tap on it brings the message it answers into view, lit up for a moment
     await page.evaluate(() => document.querySelector('[data-msg="tall-agent"]')!.scrollIntoView({ block: 'start' }))
-    await page.locator('[data-you]').filter({ hasText: 'Fix the clock then' }).locator('[data-quote]').evaluate((b) => (b as HTMLElement).click())
+    await page
+      .locator('[data-you]')
+      .filter({ hasText: 'Fix the clock then' })
+      .locator('[data-quote]')
+      .evaluate((b) => (b as HTMLElement).click())
     await page.waitForSelector('[data-msg="long-agent"] [data-anchor][data-flash]')
     await page.waitForTimeout(600)
     const box = (await page.$eval('[data-msg="long-agent"] [data-anchor]', (b) => b.getBoundingClientRect().toJSON())) as Box
@@ -226,7 +260,13 @@ describe.skipIf(!browser)('replies', () => {
     const at = Date.now()
     const said = 'First thing I need is the flaky test rerun once, then skip it if it fails again'
     world.chats['p:vm-str:~'].messages.push(
-      { id: 'card-q', who: 'agent', text: 'Rerun CI?', at, question: { id: 'ask:q', title: 'Rerun CI on main?', kind: 'Form', choices: [{ label: 'Rerun it' }, { label: 'Leave it' }], to: 'p:vm-str:~', sent: -1, said, via: 'chat' } },
+      {
+        id: 'card-q',
+        who: 'agent',
+        text: 'Rerun CI?',
+        at,
+        question: { id: 'ask:q', title: 'Rerun CI on main?', kind: 'Form', choices: [{ label: 'Rerun it' }, { label: 'Leave it' }], to: 'p:vm-str:~', sent: -1, said, via: 'chat' },
+      },
       { id: 'card-a', who: 'you', text: said, at: at + 1 },
       ...Array.from({ length: 8 }, (_, i) => ({ id: `card-f${i}`, who: 'agent' as const, text: `Filler ${i}\n\n${'More words here. '.repeat(12)}`, at: at + 2 + i })),
     )
@@ -283,7 +323,9 @@ describe.skipIf(!browser)('replies', () => {
       await msg.locator('[data-quote]').waitFor()
       await msg.hover()
       const rect = (l: ReturnType<typeof page.locator>) => l.evaluate((el) => el.getBoundingClientRect().toJSON()) as Promise<Box & { width: number; height: number }>
-      const [unit, bubble, q, pill, reply] = await Promise.all([msg, msg.locator('[data-anchor]'), msg.locator('[data-quote]'), msg.locator('button:has-text("👍")'), msg.locator('button[aria-label=Reply]')].map(rect))
+      const [unit, bubble, q, pill, reply] = await Promise.all(
+        [msg, msg.locator('[data-anchor]'), msg.locator('[data-quote]'), msg.locator('button:has-text("👍")'), msg.locator('button[aria-label=Reply]')].map(rect),
+      )
       // the message is as wide as its bubble; the quote reaches past it toward the middle, its words in the part that shows
       expect(Math.abs(unit.width - bubble.width)).toBeLessThan(1)
       expect(q.width).toBeGreaterThan(bubble.width * 2)
@@ -445,7 +487,6 @@ describe.skipIf(!browser)('what the best chats do', () => {
       await page.close()
     }, 30_000)
 })
-
 
 describe.skipIf(!browser)('held messages', () => {
   test('links to the blocking question without answering or offering Send now', async () => {

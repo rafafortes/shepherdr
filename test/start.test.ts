@@ -13,12 +13,24 @@ const THEME = 'Choose a style\n\n ❯ Dark mode\n   Light mode\n\n Enter to conf
 const WORKING = '⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt · ← 4 agents\n'
 // its transcript's end, which reads like a numbered menu with a question above it
 const TRANSCRIPT = 'Should I take the second approach?\n\n1. Yes, do that\n2. No, keep this one\n'
-const PI = " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash ·\n Press ctrl+o to show full startup help and loaded resources.\n /tmp/pitest\n 0.0%/1.0M (auto)  deepseek/deepseek-v4.1-flash • high\n"
+const PI =
+  ' █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash ·\n Press ctrl+o to show full startup help and loaded resources.\n /tmp/pitest\n 0.0%/1.0M (auto)  deepseek/deepseek-v4.1-flash • high\n'
 const CLAUDE_LOST = 'No conversation found with session ID: 11111111-2222-4333-8444-555555555555\n'
 const STARTED = 1_000_000
 const SETTLED = STARTED + FIRST_LOOK + 2000
 /** a look at a start that began at STARTED, changing only what the test is about */
-const look = (o: Partial<StartLook> = {}): StartLook => ({ started: STARTED, wrong: undefined, pending: false, begun: false, prior: false, screen: '', resumed: false, waits: false, card: false, ...o })
+const look = (o: Partial<StartLook> = {}): StartLook => ({
+  started: STARTED,
+  wrong: undefined,
+  pending: false,
+  begun: false,
+  prior: false,
+  screen: '',
+  resumed: false,
+  waits: false,
+  card: false,
+  ...o,
+})
 /** two looks at the same start, a poll apart, past the first look: what a card takes */
 function settle(l: StartLook = look(), at = SETTLED) {
   const s = new Starts()
@@ -48,7 +60,7 @@ describe('reading what a screen says', () => {
     expect(parseMenu('Pick one:\n\n 1. A\n 2. B\n')).toBeNull()
   })
 
-  test('a spinner frame is a frame only at a line\'s start: the rest of the screen counts, whatever it is', () => {
+  test("a spinner frame is a frame only at a line's start: the rest of the screen counts, whatever it is", () => {
     expect(restingScreen('⠋ Loading')).toBe('Loading')
     // a braille mark in words is part of the words, so the screen rests and says something new when it changes
     expect(restingScreen('⠁ means allow access')).toBe('⠁ means allow access')

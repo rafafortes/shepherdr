@@ -46,7 +46,7 @@ function addMessage(sid: string, seq: number, type: string, data: object, file =
 }
 
 describe('finding the OpenCode session of a folder', () => {
-  test('the newest top-level session of the folder, mirrored into Shepherdr\'s home; a trailing slash does not matter', () => {
+  test("the newest top-level session of the folder, mirrored into Shepherdr's home; a trailing slash does not matter", () => {
     addMessage('ses_new', 1, 'user', { time: { created: 310 }, text: 'hello', files: [] })
     const path = opencodeLogPath(home(), 'ses_new')
     expect(findOpencodeLog('/w/app/')).toBe(path)
@@ -119,7 +119,13 @@ describe('the OpenCode log is read again as its session grows', () => {
     const first = tail.read().map((e) => e.kind)
     expect(first).toEqual(['session', 'turn-start', 'user'])
     expect(tail.read()).toEqual([])
-    addMessage('ses_new', 2, 'assistant', { time: { created: 320, completed: 325 }, model: { id: 'm', providerID: 'opencode' }, content: [{ type: 'text', text: 'HERON' }], finish: 'stop', tokens: { input: 2, output: 1 } })
+    addMessage('ses_new', 2, 'assistant', {
+      time: { created: 320, completed: 325 },
+      model: { id: 'm', providerID: 'opencode' },
+      content: [{ type: 'text', text: 'HERON' }],
+      finish: 'stop',
+      tokens: { input: 2, output: 1 },
+    })
     const got = tail.read()
     expect(got.find((e) => e.kind === 'agent')).toMatchObject({ kind: 'agent', text: 'HERON' })
     expect(got.map((e) => e.kind)).toContain('turn-end')

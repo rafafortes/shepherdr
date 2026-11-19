@@ -61,7 +61,10 @@ function spies() {
       tabDirs.push(dir)
       return { tab: { tab_id: 't2' }, root_pane: { pane_id: NEW } } as never
     }),
-    workspaces: spyOn(herdr, 'workspaces').mockResolvedValue([{ workspace_id: 'w1', label: 'T-166: keep the space' }, { workspace_id: 'w0', label: 'a project' }] as never),
+    workspaces: spyOn(herdr, 'workspaces').mockResolvedValue([
+      { workspace_id: 'w1', label: 'T-166: keep the space' },
+      { workspace_id: 'w0', label: 'a project' },
+    ] as never),
     createWorkspace: spyOn(herdr, 'createWorkspace').mockImplementation(async (label: string, dir: string) => {
       events.push(`workspace ${label}`)
       tabDirs.push(dir)
@@ -145,7 +148,18 @@ describe("a start that failed puts the chat's record back", () => {
           await a.refresh()
           const before = { ...a.record(KEY)! }
           // the backup's CLI never came up (no pane for it): its kind, and a session it never ran, went over the record
-          await expect(a.restart({ key: KEY, name: NAME, kind: c.kind === 'codex' ? 'pi' : 'codex', cwd, workspace: 'T-166: keep the space', tab: 'Agent', env: {}, pane: async () => Promise.reject(new Error('no pane for it')) })).rejects.toThrow('no pane')
+          await expect(
+            a.restart({
+              key: KEY,
+              name: NAME,
+              kind: c.kind === 'codex' ? 'pi' : 'codex',
+              cwd,
+              workspace: 'T-166: keep the space',
+              tab: 'Agent',
+              env: {},
+              pane: async () => Promise.reject(new Error('no pane for it')),
+            }),
+          ).rejects.toThrow('no pane')
           expect(a.record(KEY)?.kind).not.toBe(c.kind)
           expect(a.record(KEY)?.startError).toContain('no pane')
           a.restore(KEY, before)
@@ -229,7 +243,7 @@ describe('a restart opens the new pane before it ends the run it takes over from
         // the run went in all the same, in the tab the start opened after the one ahead of it failed
         expect(events).toEqual(['pane', `close ${OLD}`, 'pane', `start ${NEW}`])
         expect(started[0].pane).toBe(NEW)
-        expect(errors.mock.calls.flat().join(' ')).toContain("ahead of its restart")
+        expect(errors.mock.calls.flat().join(' ')).toContain('ahead of its restart')
       } finally {
         errors.mockRestore()
         a.stop()

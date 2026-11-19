@@ -24,7 +24,7 @@ async function open() {
 }
 
 describe.skipIf(!browser)('the app under its own CSP', () => {
-  test('the page and its socket load with no policy violation of the app\'s own', async () => {
+  test("the page and its socket load with no policy violation of the app's own", async () => {
     const { page, errors, violations } = await open()
     const csp = await page.evaluate(() => fetch('./').then((r) => r.headers.get('content-security-policy')))
     expect(csp).toContain("script-src 'self'")
@@ -55,14 +55,23 @@ describe.skipIf(!browser)('the app under its own CSP', () => {
     const { page, violations } = await open()
     const got = await page.evaluate(async () => ({
       // worker-src 'self': the alerts service worker is this origin's own file
-      worker: await navigator.serviceWorker.register('./sw.js').then(() => true, () => false),
-      key: await fetch('./api/push/key').then((r) => r.status, () => 0),
+      worker: await navigator.serviceWorker.register('./sw.js').then(
+        () => true,
+        () => false,
+      ),
+      key: await fetch('./api/push/key').then(
+        (r) => r.status,
+        () => 0,
+      ),
       // the same POST the alerts plugin makes to hand over its subscription, connect-src 'self' and x-shepherdr
       subscribe: await fetch('./api/push/subscribe', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-shepherdr': '1' },
         body: JSON.stringify({ sub: { endpoint: 'https://push.example/1' }, device: 'a test' }),
-      }).then((r) => r.status, () => 0),
+      }).then(
+        (r) => r.status,
+        () => 0,
+      ),
     }))
     expect(got).toEqual({ worker: true, key: 200, subscribe: 200 })
     expect(await violations()).toEqual([])

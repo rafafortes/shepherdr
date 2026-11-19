@@ -10,10 +10,7 @@ import { herdr, missing, type WorkspaceInfo, type WorktreeFrom, type WorktreeSpa
 import * as G from './git.ts'
 
 /** what this asks of herdr; tests give a stand-in */
-export type HerdrSpaces = Pick<
-  typeof herdr,
-  'workspaces' | 'agents' | 'panes' | 'paneIdle' | 'worktreeCreate' | 'worktreeOpen' | 'worktreeRemove' | 'createTab' | 'closePane' | 'closeWorkspace'
->
+export type HerdrSpaces = Pick<typeof herdr, 'workspaces' | 'agents' | 'panes' | 'paneIdle' | 'worktreeCreate' | 'worktreeOpen' | 'worktreeRemove' | 'createTab' | 'closePane' | 'closeWorkspace'>
 
 /** a worktree herdr just made (or opened): its folder, its workspace and the shell herdr opened in a new one */
 export interface Made {
@@ -49,7 +46,10 @@ const tilde = (p: string) => (p.startsWith(boxHome()) ? `~${p.slice(boxHome().le
 const SPACES = 'repo-spaces.json'
 
 export class Worktrees {
-  constructor(private h: HerdrSpaces = herdr, private dir = home()) {}
+  constructor(
+    private h: HerdrSpaces = herdr,
+    private dir = home(),
+  ) {}
 
   private repoSpaces(list: WorkspaceInfo[], repo: string) {
     return list.filter((w) => w.worktree && !w.worktree.is_linked_worktree && real(w.worktree.checkout_path) === real(repo))
@@ -265,7 +265,12 @@ export class Worktrees {
     const [panes, agents] = await Promise.all([this.h.panes(id), this.h.agents()]).catch(() => [null, null])
     if (!panes || !agents) return
     const one = panes.length === 1 ? panes[0] : undefined
-    const used = !one || (w.tab_count ?? 1) > 1 || agents.some((a) => a.pane_id === one.pane_id) || real(one.foreground_cwd ?? one.cwd ?? '') !== real(repo) || !(await this.h.paneIdle(one.pane_id).catch(() => false))
+    const used =
+      !one ||
+      (w.tab_count ?? 1) > 1 ||
+      agents.some((a) => a.pane_id === one.pane_id) ||
+      real(one.foreground_cwd ?? one.cwd ?? '') !== real(repo) ||
+      !(await this.h.paneIdle(one.pane_id).catch(() => false))
     if (!used) await this.h.closeWorkspace(id).catch(() => undefined)
     forget()
   }

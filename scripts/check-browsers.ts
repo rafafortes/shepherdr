@@ -16,7 +16,10 @@ async function probe(name: string, browser: BrowserType, install: string, deps?:
     await b.close()
     line(name, `ok (${version}, ${((Date.now() - t0) / 1000).toFixed(1)}s)`)
   } catch (e) {
-    const said = (e as Error).message.split('\n')[0]!.replace(/^[\w.]+: /, '').trim()
+    const said = (e as Error).message
+      .split('\n')[0]!
+      .replace(/^[\w.]+: /, '')
+      .trim()
     // the browser isn't downloaded: a download of its own, no root
     if (/Executable doesn't exist/i.test(said)) line(name, `not installed: ${install}`)
     // it is there but something it links against isn't: its system libraries, from apt (root)

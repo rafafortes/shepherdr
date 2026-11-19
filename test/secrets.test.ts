@@ -44,9 +44,16 @@ describe('the vault', () => {
     expect(v.set('all', 'github_token', 'x').ok).toBe(true)
   })
 
-  test("Settings gets a Secrets page for each level, with names and never a value", () => {
+  test('Settings gets a Secrets page for each level, with names and never a value', () => {
     const v = new Vault('', { all: { A: { value: 'shh-1', at: 1 } }, 'p:box:api': { B: { value: 'shh-2', at: 2 } } })
-    const pages = secretPages([{ name: 'Tasks', rows: [], level: 'all' }, { name: 'Tasks', rows: [], level: 'p:box:api', machine: 'box' }, { name: 'Alerts', rows: [], global: true }], v.names())
+    const pages = secretPages(
+      [
+        { name: 'Tasks', rows: [], level: 'all' },
+        { name: 'Tasks', rows: [], level: 'p:box:api', machine: 'box' },
+        { name: 'Alerts', rows: [], global: true },
+      ],
+      v.names(),
+    )
     const secrets = pages.filter((p) => p.secrets)
     expect(secrets.map((p) => [p.level, p.machine, p.secrets!.map((s) => s.name)])).toEqual([
       ['all', undefined, ['A']],
@@ -94,7 +101,12 @@ describe('the shepherdr secret command', () => {
     const shown = JSON.stringify([list, src.snapshot(), src.chats.log(home)])
     expect(shown).not.toContain('k-123456')
     expect(shown).not.toContain('o-987654')
-    expect(src.snapshot().settings.find((x) => x.name === 'Secrets' && x.level === 'all')?.secrets?.map((s) => s.name)).toEqual(['OTHER'])
+    expect(
+      src
+        .snapshot()
+        .settings.find((x) => x.name === 'Secrets' && x.level === 'all')
+        ?.secrets?.map((s) => s.name),
+    ).toEqual(['OTHER'])
     expect(readFileSync(join(process.env.SHEPHERDR_HOME!, 'vault.json'), 'utf8')).toContain('k-123456')
   })
 
@@ -111,12 +123,20 @@ describe('the shepherdr secret command', () => {
     await new Promise<void>((done) => proxy.listen(0, '127.0.0.1', done))
     const address = proxy.address() as { port: number }
     const request = async (port: number, headers: Record<string, string> = {}, body = {}) => {
-      const r = await fetch(`http://127.0.0.1:${port}/api/cli`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ args: ['secret', 'run', 'API_KEY'], chat: home, ...body }) })
-      return await r.json() as { code: number; secrets?: Record<string, string> }
+      const r = await fetch(`http://127.0.0.1:${port}/api/cli`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...headers },
+        body: JSON.stringify({ args: ['secret', 'run', 'API_KEY'], chat: home, ...body }),
+      })
+      return (await r.json()) as { code: number; secrets?: Record<string, string> }
     }
     try {
       for (const port of [server.port!, address.port]) {
-        for (const headers of ([{}, { 'x-forwarded-for': '127.0.0.1', 'x-forwarded-host': 'localhost', forwarded: 'for=127.0.0.1', 'tailscale-user-login': 'owner' }, { authorization: `Bearer ${'0'.repeat(64)}` }] as Record<string, string>[])) {
+        for (const headers of [
+          {},
+          { 'x-forwarded-for': '127.0.0.1', 'x-forwarded-host': 'localhost', forwarded: 'for=127.0.0.1', 'tailscale-user-login': 'owner' },
+          { authorization: `Bearer ${'0'.repeat(64)}` },
+        ] as Record<string, string>[]) {
           const r = await request(port, headers)
           expect(r.code).toBe(1)
           expect(r.secrets).toBeUndefined()
@@ -153,18 +173,26 @@ describe('the shepherdr secret command', () => {
     // a remote helper: the box's own HOME, with no SHEPHERDR_HOME of its own (route.pl's credentials live under it)
     const env = { ...process.env, SHEPHERDR_HOME: '', HOME: dir, SHEPHERDR_CHAT: home, SHEPHERDR_SECRET_FILE: credentialFile, SHEPHERDR_URL: `http://127.0.0.1:${server.port}` }
     const bind = (capability: string, pid = process.pid) => {
-      const r = Bun.spawnSync(['perl', join(root, 'helper', 'route.pl'), '--bind', String(pid)], { env, stdin: Buffer.from(JSON.stringify({ chat: home, cwd: dir, url: env.SHEPHERDR_URL, capability, credentialFile })) })
+      const r = Bun.spawnSync(['perl', join(root, 'helper', 'route.pl'), '--bind', String(pid)], {
+        env,
+        stdin: Buffer.from(JSON.stringify({ chat: home, cwd: dir, url: env.SHEPHERDR_URL, capability, credentialFile })),
+      })
       expect(r.exitCode).toBe(0)
       expect(statSync(credentialFile).mode & 0o777).toBe(0o600)
       expect(statSync(join(helper, 'credentials')).mode & 0o777).toBe(0o700)
     }
-    const run = (command: string[]) => new Promise<{ code: number | null; out: string }>((done) => {
-      const child = spawn(command[0], [...command.slice(1), 'secret', 'run', 'API_KEY', '--', 'sh', '-c', '[ "$API_KEY" = "k-123456" ] && [ -z "$SHEPHERDR_SECRET_CAPABILITY" ] && echo authenticated'], { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'] })
-      let out = ''
-      child.stdout.on('data', (data) => out += data)
-      child.stderr.on('data', (data) => out += data)
-      child.on('close', (code) => done({ code, out }))
-    })
+    const run = (command: string[]) =>
+      new Promise<{ code: number | null; out: string }>((done) => {
+        const child = spawn(
+          command[0],
+          [...command.slice(1), 'secret', 'run', 'API_KEY', '--', 'sh', '-c', '[ "$API_KEY" = "k-123456" ] && [ -z "$SHEPHERDR_SECRET_CAPABILITY" ] && echo authenticated'],
+          { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'] },
+        )
+        let out = ''
+        child.stdout.on('data', (data) => (out += data))
+        child.stderr.on('data', (data) => (out += data))
+        child.on('close', (code) => done({ code, out }))
+      })
     try {
       bind(proof)
       for (const command of [[join(root, 'bin', 'shepherdr')], ['perl', join(helper, 'bin', 'shepherdr')]]) {
@@ -189,7 +217,10 @@ describe('the shepherdr secret command', () => {
         env.SHEPHERDR_SECRET_FILE = ''
         expect((await run(['perl', join(helper, 'bin', 'shepherdr')])).code).toBe(1)
         env.SHEPHERDR_SECRET_FILE = fileReference
-      } finally { owner.kill(); await owner.exited }
+      } finally {
+        owner.kill()
+        await owner.exited
+      }
       bind('0'.repeat(64))
       for (const command of [[join(root, 'bin', 'shepherdr')], ['perl', join(helper, 'bin', 'shepherdr')]]) {
         const refused = await run(command)

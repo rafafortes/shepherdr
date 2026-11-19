@@ -22,7 +22,12 @@ export type Options = {
 /** the files under <root> this check reads, relative to it: the gate's shell, the agent commands, the Perl helpers */
 function files(root: string) {
   const listed = (dir: string, want: (name: string) => boolean) =>
-    existsSync(join(root, dir)) ? readdirSync(join(root, dir)).filter(want).sort().map((n) => `${dir}/${n}`) : []
+    existsSync(join(root, dir))
+      ? readdirSync(join(root, dir))
+          .filter(want)
+          .sort()
+          .map((n) => `${dir}/${n}`)
+      : []
   const shell = [...listed('scripts', (n) => n.endsWith('.sh')), ...['bin/shepherdr', 'bin/agent-browser'].filter((n) => existsSync(join(root, n)))]
   const perl = listed('helper', (n) => n.endsWith('.pl') || n === 'shepherdr')
   return { shell, perl }

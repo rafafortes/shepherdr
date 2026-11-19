@@ -51,7 +51,7 @@ describe('the plugin build cache', () => {
     file(join(f.dir, 'plugins', 'c', 'client.tsx'), 'export default c\n')
     file(join(f.dir, 'plugins.json'), JSON.stringify({ plugins: ['a', 'b', 'c'] }))
     expect(writeRegistries(f.dir)).toEqual(['a', 'b', 'c'])
-    expect(readFileSync(f.client, 'utf8')).toContain("../plugins/c/client.tsx")
+    expect(readFileSync(f.client, 'utf8')).toContain('../plugins/c/client.tsx')
     expect(readFileSync(f.cache, 'utf8')).not.toBe(first)
   })
 

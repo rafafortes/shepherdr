@@ -60,7 +60,25 @@ describe("a task's files", () => {
 
   test('no path leads outside it: .., absolute paths, .git, ignored files, links out, odd pathspecs', async () => {
     const { dir, wt } = setup()
-    for (const p of ['../outside.txt', 'src/../../outside.txt', '/etc/passwd', join(dir, 'outside.txt'), '.git/config', '.git/HEAD', '.env', 'node_modules/x.js', 'escape.txt', 'src', '', './README.md', 'src//a.ts', '*', ':(top)README.md', 'README.md\0', 'src\\a.ts'])
+    for (const p of [
+      '../outside.txt',
+      'src/../../outside.txt',
+      '/etc/passwd',
+      join(dir, 'outside.txt'),
+      '.git/config',
+      '.git/HEAD',
+      '.env',
+      'node_modules/x.js',
+      'escape.txt',
+      'src',
+      '',
+      './README.md',
+      'src//a.ts',
+      '*',
+      ':(top)README.md',
+      'README.md\0',
+      'src\\a.ts',
+    ])
       await expect(readFile(wt, p)).rejects.toThrow('No such file.')
     expect(() => safeRel(42)).toThrow()
     rmSync(dir, { recursive: true, force: true })
@@ -145,7 +163,7 @@ describe('its pull request', () => {
     ])
   })
 
-  test('asked of gh for the branch, on the remote\'s host; none without a remote or a PR', async () => {
+  test("asked of gh for the branch, on the remote's host; none without a remote or a PR", async () => {
     const { dir, wt } = setup()
     expect(await pullRequest(wt, 'work/1-x')).toEqual({ pr: null, why: 'This space has no GitHub remote.' })
     sh('git remote add origin http://github.localhost/acme/gtm.git', wt)
@@ -160,7 +178,9 @@ describe('its pull request', () => {
     const path = process.env.PATH
     process.env.PATH = `${bin}:${path}`
     try {
-      expect(await pullRequest(wt, 'work/1-x')).toEqual({ pr: { number: 7, title: 'X', state: 'draft', url: 'https://github.localhost/acme/gtm/pull/7', checks: [{ name: 't', state: 'pass', url: undefined }] } })
+      expect(await pullRequest(wt, 'work/1-x')).toEqual({
+        pr: { number: 7, title: 'X', state: 'draft', url: 'https://github.localhost/acme/gtm/pull/7', checks: [{ name: 't', state: 'pass', url: undefined }] },
+      })
       expect(await pullRequest(wt, 'work/2-y')).toEqual({ pr: null, why: 'No pull request yet.' })
       expect(sh(`cat ${join(dir, 'asked')}`, dir).split('\n')[0]).toBe('github.localhost pr view work/1-x -R acme/gtm --json number,title,state,isDraft,url,statusCheckRollup')
     } finally {

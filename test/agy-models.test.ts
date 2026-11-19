@@ -126,7 +126,15 @@ describe("agy's models in the menus and in its ids", () => {
   })
 
   test('a full id keeps its effort for --model; a base model is given as it is', () => {
-    expect(agyIds()).toEqual(['gemini-3.8-flash-low', 'gemini-3.8-flash-medium', 'gemini-3.8-flash-high', 'gemini-4-hydrogen-xhigh', 'claude-opus-5-5-high', 'gpt-oss-120b-medium', 'gemini-pro-orchestrator-g1-pro'])
+    expect(agyIds()).toEqual([
+      'gemini-3.8-flash-low',
+      'gemini-3.8-flash-medium',
+      'gemini-3.8-flash-high',
+      'gemini-4-hydrogen-xhigh',
+      'claude-opus-5-5-high',
+      'gpt-oss-120b-medium',
+      'gemini-pro-orchestrator-g1-pro',
+    ])
     expect(modelArg('agy', 'gemini-3.8-flash-high')).toBe('gemini-3.8-flash-high')
     expect(modelArg('agy', 'gemini-3.8-flash')).toBe('gemini-3.8-flash')
     expect(modelArg('agy', 'Gemini 3.8 Flash')).toBe('gemini-3.8-flash')

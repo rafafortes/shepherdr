@@ -114,7 +114,7 @@ describe('the Host header', () => {
   test('the shepherdr command reaches /api/cli on loopback', async () => {
     const r = await fetch(`${base}/api/cli`, { method: 'POST', headers: { host: `127.0.0.1:${server.port}` }, body: JSON.stringify({ args: ['status'] }) })
     expect(r.status).toBe(200)
-    expect((await r.text())).toContain('does not accept shepherdr commands')
+    expect(await r.text()).toContain('does not accept shepherdr commands')
   })
 
   test('a refused host is logged once, and the list stays bounded', async () => {
@@ -152,7 +152,9 @@ describe('who may act', () => {
   })
   test('a WebSocket from another website is refused', async () => {
     for (const path of ['/api/ws', '/api/browser?task=X-1']) {
-      const r = await fetch(`${base}${path}`, { headers: { origin: 'https://evil.example', upgrade: 'websocket', connection: 'Upgrade', 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==', 'sec-websocket-version': '13' } })
+      const r = await fetch(`${base}${path}`, {
+        headers: { origin: 'https://evil.example', upgrade: 'websocket', connection: 'Upgrade', 'sec-websocket-key': `${'dGhlIHNhbXBsZSBub25jZQ'}==`, 'sec-websocket-version': '13' },
+      })
       expect(r.status).toBe(403)
     }
   })
@@ -350,8 +352,13 @@ describe('upload cap', () => {
       })
       socket.setTimeout(5000)
       let out = ''
-      socket.on('data', (d) => { out += d.toString() })
-      socket.on('timeout', () => { socket.destroy(); reject(new Error('no early answer')) })
+      socket.on('data', (d) => {
+        out += d.toString()
+      })
+      socket.on('timeout', () => {
+        socket.destroy()
+        reject(new Error('no early answer'))
+      })
       socket.on('end', () => resolve(out))
       socket.on('error', reject)
     })

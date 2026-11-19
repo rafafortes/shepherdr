@@ -15,7 +15,19 @@ describe('a reply on the screen', () => {
     ).toBeUndefined()
     // a background job that finished wakes it: the job's line, then it thinks
     expect(
-      replyOnScreen('claude', claude('● started', '', '✻ Crunched for 2s · done 9:41 PM', '', '● Background command "Sleep 6 seconds" completed (exit code 0)', '', '· Hullaballooing…', '  ⎿  Tip: Connect Claude to your IDE · /ide')),
+      replyOnScreen(
+        'claude',
+        claude(
+          '● started',
+          '',
+          '✻ Crunched for 2s · done 9:41 PM',
+          '',
+          '● Background command "Sleep 6 seconds" completed (exit code 0)',
+          '',
+          '· Hullaballooing…',
+          '  ⎿  Tip: Connect Claude to your IDE · /ide',
+        ),
+      ),
     ).toBeUndefined()
     // its turn is done
     expect(replyOnScreen('claude', claude('● All set.', '', '✻ Sautéed for 7s · done 9:39 PM'))).toBeUndefined()

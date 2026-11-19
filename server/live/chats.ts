@@ -2,7 +2,22 @@
 // posts (update cards, choice cards, plans, artifacts, merge cards) kept in its own small log per chat.
 import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { apart, cardMessage, type ActivityAnswer, type ActivityAsk, type Chat, type ChatControls, type ArtifactPost, type Job, type Message, type Peer, type Question, type Reaction, type SecretAsk, type UpdateCard } from '../../shared/types.ts'
+import {
+  apart,
+  cardMessage,
+  type ActivityAnswer,
+  type ActivityAsk,
+  type Chat,
+  type ChatControls,
+  type ArtifactPost,
+  type Job,
+  type Message,
+  type Peer,
+  type Question,
+  type Reaction,
+  type SecretAsk,
+  type UpdateCard,
+} from '../../shared/types.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
 import { stripHidden, type Agents, type OutItem } from './agents.ts'
 import { agentLines, excerpt, findQuoted, fromAgents, markerSoFar, parseBrowserNotes, parseReply, parseUserLine, quietReply, userLines, type FromAgent, type Parsed } from './chatlines.ts'
@@ -39,8 +54,7 @@ function shownAs(p: Parsed): { title?: string; text: string } | undefined {
 
 /** a message of the human's, hidden or not: their words (or their notes on a page, which Shepherdr hides in a tag),
  *  never only reactions and never Shepherdr's own news */
-const wordsOf = (text: string) =>
-  yours(text) || /<shepherdr[^>]*>\s*<browser\b/i.test(text)
+const wordsOf = (text: string) => yours(text) || /<shepherdr[^>]*>\s*<browser\b/i.test(text)
 
 /** a line of yours the agent will answer: words of yours, not Shepherdr's hidden news and not only reactions */
 const yours = (text: string) =>
@@ -308,7 +322,8 @@ export class Chats {
 
   /** a deleted task's chat: its log goes, and all that was read of it */
   forget(key: string) {
-    for (const m of [this.tails, this.events, this.where, this.reading, this.logs, this.menus, this.menuAt, this.shown, this.revs, this.acts, this.eventCloses, this.logRevs, this.chatCache]) m.delete(key)
+    for (const m of [this.tails, this.events, this.where, this.reading, this.logs, this.menus, this.menuAt, this.shown, this.revs, this.acts, this.eventCloses, this.logRevs, this.chatCache])
+      m.delete(key)
     rmSync(join(HOME, 'chatlog', `${safe(key)}.json`), { force: true })
   }
 
@@ -349,7 +364,7 @@ export class Chats {
 
   /** a reply to the agent's plain question went from its copy in a space's chat: the reply says so */
   repliedFrom(key: string, reply: string, space: string) {
-    ;((this.log(key).said ??= {})[`reply:${reply}`] = { space })
+    ;(this.log(key).said ??= {})[`reply:${reply}`] = { space }
     this.touchLog(key)
     this.saveLog(key)
   }
@@ -719,15 +734,20 @@ export class Chats {
     // stripped text, and a card's own words), the rows that already ask (a CLI question, or the reply a card posted
     // before this one rides — a card's own question never reaches its row there), and the lines of yours or another
     // agent's that break its search
-    const rows = riders ? [
-      ...l.posted.filter((p) => !p.files?.length).map((p) => ({ at: p.at, agent: p.who !== 'you', text: p.who !== 'you' ? (p.card ? cardMessage(p.card, p.at).text ?? '' : p.text ?? '') : '', asks: !!p.question && !p.card })),
-      ...ev.filter((e) => e.kind === 'agent' || e.kind === 'peer' || e.kind === 'question' || (e.kind === 'user' && yours(e.text))).map((e) => ({ at: e.at, agent: e.kind === 'agent' || e.kind === 'question', text: e.kind === 'agent' ? agentLines(stripHidden(e.text)).text ?? '' : '', asks: e.kind === 'question' })),
-    ].sort((a, b) => a.at - b.at) : []
+    const rows = riders
+      ? [
+          ...l.posted
+            .filter((p) => !p.files?.length)
+            .map((p) => ({ at: p.at, agent: p.who !== 'you', text: p.who !== 'you' ? (p.card ? (cardMessage(p.card, p.at).text ?? '') : (p.text ?? '')) : '', asks: !!p.question && !p.card })),
+          ...ev
+            .filter((e) => e.kind === 'agent' || e.kind === 'peer' || e.kind === 'question' || (e.kind === 'user' && yours(e.text)))
+            .map((e) => ({ at: e.at, agent: e.kind === 'agent' || e.kind === 'question', text: e.kind === 'agent' ? (agentLines(stripHidden(e.text)).text ?? '') : '', asks: e.kind === 'question' })),
+        ].sort((a, b) => a.at - b.at)
+      : []
     // the closure times themselves, for the `until` that cuts a host search at the first thing that answers
-    const closedAt = riders ? [
-      ...ev.filter((e) => e.kind === 'peer' || (e.kind === 'user' && wordsOf(e.text))).map((e) => e.at),
-      ...l.posted.filter((p) => p.who === 'you').map((p) => p.at),
-    ].sort((a, b) => a - b) : []
+    const closedAt = riders
+      ? [...ev.filter((e) => e.kind === 'peer' || (e.kind === 'user' && wordsOf(e.text))).map((e) => e.at), ...l.posted.filter((p) => p.who === 'you').map((p) => p.at)].sort((a, b) => a - b)
+      : []
     const taken = new Set<number>()
     const hostAt = (at: number, until: number | undefined) => {
       for (const r of rows) {
@@ -735,7 +755,10 @@ export class Chats {
         if (until !== undefined && r.at >= until) return undefined
         if (!r.agent) return undefined
         if (r.asks || taken.has(r.at)) continue
-        if (r.text) { taken.add(r.at); return r.at }
+        if (r.text) {
+          taken.add(r.at)
+          return r.at
+        }
       }
       return undefined
     }
@@ -772,8 +795,23 @@ export class Chats {
       const id = menuId(key, menu)
       const kind = this.agents.record(key)?.kind ?? 'claude'
       out.push({
-        id, who: 'agent', at: Date.now(),
-        question: { id, title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, kind: 'Form', choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: this.nameOf(key), asks: `${CLI_NAME[kind] ?? kind} asks`, noDismiss: this.startScreens.has(key) || !menu.choices.length || undefined },
+        id,
+        who: 'agent',
+        at: Date.now(),
+        question: {
+          id,
+          title: menu.title,
+          screen: menu.screen,
+          terminal: true,
+          noNote: true,
+          multi: menu.multi,
+          reject: menu.reject,
+          kind: 'Form',
+          choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })),
+          to: this.nameOf(key),
+          asks: `${CLI_NAME[kind] ?? kind} asks`,
+          noDismiss: this.startScreens.has(key) || !menu.choices.length || undefined,
+        },
       })
     }
     return out.sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
@@ -908,7 +946,17 @@ export class Chats {
   private chatSig(key: string, from: string, user: string): string {
     const ev = this.events.get(key) ?? []
     const menu = this.menus.get(key)
-    return [this.revs.get(key) ?? 0, ev.length, ev.length ? ev[ev.length - 1]!.at : 0, this.logRevs.get(key) ?? 0, from, user, menu ? menuId(key, menu) : '', this.startScreens.has(key) ? 1 : 0, this.agents.sentLately(key).length].join('|')
+    return [
+      this.revs.get(key) ?? 0,
+      ev.length,
+      ev.length ? ev[ev.length - 1]!.at : 0,
+      this.logRevs.get(key) ?? 0,
+      from,
+      user,
+      menu ? menuId(key, menu) : '',
+      this.startScreens.has(key) ? 1 : 0,
+      this.agents.sentLately(key).length,
+    ].join('|')
   }
 
   chat(key: string): Chat {
@@ -979,7 +1027,20 @@ export class Chats {
         id: menuId(key, menu),
         who: 'agent',
         at: Date.now(),
-        question: { id: menuId(key, menu), title: menu.title, screen: menu.screen, terminal: true, noNote: true, multi: menu.multi, reject: menu.reject, kind: 'Form', choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })), to: from, asks: `${CLI_NAME[kind] ?? kind} asks`, noDismiss: this.startScreens.has(key) || !menu.choices.length || undefined },
+        question: {
+          id: menuId(key, menu),
+          title: menu.title,
+          screen: menu.screen,
+          terminal: true,
+          noNote: true,
+          multi: menu.multi,
+          reject: menu.reject,
+          kind: 'Form',
+          choices: menu.choices.map((label, i) => ({ label, description: menu.descriptions?.[i] })),
+          to: from,
+          asks: `${CLI_NAME[kind] ?? kind} asks`,
+          noDismiss: this.startScreens.has(key) || !menu.choices.length || undefined,
+        },
       }
       if (waitingAt >= 0) msgs.splice(waitingAt, 0, card)
       else msgs.push(card)
@@ -988,19 +1049,25 @@ export class Chats {
     const queued = this.inQueue(key)
     const failed = this.agents.failedLately(key)
     const active = this.agents.info(key)?.agent_session
-    const file = active?.kind === 'path' ? r?.logs.find((f) => f.endsWith('/' + active.value.split('/').at(-1)))
-      : r?.sessionId ? r.logs.find((f) => f.endsWith(`${r.sessionId}.jsonl`)) : r?.logs.at(-1)
+    const file =
+      active?.kind === 'path' ? r?.logs.find((f) => f.endsWith('/' + active.value.split('/').at(-1))) : r?.sessionId ? r.logs.find((f) => f.endsWith(`${r.sessionId}.jsonl`)) : r?.logs.at(-1)
     let runtime = sessionRuntime(ev, file, r?.started ?? 0)
     if (st !== 'working' || !runtime) runtime = this.agents.runtime(key) ?? runtime
     const hook = this.agents.runtimeHook(key)
-    if (hook) runtime = !runtime || hook.at >= runtime.at ? { ...(hook.model && runtime?.model && hook.model !== runtime.model ? {} : runtime), ...hook, source: 'hook' } : { ...(hook.model && runtime.model && hook.model !== runtime.model ? {} : hook), ...runtime }
+    if (hook)
+      runtime =
+        !runtime || hook.at >= runtime.at
+          ? { ...(hook.model && runtime?.model && hook.model !== runtime.model ? {} : runtime), ...hook, source: 'hook' }
+          : { ...(hook.model && runtime.model && hook.model !== runtime.model ? {} : hook), ...runtime }
     if (runtime?.model) runtime.modelLabel = findModel(kind, runtime.model)?.label
     const act = this.activityFor(key)
     const jobs = this.jobs(key, act).map(({ log: _l, output: _o, ...j }): Job => j)
     return {
       key,
       cli: CLI_NAME[kind] ?? kind,
-      agent: r ? { runtime, ...launchHarness({ kind: r.kind, model: r.model, effort: r.effort }), ...(findModel(r.kind, r.model) ? { modelLabel: findModel(r.kind, r.model)!.label } : {}) } : undefined,
+      agent: r
+        ? { runtime, ...launchHarness({ kind: r.kind, model: r.model, effort: r.effort }), ...(findModel(r.kind, r.model) ? { modelLabel: findModel(r.kind, r.model)!.label } : {}) }
+        : undefined,
       messages: msgs,
       closedAt,
       failed: failed.length ? failed : undefined,
@@ -1108,7 +1175,15 @@ export class Chats {
         // each file is a message of its own, right after the text (the first one keeps the message's own id, and a
         // reply with no words)
         files.forEach((file, i) =>
-          msgs.push({ id: i || body || answeredTitle ? `${e.id}:${i}` : e.id, who: 'you', at: e.at, file, cid, newSession: (!i && !body && !answeredTitle && newSession) || undefined, reply: !i && !body && !answeredTitle ? reply : undefined }),
+          msgs.push({
+            id: i || body || answeredTitle ? `${e.id}:${i}` : e.id,
+            who: 'you',
+            at: e.at,
+            file,
+            cid,
+            newSession: (!i && !body && !answeredTitle && newSession) || undefined,
+            reply: !i && !body && !answeredTitle ? reply : undefined,
+          }),
         )
         newSession = false
         continue
@@ -1154,10 +1229,9 @@ export class Chats {
     msgs.push(...cards)
     msgs.sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
     // the card-closing rule from the raw log, for openCards and hostFor: hidden notes and app answers are no rows in `messages`
-    const closedAt = [
-      ...ev.filter((e) => e.kind === 'peer' || (e.kind === 'user' && wordsOf(e.text))).map((e) => e.at),
-      ...l.posted.filter((p) => p.who === 'you').map((p) => p.at),
-    ].sort((a, b) => a - b)
+    const closedAt = [...ev.filter((e) => e.kind === 'peer' || (e.kind === 'user' && wordsOf(e.text))).map((e) => e.at), ...l.posted.filter((p) => p.who === 'you').map((p) => p.at)].sort(
+      (a, b) => a - b,
+    )
     // what else Shepherdr posted: a question or artifact joins the agent's reply of that turn
     const echoed = new Set<Message>()
     /** the replies an artifact came with: one each */
@@ -1174,7 +1248,10 @@ export class Chats {
       if (p.who === 'you') {
         // a command as you typed it: once the log has it (by its id, or by its name: /new is /clear to Claude Code), the
         // log's line shows, in your words
-        const logged = p.cid ? (msgs.find((m) => m.cid === p.cid) ?? msgs.find((m) => m.who === 'you' && !m.cid && !echoed.has(m) && !!m.text && sameCommand(m.text, p.text ?? '') && Math.abs((m.at ?? 0) - p.at) < 60_000)) : undefined
+        const logged = p.cid
+          ? (msgs.find((m) => m.cid === p.cid) ??
+            msgs.find((m) => m.who === 'you' && !m.cid && !echoed.has(m) && !!m.text && sameCommand(m.text, p.text ?? '') && Math.abs((m.at ?? 0) - p.at) < 60_000))
+          : undefined
         if (logged) {
           echoed.add(logged)
           // at when it went in: Claude Code logs a menu's command once the menu closes
@@ -1243,5 +1320,4 @@ export class Chats {
     const effort = nearest(on.efforts, r?.effort) ?? on.effort ?? on.efforts[0]
     return { models: models.map((m) => m.label), model: models.indexOf(on), efforts: on.efforts, effort: Math.max(0, on.efforts.indexOf(effort ?? '')) }
   }
-
 }

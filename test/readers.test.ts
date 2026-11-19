@@ -18,9 +18,9 @@ const parse = (cli: string, objs: object[]) =>
 // token usage, turn starts and steps are checked on their own below; the other tests read the conversation
 const STEPS = new Set(['step', 'step-end', 'job', 'job-end'])
 const brief = (ev: LogEvent[]) =>
-  ev.filter((e) => e.kind !== 'runtime' && e.kind !== 'usage' && e.kind !== 'turn-start' && !STEPS.has(e.kind)).map((e) =>
-    e.kind === 'user' || e.kind === 'agent' ? `${e.kind}:${e.text}` : e.kind === 'question' ? `question:${e.id}` : `${e.kind}:${e.id}`,
-  )
+  ev
+    .filter((e) => e.kind !== 'runtime' && e.kind !== 'usage' && e.kind !== 'turn-start' && !STEPS.has(e.kind))
+    .map((e) => (e.kind === 'user' || e.kind === 'agent' ? `${e.kind}:${e.text}` : e.kind === 'question' ? `question:${e.id}` : `${e.kind}:${e.id}`))
 
 /* ---------- Claude Code ---------- */
 
@@ -57,8 +57,7 @@ const cassistant = (uuid: string, id: string, block: object, stop: string | null
   uuid,
   timestamp: ts(),
 })
-const toolResult = (uuid: string, id: string, content: string) =>
-  cuser(uuid, [{ tool_use_id: id, type: 'tool_result', content }], { toolUseResult: { stdout: content }, sourceToolAssistantUUID: 'x' })
+const toolResult = (uuid: string, id: string, content: string) => cuser(uuid, [{ tool_use_id: id, type: 'tool_result', content }], { toolUseResult: { stdout: content }, sourceToolAssistantUUID: 'x' })
 
 describe('claude reader', () => {
   test('keeps typed prompts and replies; drops meta, wrappers, tool steps and thinking', () => {
@@ -79,7 +78,14 @@ describe('claude reader', () => {
         isVisibleInTranscriptOnly: true,
       }),
       cuser('u8', 'subagent prompt', { isSidechain: true }),
-      cuser('u9', [{ type: 'text', text: 'Also check the footer' }, { type: 'text', text: '<system-reminder>\nnote\n</system-reminder>' }], typed),
+      cuser(
+        'u9',
+        [
+          { type: 'text', text: 'Also check the footer' },
+          { type: 'text', text: '<system-reminder>\nnote\n</system-reminder>' },
+        ],
+        typed,
+      ),
       cassistant('a1', 'msg_A', { type: 'thinking', thinking: 'hmm', signature: 'sig' }, 'tool_use'),
       cassistant('a2', 'msg_A', { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } }, 'tool_use'),
       toolResult('u10', 'toolu_1', 'src\npackage.json'),
@@ -106,8 +112,13 @@ describe('claude reader', () => {
     // order, the empty thinking block, the update, the call, the result and the reply that ends the turn), with the
     // words and everything about that machine replaced. Claude Code shows the update in place of what the agent wrote
     // before the call and keeps only the update: the chat shows it too.
-    const lines = readFileSync(join(import.meta.dir, 'fixtures/readers/claude-updates.jsonl'), 'utf8').split('\n').filter(Boolean)
-    const ev = parse('claude', lines.map((l) => JSON.parse(l)))
+    const lines = readFileSync(join(import.meta.dir, 'fixtures/readers/claude-updates.jsonl'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+    const ev = parse(
+      'claude',
+      lines.map((l) => JSON.parse(l)),
+    )
     expect(brief(ev)).toEqual([
       // the fixture file's own session
       'session:session-c0a1b2c3-0000-4000-8000-000000000011',
@@ -137,7 +148,18 @@ describe('claude reader', () => {
   })
 
   test('a command Claude Code runs itself reads as typed, with what it printed as its answer, and starts no turn', () => {
-    const local = (uuid: string, content: string) => ({ parentUuid: null, ...base, version: '2.1.310', type: 'system', subtype: 'local_command', content, level: 'info', timestamp: ts(), uuid, isMeta: false })
+    const local = (uuid: string, content: string) => ({
+      parentUuid: null,
+      ...base,
+      version: '2.1.310',
+      type: 'system',
+      subtype: 'local_command',
+      content,
+      level: 'info',
+      timestamp: ts(),
+      uuid,
+      isMeta: false,
+    })
     const ev = parse('claude', [
       // /clear starts the new session's log
       cuser('u1', '<local-command-caveat>Caveat: The command below was run directly in Claude Code.</local-command-caveat>', { isMeta: true }),
@@ -153,7 +175,14 @@ describe('claude reader', () => {
       local('s6', '<local-command-stdout>Compacted (ctrl+o to see full summary)</local-command-stdout>'),
     ])
     // the /model answer is not a chat message: it is read as the runtime the CLI now runs on (runtime.test.ts)
-    expect(brief(ev).slice(1)).toEqual(['user:/clear', 'user:/context', 'agent:```\n Context Usage\n⛀ ⛁ 31.5k tokens\n```', 'user:/model sonnet', 'user:/compact', 'agent:Compacted (ctrl+o to see full summary)'])
+    expect(brief(ev).slice(1)).toEqual([
+      'user:/clear',
+      'user:/context',
+      'agent:```\n Context Usage\n⛀ ⛁ 31.5k tokens\n```',
+      'user:/model sonnet',
+      'user:/compact',
+      'agent:Compacted (ctrl+o to see full summary)',
+    ])
     expect(ev.some((e) => e.kind === 'turn-start')).toBe(false)
   })
 
@@ -366,13 +395,7 @@ describe('codex reader', () => {
       line('response_item', { type: 'function_call_output', call_id: 'call_async', output: '{"accepted":true}' }),
       cxmsg('msg_u1', 'user', [{ type: 'input_text', text: 'It is called Example' }], ['user.text']),
     ])
-    expect(brief(ev).slice(1)).toEqual([
-      'question:call_sync',
-      'answered:call_sync',
-      'question:call_async',
-      'answered:call_async',
-      'user:It is called Example',
-    ])
+    expect(brief(ev).slice(1)).toEqual(['question:call_sync', 'answered:call_sync', 'question:call_async', 'answered:call_async', 'user:It is called Example'])
     expect(ev[1]).toMatchObject({
       tool: 'request_user_input',
       items: [{ header: 'Scope', question: 'Which pages?', multiSelect: false, allowCustom: true, options: [{ label: 'All' }, { label: 'Home' }] }],
@@ -427,20 +450,13 @@ describe('pi reader', () => {
         timestamp: 6,
       }),
     ])
-    expect(brief(ev)).toEqual([
-      'session:session-sw-0001',
-      'user:List the files',
-      'agent:There is one file: a.ts',
-      'turn-end:turn-e4',
-      'user:/skill:review the parser',
-    ])
+    expect(brief(ev)).toEqual(['session:session-sw-0001', 'user:List the files', 'agent:There is one file: a.ts', 'turn-end:turn-e4', 'user:/skill:review the parser'])
     expect(ev[0]).toMatchObject({ sessionId: 'sw-0001' })
   })
 
   test('a provider error keeps the HTTP status its message names, and none where it names none', () => {
-    const err = (errorMessage: string) => parse('pi', [
-      pimsg('e1', null, { role: 'assistant', content: [], usage: {}, stopReason: 'error', errorMessage, timestamp: 3 }),
-    ]).find((e) => e.kind === 'error')
+    const err = (errorMessage: string) =>
+      parse('pi', [pimsg('e1', null, { role: 'assistant', content: [], usage: {}, stopReason: 'error', errorMessage, timestamp: 3 })]).find((e) => e.kind === 'error')
     // a status after the provider's name in "API error (502)", and a leading bare "429"
     const gateway = 'exe-dev-openai API error (502): 502 gateway proxy: upstream request failed'
     expect(err(gateway)).toMatchObject({ kind: 'error', id: 'error-e1', text: gateway, status: 502 })
@@ -472,10 +488,11 @@ describe('pi reader', () => {
     ]
     writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
     const offsets = [0, Buffer.byteLength(JSON.stringify(lines[0]) + '\n')]
-    const ev = readerFor('pi')!.parse(lines.map((l, i) => ({ text: JSON.stringify(l), offset: offsets[i] })), file)
-    expect(ev.filter((e) => e.kind === 'step')).toMatchObject([
-      { kind: 'step', id: 'pi-call_1', tool: 'bash', step: 'run', title: 'Ran tests', test: true },
-    ])
+    const ev = readerFor('pi')!.parse(
+      lines.map((l, i) => ({ text: JSON.stringify(l), offset: offsets[i] })),
+      file,
+    )
+    expect(ev.filter((e) => e.kind === 'step')).toMatchObject([{ kind: 'step', id: 'pi-call_1', tool: 'bash', step: 'run', title: 'Ran tests', test: true }])
     const end = ev.find((e) => e.kind === 'step-end')!
     expect(end).toMatchObject({ id: 'pi-call_1', result: '41 passed', out: { file, offset: offsets[1] } })
     expect(outputAt(end.kind === 'step-end' ? end.out! : { file, offset: 0 }, end.id)).toBe('41 passed')
@@ -483,7 +500,16 @@ describe('pi reader', () => {
 
   test('an unknown tool reads in words; an unmatched result says nothing, a failed one ends its step', () => {
     const ev = parse('pi', [
-      pimsg('p3', null, { role: 'assistant', content: [{ type: 'toolCall', id: 'call_2', name: 'some_tool' }, { type: 'toolCall', id: 'call_3', name: 'bash' }, { type: 'toolCall', name: 'read' }], stopReason: 'toolUse', timestamp: 1 }),
+      pimsg('p3', null, {
+        role: 'assistant',
+        content: [
+          { type: 'toolCall', id: 'call_2', name: 'some_tool' },
+          { type: 'toolCall', id: 'call_3', name: 'bash' },
+          { type: 'toolCall', name: 'read' },
+        ],
+        stopReason: 'toolUse',
+        timestamp: 1,
+      }),
       pimsg('p4', 'p3', { role: 'toolResult', toolCallId: 'other', content: 'nothing', isError: true, timestamp: 2 }),
       pimsg('p5', 'p4', { role: 'toolResult', toolCallId: 'call_2', content: [{ type: 'text', text: 'oops' }], isError: true, timestamp: 2 }),
     ])
@@ -627,11 +653,7 @@ describe('finding logs', () => {
     const now = Date.now()
     touch(join(day, 'rollout-a.jsonl'), jl(sessionMeta('/work/app')) + jl(cxmsg('m', 'user', [])), now - 5000)
     touch(join(day, 'rollout-b.jsonl'), jl(sessionMeta('/work/other')), now - 1000)
-    touch(
-      join(day, 'rollout-c.jsonl'),
-      jl(sessionMeta('/work/app', { source: { subagent: { thread_spawn: { parent_thread_id: T } } }, thread_source: 'subagent' })),
-      now - 500,
-    )
+    touch(join(day, 'rollout-c.jsonl'), jl(sessionMeta('/work/app', { source: { subagent: { thread_spawn: { parent_thread_id: T } } }, thread_source: 'subagent' })), now - 500)
     expect(findCodexLog('/work/app')).toBe(join(day, 'rollout-a.jsonl'))
     expect(findCodexLog('/work/app/')).toBe(join(day, 'rollout-a.jsonl'))
     expect(findCodexLog('/work/app', now)).toBeUndefined()
@@ -734,7 +756,13 @@ describe('token usage', () => {
         sessionId: 's1',
         uuid: 'x1',
         timestamp: '2026-10-25T10:00:00.000Z',
-        message: { id: 'msg_U', role: 'assistant', content: [{ type: 'text', text: 'Hi' }], stop_reason: 'end_turn', usage: { input_tokens: 10, cache_creation_input_tokens: 5, cache_read_input_tokens: 100, output_tokens: 7 } },
+        message: {
+          id: 'msg_U',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Hi' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 10, cache_creation_input_tokens: 5, cache_read_input_tokens: 100, output_tokens: 7 },
+        },
       },
     ])
     const u = ev.filter((e) => e.kind === 'usage')
@@ -742,7 +770,13 @@ describe('token usage', () => {
     expect(u[0]).toMatchObject({ id: 'usage-msg_U', tokens: 122 })
   })
   test('Claude Code: the model it ran on; a synthetic notice names none', () => {
-    const line = (model: string) => ({ type: 'assistant', sessionId: 's1', uuid: `x-${model}`, timestamp: '2026-10-25T10:00:00.000Z', message: { id: `msg_${model}`, model, role: 'assistant', content: [{ type: 'text', text: 'Hi' }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 1 } } })
+    const line = (model: string) => ({
+      type: 'assistant',
+      sessionId: 's1',
+      uuid: `x-${model}`,
+      timestamp: '2026-10-25T10:00:00.000Z',
+      message: { id: `msg_${model}`, model, role: 'assistant', content: [{ type: 'text', text: 'Hi' }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 1 } },
+    })
     const ev = parse('claude', [line('claude-opus-5-5'), line('<synthetic>')])
     const u = ev.filter((e) => e.kind === 'usage')
     expect(u.map((e) => e.kind === 'usage' && e.model)).toEqual(['claude-opus-5-5', undefined])
@@ -763,14 +797,38 @@ describe('token usage', () => {
     expect(a[0]).not.toHaveProperty('model')
     expect(a[0]!.id).not.toBe(b[0]!.id)
   })
-  test('pi: each reply from its usage, on its model with the provider in front, and pi\'s cost estimate', () => {
-    const ev = parse('pi', [{ type: 'message', id: 'm1', timestamp: '2026-10-25T10:00:00.000Z', message: { role: 'assistant', provider: 'opencode-go', model: 'deepseek-v4.1-flash', content: [{ type: 'text', text: 'Hi' }], stopReason: 'stop', usage: { totalTokens: 42, cost: { total: 0.0021 } } } }])
+  test("pi: each reply from its usage, on its model with the provider in front, and pi's cost estimate", () => {
+    const ev = parse('pi', [
+      {
+        type: 'message',
+        id: 'm1',
+        timestamp: '2026-10-25T10:00:00.000Z',
+        message: {
+          role: 'assistant',
+          provider: 'opencode-go',
+          model: 'deepseek-v4.1-flash',
+          content: [{ type: 'text', text: 'Hi' }],
+          stopReason: 'stop',
+          usage: { totalTokens: 42, cost: { total: 0.0021 } },
+        },
+      },
+    ])
     expect(ev.find((e) => e.kind === 'usage')).toMatchObject({ tokens: 42, model: 'opencode-go/deepseek-v4.1-flash', cost: 0.0021 })
   })
   test('pi: a provider whose model id already has it in front is not named twice, and no cost is no cost', () => {
     const ev = parse('pi', [
-      { type: 'message', id: 'm2', timestamp: '2026-10-25T10:00:00.000Z', message: { role: 'assistant', provider: 'commandcode', model: 'commandcode/x', content: [], stopReason: 'stop', usage: { totalTokens: 5 } } },
-      { type: 'message', id: 'm3', timestamp: '2026-10-25T10:00:01.000Z', message: { role: 'assistant', provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash', content: [], stopReason: 'stop', usage: { totalTokens: 6, cost: { total: -1 } } } },
+      {
+        type: 'message',
+        id: 'm2',
+        timestamp: '2026-10-25T10:00:00.000Z',
+        message: { role: 'assistant', provider: 'commandcode', model: 'commandcode/x', content: [], stopReason: 'stop', usage: { totalTokens: 5 } },
+      },
+      {
+        type: 'message',
+        id: 'm3',
+        timestamp: '2026-10-25T10:00:01.000Z',
+        message: { role: 'assistant', provider: 'commandcode', model: 'deepseek/deepseek-v4.1-flash', content: [], stopReason: 'stop', usage: { totalTokens: 6, cost: { total: -1 } } },
+      },
     ])
     const u = ev.filter((e) => e.kind === 'usage')
     expect(u[0]).toMatchObject({ model: 'commandcode/x' })
@@ -783,7 +841,7 @@ describe('token usage', () => {
 describe('turn marks', () => {
   const turns = (ev: LogEvent[]) => ev.filter((e) => e.kind === 'turn-start' || e.kind === 'turn-end').map((e) => e.kind)
 
-  test("Claude Code: your prompt starts a turn, its reply ends it; a finished background job wakes it into a new one", () => {
+  test('Claude Code: your prompt starts a turn, its reply ends it; a finished background job wakes it into a new one', () => {
     const ev = parse('claude', [
       cuser('u1', 'Research four options', typed),
       cassistant('a1', 'msg_T1', { type: 'tool_use', id: 'toolu_B', name: 'Agent', input: { run_in_background: true } }, 'tool_use'),

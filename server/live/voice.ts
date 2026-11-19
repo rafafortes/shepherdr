@@ -52,7 +52,12 @@ async function agentId(key: string): Promise<string> {
         prompt: {
           prompt: PROMPT,
           tools: [
-            tool('send_message', 'Send the human’s words to an agent as a chat message.', { text: { type: 'string', description: 'What to send' }, to: { type: 'string', description: 'Another agent by name, only when the human names one' } }, ['text']),
+            tool(
+              'send_message',
+              'Send the human’s words to an agent as a chat message.',
+              { text: { type: 'string', description: 'What to send' }, to: { type: 'string', description: 'Another agent by name, only when the human names one' } },
+              ['text'],
+            ),
             tool('read_chat', 'Read the recent chat and state of the agent on the call, or another one.', { to: { type: 'string', description: 'Another agent by name' } }, []),
             tool('overview', 'Every place, task and agent with its state: what needs the human, what is working.', {}, []),
           ],
@@ -87,7 +92,10 @@ export function startVoice(tools: VoiceTools, out: { send(d: ArrayBuffer | strin
     if (ended) return
     ws = new WebSocket(signed_url)
     ws.onopen = () => {
-      if (ended) { ws?.close(); return }
+      if (ended) {
+        ws?.close()
+        return
+      }
       ws!.send(
         JSON.stringify({
           type: 'conversation_initiation_client_data',
@@ -96,8 +104,14 @@ export function startVoice(tools: VoiceTools, out: { send(d: ArrayBuffer | strin
         }),
       )
       try {
-        offReply = tools.onReply((text) => !ended && ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'user_message', text: `(${tools.name} replied in the chat: "${text}") Read this reply out, briefly.` })))
-      } catch (e) { fail((e as Error).message); ws?.close() }
+        offReply = tools.onReply(
+          (text) =>
+            !ended && ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'user_message', text: `(${tools.name} replied in the chat: "${text}") Read this reply out, briefly.` })),
+        )
+      } catch (e) {
+        fail((e as Error).message)
+        ws?.close()
+      }
     }
     ws.onmessage = async (e) => {
       if (ended) return
@@ -114,8 +128,7 @@ export function startVoice(tools: VoiceTools, out: { send(d: ArrayBuffer | strin
       } else if (m.type === 'agent_response') {
         const text = m.agent_response_event?.agent_response
         if (text) out.send(JSON.stringify({ type: 'caption', who: 'agent', text }))
-      }
-      else if (m.type === 'audio' && m.audio_event?.audio_base_64) out.send(Buffer.from(m.audio_event.audio_base_64, 'base64').buffer as ArrayBuffer)
+      } else if (m.type === 'audio' && m.audio_event?.audio_base_64) out.send(Buffer.from(m.audio_event.audio_base_64, 'base64').buffer as ArrayBuffer)
       else if (m.type === 'interruption') out.send(JSON.stringify({ type: 'interrupt' }))
       else if (m.type === 'client_tool_call') {
         const c = m.client_tool_call
@@ -126,7 +139,7 @@ export function startVoice(tools: VoiceTools, out: { send(d: ArrayBuffer | strin
           if (c.tool_name === 'send_message') result = await tools.send(String(c.parameters?.text ?? ''), c.parameters?.to)
           else if (c.tool_name === 'read_chat') result = await tools.read(c.parameters?.to)
           else if (c.tool_name === 'overview') result = await tools.overview()
-          else ((is_error = true), (result = 'no such tool'))
+          else (is_error = true), (result = 'no such tool')
         } catch (err) {
           is_error = true
           result = (err as Error).message
@@ -138,7 +151,10 @@ export function startVoice(tools: VoiceTools, out: { send(d: ArrayBuffer | strin
     ws.onclose = () => {
       offReply?.()
       offReply = null
-      if (!ended) { ended = true; out.close() }
+      if (!ended) {
+        ended = true
+        out.close()
+      }
     }
   })().catch((e) => fail((e as Error).message))
   return {

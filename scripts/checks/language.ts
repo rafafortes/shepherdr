@@ -50,7 +50,11 @@ export function gitIn(root: string): (...args: string[]) => string {
   }
 }
 
-const lines = (s: string) => s.split('\n').map((l) => l.trim()).filter(Boolean)
+const lines = (s: string) =>
+  s
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
 
 /** code files the diff touches: commits since the default branch plus untracked files; null when there is no base */
 export function changedFiles(git: (...args: string[]) => string): string[] | null {

@@ -12,7 +12,11 @@ test("a command the code under test starts gets the test's Shepherdr home and he
   // set since the process started: still what the child gets
   process.env.PRELOAD_PROBE = 'now'
   expect(said('echo "$PRELOAD_PROBE"')).toBe('now')
-  expect(Bun.spawnSync({ cmd: ['/bin/sh', '-c', 'echo "$PRELOAD_PROBE"'] }).stdout.toString().trim()).toBe('now')
+  expect(
+    Bun.spawnSync({ cmd: ['/bin/sh', '-c', 'echo "$PRELOAD_PROBE"'] })
+      .stdout.toString()
+      .trim(),
+  ).toBe('now')
   // one that passes its own env keeps it
   expect(said('echo "[$PRELOAD_PROBE]"', { env: { PATH: process.env.PATH! } })).toBe('[]')
   delete process.env.PRELOAD_PROBE

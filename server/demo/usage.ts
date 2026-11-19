@@ -39,8 +39,32 @@ export function demoUsage(now = Date.now()): UsageLedger {
   // OpenCode Go's calls under pi before its run-outs, whatever the hour the demo is looked at: the learned limit reads from them
   for (const h of [2.5, 4, 6]) l.count('LV-3/Agent', 'pi.opencode-go/deepseek-v4.1-flash', { id: `demo-opencode-before-${h}`, at: now - h * HOUR, tokens: 15_000, cost: 0.0009 }, now)
   // OpenCode Go ran out twice this week under pi: the second time, now, until a reset three hours on (out now)
-  l.runOut({ at: now - 50 * HOUR, key: 'pi.opencode-go/deepseek-v4.1-flash', chat: 'LV-3/Agent', role: 'task', reason: 'Out of allowance until 6pm', words: 'You have hit your usage limit · resets 6pm', reset: '6pm', resetAt: now - 40 * HOUR }, now)
-  l.runOut({ at: now - 2 * HOUR, key: 'pi.opencode-go/deepseek-v4.1-flash', chat: 'LV-3/Agent', role: 'task', reason: 'Out of allowance until 5pm', words: 'You have hit your usage limit · resets 5pm', reset: '5pm', resetAt: now + 3 * HOUR }, now)
+  l.runOut(
+    {
+      at: now - 50 * HOUR,
+      key: 'pi.opencode-go/deepseek-v4.1-flash',
+      chat: 'LV-3/Agent',
+      role: 'task',
+      reason: 'Out of allowance until 6pm',
+      words: 'You have hit your usage limit · resets 6pm',
+      reset: '6pm',
+      resetAt: now - 40 * HOUR,
+    },
+    now,
+  )
+  l.runOut(
+    {
+      at: now - 2 * HOUR,
+      key: 'pi.opencode-go/deepseek-v4.1-flash',
+      chat: 'LV-3/Agent',
+      role: 'task',
+      reason: 'Out of allowance until 5pm',
+      words: 'You have hit your usage limit · resets 5pm',
+      reset: '5pm',
+      resetAt: now + 3 * HOUR,
+    },
+    now,
+  )
   // the demo's week was read already: no backfill notice. Claude Code's plan limits, as a read of its own would give them
   // (fictional, as the rest of the demo, read seven minutes ago): one window refilled since, which says nothing of now
   l.setQuota('claude', {

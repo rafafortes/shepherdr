@@ -8,7 +8,25 @@ export interface Parsed {
   flags: Set<string>
 }
 
-const FLAGS = new Set(['ordinary', 'other', 'multi', 'json', 'project-coordinator', 'off', 'help', 'force', 'archived', 'machine', 'later', 'save', 'all', 'yes', 'priority', 'apply-waiting', 'limits'])
+const FLAGS = new Set([
+  'ordinary',
+  'other',
+  'multi',
+  'json',
+  'project-coordinator',
+  'off',
+  'help',
+  'force',
+  'archived',
+  'machine',
+  'later',
+  'save',
+  'all',
+  'yes',
+  'priority',
+  'apply-waiting',
+  'limits',
+])
 
 export function parseArgs(args: string[]): Parsed {
   const words: string[] = []

@@ -3,7 +3,23 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { agoWords, changeWords, cleanName, keysOf, LIMIT_KEYS, MODEL_KEYS, nameProblem, Profiles, ProfileStore, previewWords, planOf, UNDO_KEEP, waitingPicks, type Change, type Site } from '../server/live/profiles.ts'
+import {
+  agoWords,
+  changeWords,
+  cleanName,
+  keysOf,
+  LIMIT_KEYS,
+  MODEL_KEYS,
+  nameProblem,
+  Profiles,
+  ProfileStore,
+  previewWords,
+  planOf,
+  UNDO_KEEP,
+  waitingPicks,
+  type Change,
+  type Site,
+} from '../server/live/profiles.ts'
 import { Settings, type Level } from '../server/live/settings.ts'
 import { home } from '../server/store.ts'
 
@@ -88,7 +104,11 @@ describe('a profile: what it keeps, at every level', () => {
     // the space's sub-limit changed since, and the machine's total too: the plan names both, each as it reads now
     w.s.set('models.maxAtOnce', 'off', { space: 'gtm' })
     w.s.set('models.maxAtOnce', 'pi.radeon=1', 'machine')
-    expect(planOf(w.site(), lim).changes.filter((c) => c.key === 'models.maxAtOnce').map((c) => [c.at, c.now, c.then])).toEqual([
+    expect(
+      planOf(w.site(), lim)
+        .changes.filter((c) => c.key === 'models.maxAtOnce')
+        .map((c) => [c.at, c.now, c.then]),
+    ).toEqual([
       ['machine', 'pi.radeon=1', 'pi.spark=4'],
       [{ space: 'gtm' }, 'off', 'claude=2'],
     ])
@@ -137,7 +157,11 @@ describe('a profile: what it keeps, at every level', () => {
 
 describe('apply: the difference, all of it or nothing, and what restores exactly', () => {
   test('a round trip at all levels: after changes everywhere, apply writes back exactly what was saved, nulls included', () => {
-    const w = world({ everywhere: { 'task.agent': 'pi', 'task.model': 'opencode-go/deepseek-v4.1-flash', 'task.effort': 'high' }, machine: { 'task.effort': 'low' }, spaces: { gtm: { 'task.agent': 'Codex', 'space.maxTasks': '4' } } })
+    const w = world({
+      everywhere: { 'task.agent': 'pi', 'task.model': 'opencode-go/deepseek-v4.1-flash', 'task.effort': 'high' },
+      machine: { 'task.effort': 'low' },
+      spaces: { gtm: { 'task.agent': 'Codex', 'space.maxTasks': '4' } },
+    })
     w.p.save('night', { limits: true })
     const saved = structuredClone(w.store.f.profiles[0]!.values)
     // day changes: everything moves, a space sets what it did not, another drops what it had
@@ -219,8 +243,20 @@ describe('apply: the difference, all of it or nothing, and what restores exactly
     const w = world({ spaces: { gtm: { 'task.agent': 'pi' } } })
     w.p.save('then')
     // now: gtm, a new space news, home; docs (saved) is gone
-    const now: Site = { settings: w.s, machine: { host: HOST, name: 'box' }, spaces: [{ key: 'gtm', name: 'gtm' }, { key: 'news', name: 'news' }, { key: '~', name: 'home' }] }
-    const p = new Profiles(w.store, () => now, () => undefined)
+    const now: Site = {
+      settings: w.s,
+      machine: { host: HOST, name: 'box' },
+      spaces: [
+        { key: 'gtm', name: 'gtm' },
+        { key: 'news', name: 'news' },
+        { key: '~', name: 'home' },
+      ],
+    }
+    const p = new Profiles(
+      w.store,
+      () => now,
+      () => undefined,
+    )
     w.s.set('task.agent', 'Codex', { space: 'news' })
     w.s.set('task.agent', 'Claude Code', { space: 'gtm' })
     const pre = p.preview('then')
@@ -234,7 +270,10 @@ describe('apply: the difference, all of it or nothing, and what restores exactly
   })
 
   test('planOf names what it leaves out, and skips a saved space by its key when it has no name of its own', () => {
-    const plan = planOf({ settings: new Settings({ everywhere: {}, machine: {}, spaces: {} }), machine: { host: HOST, name: 'box' }, spaces: [{ key: 'a', name: 'A' }] }, { limits: false, names: {}, values: { all: {}, machine: {}, spaces: { gone: {} } } })
+    const plan = planOf(
+      { settings: new Settings({ everywhere: {}, machine: {}, spaces: {} }), machine: { host: HOST, name: 'box' }, spaces: [{ key: 'a', name: 'A' }] },
+      { limits: false, names: {}, values: { all: {}, machine: {}, spaces: { gone: {} } } },
+    )
     expect(plan).toEqual({ changes: [], skipped: ['gone'], added: ['A'] })
   })
 })
@@ -291,7 +330,11 @@ describe('undo: puts back what the last apply changed, where it still reads as t
     w.p.save('night')
     w.store.f.profiles[0]!.values.spaces.gtm!['task.agent'] = 'pi'
     w.p.apply('night')
-    const shown = new Profiles(w.store, () => ({ ...w.site(), spaces: [{ key: 'docs', name: 'Docs site' }] }), () => undefined)
+    const shown = new Profiles(
+      w.store,
+      () => ({ ...w.site(), spaces: [{ key: 'docs', name: 'Docs site' }] }),
+      () => undefined,
+    )
     const u = shown.undo()
     expect(u).toMatchObject({ ok: true, changes: [], kept: [] })
   })
@@ -455,7 +498,11 @@ describe('the words: show, list, the preview and the waiting tasks', () => {
   test('show marks a saved space that is no longer one', () => {
     const w = world({ spaces: { gtm: { 'task.agent': 'pi' } } })
     w.p.save('night')
-    const shown = new Profiles(w.store, () => ({ ...w.site(), spaces: [{ key: 'other', name: 'other' }] }), () => undefined)
+    const shown = new Profiles(
+      w.store,
+      () => ({ ...w.site(), spaces: [{ key: 'other', name: 'other' }] }),
+      () => undefined,
+    )
     expect(shown.show('night')).toContain('gtm (no longer a space)')
   })
 
@@ -511,7 +558,11 @@ describe('the file: profiles.json in the home, and what a damaged one reads as',
     const dir = home()
     const w = new ProfileStore()
     const s = new Settings({ everywhere: { 'task.agent': 'pi' }, machine: {}, spaces: {} })
-    const p = new Profiles(w, () => ({ settings: s, machine: { host: HOST, name: 'box' }, spaces: SPACES }), () => undefined)
+    const p = new Profiles(
+      w,
+      () => ({ settings: s, machine: { host: HOST, name: 'box' }, spaces: SPACES }),
+      () => undefined,
+    )
     p.save('kept')
     p.apply('kept', 1_000)
     const again = new ProfileStore()
@@ -533,7 +584,21 @@ describe('the file: profiles.json in the home, and what a damaged one reads as',
 describe('a profiles.json from before the harness keys: converted once', () => {
   test('its saved models.maxAtOnce texts are written in the harness form, each change logged, and the file marked so it runs once', () => {
     const file = join(home(), 'profiles.json')
-    writeFileSync(file, JSON.stringify({ profiles: [{ name: 'sub', limits: true, saved: 1, names: {}, values: { all: { 'models.maxAtOnce': 'spark=4' }, machine: { 'models.maxAtOnce': null }, spaces: { gtm: { 'models.maxAtOnce': 'anthropic=2' } } } }], undo: [] }))
+    writeFileSync(
+      file,
+      JSON.stringify({
+        profiles: [
+          {
+            name: 'sub',
+            limits: true,
+            saved: 1,
+            names: {},
+            values: { all: { 'models.maxAtOnce': 'spark=4' }, machine: { 'models.maxAtOnce': null }, spaces: { gtm: { 'models.maxAtOnce': 'anthropic=2' } } },
+          },
+        ],
+        undo: [],
+      }),
+    )
     const errors = spyOn(console, 'error').mockImplementation(() => {})
     try {
       const store = new ProfileStore()

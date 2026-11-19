@@ -35,10 +35,7 @@ export function runSecrets(o: Options): number {
   }
   const report = o.report ?? join(o.logs, 'gitleaks.json')
   mkdirSync(o.logs, { recursive: true })
-  const r = Bun.spawnSync(
-    [o.binary, 'detect', '--source', '.', '--redact', '--report-path', report, '--report-format', 'json', '--no-banner'],
-    { cwd: o.root, stdout: 'pipe', stderr: 'pipe' },
-  )
+  const r = Bun.spawnSync([o.binary, 'detect', '--source', '.', '--redact', '--report-path', report, '--report-format', 'json', '--no-banner'], { cwd: o.root, stdout: 'pipe', stderr: 'pipe' })
   if (r.exitCode === 0) {
     o.note?.('no secrets found in the committed tree or its history')
     return 0

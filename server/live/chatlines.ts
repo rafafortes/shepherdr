@@ -51,7 +51,11 @@ import { artifactQuote, type ArtifactPost } from '../../shared/types.ts'
 export { excerpt }
 
 /** a value as an attribute: on one line, its double quotes made curly */
-const attr = (s: string) => s.replace(/\s*\n\s*/g, ' ').replace(/"([^"]*)"/g, '“$1”').replace(/"/g, '”')
+const attr = (s: string) =>
+  s
+    .replace(/\s*\n\s*/g, ' ')
+    .replace(/"([^"]*)"/g, '“$1”')
+    .replace(/"/g, '”')
 
 /** a tag: <name a="…"/>, or <name a="…">words</name> when it has words (empty ones too) */
 export function tag(name: string, attrs: Record<string, string | number | undefined>, body?: string) {
@@ -102,7 +106,13 @@ function browserNote(n: number, { comment, pick: p }: BrowserNote, url: string) 
   const one = (s: string) => s.replace(/\s*\n\s*/g, ' ').trim()
   const pad = '   '
   const out = [`${n}. ${one(p.element)}`, `${pad}Note: ${comment.trim().replace(/\n/g, `\n${pad}      `)}`, `${pad}Selector: ${one(p.selector)}`]
-  const facts = [p.text && `Text: "${one(p.text)}"`, p.nearby && `Near: "${one(p.nearby)}"`, p.react && `React: ${one(p.react)}`, p.attrs && `Attributes: ${one(p.attrs)}`, p.a11y && `Accessibility: ${one(p.a11y)}`]
+  const facts = [
+    p.text && `Text: "${one(p.text)}"`,
+    p.nearby && `Near: "${one(p.nearby)}"`,
+    p.react && `React: ${one(p.react)}`,
+    p.attrs && `Attributes: ${one(p.attrs)}`,
+    p.a11y && `Accessibility: ${one(p.a11y)}`,
+  ]
   const where = [`Box: x ${p.box.x}, y ${p.box.y}, ${p.box.w}×${p.box.h}${p.fixed ? ' (fixed)' : ''}${p.frame ? ' (inside a frame)' : ''}`, p.classes && `Classes: ${one(p.classes)}`]
   for (const row of [facts, where]) {
     const r = row.filter(Boolean).join(' · ')
@@ -199,7 +209,16 @@ export function userLines(text: string): string[] {
     const open = lines[i].trim().match(LONG)
     // its last closing tag: the words may hold one of their own
     const close = open && lines.findLastIndex((l, j) => j >= i && l.trimEnd().endsWith(`</${open[1]}>`))
-    if (close && close > i && tagOf(lines.slice(i, close + 1).join('\n').trim())) {
+    if (
+      close &&
+      close > i &&
+      tagOf(
+        lines
+          .slice(i, close + 1)
+          .join('\n')
+          .trim(),
+      )
+    ) {
       out.push(lines.slice(i, close + 1).join('\n'))
       i = close
     } else out.push(lines[i])
@@ -286,7 +305,9 @@ function attrsOf(s: string): Record<string, string> {
  * shows it beside the message and nothing treats it as the human's word.
  */
 export function fromAgents(text: string): FromAgent[] {
-  const whole = String(text ?? '').trim().replace(CLAUDE_PEER, '')
+  const whole = String(text ?? '')
+    .trim()
+    .replace(CLAUDE_PEER, '')
   const out: FromAgent[] = []
   let s = whole
   while (s.startsWith('<')) {

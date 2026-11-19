@@ -17,7 +17,11 @@ mkdirSync(join(h, '.config'))
 writeFileSync(join(h, 'dev', 'notes.txt'), 'not a folder')
 writeFileSync(join(h, 'dev', 'new', '.git', 'HEAD'), 'ref: refs/heads/main\n')
 // worked in: new now, added a day ago, old a year ago
-for (const [r, ago] of [['new', 0], ['added', 86_400], ['old', 365 * 86_400]] as const) {
+for (const [r, ago] of [
+  ['new', 0],
+  ['added', 86_400],
+  ['old', 365 * 86_400],
+] as const) {
   const t = Date.now() / 1000 - ago
   utimesSync(join(h, 'dev', r, '.git'), t, t)
   if (r === 'new') utimesSync(join(h, 'dev', r, '.git', 'HEAD'), t, t)
@@ -34,8 +38,7 @@ describe('where a path leads', () => {
     expect(resolveInHome('~/dev/brand-new/app', h)).toEqual({ abs: join(h, 'dev', 'brand-new', 'app'), exists: false })
   })
   test('no spelling leads out of home: .., absolute paths, links out, links to nowhere', () => {
-    for (const p of ['/etc', '~/..', '~/dev/../../', '../x', `${h}-other`, '~/out', '~/out/new', '~/dangling/new', 'a\0b'])
-      expect(() => resolveInHome(p, h)).toThrow()
+    for (const p of ['/etc', '~/..', '~/dev/../../', '../x', `${h}-other`, '~/out', '~/out/new', '~/dangling/new', 'a\0b']) expect(() => resolveInHome(p, h)).toThrow()
   })
 })
 

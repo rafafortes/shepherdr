@@ -33,7 +33,11 @@ const dueOf = (name: string) => {
   return nextRun(s.when, src.settings.zone(), s.since)!
 }
 /** the cards the home space's chat got from schedules */
-const homeCards = () => src.chats.log(placeId.home()).posted.filter((p) => p.id.startsWith('profile-schedule:')).map((p) => p.card?.text)
+const homeCards = () =>
+  src.chats
+    .log(placeId.home())
+    .posted.filter((p) => p.id.startsWith('profile-schedule:'))
+    .map((p) => p.card?.text)
 
 describe('scheduled profiles: the actions the screen sends', () => {
   test('a schedule is added, changed, switched off and removed; the view names each one and the next run; a rule that reads wrong is refused', async () => {

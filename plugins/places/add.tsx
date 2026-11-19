@@ -130,7 +130,12 @@ function AddDialog() {
   const shownName = name ?? slugify(base(path))
   // a repo folder decides on its own: it may be a space already (its repo's id, or a link left at its old name), and a
   // space found again keeps the name it has — the server refuses a taken name for a new one, and says so here
-  const nameBad = info?.repo ? null : nameProblem(shownName, snap.places.filter((p) => p.machine === machine).map((p) => p.name))
+  const nameBad = info?.repo
+    ? null
+    : nameProblem(
+        shownName,
+        snap.places.filter((p) => p.machine === machine).map((p) => p.name),
+      )
 
   // once it is added, wait for the new place to show, then open it
   useEffect(() => {
@@ -230,128 +235,121 @@ function AddDialog() {
   const typing = ui.device === 'phone' && ui.keyboard
   return (
     <Sheet label="New space" onClose={close} panel="max-w-[480px]">
-        <div className="flex min-h-[52px] shrink-0 items-center gap-2.5 border-b border-line pr-3 pl-4">
-          <Who name="New space" kind={one ? `On ${machineName(snap.machines, machine)}` : 'Pick a machine, a folder and a name'} />
-          <SheetClose onClose={close} />
-        </div>
+      <div className="flex min-h-[52px] shrink-0 items-center gap-2.5 border-b border-line pr-3 pl-4">
+        <Who name="New space" kind={one ? `On ${machineName(snap.machines, machine)}` : 'Pick a machine, a folder and a name'} />
+        <SheetClose onClose={close} />
+      </div>
 
-        <div className="flex shrink-0 flex-col gap-3 px-4 pt-3.5 pb-2 phone:gap-4 phone:pt-4">
-          {one || typing ? null : (
-            <div className="flex flex-col gap-1.5">
-              <div className="text-[0.75rem] font-medium text-fg3 phone:text-[0.875rem]">
-                Machine
-              </div>
-              <MachinePick
-                machines={machines}
-                value={machine}
-                onPick={(m) => {
-                  setMachine(m)
-                  go('~/')
-                }}
-              />
-            </div>
-          )}
+      <div className="flex shrink-0 flex-col gap-3 px-4 pt-3.5 pb-2 phone:gap-4 phone:pt-4">
+        {one || typing ? null : (
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${listId}-path`} className="text-[0.75rem] font-medium text-fg3 phone:text-[0.875rem]">
-              Folder
+            <div className="text-[0.75rem] font-medium text-fg3 phone:text-[0.875rem]">Machine</div>
+            <MachinePick
+              machines={machines}
+              value={machine}
+              onPick={(m) => {
+                setMachine(m)
+                go('~/')
+              }}
+            />
+          </div>
+        )}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={`${listId}-path`} className="text-[0.75rem] font-medium text-fg3 phone:text-[0.875rem]">
+            Folder
+          </label>
+          <input
+            ref={input}
+            id={`${listId}-path`}
+            name="folder"
+            autoFocus
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            role="combobox"
+            aria-expanded="true"
+            aria-controls={listId}
+            aria-activedescendant={cur >= 0 ? `${listId}-${cur}` : undefined}
+            value={path}
+            onChange={(e) => {
+              setPath(e.target.value)
+              // what is typed narrows the list: the best match is ready for Enter
+              setCur(split(e.target.value).leaf ? 0 : -1)
+              setName(null)
+              setError(null)
+            }}
+            onKeyDown={onKey}
+            className="h-9 w-full rounded-full bg-bg px-3 shadow-[inset_0_0_0_1px_var(--line2)] outline-none placeholder:text-fg3 focus:shadow-box-focus phone:h-11 phone:px-3.5 phone:text-[1rem]"
+          />
+        </div>
+      </div>
+
+      <ul id={listId} role="listbox" aria-label="Folders" className="h-[min(300px,40vh)] min-h-0 overflow-y-auto px-2 pb-1.5 phone:h-auto phone:flex-1">
+        {rows.map((e, i) => (
+          <FolderRow
+            key={e.path}
+            id={`${listId}-${i}`}
+            e={e}
+            cur={i === cur}
+            chosen={e.path === named}
+            heading={atHome && i === 0 && likelyCount ? 'Likely repos' : atHome && i === likelyCount && likelyCount ? 'Folders in ~' : undefined}
+            where={i < likelyCount ? e.path.slice(0, -e.name.length - 1) : undefined}
+            onPick={() => pick(e)}
+            onHover={() => setCur(i)}
+          />
+        ))}
+        {/* a name nothing matches is a new folder: the line under the list says so */}
+        {listed && !rows.length && (listed.error || !leaf) ? (
+          <li className="px-2 py-2 text-[0.8125rem] text-fg2 phone:text-[0.9375rem]">{listed.error ?? (listed.data?.exists === false ? 'No folder here yet.' : 'No folders in here.')}</li>
+        ) : null}
+      </ul>
+
+      <div className="flex shrink-0 flex-col gap-3 border-t border-line px-4 pt-3 pb-4 phone:pb-[max(env(safe-area-inset-bottom),--spacing(4))]">
+        <p className="flex gap-2 text-[0.8125rem] text-pretty text-fg2 phone:text-[0.9375rem]" aria-live="polite">
+          {mark ? <span className="flex h-lh items-center">{mark}</span> : null}
+          <span className="min-w-0">{status}</span>
+        </p>
+        {named && named !== '~' ? (
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={`${listId}-name`} className="text-[0.75rem] font-medium text-fg3 phone:text-[0.875rem]">
+              Name
             </label>
             <input
-              ref={input}
-              id={`${listId}-path`}
-              name="folder"
-              autoFocus
+              id={`${listId}-name`}
+              name="name"
               autoComplete="off"
-              autoCapitalize="off"
-              autoCorrect="off"
+              autoCapitalize="none"
               spellCheck={false}
-              role="combobox"
-              aria-expanded="true"
-              aria-controls={listId}
-              aria-activedescendant={cur >= 0 ? `${listId}-${cur}` : undefined}
-              value={path}
-              onChange={(e) => {
-                setPath(e.target.value)
-                // what is typed narrows the list: the best match is ready for Enter
-                setCur(split(e.target.value).leaf ? 0 : -1)
-                setName(null)
-                setError(null)
+              enterKeyHint="go"
+              maxLength={80}
+              aria-invalid={!!nameBad || undefined}
+              aria-describedby={`${listId}-name-hint`}
+              value={shownName}
+              onChange={(e) => setName(asTyped(e.target.value))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submit()
+                else if (e.key === 'Escape') {
+                  e.stopPropagation()
+                  close()
+                }
               }}
-              onKeyDown={onKey}
-              className="h-9 w-full rounded-full bg-bg px-3 shadow-[inset_0_0_0_1px_var(--line2)] outline-none placeholder:text-fg3 focus:shadow-box-focus phone:h-11 phone:px-3.5 phone:text-[1rem]"
+              className="h-9 w-full rounded-full bg-bg px-3 shadow-[inset_0_0_0_1px_var(--line2)] outline-none focus:shadow-box-focus aria-invalid:shadow-[inset_0_0_0_1.5px_var(--color-need-fg)] phone:h-11 phone:px-3.5 phone:text-[1rem]"
             />
+            <p id={`${listId}-name-hint`} className={clsx('text-[0.75rem] phone:text-[0.875rem]', nameBad && shownName ? 'text-need-fg' : 'text-fg3', typing && !(nameBad && shownName) && 'sr-only')}>
+              {nameBad && shownName ? nameBad : 'Lowercase letters, numbers, - and _. Its links and commands use it.'}
+            </p>
           </div>
+        ) : null}
+        <div className={clsx('flex items-center justify-end gap-2', typing && 'hidden')}>
+          <Primary soft onClick={close} className="phone:flex-1 phone:justify-center">
+            Cancel
+          </Primary>
+          <Primary disabled={!ready || busy || !!nameBad} onClick={submit} className="phone:flex-1 phone:justify-center">
+            {busy ? (opening ? 'Opening…' : 'Creating…') : 'Create space'}
+          </Primary>
         </div>
-
-        <ul
-          id={listId}
-          role="listbox"
-          aria-label="Folders"
-          className="h-[min(300px,40vh)] min-h-0 overflow-y-auto px-2 pb-1.5 phone:h-auto phone:flex-1"
-        >
-          {rows.map((e, i) => (
-            <FolderRow
-              key={e.path}
-              id={`${listId}-${i}`}
-              e={e}
-              cur={i === cur}
-              chosen={e.path === named}
-              heading={atHome && i === 0 && likelyCount ? 'Likely repos' : atHome && i === likelyCount && likelyCount ? 'Folders in ~' : undefined}
-              where={i < likelyCount ? e.path.slice(0, -e.name.length - 1) : undefined}
-              onPick={() => pick(e)}
-              onHover={() => setCur(i)}
-            />
-          ))}
-          {/* a name nothing matches is a new folder: the line under the list says so */}
-          {listed && !rows.length && (listed.error || !leaf) ? (
-            <li className="px-2 py-2 text-[0.8125rem] text-fg2 phone:text-[0.9375rem]">{listed.error ?? (listed.data?.exists === false ? 'No folder here yet.' : 'No folders in here.')}</li>
-          ) : null}
-        </ul>
-
-        <div className="flex shrink-0 flex-col gap-3 border-t border-line px-4 pt-3 pb-4 phone:pb-[max(env(safe-area-inset-bottom),--spacing(4))]">
-          <p className="flex gap-2 text-[0.8125rem] text-pretty text-fg2 phone:text-[0.9375rem]" aria-live="polite">
-            {mark ? <span className="flex h-lh items-center">{mark}</span> : null}
-            <span className="min-w-0">{status}</span>
-          </p>
-          {named && named !== '~' ? (
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={`${listId}-name`} className="text-[0.75rem] font-medium text-fg3 phone:text-[0.875rem]">
-                Name
-              </label>
-              <input
-                id={`${listId}-name`}
-                name="name"
-                autoComplete="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                enterKeyHint="go"
-                maxLength={80}
-                aria-invalid={!!nameBad || undefined}
-                aria-describedby={`${listId}-name-hint`}
-                value={shownName}
-                onChange={(e) => setName(asTyped(e.target.value))}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') submit()
-                  else if (e.key === 'Escape') {
-                    e.stopPropagation()
-                    close()
-                  }
-                }}
-                className="h-9 w-full rounded-full bg-bg px-3 shadow-[inset_0_0_0_1px_var(--line2)] outline-none focus:shadow-box-focus aria-invalid:shadow-[inset_0_0_0_1.5px_var(--color-need-fg)] phone:h-11 phone:px-3.5 phone:text-[1rem]"
-              />
-              <p id={`${listId}-name-hint`} className={clsx('text-[0.75rem] phone:text-[0.875rem]', nameBad && shownName ? 'text-need-fg' : 'text-fg3', typing && !(nameBad && shownName) && 'sr-only')}>
-                {nameBad && shownName ? nameBad : 'Lowercase letters, numbers, - and _. Its links and commands use it.'}
-              </p>
-            </div>
-          ) : null}
-          <div className={clsx('flex items-center justify-end gap-2', typing && 'hidden')}>
-            <Primary soft onClick={close} className="phone:flex-1 phone:justify-center">
-              Cancel
-            </Primary>
-            <Primary disabled={!ready || busy || !!nameBad} onClick={submit} className="phone:flex-1 phone:justify-center">
-              {busy ? (opening ? 'Opening…' : 'Creating…') : 'Create space'}
-            </Primary>
-          </div>
-        </div>
+      </div>
     </Sheet>
   )
 }
@@ -468,11 +466,7 @@ function FolderRow({
         aria-disabled={e.added || undefined}
         onMouseMove={onHover}
         onClick={onPick}
-        className={clsx(
-          'press flex min-h-8 cursor-pointer items-center gap-2.5 rounded-row px-2 aria-disabled:cursor-default coarse:min-h-11 phone:min-h-12',
-          cur && 'bg-hover',
-          chosen && 'bg-sel',
-        )}
+        className={clsx('press flex min-h-8 cursor-pointer items-center gap-2.5 rounded-row px-2 aria-disabled:cursor-default coarse:min-h-11 phone:min-h-12', cur && 'bg-hover', chosen && 'bg-sel')}
       >
         <FolderIcon className={clsx(ic, e.repo ? 'text-fg2' : 'text-fg3')} />
         <span className={clsx('min-w-0 flex-1 truncate', e.added && 'text-fg3')}>

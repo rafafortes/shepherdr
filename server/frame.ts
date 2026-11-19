@@ -5,7 +5,8 @@ import { CHECK_PROBE } from './live/artifacts.ts'
 
 /** Shepherdr's dark colours: by the device's own mode, or the appearance the app has (the shepherdr-dark or -light
  *  class, which the app sends again when it changes) */
-const DARK = '--bg:#0b0b0d;--fg:#fafafa;--fg2:#a1a1aa;--fg3:#71717a;--line:rgb(255 255 255/.07);--line2:rgb(255 255 255/.12);--well:#111114;--bubble:#1c1c20;--need:#ff6369;--ready:#3dd68c;--work:#f5b544;--accent:#fb923c;--chart-1:#fb923c;--chart-2:#60a5fa;--chart-3:#4ade80;--chart-4:#c084fc;--chart-5:#facc15'
+const DARK =
+  '--bg:#0b0b0d;--fg:#fafafa;--fg2:#a1a1aa;--fg3:#71717a;--line:rgb(255 255 255/.07);--line2:rgb(255 255 255/.12);--well:#111114;--bubble:#1c1c20;--need:#ff6369;--ready:#3dd68c;--work:#f5b544;--accent:#fb923c;--chart-1:#fb923c;--chart-2:#60a5fa;--chart-3:#4ade80;--chart-4:#c084fc;--chart-5:#facc15'
 
 const BASE_CSS = `
 :root{color-scheme:light dark;--bg:#fff;--fg:#09090b;--fg2:#52525b;--fg3:#a1a1aa;--line:rgb(9 9 11/.07);--line2:rgb(9 9 11/.12);--well:#fafafa;--bubble:#f4f4f5;--need:#e5484d;--ready:#30a46c;--work:#e2a336;--accent:#c2410c;--focus:#3b82f6;--chart-1:#c2410c;--chart-2:#2563eb;--chart-3:#16a34a;--chart-4:#9333ea;--chart-5:#ca8a04}
@@ -154,14 +155,24 @@ const BRIDGE = `
 export const SEALED = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data: 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'`
 
 /** JSON inside a script tag: no "</script>" can end it early */
-const inScript = (v: unknown) => JSON.stringify(v ?? null).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+const inScript = (v: unknown) =>
+  JSON.stringify(v ?? null)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
 
 export function wrapPage(html: string, opts: { sent?: string; data?: unknown; big?: boolean; font?: string; phone?: boolean; check?: boolean; theme?: 'light' | 'dark' } = {}) {
   // the check opens the file on its own: the same policy as a meta, and a probe that keeps what breaks, before all else
   const check = opts.check ? `<meta http-equiv="Content-Security-Policy" content="${SEALED}">${CHECK_PROBE}` : ''
-  const font = opts.check ? '' : `@font-face{font-family:InterVariable;font-style:normal;font-weight:100 900;font-display:swap;src:url("${opts.font ?? '../font/InterVariable.woff2'}") format("woff2")}`
+  const font = opts.check
+    ? ''
+    : `@font-face{font-family:InterVariable;font-style:normal;font-weight:100 900;font-display:swap;src:url("${opts.font ?? '../font/InterVariable.woff2'}") format("woff2")}`
   // on one line, so a script error's line number is the page's own
-  const head = `<meta charset="utf-8">${check}<meta name="viewport" content="width=device-width,initial-scale=1"><style>${BASE_CSS.replace(/\n/g, '').replace(/__DARK__/g, DARK).replace('__FONTFACE__', () => font)}</style><script>${BRIDGE.replace(/\n\s*/g, ' ').replace('__SENT__', () => inScript(opts.sent)).replace('__DATA__', () => inScript(opts.data))}</script>`
+  const head = `<meta charset="utf-8">${check}<meta name="viewport" content="width=device-width,initial-scale=1"><style>${BASE_CSS.replace(/\n/g, '')
+    .replace(/__DARK__/g, DARK)
+    .replace('__FONTFACE__', () => font)}</style><script>${BRIDGE.replace(/\n\s*/g, ' ')
+    .replace('__SENT__', () => inScript(opts.sent))
+    .replace('__DATA__', () => inScript(opts.data))}</script>`
   const classes = [opts.big && 'full', opts.phone && 'phone', opts.theme && `shepherdr-${opts.theme}`].filter(Boolean).join(' ')
   const cls = classes ? ` class="${classes}"` : ''
   // the page's own <html> keeps its classes and gains ours; <header> is not <head>, and a page always gets a doctype

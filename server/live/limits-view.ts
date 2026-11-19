@@ -4,7 +4,26 @@
 // at each level the way Settings reads them (Settings.pick), the numbers now come from the health sample and the engine's
 // own accessors, the providers from the summary (models-summary.ts), and a write is the setting action at the cell's
 // place. The page's cells, the held groups and the waits are built from these, with `now` as a parameter for a test.
-import type { LimitByRole, LimitCell, LimitColumn, LimitKnown, LimitProvider, LimitRow, LimitSpaceRow, LimitTable, LimitsQueue, LimitsView, MatrixRole, ModelsMatrix, ModelsSummary, QueueTask, SettingRow, WaitingGroup, WaitingNow, WaitingTask } from '../../shared/types.ts'
+import type {
+  LimitByRole,
+  LimitCell,
+  LimitColumn,
+  LimitKnown,
+  LimitProvider,
+  LimitRow,
+  LimitSpaceRow,
+  LimitTable,
+  LimitsQueue,
+  LimitsView,
+  MatrixRole,
+  ModelsMatrix,
+  ModelsSummary,
+  QueueTask,
+  SettingRow,
+  WaitingGroup,
+  WaitingNow,
+  WaitingTask,
+} from '../../shared/types.ts'
 import { capFor, parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
 import { busy, memPct, type Sample } from './health.ts'
 import { placeId } from './places.ts'
@@ -121,7 +140,10 @@ export function machineReason(sample: Sample | undefined, herdr: boolean, s: Set
   if (!herdr) why.push("herdr doesn't answer")
   if (sample) {
     const b = busy(sample, l)
-    if (b === 'cpu') why.push(`CPU is busy: load ${((sample.load5 ?? sample.load) / sample.cores).toFixed(2)}× cores${l.startLoad !== null ? ` (limit ${l.startLoad}×)` : ''}${sample.cpuSome !== undefined && l.startPressure !== null ? `, pressure ${sample.cpuSome}% (limit ${l.startPressure}%)` : ''}`)
+    if (b === 'cpu')
+      why.push(
+        `CPU is busy: load ${((sample.load5 ?? sample.load) / sample.cores).toFixed(2)}× cores${l.startLoad !== null ? ` (limit ${l.startLoad}×)` : ''}${sample.cpuSome !== undefined && l.startPressure !== null ? `, pressure ${sample.cpuSome}% (limit ${l.startPressure}%)` : ''}`,
+      )
     if (b === 'memory') why.push(`memory ${memPct(sample)}% (limit ${l.startMemory}%)`)
   }
   return why.join(' · ') || 'the machine has room now: the next look starts it'
@@ -289,7 +311,10 @@ function spacesOf(input: LimitsInput): LimitsView['spaces'] {
     return p.ok ? p.entries : []
   }
   // the pattern columns: each entry the machine or a space sets, in the order they are first set
-  const patterns = entryPatterns(s, summary.caps.spaces.map((sp) => sp.key))
+  const patterns = entryPatterns(
+    s,
+    summary.caps.spaces.map((sp) => sp.key),
+  )
   const totals = Object.fromEntries(
     patterns.flatMap((p) => {
       const e = capFor(machineEntries, p)
@@ -310,11 +335,9 @@ function spacesOf(input: LimitsInput): LimitsView['spaces'] {
       },
       'merge.train': cellOf(input, 'merge.train', { space: key }, id, false),
     }
-    const caps = Object.fromEntries(
-      own(key).map((e) => [e.pattern, { max: e.max, now: runs.filter((x) => x.space === key && covers(e.pattern, x.key)).length }]),
-    )
+    const caps = Object.fromEntries(own(key).map((e) => [e.pattern, { max: e.max, now: runs.filter((x) => x.space === key && covers(e.pattern, x.key)).length }]))
     return { id, name, kind: 'space' as const, key, ...(key === HOME ? { home: true } : {}), working, held, cells, caps }
-    })
+  })
   return { columns: cols, rows, patterns, totals }
 }
 
@@ -343,4 +366,3 @@ export function limitsView(input: LimitsInput): LimitsView {
     waiting: waitingOf(input),
   }
 }
-

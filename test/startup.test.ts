@@ -68,7 +68,10 @@ describe('trust only the task folder, preserving settings', () => {
   })
   test('Claude retains project permissions and never approves MCP servers', () => {
     const dir = tmp('startup')
-    writeFileSync(join(dir, '.claude.json'), JSON.stringify({ preference: true, projects: { [dir]: { allowedTools: ['Read'], hasTrustDialogAccepted: false }, '/other': { hasTrustDialogAccepted: false } } }))
+    writeFileSync(
+      join(dir, '.claude.json'),
+      JSON.stringify({ preference: true, projects: { [dir]: { allowedTools: ['Read'], hasTrustDialogAccepted: false }, '/other': { hasTrustDialogAccepted: false } } }),
+    )
     trustWorktree(dir, 'claude', { CLAUDE_CONFIG_DIR: dir })
     const config = JSON.parse(readFileSync(join(dir, '.claude.json'), 'utf8'))
     expect(config.preference).toBe(true)

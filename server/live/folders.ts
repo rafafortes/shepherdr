@@ -97,7 +97,13 @@ function subfolders(abs: string, h: string, added: Set<string>): (FolderEntry & 
       .filter(Boolean)
       .map((l) => l.split('\t'))
       .filter(([, real]) => inside(real, h))
-      .map(([name, real, repo, at]) => ({ name, path: tilde(join(abs, name), h), repo: repo === '1', added: added.has(real) || added.has(join(abs, name)) || undefined, at: repo === '1' ? Number(at) : 0 }))
+      .map(([name, real, repo, at]) => ({
+        name,
+        path: tilde(join(abs, name), h),
+        repo: repo === '1',
+        added: added.has(real) || added.has(join(abs, name)) || undefined,
+        at: repo === '1' ? Number(at) : 0,
+      }))
   }
   let names: string[]
   try {
@@ -124,8 +130,7 @@ function subfolders(abs: string, h: string, added: Set<string>): (FolderEntry & 
 }
 
 /** repos first, the latest worked in on top; then the other folders by name */
-const order = (a: FolderEntry & { at: number }, b: FolderEntry & { at: number }) =>
-  Number(b.repo) - Number(a.repo) || b.at - a.at || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+const order = (a: FolderEntry & { at: number }, b: FolderEntry & { at: number }) => Number(b.repo) - Number(a.repo) || b.at - a.at || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
 
 /** a folder and the folders in it; at home also the repos most likely meant */
 export async function listFolders(input: string, projects: string[] = [], h = home()): Promise<Folders> {

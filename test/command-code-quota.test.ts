@@ -69,7 +69,16 @@ describe('a read with the key', () => {
     const ms = { windowLimits: { weekly: { used: 1, cap: 4, resetAt: 1794600000_000 }, fiveHour: { used: 5, cap: 0, resetAt: -5 } } }
     const { fetchImpl: second, asked } = fakeFetch({ '/alpha/whoami': { status: 200, body: { user: { userName: 'me' } } }, '/alpha/billing/credits': { status: 200, body: ms } })
     const got = await readCommandCode(KEY, () => NOW, { fetch: second })
-    expect(got).toEqual({ figure: { windows: [{ name: '5 h', used: 5, cap: 0, usedPct: 100 }, { name: 'Week', used: 1, cap: 4, usedPct: 25, resetAt: 1794600000_000 }], source: "from Command Code's API", at: NOW } })
+    expect(got).toEqual({
+      figure: {
+        windows: [
+          { name: '5 h', used: 5, cap: 0, usedPct: 100 },
+          { name: 'Week', used: 1, cap: 4, usedPct: 25, resetAt: 1794600000_000 },
+        ],
+        source: "from Command Code's API",
+        at: NOW,
+      },
+    })
     // no org: the credits are asked without one
     expect(new URL(asked[1]!.url).search).toBe('')
   })

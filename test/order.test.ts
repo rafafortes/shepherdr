@@ -4,7 +4,13 @@ import { describe, expect, test } from 'bun:test'
 import { deleteSection, moveSpace, newSection, ordered, PINNED, sectionProblem, setOrder, sortPlaces, TOP, type PlaceOrder, type SectionDefs } from '../shared/order.ts'
 import type { Machine, Place } from '../shared/types.ts'
 
-const names = (xs: string[], saved?: string[]) => ordered(xs.map((name) => ({ name })), saved, (x) => x.name, (x) => x.name).map((x) => x.name)
+const names = (xs: string[], saved?: string[]) =>
+  ordered(
+    xs.map((name) => ({ name })),
+    saved,
+    (x) => x.name,
+    (x) => x.name,
+  ).map((x) => x.name)
 
 describe('ordering places', () => {
   test('A to Z by default, any case, numbers as numbers', () => {
@@ -33,7 +39,16 @@ describe('ordering places', () => {
 })
 
 const m = (name: string): Machine => ({ id: `m:${name}`, machine: name, name, status: 'idle' })
-const p = (machine: string, name: string, home = false): Place => ({ id: `p:${machine}:${home ? '~' : name}`, name, machine, ...(home ? { home } : {}), level: home ? 1 : 2, status: 'idle', mode: 'regular', chat: `p:${machine}:${name}` })
+const p = (machine: string, name: string, home = false): Place => ({
+  id: `p:${machine}:${home ? '~' : name}`,
+  name,
+  machine,
+  ...(home ? { home } : {}),
+  level: home ? 1 : 2,
+  status: 'idle',
+  mode: 'regular',
+  chat: `p:${machine}:${name}`,
+})
 const places = [p('vm', 'b'), p('vm', 'a'), p('vm', 'home', true), p('mac', 'x'), p('mac', 'home', true)]
 const machines = [m('vm'), m('mac')]
 

@@ -41,7 +41,7 @@ export type Baseline = { commit: string; at: number } & Snapshot
 export const HARD_CAP = 300 * 1024
 
 /** bytes in words, for the human's note and the failures */
-export const fmt = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+export const fmt = (bytes: number) => (bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(2)} MB`)
 
 /** which kind of asset a name is, by its extension */
 export function kindOf(name: string): Kind {
@@ -103,12 +103,10 @@ export const slack = (js: number) => Math.max(Math.ceil(js * 0.01), 5 * 1024)
 export function compare(now: Snapshot, base: Baseline): string[] {
   const fell: string[] = []
   const allowed = slack(base.js)
-  if (now.js > base.js + allowed)
-    fell.push(`total JS: ${fmt(now.js)} (${now.js} bytes) now, ${fmt(base.js)} (${base.js}) at the baseline + ${fmt(allowed)} allowed: +${now.js - base.js} bytes`)
+  if (now.js > base.js + allowed) fell.push(`total JS: ${fmt(now.js)} (${now.js} bytes) now, ${fmt(base.js)} (${base.js}) at the baseline + ${fmt(allowed)} allowed: +${now.js - base.js} bytes`)
   const exempt = base.exempt ?? []
   for (const [name, bytes] of Object.entries(now.files))
-    if (bytes > HARD_CAP && !exempt.includes(name))
-      fell.push(`${name in base.files ? 'asset' : 'new asset'} over the ${fmt(HARD_CAP)} cap: ${name} (${fmt(bytes)}, ${bytes} bytes)`)
+    if (bytes > HARD_CAP && !exempt.includes(name)) fell.push(`${name in base.files ? 'asset' : 'new asset'} over the ${fmt(HARD_CAP)} cap: ${name} (${fmt(bytes)}, ${bytes} bytes)`)
   return fell
 }
 
@@ -163,7 +161,9 @@ export function main(args: string[], o: { repo?: string; baseline?: string; log?
   else {
     const fell = compare(now, base)
     if (fell.length) {
-      log(`\nDist budget grew since the baseline (${base.commit.slice(0, 7)}): ${fell.length} breach${fell.length === 1 ? '' : 'es'}. Record a new baseline on the default branch if the growth is wanted.`)
+      log(
+        `\nDist budget grew since the baseline (${base.commit.slice(0, 7)}): ${fell.length} breach${fell.length === 1 ? '' : 'es'}. Record a new baseline on the default branch if the growth is wanted.`,
+      )
       for (const f of fell) log(`  ${f}`)
       code = 1
     } else log(`Dist budget held: total JS within ${fmt(slack(base.js))} of ${base.commit.slice(0, 7)}; no new asset over ${fmt(HARD_CAP)}.`)

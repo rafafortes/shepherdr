@@ -141,7 +141,21 @@ export function RowMenu({ menu, label, className, children }: { menu: RowMenuSta
  * Escape or a tap on the shade cancels; Tab stays inside it; the focus goes back to where it was once it closes.
  * safe: Cancel takes the focus, so Enter loses nothing.
  */
-export function Dialog({ title, children, buttons, safe, cancel = 'Cancel', onCancel }: { title: string; children: ReactNode; buttons: ReactNode; safe?: boolean; cancel?: string; onCancel: () => void }) {
+export function Dialog({
+  title,
+  children,
+  buttons,
+  safe,
+  cancel = 'Cancel',
+  onCancel,
+}: {
+  title: string
+  children: ReactNode
+  buttons: ReactNode
+  safe?: boolean
+  cancel?: string
+  onCancel: () => void
+}) {
   const phone = useUI((u) => u.device === 'phone')
   const shade = useRef<HTMLDivElement>(null)
   const box = useRef<HTMLDivElement>(null)
@@ -170,8 +184,20 @@ export function Dialog({ title, children, buttons, safe, cancel = 'Cancel', onCa
     }
   }, [opener])
   return (
-    <div ref={shade} className="absolute inset-0 z-30 flex items-start justify-center bg-black/35 px-6 py-12 phone:items-end phone:p-3 phone:pb-[max(env(safe-area-inset-bottom),--spacing(3))]" onClick={(e) => e.target === e.currentTarget && onCancel()}>
-      <div ref={box} data-panel role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-desc" className="w-full max-w-[400px] rounded-box bg-bg p-5 shadow-dialog phone:max-w-none">
+    <div
+      ref={shade}
+      className="absolute inset-0 z-30 flex items-start justify-center bg-black/35 px-6 py-12 phone:items-end phone:p-3 phone:pb-[max(env(safe-area-inset-bottom),--spacing(3))]"
+      onClick={(e) => e.target === e.currentTarget && onCancel()}
+    >
+      <div
+        ref={box}
+        data-panel
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        aria-describedby="confirm-desc"
+        className="w-full max-w-[400px] rounded-box bg-bg p-5 shadow-dialog phone:max-w-none"
+      >
         <h2 id="confirm-title" className="font-semibold">
           {title}
         </h2>

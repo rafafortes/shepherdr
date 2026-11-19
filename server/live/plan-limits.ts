@@ -37,7 +37,11 @@ export function claudeReset(words: string, now: number): number | undefined {
 }
 
 /** a window's name as Claude Code words it, in the screen's words: "Current session" is the 5 h window, "Current week" the week */
-const windowName = (raw: string) => raw.replace(/^Current session\b/, '5 h').replace(/^Current week\b/, 'Week').slice(0, 40)
+const windowName = (raw: string) =>
+  raw
+    .replace(/^Current session\b/, '5 h')
+    .replace(/^Current week\b/, 'Week')
+    .slice(0, 40)
 
 export type Parsed = { state: 'ok'; windows: QuotaWindow[] } | { state: 'signed-out' } | { state: 'no-plan' } | { state: 'unknown'; why: string }
 

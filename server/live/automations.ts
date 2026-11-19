@@ -162,7 +162,15 @@ export class Automations {
    *  the machine they run on) */
   on(h: Happened, place: string) {
     const own = (a: Automation) => (h.event === 'health' ? undefined : spaceOf(a.place))
-    return this.list.filter((a) => a.on && a.trigger.on?.length && matches(a.trigger.on.map((r) => ({ ...r, space: r.space ?? own(a) })), { ...h, space: h.space ?? spaceOf(place) }))
+    return this.list.filter(
+      (a) =>
+        a.on &&
+        a.trigger.on?.length &&
+        matches(
+          a.trigger.on.map((r) => ({ ...r, space: r.space ?? own(a) })),
+          { ...h, space: h.space ?? spaceOf(place) },
+        ),
+    )
   }
 
   /** it ran (timed: by its time rule): the task it added, or why it couldn't. A once is over once it ran on time. */

@@ -235,7 +235,11 @@ export class ProfileSchedules {
       const head = late ? `${p.name} was due ${when}, while Shepherdr was not running, and is applied now` : `Applied ${p.name}, due ${when}`
       // a waiting task reached by what changed takes it now, as the apply-waiting question would make it
       const moved = s.waiting && n ? this.env.retune(r.changes) : []
-      text = [n ? `${head}: ${n} ${n === 1 ? 'setting' : 'settings'} changed. Undo last apply puts them back.` : `${head}: nothing changed, the settings read as ${p.name} says already.`, ...moved, ...skipped].join(' ')
+      text = [
+        n ? `${head}: ${n} ${n === 1 ? 'setting' : 'settings'} changed. Undo last apply puts them back.` : `${head}: nothing changed, the settings read as ${p.name} says already.`,
+        ...moved,
+        ...skipped,
+      ].join(' ')
     }
     this.store.save()
     this.env.report(text, !r.ok, p.name)

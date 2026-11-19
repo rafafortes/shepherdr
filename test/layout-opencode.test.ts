@@ -23,15 +23,24 @@ async function openSection(page: Page, section: 'Models' | 'Limits') {
 
 describe.skipIf(!browser)('OpenCode on the Models and Limits screens', () => {
   test("a slot's popover offers OpenCode, and its models grouped by provider, named as OpenCode names them", async () => {
-    setModels('opencode', { ...opencodeList([
-      { id: NV, label: NV, efforts: [] },
-      { id: ZEN, label: ZEN, efforts: [] },
-      { id: GO, label: GO, efforts: ['high'] },
-    ], GO), at: Date.now() })
+    setModels('opencode', {
+      ...opencodeList(
+        [
+          { id: NV, label: NV, efforts: [] },
+          { id: ZEN, label: ZEN, efforts: [] },
+          { id: GO, label: GO, efforts: ['high'] },
+        ],
+        GO,
+      ),
+      at: Date.now(),
+    })
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
       await openSection(page, 'Models')
-      await page.getByRole('button', { name: /^Everywhere · Tasks · Backup 1/ }).first().click()
+      await page
+        .getByRole('button', { name: /^Everywhere · Tasks · Backup 1/ })
+        .first()
+        .click()
       const pop = page.getByRole('dialog', { name: 'Edit this setting' })
       await pop.getByRole('button', { name: 'Backup: Codex', exact: true }).click()
       await page.getByRole('menuitemradio', { name: 'OpenCode', exact: true }).click()
