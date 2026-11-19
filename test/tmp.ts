@@ -70,10 +70,11 @@ const alive = (pid: number) => {
 /** the test folder a process's cwd or command line names, if any: the root of a run's folders, not a `go` file in it.
  *  Only a name the tests make counts — another `shep-*` file in /tmp named in a command is none of this sweep's business.
  *  A command may name several paths; a stray `shep-*` file before a real run folder must not hide the latter. */
-const shepRoot = (s: string) => {
+const shepRoots = (s: string) => {
   const base = tmpdir().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  for (const m of s.matchAll(new RegExp(`${base}/(shep-[^\\s'"/]+)`, 'g'))) if (ownerOf(m[1])) return m[1]
-  return undefined
+  const roots: string[] = []
+  for (const m of s.matchAll(new RegExp(`${base}/(shep-[^\\s'"/]+)`, 'g'))) if (ownerOf(m[1]) && !roots.includes(m[1])) roots.push(m[1])
+  return roots
 }
 
 /** how old a folder has to be to go: a suite in flight is younger (every test writes into its own), and one older is a
@@ -107,7 +108,7 @@ export function sweep(age = STALE) {
   let killed = 0
   for (const p of processes()) {
     if (p.pid === process.pid) continue
-    const roots = [p.cwd, p.cmd].map(shepRoot).filter((root): root is string => !!root)
+    const roots = [p.cwd, p.cmd].flatMap(shepRoots)
     if (roots.some((root) => !existsSync(join(tmpdir(), root))) && alive(p.pid)) {
       killGroup(p.pid)
       killed++
@@ -129,7 +130,7 @@ export function leftBy(runID: string): Left[] {
   for (const p of processes()) {
     if (p.pid === process.pid) continue
     // the folder itself may be gone already (its process removed it on the way out): the name still says whose it was
-    const inRun = [p.cwd, p.cmd].some((s) => ownerOf(shepRoot(s) ?? '')?.run === runID)
+    const inRun = [p.cwd, p.cmd].some((s) => shepRoots(s).some((root) => ownerOf(root)?.run === runID))
     if (inRun) left.push({ path: `pid ${p.pid}`, pid: p.pid, why: `${p.cmd.slice(0, 120) || '(no command)'} is still running in this run's folder` })
   }
   return left

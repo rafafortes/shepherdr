@@ -66,6 +66,8 @@ function parents(): Map<number, number> {
  *  reparented to init as soon as its parent goes. Each group it leads is killed with it (the detached shell's own and
  *  the `timeout` wrapper's); a child that leads no group is killed on its own. */
 export function killGroup(pid: number) {
+  // pid 0 is this process's group and -0 is the caller's: never turn a gate that failed to start into a self-kill
+  if (pid <= 0) return
   const parent = parents()
   const tree = [pid]
   for (;;) {

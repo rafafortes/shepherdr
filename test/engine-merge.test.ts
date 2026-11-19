@@ -1028,7 +1028,7 @@ describe('shepherdr merge', () => {
         // the train's gate has logged the commit it runs on before it is killed: a kill that won the race left no line,
         // and every run after it moved up one in heads()
         await until(() => ran().length === 2)
-        process.kill(-x.gateRun!.pid, 'SIGKILL')
+        killGroup(x.gateRun!.pid)
         // its head goes on alone, on a gate of its own waiting for its go like any
         await until(() => x.landing?.step === 'gate' && x.landing.cars === undefined)
         go(x)
@@ -1051,7 +1051,7 @@ describe('shepherdr merge', () => {
       t.alone = true
       const run = w.engine.merge(t.id, { self: true })
       await until(() => !!t.gateRun?.pid)
-      process.kill(-t.gateRun!.pid, 'SIGKILL')
+      killGroup(t.gateRun!.pid)
       expect((await run).error).toContain(`${t.id}'s merge gate (sleep 30) was stopped before it ended`)
       expect(sh('git rev-parse main', dir)).toBe(main)
       expect(t.alone).toBe(true)
