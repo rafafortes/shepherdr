@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Check after docs: package.json, herdr-plugin.toml and plugins.json (where it carries one) must agree on the version
+# (audit 2026-11-18, QG-09). The logic and its fixture tests live in the version.ts module beside this shim; the runner
+# runs whichever executable files it finds.
+set -uo pipefail
+root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
+cd "$root" || exit 1
+exec bun "$root/scripts/checks/version.ts"
