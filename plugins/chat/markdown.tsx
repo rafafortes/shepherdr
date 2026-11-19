@@ -91,22 +91,34 @@ function keepIdsWhole(root: HTMLElement) {
   }
 }
 
-/** copy words: the clipboard where the page may use it, the old way on a plain http link */
-export function copyText(text: string) {
-  if (navigator.clipboard && isSecureContext) return navigator.clipboard.writeText(text).catch(() => fallback(text))
-  fallback(text)
-  return Promise.resolve()
+/** copy words: the clipboard where the page may use it, the old way on a plain http link. It never throws and never
+ *  rejects: the promise says whether the words were copied, and a browser that refuses both ways answers false */
+export function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && isSecureContext)
+      return navigator.clipboard.writeText(text).then(
+        () => true,
+        () => fallback(text),
+      )
+  } catch {
+    /* a clipboard that throws where it was meant to refuse: the old way below */
+  }
+  return Promise.resolve(fallback(text))
 }
 
-function fallback(text: string) {
+/** the old way, for a page whose clipboard API refuses: the words in a hidden box, selected and copied. False when the
+ *  browser refuses this too, or throws doing it */
+function fallback(text: string): boolean {
   const area = document.createElement('textarea')
-  area.value = text
-  area.setAttribute('readonly', '')
-  area.style.cssText = 'position:fixed;opacity:0;pointer-events:none'
-  document.body.append(area)
-  area.select()
   try {
-    document.execCommand('copy')
+    area.value = text
+    area.setAttribute('readonly', '')
+    area.style.cssText = 'position:fixed;opacity:0;pointer-events:none'
+    document.body.append(area)
+    area.select()
+    return document.execCommand('copy')
+  } catch {
+    return false
   } finally {
     area.remove()
   }
@@ -145,9 +157,10 @@ function onCopy(e: MouseEvent) {
   e.stopPropagation()
   const code = el.tagName === 'CODE' ? el : el.parentElement?.querySelector('pre')
   if (!code?.textContent) return
-  // the words are copied or they are not: a browser that refuses both ways leaves no rejection behind
-  copyText(code.textContent.replace(/\n$/, '')).catch(() => {})
-  copied(el)
+  // the words are copied or they are not: the button says Copied only when they were
+  void copyText(code.textContent.replace(/\n$/, '')).then((ok) => {
+    if (ok) copied(el)
+  })
 }
 
 /** a reply, drawn from its HTML: a code block's copy button and a mention's chip are marked in it, and both are its
