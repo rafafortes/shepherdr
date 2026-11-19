@@ -800,10 +800,12 @@ nothing to come back to, and is never asked.
   next pass, a minute later, asks once that work is over. A model is this machine's, not a space's: one answer for it frees
   every space and role waiting on it, so a probe in one space unlocks the others at once (and is not asked again for
   them), each still going back on its own setting and its own count of returns, and a space whose watch is off is never
-  written into. One cut-off after another keeps the schedule of the
-  first: a night of them never puts the question off. One at a time, and not at boot: the first look comes a minute
-  after Shepherdr started, so an outage kept from before a restart, its wait long over, is asked then. It is nobody's turn: no chat line, no herdr pane, no agent's secret, and its own failure is
-  silent for you — no card, no alert, nothing to answer, nothing of its words in a chat (the server's log says why, for
+  written into. An answer only counts until that model refuses a chat again, whichever space: an answer older than the
+  newest cut-off is no answer, and the machine's own work only answers an outage whose own two minutes are over. One
+  cut-off after another keeps the schedule of the first: a night of them never puts the question off. One at a time,
+  and not at boot: the first look comes a minute after Shepherdr started, so an outage kept from before a restart, its
+  wait long over, is asked then. It is nobody's turn: no chat line, no herdr pane, no agent's secret, and its own
+  failure is silent for you — no card, no alert, nothing to answer, nothing of its words in a chat (the server's log says why, for
   the day it needs explaining — an option its CLI is too old to know shows up there too).
 - **Never a loop.** A role and space go back by themselves at most three times a day. A primary that runs out again
   each time leaves the next return to you: its chats get the tell me card instead, saying so, and a day later the count

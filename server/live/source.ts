@@ -2752,14 +2752,15 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // itself too often today waits for the human: both only hear
       const often = this.returns.tooOften(o, now)
       const moves = mode === 'go back' && o.role !== 'reviewer' && !often
-      // the primary answered a moment ago: what is still on the backup follows, without asking it again (an answer
-      // that freed a sibling space says the same here)
-      const fresh = o.ok !== undefined && now - o.ok < FRESH
+      // the primary answered a moment ago, and nothing of that model was refused since: what is still on the backup
+      // follows, without asking it again (an answer that freed a sibling space says the same here)
+      const fresh = o.ok !== undefined && now - o.ok < FRESH && o.ok >= this.lastCutOf(to.primary)
       if (!fresh) {
         // an agent of this machine at work on that very model, with no cut-off of its own, and none in this outage for
-        // a while: the primary answers, and nothing needs asking — for every space waiting on that model too
+        // a while: the primary answers, and nothing needs asking — for every space waiting on that model too, each once
+        // its own quiet is over
         const busy = this.answersNow(to.primary)
-        if (now - (o.lastCut ?? o.at) >= QUIET && busy) this.answeredModel(to.primary, now)
+        if (now - (o.lastCut ?? o.at) >= QUIET && busy) this.answeredModel(to.primary, now, { quiet: true })
         // a turn of this machine still runs on it: a probe never asks beside work on the model it asks, and the next pass
         // asks once that work is over (or the quiet makes it the answer)
         else if (busy) continue
@@ -2785,12 +2786,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
             this.returns.failed(o.role, o.space, now)
             continue
           }
-          // a cut on the primary while this pass was asking (one probe may take up to its timeout) is the provider
-          // refusing again: its answer is older than that cut, so this outage is never answered by it
-          if ((o.lastCut ?? o.at) > now) continue
+          // a cut on that model while this pass was asking (one probe may take up to its timeout) is the provider refusing
+          // again: its answer is older than that cut, so nothing is answered by it, in this space or another
+          if (this.lastCutOf(to.primary) > now) continue
           // the one that asked counts this answer; its siblings hear of it unasked, each on its own schedule
           this.returns.ok(o.role, o.space, now, !askedBefore)
-          if (!askedBefore) this.answeredModel(to.primary, now, o)
+          if (!askedBefore) this.answeredModel(to.primary, now, { asker: o })
         }
       }
       if (!moves) {
@@ -2835,16 +2836,33 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * So a passing probe in one space unlocks the others without asking the provider again (a probe once serves them all,
    * and outNow stops holding new starts off it), each going back on its own setting and its own count of returns (never
    * one whose watch is off, and never one cut off after the answer: that is the primary refusing again, not an answer).
-   * `asker` is the outage whose own probe answered: it counts the answer itself.
+   * `asker` is the outage whose own probe answered: it counts the answer itself. `quiet`: the answer is only the machine's
+   * work, so each outage's own QUIET must be over first — another space's clean turn says nothing of a chat that was just
+   * refused.
    */
-  private answeredModel(primary: Harness, at: number, asker?: Outage) {
+  private answeredModel(primary: Harness, at: number, also: { asker?: Outage; quiet?: boolean } = {}) {
     const model = keyOf(primary.kind, primary.model)
+    // that model refused a chat again after this answer (in this space or another): it is no answer any more
+    if (this.lastCutOf(primary) > at) return
     for (const o of this.returns.list()) {
-      if (o === asker || o.back || keyOf(o.primary.kind, o.primary.model) !== model) continue
+      if (o === also.asker || o.back || keyOf(o.primary.kind, o.primary.model) !== model) continue
       if (returnMode(this.settings.get('backup.watchReturn', o.space || undefined)) === 'off') continue
+      // cut off after the answer: that is the primary refusing again, not an answer
       if ((o.lastCut ?? o.at) > at) continue
+      // an answer that only work gives is not this outage's until its own quiet is over: a chat cut a moment ago is not
+      // freed by another space's clean turn
+      if (also.quiet && at - (o.lastCut ?? o.at) < QUIET) continue
       this.returns.ok(o.role, o.space, at, false)
     }
+  }
+
+  /**
+   * The last cut on the primary of any outage of that model, whichever role or space: a model that refused a chat a
+   * moment ago is not answered by an answer older than that cut, however clean the probe or the work behind it was.
+   */
+  private lastCutOf(primary: Harness): number {
+    const model = keyOf(primary.kind, primary.model)
+    return this.returns.list().reduce((a, o) => (keyOf(o.primary.kind, o.primary.model) === model ? Math.max(a, o.lastCut ?? o.at) : a), 0)
   }
 
   /**

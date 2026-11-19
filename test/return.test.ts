@@ -1501,14 +1501,75 @@ describe('a model answers for the whole machine, not for one space', () => {
         return { ok: true, said: 'ok' }
       }
       await a.src.watchReturns(now)
-      // a went back on the answer; b did not, and is not told the primary answers
+      // the model refused a chat during the probe: nothing is answered by it, and neither chat is started on it
       expect(asked).toEqual(['claude'])
-      expect(started.map((x) => x.key)).toEqual([ta.key])
+      expect(started).toEqual([])
+      expect(a.src.returns.get('task', a.p.name)!.ok).toBeUndefined()
       expect(b.src.returns.get('task', b.p.name)!.ok).toBeUndefined()
       expect(cards(tb.key)).toEqual([])
+      expect(cards(ta.key)).toEqual([])
     } finally {
       b.done()
       a.done()
+    }
+  })
+
+  test('a fresh answer stops counting once another space is cut on that model again', async () => {
+    const a = await goingBack('share-recut-a')
+    const b = await goingBack('share-recut-b')
+    const status = a.src.agents.status
+    try {
+      const ta = a.onBackup()
+      const tb = b.onBackup()
+      const late = Date.now() - FIRST_WAIT * 2
+      a.src.returns.note({ role: 'task', space: a.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
+      b.src.returns.note({ role: 'task', space: b.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: late })
+      const now = later()
+      // both are freed by the same answer; a is idle and goes back, b is still at work
+      a.src.agents.status = ((k: string) => (k === tb.key ? 'working' : 'idle')) as never
+      await a.src.watchReturns(now)
+      expect(started.map((x) => x.key)).toEqual([ta.key])
+      expect(a.src.returns.get('task', b.p.name)!.ok).toBeDefined()
+      // a's restarted chat is cut on the primary a minute later, and b goes idle two minutes after the answer: b is not
+      // started on a model that has just refused a, though its answer is still inside the fresh quarter of an hour
+      a.src.agents.status = status
+      a.src.returns.note({ role: 'task', space: a.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: now + 60_000 })
+      await b.src.watchReturns(now + 2 * 60_000)
+      expect(started.map((x) => x.key)).toEqual([ta.key])
+      // its own question comes due once the refusal is older than the fresh quarter of an hour: then it goes back
+      await b.src.watchReturns(now + FRESH + 60_000)
+      expect(started.map((x) => x.key)).toEqual([ta.key, tb.key])
+    } finally {
+      a.src.agents.status = status
+      b.done()
+      a.done()
+    }
+  })
+
+  test('another space’s clean work does not free a chat cut on that model a moment ago', async () => {
+    const b = await space('share-quiet-b')
+    const a = await goingBack('share-quiet-a')
+    const status = a.src.agents.status
+    try {
+      const tb = task(b.p.name, 'codex', { from: 'claude' })
+      coordinator(a.key, 'claude')
+      a.src.agents.status = ((k: string) => (k === a.key ? 'working' : 'idle')) as never
+      const at = Date.now()
+      b.src.returns.note({ role: 'task', space: b.p.name, primary: { kind: 'claude' }, to: { kind: 'codex' }, why: 'signed out', at: at - 10 * 60_000 })
+      // cut on the primary ten seconds ago: its own quiet is not over, so the machine's clean work is no answer for it
+      b.src.returns.cut('task', b.p.name, at - 10_000, { key: tb.key, onPrimary: true })
+      await b.src.watchReturns(at)
+      expect(asked).toEqual([])
+      expect(cards(tb.key)).toEqual([])
+      expect(b.src.returns.get('task', b.p.name)!.ok).toBeUndefined()
+      // its own quiet over, the work is the answer: the card comes without a probe
+      await b.src.watchReturns(at - 10_000 + QUIET)
+      expect(asked).toEqual([])
+      expect(cards(tb.key)).toHaveLength(1)
+    } finally {
+      a.src.agents.status = status
+      a.done()
+      b.done()
     }
   })
 
