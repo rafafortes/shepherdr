@@ -491,7 +491,7 @@ export const CATALOG: Section[] = [
     // an idle agent's pane and CLI are parked (source.ts parkIdleAgents, SHE-72): the chat keeps its session, and the
     // next message to it starts it again on the same session. Coordinators have their own gate, off until the operator
     // answers whether they are parked too
-    name: 'Agents',
+    name: 'Idle agents',
     levels: ['all', 'machine'],
     about: "An agent idle this long has its pane and CLI closed, so it stops using memory: its chat keeps its session, and a message there starts it again on the same session. Off: agents run until their task ends or you restart them.",
     rows: [
