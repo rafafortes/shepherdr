@@ -36,6 +36,7 @@ type Pass = {
   bindRoute: (r: AgentRecord, pane: string, own?: boolean, deadlineMs?: number) => Promise<void>
   routes: Map<string, string>
   starting: Map<string, Promise<unknown>>
+  stopping: Set<string>
   stopped: boolean
 }
 
@@ -132,20 +133,22 @@ describe('the route repair pass', () => {
   })
 
   test('leaves an agent whose own launch binds it to that bind, and never writes a route twice', async () => {
-    const { a, records } = world(3)
-    const [one, pending, starting] = Object.values(a.records)
+    const { a, records } = world(5)
+    const [one, pending, starting, restarting, launching] = Object.values(a.records)
     listed(a, Object.values(records))
-    // herdr still lists its launch as pending, and ensure() has its start in flight: each binds on its own start
+    // the store still says its launch is pending, ensure() has its start in flight, a restart holds it, and herdr itself
+    // lists the last one's launch as pending: each binds on its own start
     pending.pendingLaunch = true
     const inner = a as unknown as Pass
     inner.starting.set(starting.key, Promise.resolve(null))
+    inner.stopping.add(restarting.key)
+    a.live.get(launching.name)!.launch_pending = true
     const info = processInfo()
     const b = binder(0)
     try {
       await inner.repairRoutes()
       expect(b.written).toEqual(pids([one]))
-      expect(a.routed(pending.key)).toBe(false)
-      expect(a.routed(starting.key)).toBe(false)
+      for (const r of [pending, starting, restarting, launching]) expect(a.routed(r.key)).toBe(false)
       // its launch's own bind, which the pass left to it
       await inner.bindRoute(pending, paneOf(pending.key), true)
       expect(b.written).toEqual(pids([one, pending]))
@@ -154,10 +157,12 @@ describe('the route repair pass', () => {
       // before writing
       await inner.repairRoute(starting)
       expect(b.written).toEqual(pids([one, pending]))
-      // the start is over: the next pass binds that one and writes nothing a second time
+      // their own flow is over: the next pass binds those and writes nothing a second time
       inner.starting.clear()
+      inner.stopping.clear()
+      a.live.get(launching.name)!.launch_pending = false
       await inner.repairRoutes()
-      expect(b.written).toEqual(pids([one, pending, starting]))
+      expect(b.written).toEqual(pids([one, pending, starting, restarting, launching]))
       expect(Object.keys(records).every((k) => a.routed(k))).toBe(true)
     } finally {
       a.stop(); info.mockRestore(); b.run.mockRestore()
