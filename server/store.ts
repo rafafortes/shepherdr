@@ -74,9 +74,16 @@ export function pruneCopies(file: string, kind: CopyKind) {
 const frozen = new Set<string>()
 /** the frozen stores whose writer has already said so once: a save() every second must not fill the log */
 const told = new Set<string>()
+/** the stores whose line has been said while its bytes could not be copied either: a look every second (server.json)
+ *  must not fill the log */
+const said = new Set<string>()
 /** the copy last made for a store in this run, and the file it was of: two readers of one unreadable file (the places
  *  and their migration) make one copy and say one line between them */
 const copied = new Map<string, { size: number; mtimeMs: number; to: string }>()
+
+/** whether this run may write a store: false for a store of record whose file could not be read (writeJson says why
+ *  once). What re-derives from a store of record asks this before trusting it. */
+export const readOnly = (file: string) => frozen.has(file)
 
 const words = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -89,6 +96,9 @@ export function readJson<T>(name: string, fallback: T, dir = home()): T {
   } catch (e) {
     return unreadable(f, fallback, `cannot be read (${words(e)})`)
   }
+  // an empty file holds nothing worth keeping: a store that was never written, or one whose write was torn off whole.
+  // It is not a store that could not be read, so it is neither copied nor kept from being written again.
+  if (!text.trim()) return fallback
   try {
     return JSON.parse(text) as T
   } catch (e) {
@@ -121,13 +131,16 @@ function unreadable<T>(f: string, fallback: T, why: string, bytes?: number): T {
   } catch (e) {
     failed = words(e)
   }
-  // a copy of this same file made earlier in this run has said its line already
-  if (made || !copy)
+  // a copy of this same file made earlier in this run has said its line already, and so has one whose bytes could not
+  // be copied at all: a file read again and again says it once
+  if (made || (!copy && !said.has(f))) {
+    said.add(f)
     console.error(
       `shepherdr: ${f} ${why} (${bytes === undefined ? 'size unknown' : `${bytes} bytes`}): ` +
         (copy ? `its bytes are kept in ${copy}, the newest ${COPIES} of each copy stay beside it; ` : `it could not be copied (${failed}); `) +
-        (record ? 'running read-only for it in this run so no save overwrites them (restart once it is restored)' : 'starting from the fallback'),
+        (record ? 'running read-only for it in this run, every save to it dropped rather than written over it (restart once it is restored)' : 'starting from the fallback'),
     )
+  }
   return fallback
 }
 
@@ -162,8 +175,13 @@ function beforeEmpty(f: string, value: unknown) {
     /* not JSON: it holds bytes worth keeping */
   }
   const copy = copyName(f, 'before-empty')
-  fs.copyFileSync(f, copy)
-  pruneCopies(f, 'before-empty')
+  try {
+    fs.copyFileSync(f, copy)
+    pruneCopies(f, 'before-empty')
+  } catch (e) {
+    console.error(`shepherdr: ${f} is being written empty and a copy of it could not be made (${words(e)}): what it held is lost`)
+    return
+  }
   console.error(`shepherdr: ${f} is being written empty: its bytes are kept in ${copy}, the newest ${COPIES} of each copy stay beside it`)
 }
 
@@ -176,7 +194,8 @@ function syncDir(dir: string) {
     } finally {
       fs.closeSync(fd)
     }
-  } catch { // coverage-exempt: no filesystem this runs on refuses to sync a folder it just opened (ext4 here, APFS on a Mac)
+  } catch {
+    /* a folder that refuses to be synced: the last write is what is at risk, not the run */
   }
 }
 

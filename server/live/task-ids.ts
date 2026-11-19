@@ -4,7 +4,7 @@ import { Database } from 'bun:sqlite'
 import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { SettingSection } from '../../shared/types.ts'
-import { COPIES, copyName, home, pruneCopies } from '../store.ts'
+import { COPIES, copyName, home, pruneCopies, readOnly } from '../store.ts'
 import type { Space } from './places.ts'
 
 export const MAX_TASK_NUMBER = Number.MAX_SAFE_INTEGER - 1
@@ -41,8 +41,18 @@ function opened(dir: string, retry = true): Database {
     }
     return db
   } catch (e) {
-    if (!retry) throw e
     const words = e instanceof Error ? e.message : String(e)
+    const code = (e as { code?: string }).code
+    // only a file SQLite cannot read is moved aside, and only once: a lock, a full disk or a folder in its place says
+    // what it is, and is nothing to rebuild the numbers over
+    if (!retry || (code !== 'SQLITE_NOTADB' && code !== 'SQLITE_CORRUPT')) throw e
+    // the numbers are rebuilt from tasks.json's data: a store that could not be read has none to give, and a number
+    // handed out again would collide with the branch and worktree an earlier task of that number made
+    if (readOnly(join(dir, 'tasks.json')))
+      throw new Error(
+        `shepherdr: ${file} could not be opened (${words}) and tasks.json could not be read either, so no task number can be ` +
+          `re-derived from it without being reused: restore tasks.json and start again`,
+      )
     let moved = ''
     try {
       // one repair is one entry beside the store, holding the three files SQLite keeps (the database, its write-ahead log

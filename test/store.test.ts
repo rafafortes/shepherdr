@@ -184,8 +184,8 @@ describe('a write that would leave a store with nothing in it', () => {
       expect(copies(dir, 'corrupt')).toHaveLength(1)
       // a file already holding nothing, or nothing at all, is replaced as before: no copy of it
       writeJson('agents.json', {}, dir)
-      fs.writeFileSync(join(dir, 'health.json'), '')
-      writeJson('health.json', {}, dir)
+      fs.writeFileSync(join(dir, 'agents.json'), '')
+      writeJson('agents.json', {}, dir)
       expect(copies(dir, 'before-empty')).toHaveLength(1)
       // nor is a file whose entries are replaced by other entries
       fs.writeFileSync(join(dir, 'usage.json'), '{"a": 1}')
@@ -226,6 +226,49 @@ describe('a write that would leave a store with nothing in it', () => {
       page.mockRestore()
     }
   })
+
+  test('a guarded file it cannot read is copied nowhere before an empty write, and the write goes in', () => {
+    const dir = tmp('store-unreadable-empty')
+    fs.writeFileSync(join(dir, 'agents.json'), '{"a": 1}')
+    fs.chmodSync(join(dir, 'agents.json'), 0o000)
+    writeJson('agents.json', {}, dir)
+    expect(copies(dir, 'before-empty')).toHaveLength(0)
+    expect(readJson<unknown>('agents.json', null, dir)).toEqual({})
+  })
+
+  test('a copy that cannot be made is said, and the write goes on without it', () => {
+    const dir = tmp('store-copy-refused')
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    const stamp = spyOn(Date.prototype, 'toISOString').mockReturnValue('1999-01-01T00-00-00.000Z')
+    try {
+      writeJson('agents.json', { a: 1 }, dir)
+      // what a copy of it would be named is a folder that cannot be copied onto
+      fs.mkdirSync(join(dir, 'agents.json.before-empty-1999-01-01T00-00-00.000Z', 'inside'), { recursive: true })
+      writeJson('agents.json', {}, dir)
+      expect(said(page)).toContain('could not be made')
+      expect(readJson<unknown>('agents.json', null, dir)).toEqual({})
+    } finally {
+      stamp.mockRestore()
+      page.mockRestore()
+    }
+  })
+})
+
+describe('a store of record that is empty', () => {
+  test('holds nothing to keep: it starts from the fallback, takes no copy, and writes again', () => {
+    const dir = tmp('store-empty-file')
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      fs.writeFileSync(join(dir, 'tasks.json'), '')
+      expect(readJson('tasks.json', { next: {}, tasks: [] }, dir)).toEqual({ next: {}, tasks: [] })
+      expect(page).not.toHaveBeenCalled()
+      expect(copies(dir, 'corrupt')).toHaveLength(0)
+      writeJson('tasks.json', { next: { A: 1 }, tasks: [] }, dir)
+      expect(readJson<unknown>('tasks.json', null, dir)).toEqual({ next: { A: 1 }, tasks: [] })
+    } finally {
+      page.mockRestore()
+    }
+  })
 })
 
 describe('a write of a store of record', () => {
@@ -247,6 +290,22 @@ describe('a write of a store of record', () => {
       ])
       writeJson('agents.json', { a: 1 }, dir)
       expect(seen).toHaveLength(2)
+    } finally {
+      sync.mockRestore()
+    }
+  })
+
+  test('a folder that refuses to be synced costs the last write, not the run', () => {
+    const dir = tmp('store-fsync-folder')
+    let calls = 0
+    const sync = spyOn(fs, 'fsyncSync').mockImplementation(() => {
+      if (++calls === 2) throw new Error('EIO: the folder refused')
+      return 0
+    })
+    try {
+      writeJson('tasks.json', { next: {}, tasks: [{}] }, dir)
+      expect(calls).toBe(2)
+      expect(readJson<unknown>('tasks.json', null, dir)).toEqual({ next: {}, tasks: [{}] })
     } finally {
       sync.mockRestore()
     }
@@ -300,6 +359,35 @@ describe('the file that keeps task numbers', () => {
       } finally {
         fs.chmodSync(dir, 0o700)
       }
+    } finally {
+      page.mockRestore()
+    }
+  })
+
+  test('a file it cannot open for any other reason is said as it is, never moved aside', () => {
+    const dir = tmp('store-task-ids-folder')
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      fs.mkdirSync(join(dir, 'task-ids.sqlite')) // a folder in the database's place: SQLite cannot open it
+      expect(() => new TaskIds([space('web', 'WEB')], { next: {}, tasks: [] }, id, dir)).toThrow()
+      expect(page).not.toHaveBeenCalled()
+      expect(fs.readdirSync(dir)).toEqual(['task-ids.sqlite'])
+    } finally {
+      page.mockRestore()
+    }
+  })
+
+  test('a corrupt file is not rebuilt over a tasks.json nothing could read either', () => {
+    const dir = tmp('store-task-ids-both')
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      fs.writeFileSync(join(dir, 'task-ids.sqlite'), 'not a database at all')
+      fs.writeFileSync(join(dir, 'tasks.json'), '{"next": {"WEB": 2}, "tasks": [')
+      expect(readJson('tasks.json', { next: {}, tasks: [] }, dir)).toEqual({ next: {}, tasks: [] })
+      // its numbers are what a rebuild would derive: without them a reuse is certain, so nothing is moved or made
+      expect(() => new TaskIds([space('web', 'WEB')], { next: {}, tasks: [] }, id, dir)).toThrow(/no task number/)
+      expect(fs.readdirSync(dir).filter((n) => n.startsWith('task-ids.sqlite.corrupt-'))).toHaveLength(0)
+      expect(fs.readFileSync(join(dir, 'task-ids.sqlite'), 'utf8')).toBe('not a database at all')
     } finally {
       page.mockRestore()
     }
