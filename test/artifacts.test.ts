@@ -1,8 +1,9 @@
 // Artifacts: one HTML file and its data, kept per place, a new version on every update, checked before anyone sees it.
-import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { describe, expect, spyOn, test } from 'bun:test'
+import { existsSync, mkdirSync, readFileSync, statSync, truncateSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
+import * as task from '../server/live/mfs.ts'
 
 process.env.SHEPHERDR_HOME ??= tmp('art')
 // one process runs every test file: the home is whichever file set it first
@@ -122,6 +123,35 @@ describe('what an agent hands over', () => {
     expect(() => Artifacts.read('nothere.html', undefined, dir)).toThrow('No file at')
     file('good.json', '{"a":1}')
     expect(Artifacts.read('ok.html', 'good.json', dir)).toEqual({ html: '<p>ok</p>', data: '{"a":1}', missing: [] })
+  })
+  test('an over-cap HTML and data file are refused before any of them is read', () => {
+    // sparse files: stat reports the size a read would have to pull in, without writing 100 MB to disk
+    const bigHtml = join(dir, 'huge.html')
+    const bigData = join(dir, 'huge.json')
+    writeFileSync(bigHtml, '')
+    truncateSync(bigHtml, 100 * 1024 * 1024)
+    writeFileSync(bigData, '')
+    truncateSync(bigData, 2 * 1024 * 1024)
+    file('small.html', '<p>ok</p>')
+    const reads = spyOn(task, 'readFileSync')
+    try {
+      // prove the spy really sees this module's reads, so the zero below is meaningful
+      Artifacts.read('small.html', undefined, dir)
+      expect(reads).toHaveBeenCalled()
+      reads.mockClear()
+      expect(() => Artifacts.read('huge.html', undefined, dir)).toThrow(`${bigHtml} is over 2 MB with its pictures inlined; make the pictures smaller`)
+      expect(() => Artifacts.read(undefined, 'huge.json', dir)).toThrow(`${bigData} is over 1 MB`)
+      expect(reads).not.toHaveBeenCalled()
+    } finally {
+      reads.mockRestore()
+    }
+  })
+  test('a page under 2 MB whose inlined pictures push it over is still refused after the read', () => {
+    const png = Buffer.concat([Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'), Buffer.alloc(200 * 1024)])
+    const pic = file('grow.png', png)
+    const page = file('grows.html', `${'x'.repeat(MAX_HTML - 100_000)}<img src="${pic}">`)
+    expect(statSync(page).size).toBeLessThan(MAX_HTML)
+    expect(() => Artifacts.read('grows.html', undefined, dir)).toThrow(`${page} is over 2 MB with its pictures inlined; make the pictures smaller`)
   })
 })
 

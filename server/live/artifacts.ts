@@ -167,7 +167,12 @@ export class Artifacts {
     if (file) {
       const f = at(file)
       if (!task.existsSync(f)) throw new Error(`No file at ${f}`)
-      const r = inlineImages(task.readFileSync(publicArtifactInput(f), 'utf8'))
+      const real = publicArtifactInput(f)
+      // Refuse before the read: stat (through task, so a file on another machine is statted there) costs nothing,
+      // while reading a huge file onto the event loop before this check is the stall the cap is here to prevent.
+      // Keep the byteLength check below: pictures inlined into a near-cap page can still push it over MAX_HTML.
+      if (task.statSync(real).size > MAX_HTML) throw new Error(`${f} is over 2 MB with its pictures inlined; make the pictures smaller`)
+      const r = inlineImages(task.readFileSync(real, 'utf8'))
       html = r.html
       missing = r.missing
       if (!html.trim()) throw new Error(`${f} is empty`)
@@ -176,7 +181,9 @@ export class Artifacts {
     if (dataFile) {
       const f = at(dataFile)
       if (!task.existsSync(f)) throw new Error(`No file at ${f}`)
-      data = task.readFileSync(publicArtifactInput(f), 'utf8')
+      const real = publicArtifactInput(f)
+      if (task.statSync(real).size > MAX_DATA) throw new Error(`${f} is over 1 MB`)
+      data = task.readFileSync(real, 'utf8')
       if (Buffer.byteLength(data) > MAX_DATA) throw new Error(`${f} is over 1 MB`)
       try {
         JSON.parse(data)
