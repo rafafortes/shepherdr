@@ -311,7 +311,9 @@ step() { # <name> <check file>
   local line="${#what[@]}/$total $name"
   if [ "$code" -eq 0 ] && [ -s "$logs/$name$log_suffix.skip" ]; then
     skipped_reason=$(cat "$logs/$name$log_suffix.skip")
-    say "$line skipped: $skipped_reason"
+    # a check can run part of itself and skip another part (17-scripts without shellcheck): its note says what ran
+    note=$(step_note "$name")
+    say "$line skipped: $skipped_reason${note:+ · $note}"
     notes+=("$name: $skipped_reason")
   elif [ "$code" -eq 0 ]; then
     note=$(step_note "$name")

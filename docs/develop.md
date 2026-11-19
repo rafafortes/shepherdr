@@ -113,15 +113,17 @@ name. A check file:
   `<logs>/<name>-quick.log` in a `--quick` run, which can run beside a full run of the same worktree), the log the
   runner reads to show why a failure happened;
 - says it cannot run (a tool is missing, say) by writing one reason to `$SHEPHERDR_CHECK_SKIP` and exiting 0: the result
-  line reads `N/<total> <name> skipped: <reason>`, is named in the verdict's "parts not run", and is not a failure.
+  line reads `N/<total> <name> skipped: <reason>`, is named in the verdict's "parts not run", and is not a failure. A
+  check that skips one part and runs another (a missing `shellcheck` beside a `perl -c` that ran, say) writes what ran
+  to `$SHEPHERDR_CHECK_NOTE` too, and its line keeps both, joined by ` · `.
 
 The secrets step (`15-secrets`, whose logic is `scripts/checks/secrets.ts`) runs `gitleaks detect --source . --redact`,
 so it reads the committed tree and its history, not uncommitted files: commit before the gate. Its JSON report goes to
-the run's log folder, named after that run's own log (`secrets.log.json`, `secrets-quick.log.json`), never the repo, and
-only a finding's file, line and rule are printed, never its value. A finding
-that predates the step is baselined in `.gitleaksignore` as one fingerprint per line, with a `#` line above saying why
-it is a false positive or a revoked token; a new fingerprint fails the step. A host without gitleaks skips it with the
-install command, and the verdict names the part that did not run.
+the run's log folder, named after that run's own log (`secrets.log.json`, `secrets-quick.log.json`), never a tracked
+path (a run by hand writes it to `node_modules/.cache/secrets/`), and only a finding's file, line, rule and
+fingerprint are printed, never its value. A finding that predates the step is baselined in `.gitleaksignore` as one
+fingerprint per line, under a `#` comment saying why it is a false positive or a revoked token; a new fingerprint fails
+the step. A host without gitleaks skips it with the install command, and the verdict names the part that did not run.
 
 The audit step (`12-audit`, whose logic is `scripts/checks/audit.ts`) runs `bun audit --json` right after dependencies:
 Bun reads `bun.lock` and asks the npm advisory database, with no second binary to pin. Advisory ids that are already
@@ -134,10 +136,13 @@ counted, not failed. A registry that cannot be reached is a note on a green step
 offline work is never blocked by it.
 
 The scripts step (`17-scripts`, whose logic is `scripts/checks/scripts.ts`) runs `shellcheck -S warning` over
-`scripts/*.sh`, `bin/shepherdr` and `bin/agent-browser`, and `perl -c` over `helper/*.pl` and `helper/shepherdr`. A
-warning or a syntax error fails with its file and line; an accepted finding is baselined with `# shellcheck disable=`
-and the reason on the line. perlcritic is not gated on: its style rules are too opinionated for a check. A host without
-either tool skips just that part, naming it, and the verdict says what did not run.
+`scripts/*.sh`, `bin/shepherdr`, `bin/agent-browser`, `helper/agent-browser` and the gate's own check shims in
+`scripts/checks/` (a regular file, no dotfile, not a `.ts` module, with a shell on its first line; a check written in
+another language is that language's to lint), and `perl -c` over `helper/*.pl` and `helper/shepherdr`: a shell typo in
+a check shim breaks the whole gate, so the shims are linted like the rest. A finding or a syntax error fails with its
+file and line; an accepted finding is baselined with `# shellcheck disable=` and the reason on the line. perlcritic is
+not gated on: its style rules are too opinionated for a check. A host without either tool skips just that part, naming
+it in the step's line, and the verdict says what did not run.
 
 The docs step (`18-docs`, whose logic is `scripts/checks/docs.ts`) resolves every relative markdown link in `docs/`,
 `README.md`, `AGENTS.md` and `skill/` against the tree — external URLs are never fetched — and checks every
