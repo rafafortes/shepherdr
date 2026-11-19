@@ -326,15 +326,23 @@ export class Procs {
       // an empty command line is a process still starting (or a kernel thread): looked at again next pass
       const argv = this.argv(pid)
       if (!argv.length) continue
+      // only a headless CLI or an OpenCode shell needs the chat: every other young process (a shell, compiler
+      // wrapper or tool subprocess a build spawns by the hundred) would have its environ read and then discarded
+      const head = headless(argv)
+      const shell = shellCommand(argv)
+      if (!head && !shell) {
+        plain.set(pid, since ?? now)
+        continue
+      }
       const chat = this.chatOf(pid)
-      if (headless(argv)) {
+      if (head) {
         // its folder in /proc is as old as it is; one that ended as the pass read it is left for the next pass
         const st = statSync(join(this.proc, pid), { throwIfNoEntry: false })
         if (chat && st) this.add(chats, chat, { argv, pid: Number(pid), at: st.ctimeMs })
         continue
       }
       // an OpenCode background shell: a command its own pty daemon still runs for this chat
-      if (chat && shellCommand(argv) && this.underDaemon(pid)) {
+      if (chat && this.underDaemon(pid)) {
         this.tracked.set(pid, { chat, argv })
         this.add(running, chat, argv)
         continue

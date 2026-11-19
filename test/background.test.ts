@@ -1,6 +1,7 @@
 // Background work that outlives an agent's turn (readers/background.ts): Claude Code's session file and its screen, on
 // samples captured from real panes and session files (Claude Code 2.1.310).
-import { afterAll, describe, expect, test } from 'bun:test'
+import { afterAll, describe, expect, spyOn, test } from 'bun:test'
+import * as fs from 'node:fs'
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
@@ -588,6 +589,86 @@ describe("OpenCode's background shells", () => {
     expect(new Procs('/no/proc/here', () => ps).shells('T-1/Agent')).toEqual([['/bin/bash', '-c', 'tools/changed-check.sh', '--fast']])
     // a headless reviewer is still a reviewer there, never a shell
     expect(new Procs('/no/proc/here', () => 'claude -p --model opus SHEPHERDR_CHAT=T-1/Agent').shells('T-1/Agent')).toEqual([])
+  })
+})
+
+// SHE-67: a pass over a busy /proc must not read a young process's environ unless its argv says it can matter (a
+// headless reviewer or an OpenCode shell). A build spawns hundreds of short-lived compiler wrappers and shells, each
+// carrying the chat, so reading all their environ blocks and throwing them away was a syscall storm.
+describe('the cost of a /proc pass', () => {
+  /** a process as /proc keeps one: its command line, environment and parent */
+  const put = (proc: string, pid: number, argv: string[], env: string[] = [], ppid = 0) => {
+    mkdirSync(join(proc, String(pid)), { recursive: true })
+    writeFileSync(join(proc, String(pid), 'cmdline'), `${argv.join('\0')}\0`)
+    writeFileSync(join(proc, String(pid), 'environ'), `${env.join('\0')}\0`)
+    writeFileSync(join(proc, String(pid), 'stat'), `${pid} (${argv[0]?.split('/').at(-1) ?? 'x'}) S ${ppid} 0 0 0\n`)
+  }
+  /** the reads one pass makes under this fake /proc, by file: argv (cmdline) and chat (environ) */
+  const reads = (proc: string, scan: () => void) => {
+    const spy = spyOn(fs, 'readFileSync')
+    try {
+      scan()
+      const paths = spy.mock.calls.map((args) => String(args[0]))
+      return {
+        argv: paths.filter((p) => p.startsWith(proc) && p.endsWith('/cmdline')).length,
+        env: paths.filter((p) => p.startsWith(proc) && p.endsWith('/environ')).length,
+      }
+    } finally {
+      spy.mockRestore()
+    }
+  }
+  /** what a build leaves running: 100 young wrong-argv processes, each carrying the chat it never needs */
+  const builders = (proc: string) => {
+    mkdirSync(proc, { recursive: true })
+    for (let pid = 100; pid < 200; pid++) put(proc, pid, ['/usr/lib/gcc/cc1', '-o', `x${pid}.o`], ['HOME=/h', 'SHEPHERDR_CHAT=T-1/Agent'])
+  }
+
+  test('a hundred irrelevant young processes are not read for their environment', () => {
+    const proc = tmp('proc-young-churn')
+    builders(proc)
+    const r = new Procs(proc)
+    const count = reads(proc, () => expect(r.runs('T-1/Agent')).toBe(false))
+    // none of them is a headless CLI or an OpenCode shell, so their environ is never opened
+    expect(count.env).toBe(0)
+    // the argv that rules them out is still read once each on this pass
+    expect(count.argv).toBe(100)
+  })
+
+  test('a headless CLI and an OpenCode shell are still read for their environment and found', () => {
+    const proc = tmp('proc-young-mixed')
+    builders(proc)
+    // the pty daemon, a shell it runs for T-1, and a headless reviewer of another CLI for T-2
+    put(proc, 10, ['/home/u/.cache/opencode/bin/opencode-pty/0.5.2/opencode-pty', 'daemon', '--runtime-dir', '/state'], ['HOME=/h'], 5)
+    put(proc, 11, ['/bin/bash', '-c', 'bun test'], ['SHEPHERDR_CHAT=T-1/Agent'], 10)
+    put(proc, 12, ['codex', 'exec', '-'], ['SHEPHERDR_CHAT=T-2/Agent'])
+    const r = new Procs(proc)
+    const count = reads(proc, () => {
+      expect(r.shells('T-1/Agent')).toEqual([['/bin/bash', '-c', 'bun test']])
+      expect(r.runs('T-2/Agent')).toBe(true)
+      expect(r.runs('T-9/Agent')).toBe(false)
+    })
+    // only the shell and the headless CLI need their environ; the 100 builders and the daemon do not
+    expect(count.env).toBe(2)
+    // argv: the 100 builders, the daemon, the shell, the reviewer, and the daemon again as the shell's parent
+    expect(count.argv).toBe(104)
+  })
+
+  test('every CLI headless pattern still reaches its environ and is found', () => {
+    const proc = tmp('proc-every-cli')
+    mkdirSync(proc, { recursive: true })
+    // the five CLIs' headless shapes, as headless() names them: the argv gate must still open their environ
+    const clis = [
+      ['codex', 'exec', '-'],
+      ['node', '/usr/lib/node_modules/@openai/codex/bin/codex.js', 'exec', '-'],
+      ['claude', '-p'],
+      ['pi', '--print'],
+      ['opencode', 'run', 'Review this change'],
+      ['agy', '-p', 'Review this change'],
+    ]
+    clis.forEach((argv, i) => put(proc, 200 + i, argv, [`SHEPHERDR_CHAT=T-${i}/Agent`]))
+    const r = new Procs(proc)
+    const count = reads(proc, () => clis.forEach((_, i) => expect(r.runs(`T-${i}/Agent`)).toBe(true)))
+    expect(count.env).toBe(clis.length)
   })
 })
 
