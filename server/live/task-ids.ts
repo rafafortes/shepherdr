@@ -1,10 +1,10 @@
 // Each machine owns its ID namespace. SQLite commits reservations before a task starts, so concurrent requests,
 // restarts and deleted tasks cannot reuse an ID. Remote settings and creation are routed to that machine.
 import { Database } from 'bun:sqlite'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SettingSection } from '../../shared/types.ts'
-import { home } from '../store.ts'
+import { beside, COPIES, home } from '../store.ts'
 import type { Space } from './places.ts'
 
 export const MAX_TASK_NUMBER = Number.MAX_SAFE_INTEGER - 1
@@ -23,14 +23,52 @@ export function taskIdsSection(level: string, machine: string, prefix: string, n
   }
 }
 
+const SCHEMA = 'CREATE TABLE IF NOT EXISTS prefixes (prefix TEXT PRIMARY KEY, space TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sequences (space TEXT PRIMARY KEY, prefix TEXT NOT NULL, last INTEGER NOT NULL);'
+
+/** the ID store, opened and ready. A file SQLite cannot read (a crash or a full disk leaves one) is moved aside once and
+ *  made again, so that it costs the sequence table its rebuild from tasks.json's data — the constructor imports it —
+ *  instead of costing the server every start, for ever, as a crash on the constructor did. */
+function opened(dir: string, retry = true): Database {
+  const file = join(dir, 'task-ids.sqlite')
+  try {
+    const db = new Database(file, { create: true })
+    try {
+      db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;')
+      db.exec(SCHEMA)
+    } catch (e) {
+      db.close()
+      throw e
+    }
+    return db
+  } catch (e) {
+    if (!retry) throw e
+    const words = e instanceof Error ? e.message : String(e)
+    let moved = ''
+    try {
+      const to = beside(file, 'corrupt')
+      renameSync(file, to)
+      moved = to
+      // a write-ahead log and its index belong to the file that just went: one left behind would be read against the new one
+      for (const ext of ['-wal', '-shm']) if (existsSync(file + ext)) renameSync(file + ext, to + ext)
+    } catch {
+      /* it cannot be moved: the new file's own failure says why below */
+    }
+    console.error(
+      moved
+        ? `shepherdr: ${file} could not be opened (${words}): moved it to ${moved}, the newest ${COPIES} of each copy stay beside it, ` +
+            'and made it again from tasks.json, so no task number is reused'
+        : `shepherdr: ${file} could not be opened (${words}) and could not be moved aside: it stays where it is`,
+    )
+    return opened(dir, false)
+  }
+}
+
 type Sequence = { space: string; prefix: string; last: number }
 export class TaskIds {
   private db: Database
   constructor(spaces: Space[], legacy: { next: Record<string, number>; tasks: { id: string; n: number; project: string }[] }, idOf: (name: string) => string, dir = home()) {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
-    this.db = new Database(join(dir, 'task-ids.sqlite'), { create: true })
-    this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;')
-    this.db.exec('CREATE TABLE IF NOT EXISTS prefixes (prefix TEXT PRIMARY KEY, space TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sequences (space TEXT PRIMARY KEY, prefix TEXT NOT NULL, last INTEGER NOT NULL);')
+    this.db = opened(dir)
     this.db.transaction(() => {
       // Import tombstones too: tasks.json.next remembers numbers even after tasks were deleted. Unknown owners
       // stay reserved. Never change an existing reservation when another engine has an older JSON snapshot.
