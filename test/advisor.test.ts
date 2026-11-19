@@ -4,7 +4,7 @@
 // run stubbed at the one place it runs: no CLI is run, and no model is asked anything.
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -13,7 +13,7 @@ process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock'
 delete process.env.SHEPHERDR_MAIN
 const { LiveSource } = await import('../server/live/source.ts')
 const { placeId } = await import('../server/live/places.ts')
-const { adviceArgs, advisorPrompt, parseAdvice } = await import('../server/live/advisor.ts')
+const { adviceArgs, advisorPrompt, parseAdvice, runAdvisor } = await import('../server/live/advisor.ts')
 const { keyOf } = await import('../server/live/models-summary.ts')
 const { providerOfKey: providerOf } = await import('../shared/model-caps.ts')
 
@@ -647,6 +647,67 @@ describe('the advisor on the caps: a harness with room, a run held as a lease, a
     } finally {
       capped('off')
       w.done()
+    }
+  })
+})
+
+describe('the advisor run itself: one process group for all five CLIs', () => {
+  /** the five CLIs adviceArgs makes a run for: the group kill lives in runAdvisor, shared by all of them */
+  const KINDS = ['claude', 'codex', 'pi', 'opencode', 'agy']
+  const cwd = process.env.SHEPHERDR_HOME!
+
+  /** a fake CLI script standing in for one kind's command; {pid} is where its child writes its pid */
+  async function withFakeCli(name: string, body: string, run: (pidFile: string) => Promise<void>) {
+    const dir = tmp(`advisor-cli-${name}`)
+    const file = join(dir, name)
+    const pidFile = join(dir, 'child.pid')
+    writeFileSync(file, `#!/bin/sh\n${body.replaceAll('{pid}', JSON.stringify(pidFile))}\n`, { mode: 0o755 })
+    const which = Bun.which
+    const spawn = Bun.spawn as (cmd: unknown, opts?: unknown) => unknown
+    const bun = Bun as unknown as { which: (cmd: string) => string | null; spawn: typeof spawn }
+    bun.which = (cmd) => (cmd === name ? file : which(cmd))
+    bun.spawn = (cmd, opts) => spawn(Array.isArray(cmd) && cmd[0] === name ? [file, ...cmd.slice(1)] : cmd, opts)
+    try {
+      await run(pidFile)
+    } finally {
+      bun.which = which
+      bun.spawn = spawn
+    }
+  }
+
+  /** whether a pid still names a process that runs (a zombie is already gone for the child we killed) */
+  const running = (pid: number) => {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+      return !['Z', 'X'].includes(stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3))
+    } catch {
+      return false
+    }
+  }
+  async function until(what: string, f: () => boolean, ms = 5000) {
+    const end = performance.now() + ms
+    while (!f()) {
+      if (performance.now() > end) throw new Error(`timed out waiting: ${what}`)
+      await Bun.sleep(20)
+    }
+  }
+
+  test('a clean run answers as before for every CLI: its words and exit code, no child left', async () => {
+    for (const kind of KINDS) {
+      const body = kind === 'agy' ? `printf '%s' '{"status":"SUCCESS","response":"advisor said this"}'` : `printf '%s' 'advisor said this'`
+      await withFakeCli(kind, body, async () => {
+        expect(await runAdvisor({ kind } as never, 'Q', cwd)).toEqual({ ok: true, out: 'advisor said this' })
+      })
+    }
+  })
+
+  test('a timeout kills the whole group for every CLI: a child holding stdout cannot survive', async () => {
+    for (const kind of KINDS) {
+      await withFakeCli(kind, `sleep 12 & echo $! > {pid}; wait`, async (pidFile) => {
+        expect((await runAdvisor({ kind } as never, 'Q', cwd, 250)).ok).toBe(false)
+        const child = Number(readFileSync(pidFile, 'utf8').trim())
+        await until(`the ${kind} child holding stdout to be gone`, () => !running(child))
+      })
     }
   })
 })
