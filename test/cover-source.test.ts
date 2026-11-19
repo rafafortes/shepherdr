@@ -1063,6 +1063,9 @@ describe('agents Shepherdr keeps running', () => {
               wrong = { [key]: 'stale' }
               seen = 'give-up'
               await src.revive()
+              // the card's id carries the millisecond it was posted in, and the log keeps one card per id: a second
+              // give-up in that same millisecond would take the first one's place, so let the clock move on
+              await Bun.sleep(2)
               wrong = { [key]: 'gone' }
               await src.revive()
             })

@@ -34,6 +34,9 @@ export interface FakeGitHub {
   prs: FakePr[]
   /** what gh pr checks answers; none: "no checks reported" */
   checks?: { name: string; bucket: string; link?: string }[]
+  /** gh pr checks takes this long (ms) before it answers, with its call already written down: GitHub slow, and a test
+   *  that acts meanwhile (a base that moves while the merge waits for them) */
+  checksSlow?: number
   /** the token can't read checks (a fine-grained one on a private repo): gh pr checks is refused */
   noChecks?: boolean
   /** what gh api answers for a path ("repos/acme/app/pulls/1/reviews"), without its query: each item on a line, as
@@ -188,6 +191,11 @@ if (import.meta.main) {
       out(`✓ Pull request #${a2} is marked as "ready for review"`)
       break
     case 'checks':
+      // written down before it answers, so a test can act while GitHub takes its time with them
+      if (st.checksSlow) {
+        save()
+        Bun.sleepSync(st.checksSlow)
+      }
       if (st.noChecks) fail('GraphQL: Resource not accessible by personal access token (repository.pullRequest.statusCheckRollup.nodes.0.commit.statusCheckRollup.contexts.nodes.0)')
       if (!st.checks?.length) fail(`no checks reported on the '${pr().head}' branch`)
       out(JSON.stringify(st.checks), st.checks!.some((c) => c.bucket === 'fail') ? 1 : st.checks!.some((c) => c.bucket === 'pending') ? 8 : 0)

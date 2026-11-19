@@ -3397,17 +3397,38 @@ export class Engine extends Emitter<Events> {
 
   /**
    * A space's merge gate (Settings → How tasks work → Merge gate, a command of its own): run in the task's worktree
-   * after its rebase and before it goes into main, here. Exit 0 lets it in, with the last line it printed; anything else
-   * (or GATE_TIMEOUT) refuses the merge with the end of its output, and main is untouched. Merges into one repo go one at
-   * a time (merge), so the others wait while it runs; main moved meanwhile anyway (by hand, say), the branch is rebased
-   * on it and the gate runs again.
+   * after its rebase and before it goes into `t.base`, the merge made here or through its pull request alike. Exit 0
+   * lets it in, with the last line it printed, on the commit it ran on (`at`, the base as it then was); anything else
+   * (or GATE_TIMEOUT) refuses the merge with the end of its output, and the base is untouched. Merges into one repo go
+   * one at a time (merge), so the others wait while it runs; the base moved meanwhile anyway (a commit on GitHub, say),
+   * the branch is rebased on it and the gate runs again, at most GATE_ROUNDS times. `on` is the ref it lands on — main
+   * here, `origin/<base>` for a merge through a pull request — and `refresh` fetches that ref before each read, since
+   * GitHub's main moves where this machine can only see it through a fetch. The branch is on the base before each run,
+   * not only after: a base that moved since the caller put it there (or while the gate ran) is rebased under it, so what
+   * the gate checks is always what will land.
    */
-  private async gate(t: TaskRec, repo: string, space: string, wt: string): Promise<{ ok: true; line?: string } | { ok: false; error: string; stopped?: true }> {
+  private async gate(t: TaskRec, repo: string, space: string, wt: string, on = `refs/heads/${t.base}`, refresh?: () => Promise<void>): Promise<{ ok: true; line?: string; at?: string } | { ok: false; error: string; stopped?: true }> {
     const cmd = this.gateOf(t, space)
     if (!cmd) return { ok: true }
-    const tip = async () => (await G.git(repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out
+    const tip = async () => (await G.git(repo, 'rev-parse', '--verify', '--quiet', on)).out
+    let at = ''
+    /** the branch on the base as it is now: the error that stopped it, or nothing when it is */
+    const onto = async () => {
+      // nothing to bring it onto when the base can't be read (a link to another machine that is down, say): the run
+      // itself says what is wrong, as it always did
+      if (!at) return
+      if ((await G.git(wt, 'merge-base', '--is-ancestor', at, 'HEAD')).ok) return
+      if (!(await G.rebase(wt, on)).ok) {
+        this.land(t, 'rebase')
+        return `Conflict with ${t.base}, which moved while the merge gate ran: rebase ${t.branch} on ${t.base} by hand, commit, then run shepherdr merge ${t.id} again.`
+      }
+      return
+    }
     for (let round = 1; round <= GATE_ROUNDS; round++) {
-      const at = await tip()
+      if (refresh) await refresh()
+      at = await tip()
+      const behind = await onto()
+      if (behind) return { ok: false, error: behind }
       const head = (await G.git(wt, 'rev-parse', 'HEAD')).out
       this.land(t, 'gate')
       const ran = await this.runGate(t, cmd, wt, head, at)
@@ -3422,13 +3443,13 @@ export class Engine extends Emitter<Events> {
         const why = r.code === 124 ? `didn't finish in ${limit}` : `failed (exit ${r.code})`
         return { ok: false, error: `${t.id}'s merge gate (${cmd}) ${why}: nothing was merged, and ${t.base} is as it was.${said ? ` Its output ends:\n${said}` : ''}\n${GATE_AGAIN}` }
       }
-      if ((await tip()) === at) return { ok: true, line: r.out.split('\n').filter((l) => l.trim()).at(-1)?.trim() }
-      // main moved while it ran: on top of it again, and the gate once more
-      const rb = await G.rebase(wt, t.base!)
-      if (!rb.ok) {
-        this.land(t, 'rebase')
-        return { ok: false, error: `Conflict with ${t.base}, which moved while the merge gate ran: rebase ${t.branch} on ${t.base} by hand, commit, then run shepherdr merge ${t.id} again.` }
-      }
+      if (refresh) await refresh()
+      const now = await tip()
+      if (now === at) return { ok: true, line: r.out.split('\n').filter((l) => l.trim()).at(-1)?.trim(), at }
+      // the base moved while it ran: on top of it again, and the gate once more
+      at = now
+      const moved = await onto()
+      if (moved) return { ok: false, error: moved }
     }
     return { ok: false, error: `${t.base} kept moving while ${t.id}'s merge gate ran (${GATE_ROUNDS} times): nothing was merged. Run shepherdr merge ${t.id} again.` }
   }
@@ -4067,7 +4088,9 @@ export class Engine extends Emitter<Events> {
    * Through the pull request, as herdr-projects lands one: the branch pushed as it is, rebased on GitHub's main only
    * when it conflicts with it (its pull request opened if the agent didn't), GitHub's checks passed at exactly that
    * commit, then squash-merged on GitHub only while its head is still that commit, its branch there deleted, and main here brought up to GitHub's (which
-   * is what Shepherdr's own update watches). Failed checks go back to the agent.
+   * is what Shepherdr's own update watches). Failed checks go back to the agent. Its space's merge gate, when it has one,
+   * runs here before anything is pushed: the branch on GitHub's base as it is now, the gate on that very commit, and
+   * the merge only while the base is still the one it ran on.
    */
   private async mergeOnGitHub(t: TaskRec, p: Space, g: G.GitHub, self: boolean): Promise<{ ok: boolean; error?: string; note?: string }> {
     const wt = t.worktree!
@@ -4081,17 +4104,24 @@ export class Engine extends Emitter<Events> {
     // merged on GitHub already (by hand, or a merge whose answer was lost): it only needs main here and marking
     if (pr?.state === 'MERGED') return this.mergedOnGitHub(t, p, `PR #${pr.number} was merged on GitHub already`)
     if ((await G.aheadCount(wt, t.base!)) === 0) return { ok: false, error: `${t.id} has no changes to merge` }
-    // GitHub squash-merges a branch behind main as it is: rebasing it would make a new commit, and all its checks run
-    // again (again each time main moves meanwhile). Only a real conflict is rebased here; a clash that merges cleanly
-    // but breaks is caught by the checks on main.
-    let rebased = false
-    if (!(await G.mergesCleanly(wt, base, 'HEAD'))) {
+    // GitHub's base as it is now: what the gate checks, and what the merge must not have moved past
+    const refreshBase = async () => void (await G.git(p.path, 'fetch', '--quiet', 'origin', t.base!))
+    // its space's merge gate (merge.gate), where it has one: nothing is pushed, or merged, that did not pass it
+    const cmd = this.gateOf(t, p.name)
+    // Without a merge gate, GitHub squash-merges a branch behind main as it is: rebasing it would make a new commit, and
+    // all its checks run again (again each time main moves meanwhile). Only a real conflict is rebased here; a clash
+    // that merges cleanly but breaks is caught by the checks on main. With a gate the branch goes onto the base as it
+    // is now even when it moved without a conflict, since what the gate checks is what will land.
+    const conflict = !(await G.mergesCleanly(wt, base, 'HEAD'))
+    const behind = !!cmd && !conflict && !(await G.git(wt, 'merge-base', '--is-ancestor', base, 'HEAD')).ok
+    let rebased: 'conflict' | 'gate' | undefined
+    if (conflict || behind) {
       const rb = await G.rebase(wt, base)
       if (!rb.ok) {
         this.land(t, 'rebase')
         return { ok: false, error: `Conflict with ${t.base}: rebase ${t.branch} on ${base} by hand, commit, push with shepherdr pr ${t.id}, then run shepherdr merge ${t.id} again.` }
       }
-      rebased = true
+      rebased = conflict ? 'conflict' : 'gate'
     }
     // main has this work already (merged another way): its pull request would change nothing
     if (await G.landed(wt, 'HEAD', base)) {
@@ -4100,7 +4130,20 @@ export class Engine extends Emitter<Events> {
       if (closed) await G.git(p.path, 'push', '--quiet', 'origin', '--delete', t.branch!)
       return this.mergedOnGitHub(t, p, `it was in ${t.base} already${pr ? (closed ? `; closed PR #${pr.number}` : `; could not close PR #${pr.number}: close it on GitHub`) : ''}`)
     }
+    // the gate, on the commit that will land, in the task's worktree: a run of its own, detached as it is for a merge
+    // made here, found again after a restart
+    let gate: { line?: string; at?: string } | undefined
+    if (cmd) {
+      // a merge train is for merges made here only (docs/tasks.md): one set on this space is not a train, and says so
+      if (this.trainSize(p.name) > 1) trainLog(`${t.id}'s merge goes alone: ${p.name} merges through a pull request, and a merge train is for merges made here`)
+      const ran = await this.gate(t, p.path, p.name, wt, base, refreshBase)
+      if (!ran.ok) return { ok: false, error: ran.error }
+      gate = ran
+      this.land(t, 'merge')
+    }
     const head = (await G.git(wt, 'rev-parse', 'HEAD')).out
+    // what the messages below say about the branch being rebased here: for a conflict, or for its merge gate
+    const whyRebased = rebased === 'gate' ? `, rebased on ${t.base} for its merge gate` : rebased ? `, rebased on ${t.base} for a conflict` : ''
     const pushing = !pr || pr.headRefOid !== head
     if (pushing) {
       const push = await this.push(t)
@@ -4131,11 +4174,11 @@ export class Engine extends Emitter<Events> {
     else c = now?.state === 'fail' ? now : { state: 'pass' as const, passed: 0, failed: [] }
     if (c.state === 'unknown') {
       if (t.landing) this.land(t, 'checks', await this.checksDue(t, p, g, head), { why: 'Checks not started yet' })
-      return { ok: false, error: `GitHub has not reported checks on PR #${n}${pushing ? ` (just pushed${rebased ? `, rebased on ${t.base} for a conflict` : ''})` : ''} yet, but ${this.checksWhy(c.expect)}: waiting for them to start, not merging. Run shepherdr checks ${t.id} again; if that workflow cannot run on this pull request, merge it by hand on GitHub.` }
+      return { ok: false, error: `GitHub has not reported checks on PR #${n}${pushing ? ` (just pushed${whyRebased})` : ''} yet, but ${this.checksWhy(c.expect)}: waiting for them to start, not merging. Run shepherdr checks ${t.id} again; if that workflow cannot run on this pull request, merge it by hand on GitHub.` }
     }
     if (c.state === 'pending') {
       this.land(t, 'checks', await this.checksDue(t, p, g, head))
-      return { ok: false, error: `GitHub's checks are running on PR #${n}${pushing ? ` (just pushed${rebased ? `, rebased on ${t.base} for a conflict` : ''})` : ''}: wait for them with shepherdr checks ${t.id}, then run shepherdr merge ${t.id} again.` }
+      return { ok: false, error: `GitHub's checks are running on PR #${n}${pushing ? ` (just pushed${whyRebased})` : ''}: wait for them with shepherdr checks ${t.id}, then run shepherdr merge ${t.id} again.` }
     }
     if (c.state === 'error') return { ok: false, error: `Could not read GitHub's checks on PR #${n}: ${c.error}. Nothing was merged.` }
     if (c.state === 'fail') {
@@ -4148,7 +4191,15 @@ export class Engine extends Emitter<Events> {
       await this.sendBack(t, `${why} ${this.fixIt(t)}`)
       return { ok: false, error: `${why} Sent back to ${t.id}'s agent to fix.` }
     }
-    const m = await G.mergePr(g, wt, n, head, `${t.id}: ${t.title} (#${n})`, [t.said, t.facts && `Facts: ${t.facts}`].filter(Boolean).join('\n\n'))
+    // its gate ran on a branch on GitHub's base as it was then: a base that moved since is no merge, the gate is for
+    // the base it will land on
+    if (gate) {
+      await refreshBase()
+      if ((await G.git(p.path, 'rev-parse', '--verify', '--quiet', base)).out !== gate.at) {
+        return { ok: false, error: `${t.base} moved on GitHub after ${t.id}'s merge gate ran: nothing was merged, since the gate checks the branch on the base it will land on. Run shepherdr merge ${t.id} again, and the gate runs again on the new ${t.base}.` }
+      }
+    }
+    const m = await G.mergePr(g, wt, n, head, `${t.id}: ${t.title} (#${n})`, [t.said, t.facts && `Facts: ${t.facts}`, gate?.line].filter(Boolean).join('\n\n'))
     if ((await G.viewPr(g, wt, n))?.state !== 'MERGED') {
       const said = (m.err || m.out || 'it did not say why').split('\n')[0]
       // main moved on GitHub since it was fetched: merging again rebases it if it now conflicts (Merging meanwhile)
