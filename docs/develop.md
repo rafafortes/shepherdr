@@ -80,6 +80,12 @@ A verdict does not expire: it goes away when a full run of that tree fails, or w
 `~/.cache/shepherdr/check-local/verdicts` after changing the host's tools (a new browser, another gitleaks) if the trees
 should be checked again.
 
+What two runs of the same worktree still share is safe to share: `50-build` takes a lock of its own
+(`<logs>/build.lock`), because both runs write `dist/` and vite empties it first, so no build ever interleaves with
+another; the plugin registries are written atomically (a run reads the old or the new file, never half of one); and a
+quick run's logs, notes, skips, browser probe and gitleaks report take `-quick`, beside its own verdict. A `tsc` build
+info file one run replaces under the other only costs a rebuild, never a wrong answer.
+
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe, and runs the
 checks in the two phases above; each step is one executable file in `scripts/checks/`, named `<number>-<name>` with the
 numbers spaced by ten (`10-dependencies`, `12-audit`, `15-secrets`, `17-scripts`, `18-docs`, `19-version`, `20-types`,

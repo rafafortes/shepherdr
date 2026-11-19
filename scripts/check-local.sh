@@ -402,6 +402,7 @@ acquire_lock() { # <nothing|shared>: what a give-up leaves unrun
   [ "$lock_taken" = 1 ] && return 0
   if ! command -v flock >/dev/null 2>&1; then
     say "flock is missing: running without the one-at-a-time lock."
+    lock_taken=1
     return 0
   fi
   exec 9>>"$lock"
@@ -509,7 +510,7 @@ fi
 # that could not start at all. Only when they ran: a run stopped earlier must not read an older run's tests.log
 if [ "$ran_tests" = 1 ]; then
   skipped=$(grep -c '^(skip) ' "$logs/tests$log_suffix.log" 2>/dev/null || true)
-  [ -n "$skipped" ] && [ "$skipped" -gt 0 ] && notes+=("the tests: $skipped skipped (a browser that could not start, or a tool this host lacks; see tests.log)")
+  [ -n "$skipped" ] && [ "$skipped" -gt 0 ] && notes+=("the tests: $skipped skipped (a browser that could not start, or a tool this host lacks; see tests$log_suffix.log)")
 fi
 
 echo

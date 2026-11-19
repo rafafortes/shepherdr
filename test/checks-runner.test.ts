@@ -397,3 +397,60 @@ exit 0
     expect(existsSync(join(f.home, '.cache', 'shepherdr', 'check-local.lock.pid'))).toBe(false)
   })
 })
+
+// Two runs of one worktree can now overlap (a --quick one beside a full one): what they still share must never race.
+describe('what two runs of one worktree share', () => {
+  test('two full runs never run their shared phase at once: 30-tests still goes one at a time', async () => {
+    const tests = `#!/usr/bin/env bash
+set -uo pipefail
+echo "tests $1 $(date +%s%N)" >> "$SHEPHERDR_CHECK_ROOT/phases.txt"
+sleep 0.4
+echo "tests $2 $(date +%s%N)" >> "$SHEPHERDR_CHECK_ROOT/phases.txt"
+`
+    const f = fixture({ '10-one': check(), '30-tests': tests.replace('$1', 'start').replace('$2', 'end') })
+    const spawn = () =>
+      Bun.spawn(['bash', join(f.dir, 'scripts', 'check-local.sh')], {
+        cwd: f.dir,
+        env: { ...process.env, HOME: f.home, SHEPHERDR_TEST_JOBS: '', SHEPHERDR_CHECK_WAIT: '30', SHEPHERDR_CHECK_STEP_TIMEOUT: '30' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+    const [a, b] = [spawn(), spawn()]
+    expect(await Promise.all([a.exited, b.exited])).toEqual([0, 0])
+    const lines = readFileSync(join(f.dir, 'phases.txt'), 'utf8').trim().split('\n').map((l) => l.split(' '))
+    expect(lines.length).toBe(4)
+    const starts = lines.filter((l) => l[1] === 'start').map((l) => Number(l[2])).sort((x, y) => x - y)
+    const ends = lines.filter((l) => l[1] === 'end').map((l) => Number(l[2])).sort((x, y) => x - y)
+    // each test step finishes before the other starts: the lock serializes them, not the minute of the run
+    expect(ends[0]).toBeLessThan(starts[1])
+  })
+
+  test('one build of a worktree at a time: the build waits for the lock another run holds, and never interleaves', async () => {
+    const dir = tmp('build-lock')
+    const logs = join(dir, 'logs')
+    mkdirSync(join(dir, 'scripts', 'checks'), { recursive: true })
+    mkdirSync(logs, { recursive: true })
+    copyFileSync(join(root, 'scripts', 'checks', '50-build'), join(dir, 'scripts', 'checks', '50-build'))
+    // a bun that only records whether the other run was still building when it ran
+    const bin = join(dir, 'bin')
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, 'bun'), `#!/bin/sh\necho "held=$([ -f "${dir}/held" ] && echo yes || echo no)" >> "${dir}/built.txt"\n`)
+    chmodSync(join(bin, 'bun'), 0o755)
+    const held = join(dir, 'held')
+    const proc = Bun.spawn(['bash', '-c', `exec 9>>"${join(logs, 'build.lock')}"; flock 9; touch "${held}"; sleep 1.5; rm -f "${held}"`], { stdout: 'ignore', stderr: 'ignore' })
+    try {
+      for (let i = 0; i < 200 && !existsSync(held); i++) await Bun.sleep(25)
+      expect(existsSync(held), 'the build lock is held').toBe(true)
+      // it fails on the dist checks below (the fixture builds nothing), which is not what this test is about
+      Bun.spawnSync(['bash', join(dir, 'scripts', 'checks', '50-build')], {
+        cwd: dir,
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SHEPHERDR_CHECK_ROOT: dir, SHEPHERDR_CHECK_LOGS: logs },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      expect(readFileSync(join(dir, 'built.txt'), 'utf8').trim()).toBe('held=no')
+    } finally {
+      proc.kill()
+    }
+  })
+})

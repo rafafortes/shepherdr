@@ -115,9 +115,10 @@ function put(file: string, text: string) {
   renameSync(tmp, file)
 }
 
-/* A build is a pure function of its inputs, so a worktree that already wrote them need not write them again. The gate's
- * lock keeps one build at a time, so this needs no cache server: a hash in node_modules/.cache (per worktree) is enough.
- * typecheck, tests and build all call writeRegistries, so they share one build per run. */
+/* A build is a pure function of its inputs, so a worktree that already wrote them need not write them again: a hash in
+ * node_modules/.cache (per worktree) is enough, no cache server. typecheck, tests and build all call writeRegistries, so
+ * they share one build per run; the writes are atomic, so a run beside another of the same worktree reads either the old
+ * or the new file, never half of one (SHE-172). */
 const outputs = (dir: string) => [join(dir, 'generated', 'client-plugins.ts'), join(dir, 'generated', 'server-plugins.ts')]
 const cacheFile = (dir: string) => join(dir, 'node_modules', '.cache', 'build-plugins.json')
 
