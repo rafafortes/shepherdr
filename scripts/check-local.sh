@@ -5,10 +5,10 @@
 # own file under scripts/checks/.
 # GitHub Actions is off on rafafortes/shepherdr (SHE-21), so this is the check every change goes through:
 #
-#   bun run check:local        # a task runs it before `shepherdr ready`; the coordinator before a release
-#   bun run check:local --quick  # opt-in: incremental types + changed tests + build, no coverage; marked QUICK in a
-#                                # verdict of its own, never a baseline or a full verdict (the full gate still runs at
-#                                # the merge, weekly and before a release)
+#   bun run check:local --quick  # a task's pre-ready run: incremental types + changed tests + build, no coverage; marked
+#                                # QUICK in a verdict of its own, never a baseline or a full verdict (the full gate still
+#                                # runs at the merge, weekly and before a release)
+#   bun run check:local        # the full gate: the merge gate, the weekly sweep and the coordinator before a release
 #   bun run check:local --reuse  # the merge gate's cheap question: answers at once when this very tree already passed
 #                                # the full check in some worktree, and runs the full check when it did not (QG-10)
 #
@@ -342,7 +342,7 @@ show_failure() { # the reasons a step failed
 dirty=''
 [ -n "$(git -C "$root" status --porcelain 2>/dev/null)" ] && dirty=' and what is not committed'
 if [ "$quick" = 1 ]; then
-  say "check:local QUICK · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty · NOT run: the full suite, coverage, screen map and baseline · the full gate runs at the merge, weekly and before a release"
+  say "check:local QUICK · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty · NOT run: coverage, screen map and baseline · the full suite only if a shared file changed · the full gate runs at the merge, weekly and before a release"
 else
   say "check:local · $branch at $(git -C "$root" rev-parse --short HEAD)$dirty${reuse_miss:+ · $reuse_miss} · $jobs test workers · $priority"
 fi

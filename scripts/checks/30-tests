@@ -3,7 +3,8 @@
 # earlier pass at this commit for its own (a browser that skipped then would hide here). On the default branch the
 # screen map bun run test changed picks from is recorded there too. In a --quick run (SHEPHERDR_CHECK_QUICK=1) it runs
 # only the tests that reach what changed, with no --cover or --map: the full gate runs them all later. The note is how
-# many tests ran, read from this check's own log, exactly as the runner used to read it.
+# many tests ran, read from this check's own log, exactly as the runner used to read it; a run nothing reached (a
+# docs-only change) says so on the line instead of leaving it empty.
 set -uo pipefail
 root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
 cover=${SHEPHERDR_CHECK_COVER:-"${SHEPHERDR_CHECK_LOGS:-/tmp}/coverage"}
@@ -19,5 +20,8 @@ else
   bun "$root/scripts/test.ts" --force --cover="$cover" ${map[@]+"${map[@]}"}
 fi
 code=$?
-grep -oE 'Ran [0-9]+ tests across [0-9]+ files?' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1 >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
+note=$(grep -oE 'Ran [0-9]+ tests across [0-9]+ files?' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1)
+# nothing reached the change (a docs-only quick run, say): say so on the result line instead of leaving it blank
+[ -n "$note" ] || [ "$code" -ne 0 ] || note='no test reaches what changed'
+printf '%s\n' "$note" >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
 exit "$code"

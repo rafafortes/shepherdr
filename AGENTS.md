@@ -42,8 +42,9 @@ The operator's fork, used on their desktop since 2026-11-04 (herdr installs the 
   `herdr plugin install rafafortes/shepherdr --ref <tag> --yes`, then the plugin's start action swaps the running
   server.
 - **Tests.** The whole check (the types, every test with the browser ones, the coverage ratchet, the build) runs on this machine: GitHub
-  Actions is off on this repository since 2026-11-06. `bun run check:local` is what a task runs before `shepherdr
-  ready`, and the coordinator runs it on `herdr-tui` before a release (Tests, below).
+  Actions is off on this repository since 2026-11-06. A task runs `bun run check:local --quick` before `shepherdr
+  ready`; the full `bun run check:local` runs where nothing may be missed — the merge gate, the weekly sweep, and the
+  coordinator's run on `herdr-tui` before a release (Tests, below).
 - Nothing of the operator's host goes into this repository: settings, secrets, hosts and paths stay in
   `~/.shepherdr` and the operator's own tools.
 
@@ -77,14 +78,24 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   by file, the verdict and where the logs are. It takes about two minutes warm, longer while other work keeps the
   machine busy or behind another worktree's check (it waits for it, up to an hour): run it with a long timeout, or in
   the background and read the verdict it prints.
-- A task runs it before `shepherdr ready` and says the result in `--facts`: passed, about how long, or what failed —
-  and, when the verdict names a part that did not run (a browser that could not start), that it did not. A check that
-  did not pass keeps `shepherdr ready` unrun and the change unmerged, whatever file the failure is in: the task fixes a
-  small failure and says so, or it stops, says what fails and why the failure is not its own, and its coordinator
-  decides. The coordinator runs it on `herdr-tui` before a release, and that run also records the screen map `bun run
-  test changed` picks from (until it has, a change of the screen's files runs every browser test). While you work, `bun
-  run typecheck` (seconds) and `bun run test changed` (a quarter of the cores, like the check, but no lock) are enough
-  to keep moving.
+- A task runs `bun run check:local --quick` before `shepherdr ready` and says the result in `--facts`: passed, about
+  how long, or what failed — and, when the verdict names a part that did not run (a browser that could not start), that
+  it did not. It is the full check's steps with the tests narrowed to what changed and no coverage ratchet, marked
+  `QUICK` in a verdict of its own so it is never taken for a full one. A change to one of the files that can break any
+  test (`test/preload.ts`, `test/once.ts`, `scripts/test.ts`, `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`:
+  `scripts/test.ts`'s `EVERYTHING`) runs the whole suite in a quick run too; a change to the coverage ratchet itself
+  (`scripts/coverage.ts`, `scripts/checks/40-coverage`, `test/screen-map.ts`) is the one a quick run cannot judge, so run
+  the full check for it.
+- Never make a check cheaper by hand: `SHEPHERDR_TEST_JOBS=1` serializes the suite and is for debugging one test's
+  order, never for a gate — the runner already caps the workers and takes the lock that keeps runs apart.
+- The full `bun run check:local` is where nothing may be missed: the merge gate (a space sets `merge.gate` to the check
+  itself, `bash scripts/check-local.sh --reuse`, which answers at once for a tree a full run already passed), the weekly
+  sweep, and the coordinator's run on `herdr-tui` before a release, which also records the screen map `bun run
+  test changed` picks from (until it has, a change of the screen's files runs every browser test). A check that did not
+  pass keeps `shepherdr ready` unrun and the change unmerged, whatever file the failure is in: the task fixes a small
+  failure and says so, or it stops, says what fails and why the failure is not its own, and its coordinator decides.
+  While you work, `bun run typecheck` (seconds) and `bun run test changed` (a quarter of the cores, like the check, but
+  no lock) are enough to keep moving.
 - Check what you changed on the screen by hand in your shared browser, for the proof, against a proof server of your
   own, never the one the human runs: the demo source (`SHEPHERDR_SOURCE=demo`) first, or `HERDR_SOCKET_PATH` at a
   socket that isn't there (as the tests do), a `SHEPHERDR_HOME` under `/tmp`, a `SHEPHERDR_PORT` other than 7787 and
@@ -97,7 +108,7 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   brings its own (test/fake-herdr.ts). Run by hand they are the same, and at the lowest priority.
 - A browser test skips where its browser can't start, so the run opens both first and names what is missing, and its
   verdict says which parts did not run; a task whose browser was missing says so in `--facts` instead of passing it as a
-  whole check. Chromium's headless shell (`bun x playwright-core install --only-shell chromium`, no root) runs every
+  check that ran whole. Chromium's headless shell (`bun x playwright-core install --only-shell chromium`, no root) runs every
   browser test, and WebKit, Safari's engine, the iPhone tests (`bun x playwright-core install webkit`); WebKit's system
   libraries come from `sudo bun x playwright-core install-deps webkit`, which only the operator runs.
 - Still write tests with your change: the check runs them here. A new browser test goes in the `layout-*.test.ts` file
@@ -112,7 +123,9 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   fail here) says why on it or on the line above: `// coverage-exempt: <why>`, never to skip a test you could write. The
   lines each file misses are in the check's logs, `coverage/report.txt`. The baseline is the default branch's, recorded
   by the coordinator's check there before a release, in the repo's `.git` like the screen map; until the first one
-  nothing is compared. Say the coverage line of your check in `--facts`.
+  nothing is compared. A quick run prints no coverage line, and a new file its tests never reach passes it: write the
+  test, or run the full check, rather than reporting a coverage line you did not see. Say in `--facts` the percentages a
+  full run you made printed, or that your check was the quick one and the ratchet is held where the full check runs.
 - GitHub Actions is off: `.github/workflows/check.yml` keeps only `workflow_dispatch`, so nothing waits for GitHub and
   `shepherdr checks` finds nothing to wait for. A branch can still be checked there by hand (`gh workflow run check.yml
   --ref <branch>`, then `gh run watch`), only for a rare case such as a review asking for it.
