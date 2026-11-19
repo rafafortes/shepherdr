@@ -9,8 +9,9 @@
 // with the same editors. Bulk actions are confirmed first (a column's Set for every space…, a provider's Clear every
 // space's sub-limit).
 import clsx from 'clsx'
-import { Fragment, useEffect, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { BLOCKED as BLOCKED_WORDS, parseMaxAtOnce, withEntry, type MaxEntry } from '@shared/model-caps.ts'
+import { PLACE_MAX } from '@shared/space-order.ts'
 import { shareOf } from '@shared/quota-words.ts'
 import type { LimitCell, LimitColumn, LimitKnown, LimitProvider, LimitRow, LimitSpaceRow, LimitTable, LimitsView, QueueTask, SettingRow, WaitingGroup, WaitingNow, WaitingTask } from '@shared/types.ts'
 import { act, openTask, useSnap } from './kernel.ts'
@@ -404,22 +405,62 @@ export function LimitValue({ title, cell, machine, phone }: { title: string; cel
   )
 }
 
-/** a space's Priority in this machine's queue, with the buttons that move it up or down. They are real buttons, so a Tab
- *  and Enter/Space and a finger both work, without adding drag code; a move writes 1..n to every space of this machine */
-function PriorityCell({ row, rows, machine, phone, onMove }: { row: LimitSpaceRow; rows: LimitSpaceRow[]; machine: string; phone: boolean; onMove: (next: LimitSpaceRow[]) => void }) {
-  const at = rows.indexOf(row)
-  const move = (dir: -1 | 1) => {
-    const next = [...rows]
-    const to = at + dir
-    ;[next[at], next[to]] = [next[to]!, next[at]!]
-    onMove(next)
+/** one value a move writes: the place of a space's Priority cell, and its number now (null: it goes back to by age) */
+type Move = { place: string; value: string | null }
+
+/** the number a space's Priority cell holds now, or null when it has none (off, or a value no longer readable) */
+function placeOf(row: LimitSpaceRow): number | null {
+  const v = row.cells['space.priority']?.row.value.trim() ?? ''
+  return /^[0-9]+$/.test(v) ? Number(v) : null
+}
+
+/**
+ * What one arrow does to this machine's numbered spaces, as the values it writes — and nothing when the arrow is off:
+ * ↑ on a numbered space swaps its number with the numbered space above it, and ↓ swaps it with the one below; ↓ on the
+ * last numbered one clears its number, so it goes back to by age with the others that have none. ↑ on a space with no
+ * number puts it last among the numbered ones, in one write, and its ↓ is off (it is already after them all). Only the
+ * numbered spaces are touched, and only the values that change; a space with no number keeps none until the human gives
+ * it a place.
+ */
+function moveOf(rows: LimitSpaceRow[], at: number, dir: -1 | 1): Move[] | null {
+  const row = rows[at]
+  if (!row || row.home) return null
+  const place = row.cells['space.priority']!.place
+  const mine = placeOf(row)
+  const others = rows
+    .flatMap((r, i) => {
+      const n = i === at ? null : placeOf(r)
+      return n === null ? [] : [{ place: r.cells['space.priority']!.place, n }]
+    })
+    .sort((a, b) => a.n - b.n)
+  // no number yet: it goes last among the numbered ones (the first one when nothing is numbered), and no lower. Past the
+  // range there is no place to give it: the arrow is off rather than refused by the server
+  if (mine === null) {
+    const next = (others[others.length - 1]?.n ?? 0) + 1
+    return dir < 0 && next <= PLACE_MAX ? [{ place, value: String(next) }] : null
   }
-  const button = (dir: -1 | 1) => (
+  if (dir < 0) {
+    const above = others.filter((o) => o.n < mine).at(-1)
+    return above ? [{ place, value: String(above.n) }, { place: above.place, value: String(mine) }] : null
+  }
+  const below = others.find((o) => o.n > mine)
+  // the last numbered one goes back to by age
+  return below ? [{ place, value: String(below.n) }, { place: below.place, value: String(mine) }] : [{ place, value: null }]
+}
+
+/** a space's Priority in this machine's queue, with the buttons that move it up or down. They are real buttons, so a Tab
+ *  and Enter/Space and a finger both work, without adding drag code; a move writes only the numbers it changes, as one
+ *  action, and every button is off while one is being written */
+function PriorityCell({ row, rows, machine, phone, moving, onMove }: { row: LimitSpaceRow; rows: LimitSpaceRow[]; machine: string; phone: boolean; moving: boolean; onMove: (moves: Move[]) => void }) {
+  const at = rows.indexOf(row)
+  const up = moveOf(rows, at, -1)
+  const down = moveOf(rows, at, 1)
+  const button = (dir: -1 | 1, moves: Move[] | null) => (
     <button
       type="button"
       aria-label={`Move ${row.name} ${dir < 0 ? 'up' : 'down'}`}
-      disabled={dir < 0 ? at === 0 : at === rows.length - 1}
-      onClick={() => move(dir)}
+      disabled={moving || !moves}
+      onClick={() => moves && onMove(moves)}
       className="press-dim grid size-9 shrink-0 place-items-center rounded-row text-fg2 hover:bg-hover disabled:opacity-30"
     >
       <span aria-hidden="true">{dir < 0 ? '↑' : '↓'}</span>
@@ -430,8 +471,8 @@ function PriorityCell({ row, rows, machine, phone, onMove }: { row: LimitSpaceRo
       <span className="min-w-0 flex-1">
         <LimitValue title={`${row.name} · Priority`} cell={row.cells['space.priority']!} machine={machine} phone={phone} />
       </span>
-      {button(-1)}
-      {button(1)}
+      {button(-1, up)}
+      {button(1, down)}
     </span>
   )
 }
@@ -571,11 +612,36 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
   const [bulk, setBulk] = useState<Bulk | null>(null)
   const [picker, setPicker] = useState(false)
   const [columns, setColumns] = useState<string[]>(readColumns)
+  // a move of a space up or down: its values go as one action (server: space-order), the arrows are off while it is
+  // written, and a second tap before the page draws again is dropped here, not only by the buttons
+  const [moving, setMoving] = useState(false)
+  const inFlight = useRef(false)
+  const [moveError, setMoveError] = useState('')
+  const move = async (moves: Move[]) => {
+    if (inFlight.current) return
+    inFlight.current = true
+    setMoving(true)
+    setMoveError('')
+    const r = (await act({ type: 'space-order', moves }).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string }
+    // written: the arrows stay off until the page has read the rows the write made (the snapshot it brings); refused: no
+    // snapshot comes, so they come back now with the reason
+    if (!r?.ok) {
+      inFlight.current = false
+      setMoving(false)
+      setMoveError(r?.error ?? "That didn't go through.")
+    }
+  }
   // every change of Settings is a new snapshot: the page reads again
   useEffect(() => {
     let live = true
     act({ type: 'limits-view' })
-      .then((r) => live && setV(r as LimitsView))
+      .then((r) => {
+        if (!live) return
+        setV(r as LimitsView)
+        // a move's write is in: its arrows come back with the rows the write made, never with the ones before it
+        inFlight.current = false
+        setMoving(false)
+      })
       .catch((e: Error) => live && setFailed(e.message))
     return () => {
       live = false
@@ -608,10 +674,6 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
     </MenuItem>
   )
   const spaceRows = v.spaces.rows
-  /** a move of one space renumbers all of this machine's spaces 1..n, so the list and the queue follow it */
-  const moveSpaces = async (rows: LimitSpaceRow[]) => {
-    for (const [i, row] of rows.entries()) await write(row.cells['space.priority']!.place, 'space.priority', String(i + 1))
-  }
   const machineTotal = (p: string) => v.spaces.totals[p]?.max
   // the providers in use, then those nothing uses yet (Other providers): a phone's card per provider, a desktop's grid
   const used = v.providers.filter((p) => !p.idle)
@@ -714,7 +776,7 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
                   {([['space.priority', 'Priority'], ['space.maxTasks', 'Max tasks'], ['merge.train', 'Merge train']] as const).map(([key, title]) => (
                     <li key={key} className="flex flex-col gap-1 border-t border-line py-2">
                       <Small className="text-fg2">{title}</Small>
-                      {key === 'space.priority' ? <PriorityCell row={row} rows={spaceRows} machine={v.machine.name} phone onMove={(next) => void moveSpaces(next)} /> : <LimitValue title={`${row.name} · ${title}`} cell={row.cells[key]!} machine={v.machine.name} phone />}
+                      {key === 'space.priority' ? <PriorityCell row={row} rows={spaceRows} machine={v.machine.name} phone moving={moving} onMove={(next) => void move(next)} /> : <LimitValue title={`${row.name} · ${title}`} cell={row.cells[key]!} machine={v.machine.name} phone />}
                     </li>
                   ))}
                 </ul>
@@ -822,7 +884,7 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
                       </span>
                     </th>
                     <td className="relative py-1.5 pr-3 align-top">
-                      <PriorityCell row={row} rows={spaceRows} machine={v.machine.name} phone={false} onMove={(next) => void moveSpaces(next)} />
+                      <PriorityCell row={row} rows={spaceRows} machine={v.machine.name} phone={false} moving={moving} onMove={(next) => void move(next)} />
                     </td>
                     {(['space.maxTasks', 'merge.train'] as const).map((key) => (
                       <td key={key} className="relative py-1.5 pr-3 align-top">
@@ -841,6 +903,12 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
             </table>
           </div>
         )}
+        {moveError ? (
+          <Small role="alert" className="text-need-fg">
+            {moveError}
+          </Small>
+        ) : null}
+        <Small className="text-pretty">A space with no number goes by age, after the numbered ones.</Small>
         <Small className="text-pretty">Strong: set at that space. Faint: inherited, or none. A sub-limit is written at its space; the machine's total is written at this machine or Everywhere, in the table of the providers below.</Small>
       </section>
 

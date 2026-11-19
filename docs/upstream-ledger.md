@@ -705,11 +705,19 @@ seven spaces). Upstream's per-folder `tasks.max_running` (`83548e45`, SHEP-7) is
 is a share, not an order. No commit or issue ported; 3.x's rewrite (`core/`, `mods/`, a Python `herdr-task`) has no
 2.0 engine, spaces settings or Limits screen to receive this.
 
+#1195's idea 4 is the same hole seen from their side: "start the highest-ranked startable task when running drops
+below `max_running`" is a line that every start goes through, not only the ones `release()` makes among tasks already
+held — ours had the same gap (a task added, or freed by an `--after` or a time, started past the line) until SHE-164
+closed it: `engine.startGate` is the one place every start Shepherdr makes by itself asks, `release()` walking the same
+line, and `machine.startEvery` applies to those starts too.
+
 Ours: `space.priority` is a whole number at one space only (1 first, unset spaces after all numbered ones, ties by
-age) in `engine.heldTasks()` and the waiting-review path `retryReviews()`, with a Priority column on Settings → Limits
-→ Spaces that lists spaces in order and renumbers them 1..n when one is moved. The order is strict, with the first
-space's `space.maxTasks` cap as the way to leave room for the others; a first-in-line task still goes ahead of every
-space, and a space held for its own cap or model is stepped over, as before. Nothing set leaves today's order intact.
+age) in `engine.startLine()`, which `engine.heldTasks()` and the waiting-review path `retryReviews()` read, with a
+Priority column on Settings → Limits → Spaces that lists spaces in order; its ↑ and ↓ move one space among the numbered
+ones (`shared/space-order.ts`, one comparator for the engine, the table and `shepherdr space list`). The order is strict,
+with the first space's `space.maxTasks` cap as the way to leave room for the others; a first-in-line task still goes
+ahead of every space, and a space held for its own cap or model is stepped over, as before. Nothing set leaves today's
+order intact.
 
 ## A closed pane's orphans: the tree-kill idea ported from upstream 3.x
 

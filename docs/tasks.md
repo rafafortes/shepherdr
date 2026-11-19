@@ -114,23 +114,35 @@
   first space at its own cap or with its model full does not hold the others back, their tasks are passed over in the
   same way. This order never stops a running task, does not pass the machine's limits, and leaves `--after` chains,
   the merge train and each space's cap as they were. A coordinator never changes it; it is the human's setting.
+  **It holds for every start Shepherdr makes by itself**, not only among the tasks already held: a task added while the
+  machine has room at that moment, one whose `--after` tasks just finished, one whose time came, one that got a go,
+  joins the line instead of passing the tasks already in it — held as `Waiting for its turn` when a task ahead of it
+  could start — and `release()` starts it at its turn. Nor does a start go inside `machine.startEvery` of the last one:
+  five tasks freed by one merge start one at a time, in the line's order, that spacing apart. Only two things pass the
+  line: a task marked first in line (`shepherdr task priority`), and a task whose turn waits for nothing — a task ahead
+  held for its own space's cap or its own model is stepped over. With nothing set, this is still a change from before:
+  a new task no longer passes older held ones, which is what oldest first always said here.
 - **Held for room.** A task waits for room as Queued, with no agent yet, and its row says why: `Waiting for a free slot`
   (the machine's slots are all taken), `Waiting for the machine` (its load, pressure or memory, or a herdr that doesn't
   answer), `Waiting for a free slot of <space>` (that space's own cap, Settings → Space, `space.maxTasks`, is full),
-  `Waiting: every model ran out`, or `Waiting: cut-off tasks go back to work first`. Three more, for a limit set to 0 (see
+  `Waiting: every model ran out`, `Waiting: cut-off tasks go back to work first`, `Waiting for its turn` (a task ahead of
+  it in the line could start, and the row adds what is ahead), or `Waiting for the gap between starts` (nothing is ahead
+  of it: the `machine.startEvery` spacing after the last start has not passed). Three more, for a limit set to 0 (see
   [settings](settings.md)): `This machine is set to 0 tasks` (`machine.maxTasks` 0: this machine starts no
   task), `<space> is set to 0 tasks` (`space.maxTasks` 0 for that space), and `Blocked: every model it may use is 0 allowed`
   (every model of the task's chain is blocked by a `models.maxAtOnce` 0: it starts once a limit changes, never by waiting).
   A task held for its space's cap is
   passed over: a task of another space with room starts past it in the same pass, and the space's held tasks start in
-  turn (first in line, then space priority, then oldest) as its own tasks end and free a slot. When another space's
-   priority is why a task is not next, its line adds `· after <space>'s tasks` (for example `Waiting for the machine ·
-   after lyvora-app's tasks`). The machine's limit still comes first, so a
+  turn (first in line, then space priority, then oldest) as its own tasks end and free a slot. A task's line names
+  what is truly ahead of it: how many tasks that could start, and in which spaces (`Waiting for a free slot · 4 ahead,
+  of lyvora-app and lyvora-site`), counting only the ones that could start — a task stepped over for its own cap or
+  model is named by nothing — and nothing at all when its turn is next. A task of a later space held with room on the
+  machine is `Waiting for its turn`, and the same words say what is ahead of it. The machine's limit still comes first, so a
   space's cap never lets more tasks work than the machine has slots.
   - **A model's cap.** A task whose agent would run on a model at its most-at-once cap (`models.maxAtOnce`, one provider
     such as `pi.spark`, or one model key) reads `Waiting for a free slot of pi · spark (4 of 4 at once)`, naming the entry that is
     full. The order of the reasons is the machine's slots, the machine's load, the space's own models and cut-off tasks,
-    the space's cap, then the model's: the row names the first one that holds the task. A task held for its model is
+    the space's cap, the model's, and last the task's turn in the line: the row names the first one that holds it. A task held for its model is
     passed over like a held space's: the tasks on other models start in the same pass, and its held tasks start in turn as
     the model frees up. A first in line does not pass it. What counts toward a model, and what does not, is in
     [settings](settings.md).

@@ -91,10 +91,14 @@
   why is in [tasks](tasks.md) and [machines](machines.md).
 - **Priority order of this space** (`space.priority`, the Space section; off by default, or a whole number from 1 to 200)
    orders the tasks of this machine's spaces when they wait for something they share: room on the machine (slots, load,
-   pressure, spacing) or a free reviewer. **1 is first**, then 2, and so on. A space with no number comes after every
+   pressure, spacing) or a free reviewer. **1 is first**, then 2, and so on. It holds for every start Shepherdr makes by
+   itself, not only among the tasks already waiting: a task added while the machine has room, one whose `--after` tasks
+   just finished, one whose time came or that got a go joins the line (held as `Waiting for its turn`) instead of passing
+   it, and `machine.startEvery` spaces those starts out too. A space with no number comes after every
    numbered space; two spaces with the same number, or with none, are told apart by how long their tasks have waited,
-   exactly as before. With nothing set, nothing changes. Set it at one space only, with `shepherdr set space.priority 1
-   --space lyvora-app`; `shepherdr unset space.priority --space lyvora-app` clears it, `shepherdr show --space NAME`
+   exactly as before. With nothing set the line is by age, as before; what changes even so is that a task arriving now
+   joins it instead of passing it, and a held row still names what is ahead of it. Set it at one space only, with
+   `shepherdr set space.priority 1 --space lyvora-app`; `shepherdr unset space.priority --space lyvora-app` clears it, `shepherdr show --space NAME`
    lists it with where it comes from, `shepherdr space list` shows this machine's spaces in order and `shepherdr status`
    says the order in one line. There is no Everywhere or machine value: an order is only between the spaces of one machine.
    The order is **strict**: while the first space has a task that can start, no later space starts one. Its own **Max
@@ -102,8 +106,10 @@
    start their tasks once lyvora-app has two working. A first space at its cap, or whose model is full, does not stop
    the others: `release()` steps over a task waiting for its own space or model. A task marked first in line
    (`shepherdr task priority`) still goes ahead of every space, and `--after` chains, the merge train and `space.maxTasks`
-   are unchanged. It stops or pauses no running task. A held task's row says `Waiting for the machine · after
-   lyvora-app's tasks` when another space's priority is why it is not next.
+   are unchanged. It stops or pauses no running task. A held task's row names what is truly ahead of it: how many tasks
+   that could start, and in which spaces (`Waiting for the machine · 4 ahead, of lyvora-app and lyvora-site`), and
+   nothing when its turn is next. The home space holds no tasks of its own, so it has no place in this order, and
+   `shepherdr set space.priority` refuses it: only a repo's space waits in the line.
 - **Most agents at once per provider or per model** (`models.maxAtOnce`, the Machine section, under Max tasks working at
   once; no entry by default, which is no cap) caps how many of this machine's agents run on one provider or one model. It is a text, one entry
   per pattern: `pi.spark=4, pi.radeon=1` caps every model of pi's `spark` provider at 4 and every model of its `radeon`
@@ -514,7 +520,7 @@ row. The profiles bar sits above it (a profile saved from here includes the limi
   train** (`merge.train`) is a column here only when Everywhere sets one; the spaces read it otherwise. Under the table,
   **Alerts** (collapsed) holds the four thresholds the coordinator is told by (`machine.alertLoad`, `alertMemory`,
   `alertDisk`, `alertHerdr`), each with its number now: they only tell, as above.
-- **Spaces** (one row per space of this machine, listed in queue order; home only when it sets one of these keys itself). **Priority** (the space's `space.priority`; a number, or off) comes first, with ↑ and ↓ buttons that move a space up or down: a move writes 1..n to every space and the list re-orders. The keyboard works them too (Tab to a button, Enter or Space), as does touch. **Max tasks** of the space
+- **Spaces** (one row per space of this machine, listed in queue order; home only when it sets one of these keys itself). **Priority** (the space's `space.priority`; a number, or off) comes first, with ↑ and ↓ buttons that move a space up or down among the numbered ones: ↑ swaps its number with the space above it and ↓ with the space below, writing only the values that change; ↓ on the last numbered space clears its number, so it goes back to by age; ↑ on a space with no number puts it last among the numbered ones, in one write, and its ↓ is off. A space with no number keeps none until you give it a place. A move is one action, sent whole or refused whole, and every arrow is off until it answers, so two quick taps cannot take each other's place. The keyboard works them too (Tab to a button, Enter or Space), as does touch. One line under the table says it: `A space with no number goes by age, after the numbered ones.` **Max tasks** of the space
   (`space.maxTasks`; `2 of 3 working · 1 held`) and **Merge train** (`merge.train`). Then one column per provider or model
   that a `models.maxAtOnce` entry names at any level (`models.maxAtOnce` is in [Most agents at once](#models), above); **+
   column** adds one from the providers and models Shepherdr knows. A column added with no entry yet stays in this browser
@@ -555,9 +561,11 @@ row. The profiles bar sits above it (a profile saved from here includes the limi
 
 **The order between spaces** comes before any limit: a task marked first in line, then the space's `space.priority`
 (numbered spaces first by their number, spaces with none after them), then how long it has waited. A held task's row
-names the space it waits behind, as `Waiting for the machine · after lyvora-app's tasks`. The order is strict while the
-first space can start a task; its Max tasks cap leaves room for the others, and a space held for its own cap or model is
-stepped over. Reviews waiting for a free reviewer follow the same order.
+names what is truly ahead of it, as `Waiting for the machine · 4 ahead, of lyvora-app and lyvora-site`. The order is
+strict while the first space can start a task; its Max tasks cap leaves room for the others, and a space held for its
+own cap or model is stepped over. The Spaces table, `shepherdr space list` and the engine's line read one comparator
+(`shared/space-order.ts`), so the three never disagree, and a stored value that is no number from 1 to 200 is no place
+at all. Reviews waiting for a free reviewer follow the same order.
 
 **The order in which the limits hold a task** (the row names the first one that holds it): the machine's slots
 (`machine.maxTasks`); the machine's load, pressure and memory, and whether herdr answers; the space's own models out and its

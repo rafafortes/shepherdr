@@ -34,4 +34,12 @@ describe('the order between spaces in shepherdr space list and status', () => {
     await src.cli(['unset', 'space.priority', '--space', b.name], {})
     expect((await src.cli(['status'], {})).out).not.toContain('Space order here')
   })
+
+  test('the home space has no place in the queue, and set says why', async () => {
+    // home holds no repo, so no task starts in it: a number there would decide nothing, and is refused rather than kept
+    const r = await src.cli(['set', 'space.priority', '1', '--space', 'home'], {})
+    expect(r.code).toBe(1)
+    expect(r.out).toContain('The home space holds no repo, so no task starts in it')
+    expect(src.settings.spacePriority('~')).toBeNull()
+  })
 })

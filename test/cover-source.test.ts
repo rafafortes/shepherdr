@@ -240,6 +240,26 @@ describe('the screen acts', () => {
     expect(((await src.act({ type: 'setting', key: 'no.such.key', value: '1' } as never)) as { ok: boolean }).ok).toBe(false)
   })
 
+  test("a space's move up or down the queue is one action: its values are written together, and a bad one writes none", async () => {
+    const one = await space('order-one')
+    const two = await space('order-two')
+    // the move the arrows send: both numbers at once
+    expect(await src.act({ type: 'space-order', moves: [{ place: one.place, value: '1' }, { place: two.place, value: '2' }] } as never)).toEqual({ ok: true })
+    expect([src.settings.spacePriority(one.p.name), src.settings.spacePriority(two.p.name)]).toEqual([1, 2])
+    // a move that names no space of this machine, or the home space, is refused whole: nothing of it is written
+    const refused = { ok: false, error: 'A move names a space of this machine, and never the home space.' }
+    expect(await src.act({ type: 'space-order', moves: [{ place: one.place, value: '5' }, { place: 'p:here:none', value: '6' }] } as never)).toEqual(refused)
+    expect(await src.act({ type: 'space-order', moves: [{ place: placeId.home(), value: '5' }] } as never)).toEqual(refused)
+    expect(await src.act({ type: 'space-order', moves: [] } as never)).toEqual(refused)
+    expect(src.settings.spacePriority(one.p.name)).toBe(1)
+    // a value the setting refuses refuses the whole move (settings.ts setMany tries them on a copy first)
+    expect(await src.act({ type: 'space-order', moves: [{ place: two.place, value: '0' }, { place: one.place, value: '7' }] } as never)).toMatchObject({ ok: false })
+    expect([src.settings.spacePriority(one.p.name), src.settings.spacePriority(two.p.name)]).toEqual([1, 2])
+    // and one clearing them, as ↓ on the last numbered space sends it, writes none
+    expect(await src.act({ type: 'space-order', moves: [{ place: one.place, value: null }, { place: two.place, value: null }] } as never)).toEqual({ ok: true })
+    expect([src.settings.spacePriority(one.p.name), src.settings.spacePriority(two.p.name)]).toEqual([null, null])
+  })
+
   test('a task is archived and brought back, paused, and a stop that fails says why', async () => {
     const sp = await space('acts')
     const t = task(sp)

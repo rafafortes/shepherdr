@@ -28,6 +28,9 @@ const { NO_PICKS } = await import('../shared/picks.ts')
 const { ADVISOR_AT_ONCE } = await import('../shared/apply-waiting.ts')
 
 const src = new LiveSource()
+// this file is not about the spacing between starts: with machine.startEvery's 2 minutes, the shared machine of these
+// tests would start one task every two minutes (every start Shepherdr makes by itself follows it now, engine.startGate)
+src.settings.set('machine.startEvery', '0', 'machine')
 /** the live switch is private: drive it directly with an injected io (the action path is covered too) */
 const liveSwitch = (key: string, pick: unknown, io?: unknown) => (src as unknown as { liveSwitch: (k: string, p: unknown, io?: unknown) => Promise<unknown> }).liveSwitch(key, pick, io)
 // herdr makes task worktrees: a stand-in on real git; no terminal opens for their agents (no herdr is there)

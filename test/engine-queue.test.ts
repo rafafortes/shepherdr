@@ -985,6 +985,29 @@ describe('the line of what waits: the engine lists each kind with its wait and t
     expect(by['CYC-2']!.need).toBeUndefined()
   })
 
+  test('200 held tasks: the line is computed once for all their rows, and each row says what is truly ahead of it', async () => {
+    const w = world()
+    const one = await w.places.add(repo(), 'line-one')
+    const two = await w.places.add(repo(), 'line-two')
+    const now = Date.now()
+    const held = (id: string, project: string, since: number) => ({ id, n: 1, project, title: id, by: 'test', created: since, updated: since, held: { why: 'slots' as const, since } })
+    for (let i = 0; i < 200; i++) w.engine.tasks.push(held(`L-${i}`, placeId.space(i % 2 ? one.name : two.name), now - i * 1000) as never)
+    // one line for every row a snapshot draws (the snapshot hands it to view, the Limits view to holdLine)
+    w.engine.lineComputations = 0
+    const line = w.engine.startLine()
+    expect(w.engine.lineComputations).toBe(1)
+    const rows = line.order.map((t) => w.engine.view(t, line))
+    expect(w.engine.lineComputations).toBe(1)
+    expect(rows.filter((r) => r.status === 'queued')).toHaveLength(200)
+    // the first has nothing ahead of it; the last names all 199 and the spaces they are in
+    expect(rows[0]!.sub).toBe('Waiting for a free slot')
+    expect(rows[199]!.sub).toBe(`Waiting for a free slot · 199 ahead, of ${one.name} and ${two.name}`)
+    // a row drawn on its own sorts the line itself: the per-row cost this replaces, 200 times over
+    w.engine.lineComputations = 0
+    for (const t of w.engine.heldTasks()) w.engine.view(t)
+    expect(w.engine.lineComputations).toBeGreaterThanOrEqual(200)
+  })
+
   test('heldTasks is the start order the screen numbers: first in line, then space priority, then age', async () => {
     const w = world()
     const alpha = await w.places.add(repo(), 'alpha')

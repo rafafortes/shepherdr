@@ -33,7 +33,7 @@ import { excerpt, fromAgent, line, tag, type FromAgent } from './chatlines.ts'
 import { Chats, menuId, menuKeys, rememberReply } from './chats.ts'
 import { DISMISSED, dismissKind, dismissWords } from './dismiss.ts'
 import { dictate as dictation } from './dictate.ts'
-import { age, askOf, backupHarness, capWords, checkTitle, ended, Engine, fitStatus, retuneLine, reviewRetuneLine, type BackupPlan, type HeldWhy, type Retune, type TaskRec } from './engine/engine.ts'
+import { age, askOf, backupHarness, capWords, checkTitle, ended, Engine, fitStatus, retuneLine, reviewRetuneLine, type BackupPlan, type HeldWhy, type Retune, type StartLine, type TaskRec } from './engine/engine.ts'
 import { allBlocked, blockedOnly, waitWords, type Blocked, type Run } from './engine/choose.ts'
 import { ADVISOR_AT_ONCE, waitingKind } from '../../shared/apply-waiting.ts'
 import { listFolders, makeRepo, resolveInHome } from './folders.ts'
@@ -79,6 +79,7 @@ import { Unread } from './unread.ts'
 import { Monitor, meters, procLines, summary, topProcs, type HealthEvent, type Kind } from './health.ts'
 import { has, PLUGIN_KEY, pluginSection, setPluginOn } from '../plugins.ts'
 import { TOOK_OVER, type TookOver } from '../../scripts/take-over.ts'
+import { placeOrder } from '../../shared/space-order.ts'
 
 /** a coordinator that waits for room under the caps (source.ts capWaits): its start, or its takeover after the cut-off `r`
  *  on the model `on` */
@@ -679,7 +680,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const summary = this.summaryNow()
     const runs = this.engine.runs()
     const workingIn = Object.fromEntries(spaces.map((x) => [x.key, this.engine.workingIn(x.key)]))
-    const held = this.engine.heldTasks().map((t): HeldFact => {
+    // the engine's line, computed once: the Waiting list and each row's words read it from here
+    const line = this.engine.startLine(now)
+    const held = line.order.map((t): HeldFact => {
       const key = this.places.space(t.project)?.name ?? '~'
       const why = t.held!.why
       const c = why === 'model' || why === 'blocked' ? this.engine.taskChoice(t) : undefined
@@ -690,7 +693,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         space: key,
         spaceName: this.places.shownName(key),
         why,
-        words: this.engine.holdLine(t),
+        words: this.engine.holdLine(t, line),
         ...(t.priority ? { priority: true } : {}),
         ...(full?.cap ? { entry: { name: patternName(full.name), count: full.cap.count, max: full.cap.max } } : cap ? { entry: { name: cap.shown, count: cap.working, max: cap.max } } : {}),
       }
@@ -778,7 +781,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /** every space and every machine, as the sidebar shows them: this machine's, then the others' as they last showed
    *  themselves (just after a start, while they connect, as before it), the names the human gave them, in their order */
-  private listed(): { places: Place[]; machines: Machine[]; sections: Section[] } {
+  private listed(line?: StartLine): { places: Place[]; machines: Machine[]; sections: Section[] } {
     const ts = this.engine.tasks
     let asks: Record<string, string> | undefined
     const asksMap = () => (asks ??= this.asks())
@@ -791,7 +794,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     }
     const peers = this.peers?.list() ?? []
     const up = this.agents.reachable
-    const machines: Machine[] = [{ id: placeId.machine(), machine: HOST, name: NAME, status: up ? 'idle' : 'off', unreachableSince: up ? undefined : clock(this.agents.lastReach), health: this.healthView(), herdrDown: up ? undefined : clock(this.agents.lastReach) }]
+    const machines: Machine[] = [{ id: placeId.machine(), machine: HOST, name: NAME, status: up ? 'idle' : 'off', unreachableSince: up ? undefined : clock(this.agents.lastReach), health: this.healthView(line), herdrDown: up ? undefined : clock(this.agents.lastReach) }]
     const places: Place[] = this.places.shown().map(({ id, name, space }) => ({
       id,
       name,
@@ -907,7 +910,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /* ---------- reading ---------- */
 
   snapshot(): Snapshot {
-    const { places, machines, sections } = this.listed()
+    // the line held tasks start in: one computation for the whole snapshot, however many held rows it draws
+    const line = this.engine.startLine()
+    const { places, machines, sections } = this.listed(line)
     this.placesNow = places
     try {
       const peers = this.peers?.list() ?? []
@@ -929,7 +934,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         tasks: [
           ...this.engine.tasks
             .filter((t) => this.places.space(t.project))
-            .map((t) => ({ ...this.engine.view(t), ...(this.browsers && !ended(t) ? { browser: t.stopped ? STOPPED : this.browsers.status() } : {}) })),
+            .map((t) => ({ ...this.engine.view(t, line), ...(this.browsers && !ended(t) ? { browser: t.stopped ? STOPPED : this.browsers.status() } : {}) })),
           ...peers.flatMap((l) => l.snap?.tasks ?? []),
         ],
         automations,
@@ -3308,10 +3313,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (!all.length) return 'No waiting task holds an agent or a worktree: nothing to park.'
     const go = all.filter((x) => !x.keep)
     const stay = all.filter((x) => x.keep)
+    // one line for all the rows below, as the screen reads one per snapshot
+    const line = this.engine.startLine()
+    const sub = (t: TaskRec) => this.engine.subOf(t, this.engine.statusOf(t), false, line)
     const row = (t: TaskRec, why: string) => `  ${t.id.padEnd(8)} ${t.title}  · ${why}`
     return [
       go.length ? `${go.length} waiting task${go.length === 1 ? '' : 's'} would be parked (its agent and herdr space close, its empty worktree and branch go; it starts fresh on its brief at its turn):` : 'None can be parked.',
-      ...go.map(({ t, notes }) => row(t, `${this.engine.subOf(t)}${notes.length ? ` · ${notes.length === 1 ? 'a note' : `${notes.length} notes`} from another agent go${notes.length === 1 ? 'es' : ''} into its brief` : ''}`)),
+      ...go.map(({ t, notes }) => row(t, `${sub(t)}${notes.length ? ` · ${notes.length === 1 ? 'a note' : `${notes.length} notes`} from another agent go${notes.length === 1 ? 'es' : ''} into its brief` : ''}`)),
       ...(stay.length ? [`${stay.length} kept as ${stay.length === 1 ? 'it is' : 'they are'}:`, ...stay.map(({ t, keep }) => row(t, keep!))] : []),
       go.length ? `Park ${go.length === 1 ? 'it' : 'them'}: shepherdr task park${ids.length ? ` ${ids.join(' ')}` : ''} --yes` : '',
     ].filter(Boolean).join('\n')
@@ -3323,6 +3331,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return {
       slots: `all ${this.settings.machine().max} slots are taken`,
       machine: 'the machine is busy',
+      turn: 'its turn in the line has not come: it starts at its turn, one start at a time (machine.startEvery)',
       models: 'every model of its space ran out, so it would only be cut off too, until the primary answers again',
       resume: 'the tasks that were cut off go back to work first',
       space: cap ? `${cap.shown}'s own limit of ${cap.max} tasks is taken` : 'its space is at its own limit',
@@ -3340,10 +3349,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   }
 
   /** this machine's numbers for the screen */
-  private healthView() {
+  private healthView(line?: StartLine) {
     const s = this.health.last
     if (!s || !has('health')) return undefined
-    const held = this.engine.heldTasks()
+    const held = line?.order ?? this.engine.heldTasks()
     return {
       meters: meters(s, this.settings.machine(), this.health.told()),
       herdr: this.agents.reachable,
@@ -3351,7 +3360,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       waiting: this.engine.waitingOnYou(),
       max: this.settings.machine().max ?? undefined,
       held: held.length,
-      heldWhy: held[0] && this.engine.subOf(held[0]),
+      heldWhy: held[0] && this.engine.subOf(held[0], this.engine.statusOf(held[0]), false, line),
       at: clock(s.at),
       hostWarning: BOX || this.settings.get('app.hosts').trim() ? undefined : 'Only the loopback page works until app.hosts is set. On this machine run: shepherdr set app.hosts <host>.',
     }
@@ -3646,8 +3655,21 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // its level: Everywhere (all, or none), this machine (its m: id), or one of its spaces
         const pr = a.place?.startsWith('p:') ? this.spaceKey(a.place) : undefined
         if (a.place?.startsWith('p:') && !pr) return { ok: false, error: 'No such space.' }
+        if (a.key === 'space.priority' && pr === '~') return { ok: false, error: HOME_NO_PLACE }
         const r = this.settings.set(a.key, a.value, pr ? { space: pr } : a.place?.startsWith('m:') ? 'machine' : 'all')
         if (r.ok) this.settingChanged(a.key)
+        return r
+      }
+      case 'space-order': {
+        // a space's move up or down the queue: every value it writes, as one write (settings.ts setMany), so two moves
+        // can never interleave and a refused one leaves none of its values behind
+        const moves = a.moves.flatMap((m) => {
+          const pr = m.place.startsWith('p:') ? this.spaceKey(m.place) : undefined
+          return pr && pr !== '~' ? [{ key: 'space.priority', value: m.value, level: { space: pr } as Level }] : []
+        })
+        if (!moves.length || moves.length !== a.moves.length) return { ok: false, error: 'A move names a space of this machine, and never the home space.' }
+        const r = this.settings.setMany(moves)
+        if (r.ok) this.emit('snapshot')
         return r
       }
       case 'models-matrix':
@@ -4612,8 +4634,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /** this machine's spaces in the order their tasks wait for its room: numbered ones by their number, then the rest. A
    *  stable sort keeps the usual order for spaces with the same number (or none), as the engine's queue does */
   private orderedSpaces() {
-    const priority = (x: ReturnType<Places['shown']>[number]) => this.settings.spacePriority(x.space?.name ?? '~') ?? Number.POSITIVE_INFINITY
-    return [...this.places.shown()].sort((a, b) => priority(a) - priority(b))
+    // the same order the engine's line and the Spaces table sort by (shared/space-order.ts), each space's number read once
+    const byPlace = placeOrder((space) => this.settings.spacePriority(space))
+    const key = (x: ReturnType<Places['shown']>[number]) => x.space?.name ?? '~'
+    return [...this.places.shown()].sort((a, b) => byPlace(key(a), key(b)))
   }
 
   /** the one line shepherdr status adds when a space of this machine has a priority (none otherwise) */
@@ -4822,6 +4846,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // Everywhere unless it says --machine (this machine's own) or --space NAME (that space's own)
         const named = one(p, 'space')
         const pr = named ? (this.places.find(named)?.id === placeId.home() ? '~' : this.projectFor(p, ctx).name) : undefined
+        if (a1 === 'space.priority' && pr === '~') throw new Error(HOME_NO_PLACE)
         const level: Level = pr ? { space: pr } : p.flags.has('machine') ? 'machine' : 'all'
         // what the setting kept otherwise than written, said after its value
         let note: string | undefined
@@ -5259,14 +5284,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const on = [CLI_NAME[t.agent!.kind] ?? t.agent!.kind, t.agent!.model, t.agent!.effort && `${t.agent!.effort} effort`].filter(Boolean).join(', ')
       if (t.after?.length) return `Added ${t.id}: ${t.title}, queued after ${t.after.join(', ')}. It has no agent, worktree or herdr space while it waits: once ${t.after.length === 1 ? 'that task is' : 'they are all'} done and the machine has room, its agent (${on}) starts on the brief. A message to it (shepherdr task tell ${t.id} …) starts its agent sooner, still queued.`
       if (p.flags.has('later')) return `Added ${t.id}: ${t.title}, for later. Its agent (${on}) reads the brief now and waits for a go (shepherdr task tell ${t.id} "go").`
-      if (t.held) return `Added ${t.id}: ${t.title}, held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : HELD_NAMED.has(t.held.why) ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and its agent (${on}) starts by itself when there's room, oldest first.`
+      if (t.held) return `Added ${t.id}: ${t.title}, held: ${t.held.why === 'slots' ? `all ${this.settings.machine().max} slots are taken` : HELD_NAMED.has(t.held.why) ? this.heldWords(t.held.why, t) : 'the machine is busy'} (${this.workingLine()}). It shows as Queued and its agent (${on}) starts by itself when there's room, at its turn in the line (first in line, then each space's place, then oldest first).`
       return `Added ${t.id}: ${t.title}. Its agent (${on}) starts on the brief now.${after.length ? ' What it would wait for is done already.' : ''}`
     }
     if (sub === 'list' || !sub) {
       const pr = one(p, 'space') ? this.projectFor(p, ctx) : null
       // archived tasks only with --archived, and then only they
       const shown = (t: { archived?: unknown }) => !!t.archived === p.flags.has('archived')
-      const ts = this.engine.tasks.filter((t) => (!pr || t.project === placeId.space(pr.name)) && shown(t)).map((t) => this.engine.view(t))
+      // the line read once for every row, as one snapshot reads it: a held row says what is ahead of it
+      const line = this.engine.startLine()
+      const ts = this.engine.tasks.filter((t) => (!pr || t.project === placeId.space(pr.name)) && shown(t)).map((t) => this.engine.view(t, line))
       const others = pr ? [] : (this.peers?.list() ?? []).flatMap((l) => (l.snap?.tasks ?? []).filter(shown).map((t) => ({ ...t, machine: l.rec.machine })))
       const all = doneNewestFirst<(typeof ts)[number] | (typeof others)[number]>([...ts, ...others])
       if (p.flags.has('json')) return JSON.stringify(all.map((t) => ({ id: t.id, title: t.name, status: t.status, sub: statusLine(t), machine: 'machine' in t ? t.machine : undefined, archived: t.archived, pinned: t.pinned, ...(t.scheduled ? { scheduled: t.scheduled } : {}) })), null, 2)
@@ -5298,7 +5325,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // a coordinator's go to a task that waits starts it only when this machine has room; a message an agent's own
         // shell sends says who it came from, so the chat shows it as that agent's and never as the human's words
         const r = await this.engine.tell(t.id, rest.slice(1).join(' '), { gate: !ctx.chat?.includes('/'), from: await this.toldFrom(ctx) })
-        if (r.held) return `${t.id} is held: ${this.heldWords(r.held, t)} (${this.workingLine()}). It shows as Queued and gets your message when there's room, oldest first.`
+        if (r.held) return `${t.id} is held: ${this.heldWords(r.held, t)} (${this.workingLine()}). It shows as Queued and gets your message at its turn in the line.`
         return `Told ${t.id}.`
       }
       case 'start': {
@@ -5326,7 +5353,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           if (within === undefined && /^(none|nothing|off|-|)$/i.test((at ?? '').trim())) {
             const r = this.engine.schedule(t.id, null)
             if (r.queued?.length) return `${t.id} no longer waits for a time: it starts once ${r.queued.join(', ')} ${r.queued.length === 1 ? 'is' : 'are'} done.`
-            if (r.held) return `${t.id} no longer waits for a time, but is held: ${this.heldWords(r.held, t)} (${this.workingLine()}). It starts as soon as there's room, oldest first.`
+            if (r.held) return `${t.id} no longer waits for a time, but is held: ${this.heldWords(r.held, t)} (${this.workingLine()}). It starts at its turn in the line (first in line, then each space's place, then oldest first).`
             return `${t.id} no longer waits for a time: it starts now.`
           }
           const when = whenFrom(at, within, this.settings.zone())
@@ -5466,8 +5493,9 @@ const WAIT_LOOK = 5_000
 /** a question the advisor will take by itself waits this much longer than advisor.after before an alert goes out anyway,
  *  so an advisor that never finishes (a run that hangs, no model that can run) cannot swallow the alert */
 const ADVISOR_MARGIN = 60_000
-/** the held reasons whose words name their own limit (heldWords), in a task's add and tell replies */
-const HELD_NAMED = new Set<HeldWhy>(['space', 'model', 'blocked', 'zero', 'spaceZero'])
+/** the held reasons heldWords gives their own words, in a task's add and tell replies (the machine's own room and its line
+ *  have theirs there) */
+const HELD_NAMED = new Set<HeldWhy>(['space', 'model', 'blocked', 'zero', 'spaceZero', 'turn'])
 
 /** how a coordinator answers news the human sees as a card: the card is never the chat's last word */
 const REPLY_AFTER_CARD =
@@ -5477,6 +5505,8 @@ const REPLY_AFTER_CARD =
 /** who added a task an automation added: "the automation “Nightly”" */
 const BY_AUTOMATION = 'the automation'
 
+/** the home space holds no repo, so no task starts in it: a place in this machine's queue would decide nothing */
+const HOME_NO_PLACE = 'The home space holds no repo, so no task starts in it: a place in this machine’s queue would decide nothing. Set space.priority on a space (shepherdr space list shows them).'
 
 /** no backup is left after the harness an agent ran on: it was the last of its chain that differs from the primary, or
  *  none differs (then it ran on the primary): every model of that role ran out */

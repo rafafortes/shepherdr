@@ -1091,6 +1091,8 @@ export interface LimitSpaceCap {
  *  sub-limits by column (the patterns the columns name) */
 export interface LimitSpaceRow extends LimitRow {
   key: string
+  /** the machine's home space: no repo, so no tasks of its own, and no place in the queue to move */
+  home?: boolean
   working: number
   held: number
   caps: Record<string, LimitSpaceCap>
@@ -1454,6 +1456,9 @@ export type Action =
   | { type: 'call'; chat: string; on: boolean }
   /** place: the level it is set at, as a place id (all when none); a machine's or project's goes to that machine */
   | { type: 'setting'; key: string; value: string | null; place?: string }
+  /** a space's move up or down the queue in Settings → Limits → Spaces: every value the move writes, at the space each
+   *  names (null clears it). One action, so a move happens whole or not at all and two moves cannot interleave */
+  | { type: 'space-order'; moves: { place: string; value: string | null }[] }
   /** a task agent Setting (task.agent, task.model, task.effort) changed at a level (place: a space, this machine, or none
    *  for Everywhere): the waiting tasks it reaches take what Settings name for their space, as Start with… gives each
    *  (engine retuneWaiting). dry: the counts only, for the question asked first. Running tasks keep their agent */
