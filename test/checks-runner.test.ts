@@ -102,6 +102,10 @@ describe('the discovered checks', () => {
     expect(f.calls()).toEqual(['one', 'two', 'three'])
     expect(r.out).toMatch(/1\/3 one ok \([^)]*\) Ran 7 tests across 2 files/)
     expect(r.out).toContain('2/3 two skipped: the tool is missing')
+    // the verdict says which part did not run, as it does for a browser that could not start
+    expect(r.out).toContain('PASSED in ')
+    expect(r.out).toContain('with parts of it not run:')
+    expect(r.out).toContain('  ! two: the tool is missing')
   })
 
   test('only the default branch gets the record and map flags a baseline needs', () => {
@@ -120,10 +124,13 @@ describe('the discovered checks', () => {
 describe('the check files themselves', () => {
   test('one executable per step, each running its own command', () => {
     const dir = join(root, 'scripts', 'checks')
-    const names = readdirSync(dir).sort()
-    expect(names).toEqual(['10-dependencies', '20-types', '30-tests', '40-coverage', '50-build'])
+    // a .ts module beside the checks is not a check; a check without its executable bit would still be discovered
+    expect(statSync(join(dir, 'secrets.ts')).mode & 0o111, 'secrets.ts is a module, not a check').toBe(0)
+    const names = readdirSync(dir).filter((n) => !n.endsWith('.ts')).sort()
+    expect(names).toEqual(['10-dependencies', '15-secrets', '20-types', '30-tests', '40-coverage', '50-build'])
     const text = Object.fromEntries(names.map((n) => [n, readFileSync(join(dir, n), 'utf8')])) as Record<string, string>
     expect(text['10-dependencies']).toContain('bun install --frozen-lockfile')
+    expect(text['15-secrets']).toContain('scripts/checks/secrets.ts')
     expect(text['20-types']).toContain('bun run typecheck')
     expect(text['30-tests']).toContain('scripts/test.ts')
     expect(text['30-tests']).toContain('--force')

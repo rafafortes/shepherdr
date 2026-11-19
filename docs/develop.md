@@ -24,8 +24,9 @@ On a machine where herdr runs as a systemd user service, give it (and the server
 
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe; each step is
 one executable file in `scripts/checks/`, named `<number>-<name>` with the numbers spaced by ten (`10-dependencies`,
-`20-types`, `30-tests`, `40-coverage`, `50-build`). The runner discovers them by sorted file name, so adding a check is
-adding one file and no later task edits a shared list: the order is reviewed because it is the file name. A check file:
+`15-secrets`, `20-types`, `30-tests`, `40-coverage`, `50-build`). The runner discovers the executable files by sorted
+file name, so adding a check is adding one file and no later task edits a shared list: a `.ts` file beside them is a
+check's own logic, not a check (e.g. `secrets.ts`), and the order is reviewed because it is the file name. A check file:
 
 - gets its shared context in `SHEPHERDR_CHECK_*` environment variables, never positional arguments:
   `SHEPHERDR_CHECK_ROOT`, `SHEPHERDR_CHECK_LOGS`, `SHEPHERDR_CHECK_COVER`, `SHEPHERDR_CHECK_MAP` and
@@ -38,7 +39,14 @@ adding one file and no later task edits a shared list: the order is reviewed bec
   `$SHEPHERDR_CHECK_NOTE`; its stdout and stderr already go to `$SHEPHERDR_CHECK_LOG` (`<logs>/<name>.log`), the log the
   runner reads to show why a failure happened;
 - says it cannot run (a tool is missing, say) by writing one reason to `$SHEPHERDR_CHECK_SKIP` and exiting 0: the result
-  line reads `N/<total> <name> skipped: <reason>` and the check is not counted as a failure.
+  line reads `N/<total> <name> skipped: <reason>`, is named in the verdict's "parts not run", and is not a failure.
+
+The secrets step (`15-secrets`, whose logic is `scripts/checks/secrets.ts`) runs `gitleaks detect --source . --redact`,
+so it reads the committed tree and its history, not uncommitted files: commit before the gate. Its JSON report goes to
+the run's log folder, never the repo, and only a finding's file, line and rule are printed, never its value. A finding
+that predates the step is baselined in `.gitleaksignore` as one fingerprint per line, with a `#` line above saying why
+it is a false positive or a revoked token; a new fingerprint fails the step. A host without gitleaks skips it with the
+install command, and the verdict names the part that did not run.
 
 The tests never touch the Shepherdr on this machine or its herdr: `test/preload.ts` gives each file a home of its own
 under `/tmp`, a socket that isn't there and no inherited pane, tab or workspace id. Every temporary folder a test makes

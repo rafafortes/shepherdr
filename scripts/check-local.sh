@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The whole check on this machine, for this fork: the types, every test (the browser tests too), the coverage ratchet
-# (scripts/coverage.ts) and the build, each in its own file under scripts/checks/.
+# The whole check on this machine, for this fork: the types, a gitleaks secret scan, every test (the browser tests
+# too), the coverage ratchet (scripts/coverage.ts) and the build, each in its own file under scripts/checks/.
 # GitHub Actions is off on rafafortes/shepherdr (SHE-21), so this is the check every change goes through:
 #
 #   bun run check:local        # a task runs it before `shepherdr ready`; the coordinator before a release
@@ -24,8 +24,9 @@
 # up waiting for another check.
 #
 # A check is one executable file in scripts/checks/, named <number>-<name> with the numbers spaced by ten
-# (10-dependencies, 20-types, 30-tests, 40-coverage, 50-build). The runner discovers them by sorted file name: adding
-# a check is adding one file, and the order is reviewed because it is the file name. Each check gets its shared context
+# (10-dependencies, 15-secrets, 20-types, 30-tests, 40-coverage, 50-build). The runner discovers them by sorted file
+# name; a .ts file beside them is a check's own logic, not a check. Adding a check is adding one file, and the order is
+# reviewed because it is the file name. Each check gets its shared context
 # in SHEPHERDR_CHECK_* environment variables (never positional arguments), writes its note to SHEPHERDR_CHECK_NOTE and
 # a reason for skipping to SHEPHERDR_CHECK_SKIP, and exits non-zero on failure. The whole contract is in docs/develop.md.
 set -uo pipefail
@@ -113,9 +114,10 @@ record_flag=''
 [ "$branch" = "$base" ] && { map_flag=1; record_flag=1; }
 cover="$logs/coverage"
 
-# discover the checks by sorted file name: adding a check is adding one file, with no list here to edit
+# discover the checks by sorted file name: a .ts file beside them is a check's own logic, not a check
+# (docs/develop.md). A check that landed without its executable bit is still discovered and fails loudly.
 checks_dir="$root/scripts/checks"
-mapfile -t check_files < <(find "$checks_dir" -maxdepth 1 -type f ! -name '.*' -printf '%f\n' 2>/dev/null | LC_ALL=C sort)
+mapfile -t check_files < <(find "$checks_dir" -maxdepth 1 -type f ! -name '.*' ! -name '*.ts' -printf '%f\n' 2>/dev/null | LC_ALL=C sort)
 total=${#check_files[@]}
 
 # the shared context every check gets by environment, never as positional arguments
@@ -167,7 +169,9 @@ step() { # <name> <check file>
   fi
   local line="${#what[@]}/$total $name"
   if [ "$code" -eq 0 ] && [ -s "$logs/$name.skip" ]; then
-    say "$line skipped: $(cat "$logs/$name.skip")"
+    skipped_reason=$(cat "$logs/$name.skip")
+    say "$line skipped: $skipped_reason"
+    notes+=("$name: $skipped_reason")
   elif [ "$code" -eq 0 ]; then
     note=$(step_note "$name")
     say "$line ok ($(dur "$secs"))${note:+ $note}"
