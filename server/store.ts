@@ -33,10 +33,12 @@ export function readJson<T>(name: string, fallback: T, dir = home()): T {
 /** secrets (keys, push subscriptions) are readable by you only */
 const PRIVATE = new Set(['secrets.json', 'vapid.json', 'push.json'])
 
-export function writeJson(name: string, value: unknown, dir = home()) {
+/** `compact` skips the indentation for a whole store rewritten often (agents.json): the bytes, and the time spent
+ *  stringifying them on the event loop, are several times smaller; the JSON and its shape are unchanged. */
+export function writeJson(name: string, value: unknown, dir = home(), compact = false) {
   const f = join(dir, name)
   mkdirSync(dirname(f), { recursive: true, mode: 0o700 })
   const tmp = `${f}.tmp`
-  writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: PRIVATE.has(name) ? 0o600 : 0o644 })
+  writeFileSync(tmp, compact ? JSON.stringify(value) : JSON.stringify(value, null, 2), { mode: PRIVATE.has(name) ? 0o600 : 0o644 })
   renameSync(tmp, f)
 }
