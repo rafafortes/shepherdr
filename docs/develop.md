@@ -93,6 +93,21 @@ info file one run replaces under the other only costs a rebuild, never a wrong a
 worktree still report to one `verdict.txt` and one set of step logs, so a worktree runs one full check at a time; the
 overlap to use is a `--quick` run beside a full one.
 
+`bun scripts/weekly.ts` is the weekly full check, one Shepherdr automation ("Weekly full check", Tuesday 9:00, after
+Monday's upstream pass) whose added task runs it and, on red, files one task per red area through its coordinator. It
+runs `bash scripts/check-local.sh` whole with the whole tree's language scan (`SHEPHERDR_LANGUAGE_SCOPE=tree`), the
+advisory audit and `bun outdated`, repeats the slowest five browser test files five times each on a rotating sample (so
+the next week continues down the list instead of probing the same five), and measures the coverage trend (the
+baseline's age, the worst files, the `coverage-exempt:` count) and the leftovers: worktrees of merged tasks, `/tmp`
+homes of finished proof servers, gate log folders older than a week and the checkout's uncommitted files. It deletes
+nothing. It writes one markdown report into the repository's own `.git` (`shepherdr-weekly/report.md`, beside
+`state.json` for the next rotation), never into the tree, and exits non-zero naming every red part; a green week prints
+one line. A dependency that could move is only reported, never bumped: each update is weighed and pinned by hand. The
+probe repeats at most five files, is skipped when the gate's own tests part is red (nothing to learn from piling load
+on a red machine) and runs `bun test` directly, so it never rewrites the timings that order the list; everything runs
+at the check's low priority. `--no-probe` is a trial run, `--sample <n>` bounds the probe, and neither replaces the
+gate: nothing merges over a red check.
+
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe, and runs the
 checks in the two phases above; each step is one executable file in `scripts/checks/`, named `<number>-<name>` with the
 numbers spaced by ten (`10-dependencies`, `12-audit`, `15-secrets`, `17-scripts`, `18-docs`, `19-version`, `20-types`,
