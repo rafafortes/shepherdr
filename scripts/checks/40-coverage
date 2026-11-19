@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Check 4: the coverage ratchet (scripts/coverage.ts). It runs after tests that all passed: the runner stops at the
+# first failure, so what a failed test run left is never measured. On the default branch it records the baseline in the
+# repo's .git; the note is the summary line, read from this check's own log, exactly as the runner used to read it.
+set -uo pipefail
+root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
+cover=${SHEPHERDR_CHECK_COVER:-"${SHEPHERDR_CHECK_LOGS:-/tmp}/coverage"}
+cd "$root" || exit 1
+record=()
+[ "${SHEPHERDR_CHECK_RECORD:-}" = 1 ] && record=(--record)
+bun "$root/scripts/coverage.ts" "$cover" ${record[@]+"${record[@]}"}
+code=$?
+grep -E '^Coverage: ' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1 | sed -E 's/ \([0-9]+ of [0-9]+\)//g; s/^Coverage: //; s/;.*//' >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
+exit "$code"

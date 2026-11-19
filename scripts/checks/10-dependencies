@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Check 1: dependencies first. A fresh worktree has none, neither the types nor a browser can be read without them
+# (bun install itself is a no-op when they are all there). No note: the runner's line is just "1/<total> dependencies ok".
+set -uo pipefail
+root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
+cd "$root" || exit 1
+exec bun install --frozen-lockfile

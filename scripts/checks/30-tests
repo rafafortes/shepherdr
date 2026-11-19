@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Check 3: every test, with the browser ones, in the workers the runner capped. --force: a check never takes an
+# earlier pass at this commit for its own (a browser that skipped then would hide here). On the default branch the
+# screen map bun run test changed picks from is recorded there too. The note is how many tests ran, read from this
+# check's own log, exactly as the runner used to read it.
+set -uo pipefail
+root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
+cover=${SHEPHERDR_CHECK_COVER:-"${SHEPHERDR_CHECK_LOGS:-/tmp}/coverage"}
+cd "$root" || exit 1
+map=()
+[ "${SHEPHERDR_CHECK_MAP:-}" = 1 ] && map=(--map)
+bun "$root/scripts/test.ts" --force --cover="$cover" ${map[@]+"${map[@]}"}
+code=$?
+grep -oE 'Ran [0-9]+ tests across [0-9]+ files?' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1 >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
+exit "$code"
