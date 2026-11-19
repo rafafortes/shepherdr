@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { pluginCatalog, readStaged, stageUserPlugins, writeRegistries } from '../scripts/build-plugins.ts'
 import { pluginsPage, setPluginOn } from '../server/plugins.ts'
 import { HOME } from '../server/store.ts'
-import { guardFn, setupGuarded } from '../src/guard.tsx'
+import { CRASH_RELOADS, guardFn, nextCrash, setupGuarded } from '../src/guard.tsx'
 import { tmp } from './tmp.ts'
 
 function file(path: string, text = '') {
@@ -129,6 +129,34 @@ describe('on the screen', () => {
     expect(reg.composerIdle).toBeNull()
   })
 
+  test('installPlugins wires every plugin through the guard, not only yours', () => {
+    const kernel = readFileSync(join(import.meta.dir, '..', 'src', 'kernel.ts'), 'utf8')
+    const body = kernel.match(/export function installPlugins[\s\S]*?\n}\n/)?.[0] ?? ''
+    expect(body).toContain('setupGuarded(p.name, registry, (r) => p.setup(r))')
+    expect(body).not.toContain('user.includes')
+    expect(body).not.toContain('else p.setup(registry)')
+  })
+
+  test('a built-in name is guarded the same way: its setup throw leaves the slots as they were', () => {
+    const View = () => null
+    const reg = { messageEdge: [] as { View: typeof View }[], topBars: [View] }
+    setupGuarded('reactions', reg, (r) => {
+      r.messageEdge.push({ View: () => null })
+      r.topBars.push(() => null)
+      throw new Error('bad snapshot shape')
+    })
+    expect(reg.messageEdge).toEqual([])
+    expect(reg.topBars).toEqual([View])
+  })
+
+  test('a view added by a built-in is wrapped: it says the name when it throws', () => {
+    const reg = { messageEdge: [] as { View: () => never }[] }
+    setupGuarded('reactions', reg, (r) => {
+      r.messageEdge.push({ View: () => { throw new Error('bad reaction') } })
+    })
+    expect((reg.messageEdge[0].View as unknown as { displayName?: string }).displayName).toMatch(/^reactions\(/)
+  })
+
   test('what it adds is wrapped: its functions give a safe answer once they throw', async () => {
     const reg = { keys: [] as { order: number; handle: () => boolean }[], settingActions: {} as Record<string, () => Promise<string>> }
     setupGuarded('keys', reg, (r) => {
@@ -139,5 +167,26 @@ describe('on the screen', () => {
     expect(reg.keys[0].handle()).toBe(false)
     expect(await reg.settingActions.go()).toBe('That failed.')
     expect(guardFn('x', () => 2, 0)()).toBe(2)
+  })
+})
+
+describe('the screen fallback', () => {
+  const at = 1_700_000_000_000
+  test('a first break starts at one; a different break starts over', () => {
+    const first = nextCrash(null, 'boom', at)
+    expect(first).toEqual({ message: 'boom', count: 1, reloaded: false, at })
+    expect(nextCrash(first, 'another', at + 1)).toEqual({ message: 'another', count: 1, reloaded: false, at: at + 1 })
+  })
+  test('the same break after a Reload counts up, and stops counting once the card says to restart', () => {
+    let crash = nextCrash(null, 'boom', at)
+    for (let n = 2; n <= CRASH_RELOADS + 1; n++) {
+      crash = nextCrash({ ...crash, reloaded: true }, 'boom', at + n)
+      expect(crash.count).toBe(n)
+    }
+    expect(crash.count).toBeGreaterThanOrEqual(CRASH_RELOADS)
+    // a repeat without a Reload keeps the count: React can call the error lifecycle twice for one break
+    expect(nextCrash(crash, 'boom', at + 99).count).toBe(crash.count)
+    // a break much later in the same tab starts over, even with a reload still remembered
+    expect(nextCrash({ ...crash, reloaded: true }, 'boom', at + 120_000).count).toBe(1)
   })
 })

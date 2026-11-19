@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client'
 import plugins, { enabled, user } from '../generated/client-plugins.ts'
 import App from './App.tsx'
 import { watchKeys } from './focus.ts'
-import { pluginFailed, usePluginErrors } from './guard.tsx'
+import { pluginFailed, ScreenBoundary, usePluginErrors } from './guard.tsx'
 import { connect, getState, installPlugins, registry, setUI, useStore, useUI } from './kernel.ts'
 import { watchScrolling } from './scrolling.ts'
 import Settings, { sectionOf, withPluginErrors } from './Settings.tsx'
@@ -57,7 +57,7 @@ function UpdateFailed() {
   )
 }
 
-/** A plugin of the human's own didn't build, threw as it loaded or threw here: one line, Settings → Plugins says why. */
+/** A plugin didn't build, threw as it loaded or threw here: one line, Settings → Plugins says why. */
 function PluginTrouble() {
   const settings = useStore((s) => s.snap?.settings)
   const errors = usePluginErrors()
@@ -66,10 +66,13 @@ function PluginTrouble() {
   const names = [...new Set([...(page?.rows ?? []).filter((r) => r.warn).map((r) => r.label), ...Object.keys(errors)])]
   const key = names.join(' ')
   if (!names.length || hidden === key) return null
+  // a name on the page under Yours is theirs even when its file doesn't build (a failed override is listed under
+  // Built in, with a warn that starts with "Yours")
+  const mine = (n: string) => (user as string[]).includes(n) || (page?.rows ?? []).some((r) => r.label === n && (r.group === 'Yours' || !!r.warn?.startsWith('Yours')))
   const open = () => setUI({ settings: { section: Math.max(0, sectionOf('Plugins', settings ?? [], getState().ui)) }, drawer: false })
   return (
     <div role="status" data-topbar className={topBar}>
-      {names.length === 1 ? `Your plugin “${names[0]}” has a problem` : `Your plugins ${names.map((n) => `“${n}”`).join(', ')} have problems`}.{' '}
+      {names.length === 1 ? `${mine(names[0]) ? 'Your' : 'A built-in'} plugin “${names[0]}” has a problem` : `${names.every(mine) ? 'Your plugins' : 'Plugins'} ${names.map((n) => `“${n}”`).join(', ')} have problems`}.{' '}
       <button type="button" className={barButton} onClick={open}>
         Why
       </button>{' '}
@@ -94,14 +97,16 @@ const loaded = await Promise.all(
     }
   }),
 )
-installPlugins(loaded.filter((p) => p !== null), enabled, user)
+installPlugins(loaded.filter((p) => p !== null), enabled)
 connect()
 watchViewport((keyboard) => setUI({ keyboard }))
 watchScrolling()
 watchKeys()
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+  <ScreenBoundary>
+    <StrictMode>
+      <App />
+    </StrictMode>
+  </ScreenBoundary>,
 )
