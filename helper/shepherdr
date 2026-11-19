@@ -50,22 +50,34 @@ unless ($s) {
   exit 2;
 }
 print $s "POST /api/cli HTTP/1.0\r\nHost: shepherdr\r\n${authorization}Content-Type: application/json\r\nContent-Length: " . length($json) . "\r\n\r\n$json";
-# shepherdr merge answers within 90 s: no answer a little after that means none is coming (Shepherdr restarted, or the
-# tunnel dropped and left this end open), never a wait on and on. The same words as server/cli.ts's
-my $merge = @ARGV && ($ARGV[0] eq 'merge' || ($ARGV[0] eq 'task' && ($ARGV[1] // '') eq 'merge'));
-my $wait = $merge ? ($ENV{SHEPHERDR_MERGE_WAIT} // 110000) : 0;
+# Any call must end with words when Shepherdr gives no answer: an agent's turn must not hang on a stalled server.
+# The long verbs have their own server-side deadlines (engine.ts, the same as server/cli.ts): checks waits up to
+# 9 minutes for GitHub, review up to 90 s for a reviewer slot, merge up to 90 s (110 s here); the rest get 30 s
+# (SHEPHERDR_CLI_WAIT). The merge words below stay as they were: agents already parse them.
+my $word = @ARGV ? $ARGV[0] : '';
+my $second = ($word eq 'task' && @ARGV > 1) ? $ARGV[1] : '';
+my $merge = $word eq 'merge' || ($word eq 'task' && $second eq 'merge');
+my $wait = $merge ? ($ENV{SHEPHERDR_MERGE_WAIT} // 110000)
+  : $word eq 'checks' ? ($ENV{SHEPHERDR_CHECKS_WAIT} // 570000)
+  : $word eq 'review' ? ($ENV{SHEPHERDR_REVIEW_WAIT} // 100000)
+  : ($ENV{SHEPHERDR_CLI_WAIT} // 30000);
 my $res = eval {
   local $SIG{ALRM} = sub { die "no answer\n" };
-  alarm(int(($wait + 999) / 1000)) if $wait;
+  alarm(int(($wait + 999) / 1000));
   my $r = do { local $/; <$s> };
   alarm(0);
   $r;
 };
 close $s;
-unless (defined $res || !$merge) {
-  my $id = ($ARGV[0] eq 'merge' ? $ARGV[1] : $ARGV[2]) // '<id>';
+unless (defined $res) {
   my $secs = int(($wait + 999) / 1000);
-  print STDERR "shepherdr merge $id got no answer from Shepherdr in $secs s (it may have restarted). Don't leave it running: see where it is with shepherdr task show $id, and unless it says Merged, run shepherdr merge $id again; it finishes the merge, or says it is merged.\n";
+  if ($merge) {
+    my $id = ($ARGV[0] eq 'merge' ? $ARGV[1] : $ARGV[2]) // '<id>';
+    print STDERR "shepherdr merge $id got no answer from Shepherdr in $secs s (it may have restarted). Don't leave it running: see where it is with shepherdr task show $id, and unless it says Merged, run shepherdr merge $id again; it finishes the merge, or says it is merged.\n";
+  } else {
+    my $name = $word eq 'task' ? "task $second" : $word;
+    print STDERR "shepherdr $name got no answer from Shepherdr in $secs s (it may have restarted or stalled). Try the call again; if it keeps happening, run shepherdr doctor on the main machine.\n";
+  }
   exit 1;
 }
 my ($head, $resp) = split /\r\n\r\n/, $res // '', 2;

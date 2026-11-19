@@ -60,6 +60,98 @@ describe('shepherdr merge with no answer coming', () => {
   })
 })
 
+describe('every shepherdr call ends with words when the server gives no answer', () => {
+  /** the one-line answer a non-merge call gets */
+  const words = (verb: string) => [`shepherdr ${verb} got no answer from Shepherdr in 1 s`, 'Try the call again', 'shepherdr doctor']
+
+  /** a server that accepts the call and answers after a delay, or never when the delay is 0 */
+  const slow = (ms: number) =>
+    Bun.serve({
+      hostname: '127.0.0.1', port: 0, idleTimeout: 0,
+      fetch: ms === 0
+        ? () => new Promise<Response>(() => {})
+        : async () => { await Bun.sleep(ms); return Response.json({ out: 'ok\n', code: 0 }) },
+    })
+
+  test('status here: bounded, one line, exit 1, and a two-word verb keeps both words', async () => {
+    const server = slow(0)
+    try {
+      const env = { SHEPHERDR_URL: `http://127.0.0.1:${server.port}`, SHEPHERDR_CLI_WAIT: '1000' }
+      const r = await run([process.execPath, join(root, 'server', 'cli.ts'), 'status'], env)
+      expect(r.code).toBe(1)
+      for (const w of words('status')) expect(r.err).toContain(w)
+      expect(r.ms).toBeLessThan(8000)
+      const told = await run([process.execPath, join(root, 'server', 'cli.ts'), 'task', 'tell', 'SHE-9', 'hi'], env)
+      expect(told.code).toBe(1)
+      expect(told.err).toContain('shepherdr task tell got no answer')
+    } finally { server.stop(true) }
+  })
+
+  test('checks and review keep their own long bounds, not the short default', async () => {
+    const served = slow(2000)
+    try {
+      const url = `http://127.0.0.1:${served.port}`
+      // only the default is made short: a 2 s answer still gets through for the two long verbs
+      for (const verb of ['checks', 'review'])
+        expect((await run([process.execPath, join(root, 'server', 'cli.ts'), verb, 'SHE-1'], { SHEPHERDR_URL: url, SHEPHERDR_CLI_WAIT: '1000' })).out).toBe('ok\n')
+      // each reads its own override when one is given
+      const never = slow(0)
+      try {
+        const base = { SHEPHERDR_URL: `http://127.0.0.1:${never.port}` }
+        for (const [verb, env] of [['checks', { SHEPHERDR_CHECKS_WAIT: '1000' }], ['review', { SHEPHERDR_REVIEW_WAIT: '1000' }]] as const) {
+          const r = await run([process.execPath, join(root, 'server', 'cli.ts'), verb, 'SHE-1'], { ...base, ...env })
+          expect(r.code).toBe(1)
+          for (const w of words(verb)) expect(r.err).toContain(w)
+        }
+      } finally { never.stop(true) }
+    } finally { served.stop(true) }
+  })
+
+  test('merge keeps its own wait and words, whatever the default is set to', async () => {
+    const server = slow(0)
+    try {
+      const r = await run([process.execPath, join(root, 'server', 'cli.ts'), 'merge', 'SHE-9'], { SHEPHERDR_URL: `http://127.0.0.1:${server.port}`, SHEPHERDR_CLI_WAIT: '1000', SHEPHERDR_MERGE_WAIT: '2000' })
+      expect(r.code).toBe(1)
+      expect(r.err).toContain('got no answer from Shepherdr in 2 s')
+      expect(r.err).toContain('run shepherdr merge SHE-9 again')
+    } finally { server.stop(true) }
+  })
+
+  test('a slow but answering server still succeeds under the bound', async () => {
+    const server = slow(2000)
+    try {
+      const r = await run([process.execPath, join(root, 'server', 'cli.ts'), 'status'], { SHEPHERDR_URL: `http://127.0.0.1:${server.port}`, SHEPHERDR_CLI_WAIT: '5000' })
+      expect(r.code).toBe(0)
+      expect(r.out).toBe('ok\n')
+      expect(r.err).toBe('')
+      expect(r.ms).toBeGreaterThanOrEqual(1800)
+    } finally { server.stop(true) }
+  })
+
+  test.if(perl)('on another machine: the dropped tunnel ends it with the same words', async () => {
+    const dir = tmp('cli-timeout')
+    const server = Bun.listen({ unix: join(dir, 'main.sock'), socket: { data() {} } })
+    try {
+      const helper = join(dir, 'bin', 'shepherdr')
+      mkdirSync(join(dir, 'bin'))
+      copyFileSync(join(root, 'helper', 'shepherdr'), helper)
+      const r = await run(['perl', helper, 'status'], { SHEPHERDR_CLI_WAIT: '1000' })
+      expect(r.code).toBe(1)
+      for (const w of words('status')) expect(r.err).toContain(w)
+      expect(r.ms).toBeLessThan(8000)
+      // the helper's long verbs keep their own bounds too, not the short default
+      for (const [verb, env] of [['checks', { SHEPHERDR_CHECKS_WAIT: '1000' }], ['review', { SHEPHERDR_REVIEW_WAIT: '1000' }]] as const) {
+        const long = await run(['perl', helper, verb, 'SHE-1'], { ...env })
+        expect(long.code).toBe(1)
+        expect(long.err).toContain(`shepherdr ${verb} got no answer`)
+      }
+      const told = await run(['perl', helper, 'task', 'tell', 'SHE-9', 'hi'], { SHEPHERDR_CLI_WAIT: '1000' })
+      expect(told.code).toBe(1)
+      expect(told.err).toContain('shepherdr task tell got no answer')
+    } finally { server.stop(true) }
+  })
+})
+
 describe('shepherdr secret run and env', () => {
   // Shepherdr's answer to secret run and env: the values, for the command to use here; it never prints them
   const values = { TOKEN: "a b'c$d", PLAIN: 'xyz' }

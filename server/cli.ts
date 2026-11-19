@@ -26,10 +26,18 @@ if (secret === 'run' && !command.length) {
 // the words that take a text on stdin: a secret to keep, a new HEARTBEAT.md (never secret run's: that is its command's)
 const stdin = ((secret === 'set' || secret === 'elevenlabs') || (args[0] === 'heartbeat' && args[1] === 'set')) && !process.stdin.isTTY ? await Bun.stdin.text() : undefined
 
-// shepherdr merge answers within 90 s (MERGE_DEADLINE, engine.ts): no answer a little after that means none is coming
-// (Shepherdr restarted, or its link dropped), never a wait on and on
+// Every call must end with words when Shepherdr gives no answer: a stalled server (1452 event-loop stalls of 1 s or
+// more on 2026-11-18, worst 20.1 s) otherwise hangs an agent's turn for ever. The long verbs have their own deadlines
+// on the server (engine.ts): checks waits up to 9 minutes for GitHub, review up to 90 s for a reviewer slot, merge up
+// to 90 s (110 s here); the rest get the default. Every call gets a bound, and says so instead of waiting on and on.
+const envWait = (name: string, fallback: number) => Number(process.env[name] ?? fallback)
 const merge = args[0] === 'merge' || (args[0] === 'task' && args[1] === 'merge')
-const wait = merge ? Number(process.env.SHEPHERDR_MERGE_WAIT ?? 110_000) : 0
+const wait = merge
+  ? envWait('SHEPHERDR_MERGE_WAIT', 110_000)
+  : args[0] === 'checks' ? envWait('SHEPHERDR_CHECKS_WAIT', 9 * 60_000 + 30_000)
+    : args[0] === 'review' ? envWait('SHEPHERDR_REVIEW_WAIT', 100_000)
+      : envWait('SHEPHERDR_CLI_WAIT', 30_000)
+const verb = args[0] === 'task' ? `task ${args[1] ?? ''}`.trim() : args[0] ?? '<verb>'
 
 let j: { out: string; code: number; secrets?: Record<string, string> }
 try {
@@ -37,12 +45,12 @@ try {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(capability ? { authorization: `Bearer ${capability}` } : {}) },
     body: JSON.stringify({ args, chat: process.env.SHEPHERDR_CHAT, pane: process.env.HERDR_PANE_ID, cwd: process.cwd(), stdin }),
-    signal: wait ? AbortSignal.timeout(wait) : undefined,
+    signal: AbortSignal.timeout(wait),
   })
   j = (await r.json()) as typeof j
 } catch (e) {
-  if (merge && (e as Error).name === 'TimeoutError') {
-    process.stderr.write(noAnswer(wait, args[0] === 'merge' ? args[1] : args[2]))
+  if ((e as Error).name === 'TimeoutError') {
+    process.stderr.write(merge ? noAnswer(wait, args[0] === 'merge' ? args[1] : args[2]) : noAnswerOther(wait, verb))
     process.exit(1)
   }
   process.stderr.write(`Cannot reach the shepherdr command at ${url}. Check the target URL or use this session's installed helper. Do not start another server to repair routing.\n`)
@@ -60,6 +68,11 @@ else {
 /** what to do when shepherdr merge heard nothing back (the helper's shepherdr says the same) */
 function noAnswer(ms: number, id = '<id>') {
   return `shepherdr merge ${id} got no answer from Shepherdr in ${Math.round(ms / 1000)} s (it may have restarted). Don't leave it running: see where it is with shepherdr task show ${id}, and unless it says Merged, run shepherdr merge ${id} again; it finishes the merge, or says it is merged.\n`
+}
+
+/** any other verb that heard nothing back: the same one line of words, so the calling agent's turn ends */
+function noAnswerOther(ms: number, verb: string) {
+  return `shepherdr ${verb} got no answer from Shepherdr in ${Math.round(ms / 1000)} s (it may have restarted or stalled). Try the call again; if it keeps happening, run shepherdr doctor on the main machine.\n`
 }
 
 /** shepherdr secret run: the command, with the values in its environment; what it prints comes through with each value
