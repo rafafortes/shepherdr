@@ -130,32 +130,41 @@ describe('what --quick runs', () => {
 })
 
 /** a page's text with its line breaks taken out, so a rule reads the same however it is wrapped */
-const flat = (path: string) => readFileSync(join(root, path), 'utf8').replace(/\s+/g, ' ')
+const flat = (path: string) => readFileSync(path, 'utf8').replace(/\s+/g, ' ')
+
+/** the pages a task agent reads its pre-ready rule in; the literal join() paths are how `bun run test changed` picks
+ *  this file when one of them changes (scripts/test.ts's reach) */
+const pages = () => ({
+  agents: flat(join(root, 'AGENTS.md')),
+  develop: flat(join(root, 'docs', 'develop.md')),
+  tasks: flat(join(root, 'docs', 'tasks.md')),
+  skill: flat(join(root, 'skill', 'shepherdr-agent', 'SKILL.md')),
+})
+
+/** tell a task to run the whole check before it is ready: the shapes the rule had before --quick, whoever wrote them */
+const FULL_BEFORE_READY = /`bun run check:local`(?! --quick)[^.]*before `shepherdr ready`|full check \(`bun run check:local`[^)]*\)[^.]*`shepherdr ready`/
 
 describe('the pre-ready run the repo asks for', () => {
   test('AGENTS.md asks for the quick run before ready, forbids a single worker, and keeps the full check elsewhere', () => {
-    const agents = flat('AGENTS.md')
+    const { agents, develop, skill } = pages()
     expect(agents).toContain('A task runs `bun run check:local --quick` before `shepherdr ready`')
     expect(agents).toContain('`SHEPHERDR_TEST_JOBS=1` serializes the suite and is for debugging')
     expect(agents).toContain('The full `bun run check:local` is where nothing may be missed')
     expect(agents).toContain('the weekly sweep, and the coordinator')
-    // nothing is left asking a task for the whole check before it is ready (a revert of the rule fails here)
-    for (const page of [agents, flat(join('docs', 'develop.md')), flat(join('skill', 'shepherdr-agent', 'SKILL.md'))]) {
-      expect(page).not.toContain('`bun run check:local` before `shepherdr ready`')
-    }
+    // no page asks for the whole check before ready again (a revert of the rule fails here)
+    for (const page of [agents, develop, skill]) expect(page).not.toMatch(FULL_BEFORE_READY)
   })
 
   test('the agent skill and docs/develop.md say the same, so no harness reads another rule', () => {
-    const skill = flat(join('skill', 'shepherdr-agent', 'SKILL.md'))
-    expect(skill).toContain("a task runs that repository's own pre-ready check")
+    const { develop, tasks, skill } = pages()
+    expect(skill).toContain("runs the check its repo's rules name for that point")
     expect(skill).toContain('`bun run check:local --quick` in')
-    expect(skill).toContain('otherwise its own full check')
+    expect(skill).toContain("where they name none, the repo's own full check")
+    expect(skill).toContain('keeps `shepherdr ready` unrun and the change unmerged')
     expect(skill).toContain('`SHEPHERDR_TEST_JOBS=1`')
-    const develop = flat(join('docs', 'develop.md'))
     expect(develop).toContain("`bun run check:local --quick` is a task's pre-ready run")
     expect(develop).toContain('the merge gate, the weekly sweep, and the coordinator')
     // the product page says where the full check now happens, and how a space asks for it on every merge
-    const tasks = flat(join('docs', 'tasks.md'))
     expect(tasks).toContain('the quick pre-ready check, `bun run check:local --quick`')
     expect(tasks).toContain('merge sets the gate to it (`shepherdr set merge.gate')
   })
@@ -168,6 +177,11 @@ describe('the pre-ready run the repo asks for', () => {
       expect(list).toContain(`'${f}'`)
     }
     // the pages name the same list, so a task knows what makes its quick run the whole suite
-    for (const page of ['AGENTS.md', join('docs', 'develop.md')]) expect(flat(page)).toContain('`test/preload.ts`, `test/once.ts`, `scripts/test.ts`')
+    for (const page of [pages().agents, pages().develop]) expect(page).toContain('`test/preload.ts`, `test/once.ts`, `scripts/test.ts`')
+  })
+
+  test('a quick run nothing reached says so, instead of leaving the result line blank', () => {
+    const step = readFileSync(join(root, 'scripts', 'checks', '30-tests'), 'utf8')
+    expect(step).toContain("note='no test reaches what changed'")
   })
 })

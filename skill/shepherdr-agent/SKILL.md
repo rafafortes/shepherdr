@@ -158,14 +158,14 @@ report that operational follow-up instead of using an unauthenticated fallback.
 
 - Nothing merged on a red check you know of, or past "ask the human first"; nothing irreversible without their yes.
   A failed check of the repository is never merged over, whatever file the failure is in. Before `shepherdr ready` a task
-  runs that repository's own pre-ready check: the quick one where it has one (`bun run check:local --quick` in
+  runs the check its repo's rules name for that point: where they name a quick one (`bun run check:local --quick` in
   Shepherdr — the full check's steps with the tests narrowed to what changed and no coverage ratchet, in a verdict marked
-  QUICK and never a full gate verdict), otherwise its own full check. That is the task's proof of its own change; the
-  repository's full check is still where nothing may be missed — its merge gate, its weekly sweep and its release — and a
-  full check that fails keeps the change unmerged. Never cheapen the run by hand: a single test worker
-  (`SHEPHERDR_TEST_JOBS=1`) serializes the suite and is for debugging one test's order, not for a gate. Fix a failure
-  that is small and say so in the facts; otherwise stop, say what fails and why it is not yours, and let your coordinator
-  decide.
+  QUICK and never a full gate verdict), that one; where they name none, the repo's own full check. That is the task's
+  proof of its own change, and a check that did not pass keeps `shepherdr ready` unrun and the change unmerged. The
+  repo's full check still runs where nothing may be missed: its merge gate, its weekly run and its release. Never
+  cheapen a run by hand (one test worker, `SHEPHERDR_TEST_JOBS=1` in Shepherdr, serializes the suite): that is for
+  debugging a test's order, not for a gate. Fix a failure that is small and say so in the facts; otherwise stop, say what
+  fails and why it is not yours, and let your coordinator decide.
 - Each thing the brief asked for has a real proof or a "Not proven" line.
 - The summary says what changed for the human; failures lead the facts.
 

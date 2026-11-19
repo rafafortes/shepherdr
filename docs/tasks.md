@@ -168,8 +168,7 @@
   Merges into one repo go one at a time, so the others wait while it runs; a `shepherdr merge` that asks meanwhile hears
   that the gate still runs. If the base moved anyway while it ran, the branch is rebased on it and the gate runs again
   (three times at most). It is never a git hook: a hook that refuses an update leaves what it would write in the space's
-  checkout. The gate runs detached, its words and exit code in files of
-  their own, so a restart of Shepherdr (an update) leaves it running: the Shepherdr that comes back goes on from it and
+  checkout. The gate runs detached, its words and exit code in files of their own, so a restart of Shepherdr (an update) leaves it running: the Shepherdr that comes back goes on from it and
   merges once it passes. It has a limit of its own inside the command (45 minutes, under `timeout` where that binary
   exists, exiting 124), so it ends even if Shepherdr never comes back; it is also stopped when a newer run replaces it
   (a stale run must never go on in the worktree) or when its task is closed, stopped, archived or deleted. On startup a

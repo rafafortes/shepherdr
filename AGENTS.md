@@ -83,7 +83,9 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   it did not. It is the full check's steps with the tests narrowed to what changed and no coverage ratchet, marked
   `QUICK` in a verdict of its own so it is never taken for a full one. A change to one of the files that can break any
   test (`test/preload.ts`, `test/once.ts`, `scripts/test.ts`, `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`:
-  `scripts/test.ts`'s `EVERYTHING`) runs the whole suite in a quick run too.
+  `scripts/test.ts`'s `EVERYTHING`) runs the whole suite in a quick run too; a change to the coverage ratchet itself
+  (`scripts/coverage.ts`, `scripts/checks/40-coverage`, `test/screen-map.ts`) is the one a quick run cannot judge, so run
+  the full check for it.
 - Never make a check cheaper by hand: `SHEPHERDR_TEST_JOBS=1` serializes the suite and is for debugging one test's
   order, never for a gate — the runner already caps the workers and takes the lock that keeps runs apart.
 - The full `bun run check:local` is where nothing may be missed: the merge gate (where a space sets `merge.gate` to it),
