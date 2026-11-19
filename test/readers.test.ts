@@ -434,6 +434,32 @@ describe('pi reader', () => {
     ])
     expect(ev[0]).toMatchObject({ sessionId: 'sw-0001' })
   })
+
+  test('a provider error keeps the HTTP status its message names, and none where it names none', () => {
+    const err = (errorMessage: string) => parse('pi', [
+      pimsg('e1', null, { role: 'assistant', content: [], usage: {}, stopReason: 'error', errorMessage, timestamp: 3 }),
+    ]).find((e) => e.kind === 'error')
+    // a status after the provider's name in "API error (502)", and a leading bare "429"
+    const gateway = 'exe-dev-openai API error (502): 502 gateway proxy: upstream request failed'
+    expect(err(gateway)).toMatchObject({ kind: 'error', id: 'error-e1', text: gateway, status: 502 })
+    expect(err('429 usage limit reached for this plan, resets 3pm')).toMatchObject({ kind: 'error', status: 429 })
+    // the words are kept unchanged: the status is added beside them, not instead of them
+    expect(err('API error (503)')).toMatchObject({ kind: 'error', text: 'API error (503)', status: 503 })
+    // a message that names no status emits none
+    const overloaded = err('Our servers are currently overloaded. Please try again later.')
+    expect(overloaded).toMatchObject({ kind: 'error', text: 'Our servers are currently overloaded. Please try again later.' })
+    expect(overloaded && 'status' in overloaded).toBe(false)
+    const socket = err('The socket connection was closed unexpectedly.')
+    expect(socket && 'status' in socket).toBe(false)
+    // a number buried in the words is not a status: only the start of the message names one
+    const middle = err('invalid request: max_tokens must be at most 500')
+    expect(middle && 'status' in middle).toBe(false)
+    const notStatus = err('request 503 of 600, image is 402 pixels wide')
+    expect(notStatus && 'status' in notStatus).toBe(false)
+    // a leading number that is not an HTTP status is not one either
+    const leadingCount = err('700 tokens requested exceeds the model limit')
+    expect(leadingCount && 'status' in leadingCount).toBe(false)
+  })
 })
 
 /* ---------- LogTail and finding logs ---------- */
