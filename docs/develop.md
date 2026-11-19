@@ -84,7 +84,9 @@ What two runs of the same worktree still share is safe to share: `50-build` take
 (`<logs>/build.lock`), because both runs write `dist/` and vite empties it first, so no build ever interleaves with
 another; the plugin registries are written atomically (a run reads the old or the new file, never half of one); and a
 quick run's logs, notes, skips, browser probe and gitleaks report take `-quick`, beside its own verdict. A `tsc` build
-info file one run replaces under the other only costs a rebuild, never a wrong answer.
+info file one run replaces under the other only costs a rebuild, never a wrong answer. Two runs of the same kind in one
+worktree still report to one `verdict.txt` and one set of step logs, so a worktree runs one full check at a time; the
+overlap to use is a `--quick` run beside a full one.
 
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe, and runs the
 checks in the two phases above; each step is one executable file in `scripts/checks/`, named `<number>-<name>` with the

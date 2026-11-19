@@ -289,7 +289,7 @@ describe('a quick run beside a full one', () => {
     const lock = join(f.home, '.cache', 'shepherdr', 'check-local-quick.lock')
     mkdirSync(dirname(lock), { recursive: true })
     const held = join(f.dir, 'quick-held')
-    const proc = Bun.spawn(['bash', '-c', `exec 9>>"${lock}"; flock 9; touch "${held}"; sleep 2`], { stdout: 'ignore', stderr: 'ignore' })
+    const proc = Bun.spawn(['bash', '-c', `exec 9>>"${lock}"; flock 9; touch "${held}"; exec sleep 2`], { stdout: 'ignore', stderr: 'ignore' })
     try {
       for (let i = 0; i < 200 && !existsSync(held); i++) await Bun.sleep(25)
       expect(existsSync(held), 'the quick lock is held').toBe(true)
@@ -310,7 +310,7 @@ describe('a quick run beside a full one', () => {
     const lock = join(f.home, '.cache', 'shepherdr', 'check-local-quick.lock')
     mkdirSync(dirname(lock), { recursive: true })
     const held = join(f.dir, 'quick-held')
-    const proc = Bun.spawn(['bash', '-c', `exec 9>>"${lock}"; flock 9; touch "${held}"; sleep 30`], { stdout: 'ignore', stderr: 'ignore' })
+    const proc = Bun.spawn(['bash', '-c', `exec 9>>"${lock}"; flock 9; touch "${held}"; exec sleep 30`], { stdout: 'ignore', stderr: 'ignore' })
     try {
       for (let i = 0; i < 200 && !existsSync(held); i++) await Bun.sleep(25)
       const r = Bun.spawnSync(['bash', join(f.dir, 'scripts', 'check-local.sh'), '--quick'], {
