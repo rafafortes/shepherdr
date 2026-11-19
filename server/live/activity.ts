@@ -203,6 +203,16 @@ export function outputAt(where: OutputAt, id: string): string | undefined {
   }
   // agy: the output of a tool call the mirror (agy.ts) wrote on its line
   if (l?.kind === 'tool') return typeof l.output === 'string' ? l.output : undefined
+  // OpenCode: the tool part of an assistant row copied from its session database; the step id ends in the part's index
+  if (l?.type === 'assistant' && Array.isArray(l.data?.content)) {
+    const part = l.data.content[Number(/-(\d+)$/.exec(id)?.[1])]
+    if (part?.type === 'tool') {
+      const state = part.state ?? part
+      return typeof state.output === 'string' ? state.output : undefined
+    }
+  }
+  // pi: the tool result message that ends a step
+  if (l?.type === 'message' && l.message?.role === 'toolResult') return textOf(l.message.content)
   // Claude Code: the result of that tool call
   const blocks: Json[] = Array.isArray(l?.message?.content) ? l.message.content : []
   const r = blocks.find((b) => b?.type === 'tool_result' && b.tool_use_id === id)

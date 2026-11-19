@@ -1,7 +1,11 @@
 // The opencode log reader, on mirrored lines in the shape server/live/opencode.ts writes ({id, type, seq, time, data}).
 import { describe, expect, test } from 'bun:test'
-import { OpencodeReader } from '../server/live/readers/opencode.ts'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { outputAt } from '../server/live/activity.ts'
+import { OpencodeReader, opencodeStep } from '../server/live/readers/opencode.ts'
 import type { LogEvent } from '../server/live/readers/types.ts'
+import { tmp } from './tmp.ts'
 
 const FILE = '/home/me/.shepherdr/opencode/ses_1.jsonl'
 const line = (o: object, offset = 0) => ({ text: JSON.stringify(o), offset })
@@ -57,8 +61,8 @@ describe('opencode reader', () => {
     expect(ev.find((e) => e.kind === 'agent')).toEqual({ kind: 'agent', id: 'a1', at: 10, text: 'HERON\n\nand more' })
   })
 
-  test('a reply with no text says nothing', () => {
-    expect(brief(parse([turn('a2', { content: [{ type: 'tool', name: 'x' }], finish: 'tool-calls' })]))).toEqual([])
+  test('a reply with no text says nothing beyond its tool steps', () => {
+    expect(brief(parse([turn('a2', { content: [{ type: 'tool', name: 'x' }], finish: 'tool-calls' })]))).toEqual(['step:a2-0'])
     expect(brief(parse([turn('a3', { finish: 'stop' })]))).toEqual(['turn-end:turn-a3'])
   })
 
@@ -212,5 +216,73 @@ describe('opencode reader', () => {
     const ids = (ev: LogEvent[]) => ev.map((e) => e.id)
     expect(ids(parse(objs))).toEqual(ids(parse(objs)))
     expect(ids(parse(objs))).toEqual(['session-ses_1', 'start-u9', 'u9', 'runtime-model-a10', 'a10', 'usage-a10', 'turn-a10'])
+  })
+
+  test('a tool part is a step, over with the row; reasoning stays out and the text reads as before', () => {
+    const ev = parse([
+      turn('a20', {
+        content: [
+          { type: 'reasoning', text: 'hmm' },
+          { type: 'tool', tool: 'read', state: { status: 'completed', input: { filePath: '/w/src/app.ts' }, output: 'line one', title: 'Read app.ts' } },
+          { type: 'text', text: ' done ' },
+          { type: 'tool', name: 'frobnicate', state: { status: 'error', error: 'no such tool' } },
+          { type: 'tool', input: { command: 'ls' } },
+        ],
+        finish: 'stop',
+      }),
+    ])
+    expect(ev.find((e) => e.kind === 'agent')).toEqual({ kind: 'agent', id: 'a20', at: 10, text: 'done' })
+    const steps = ev.filter((e) => e.kind === 'step')
+    expect(steps).toMatchObject([
+      { kind: 'step', id: 'a20-1', at: 10, tool: 'read', end: 10, step: 'read', title: 'Read app.ts', target: 'app.ts', out: { file: FILE, offset: 0 } },
+      { kind: 'step', id: 'a20-3', at: 10, tool: 'frobnicate', end: 10, step: 'other', title: 'Used frobnicate', failed: true, out: { file: FILE, offset: 0 } },
+      { kind: 'step', id: 'a20-4', at: 10, tool: '', end: 10, step: 'other', title: 'Used', out: { file: FILE, offset: 0 } },
+    ])
+    expect(steps).toHaveLength(3)
+    expect(turns(ev)).toEqual(['turn-end:turn-a20'])
+  })
+
+  test('a tool-only row keeps the turn open until the reply after it; a tool run counts its result', () => {
+    const ev = parse([
+      row('u11', 'user', { text: 'go' }),
+      turn('a21', { content: [{ type: 'tool', tool: 'bash', state: { status: 'completed', time: { start: 8, end: 12 }, input: { command: 'bun test' }, output: '41 passed' } }], finish: 'tool-calls' }),
+      turn('a22', { content: [{ type: 'text', text: 'ok' }], finish: 'stop' }),
+    ])
+    expect(turns(ev)).toEqual(['turn-start:start-u11', 'turn-end:turn-a22'])
+    expect(ev.find((e) => e.kind === 'step')).toMatchObject({
+      id: 'a21-0', tool: 'bash', step: 'run', title: 'Ran tests', test: true, result: '41 passed', at: 8, end: 12,
+    })
+  })
+
+  test('a part with a start but no end never ends before it started', () => {
+    const ev = parse([turn('a31', { content: [{ type: 'tool', tool: 'bash', state: { status: 'running', time: { start: 50 } } }], finish: 'tool-calls' })])
+    expect(ev.find((e) => e.kind === 'step')).toMatchObject({ at: 50, end: 50 })
+  })
+
+  test('each tool reads in words: shell, files, search, web, subagent and an unknown tool', () => {
+    expect(opencodeStep('bash', { command: 'git status' })).toMatchObject({ step: 'run', title: 'Checked git status' })
+    expect(opencodeStep('read', { filePath: '/w/a.ts' })).toMatchObject({ step: 'read', title: 'Read a.ts' })
+    expect(opencodeStep('read', undefined)).toMatchObject({ step: 'other', title: 'Used read' })
+    expect(opencodeStep('edit', { filePath: '/w/a.ts', oldString: 'a', newString: 'a\nb' })).toMatchObject({ step: 'edit', title: 'Edited a.ts', added: 1 })
+    expect(opencodeStep('edit', undefined)).toMatchObject({ step: 'other', title: 'Used edit' })
+    expect(opencodeStep('write', { filePath: '/w/a.ts', content: 'a\nb' })).toMatchObject({ step: 'edit', title: 'Wrote a.ts', added: 2 })
+    expect(opencodeStep('write', undefined)).toMatchObject({ step: 'other', title: 'Used write' })
+    expect(opencodeStep('grep', { pattern: 'review' })).toMatchObject({ step: 'search', title: 'Searched the code for “review”' })
+    expect(opencodeStep('glob', { pattern: '*.ts' })).toMatchObject({ step: 'search', title: 'Looked for files named *.ts' })
+    expect(opencodeStep('webfetch', { url: 'https://example.com/docs' })).toMatchObject({ step: 'web', title: 'Read example.com/docs' })
+    expect(opencodeStep('task', { description: 'Review the fix' })).toMatchObject({ step: 'agent', title: 'Asked a subagent to review the fix' })
+    expect(opencodeStep('todowrite')).toMatchObject({ step: 'other', title: 'Used todowrite' })
+  })
+
+  test('outputAt reads a tool part’s raw output from its row', () => {
+    const file = join(tmp('opencode-reader-out'), 'ses_1.jsonl')
+    const obj = row('a30', 'assistant', {
+      content: [{ type: 'text', text: 'x' }, { type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'ls' }, output: 'a.ts\n' } }],
+      finish: 'stop',
+    })
+    writeFileSync(file, JSON.stringify(obj) + '\n')
+    const step = new OpencodeReader().parse([line(obj, 0)], file).find((e) => e.kind === 'step')!
+    expect(outputAt(step.kind === 'step' ? step.out! : { file, offset: 0 }, step.id)).toBe('a.ts\n')
+    expect(outputAt({ file, offset: 0 }, 'a30-9')).toBeUndefined()
   })
 })
