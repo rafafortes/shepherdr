@@ -40,10 +40,11 @@ On a machine where herdr runs as a systemd user service, give it (and the server
 coverage baseline is recorded). It takes a lock of its own (`check-local-quick.lock`), so it never waits behind a full
 run: it starts at once and, while a full run holds the shared lock, its changed tests take `max(2, cores / 8)` workers
 rather than a quarter of the cores, so the full run's browser tests do not flake on the contention (an explicit
-`SHEPHERDR_TEST_JOBS` is never overridden), and two quick runs still go one at a time. Its verdict says `QUICK` and
-what it did not run on its first line, in
-`verdict-quick.txt`, so it can never be taken for a full verdict where one is asked for, and it is never kept as a
-tree's verdict for the merge gate (`--reuse`, below) to answer from; a quick run that fails types or the build still
+`SHEPHERDR_TEST_JOBS` is never overridden), and two quick runs still go one at a time. `60-dist-budget` still runs on
+what its own build left in `dist/` (the same build lock keeps a full run's build from emptying it mid-read). Its verdict
+says `QUICK` and what it did not run on its first line, in `verdict-quick.txt`, so it can never be taken for a full
+verdict where one is asked for, and it is never kept as a tree's verdict for the merge gate (`--reuse`, below) to answer
+from; a quick run that fails types or the build still
 fails the gate. A change to a file that can break any test — `test/preload.ts`, `test/once.ts`,
 `scripts/test.ts`, `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json` (`scripts/test.ts`'s `EVERYTHING` list) —
 runs the whole suite in a quick run as well, so a change to one of them is never proven by a handful of files. A change
