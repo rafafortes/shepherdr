@@ -164,7 +164,8 @@
   the pull request's path too: the branch is first brought onto GitHub's base (`origin/<base>`, rebased whenever it moved,
   not only on a conflict, so that what the gate checks is what will land), the gate runs on that very commit before
   anything is pushed, and the pull request merges only while its head is still that commit and GitHub's base is still the
-  one it ran on. A base that moved while it ran: the branch is rebased and the gate runs again (three times at most, then
+  one it ran on, as far as a fetch just before the merge can tell (GitHub itself pins only the head). A merge that comes
+  back for GitHub's checks gates again on its next `shepherdr merge`: the gate is on every one of them. A base that moved while it ran: the branch is rebased and the gate runs again (three times at most, then
   `main kept moving while … nothing was merged`); a base that moved after it ran, while GitHub's checks were read, no
   merge at all — the next `shepherdr merge` gates the branch on the new base. GitHub's own checks, where a repository has
   them, are read as before: the gate is one more condition, never a replacement.

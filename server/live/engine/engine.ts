@@ -4105,10 +4105,10 @@ export class Engine extends Emitter<Events> {
     const refreshBase = async () => void (await G.git(p.path, 'fetch', '--quiet', 'origin', t.base!))
     // its space's merge gate (merge.gate), where it has one: nothing is pushed, or merged, that did not pass it
     const cmd = this.gateOf(t, p.name)
-    // GitHub squash-merges a branch behind main as it is: rebasing it would make a new commit, and all its checks run
-    // again (again each time main moves meanwhile). Only a real conflict is rebased here; a clash that merges cleanly
-    // but breaks is caught by the checks on main. With a merge gate the branch goes onto the base as it is now even
-    // when it moved without a conflict, since what the gate checks is what will land.
+    // Without a merge gate, GitHub squash-merges a branch behind main as it is: rebasing it would make a new commit, and
+    // all its checks run again (again each time main moves meanwhile). Only a real conflict is rebased here; a clash
+    // that merges cleanly but breaks is caught by the checks on main. With a gate the branch goes onto the base as it
+    // is now even when it moved without a conflict, since what the gate checks is what will land.
     const conflict = !(await G.mergesCleanly(wt, base, 'HEAD'))
     const behind = !!cmd && !conflict && !(await G.git(wt, 'merge-base', '--is-ancestor', base, 'HEAD')).ok
     let rebased: 'conflict' | 'gate' | undefined
