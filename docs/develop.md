@@ -7,7 +7,7 @@ bun run dev           # the screen with hot reload, on :5173, talking to the ser
 bun run typecheck     # types, in seconds: what to run while you work
 bun run test changed  # the tests that reach what you changed from the default branch
 bun run test          # every test, in parallel, a quarter of the cores as the check does (but no lock)
-bun run check:local   # the whole check: types, every test with the browser ones, the coverage ratchet, the build (about 2 minutes)
+bun run check:local   # the whole check: dependencies, secrets, scripts, docs, version, types, language, every test with the browser ones, the coverage ratchet, the build (about 2 minutes)
 ```
 
 The whole check runs on this machine: GitHub Actions is off on this repo (2026-11-06), so `.github/workflows/check.yml`
@@ -24,7 +24,8 @@ On a machine where herdr runs as a systemd user service, give it (and the server
 
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe; each step is
 one executable file in `scripts/checks/`, named `<number>-<name>` with the numbers spaced by ten (`10-dependencies`,
-`15-secrets`, `17-scripts`, `20-types`, `30-tests`, `40-coverage`, `50-build`). The runner discovers the executable
+`15-secrets`, `17-scripts`, `18-docs`, `19-version`, `20-types`, `21-language`, `30-tests`, `40-coverage`, `50-build`).
+The runner discovers the executable
 files by sorted file name, so adding a check is adding one file and no later task edits a shared list: a `.ts` file
 beside them is a check's own logic, not a check (e.g. `secrets.ts`), and the order is reviewed because it is the file
 name. A check file:
@@ -54,6 +55,24 @@ The scripts step (`17-scripts`, whose logic is `scripts/checks/scripts.ts`) runs
 warning or a syntax error fails with its file and line; an accepted finding is baselined with `# shellcheck disable=`
 and the reason on the line. perlcritic is not gated on: its style rules are too opinionated for a check. A host without
 either tool skips just that part, naming it, and the verdict says what did not run.
+
+The docs step (`18-docs`, whose logic is `scripts/checks/docs.ts`) resolves every relative markdown link in `docs/`,
+`README.md`, `AGENTS.md` and `skill/` against the tree — external URLs are never fetched — and checks every
+`shepherdr <verb>` instruction there against the commands `shepherdr help` actually lists, so a renamed verb cannot
+leave stale orders that task agents obey. A broken link fails with its file and target; a stale verb fails with its
+line. The two upstream pages (`docs/upstream.md`, `docs/upstream-ledger.md`) quote another line's command names as
+their subject, so they are left out of the verb check.
+
+The version step (`19-version`, whose logic is `scripts/checks/version.ts`) fails when `package.json` and
+`herdr-plugin.toml` disagree on `version`, and checks `plugins.json` too if a release gives it one: the bump edits these
+by hand in separate places, the moment a forgotten one ships a mismatch that breaks plugin installs.
+
+The language step (`21-language`, whose logic is `scripts/checks/language.ts`) scans the code files the diff from the
+default branch touches for prose-like runs of non-ASCII letters and fails with the file and line, so a Portuguese
+sentence cannot be committed on a reviewer's notice alone. Em dash, curly quotes, ellipsis and emoji are not letters
+and are never flagged; test fixtures, the emoji keyword table and a `language-allow: <why>` marker (for quoted sources
+and user-facing strings) are the explicit allowlist. `SHEPHERDR_LANGUAGE_SCOPE=tree` scans the whole tree instead —
+that is the weekly run.
 
 The tests never touch the Shepherdr on this machine or its herdr: `test/preload.ts` gives each file a home of its own
 under `/tmp`, a socket that isn't there and no inherited pane, tab or workspace id. Every temporary folder a test makes

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Check after types: scan the files the diff from the default branch touches (the whole tree on the weekly run) for
+# prose-like foreign letters in code (audit 2026-11-18, QG-09). The logic and its fixture tests live in the language.ts
+# module beside this shim; the runner runs whichever executable files it finds.
+set -uo pipefail
+root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
+cd "$root" || exit 1
+exec bun "$root/scripts/checks/language.ts"

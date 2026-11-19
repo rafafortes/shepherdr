@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# The whole check on this machine, for this fork: the types, a gitleaks secret scan, every test (the browser tests
-# too), the coverage ratchet (scripts/coverage.ts) and the build, each in its own file under scripts/checks/.
+# The whole check on this machine, for this fork: dependencies, a gitleaks secret scan, shell/Perl lint, doc links and
+# verbs, the version fields, the types, the language scan, every test (the browser tests too), the coverage ratchet
+# (scripts/coverage.ts) and the build, each in its own file under scripts/checks/.
 # GitHub Actions is off on rafafortes/shepherdr (SHE-21), so this is the check every change goes through:
 #
 #   bun run check:local        # a task runs it before `shepherdr ready`; the coordinator before a release
@@ -24,8 +25,9 @@
 # up waiting for another check.
 #
 # A check is one executable file in scripts/checks/, named <number>-<name> with the numbers spaced by ten
-# (10-dependencies, 15-secrets, 17-scripts, 20-types, 30-tests, 40-coverage, 50-build). The runner discovers them by
-# sorted file name; a .ts file beside them is a check's own logic, not a check. Adding a check is adding one file, and
+# (10-dependencies, 15-secrets, 17-scripts, 18-docs, 19-version, 20-types, 21-language, 30-tests, 40-coverage,
+# 50-build). The runner discovers them by sorted file name; a .ts file beside them is a check's own logic, not a check.
+# Adding a check is adding one file, and
 # the order is reviewed because it is the file name. Each check gets its shared context
 # in SHEPHERDR_CHECK_* environment variables (never positional arguments), writes its note to SHEPHERDR_CHECK_NOTE and
 # a reason for skipping to SHEPHERDR_CHECK_SKIP, and exits non-zero on failure. The whole contract is in docs/develop.md.
