@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { tmp } from './tmp.ts'
 import { CODEX_WORDS, PI_WORDS, reviewerLineFor } from './reviewer-line.ts'
 
@@ -1216,6 +1216,13 @@ describe('attachments', () => {
       ['u2', 'shot.png'],
     ])
     expect(msgs[1].file?.path).toBe(shot)
+  })
+  test('an upload writes its bytes under a sanitized name', async () => {
+    const path = await src.upload(chat, '../../evil?.png', new Uint8Array([1, 2, 3]))
+    expect(basename(path)).toContain('-.._.._evil_.png')
+    expect(basename(path)).not.toContain('/')
+    expect(existsSync(path)).toBe(true)
+    expect(await (await src.attachment(chat, path))?.bytes()).toEqual(new Uint8Array([1, 2, 3]))
   })
   test('a reaction to a file lands on that file, not on a later one of the same name', async () => {
     const first = src.chats.chat(chat).messages.find((x) => x.id === 'u1:0')!
