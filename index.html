@@ -6,16 +6,9 @@
     <title>Shepherdr</title>
     <meta name="description" content="Run many coding agents across machines from a phone, tablet or desktop." />
     <meta name="theme-color" content="#ffffff" />
-    <script>
-      /* the appearance picked on this device (src/theme.ts), on the page before the first paint: no flash of the other */
-      (function () {
-        var a = null
-        try { a = localStorage.getItem('shepherdr.appearance') } catch (e) {}
-        var dark = a === 'dark' || (a !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
-        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
-        document.querySelector('meta[name=theme-color]').content = dark ? '#0b0b0d' : '#ffffff'
-      })()
-    </script>
+    <!-- the appearance picked on this device (src/theme.ts), before the first paint: a file, not an inline script, so
+         the app's script-src 'self' needs no unsafe-inline -->
+    <script src="/theme.js"></script>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
