@@ -105,7 +105,8 @@ name. A check file:
 
 The secrets step (`15-secrets`, whose logic is `scripts/checks/secrets.ts`) runs `gitleaks detect --source . --redact`,
 so it reads the committed tree and its history, not uncommitted files: commit before the gate. Its JSON report goes to
-the run's log folder, never the repo, and only a finding's file, line and rule are printed, never its value. A finding
+the run's log folder, named after that run's own log (`secrets.log.json`, `secrets-quick.log.json`), never the repo, and
+only a finding's file, line and rule are printed, never its value. A finding
 that predates the step is baselined in `.gitleaksignore` as one fingerprint per line, with a `#` line above saying why
 it is a false positive or a revoked token; a new fingerprint fails the step. A host without gitleaks skips it with the
 install command, and the verdict names the part that did not run.
