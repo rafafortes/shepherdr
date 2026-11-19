@@ -1,6 +1,7 @@
 // Voice calls go through a voice agent (ElevenLabs Conversational AI). It sends what you ask as ordinary messages to
 // the agent whose chat you called from (or another, when you say so), reads the replies out, and can read every
 // agent's state and recent chat. The call itself is not saved: no recording, no transcript kept (retention 0).
+// The transcripts relayed below as captions are display-only, never written to disk.
 import { readJson, writeJson } from '../store.ts'
 
 const API = 'https://api.elevenlabs.io/v1'
@@ -104,7 +105,16 @@ export function startVoice(tools: VoiceTools, out: { send(d: ArrayBuffer | strin
       if (m.type === 'ping') ws!.send(JSON.stringify({ type: 'pong', event_id: m.ping_event?.event_id }))
       // the screen shows what the call is doing: through, then thinking once you've said something
       else if (m.type === 'conversation_initiation_metadata') out.send(JSON.stringify({ type: 'state', state: 'listening' }))
-      else if (m.type === 'user_transcript') out.send(JSON.stringify({ type: 'state', state: 'thinking' }))
+      // the service's final transcript events (ElevenLabs conversation client events): the human's words and the
+      // agent's spoken reply. The pill shows them as captions; nothing here is recorded.
+      else if (m.type === 'user_transcript') {
+        const text = m.user_transcription_event?.user_transcript
+        if (text) out.send(JSON.stringify({ type: 'caption', who: 'you', text }))
+        out.send(JSON.stringify({ type: 'state', state: 'thinking' }))
+      } else if (m.type === 'agent_response') {
+        const text = m.agent_response_event?.agent_response
+        if (text) out.send(JSON.stringify({ type: 'caption', who: 'agent', text }))
+      }
       else if (m.type === 'audio' && m.audio_event?.audio_base_64) out.send(Buffer.from(m.audio_event.audio_base_64, 'base64').buffer as ArrayBuffer)
       else if (m.type === 'interruption') out.send(JSON.stringify({ type: 'interrupt' }))
       else if (m.type === 'client_tool_call') {

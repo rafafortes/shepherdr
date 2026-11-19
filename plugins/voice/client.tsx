@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 import { act, agentChat, chatName, definePlugin, getState, goChat, placeOf, setUI, useSnap, useStore, useUI, visibleChats } from '@client/kernel.ts'
 import { EndCallIcon, ic, IconButton, LiveWave, MicIcon, MicOffIcon, roundBtn, useElapsed, WaveIcon, Waves, XIcon } from '@client/ui.tsx'
 import { cancelDictation } from '@plugins/chat/client.tsx'
-import { callPhase, callSample, muteCall, startCall, stopCall } from './call.ts'
+import { callCaptions, callPhase, callSample, muteCall, startCall, stopCall } from './call.ts'
 
 export function toggleCall(chatKey: string) {
   const ui = getState().ui
@@ -63,16 +63,28 @@ function usePhase() {
   return phase
 }
 
+/** the captions come over the call socket, so read them on the same beat as the phase */
+function useCaptions() {
+  const [captions, set] = useState(callCaptions)
+  useEffect(() => {
+    const t = setInterval(() => set(callCaptions()), 150)
+    return () => clearInterval(t)
+  }, [])
+  return captions
+}
+
 /** On a call the chat box is the call: no typing, a live wave of who is talking, what the call is doing, Mute and End */
 function CallBox({ chatKey }: { chatKey: string }) {
   const ui = useUI()
   const snap = useSnap()!
   const phase = usePhase()
+  const captions = useCaptions()
   const t = useElapsed(ui.callStarted)
   // muted shows whenever the agent isn't speaking, so a silent call never looks like it's listening
   const word = ui.callMuted && phase !== 'speaking' ? 'Muted' : WORD[phase]
   return (
-    <>
+    // the controls keep their row: the captions, when there are any, get a whole line of their own beneath it
+    <div className="flex w-full flex-wrap items-center gap-1">
       {/* a call control, not the talk to type mic: filled, and struck through and dark while muted */}
       <IconButton
         label={ui.callMuted ? 'Unmute' : 'Mute'}
@@ -82,7 +94,7 @@ function CallBox({ chatKey }: { chatKey: string }) {
       >
         {ui.callMuted ? <MicOffIcon className={ic} /> : <MicIcon className={ic} />}
       </IconButton>
-      <LiveWave sample={callSample} label={`Voice call with ${chatName(snap, chatKey)}`} className="ml-1.5 flex-1" />
+      <LiveWave sample={callSample} label={`Voice call with ${chatName(snap, chatKey)}`} className="ml-1.5 min-w-10 flex-1" />
       <p className="flex shrink-0 items-baseline gap-1.5 px-2 text-[0.8125rem] phone:text-[0.9375rem]">
         <span role="status" className="font-medium text-fg">
           {word}
@@ -97,7 +109,17 @@ function CallBox({ chatKey }: { chatKey: string }) {
       >
         <EndCallIcon className={ic} />
       </button>
-    </>
+      {/* the words said on the call, last two lines, no history: display only, gone when the call ends */}
+      {captions.length > 0 && (
+        <p data-captions role="status" aria-live="polite" aria-atomic="false" className="w-full px-2 text-[0.8125rem] leading-snug text-fg2">
+          {captions.map((c) => (
+            <span key={c.id} className="block">
+              {c.who === 'you' ? 'You: ' : ''}{c.text}
+            </span>
+          ))}
+        </p>
+      )}
+    </div>
   )
 }
 

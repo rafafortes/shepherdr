@@ -14,6 +14,9 @@ let theirs: AnalyserNode | null = null
 /** what the call is doing, besides the agent speaking (which the playing audio tells) */
 let phase: 'connecting' | 'listening' | 'thinking' = 'connecting'
 let phaseAt = 0
+/** the last spoken lines, for the pill's captions; display-only, never saved */
+let captions: { id: number; who: 'agent' | 'you'; text: string }[] = []
+let captionSeq = 0
 
 const RATE = 16000
 
@@ -58,11 +61,13 @@ export async function startCall(chatKey: string, onError: (message: string) => v
       phase = 'listening'
       return play(e.data)
     }
-    const m = JSON.parse(String(e.data)) as { type: string; message?: string; state?: typeof phase }
+    const m = JSON.parse(String(e.data)) as { type: string; message?: string; state?: typeof phase; who?: 'agent' | 'you'; text?: string }
     if (m.type === 'state' && m.state) {
       phase = m.state
       phaseAt = Date.now()
     }
+    // words the service heard and said, for the pill: no history, just the last couple of lines
+    if (m.type === 'caption' && m.who && m.text) captions = [...captions, { id: ++captionSeq, who: m.who, text: m.text }].slice(-2)
     // you talked over it: what it was about to say is dropped
     if (m.type === 'interrupt') {
       sources.forEach((s) => s.stop())
@@ -116,6 +121,11 @@ export function callPhase(): 'connecting' | 'listening' | 'thinking' | 'speaking
   return phase
 }
 
+/** the last lines said on the call, newest last, for the pill's captions */
+export function callCaptions(): { id: number; who: 'agent' | 'you'; text: string }[] {
+  return captions
+}
+
 /** for the wave: whoever is louder right now, the agent first (your mic hears it a little too) */
 export function callSample(): Sample {
   const agent = levelOf(theirs)
@@ -141,4 +151,5 @@ export function stopCall() {
   playAt = 0
   muted = false
   phase = 'connecting'
+  captions = []
 }

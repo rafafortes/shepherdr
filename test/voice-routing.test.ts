@@ -174,3 +174,57 @@ test('provider close and explicit call end both release the reply subscription o
     else process.env.ELEVENLABS_API_KEY = previousKey
   }
 })
+
+test('final transcripts become display-only captions; a service that sends none just changes phase', async () => {
+  const { startVoice } = await import('../server/live/voice.ts')
+  const nativeFetch = globalThis.fetch
+  const nativeSocket = globalThis.WebSocket
+  const previousKey = process.env.ELEVENLABS_API_KEY
+  process.env.ELEVENLABS_API_KEY = 'isolated-fake-key'
+  writeFileSync(join(process.env.SHEPHERDR_HOME!, 'voice.json'), JSON.stringify({ agent: 'fake' }))
+  let socket: FakeSocket
+  class FakeSocket {
+    static OPEN = 1
+    readyState = 1
+    onopen?: () => void
+    onclose?: () => void
+    onmessage?: (e: { data: string }) => void
+    constructor() { socket = this }
+    send() {}
+    close() { this.onclose?.() }
+  }
+  const messages: Record<string, unknown>[] = []
+  try {
+    globalThis.fetch = (async () => Response.json({ signed_url: 'ws://fake' })) as unknown as typeof fetch
+    globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket
+    const call = startVoice(
+      { name: 'remote:test', send: async () => '', read: async () => '', overview: async () => '', onReply: () => () => {} },
+      { send(d) { if (typeof d === 'string') messages.push(JSON.parse(d)) }, close() {} },
+    )
+    await Bun.sleep(0)
+    socket!.onopen?.()
+    const fire = (m: object) => socket!.onmessage?.({ data: JSON.stringify(m) })
+
+    // the service's final transcript events, in the shape of its conversation client events
+    fire({ type: 'user_transcript', user_transcription_event: { user_transcript: 'ship it', event_id: 1 } })
+    fire({ type: 'agent_response', agent_response_event: { agent_response: 'on it', event_id: 2 } })
+    expect(messages).toContainEqual({ type: 'caption', who: 'you', text: 'ship it' })
+    expect(messages).toContainEqual({ type: 'caption', who: 'agent', text: 'on it' })
+    expect(messages).toContainEqual({ type: 'state', state: 'thinking' })
+
+    // an event with no words says nothing: no empty caption, no error
+    messages.length = 0
+    fire({ type: 'agent_response', agent_response_event: { event_id: 3 } })
+    expect(messages).toEqual([])
+
+    // a service that sends no transcript at all still shows the phase word
+    fire({ type: 'conversation_initiation_metadata', conversation_initiation_metadata_event: { conversation_id: 'c' } })
+    expect(messages).toEqual([{ type: 'state', state: 'listening' }])
+    call.end()
+  } finally {
+    globalThis.fetch = nativeFetch
+    globalThis.WebSocket = nativeSocket
+    if (previousKey === undefined) delete process.env.ELEVENLABS_API_KEY
+    else process.env.ELEVENLABS_API_KEY = previousKey
+  }
+})
