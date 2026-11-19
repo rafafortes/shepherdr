@@ -221,7 +221,7 @@ const ROUTE_REPAIR_MS = 10_000
  *  chain is as long as the number of agents — minutes with ~60 — while a task starting during it can fail its first
  *  write (SHE-56). A handful at a time keeps the pass short without a burst of helper processes on a busy machine. */
 const ROUTE_REPAIR_CHUNK = 6
-/** how often a repair pass runs once the routes are there. The first one runs at the first look at herdr (routesAt
+/** how often a repair pass runs. The first one runs at the first look at herdr that lists an agent to bind (routesAt
  *  starts at 0), so a restart repairs its routes at once instead of waiting this out. */
 const ROUTE_REPAIR_EVERY = 30_000
 
@@ -653,10 +653,6 @@ export class Agents extends Emitter<Events> {
         }
       }
       // Repair running sessions without interrupting them, including ones restored by herdr.
-      if (Date.now() - this.routesAt > ROUTE_REPAIR_EVERY && !this.routing) {
-        this.routesAt = Date.now()
-        void this.repairRoutes()
-      }
       void this.readRuntime()
       // Slow pane reads must not hold up transport health checks.
       if (!this.readingBackground) {
@@ -667,7 +663,14 @@ export class Agents extends Emitter<Events> {
             this.readingBackground = false
           })
       }
+      // what each launch is really doing now, before the repair pass reads it: a pendingLaunch its launch is done with
+      // must not keep its route waiting for the next pass
       this.settleLaunches()
+      const todo = this.repairTodo()
+      if (todo.length && Date.now() - this.routesAt > ROUTE_REPAIR_EVERY && !this.routing) {
+        this.routesAt = Date.now()
+        void this.repairRoutes(todo)
+      }
       // learn log files herdr names (its agent integrations report them)
       for (const [name, key] of this.byName) this.learnSession(key, this.live.get(name))
       // and the session its hooks say it is in now, which herdr doesn't name: a /clear starts another
@@ -845,10 +848,9 @@ export class Agents extends Emitter<Events> {
    * never one whose own launch is about to bind it (a launch's bind stays its own, so the repair pass can neither
    * skip nor duplicate it). Each route fails on its own, said once, and never stops the others.
    */
-  private async repairRoutes() {
+  private async repairRoutes(todo = this.repairTodo()) {
     this.routing = true
     try {
-      const todo = Object.values(this.records).filter((r) => this.live.has(r.name) && !r.pendingLaunch && !this.starting.has(r.key))
       for (let i = 0; i < todo.length; i += ROUTE_REPAIR_CHUNK) {
         if (this.stopped) return
         await Promise.allSettled(todo.slice(i, i + ROUTE_REPAIR_CHUNK).map((r) => this.repairRoute(r)))
@@ -858,10 +860,23 @@ export class Agents extends Emitter<Events> {
     }
   }
 
-  /** one route of the repair pass: its failure is said here and belongs to this route alone */
+  /** the live agents a repair pass has to bind: the ones no launch is binding itself right now */
+  private repairTodo() {
+    return Object.values(this.records).filter((r) => this.live.has(r.name) && !this.itsOwnBind(r))
+  }
+
+  /** whether a launch owns this route: it binds it itself, so the repair pass leaves it alone. Herdr's own answer for
+   *  the launch, not only what the store kept, so a restart's stale pendingLaunch strands nothing. */
+  private itsOwnBind(r: AgentRecord) {
+    if (r.pendingLaunch || this.starting.has(r.key) || this.stopping.has(r.key)) return true
+    return !!this.live.get(r.name)?.launch_pending
+  }
+
+  /** one route of the repair pass: its failure is said here and belongs to this route alone. Read again just before the
+   *  write, so a launch that started while an earlier chunk bound is left to its own bind. */
   private async repairRoute(r: AgentRecord) {
     const a = this.live.get(r.name)
-    if (!a) return
+    if (!a || this.itsOwnBind(r)) return
     try { await this.bindRoute(r, a.pane_id, false, ROUTE_REPAIR_MS) }
     catch (e) { console.error(`shepherdr: routing ${r.key}: ${(e as Error).message}`) }
   }
