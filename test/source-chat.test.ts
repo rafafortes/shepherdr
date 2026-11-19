@@ -37,13 +37,6 @@ const until = async (f: () => boolean, ms = 8000, said = 'it') => {
   for (const t0 = Date.now(); !f(); await Bun.sleep(20)) if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${said}`)
 }
 
-/**
- * Something that only has to settle before the tests after this one (an agent herdr can't start): waited for at
- * most 8 s — the 20 s these tests run in is the other bound — and the test goes on either way, however slow the
- * machine. The fixed 5 s these had failed a slow runner; a longer wait would only spend a test's own time.
- */
-const settle = (f: () => boolean, said: string) => until(f, 8000, said).catch(() => undefined)
-
 /** a repo a test made, with its first commit (never the folder the tests run from) */
 const REPO = 'git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init'
 
