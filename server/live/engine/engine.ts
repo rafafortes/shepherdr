@@ -1666,6 +1666,37 @@ export class Engine extends Emitter<Events> {
     return { space, shown: this.places.shownName(space), max, working: this.tasks.filter((x) => this.places.space(x.project)?.name === space && this.busy(x)).length }
   }
 
+  /** a task's place in this machine's queue: its space's priority, or past the end when the space has none */
+  private spaceOrder(t: TaskRec) {
+    return this.settings.spacePriority(this.nameOf(t) ?? '') ?? Number.POSITIVE_INFINITY
+  }
+
+  /** the line held tasks start in: first in line, then its space's priority (unset spaces last), then how long it waited */
+  private heldOrder(a: TaskRec, b: TaskRec) {
+    const pa = this.spaceOrder(a)
+    const pb = this.spaceOrder(b)
+    return Number(!!b.priority) - Number(!!a.priority) || (pa === pb ? 0 : pa - pb) || a.held!.since - b.held!.since
+  }
+
+  /** the line review waits are woken in: the same order, by how long the review has waited */
+  private reviewOrder(a: TaskRec, b: TaskRec) {
+    const pa = this.spaceOrder(a)
+    const pb = this.spaceOrder(b)
+    return Number(!!b.priority) - Number(!!a.priority) || (pa === pb ? 0 : pa - pb) || (a.reviewWait?.since ?? 0) - (b.reviewWait?.since ?? 0)
+  }
+
+  /** a shared wait's "after <space>'s tasks": the one ahead of this task is in a space ordered before its own */
+  private behindWords(t: TaskRec) {
+    const why = t.held?.why
+    if (why !== 'slots' && why !== 'machine') return ''
+    const list = this.heldTasks()
+    const at = list.indexOf(t)
+    if (at <= 0) return ''
+    const first = list[0]!
+    if (this.spaceOrder(first) >= this.spaceOrder(t)) return ''
+    return ` · after ${this.places.shownName(this.nameOf(first) ?? '')}'s tasks`
+  }
+
   /** a held task's line in its row: a task held by its space's cap names the space, as it shows; one held for its models
    *  names each harness of its chain, short (waitShort), and in full when `full` (the row's title) */
   private heldLabel(t: TaskRec, full = false) {
@@ -1678,7 +1709,7 @@ export class Engine extends Emitter<Events> {
     }
     const cap = t.held!.why === 'space' || t.held!.why === 'spaceZero' ? this.spaceCap(t) : undefined
     if (cap && t.held!.why === 'spaceZero') return `${cap.shown} is set to 0 tasks`
-    return cap ? `Waiting for a free slot of ${cap.shown}` : HELD[t.held!.why]
+    return (cap ? `Waiting for a free slot of ${cap.shown}` : HELD[t.held!.why]) + this.behindWords(t)
   }
 
   /** the name a space of this machine was added under, for a scope that names it: its place id, the name it was added
@@ -1715,17 +1746,18 @@ export class Engine extends Emitter<Events> {
   /** the reviews that wait for a reviewer now: each task, its space and each reviewer that is full or out, in words (none
    *  where none waits) */
   reviewWaits(): { id: string; space: string; words: string }[] {
-    return this.tasks.flatMap((t) => {
-      if (!t.reviewWait || !this.atReviewStep(t)) return []
-      const c = this.reviewChoice(t)
-      return 'wait' in c ? [{ id: t.id, space: this.nameOf(t) ?? '', words: this.waitIn(c.wait) }] : []
-    })
+    return this.tasks
+      .filter((t) => !!t.reviewWait && this.atReviewStep(t))
+      .sort((a, b) => this.reviewOrder(a, b))
+      .flatMap((t) => {
+        const c = this.reviewChoice(t)
+        return 'wait' in c ? [{ id: t.id, space: this.nameOf(t) ?? '', words: this.waitIn(c.wait) }] : []
+      })
   }
 
-  /** tasks held now, oldest first */
+  /** tasks held now, in the line release() starts them: first in line, then space priority, then oldest first */
   heldTasks() {
-    // first in line first, then the oldest
-    return this.tasks.filter((t) => this.holding(t) && !t.archived).sort((a, b) => Number(!!b.priority) - Number(!!a.priority) || a.held!.since - b.held!.since)
+    return this.tasks.filter((t) => this.holding(t) && !t.archived).sort((a, b) => this.heldOrder(a, b))
   }
 
   /** hold it until there's room: its line says why, and its chat gets a small card */
@@ -1737,9 +1769,10 @@ export class Engine extends Emitter<Events> {
     const id = `held:${t.id}:${Date.now()}`
     const cap = why === 'space' || why === 'spaceZero' ? this.spaceCap(t) : undefined
     const choice = why === 'model' || why === 'blocked' ? this.taskChoice(t) : undefined
+    const after = this.behindWords(t)
     const words = {
-      slots: `waiting for a free slot (${this.slotsWords(l.max)})`,
-      machine: 'waiting for the machine: it is busy',
+      slots: `waiting for a free slot (${this.slotsWords(l.max)})${after}`,
+      machine: `waiting for the machine: it is busy${after}`,
       models: 'waiting: every model of this space ran out, so a start would only be cut off too',
       resume: 'waiting: the tasks that were cut off go back to work first',
       space: `waiting for a free slot of ${cap?.shown ?? 'its space'} (${cap?.working ?? 0} of ${cap?.max ?? 0} of its tasks working)`,
@@ -1761,7 +1794,8 @@ export class Engine extends Emitter<Events> {
   }
 
   /**
-   * Start held tasks while this machine has room, oldest first, one at a time machine.startEvery apart (2 min by
+   * Start held tasks while this machine has room, in heldTasks' order (first in line, then space priority, then age),
+   * one at a time machine.startEvery apart (2 min by
    * default): the load averages take minutes to show what a task adds. Called on each health sample and status change.
    */
   release(now = Date.now()) {
@@ -2915,8 +2949,10 @@ export class Engine extends Emitter<Events> {
    * is past its step (reported, stopped, ended, archived), and never one whose command is still waiting for the reviewer.
    */
   retryReviews(): void {
-    for (const t of this.tasks) {
-      if (!t.reviewWait || this.reviewLive.has(t.id)) continue
+    // a freed reviewer goes to the first task in the shared line, not the first one added: first in line, then the
+    // space's priority, then how long its review waited (the same order reviewWaits lists)
+    const waiting = this.tasks.filter((t) => !!t.reviewWait && !this.reviewLive.has(t.id)).sort((a, b) => this.reviewOrder(a, b))
+    for (const t of waiting) {
       if (!this.atReviewStep(t) || this.reviewsLeft(t) <= 0) {
         t.reviewWait = undefined
         this.save()

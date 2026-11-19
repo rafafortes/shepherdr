@@ -356,6 +356,39 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
     }
   })
 
+  test('the Priority column lists the spaces in order; moving one by keyboard writes 1..n and re-orders the list', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      await set('space.priority', '1', 'p:vm-str:herdr-projects')
+      await set('space.priority', '2', 'p:vm-str:gtm')
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 1/ }).waitFor()
+      await table.getByRole('button', { name: /^gtm · Priority: 2/ }).waitFor()
+      const labels = await rowLabels(table)
+      expect(labels.indexOf('herdr-projects')).toBeLessThan(labels.indexOf('gtm'))
+      // keyboard: Tab to gtm's ↑ and press Enter. Both moves renumber every space, so the new Priority: 1 proves the write
+      const up = table.getByRole('button', { name: 'Move gtm up' })
+      await up.focus()
+      await page.keyboard.press('Enter')
+      await table.getByRole('button', { name: /^gtm · Priority: 1/ }).waitFor()
+      expect((await rowLabels(table)).indexOf('gtm')).toBeLessThan((await rowLabels(table)).indexOf('herdr-projects'))
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
+      // the other direction works too: gtm is first now, so its ↓ is on and takes the list back
+      await table.getByRole('button', { name: 'Move gtm down' }).click()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 1/ }).waitFor()
+      expect(await up.isEnabled()).toBe(true)
+      expect(await table.getByRole('button', { name: 'Move herdr-projects up' }).isDisabled()).toBe(true)
+      expect(await table.getByRole('button', { name: 'Move herdr-projects down' }).isEnabled()).toBe(true)
+    } finally {
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await page.close()
+    }
+  })
+
   test('the Providers and the Machine tables fit the Settings width at 1440 px: no horizontal scroll, their columns in view', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
@@ -408,6 +441,32 @@ describe.skipIf(!browser)('Settings → Limits on a phone', () => {
       expect(await follows(pi, spark)).toBe(true)
       expect(await follows(spark, opencode)).toBe(true)
     } finally {
+      await page.close()
+    }
+  })
+
+  test('a phone lists the spaces in queue order and moves one by touch', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    try {
+      await openLimits(page, true)
+      await set('space.priority', '1', 'p:vm-str:gtm')
+      await set('space.priority', '2', 'p:vm-str:herdr-projects')
+      const gtm = page.getByRole('region', { name: 'Space gtm' })
+      await gtm.scrollIntoViewIfNeeded()
+      await gtm.getByRole('button', { name: /^gtm · Priority: 1/ }).waitFor()
+      const hp = page.getByRole('region', { name: 'Space herdr-projects' })
+      await hp.scrollIntoViewIfNeeded()
+      await hp.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
+      expect(await follows(gtm, hp)).toBe(true)
+      // touch: a tap of the ↑ moves it first, renumbers both spaces and re-orders the cards
+      await hp.getByRole('button', { name: 'Move herdr-projects up' }).tap()
+      await hp.getByRole('button', { name: /^herdr-projects · Priority: 1/ }).waitFor()
+      await gtm.getByRole('button', { name: /^gtm · Priority: 2/ }).waitFor()
+      expect(await follows(hp, gtm)).toBe(true)
+    } finally {
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
       await page.close()
     }
   })

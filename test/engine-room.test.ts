@@ -200,3 +200,142 @@ describe('room on the machine', () => {
     expect([w.engine.startsNow(1_000_000 + 4 * 60_000), w.engine.startsNow(1_000_000 + 5 * 60_000)]).toEqual([0, 1])
   })
 })
+
+/** two spaces of this machine, added under their own names (the names their settings are keyed by) */
+async function twoSpaces(w: ReturnType<typeof world>) {
+  const a = await w.places.add(repo(), 'prio-a')
+  const b = await w.places.add(repo(), 'prio-b')
+  return { a, b }
+}
+
+/** all tasks wait for the same thing: the machine's load. Its spacing is off, so release() can start them one by one */
+function busy(w: ReturnType<typeof world>) {
+  w.engine.machine = () => ({ busy: 'cpu' as const, herdr: true })
+}
+
+describe('the order between spaces in the shared queue', () => {
+  test('with nothing set it is by age; a numbered space goes first whatever its age, and the later line names it', async () => {
+    const w = fresh({ 'machine.maxTasks': '1', 'machine.startEvery': '0' })
+    const { a, b } = await twoSpaces(w)
+    // one task at work holds the only slot, so the two that follow wait for the machine's room by age
+    const atWork = w.engine.add({ project: b.name, title: 'B work', by: 'test' })
+    await until(() => w.started.some((s) => s.key === `${atWork.id}/Agent`))
+    w.brief(`${atWork.id}/Agent`)
+    const old = w.engine.add({ project: b.name, title: 'B old', by: 'test' })
+    const young = w.engine.add({ project: a.name, title: 'A young', by: 'test' })
+    expect(w.engine.heldTasks().map((t) => t.id)).toEqual([old.id, young.id])
+    expect(w.engine.subOf(old)).toBe('Waiting for a free slot')
+    expect(w.posted.some((x) => x.key === `${old.id}/Agent` && x.card?.text === 'waiting for a free slot (1 of 1 working)')).toBe(true)
+    // the human gives A the first place: it leads despite being younger, and B says what it waits behind
+    expect(w.settings.set('space.priority', '1', { space: a.name }).ok).toBe(true)
+    expect(w.engine.heldTasks().map((t) => t.id)).toEqual([young.id, old.id])
+    expect(w.engine.subOf(old)).toBe(`Waiting for a free slot · after ${a.name}'s tasks`)
+    // a task held after the setting is made gets the same words in its chat card (the line above is read live)
+    const later = w.engine.add({ project: b.name, title: 'B later', by: 'test' })
+    expect(w.posted.some((x) => x.key === `${later.id}/Agent` && x.card?.text === `waiting for a free slot (1 of 1 working) · after ${a.name}'s tasks`)).toBe(true)
+    // the slot frees: A's task starts first, B's still waits
+    await w.engine.done(atWork.id, 'Nothing to change.')
+    w.agentIs(`${atWork.id}/Agent`, 'idle')
+    await until(() => w.started.some((s) => s.key === `${young.id}/Agent`))
+    expect(w.started.some((s) => s.key === `${old.id}/Agent`)).toBe(false)
+  })
+
+  test('the order is decided before any agent starts: it holds for tasks on different CLIs too', async () => {
+    const w = fresh({ 'machine.maxTasks': '1', 'machine.startEvery': '0' })
+    const { a, b } = await twoSpaces(w)
+    const atWork = w.engine.add({ project: b.name, title: 'B work', by: 'test' })
+    await until(() => w.started.some((s) => s.key === `${atWork.id}/Agent`))
+    w.brief(`${atWork.id}/Agent`)
+    const claude = w.engine.add({ project: b.name, title: 'B Claude Code', by: 'test', agent: { kind: 'claude' } })
+    const pi = w.engine.add({ project: a.name, title: 'A pi', by: 'test', agent: { kind: 'pi' } })
+    expect(w.settings.set('space.priority', '1', { space: a.name }).ok).toBe(true)
+    expect(w.engine.heldTasks().map((t) => t.id)).toEqual([pi.id, claude.id])
+    await w.engine.done(atWork.id, 'Nothing to change.')
+    w.agentIs(`${atWork.id}/Agent`, 'idle')
+    await until(() => w.started.some((s) => s.key === `${pi.id}/Agent`))
+    expect(w.started.some((s) => s.key === `${claude.id}/Agent`)).toBe(false)
+  })
+
+  test('lower numbers first, equal numbers by age, unset spaces last, and first in line ahead of every space', async () => {
+    const w = fresh({ 'machine.startEvery': '0' })
+    busy(w)
+    const { a, b } = await twoSpaces(w)
+    const third = await w.places.add(repo(), 'prio-c')
+    expect(w.settings.set('space.priority', '2', { space: a.name }).ok).toBe(true)
+    expect(w.settings.set('space.priority', '1', { space: third.name }).ok).toBe(true)
+    const b1 = w.engine.add({ project: b.name, title: 'B unset', by: 'test' })
+    const a1 = w.engine.add({ project: a.name, title: 'A two', by: 'test' })
+    const c1 = w.engine.add({ project: third.name, title: 'C one', by: 'test' })
+    const b2 = w.engine.add({ project: b.name, title: 'B unset 2', by: 'test' })
+    // controlled ages: the first added is the oldest of the unset spaces, and the two numbered spaces are younger
+    b1.held!.since = 1_000
+    a1.held!.since = 2_000
+    c1.held!.since = 3_000
+    b2.held!.since = 4_000
+    expect(w.engine.heldTasks().map((t) => t.id)).toEqual([c1.id, a1.id, b1.id, b2.id])
+    expect(w.engine.subOf(b1)).toBe(`Waiting for the machine · after ${third.name}'s tasks`)
+    // a task marked first in line goes ahead of every space, unaffected by the setting. It passes load, but not a herdr
+    // that does not answer, so that is what holds it here
+    w.engine.machine = () => ({ herdr: false })
+    const fix = w.engine.add({ project: b.name, title: 'Fix main', by: 'test', priority: true })
+    fix.held!.since = 5_000
+    expect(w.engine.heldTasks().map((t) => t.id)).toEqual([fix.id, c1.id, a1.id, b1.id, b2.id])
+    expect(w.engine.subOf(c1)).toBe('Waiting for the machine')
+    // two spaces with the same number keep the old age order within their place
+    expect(w.settings.set('space.priority', '1', { space: a.name }).ok).toBe(true)
+    a1.held!.since = 10
+    c1.held!.since = 20
+    expect(w.engine.heldTasks().map((t) => t.id)).toEqual([fix.id, a1.id, c1.id, b1.id, b2.id])
+  })
+
+  test('a first space at its own Max tasks cap is stepped over, so a later space starts in the same pass', async () => {
+    const w = fresh({ 'machine.maxTasks': '2', 'machine.startEvery': '0' })
+    const { a, b } = await twoSpaces(w)
+    expect(w.settings.set('space.priority', '1', { space: a.name }).ok).toBe(true)
+    expect(w.settings.set('space.maxTasks', '1', { space: a.name }).ok).toBe(true)
+    const aWork = w.engine.add({ project: a.name, title: 'A work', by: 'test' })
+    await until(() => w.started.some((s) => s.key === `${aWork.id}/Agent`))
+    w.brief(`${aWork.id}/Agent`)
+    const aHeld = w.engine.add({ project: a.name, title: 'A next', by: 'test' })
+    expect(aHeld.held?.why).toBe('space')
+    // fill the machine with another space's task, so B's next one waits for a slot
+    const x = await w.places.add(repo(), 'prio-x')
+    const xWork = w.engine.add({ project: x.name, title: 'X work', by: 'test' })
+    await until(() => w.started.some((s) => s.key === `${xWork.id}/Agent`))
+    w.brief(`${xWork.id}/Agent`)
+    const bHeld = w.engine.add({ project: b.name, title: 'B next', by: 'test' })
+    expect(bHeld.held?.why).toBe('slots')
+    expect(w.engine.heldTasks().map((t) => t.id)).toEqual([aHeld.id, bHeld.id])
+    // X frees a machine slot: A cannot use it (still at its cap), but B starts in the same pass
+    await w.engine.done(xWork.id, 'Nothing to change.')
+    w.agentIs(`${xWork.id}/Agent`, 'idle')
+    await until(() => w.started.some((s) => s.key === `${bHeld.id}/Agent`))
+    expect(w.started.some((s) => s.key === `${aHeld.id}/Agent`)).toBe(false)
+    // B's start filled the machine again, so A's row now names the machine's slots as the first thing holding it
+    expect(w.engine.room(aHeld)).toEqual({ why: 'slots' })
+  })
+
+  test('a first space whose model is full is stepped over too', async () => {
+    const w = fresh({ 'machine.maxTasks': '2', 'machine.startEvery': '0' })
+    expect(w.settings.set('models.maxAtOnce', 'codex=1', 'all').ok).toBe(true)
+    const { a, b } = await twoSpaces(w)
+    expect(w.settings.set('space.priority', '1', { space: a.name }).ok).toBe(true)
+    w.engine.lease('advisor:busy', 'advisor', 'codex/unknown', a.name)
+    const aHeld = w.engine.add({ project: a.name, title: 'A codex', by: 'test', agent: { kind: 'codex' } })
+    expect(aHeld.held?.why).toBe('model')
+    // fill the machine, so B's task waits for a slot behind A's capped model
+    const x = await w.places.add(repo(), 'prio-x-model')
+    const y = await w.places.add(repo(), 'prio-y-model')
+    const xWork = w.engine.add({ project: x.name, title: 'X work', by: 'test' })
+    const yWork = w.engine.add({ project: y.name, title: 'Y work', by: 'test' })
+    await until(() => [xWork, yWork].every((t) => w.started.some((s) => s.key === `${t.id}/Agent`)))
+    w.brief(`${xWork.id}/Agent`)
+    w.brief(`${yWork.id}/Agent`)
+    const bHeld = w.engine.add({ project: b.name, title: 'B plain', by: 'test' })
+    expect(bHeld.held?.why).toBe('slots')
+    await w.engine.done(xWork.id, 'Nothing to change.')
+    w.agentIs(`${xWork.id}/Agent`, 'idle')
+    await until(() => w.started.some((s) => s.key === `${bHeld.id}/Agent`))
+    expect(w.started.some((s) => s.key === `${aHeld.id}/Agent`)).toBe(false)
+  })
+})

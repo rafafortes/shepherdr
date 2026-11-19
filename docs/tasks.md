@@ -104,6 +104,16 @@
   happens (a start now takes the first backup with room, or waits first in line). Settings' task agent, model or effort changed in Settings can go to the waiting tasks
   the same way, when you answer yes to its question (or `shepherdr set … --apply-waiting`), and so can the reviewer: a
   waiting task's brief names the new one, and its agent hears it at its turn: see [settings](settings.md).
+- **The order between spaces.** When tasks of different spaces wait for the machine's room, or for a free reviewer, they
+  stand in one queue. The first in line (above) goes first; then the space's `space.priority` (Settings → Limits →
+  Spaces, `space.priority`, a whole number set at one space only: 1 first, spaces with no number after all numbered
+  ones, ties by age); then how long they waited. With no priority set, that is today's order by age. The order is
+  **strict**: while the first space has a task that can start, no later space starts one. Give the first space a
+  `space.maxTasks` cap to leave room — for example `shepherdr set space.priority 1 --space lyvora-app` and
+  `shepherdr set space.maxTasks 2 --space lyvora-app`: once two of its tasks work, the other spaces start theirs. A
+  first space at its own cap or with its model full does not hold the others back, their tasks are passed over in the
+  same way. This order never stops a running task, does not pass the machine's limits, and leaves `--after` chains,
+  the merge train and each space's cap as they were. A coordinator never changes it; it is the human's setting.
 - **Held for room.** A task waits for room as Queued, with no agent yet, and its row says why: `Waiting for a free slot`
   (the machine's slots are all taken), `Waiting for the machine` (its load, pressure or memory, or a herdr that doesn't
   answer), `Waiting for a free slot of <space>` (that space's own cap, Settings → Space, `space.maxTasks`, is full),
@@ -113,7 +123,9 @@
   (every model of the task's chain is blocked by a `models.maxAtOnce` 0: it starts once a limit changes, never by waiting).
   A task held for its space's cap is
   passed over: a task of another space with room starts past it in the same pass, and the space's held tasks start in
-  turn (first in line, then oldest) as its own tasks end and free a slot. The machine's limit still comes first, so a
+  turn (first in line, then space priority, then oldest) as its own tasks end and free a slot. When another space's
+   priority is why a task is not next, its line adds `· after <space>'s tasks` (for example `Waiting for the machine ·
+   after lyvora-app's tasks`). The machine's limit still comes first, so a
   space's cap never lets more tasks work than the machine has slots.
   - **A model's cap.** A task whose agent would run on a model at its most-at-once cap (`models.maxAtOnce`, one provider
     such as `pi.spark`, or one model key) reads `Waiting for a free slot of pi · spark (4 of 4 at once)`, naming the entry that is

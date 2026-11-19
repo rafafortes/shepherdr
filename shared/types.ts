@@ -1093,7 +1093,8 @@ export interface LimitSpaceRow extends LimitRow {
   held: number
   caps: Record<string, LimitSpaceCap>
 }
-/** the Spaces table: its columns (Max tasks, Merge train), and then one column per pattern a models.maxAtOnce entry names */
+/** the Spaces table: its columns (Priority, Max tasks, Merge train), the rows in queue order, and then one column per
+ *  pattern a models.maxAtOnce entry names */
 export interface LimitSpaces extends LimitTable {
   rows: LimitSpaceRow[]
   patterns: string[]

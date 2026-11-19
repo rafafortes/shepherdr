@@ -251,6 +251,38 @@ export function LimitValue({ title, cell, machine, phone }: { title: string; cel
   )
 }
 
+/** a space's Priority in this machine's queue, with the buttons that move it up or down. They are real buttons, so a Tab
+ *  and Enter/Space and a finger both work, without adding drag code; a move writes 1..n to every space of this machine */
+function PriorityCell({ row, rows, machine, phone, onMove }: { row: LimitSpaceRow; rows: LimitSpaceRow[]; machine: string; phone: boolean; onMove: (next: LimitSpaceRow[]) => void }) {
+  const at = rows.indexOf(row)
+  const move = (dir: -1 | 1) => {
+    const next = [...rows]
+    const to = at + dir
+    ;[next[at], next[to]] = [next[to]!, next[at]!]
+    onMove(next)
+  }
+  const button = (dir: -1 | 1) => (
+    <button
+      type="button"
+      aria-label={`Move ${row.name} ${dir < 0 ? 'up' : 'down'}`}
+      disabled={dir < 0 ? at === 0 : at === rows.length - 1}
+      onClick={() => move(dir)}
+      className="press-dim grid size-9 shrink-0 place-items-center rounded-row text-fg2 hover:bg-hover disabled:opacity-30"
+    >
+      <span aria-hidden="true">{dir < 0 ? '↑' : '↓'}</span>
+    </button>
+  )
+  return (
+    <span className="flex min-w-0 items-center gap-1">
+      <span className="min-w-0 flex-1">
+        <LimitValue title={`${row.name} · Priority`} cell={row.cells['space.priority']!} machine={machine} phone={phone} />
+      </span>
+      {button(-1)}
+      {button(1)}
+    </span>
+  )
+}
+
 /** a space's sub-limit for one pattern: its own entry (strong: its runs now, of its max), or none (faint: the machine's total
  *  applies, or no sub-limit). Either opens the cap editor at this space: a number, or Clear here */
 function SpaceCapCell({ name, pattern, space, caps, total, phone, openId, onOpen }: { name: string; pattern: string; space: LimitSpaceRow; caps: Caps; total?: number; phone: boolean; openId: string | null; onOpen: (id: string | null) => void }) {
@@ -423,6 +455,10 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
     </MenuItem>
   )
   const spaceRows = v.spaces.rows
+  /** a move of one space renumbers all of this machine's spaces 1..n, so the list and the queue follow it */
+  const moveSpaces = async (rows: LimitSpaceRow[]) => {
+    for (const [i, row] of rows.entries()) await write(row.cells['space.priority']!.place, 'space.priority', String(i + 1))
+  }
   const machineTotal = (p: string) => v.spaces.totals[p]?.max
   // the providers in use, then those nothing uses yet (Other providers): a phone's card per provider, a desktop's grid
   const used = v.providers.filter((p) => !p.idle)
@@ -511,7 +547,7 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
       <section aria-label="Spaces" className="flex flex-col gap-2">
         <div className="flex flex-col">
           <h2 className="font-medium">Spaces</h2>
-          <Small className="text-pretty">Each space's own limits. Max tasks is a cap inside the machine's. A column is one provider's or model's sub-limit for each space: its own runs, inside the machine's total for that row. An empty cell has none of its own.</Small>
+          <Small className="text-pretty">Each space's own limits, listed in queue order. Priority puts a space ahead of the others: while it has a task that can start, no later space starts one, so give it a Max tasks cap to leave room. Max tasks is a cap inside the machine's. A column is one provider's or model's sub-limit for each space: its own runs, inside the machine's total for that row. An empty cell has none of its own.</Small>
         </div>
         {phone ? (
           <div className="flex flex-col gap-3">
@@ -522,10 +558,10 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
                   <Small>{row.working} working{row.held ? ` · ${row.held} held` : ''}</Small>
                 </div>
                 <ul className="flex flex-col px-4 pb-2">
-                  {(['space.maxTasks', 'merge.train'] as const).map((key) => (
+                  {([['space.priority', 'Priority'], ['space.maxTasks', 'Max tasks'], ['merge.train', 'Merge train']] as const).map(([key, title]) => (
                     <li key={key} className="flex flex-col gap-1 border-t border-line py-2">
-                      <Small className="text-fg2">{key === 'space.maxTasks' ? 'Max tasks' : 'Merge train'}</Small>
-                      <LimitValue title={`${row.name} · ${key === 'space.maxTasks' ? 'Max tasks' : 'Merge train'}`} cell={row.cells[key]!} machine={v.machine.name} phone />
+                      <Small className="text-fg2">{title}</Small>
+                      {key === 'space.priority' ? <PriorityCell row={row} rows={spaceRows} machine={v.machine.name} phone onMove={(next) => void moveSpaces(next)} /> : <LimitValue title={`${row.name} · ${title}`} cell={row.cells[key]!} machine={v.machine.name} phone />}
                     </li>
                   ))}
                 </ul>
@@ -549,6 +585,9 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
                 <tr>
                   <th scope="col" className="sticky top-0 left-0 z-30 min-w-44 bg-bg pr-4 pb-2 text-left align-bottom font-medium text-fg3">
                     Space
+                  </th>
+                  <th scope="col" title="Lower numbers start first. While the first space has a task that can start, no later space starts one: cap its Max tasks to leave room. A task marked first in line still goes ahead." className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium whitespace-nowrap text-fg3">
+                    Priority
                   </th>
                   <th scope="col" className="sticky top-0 z-20 bg-bg px-2 pb-2 text-left align-bottom font-medium whitespace-nowrap text-fg3">
                     <span className="inline-flex items-center gap-1">
@@ -629,6 +668,9 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
                         {row.working} working{row.held ? ` · ${row.held} held` : ''}
                       </span>
                     </th>
+                    <td className="relative py-1.5 pr-3 align-top">
+                      <PriorityCell row={row} rows={spaceRows} machine={v.machine.name} phone={false} onMove={(next) => void moveSpaces(next)} />
+                    </td>
                     {(['space.maxTasks', 'merge.train'] as const).map((key) => (
                       <td key={key} className="relative py-1.5 pr-3 align-top">
                         <LimitValue title={`${row.name} · ${key === 'space.maxTasks' ? 'Max tasks' : 'Merge train'}`} cell={row.cells[key]!} machine={v.machine.name} phone={false} />

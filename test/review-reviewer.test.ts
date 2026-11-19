@@ -51,9 +51,14 @@ afterAll(() => src?.stop())
 
 /** a task of this space, with its agent on claude and a brief that names its reviewers as its Settings do */
 function task(set?: Record<string, string>) {
+  return taskIn(space.place, set)
+}
+
+/** the same task in a named space of this machine, for the order between spaces */
+function taskIn(place: string, set?: Record<string, string>) {
   const id = `RV-${++n}`
   const now = Date.now()
-  const t = { id, n, project: space.place, base: 'main', title: 'Reviewed change', desc: 'Add b.txt.', by: 'test', created: now, updated: now, told: 'work', agent: { kind: 'claude' }, ...(set ? { set } : {}) }
+  const t = { id, n, project: place, base: 'main', title: 'Reviewed change', desc: 'Add b.txt.', by: 'test', created: now, updated: now, told: 'work', agent: { kind: 'claude' }, ...(set ? { set } : {}) }
   src.engine.tasks.push(t as never)
   return src.engine.task(id)!
 }
@@ -162,6 +167,37 @@ describe('shepherdr review: the caps choose the reviewer of each round', () => {
     src.engine.retryReviews()
     expect(sent).toHaveLength(1)
     expect(t.reviews).toBe(1)
+  })
+
+  test('two reviews waiting for one reviewer: the higher space is woken first, even when the other waited longer', async () => {
+    const dir = tmp('review-second-repo')
+    execSync(REPO, { cwd: dir, shell: '/bin/sh' })
+    const other = await src.places.add(dir, `review-other-${n}`)
+    // space A is first, space B second, though B's round starts waiting first (by age B would go first)
+    expect(src.settings.set('space.priority', '1', { space: space.name }).ok).toBe(true)
+    expect(src.settings.set('space.priority', '2', { space: other.name }).ok).toBe(true)
+    expect(src.settings.set('models.maxAtOnce', 'codex=1, pi/unknown=1', 'machine').ok).toBe(true)
+    hold('advisor:a', 'codex/gpt-5.5')
+    hold('advisor:b', 'pi/unknown')
+    const fallback = { 'reviewer.fallback': 'pi' }
+    const b = taskIn(placeId.space(other.name), fallback)
+    await review(b)
+    const a = task(fallback)
+    await review(a)
+    expect(a.reviewWait).toBeDefined()
+    expect(b.reviewWait).toBeDefined()
+    expect(src.engine.reviewWaits().map((r) => r.id)).toEqual([a.id, b.id])
+    // the health look's retry is where a freed reviewer is handed to the next waiting task
+    src.engine.unlease('advisor:a')
+    src.engine.retryReviews()
+    expect(a.reviews).toBe(1)
+    expect(b.reviews).toBeUndefined()
+    expect(sent.map((s) => s.key)).toEqual([`${a.id}/Agent`])
+    // the other one goes once its reviewer frees too
+    src.engine.unlease('advisor:b')
+    src.engine.retryReviews()
+    expect(b.reviews).toBe(1)
+    expect(sent.map((s) => s.key)).toEqual([`${a.id}/Agent`, `${b.id}/Agent`])
   })
 
   test('the health look wakes a waiting round too (healthTick runs the same retry)', async () => {

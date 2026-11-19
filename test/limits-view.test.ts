@@ -110,6 +110,21 @@ describe('the spaces: Max tasks and Merge train, and one sub-limit per provider 
     expect(gtm.caps['pi.spark']).toBeUndefined()
   })
 
+  test('the spaces are listed in queue order, with a Priority cell at each space', () => {
+    const s = settings({
+      machine: { 'models.maxAtOnce': 'spark=4' },
+      spaces: { alpha: { 'space.priority': '1' }, gtm: { 'space.priority': '2' }, zeta: { 'space.priority': '2' }, beta: {} },
+    })
+    const places = [{ key: '~', name: 'home' }, { key: 'beta', name: 'beta' }, { key: 'alpha', name: 'alpha' }, { key: 'gtm', name: 'gtm' }, { key: 'zeta', name: 'zeta' }]
+    const view = limitsView(input(s, { matrix: modelsMatrix(s, { host: HOST, name: HOST }, places) }))
+    // numbered spaces by their number; the two with 2 keep their listed order; the unset one comes last
+    expect(view.spaces.rows.map((r) => r.key)).toEqual(['alpha', 'gtm', 'zeta', 'beta'])
+    expect(view.spaces.columns.map((c) => c.key)).toEqual(['space.priority', 'space.maxTasks', 'merge.train'])
+    expect(view.spaces.rows.map((r) => r.cells['space.priority']!.row.value)).toEqual(['1', '2', '2', 'off'])
+    expect(view.spaces.rows[0]!.cells['space.priority']).toMatchObject({ place: 'p:box:alpha', from: 'space', set: true })
+    expect(view.spaces.rows[3]!.cells['space.priority']).toMatchObject({ place: 'p:box:beta', from: 'default', set: false })
+  })
+
   test('a space with no value of its own still shows its tasks; a machine total with no space entry shows as its total', () => {
     const view = limitsView(input(settings({ machine: { 'models.maxAtOnce': 'spark=4' } }), { workingIn: { gtm: 0 } }))
     // gtm is a space of this machine: its row is there, its Max tasks inherited, and its sub-limit for spark faint

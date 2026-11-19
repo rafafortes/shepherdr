@@ -18,8 +18,8 @@ import { providerOf } from './usage-ledger.ts'
 export const MACHINE_KEYS = ['machine.maxTasks', 'machine.startLoad', 'machine.startPressure', 'machine.startMemory', 'machine.startEvery']
 /** the keys of the coordinator's alerts (machine.alert…), the page's second group */
 export const ALERT_KEYS = ['machine.alertLoad', 'machine.alertMemory', 'machine.alertDisk', 'machine.alertHerdr']
-/** the per-space keys: Max tasks of a space, and its Merge train */
-export const SPACE_KEYS = ['space.maxTasks', 'merge.train']
+/** the per-space keys: the space's priority in this machine's queue, its Max tasks, and its Merge train */
+export const SPACE_KEYS = ['space.priority', 'space.maxTasks', 'merge.train']
 
 /** one held task as the engine holds it: its space (key and shown name), why it waits, its line in words, and the entry
  *  that holds it for its model (its name, what runs under it now and its limit) */
@@ -211,7 +211,8 @@ function byRoleOf(runs: LimitsInput['runs'], covered: (key: string) => boolean):
   return tasks.length ? { byRole, tasks } : { byRole }
 }
 
-/** the Spaces table: each space of this machine, its Max tasks and Merge train, and its sub-limit per pattern column */
+/** the Spaces table: each space of this machine in queue order, its Priority, Max tasks and Merge train, and its sub-limit
+ *  per pattern column */
 function spacesOf(input: LimitsInput): LimitsView['spaces'] {
   const { matrix, summary, settings: s, runs } = input
   const machineEntries: MaxEntry[] = capsOf(s).entries
@@ -233,11 +234,16 @@ function spacesOf(input: LimitsInput): LimitsView['spaces'] {
   const listed = matrix.rows.filter((r) => r.kind === 'space').map((r) => ({ id: r.id, name: r.name, key: r.id.split(':')[2]! }))
   const homeSets = [...SPACE_KEYS, 'models.maxAtOnce'].some((k) => s.pick(k, { space: HOME }).from === 'space')
   if (homeSets && !listed.some((x) => x.key === HOME)) listed.unshift({ id: placeId.home(input.host), name: 'home', key: HOME })
+  // the page lists them in queue order: numbered spaces by their number, then the ones with none as they were listed.
+  // The sort is stable, so spaces with the same number (or none) keep their old order and their tasks go by age
+  const priority = (key: string) => s.spacePriority(key) ?? Number.POSITIVE_INFINITY
+  listed.sort((a, b) => priority(a.key) - priority(b.key))
   const rows: LimitSpaceRow[] = listed.map(({ id, name, key }) => {
     const working = input.workingIn[key] ?? 0
     const held = input.held.filter((h) => h.space === key).length
     const maxTasks = s.spaceMax(key)
     const cells: Record<string, LimitCell> = {
+      'space.priority': cellOf(input, 'space.priority', { space: key }, id, false),
       'space.maxTasks': {
         ...cellOf(input, 'space.maxTasks', { space: key }, id, false),
         now: `${working}${maxTasks === null ? '' : ` of ${maxTasks}`} working${held ? ` · ${held} held` : ''}`,
