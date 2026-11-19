@@ -31,7 +31,10 @@ process.env.HERDR_SOCKET_PATH = join(home, 'no-herdr.sock')
 // through the seconds a real start waits
 process.env.SHEPHERDR_HERDR_RETRY_MS = '5,5,5'
 process.env.SHEPHERDR_START_RETRY_MS = '5,5,5'
-for (const k of ['SHEPHERDR_URL', 'SHEPHERDR_CHAT', 'HERDR_SOCKET', 'HERDR_PANE_ID', 'HERDR_WORKSPACE_ID', 'HERDR_TAB_ID']) delete process.env[k]
+// HERDR_PLUGIN_STATE_DIR is the live plugin's own folder when this suite is started from inside Shepherdr (the merge gate
+// starts it that way): a test that asserts the supervisor's server.log path, or writes there, must see its own home, never
+// ~/.local/state/herdr/plugins/herdr-projects. test/prepare.test.ts sets it for the children it starts, on purpose.
+for (const k of ['SHEPHERDR_URL', 'SHEPHERDR_CHAT', 'HERDR_SOCKET', 'HERDR_PANE_ID', 'HERDR_WORKSPACE_ID', 'HERDR_TAB_ID', 'HERDR_PLUGIN_STATE_DIR']) delete process.env[k]
 
 // What this file sets above reaches every child too. Bun.spawn and Bun.spawnSync hand a child the environment the
 // process started with, not process.env as changed since (Bun 1.4.4): a command the code under test starts with no env of
