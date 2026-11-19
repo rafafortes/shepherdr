@@ -1,6 +1,6 @@
 // #1044/#1018: "no checks yet" is not "none set up". The repo's workflows at HEAD say whether checks will come
 // (git.ts: workflowExpect, prWorkflowExpect, noneIsUnknown), read by checksOf in engine.ts; a merge never decides on
-// the first unknown. These are the pure rules; four end-to-end cases are with the engine in engine-merge.test.ts.
+// the first unknown. These are the pure rules; four end-to-end cases are with the engine in engine-merge-checks.test.ts.
 import { describe, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'

@@ -1,0 +1,267 @@
+// Settings → Limits, the spaces under the limits: Set for every space…, the Priority column and its arrows, and the
+// tables fitting the Settings width, in a real browser (layout.ts).
+import { afterAll, describe, expect, test } from 'bun:test'
+import type { Locator, Page } from 'playwright-core'
+import type { LimitsQueue } from '../shared/types.ts'
+import { at, layout, pickLimit, rowLabels, settled } from './layout.ts'
+import { piOffers } from './pi-offers.ts'
+
+// pi lists nvidia and amd-tokenlab, which nothing in the demo uses: they are the providers under Other providers
+const restorePi = piOffers()
+afterAll(restorePi)
+const { browser, world, url } = await layout()
+
+/** the file's tests share one world and one browser: each starts from the demo's own limits, with no column of this browser's */
+async function fresh(page: Page) {
+  const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+  await set('machine.maxTasks', null, 'm:vm-str')
+  await set('space.maxTasks', '2', 'p:vm-str:gtm')
+  await set('space.maxTasks', null, 'p:vm-str:herdr-projects')
+  for (const place of ['all', 'm:vm-str', 'p:vm-str:gtm', 'p:vm-str:herdr-projects']) await set('models.maxAtOnce', null, place)
+  await set('space.maxTasks', null, 'all')
+  await page.goto(url())
+  await page.evaluate(() => localStorage.removeItem('limits:columns'))
+}
+
+/** the Priority value each space of this machine holds now, as Settings → Limits reads it (off: no number) */
+const places = async () => {
+  const v = (await world.act({ type: 'limits-view' } as never)) as { spaces: { rows: { name: string; cells: Record<string, { row: { value: string } }> }[] } }
+  return Object.fromEntries(v.spaces.rows.map((r) => [r.name, r.cells['space.priority']!.row.value]))
+}
+
+/** whether the second element comes after the first in the page */
+const follows = (first: Locator, second: Locator) => second.elementHandle().then((h) => first.evaluate((el, other) => (el.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0, h))
+
+/** 300 waiting tasks: 200 in one queued group (for Show all), the rest in the other kinds */
+function bigQueue(): LimitsQueue {
+  const task = (id: string, space: string, words: string) => ({ id, space, spaceName: space, words })
+  return {
+    queued: Array.from({ length: 200 }, (_, i) => task(`QP-${i}`, 'herdr-projects', `After QP-${i}-x`)),
+    scheduled: Array.from({ length: 50 }, (_, i) => task(`SP-${i}`, 'gtm', 'Starts Tomorrow 9:00')),
+    todo: Array.from({ length: 30 }, (_, i) => task(`TP-${i}`, 'gtm', 'Added 1h ago')),
+    merges: Array.from({ length: 20 }, (_, i) => task(`MP-${i}`, 'gtm', "Waiting for other's merge")),
+  }
+}
+
+/** the Limits page on a desktop, opened from Settings → How Shepherdr runs */
+async function openLimits(page: Page, phone = false) {
+  await fresh(page)
+  await page.goto(url())
+  if (phone) await page.getByRole('button', { name: 'Places', exact: true }).click()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('region', { name: 'Settings' }).getByRole('button', { name: 'Limits', exact: true }).click()
+  await settled(page)
+}
+
+describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
+  test('a press outside an open editor closes it without writing; Set for every space… with Everywhere resets the spaces to it', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      const cell = page.getByRole('button', { name: /^vm-str · Max tasks working at once: 10/ })
+      await cell.scrollIntoViewIfNeeded()
+      await cell.click()
+      const pop = page.getByRole('dialog', { name: 'Edit this setting' })
+      await pop.waitFor()
+      // a press outside the editor closes it, and writes nothing (Escape would close the sheet too)
+      await page.getByRole('heading', { name: 'Waiting now', exact: true }).click()
+      await pop.waitFor({ state: 'detached' })
+      await page.getByRole('button', { name: /^vm-str · Max tasks working at once: 10/ }).waitFor()
+      // the column's Everywhere mode: Everywhere gets 5, and each space loses its own value (gtm had 2)
+      await page.getByRole('button', { name: 'More for Max tasks', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Set for every space…', exact: true }).click()
+      const dialog = page.getByRole('alertdialog', { name: 'Set Max tasks for every space' })
+      await dialog.getByRole('radio', { name: /Everywhere, and reset the spaces/ }).check()
+      await pickLimit(dialog, '5')
+      await dialog.getByRole('button', { name: 'Set for 2 spaces', exact: true }).click()
+      await dialog.waitFor({ state: 'detached' })
+      // gtm now reads Everywhere's value, faint, from there
+      const gtm = page.getByRole('button', { name: /^gtm · Max tasks: 5, / })
+      await gtm.waitFor()
+      await gtm.getByText('Everywhere', { exact: true }).waitFor()
+    } finally {
+      await page.close()
+    }
+  })
+  test("a column's Set for every space… writes each space its own value, and the dialog closes once they are written", async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      await page.getByRole('button', { name: 'More for Max tasks', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Set for every space…', exact: true }).click()
+      const dialog = page.getByRole('alertdialog', { name: 'Set Max tasks for every space' })
+      await pickLimit(dialog, '4')
+      await dialog.getByRole('button', { name: 'Set for 2 spaces', exact: true }).click()
+      await dialog.waitFor({ state: 'detached' })
+      await page.getByRole('button', { name: /^gtm · Max tasks: 4, / }).waitFor()
+      await page.getByRole('button', { name: /^herdr-projects · Max tasks: 4, / }).waitFor()
+    } finally {
+      await page.close()
+    }
+  })
+  test('a browser that keeps no storage still shows the page, and a column added stays for the page while it is open', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      // the columns' keys are refused by the browser's storage: the page keeps them for this view only
+      await page.addInitScript(() => {
+        const get = Storage.prototype.getItem
+        const put = Storage.prototype.setItem
+        Storage.prototype.getItem = function (k: string) {
+          if (k.startsWith('limits:')) throw new Error('no storage')
+          return get.call(this, k)
+        }
+        Storage.prototype.setItem = function (k: string, v: string) {
+          if (k.startsWith('limits:')) throw new Error('no storage')
+          put.call(this, k, v)
+        }
+      })
+      await openLimits(page)
+      await page.getByRole('button', { name: '+ column', exact: true }).click()
+      await page.getByRole('menuitem', { name: /^pi · Spark \(local\) provider$/ }).click()
+      await page.getByRole('table', { name: 'Spaces' }).getByRole('button', { name: /^pi · Spark \(local\) in gtm: no sub-limit$/ }).waitFor()
+      // opening a Waiting section with no storage still works: its opened state is kept for this page only
+      await page.getByRole('region', { name: 'Scheduled' }).getByRole('button', { name: 'Scheduled' }).click()
+      await page.getByRole('region', { name: 'Scheduled' }).getByText('Starts', { exact: false }).first().waitFor()
+    } finally {
+      await page.close()
+    }
+  })
+  test('the Priority column lists the spaces in order; an arrow swaps two numbers by keyboard, and re-orders the list', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      await set('space.priority', '1', 'p:vm-str:herdr-projects')
+      await set('space.priority', '2', 'p:vm-str:gtm')
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 1/ }).waitFor()
+      await table.getByRole('button', { name: /^gtm · Priority: 2/ }).waitFor()
+      const labels = await rowLabels(table)
+      expect(labels.indexOf('herdr-projects')).toBeLessThan(labels.indexOf('gtm'))
+      // keyboard: Tab to gtm's ↑ and press Enter. The two numbered spaces swap their numbers, so Priority: 1 proves the write
+      const up = table.getByRole('button', { name: 'Move gtm up' })
+      await up.focus()
+      await page.keyboard.press('Enter')
+      await table.getByRole('button', { name: /^gtm · Priority: 1/ }).waitFor()
+      expect((await rowLabels(table)).indexOf('gtm')).toBeLessThan((await rowLabels(table)).indexOf('herdr-projects'))
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
+      // the other direction works too: gtm is first now, so its ↓ is on and swaps the two back
+      await table.getByRole('button', { name: 'Move gtm down' }).click()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 1/ }).waitFor()
+      expect(await up.isEnabled()).toBe(true)
+      expect(await table.getByRole('button', { name: 'Move herdr-projects up' }).isDisabled()).toBe(true)
+      expect(await table.getByRole('button', { name: 'Move herdr-projects down' }).isEnabled()).toBe(true)
+      // one line under the table says what no number means
+      await page.getByText('A space with no number goes by age, after the numbered ones.').first().waitFor()
+    } finally {
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await page.close()
+    }
+  })
+  test('the arrows keep a space with no number without one: ↑ puts it last among the numbered ones, ↓ on the last clears it', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      // nothing is numbered yet: ↑ gives it the first place, in one write; ↓ has nothing to go below
+      expect(await table.getByRole('button', { name: 'Move gtm down' }).isDisabled()).toBe(true)
+      // ↑ on a space with no number puts it last among the numbered ones: one value written, the other space keeps none
+      await table.getByRole('button', { name: 'Move gtm up' }).click()
+      await table.getByRole('button', { name: /^gtm · Priority: 1/ }).waitFor()
+      expect(await places()).toEqual({ gtm: '1', 'herdr-projects': 'off' })
+      expect(await table.getByRole('button', { name: 'Move gtm up' }).isDisabled()).toBe(true)
+      // the second one goes after it, and only its own value changes
+      await table.getByRole('button', { name: 'Move herdr-projects up' }).click()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
+      expect(await places()).toEqual({ gtm: '1', 'herdr-projects': '2' })
+      // ↓ on the last numbered space clears its number: it goes back to by age, and the other keeps its own
+      await table.getByRole('button', { name: 'Move herdr-projects down' }).click()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: Off/ }).waitFor()
+      expect(await places()).toEqual({ gtm: '1', 'herdr-projects': 'off' })
+      expect(await table.getByRole('button', { name: 'Move herdr-projects down' }).isDisabled()).toBe(true)
+    } finally {
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await page.close()
+    }
+  })
+  test('two quick taps cannot take each other\'s place: the arrows are off while a move is written, and the second is dropped', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      await set('space.priority', '1', 'p:vm-str:gtm')
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: /^gtm · Priority: 1/ }).waitFor()
+      const up = table.getByRole('button', { name: 'Move herdr-projects up' })
+      // two taps in the same tick, as a quick double tap sends them: the first writes hp=2, the second would swap both
+      // back if it went through
+      await up.evaluate((el) => {
+        ;(el as HTMLElement).click()
+        ;(el as HTMLElement).click()
+      })
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
+      await settled(page)
+      expect(await places()).toEqual({ gtm: '1', 'herdr-projects': '2' })
+      expect(await rowLabels(table).then((l) => l.indexOf('gtm'))).toBeLessThan(await rowLabels(table).then((l) => l.indexOf('herdr-projects')))
+    } finally {
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await page.close()
+    }
+  })
+  test('a move the server refuses says why under the table, and writes nothing', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    // the demo's own answer for one move: the screen's error path, which a real refusal (the home space, another machine)
+    // cannot reach from this machine's table
+    const real = world.act.bind(world)
+    let asked = 0
+    ;(world as unknown as { act: (a: unknown) => Promise<unknown> }).act = async (a: unknown) => {
+      if ((a as { type?: string }).type !== 'space-order') return real(a as never)
+      asked++
+      return { ok: false, error: 'That space cannot move: it is not on this machine.' }
+    }
+    try {
+      await openLimits(page)
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: 'Move gtm up' }).click()
+      const refused = page.getByRole('alert').filter({ hasText: 'That space cannot move: it is not on this machine.' })
+      await refused.waitFor()
+      expect(asked).toBe(1)
+      expect(await places()).toEqual({ gtm: 'off', 'herdr-projects': 'off' })
+      // the arrows come back on once it has answered
+      expect(await table.getByRole('button', { name: 'Move gtm up' }).isEnabled()).toBe(true)
+    } finally {
+      ;(world as unknown as { act: (a: unknown) => Promise<unknown> }).act = real as never
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await page.close()
+    }
+  })
+  test('the Providers and the Machine tables fit the Settings width at 1440 px: no horizontal scroll, their columns in view', async () => {
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      for (const name of ['Providers and models', 'Machine limits']) {
+        const table = page.getByRole('table', { name, exact: true })
+        await table.waitFor()
+        // the table's own box is its scroll box's width, and the box never scrolls sideways
+        const fit = await table.evaluate((t) => {
+          const box = t.parentElement!
+          return { scroll: box.scrollWidth - box.clientWidth, width: t.getBoundingClientRect().width - box.clientWidth }
+        })
+        expect(fit.scroll).toBe(0)
+        expect(fit.width).toBeLessThanOrEqual(1)
+      }
+    } finally {
+      await page.close()
+    }
+  })
+})
