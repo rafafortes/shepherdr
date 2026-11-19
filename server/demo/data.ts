@@ -1,6 +1,7 @@
 // Fictional data for the demo source: the same world the frozen prototype shows, so a reviewer can put the
 // build and the prototype side by side. Nothing here is real.
-import { apart, type Artifact, type Automation, type Chat, type Machine, type MachineHealth, type Message, type Place, type SettingSection, type Task, type TaskAgent } from '../../shared/types.ts'
+import { apart, type Artifact, type Automation, type Chat, type LimitsQueue, type Machine, type MachineHealth, type Message, type Place, type QueueTask, type SettingSection, type Task, type TaskAgent } from '../../shared/types.ts'
+import { startsLine } from '../../shared/when.ts'
 import { firstChecklist } from '../live/heartbeat.ts'
 import { nextWords, timeRule, timeWords } from '../live/trigger.ts'
 import { Settings } from '../live/settings.ts'
@@ -568,6 +569,30 @@ export function heldFor(s: Settings, workingIn: Record<string, number>): { held:
     advisor: [{ chat: 'HP-201/Agent', task: 'HP-201', words: "HP-201's agent asks: Keep Pinned as a filter, or a tab?" }],
     reviews: [{ task: 'GTM-15', space: 'gtm', words: 'Waits for a reviewer: pi · Spark (local) (4 of 4 at once)' }],
   }
+}
+
+/** the whole line of waiting tasks for Settings → Limits' Waiting now, in the demo's fiction. The To do ones are the
+ *  demo's own tasks; the others are fixtures like heldFor's, so a reviewer can see every kind on the page. HP-205 and
+ *  HP-206 form a chain whose root, HP-201, waits on you (as its question in the chat shows). None comes due here. */
+export function queueFor(tasks: Task[], s: Settings): LimitsQueue {
+  const now = Date.now()
+  const zone = s.get('time.zone') || DEMO_ZONE
+  const queued: QueueTask[] = [
+    { id: 'HP-203', space: 'herdr-projects', spaceName: 'herdr-projects', words: 'After HP-202' },
+    { id: 'HP-205', space: 'herdr-projects', spaceName: 'herdr-projects', words: 'After HP-201', need: { id: 'HP-201', words: 'waits for your reply' } },
+    { id: 'HP-206', space: 'herdr-projects', spaceName: 'herdr-projects', words: 'After HP-205', need: { id: 'HP-201', words: 'waits for your reply' } },
+  ]
+  const at = now + 2 * 3_600_000
+  const scheduled: QueueTask[] = [{ id: 'GTM-20', space: 'gtm', spaceName: 'gtm', words: startsLine(at, now, zone), since: at }]
+  const todo: QueueTask[] = [
+    // HP-204 is held here, and GTM-17 is the space-held task: neither is a To do task in this section
+    ...tasks
+      .filter((t) => t.status === 'todo' && !['HP-204', 'GTM-17'].includes(t.id))
+      .map((t) => ({ id: t.id, space: t.place.split(':')[2] ?? '~', spaceName: t.place.split(':')[2] ?? 'home', words: `Added ${t.age} ago`, since: now })),
+    { id: 'GTM-22', space: 'gtm', spaceName: 'gtm', words: 'Added 2h ago', since: now },
+  ]
+  const merges: QueueTask[] = [{ id: 'GTM-19', space: 'gtm', spaceName: 'gtm', words: "Waiting for GTM-18's merge", since: now - 10 * 60_000 }]
+  return { queued, scheduled, todo, merges }
 }
 
 /** Replies the demo agents give once a question is answered. */

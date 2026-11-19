@@ -12,7 +12,7 @@ import clsx from 'clsx'
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { BLOCKED as BLOCKED_WORDS, parseMaxAtOnce, withEntry, type MaxEntry } from '@shared/model-caps.ts'
 import { shareOf } from '@shared/quota-words.ts'
-import type { LimitCell, LimitColumn, LimitKnown, LimitProvider, LimitRow, LimitSpaceRow, LimitTable, LimitsView, SettingRow, WaitingNow } from '@shared/types.ts'
+import type { LimitCell, LimitColumn, LimitKnown, LimitProvider, LimitRow, LimitSpaceRow, LimitTable, LimitsView, QueueTask, SettingRow, WaitingGroup, WaitingNow, WaitingTask } from '@shared/types.ts'
 import { act, openTask, useSnap } from './kernel.ts'
 import { askWaitingMany } from './apply-waiting.tsx'
 import { Anchored, OnTop } from './anchored.tsx'
@@ -29,6 +29,25 @@ import { Menu, MenuItem, MoreIcon, Primary, Small, ic } from './ui.tsx'
 
 /** the + column's choices are kept in this browser: a column added with no entry yet stays until it is removed */
 const COLUMNS = 'limits:columns'
+/** the Waiting now sections and groups the viewer opened, kept in this browser: Held for room starts open */
+const WAIT_OPEN = 'limits:waiting'
+const WAIT_CARD = 'rounded-box bg-bg px-3 py-2 shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble'
+/** how many rows of a group show before its Show all button */
+const WAIT_ROWS = 10
+function readOpen(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(WAIT_OPEN) ?? '{}') as Record<string, boolean>
+  } catch {
+    return {}
+  }
+}
+function saveOpen(o: Record<string, boolean>) {
+  try {
+    localStorage.setItem(WAIT_OPEN, JSON.stringify(o))
+  } catch {
+    /* a browser with no storage keeps its sections open for this page only */
+  }
+}
 function readColumns(): string[] {
   try {
     return (JSON.parse(localStorage.getItem(COLUMNS) ?? '[]') as unknown[]).filter((x): x is string => typeof x === 'string')
@@ -137,68 +156,202 @@ function TaskButton({ id }: { id: string }) {
   )
 }
 
-/** the Waiting now list: the tasks held right now by what holds them (machine slots, the machine's load, each space's cap,
- *  each model's cap, every model out, the cut-off tasks that go back first), the advisor's questions and the reviews that
- *  wait for a reviewer */
+/** the count of one kind, left out when there is none of it: "37 held for room", "1 merge waiting" */
+const countWords = (n: number, rest: string) => `${n} ${rest}`
+
+/** the Waiting now list: every task that has not started or waits to go on, in the order it will go, and why. Held tasks
+ *  are numbered in the engine's own start order; the rest are queued after other tasks, scheduled, waiting for a go or
+ *  waiting to merge. The advisor's questions and the review rounds wait too. Read only: an id opens its task. */
 export function Waiting({ w, phone }: { w: WaitingNow; phone: boolean }) {
-  const none = !w.held && !w.advisor.length && !w.reviews.length
-  const card = 'rounded-box bg-bg px-3 py-2 shadow-[inset_0_0_0_1px_var(--line)] dark:bg-bubble'
+  const [open, setOpen] = useState<Record<string, boolean>>(readOpen)
+  const shown = (id: string, byDefault: boolean) => open[id] ?? byDefault
+  const toggle = (id: string, byDefault: boolean) =>
+    setOpen((prev) => {
+      const next = { ...prev, [id]: !(prev[id] ?? byDefault) }
+      saveOpen(next)
+      return next
+    })
+  const queued = w.queued.reduce((n, g) => n + g.tasks.length, 0)
+  const counts = [
+    ...(w.held ? [countWords(w.held, 'held for room')] : []),
+    ...(queued ? [countWords(queued, 'queued after other tasks')] : []),
+    ...(w.scheduled.length ? [countWords(w.scheduled.length, 'scheduled')] : []),
+    ...(w.todo.length ? [countWords(w.todo.length, 'waiting for a go')] : []),
+    ...(w.merges.length ? [countWords(w.merges.length, w.merges.length === 1 ? 'merge waiting' : 'merges waiting')] : []),
+  ]
+  const none = !counts.length && !w.advisor.length && !w.reviews.length
   return (
-    <section aria-label="Waiting now" className="flex flex-col gap-2">
+    <section aria-label="Waiting now" className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline gap-x-2">
         <h2 className="font-medium">Waiting now</h2>
-        <Small>{w.held ? `${w.held} ${w.held === 1 ? 'task' : 'tasks'} held for room` : 'Nothing is held for room'}</Small>
+        <Small>{counts.length ? counts.join(' · ') : 'Nothing is held for room'}</Small>
       </div>
       {none ? <Small className="text-pretty">Every limit has room now: nothing waits for a slot, a load or a cap.</Small> : null}
-      <ul className={clsx('grid gap-2', phone ? '' : 'md:grid-cols-2')}>
-        {w.groups.map((g) => (
-          <li key={g.id} className={card}>
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-              <span className="font-medium">
-                {g.title} <span className="tabular-nums text-fg2">· {g.tasks.length}</span>
-              </span>
-              {g.limit ? <Small className="text-pretty">{g.limit}</Small> : null}
-            </div>
-            <ul className="flex flex-col gap-0.5 pt-1">
-              {g.tasks.map((t) => (
-                <li key={t.id} className="flex min-w-0 flex-wrap gap-x-2 text-fg2">
-                  <TaskButton id={t.id} />
-                  <span className="min-w-0 text-pretty">
-                    {t.space} · {t.words}
-                  </span>
-                </li>
-              ))}
-            </ul>
+      {w.spaceLines.some((s) => s.working || s.held || s.queued) ? (
+        <ul className="flex flex-col gap-0.5">
+          {w.spaceLines
+            .filter((s) => s.working || s.held || s.queued)
+            .map((s) => (
+              <li key={s.name} className="text-fg2 text-pretty">
+                <span className="font-medium">{s.name}:</span>{' '}
+                {[s.working ? `${s.working} working` : '', s.held ? `${s.held} held` : '', s.queued ? `${s.queued} queued` : ''].filter(Boolean).join(', ')}
+              </li>
+            ))}
+        </ul>
+      ) : null}
+      {counts.length ? (
+        <Fragment>
+          <WaitSection id="held" title="Held for room" byDefault open={shown} toggle={toggle}>
+            {w.groups.length ? (
+              <ul className={clsx('grid gap-2', phone ? '' : 'md:grid-cols-2')}>
+                {w.groups.map((g) => (
+                  <WaitGroup key={g.id} g={g} numbered open={shown} toggle={toggle} />
+                ))}
+              </ul>
+            ) : (
+              <Small className="text-pretty">Nothing here now.</Small>
+            )}
+          </WaitSection>
+          <WaitSection id="queued" title="Queued after other tasks" open={shown} toggle={toggle}>
+            {w.behindYou.tasks ? (
+              <Small className="text-pretty">
+                {w.behindYou.tasks} {w.behindYou.tasks === 1 ? 'task waits' : 'tasks wait'} behind {w.behindYou.roots.length} {w.behindYou.roots.length === 1 ? 'task that needs' : 'tasks that need'} you: {w.behindYou.roots.join(', ')}
+              </Small>
+            ) : null}
+            {w.queued.length ? (
+              <ul className={clsx('grid gap-2', phone ? '' : 'md:grid-cols-2')}>
+                {w.queued.map((g) => (
+                  <WaitGroup key={g.id} g={g} open={shown} toggle={toggle} />
+                ))}
+              </ul>
+            ) : (
+              <Small className="text-pretty">Nothing here now.</Small>
+            )}
+          </WaitSection>
+          <WaitSection id="scheduled" title="Scheduled" open={shown} toggle={toggle}>
+            <WaitList id="scheduled" title="Starting soonest first" tasks={w.scheduled} phone={phone} open={shown} toggle={toggle} />
+          </WaitSection>
+          <WaitSection id="todo" title="Waiting for a go" open={shown} toggle={toggle}>
+            <WaitList id="todo" title="To do" tasks={w.todo} phone={phone} open={shown} toggle={toggle} />
+          </WaitSection>
+          <WaitSection id="merges" title="Merges waiting" open={shown} toggle={toggle}>
+            <WaitList id="merges" title="In line to merge" tasks={w.merges} phone={phone} open={shown} toggle={toggle} />
+          </WaitSection>
+        </Fragment>
+      ) : null}
+      {w.advisor.length || w.reviews.length ? (
+        <ul className={clsx('grid gap-2', phone ? '' : 'md:grid-cols-2')}>
+          {w.advisor.length ? (
+            <li className={WAIT_CARD}>
+              <span className="font-medium">Questions waiting for the advisor</span>
+              <ul className="flex flex-col gap-0.5 pt-1">
+                {w.advisor.map((a) => (
+                  <li key={a.chat} className="text-pretty text-fg2">
+                    {a.task ? <TaskButton id={a.task} /> : null}
+                    {a.words}
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ) : null}
+          {w.reviews.length ? (
+            <li className={WAIT_CARD}>
+              <span className="font-medium">Review rounds waiting for a reviewer</span>
+              <ul className="flex flex-col gap-0.5 pt-1">
+                {w.reviews.map((r) => (
+                  <li key={r.task} className="text-pretty text-fg2">
+                    <TaskButton id={r.task} />
+                    {r.words}
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+    </section>
+  )
+}
+
+/** one collapsible section of Waiting now: Held for room starts open, the rest closed; what the viewer opened is kept */
+function WaitSection({ id, title, byDefault = false, open, toggle, children }: { id: string; title: string; byDefault?: boolean; open: (id: string, byDefault: boolean) => boolean; toggle: (id: string, byDefault: boolean) => void; children: ReactNode }) {
+  const isOpen = open(id, byDefault)
+  return (
+    <section aria-label={title} className="flex flex-col gap-2">
+      <button type="button" aria-expanded={isOpen} onClick={() => toggle(id, byDefault)} className="press-dim flex w-full items-center justify-between gap-2 rounded-row py-0.5 text-left hover:bg-hover">
+        <h3 className="font-medium">{title}</h3>
+        <span aria-hidden="true" className="text-fg3">{isOpen ? '−' : '+'}</span>
+      </button>
+      {isOpen ? children : null}
+    </section>
+  )
+}
+
+/** one group in Waiting now: its count and at most its first rows, with Show all N for the rest */
+function WaitGroup({ g, numbered = false, open, toggle }: { g: WaitingGroup; numbered?: boolean; open: (id: string, byDefault: boolean) => boolean; toggle: (id: string, byDefault: boolean) => void }) {
+  const id = `group:${g.id}`
+  const all = open(id, false)
+  const rows = all ? g.tasks : g.tasks.slice(0, WAIT_ROWS)
+  return (
+    <li data-group={g.id} className={WAIT_CARD}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+        <span className="font-medium">
+          {g.title} <span className="tabular-nums text-fg2">· {g.tasks.length}</span>
+        </span>
+        {g.limit ? <Small className="text-pretty">{g.limit}</Small> : null}
+      </div>
+      <ul className="flex flex-col gap-0.5 pt-1">
+        {rows.map((t: WaitingTask) => (
+          <li key={t.id} className="flex min-w-0 flex-wrap gap-x-2 text-fg2">
+            {numbered ? <span className="tabular-nums text-fg3">{t.order! + 1}.</span> : null}
+            <TaskButton id={t.id} />
+            <span className="min-w-0 text-pretty">
+              {t.space} · {t.words}
+              {t.need ? (
+                <span className="text-need-fg">{t.words === `After ${t.need.id}` ? `, which ${t.need.words}` : ` · ${t.need.id} ${t.need.words}`}</span>
+              ) : null}
+            </span>
           </li>
         ))}
-        {w.advisor.length ? (
-          <li className={card}>
-            <span className="font-medium">Questions waiting for the advisor</span>
-            <ul className="flex flex-col gap-0.5 pt-1">
-              {w.advisor.map((a) => (
-                <li key={a.chat} className="text-pretty text-fg2">
-                  {a.task ? <TaskButton id={a.task} /> : null}
-                  {a.words}
-                </li>
-              ))}
-            </ul>
-          </li>
-        ) : null}
-        {w.reviews.length ? (
-          <li className={card}>
-            <span className="font-medium">Review rounds waiting for a reviewer</span>
-            <ul className="flex flex-col gap-0.5 pt-1">
-              {w.reviews.map((r) => (
-                <li key={r.task} className="text-pretty text-fg2">
-                  <TaskButton id={r.task} />
-                  {r.words}
-                </li>
-              ))}
-            </ul>
-          </li>
-        ) : null}
       </ul>
-    </section>
+      {g.tasks.length > WAIT_ROWS ? (
+        <button type="button" onClick={() => toggle(id, false)} className="press-dim mt-1 rounded-row font-medium text-accent hover:underline">
+          {all ? 'Show less' : `Show all ${g.tasks.length}`}
+        </button>
+      ) : null}
+    </li>
+  )
+}
+
+/** the flat kinds of Waiting now (scheduled, To do, merges): one group card, with its count and its first rows */
+function WaitList({ id, title, tasks, phone, open, toggle }: { id: string; title: string; tasks: QueueTask[]; phone: boolean; open: (id: string, byDefault: boolean) => boolean; toggle: (id: string, byDefault: boolean) => void }) {
+  if (!tasks.length) return <Small className="text-pretty">Nothing here now.</Small>
+  const key = `group:${id}`
+  const all = open(key, false)
+  const rows = all ? tasks : tasks.slice(0, WAIT_ROWS)
+  return (
+    <ul className={clsx('grid gap-2', phone ? '' : 'md:grid-cols-2')}>
+      <li data-group={`list:${id}`} className={WAIT_CARD}>
+        <span className="font-medium">
+          {title} <span className="tabular-nums text-fg2">· {tasks.length}</span>
+        </span>
+        <ul className="flex flex-col gap-0.5 pt-1">
+          {rows.map((t) => (
+            <li key={t.id} className="flex min-w-0 flex-wrap gap-x-2 text-fg2">
+              <TaskButton id={t.id} />
+              <span className="min-w-0 text-pretty">
+                {t.spaceName} · {t.words}
+              </span>
+            </li>
+          ))}
+        </ul>
+        {tasks.length > WAIT_ROWS ? (
+          <button type="button" onClick={() => toggle(key, false)} className="press-dim mt-1 rounded-row font-medium text-accent hover:underline">
+            {all ? 'Show less' : `Show all ${tasks.length}`}
+          </button>
+        ) : null}
+      </li>
+    </ul>
   )
 }
 

@@ -2,7 +2,7 @@
 // the real thing would, so every screen and case can be walked through without touching real agents.
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { apart, asEmoji, artifactQuote, cardMessage, modeCard, nameProblem, slugify, type Action, type ActivityAsk, type AddSpace, type Artifact, type Chat, type FolderEntry, type Folders, type Machine, type Message, type Need, type Place, type Snapshot, type Task, type TaskStatus, type TermScreen, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
+import { apart, asEmoji, artifactQuote, cardMessage, modeCard, nameProblem, slugify, type Action, type ActivityAsk, type AddSpace, type Artifact, type Chat, type FolderEntry, type Folders, type LimitsQueue, type Machine, type Message, type Need, type Place, type Snapshot, type Task, type TaskStatus, type TermScreen, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
 import { Emitter, type Source, type SourceEvents } from '../source.ts'
 import { DICTATE_CAP, DICTATE_TOO_LONG } from '../../shared/dictate.ts'
 import * as D from './data.ts'
@@ -63,6 +63,10 @@ const OTHER_CONTROLS = () => ({ models: [], model: 0, efforts: [], effort: 0 })
 
 export class DemoWorld extends Emitter<SourceEvents> implements Source {
   readonly kind = 'demo' as const
+  /** a stand-in for the whole waiting line, set by a test that needs hundreds of waiting tasks on this page */
+  queueOverride?: LimitsQueue
+  /** a test that needs the page with nothing waiting sets this */
+  waitingEmpty?: boolean
   places: Place[] = D.places()
   machines: Machine[] = D.machines()
   /** the sidebar's order the human dragged */
@@ -584,7 +588,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     const summary = this.summaryNow(entryPatterns(s, spaces.map((x) => x.key)).map(providerOf))
     const working = this.tasks.filter((t) => t.status === 'work')
     const workingIn = Object.fromEntries(spaces.map((x) => [x.key, working.filter((t) => t.place.split(':')[2] === x.key).length]))
-    const held = D.heldFor(s, workingIn)
+    const held: { held: HeldFact[]; advisor: { chat: string; task?: string; words: string }[]; reviews: { task: string; space: string; words: string }[] } = this.waitingEmpty ? { held: [], advisor: [], reviews: [] } : D.heldFor(s, workingIn)
     return limitsView({
       now: Date.now(),
       settings: s,
@@ -601,6 +605,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       herdr: true,
       advisor: held.advisor,
       reviews: held.reviews,
+      queue: this.waitingEmpty ? { queued: [], scheduled: [], todo: [], merges: [] } : (this.queueOverride ?? D.queueFor(this.tasks, s)),
       known: knownOf(matrix, summary),
     })
   }
