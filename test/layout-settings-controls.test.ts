@@ -9,7 +9,7 @@ describe.skipIf(!browser)('the controls shared by Settings and its pages', () =>
   test('a number steps by button and key, takes a value that is not a number, and a doc saves with Ctrl+S', async () => {
     const store = world.stores['vm-str']
     const rounds = store.get('review.rounds')
-    const instructions = store.get('task.instructions', { space: '~' })
+    const instructions = store.get('task.instructions', '~')
     const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } })
     try {
       await page.goto(url())
@@ -42,7 +42,7 @@ describe.skipIf(!browser)('the controls shared by Settings and its pages', () =>
       const doc = settings.getByRole('textbox', { name: 'Task agents', exact: true })
       await doc.fill('Saved with a shortcut.')
       await doc.press('Control+s')
-      await until(() => store.get('task.instructions', { space: '~' }) === 'Saved with a shortcut.', (v) => v)
+      await until(async () => (await store.get('task.instructions', '~')) === 'Saved with a shortcut.', (v) => v)
     } finally {
       store.set('review.rounds', rounds)
       store.set('task.instructions', instructions, { space: '~' })
