@@ -137,6 +137,23 @@ describe('the built chat is cached per revision', () => {
     expect(beforeLink.messages.find((m) => m.who === 'you')?.answered).toBeUndefined()
   })
 
+  test('a reposted page and a message closing the asks both invalidate the build', () => {
+    const key = 'cache-log/Agent'
+    const chats = chatWith()
+    chats.post(key, { id: 'page:p1', at: 1000, text: 'A page' })
+    chats.post(key, { id: 'ask:1', at: 1100, question: question('ask:1') })
+    chats.chat(key)
+    const built = chats.chatBuilds
+    chats.repostPage(key, 'p1')
+    const reposted = chats.chat(key)
+    expect(chats.chatBuilds).toBe(built + 1)
+    expect(reposted.messages.some((m) => m.artifact?.id === 'p1')).toBe(true)
+    expect(chats.closeAsks(key, 'Answered in words')).toBe(true)
+    const closed = chats.chat(key)
+    expect(chats.chatBuilds).toBe(built + 2)
+    expect(closed.messages.find((m) => m.question?.id === 'ask:1')?.question?.sent).toBe(-1)
+  })
+
   test('forget drops the built chat with the rest of it', () => {
     const key = 'cache-forget/Agent'
     const chats = chatWith()
