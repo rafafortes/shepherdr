@@ -566,11 +566,17 @@ reads nothing, and reads once when it is shown again.
   `0 · starts none`, and a blocked model's cell `blocked · 0 allowed`, in the warning colour.
 - **Machine** (rows: Everywhere, this machine). The columns are **Max tasks working at once** (`machine.maxTasks`; beside
   it, `now 7 of 9 working, 2 wait on you`; 0 starts no task here), **Wait while CPU load is over** (`machine.startLoad`; now, the 5-minute load
-  against the cores), **Wait while CPU pressure is over** (`machine.startPressure`; now, the pressure), **Wait while memory is
-  over** (`machine.startMemory`; now, the memory in use), and **Start one task at most every** (`machine.startEvery`). **Merge
+  against the cores), **Wait while CPU pressure is over** (`machine.startPressure`; now, the pressure), **Wait while memory
+  pressure is over** (`machine.startMemoryPressure`) and **Wait while I/O pressure is over** (`machine.startIoPressure`),
+  each with the pressure now (`no pressure reading` on a machine that has none, as macOS), **Wait while memory is over**
+  (`machine.startMemory`; now, the memory in use), **Wait while swap is over** (`machine.startSwap`; now, the share of swap
+  in use, or `no swap`), and **Start one task at most every** (`machine.startEvery`). **Merge
   train** (`merge.train`) is a column here only when Everywhere sets one; the spaces read it otherwise. Under the table,
   **Alerts** (collapsed) holds the four thresholds the coordinator is told by (`machine.alertLoad`,
-  `machine.alertMemory`, `machine.alertDisk`, `machine.alertHerdr`), each with its number now: they only tell, as above.
+  `machine.alertMemory`, `machine.alertDisk`, `machine.alertHerdr`), each with its number now: they only tell, as above. The
+  swap, memory-pressure and I/O-pressure columns tell too: a machine short of memory or I/O past one of them for 2
+  minutes is news once (and again once every one of them is back well under), as a CPU load is, so a machine holding
+  every new start says why.
 - **Spaces** (one row per space of this machine, listed in queue order; home only when it sets one of these keys itself). **Priority** (the space's `space.priority`; a number, or off) comes first, with ↑ and ↓ buttons that move a space up or down among the numbered ones: ↑ swaps its number with the space above it and ↓ with the space below, writing only the values that change; ↓ on the last numbered space clears its number, so it goes back to by age; ↑ on a space with no number puts it last among the numbered ones, in one write, and its ↓ is off. A space with no number keeps none until you give it a place. A move is one action, sent whole or refused whole, and every arrow is off until it answers, so two quick taps cannot take each other's place. The keyboard works them too (Tab to a button, Enter or Space), as does touch. One line under the table says it: `A space with no number goes by age, after the numbered ones.` **Max tasks** of the space
   (`space.maxTasks`; `2 of 3 working · 1 held`) and **Merge train** (`merge.train`). Then one column per provider or model
   that a `models.maxAtOnce` entry names at any level (`models.maxAtOnce` is in [Most agents at once](#models), above); **+

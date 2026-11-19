@@ -933,7 +933,7 @@ export class Engine extends Emitter<Events> {
   reviewTimeout = REVIEW_TIMEOUT
   /** how loaded this machine is now: over a start limit (health.ts busy), and whether herdr answers; none until first
    *  measured, which holds nothing by load */
-  machine?: () => { busy?: 'cpu' | 'memory'; herdr: boolean } | undefined
+  machine?: () => { busy?: 'cpu' | 'memory' | 'io'; herdr: boolean } | undefined
   /** when a held task last started while load decided */
   private lastStart = 0
   /** how many times this machine's line was computed: one per snapshot, however many held rows it builds (a test counts

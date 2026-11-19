@@ -27,26 +27,45 @@ describe('reading the machine', () => {
     expect(H.parseLoad5('')).toBeUndefined()
     expect(H.parsePressure('some avg10=1.01 avg60=27.40 avg300=5.89 total=7063159309\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n')).toBe(27.4)
     expect(H.parsePressure('')).toBeUndefined()
-    const m = H.parseMem('MemTotal:       32858064 kB\nMemFree:         3661672 kB\nMemAvailable:   20015576 kB\n')
+    // the same line reads memory's and I/O's pressure (/proc/pressure/memory, /proc/pressure/io)
+    expect(H.parsePressure('some avg10=1.40 avg60=24.50 avg300=0.90 total=2041250513\nfull avg10=1.40 avg60=24.50 avg300=0.86 total=1891098326\n')).toBe(24.5)
+    const m = H.parseMem('MemTotal:       32858064 kB\nMemFree:         3661672 kB\nMemAvailable:   20015576 kB\nSwapTotal:       8388604 kB\nSwapFree:        4194300 kB\n')
     expect(m.total).toBe(32858064 * 1024)
     expect(m.used).toBe((32858064 - 20015576) * 1024)
+    // swap in use is what is not free of it; a machine with none (macOS) gives neither number
+    expect(m.swapTotal).toBe(8388604 * 1024)
+    expect(m.swapUsed).toBe((8388604 - 4194300) * 1024)
+    expect(H.parseMem('MemTotal: 1000 kB\nMemAvailable: 400 kB\n')).toMatchObject({ swapTotal: 0, swapUsed: 0 })
     expect(H.parseGpus('NVIDIA A10G, 37, 4096, 23028\n\n')).toEqual([{ name: 'NVIDIA A10G', util: 37, memPct: 18 }])
     expect(H.parseGpus('')).toEqual([])
   })
 
-  test('a real sample of this machine: cores, load, memory, and home and /tmp once each', () => {
+  test('a real sample of this machine: cores, load, memory and swap, and home and /tmp once each', () => {
     const s = H.sample()
     expect(s.cores).toBeGreaterThan(0)
     expect(s.memTotal).toBeGreaterThan(s.memUsed)
     expect(s.disks.length).toBeGreaterThanOrEqual(1)
     expect(new Set(s.disks.map((d) => d.dev)).size).toBe(s.disks.length)
-    expect(H.summary(s)).toMatch(/^CPU \d+% \(load [\d.]+ on \d+ cores\) · Memory \d+% \(\d+ GB of \d+ GB\) · Disk /)
+    expect(H.summary(s)).toMatch(/^CPU \d+% \(load [\d.]+ on \d+ cores( · pressure \d+%)?\) · Memory \d+% \(\d+ GB of \d+ GB( · swap \d+ GB)?( · pressure \d+%)?\)( · I\/O pressure \d+%)? · Disk /)
   })
 })
 
 describe('limits', () => {
   test('defaults: 10 at once, start under 1× cores and 80% memory; told at 1.5× cores, 90% memory and disk, herdr', () => {
-    expect(limits()).toEqual({ max: 10, startLoad: 1, startPressure: null, startEvery: 2, startMemory: 80, alertLoad: 1.5, alertMemory: 90, alertDisk: 90, alertHerdr: true })
+    expect(limits()).toEqual({
+      max: 10,
+      startLoad: 1,
+      startPressure: null,
+      startMemoryPressure: null,
+      startIoPressure: null,
+      startEvery: 2,
+      startMemory: 80,
+      startSwap: null,
+      alertLoad: 1.5,
+      alertMemory: 90,
+      alertDisk: 90,
+      alertHerdr: true,
+    })
     const s = new Settings()
     // any number in range, not a fixed list
     expect(s.set('machine.maxTasks', '13').ok).toBe(true)
@@ -102,6 +121,72 @@ describe('limits', () => {
     s.set('machine.startPressure', null, 'machine')
   })
 
+  test('swap, memory pressure and I/O pressure hold starts once set: swap and memory as memory, I/O as its own', () => {
+    const l = limits()
+    // all three off by default, as the CPU pressure is: a machine thrashing in swap starts tasks as it did before
+    expect([l.startSwap, l.startMemoryPressure, l.startIoPressure]).toEqual([null, null, null])
+    const thrash = { ...at(2, 43), load5: 2, swapTotal: 128 * 2 ** 30, swapUsed: 57 * 2 ** 30 }
+    expect(H.busy(thrash, l)).toBeUndefined()
+    // 45% of swap in use with 43% of memory in use: memory is short though its share looks calm
+    expect(H.swapPct(thrash)).toBe(45)
+    expect(H.busy(thrash, { ...l, startSwap: 20 })).toBe('memory')
+    expect(H.busy(thrash, { ...l, startSwap: 50 })).toBeUndefined()
+    // no swap at all (macOS): its share is 0, so the limit never holds there
+    expect(H.busy({ ...at(2, 43) }, { ...l, startSwap: 1 })).toBeUndefined()
+    // memory pressure: the share of the last minute some task waited for memory
+    expect(H.busy({ ...at(2), load5: 2, memSome: 24.5 }, { ...l, startMemoryPressure: 20 })).toBe('memory')
+    expect(H.busy({ ...at(2), load5: 2, memSome: 12 }, { ...l, startMemoryPressure: 20 })).toBeUndefined()
+    expect(H.busy({ ...at(2), load5: 2 }, { ...l, startMemoryPressure: 20 })).toBeUndefined()
+    // I/O pressure is a reason of its own: no CPU and no memory of ours waits on it
+    expect(H.busy({ ...at(2), load5: 2, ioSome: 33.6 }, { ...l, startIoPressure: 25 })).toBe('io')
+    expect(H.busy({ ...at(2), load5: 2, ioSome: 12 }, { ...l, startIoPressure: 25 })).toBeUndefined()
+    expect(H.busy({ ...at(2), load5: 2 }, { ...l, startIoPressure: 25 })).toBeUndefined()
+    // and each is a setting of its own, a percent or off
+    const s = new Settings()
+    for (const [key, v] of [
+      ['machine.startSwap', 25],
+      ['machine.startMemoryPressure', 30],
+      ['machine.startIoPressure', 40],
+    ] as const) {
+      expect(s.set(key, `${v}%`, 'machine').ok).toBe(true)
+      expect(s.machine()[key.replace('machine.', '') as 'startSwap']).toBe(v)
+      expect(s.set(key, 'off', 'machine').ok).toBe(true)
+      s.set(key, null, 'machine')
+    }
+    expect(s.machine()).toMatchObject({ startSwap: null, startMemoryPressure: null, startIoPressure: null })
+  })
+
+  test('swap and the memory and I/O pressure are one kind, told on their start limits, once, after 2 minutes over', () => {
+    const l = { ...limits(), startSwap: 25, startMemoryPressure: 20, startIoPressure: 25 }
+    let w = {}
+    const sample = (over: object) => ({ ...at(1, 43), load5: 1, swapTotal: 100 * 2 ** 30, ...over })
+    const step = (over: object, t: number) => {
+      const r = H.judge(w, H.levels(sample(over), true, l), t)
+      w = r.next
+      return r.events.map((e) => `${e.kind} ${e.what}`)
+    }
+    // a swap-bound machine: nothing before 2 minutes over, as the CPU kind (a swap filling in a burst is no news yet)
+    expect(step({ swapUsed: 30 * 2 ** 30 }, 0)).toEqual([])
+    expect(step({ swapUsed: 30 * 2 ** 30 }, 119_000)).toEqual([])
+    expect(step({ swapUsed: 30 * 2 ** 30 }, 120_000)).toEqual(['pressure over'])
+    // told once, and nothing again while it stays short
+    expect(step({ swapUsed: 30 * 2 ** 30 }, 200_000)).toEqual([])
+    // back only well under 90% of its limit, as the CPU kind: 25% of 25 is not back yet, 22% is
+    expect(step({ swapUsed: 25 * 2 ** 30 }, 260_000)).toEqual([])
+    expect(step({ swapUsed: 22 * 2 ** 30 }, 320_000)).toEqual(['pressure back'])
+    // the one kind covers each measure of it: memory pressure alone, then I/O pressure alone, each told once
+    expect(step({ memSome: 24 }, 400_000)).toEqual([])
+    expect(step({ memSome: 24 }, 520_000)).toEqual(['pressure over'])
+    expect(step({ memSome: 1 }, 580_000)).toEqual(['pressure back'])
+    expect(step({ ioSome: 33 }, 640_000)).toEqual([])
+    expect(step({ ioSome: 33 }, 760_000)).toEqual(['pressure over'])
+    // and it is back only once every limit set is under: I/O still over holds the news, as the state is still the one
+    expect(step({ ioSome: 33, memSome: 1 }, 820_000)).toEqual([])
+    expect(step({ ioSome: 1, memSome: 1 }, 880_000)).toEqual(['pressure back'])
+    // a machine that gives no reading (macOS) has no limit there, whatever is set
+    expect(step({}, 1_000_000)).toEqual([])
+  })
+
   test('the load is told after 2 minutes over its limit, once; again only when it is back well under', () => {
     const l = limits()
     let w = {}
@@ -146,6 +231,26 @@ describe('limits', () => {
     // its 5-minute load and pressure, where the machine gives them; amber by what holds starts back
     const n = H.meters({ ...at(8), load5: 21, cpuSome: 27.6 }, limits(), {})
     expect(n[0]).toMatchObject({ detail: 'load 8.0 (5 min 21.0) on 16 cores · pressure 28%', level: 'busy' })
+  })
+
+  test('the health line and the Memory meter show swap and the pressure readings, where the machine gives them', () => {
+    const l = limits()
+    // 43% of memory in use and 45% of swap: the share looks calm where the machine crawls
+    const thrash = { ...at(2, 43), swapTotal: 128 * 2 ** 30, swapUsed: 57 * 2 ** 30, memSome: 24, ioSome: 33 }
+    expect(H.summary(thrash)).toBe('CPU 13% (load 2.0 on 16 cores) · Memory 43% (43 GB of 100 GB · swap 57 GB · pressure 24%) · I/O pressure 33% · Disk /tmp 50% (50 GB free)')
+    const m = H.meters(thrash, l, {})
+    expect(m.map((x) => x.name)).toEqual(['CPU', 'Memory', 'I/O', 'Disk'])
+    expect(m[1]).toMatchObject({ pct: 43, detail: '43 GB of 100 GB · swap 57 GB · pressure 24%', level: 'ok' })
+    expect(m[2]).toMatchObject({ pct: 33, detail: 'the share of the last minute some task waited on I/O', level: 'ok' })
+    // a swap or a memory pressure limit holds starts: the one meter goes amber, then red once its coordinator is told
+    expect(H.meters(thrash, { ...l, startSwap: 20 }, {})[1].level).toBe('busy')
+    expect(H.meters(thrash, { ...l, startSwap: 20 }, { pressure: { since: 0, told: true } })[1].level).toBe('over')
+    expect(H.meters(thrash, { ...l, startIoPressure: 25 }, {})[2].level).toBe('busy')
+    expect(H.meters(thrash, { ...l, startIoPressure: 25 }, { pressure: { since: 0, told: true } })[2].level).toBe('over')
+    // a machine that gives none of them (macOS): no swap, no pressure, and no I/O meter
+    const mac = { ...at(2, 43) }
+    expect(H.summary(mac)).toBe('CPU 13% (load 2.0 on 16 cores) · Memory 43% (43 GB of 100 GB) · Disk /tmp 50% (50 GB free)')
+    expect(H.meters(mac, l, {}).map((x) => x.name)).toEqual(['CPU', 'Memory', 'Disk'])
   })
 
   test('the watch: what was told is kept, so a restart tells nothing again while it is still over', () => {

@@ -738,3 +738,26 @@ lists what escaped earlier in `shepherdr doctor` with a ready kill line; a workt
 herdr excludes a live task. Auto-ending the proof-marked leftovers is implemented but off until the operator answers
 the open question. The close path reads only parent and command (two `/proc` reads per process), not the five the
 hourly sweep needs.
+
+## Swap and memory and I/O pressure in machine health: ours, with upstream's memory guard weighed
+
+Checked 2026-11-19 (SHE-73) on `upstream/main` and `upstream/v2.0`, their histories and the public issues (read only):
+neither line reads swap or pressure stall information (PSI) at all: the tree has no `/proc/pressure` file.
+`mods/tasks/bin/herdr_task/machine.py`'s `_memory()` reads `/proc/meminfo` exactly as our `parseMem` did
+(`MemAvailable`, else `MemFree`), with no `SwapTotal`, and `upstream/v2.0`'s own `server/live/health.ts` reads no pressure
+either. Upstream's own answer to a machine short of memory is `tick.py`'s `memory_guard()`
+(`GUARD_MEMORY` 85, `GUARD_BACK_UNDER` 75, `GUARD_ALERT_EVERY_MS` 30 min): past 85% of memory in use it ends the idle
+agents of Done tasks first (`end_done_pass(pressed=True)`) and tells the person once per 30 minutes, where `HOLD`'s
+`start_memory` (80) keeps new tasks waiting. Not ported: its second half, "end the idle agents of finished tasks first",
+needs the ending of a Done task's idle agents that RES-01 (SHE-72's neighbour in the audit) brings here, and it acts on a
+memory share rather than on swap or PSI, which is where a busy machine hurts: its memory share reads calm while most of
+its memory sits in swap.
+
+Ours: `parseMem` also reads `SwapTotal`/`SwapFree` and `sample()` reads `some avg60` of `/proc/pressure/memory` and
+`/proc/pressure/io` beside the CPU's, so the health line, the meters and the coordinator's news show swap and the three
+pressures (`summary()`, `meters()`), and each is a start limit of its own — `machine.startSwap`,
+`machine.startMemoryPressure`, `machine.startIoPressure`, all off until set — that holds new tasks (`busy()`, as
+`memory` or, for I/O, as `io`) and, because a machine that holds every start otherwise says nothing, tells the
+coordinator: the three are one alert kind, over while any of them is, told once on the CPU kind's 2-minute hold and
+back only once every one of them is under 90% of its limit. macOS gives no swap number and no PSI: its health line shows neither and the limits never
+trigger there (the helper's `health.pl` sends the same fields from another machine, where the kernel has them).

@@ -25,7 +25,7 @@ import type {
   WaitingTask,
 } from '../../shared/types.ts'
 import { capFor, parseMaxAtOnce, type MaxEntry } from '../../shared/model-caps.ts'
-import { busy, memPct, type Sample } from './health.ts'
+import { busy, memPct, shortage, swapPct, type Sample } from './health.ts'
 import { placeId } from './places.ts'
 import { covers } from './engine/choose.ts'
 import type { HeldWhy } from './engine/engine.ts'
@@ -35,7 +35,16 @@ import { providerOf } from './usage-ledger.ts'
 import { placeOrder } from '../../shared/space-order.ts'
 
 /** the machine's keys that start tasks, in the order the page shows them */
-export const MACHINE_KEYS = ['machine.maxTasks', 'machine.startLoad', 'machine.startPressure', 'machine.startMemory', 'machine.startEvery']
+export const MACHINE_KEYS = [
+  'machine.maxTasks',
+  'machine.startLoad',
+  'machine.startPressure',
+  'machine.startMemoryPressure',
+  'machine.startIoPressure',
+  'machine.startMemory',
+  'machine.startSwap',
+  'machine.startEvery',
+]
 /** the keys of the coordinator's alerts (machine.alert…), the page's second group */
 export const ALERT_KEYS = ['machine.alertLoad', 'machine.alertMemory', 'machine.alertDisk', 'machine.alertHerdr']
 /** the per-space keys: the space's priority in this machine's queue, its Max tasks, and its Merge train */
@@ -100,7 +109,10 @@ function nowOf(key: string, s: Sample | undefined, l: { max: number | null; work
   if (key === 'machine.startLoad') return `${((s.load5 ?? s.load) / s.cores).toFixed(2)}× cores now`
   if (key === 'machine.alertLoad') return `${(s.load / s.cores).toFixed(2)}× cores now`
   if (key === 'machine.startPressure') return s.cpuSome === undefined ? 'no pressure reading' : `${s.cpuSome}% now`
+  if (key === 'machine.startMemoryPressure') return s.memSome === undefined ? 'no pressure reading' : `${Math.round(s.memSome)}% now`
+  if (key === 'machine.startIoPressure') return s.ioSome === undefined ? 'no pressure reading' : `${Math.round(s.ioSome)}% now`
   if (key === 'machine.startMemory' || key === 'machine.alertMemory') return `${memPct(s)}% now`
+  if (key === 'machine.startSwap') return s.swapTotal ? `${swapPct(s)}% now` : 'no swap'
   if (key === 'machine.alertDisk') return `${Math.max(0, ...s.disks.map((d) => d.pct))}% now`
   return undefined
 }
@@ -133,7 +145,8 @@ export function machineColumns(s: Settings): string[] {
   return s.pick('merge.train', 'all').from === 'all' ? [...MACHINE_KEYS, 'merge.train'] : MACHINE_KEYS
 }
 
-/** why the machine holds a task now, in words: herdr does not answer, its CPU is past the limit (load or pressure), or its memory */
+/** why the machine holds a task now, in words: herdr does not answer, its CPU is past the limit (load or pressure), its
+ *  memory (in use, in swap or under pressure), or its I/O pressure */
 export function machineReason(sample: Sample | undefined, herdr: boolean, s: Settings): string {
   const l = s.machine('machine')
   const why: string[] = []
@@ -144,7 +157,8 @@ export function machineReason(sample: Sample | undefined, herdr: boolean, s: Set
       why.push(
         `CPU is busy: load ${((sample.load5 ?? sample.load) / sample.cores).toFixed(2)}× cores${l.startLoad !== null ? ` (limit ${l.startLoad}×)` : ''}${sample.cpuSome !== undefined && l.startPressure !== null ? `, pressure ${sample.cpuSome}% (limit ${l.startPressure}%)` : ''}`,
       )
-    if (b === 'memory') why.push(`memory ${memPct(sample)}% (limit ${l.startMemory}%)`)
+    if (b === 'memory' || b === 'io')
+      why.push([...(l.startMemory !== null && memPct(sample) > l.startMemory ? [`memory ${memPct(sample)}% (limit ${l.startMemory}%)`] : []), ...shortage(sample, l)].join(', '))
   }
   return why.join(' · ') || 'the machine has room now: the next look starts it'
 }

@@ -1,6 +1,6 @@
-// Machine health: every 30 seconds Shepherdr reads how loaded this machine is (its 1- and 5-minute load against its cores, its CPU pressure,
-// memory in use, how full home and /tmp are, a GPU's use where nvidia-smi is there) and whether herdr answers. Cheap:
-// /proc, statfs and one nvidia-smi call. It only measures and tells: past a limit in Settings (machine.*) its
+// Machine health: every 30 seconds Shepherdr reads how loaded this machine is (its 1- and 5-minute load against its cores, its CPU, memory
+// and I/O pressure, memory and swap in use, how full home and /tmp are, a GPU's use where nvidia-smi is there) and whether herdr answers.
+// Cheap: /proc, statfs and one nvidia-smi call. It only measures and tells: past a limit in Settings (machine.*) its
 // coordinator hears once, with the numbers and what uses the machine most, and again only after it came back under.
 // What to do about it (pause or queue tasks, clean the disk, tell the human) is the coordinator's call. The same
 // numbers decide when Shepherdr starts more tasks (engine.release).
@@ -43,8 +43,16 @@ export interface Sample {
   /** the share of the last minute some task waited for a CPU (%, /proc/pressure/cpu some avg60); none where the kernel
    *  has no pressure stall information */
   cpuSome?: number
+  /** the same for memory (%, /proc/pressure/memory some avg60): memory short enough that a task waits for it. Linux only */
+  memSome?: number
+  /** the same for I/O (%, /proc/pressure/io some avg60). Linux only */
+  ioSome?: number
   memTotal: number
   memUsed: number
+  /** swap in use, and how much of it there is (bytes, /proc/meminfo): a machine with no swap gives neither, and macOS
+   *  gives neither */
+  swapUsed?: number
+  swapTotal?: number
   disks: Disk[]
   gpus: Gpu[]
 }
@@ -58,18 +66,21 @@ export const parseLoad5 = (text: string) => {
   return Number.isFinite(n) ? n : undefined
 }
 
-/** `some avg60` of /proc/pressure/cpu: the share of the last minute some task waited for a CPU (%); none without it */
+/** `some avg60` of /proc/pressure/<resource> (cpu, memory, io): the share of the last minute some task waited for it
+ *  (%); none without that file (a kernel without PSI, or macOS) */
 export const parsePressure = (text: string) => {
   const m = /^some\b.*\bavg60=([\d.]+)/m.exec(text)
   return m ? Number(m[1]) : undefined
 }
 
-/** total and in-use memory (bytes) from /proc/meminfo: in use is what is not available */
+/** total and in-use memory, and swap in use out of its total (bytes), from /proc/meminfo: in use is what is not
+ *  available, swap in use what is not free */
 export function parseMem(text: string) {
   const kb = (name: string) => Number(text.match(new RegExp(`^${name}:\\s+(\\d+)`, 'm'))?.[1] ?? 0) * 1024
   const total = kb('MemTotal')
   const avail = kb('MemAvailable') || kb('MemFree')
-  return { total, used: Math.max(0, total - avail) }
+  const swapTotal = kb('SwapTotal')
+  return { total, used: Math.max(0, total - avail), swapTotal, swapUsed: Math.max(0, swapTotal - kb('SwapFree')) }
 }
 
 /** nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits */
@@ -132,14 +143,19 @@ export function sample(): Sample {
   const avg = read('/proc/loadavg')
   const load5 = parseLoad5(avg)
   const cpuSome = parsePressure(read('/proc/pressure/cpu'))
+  const memSome = parsePressure(read('/proc/pressure/memory'))
+  const ioSome = parsePressure(read('/proc/pressure/io'))
   return {
     at: Date.now(),
     cores: cpus().length || 1,
     load: parseLoad(avg),
     ...(load5 !== undefined ? { load5 } : {}),
     ...(cpuSome !== undefined ? { cpuSome } : {}),
+    ...(memSome !== undefined ? { memSome } : {}),
+    ...(ioSome !== undefined ? { ioSome } : {}),
     memTotal: mem.total,
     memUsed: mem.used,
+    ...(mem.swapTotal ? { swapTotal: mem.swapTotal, swapUsed: mem.swapUsed } : {}),
     disks,
     gpus: gpus(),
   }
@@ -147,17 +163,20 @@ export function sample(): Sample {
 
 export const cpuPct = (s: Sample) => Math.round((s.load / s.cores) * 100)
 export const memPct = (s: Sample) => (s.memTotal ? Math.round((s.memUsed / s.memTotal) * 100) : 0)
+/** the share of swap in use (%): 0 where the machine has no swap, or gives no swap numbers (macOS) */
+export const swapPct = (s: Sample) => (s.swapTotal ? Math.round(((s.swapUsed ?? 0) / s.swapTotal) * 100) : 0)
 const gb = (b: number) => `${Math.round(b / 2 ** 30)} GB`
 const tilde = (p: string) => (p === homedir() ? 'home' : p)
 
 /* ---------- limits ---------- */
 
-/** new tasks wait: the 5-minute load (the 1-minute one where a machine gives no other), CPU pressure or memory is over
- *  its start limit (nothing when the limit is by number only) */
-export function busy(s: Sample | undefined, l: MachineLimits): 'cpu' | 'memory' | undefined {
+/** new tasks wait: the 5-minute load (the 1-minute one where a machine gives no other), CPU pressure, memory in use
+ *  or in swap, memory pressure or I/O pressure is over its start limit (nothing when the limit is by number only) */
+export function busy(s: Sample | undefined, l: MachineLimits): 'cpu' | 'memory' | 'io' | undefined {
   if (!s) return undefined
   if (cpuOver(s, l)) return 'cpu'
-  if (l.startMemory !== null && memPct(s) > l.startMemory) return 'memory'
+  if (memoryOver(s, l)) return 'memory'
+  if (ioPressureOver(s, l)) return 'io'
   return undefined
 }
 
@@ -165,15 +184,42 @@ export function busy(s: Sample | undefined, l: MachineLimits): 'cpu' | 'memory' 
 const cpuOver = (s: Sample, l: MachineLimits) =>
   (l.startLoad !== null && (s.load5 ?? s.load) > l.startLoad * s.cores) || (l.startPressure !== null && s.cpuSome !== undefined && s.cpuSome > l.startPressure)
 
-export type Kind = 'cpu' | 'memory' | 'disk' | 'herdr'
+const swapOver = (s: Sample, l: MachineLimits) => l.startSwap !== null && swapPct(s) > l.startSwap
+const memPressureOver = (s: Sample, l: MachineLimits) => l.startMemoryPressure !== null && s.memSome !== undefined && s.memSome > l.startMemoryPressure
+const ioPressureOver = (s: Sample, l: MachineLimits) => l.startIoPressure !== null && s.ioSome !== undefined && s.ioSome > l.startIoPressure
+
+/** memory is past a start limit: in use, in swap, or the share of the last minute some task waited for it */
+export const memoryOver = (s: Sample, l: MachineLimits) => (l.startMemory !== null && memPct(s) > l.startMemory) || swapOver(s, l) || memPressureOver(s, l)
+
+/** the machine short of memory or I/O, in words: each measure over its own start limit now ("swap 45% used (limit
+ *  20%)"): what holds starts and what its coordinator is told, so the one news says which */
+export function shortage(s: Sample, l: MachineLimits): string[] {
+  return [
+    ...(swapOver(s, l) ? [`swap ${swapPct(s)}% used (limit ${l.startSwap}%)`] : []),
+    ...(memPressureOver(s, l) ? [`memory pressure ${Math.round(s.memSome ?? 0)}% (limit ${l.startMemoryPressure}%)`] : []),
+    ...(ioPressureOver(s, l) ? [`I/O pressure ${Math.round(s.ioSome ?? 0)}% (limit ${l.startIoPressure}%)`] : []),
+  ]
+}
+
+/** swap and the memory and I/O pressure are one alert kind ('pressure'): a machine short of memory or I/O is one state,
+ *  so its coordinator hears of it once and again once every one of those limits is under */
+export type Kind = 'cpu' | 'memory' | 'pressure' | 'disk' | 'herdr'
 
 /** what is past its alert limit now (over), and what is well back under it (back) */
 export function levels(s: Sample, herdr: boolean, l: MachineLimits): Record<Kind, { over: boolean; back: boolean }> {
   const disk = Math.max(0, ...s.disks.map((d) => d.pct))
   const vs = (v: number, limit: number | null) => ({ over: limit !== null && v > limit, back: limit === null || v < limit * BACK_UNDER })
+  // the machine's shortness (swap, memory pressure, I/O pressure): over while any of them is, back once every one of
+  // the limits set is well under its own
+  const set = [
+    { v: swapPct(s), limit: l.startSwap },
+    { v: s.memSome, limit: l.startMemoryPressure },
+    { v: s.ioSome, limit: l.startIoPressure },
+  ].filter((x): x is { v: number; limit: number } => x.limit !== null && x.v !== undefined)
   return {
     cpu: vs(s.load, l.alertLoad === null ? null : l.alertLoad * s.cores),
     memory: vs(memPct(s), l.alertMemory),
+    pressure: { over: shortage(s, l).length > 0, back: set.every((x) => x.v < x.limit * BACK_UNDER) },
     disk: vs(disk, l.alertDisk),
     herdr: { over: l.alertHerdr && !herdr, back: herdr || !l.alertHerdr },
   }
@@ -190,7 +236,7 @@ export interface Watch {
  * (that it is back) once it is well under. In between, nothing.
  */
 export function judge(was: Partial<Record<Kind, Watch>>, now: Record<Kind, { over: boolean; back: boolean }>, at: number) {
-  const hold: Record<Kind, number> = { cpu: LOAD_FOR, memory: 0, disk: 0, herdr: HERDR_FOR }
+  const hold: Record<Kind, number> = { cpu: LOAD_FOR, memory: 0, pressure: LOAD_FOR, disk: 0, herdr: HERDR_FOR }
   const next: Partial<Record<Kind, Watch>> = {}
   const events: { kind: Kind; what: 'over' | 'back' }[] = []
   for (const kind of Object.keys(now) as Kind[]) {
@@ -212,19 +258,23 @@ export function judge(was: Partial<Record<Kind, Watch>>, now: Record<Kind, { ove
   return { next, events }
 }
 
-/** each meter for the screen: CPU, Memory, Disk, and each GPU */
+/** each meter for the screen: CPU, Memory, I/O pressure where the kernel gives it, Disk, and each GPU */
 export function meters(s: Sample, l: MachineLimits, told: Partial<Record<Kind, Watch>>): HealthMeter[] {
-  const level = (kind: Kind, start: boolean): HealthLevel => (told[kind]?.told ? 'over' : start ? 'busy' : 'ok')
+  const level = (over: boolean | undefined, start: boolean): HealthLevel => (over ? 'over' : start ? 'busy' : 'ok')
   const disk = s.disks.reduce<Disk | undefined>((a, d) => (!a || d.pct > a.pct ? d : a), undefined)
   return [
     {
       name: 'CPU',
       pct: cpuPct(s),
       detail: `load ${s.load.toFixed(1)}${s.load5 !== undefined ? ` (5 min ${s.load5.toFixed(1)})` : ''} on ${s.cores} cores${s.cpuSome !== undefined ? ` · pressure ${Math.round(s.cpuSome)}%` : ''}`,
-      level: level('cpu', cpuOver(s, l)),
+      level: level(told.cpu?.told, cpuOver(s, l)),
     },
-    { name: 'Memory', pct: memPct(s), detail: `${gb(s.memUsed)} of ${gb(s.memTotal)}`, level: level('memory', l.startMemory !== null && memPct(s) > l.startMemory) },
-    ...(disk ? [{ name: 'Disk', pct: disk.pct, detail: s.disks.map((d) => `${tilde(d.path)} ${d.pct}%`).join(' · '), level: level('disk', false) }] : []),
+    // a held start shows here: memory, swap and memory pressure are the one meter, and the kind told of any of them
+    { name: 'Memory', pct: memPct(s), detail: memDetail(s), level: level(told.memory?.told || (told.pressure?.told && (swapOver(s, l) || memPressureOver(s, l))), memoryOver(s, l)) },
+    ...(s.ioSome !== undefined
+      ? [{ name: 'I/O', pct: Math.round(s.ioSome), detail: 'the share of the last minute some task waited on I/O', level: level(told.pressure?.told && ioPressureOver(s, l), ioPressureOver(s, l)) }]
+      : []),
+    ...(disk ? [{ name: 'Disk', pct: disk.pct, detail: s.disks.map((d) => `${tilde(d.path)} ${d.pct}%`).join(' · '), level: level(told.disk?.told, false) }] : []),
     ...s.gpus.map((g, i) => ({ name: s.gpus.length > 1 ? `GPU ${i + 1}` : 'GPU', pct: g.util, detail: `${g.name} · memory ${g.memPct}%`, level: 'ok' as const })),
   ]
 }
@@ -309,11 +359,17 @@ export function procLines(procs: Proc[], tasks: { id: string; worktree?: string 
   return [...(per.length ? [`Tasks among them: ${per.join(', ')}.`] : []), 'Using it most now:', ...lines]
 }
 
-/** the numbers in one line: "CPU 170% (load 27.2 on 16 cores) · Memory 62% (19 of 31 GB) · Disk home 22%" */
+/** memory in a few words: "19 of 31 GB · swap 4 GB · pressure 24%" (swap and pressure only where the machine gives them) */
+const memDetail = (s: Sample) => `${gb(s.memUsed)} of ${gb(s.memTotal)}${s.swapTotal ? ` · swap ${gb(s.swapUsed ?? 0)}` : ''}${s.memSome !== undefined ? ` · pressure ${Math.round(s.memSome)}%` : ''}`
+
+/** the numbers in one line: "CPU 170% (load 27.2 on 16 cores · pressure 31%) · Memory 62% (19 of 31 GB · swap 4 GB) ·
+ *  I/O pressure 12% · Disk home 22%": swap and the three pressure readings where the kernel gives them (Linux; a macOS
+ *  machine shows none of them) */
 export function summary(s: Sample) {
   return [
-    `CPU ${cpuPct(s)}% (load ${s.load.toFixed(1)} on ${s.cores} cores)`,
-    `Memory ${memPct(s)}% (${gb(s.memUsed)} of ${gb(s.memTotal)})`,
+    `CPU ${cpuPct(s)}% (load ${s.load.toFixed(1)} on ${s.cores} cores${s.cpuSome !== undefined ? ` · pressure ${Math.round(s.cpuSome)}%` : ''})`,
+    `Memory ${memPct(s)}% (${memDetail(s)})`,
+    ...(s.ioSome !== undefined ? [`I/O pressure ${Math.round(s.ioSome)}%`] : []),
     `Disk ${s.disks.map((d) => `${tilde(d.path)} ${d.pct}% (${Math.round(d.freeGb)} GB free)`).join(', ')}`,
     ...s.gpus.map((g) => `GPU ${g.util}% (${g.name})`),
   ].join(' · ')

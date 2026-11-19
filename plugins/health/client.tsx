@@ -1,7 +1,8 @@
 // Machine health: a machine's home space carries a small meter at the top right of its chat, one thin bar each for CPU,
-// memory, disk (and a GPU), with a short status where the header has room. Calm: grey while all is well, amber
-// while new tasks wait for room, red past an alert limit. A tap opens what is behind it (the numbers, the tasks at
-// work against the limit, herdr) and the machine's settings. Shepherdr samples it every 30 seconds (health.ts).
+// memory, I/O pressure where the kernel gives it, disk (and a GPU), with a short status where the header has room. Calm:
+// grey while all is well, amber while new tasks wait for room, red past an alert limit. A tap opens what is behind it (the
+// numbers, the tasks at work against the limit, herdr) and the machine's settings. Shepherdr samples it every 30 seconds
+// (health.ts).
 import clsx from 'clsx'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { definePlugin, setUI, useSnap, useUI } from '@client/kernel.ts'
@@ -105,7 +106,7 @@ function Details({ m, h, onClose }: { m: Machine; h: MachineHealth; onClose: () 
             <dd className={clsx('text-right tabular-nums', m.level === 'ok' ? 'text-fg2' : WORD[m.level])}>{m.pct}%</dd>
             <dd className="col-start-2 col-end-4 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]">
               {m.detail}
-              {m.level === 'over' ? ' · Alert limit crossed' : m.level === 'busy' ? ' · New tasks wait for room' : ''}
+              {m.level === 'over' ? ' · Over its limit' : m.level === 'busy' ? ' · New tasks wait for room' : ''}
             </dd>
           </div>
         ))}

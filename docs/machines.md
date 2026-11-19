@@ -26,17 +26,24 @@ pull requests of GitHub repos); nothing to install by hand.
 
 ## Health and limits
 
-Each machine watches its own health: every 30 seconds it reads its 1- and 5-minute load against its cores, its CPU
-pressure (Linux: the share of the last minute some task waited for a CPU, `/proc/pressure/cpu`), memory in use,
-how full home and /tmp are, a GPU's use (nvidia-smi, where there is one) and whether herdr answers. A small meter at
-the top right of its home space's chat shows it (thin bars, the numbers in words where there is room; grey while all is
-well, amber while new tasks wait, red past an alert limit), and a tap shows the numbers, the tasks at work against
-the limit, herdr, and its settings. Settings → Each machine → its name holds its limits, each machine keeping its
-own, scaled to its cores and memory: limit working tasks by Number of tasks, Machine load or Both (Both); max tasks
+Each machine watches its own health: every 30 seconds it reads its 1- and 5-minute load against its cores, its CPU,
+memory and I/O pressure (Linux: the share of the last minute some task waited for a CPU, memory or I/O,
+`/proc/pressure/cpu`, `/proc/pressure/memory` and `/proc/pressure/io`; a macOS machine has no such reading and no swap
+either), memory and swap in use (Linux: `/proc/meminfo`), how full home and /tmp are, a GPU's use (nvidia-smi, where
+there is one) and whether herdr answers. A small meter at the top right of its home space's chat shows it (thin bars,
+the numbers in words where there is room; grey while all is well, amber while new tasks wait, red past a limit and its
+coordinator told), and a tap shows the numbers, the tasks at work against the limit, herdr, and its settings. Settings
+→ Each machine → its name holds its limits, each machine keeping its own, scaled to its cores and memory: limit
+working tasks by Number of tasks, Machine load or Both (Both); max tasks
 working at once (10); new tasks wait while the 5-minute load is over 1× the cores (the 1-minute one swings with every
 build, and let tasks start in each lull), CPU pressure over its limit (off until set: Wait while CPU pressure is over,
-`machine.startPressure`, a share such as 20%) or memory over 80%; its coordinator is told
-when the load stays over 1.5× the cores for 2 minutes, memory or a disk is over 90%, or herdr stops answering.
+`machine.startPressure`, a share such as 20%), memory pressure or I/O pressure over its own limit (off until set:
+`machine.startMemoryPressure`, `machine.startIoPressure`), memory over 80%, or swap in use over its limit (off until
+set: `machine.startSwap`: memory in swap is memory short while the memory share still reads calm, when most of the
+machine sits in swap and every task crawls); its coordinator is told when the load stays over 1.5× the cores for 2
+minutes, memory or a disk is over 90%, or herdr stops answering. A swap, memory-pressure or I/O-pressure start limit
+tells too, as one piece of news: a machine short of memory or I/O past one of them for 2 minutes says so instead of
+quietly holding every new start, and says when every one of them is back under.
 - **Room for tasks** (Shepherdr enforces it): a task added, or told to go (a queued task's go, or a coordinator's
   `task tell` to one that waits), waits as Queued, `Waiting for a free slot` or `Waiting for the machine` (or `This
   machine is set to 0 tasks`, when Max tasks is 0; `Waiting for a free slot of <space>` once that space's own cap,
