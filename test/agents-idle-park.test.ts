@@ -7,7 +7,7 @@
 // runs. The park-and-resume round trip is the real Agents class per kind: parked, then started again on its session,
 // with its model and effort, by the args each CLI is handed.
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
-import { closeSync, mkdirSync, openSync, utimesSync } from 'node:fs'
+import { closeSync, mkdirSync, openSync, rmSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 import type { TaskRec } from '../server/live/engine/engine.ts'
@@ -243,6 +243,18 @@ describe('the idle sweep parks', () => {
     fiveIdle()
     expect(await src.parkIdleAgents()).toEqual([])
     expect(src.parkedCount()).toBe(0)
+  })
+
+  test('a log gone between the looks: its life is its start; a chat that is neither task nor coordinator is left', async () => {
+    expect(src.settings.set('agents.idleClose', '120', 'machine').ok).toBe(true)
+    // its log vanished (a mirror rewritten away): when it started is the last life it has, and that is long ago
+    const gone = agent('IDLE-V/Agent', 'pi', { log: 'IDLE-V.jsonl' })
+    rmSync(join(home, 'logs', 'IDLE-V.jsonl'))
+    // a record left by a chat that is no task's and no place's: nothing here decides for it
+    const stray = agent('stray-chat', 'claude', { log: 'stray.jsonl' })
+    expect(await src.parkIdleAgents()).toEqual([gone.key])
+    expect(gone.finished).toBe(true)
+    expect(stray.finished).toBeUndefined()
   })
 })
 
