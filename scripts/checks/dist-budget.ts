@@ -10,7 +10,8 @@
 // Vite gives its assets content hashes (index-5tkGkQ0q.js); a rebuild changes them even when nothing really changed, so
 // the files are counted under hash-stripped names. The baseline is the default branch's, in the repo's own .git next to
 // the coverage baseline, recorded by the check there from a clean tree. Until the first such run there is none, and
-// nothing is compared. InterVariable's fonts are already over the cap: they stay exempt only while the baseline says so.
+// nothing is compared. What already shipped over the cap at the baseline (InterVariable's fonts among it) stays exempt
+// while the baseline says so: the cap gates new growth, not the build the baseline was recorded from.
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
@@ -89,8 +90,9 @@ export function scan(dir: string): Snapshot | null {
     kinds,
     files,
     top: assets.sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name)).slice(0, 10),
-    // the fonts that were already over the cap at the baseline keep their exemption; a new big font is not let in
-    exempt: assets.filter((a) => a.kind === 'font' && a.bytes > HARD_CAP).map((a) => a.name),
+    // what already shipped over the cap is grandfathered here (the InterVariable fonts among it); anything else that
+    // arrives over the cap fails, so a new big font is not let in until the coordinator records a new baseline
+    exempt: assets.filter((a) => a.bytes > HARD_CAP).map((a) => a.name),
   }
 }
 
@@ -105,8 +107,8 @@ export function compare(now: Snapshot, base: Baseline): string[] {
     fell.push(`total JS: ${fmt(now.js)} (${now.js} bytes) now, ${fmt(base.js)} (${base.js}) at the baseline + ${fmt(allowed)} allowed: +${now.js - base.js} bytes`)
   const exempt = base.exempt ?? []
   for (const [name, bytes] of Object.entries(now.files))
-    if (!(name in base.files) && bytes > HARD_CAP && !exempt.includes(name))
-      fell.push(`new asset over the ${fmt(HARD_CAP)} cap: ${name} (${fmt(bytes)}, ${bytes} bytes)`)
+    if (bytes > HARD_CAP && !exempt.includes(name))
+      fell.push(`${name in base.files ? 'asset' : 'new asset'} over the ${fmt(HARD_CAP)} cap: ${name} (${fmt(bytes)}, ${bytes} bytes)`)
   return fell
 }
 

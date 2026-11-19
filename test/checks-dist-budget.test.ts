@@ -102,7 +102,7 @@ describe('the ratchet', () => {
   })
 
   test('a new asset over the 300 KB cap fails outright with the asset and its size; old big assets stay', () => {
-    const w = world({ 'assets/index-5tkGkQ0q.js': 100000, 'assets/xterm-BMsy1fDS.js': 330000, 'assets/InterVariable-DiVDrmQJ.woff2': 400000 }, ['assets/InterVariable.woff2'])
+    const w = world({ 'assets/index-5tkGkQ0q.js': 100000, 'assets/xterm-BMsy1fDS.js': 330000, 'assets/InterVariable-DiVDrmQJ.woff2': 400000 }, ['assets/xterm.js', 'assets/InterVariable.woff2'])
     const big = (name: string, bytes: number) => ({ ...w.snap, js: w.snap.js + (name.endsWith('.js') ? bytes : 0), files: { ...w.snap.files, [name]: bytes } })
     // an asset the baseline already carried is grandfathered, even one over the cap; the exempt font stays exempt
     expect(D.compare(w.snap, w.base)).toEqual([])
@@ -113,6 +113,9 @@ describe('the ratchet', () => {
     // a new font over the cap is not let in unless the baseline already exempted its name
     expect(D.compare(big('assets/Roboto.woff2', 400000), w.base).some((f) => f.includes('Roboto.woff2'))).toBe(true)
     expect(D.compare(big('assets/InterVariable.woff2', 400000), w.base).some((f) => f.includes('cap'))).toBe(false)
+    // an asset that was under the cap at the baseline and grows past it is caught too, and named as not new
+    const grown = D.compare(big('assets/index.js', 400000), w.base)
+    expect(grown.some((f) => f.includes('asset over the 300.0 KB cap: assets/index.js') && !f.includes('new asset'))).toBe(true)
   })
 })
 
@@ -190,4 +193,3 @@ describe('the command', () => {
     expect(D.readBaseline(w.baseline)).toBeNull()
   })
 })
-

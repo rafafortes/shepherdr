@@ -247,6 +247,10 @@ show_failure() { # the reasons a step failed
       shown=$(sed -n '/^Coverage fell since the baseline/,$p' "$log" | head -14)
       [ -n "$shown" ] && echo "$shown"
       ;;
+    dist-budget)
+      shown=$(sed -n '/^Dist budget grew since the baseline/,$p' "$log" | head -14)
+      [ -n "$shown" ] && echo "$shown"
+      ;;
     types)
       shown=$(grep -E 'error TS[0-9]+' "$log" | sort -u | head -8)
       [ -n "$shown" ] && { echo "Type errors:"; echo "$shown" | sed 's/^/  /'; }

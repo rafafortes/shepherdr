@@ -8,5 +8,5 @@ record=()
 [ "${SHEPHERDR_CHECK_RECORD:-}" = 1 ] && record=(--record)
 bun "$root/scripts/checks/dist-budget.ts" "$root/dist" ${record[@]+"${record[@]}"}
 code=$?
-grep -E '^Dist budget: ' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1 >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
+grep -E '^Dist budget: ' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1 | sed 's/^Dist budget: //' >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
 exit "$code"
