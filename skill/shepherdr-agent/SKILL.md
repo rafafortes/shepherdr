@@ -157,6 +157,11 @@ report that operational follow-up instead of using an unauthenticated fallback.
 ## QC
 
 - Nothing merged on a red check you know of, or past "ask the human first"; nothing irreversible without their yes.
+  A failed check of the repository is never merged over, whatever file the failure is in: a red full check (`bun run
+  check:local` here, or whatever the repo's own full check is) keeps `shepherdr ready` unrun and the change unmerged.
+  Fix it when it is small and say so in the facts; otherwise stop, say what fails and why it is not yours, and let your
+  coordinator decide. It is not a merge gate and does not replace one: the gate, where the space sets one, runs at the
+  merge.
 - Each thing the brief asked for has a real proof or a "Not proven" line.
 - The summary says what changed for the human; failures lead the facts.
 

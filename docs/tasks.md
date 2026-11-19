@@ -144,22 +144,30 @@
     `every model it may use is full or out`. A cut-off task's takeover skips the full backups the same way and, with none with
     room, waits (`Waiting: …`) until one frees. Its way back to the primary is in [settings](settings.md) (the caps and the chain).
 - A space may have a **merge gate** (Settings → How tasks work → Merge gate, `merge.gate`, off by default; a task's own
-  `--set merge.gate=…` wins): a command run in the task's worktree after its rebase and before it goes into main here
-  (not through a pull request), with `SHEPHERDR_TASK` and `SHEPHERDR_BASE` set. Exit 0 lets it in, and the last line it
-  printed goes into the merge commit; anything else, or 45 minutes without an end, refuses the merge with the end of its
-  output, main stays as it was and the task is Ready again. Merges into one repo go one at a time, so the others wait
-  while it runs; a `shepherdr merge` that asks meanwhile hears that the gate still runs. If main moved anyway while it
-  ran, the branch is rebased on it and the gate runs again (three times at most). It is never a git hook: a hook that
-  refuses an update leaves what it would write in the space's checkout. The gate runs detached, its words and exit code
-  in files of their own, so a restart of Shepherdr (an update) leaves it running: the Shepherdr that comes back goes on
-  from it and merges once it passes. It has a limit of its own inside the command (45 minutes, under `timeout` where
-  that binary exists, exiting 124), so it ends even if Shepherdr never comes back; it is also stopped when a newer run
-  replaces it (a stale run must never go on in the worktree) or when its task is closed, stopped, archived or deleted.
-  On startup a gate past its limit, or one whose task is gone or no longer waits for it, is stopped too; a young gate of
-  a task that still wants it survives and is found again. A merge that only waited in line takes its place in line again
-  by itself, in the order it had, and its agent hears how it went. A merge a restart cut short with nothing left of it
-  (a gate that was stopped, or the merge itself halfway) is back at its turn, its row reading `Merge gate interrupted by
-  a restart: run shepherdr merge again` and its agent told so.
+  `--set merge.gate=…` wins): a command run in the task's worktree after its rebase and before its change goes into its
+  base — the merge made here and the merge of its pull request alike —, with `SHEPHERDR_TASK` and `SHEPHERDR_BASE` set.
+  Exit 0 lets it in, and the last line it printed goes into the merge commit (for a squash on GitHub, the body of that
+  commit); anything else, or 45 minutes without an end, refuses the merge with the end of its output, the base stays as
+  it was and the task is Ready again. Merges into one repo go one at a time, so the others wait while it runs; a
+  `shepherdr merge` that asks meanwhile hears that the gate still runs. If the base moved anyway while it ran, the
+  branch is rebased on it and the gate runs again (three times at most). It is never a git hook: a hook that refuses an
+  update leaves what it would write in the space's checkout. The gate runs detached, its words and exit code in files of
+  their own, so a restart of Shepherdr (an update) leaves it running: the Shepherdr that comes back goes on from it and
+  merges once it passes. It has a limit of its own inside the command (45 minutes, under `timeout` where that binary
+  exists, exiting 124), so it ends even if Shepherdr never comes back; it is also stopped when a newer run replaces it
+  (a stale run must never go on in the worktree) or when its task is closed, stopped, archived or deleted. On startup a
+  gate past its limit, or one whose task is gone or no longer waits for it, is stopped too; a young gate of a task that
+  still wants it survives and is found again. A merge that only waited in line takes its place in line again by itself,
+  in the order it had, and its agent hears how it went. A merge a restart cut short with nothing left of it (a gate that
+  was stopped, or the merge itself halfway) is back at its turn, its row reading `Merge gate interrupted by a restart:
+  run shepherdr merge again` and its agent told so. A gate set on a space whose merges go through a pull request runs on
+  the pull request's path too: the branch is first brought onto GitHub's base (`origin/<base>`, rebased whenever it moved,
+  not only on a conflict, so that what the gate checks is what will land), the gate runs on that very commit before
+  anything is pushed, and the pull request merges only while its head is still that commit and GitHub's base is still the
+  one it ran on. A base that moved while it ran: the branch is rebased and the gate runs again (three times at most, then
+  `main kept moving while … nothing was merged`); a base that moved after it ran, while GitHub's checks were read, no
+  merge at all — the next `shepherdr merge` gates the branch on the new base. GitHub's own checks, where a repository has
+  them, are read as before: the gate is one more condition, never a replacement.
 - A space with a merge gate may also take **merge trains** (Settings → How tasks work → Merge train, `merge.train`: off
   by default, or 2 to 5, the most merges one train takes, the head included). When several merges wait in line here,
   the first one in line runs the gate once for them all: their changes are stacked on main, one on top of the other,
@@ -167,7 +175,9 @@
   changes). If it passes, each merge goes in as its own commit, with its task's words and the gate's last line, and the
   line `Merge train: A, B, C (one merge gate run)`. The riders are the next tasks in line with the same gate, whose agent
   is at rest and has read its messages. One whose change conflicts with the ones before it, or adds nothing to them,
-  keeps its place and goes in on its own turn, as usual. Only merges made here take part (not GitHub pull requests).
+  keeps its place and goes in on its own turn, as usual. Only merges made here take part: a space whose merges go
+  through a pull request takes no train, and the server's log says so once per merge (`… merges through a pull request,
+  and a merge train is for merges made here`).
   If the gate refuses the train, nothing of it lands: each member then goes alone once, on its own gate, before it rides
   a train again, and only the task whose change fails is told of the refusal. If main moves while the train's gate
   runs, the head goes alone and the riders wait in line as before. The server's log names each train decision and why a
@@ -300,9 +310,11 @@
   and main here is pulled, so Shepherdr's own update sees the merge. Failed checks are sent back to the agent. A branch
   behind main is merged as it is: rebasing it would make a new commit and run all of GitHub's checks again, and again
   each time another task lands meanwhile. Only a conflict with main is rebased (by `shepherdr merge` when git can, else
-  by the agent), and when waiting for GitHub's checks they run on that commit before it merges. For a few hours after
-  a task merges through its pull request, Shepherdr watches GitHub's runs on main: once one fails, the space's
-  coordinator hears it once (news), with the failing run, the end of its log and the tasks merged since main was last
+  by the agent), and when waiting for GitHub's checks they run on that commit before it merges. With a merge gate set
+  (above) it is different: the branch is brought onto GitHub's base (`origin/main`) as it is now, whether it moved
+  cleanly or not, and the gate runs on that very commit before anything is pushed, so the gate checks what will land.
+  For a few hours after a task merges through its pull request, Shepherdr watches GitHub's runs on main: once one fails,
+  the space's coordinator hears it once (news), with the failing run, the end of its log and the tasks merged since main was last
   green, and decides on a fix-forward task (Autopilot adds one by itself). It hears again only after main was green. GitHub's
   merge queue would test each one on top of the others, but it needs an organisation's repo. Elsewhere it is rebased
   and squash-merged into main here (and main pushed when there is a remote). Work of your own left uncommitted in that

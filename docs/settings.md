@@ -72,10 +72,11 @@
   Like the rest, it is set Everywhere, for a machine or for a space (the most specific one set wins), and for one task
   by its coordinator (`task add --set reviewer.fallback=pi`), which wins for that task.
 - Merge gate and Merge train (How tasks work, `merge.gate` and `merge.train`), per space like the rest. The gate is a
-  command a merge made here must pass (exit 0) before it goes into main. The train (2 to 5, the most merges one takes,
-  the head included; off by default) lets the first merges in line go in together on one gate run, each as its own
-  commit. It needs a gate set and works only for merges made here, not through a GitHub pull request. Off means one at
-  a time. What each row does is in [tasks](tasks.md).
+  command every merge must pass (exit 0) before its change goes into its base, whether the merge is made here or through
+  the space's pull request. The train (2 to 5, the most merges one takes, the head included; off by default) lets the
+  first merges in line go in together on one gate run, each as its own commit. It needs a gate set and works only for
+  merges made here, not through a GitHub pull request. Off means one at a time. What each row does is in
+  [tasks](tasks.md).
 - **Max tasks of this space working at once** (`space.maxTasks`, the Space section; No cap by default, or 0 to 200) caps how
   many of one space's tasks work on this machine at once. **0 starts none**: every task of that space is held, as `<space> is
   set to 0 tasks`, and another space's tasks start as before. No cap is not 0: it is unlimited within the machine's limit. It works together with the machine's own limit (Machine → Max
