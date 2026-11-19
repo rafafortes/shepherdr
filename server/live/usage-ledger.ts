@@ -18,8 +18,13 @@ export const HOUR = 3_600_000
 export const KEEP_USAGE = 35 * 24 * HOUR
 /** how far back run-outs are kept */
 export const KEEP_RUNOUTS = 60 * 24 * HOUR
-/** a change is written this long after it was made, once (not on each call) */
-const SAVE_AFTER = 5_000
+/** A change is written this long after it was made, once (not on each call). Under a steady trickle of events (a usage
+ *  row on every turn of many agents) the delay grows from MIN to MAX, so the whole 5.5 MB store is not rewritten every
+ *  5 s; a quiet spell resets it to MIN so a one-off change is durable soon. Every reader — models.maxAtOnce, the plan
+ *  limits, the screen and shepherdr status — reads this ledger's in-memory state; only the constructor reads
+ *  usage.json, so a longer on-disk delay cannot pass a cap with stale data. stop()/flush() write the file now. */
+export const SAVE_AFTER_MIN = 5_000
+export const SAVE_AFTER_MAX = 30_000
 
 /** the role of the chat a run-out cut off: a task's agent, a task's reviewer, a coordinator (a chat of a place) */
 export type RunRole = 'task' | 'reviewer' | 'coordinator'
@@ -147,6 +152,10 @@ export class UsageLedger {
   private data: Stored
   private timer?: ReturnType<typeof setTimeout>
   private dirty = false
+  /** the current write delay, grown while events keep arriving and reset after a quiet spell (see the constants above) */
+  private delay = SAVE_AFTER_MIN
+  /** when save() was last called: a gap of at least `delay` says the trickle stopped */
+  private lastSave = 0
 
   /** dir: where usage.json is kept (Shepherdr's home by default); memory: nothing is written (the demo's world) */
   constructor(
@@ -342,14 +351,15 @@ export class UsageLedger {
     this.data.runOuts = this.data.runOuts.filter((r) => r.at >= now - KEEP_RUNOUTS)
   }
 
-  /** writes what changed, now (a test, the end of a run) or with the next save */
+  /** writes what changed, now (a test, the end of a run) or with the next save. Compact JSON: the 5.5 MB store is
+   *  rewritten often, and indentation makes both the stringify and the file several times larger. */
   flush(now = Date.now()) {
     clearTimeout(this.timer)
     this.timer = undefined
     if (!this.dirty || this.memory) return
     this.dirty = false
     this.prune(now)
-    writeJson('usage.json', this.data, this.dir)
+    writeJson('usage.json', this.data, this.dir, true)
   }
 
   stop() {
@@ -357,9 +367,20 @@ export class UsageLedger {
   }
 
   private save() {
+    const now = Date.now()
+    // a quiet spell (no event for a whole delay) ends the grown window: a one-off change is durable soon again
+    if (now - this.lastSave >= this.delay) this.delay = SAVE_AFTER_MIN
     this.dirty = true
+    this.lastSave = now
     if (this.memory || this.timer) return
-    this.timer = setTimeout(() => this.flush(), SAVE_AFTER)
+    this.timer = setTimeout(() => {
+      this.timer = undefined
+      const at = Date.now()
+      // events still arriving through the window: hold the next write longer while the trickle lasts
+      const busy = at - this.lastSave < this.delay
+      this.flush(at)
+      if (busy) this.delay = Math.min(this.delay * 2, SAVE_AFTER_MAX)
+    }, this.delay)
     this.timer.unref?.()
   }
 }
