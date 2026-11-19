@@ -4,13 +4,15 @@ import { afterAll, describe, expect, spyOn, test } from 'bun:test'
 import * as fs from 'node:fs'
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmp } from './tmp.ts'
 
 process.env.SHEPHERDR_HOME = tmp('bg')
 process.env.CLAUDE_CONFIG_DIR = tmp('bg-claude')
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'herdr.sock')
 const { agyScreenBackground, ClaudeSessions, Procs, headless, screenBackground, servesCommand, sessionBackground, shellCommand } = await import('../server/live/readers/background.ts')
+const { headlessJob } = await import('../server/live/activity.ts')
+const { claudeProjectDir, piSessionDir } = await import('../server/live/readers/find.ts')
 const { Agents } = await import('../server/live/agents.ts')
 const { writeJson } = await import('../server/store.ts')
 const { record } = await import('../server/live/readers/hooks.ts')
@@ -483,6 +485,84 @@ describe('headless reviewers', () => {
     expect(headless(['claude', '--settings', 'x.json'])).toBe(false)
     expect(headless(['codex', 'resume'])).toBe(false)
     expect(headless(['grep', 'codex', 'exec'])).toBe(false)
+  })
+  test('their job row names the CLI and how it was asked, for every one-shot form', () => {
+    const title = (...argv: string[]) => headlessJob({ argv, at: 1 }, []).title
+    expect(title('/usr/local/bin/codex', 'exec', '-s', 'read-only', 'Review this change in detail')).toBe('codex exec: Review this change in detail')
+    expect(title('claude', '-p', '--model', 'opus', 'Review this change in detail')).toBe('claude -p: Review this change in detail')
+    expect(title('pi', '-p', 'Review this change in detail')).toBe('pi -p: Review this change in detail')
+    expect(title('opencode', 'run', '--standalone', 'Review this change in detail')).toBe('opencode run: Review this change in detail')
+    expect(title('agy', '-p', '--mode', 'plan', 'Review this change in detail')).toBe('agy -p: Review this change in detail')
+    // node/bun run the CLI's script: the word after it names the run, not the prompt
+    expect(title('node', '/usr/lib/node_modules/opencode/bin/opencode.js', 'run', 'Review this change in detail')).toBe('opencode run: Review this change in detail')
+    // no CLI named stays plain; a long prompt is cut
+    expect(title('mystery', '-p', 'Review this change in detail')).toBe('agent -p: Review this change in detail')
+    expect(title('pi', '-p', 'x'.repeat(80)).endsWith('…')).toBe(true)
+    // a run whose process is gone, or whose /proc folder has vanished as we looked, has no log to show
+    expect(headlessJob({ argv: ['pi', '-p', 'Review this change in detail'], at: 1 }, []).log).toBeUndefined()
+    expect(headlessJob({ argv: ['claude', '-p', 'Review this change in detail'], at: 1, pid: 999 }, [], '/no/proc/here').log).toBeUndefined()
+  })
+  test('a headless pi reviewer’s log is its newest session file for the run’s cwd', () => {
+    const pi = tmp('headless-pi-home')
+    const saved = process.env.PI_CODING_AGENT_DIR
+    process.env.PI_CODING_AGENT_DIR = pi
+    try {
+      const cwd = join(pi, 'work')
+      mkdirSync(cwd, { recursive: true })
+      const proc = tmp('headless-pi-proc')
+      mkdirSync(join(proc, '80'))
+      symlinkSync(cwd, join(proc, '80', 'cwd'))
+      const dir = piSessionDir(cwd)
+      mkdirSync(dir, { recursive: true })
+      const log = join(dir, 'run.jsonl')
+      writeFileSync(log, `${JSON.stringify({ type: 'session', id: 'p1', cwd, timestamp: new Date().toISOString() })}\n`)
+      const h = { argv: ['pi', '-p', 'Review this change in detail'], at: Date.now() - 10_000, pid: 80 }
+      expect(headlessJob(h, [], proc)).toMatchObject({ kind: 'headless', title: 'pi -p: Review this change in detail', log, more: 'steps' })
+    } finally {
+      if (saved === undefined) delete process.env.PI_CODING_AGENT_DIR
+      else process.env.PI_CODING_AGENT_DIR = saved
+    }
+  })
+  test('claude -p and codex exec still find their jsonl, held open or written in the project folder', () => {
+    const savedCodex = process.env.CODEX_HOME
+    const savedClaude = process.env.CLAUDE_CONFIG_DIR
+    const codex = tmp('headless-codex-home')
+    const claude = tmp('headless-claude-home')
+    process.env.CODEX_HOME = codex
+    process.env.CLAUDE_CONFIG_DIR = claude
+    try {
+      // codex exec: the session jsonl the run holds open
+      const cfile = join(codex, 'sessions', '2026', '11', '19', 'rollout-x.jsonl')
+      mkdirSync(dirname(cfile), { recursive: true })
+      writeFileSync(cfile, '')
+      const cproc = tmp('headless-codex-proc')
+      mkdirSync(join(cproc, '85', 'fd'), { recursive: true })
+      symlinkSync(cfile, join(cproc, '85', 'fd', '3'))
+      expect(headlessJob({ argv: ['codex', 'exec', '-'], at: Date.now() - 5000, pid: 85 }, [], cproc).log).toBe(cfile)
+      // claude -p: the newest jsonl in its project folder that is not its agent's own
+      const cwd = tmp('headless-claude-work')
+      const dir = claudeProjectDir(cwd)
+      mkdirSync(dir, { recursive: true })
+      const own = join(dir, 'own.jsonl')
+      const log = join(dir, 'review.jsonl')
+      writeFileSync(own, '')
+      writeFileSync(log, '')
+      const lproc = tmp('headless-claude-proc')
+      mkdirSync(join(lproc, '86', 'fd'), { recursive: true })
+      // an fd that is not a link (one closed as the pass read it) is simply skipped
+      writeFileSync(join(lproc, '86', 'fd', '9'), 'x')
+      symlinkSync(cwd, join(lproc, '86', 'cwd'))
+      const h = { argv: ['claude', '-p', 'Review this change in detail'], at: Date.now() - 5000, pid: 86 }
+      expect(headlessJob(h, [own], lproc).log).toBe(log)
+      // a jsonl it holds open wins over the folder scan
+      symlinkSync(own, join(lproc, '86', 'fd', '4'))
+      expect(headlessJob(h, [own], lproc).log).toBe(own)
+    } finally {
+      if (savedCodex === undefined) delete process.env.CODEX_HOME
+      else process.env.CODEX_HOME = savedCodex
+      if (savedClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR
+      else process.env.CLAUDE_CONFIG_DIR = savedClaude
+    }
   })
   test("they are found in /proc by their command, and are the chat's their environment names", () => {
     const proc = tmp('proc')

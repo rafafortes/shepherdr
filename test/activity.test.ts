@@ -2,15 +2,21 @@
 // on, its background work, and their output read only when opened. Words, rows, folding, and a chat built from logs in
 // each CLI's exact format.
 import { describe, expect, test } from 'bun:test'
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { Database } from 'bun:sqlite'
+import { appendFileSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { glance, jobsWords, rowsOf, say, testResult, took } from '../shared/activity.ts'
-import { activityOf, cutOutput, lineOf, outputAt } from '../server/live/activity.ts'
+import { activityOf, cutOutput, headlessJob, JobLogs, lineOf, outputAt } from '../server/live/activity.ts'
+import { agyDb, agyLogPath } from '../server/live/agy.ts'
+import { opencodeLogPath } from '../server/live/opencode.ts'
 import { ClaudeReader, readerFor } from '../server/live/readers/index.ts'
+import { logKind, piSessionDir } from '../server/live/readers/find.ts'
 import { notices } from '../server/live/readers/claude.ts'
 import { claudeStep, codexItem, commandSay, commandWords } from '../server/live/readers/steps.ts'
+import { home } from '../server/store.ts'
 import type { Step } from '../shared/types.ts'
 import type { LogEvent } from '../server/live/readers/types.ts'
+import { makeConversation, makeSummaries, toolPayload } from './agy-fixture.ts'
 import { tmp } from './tmp.ts'
 
 process.env.SHEPHERDR_HOME ??= tmp('act')
@@ -423,5 +429,122 @@ describe('a long chat log', () => {
     w.add(user('u600', 'one more', typed))
     expect(w.chats.pull('T-1/Agent')).toBe(true)
     expect(w.chats.chat('T-1/Agent').messages.at(-1)?.text).toBe('one more')
+  })
+})
+
+/* ---------- a headless reviewer's own steps ---------- */
+
+/** a fake /proc entry whose cwd is a folder of its own, so a run is found by where it works */
+function headlessProc(pid: number, cwd: string): string {
+  const proc = tmp(`headless-proc-${pid}`)
+  mkdirSync(join(proc, String(pid)), { recursive: true })
+  symlinkSync(cwd, join(proc, String(pid), 'cwd'))
+  return proc
+}
+
+describe('a headless reviewer’s own steps', () => {
+  const review = 'Review this change in detail'
+
+  test('each CLI’s job log is read by its own reader, and its steps come out in words', () => {
+    const logs = new JobLogs()
+    const savedOc = process.env.SHEPHERDR_OPENCODE_DB
+    const savedAgy = process.env.SHEPHERDR_AGY_HOME
+    const savedPi = process.env.PI_CODING_AGENT_DIR
+    // no store of this machine's is to be opened by a mirror refresh
+    process.env.SHEPHERDR_OPENCODE_DB = join(tmp('act-no-oc'), 'none.db')
+    process.env.SHEPHERDR_AGY_HOME = tmp('act-no-agy')
+    try {
+      const t = '2026-11-19T10:00:00Z'
+      // pi: a tool call and its result, in pi's session folder
+      const pi = tmp('act-pi-home')
+      process.env.PI_CODING_AGENT_DIR = pi
+      const piLog = join(piSessionDir('/w/review'), 'run.jsonl')
+      mkdirSync(dirname(piLog), { recursive: true })
+      writeFileSync(piLog, [
+        JSON.stringify({ type: 'session', id: 'p1', cwd: '/w/review', timestamp: t }),
+        JSON.stringify({ type: 'message', id: 'm1', timestamp: t, message: { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'bun test' } }] } }),
+        JSON.stringify({ type: 'message', id: 'm2', timestamp: t, message: { role: 'toolResult', toolCallId: 'c1', content: [{ type: 'text', text: 'pass' }] } }),
+      ].join('\n') + '\n')
+      expect(logKind(piLog)).toBe('pi')
+      expect(logs.steps(piLog).steps.map((s) => s.title)).toEqual(['Ran tests'])
+      expect(logs.now(piLog)).toBe('Ran tests')
+      // OpenCode: a tool part of a mirrored assistant row
+      const ocLog = opencodeLogPath(home(), 'ses_headless')
+      mkdirSync(dirname(ocLog), { recursive: true })
+      writeFileSync(ocLog, JSON.stringify({ id: 'a1', type: 'assistant', seq: 1, time: 10, data: { time: { created: 320, completed: 325 }, content: [{ type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'bun test' }, output: 'pass' } }], finish: 'stop' } }) + '\n')
+      expect(logKind(ocLog)).toBe('opencode')
+      expect(logs.steps(ocLog).steps.map((s) => s.title)).toEqual(['Ran tests'])
+      // agy: a tool step of a mirrored conversation
+      const agyLog = agyLogPath(home(), 'conv_headless')
+      mkdirSync(dirname(agyLog), { recursive: true })
+      writeFileSync(agyLog, `${JSON.stringify({ mirror: 2 })}\n${JSON.stringify({ idx: 1, at: 1_700_000_000_000, kind: 'tool', tool: 'run_command', args: JSON.stringify({ CommandLine: 'bun test' }), output: 'pass' })}\n`)
+      expect(logKind(agyLog)).toBe('agy')
+      expect(logs.steps(agyLog).steps.map((s) => s.title)).toEqual(['Ran tests'])
+      // a log outside every CLI's store still reads as a Claude log
+      const other = join(tmp('act-other'), 'run.jsonl')
+      mkdirSync(dirname(other), { recursive: true })
+      writeFileSync(other, JSON.stringify({ ...base, type: 'assistant', uuid: 'h1', timestamp: ts(), message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_h1', name: 'Bash', input: { command: 'bun test' } }], stop_reason: 'tool_use' } }) + '\n')
+      expect(logKind(other)).toBeUndefined()
+      expect(logs.steps(other).steps.map((s) => s.title)).toEqual(['Ran tests'])
+    } finally {
+      if (savedOc === undefined) delete process.env.SHEPHERDR_OPENCODE_DB
+      else process.env.SHEPHERDR_OPENCODE_DB = savedOc
+      if (savedAgy === undefined) delete process.env.SHEPHERDR_AGY_HOME
+      else process.env.SHEPHERDR_AGY_HOME = savedAgy
+      if (savedPi === undefined) delete process.env.PI_CODING_AGENT_DIR
+      else process.env.PI_CODING_AGENT_DIR = savedPi
+    }
+  })
+
+  test('a headless OpenCode run is found in its database and mirrored into its log', () => {
+    const saved = process.env.SHEPHERDR_OPENCODE_DB
+    const dir = tmp('act-headless-oc')
+    const cwd = join(dir, 'work')
+    mkdirSync(cwd, { recursive: true })
+    const db = join(dir, 'opencode.db')
+    const d = new Database(db, { create: true })
+    d.run('CREATE TABLE session_v2 (id text primary key, directory text, parent_id text, time_archived integer, time_updated integer)')
+    d.run('CREATE TABLE session_message (id text primary key, session_id text, type text, seq integer, time_created integer, time_updated integer, data text)')
+    const now = Date.now()
+    d.run('INSERT INTO session_v2 VALUES (?, ?, NULL, NULL, ?)', ['ses_review', cwd, now])
+    d.run('INSERT INTO session_message VALUES (?, ?, ?, ?, ?, ?, ?)', ['m1', 'ses_review', 'assistant', 1, now, now, JSON.stringify({ time: { created: now, completed: now }, content: [{ type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'bun test' }, output: 'pass' } }], finish: 'stop' })])
+    d.close()
+    process.env.SHEPHERDR_OPENCODE_DB = db
+    try {
+      const job = headlessJob({ argv: ['opencode', 'run', review], at: now - 10_000, pid: 81 }, [], headlessProc(81, cwd))
+      expect(job).toMatchObject({ kind: 'headless', title: 'opencode run: Review this change in detail', more: 'steps' })
+      expect(job.log).toBe(opencodeLogPath(home(), 'ses_review'))
+      expect(new JobLogs().steps(job.log!).steps.map((s) => s.title)).toEqual(['Ran tests'])
+    } finally {
+      if (saved === undefined) delete process.env.SHEPHERDR_OPENCODE_DB
+      else process.env.SHEPHERDR_OPENCODE_DB = saved
+    }
+  })
+
+  test('a headless agy run is found by its cwd conversation, with no steps where the store has none', () => {
+    const savedAgy = process.env.SHEPHERDR_AGY_HOME
+    const dir = tmp('act-headless-agy')
+    process.env.SHEPHERDR_AGY_HOME = join(dir, 'store')
+    mkdirSync(join(process.env.SHEPHERDR_AGY_HOME, 'conversations'), { recursive: true })
+    const cwd = join(dir, 'work')
+    mkdirSync(cwd, { recursive: true })
+    const now = Date.now()
+    const recent = new Date(now).toISOString().replace('T', ' ').replace('Z', '+00:00')
+    try {
+      // a reviewer the task agent started: an ordinary conversation of this cwd
+      makeSummaries(join(process.env.SHEPHERDR_AGY_HOME, 'conversation_summaries.db'), [{ id: 'conv-review', uris: JSON.stringify([`file://${cwd}`]), last: recent }])
+      makeConversation(agyDb('conv-review'), [{ idx: 1, step_type: 132, payload: toolPayload({ tool: 'run_command', args: JSON.stringify({ CommandLine: 'bun test' }), output: 'pass' }) }])
+      const job = headlessJob({ argv: ['agy', '-p', review], at: now - 10_000, pid: 82 }, [], headlessProc(82, cwd))
+      expect(job).toMatchObject({ kind: 'headless', title: 'agy -p: Review this change in detail', more: 'steps' })
+      expect(job.log).toBe(agyLogPath(home(), 'conv-review'))
+      expect(new JobLogs().steps(job.log!).steps.map((s) => s.title)).toEqual(['Ran tests'])
+      // a cwd with no conversation in the store: no log, so no steps (headless.json ids are written only after a run ends)
+      const other = join(dir, 'other')
+      mkdirSync(other, { recursive: true })
+      expect(headlessJob({ argv: ['agy', '-p', review], at: now - 10_000, pid: 83 }, [], headlessProc(83, other)).log).toBeUndefined()
+    } finally {
+      if (savedAgy === undefined) delete process.env.SHEPHERDR_AGY_HOME
+      else process.env.SHEPHERDR_AGY_HOME = savedAgy
+    }
   })
 })

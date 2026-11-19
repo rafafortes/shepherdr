@@ -6,8 +6,8 @@ import { join } from 'node:path'
 import { glance, rowsOf } from '../../shared/activity.ts'
 import type { Job, Step, TurnActivity } from '../../shared/types.ts'
 import type { Headless } from './readers/background.ts'
-import { claudeHome, claudeProjectDir, codexHome } from './readers/find.ts'
-import { ClaudeReader, CodexReader, LogTail } from './readers/index.ts'
+import { claudeHome, claudeProjectDir, codexHome, findAgyLog, findOpencodeLog, findPiLog, logKind } from './readers/find.ts'
+import { ClaudeReader, LogTail, readerFor } from './readers/index.ts'
 import type { LogEvent, OutputAt } from './readers/types.ts'
 
 export type StepRec = Step & { where?: OutputAt }
@@ -276,7 +276,9 @@ export class JobLogs {
   private read(file: string): LogEvent[] {
     let l = this.logs.get(file)
     if (!l) {
-      const reader = file.includes('/subagents/') ? new ClaudeReader(true) : file.startsWith(codexHome()) ? new CodexReader() : new ClaudeReader(true)
+      // claude paths (a subagent's own log among them) keep the step-only reader; the other stores pick theirs by folder
+      const kind = logKind(file)
+      const reader = file.includes('/subagents/') || !kind || kind === 'claude' ? new ClaudeReader(true) : readerFor(kind)!
       l = { tail: new LogTail(file, reader), ev: [], used: 0 }
       this.logs.set(file, l)
       // a few logs at a time: the oldest read goes
@@ -292,21 +294,43 @@ export class JobLogs {
 
 /* ---------- a headless agent it runs ---------- */
 
-/** the log a headless CLI writes: the one it holds open, else (Claude Code writes and closes) the newest in its
- *  folder's project since it started that isn't its agent's own */
-function headlessLog(h: Headless, own: string[]): string | undefined {
+/** the CLIs a headless one-shot can be, as readers/background.ts's headless() names them */
+const HEADLESS = ['codex', 'claude', 'pi', 'opencode', 'agy']
+
+/** the CLI's own word in a headless command and where it is (past node/bun, which run the CLI's script) */
+function headlessBin(argv: string[]): { at: number; cli: string } {
+  const bin = (i: number) => argv[i]?.split('/').at(-1) ?? ''
+  const at = /^(node|bun|deno)$/.test(bin(0)) ? 1 : 0
+  return { at, cli: bin(at).replace(/\.(js|mjs|cjs)$/, '') }
+}
+
+/**
+ * The log a headless CLI writes. Claude Code and Codex write a jsonl under their own home: the one held open, else
+ * (Claude writes and closes it) the newest in its project folder since it started that isn't its agent's own. pi writes
+ * one file per run under its sessions folder; OpenCode's run is a row in its database, mirrored into ours; agy's is a
+ * conversation in its store, mirrored too. agy's kept ids (headless.json) are written only when one of Shepherdr's own
+ * headless runs finishes (agy.ts keepHeadless), so a run still going has no id there and its cwd conversation is the
+ * only one findable; where a store holds nothing for this run, the job's row has no steps to show. The proc root is a
+ * parameter so a test can give the run a fake one.
+ */
+function headlessLog(h: Headless, own: string[], proc = '/proc'): string | undefined {
   if (!h.pid) return undefined
-  const ours = (f: string) => f.endsWith('.jsonl') && (f.startsWith(join(codexHome(), 'sessions')) || f.startsWith(join(claudeHome(), 'projects')))
+  const { cli } = headlessBin(h.argv)
   try {
-    for (const fd of readdirSync(`/proc/${h.pid}/fd`)) {
+    const cwd = () => readlinkSync(`${proc}/${h.pid}/cwd`)
+    if (cli === 'pi') return findPiLog(cwd(), h.at)
+    if (cli === 'opencode') return findOpencodeLog(cwd(), h.at)
+    if (cli === 'agy') return findAgyLog(cwd(), h.at)
+    const ours = (f: string) => f.endsWith('.jsonl') && (f.startsWith(join(codexHome(), 'sessions')) || f.startsWith(join(claudeHome(), 'projects')))
+    for (const fd of readdirSync(`${proc}/${h.pid}/fd`)) {
       try {
-        const f = readlinkSync(`/proc/${h.pid}/fd/${fd}`)
+        const f = readlinkSync(`${proc}/${h.pid}/fd/${fd}`)
         if (ours(f)) return f
       } catch {
         /* closed meanwhile */
       }
     }
-    const dir = claudeProjectDir(readlinkSync(`/proc/${h.pid}/cwd`))
+    const dir = claudeProjectDir(cwd())
     let best: { f: string; t: number } | undefined
     for (const n of readdirSync(dir)) {
       const f = join(dir, n)
@@ -320,22 +344,22 @@ function headlessLog(h: Headless, own: string[]): string | undefined {
   }
 }
 
-/** what it is in a few words: "codex exec: Review this change…" */
+/** what it is in a few words: "codex exec: Review this change…", "opencode run: …", "pi -p: …" */
 function headlessTitle(argv: string[]): string {
-  const at = argv.findIndex((a) => /(^|\/)(codex|claude|pi|agy)(\.(js|mjs|cjs))?$/.test(a))
-  const cli = (argv[at] ?? 'agent').split('/').at(-1)!.replace(/\.(js|mjs|cjs)$/, '')
-  const how = cli === 'codex' ? 'exec' : '-p'
+  const { at, cli } = headlessBin(argv)
+  const name = HEADLESS.includes(cli) ? cli : 'agent'
+  const how = name === 'codex' ? 'exec' : name === 'opencode' ? 'run' : '-p'
   // its prompt: its longest word that is no flag
   const prompt = argv
     .slice(at + 1)
     .filter((a) => !a.startsWith('-') && a.length > 12)
     .sort((a, b) => b.length - a.length)[0]
   const words = prompt?.replace(/\s+/g, ' ').trim()
-  return `${cli} ${how}${words ? `: ${words.length > 60 ? `${words.slice(0, 59)}…` : words}` : ''}`
+  return `${name} ${how}${words ? `: ${words.length > 60 ? `${words.slice(0, 59)}…` : words}` : ''}`
 }
 
 /** a headless CLI its agent runs (a reviewer), as background work; its log, where it can be found, gives its steps */
-export function headlessJob(h: Headless, own: string[]): JobRec {
-  const log = headlessLog(h, own)
+export function headlessJob(h: Headless, own: string[], proc = '/proc'): JobRec {
+  const log = headlessLog(h, own, proc)
   return { id: `headless-${h.pid ?? h.argv.join(' ').slice(0, 60)}`, kind: 'headless', title: headlessTitle(h.argv), at: h.at, log, more: log ? 'steps' : undefined }
 }
