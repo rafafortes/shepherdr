@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getState, goChat, goPlace, keysChat, listView, openArtifact, openTask, placeOf, setUI, shownPlaces, useSnap } from '@client/kernel.ts'
 import { Sheet, SheetClose } from '@client/Stack.tsx'
+import { openPage } from '@client/Settings.tsx'
 import { ic, PlaceIcon, SearchIcon } from '@client/ui.tsx'
 import type { Chat } from '@shared/types.ts'
 import { jumpTo } from '@plugins/chat/reply.ts'
 import { searchCapped, searchChats, searchResults, SEARCH_MESSAGE_WINDOW, type SearchHit, type SearchKind, type SearchScope } from './search-data.ts'
 import { loadSearchChats } from './search-load.ts'
 
-const kinds: SearchKind[] = ['Spaces', 'Tasks', 'Messages', 'Artifacts']
+const kinds: SearchKind[] = ['Spaces', 'Tasks', 'Messages', 'Artifacts', 'Settings']
 
 /** Navigate by stable identity, never a display name or row number. Wait for the destination chat to mount. */
 function openHit(hit: SearchHit, q: string) {
+  if (hit.setting) { openPage(hit.setting, hit.level ?? 'all'); return }
   if (hit.artifact) { goPlace(hit.place); openArtifact(hit.artifact); return }
   if (hit.message && hit.chat) {
     goChat(hit.chat)
@@ -83,7 +85,7 @@ export function Search({ onClose }: { onClose: () => void }) {
   return <Sheet label="Search or jump to" onClose={onClose} panel="max-w-[640px]">
     <div className="flex shrink-0 items-center gap-2 border-b border-line pr-2 pl-4">
       <SearchIcon className={`${ic} text-fg3`} />
-      <input autoFocus name="search" role="combobox" aria-expanded="true" aria-controls="search-list" aria-activedescendant={current ? `search-hit-${current.key}` : undefined} aria-label="Search or jump to" placeholder="Search spaces, tasks, messages, artifacts" value={q}
+      <input autoFocus name="search" role="combobox" aria-expanded="true" aria-controls="search-list" aria-activedescendant={current ? `search-hit-${current.key}` : undefined} aria-label="Search or jump to" placeholder="Search spaces, tasks, messages, artifacts, settings" value={q}
         onChange={e => { setQ(e.target.value); setSelected(null); setLimit(8) }}
         onKeyDown={e => {
           if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setSelected(list[Math.max(0, Math.min(list.length - 1, list.findIndex(h => h.key === current?.key) + (e.key === 'ArrowDown' ? 1 : -1)))]?.key ?? null) }

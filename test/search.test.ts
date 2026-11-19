@@ -54,18 +54,50 @@ describe('unified search identities, scope and privacy', () => {
     expect(searchResults(snap, all, 'unsearchable', chats).filter(h => h.kind === 'Messages')).toEqual([])
   })
 
-  test('secret cards, tool output and settings values are never indexed; empty search omits blank records', () => {
+  test('secret cards and tool output are never indexed; settings are read by word, never by value', () => {
     const snap = new DemoWorld().snapshot()
     const c = searchChats(snap, all)[0]
     const chats: Record<string, Chat> = { [c.key]: { key: c.key, cli: 'Codex', messages: [
       { id: 'secret', who: 'agent', secret: { id: 'secret', name: 'PRIVATE_TOKEN', why: 'hidden-needle', levels: [] } },
       { id: 'empty', who: 'agent' },
     ] } }
-    Object.defineProperty(snap, 'settings', { get() { throw new Error('Search must never inspect secret settings') } })
-    const results = searchResults(snap, all, '', chats)
-    expect(results.some(h => h.kind === 'Messages')).toBe(false)
+    // Search reads a setting's words (label, key, hint, group, sub) and where it opens; a value can hold a private
+    // instruction or a secret, so reading one here throws and a regression cannot slip in quietly.
+    Object.defineProperty(snap, 'settings', { value: snap.settings.map(s => ({ ...s, rows: s.rows.map(r => {
+      const meta = { ...r }
+      Object.defineProperty(meta, 'value', { get() { throw new Error('Search must never read a setting value') } })
+      return meta
+    }) })) })
+    expect(searchResults(snap, all, '', chats).some(h => h.kind === 'Messages')).toBe(false)
     expect(searchResults(snap, all, 'hidden-needle', chats)).toEqual([])
     expect(searchResults(snap, all, 'PRIVATE_TOKEN', chats)).toEqual([])
+  })
+
+  test('settings rows match their words at their own level and carry the page and level to open', () => {
+    const snap = new DemoWorld().snapshot()
+    const rounds = searchResults(snap, all, 'rounds', {}).filter(h => h.kind === 'Settings')
+    expect(rounds.length).toBeGreaterThan(0)
+    const row = rounds.find(h => h.label === 'Review rounds')!
+    expect(row.setting).toBe('How tasks work')
+    expect(row.level).toBe('all')
+    expect(row.context).toContain('How tasks work')
+    expect(row.context).toContain('Everywhere')
+    // a grouped row is found by its key, and its group and level are shown
+    const load = searchResults(snap, { kind: 'machine', id: 'vm-str' }, 'startLoad', {}).filter(h => h.kind === 'Settings').find(h => h.label === 'Wait while CPU load is over')!
+    expect(load.setting).toBe('Machine')
+    expect(load.level).toBe('m:vm-str')
+    expect(load.context).toContain('Working tasks')
+    // a space reads only its own level, never Everywhere's rows or another space's
+    const space = searchResults(snap, { kind: 'space', id: 'p:vm-str:~' }, 'rounds', {}).filter(h => h.kind === 'Settings')
+    expect(space.length).toBeGreaterThan(0)
+    expect(space.every(h => h.level === 'p:vm-str:~')).toBe(true)
+    expect(space.some(h => h.label === 'Review rounds')).toBe(true)
+    // sections with no page of their own open the page that draws them, and the context names that page
+    expect(searchResults(snap, all, 'Voice agent', {}).filter(h => h.kind === 'Settings').find(h => h.label === 'Voice agent')?.setting).toBe('Voice')
+    expect(searchResults(snap, all, 'alerts on', {}).filter(h => h.kind === 'Settings').find(h => h.label === 'Alerts on')?.setting).toBe('Notifications')
+    expect(searchResults(snap, all, 'quota.alertAt', {}).filter(h => h.kind === 'Settings').find(h => h.key.endsWith('quota.alertAt'))?.setting).toBe('Models')
+    // no query keeps 'Recent items' as it was: all 66 rows do not flood the sheet
+    expect(searchResults(snap, all, '', {}).some(h => h.kind === 'Settings')).toBe(false)
   })
 
   test('archived tasks are found by brief words, keep their identity, and stay out of empty search', () => {
