@@ -74,6 +74,8 @@ function pretend() {
     },
   })
   w.say = (state: string) => (w.call as Call).onmessage?.({ data: JSON.stringify({ type: 'state', state }) })
+  // the server relays the service's final transcripts as captions
+  w.caption = (who: string, text: string) => (w.call as Call).onmessage?.({ data: JSON.stringify({ type: 'caption', who, text }) })
   // the agent speaks: two seconds of a tone
   w.speak = () => {
     const pcm = new Int16Array(32000)
@@ -137,6 +139,32 @@ describe.skipIf(!browser)('a voice call lives in the chat box', () => {
     await page.tap(`${box} button[aria-label="Mute"]`)
     expect(await page.getAttribute(`${box} button[aria-label="Unmute"]`, 'aria-pressed')).toBe('true')
     await page.waitForFunction((sel) => document.querySelector(sel)?.textContent === 'Muted', `${box} [role=status]`, { timeout: 5000 })
+    await page.tap(`${box} button[aria-label="End call"]`)
+    await page.waitForSelector(`${box} textarea`)
+    await ctx.close()
+  }, 30_000)
+
+  test('captions read both ways in the pill, are announced politely and leave with the call', async () => {
+    const { ctx, page } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    await page.tap('button[aria-label="Voice call"]')
+    const status = `${box} [role=status]`
+    await page.waitForSelector(status)
+    // no transcript yet: the pill still just says what the call is doing
+    expect(await page.textContent(status)).toBe('Connecting')
+    const caption = (who: string, text: string) =>
+      page.evaluate(([w, t]) => (window as unknown as { caption(w: string, t: string): void }).caption(w, t), [who, text])
+    await caption('you', 'ship it')
+    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('You: ship it'), status)
+    await caption('agent', 'on it')
+    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('on it'), status)
+    expect(await page.getAttribute(status, 'aria-live')).toBe('polite')
+    // two lines at most: the oldest drops out, nothing accumulates as history
+    await caption('you', 'and one more')
+    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes('and one more'), status)
+    const shown = (await page.textContent(status)) ?? ''
+    expect(shown).not.toContain('ship it')
+    expect(shown).toContain('on it')
+    // ending the call takes the captions with it; nothing is kept on screen
     await page.tap(`${box} button[aria-label="End call"]`)
     await page.waitForSelector(`${box} textarea`)
     await ctx.close()
