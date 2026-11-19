@@ -1,6 +1,6 @@
 import { TaskIds } from '../task-ids.ts'
 import { trustWorktree } from '../trust.ts'
-import { dropped, retrying, startDelays } from '../herdr.ts'
+import { dropped, missing, retrying, startDelays } from '../herdr.ts'
 // The tasks engine. A task is added by a coordinator and at once gets one agent, in its own git worktree and branch
 // from main. The coordinator's brief is the agent's first message and decides everything else (wait for a go, plan
 // first, ask a reviewer, merge or wait for a yes). Its status comes from that agent alone: working, waiting on you, To
@@ -971,6 +971,12 @@ export class Engine extends Emitter<Events> {
     const p = this.places.space(t.project)
     if (!p) throw new Error(`${t.id}: its project is gone`)
     return p
+  }
+
+  /** where its worktree belongs: its project's repo, and the name of the project's own space (worktrees.ts Home) */
+  private homeOf(t: TaskRec) {
+    const p = this.proj(t)
+    return { repo: p.path, name: p.name }
   }
 
   private key(t: TaskRec) {
@@ -2564,9 +2570,14 @@ export class Engine extends Emitter<Events> {
       system: taskPrompt({ id: t.id, branch: t.branch!, base: t.base! }, pastTimes(this.data.tasks, t)) + '\n\n' + privatePrompt(this.settings.instructions('task', this.nameOf(t)), this.settings.instructions('reviewer', this.nameOf(t))),
       env,
       first,
-      pane: () => this.wt.agentPane({ home, wt: t.worktree!, label: labelOf(t), tab: 'Agent', env, made }),
+      pane: this.paneOf(t, made, env),
     }
     return restart ? this.agents.restart(spec, restart) : this.agents.ensure(spec)
+  }
+
+  /** where its agent's run goes: a tab of its own in its worktree's herdr space, made or opened again (worktrees.ts) */
+  private paneOf(t: TaskRec, made?: Made, env = this.env(this.key(t))) {
+    return () => this.wt.agentPane({ home: this.homeOf(t), wt: t.worktree!, label: labelOf(t), tab: 'Agent', env, made })
   }
 
   /**
@@ -3032,9 +3043,15 @@ export class Engine extends Emitter<Events> {
     // with the brief and the chat
     const same = to === from && !!rec && !rec.fresh && (!!rec.sessionId || rec.logs.length > 0)
     const name = (k: string) => CLI_NAME[k] ?? k
+    // what it takes over from, and how to be where it ran: a space herdr closes under the backup is opened again there
+    const prior = t.tookOver
+    const home = this.homeOf(t)
+    // its agent's record as the hand-over found it: a start writes its own CLI (and a session it never ran) over it
+    // before it asks herdr for a pane, and a retry or a later start must begin from what the agent really was
+    const rec0 = rec ? { ...rec } : undefined
     this.handing.add(t.id)
     // on its way from here: a restart before the backup is up takes it again (resumeTakeovers)
-    t.handover = { why, lasting, ...(t.tookOver ? { prior: t.tookOver } : {}), at: Date.now() }
+    t.handover = { why, lasting, ...(prior ? { prior } : {}), at: Date.now() }
     // kept on the mark: the way back adopts an open takeover as an outage, but a one-response filter refusal is none
     t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now(), step: plan.n, ...(blocked ? { blocked: true } : {}) }
     this.save()
@@ -3048,8 +3065,18 @@ export class Engine extends Emitter<Events> {
       const first = same
         ? hidden(backupKeptLine({ on: words, why: t.tookOver.why }), 'restart')
         : `${taskFirst(t)}\n\n${handOverLine({ from: name(from), why: t.tookOver.why, ...(await this.soFar(t, key, name(from))) })}`
-      await this.agents.finish(key)
-      await this.launch(t, first, undefined, h)
+      // the pane the backup goes in is opened before the one it takes over from closes (agents.ts restart): herdr closes
+      // a task's worktree space with its agent's last pane, and a hand-over that closed it left the backup nowhere to
+      // start (SHE-166)
+      try {
+        await this.launch(t, undefined, undefined, h, async () => first)
+      } catch (e) {
+        // a space or pane herdr no longer has, closed while the backup started: its worktree's space is opened again
+        // and the backup starts once more there, before the task waits for you
+        if (!missing(e)) throw e
+        this.agents.restore(key, rec0)
+        await this.launch(t, first, await this.wt.reopen(home, t.worktree!, labelOf(t)), h)
+      }
       // the backup is up: no restart takes this takeover again
       t.handover = undefined
       this.save()
@@ -3065,11 +3092,15 @@ export class Engine extends Emitter<Events> {
           console.error(`shepherdr: couldn't keep that ${t.id} runs on a backup: ${(e as Error).message}`)
         }
     } catch (e) {
-      // the backup didn't start: it went wrong, and a later hand-over may try again
+      // the backup didn't start: the task says why, with the chain as it was (no takeover counted and no hand-over kept,
+      // so a later one tries the same backup again) and "No backup agent took over" in its chat rather than silence. A
+      // start refused before it got going (a cap, a worktree) left the run it takes over from exactly as it was
       t.trouble = troubleOf(e)
-      t.tookOver = undefined
+      t.tookOver = prior
       t.handover = undefined
+      this.agents.restore(key, rec0)
       stuck()
+      this.noBackup(key, troubleOf(e))
     } finally {
       this.handing.delete(t.id)
       this.unclaim(key)

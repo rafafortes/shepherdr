@@ -90,7 +90,10 @@ export function fakeHerdr() {
       drop(id)
     },
     createTab: async (id: string, _label: string, dir: string) => {
-      const ws = find(id)!
+      // herdr's own answer for a space it closed meanwhile (a hand-over closes the last pane of a task's space, and the
+      // space with it): not a passing failure, nothing is tried again
+      const ws = find(id)
+      if (!ws) throw new HerdrError('workspace_not_found', `workspace ${id} not found`)
       ws.tab_count++
       return { root_pane: { pane_id: pane(ws, dir) } }
     },

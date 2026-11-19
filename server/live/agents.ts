@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path'
 import { Emitter } from '../source.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
-import { dropped, herdr, isPassing, retrying, startDelays, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
+import { dropped, herdr, isPassing, missing, retrying, startDelays, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
 import { agyScreenBackground, ClaudeSessions, Procs, screenBackground, servesCommand, sessionBackground, type Background } from './readers/background.ts'
 import { claudeHome, claudeLogPath, cwdCandidates, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind, type LogCwd } from './readers/find.ts'
 import { createSession, mirrorSession, opencodeLogPath, putInstructions, switchModel } from './opencode.ts'
@@ -1040,17 +1040,64 @@ export class Agents extends Emitter<Events> {
     const p = (async () => {
       await p0?.catch(() => undefined)
       this.stopping.add(spec.key)
+      let next: { place: () => Promise<string>; close: () => Promise<void> } | undefined
       try {
         const first = await before?.()
+        // the pane its new run goes in is opened while the run it takes over from still holds its own: herdr closes a
+        // space with its last pane, and closing a task's only pane closed its worktree's space with it, under the run
+        // coming in (a hand-over, SHE-166)
+        next = await this.ahead(spec)
         await this.finish(spec.key)
-        return await this.launch({ ...spec, ...(first ? { first } : {}) }).catch((e) => this.startedWrongly(spec.key, e))
+        return await this.launch({ ...spec, ...(first ? { first } : {}), ...(next ? { pane: next.place } : {}) }).catch((e) => this.startedWrongly(spec.key, e))
       } finally {
+        await next?.close()
         this.stopping.delete(spec.key)
         this.deliver(spec.key)
       }
     })().finally(() => this.starting.delete(spec.key))
     this.starting.set(spec.key, p)
     return p
+  }
+
+  /**
+   * The pane this chat's next run goes in, opened before the run it takes over from ends (a restart): herdr closes a
+   * space with its last pane, so a hand-over that closed a task's worktree space with the agent's only pane left the
+   * run coming in nowhere to go. What the start would have opened itself, opened now; when that fails it falls back to
+   * opening it in the start, as it always did, and a start that never gets that far (a cap, a worktree, a CLI) closes
+   * the pane it never used.
+   */
+  private async ahead(spec: Spec) {
+    // the record as the launch will leave it — its folder, space and tab as this spec has them, not as the run it takes
+    // over from had them: a coordinator whose repo moved opens its tab in the folder the repo is in now
+    const old = this.records[spec.key]
+    const record: AgentRecord = {
+      ...(old ?? { logs: [], started: Date.now() }),
+      name: spec.name,
+      kind: spec.kind,
+      cwd: spec.cwd,
+      workspace: spec.workspace,
+      tab: spec.tab ?? old?.tab,
+      env: spec.env ?? old?.env,
+    }
+    const make = spec.pane ?? (() => this.paneFor(record, spec.was))
+    let pane: string | undefined
+    try {
+      pane = await make()
+    } catch (e) {
+      console.error(`shepherdr: couldn't open ${spec.key}'s pane ahead of its restart: ${(e as Error).message}`)
+    }
+    if (!pane) return undefined
+    const made = pane
+    let used = false
+    return {
+      place: async () => {
+        used = true
+        return made
+      },
+      close: async () => {
+        if (!used) await herdr.closePane(made).catch(() => undefined)
+      },
+    }
   }
 
   /** start (or resume) this chat's agent; resolves once herdr says it is ready for input */
@@ -1324,11 +1371,39 @@ export class Agents extends Emitter<Events> {
     return ws ?? old
   }
 
+  /** a pane for this chat, in its space: one herdr opens for it when it has none, in a tab of its own otherwise. A space
+   *  that closed between finding it and opening a tab in it (herdr closes a space with its last pane, and a hand-over
+   *  ends the agent's run) is one herdr opens again for the chat */
   private async paneFor(r: AgentRecord, was?: string): Promise<string> {
     const env = r.env ?? {}
+    const make = async () => (await herdr.createWorkspace(r.workspace, r.cwd, env)).root_pane.pane_id
     const ws = await this.space(r.workspace, was)
-    if (!ws) return (await herdr.createWorkspace(r.workspace, r.cwd, env)).root_pane.pane_id
-    return (await herdr.createTab(ws.workspace_id, r.tab ?? r.name, r.cwd, env)).root_pane.pane_id
+    if (!ws) return make()
+    try {
+      return (await herdr.createTab(ws.workspace_id, r.tab ?? r.name, r.cwd, env)).root_pane.pane_id
+    } catch (e) {
+      // a space it still has is the chat's own failure; one that went away is made again
+      if (!missing(e) || (await this.space(r.workspace, was))) throw e
+      return make()
+    }
+  }
+
+  /**
+   * A chat's record put back as it was before a start that failed: a start writes its own CLI, and a session it never
+   * ran, over the record before it asks herdr for a pane. What comes after starts from what the agent was, so the same
+   * CLI resumes its own session and another CLI is handed the brief and its instructions again. Two things of the
+   * failed start stay: why it failed (start.ts shows it), and whether its run was ended; its hooks were forgotten with
+   * the run it started, so the old ones never come back.
+   */
+  restore(key: string, record: AgentRecord | undefined) {
+    if (!record) return
+    const now = this.records[key]
+    const back = { ...record }
+    delete back.hooks
+    this.records[key] = { ...back, finished: now?.finished, ...(now?.startError ? { startError: now.startError } : {}) }
+    this.byName.set(record.name, key)
+    this.save()
+    this.flushRecords()
   }
 
   /* ---------- sending ---------- */
