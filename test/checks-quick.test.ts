@@ -16,7 +16,7 @@ describe('what --quick composes', () => {
   test('the runner keeps the lock, cap and timeout, filters coverage and writes a verdict of its own', () => {
     const lines = notComments(runner)
     expect(lines).toContain('for arg in "$@"; do [ "$arg" = --quick ] && quick=1; done')
-    expect(lines).toContain('[ "$quick" = 1 ] && V="$logs/verdict-quick.txt"')
+    expect(lines).toContain('V="$logs/verdict-quick.txt"')
     expect(lines).toContain('[ "${file#*-}" = coverage ] || kept+=("$file")')
     expect(lines).toContain('export SHEPHERDR_CHECK_QUICK="$quick"')
     expect(lines).toContain('[ "$quick" = 1 ] && { map_flag=\'\'; record_flag=\'\'; }')
@@ -32,6 +32,8 @@ describe('what --quick composes', () => {
     expect(lines).toContain('share=$((cores / 8))')
     expect(lines).toContain('[ "$share" -ge 2 ] || share=2')
     expect(lines).toContain('[ -z "$caller_jobs" ] || return 0')
+    // it can run beside a full run of the same worktree, so its step logs and verdict never share their names
+    expect(lines).toContain("log_suffix='-quick'")
     // what it must not change: the lock, the worker cap, the timeout or the exit-code contract
     expect(lines).toContain('exec 9>>"$lock"')
     expect(lines).toContain('export SHEPHERDR_TEST_JOBS="$jobs"')
@@ -258,6 +260,25 @@ describe('a quick run beside a full one', () => {
     try {
       f.run(true)
       expect(jobs(f)).toBe('tests jobs=3 held=yes')
+    } finally {
+      holder.stop()
+    }
+  })
+
+  test('a quick run beside a full run of the same worktree never overwrites its logs or notes', async () => {
+    const f = fixture(checks, 'herdr-tui', { cores: 32 })
+    // what a full run of this worktree left behind, while it was running
+    mkdirSync(f.logs, { recursive: true })
+    writeFileSync(join(f.logs, 'tests.log'), "Ran 3057 tests across 234 files\n")
+    writeFileSync(join(f.logs, 'tests.note'), 'Ran 3057 tests across 234 files\n')
+    const holder = await f.holdFullLock()
+    try {
+      f.run(true)
+      // its own step log, and the full run's log and note untouched
+      expect(existsSync(join(f.logs, 'tests-quick.log'))).toBe(true)
+      expect(readFileSync(join(f.logs, 'tests.log'), 'utf8')).toBe('Ran 3057 tests across 234 files\n')
+      expect(readFileSync(join(f.logs, 'tests.note'), 'utf8')).toBe('Ran 3057 tests across 234 files\n')
+      expect(existsSync(join(f.logs, 'verdict.txt'))).toBe(false)
     } finally {
       holder.stop()
     }

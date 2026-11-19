@@ -71,11 +71,17 @@ if [ "$quick" = 1 ] && [ "$reuse" = 1 ]; then
   printf 'check:local: --quick and --reuse ask different things: --reuse is the merge gate question, and only a full check answers it.\n'
   exit 1
 fi
-# a log folder of this worktree's own: several worktrees' checks never overwrite each other's
+# a log folder of this worktree's own: several worktrees' checks never overwrite each other's. A quick run may run
+# beside a full run of the same worktree (its own lock, below), so its step logs take a suffix of their own: its verdict
+# is already a file of its own (verdict-quick.txt).
 logs="$HOME/.cache/shepherdr/check-local/$(basename "$root")"
 mkdir -p "$logs"
 V="$logs/verdict.txt"
-[ "$quick" = 1 ] && V="$logs/verdict-quick.txt"
+log_suffix=''
+if [ "$quick" = 1 ]; then
+  V="$logs/verdict-quick.txt"
+  log_suffix='-quick'
+fi
 vname=$(basename "$V")
 # every verdict line, not just the header, says a quick run is not a full gate verdict
 verdict_kind=''
@@ -267,7 +273,7 @@ say() { printf '%s\n' "$1" | tee -a "$V"; }
 # the note a check wrote for its own line: tests say how many ran, coverage its percentage, build its time, the dist
 # budget its sizes
 step_note() {
-  cat "$logs/$1.note" 2>/dev/null
+  cat "$logs/$1$log_suffix.note" 2>/dev/null
 }
 
 step() { # <name> <check file>
@@ -278,18 +284,18 @@ step() { # <name> <check file>
   [ "$have_timeout" = 1 ] && cmd+=(timeout --foreground -k 60 "$step_timeout")
   cmd+=("$file")
   what+=("$name")
-  rm -f "$logs/$name.note" "$logs/$name.skip"
+  rm -f "$logs/$name$log_suffix.note" "$logs/$name$log_suffix.skip"
   export SHEPHERDR_CHECK_NAME="$name"
-  export SHEPHERDR_CHECK_LOG="$logs/$name.log"
-  export SHEPHERDR_CHECK_NOTE="$logs/$name.note"
-  export SHEPHERDR_CHECK_SKIP="$logs/$name.skip"
+  export SHEPHERDR_CHECK_LOG="$logs/$name$log_suffix.log"
+  export SHEPHERDR_CHECK_NOTE="$logs/$name$log_suffix.note"
+  export SHEPHERDR_CHECK_SKIP="$logs/$name$log_suffix.skip"
   # fd 9 is the lock: the check's own processes must not keep it open after this check is gone; and the subshell becomes
   # the check itself, so a stop reaches it and it reaches its own children (scripts/test.ts)
   (
     cd "$root" || exit 1
     exec 9>&-
     exec "${cmd[@]}"
-  ) >"$logs/$name.log" 2>&1 &
+  ) >"$logs/$name$log_suffix.log" 2>&1 &
   STEP_PID=$!
   code=0
   wait "$STEP_PID" || code=$?
@@ -300,8 +306,8 @@ step() { # <name> <check file>
     exit 130
   fi
   local line="${#what[@]}/$total $name"
-  if [ "$code" -eq 0 ] && [ -s "$logs/$name.skip" ]; then
-    skipped_reason=$(cat "$logs/$name.skip")
+  if [ "$code" -eq 0 ] && [ -s "$logs/$name$log_suffix.skip" ]; then
+    skipped_reason=$(cat "$logs/$name$log_suffix.skip")
     say "$line skipped: $skipped_reason"
     notes+=("$name: $skipped_reason")
   elif [ "$code" -eq 0 ]; then
@@ -358,7 +364,7 @@ record() { # <1 when it passed whole>
 }
 
 show_failure() { # the reasons a step failed
-  local name=$1 log="$logs/$1.log" shown=''
+  local name=$1 log="$logs/$1$log_suffix.log" shown=''
   case $name in
     tests)
       shown=$(failing_tests "$log")
@@ -458,7 +464,7 @@ run_phase() {
     if [ "$probed" = 0 ]; then
       probed=1
       browsers=$(cd "$root" && exec 9>&- && "${probe[@]}" 2>&1)
-      printf '%s\n' "$browsers" >"$logs/browsers.log"
+      printf '%s\n' "$browsers" >"$logs/browsers$log_suffix.log"
       for engine in chromium webkit; do
         said=$(printf '%s\n' "$browsers" | sed -n "s/^$engine: //p" | tail -1)
         what_skips='every browser test'
@@ -502,7 +508,7 @@ fi
 # a browser that died during the run skips its tests instead of failing them (test/chromium.ts): say so, as for the ones
 # that could not start at all. Only when they ran: a run stopped earlier must not read an older run's tests.log
 if [ "$ran_tests" = 1 ]; then
-  skipped=$(grep -c '^(skip) ' "$logs/tests.log" 2>/dev/null || true)
+  skipped=$(grep -c '^(skip) ' "$logs/tests$log_suffix.log" 2>/dev/null || true)
   [ -n "$skipped" ] && [ "$skipped" -gt 0 ] && notes+=("the tests: $skipped skipped (a browser that could not start, or a tool this host lacks; see tests.log)")
 fi
 

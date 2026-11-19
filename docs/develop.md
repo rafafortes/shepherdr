@@ -97,7 +97,8 @@ name. A check file:
 - exits 0 on pass and non-zero on failure (the runner maps 124/137 to timed out or killed, and stops at the first
   failure, so a later check never reads a half-finished world);
 - writes its note — the human line appended to its result, e.g. how many tests ran — as one line to
-  `$SHEPHERDR_CHECK_NOTE`; its stdout and stderr already go to `$SHEPHERDR_CHECK_LOG` (`<logs>/<name>.log`), the log the
+  `$SHEPHERDR_CHECK_NOTE`; its stdout and stderr already go to `$SHEPHERDR_CHECK_LOG` (`<logs>/<name>.log`, and
+  `<logs>/<name>-quick.log` in a `--quick` run, which can run beside a full run of the same worktree), the log the
   runner reads to show why a failure happened;
 - says it cannot run (a tool is missing, say) by writing one reason to `$SHEPHERDR_CHECK_SKIP` and exiting 0: the result
   line reads `N/<total> <name> skipped: <reason>`, is named in the verdict's "parts not run", and is not a failure.
