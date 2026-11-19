@@ -24,9 +24,9 @@
 # up waiting for another check.
 #
 # A check is one executable file in scripts/checks/, named <number>-<name> with the numbers spaced by ten
-# (10-dependencies, 15-secrets, 20-types, 30-tests, 40-coverage, 50-build). The runner discovers them by sorted file
-# name; a .ts file beside them is a check's own logic, not a check. Adding a check is adding one file, and the order is
-# reviewed because it is the file name. Each check gets its shared context
+# (10-dependencies, 15-secrets, 17-scripts, 20-types, 30-tests, 40-coverage, 50-build). The runner discovers them by
+# sorted file name; a .ts file beside them is a check's own logic, not a check. Adding a check is adding one file, and
+# the order is reviewed because it is the file name. Each check gets its shared context
 # in SHEPHERDR_CHECK_* environment variables (never positional arguments), writes its note to SHEPHERDR_CHECK_NOTE and
 # a reason for skipping to SHEPHERDR_CHECK_SKIP, and exits non-zero on failure. The whole contract is in docs/develop.md.
 set -uo pipefail
