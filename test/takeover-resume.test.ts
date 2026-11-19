@@ -153,12 +153,20 @@ describe('a space herdr closes while a backup starts', () => {
       if (n++ < 2) throw new HerdrError('workspace_not_found', 'workspace w9 not found')
       return createTab(...args)
     }
+    // the failed try's mark on the agent's record is given back before the retry: it starts from what the agent was
+    const restore = w.agents.restore
+    let given: Record<string, unknown> | undefined
+    w.agents.restore = ((k: string, r: Record<string, unknown> | undefined) => {
+      given = r
+      return restore(k, r)
+    }) as never
     try {
       await w.engine.cantGoOn(t.id, 'Out of allowance')
     } finally {
       w.herdr.h.createTab = createTab
       w.settings.set('task.fallback', null)
     }
+    expect(given).toMatchObject({ kind: 'pi' })
     // the backup went in all the same, in a space opened again from its worktree, with no failure left on the task
     expect(kindOf(w, key)).toBe('codex')
     expect(t.tookOver).toMatchObject({ from: 'pi', to: 'codex', step: 1 })
@@ -185,7 +193,9 @@ describe('a space herdr closes while a backup starts', () => {
     expect(kindOf(w, key)).toBe('pi')
     expect(t.trouble).toContain('not found')
     expect(w.engine.view(t)).toMatchObject({ status: 'need' })
-    // the chain is as it was: no takeover counted, no hand-over left for a restart to take again
+    // the chain is as it was: no takeover counted, no hand-over left for a restart to take again, and its agent's
+    // record is the one the run that was cut off had
+    expect(w.records[key]).toMatchObject({ kind: 'pi' })
     expect(t.tookOver).toBeUndefined()
     expect(t.handover).toBeUndefined()
     expect(w.posted.some((p) => p.key === key && p.card?.text.includes('No backup agent took over'))).toBe(true)

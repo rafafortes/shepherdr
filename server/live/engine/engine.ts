@@ -3046,6 +3046,9 @@ export class Engine extends Emitter<Events> {
     // what it takes over from, and how to be where it ran: a space herdr closes under the backup is opened again there
     const prior = t.tookOver
     const home = this.homeOf(t)
+    // its agent's record as the hand-over found it: a start writes its own CLI (and a session it never ran) over it
+    // before it asks herdr for a pane, and a retry or a later start must begin from what the agent really was
+    const rec0 = rec ? { ...rec } : undefined
     this.handing.add(t.id)
     // on its way from here: a restart before the backup is up takes it again (resumeTakeovers)
     t.handover = { why, lasting, ...(prior ? { prior } : {}), at: Date.now() }
@@ -3071,6 +3074,7 @@ export class Engine extends Emitter<Events> {
         // a space or pane herdr no longer has, closed while the backup started: its worktree's space is opened again
         // and the backup starts once more there, before the task waits for you
         if (!missing(e)) throw e
+        this.agents.restore(key, rec0)
         await this.launch(t, first, await this.wt.reopen(home, t.worktree!, labelOf(t)), h)
       }
       // the backup is up: no restart takes this takeover again
@@ -3094,6 +3098,7 @@ export class Engine extends Emitter<Events> {
       t.trouble = troubleOf(e)
       t.tookOver = prior
       t.handover = undefined
+      this.agents.restore(key, rec0)
       stuck()
       this.noBackup(key, troubleOf(e))
     } finally {

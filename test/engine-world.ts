@@ -108,6 +108,10 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
       await agents.finish(s.key)
       return agents.ensure({ ...s, ...(first ? { first } : {}), ...(pane ? { pane: async () => pane } : {}) })
     },
+    // the record as it was before a start that failed (agents.ts restore): this stand-in writes only what started
+    restore: (key: string, record: Record<string, unknown> | undefined) => {
+      if (record) records[key] = record as never
+    },
     forget: (key: string) => {
       delete records[key]
       forgot.push(key)

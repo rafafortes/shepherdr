@@ -62,6 +62,11 @@ function spies() {
       return { tab: { tab_id: 't2' }, root_pane: { pane_id: NEW } } as never
     }),
     workspaces: spyOn(herdr, 'workspaces').mockResolvedValue([{ workspace_id: 'w1', label: 'T-166: keep the space' }, { workspace_id: 'w0', label: 'a project' }] as never),
+    createWorkspace: spyOn(herdr, 'createWorkspace').mockImplementation(async (label: string, dir: string) => {
+      events.push(`workspace ${label}`)
+      tabDirs.push(dir)
+      return { workspace: { workspace_id: 'w2', label }, root_pane: { pane_id: NEW } } as never
+    }),
   }
 }
 
@@ -85,6 +90,77 @@ function chat(c: { kind: string; logs: string[] }) {
   started.length = 0
   tabDirs.length = 0
 }
+
+describe('a chat whose space closed anyway (a coordinator, whose spec has no pane of its own)', () => {
+  test('is given a space again, and the run starts in it', async () => {
+    const s = spies()
+    try {
+      chat(CASES[2])
+      const a = new Agents()
+      try {
+        await a.refresh()
+        // herdr lists the space and closes it before the tab: after that it has none for the chat
+        s.workspaces.mockResolvedValueOnce([{ workspace_id: 'w1', label: 'T-166: keep the space' }] as never).mockResolvedValue([] as never)
+        s.createTab.mockRejectedValueOnce(new HerdrError('workspace_not_found', 'workspace w1 not found') as never)
+        await a.restart({ key: KEY, name: NAME, kind: 'pi', cwd, workspace: 'T-166: keep the space', tab: 'Agent', env: {} })
+        // the space it is given is opened where it runs, before the old pane closes
+        expect(events).toEqual(['workspace T-166: keep the space', `close ${OLD}`, `start ${NEW}`])
+        expect(started[0].pane).toBe(NEW)
+      } finally {
+        a.stop()
+      }
+    } finally {
+      for (const spy of Object.values(s)) spy.mockRestore()
+    }
+  })
+
+  test('a space herdr still has, and a tab it refused for its own reason, fails the start as it did', async () => {
+    const s = spies()
+    try {
+      chat(CASES[2])
+      const a = new Agents()
+      try {
+        await a.refresh()
+        s.createTab.mockRejectedValue(new HerdrError('invalid_request', 'tab.create: no such folder') as never)
+        await expect(a.restart({ key: KEY, name: NAME, kind: 'pi', cwd, workspace: 'T-166: keep the space', tab: 'Agent', env: {} })).rejects.toThrow('no such folder')
+        // no second space was opened for it
+        expect(events).toEqual([`close ${OLD}`])
+      } finally {
+        a.stop()
+      }
+    } finally {
+      for (const spy of Object.values(s)) spy.mockRestore()
+    }
+  })
+})
+
+describe("a start that failed puts the chat's record back", () => {
+  test('the retry resumes the session the chat had, not the one the failed start wrote over it', async () => {
+    const s = spies()
+    try {
+      chat(CASES[0])
+      const a = new Agents()
+      try {
+        await a.refresh()
+        const before = { ...a.record(KEY)! }
+        // the backup's CLI never came up (no pane for it): its kind, and a session it never ran, went over the record
+        await expect(a.restart({ key: KEY, name: NAME, kind: 'codex', cwd, workspace: 'T-166: keep the space', tab: 'Agent', env: {}, pane: async () => Promise.reject(new Error('no pane for it')) })).rejects.toThrow('no pane')
+        expect(a.record(KEY)?.kind).toBe('codex')
+        a.restore(KEY, before)
+        expect(a.record(KEY)).toMatchObject({ kind: 'claude', sessionId: 'sess-1' })
+        // and the same CLI starts again on its own session
+        started.length = 0
+        events.length = 0
+        await a.restart({ key: KEY, name: NAME, kind: 'claude', cwd, workspace: 'T-166: keep the space', tab: 'Agent', env: {}, pane: async () => NEW })
+        expect(started[0].args.join(' ')).toContain('--resume sess-1')
+      } finally {
+        a.stop()
+      }
+    } finally {
+      for (const spy of Object.values(s)) spy.mockRestore()
+    }
+  })
+})
 
 describe('a restart opens the new pane before it ends the run it takes over from', () => {
   for (const c of CASES) {

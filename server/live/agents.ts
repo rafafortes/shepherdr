@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path'
 import { Emitter } from '../source.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
-import { dropped, herdr, isPassing, retrying, startDelays, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
+import { dropped, herdr, isPassing, missing, retrying, startDelays, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
 import { agyScreenBackground, ClaudeSessions, Procs, screenBackground, servesCommand, sessionBackground, type Background } from './readers/background.ts'
 import { claudeHome, claudeLogPath, cwdCandidates, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind, type LogCwd } from './readers/find.ts'
 import { createSession, mirrorSession, opencodeLogPath, putInstructions, switchModel } from './opencode.ts'
@@ -1371,11 +1371,35 @@ export class Agents extends Emitter<Events> {
     return ws ?? old
   }
 
+  /** a pane for this chat, in its space: one herdr opens for it when it has none, in a tab of its own otherwise. A space
+   *  that closed between finding it and opening a tab in it (herdr closes a space with its last pane, and a hand-over
+   *  ends the agent's run) is one herdr opens again for the chat */
   private async paneFor(r: AgentRecord, was?: string): Promise<string> {
     const env = r.env ?? {}
+    const make = async () => (await herdr.createWorkspace(r.workspace, r.cwd, env)).root_pane.pane_id
     const ws = await this.space(r.workspace, was)
-    if (!ws) return (await herdr.createWorkspace(r.workspace, r.cwd, env)).root_pane.pane_id
-    return (await herdr.createTab(ws.workspace_id, r.tab ?? r.name, r.cwd, env)).root_pane.pane_id
+    if (!ws) return make()
+    try {
+      return (await herdr.createTab(ws.workspace_id, r.tab ?? r.name, r.cwd, env)).root_pane.pane_id
+    } catch (e) {
+      // a space it still has is the chat's own failure; one that went away is made again
+      if (!missing(e) || (await this.space(r.workspace, was))) throw e
+      return make()
+    }
+  }
+
+  /**
+   * A chat's record put back as it was before a start that failed: a start writes its own CLI, and a session it never
+   * ran, over the record before it asks herdr for a pane. What comes after starts from what the agent was, so the same
+   * CLI resumes its own session and another CLI is handed the brief and its instructions again. `finished` stays as the
+   * start left it: the run it took over from ended, and that does not come back.
+   */
+  restore(key: string, record: AgentRecord | undefined) {
+    if (!record) return
+    this.records[key] = { ...record, finished: this.records[key]?.finished }
+    this.byName.set(record.name, key)
+    this.save()
+    this.flushRecords()
   }
 
   /* ---------- sending ---------- */
