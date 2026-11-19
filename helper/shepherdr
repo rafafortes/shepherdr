@@ -51,16 +51,24 @@ unless ($s) {
 }
 print $s "POST /api/cli HTTP/1.0\r\nHost: shepherdr\r\n${authorization}Content-Type: application/json\r\nContent-Length: " . length($json) . "\r\n\r\n$json";
 # Any call must end with words when Shepherdr gives no answer: an agent's turn must not hang on a stalled server.
-# The long verbs have their own server-side deadlines (engine.ts, the same as server/cli.ts): checks waits up to
-# 9 minutes for GitHub, review up to 90 s for a reviewer slot, merge up to 90 s (110 s here); the rest get 30 s
-# (SHEPHERDR_CLI_WAIT). The merge words below stay as they were: agents already parse them.
+# The long verbs have their own server-side deadlines (engine.ts, git.ts, the same as server/cli.ts): checks waits
+# up to 9 minutes for GitHub plus one last gh call (120 s), pr may push and open a pull request with gh calls of
+# 120 s, review up to 90 s for a reviewer slot, merge up to 90 s (110 s here); the rest get 30 s. A bad override
+# falls back, never disables the bound. The merge words below stay as they were: agents already parse them.
+my $bound = sub {
+  my ($name, $fallback) = @_;
+  my $v = $ENV{$name} // '';
+  return $fallback unless $v =~ /^\d+$/ && $v > 0;
+  return 0 + $v;
+};
 my $word = @ARGV ? $ARGV[0] : '';
 my $second = ($word eq 'task' && @ARGV > 1) ? $ARGV[1] : '';
 my $merge = $word eq 'merge' || ($word eq 'task' && $second eq 'merge');
-my $wait = $merge ? ($ENV{SHEPHERDR_MERGE_WAIT} // 110000)
-  : $word eq 'checks' ? ($ENV{SHEPHERDR_CHECKS_WAIT} // 570000)
-  : $word eq 'review' ? ($ENV{SHEPHERDR_REVIEW_WAIT} // 100000)
-  : ($ENV{SHEPHERDR_CLI_WAIT} // 30000);
+my $wait = $merge ? $bound->('SHEPHERDR_MERGE_WAIT', 110000)
+  : $word eq 'checks' ? $bound->('SHEPHERDR_CHECKS_WAIT', 690000)
+  : $word eq 'pr' ? $bound->('SHEPHERDR_PR_WAIT', 270000)
+  : $word eq 'review' ? $bound->('SHEPHERDR_REVIEW_WAIT', 100000)
+  : $bound->('SHEPHERDR_CLI_WAIT', 30000);
 my $res = eval {
   local $SIG{ALRM} = sub { die "no answer\n" };
   alarm(int(($wait + 999) / 1000));
@@ -76,7 +84,7 @@ unless (defined $res) {
     print STDERR "shepherdr merge $id got no answer from Shepherdr in $secs s (it may have restarted). Don't leave it running: see where it is with shepherdr task show $id, and unless it says Merged, run shepherdr merge $id again; it finishes the merge, or says it is merged.\n";
   } else {
     my $name = $word eq 'task' ? "task $second" : $word;
-    print STDERR "shepherdr $name got no answer from Shepherdr in $secs s (it may have restarted or stalled). Try the call again; if it keeps happening, run shepherdr doctor on the main machine.\n";
+    print STDERR "shepherdr $name got no answer from Shepherdr in $secs s (it may have restarted or stalled). Check whether it went through first; if not, try again. If it keeps happening, run shepherdr doctor on the main machine.\n";
   }
   exit 1;
 }

@@ -28,15 +28,20 @@ const stdin = ((secret === 'set' || secret === 'elevenlabs') || (args[0] === 'he
 
 // Every call must end with words when Shepherdr gives no answer: a stalled server (1452 event-loop stalls of 1 s or
 // more on 2026-11-18, worst 20.1 s) otherwise hangs an agent's turn for ever. The long verbs have their own deadlines
-// on the server (engine.ts): checks waits up to 9 minutes for GitHub, review up to 90 s for a reviewer slot, merge up
-// to 90 s (110 s here); the rest get the default. Every call gets a bound, and says so instead of waiting on and on.
-const envWait = (name: string, fallback: number) => Number(process.env[name] ?? fallback)
+// on the server (engine.ts, git.ts): checks waits up to 9 minutes for GitHub plus one last gh call (120 s), pr may
+// push and open a pull request with gh calls of 120 s, review up to 90 s for a reviewer slot, merge up to 90 s
+// (110 s here); the rest get the default. Every call gets a bound, and says so instead of waiting on and on.
+const envWait = (name: string, fallback: number) => {
+  const n = Number(process.env[name] ?? fallback)
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
 const merge = args[0] === 'merge' || (args[0] === 'task' && args[1] === 'merge')
 const wait = merge
   ? envWait('SHEPHERDR_MERGE_WAIT', 110_000)
-  : args[0] === 'checks' ? envWait('SHEPHERDR_CHECKS_WAIT', 9 * 60_000 + 30_000)
-    : args[0] === 'review' ? envWait('SHEPHERDR_REVIEW_WAIT', 100_000)
-      : envWait('SHEPHERDR_CLI_WAIT', 30_000)
+  : args[0] === 'checks' ? envWait('SHEPHERDR_CHECKS_WAIT', 9 * 60_000 + 120_000 + 30_000)
+    : args[0] === 'pr' ? envWait('SHEPHERDR_PR_WAIT', 2 * 120_000 + 30_000)
+      : args[0] === 'review' ? envWait('SHEPHERDR_REVIEW_WAIT', 100_000)
+        : envWait('SHEPHERDR_CLI_WAIT', 30_000)
 const verb = args[0] === 'task' ? `task ${args[1] ?? ''}`.trim() : args[0] ?? '<verb>'
 
 let j: { out: string; code: number; secrets?: Record<string, string> }
@@ -72,7 +77,7 @@ function noAnswer(ms: number, id = '<id>') {
 
 /** any other verb that heard nothing back: the same one line of words, so the calling agent's turn ends */
 function noAnswerOther(ms: number, verb: string) {
-  return `shepherdr ${verb} got no answer from Shepherdr in ${Math.round(ms / 1000)} s (it may have restarted or stalled). Try the call again; if it keeps happening, run shepherdr doctor on the main machine.\n`
+  return `shepherdr ${verb} got no answer from Shepherdr in ${Math.round(ms / 1000)} s (it may have restarted or stalled). Check whether it went through first; if not, try again. If it keeps happening, run shepherdr doctor on the main machine.\n`
 }
 
 /** shepherdr secret run: the command, with the values in its environment; what it prints comes through with each value
