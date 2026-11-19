@@ -24,13 +24,14 @@ On a machine where herdr runs as a systemd user service, give it (and the server
 `systemctl --user set-property herdr.service CPUWeight=1000`.
 
 `bun run check:local --quick` is the opt-in pre-ready run: the same incremental types and build, but `30-tests` runs
-`bun run test changed` instead of the whole forceful suite, and `40-coverage` does not run at all (so no screen map or
+`bun run test changed --force` instead of the whole forceful suite, and `40-coverage` does not run at all (so no screen map or
 coverage baseline is recorded). Its verdict says `QUICK` and what it did not run on its first line, in
 `verdict-quick.txt`, so it can never be taken for a full verdict where one is asked for; a quick run that fails types
 or the build still fails the gate. The default stays full: the whole gate still runs at the merge, weekly on
 `herdr-tui`, and before every release. `scripts/build-plugins.ts` hashes its inputs into `node_modules/.cache` so the
-typecheck, tests and build steps share one build per run instead of three, and `tsc`'s `--incremental` cache is per
-worktree; neither weakens what any step checks.
+typecheck, tests and build steps share one build per run instead of three, and `tsc`'s `--incremental` cache lives
+there too. A release symlinks its `node_modules` to a shared deps folder, where the hash and the check that the
+registries still match what it wrote keep a shared cache safe; neither weakens what any step checks.
 
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe; each step is
 one executable file in `scripts/checks/`, named `<number>-<name>` with the numbers spaced by ten (`10-dependencies`,

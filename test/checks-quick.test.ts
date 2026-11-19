@@ -31,7 +31,7 @@ describe('what --quick composes', () => {
   test('the tests check picks the changed tests in a quick run and the forceful suite otherwise', () => {
     const tests = readFileSync(join(root, 'scripts', 'checks', '30-tests'), 'utf8')
     expect(tests).toContain('SHEPHERDR_CHECK_QUICK')
-    expect(tests).toContain('bun "$root/scripts/test.ts" changed')
+    expect(tests).toContain('bun "$root/scripts/test.ts" changed --force')
     expect(tests).toContain('--force --cover="$cover"')
     const coverage = readFileSync(join(root, 'scripts', 'checks', '40-coverage'), 'utf8')
     expect(coverage).toContain('--record')
@@ -45,7 +45,7 @@ describe('what --quick composes', () => {
 })
 
 /** a fixture repo with the real runner and fake checks that record that they ran, like test/checks-runner.test.ts */
-function fixture(checks: Record<string, string>) {
+function fixture(checks: Record<string, string>, branch = 'herdr-tui') {
   const dir = tmp('checks-quick')
   const home = join(dir, 'home')
   mkdirSync(join(dir, 'scripts', 'checks'), { recursive: true })
@@ -54,7 +54,7 @@ function fixture(checks: Record<string, string>) {
     const r = Bun.spawnSync(['git', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
     expect(r.exitCode, r.stderr.toString()).toBe(0)
   }
-  git('init', '-q', '-b', 'herdr-tui')
+  git('init', '-q', '-b', branch)
   writeFileSync(join(dir, 'README.md'), 'fixture\n')
   git('add', '-A')
   git('-c', 'user.name=CI', '-c', 'user.email=ci@localhost', 'commit', '-qm', 'init')
@@ -62,7 +62,7 @@ function fixture(checks: Record<string, string>) {
   writeFileSync(join(dir, 'scripts', 'check-browsers.ts'), "console.log('chromium: ok (fixture)')\nconsole.log('webkit: ok (fixture)')\n")
   for (const [name, body] of Object.entries(checks)) {
     const f = join(dir, 'scripts', 'checks', name)
-    writeFileSync(f, `#!/usr/bin/env bash\nset -uo pipefail\necho "$SHEPHERDR_CHECK_NAME $SHEPHERDR_CHECK_QUICK" >> "$SHEPHERDR_CHECK_ROOT/calls.txt"\n${body}\nexit 0\n`)
+    writeFileSync(f, `#!/usr/bin/env bash\nset -uo pipefail\necho "$SHEPHERDR_CHECK_NAME $SHEPHERDR_CHECK_QUICK" >> "$SHEPHERDR_CHECK_ROOT/calls.txt"\necho "$SHEPHERDR_CHECK_NAME map=\${SHEPHERDR_CHECK_MAP:-} record=\${SHEPHERDR_CHECK_RECORD:-}" >> "$SHEPHERDR_CHECK_ROOT/flags.txt"\n${body}\nexit 0\n`)
     chmodSync(f, 0o755)
   }
   const logs = join(home, '.cache', 'shepherdr', 'check-local', basename(dir))
@@ -80,6 +80,7 @@ function fixture(checks: Record<string, string>) {
       return r.stdout.toString()
     },
     calls: () => (existsSync(join(dir, 'calls.txt')) ? readFileSync(join(dir, 'calls.txt'), 'utf8').trim().split('\n') : []),
+    flags: () => (existsSync(join(dir, 'flags.txt')) ? readFileSync(join(dir, 'flags.txt'), 'utf8').trim().split('\n') : []),
     verdict: (file: string) => readFileSync(join(logs, file), 'utf8'),
   }
 }
@@ -104,5 +105,23 @@ describe('what --quick runs', () => {
     expect(f.calls()).toEqual(['types 0', 'coverage 0', 'build 0'])
     expect(out).toMatch(/^check:local · /)
     expect(f.verdict('verdict.txt')).toContain('PASSED in')
+    expect(f.verdict('verdict.txt')).not.toContain('not a full gate verdict')
+  })
+
+  test('on the default branch a quick run clears the map and record flags the full run sets', () => {
+    const full = fixture(checks, 'main')
+    full.run(false)
+    expect(full.flags()[0]).toContain('map=1 record=1')
+    const quick = fixture(checks, 'main')
+    quick.run(true)
+    for (const line of quick.flags()) expect(line).toContain('map= record=')
+  })
+
+  test('every quick verdict line says it is not a full gate verdict, in a file of its own', () => {
+    const f = fixture(checks)
+    f.run(true)
+    const v = f.verdict('verdict-quick.txt')
+    expect(v.split('\n').filter((l) => l.startsWith('PASSED') || l.startsWith('FAILED')).length).toBeGreaterThan(0)
+    for (const l of v.split('\n').filter((l) => l.startsWith('PASSED') || l.startsWith('FAILED'))) expect(l).toContain('not a full gate verdict')
   })
 })

@@ -11,9 +11,10 @@ cd "$root" || exit 1
 map=()
 [ "${SHEPHERDR_CHECK_MAP:-}" = 1 ] && map=(--map)
 if [ "${SHEPHERDR_CHECK_QUICK:-0}" = 1 ]; then
-  # the pre-ready run: only the tests that reach what changed. No --cover (no coverage in a quick run), no --map
-  # recording (a map is the full suite's), no --force (the picker needs none): the full gate runs them all later.
-  bun "$root/scripts/test.ts" changed
+  # the pre-ready run: only the tests that reach what changed. No --cover (no coverage in a quick run) and no --map
+  # recording (a map is the full suite's); --force still refuses an earlier pass at this commit: the full gate runs
+  # all of them later.
+  bun "$root/scripts/test.ts" changed --force
 else
   bun "$root/scripts/test.ts" --force --cover="$cover" ${map[@]+"${map[@]}"}
 fi

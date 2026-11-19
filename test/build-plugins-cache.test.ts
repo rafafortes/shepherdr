@@ -2,7 +2,7 @@
 // scripts/build-plugins.ts keeps a hash of them in node_modules/.cache and skips a build whose inputs and outputs did
 // not change. These tests drive writeRegistries on a fixture of its own, including the invalidation paths.
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeRegistries } from '../scripts/build-plugins.ts'
 import { tmp } from './tmp.ts'
@@ -33,13 +33,15 @@ describe('the plugin build cache', () => {
     expect(writeRegistries(f.dir)).toEqual(['a', 'b'])
     const before = { client: readFileSync(f.client, 'utf8'), server: readFileSync(f.server, 'utf8'), cache: readFileSync(f.cache, 'utf8') }
     const clientAt = statSync(f.client).mtimeMs
-    const cacheAt = statSync(f.cache).mtimeMs
+    // date the cache back so a rewrite cannot hide behind a coarse filesystem timestamp
+    const old = new Date('2020-01-01T00:00:00Z')
+    utimesSync(f.cache, old, old)
     expect(writeRegistries(f.dir)).toEqual(['a', 'b'])
     expect(readFileSync(f.client, 'utf8')).toBe(before.client)
     expect(readFileSync(f.server, 'utf8')).toBe(before.server)
     expect(readFileSync(f.cache, 'utf8')).toBe(before.cache)
     expect(statSync(f.client).mtimeMs, 'the registry was not written again').toBe(clientAt)
-    expect(statSync(f.cache).mtimeMs, 'the cache was hit, not rewritten').toBe(cacheAt)
+    expect(statSync(f.cache).mtimeMs, 'the cache was hit, not rewritten').toBe(old.getTime())
   })
 
   test('changed inputs rebuild: a plugin added to the list is in the registry', () => {

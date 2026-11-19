@@ -49,6 +49,10 @@ logs="$HOME/.cache/shepherdr/check-local/$(basename "$root")"
 mkdir -p "$logs"
 V="$logs/verdict.txt"
 [ "$quick" = 1 ] && V="$logs/verdict-quick.txt"
+vname=$(basename "$V")
+# every verdict line, not just the header, says a quick run is not a full gate verdict
+verdict_kind=''
+[ "$quick" = 1 ] && verdict_kind=' (quick run; not a full gate verdict)'
 # a run gone by must not answer for this one, while this one waits for the lock
 printf 'check:local is running: no verdict yet\n' >"$V"
 # one lock for every session (never in the repo, never in ~/.shepherdr): a shell without XDG_RUNTIME_DIR takes it too
@@ -307,11 +311,11 @@ fi
 
 echo
 if [ ${#failed[@]} -eq 0 ] && [ ${#notes[@]} -eq 0 ]; then
-  say "PASSED in $(dur $((SECONDS - started))) · logs: $logs"
+  say "PASSED in $(dur $((SECONDS - started)))$verdict_kind · logs: $logs"
   exit 0
 fi
 if [ ${#failed[@]} -eq 0 ]; then
-  say "PASSED in $(dur $((SECONDS - started))), with parts of it not run:"
+  say "PASSED in $(dur $((SECONDS - started)))$verdict_kind, with parts of it not run:"
   for n in "${notes[@]}"; do say "  ! $n"; done
   say "· logs: $logs"
   exit 0
@@ -322,6 +326,6 @@ if [ ${#notes[@]} -gt 0 ]; then
   say ""
 fi
 for name in "${failed[@]}"; do say "$(show_failure "$name")"; done
-say "FAILED in $(dur $((SECONDS - started))): ${failed[*]}"
-say "Full logs: $logs (verdict.txt)"
+say "FAILED in $(dur $((SECONDS - started)))$verdict_kind: ${failed[*]}"
+say "Full logs: $logs ($vname)"
 exit 1
