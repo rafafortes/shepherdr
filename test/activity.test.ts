@@ -3,11 +3,11 @@
 // each CLI's exact format.
 import { describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { appendFileSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { glance, jobsWords, rowsOf, say, testResult, took } from '../shared/activity.ts'
 import { activityOf, cutOutput, headlessJob, JobLogs, lineOf, outputAt } from '../server/live/activity.ts'
-import { agyDb, agyLogPath } from '../server/live/agy.ts'
+import { agyDb, agyLogPath, MIRROR_HEAD } from '../server/live/agy.ts'
 import { opencodeLogPath } from '../server/live/opencode.ts'
 import { ClaudeReader, readerFor } from '../server/live/readers/index.ts'
 import { logKind, piSessionDir } from '../server/live/readers/find.ts'
@@ -587,7 +587,9 @@ describe('a headless reviewer’s own steps', () => {
       mkdirSync(dirname(agyLog), { recursive: true })
       writeFileSync(
         agyLog,
-        `${JSON.stringify({ mirror: 2 })}\n${JSON.stringify({ idx: 1, at: 1_700_000_000_000, kind: 'tool', tool: 'run_command', args: JSON.stringify({ CommandLine: 'bun test' }), output: 'pass' })}\n`,
+        `${MIRROR_HEAD}
+${JSON.stringify({ idx: 1, at: 1_700_000_000_000, kind: 'tool', tool: 'run_command', args: JSON.stringify({ CommandLine: 'bun test' }), output: 'pass' })}
+`,
       )
       expect(logKind(agyLog)).toBe('agy')
       expect(logs.steps(agyLog).steps.map((s) => s.title)).toEqual(['Ran tests'])
@@ -613,6 +615,28 @@ describe('a headless reviewer’s own steps', () => {
       else process.env.SHEPHERDR_AGY_HOME = savedAgy
       if (savedPi === undefined) delete process.env.PI_CODING_AGENT_DIR
       else process.env.PI_CODING_AGENT_DIR = savedPi
+    }
+  })
+
+  test('a log written again whole under the reader gives its steps once', () => {
+    const saved = process.env.SHEPHERDR_AGY_HOME
+    process.env.SHEPHERDR_AGY_HOME = tmp('act-no-agy-read')
+    try {
+      const logs = new JobLogs()
+      const file = agyLogPath(home(), 'conv-again')
+      mkdirSync(dirname(file), { recursive: true })
+      const tool = (idx: number, command: string) =>
+        JSON.stringify({ idx, at: 1_700_000_000_000 + idx, kind: 'tool', tool: 'run_command', args: JSON.stringify({ CommandLine: command }), output: 'Command exited with code 0.' })
+      writeFileSync(file, `${MIRROR_HEAD}\n${tool(1, 'bun test')}\n`)
+      expect(logs.steps(file).steps.map((s) => s.title)).toEqual(['Ran tests'])
+      // the same log again, whole, in a new file (a store's mirror written again whole), and one more step with it
+      const next = join(dirname(file), 'conv-again.new')
+      writeFileSync(next, `${MIRROR_HEAD}\n${tool(1, 'bun test')}\n${tool(2, 'git status')}\n`)
+      renameSync(next, file)
+      expect(logs.steps(file).steps.map((s) => s.title)).toEqual(['Ran tests', 'Checked git status'])
+    } finally {
+      if (saved === undefined) delete process.env.SHEPHERDR_AGY_HOME
+      else process.env.SHEPHERDR_AGY_HOME = saved
     }
   })
 
