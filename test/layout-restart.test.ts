@@ -120,10 +120,19 @@ describe.skipIf(!browser)('restarting an agent', () => {
       expect(await dialog.getByText('herdr-projects', { exact: true }).count()).toBe(1)
       expect(await dialog.locator('[data-restart-all-row]', { hasText: 'gtm' }).textContent()).toContain('working, its turn stops first')
       expect(await dialog.locator('[data-restart-all-row]', { hasText: 'herdr-projects' }).textContent()).not.toContain('working')
+      // the screen watches gtm (the place on screen) and not herdr-projects: its row can't be marked, so the
+      // server's own rule is said
+      expect(await dialog.getByText('A turn at work is stopped first: their work in progress stops.').count()).toBe(1)
       // asking has restarted nothing: no card yet
       expect(world.chats['p:vm-str:gtm'].messages.at(-1)?.card).toBeUndefined()
       expect(world.chats['p:vm-str:herdr-projects'].messages.filter((m) => m.card?.restart).length).toBe(0)
       await dialog.getByRole('button', { name: 'Restart', exact: true }).click()
+      // the real run's answer, in the dialog, before it closes
+      const answer = page.locator('[data-restart-all-answer]')
+      await answer.waitFor()
+      expect(await answer.textContent()).toBe('Restarted 2')
+      expect(await answer.getAttribute('class')).toBe(null)
+      await page.getByRole('button', { name: 'OK', exact: true }).click()
       await dialog.waitFor({ state: 'detached' })
       expect(world.chats['p:vm-str:gtm'].messages.at(-1)?.card).toMatchObject({ restart: true, text: 'Restarted on Codex' })
       expect(world.chats['p:vm-str:herdr-projects'].messages.at(-1)?.card).toMatchObject({ restart: true, text: 'Restarted on pi' })
@@ -195,13 +204,11 @@ describe.skipIf(!browser)('restarting an agent', () => {
       await page.getByRole('menuitem', { name: 'Restart 2 coordinators', exact: true }).click()
       const dialog = page.getByRole('alertdialog', { name: 'Restart 2 coordinators?' })
       await dialog.waitFor()
-      // their Settings moved back while the question is open: it says so, and nothing is restarted
+      // their Settings moved back while the question is open: nothing to confirm, so it closes, and nothing is restarted
       noSettings()
-      await page.getByRole('alertdialog', { name: 'Nothing to restart' }).waitFor()
+      await dialog.waitFor({ state: 'detached' })
       expect(sent).toEqual([])
-      await page.getByRole('button', { name: 'OK', exact: true }).click()
-      await page.getByRole('alertdialog').waitFor({ state: 'detached' })
-      await settled(page)
+      expect(await page.getByRole('alertdialog').count()).toBe(0)
       // a run that found nothing to touch answers with the same words, in the same place: the screen still saw two
       // (a real one only happens when the Settings move back between the tap and the Restart, on the server)
       newSettings()

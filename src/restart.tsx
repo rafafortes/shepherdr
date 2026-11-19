@@ -3,7 +3,7 @@ import clsx from 'clsx'
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { Place, RestartCli, RestartInfo, RestartRoom } from '@shared/types.ts'
 import { NO_PICKS, orderByPicks, type Picks } from '@shared/picks.ts'
-import { act, setUI, taskOf, useSnap, useStore } from './kernel.ts'
+import { act, setUI, taskOf, useSnap, useStore, useUI, visibleChats } from './kernel.ts'
 import { Dialog } from './rowmenu.tsx'
 import { Pick, shown, Switch, TextValue, type Note } from './settings-parts.tsx'
 import { EffortIcon, ic, MenuItem, ModelIcon, ModeIcon, PlayIcon, Primary, RestartIcon, UpDownIcon } from './ui.tsx'
@@ -334,9 +334,9 @@ function setAskingAll(open: boolean) {
  * how many it will touch, and a question before it, as the single restart and the tasks' Stop, Archive and Delete ask
  * for their first: the server stops a turn at work before it restarts, so a mis-tap on the phone must not interrupt.
  * The answer (what restarted, what failed) comes in the dialog, not the row: the menu closes with the tap that opens
- * the question. Nothing to do (no coordinator's Settings moved) and the item is not there at all; a Settings change
- * that goes away while the question is open is answered there, as nothing. It touches no task's agent and no other
- * machine's place, which the server says in what it answers.
+ * the question. Nothing to do (no coordinator's Settings moved) and the item is not there at all; its going away
+ * while the question is open closes it. It touches no task's agent and no other machine's place, which the server
+ * says in what it answers.
  */
 export function RestartAllItem({ onPick }: { onPick?: () => void }) {
   const snap = useSnap()!
@@ -372,17 +372,23 @@ export function ConfirmRestartAll() {
 
 function RestartAllBox() {
   const snap = useSnap()!
+  const ui = useUI()
   const chats = useStore((s) => s.chats)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // what the run answered, in the row's own words: the dialog says it, as the row did before it asked first
   const [answer, setAnswer] = useState<{ text: string; failed: boolean } | null>(null)
-  // the same places the item's label counts; the chat each runs on, while this is open: the screen may have watched
-  // it (its own place) and know a turn is at work, where it has not (the others') the row says nothing of work
-  const affected = snap.places.filter((p) => p.machine === snap.host && p.restart)
+  // the places the question shows: live until Restart is pressed, then fixed — the run's snapshots shrink the live
+  // list one restart at a time, and the dialog asks what it asked and says what the run said
+  const [frozen, setFrozen] = useState<Place[] | null>(null)
+  const affected = frozen ?? snap.places.filter((p) => p.machine === snap.host && p.restart)
   const count = affected.length
+  // a chat the screen watches is live, with its working state as the server pushes it; one it watched before and
+  // left is stale, and one it never saw is missing: neither can be marked, so the server's own rule is said for them
+  const watched = new Set(visibleChats(ui, snap))
   const cancel = () => setAskingAll(false)
   const go = async () => {
+    setFrozen(affected)
     setBusy(true)
     setError(null)
     const r = (await act({ type: 'restart-all' }).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string; restarted?: number; failed?: number; failures?: string[] }
@@ -391,6 +397,10 @@ function RestartAllBox() {
     if (!r.restarted && !r.failed) setAnswer({ text: 'Nothing new in their Settings', failed: false })
     else setAnswer({ text: `Restarted ${r.restarted ?? 0}${r.failed ? `, ${r.failed} failed: ${(r.failures ?? []).join(', ')}` : ''}`, failed: !!r.failed })
   }
+  // the world emptying while the question is open (its Settings moved back) closes it: there is nothing to ask
+  useEffect(() => {
+    if (!count && !frozen) setAskingAll(false)
+  }, [count, frozen])
   if (answer)
     return (
       <Dialog title="Restart done" safe cancel="OK" onCancel={cancel} buttons={null}>
@@ -399,14 +409,7 @@ function RestartAllBox() {
         </p>
       </Dialog>
     )
-  if (!count) {
-    // its Settings moved back while this was open: nothing to confirm, and nothing to run
-    return (
-      <Dialog title="Nothing to restart" safe cancel="OK" onCancel={cancel} buttons={null}>
-        <p>Nothing new in their Settings.</p>
-      </Dialog>
-    )
-  }
+  if (!count) return null
   return (
     <Dialog
       title={`Restart ${count} coordinator${count === 1 ? '' : 's'}?`}
@@ -420,7 +423,7 @@ function RestartAllBox() {
     >
       <ul className="flex flex-col gap-1">
         {affected.map((p) => {
-          const atWork = !!chats[p.chat]?.working
+          const atWork = watched.has(p.chat) && !!chats[p.chat]?.working
           return (
             <li key={p.id} data-restart-all-row className="flex items-center gap-2">
               <span>{p.name}</span>
@@ -429,9 +432,7 @@ function RestartAllBox() {
           )
         })}
       </ul>
-      {/* the screen only knows a turn is at work for the chats it watches (its own place); where one is not watched
-          its row can't be marked, so say the server's own rule: a turn at work is stopped first */}
-      {affected.some((p) => !chats[p.chat]) ? (
+      {affected.some((p) => !watched.has(p.chat)) ? (
         <p className="mt-1.5 text-fg3">A turn at work is stopped first: their work in progress stops.</p>
       ) : null}
       <p className="mt-1.5">Their chats and worktrees stay, and each comes back on what its Settings say now.</p>
