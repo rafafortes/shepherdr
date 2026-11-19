@@ -201,8 +201,8 @@ function AddDialog() {
   }
 
   const status = (() => {
-    if (error) return <span className="text-need">{error}</span>
-    if (t?.error) return <span className="text-need">{t.error}</span>
+    if (error) return <span className="text-need-fg">{error}</span>
+    if (t?.error) return <span className="text-need-fg">{t.error}</span>
     if (!named || path === '~/') return 'Pick a folder in your home, or type a name for a new one.'
     if (named === '~') return 'Your home folder is the home space already: pick a folder in it.'
     if (!info) return ' '

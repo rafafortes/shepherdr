@@ -686,7 +686,7 @@ function Notes({
   const touch = matchMedia('(pointer: coarse)').matches
   return (
     <div className="flex max-h-[45%] shrink-0 flex-col gap-2 overflow-y-auto border-t border-line p-3">
-      {sent ? <Small className="text-ready">{sent}</Small> : null}
+      {sent ? <Small className="text-ready-fg">{sent}</Small> : null}
       {notes.length ? (
         <ol className="flex flex-col gap-1.5" role="list">
           {notes.map((n, i) => (
@@ -706,7 +706,7 @@ function Notes({
       {draft ? (
         <div className="flex flex-col gap-2 rounded-box bg-bubble p-2.5">
           {draft.error ? (
-            <Small className="text-need">{draft.error}</Small>
+            <Small className="text-need-fg">{draft.error}</Small>
           ) : !draft.pick ? (
             <Small>Looking at what you tapped…</Small>
           ) : (
