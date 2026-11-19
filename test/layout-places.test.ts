@@ -978,7 +978,7 @@ describe.skipIf(!browser)('the order of places', () => {
       expect(world.order.all).toEqual(['m:mac', 'm:vm-str', 'm:nas'])
       expect(await order(page)).toEqual(['mac', 'home', 'lilla-varlden', 'vm-str', 'home', 'gtm', 'herdr-projects', 'nas'])
       expect(await page.locator('#places li[data-heading="m:nas"] button[aria-expanded]').first().getAttribute('aria-expanded')).toBe('false')
-      // the top stays the top
+      // the bottom stays the bottom
       await page.keyboard.press('Alt+Shift+ArrowDown')
       await page.waitForTimeout(200)
       expect(await headings()).toEqual(['m:mac', 'm:vm-str', 'm:nas'])
