@@ -265,8 +265,10 @@ train, above, are this section's other controls, and the Reviewer rows name the 
 On Autopilot a coordinator works on its own within what you asked for and asks you when unsure.
 
 - **Heartbeat** (`heartbeat.when`, every 30 minutes): when its coordinator goes through its checklist. **Wakes at once
-  on** (`heartbeat.on`, all news) names the news that wakes it immediately; the rest waits for the heartbeat. A limit
-  such as 5 new tasks a day is words in the checklist. Heartbeats use the time zone set in Settings → Time zone.
+  on** (`heartbeat.on`, all news) names the news that wakes it immediately; the rest waits for the heartbeat. A space's
+  heartbeat is skipped while its state gives it nothing to act on (no news waiting, no task queued, held or needing
+  you, a quiet machine): one quiet line in its chat instead of a turn. A limit such as 5 new tasks a day is words in
+  the checklist. Heartbeats use the time zone set in Settings → Time zone.
 - **Checklist**: a space's own HEARTBEAT.md, a file rather than a value inherited from a level above it;
   [Autopilot](autopilot.md) says what goes in it and how the coordinator reads it.
 

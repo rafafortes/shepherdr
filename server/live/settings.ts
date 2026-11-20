@@ -584,7 +584,7 @@ export const CATALOG: Section[] = [
     // row of its own at each level, sections). Any limit the human wants is words in the checklist
     name: AUTOPILOT,
     about:
-      'On Autopilot, a coordinator works on its own within what you asked for, and asks you when unsure. Each heartbeat, it goes through its checklist; the news you pick wakes it at once. Want a limit, such as 5 new tasks a day? Write it in the checklist.',
+      'On Autopilot, a coordinator works on its own within what you asked for, and asks you when unsure. Each heartbeat, it goes through its checklist; a space whose state gives it nothing to act on is skipped, one quiet line instead of a turn (add a line of its own saying (wake me anyway) to be woken every time). The news you pick wakes it at once. Want a limit, such as 5 new tasks a day? Write it in the checklist.',
     rows: [
       { label: 'Heartbeat', key: 'heartbeat.when', value: HEARTBEAT_RULE },
       { label: 'Wakes at once on', key: 'heartbeat.on', value: 'all news' },
@@ -1554,7 +1554,7 @@ function fromEvery(every: string, quiet: string): string | undefined {
 /** what Autopilot does on its own, and never does, as the human reads it under its Settings; coordinators read the
  *  same rules in their skill (skill/shepherdr-coordinator) */
 const AUTOPILOT_DOES = [
-  'Goes through its HEARTBEAT.md each heartbeat while idle, and says nothing when nothing needs it',
+  'Goes through its HEARTBEAT.md each heartbeat while idle (a space with nothing to act on is skipped), and says nothing when nothing needs it',
   "Answers task agents' questions it can answer from the brief or the space",
   'Has conflicts rebased and failed checks fixed',
   'Starts queued tasks and closes tasks whose work is over',

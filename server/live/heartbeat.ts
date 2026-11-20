@@ -2,14 +2,20 @@
 // coordinator on Autopilot gets one fixed prompt in its own session: go through its HEARTBEAT.md, its standing
 // checklist in plain words, and act on what needs it, or else reply with only <no-reply> (the chat shows none of it, and
 // a quiet line says it woke and had nothing to report, so a quiet night is not taken for a broken heartbeat). Only
-// while it is idle: a busy one gets it once its turn is over. None while its HEARTBEAT.md is empty and no news waits.
+// while it is idle: a busy one gets it once its turn is over. None while its HEARTBEAT.md is empty and no news waits,
+// and none while a space's own state gives it nothing to act on either (source.ts's precheck: no news waiting, no task
+// queued, held or needing the human, a quiet machine): that wake is skipped whole, no coordinator turn spent, and one
+// quiet line says so. A checklist with "(wake me anyway)" in it is woken every time, a watchdog of its own.
 // News its trigger's event rules name (all news by default) wakes the coordinator at once; other news waits here and
 // comes with the next heartbeat. Run now (Settings → Autopilot, the chat's pill, shepherdr heartbeat run) asks for one
-// wake at once, one per tap.
+// wake at once, one per tap, and never skips.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { HOME, readJson, writeJson } from '../store.ts'
 import { nextRun } from './trigger.ts'
+
+/** the words a checklist carries to be woken at every heartbeat, whatever the precheck finds: a watchdog of its own */
+export const WAKE_ANYWAY = '(wake me anyway)'
 
 /** a place's HEARTBEAT.md, in Shepherdr's own folder (a worker's for another machine's places, on the main machine):
  *  never a path for the coordinator, whose machine may not have it. It reads the checklist in its heartbeat and with
@@ -36,6 +42,14 @@ export function firstChecklist(role: 'space' | 'home' | 'main') {
     '# Heartbeat',
     '',
     'What to check each heartbeat. Edit it in Settings → Autopilot, or ask your coordinator to.',
+    // a space's own is skipped while none of its items has anything to act on: said here, since the human who wants a
+    // watchdog every time has to know how to keep one
+    ...(role === 'space'
+      ? [
+          '',
+          `A heartbeat is skipped while this space's state gives it nothing to act on (no news waiting, no task queued, held or needing you, a quiet machine): one quiet line in the chat instead of a turn. An item of your own that the state cannot show, such as a live link to try, runs only in a heartbeat that does happen: to be woken every time whatever the state, add a line of its own that says ${WAKE_ANYWAY}`,
+        ]
+      : []),
     '',
     ...items.map((x) => `- ${x}`),
     '',
@@ -133,7 +147,31 @@ export class Heartbeats {
     this.save()
     return list || held.length ? heartbeatPrompt(list, held) : undefined
   }
+
+  /** a heartbeat that came due with nothing to act on (source.ts's precheck): it counts as given, so the next is its
+   *  time rule's next, and no prompt is written */
+  pass(place: string, now = Date.now()) {
+    const b = this.of(place)
+    b.last = now
+    delete b.held
+    this.save()
+  }
 }
+
+/** does this HEARTBEAT.md ask for every heartbeat (WAKE_ANYWAY), however little there is to act on. Its own line, a
+ *  bullet or not: a checklist that only tells the human about it ("to be woken every time, add …") is not asking */
+export const wakesAnyway = (list: string) =>
+  list.split('\n').some(
+    (line) =>
+      line
+        .trim()
+        .replace(/^[-*]\s+/, '')
+        .toLowerCase() === WAKE_ANYWAY,
+  )
+
+/** the one quiet line a skipped heartbeat leaves in the chat: its scheduled run came, found nothing to act on and spent
+ *  no turn. A card's shape and a wake's own (pilotLine): never a card, never an alert */
+export const SKIPPED_LINE = 'Autopilot skipped · on schedule · nothing to do'
 
 /** the fixed heartbeat prompt, with the checklist itself in it: the coordinator may run on another machine than the
  *  file */

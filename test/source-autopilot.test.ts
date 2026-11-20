@@ -410,6 +410,8 @@ describe("Autopilot's heartbeat", () => {
       // once given, the next is the rule's next run
       src.heartbeat(t0 + 40 * min)
       expect(beats()).toHaveLength(1)
+      // with nothing to act on a due heartbeat is skipped (its own tests below): news waiting gives it one
+      src.heartbeats.hold(place, 'BE-5 was added')
       src.heartbeat(t0 + 62 * min)
       expect(beats()).toHaveLength(2)
       // an empty HEARTBEAT.md, edited in Settings: no heartbeat
@@ -512,6 +514,274 @@ describe("Autopilot's heartbeat", () => {
       src.agents.send = send
       src.agents.status = status
       src.agents.reachable = reachable
+    }
+  })
+})
+
+// RES-05: a scheduled heartbeat over a space with nothing to act on spends no coordinator turn, one quiet line instead
+describe('a heartbeat with nothing to act on', () => {
+  const min = 60_000
+
+  /**
+   * A place of its own on Autopilot, its coordinator idle and due: what its heartbeats sent, the quiet lines they left,
+   * and done() to give the shared source back as it was. A look at the clock an hour later than when Autopilot went on
+   * is due; each look after it is the rule's next, so one place never fires twice by accident.
+   */
+  async function world(name: string) {
+    const dir = tmp(`skip-${name}`)
+    run(REPO, dir)
+    const p = await src.places.add(dir, name)
+    const place = placeId.space(p.name)
+    const sent: { k: string; text: string }[] = []
+    const send = src.agents.send
+    const status = src.agents.status
+    const reachable = src.agents.reachable
+    src.agents.send = (async (k: string, text: string) => {
+      sent.push({ k, text })
+      return { waiting: false }
+    }) as typeof send
+    src.agents.status = ((k: string) => (k === place ? 'idle' : 'gone')) as typeof status
+    src.agents.reachable = true
+    // no sample of this machine: a real one (a busy host, a full disk) would decide these tests, not the place
+    const sample = src.health.last
+    src.health.last = undefined
+    src.places.setMode(place, 'autopilot')
+    const due = (at = Date.now()) => src.heartbeats.switched(place, true, at - 60 * min)
+    due()
+    return {
+      p,
+      place,
+      due,
+      beats: () => sent.filter((x) => x.k === place && x.text.includes('<heartbeat')),
+      quiet: () => (src.chats.chat(place)?.messages ?? []).filter((m) => m.pilot),
+      done: () => {
+        src.places.setMode(place, 'regular')
+        src.heartbeats.switched(place, false)
+        src.agents.send = send
+        src.agents.status = status
+        src.agents.reachable = reachable
+        src.health.last = sample
+      },
+    }
+  }
+
+  /** a task of the place, waiting in it with no agent there */
+  const task = (w: { p: { name: string } }) => src.engine.add({ project: w.p.name, title: 'Nothing yet', by: 'test' })
+
+  test('a quiet space is not woken: one quiet line, the rule counted as given, and the command says it would skip', async () => {
+    const w = await world('quiet')
+    try {
+      src.heartbeat(Date.now())
+      expect(w.beats()).toEqual([])
+      expect(w.quiet().map((m) => m.pilot)).toEqual(['Autopilot skipped · on schedule · nothing to do'])
+      // counted as given: the next is the rule's next, so the tick a minute later spends nothing again
+      src.heartbeat(Date.now() + min)
+      expect(w.beats()).toEqual([])
+      expect(w.quiet()).toHaveLength(1)
+      // and it buzzes nothing: a quiet line is no new message, so no alert and no unread mark
+      expect(src.chats.newest(w.place)).toBeUndefined()
+      // the command shows the precheck before it comes due
+      const out = (await src.cli(['heartbeat', w.p.name], {})).out
+      expect(out).toContain('Next wake would be skipped: nothing to do.')
+      // Run now is the human's own word, and never skips
+      expect(src.heartbeats.held(w.place)).toEqual([])
+      expect(await src.act({ type: 'heartbeat', place: w.place, op: 'run' })).toEqual({ ok: true, queued: false })
+      expect(w.beats()).toHaveLength(1)
+      // the cost this removes, counted: a day of the time rule on a quiet space is 48 heartbeats, and not one of them
+      // a coordinator turn (before this, each was a model call and a CLI start: 7 spaces meant up to 336 turns a day)
+      const at = Date.now()
+      const lines = w.quiet().length
+      for (let i = 1; i <= 48; i++) src.heartbeat(at + i * 30 * min)
+      expect(w.beats()).toHaveLength(1)
+      expect(w.quiet()).toHaveLength(lines + 48)
+    } finally {
+      w.done()
+    }
+  })
+
+  test('each thing there is to act on wakes it: news, a task waiting or held, one needing you, a failed start, a Ready task left unmerged, a machine past a limit', async () => {
+    // news its event rules let wait
+    const news = await world('news')
+    try {
+      src.heartbeats.hold(news.place, 'WEB-1 is ready to merge')
+      src.heartbeat(Date.now())
+      expect(news.beats()).toHaveLength(1)
+      expect(news.beats()[0].text).toContain('WEB-1 is ready to merge')
+      expect(news.quiet()).toEqual([])
+    } finally {
+      news.done()
+    }
+    // a task of its space waiting behind another, and one held for room on the machine
+    for (const [name, held] of [
+      ['queued', false],
+      ['held', true],
+    ] as const) {
+      const w = await world(name)
+      try {
+        const first = task(w)
+        const t = task(w)
+        if (held) t.held = { why: 'machine', since: Date.now() }
+        else t.after = [first.id]
+        expect(src.engine.statusOf(t)).toBe('queued')
+        src.heartbeat(Date.now())
+        expect(w.beats()).toHaveLength(1)
+        expect(w.quiet()).toEqual([])
+      } finally {
+        w.done()
+      }
+    }
+    // a task needing the human, and one whose start went wrong (which is the same status)
+    for (const [name, failed] of [
+      ['need', false],
+      ['failed', true],
+    ] as const) {
+      const w = await world(name)
+      try {
+        const t = task(w)
+        if (failed) src.engine.startFailed(`${t.id}/Agent`, 'Claude Code couldn’t start: no such model')
+        else t.trouble = 'it asked something and its turn ended'
+        expect(src.engine.statusOf(t)).toBe('need')
+        src.heartbeat(Date.now())
+        expect(w.beats()).toHaveLength(1)
+      } finally {
+        w.done()
+      }
+    }
+    // the coordinator's own start that went wrong: its card is open in its chat
+    const own = await world('own')
+    try {
+      src.engine.startFailed(own.place, 'Claude Code couldn’t start: boom')
+      src.heartbeat(Date.now())
+      expect(own.beats()).toHaveLength(1)
+    } finally {
+      own.done()
+    }
+    // a task that merges itself and was left Ready: not before its patience is over, then yes
+    const ready = await world('ready')
+    try {
+      // its agent did its work and reported done, and never merged itself (no herdr answers in the test, so its start
+      // left the record going wrong: it is put as that agent left it)
+      const t = await worked(ready.p)
+      await until(() => !!t.trouble)
+      t.trouble = undefined
+      t.reported = true
+      t.reportedAt = Date.now() - min
+      expect(src.engine.statusOf(t)).toBe('ready')
+      src.heartbeat(Date.now())
+      expect(ready.beats()).toEqual([])
+      expect(ready.quiet()).toHaveLength(1)
+      t.reportedAt = Date.now() - 11 * min
+      ready.due()
+      src.heartbeat(Date.now())
+      expect(ready.beats()).toHaveLength(1)
+      // the same task says nothing for the waits it is not the coordinator's to see: asked for your yes before it
+      // merges, archived, or another space's
+      const quietAgain = () => {
+        ready.due()
+        src.heartbeat(Date.now())
+        expect(ready.beats()).toHaveLength(1)
+      }
+      t.set = { 'brief.merge': 'ask me first' }
+      quietAgain()
+      t.set = undefined
+      t.archived = Date.now()
+      quietAgain()
+      t.archived = undefined
+      t.project = placeId.space('elsewhere')
+      quietAgain()
+      t.project = ready.place
+      // and it wakes it again once nothing holds it back
+      ready.due()
+      src.heartbeat(Date.now())
+      expect(ready.beats()).toHaveLength(2)
+    } finally {
+      ready.done()
+    }
+    // this machine past one of its alert limits
+    const busy = await world('busy')
+    try {
+      src.health.last = { at: Date.now(), cores: 4, load: 40, memTotal: 8 * 2 ** 30, memUsed: 2 ** 30, disks: [], gpus: [] }
+      src.heartbeat(Date.now())
+      expect(busy.beats()).toHaveLength(1)
+    } finally {
+      busy.done()
+    }
+  })
+
+  test('an empty HEARTBEAT.md is a stopped heartbeat: no wake, no line, and the command says only that', async () => {
+    const w = await world('stopped')
+    try {
+      expect(await src.act({ type: 'setting', key: 'heartbeat.md', value: '', place: w.place })).toEqual({ ok: true })
+      src.heartbeat(Date.now())
+      expect(w.beats()).toEqual([])
+      expect(w.quiet()).toEqual([])
+      const out = (await src.cli(['heartbeat', w.p.name], {})).out
+      expect(out).not.toContain('Next wake would be skipped')
+      expect(out).toContain('HEARTBEAT.md is empty: no heartbeat until it has a checklist.')
+    } finally {
+      w.done()
+    }
+  })
+
+  test("a home space is woken every time: the precheck is a space's own, its machine watch is not", async () => {
+    const home = placeId.home()
+    const sent: { k: string; text: string }[] = []
+    const send = src.agents.send
+    const status = src.agents.status
+    const reachable = src.agents.reachable
+    const modes = { ...src.places.modes }
+    const last = src.heartbeats.last(home)
+    const sample = src.health.last
+    src.agents.send = (async (k: string, text: string) => {
+      sent.push({ k, text })
+      return { waiting: false }
+    }) as typeof send
+    src.agents.status = ((k: string) => (k === home ? 'idle' : 'gone')) as typeof status
+    src.agents.reachable = true
+    src.health.last = undefined
+    // messages earlier tests left queued for it (nothing here takes them): none may hold its heartbeat back
+    const outbox = src.agents as unknown as { outbox: { key: string }[] }
+    outbox.outbox = outbox.outbox.filter((o) => o.key !== home)
+    try {
+      src.places.setMode(home, 'autopilot')
+      src.heartbeats.switched(home, true, Date.now() - 60 * min)
+      src.heartbeat(Date.now())
+      expect(sent.filter((x) => x.k === home && x.text.includes('<heartbeat'))).toHaveLength(1)
+      expect((src.chats.chat(home)?.messages ?? []).filter((m) => m.pilot)).toEqual([])
+      // the command never says it would be skipped: nothing of the precheck applies to it
+      expect((await src.cli(['heartbeat'], { chat: home })).out).not.toContain('Next wake would be skipped')
+    } finally {
+      src.chats.post(home, { id: 'test-home-done', text: undefined })
+      src.places.modes = modes
+      if (last === undefined) src.heartbeats.switched(home, false)
+      else src.heartbeats.switched(home, true, last)
+      src.agents.send = send
+      src.agents.status = status
+      src.agents.reachable = reachable
+      src.health.last = sample
+    }
+  })
+
+  test('“(wake me anyway)” in its HEARTBEAT.md restores the unconditional wake', async () => {
+    const w = await world('anyway')
+    try {
+      // a checklist that only tells about it is not asking for it
+      expect(await src.act({ type: 'setting', key: 'heartbeat.md', value: '- Check the machines. To be woken every time, add (wake me anyway)', place: w.place })).toEqual({ ok: true })
+      src.heartbeat(Date.now())
+      expect(w.beats()).toEqual([])
+      expect(w.quiet()).toHaveLength(1)
+      // its own line, a bullet or not, is
+      const lines = w.quiet().length
+      expect(await src.act({ type: 'setting', key: 'heartbeat.md', value: '- Check the machines\n\n    (wake me anyway)\n', place: w.place })).toEqual({ ok: true })
+      w.due()
+      const out = (await src.cli(['heartbeat', w.p.name], {})).out
+      expect(out).not.toContain('Next wake would be skipped')
+      src.heartbeat(Date.now())
+      expect(w.beats()).toHaveLength(1)
+      expect(w.beats()[0].text).toContain('(wake me anyway)')
+      expect(w.quiet()).toHaveLength(lines)
+    } finally {
+      w.done()
     }
   })
 })
