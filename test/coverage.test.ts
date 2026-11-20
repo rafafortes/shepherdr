@@ -297,7 +297,7 @@ describe('the command', () => {
     // the screen's own files, and a file the screen is built from that only a browser test runs, are named as such
     expect(readFileSync(join(w.dir, 'report.txt'), 'utf8')).toContain('src/c.tsx')
     expect(readFileSync(join(w.dir, 'report.txt'), 'utf8')).toContain('plugins/x/srv.ts')
-    expect(readFileSync(join(w.dir, 'report.txt'), 'utf8').match(/^(src\/c\.tsx|plugins\/x\/srv\.ts)\s+-   not compared this run \(no browser could start\)$/gm)).toHaveLength(2)
+    expect(readFileSync(join(w.dir, 'report.txt'), 'utf8').match(/^(src\/c\.tsx|plugins\/x\/srv\.ts)\s+-\s+not compared this run \(no browser could start\)$/gm)).toHaveLength(2)
     // a run of half the world records no baseline: the screen would be held against lines from another run
     expect(w.main(w.dir, '--screen-absent', '--record')).toBe(0)
     expect(w.said.at(-1)).toContain('No coverage baseline recorded: this run did not measure the screen (no browser could start)')
