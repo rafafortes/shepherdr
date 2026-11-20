@@ -33,8 +33,17 @@ import { capture, end as endProcesses, endDeps, readTree, systemSource, type Sou
 /** a log's name (its session id), wherever it lies: one named both by its mirrored path and by its own is one log */
 const logName = (f: string) => f.slice(f.lastIndexOf('/') + 1)
 
+/** one path per session is enough for a chat to resume, and a record that restarts over and over must not grow
+ *  agents.json for ever. The last sessions are the ones the agent resumes from and a chat reads first. A chat that has
+ *  been through more than this many sessions loses the transcript of the oldest ones; the bound is high enough that an
+ *  ordinary task keeps all its history, and it is what keeps a long-lived record from growing the store without limit.
+ *  The usage feed reads these paths too, so a trimmed session stops feeding new usage; what was counted stays. Applied
+ *  on load (uniqueLogs) and as sessions are added (addLog). */
+export const MAX_LOGS = 32
+
 /** the logs with each one once, where it first came, by the path it was named by last (a session carried to another
- *  folder goes on there): the same log twice is read twice, and a big one holds up the server */
+ *  folder goes on there): the same log twice is read twice, and a big one holds up the server. Only the last MAX_LOGS
+ *  sessions are kept. */
 export function uniqueLogs(logs: string[]): string[] {
   const at = new Map<string, number>()
   const out: string[] = []
@@ -43,7 +52,7 @@ export function uniqueLogs(logs: string[]): string[] {
     if (i === undefined) at.set(logName(f), out.length), out.push(f)
     else out[i] = f
   }
-  return out
+  return out.slice(-MAX_LOGS)
 }
 
 /** a log's time, or nothing when it vanished between the look and the stat (files do get pruned and mirrors rewritten) */
@@ -60,6 +69,7 @@ function addLog(r: AgentRecord, f: string): boolean {
   const i = r.logs.findIndex((x) => logName(x) === logName(f))
   if (i < 0) {
     r.logs.push(f)
+    if (r.logs.length > MAX_LOGS) r.logs.splice(0, r.logs.length - MAX_LOGS)
     return true
   }
   // a session is first named by a path guessed before its file existed (a symlink's remembered name, or the real
@@ -1815,8 +1825,8 @@ export class Agents extends Emitter<Events> {
     await this.refresh()
   }
 
-  /** a deleted task's agent, forgotten: its record (so its chat no longer reads its CLI's log) and what waited for it */
-  forget(key: string) {
+  /** everything but the write: a record and what waited for it, dropped in memory */
+  private drop(key: string) {
     this.secretAccess.revoke(key)
     this.routes.delete(key)
     const r = this.records[key]
@@ -1825,9 +1835,32 @@ export class Agents extends Emitter<Events> {
     this.outbox = this.outbox.filter((o) => o.key !== key)
     this.failures = this.failures.filter((f) => f.key !== key)
     this.stranded.delete(key)
+  }
+
+  /** a deleted task's agent, forgotten: its record (so its chat no longer reads its CLI's log) and what waited for it */
+  forget(key: string) {
+    this.drop(key)
     this.save()
     // a forget is durable when it returns: a restart must not bring the deleted chat's agent back
     this.flushRecords()
+  }
+
+  /** drop records no screen, search or command can reach (PERFS-12), whatever the caller says is not live: today the
+   *  engine only names task chats of deleted tasks, and keeps every coordinator. Kept records (archived tasks' chats
+   *  above all) keep their logs, so a chat the operator can still open reads its history. One batched write for the
+   *  whole pass, whatever the number of orphans. */
+  prune(keep: (key: string, record: AgentRecord) => boolean): number {
+    let dropped = 0
+    for (const [key, r] of Object.entries(this.records)) {
+      if (keep(key, r)) continue
+      this.drop(key)
+      dropped++
+    }
+    if (dropped) {
+      this.save()
+      this.flushRecords()
+    }
+    return dropped
   }
 
   /** a turn under way ended cleanly before its run ends (a restart): interrupted, then a few seconds for the CLI to

@@ -122,7 +122,20 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
       delete records[key]
       forgot.push(key)
     },
+    // the real registry's PERFS-12 pass: drop records no screen can reach, in one batch
+    prune: (keep: (key: string) => boolean) => {
+      let dropped = 0
+      for (const key of Object.keys(records)) {
+        if (keep(key)) continue
+        delete records[key]
+        forgot.push(key)
+        dropped++
+      }
+      pruned.push(dropped)
+      return dropped
+    },
   }
+  const pruned: number[] = []
   const forgot: string[] = []
   /** agents whose turn was interrupted before a restart */
   const stopped: string[] = []
@@ -167,7 +180,7 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
     outbox.splice(0, outbox.length, ...outbox.filter((k) => k !== key))
     engine.sent(key)
   }
-  return { routed, agents, engine, places, settings, started, sent, posted, status, records, news, newsTo, cards, agentIs, brief, herdr, chat, bg, forgot, said, stopped }
+  return { routed, agents, engine, places, settings, started, sent, posted, status, records, news, newsTo, cards, agentIs, brief, herdr, chat, bg, forgot, pruned, said, stopped }
 }
 
 export const until = async (f: () => boolean, ms = 8000) => {
