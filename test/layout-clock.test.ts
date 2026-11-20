@@ -34,23 +34,23 @@ describe.skipIf(!browser)('relative times tick on the shared clock', () => {
       const row = page.getByRole('button', { name: /HP-202 Voice/ })
       await row.waitFor()
       await row.getByText('12m', { exact: true }).waitFor()
-      // let anything queued while the page opened land before measuring what the clock alone changes
-      await Bun.sleep(100)
+      // the page has read the snapshot that carries the report; anything the observer saw came before it
       const settled = revs.length
       await page.evaluate(() => {
         ;(window as unknown as { shepRenderCount: Record<string, number> }).shepRenderCount = {}
       })
 
-      // four minutes later, still inside the five-minute cadence: the same snapshot reads "8m"
-      await page.clock.fastForward(4 * minute)
-      await row.getByText('8m', { exact: true }).waitFor()
+      // one minute later, still inside the five-minute cadence: the dot's countdown moves 12m -> 11m. No "11m" is
+      // built into the row, so this proves the clock moved the label and not a server string that was already there.
+      await page.clock.fastForward(minute)
+      await row.getByText('11m', { exact: true }).waitFor()
       const renders = await page.evaluate(() => ({ ...(window as unknown as { shepRenderCount: Record<string, number> }).shepRenderCount }))
       expect(renders.app ?? 0).toBe(0)
       expect(revs.length).toBe(settled)
 
-      // past the cadence, the countdown gives way to the line's age: "11m ago", still on the same revision
-      await page.clock.fastForward(4 * minute)
-      await row.getByText(/11m ago/).waitFor()
+      // five minutes more, past the cadence: the countdown gives way to the line's age, "9m ago", on the same revision
+      await page.clock.fastForward(5 * minute)
+      await row.getByText(/9m ago/).waitFor()
       expect(revs.length).toBe(settled)
     } finally {
       observer.close()
