@@ -11,7 +11,7 @@ process.env.SHEPHERDR_HOME = home
 process.env.HERDR_SOCKET_PATH = join(home, 'no-herdr.sock')
 delete process.env.SHEPHERDR_MAIN
 const { LiveSource } = await import('../server/live/source.ts')
-const { HELP, TOPIC, VERBS, VERB_TOPIC, helpTopic, helpVerb } = await import('../server/live/args.ts')
+const { HELP, TOPIC, CLI_VERBS, VERB_TOPIC, helpTopic, helpVerb } = await import('../server/live/args.ts')
 const { helpVerbs } = await import('../scripts/checks/docs.ts')
 
 /** SHA-256 of the bare-help page: the split must not drift its bytes by accident. The docs check ties HELP to the
@@ -39,7 +39,7 @@ describe('shepherdr help, per topic', () => {
     expect(tasks.out).toContain('shepherdr task add')
     expect(tasks.out).not.toContain('shepherdr secret run')
     // every verb the CLI takes has a section, and its --help opens exactly that section
-    for (const verb of VERBS) expect((await cli([verb, '--help'])).out).toBe(TOPIC[VERB_TOPIC[verb]])
+    for (const verb of CLI_VERBS) expect((await cli([verb, '--help'])).out).toBe(TOPIC[VERB_TOPIC[verb]])
   })
 
   test('help <topic> prints one section; an unknown topic lists the topics and the page', async () => {
@@ -59,7 +59,7 @@ describe('shepherdr help, per topic', () => {
   })
 
   test('help <verb> finds its section too, instead of the whole page plus an unknown-topic line', async () => {
-    for (const verb of VERBS) {
+    for (const verb of CLI_VERBS) {
       expect((await cli(['help', verb])).out).toBe(TOPIC[VERB_TOPIC[verb]])
       expect(helpTopic(verb)).toBe(TOPIC[VERB_TOPIC[verb]])
     }
@@ -68,15 +68,15 @@ describe('shepherdr help, per topic', () => {
   })
 
   test('every verb has a topic, and an unknown verb keeps its old refusal', async () => {
-    expect(VERBS).toContain('project') // the old alias
-    expect(VERBS).toContain('done') // ready's old name
-    expect(VERBS).toContain('render') // the gone verb that points at artifacts
+    expect(CLI_VERBS).toContain('project') // the old alias
+    expect(CLI_VERBS).toContain('done') // ready's old name
+    expect(CLI_VERBS).toContain('render') // the gone verb that points at artifacts
     // the verbs helpVerbs reads out of HELP are tied to the dispatch by the docs check; none may miss the map
     for (const verb of helpVerbs().groups) {
-      expect(VERBS as readonly string[]).toContain(verb)
+      expect(CLI_VERBS as readonly string[]).toContain(verb)
       expect(Object.hasOwn(VERB_TOPIC, verb)).toBe(true)
     }
-    for (const verb of VERBS) {
+    for (const verb of CLI_VERBS) {
       const topic = VERB_TOPIC[verb]
       expect(Object.hasOwn(TOPIC, topic)).toBe(true)
       expect(TOPIC[topic].length).toBeGreaterThan(0)

@@ -370,8 +370,10 @@ ${TRIGGERS}  shepherdr automation pause|resume|run|remove "<name>" [--space NAME
 
 export type Topic = keyof typeof TOPIC
 
-/** the CLI verbs, including the two aliases and the two gone verbs that point at their replacement */
-export const VERBS = [
+/** the CLI verbs command() dispatches, including the two aliases and the two gone verbs that point at their replacement.
+ *  The single source of truth: the help page, the docs check and the list of own commands an agent may run without a
+ *  permission card are pinned to it (test/own-verbs.test.ts, readers/own-commands.ts). */
+export const CLI_VERBS = [
   'status',
   'project',
   'space',
@@ -403,7 +405,7 @@ export const VERBS = [
   'secret',
 ] as const
 
-export type Verb = (typeof VERBS)[number]
+export type Verb = (typeof CLI_VERBS)[number]
 
 /** the help section a verb's `--help` opens */
 export const VERB_TOPIC: Record<Verb, Topic> = {
