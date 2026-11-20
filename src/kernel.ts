@@ -733,6 +733,67 @@ let downSince: number | null = null
 let pruned = false
 let tried = 0
 
+/** The frequent pushes a hidden tab keeps back: one chat per key and one terminal (PERFC-07). Snapshots never come
+ *  here: the alerts plugin reads the wait count from them to keep the badge and the window title right while the tab
+ *  is away, and the service worker owns its own path. Keeping only the latest of each bounds the memory a tab that
+ *  stays hidden for days can hold. */
+const deferredChats = new Map<string, Chat>()
+let deferredTerm: Extract<ServerEvent, { type: 'terminal' }> | null = null
+
+/** hold back the latest chat per key and terminal while the document is hidden */
+function defer(msg: ServerEvent) {
+  if (msg.type === 'chat') deferredChats.set(msg.chat.key, msg.chat)
+  else if (msg.type === 'terminal') deferredTerm = msg
+}
+
+/** Apply one server message to the store. The live socket and the wake flush both go through here, so a chat held
+ *  back while hidden runs through the same settle/expire steps, in the same order, as one that arrived on screen.
+ *  Returns whether the store changed and a redraw is owed. */
+function apply(msg: ServerEvent): boolean {
+  // A snapshot whose revision the server did not advance says what we already drew: keep the object so every
+  // picker keeps its identity and React skips the tree. The 30-second heartbeat is one of these (PERFC-01).
+  let changed = true
+  if (msg.type === 'snapshot') {
+    const snap = msg.snapshot
+    const before = state
+    changed = !state.snap || snap.rev === undefined || snap.rev !== state.snap.rev
+    if (changed) state = { ...state, snap }
+    stayOnShown()
+    fromOldPin(snap)
+    // once loaded, the first snapshot with every machine in reach says which chats are gone (one connecting or out
+    // of reach may not list its chats yet: then none is dropped); later ones don't, so a failed one left open a day
+    // keeps its Retry
+    if (!pruned && snap.machines.every((m) => !m.connecting && m.status !== 'off')) {
+      putOutbox(prune(state.outbox, Date.now(), chatIn(snap)))
+      pruned = true
+    }
+    // those steps can change state of their own (a place gone, an outbox pruned) without going through setUI: a
+    // redraw is still owed for them even when the snapshot's revision did not move (PERFC-01)
+    if (state !== before) changed = true
+  } else if (msg.type === 'chat') {
+    state = { ...state, chats: { ...state.chats, [msg.chat.key]: msg.chat } }
+    putOutbox(settle(state.outbox, msg.chat))
+  } else if (msg.type === 'terminal') state = { ...state, terms: { ...state.terms, [msg.chat]: { ansi: msg.ansi, cols: msg.cols, rows: msg.rows } } }
+  else if (msg.type === 'update') state = { ...state, update: msg.update }
+  else if (msg.type === 'build' && BUILD && msg.id && msg.id !== BUILD) reloadSoon()
+  if (msg.type === 'snapshot') watchVisible()
+  return changed
+}
+
+/** back on screen: apply what the hidden tab kept, through the same path as a live push, in one redraw (PERFC-07).
+ *  Clear the buffer before applying so a message that arrives on the now-live socket is not mistaken for a held one. */
+function flushDeferred() {
+  if (!deferredChats.size && !deferredTerm) return
+  const chats = [...deferredChats.values()]
+  const term = deferredTerm
+  deferredChats.clear()
+  deferredTerm = null
+  let changed = false
+  for (const chat of chats) changed = apply({ type: 'chat', chat }) || changed
+  if (term) changed = apply(term) || changed
+  if (changed) emit()
+}
+
 export function connect() {
   if (retrying) clearTimeout(retrying)
   retrying = null
@@ -762,34 +823,13 @@ export function connect() {
       writeCapability = msg.capability
       return
     }
-    // A snapshot whose revision the server did not advance says what we already drew: keep the object so every
-    // picker keeps its identity and React skips the tree. The 30-second heartbeat is one of these (PERFC-01).
-    let changed = true
-    if (msg.type === 'snapshot') {
-      const snap = msg.snapshot
-      const before = state
-      changed = !state.snap || snap.rev === undefined || snap.rev !== state.snap.rev
-      if (changed) state = { ...state, snap }
-      stayOnShown()
-      fromOldPin(snap)
-      // once loaded, the first snapshot with every machine in reach says which chats are gone (one connecting or out
-      // of reach may not list its chats yet: then none is dropped); later ones don't, so a failed one left open a day
-      // keeps its Retry
-      if (!pruned && snap.machines.every((m) => !m.connecting && m.status !== 'off')) {
-        putOutbox(prune(state.outbox, Date.now(), chatIn(snap)))
-        pruned = true
-      }
-      // those steps can change state of their own (a place gone, an outbox pruned) without going through setUI: a
-      // redraw is still owed for them even when the snapshot's revision did not move (PERFC-01)
-      if (state !== before) changed = true
-    } else if (msg.type === 'chat') {
-      state = { ...state, chats: { ...state.chats, [msg.chat.key]: msg.chat } }
-      putOutbox(settle(state.outbox, msg.chat))
-    } else if (msg.type === 'terminal') state = { ...state, terms: { ...state.terms, [msg.chat]: { ansi: msg.ansi, cols: msg.cols, rows: msg.rows } } }
-    else if (msg.type === 'update') state = { ...state, update: msg.update }
-    else if (msg.type === 'build' && BUILD && msg.id && msg.id !== BUILD) reloadSoon()
-    if (msg.type === 'snapshot') watchVisible()
-    if (changed) emit()
+    // A hidden tab keeps applying snapshots (the badge and the service worker need them) but holds back the frequent
+    // chat and terminal pushes: keep only the latest of each and apply them together on wake (PERFC-07).
+    if (document.visibilityState !== 'visible' && (msg.type === 'chat' || msg.type === 'terminal')) {
+      defer(msg)
+      return
+    }
+    if (apply(msg)) emit()
   }
   sock.onclose = () => drop(sock)
 }
@@ -825,6 +865,9 @@ function sayLater(at = Date.now()): ReturnType<typeof setTimeout> {
 /** back on screen (or on the network): an open link must answer a ping, any other is tried again at once */
 function wake() {
   if (document.visibilityState !== 'visible') return
+  // back on screen: what the hidden tab kept goes out through the same path a live push uses, in one redraw, before
+  // the link is checked (PERFC-07). A wake while still hidden returns above and leaves the buffer for the real one.
+  flushDeferred()
   if (ws?.readyState === WebSocket.OPEN) {
     if (pinging) return
     const sock = ws
