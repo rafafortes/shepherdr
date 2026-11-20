@@ -185,13 +185,6 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    * an executable setting. The shepherdr command writes settings directly and needs none.
    */
   readonly writeCapability = randomBytes(32).toString('hex')
-  /** on a worker: the main machine's proof, learned over its live link (SEC-04), so a write the main gated and
-   *  forwarded can be told from a caller's forgery. None on the main machine itself. */
-  mainCapability?: string
-  /** the worker's server calls this when its link to the main names the main's proof */
-  setMainProof(capability: string) {
-    this.mainCapability = capability
-  }
   user = userName()
   settings = new Settings()
   /** the published names the app answers to (app.hosts), read fresh so a change to the setting needs no restart */
@@ -311,7 +304,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   pushWarnings: () => string[] = () => []
   /** the main machine runs every other machine saved in herdr, each from a worker of its own (machines.ts); a worker
    *  is one of those (box.ts) */
-  peers: Machines | null = BOX ? null : new Machines(process.env.NODE_ENV === 'test' ? null : undefined, undefined, () => this.writeCapability)
+  peers: Machines | null = BOX ? null : new Machines(process.env.NODE_ENV === 'test' ? null : undefined)
   /** a worker's copy of its machine's agent logs, as they grow */
   mirror = BOX ? new Mirror(BOX) : null
   /** Settings → Models → profiles (profiles.ts): this machine's named settings, kept in profiles.json */
@@ -3975,9 +3968,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   async act(a: Action): Promise<unknown> {
     // gate before the peer branch: a write aimed at another machine must pass this machine's own wall before it is
     // forwarded, or the main would be an open door to every worker's alert command (SEC-04)
-    const proofGiven = a.type === 'setting' && a.capability === this.writeCapability
-    const fromMain = a.type === 'setting' && !!this.mainCapability && a.capability === this.mainCapability
-    if (a.type === 'setting' && EXECUTABLE_KEYS.has(a.key) && !proofGiven && !fromMain) return { ok: false, error: 'Set it in Settings: a command here can only be changed from this page.' }
+    if (a.type === 'setting' && EXECUTABLE_KEYS.has(a.key) && a.capability !== this.writeCapability)
+      return { ok: false, error: 'Set it in Settings: a command here can only be changed from this page.' }
     const peer = this.peers?.ownerOfAction(a)
     if (peer) return this.peers!.act(peer, a)
     return this.actLocal(a)

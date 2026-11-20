@@ -234,11 +234,9 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
         if (path === '/api/action' && req.method === 'POST') {
           const a = (await req.json()) as Action
           // the screen sends the per-boot proof it got over its socket as a header (the way a secret's credential
-          // travels): only the server copies it into the action, so a caller cannot choose a proof in the JSON body.
-          // The live source checks it when a write names an executable setting (SEC-04); other writes ignore it.
+          // travels); a header wins over one in the JSON body. A peer forward has no header and carries the proof the
+          // main rewired for this worker, which the source checks against its own token (SEC-04). Other writes ignore it.
           const capability = req.headers.get('x-shepherdr-capability') ?? undefined
-          // a peer forward carries the main's proof in the body, so keep it when there is no header to override it;
-          // either way the source checks the value against a proof this machine actually holds (SEC-04)
           const act = a.type === 'setting' && capability ? { ...a, capability } : a
           // one restart of every coordinator can outlast the idle cut-off (each turn that has to stop, each launch
           // that retries): its answer is the count the row shows, so it gets no cut-off, as the command does
@@ -369,7 +367,8 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           live.add(ws)
           send(ws, { type: 'snapshot', snapshot: source.snapshot() })
           // the screen's own proof of executable-setting writes (SEC-04): over this socket, never in the snapshot or
-          // a file. A page that can POST but cannot read this socket cannot change a command the operator runs.
+          // a file. It is a second wall for a caller that can POST but cannot read this socket; one that can do both
+          // gets no more from this than it already has (the lead's honest threat model).
           if (source.writeCapability) send(ws, { type: 'capability', capability: source.writeCapability })
           send(ws, { type: 'build', id: build })
           send(ws, { type: 'update', update })
@@ -386,7 +385,7 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
       message(ws, msg) {
         const d = ws.data
         if (d.kind === 'live') {
-          const m = JSON.parse(String(msg)) as { type: 'ping' } | { type: 'watch'; chats: string[]; term: string | null; visible?: boolean; push?: string | null; link?: boolean; capability?: string }
+          const m = JSON.parse(String(msg)) as { type: 'ping' } | { type: 'watch'; chats: string[]; term: string | null; visible?: boolean; push?: string | null; link?: boolean }
           if (m.type === 'ping') return void send(ws, { type: 'pong' })
           if (m.type !== 'watch') return
           const before = new Set(d.chats)
@@ -395,9 +394,6 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           d.visible = !!m.visible
           d.push = m.push ?? null
           d.link = !!m.link
-          // this socket came from the main machine's Machines: its proof lets a write the main gated and forwarded
-          // through here be told from one a caller forged (SEC-04)
-          if (d.link && m.capability) (source as Source & { setMainProof?(capability: string): void }).setMainProof?.(m.capability)
           if (d.link) for (const news of unsent.splice(0)) send(ws, { type: 'news', news } as unknown as ServerEvent)
           for (const k of m.chats) {
             if (before.has(k)) continue

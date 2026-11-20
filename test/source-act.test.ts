@@ -114,17 +114,14 @@ describe("executable settings need the screen's own proof", () => {
     expect(local.out).not.toContain('Set it in Settings')
   })
 
-  test('a worker accepts a forwarded write only with the main proof it learned over its link', async () => {
-    const mainProof = 'f'.repeat(64)
-    src.setMainProof(mainProof)
-    try {
-      refused(await src.act({ type: 'setting', key: 'alerts.command', value: 'echo forged' }))
-      expect(await src.act({ type: 'setting', key: 'alerts.command', value: 'echo from-main', capability: mainProof })).toEqual({ ok: true })
-      expect(stored().everywhere?.['alerts.command']).toBe('echo from-main')
-      expect(await src.act({ type: 'setting', key: 'alerts.command', value: null, capability: src.writeCapability })).toEqual({ ok: true })
-    } finally {
-      src.setMainProof('')
-    }
+  test('the worker checks the proof its own link gave the main, not one a caller chose', async () => {
+    // the main rewires a gated write to the worker's proof before forwarding; on the worker only its own token works
+    const workerProof = 'e'.repeat(64)
+    refused(await src.act({ type: 'setting', key: 'alerts.command', value: 'echo forged', capability: workerProof }))
+    expect(stored().everywhere?.['alerts.command']).toBeUndefined()
+    expect(await src.act({ type: 'setting', key: 'alerts.command', value: 'echo gated', capability: src.writeCapability })).toEqual({ ok: true })
+    expect(stored().everywhere?.['alerts.command']).toBe('echo gated')
+    expect(await src.act({ type: 'setting', key: 'alerts.command', value: null, capability: src.writeCapability })).toEqual({ ok: true })
   })
 
   test('the screen gets that proof once over its own socket', async () => {

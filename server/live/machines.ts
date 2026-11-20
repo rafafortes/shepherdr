@@ -20,6 +20,7 @@ import { boxInfo, browserVersion, helperVersion, installHelper, lacks, machineSt
 import { mirrorHomes } from './mirror.ts'
 import { q, sshArgs } from './box.ts'
 import { MERGE_DEADLINE } from './engine/engine.ts'
+import { EXECUTABLE_KEYS } from './settings.ts'
 
 export interface MachineRec {
   machine: string
@@ -48,6 +49,9 @@ interface Link {
   down?: number
   /** what you sent while it was out of reach */
   waiting: Action[]
+  /** the worker's own per-boot write proof, read from the live link it opened (SEC-04): the main rewires a gated
+   *  executable-setting write to this before forwarding, so the worker checks its own token, never one a caller chose */
+  capability?: string
   /** its worker: started here, or one from before a restart taken back */
   worker?: Worker
   /** how it is going, in a few words: Ready, Putting the helper there…, Can't reach it: … */
@@ -136,9 +140,6 @@ export class Machines extends Emitter<Events> {
   constructor(
     private saved: (() => Promise<Saved[]>) | null = savedMachines,
     private status: typeof machineStatus = machineStatus,
-    /** this machine's own write proof (SEC-04), sent to each worker over its live link so the worker can tell a write
-     *  the main already gated from one a caller forged. A worker has no Machines of its own and never uses this. */
-    private proof?: () => string,
   ) {
     super()
     // from the time Shepherdr was installed on every machine: the machines that announced themselves
@@ -485,9 +486,8 @@ export class Machines extends Emitter<Events> {
         l.reachable = true
         l.down = undefined
         this.connect(l)
-        // what waited goes in now
-        const queued = l.waiting.splice(0)
-        for (const a of queued) await this.forward(l, a).catch(() => l.waiting.push(a))
+        // what waited goes in now; an executable-setting write waits for this worker's proof over the new link
+        await this.drain(l)
       }
       this.emit('snapshot')
     } catch {
@@ -551,16 +551,26 @@ export class Machines extends Emitter<Events> {
 
   private connect(l: Link) {
     l.ws?.close()
+    // a new link means a new worker boot: its old proof is no longer valid
+    l.capability = undefined
     const url = new URL(`${l.rec.url}/api/ws`)
     url.protocol = url.protocol.replace('http', 'ws')
     const ws = new WebSocket(url)
     l.ws = ws
     ws.onopen = () => {
-      if (this.active(l) && l.ws === ws) ws.send(JSON.stringify({ type: 'watch', ...l.watching, link: true, ...(this.proof ? { capability: this.proof() } : {}) }))
+      if (this.active(l) && l.ws === ws) ws.send(JSON.stringify({ type: 'watch', ...l.watching, link: true }))
     }
     ws.onmessage = (e) => {
       if (!this.active(l) || l.ws !== ws) return
       const m = JSON.parse(String(e.data))
+      // the worker sends its own write proof on this server-to-server socket, which no browser page can open; the main
+      // uses it to rewire a gated write before forwarding (SEC-04)
+      if (m.type === 'capability') {
+        const fresh = m.capability !== l.capability
+        l.capability = m.capability
+        if (fresh && l.capability) void this.drain(l)
+        return
+      }
       if (m.type === 'chat') {
         l.chats.set(m.chat.key, m.chat)
         this.keep(l)
@@ -600,9 +610,10 @@ export class Machines extends Emitter<Events> {
   }
 
   async act(l: Link, a: Action): Promise<unknown> {
-    if (!l.reachable) {
+    if (!l.reachable || (a.type === 'setting' && EXECUTABLE_KEYS.has(a.key) && !l.capability)) {
       // Send now is a tap on a screen, answered now or not at all: kept for later it would press at a screen that has
-      // long moved on
+      // long moved on. An executable-setting write waits too until this worker's proof has arrived over its link, or
+      // it would be refused after a restart (the worker has no proof yet) and silently lost (SEC-04).
       if (a.type === 'steer') return { ok: false, error: 'Its machine is out of reach.' }
       l.waiting.push(a)
       return { waiting: true }
@@ -610,11 +621,20 @@ export class Machines extends Emitter<Events> {
     return this.forward(l, a)
   }
 
+  /** what waited for a worker now that it is reachable and, for an executable-setting write, has sent its proof */
+  private async drain(l: Link) {
+    const queued = l.waiting.splice(0)
+    for (const a of queued) await this.forward(l, a).catch(() => l.waiting.push(a))
+  }
+
   private async forward(l: Link, a: Action) {
+    // the main already checked this write against its own proof; the worker checks its own, so swap in the one it
+    // sent over the link. No caller can choose this: it comes only from the worker's own server socket (SEC-04).
+    const sent = a.type === 'setting' && EXECUTABLE_KEYS.has(a.key) && l.capability ? { ...a, capability: l.capability } : a
     const r = await fetch(`${l.rec.url}/api/action`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(a),
+      body: JSON.stringify(sent),
       signal: AbortSignal.timeout(20_000),
     })
     return r.json()
