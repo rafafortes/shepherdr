@@ -761,3 +761,22 @@ pressures (`summary()`, `meters()`), and each is a start limit of its own — `m
 coordinator: the three are one alert kind, over while any of them is, told once on the CPU kind's 2-minute hold and
 back only once every one of them is under 90% of its limit. macOS gives no swap number and no PSI: its health line shows neither and the limits never
 trigger there (the helper's `health.pl` sends the same fields from another machine, where the kernel has them).
+
+## The window on the chat's message list (SHE-111)
+
+Checked 2026-11-19 (SHE-111) on `upstream/main` and `upstream/v2.0`, their histories and the public issues (read
+only): neither line windows or virtualizes the chat's list, and neither memoizes its rows — `main` has no
+`virtualiz` at all, and `v2.0` has only the `memo` around `Messages` itself (`plugins/chat/client.tsx:1188`), a plain
+`map` over every message. The nearest idea is 3.x's `mods/chat/core/chat-log.js:44`: `log page <file> <before>
+<want>` — "about `<want>` messages ending at byte `<before>`, going back in growing chunks": upstream pages history
+backwards on the agent's machine, so its web client never holds the whole chat. That is a 3.x design whose web app
+does not load a whole chat into the screen's store as ours does, so the idea is ported client-side, not the code.
+
+Ours: `plugins/chat/windowing.ts` keeps, per chat, the floor on the first rendered row of the list `Messages`
+builds (chat's messages plus what you sent, pictures of one send in one album row). The screen draws the last 200
+rows and what has been revealed above them; an "↑ Earlier" sentinel (and the reader's own scroll, wheel and keys at
+the top) reveal 100 rows a pass, and every jump into the list — `jumpTo`, so a reply's quote, search in the chat,
+an alert's link, unified search and Go to question — reveals up to its row first, retrying until the row is in the
+DOM. The store keeps every message: the outbox settles against the whole array and search finds across it; only the
+DOM is capped (a 1000-message chat renders at most the window plus what was revealed), and a revealed batch does not
+move the reader (the browser keeps their place while it goes in).

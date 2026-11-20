@@ -6,11 +6,13 @@ import {
   createContext,
   Fragment,
   memo,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ChangeEvent,
   type ComponentType,
   type CSSProperties,
@@ -109,6 +111,7 @@ import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, LiveLine, TurnLine } from './activity.tsx'
 import { AgentControls, PlaceRestartItem, RestartSheet } from '@client/restart.tsx'
 import { countRender, currentChat, memoRow, rememberChat } from './rows.ts'
+import { CHAT_BATCH, floorOf, revealMore, setRows, subscribeFloor, takeCompensation, topOf, watchReveal } from './windowing.ts'
 
 /* ---------- messages ---------- */
 
@@ -1589,21 +1592,84 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   // a message just sent, or just in, rises into place
   const list = useRef<HTMLDivElement>(null)
   useArrive(list, chat.key)
+  // the window: the last rows by default, higher where the reader has scrolled or a jump has asked (windowing.ts)
+  useSyncExternalStore(
+    useCallback((l) => subscribeFloor(chat.key)(l), [chat.key]),
+    () => floorOf(chat.key),
+  )
+  // a jump finds a row by any of its parts (one album row holds several pictures)
+  const rowOf = new Map<string, number>()
+  rows.forEach((it, i) => {
+    if ('msg' in it) rowOf.set(it.msg.id, i)
+    else for (const m of it.album) rowOf.set(m.id, i)
+  })
+  setRows(chat.key, rowOf, rows.length)
+  const top = topOf(chat.key, rows.length)
+  // the sentinel shows only while rows are hidden above the window (top 0: everything is rendered already)
+  const hidden = top > 0
+  const shown = rows.slice(top)
+  const topRef = useRef(top)
+  topRef.current = top
+  // a reveal puts rows in above what the reader sees. Where the browser anchors (the common case) it keeps their
+  // place; at the very top it doesn't, so move the box by what the list grew — no visible jump either way
+  const lastHeight = useRef(0)
+  useLayoutEffect(() => {
+    const scroller = list.current?.closest<HTMLElement>('.overflow-y-auto')
+    if (!scroller) return
+    const height = scroller.scrollHeight
+    if (takeCompensation(chat.key) && lastHeight.current) scroller.scrollTop += height - lastHeight.current
+    lastHeight.current = height
+  })
+  // the reader's own scroll into the sentinel: one more batch, from the first row now shown (the store's raw floor
+  // is Infinity until something is revealed, so revealing from it would do nothing)
+  useEffect(() => {
+    if (!hidden) return
+    const el = list.current
+    if (!el) return
+    return watchReveal(el, () => revealMore(chat.key, topRef.current))
+  }, [hidden, chat.key])
+  // a date line goes on the first row of its day, as before: computed over the whole list, drawn where it shows
   let day = ''
+  const dated: boolean[] = []
+  for (const it of rows) {
+    const at = it.at > 1e12 ? it.at : 0
+    const d = at ? new Date(at).toDateString() : day
+    dated.push(!!at && d !== day)
+    day = d
+  }
   return (
     // a finger sliding a message left moves them all (--peek), and each one's time comes in at the right, like iMessage
     <div ref={list} data-messages className="mx-auto flex w-full max-w-read flex-1 flex-col gap-3.5 px-5 pt-5 pb-3 phone:px-4">
       {!rows.length && !chat.unreadable ? <Empty className="p-0!">No messages yet. Write to start.</Empty> : null}
-      {rows.map((it) => {
+      {hidden ? (
+        // biome-ignore lint/a11y/useSemanticElements: a button takes its width from its words; this sentinel fills the row
+        <div
+          data-earlier
+          onClick={() => revealMore(chat.key, top)}
+          onDoubleClick={() => revealMore(chat.key, top)}
+          role="button"
+          tabIndex={0}
+          aria-label={`Earlier messages: show ${Math.min(CHAT_BATCH, top)} more`}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return
+            e.preventDefault()
+            e.stopPropagation()
+            revealMore(chat.key, top)
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="sticky top-0 z-[1] -mb-3.5 flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 self-center bg-bg py-2 text-[0.75rem] font-medium text-fg3 hover:text-fg2 phone:text-[0.8125rem]"
+        >
+          <UpIcon aria-hidden className={ic} />
+          Earlier
+        </div>
+      ) : null}
+      {shown.map((it, j) => {
         const at = it.at > 1e12 ? it.at : 0
-        const d = at ? new Date(at).toDateString() : day
-        const dated = !!at && d !== day
-        day = d
         const first = 'album' in it ? it.album[0].id : it.msg.id
         const key = keyOf('album' in it ? it.album[0] : it.msg)
         return (
           <Fragment key={key}>
-            {dated ? <DateLine at={at} /> : null}
+            {dated[top + j] ? <DateLine at={at} /> : null}
             {newAt === first ? <NewLine /> : null}
             {/* queued: one you sent that Claude Code holds in its own queue; it takes it now with Ctrl+Enter, which
                 the server presses only while its screen offers it. Another CLI offers nothing, so nothing shows */}
@@ -2964,9 +3030,12 @@ function StickToBottom({ chatKey, children }: { chatKey: string; children: React
   useEffect(() => {
     const m = jump ? msgs?.find((x) => x.id === jump || x.question?.id === jump) : undefined
     if (!m) return
-    // after the chat has settled at its newest message
+    // after the chat has settled at its newest message (jumpTo puts the row in the window first, if it was out).
+    // jumpTo's first call only asks for the row; it returns before React draws it, so its rAF retry does the scroll.
+    // Let the address forget the card now, or a later push would re-run this and pull the reader back to it.
     const t = setTimeout(() => {
-      if (jumpTo(chatKey, m.id, { card: !!m.question && m.question.id === jump })) setUI({ jump: null })
+      jumpTo(chatKey, m.id, { card: !!m.question && m.question.id === jump })
+      setUI({ jump: null })
     }, 120)
     return () => clearTimeout(t)
   }, [jump, msgs])
