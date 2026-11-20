@@ -71,10 +71,14 @@ const s = Bun.serve({
     const u = new URL(req.url)
     if (u.pathname === '/api/ws') return srv.upgrade(req) ? undefined : new Response('no', { status: 400 })
     if (u.pathname === '/api/snapshot') return Response.json(snapshot)
-    if (u.pathname === '/api/action') return Response.json({ ok: true, did: await req.json() })
+    if (u.pathname === '/api/action') {
+      const body = await req.json()
+      return Response.json({ ok: true, did: body })
+    }
     return new Response(box.label + ' ' + u.pathname)
   },
-  websocket: { message() {} },
+  // the worker's own proof, sent to the main over this server-to-server socket (SEC-04)
+  websocket: { open(ws) { ws.send(JSON.stringify({ type: 'capability', capability: 'WORKER-PROOF' })) }, message() {} },
 })
 console.log('worker of ' + box.label + ' serves on ' + s.port)
 writeFileSync(join(home, 'server.json'), JSON.stringify({ port: s.port, pid: process.pid }))
@@ -256,6 +260,10 @@ describe('a machine herdr saves', () => {
     // what you do there and the pages you open go through to it
     const a: Action = { type: 'send', chat: `p:${label}:web`, text: 'hi' }
     expect(await m.act(l, a)).toEqual({ ok: true, did: a })
+    // a gated executable-setting write is rewired to this worker's own proof before it is forwarded, never the main's
+    await until('the worker proof over the link', () => !!l.capability)
+    const gated: Action = { type: 'setting', key: 'alerts.command', value: 'echo remote', capability: 'MAIN-PROOF' }
+    expect(await m.act(l, gated)).toEqual({ ok: true, did: { ...gated, capability: 'WORKER-PROOF' } })
     expect(await (await m.fetch(l, '/some/page')).text()).toBe(`${label} /some/page`)
     // and the doctor reads its own log
     expect(m.log(label)).toContain(`worker of ${label} serves on`)

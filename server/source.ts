@@ -34,6 +34,9 @@ export class Emitter<E extends Record<string, unknown[]>> {
 
 export interface Source extends Emitter<SourceEvents> {
   readonly kind: 'live' | 'demo'
+  /** the screen's per-boot proof of its own writes (SEC-04), handed to it over the live socket. The demo source has
+   *  none: its writes carry no gate. */
+  readonly writeCapability?: string
   /** the live source's event loop watch: the server times what it holds the loop with by name (stall.ts) */
   readonly stall?: import('./live/stall.ts').StallWatch
   /** the published names this app answers to (app.hosts); read fresh so a change needs no restart */

@@ -1466,7 +1466,10 @@ export type Action =
   | { type: 'text'; chat: string; text: string }
   | { type: 'call'; chat: string; on: boolean }
   /** place: the level it is set at, as a place id (all when none); a machine's or project's goes to that machine */
-  | { type: 'setting'; key: string; value: string | null; place?: string }
+  /** capability: the screen's per-boot proof (the x-shepherdr-capability header, copied here by the server). A write of
+   *  an executable setting (alerts.command and its kind) needs this or the main machine's proof, which a worker reads
+   *  over its live link; the shepherdr command writes settings directly and has neither (SEC-04). */
+  | { type: 'setting'; key: string; value: string | null; place?: string; capability?: string }
   /** a space's move up or down the queue in Settings → Limits → Spaces: every value the move writes, at the space each
    *  names (null clears it). One action, so a move happens whole or not at all and two moves cannot interleave */
   | { type: 'space-order'; moves: { place: string; value: string | null }[] }
@@ -1563,6 +1566,9 @@ export interface TermScreen {
 
 export type ServerEvent =
   | { type: 'snapshot'; snapshot: Snapshot }
+  /** the screen's per-boot proof of its own writes, handed to it once over this socket (SEC-04). It is never in a
+   *  snapshot or a file: a page that can POST but cannot read this socket cannot change an executable setting. */
+  | { type: 'capability'; capability: string }
   | { type: 'chat'; chat: Chat }
   | ({ type: 'terminal'; chat: string } & TermScreen)
   | { type: 'offline'; since: number }

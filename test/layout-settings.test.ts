@@ -51,6 +51,10 @@ describe.skipIf(!browser)('notification settings', () => {
   test('the alert command is on Notifications at any level, written for the machine (or Everywhere), never a page of its own', async () => {
     const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } })
     const store = world.stores['vm-str']
+    const writes: Record<string, string | undefined>[] = []
+    page.on('request', (r) => {
+      if (r.url().endsWith('/api/action') && r.method() === 'POST') writes.push(r.headers())
+    })
     try {
       await page.goto(url())
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
@@ -64,6 +68,8 @@ describe.skipIf(!browser)('notification settings', () => {
       await box.press('Enter')
       await until(() => store.get('alerts.command') === '~/.local/bin/notify-operator')
       expect(store.get('alerts.command', '~')).toBe('~/.local/bin/notify-operator')
+      // the screen sends the proof it got over its socket on the setting write (SEC-04), not in the JSON body
+      expect(writes.some((h) => h['x-shepherdr-capability'] === world.writeCapability)).toBe(true)
       expect(await settings.getByRole('button', { name: /^Tell it after: 10 s/ }).count()).toBe(1)
       // at Everywhere it is Everywhere's own
       await settings.getByRole('button', { name: /^Editing:/ }).click()

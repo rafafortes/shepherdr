@@ -4,7 +4,7 @@ import { providerOfKey } from '../../shared/model-caps.ts'
 // The live source: herdr is the truth for agents and their states; the CLIs' own logs are the chats; Shepherdr keeps
 // only what herdr can't tell it (spaces, tasks, modes, cards, settings). Assembled from the base plugins' parts.
 import { execSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, sep } from 'node:path'
@@ -142,7 +142,7 @@ import { readCommandCode as readCommandCodeQuota, SECRET as COMMANDCODE_KEY } fr
 import { alertShare, Quotas } from './quotas.ts'
 import { UsageFeed } from './usage-feed.ts'
 import { modelKey, providerOf, UsageLedger } from './usage-ledger.ts'
-import { CATALOG, CLI_NAME, CLIS, kindOf, MAX_BACKUPS, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
+import { CATALOG, CLI_NAME, CLIS, EXECUTABLE_KEYS, kindOf, MAX_BACKUPS, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
 import { modelsMatrix } from './models-matrix.ts'
 import { changeWords, Profiles, ProfileStore, previewWords, PROFILES_ON_MAIN, waitingPicks, type Change, type Site } from './profiles.ts'
 import { ProfileSchedules, scheduleRows, scheduleWords } from './profile-schedule.ts'
@@ -179,6 +179,12 @@ function userName(): string {
 
 export class LiveSource extends Emitter<SourceEvents> implements Source {
   readonly kind = 'live' as const
+  /**
+   * The screen's per-boot proof of its own writes (SEC-04). Minted here, never written to a file or an HTTP header a
+   * caller chooses: the server hands it to the live socket once at boot, and only a write carrying it back may change
+   * an executable setting. The shepherdr command writes settings directly and needs none.
+   */
+  readonly writeCapability = randomBytes(32).toString('hex')
   user = userName()
   settings = new Settings()
   /** the published names the app answers to (app.hosts), read fresh so a change to the setting needs no restart */
@@ -3960,6 +3966,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   /* ---------- acting ---------- */
 
   async act(a: Action): Promise<unknown> {
+    // gate before the peer branch: a write aimed at another machine must pass this machine's own wall before it is
+    // forwarded, or the main would be an open door to every worker's alert command (SEC-04)
+    if (a.type === 'setting' && EXECUTABLE_KEYS.has(a.key) && a.capability !== this.writeCapability)
+      return { ok: false, error: 'Set it in Settings: a command here can only be changed from this page.' }
     const peer = this.peers?.ownerOfAction(a)
     if (peer) return this.peers!.act(peer, a)
     return this.actLocal(a)
@@ -5203,7 +5213,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return `Space order here: ${list}; spaces with no priority come after.`
   }
 
-  private async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string }): Promise<string> {
+  private async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean }): Promise<string> {
     const [a0, a1, ...rest] = p.words
     if (!a0 || a0 === 'help' || p.flags.has('help')) return HELP
     switch (a0) {
@@ -5429,6 +5439,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           return `${this.places.shownName(pr.name)}: base branch ${pr.base}. Existing tasks keep their target.`
         }
         if (!CATALOG.some((s) => s.rows.some((r) => r.key === a1))) throw new Error(`No setting ${a1}; shepherdr show lists them`)
+        // A browser page that got past same-site rules would send an Origin on its POST to /api/cli, so `local` is
+        // false there. A shell running shepherdr (the operator, their alert installer) sends none and keeps working;
+        // a local process gains nothing here anyway, as the lead's bound says (SEC-04).
+        if (EXECUTABLE_KEYS.has(a1) && !ctx.local) throw new Error('Set it in Settings: a command here can only be changed from the Settings page.')
         const waiting = p.flags.has('apply-waiting')
         if (waiting && a0 === 'set' && a1.startsWith('advisor.')) throw new Error(`${ADVISOR_AT_ONCE} Set it without --apply-waiting.`)
         if (waiting && (a0 !== 'set' || !waitingKind(a1))) throw new Error('--apply-waiting goes with shepherdr set task.agent, task.model, task.effort or a reviewer.* key')
@@ -5870,7 +5884,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     throw new Error('shepherdr artifact new|update|check|list|show|rm')
   }
 
-  private async taskCommand(sub: string | undefined, rest: string[], p: Parsed, ctx: { chat?: string; cwd?: string }) {
+  private async taskCommand(sub: string | undefined, rest: string[], p: Parsed, ctx: { chat?: string; cwd?: string; local?: boolean }) {
     if (sub === 'add') {
       if (!rest[0]?.trim()) throw new Error('shepherdr task add "<title>" --desc "<the whole brief>"')
       if (p.flags.has('after')) throw new Error('--after needs the tasks it waits for: --after SHE-12,SHE-13')
@@ -5886,6 +5900,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       for (const pair of p.opts.set ?? []) {
         const r = setForTask(pair)
         if ('error' in r) throw new Error(r.error)
+        // a per-task merge gate runs through sh too: a browser page (Origin present, local false) cannot plant one
+        // through task add, while a shell on this machine still can (SEC-04)
+        if ('key' in r && EXECUTABLE_KEYS.has(r.key) && !ctx.local) throw new Error('Set it in Settings: a command here can only be changed from the Settings page.')
         if ('flag' in r) (p.opts[r.flag] ??= []).push(r.value)
         else set[r.key] = r.value
       }
