@@ -43,6 +43,7 @@ import {
   type WorktreeAsk,
 } from '../../shared/types.ts'
 import { Emitter, type Overview, type Source, type SourceEvents } from '../source.ts'
+import { chatDir } from './inbox.ts'
 import { parseHosts, refusedHosts } from '../hosts.ts'
 import { HOME, readJson, writeJson } from '../store.ts'
 import { ROOT } from '../root.ts'
@@ -6213,11 +6214,6 @@ function statusLine(t: Task) {
 
 /** a stopped task's Browser item */
 const STOPPED = { ready: false, hint: 'The browser closed when the task was stopped. Write to the task to start it again.' }
-
-/** a chat's own folder in the inbox: never "." or "..", so it can't lead out of it */
-function chatDir(chat: string) {
-  return chat.replace(/[^a-zA-Z0-9_.-]+/g, '_').replace(/^\.+/, '_')
-}
 
 const HM = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' })
 

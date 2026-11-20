@@ -96,6 +96,78 @@ describe.skipIf(!browser)("an agent's pictures and videos in its chat", () => {
     await page.close()
   }, 30_000)
 
+  test('a picture whose file was removed says so in place of a broken tile', async () => {
+    // the chat row still names the file, but retention removed the bytes: the route answers 404 as it does then
+    world.chats['p:vm-str:~'].messages.push({ id: 'gone-shot', who: 'agent', file: { name: 'gone.png', path: '~/inbox/home/gone.png' }, at: Date.now() })
+    const page = await open()
+    const tile = page.locator('[data-msg="gone-shot"], [data-msg="gone-shot:0"]').first()
+    await tile.waitFor()
+    const gone = tile.locator('[data-file-gone]')
+    await gone.waitFor()
+    expect(await gone.textContent()).toContain('This file is no longer there')
+    // no broken image, and no link to a download that would fail too
+    expect(await tile.locator('img, a[download]').count()).toBe(0)
+    await page.close()
+  }, 30_000)
+
+  test("a file the browser can't draw keeps its download tile, not the removed-file words", async () => {
+    // the bytes are still there: only this browser can't show them. The file route answers 200, so this is not a
+    // retention removal (HEIC on most desktops), and the old file tile with its download link must stay.
+    world.files['~/inbox/home/undrawable.heic'] = () => new Blob([new Uint8Array([1, 2, 3, 4, 5])], { type: 'image/heic' })
+    const at = Date.now()
+    world.chats['p:vm-str:~'].messages.push({ id: 'undrawable', who: 'agent', file: { name: 'undrawable.heic', path: '~/inbox/home/undrawable.heic' }, at })
+    const page = await open()
+    const tile = page.locator('[data-msg="undrawable"], [data-msg="undrawable:0"]').first()
+    await tile.waitFor()
+    const download = tile.getByRole('link', { name: 'Download undrawable.heic' })
+    await download.waitFor()
+    expect(await tile.locator('[data-file-gone]').count()).toBe(0)
+    await page.close()
+  }, 30_000)
+
+  test('two pictures removed together each say so in their album tile', async () => {
+    const at = Date.now()
+    world.chats['p:vm-str:~'].messages.push(
+      { id: 'gone-a', who: 'agent', file: { name: 'a.png', path: '~/inbox/home/gone-a.png' }, at },
+      { id: 'gone-b', who: 'agent', file: { name: 'b.png', path: '~/inbox/home/gone-b.png' }, at },
+    )
+    const page = await open()
+    const album = page.getByRole('group', { name: '2 pictures' }).last()
+    await album.waitFor()
+    await album.locator('[data-file-gone]').first().waitFor()
+    expect(await album.locator('[data-file-gone]').count()).toBe(2)
+    expect(await album.locator('[data-file-gone]').first().textContent()).toBe('File gone')
+    expect(await album.locator('img').count()).toBe(0)
+    await page.close()
+  }, 30_000)
+
+  test('a video whose file was removed says so instead of a dead player', async () => {
+    // no bytes at this path: the player's source fails, and the tile says the file went rather than showing a black box
+    world.chats['p:vm-str:~'].messages.push({ id: 'gone-clip', who: 'agent', file: { name: 'gone-clip.mp4', path: '~/inbox/home/gone-clip.mp4' }, at: Date.now() })
+    const page = await open()
+    const tile = page.locator('[data-msg="gone-clip"], [data-msg="gone-clip:0"]').first()
+    await tile.waitFor()
+    const gone = tile.locator('[data-file-gone]')
+    await gone.waitFor()
+    expect(await gone.textContent()).toContain('This file is no longer there')
+    expect(await tile.locator('video, a[download]').count()).toBe(0)
+    await page.close()
+  }, 30_000)
+
+  test('a check that cannot reach the file route keeps the download tile, not the removed words', async () => {
+    // the HEAD that tells removal from an undrawable format fails: the conservative answer is the old file tile
+    const page = await open()
+    await page.route('**/api/file*', (route) => (route.request().method() === 'HEAD' ? route.abort() : route.continue()))
+    world.chats['p:vm-str:~'].messages.push({ id: 'unreachable', who: 'agent', file: { name: 'unreachable.png', path: '~/inbox/home/unreachable.png' }, at: Date.now() })
+    await page.reload()
+    await page.getByRole('textbox', { name: /Message/ }).waitFor()
+    const tile = page.locator('[data-msg="unreachable"], [data-msg="unreachable:0"]').first()
+    await tile.waitFor()
+    await tile.getByRole('link', { name: 'Download unreachable.png' }).waitFor()
+    expect(await tile.locator('[data-file-gone]').count()).toBe(0)
+    await page.close()
+  }, 30_000)
+
   test('two pictures an agent sent together lie side by side, and a tap opens the one tapped', async () => {
     sent('pair')
     const page = await open()
