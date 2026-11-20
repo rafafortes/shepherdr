@@ -88,6 +88,22 @@ describe('the server log', () => {
     expect(() => write(asDir, ['shepherdr: nope'])).not.toThrow()
   })
 
+  test('a real process at the edge writes a dated line to the log and keeps its stdout', async () => {
+    const dir = tmp('log-child')
+    const log = join(dir, 'server.log')
+    const module = join(import.meta.dir, '../server/live/server-log.ts')
+    const code = `import { install } from ${JSON.stringify(module)}; install(${JSON.stringify(log)}); console.log('shepherdr: from a child')`
+    const p = Bun.spawn([process.execPath, '-e', code], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...process.env, NODE_ENV: 'production' },
+    })
+    const out = await new Response(p.stdout).text()
+    await p.exited
+    expect(out).toBe('')
+    expect(readFileSync(log, 'utf8')).toMatch(/^\d{4}-\d\d-\d\dT[\d:.]+Z shepherdr: from a child\n$/)
+  })
+
   test('console is left alone in a test, and at a process edge every level is dated until put back', () => {
     const dir = tmp('log-install')
     const log = join(dir, 'server.log')
