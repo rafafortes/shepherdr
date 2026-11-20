@@ -5463,7 +5463,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'models': {
         const kinds = a1 ? [kindOf(a1)] : ['claude', 'codex', 'pi', 'opencode', 'agy']
         if (!kinds[0]) throw new Error(`No CLI called ${a1}; herdr starts ${CLIS.join(', ')}`)
-        if (p.flags.has('json')) return JSON.stringify(kinds.map((k) => ({ agent: k, cli: CLI_NAME[k!], ...modelsOf(k!) })), null, 2)
+        if (p.flags.has('json')) return JSON.stringify(kinds.filter((k): k is string => !!k).map((k) => ({ agent: k, cli: CLI_NAME[k], ...modelsOf(k) })), null, 2)
         return kinds
           .map((k) => {
             const c = modelsOf(k!)
