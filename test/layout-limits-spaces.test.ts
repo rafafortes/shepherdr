@@ -203,6 +203,139 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await page.close()
     }
   })
+  test('two spaces with the same number: an arrow still moves its row one place, and the numbered ones are given 1, 2, 3, …', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await openLimits(page)
+      // both spaces say 1, so the list keeps its own listing order: herdr-projects is below gtm with the same number
+      await set('space.priority', '1', 'p:vm-str:gtm')
+      await set('space.priority', '1', 'p:vm-str:herdr-projects')
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 1/ }).waitFor()
+      expect(at(await rowLabels(table), 'gtm')).toBeLessThan(at(await rowLabels(table), 'herdr-projects'))
+      // ↑ on the second one is on, as it is on any row with rows above it: equal numbers are no order at all (the two go
+      // by age), so the numbered ones get 1, 2, 3, … in the order the move makes, writing only what changes
+      await table.getByRole('button', { name: 'Move herdr-projects up' }).click()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 1/ }).waitFor()
+      await settled(page)
+      expect(await places()).toEqual({ gtm: '2', 'herdr-projects': '1' })
+      expect(at(await rowLabels(table), 'herdr-projects')).toBeLessThan(at(await rowLabels(table), 'gtm'))
+      // and the row it passed went exactly one place: one move, one place
+      expect(at(await rowLabels(table), 'herdr-projects') + 1).toBe(at(await rowLabels(table), 'gtm'))
+    } finally {
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await page.close()
+    }
+  })
+  test('a tie between other spaces: one arrow still moves its row one place, never past the numbers between them', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    // a third space of this machine, so a tie can sit between two rows rather than at the moved row's own number
+    world.places.push({ id: 'p:vm-str:notes', name: 'notes', machine: 'vm-str', level: 2, status: 'need', mode: 'regular', chat: 'p:vm-str:notes', githubRemote: false })
+    world.emit('snapshot')
+    try {
+      await openLimits(page)
+      await set('space.priority', '1', 'p:vm-str:gtm')
+      await set('space.priority', '3', 'p:vm-str:herdr-projects')
+      await set('space.priority', '3', 'p:vm-str:notes')
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: /^notes · Priority: 3/ }).waitFor()
+      const labels = await rowLabels(table)
+      expect(at(labels, 'gtm')).toBeLessThan(at(labels, 'herdr-projects'))
+      // gtm's own number is not shared, but the two below it share one: a swap with herdr-projects would leave gtm at 3
+      // too, tied with notes and listed after it, two rows down. One move, one place
+      await table.getByRole('button', { name: 'Move gtm down' }).click()
+      await table.getByRole('button', { name: /^gtm · Priority: 2/ }).waitFor()
+      await settled(page)
+      expect(await places()).toEqual({ gtm: '2', 'herdr-projects': '1', notes: '3' })
+      expect(at(await rowLabels(table), 'gtm')).toBe(1)
+    } finally {
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await set('space.priority', null, 'p:vm-str:notes')
+      world.places.splice(
+        world.places.findIndex((x) => x.name === 'notes'),
+        1,
+      )
+      world.emit('snapshot')
+      await page.close()
+    }
+  })
+  test('a stored number Settings reads as no place is no place in the page either: ↑ gives that space a place, it swaps nothing', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    // a settings.json the human edited by hand: 201 is outside the range Settings keeps, so spacePriority reads no place
+    const raw = world.stores['vm-str'] as unknown as { d: { spaces: Record<string, Record<string, string>> } }
+    try {
+      await openLimits(page)
+      await set('space.priority', '1', 'p:vm-str:gtm')
+      raw.d.spaces['herdr-projects'] = { 'space.priority': '201' }
+      // a write of a setting sends a snapshot, so the page reads the view with it
+      await set('space.maxTasks', '2', 'p:vm-str:gtm')
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: /^gtm · Priority: 1/ }).waitFor()
+      // the page treats it as a space with no number: ↑ puts it last among the numbered ones instead of swapping with gtm
+      await table.getByRole('button', { name: 'Move herdr-projects up' }).click()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
+      expect(await places()).toEqual({ gtm: '1', 'herdr-projects': '2' })
+    } finally {
+      delete raw.d.spaces['herdr-projects']
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await page.close()
+    }
+  })
+  test('a read that fails says why under the table, and the arrows wait for a read that lands', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    // the page's own reads, refused while the test says so: the screen's error path, which a live server cannot be made
+    // to take from this table
+    let fails = false
+    await page.route('**/api/action', (route) => {
+      const a = route.request().postDataJSON() as { type?: string }
+      return fails && a.type === 'limits-view' ? route.abort() : route.continue()
+    })
+    try {
+      await openLimits(page)
+      await set('space.priority', '1', 'p:vm-str:gtm')
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      const up = table.getByRole('button', { name: 'Move herdr-projects up' })
+      await table.getByRole('button', { name: /^gtm · Priority: 1/ }).waitFor()
+      await up.waitFor()
+      await expect(up.isEnabled()).resolves.toBe(true)
+      // the move is written, and the read that follows it fails: the table says so, and its rows are the ones before the
+      // write, so the arrows stay off (a move from them would be worked out on numbers that are no longer true)
+      fails = true
+      await up.click()
+      await page.getByRole('alert').filter({ hasText: 'Failed to fetch' }).waitFor()
+      expect(await places()).toEqual({ gtm: '1', 'herdr-projects': '2' })
+      expect(await up.isDisabled()).toBe(true)
+      // a read that lands brings the rows and the arrows back, and the word with them
+      fails = false
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
+      await until(
+        () => up.isEnabled(),
+        (on) => on,
+        10_000,
+      )
+      expect(await page.getByRole('alert').filter({ hasText: 'Failed to fetch' }).count()).toBe(0)
+    } finally {
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await page.close()
+    }
+  })
   test('a move the server refuses says why under the table, and writes nothing', async () => {
     const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
@@ -279,6 +412,20 @@ const letViewsGo = (page: Page) =>
     for (const go of list) go()
   })
 
+/** the write of a move, held at its fetch until the test lets it go, as a slow server would (the read of it is held by
+ *  holdViews' own gate, so a test can decide which answer lands first) */
+async function holdMoves(page: Page) {
+  const w = { release: undefined as undefined | (() => void), asked: 0 }
+  await page.route('**/api/action', async (route) => {
+    const a = route.request().postDataJSON() as { type?: string }
+    if (a.type !== 'space-order') return route.continue()
+    w.asked++
+    await new Promise<void>((go) => (w.release = go))
+    return route.continue()
+  })
+  return w
+}
+
 describe.skipIf(!browser)('Settings → Limits: a move waits for an answer the write could not have overtaken (SHE-165)', () => {
   test('the arrows come back with the rows the move made, not with an answer sent before it', async () => {
     const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
@@ -314,6 +461,55 @@ describe.skipIf(!browser)('Settings → Limits: a move waits for an answer the w
       await table.getByRole('button', { name: /^gtm · Priority: 2/ }).waitFor()
       expect(await table.getByRole('button', { name: 'Move gtm up' }).isEnabled()).toBe(true)
       expect(await table.getByRole('button', { name: 'Move herdr-projects down' }).isEnabled()).toBe(true)
+    } finally {
+      await gateViews(page, false)
+      await set('space.priority', null, 'p:vm-str:gtm')
+      await set('space.priority', null, 'p:vm-str:herdr-projects')
+      await page.close()
+    }
+  })
+  test('the arrows stay off while the write is out, though a read sent before it lands meanwhile', async () => {
+    const set = (key: string, value: string | null, place: string) => world.act({ type: 'setting', key, value, place } as never)
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      await holdViews(page)
+      const write = await holdMoves(page)
+      await openLimits(page)
+      await set('space.priority', '1', 'p:vm-str:gtm')
+      await set('space.priority', '2', 'p:vm-str:herdr-projects')
+      const table = page.getByRole('table', { name: 'Spaces' })
+      await table.scrollIntoViewIfNeeded()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 2/ }).waitFor()
+      // a read is out, and the move is written while it is: its rows are the ones before the move, so its answer is no
+      // reason to let a second tap through
+      await gateViews(page, true)
+      world.emit('snapshot')
+      await until(
+        () => heldViews(page),
+        (n) => n >= 1,
+        10_000,
+      )
+      await table.getByRole('button', { name: 'Move herdr-projects up' }).click()
+      await until(
+        async () => write.asked,
+        (n) => n >= 1,
+        10_000,
+      )
+      // that read lands while the write is still out: every arrow is off, as the answer says nothing of the move
+      await letViewsGo(page)
+      await settled(page)
+      expect(await table.getByRole('button', { name: 'Move gtm up' }).isDisabled()).toBe(true)
+      expect(await table.getByRole('button', { name: 'Move herdr-projects down' }).isDisabled()).toBe(true)
+      // the write answers, the page reads the rows it made, and the arrows come back
+      await gateViews(page, false)
+      write.release?.()
+      await table.getByRole('button', { name: /^herdr-projects · Priority: 1/ }).waitFor({ timeout: 10_000 })
+      await until(
+        () => table.getByRole('button', { name: 'Move gtm up' }).isEnabled(),
+        (on) => on,
+        10_000,
+      )
     } finally {
       await gateViews(page, false)
       await set('space.priority', null, 'p:vm-str:gtm')

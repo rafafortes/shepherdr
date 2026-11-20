@@ -484,10 +484,14 @@ export function LimitValue({ title, cell, machine, phone }: { title: string; cel
 /** one value a move writes: the place of a space's Priority cell, and its number now (null: it goes back to by age) */
 type Move = { place: string; value: string | null }
 
-/** the number a space's Priority cell holds now, or null when it has none (off, or a value no longer readable) */
+/** the number a space's Priority cell holds now, or null when it has none: off, a value no longer readable, one outside the
+ *  range Settings keeps (1 to PLACE_MAX), which the queue reads as no place at all (settings.ts spacePriority), or the home
+ *  space's, which has no tasks of its own and no place to move (the server refuses a write there) */
 function placeOf(row: LimitSpaceRow): number | null {
-  const v = row.cells['space.priority']?.row.value.trim() ?? ''
-  return /^[0-9]+$/.test(v) ? Number(v) : null
+  const v = row.home ? '' : (row.cells['space.priority']?.row.value.trim() ?? '')
+  if (!/^[0-9]+$/.test(v)) return null
+  const n = Number(v)
+  return n >= 1 && n <= PLACE_MAX ? n : null
 }
 
 /**
@@ -497,42 +501,63 @@ function placeOf(row: LimitSpaceRow): number | null {
  * number puts it last among the numbered ones, in one write, and its ↓ is off (it is already after them all). Only the
  * numbered spaces are touched, and only the values that change; a space with no number keeps none until the human gives
  * it a place.
+ *
+ * Two spaces may hold the same number (they then go by age, as the setting says), and a swap of two numbers can say
+ * nothing there: equal numbers would leave the list as it was, and two different ones let the row jump over the numbers
+ * between them. So while any two numbered spaces share a number, a move gives the numbered ones 1, 2, 3, … in their new
+ * order instead — the same places in the same order, now each its own, and only the numbers that change are written.
  */
 function moveOf(rows: LimitSpaceRow[], at: number, dir: -1 | 1): Move[] | null {
   const row = rows[at]
   if (!row || row.home) return null
-  const place = row.cells['space.priority']!.place
+  const place = placeAt(row)
   const mine = placeOf(row)
-  const others = rows
-    .flatMap((r, i) => {
-      const n = i === at ? null : placeOf(r)
-      return n === null ? [] : [{ place: r.cells['space.priority']!.place, n }]
-    })
-    .sort((a, b) => a.n - b.n)
+  if (!place) return null
+  const numbered = rows.filter((r) => placeOf(r) !== null)
+  const numbers = numbered.map((r) => placeOf(r) ?? 0)
   // no number yet: it goes last among the numbered ones (the first one when nothing is numbered), and no lower. Past the
   // range there is no place to give it: the arrow is off rather than refused by the server
   if (mine === null) {
-    const next = (others[others.length - 1]?.n ?? 0) + 1
+    const next = Math.max(0, ...numbers) + 1
     return dir < 0 && next <= PLACE_MAX ? [{ place, value: String(next) }] : null
   }
-  if (dir < 0) {
-    const above = others.filter((o) => o.n < mine).at(-1)
-    return above
-      ? [
-          { place, value: String(above.n) },
-          { place: above.place, value: String(mine) },
-        ]
-      : null
+  // a tie anywhere among the numbered ones: the numbered spaces are renumbered 1, 2, 3, … in the order the move makes
+  if (new Set(numbers).size !== numbers.length) {
+    const from = numbered.indexOf(row)
+    const to = from + dir
+    // ↓ on the last numbered one still clears its number, as it does with no tie: it goes back to by age
+    if (to >= numbered.length) return [{ place, value: null }]
+    if (to < 0) return null
+    const order = numbered.filter((_, i) => i !== from)
+    order.splice(to, 0, row)
+    return order.flatMap((r, i) => {
+      const cell = placeAt(r)
+      return cell && placeOf(r) !== i + 1 ? [{ place: cell, value: String(i + 1) }] : []
+    })
   }
-  const below = others.find((o) => o.n > mine)
-  // the last numbered one goes back to by age
-  return below
-    ? [
-        { place, value: String(below.n) },
-        { place: below.place, value: String(mine) },
-      ]
-    : [{ place, value: null }]
+  // the numbered row above (↑) or below (↓) it in the table: the one the arrow passes, and the first with a number that
+  // way (the numbered ones come first, so it is the next row, but a row with no place is stepped over all the same)
+  let neighbour: LimitSpaceRow | undefined
+  for (let i = at + dir; i >= 0 && i < rows.length; i += dir) {
+    const r = rows[i]
+    if (r && placeOf(r) !== null) {
+      neighbour = r
+      break
+    }
+  }
+  const other = neighbour ? placeAt(neighbour) : undefined
+  const n = neighbour ? placeOf(neighbour) : null
+  if (other && n !== null)
+    return [
+      { place, value: String(n) },
+      { place: other, value: String(mine) },
+    ]
+  // ↑ with none above it is off; ↓ with none below is the last numbered one, and goes back to by age
+  return dir > 0 ? [{ place, value: null }] : null
 }
+
+/** where a space's Priority is written: its cell's place (every row of the Spaces table has one) */
+const placeAt = (row: LimitSpaceRow) => row.cells['space.priority']?.place
 
 /** a space's Priority in this machine's queue, with the buttons that move it up or down. They are real buttons, so a Tab
  *  and Enter/Space and a finger both work, without adding drag code; a move writes only the numbers it changes, as one
@@ -745,6 +770,9 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
     inFlight.current = true
     setMoving(true)
     setMoveError('')
+    // counted before it is sent: a read that came back from before this move (or from during it) says nothing of the rows
+    // it makes, so it leaves the arrows off; only the move's own answer and the read it asks for bring them back
+    moved.current++
     const r = (await act({ type: 'space-order', moves }).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string }
     // written: the arrows stay off until the page has read the rows the write made (the snapshot it brings); refused: no
     // snapshot comes, so they come back now with the reason
@@ -752,10 +780,7 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
       inFlight.current = false
       setMoving(false)
       setMoveError(r?.error ?? "That didn't go through.")
-    } else {
-      moved.current++
-      askNow.current()
-    }
+    } else askNow.current()
   }
   // the reads of the view: one at a time, at most one every LIMITS_EVERY while something changed (one trailing read,
   // never a queue of them), at once for a write made here, and none while the tab is hidden: shown again, it reads once
@@ -1181,9 +1206,9 @@ export default function LimitsPage({ phone }: { phone: boolean }) {
             </table>
           </div>
         )}
-        {moveError ? (
+        {moveError || failed ? (
           <Small role="alert" className="text-need-fg">
-            {moveError}
+            {moveError || failed}
           </Small>
         ) : null}
         <Small className="text-pretty">A space with no number goes by age, after the numbered ones.</Small>

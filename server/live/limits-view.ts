@@ -302,15 +302,17 @@ function byRoleOf(runs: LimitsInput['runs'], covered: (key: string) => boolean):
 }
 
 /** the spaces of this machine in queue order: numbered by their priority, then the ones with none as they were listed.
- *  The sort is stable, so spaces with the same number (or none) keep their old order and their tasks go by age. Shared by
+ *  The sort is stable, so spaces with the same number (or none) keep their old order (their tasks go by age). Shared by
  *  the Spaces table and the Waiting list so a group never disagrees with the table's order; the order itself is one
- *  comparator (shared/space-order.ts), the engine's own line and `shepherdr space list` reading it too. */
+ *  comparator (shared/space-order.ts), the engine's own line and `shepherdr space list` reading it too. The home space has
+ *  no place (source.ts HOME_NO_PLACE): a number a hand-edited settings.json keeps there moves nothing, as the arrows read
+ *  it, so the table does not order by it either. */
 function listedSpaces(input: LimitsInput): { id: string; name: string; key: string }[] {
   const s = input.settings
   const listed = input.matrix.rows.filter((r) => r.kind === 'space').map((r) => ({ id: r.id, name: r.name, key: r.id.split(':')[2]! }))
   const homeSets = [...SPACE_KEYS, 'models.maxAtOnce'].some((k) => s.pick(k, { space: HOME }).from === 'space')
   if (homeSets && !listed.some((x) => x.key === HOME)) listed.unshift({ id: placeId.home(input.host), name: 'home', key: HOME })
-  const byPlace = placeOrder((key) => s.spacePriority(key))
+  const byPlace = placeOrder((key) => (key === HOME ? null : s.spacePriority(key)))
   return listed.sort((a, b) => byPlace(a.key, b.key))
 }
 

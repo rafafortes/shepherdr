@@ -191,6 +191,12 @@ describe('the spaces: Max tasks and Merge train, and one sub-limit per provider 
     expect(view.spaces.rows.map((r) => r.cells['space.priority']!.row.value)).toEqual(['1', '2', '2', 'off'])
     expect(view.spaces.rows[0]!.cells['space.priority']).toMatchObject({ place: 'p:box:alpha', from: 'space', set: true })
     expect(view.spaces.rows[3]!.cells['space.priority']).toMatchObject({ place: 'p:box:beta', from: 'default', set: false })
+    // the home space has no place in the queue: a number a hand-edited settings.json keeps there orders nothing (the
+    // arrows read it as none too, and source.ts refuses to write one), so the table does not order by it either
+    const homed = settings({ spaces: { '~': { 'space.priority': '1' }, gtm: { 'space.priority': '2' } } })
+    const homedView = limitsView(input(homed, { matrix: modelsMatrix(homed, { host: HOST, name: HOST }, places) }))
+    expect(homedView.spaces.rows.map((r) => r.key)).toEqual(['gtm', '~', 'beta', 'alpha', 'zeta'])
+    expect(homedView.spaces.rows[1]).toMatchObject({ home: true })
   })
 
   test('one order for every mix of numbered, equal and unnumbered spaces: the Spaces table, the engine and space list read it', () => {
