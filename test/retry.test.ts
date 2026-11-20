@@ -168,10 +168,17 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(providerError('Claude Code is temporarily limiting requests (not your usage limit)', 'rate_limit', 429)).toEqual({ passing: true, reason: 'Rate limited' })
     // its extra usage running out is the allowance, with the reset it names
     expect(providerError("You're out of extra usage · resets 5pm", 'rate_limit', 429).reason).toBe('Out of allowance until 5pm')
-    // a plan's spend or an organization's limit is the allowance, apostrophe and all; a limit of requests, however it is
-    // spelled, and Google's transient 429 that points at its quota page, are not
+    // a plan's spend or an organization's limit is the allowance, apostrophe and all, and the rate words after a full
+    // stop say nothing of it; a limit of requests, of tokens or of the context, however it is spelled, is not
     expect(providerError("You've hit your org's spend limit", 'rate_limit', 429)).toEqual({ passing: false, reason: 'Out of allowance' })
+    expect(providerError("You've hit your org's spend limit. Requests are blocked until you raise it", 'rate_limit', 429)).toEqual({ passing: false, reason: 'Out of allowance' })
+    expect(providerError("You've hit your corporate spend limit", 'rate_limit', 429)).toEqual({ passing: false, reason: 'Out of allowance' })
     expect(providerError('max_requests limit exceeded', 'rate_limit', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('Request limit reached', '', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('Output token limit reached', '', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('Context limit reached · /compact or /clear to continue', 'invalid_request', 400).reason).toBe('Context window full')
+    // a bare limit reached is the allowance, and Google's transient 429 that points at its quota page is a wait
+    expect(providerError('Limit reached. resets 3pm', '', 429).reason).toBe('Out of allowance until 3pm')
     expect(providerError('Resource has been exhausted (e.g. check quota).', '', 429)).toEqual({ passing: true, reason: 'Rate limited' })
     // agy's own out-of-allowance words, which name a quota reached and its reset
     expect(providerError('RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 158h59m47s.', '', 429).reason).toBe('Out of allowance until in 158h59m47s')
@@ -216,6 +223,9 @@ describe("each CLI's log says what cut its turn off", () => {
     // a date with its clock written after it; one that has passed is past (an allowance that came back is back), and one
     // a week ahead is this year's
     expect(at('resets Nov 21, 11:59am')).toBe('2026-11-21T11:59:00.000Z')
+    expect(at('resets 21 Nov, 11:59am')).toBe('2026-11-21T11:59:00.000Z')
+    // a date a machine writes names its own, never today's clock
+    expect(at('resets 2026-11-25 03:00')).toBe('2026-11-25T03:00:00.000Z')
     expect(at("You've hit your weekly limit · resets Nov 6, 11:59am")).toBe('2026-11-06T11:59:00.000Z')
     expect(at('resets Dec 30, 1:00pm')).toBe('2026-12-30T13:00:00.000Z')
     // a date this year's is half a year behind is next year's (a week that ends after New Year)
@@ -230,8 +240,11 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(resetOf('resets in 3 elephants', now, 'UTC')).toEqual({ when: 'in 3 elephants' })
     expect(resetOf('resets 31:99pm', now, 'UTC')).toEqual({ when: '31:99pm' })
     expect(resetOf('resets Nov 42, 5pm', now, 'UTC')).toEqual({ when: 'Nov 42' })
-    // a reset whose words are blank name nothing
+    // a reset whose words are blank, or that name no time at all ("try again later", "reset your payment method"),
+    // says no reset: the reason keeps nothing of those words
     expect(resetOf('resets  · 5pm', now, 'UTC')).toBeUndefined()
+    expect(resetOf('try again later', now, 'UTC')).toBeUndefined()
+    expect(resetOf('billing problem: reset your payment method', now, 'UTC')).toBeUndefined()
     // each CLI's own run-out words name when it comes back, so its run-out carries a moment, not only words
     for (const [words, iso] of [
       ["You've hit your 5-hour limit · resets 2:10am", '2026-11-20T02:10:00.000Z'],

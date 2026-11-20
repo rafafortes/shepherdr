@@ -245,17 +245,18 @@ export class Returns {
       due: o.at + wait(0),
       ...(returned.length ? { returned } : {}),
       ...(also.allOut ? { allOut: true } : {}),
-      ...(also.resetAt !== undefined ? { resetAt: also.resetAt } : {}),
+      ...('resetAt' in also ? { resetAt: also.resetAt } : {}),
     }
     // one more cut-off of an outage still open keeps its schedule: a night of cut-offs never puts its question off
-    // again and again (one that answered or is over starts a new count)
+    // again and again (one that answered or is over starts a new count). Its reset is the new takeover's own, given or
+    // not: the allowance it named is the one that came back, and a takeover of another kind has none
     if (was && !was.back && !was.ok) {
       this.data[keyOf(o.role, o.space)] = {
         ...was,
         to: fresh.to,
         why: o.why,
         lastCut: o.at,
-        ...(also.resetAt !== undefined ? { resetAt: also.resetAt } : {}),
+        ...('resetAt' in also ? { resetAt: also.resetAt } : {}),
         allOut: also.allOut ?? was.allOut,
       }
       this.again(was, also.key)
@@ -266,12 +267,14 @@ export class Returns {
   /** one more agent of that role cut off for good while its outage is open. On the primary (onPrimary), it says the primary
    *  refuses again: its answer is not fresh any more, and an agent at work on it counts only after a quiet while (QUIET);
    *  on the backup it says nothing of the primary. allOut: its backup was cut off too, or it has none */
-  cut(role: ReturnRole, space: string, at = Date.now(), also: { key?: string; allOut?: boolean; onPrimary?: boolean } = {}) {
+  cut(role: ReturnRole, space: string, at = Date.now(), also: { key?: string; allOut?: boolean; onPrimary?: boolean; resetAt?: number } = {}) {
     const o = this.get(role, space)
     if (!o || o.back) return
     if (also.onPrimary) {
       o.lastCut = at
       o.ok = undefined
+      // the refusal's own reset, given or not: it is what this outage ends at now
+      if ('resetAt' in also) o.resetAt = also.resetAt
     }
     if (also.allOut) o.allOut = true
     this.again(o, also.key)

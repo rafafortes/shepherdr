@@ -765,7 +765,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const rows = modelsMatrix(this.settings, { host: HOST, name: NAME }, spaces).rows.map((r) => r.id)
     const agents: LiveAgent[] = Object.values(this.agents.records).map((r) => ({ key: r.key, kind: r.kind, model: r.model, status: this.agents.status(r.key) }))
     const tasks: TaskFact[] = this.engine.tasks.filter((t) => !t.archived).map((t) => ({ status: this.engine.statusOf(t), agent: t.agent, reviewer: t.reviewer }))
-    const watch = this.returns.list().map((o) => ({ key: keyOf(o.primary.kind, o.primary.model), back: o.back, ok: o.ok }))
+    const watch = this.returns.list().map((o) => ({ key: keyOf(o.primary.kind, o.primary.model), back: o.back, ok: o.ok, resetAt: o.resetAt, at: o.at }))
     const now = Date.now()
     // what counts toward models.maxAtOnce now, and the entry each task held for a model's cap waits for
     const runs = this.engine.runs().map((r) => ({ key: r.key, space: r.space }))
@@ -2948,7 +2948,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const allOut = noneLeft(ran, primary, backups)
       const o = this.returns.get(role, space)
       // a cut-off on the backup says nothing of the primary: only one on the primary puts its answer off
-      if (o && !o.back) this.returns.cut(role, space, Date.now(), { key, allOut, onPrimary: sameHarness(ran, primary) })
+      if (o && !o.back)
+        this.returns.cut(role, space, Date.now(), {
+          key,
+          allOut,
+          onPrimary: sameHarness(ran, primary),
+          resetAt: sameHarness(ran, primary) ? this.resetOfTakeover(why, primary) : undefined,
+        })
       else this.returns.note({ role, space, primary, to: ran, why, at: Date.now() }, { key, allOut, resetAt: this.resetOfTakeover(why, primary) })
       // it shows in line at once, not as needing the human until the watch's next pass
       this.refreshGoingBack()

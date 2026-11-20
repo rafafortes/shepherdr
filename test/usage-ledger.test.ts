@@ -288,7 +288,7 @@ describe('run-outs: recorded once, and out until a reset, a return or a later ca
     l.runOut(runOut('A/Agent', 2, { reset: '2:10am', resetAt }), NOW)
     expect(l.outOf('pi.opencode-go', resetAt - 60_000).out).toBe(true)
     expect(l.outOf('pi.opencode-go', resetAt).out).toBe(false)
-    l.count('B/Agent', 'pi.opencode-go/deepseek-v4.1-flash', call('in-the-same-hour', 2), NOW)
+    l.count('B/Agent', 'pi.opencode-go/deepseek-v4.1-flash', { id: 'in-the-same-hour', at: ago(2), tokens: 10 }, NOW)
     expect(l.outOf('pi.opencode-go', resetAt - 60_000).out).toBe(true)
   })
 

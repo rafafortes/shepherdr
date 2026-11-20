@@ -203,6 +203,19 @@ describe('the summary: providers, models, usage, run-outs, what runs now', () =>
     expect(provider(ok, 'pi.opencode-go').runOuts.out).toBe(false)
   })
 
+  test('an outage whose own run-out named a reset that has come says nothing of now, as source.ts outNow reads it', () => {
+    const s = settings({ everywhere: { 'task.agent': 'pi', 'task.model': GO } })
+    const u = ledger('sum-watch-reset')
+    call(u, GO, 1)
+    // the run-out's own reset came, and the return watch has not asked the primary yet
+    runOut(u, GO, 3, { resetAt: NOW - HOUR })
+    const row = (resetAt: number) => provider(modelsSummary(input(s, u, { watch: [{ key: GO, resetAt, at: NOW - 3 * HOUR }] })), 'pi.opencode-go')?.runOuts
+    // the reset the takeover kept is still ahead: out, as the watch reads it
+    expect(row(NOW + HOUR)).toMatchObject({ out: true })
+    // that reset has come: new tasks start on it again, so the row says it is not out
+    expect(row(NOW - HOUR)).toMatchObject({ out: false })
+  })
+
   test('the backfill is shown once it is done', () => {
     const u = ledger('sum-backfill')
     u.markBackfilled(NOW - 5)

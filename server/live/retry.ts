@@ -76,14 +76,28 @@ const WORDS_CONTENT =
 const WORDS_RATE = /rate.?limit|too many requests/i
 const WORDS_AUTH = /\b(?:status|error|HTTP)\b[^\n]{0,12}\b40[13]\b|\b401 Unauthorized\b|please run \/login|login expired|not logged in|oauth token/i
 /** a plan's allowance in words, which no wait clears: "usage limit" (but never Claude Code's "not your usage limit"
- *  while it throttles), "out of extra usage", "limit reached" (never "rate limit reached"), "You've hit your 5-hour
- *  limit", a session or a plan limit, a quota, a billing problem. The hyphen is why this has its own words: Claude Code
- *  says "you've hit your 5-hour limit", and without it the code that comes with it (`rate_limit`) had that cut off
- *  waited out as a rate limit that passes. What the limit is *of* decides the rest: "hit your rate limit", "reached the
- *  request limit", "the output limit" and "the context window limit" are a wait or a resource, never an allowance,
- *  however the sentence runs. */
+ *  while it throttles), "out of extra usage", a session's or a plan's limit, a quota, a billing problem. */
 const WORDS_ALLOWANCE =
-  /(?<!not your )usage limit|out of (?:extra )?usage|(?<!rate.?)limit reached|\b(?:hit|reached) (?:your|its|the) (?![\w .'-]*(?:rate|requests?|context|output|tokens?|concurren\w*))[\w .'-]{0,24}?\blimit\b|\b(?:session|weekly|hourly|daily|monthly|5-hour|five-hour|plan|subscription) limit\b|(?<!check )\bquota\b|billing|credit balance|payment/i
+  /(?<!not your )usage limit|out of (?:extra )?usage|\b(?:session|weekly|hourly|daily|monthly|5-hour|five-hour|plan|subscription) limit\b|(?<!check )\bquota\b|billing|credit balance|payment/i
+/** a limit the words say the agent hit or reached, with the words between them: "You've hit your 5-hour limit",
+ *  "reached the limit for this week". The hyphen is why this has its own reader: Claude Code says "you've hit your
+ *  5-hour limit", and without it the code that comes with it (`rate_limit`) had that cut off waited out as a passing
+ *  rate limit. */
+const PHRASED_LIMIT = /\b(?:hit|reached) (?:your|its|the) ([\w .'-]{0,24}?)\blimit\b/i
+/** a bare "limit reached": an allowance, unless the limit is one of these */
+const LIMIT_REACHED = /([\w-]+[ -])?limit reached/i
+/** what a limit is *of* where that makes it a wait or a resource, never an allowance: a rate ("per-minute rate limit",
+ *  "the API rate limit"), requests ("max_requests limit"), the context, the output, tokens, concurrency */
+const LIMIT_OF_NOTHING = /\brate\b|requests?\b|context|output|tokens?\b|concurren|max_/i
+
+/** whether the provider's words say its plan's allowance ran out, never a rate limit or a resource's own limit */
+function outOfAllowanceInWords(words: string): boolean {
+  if (WORDS_ALLOWANCE.test(words)) return true
+  const phrased = PHRASED_LIMIT.exec(words)
+  if (phrased && !LIMIT_OF_NOTHING.test(phrased[1] ?? '')) return true
+  const reached = LIMIT_REACHED.exec(words)
+  return reached !== null && !LIMIT_OF_NOTHING.test(reached[1] ?? '')
+}
 /** a prepaid balance that ran out: the provider says so with 402 Payment Required, or in these words */
 const WORDS_CREDIT = /insufficient (?:account )?(?:funds|balance|credits?)|out of credits?|credit balance|payment required/i
 // agy's words for a model it does not have: "invalid model selection", "is not recognized as a known model"
@@ -99,11 +113,11 @@ const WORDS_PASSING: [RegExp, string][] = [
   ],
 ]
 
+/** a reset's own words after "resets": up to a punctuation mark, but a dot inside a clock it writes ("5 p.m.") stays */
+const RESET_WORDS = '((?:[^\n·.,;()]|\\.(?=[^\\s·.,;()])){1,24})'
 /** when an allowance comes back, as the provider says it: "resets 5pm", "resets 2:10am", "reset at 3pm", "try again at
  *  5:00 PM", "resets Nov 6, 11:59am", "resets in 1h3m51s", or an ISO time ("resets at 2026-11-11T20:44:33Z",
  *  Command Code's) */
-/** a reset's own words after "resets": up to a puntuation mark, but a dot inside a clock it writes ("5 p.m.") stays */
-const RESET_WORDS = '((?:[^\n·.,;()]|\\.(?=[^\\s·.,;()])){1,24})'
 const RESET = new RegExp(`\\bresets? (?:at )?(\\d{4}-\\d{2}-\\d{2}T[\\d:.]+(?:Z|[+-]\\d{2}:?\\d{2})?)|\\bresets? (?:at )?${RESET_WORDS}|\\btry again (?:at |on |after |in )?([^\\n.,;()]{1,24})`, 'i')
 
 /** the units a provider counts a wait in: seconds too, which no time rule of Settings has (agy says "158h59m47s") */
@@ -151,8 +165,10 @@ function spanOf(text: string): number | undefined {
 const IN_SPAN = /\b(?:in|after)\s+([\d.]+\s*[a-z]+(?:(?:\s*and)?\s*[\d.]+\s*[a-z]+)*)/i
 /** a clock time as a provider writes it: "5pm", "2:10am", "5:00 PM", "17:00", "noon" */
 const CLOCK_WORDS = /\b(?:\d{1,2}(?::\d{2})?\s*(?:[ap]\.m\.?|[ap]m)|\d{1,2}:\d{2}|noon|midday|midnight)(?!\w)/i
-/** a date a reset words itself with, its clock written after it: "Nov 6", "November 6th" */
-const DATE_WORDS = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/i
+/** a date a reset words itself with, its clock written after it: "Nov 6", "November 6th", "21 Nov" */
+const DATE_WORDS = /\b(?:(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?|(\d{1,2})(?:st|nd|rd|th)?\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)\b/i
+/** a date as a machine writes it, its clock after it: "2026-11-25 03:00" */
+const ISO_DATE_WORDS = /\b(\d{4})-(\d{2})-(\d{2})\b/
 /** a day word a reset may name instead of a date: "tomorrow 9am", "Fri 9am" */
 const DAY_WORD = /\b(today|tonight|tomorrow|tmrw|tmr|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)\b/i
 /** the zone a CLI names beside its reset: "resets 5pm (Europe/Oslo)", "resets 3pm (UTC)" */
@@ -197,6 +213,9 @@ function resetMoment(words: string, now: number, configured: string): number | u
   const y = today.getUTCFullYear()
   const at = (year: number, month: number, day: number) => instant(new Date(Date.UTC(year, month, day, clock.h, clock.m)), zone)
   const todayAt = at(y, today.getUTCMonth(), today.getUTCDate())
+  // "2026-11-25 03:00" names its own date, this year or another
+  const machine = ISO_DATE_WORDS.exec(words)
+  if (machine) return at(Number(machine[1]), Number(machine[2]) - 1, Number(machine[3]))
   const date = DATE_WORDS.exec(words)
   if (!date) {
     // a day word instead of a date: "tomorrow 9am", "Fri 9am"
@@ -211,8 +230,8 @@ function resetMoment(words: string, now: number, configured: string): number | u
     // its words stop at the minute: this minute is still today
     return todayAt + 60_000 > now ? todayAt : at(y, today.getUTCMonth(), today.getUTCDate() + 1)
   }
-  const month = MONTHS.indexOf((date[1] ?? '').toLowerCase())
-  const day = Number(date[2] ?? 0)
+  const month = MONTHS.indexOf((date[1] ?? date[4] ?? '').toLowerCase())
+  const day = Number(date[2] ?? date[3] ?? 0)
   if (day < 1 || day > 31) return undefined
   const thisYear = at(y, month, day)
   return now - thisYear > HALF_YEAR ? at(y + 1, month, day) : thisYear
@@ -243,7 +262,11 @@ export function resetOf(words: string, now = Date.now(), zone = OWN_ZONE): { whe
   if (!when) return undefined
   // the time is read from the reset's own words on: a date keeps the clock written after it, and no other number of
   // the message is taken for it
-  const at = resetMoment(words.slice(m.index), now, zone)
+  const rest = words.slice(m.index)
+  const at = resetMoment(rest, now, zone)
+  // "try again later", "reset your payment method": words that name no time at all say no reset, and the reason keeps
+  // nothing of them
+  if (at === undefined && !CLOCK_WORDS.test(rest) && !DAY_WORD.test(rest) && !DATE_WORDS.test(rest) && !ISO_DATE_WORDS.test(rest) && !IN_SPAN.test(rest)) return undefined
   return { when, ...(at !== undefined ? { at } : {}) }
 }
 
@@ -269,7 +292,7 @@ export function providerError(words: string, code = '', status = 0, resetAt?: nu
   if (status === 402 || WORDS_CREDIT.test(words)) return { passing: false, reason: `Out of credit${until(words, resetAt)}` }
   // OpenCode's quota error is its plan's or its free models' allowance (its `provider.free-limit`, whose retryAfterMs says
   // when they come back), unless the provider says it is a rate limit
-  if (c === 'usage_limit_exceeded' || c === 'billing_error' || c === 'provider.free-limit' || (c === 'provider.quota' && !WORDS_RATE.test(words)) || WORDS_ALLOWANCE.test(words))
+  if (c === 'usage_limit_exceeded' || c === 'billing_error' || c === 'provider.free-limit' || (c === 'provider.quota' && !WORDS_RATE.test(words)) || outOfAllowanceInWords(words))
     return { passing: false, reason: `Out of allowance${until(words, resetAt)}` }
   // a filter refusing one response is no outage of the provider: its own task goes to its backup (no return entry),
   // never a provider other chats are kept off. Waiting would only feed the same blocked context back to the same model.
@@ -278,7 +301,7 @@ export function providerError(words: string, code = '', status = 0, resetAt?: nu
     return {
       passing: false,
       reason:
-        c === 'context_window_exceeded' || /context (?:window|length)|too long/i.test(words)
+        c === 'context_window_exceeded' || /context (?:window|length|limit)|too long/i.test(words)
           ? 'Context window full'
           : c === 'model_not_found' || c === 'provider.no-route' || /model/i.test(words)
             ? 'Model not available'

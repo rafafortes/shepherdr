@@ -142,8 +142,8 @@ export interface SummaryInput {
   agents: LiveAgent[]
   tasks: TaskFact[]
   /** the outages the return watch has open (no back yet) or has seen answer (back, or a probe's ok: when), by the
-   *  primary's model key */
-  watch: { key: string; back?: number; ok?: number }[]
+   *  primary's model key, with the reset the provider named for its run-out (source.ts outNow reads it the same way) */
+  watch: { key: string; back?: number; ok?: number; resetAt?: number; at?: number }[]
   /** the quota figures and reads (quotas.ts); none in a test that has no quota side */
   quota?: QuotaInput
   /** the runs that count toward models.maxAtOnce now (engine.runs): the model key each runs on, and its space's key */
@@ -229,7 +229,14 @@ const sumUsage = (list: UsageTotals[]): SummaryUsage => {
 }
 
 /** one row (a provider's, or a model's): what matches it, counted */
-function rowOf(f: SummaryInput, matches: (k: string) => boolean, conf: ConfRec[], watch: { key: string; back?: number; ok?: number }[], provider: string, model?: string): SummaryRow {
+function rowOf(
+  f: SummaryInput,
+  matches: (k: string) => boolean,
+  conf: ConfRec[],
+  watch: { key: string; back?: number; ok?: number; resetAt?: number; at?: number }[],
+  provider: string,
+  model?: string,
+): SummaryRow {
   const now = f.now
   const atOnce = atOnceOf(f, provider, model)
   const c: SummaryConfigured = { primary: 0, backup: 0, roles: {}, spaces: {} }
@@ -258,7 +265,8 @@ function rowOf(f: SummaryInput, matches: (k: string) => boolean, conf: ConfRec[]
   // too (source.ts outNow), while the chats still on the backup go back. The row must not say it is out while they do.
   const answered = (w: { back?: number; ok?: number }) => w.back ?? w.ok
   const backAt = watch.filter((w) => matches(w.key) && answered(w) !== undefined).reduce((a, w) => Math.max(a, answered(w)!), 0) || undefined
-  const openWatch = watch.some((w) => matches(w.key) && answered(w) === undefined)
+  // an outage whose run-out named a reset that has come is over for new starts too, and the row says what they read
+  const openWatch = watch.some((w) => matches(w.key) && answered(w) === undefined && !(w.resetAt !== undefined && w.resetAt <= now))
   const runs = f.usage.runOuts(matches)
   const inWeek = runs.filter((r) => r.at >= now - WEEK)
   const st = f.usage.outOf(provider, now, backAt, model)

@@ -1324,6 +1324,14 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
       src.returns.failed('task', s.p.name, now - 5 * 3_600_000)
       expect(out(KEY)).toBeUndefined()
       expect(startsOn(s.p.name)).toBe('opencode')
+      // a refusal on the primary after that reset is another outage, and its own reset is what the mark ends at now
+      const later = now + 30 * 60_000
+      src.returns.cut('task', s.p.name, now, { key: 'another/Agent', onPrimary: true, resetAt: later })
+      expect(src.returns.get('task', s.p.name)?.resetAt).toBe(later)
+      // a takeover of another kind keeps none: the allowance that reset named is not what this one waits for
+      src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'signed out', at: now }, { resetAt: undefined })
+      expect(src.returns.get('task', s.p.name)?.why).toBe('signed out')
+      expect(src.returns.get('task', s.p.name)?.resetAt).toBeUndefined()
     } finally {
       forget(s.p.name)
       setModels('opencode', undefined)
