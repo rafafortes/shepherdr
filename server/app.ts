@@ -7,7 +7,7 @@ import { notifies, waiting } from '../shared/alerts.ts'
 import { buildId } from '../shared/build.ts'
 import { DICTATE_CAP, DICTATE_TOO_LONG } from '../shared/dictate.ts'
 import { ATTACH_MAX, fileType, UPLOAD_TOO_LARGE } from '../shared/files.ts'
-import type { Action, AddSpace, ServerEvent, UpdateStatus, WorktreeAsk } from '../shared/types.ts'
+import type { Action, AddSpace, ServerEvent, Snapshot, UpdateStatus, WorktreeAsk } from '../shared/types.ts'
 import { frameResponse, wrapPage } from './frame.ts'
 import { hostAllowed, refusedHosts } from './hosts.ts'
 import type { Source } from './source.ts'
@@ -23,6 +23,8 @@ type Sock =
 const FONT = join(import.meta.dir, '..', 'node_modules', 'inter-ui', 'variable', 'InterVariable.woff2')
 /** the longest a snapshot waits for the one before it (see where `source.on('snapshot')` spaces them) */
 const SNAP_MAX = 2000
+/** how old a snapshot an alert may read: it only asks what waits and whether the place's Notify lets it through */
+const SNAP_FRESH = 1000
 
 /**
  * The app's own origin holds the x-shepherdr write capability and all its data, so its pages get their own wall too:
@@ -107,6 +109,17 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
   // (what it cost, four times over), never more than SNAP_MAX
   let snapEnd = 0
   let snapCost = 0
+  // alerts come in bursts (one per status card); the ones a screen or a previous alert already built are close enough
+  let lastSnapshot: { at: number; snap: Snapshot } | null = null
+  const rememberSnapshot = (snap: Snapshot) => {
+    lastSnapshot = { at: Date.now(), snap }
+  }
+  const alertSnapshot = () => {
+    if (lastSnapshot && Date.now() - lastSnapshot.at < SNAP_FRESH) return lastSnapshot.snap
+    const snap = source.snapshot()
+    rememberSnapshot(snap)
+    return snap
+  }
   source.on('snapshot', () => {
     // nothing to send it to: no screen and no other machine's link is open, so nothing is built for nobody (an idle
     // server with the phone closed pays nothing per change and per half minute). The sockets of `live` are the ones
@@ -120,6 +133,7 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
       if (!live.size) return
       const began = Date.now()
       const snapshot = timed('snapshot', () => source.snapshot())
+      rememberSnapshot(snapshot)
       snapEnd = Date.now()
       snapCost = snapEnd - began
       for (const ws of live) send(ws, { type: 'snapshot', snapshot })
@@ -146,7 +160,7 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
     // a worker for another machine: its main machine's link pushes them
     for (const ws of live) if (ws.data.kind === 'live' && ws.data.link) send(ws, { type: 'alert', alert } as unknown as ServerEvent)
     // what its place's Notify lets through: All, Needs me or Off
-    const snap = source.snapshot()
+    const snap = alertSnapshot()
     if (!notifies(snap, alert)) return
     const onScreen = new Set<string>()
     for (const ws of live) if (ws.data.kind === 'live' && ws.data.visible && ws.data.push) onScreen.add(ws.data.push)

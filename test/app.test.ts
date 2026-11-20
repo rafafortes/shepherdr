@@ -7,15 +7,19 @@ import { startApp } from '../server/app.ts'
 import { refusedHosts } from '../server/hosts.ts'
 import type { Push } from '../server/push.ts'
 import { UPLOAD_TOO_LARGE } from '../shared/files.ts'
-import type { Alert, UpdateStatus } from '../shared/types.ts'
+import type { Alert, Snapshot, UpdateStatus } from '../shared/types.ts'
 import { Emitter, type Source, type SourceEvents } from '../server/source.ts'
 import { tmp } from './tmp.ts'
 
 const acted: unknown[] = []
 class Stub extends Emitter<SourceEvents> {
   kind = 'demo' as const
+  /** how many snapshots were built here, so a burst of alerts' builds can be counted (SHE-78) */
+  snapshots = 0
+  settings: Snapshot['settings'] = []
   snapshot() {
-    return { name: 'x', host: 'h', places: [], tasks: [], automations: {}, artifacts: [], asks: {}, settings: [], user: 'u' }
+    this.snapshots++
+    return { name: 'x', host: 'h', places: [], tasks: [], automations: {}, artifacts: [], asks: {}, settings: this.settings, user: 'u' }
   }
   chat() {
     return undefined
@@ -180,6 +184,69 @@ describe('alerts', () => {
     return { ws, got }
   }
   const settle = () => new Promise((r) => setTimeout(r, 50))
+
+  // an alert path of its own: a push that never finishes cannot ask for another snapshot behind the test's back
+  const quiet = { publicKey: 'k', send: () => new Promise<void>(() => {}) } as unknown as Push
+  const apps: ReturnType<typeof startApp>[] = []
+  const isolated = (stub: Stub, p: Push = quiet) => {
+    const app = startApp({ source: stub as unknown as Source, dist: '/nonexistent', push: p, port: 0 })
+    apps.push(app)
+    return app
+  }
+  afterAll(() =>
+    apps.forEach((a) => {
+      a.stop(true)
+    }),
+  )
+  const place = 'p:h:x'
+  const coordinator: Alert = { id: 'a2', from: 'Shepherdr', title: 'Coordinator asks', body: '', go: { place } }
+
+  test('two alerts inside a second build one snapshot between them', () => {
+    const s = new Stub()
+    isolated(s)
+    s.emit('alert', alert)
+    s.emit('alert', alert)
+    expect(s.snapshots).toBe(1)
+  })
+
+  test('alerts reuse the snapshot a screen just built, and build again once it is a second old', async () => {
+    const s = new Stub()
+    const app = isolated(s)
+    const ws = new WebSocket(`ws://127.0.0.1:${app.port}/api/ws`)
+    await new Promise((r) => (ws.onopen = r))
+    // a change with a screen open builds one through the 'snapshot' handler; wait for it (opening makes one of its own)
+    const made = s.snapshots
+    s.emit('snapshot')
+    for (let i = 0; i < 200 && s.snapshots === made; i++) await Bun.sleep(5)
+    expect(s.snapshots).toBe(made + 1)
+    const fresh = s.snapshots
+    s.emit('alert', alert)
+    s.emit('alert', alert)
+    expect(s.snapshots).toBe(fresh)
+    const now = Date.now
+    let clock = now()
+    Date.now = () => clock
+    try {
+      clock += 1001
+      s.emit('alert', alert)
+      expect(s.snapshots).toBe(fresh + 1)
+    } finally {
+      Date.now = now
+      ws.close()
+    }
+  })
+
+  test('Notify Off sends nothing, a task in the same place still sends', () => {
+    const sent: string[] = []
+    const s = new Stub()
+    s.settings = [{ name: 'Notify', level: place, rows: [{ label: 'Notify', key: 'notify', value: 'Off', options: [] }] }]
+    isolated(s, { publicKey: 'k', send: async (a: Alert) => void sent.push(a.id) } as unknown as Push)
+    s.emit('alert', coordinator)
+    s.emit('alert', coordinator)
+    expect(sent).toEqual([])
+    s.emit('alert', { ...alert, task: true, go: { place } })
+    expect(sent).toEqual(['a1'])
+  })
 
   test('the app on screen shows no alert, and its device gets no push', async () => {
     const phone = await open()
