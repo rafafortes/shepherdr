@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentRecord, Spec } from '../server/live/agents.ts'
+import { ROOT } from '../server/root.ts'
 import { tmp } from './tmp.ts'
 
 const { Agents } = await import('../server/live/agents.ts')
@@ -27,7 +28,8 @@ function harness() {
 }
 
 const key = 'SHE-137/Agent'
-const command = join(import.meta.dir, '..', 'bin', 'shepherdr')
+// agentEnv takes ROOT (which a merge gate may point at the installed checkout), so derive the path the same way
+const command = join(ROOT, 'bin', 'shepherdr')
 const base = (o: Partial<Spec> = {}): Spec =>
   ({
     key,
