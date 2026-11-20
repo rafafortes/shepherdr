@@ -76,6 +76,9 @@ import {
 } from './ui.tsx'
 
 export default function App() {
+  // Test hook for the snapshot-render browser test: it sets this global; the app never does.
+  const renderCount = (globalThis as { shepRenderCount?: Record<string, number> }).shepRenderCount
+  if (renderCount) renderCount.app = (renderCount.app ?? 0) + 1
   const snap = useSnap()
   const device = useUI((u) => u.device)
   const search = useUI((u) => u.search)

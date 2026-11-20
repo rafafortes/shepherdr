@@ -3,7 +3,10 @@
 import type { Action, ActivityAnswer, ActivityAsk, AddSpace, Alert, Chat, Folders, Snapshot, TermScreen, WorktreeAsk } from '../shared/types.ts'
 
 export type SourceEvents = {
+  /** something changed: the next snapshot gets a new revision */
   snapshot: []
+  /** the 30-second refresh: send a snapshot, but keep the revision when nothing in it changed */
+  heartbeat: []
   chat: [key: string]
   alert: [alert: Alert]
   terminal: [key: string, screen: TermScreen]
@@ -29,6 +32,42 @@ export class Emitter<E extends Record<string, unknown[]>> {
   }
   emit<K extends keyof E>(ev: K, ...a: E[K]) {
     for (const f of this.fns[ev] ?? []) f(...a)
+  }
+}
+
+/** what a snapshot says, without the number the server gave it */
+const withoutRev = (snap: Snapshot) => {
+  const { rev: _previous, ...body } = snap
+  return JSON.stringify(body)
+}
+
+/** A snapshot's revision (PERFC-01). A change emit advances it, even one whose effect is read through an action
+ *  rather than the snapshot (a profile changed, say). The 30-second heartbeat instead keeps the number when the bytes
+ *  are the same, so a screen that has not changed anything keeps the object it drew and redraws nothing. The first
+ *  number comes from the clock, so a screen that kept a snapshot across a server restart cannot mistake the next
+ *  process's early numbers for the ones it already drew. */
+export class SnapshotRevisions {
+  private rev = Date.now()
+  private last: Snapshot | null = null
+  private lastBytes: string | null = null
+  /** a change: the next snapshot gets a new number. Nothing is serialized here: the server already has the object. */
+  changed(snap: Snapshot): Snapshot {
+    this.rev++
+    this.last = snap
+    this.lastBytes = null // worked out at the next refresh, not on every change
+    return { ...snap, rev: this.rev }
+  }
+  /** a refresh: same bytes, same number; different bytes, a change the emit sites did not have to name. This is the
+   *  half-minute heartbeat, so it is the only place that pays for a comparison. */
+  refresh(snap: Snapshot): Snapshot {
+    const bytes = withoutRev(snap)
+    if (this.lastBytes === null) this.lastBytes = this.last ? withoutRev(this.last) : ''
+    if (bytes !== this.lastBytes) {
+      this.last = snap
+      this.lastBytes = bytes
+      this.rev++
+    }
+    return { ...snap, rev: this.rev }
   }
 }
 

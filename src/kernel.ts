@@ -494,6 +494,8 @@ const subscribe = (l: () => void) => {
     listeners.delete(l)
   }
 }
+/** The store's own notifications: a test counts them without a browser to prove a snapshot redrew nothing. */
+export const subscribeStore = subscribe
 
 /** Pick only what a part shows: it redraws when that changes, not on every change to the store. */
 export function useStore<T>(pick: (s: State) => T): T {
@@ -760,17 +762,26 @@ export function connect() {
       writeCapability = msg.capability
       return
     }
+    // A snapshot whose revision the server did not advance says what we already drew: keep the object so every
+    // picker keeps its identity and React skips the tree. The 30-second heartbeat is one of these (PERFC-01).
+    let changed = true
     if (msg.type === 'snapshot') {
-      state = { ...state, snap: msg.snapshot }
+      const snap = msg.snapshot
+      const before = state
+      changed = !state.snap || snap.rev === undefined || snap.rev !== state.snap.rev
+      if (changed) state = { ...state, snap }
       stayOnShown()
-      fromOldPin(msg.snapshot)
+      fromOldPin(snap)
       // once loaded, the first snapshot with every machine in reach says which chats are gone (one connecting or out
       // of reach may not list its chats yet: then none is dropped); later ones don't, so a failed one left open a day
       // keeps its Retry
-      if (!pruned && msg.snapshot.machines.every((m) => !m.connecting && m.status !== 'off')) {
-        putOutbox(prune(state.outbox, Date.now(), chatIn(msg.snapshot)))
+      if (!pruned && snap.machines.every((m) => !m.connecting && m.status !== 'off')) {
+        putOutbox(prune(state.outbox, Date.now(), chatIn(snap)))
         pruned = true
       }
+      // those steps can change state of their own (a place gone, an outbox pruned) without going through setUI: a
+      // redraw is still owed for them even when the snapshot's revision did not move (PERFC-01)
+      if (state !== before) changed = true
     } else if (msg.type === 'chat') {
       state = { ...state, chats: { ...state.chats, [msg.chat.key]: msg.chat } }
       putOutbox(settle(state.outbox, msg.chat))
@@ -778,7 +789,7 @@ export function connect() {
     else if (msg.type === 'update') state = { ...state, update: msg.update }
     else if (msg.type === 'build' && BUILD && msg.id && msg.id !== BUILD) reloadSoon()
     if (msg.type === 'snapshot') watchVisible()
-    emit()
+    if (changed) emit()
   }
   sock.onclose = () => drop(sock)
 }

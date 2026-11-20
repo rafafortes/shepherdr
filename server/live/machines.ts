@@ -32,6 +32,8 @@ export interface MachineRec {
 type Events = {
   peerChat: [machine: string, key: string, chat: Chat]
   snapshot: []
+  /** a poll or a peer push that found nothing new: a refresh, not a change */
+  heartbeat: []
   chat: [key: string, chat: Chat]
   terminal: [key: string, screen: TermScreen]
   alert: [alert: Alert]
@@ -489,7 +491,9 @@ export class Machines extends Emitter<Events> {
         // what waited goes in now; an executable-setting write waits for this worker's proof over the new link
         await this.drain(l)
       }
-      this.emit('snapshot')
+      // a successful poll that found nothing new is a refresh, not a change: keep the revision when the peer's bytes
+      // say the same thing, so a machine with a worker does not redraw every screen every five seconds
+      this.emit('heartbeat')
     } catch {
       if (!this.active(l)) return
       l.health.observe(false)
@@ -578,9 +582,11 @@ export class Machines extends Emitter<Events> {
         this.emit('peerChat', l.rec.machine, m.chat.key, m.chat)
       } else if (m.type === 'terminal') this.emit('terminal', m.chat, { ansi: m.ansi, cols: m.cols, rows: m.rows })
       else if (m.type === 'snapshot') {
+        // a peer sends its own half-minute heartbeat too: the same revision means a refresh, not a change to mirror
+        const refresh = l.snap?.rev !== undefined && m.snapshot.rev === l.snap.rev
         l.snap = m.snapshot
         this.keep(l)
-        this.emit('snapshot')
+        this.emit(refresh ? 'heartbeat' : 'snapshot')
       } else if (m.type === 'alert') this.emit('alert', m.alert)
       else if (m.type === 'news') this.emit('news', l.rec.machine, m.news)
     }

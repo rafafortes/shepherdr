@@ -456,6 +456,53 @@ describe('shepherdr doctor', () => {
 })
 
 describe('the live link to a worker', () => {
+  test('a peer snapshot with the same revision is a refresh; a new one is a change (PERFC-01)', async () => {
+    const snap = (rev: number) => ({
+      rev,
+      name: 'x',
+      host: 'talk',
+      places: [],
+      machines: [{ machine: 'talk', status: 'idle' }],
+      tasks: [],
+      automations: {},
+      artifacts: [],
+      asks: {},
+      needs: [],
+      settings: [],
+      user: 'u',
+    })
+    const s = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(req, srv) {
+        if (new URL(req.url).pathname === '/api/ws') return srv.upgrade(req) ? undefined : new Response('no', { status: 400 })
+        // the real /api/snapshot is stamped too, so the poll's copy has the revision a heartbeat repeats
+        return Response.json(snap(1))
+      },
+      websocket: {
+        open(ws) {
+          // the peer's heartbeat sends the same bytes and number; then it really changes
+          ws.send(JSON.stringify({ type: 'snapshot', snapshot: snap(1) }))
+          ws.send(JSON.stringify({ type: 'snapshot', snapshot: snap(1) }))
+          ws.send(JSON.stringify({ type: 'snapshot', snapshot: snap(2) }))
+        },
+      },
+    })
+    const m = machines(null)
+    const seen: string[] = []
+    m.on('snapshot', () => seen.push('snapshot'))
+    m.on('heartbeat', () => seen.push('heartbeat'))
+    try {
+      m.adopt('talk', `http://127.0.0.1:${s.port}/`)
+      await until('the changed push', () => seen.includes('snapshot'))
+      // the poll and both peer pushes of rev 1 are refreshes; only rev 2 is a change
+      expect(seen.filter((x) => x === 'snapshot')).toEqual(['snapshot'])
+      expect(seen.filter((x) => x === 'heartbeat').length).toBeGreaterThanOrEqual(2)
+    } finally {
+      s.stop(true)
+    }
+  })
+
   test('a chat it sends is kept and passed on, and a chat watched twice stays watched until both let go', async () => {
     const key = 'p:talk:web'
     const chat: Chat = { key, messages: [{ id: 'm1', who: 'agent', at: 1, text: 'Hello.' }] } as Chat

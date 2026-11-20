@@ -4,7 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import { layout, until } from './layout.ts'
 import type { Action, Message } from '../shared/types.ts'
 
-const { browser, world, url } = await layout()
+const { browser, world, url, server } = await layout()
 
 /** the chat the demo opens at: the home space's coordinator */
 const KEY = 'p:vm-str:~'
@@ -12,10 +12,10 @@ const emit = () => (world as unknown as { emit(e: string, k: string): void }).em
 
 type Counts = Record<string, number>
 const counts = (page: { evaluate<T>(f: () => T): Promise<T> }) => page.evaluate(() => ({ ...(window as unknown as { shepRenderCount: Counts }).shepRenderCount }))
-/** what redrew since the last reading, by row key */
+/** what redrew since the last reading, by row key; 'app' is the layout probe, not a row */
 const drawn = (now: Counts, before: Counts) =>
   Object.entries(now)
-    .filter(([k, n]) => n > (before[k] ?? 0))
+    .filter(([k, n]) => k !== 'app' && n > (before[k] ?? 0))
     .map(([k]) => k)
 
 describe.skipIf(!browser)('chat rows redraw only when their message changes', () => {
@@ -92,6 +92,67 @@ describe.skipIf(!browser)('chat rows redraw only when their message changes', ()
       const idle = await counts(page)
       expect(drawn(idle, answered)).toEqual([])
     } finally {
+      await page.close()
+    }
+  }, 60_000)
+})
+
+describe.skipIf(!browser)('a snapshot push redraws only when its revision changed', () => {
+  test('a heartbeat with the same revision redraws nothing, then one task changed redraws the layout', async () => {
+    const pushSnap = () => (world as unknown as { emit(e: string): void }).emit('snapshot')
+    const heartbeat = () => (world as unknown as { emit(e: string): void }).emit('heartbeat')
+    // a second socket to the same server sees the same broadcasts, just after the page (it connected later). Waiting
+    // for it is how the test knows a snapshot reached the screen, rather than guessing at the server's debounce.
+    const observer = new WebSocket(`ws://127.0.0.1:${server.port}/api/ws`)
+    const revs: number[] = []
+    observer.onmessage = (e) => {
+      const msg = JSON.parse(String(e.data)) as { type: string; snapshot?: { rev?: number } }
+      if (msg.type === 'snapshot') revs.push(msg.snapshot?.rev ?? 0)
+    }
+    await new Promise<void>((r) => (observer.onopen = () => r()))
+    if (!browser) return
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
+    try {
+      await page.goto(url())
+      await page.locator('[data-device]').waitFor()
+      await until(
+        () => counts(page),
+        (c) => (c.app ?? 0) > 0,
+      )
+      // let any snapshot queued while the page opened land before the one whose cost is measured
+      await Bun.sleep(100)
+      const settled = revs.length
+      await page.evaluate(() => {
+        ;(window as unknown as { shepRenderCount: Counts }).shepRenderCount = {}
+      })
+
+      // the 30-second heartbeat: the server pushes a snapshot whose revision did not move. A chat message after it
+      // is an ordering barrier: the observer says the snapshot was broadcast, and the barrier says the page read it.
+      heartbeat()
+      await until(
+        () => Promise.resolve(revs.length),
+        (n) => n > settled,
+      )
+      world.chats[KEY].messages.push({ id: 'snap-barrier', who: 'agent', text: 'Barrier for the snapshot test', at: Date.now() })
+      emit()
+      await page.getByText('Barrier for the snapshot test').waitFor()
+      expect((await counts(page)).app ?? 0).toBe(0)
+
+      // a task name that really changed advances the revision: the layout draws again
+      const afterHeartbeat = revs.length
+      const name = `Renamed for the snapshot test ${Date.now()}`
+      world.tasks[0].name = name
+      pushSnap()
+      await until(
+        () => Promise.resolve(revs.length),
+        (n) => n > afterHeartbeat,
+      )
+      await until(
+        () => counts(page),
+        (c) => (c.app ?? 0) > 0,
+      )
+    } finally {
+      observer.close()
       await page.close()
     }
   }, 60_000)

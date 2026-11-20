@@ -10,7 +10,7 @@ import { ATTACH_MAX, fileType, UPLOAD_TOO_LARGE } from '../shared/files.ts'
 import type { Action, AddSpace, ServerEvent, Snapshot, UpdateStatus, WorktreeAsk } from '../shared/types.ts'
 import { frameResponse, wrapPage } from './frame.ts'
 import { hostAllowed, refusedHosts } from './hosts.ts'
-import type { Source } from './source.ts'
+import { SnapshotRevisions, type Source } from './source.ts'
 import { span } from './live/media.ts'
 import type { Push } from './push.ts'
 
@@ -120,12 +120,21 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
     rememberSnapshot(snap)
     return snap
   }
-  source.on('snapshot', () => {
-    // nothing to send it to: no screen and no other machine's link is open, so nothing is built for nobody (an idle
-    // server with the phone closed pays nothing per change and per half minute). The sockets of `live` are the ones
-    // that get it; a screen that opens gets its own at once (websocket.open), and /api/snapshot and the alert handler
-    // build theirs when they need one. A link counts as one: it mirrors this machine (machines.ts keeps its snapshot).
-    if (snapTimer || !live.size) return
+  const revisions = new SnapshotRevisions()
+  /** nothing to send it to: no screen and no other machine's link is open, so nothing is built for nobody (an idle
+   *  server with the phone closed pays nothing per change and per half minute). The sockets of `live` are the ones
+   *  that get it; a screen that opens gets its own at once (websocket.open), and /api/snapshot and the alert handler
+   *  build theirs when they need one. A link counts as one: it mirrors this machine (machines.ts keeps its snapshot).
+   *  A change advances the revision; the half-minute heartbeat keeps it when the bytes say the same thing. */
+  let pendingRefresh = false
+  const scheduleSnapshot = (refresh: boolean) => {
+    if (snapTimer) {
+      // a change that lands while a heartbeat's build waits turns it into a change: its emit said something moved
+      if (!refresh) pendingRefresh = false
+      return
+    }
+    if (!live.size) return
+    pendingRefresh = refresh
     const wait = Math.min(SNAP_MAX, Math.max(30, snapEnd + snapCost * 4 - Date.now()))
     snapTimer = setTimeout(() => {
       snapTimer = null
@@ -133,12 +142,15 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
       if (!live.size) return
       const began = Date.now()
       const snapshot = timed('snapshot', () => source.snapshot())
-      rememberSnapshot(snapshot)
+      const stamped = pendingRefresh ? revisions.refresh(snapshot) : revisions.changed(snapshot)
+      rememberSnapshot(stamped)
       snapEnd = Date.now()
       snapCost = snapEnd - began
-      for (const ws of live) send(ws, { type: 'snapshot', snapshot })
+      for (const ws of live) send(ws, { type: 'snapshot', snapshot: stamped })
     }, wait)
-  })
+  }
+  source.on('snapshot', () => scheduleSnapshot(false))
+  source.on('heartbeat', () => scheduleSnapshot(true))
   source.on('chat', (key) => {
     const chat = timed('chat', () => source.chat(key))
     if (!chat) return
@@ -200,7 +212,8 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           const key = q.get('chat') ?? ''
           return json({ chat: timed('GET /api/chat', () => source.chat(key)) ?? null, status: source.chatStatus?.(key) })
         }
-        if (path === '/api/snapshot') return json(timed('GET /api/snapshot', () => source.snapshot()))
+        // a worker polls this route to mirror this machine: it needs the revision to tell a heartbeat from a change
+        if (path === '/api/snapshot') return json(timed('GET /api/snapshot', () => revisions.refresh(source.snapshot())))
         // which Shepherdr answers: a start from another plugin folder or version stops it (scripts/plugin.ts)
         if (path === '/api/version') return json(running())
         // the updater restarts the server only once it has stopped new calls and none is on; both at once, so no call
@@ -365,7 +378,7 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
       open(ws) {
         if (ws.data.kind === 'live') {
           live.add(ws)
-          send(ws, { type: 'snapshot', snapshot: source.snapshot() })
+          send(ws, { type: 'snapshot', snapshot: revisions.refresh(timed('snapshot', () => source.snapshot())) })
           // the screen's own proof of executable-setting writes (SEC-04): over this socket, never in the snapshot or
           // a file. It is a second wall for a caller that can POST but cannot read this socket; one that can do both
           // gets no more from this than it already has (the lead's honest threat model).
