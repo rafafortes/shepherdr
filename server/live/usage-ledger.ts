@@ -226,7 +226,8 @@ export class UsageLedger {
     return true
   }
 
-  /** one chat's totals inside the 35-day window (0s when it has none): the task row and the per-space rollup read this */
+  /** one chat's totals since counting began for it (0s when it has none), kept until 35 days after its last call: the
+   *  task row and the per-space rollup read this */
   chatUsage(chat: string): UsageTotals {
     const t = this.data.chats[chat]
     return t ? { tokens: t.tokens, calls: t.calls, ...(t.cost !== undefined ? { cost: t.cost } : {}) } : { tokens: 0, calls: 0 }

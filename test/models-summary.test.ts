@@ -245,6 +245,14 @@ describe('the usage by space: which place the chats belong to', () => {
     ])
   })
 
+  test('an archived task still counts on its space’s line, without waiting or reviewing in the rows', () => {
+    const u = ledger('sum-spaces-archived')
+    call(u, GO, 2, 400, undefined, 'T-9/Agent')
+    const sum = modelsSummary(input(settings(), u, { tasks: [{ id: 'T-9', space: 'gtm', status: 'archived' }] }))
+    expect(sum.spaces.find((s) => s.key === 'gtm')).toMatchObject({ tokens: 400, calls: 1 })
+    expect(provider(sum, 'pi.opencode-go').now.starts).toBe(0)
+  })
+
   test('one line per space even where nothing ran there', () => {
     const sum = modelsSummary(input(settings(), ledger('sum-spaces-empty')))
     expect(sum.spaces.map((s) => [s.key, s.calls])).toEqual([

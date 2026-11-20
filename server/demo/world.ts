@@ -609,7 +609,12 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     const spaces = this.matrixSpaces()
     const rows = modelsMatrix(this.stores[D.DEMO_HOST], { host: D.DEMO_HOST, name: D.DEMO_HOST }, spaces).rows.map((r) => r.id)
     const agents: LiveAgent[] = this.tasks.filter((t) => t.status === 'work').map((t) => ({ key: `${t.id}/Agent`, kind: kindOf(t.agent?.cli ?? 'Claude Code') ?? 'claude', status: 'working' }))
-    const tasks: TaskFact[] = this.tasks.map((t) => ({ id: t.id, space: t.place.split(':')[2] ?? '~', status: t.status, ...(t.agent ? { agent: { kind: kindOf(t.agent.cli) ?? 'claude' } } : {}) }))
+    const tasks: TaskFact[] = this.tasks.map((t) => ({
+      id: t.id,
+      space: t.place.split(':')[2] ?? '~',
+      status: t.archived ? 'archived' : t.status,
+      ...(t.agent && !t.archived ? { agent: { kind: kindOf(t.agent.cli) ?? 'claude' } } : {}),
+    }))
     const now = Date.now()
     return modelsSummary({
       now,

@@ -250,8 +250,8 @@ export interface Task {
   plan?: string[]
   /** none until the task's agent starts */
   agent?: TaskAgent
-  /** what this task's agent chat used inside the ledger's 35-day window: tokens, calls and pi's cost estimate; none
-   *  while it has made no counted call */
+  /** what this task's agent chat used since its first counted call, kept until 35 days after its last one: tokens,
+   *  calls and pi's cost estimate; none while it has made no counted call */
   usage?: UsageTotals
   desc?: string
   said?: string
@@ -973,8 +973,8 @@ export interface QuotaRead {
   tried?: number
 }
 
-/** what a chat, a task or a space used inside the ledger's 35-day window: tokens, calls and pi's cost estimate when
- *  its logs gave one (an estimate, never a bill) */
+/** what a chat, a task or a space used since counting began for it, kept until 35 days after its last call: tokens,
+ *  calls and pi's cost estimate when its logs gave one (an estimate, never a bill) */
 export interface UsageTotals {
   tokens: number
   calls: number

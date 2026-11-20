@@ -205,7 +205,7 @@ interface CapState {
   onOpen: (id: string | null) => void
 }
 
-/** one line per space: what the chats of its tasks, reviewers and coordinator used in the ledger's 35-day window */
+/** one line per space: what the chats of its tasks, reviewers and coordinator used since they were counted */
 function SpaceUsage({ spaces }: { spaces: SummarySpaceUsage[] }) {
   return (
     <section aria-label="Usage by space" className="flex flex-col gap-1">

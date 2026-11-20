@@ -808,9 +808,13 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const spaces = this.matrixSpaces()
     const rows = modelsMatrix(this.settings, { host: HOST, name: NAME }, spaces).rows.map((r) => r.id)
     const agents: LiveAgent[] = Object.values(this.agents.records).map((r) => ({ key: r.key, kind: r.kind, model: r.model, status: this.agents.status(r.key) }))
-    const tasks: TaskFact[] = this.engine.tasks
-      .filter((t) => !t.archived)
-      .map((t) => ({ id: t.id, space: t.project.split(':')[2] ?? '~', status: this.engine.statusOf(t), agent: t.agent, reviewer: t.reviewer }))
+    const tasks: TaskFact[] = this.engine.tasks.map((t) => ({
+      id: t.id,
+      space: t.project.split(':')[2] ?? '~',
+      // an archived task no longer waits or reviews, but its agent chat still belongs to its space's usage line
+      status: t.archived ? 'archived' : this.engine.statusOf(t),
+      ...(t.archived ? {} : { agent: t.agent, reviewer: t.reviewer }),
+    }))
     const watch = this.returns.list().map((o) => ({ key: keyOf(o.primary.kind, o.primary.model), back: o.back, ok: o.ok, resetAt: o.resetAt, at: o.at }))
     const now = Date.now()
     // what counts toward models.maxAtOnce now, and the entry each task held for a model's cap waits for
