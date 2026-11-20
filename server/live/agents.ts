@@ -423,7 +423,7 @@ export class Agents extends Emitter<Events> {
       (e) => this.onEvent(e),
       () => {
         this.outputQuietUntil = Date.now() + 1000
-        this.refresh()
+        void this.refresh()
       },
     )
   }
