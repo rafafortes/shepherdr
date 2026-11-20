@@ -3,7 +3,7 @@
 // above the message box while background work runs (subagents, shells). A row opens to its command, output or diff;
 // nothing streams by default, nothing flashes, and no command line shows until asked for.
 import clsx from 'clsx'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   ChevronDownIcon,
   ChevronLeftIcon,
@@ -55,16 +55,40 @@ type Got = { data?: ActivityAnswer; loading: boolean }
 const got = new Map<string, Got>()
 const listeners = new Set<() => void>()
 
-async function ask(chat: string, what: 'turn' | 'output' | 'job', id: string) {
+/** Only a few hundred answers are worth holding: a tab open for days otherwise keeps one per turn ever opened, and one
+ *  more on every poll of a live output (PERFC-06). */
+export const GOT_CAP = 300
+
+/** Keep one answer, dropping the oldest when full. A Map iterates in insertion order and setting an existing key does
+ *  not move it, so a poll never keeps an old answer alive and the first key is always the one to go. */
+function remember(k: string, v: Got) {
+  got.set(k, v)
+  if (got.size > GOT_CAP) {
+    const oldest = got.keys().next().value
+    if (oldest !== undefined) got.delete(oldest)
+  }
+}
+
+/** A chat whose sheet closed has no answers on screen: let go of all it had cached (PERFC-06). */
+function forget(chat: string) {
+  const prefix = `${chat}|`
+  for (const k of got.keys()) if (k.startsWith(prefix)) got.delete(k)
+}
+
+/** what the cap test reads: how many answers are cached, and whether one key is (PERFC-06) */
+export const activityCacheSize = () => got.size
+export const activityHas = (k: string) => got.has(k)
+
+export async function ask(chat: string, what: 'turn' | 'output' | 'job', id: string) {
   const k = `${chat}|${what}|${id}`
-  got.set(k, { ...(got.get(k) ?? {}), loading: true })
+  remember(k, { ...(got.get(k) ?? {}), loading: true })
   listeners.forEach((l) => l())
   try {
     const r = await fetch(`api/activity?${new URLSearchParams({ chat, what, id })}`)
     const b = (await r.json().catch(() => ({}))) as ActivityAnswer
-    got.set(k, { data: r.ok ? b : { error: ('error' in b && b.error) || `It said ${r.status}.` }, loading: false })
+    remember(k, { data: r.ok ? b : { error: ('error' in b && b.error) || `It said ${r.status}.` }, loading: false })
   } catch {
-    got.set(k, { ...(got.get(k) ?? {}), data: { error: "Can't reach Shepherdr right now." }, loading: false })
+    remember(k, { ...(got.get(k) ?? {}), data: { error: "Can't reach Shepherdr right now." }, loading: false })
   }
   listeners.forEach((l) => l())
 }
@@ -79,6 +103,12 @@ function useActivity(chat: string, what: 'turn' | 'output' | 'job', id: string, 
     },
     () => got.get(k),
   )
+  const had = useRef(false)
+  // A row whose answer was dropped when its sheet closed asks again rather than staying on Loading (PERFC-06).
+  useEffect(() => {
+    if (v) had.current = true
+    else if (had.current) void ask(chat, what, id)
+  }, [v, chat, what, id])
   useEffect(() => {
     void ask(chat, what, id)
     if (!every) return
@@ -95,6 +125,10 @@ type Open = { chat: string; job?: string } | null
 let open: Open = null
 const openers = new Set<() => void>()
 export function openJobs(o: Open) {
+  if (open && (!o || o.chat !== open.chat)) {
+    forget(open.chat)
+    for (const l of listeners) l()
+  }
   open = o
   openers.forEach((l) => l())
 }
