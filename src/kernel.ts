@@ -904,6 +904,27 @@ export function setPushEndpoint(endpoint: string | null) {
 
 document.addEventListener('visibilitychange', () => watchVisible())
 
+/** A tab open for days kept the last full chat of every place it ever watched and the last full ANSI screen of every
+ *  terminal (PERFC-06). Drop what is no longer on screen, keeping the surviving entries' object identity so the pickers
+ *  that already hold them skip a redraw. The outbox stays: settling reads a chat's messages even after it left the
+ *  screen. */
+function trimCaches(keep: Set<string>) {
+  const chats: Record<string, Chat> = {}
+  let chatDropped = false
+  for (const key of Object.keys(state.chats)) {
+    if (keep.has(key)) chats[key] = state.chats[key]
+    else chatDropped = true
+  }
+  const terms: Record<string, TermScreen> = {}
+  let termDropped = false
+  for (const key of Object.keys(state.terms)) {
+    if (keep.has(key)) terms[key] = state.terms[key]
+    else termDropped = true
+  }
+  if (!chatDropped && !termDropped) return
+  state = { ...state, chats, terms }
+}
+
 /** Tell the server the chats (and terminals) now on screen, and whether the app is on screen at all. */
 function watchVisible() {
   if (!ws || ws.readyState !== WebSocket.OPEN || !state.snap) return
@@ -913,6 +934,11 @@ function watchVisible() {
   const next = JSON.stringify({ keys, term, visible, pushEndpoint })
   if (next === watched) return
   watched = next
+  // Everything here can be fetched again from the server when it is watched once more; only the outbox's own chats
+  // and the open terminal need to stay in memory now (PERFC-06).
+  const keep = new Set([...keys, ...state.outbox.map((o) => o.chat)])
+  if (term) keep.add(term)
+  trimCaches(keep)
   ws.send(JSON.stringify({ type: 'watch', chats: keys, term, visible, push: pushEndpoint }))
 }
 
