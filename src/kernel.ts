@@ -751,8 +751,9 @@ function applyDelta(base: Chat, msg: ChatEventDelta): Chat {
   const messages = base.messages.slice()
   for (const m of msg.added) messages.push(m)
   for (const { id, patch } of msg.changed) {
-    const i = messages.findIndex((x) => x.id === id)
-    if (i >= 0) messages[i] = { ...messages[i]!, ...patch }
+    const at = messages.findIndex((x) => x.id === id)
+    const found = messages[at]
+    if (found) messages[at] = { ...found, ...patch }
   }
   messages.sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
   return { ...base, ...msg.chat, messages }
