@@ -472,3 +472,76 @@ describe('the engine on a store it cannot read', () => {
     }
   })
 })
+
+describe('the files that hold secrets stay readable by you only', () => {
+  test('a write tightens a loose private file even when its tmp was made loose; a cache stays 0644', () => {
+    const dir = tmp('store-private-write')
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      for (const name of ['secrets.json', 'vapid.json', 'push.json']) {
+        const f = join(dir, name)
+        fs.writeFileSync(f, '{"old": true}')
+        fs.chmodSync(f, 0o644)
+        // the mode passed to open applies only on create: a tmp an older write left loose keeps it, and the rename
+        // would give that mode to the file. This is the edge the explicit chmod closes.
+        fs.writeFileSync(`${f}.tmp`, 'a loose tmp from another write')
+        fs.chmodSync(`${f}.tmp`, 0o644)
+        writeJson(name, { key: 'value' }, dir)
+        expect(fs.statSync(f).mode & 0o777).toBe(0o600)
+        expect(readJson<unknown>(name, null, dir)).toEqual({ key: 'value' })
+      }
+      const agents = join(dir, 'agents.json')
+      fs.writeFileSync(agents, '{}')
+      fs.chmodSync(agents, 0o644)
+      writeJson('agents.json', { a: 1 }, dir)
+      expect(fs.statSync(agents).mode & 0o777).toBe(0o644)
+      expect(page).not.toHaveBeenCalled()
+    } finally {
+      page.mockRestore()
+    }
+  })
+
+  test('a loose private file we only read is tightened, says one line, and keeps its bytes', () => {
+    const dir = tmp('store-private-read')
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const f = join(dir, 'secrets.json')
+      const bytes = '{"elevenlabs": "key-1"}'
+      fs.writeFileSync(f, bytes)
+      fs.chmodSync(f, 0o644)
+      expect(readJson<unknown>('secrets.json', null, dir)).toEqual({ elevenlabs: 'key-1' })
+      expect(fs.statSync(f).mode & 0o777).toBe(0o600)
+      expect(fs.readFileSync(f, 'utf8')).toBe(bytes)
+      expect(page).toHaveBeenCalledTimes(1)
+      expect(said(page)).toContain(f)
+      expect(said(page)).toContain('tightened')
+      expect(said(page)).toContain('0600')
+      // the first read's chmod makes the next one quiet
+      expect(readJson<unknown>('secrets.json', null, dir)).toEqual({ elevenlabs: 'key-1' })
+      expect(page).toHaveBeenCalledTimes(1)
+    } finally {
+      page.mockRestore()
+    }
+  })
+
+  test('a private file we cannot tighten still reads, with no line about a mode we did not change', () => {
+    const dir = tmp('store-private-stuck')
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    const f = join(dir, 'secrets.json')
+    fs.writeFileSync(f, '{"key": "kept"}')
+    fs.chmodSync(f, 0o644)
+    const real = fs.chmodSync
+    const chmod = spyOn(fs, 'chmodSync').mockImplementation((p, m) => {
+      if (p === f) throw new Error('EACCES')
+      return real(p, m)
+    })
+    try {
+      expect(readJson<unknown>('secrets.json', null, dir)).toEqual({ key: 'kept' })
+      expect(fs.statSync(f).mode & 0o777).toBe(0o644)
+      expect(page).not.toHaveBeenCalled()
+    } finally {
+      chmod.mockRestore()
+      page.mockRestore()
+    }
+  })
+})

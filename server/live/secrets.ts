@@ -6,7 +6,7 @@
 // (machines.ts) reads it there, on the same disk; a value leaves the main machine only when an agent on another machine
 // uses it, over the SSH link to that machine (its shepherdr's tunnel), and never lands in a chat, a log or the
 // snapshot: those have names only.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SettingSection } from '../../shared/types.ts'
 
@@ -37,11 +37,24 @@ export class Vault {
     private seed?: Store,
   ) {}
 
+  /** a vault made loose outside our write path (copied by hand, restored from a backup, made by an older version) keeps
+   *  its mode while we only read it: tighten it and say one line, which the chmod makes a one-off. */
+  private tighten(f: string) {
+    try {
+      if (!(statSync(f).mode & 0o077)) return
+      chmodSync(f, 0o600)
+      console.error(`shepherdr: tightened ${f} to 0600: it held secrets readable by group or other`)
+    } catch {
+      /* not a reason to fail the read */
+    }
+  }
+
   /** what the file holds; one that can't be read is never taken for none (a save would lose every secret in it) */
   private read(): Store {
     if (this.seed) return this.seed
     const f = join(this.home, FILE)
     if (!existsSync(f)) return {}
+    this.tighten(f)
     try {
       return JSON.parse(readFileSync(f, 'utf8')) as Store
     } catch (e) {
@@ -97,6 +110,9 @@ export class Vault {
     const f = join(this.home, FILE)
     const tmp = `${f}.${process.pid}.tmp`
     writeFileSync(tmp, JSON.stringify(all, null, 2), { mode: 0o600 })
+    // the mode above applies only on create: a tmp left loose by an older or crashed write would give the vault that
+    // mode through the rename. Tighten it explicitly so the vault is 0600 regardless of the platform's mode semantics.
+    chmodSync(tmp, 0o600)
     renameSync(tmp, f)
   }
 
