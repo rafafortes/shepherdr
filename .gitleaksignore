@@ -1,5 +1,5 @@
 # Findings that predate the secrets check (audit 2026-11-18, QG-06), baselined so a NEW one fails the gate.
-# gitleaks' format is one fingerprint per line; the # line above each says why it is not a credential.
+# gitleaks' format is one fingerprint per line; each fingerprint sits under a # comment saying why it is not a credential.
 # Every one below is a deliberately fake value in a test fixture - no real secret, nothing to revoke.
 
 # Fake JWT used to assert how the push-hook words render a finding.

@@ -149,6 +149,18 @@ describe('the discovered checks', () => {
     expect(readFileSync(join(f.home, 'absent.txt'), 'utf8')).toBe('absent=\n')
   })
 
+  test('a step that skips one part and runs another keeps both on its line', () => {
+    // 17-scripts without shellcheck: the skip names the tool that is missing, the note says what did run
+    const both = `printf 'shellcheck is not installed\n' > "$SHEPHERDR_CHECK_SKIP"; printf 'perl -c: 6 helpers syntax OK\n' > "$SHEPHERDR_CHECK_NOTE"`
+    const f = fixture({ '10-one': check(both) })
+    const r = f.run()
+    expect(r.code).toBe(0)
+    expect(r.out).toContain('1/1 one skipped: shellcheck is not installed · perl -c: 6 helpers syntax OK')
+    // and the verdict still names what did not run
+    expect(r.out).toContain('with parts of it not run:')
+    expect(r.out).toContain('  ! one: shellcheck is not installed')
+  })
+
   test('only the default branch gets the record and map flags a baseline needs', () => {
     const envBody = `printf 'record=%s map=%s\\n' "$SHEPHERDR_CHECK_RECORD" "$SHEPHERDR_CHECK_MAP" >> "$SHEPHERDR_CHECK_ROOT/flags.txt"`
     for (const [branch, want] of [

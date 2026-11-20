@@ -1,9 +1,9 @@
-// Check after secrets (audit 2026-11-18, QG-07): shellcheck -S warning over the shell files the gate and the agent
-// commands run, and perl -c over the helpers copied to other machines. A warning or a syntax error fails with its
-// file and line; a host without one of the tools skips just that part, naming it, rather than failing. perlcritic is
-// deliberately not gated on: its opinionated style rules would make this about taste, not about breakage.
+// Check after secrets (audit 2026-11-18, QG-07): shellcheck -S warning over the shell files the gate, its own check
+// shims and the agent commands run, and perl -c over the helpers copied to other machines. A finding or a syntax error
+// fails with its file and line; a host without one of the tools skips just that part, naming it, rather than failing.
+// perlcritic is deliberately not gated on: its opinionated style rules would make this about taste, not breakage.
 // The runner discovers the executable shim scripts/checks/17-scripts; the logic and its fixture tests live here.
-import { existsSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** the note a host without a tool gets: its name and how to install it, never a red failure */
@@ -19,43 +19,69 @@ export type Options = {
   skip?: (reason: string) => void
 }
 
-/** the files under <root> this check reads, relative to it: the gate's shell, the agent commands, the Perl helpers */
+/** the files under <root> this check reads, relative to it: the gate's shell, its own check shims (a shell typo in one
+ *  of them breaks the whole gate), the agent commands and the Perl helpers */
 function files(root: string) {
+  // a regular file, not a dotfile: what a shell glob and the runner's own discovery see
   const listed = (dir: string, want: (name: string) => boolean) =>
     existsSync(join(root, dir))
-      ? readdirSync(join(root, dir))
-          .filter(want)
+      ? readdirSync(join(root, dir), { withFileTypes: true })
+          .filter((e) => e.isFile() && !e.name.startsWith('.') && want(e.name))
+          .map((e) => e.name)
           .sort()
           .map((n) => `${dir}/${n}`)
       : []
-  const shell = [...listed('scripts', (n) => n.endsWith('.sh')), ...['bin/shepherdr', 'bin/agent-browser'].filter((n) => existsSync(join(root, n)))]
+  const present = (names: string[]) => names.filter((n) => existsSync(join(root, n)))
+  /** whether a check's first line names a shell: the runner runs any executable check, so only shell shims are linted.
+   *  Anchored on the interpreter, so a shebang that merely contains "sh" is no shell; one that cannot be read is handed
+   *  to shellcheck, which fails the step naming it instead of crashing here. */
+  const shellScript = (file: string) => {
+    let first: string
+    try {
+      first = readFileSync(join(root, file), 'utf8').split('\n', 1)[0] ?? ''
+    } catch {
+      return true
+    }
+    return /^#!\s*(?:\S*\/)?(?:env\s+(?:-\S+\s+)*)?(?:ba|da|k)?sh\b/.test(first)
+  }
+  const shell = [
+    ...listed('scripts', (n) => n.endsWith('.sh')),
+    ...present(['bin/shepherdr', 'bin/agent-browser', 'helper/agent-browser']),
+    // the gate's own checks, with the runner's discovery rule (a regular file, no dotfile, not a .ts module) and a
+    // shell shebang: a check written in another language is that language's to lint
+    ...listed('scripts/checks', (n) => !n.endsWith('.ts') && shellScript(`scripts/checks/${n}`)),
+  ]
   const perl = listed('helper', (n) => n.endsWith('.pl') || n === 'shepherdr')
   return { shell, perl }
 }
 
-/** lint <root>: 0 on a clean tree or a missing tool, non-zero on a shellcheck warning or a perl syntax error */
+/** lint <root>: 0 on a clean tree or a missing tool, non-zero on a shellcheck finding or a perl syntax error */
 export function runScripts(o: Options): number {
   const found = files(o.root)
   const notes: string[] = []
   const missing: string[] = []
   let failed = 0
   if (o.shellcheck) {
-    const r = Bun.spawnSync([o.shellcheck, '-S', 'warning', '-f', 'gcc', '--', ...found.shell.map((f) => join(o.root, f))], {
-      cwd: o.root,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-    const lines = `${r.stdout.toString()}${r.stderr.toString()}`.split('\n').filter(Boolean)
-    if (r.exitCode === 0) notes.push(`shellcheck: ${found.shell.length} shell files clean`)
+    if (!found.shell.length) notes.push('shellcheck: no shell files to lint')
     else {
-      failed = 1
-      for (const line of lines) o.log?.(line)
-      o.log?.(`shellcheck: ${lines.length} warning${lines.length === 1 ? '' : 's'} in ${found.shell.join(', ')}`)
+      const r = Bun.spawnSync([o.shellcheck, '-S', 'warning', '-f', 'gcc', '--', ...found.shell.map((f) => join(o.root, f))], {
+        cwd: o.root,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      const lines = `${r.stdout.toString()}${r.stderr.toString()}`.split('\n').filter(Boolean)
+      if (r.exitCode === 0) notes.push(`shellcheck: ${found.shell.length} shell files clean`)
+      else {
+        failed = 1
+        for (const line of lines) o.log?.(line)
+        if (r.exitCode === 1) {
+          // 1 is "findings": anything else (2: a file it could not read, a bad invocation) is not a lint result
+          const findings = lines.filter((l) => /:\d+:\d+: (warning|error): /.test(l)).length
+          o.log?.(`shellcheck: ${findings} finding${findings === 1 ? '' : 's'} in ${found.shell.length} shell files`)
+        } else o.log?.(`shellcheck did not finish a lint pass: exit ${r.exitCode}`)
+      }
     }
-  } else {
-    missing.push(NO_SHELLCHECK)
-    o.log?.(NO_SHELLCHECK)
-  }
+  } else missing.push(NO_SHELLCHECK)
   if (o.perl) {
     const bad: string[] = []
     for (const f of found.perl) {
@@ -68,13 +94,15 @@ export function runScripts(o: Options): number {
     if (bad.length) {
       failed = 1
       o.log?.(`perl -c: syntax errors in ${bad.join(', ')}`)
-    } else notes.push(`perl -c: ${found.perl.length} helpers syntax OK`)
-  } else {
-    missing.push(NO_PERL)
-    o.log?.(NO_PERL)
-  }
+    } else notes.push(found.perl.length ? `perl -c: ${found.perl.length} helpers syntax OK` : 'perl -c: no Perl files to check')
+  } else missing.push(NO_PERL)
   if (notes.length) o.note?.(notes.join(' · '))
-  if (missing.length) o.skip?.(missing.join(' · '))
+  if (missing.length) {
+    // one line for what did not run, at the end of the log where a failure's tail shows it
+    const line = missing.join(' · ')
+    o.log?.(`not checked here: ${line}`)
+    o.skip?.(line)
+  }
   return failed
 }
 
