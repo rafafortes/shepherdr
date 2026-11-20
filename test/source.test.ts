@@ -142,6 +142,31 @@ describe('merging from the command', () => {
     expect(r.out).toContain('No pull request')
     expect((await src.cli(['checks', t.id], { chat: `${t.id}/Agent` })).out).toContain('No GitHub checks')
   })
+  test('doctor and checks pass their interim words out through the command step channel', async () => {
+    const { t } = await workedTask('steps')
+    const peers = src.peers
+    if (!peers) throw new Error('no machines in this world')
+    const doctor = peers.doctor
+    const checks = src.engine.checks
+    const steps: string[] = []
+    try {
+      peers.doctor = (async (step?: (words: string) => void) => {
+        step?.('one (one.test): helper put there again, worker started again')
+        return ['one (one.test): helper put there again, worker started again']
+      }) as never
+      src.engine.checks = (async (_id: string, _wait: number | undefined, step?: (words: string) => void) => {
+        step?.('checks: 1 passed, still running')
+        step?.('checks: 2 passed')
+        return { ok: true, text: "GitHub's checks passed on PR #1 (2)." }
+      }) as never
+      expect((await src.cli(['doctor'], {}, (w) => steps.push(w))).out).toContain('one (one.test)')
+      expect((await src.cli(['checks', t.id], { chat: `${t.id}/Agent` }, (w) => steps.push(w))).out).toContain('checks passed on PR #1')
+      expect(steps).toEqual(['one (one.test): helper put there again, worker started again', 'checks: 1 passed, still running', 'checks: 2 passed'])
+    } finally {
+      peers.doctor = doctor
+      src.engine.checks = checks
+    }
+  })
   test("a Done card links the task's pull request", async () => {
     const { t, place } = await workedTask('prcard')
     const pr = { number: 7, url: 'https://github.com/acme/app/pull/7' }

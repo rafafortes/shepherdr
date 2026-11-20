@@ -340,7 +340,13 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
         }
         if (path === '/api/cli' && req.method === 'POST') {
           const cli = (
-            source as Source & { cli?(a: string[], c: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string }): Promise<{ out: string; code: number }> }
+            source as Source & {
+              cli?(
+                a: string[],
+                c: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string },
+                onStep?: (words: string) => void,
+              ): Promise<{ out: string; code: number }>
+            }
           ).cli
           if (!cli)
             return json({
@@ -355,16 +361,35 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           const b = (await req.json()) as { args: string[]; chat?: string; pane?: string; cwd?: string; stdin?: string }
           // some commands wait long (shepherdr checks waits for GitHub's): no idle cut-off for these
           srv.timeout(req, 0)
-          return json(
-            await cli.call(source, b.args ?? [], {
-              chat: b.chat,
-              pane: b.pane,
-              cwd: b.cwd,
-              stdin: b.stdin,
-              local: direct(req),
-              proof: req.headers.get('authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1],
-            }),
-          )
+          // the long verbs send their words as they go: one {step} line each, as application/x-ndjson, before the one
+          // final {out, code}. The command decides by content-type: an older helper or the demo still answers with a
+          // single application/json object and is read whole (UXD-08).
+          const enc = new TextEncoder()
+          const body = new ReadableStream<Uint8Array>({
+            async start(controller) {
+              try {
+                const answer = await cli.call(
+                  source,
+                  b.args ?? [],
+                  {
+                    chat: b.chat,
+                    pane: b.pane,
+                    cwd: b.cwd,
+                    stdin: b.stdin,
+                    local: direct(req),
+                    proof: req.headers.get('authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1],
+                  },
+                  (words) => controller.enqueue(enc.encode(`${JSON.stringify({ step: words })}\n`)),
+                )
+                controller.enqueue(enc.encode(`${JSON.stringify(answer)}\n`))
+              } catch (e) {
+                controller.enqueue(enc.encode(`${JSON.stringify({ out: `${(e as Error).message}\n`, code: 1 })}\n`))
+              } finally {
+                controller.close()
+              }
+            },
+          })
+          return new Response(body, { headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' } })
         }
         if (path === '/api/push/key') return json({ key: push?.publicKey ?? null })
         // what waits on you: the service worker sets the app icon's count with it after a notification button answers
