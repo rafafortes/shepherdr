@@ -177,6 +177,7 @@ describe('work a Done task kept', () => {
     const { w, t, wt } = await withKeptWork('failed')
     expect(w.settings.set('tasks.keptExpiry', '1 day').ok).toBe(true)
     t.keptAt = Date.now() - 90 * DAY
+    t.keptNotifiedAt = Date.now() - 8 * DAY
     const before = t.keptAt
     const api = w.engine as unknown as { wt: { remove: (o: unknown) => Promise<string[]> } }
     const real = api.wt.remove
@@ -191,6 +192,7 @@ describe('work a Done task kept', () => {
     expect(t.kept?.length).toBe(1)
     expect(t.keptAt ?? 0).toBeGreaterThan(before)
     expect(w.news.some((n) => n.includes(`${t.id} could not remove its kept work`))).toBe(true)
+    expect(reminder(w).some((n) => n.includes(t.id))).toBe(true) // still named weekly while it stays
   })
 
   test('a kept task whose place is gone is left alone', async () => {

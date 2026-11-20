@@ -4921,7 +4921,8 @@ export class Engine extends Emitter<Events> {
       const written = (t.spokenAt ?? 0) > t.keptAt
       if (!written && expiry !== null && now - t.keptAt >= expiry) {
         await this.expireKept(t, expiry)
-        continue
+        // one that could not go (agent working, herdr open, removal failed) still keeps work: name it below
+        if (!t.kept?.length) continue
       }
       const list = bySpace.get(t.project) ?? []
       list.push(t)
@@ -4946,7 +4947,8 @@ export class Engine extends Emitter<Events> {
     const p = this.places.space(t.project)
     if (!p || this.cleaning.has(t.id)) return
     if (this.agents.status(this.key(t)) === 'working') return // a turn running now could still change the work
-    if (await this.wt.spaceOf(t.worktree, labelOf(t))) return // someone opened the work again in herdr: never force it closed
+    // a space opened again – or a herdr that stopped answering – is a reason to leave the work alone, not to guess
+    if (await this.wt.spaceOf(t.worktree, labelOf(t)).catch(() => true)) return
     this.cleaning.add(t.id)
     try {
       const kept = t.kept ?? []
