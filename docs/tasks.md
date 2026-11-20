@@ -348,6 +348,12 @@
   closes its space and agent), then the branch deleted. Nothing is forced: a checkout with uncommitted changes, or a
   branch with work main lacks, is kept and said so (in the coordinator's news and in `shepherdr status`), and its space
   and agent close all the same.
+  Each task has one temporary folder of its own (`<system temp>/shepherdr-task/<id>`), given to its agent, reviewer and
+  headless runs as both `TMPDIR` and `SHEPHERDR_TMP`: proofs, proof homes (`SHEPHERDR_HOME=$SHEPHERDR_TMP/home`),
+  screenshots and scratch go there. Putting a task away stops whatever still runs from that folder and removes it; a task
+  that keeps work keeps its folder, named in `shepherdr status` beside the kept worktree, until that work is removed. At
+  start the server sweeps folders of tasks that no longer exist or were archived, and touches nothing outside that root.
+
   Something still running in its space puts it all off until later. You can also just ask its coordinator to merge it.
   Task agents learn the way from brief to merged from [shepherdr-agent](../skill/shepherdr-agent/SKILL.md): the review the
   brief's Settings block asks for (Settings → How tasks work → Review, Reviewer, Must fix and Review rounds, and the

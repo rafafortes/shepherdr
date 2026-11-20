@@ -106,14 +106,19 @@ build, check and review the work is your own judgment.
 
 ## A server for a proof
 
+Your task has one temporary folder of its own, `$SHEPHERDR_TMP` (also set as your `TMPDIR`, so mktemp, Node, Bun,
+Python, Playwright and puppeteer use it without being told): keep proofs, proof homes, screenshots and scratch there,
+never loose in `/tmp` or in your worktree. It is removed when the task is put away, unless the task keeps work.
+
 Showing the screen, or a task coming due, needs a server of its own, never the one the human runs:
 
 - **The demo world first** (`SHEPHERDR_SOURCE=demo`): fictional data, no agents, nothing in herdr. Where the proof needs
   a real launch, a herdr stand-in of your own (the tests' fake is an object, not a socket) stands in for it, and
   `HERDR_SOCKET_PATH` names it; without one, point `HERDR_SOCKET_PATH` at a socket that isn't there, as the tests do,
   and nothing reaches any herdr.
-- **Never the real `~/.shepherdr`**: give it `SHEPHERDR_HOME=/tmp/<something of its own>` and a port of its own that
-  nothing else uses — `SHEPHERDR_PORT=78<nn>`, never 7787, the human's, and never another task's. Its own files, its
+- **Never the real `~/.shepherdr`**: give it `SHEPHERDR_HOME=$SHEPHERDR_TMP/home`, under your task's temporary folder,
+  and a port of its own that nothing else uses — `SHEPHERDR_PORT=78<nn>`, never 7787, the human's, and never another
+  task's. Its own files, its
   agents' credentials included, stay there; the helper's per-process route files are the one thing it writes where a CLI
   looks for them.
 - **No task that can come due**: no `--in`, `--at`, nothing queued behind another task, nothing to relaunch. A server

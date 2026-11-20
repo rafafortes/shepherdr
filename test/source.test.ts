@@ -22,6 +22,9 @@ const { Worktrees } = await import('../server/live/engine/worktrees.ts')
 const { fakeHerdr } = await import('./fake-herdr.ts')
 const { setPicks } = await import('../server/live/model-picks.ts')
 const { NO_PICKS } = await import('../shared/picks.ts')
+const { agentEnv } = await import('../server/live/box.ts')
+const { taskTmpDir } = await import('../server/live/task-tmp.ts')
+const { ROOT: APP_ROOT } = await import('../server/root.ts')
 const { ADVISOR_AT_ONCE } = await import('../shared/apply-waiting.ts')
 
 const src = new LiveSource()
@@ -836,6 +839,21 @@ describe("a task's CLI, model and effort", () => {
     }
     expect(src.agents.args(rec('pi', 'openai/gpt-5.5', 'lowest'), false)).toEqual(['--model', 'openai/gpt-5.5', '--thinking', 'minimal'])
     expect(src.agents.args(rec('gemini', 'x', 'high'), false)).toEqual([])
+  })
+
+  test('claude, codex and pi carry the task temp folder: codex writes it into its shell environment policy', () => {
+    const one = taskTmpDir('CLI-1')
+    for (const key of ['CLI-1/Agent', 'CLI-1/Reviewer']) {
+      const env = agentEnv(key, APP_ROOT)
+      expect(env.SHEPHERDR_TMP).toBe(one)
+      expect(env.TMPDIR).toBe(one)
+    }
+    // Claude Code and pi inherit the pane's environment, so both variables reach their Bash and terminal tools
+    // unchanged. Codex builds its tools' environment from a policy of its own: check the two are written into it.
+    const rec = { key: 'CLI-1/Agent', name: 'n', kind: 'codex', cwd: '/', workspace: 'w', logs: [], started: 0, env: agentEnv('CLI-1/Agent', APP_ROOT), access: 'full' as const }
+    const policy = src.agents.args(rec as never, false).find((a) => a.startsWith('shell_environment_policy.set=')) ?? ''
+    expect(policy).toContain(`"TMPDIR"="${one}"`)
+    expect(policy).toContain(`"SHEPHERDR_TMP"="${one}"`)
   })
 })
 

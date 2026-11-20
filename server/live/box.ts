@@ -8,6 +8,7 @@ import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { secretFileId } from './secret-paths.ts'
+import { ensureTaskTmp, taskOfChat, taskTmpDir } from './task-tmp.ts'
 import { home, readJson } from '../store.ts'
 
 export interface BoxInfo {
@@ -143,10 +144,21 @@ export const notifiesWith = (f: (chat: string) => boolean) => void (notifies = f
  *  can stand aside and you are not told twice */
 export function agentEnv(chat: string, root: string): Record<string, string> {
   const credential = { SHEPHERDR_SECRET_FILE: credentialFile(chat), ...(notifies(chat) ? { SHEPHERDR_NOTIFIES: '1' } : {}) }
-  if (BOX) return { ...credential, SHEPHERDR_CHAT: chat, SHEPHERDR_URL: '', SHEPHERDR_COMMAND: join(helperDir(BOX.home), 'bin', 'shepherdr'), SHEPHERDR_MACHINE: BOX.label, PATH: BOX.path }
+  // One folder per task, made when its agent first starts; a coordinator (a chat with no task) keeps the machine's
+  // default. Both variables go to every CLI, so tools that make their own temp files need no extra rule to land there.
+  const task = taskOfChat(chat)
+  const tmp = task ? taskTmpDir(task) : undefined
+  if (task && tmp) {
+    if (BOX)
+      runSync(['mkdir', '-p', tmp], { timeoutMs: 5000 }) // coverage-exempt: no box is reachable from these tests; the local branch is covered
+    else ensureTaskTmp(task)
+  }
+  const tmpEnv: Record<string, string> = tmp ? { SHEPHERDR_TMP: tmp, TMPDIR: tmp } : {}
+  if (BOX) return { ...credential, ...tmpEnv, SHEPHERDR_CHAT: chat, SHEPHERDR_URL: '', SHEPHERDR_COMMAND: join(helperDir(BOX.home), 'bin', 'shepherdr'), SHEPHERDR_MACHINE: BOX.label, PATH: BOX.path }
   // The listening live server owns these agents, never an inherited CLI target (which may be a demo).
   return {
     ...credential,
+    ...tmpEnv,
     SHEPHERDR_CHAT: chat,
     SHEPHERDR_COMMAND: join(root, 'bin', 'shepherdr'),
     SHEPHERDR_URL: `http://127.0.0.1:${readJson<{ port?: number }>('server.json', {}).port ?? process.env.SHEPHERDR_PORT ?? 7787}`,

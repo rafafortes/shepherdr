@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeRegistries } from '../scripts/build-plugins.ts'
+import { setTaskTmpBase } from '../server/live/task-tmp.ts'
 import { once } from './once.ts'
 import { cleanup, sweep, tmp } from './tmp.ts'
 
@@ -16,6 +17,9 @@ import { cleanup, sweep, tmp } from './tmp.ts'
 if (!process.env.SHEPHERDR_TEST_RUN) sweep()
 const home = tmp('test-home')
 process.env.SHEPHERDR_HOME = home
+// task agents' TMPDIR/SHEPHERDR_TMP: their own folder under a base this test process owns, removed with the rest
+const taskBase = tmp('task-tmp')
+setTaskTmpBase(() => taskBase)
 // doctor's check-log size line (server/live/resources.ts) measures this folder; a test that runs doctor without
 // injecting its own reader must see the test's copy, never the operator's
 process.env.SHEPHERDR_CHECK_LOG_ROOT = join(home, '.cache', 'shepherdr', 'check-local')

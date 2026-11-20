@@ -14,6 +14,7 @@ import { dropped, missing, retrying, startDelays } from '../herdr.ts'
 import { existsSync, statSync } from '../mfs.ts'
 import { pruneInbox } from '../inbox.ts'
 import { agentEnv, BOX } from '../box.ts'
+import { clearTaskTmp, sweepTaskTmp, taskTmpDir } from '../task-tmp.ts'
 import { join } from 'node:path'
 import {
   STATUS_CADENCE_MIN,
@@ -1052,6 +1053,25 @@ export class Engine extends Emitter<Events> {
     this.sweeps.push(stalls)
     // a restart is where a cleanup that never finished leaves its mark: drop records no screen can reach (PERFS-12)
     this.pruneAgentRecords()
+    // and sweep the task temp folders of tasks that are gone or archived, without touching anything outside the root
+    this.sweepTaskTmp()
+  }
+
+  /** at start: the temp folders of tasks that no longer exist or were archived have no owner, so they go. A task that
+   *  is merely Done keeps its folder until cleanup (or keeps it with its kept work), and a live one always keeps it. */
+  private sweepTaskTmp() {
+    sweepTaskTmp(new Set(this.tasks.filter((t) => !t.archived).map((t) => t.id)))
+  }
+
+  /** put-away's last step: stop what still runs from a task's temp folder, then remove it. A task that kept work keeps
+   *  its folder, shown in shepherdr status beside the kept worktree, until that work is finally removed. */
+  private async clearTmp(t: TaskRec) {
+    try {
+      await clearTaskTmp(t.id)
+      // coverage-exempt: a folder that cannot be removed here (permissions, a child still writing in it) cannot be forced in a test
+    } catch {
+      /* a folder that will not go must not stand in the way of the put-away the rest of which already succeeded */
+    }
   }
 
   /** drop records whose task is gone from the engine: their chat is gone with the task, so nothing reads their CLI
@@ -4839,6 +4859,8 @@ export class Engine extends Emitter<Events> {
     try {
       const r = await this.putAway(t, p.path, p.base)
       if (r.busy) return r
+      // nothing to keep: the folder and whatever still runs from it belong to a task that is being put away
+      if (!r.kept.length) await this.clearTmp(t)
       const news = r.kept.length && JSON.stringify(r.kept) !== JSON.stringify(t.kept)
       t.kept = r.kept.length ? r.kept : undefined
       t.cleaned = true
@@ -4982,6 +5004,8 @@ export class Engine extends Emitter<Events> {
         this.emit('news', t.project, `${t.id} could not remove its kept work: ${left.join(', ')}`, 'need', { task: t.id, event: 'needs-you' })
         return
       }
+      // the last of its work is gone now, so its temp folder goes with it
+      await this.clearTmp(t)
       t.worktree = undefined
       t.branch = undefined
       t.kept = undefined
@@ -5089,9 +5113,15 @@ export class Engine extends Emitter<Events> {
     }
   }
 
-  /** finished tasks that kept a worktree or branch, and why: for shepherdr status */
+  /** finished tasks that kept a worktree or branch, and why: for shepherdr status. A task that kept work keeps its
+   *  temp folder too, named here beside it so the human can find what the agent left there. */
   keptLeftovers() {
-    return this.tasks.filter((t) => ended(t) && t.kept?.length).map((t) => `${t.id} ${t.kept!.join(', ')}`)
+    return this.tasks
+      .filter((t) => ended(t) && t.kept?.length)
+      .map((t) => {
+        const tmp = taskTmpDir(t.id)
+        return `${t.id} ${t.kept!.join(', ')}${existsSync(tmp) ? `, temp folder ${tmp}` : ''}`
+      })
   }
 
   /* ---------- you and coordinators ---------- */
@@ -5254,6 +5284,8 @@ export class Engine extends Emitter<Events> {
       })
       const left = p ? await this.wt.remove({ repo: p.path, wt: t.worktree, branch: t.branch, label: labelOf(t) }) : []
       if (!p && t.worktree && existsSync(t.worktree)) left.push(`${t.worktree} (its project is gone)`)
+      // no task left to own its folder: stop what runs from it and remove it as part of the delete
+      await this.clearTmp(t)
       clearTimeout(this.later.get(t.id))
       for (const m of [this.later, this.wrote]) m.delete(t.id)
       this.data.tasks = this.data.tasks.filter((x) => x !== t)

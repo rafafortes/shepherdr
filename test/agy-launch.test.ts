@@ -7,6 +7,9 @@ import { join } from 'node:path'
 import { headlessJob } from '../server/live/activity.ts'
 import { agyLogPath, MIRROR_HEAD } from '../server/live/agy.ts'
 import { hidden, type AgentRecord, type Spec } from '../server/live/agents.ts'
+import { agentEnv } from '../server/live/box.ts'
+import { taskTmpDir } from '../server/live/task-tmp.ts'
+import { ROOT } from '../server/root.ts'
 import { makeConversation, makeSummaries, userPayload } from './agy-fixture.ts'
 import { tmp } from './tmp.ts'
 
@@ -79,6 +82,22 @@ describe('starting an agy agent', () => {
       expect(h.queued).toHaveLength(1)
       expect(h.queued[0][0]).toBe(hidden('Be brief.'))
       expect(h.queued[0][1]).toBe('first')
+    } finally {
+      h.a.stop()
+      start.mockRestore()
+      timer.mockRestore()
+    }
+  })
+
+  test('the launch environment carries the task temp folder for agy as TMPDIR and SHEPHERDR_TMP', async () => {
+    const start = spyOn(herdr, 'start').mockResolvedValue(undefined as never)
+    const timer = spyOn(globalThis, 'setTimeout').mockImplementation((() => 0) as never)
+    const h = harness()
+    try {
+      await h.a.ensure(base({ first: 'first', env: agentEnv(key, ROOT) }))
+      expect(h.a.record(key)?.env).toMatchObject({ TMPDIR: taskTmpDir('AGY-1'), SHEPHERDR_TMP: taskTmpDir('AGY-1') })
+      // agy's terminal tool inherits its pane's environment: nothing in its launch resets the two variables
+      expect(start).toHaveBeenCalled()
     } finally {
       h.a.stop()
       start.mockRestore()
