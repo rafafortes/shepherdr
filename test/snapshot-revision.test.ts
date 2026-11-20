@@ -71,6 +71,14 @@ describe('the revision on the wire', () => {
   })
 })
 
+describe('the poll route', () => {
+  test('/api/snapshot carries the revision a worker needs to tell a heartbeat from a change', async () => {
+    const r = await fetch(`http://127.0.0.1:${server.port}/api/snapshot`)
+    const snap = (await r.json()) as Snapshot
+    expect(typeof snap.rev).toBe('number')
+  })
+})
+
 describe('a peer machine', () => {
   test('a refresh it sends reaches the source as a heartbeat, not a change', async () => {
     const { LiveSource } = await import('../server/live/source.ts')

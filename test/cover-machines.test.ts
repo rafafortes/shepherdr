@@ -476,6 +476,7 @@ describe('the live link to a worker', () => {
       port: 0,
       fetch(req, srv) {
         if (new URL(req.url).pathname === '/api/ws') return srv.upgrade(req) ? undefined : new Response('no', { status: 400 })
+        // the real /api/snapshot is stamped too, so the poll's copy has the revision a heartbeat repeats
         return Response.json(snap(1))
       },
       websocket: {

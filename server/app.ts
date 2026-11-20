@@ -212,7 +212,8 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           const key = q.get('chat') ?? ''
           return json({ chat: timed('GET /api/chat', () => source.chat(key)) ?? null, status: source.chatStatus?.(key) })
         }
-        if (path === '/api/snapshot') return json(timed('GET /api/snapshot', () => source.snapshot()))
+        // a worker polls this route to mirror this machine: it needs the revision to tell a heartbeat from a change
+        if (path === '/api/snapshot') return json(timed('GET /api/snapshot', () => revisions.refresh(source.snapshot())))
         // which Shepherdr answers: a start from another plugin folder or version stops it (scripts/plugin.ts)
         if (path === '/api/version') return json(running())
         // the updater restarts the server only once it has stopped new calls and none is on; both at once, so no call
