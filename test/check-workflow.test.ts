@@ -4,10 +4,12 @@
 // up on it, and holds a merge until they do (server/live/engine/git.ts, hasPrWorkflows, read by checksOf in
 // server/live/engine/engine.ts): no merge here may wait for checks that never start.
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { keyOf, main, prune } from '../scripts/prune-logs.ts'
 import { hasPrWorkflows } from '../server/live/engine/git.ts'
 import { tmp } from './tmp.ts'
+
 type Workflow = {
   on: Record<string, unknown>
   concurrency: { group: string; 'cancel-in-progress': boolean }
@@ -107,6 +109,96 @@ describe('the check itself', () => {
     expect(lines).toContain('flock -w "$wait_timeout" 9')
     // a check's own processes never keep the lock
     expect(lines).toContain('exec 9>&-')
+  })
+
+  test('prunes old log folders on success only, never beside another check and never outside the cache', () => {
+    const lines = readFileSync(join(root, 'scripts', 'check-local.sh'), 'utf8')
+      .split('\n')
+      .filter((l) => l.trim() && !l.trim().startsWith('#'))
+      .map((l) => l.trim())
+    expect(lines).toContain('log_root="$HOME/.cache/shepherdr/check-local"')
+    expect(lines).toContain('export SHEPHERDR_CHECK_LIVE="$live"')
+    expect(lines.some((l) => l.includes('bun "$root/scripts/prune-logs.ts" >/dev/null 2>&1'))).toBe(true)
+    expect(lines.some((l) => l.includes('exec "') && l.includes('prio[@]'))).toBe(true)
+    expect(lines).toContain('exec 9>&-')
+    // the other lock is probed, so a quick run beside a full one leaves the folder it shares alone
+    expect(lines).toContain('( exec 8>>"$other_lock" 2>/dev/null || exit 1; flock -n 8 ) || return 0')
+    expect(lines).toContain('[ "$quick" = 1 ] && other_lock=$full_lock')
+    // only the three exit-0 paths call it: a failed run leaves its logs for the person who has to read them
+    expect(lines.filter((l) => l === 'prune_logs')).toHaveLength(3)
+  })
+})
+
+describe('pruning check-local log folders', () => {
+  /** a cache of run folders, oldest first: mtime decides which runs of a worktree are the newest */
+  const cache = (names: string[]) => {
+    const home = tmp('check-prune')
+    const logs = join(home, '.cache', 'shepherdr', 'check-local')
+    mkdirSync(logs, { recursive: true })
+    names.forEach((name, i) => {
+      const dir = join(logs, name)
+      mkdirSync(dir)
+      writeFileSync(join(dir, 'verdict.txt'), 'PASSED in 1s\n')
+      const at = new Date(1_700_000_000_000 + i * 60_000)
+      utimesSync(dir, at, at)
+    })
+    return { home, logs }
+  }
+  const names = (logs: string) => readdirSync(logs).sort()
+
+  test('a folder belongs to the worktree it is named for, or to the one before a run suffix', () => {
+    const live = new Set(['wt', 'other'])
+    expect(keyOf('wt', live)).toBe('wt')
+    expect(keyOf('wt.3', live)).toBe('wt')
+    expect(keyOf('other', live)).toBe('other')
+    expect(keyOf('gone.3', live)).toBeUndefined()
+    expect(keyOf('gone', live)).toBeUndefined()
+  })
+
+  test('removes the folders of worktrees that are gone and keeps the live ones', () => {
+    const { logs } = cache(['live-a', 'gone-b', 'live-c'])
+    expect(prune(logs, ['live-a', 'live-c'], 'live-a', 5)).toEqual(['gone-b'])
+    expect(names(logs)).toEqual(['live-a', 'live-c'])
+    expect(existsSync(join(logs, 'live-a', 'verdict.txt'))).toBe(true)
+  })
+
+  test('keeps at most N run folders per worktree, the newest ones, and always the current run', () => {
+    const runs = ['wt.1', 'wt.2', 'wt.3', 'wt.4', 'wt.5', 'wt.6']
+    const newest = cache(runs)
+    expect(prune(newest.logs, ['wt'], 'wt.6', 3)).toEqual(['wt.1', 'wt.2', 'wt.3'])
+    expect(names(newest.logs)).toEqual(['wt.4', 'wt.5', 'wt.6'])
+
+    // the current folder wins a place even when an older run's mtime is behind it
+    const oldest = cache(runs)
+    expect(prune(oldest.logs, ['wt'], 'wt.1', 3).sort()).toEqual(['wt.2', 'wt.3', 'wt.4'])
+    expect(names(oldest.logs)).toEqual(['wt.1', 'wt.5', 'wt.6'])
+  })
+
+  test('keeps the current folder even when its worktree is gone, and touches nothing outside the cache', () => {
+    const { home, logs } = cache(['current', 'gone', 'verdicts'])
+    mkdirSync(join(home, 'outside'))
+    expect(prune(logs, ['elsewhere'], 'current', 5)).toEqual(['gone'])
+    expect(names(logs)).toEqual(['current', 'verdicts'])
+    expect(existsSync(join(home, 'outside'))).toBe(true)
+  })
+
+  test('leaves every folder alone when no live worktree could be read', () => {
+    const { logs } = cache(['gone'])
+    expect(prune(logs, [], '', 5)).toEqual([])
+    expect(names(logs)).toEqual(['gone'])
+  })
+
+  test('main takes the cache, the live worktree paths, the current folder and the cap from the runner', () => {
+    const { home, logs } = cache(['wt.1', 'wt.2', 'wt.3', 'gone'])
+    expect(
+      main({
+        HOME: home,
+        SHEPHERDR_CHECK_LIVE: '/anywhere/wt\n/anywhere/else',
+        SHEPHERDR_CHECK_CURRENT: 'wt.3',
+        SHEPHERDR_CHECK_KEEP: '2',
+      }),
+    ).toEqual(['gone', 'wt.1'])
+    expect(names(logs)).toEqual(['wt.2', 'wt.3'])
   })
 })
 

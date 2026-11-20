@@ -3,7 +3,7 @@
 // its own with fake checks: adding a check must need no edit to a shared list, and one failure must stop the run.
 // The pattern is test/check-workflow.test.ts's: a git repo made in /tmp, driven by the file's own commands.
 import { describe, expect, test } from 'bun:test'
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -34,6 +34,7 @@ function fixture(checks: Record<string, string>, branch = 'herdr-tui', commit = 
   git('init', '-q', '-b', branch)
   writeFileSync(join(dir, 'README.md'), 'fixture\n')
   copyFileSync(runner, join(dir, 'scripts', 'check-local.sh'))
+  copyFileSync(join(root, 'scripts', 'prune-logs.ts'), join(dir, 'scripts', 'prune-logs.ts'))
   writeFileSync(join(dir, 'scripts', 'check-browsers.ts'), "console.log('chromium: ok (fixture)')\nconsole.log('webkit: ok (fixture)')\n")
   for (const [name, body] of Object.entries(checks)) {
     const file = join(dir, 'scripts', 'checks', name)
@@ -170,6 +171,52 @@ describe('the discovered checks', () => {
       const f = fixture({ '10-one': check(envBody) }, branch)
       expect(f.run().code).toBe(0)
       expect(readFileSync(join(f.dir, 'flags.txt'), 'utf8').trim()).toBe(want)
+    }
+  })
+})
+
+describe('pruning the log folders after a successful run', () => {
+  /** seed a fixture's cache with old run folders, one for a worktree that is gone and the shared verdicts store */
+  const seed = (f: ReturnType<typeof fixture>, runs: number) => {
+    const root = join(f.home, '.cache', 'shepherdr', 'check-local')
+    mkdirSync(root, { recursive: true })
+    const base = basename(f.dir)
+    for (const name of ['gone-old', 'verdicts', ...Array.from({ length: runs }, (_, i) => `${base}.${i}`)]) {
+      const dir = join(root, name)
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'marker'), name)
+      const older = new Date(1_700_000_000_000 + (name === 'gone-old' ? 0 : Number(name.split('.')[1] ?? 0) + 1) * 60_000)
+      utimesSync(dir, older, older)
+    }
+    return { root, base }
+  }
+
+  test('the run keeps its own folder, drops a gone worktree and all but the newest N runs', () => {
+    const f = fixture({ '10-one': check() })
+    const { root, base } = seed(f, 7)
+    expect(f.run().code).toBe(0)
+    const left = readdirSync(root).sort()
+    // this run's folder has the newest mtime: it is kept even though it is not a `.N` run of the seeded worktree
+    expect(left).toContain(base)
+    expect(left).toContain('verdicts')
+    expect(left).not.toContain('gone-old')
+    expect(left.filter((n) => n.startsWith(`${base}.`))).toEqual([`${base}.3`, `${base}.4`, `${base}.5`, `${base}.6`])
+  })
+
+  test('another check holding the other lock leaves every folder alone', async () => {
+    if (!Bun.which('flock')) return // the runner works without it and has no lock to guard against
+    const f = fixture({ '10-one': check() })
+    const { root, base } = seed(f, 0)
+    const lock = join(f.home, '.cache', 'shepherdr', 'check-local-quick.lock')
+    const ready = join(f.home, 'locked')
+    const holder = Bun.spawn(['bash', '-c', 'exec 8>>"$1"; flock 8; touch "$2"; exec sleep 30', 'bash', lock, ready])
+    try {
+      for (let i = 0; i < 300 && !existsSync(ready); i++) await Bun.sleep(10)
+      expect(existsSync(ready)).toBe(true)
+      expect(f.run().code).toBe(0)
+      expect(readdirSync(root).sort()).toEqual(['gone-old', base, 'verdicts'])
+    } finally {
+      holder.kill()
     }
   })
 })

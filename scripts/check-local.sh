@@ -74,7 +74,8 @@ fi
 # a log folder of this worktree's own: several worktrees' checks never overwrite each other's. A quick run may run
 # beside a full run of the same worktree (its own lock, below), so its step logs take a suffix of their own: its verdict
 # is already a file of its own (verdict-quick.txt).
-logs="$HOME/.cache/shepherdr/check-local/$(basename "$root")"
+log_root="$HOME/.cache/shepherdr/check-local"
+logs="$log_root/$(basename "$root")"
 mkdir -p "$logs"
 V="$logs/verdict.txt"
 log_suffix=''
@@ -368,6 +369,30 @@ record() { # <1 when it passed whole>
     mv -f "$tmp" "$verdicts/$tree"
 }
 
+# A successful run leaves this worktree's logs and prunes the rest of the cache at the very end (the verdict is already
+# written by then). A quick and a full run may overlap, so never prune while the other holds its lock: its folder is not
+# ours to remove while it is being written. The helper names this run's own folder and always keeps it, never removes
+# the shared verdicts store, and only ever touches immediate children of ~/.cache/shepherdr/check-local.
+prune_logs() {
+  local other_lock=$quick_lock live current
+  [ "$quick" = 1 ] && other_lock=$full_lock
+  if command -v flock >/dev/null 2>&1; then
+    ( exec 8>>"$other_lock" 2>/dev/null || exit 1; flock -n 8 ) || return 0
+  fi
+  live=$(git -C "$root" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')
+  [ -n "$live" ] || return 0
+  current=$(basename "$root")
+  (
+    # the check's own processes must not keep the lock after this one exits, even if the helper hangs
+    exec 9>&-
+    export SHEPHERDR_CHECK_LOG_ROOT="$log_root"
+    export SHEPHERDR_CHECK_LIVE="$live"
+    export SHEPHERDR_CHECK_CURRENT="$current"
+    export SHEPHERDR_CHECK_KEEP=5
+    exec "${prio[@]}" bun "$root/scripts/prune-logs.ts" >/dev/null 2>&1
+  ) || true
+}
+
 show_failure() { # the reasons a step failed
   local name=$1 log="$logs/$1$log_suffix.log" shown=''
   case $name in
@@ -511,6 +536,7 @@ if [ ${#failed[@]} -eq 0 ] && [ ${#shared_files[@]} -gt 0 ]; then
   # verdict, and the reuse says so there too
   if reuse_answer; then
     say "check:local reuse: this tree passed the full check already, so the shared phase did not run here"
+    prune_logs
     exit 0
   fi
   # a full run may have started since this one did: the changed tests then take a conservative share of the workers
@@ -536,6 +562,7 @@ if [ ${#failed[@]} -eq 0 ] && [ ${#notes[@]} -eq 0 ]; then
   else
     say "PASSED in $(dur $((SECONDS - started)))$verdict_kind · logs: $logs"
   fi
+  prune_logs
   exit 0
 fi
 if [ ${#failed[@]} -eq 0 ]; then
@@ -550,6 +577,7 @@ if [ ${#failed[@]} -eq 0 ]; then
   say "PASSED in $(dur $((SECONDS - started)))$verdict_kind, with parts of it not run:"
   for n in "${notes[@]}"; do say "  ! $n"; done
   say "· logs: $logs"
+  prune_logs
   exit 0
 fi
 if [ ${#notes[@]} -gt 0 ]; then

@@ -76,6 +76,7 @@ function fixture(checks: Record<string, string>, branch = 'herdr-tui', opts: { c
   git('add', '-A')
   git('-c', 'user.name=CI', '-c', 'user.email=ci@localhost', 'commit', '-qm', 'init')
   copyFileSync(runner, join(dir, 'scripts', 'check-local.sh'))
+  copyFileSync(join(root, 'scripts', 'prune-logs.ts'), join(dir, 'scripts', 'prune-logs.ts'))
   writeFileSync(join(dir, 'scripts', 'check-browsers.ts'), "console.log('chromium: ok (fixture)')\nconsole.log('webkit: ok (fixture)')\n")
   // a fake nproc, so the worker cap is the same on every machine this check runs on
   let path = process.env.PATH ?? ''

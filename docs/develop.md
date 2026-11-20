@@ -24,7 +24,10 @@ cores by default) so herdr, the server and the agents keep the CPU: the tests' o
 runs this user's services, gives them the least CPU and IO weight too. It takes about two minutes warm on a quiet
 machine, 5m34s under load, and its shared phase waits (up to an hour) while another worktree's check runs, so run it
 with a long timeout or in the background, where its verdict waits in
-`~/.cache/shepherdr/check-local/<worktree>/verdict.txt` (with each step's log beside it).
+`~/.cache/shepherdr/check-local/<worktree>/verdict.txt` (with each step's log beside it). A successful run prunes that
+cache at the very end: folders of worktrees that are gone go, and a worktree's run folders (`<worktree>.<run>`) are kept
+to the newest five, with the current run's folder always kept. It never prunes while another check holds the other
+lock, so a full and a quick run can overlap without one removing the other's folder (`scripts/prune-logs.ts`).
 
 A run is two phases, split by the check's number. Everything below `30` is worktree-local — its own `node_modules`, its
 own files, no browser — and runs before the lock: `10-dependencies`, `12-audit`, `15-secrets`, `17-scripts`, `18-docs`,
