@@ -128,6 +128,29 @@ describe("a Done task's stuck agent", () => {
     expect(w.records[key].finished).toBeFalsy()
   })
 
+  test('a message just before a restart keeps holding the grace after it', async () => {
+    const w = world()
+    const { t, key } = await started(w, repo(), 'restarted')
+    t.merged = true
+    t.doneAt = Date.now() - STALE
+    w.records[key].started = Date.now() - STALE
+    w.engine.saveAfter = 0
+    w.engine.youWrote(key)
+    await Bun.sleep(30)
+
+    // a fresh engine over the same home: the in-memory wrote map is gone, only the task's spokenAt survives
+    const w2 = world()
+    const t2 = w2.engine.task(t.id)!
+    expect(t2.spokenAt).toBeTruthy()
+    w2.status[key] = 'working'
+    w2.records[key] = { kind: 'claude', started: Date.now() - STALE, sessionId: `${key}-session`, logs: [] }
+    w2.engine.agentStatus(key)
+    await Bun.sleep(20)
+
+    expect(w2.stopped).toEqual([])
+    expect(w2.records[key].finished).toBeFalsy()
+  })
+
   test('a status event racing the sweep cannot force-close the same agent twice', async () => {
     const w = world()
     const { t, key } = await started(w, repo(), 'race')

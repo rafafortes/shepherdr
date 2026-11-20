@@ -115,6 +115,8 @@ export interface TaskRec {
   closed?: boolean
   /** when it was merged or closed; tasks from before it was kept fall back to their last update */
   doneAt?: number
+  /** when someone last wrote to its chat beyond the brief: moves the stuck-agent grace for a Done task */
+  spokenAt?: number
   /** when its agent first reported done: how long tasks take, for agents' guesses of their time left (estimates.ts) */
   reportedAt?: number
   /** its place was put away once done: agent, space, worktree and branch (what lost nothing) */
@@ -4846,8 +4848,8 @@ export class Engine extends Emitter<Events> {
     const key = this.key(t)
     if (!ended(t) || this.agents.status(key) !== 'working') return
     // a Done task whose agent took up a new turn since it finished — a human writing to it again — gets a fresh grace:
-    // a launch or a message to its chat both move this on, so an old done time never cuts off the new turn
-    const since = Math.max(t.doneAt ?? t.updated, this.agents.record(key)?.started ?? 0, this.wrote.get(t.id) ?? 0)
+    // a launch or a message to its chat both move this on, persisted so a restart cannot cut off the new turn
+    const since = Math.max(t.doneAt ?? t.updated, this.agents.record(key)?.started ?? 0, t.spokenAt ?? 0, this.wrote.get(t.id) ?? 0)
     if (Date.now() - since < DONE_WORKING_MS) return
     if (this.endingDone.has(key)) return // one force-close even if the sweep and a status event arrive together
     this.endingDone.add(key)
@@ -5234,9 +5236,11 @@ export class Engine extends Emitter<Events> {
     const [id] = key.split('/')
     const t = this.task(id)
     if (!t) return
-    // a message to a Done task's agent (which keeps its chat) starts a new turn: remember it even though the task stays
-    // ended, so the stuck-agent grace starts from this turn, not from when the task was finished
+    // a message to a Done task's agent (which keeps its chat) starts a new turn: remember it on the task itself, so a
+    // restart cannot lose it and the stuck-agent grace starts from this turn, not from when the task was finished
     this.wrote.set(t.id, Date.now())
+    t.spokenAt = Date.now()
+    this.saveSoon()
     // writing to an archived task brings it back: you talk to it again
     if (t.archived) this.unarchive(t.id)
     if (ended(t)) return
