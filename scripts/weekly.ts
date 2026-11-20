@@ -48,6 +48,10 @@ export type Deps = {
   log: (line: string) => void
   /** the prefix that puts a child last in line for the CPU and the disk, as the check and the tests do */
   lowPriority: string[]
+  /** the full checks' shared lock, which the probe takes as they do: one run at a time on this machine */
+  lock: string
+  /** whether this host can take that lock (`flock`) */
+  flock: boolean
 }
 
 /** the one real process call: a test stands in for it, and a missing command is one failed process, never a crash */
@@ -72,6 +76,17 @@ export function lowPriorityArgs(which: (cmd: string) => boolean = (c) => !!Bun.w
   if (which('nice')) out.push('nice', '-n', '19')
   if (which('ionice')) out.push('ionice', '-c', '3')
   return out
+}
+
+/** what the tests run under (scripts/test.ts): a systemd scope of the least CPU and IO weight where this user's
+ *  services run, then nice and idle disk; the same prefix the check's own steps get */
+export function limiter(
+  which: (cmd: string) => boolean = (c) => !!Bun.which(c),
+  spawned: (cmd: string[]) => boolean = (cmd) => Bun.spawnSync(cmd, { stdout: 'ignore', stderr: 'ignore' }).success,
+): string[] {
+  if (process.platform !== 'linux') return lowPriorityArgs(which)
+  const scope = ['systemd-run', '--user', '--scope', '--quiet', '--collect', '-p', 'CPUWeight=1', '-p', 'IOWeight=1']
+  return [...(which('systemd-run') && spawned([...scope, 'true']) ? scope : []), ...lowPriorityArgs(which)]
 }
 
 /** whether a process is still there (signal 0 asks, it does not send) */
@@ -123,7 +138,9 @@ const defaults = (): Deps => ({
     writeFileSync(file, text)
   },
   log: (line) => console.log(line),
-  lowPriority: lowPriorityArgs(),
+  lowPriority: limiter(),
+  lock: join(process.env.HOME ?? '/tmp', '.cache', 'shepherdr', 'check-local.lock'),
+  flock: !!Bun.which('flock'),
 })
 
 /* ---------- the gate's verdict, as the runner leaves it ---------- */
@@ -139,6 +156,8 @@ export type GateResult = {
   skipped: string[]
   /** the runner's own `! note` lines: what it says did not happen, outside a step */
   notes: string[]
+  /** the failing tests and type errors the runner named under the verdict, for a task's brief */
+  detail: string[]
   /** `PASSED in 2m03s` or `FAILED in ...: types tests` */
   line: string
   branch: string
@@ -160,6 +179,8 @@ export function parseDur(text: string): number {
 export function parseVerdict(text: string): Omit<GateResult, 'logs' | 'exitCode'> {
   const parts: Part[] = []
   const notes: string[] = []
+  const detail: string[] = []
+  let named = false
   let line = ''
   let passed = false
   let branch = ''
@@ -175,6 +196,19 @@ export function parseVerdict(text: string): Omit<GateResult, 'logs' | 'exitCode'
     if (note) {
       notes.push(note[1] ?? '')
       continue
+    }
+    // the failing tests or type errors the runner printed under its verdict: two spaces in, after its own heading
+    if (/^(Failing tests|Type errors|Left behind|The end of its log):$/.test(raw)) {
+      named = true
+      continue
+    }
+    if (named) {
+      const line = raw.match(/^\s{2}(\S.*)$/)
+      if (line) {
+        detail.push(line[1] ?? '')
+        continue
+      }
+      named = false
     }
     const step = raw.match(/^(\d+)\/(\d+) ([\w-]+) (ok|skipped|FAILED|STOPPED|TIMED OUT, killed|TIMED OUT|KILLED)(?: \(([^)]*)\))?(.*)$/)
     if (step) {
@@ -198,7 +232,7 @@ export function parseVerdict(text: string): Omit<GateResult, 'logs' | 'exitCode'
   }
   const failed = parts.filter((p) => p.status === 'failed').map((p) => p.name)
   const skipped = parts.filter((p) => p.status === 'skipped').map((p) => p.name)
-  return { ran: parts.length > 0, passed, parts, failed, skipped, notes, line, branch, commit }
+  return { ran: parts.length > 0, passed, parts, failed, skipped, notes, detail, line, branch, commit }
 }
 
 /** where the runner keeps this worktree's verdict and step logs */
@@ -279,18 +313,16 @@ export function orderBySlowest(files: string[], timings: Record<string, number> 
   return [...files].sort((a, b) => ms(b) - ms(a) || a.localeCompare(b))
 }
 
-/** the next sample: five files from the slowest-first list, the window moving on past last week's last pick and
- *  wrapping, so the whole set is reached over the weeks and the slowest are probed again on the next turn of the list */
-export function pickSample(ordered: string[], previous: string[], size: number): string[] {
+/** the next sample: the slowest of the files this turn has not probed yet, and once the turn is done, a new one. The
+ *  list is re-sorted by noisy timings every week, so the turn is kept by name (`probed`), never by a position in it. */
+export function pickSample(ordered: string[], probed: string[], size: number): string[] {
   if (!ordered.length || size < 1) return []
-  const at = previous.length ? ordered.indexOf(previous[previous.length - 1] ?? '') : -1
-  const from = at < 0 ? 0 : (at + 1) % ordered.length
-  const out: string[] = []
-  for (let i = 0; i < Math.min(size, ordered.length); i++) out.push(ordered[(from + i) % ordered.length] ?? '')
-  return out
+  const fresh = ordered.filter((f) => !probed.includes(f))
+  if (fresh.length >= Math.min(size, ordered.length)) return fresh.slice(0, size)
+  return [...fresh, ...ordered.filter((f) => probed.includes(f))].slice(0, Math.min(size, ordered.length))
 }
 
-export type ProbeFile = { file: string; ok: boolean; repeats: number; detail: string[] }
+export type ProbeFile = { file: string; ok: boolean; repeats: number; detail: string[]; skipped: boolean }
 export type Probe = { files: ProbeFile[]; skipped: string }
 
 /** the failing tests a `bun test` run named, for the report and a task's brief */
@@ -307,19 +339,25 @@ export function failingTests(text: string): string[] {
 export function runProbe(d: Deps, files: string[]): ProbeFile[] {
   return files.map((file) => {
     // --parallel: a plain `bun test` is sent through scripts/test.ts by test/preload.ts, which rewrites the timings that
-    // order this very list; its own worker leaves them alone
-    const r = d.run([...d.lowPriority, 'bun', 'test', '--parallel=1', `--rerun-each=${REPEATS}`, '--timeout=20000', `./${file}`], {
+    // order this very list; its own worker leaves them alone. The probe keeps the full checks' one-at-a-time rule: a
+    // browser test lane beside another worktree's gate flakes on the contention and would be filed as flaky for it.
+    const lock = d.flock ? ['flock', '-w', '3600', d.lock] : []
+    const r = d.run([...lock, ...d.lowPriority, 'bun', 'test', '--parallel=1', `--rerun-each=${REPEATS}`, '--timeout=20000', `./${file}`], {
       cwd: d.root,
       timeout: 30 * 60_000,
       // as the runner gives them to the suite: a test that makes a commit needs somebody to make it
       env: { GIT_AUTHOR_NAME: 'CI', GIT_AUTHOR_EMAIL: 'ci@localhost', GIT_COMMITTER_NAME: 'CI', GIT_COMMITTER_EMAIL: 'ci@localhost' },
     })
-    const detail = r.exitCode === 0 ? [] : failingTests(`${r.stdout}\n${r.stderr}`)
-    return { file, ok: r.exitCode === 0, repeats: REPEATS, detail: detail.length ? detail : [`exit ${r.exitCode}`] }
+    const said = `${r.stdout}\n${r.stderr}`
+    const passes = (said.match(/\(pass\) /g) ?? []).length
+    const skips = (said.match(/\(skip\) /g) ?? []).length
+    const skipped = r.exitCode === 0 && passes === 0
+    const detail = r.exitCode === 0 ? (skipped ? [`no test ran (${skips} skipped)`] : []) : (failingTests(said) ?? [])
+    return { file, ok: r.exitCode === 0 && !skipped, repeats: REPEATS, detail: detail.length ? detail : r.exitCode === 0 ? [] : [`exit ${r.exitCode}`], skipped }
   })
 }
 
-type State = { at: number; commit: string; sample: string[] }
+type State = { at: number; commit: string; sample: string[]; probed: string[] }
 
 export const weeklyDir = (common: string) => join(common, 'shepherdr-weekly')
 
@@ -415,7 +453,10 @@ function serverRunning(d: Deps, name: string): boolean {
 /** the default branch: origin/HEAD when the checkout has it, else the branch it is on */
 export function baseBranch(d: Deps): string {
   const head = git(d, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD')
-  return head ? head.replace(/^origin\//, '') : git(d, 'rev-parse', '--abbrev-ref', 'HEAD') || 'main'
+  if (head) return head.replace(/^origin\//, '')
+  // no origin/HEAD: the run's own branch is a task branch, never the base the space merges into
+  for (const name of ['herdr-tui', 'main']) if (git(d, 'rev-parse', '--verify', '--quiet', `origin/${name}`)) return name
+  return 'main'
 }
 
 /** what work of finished tasks left behind: nothing is deleted here, the report only names it for the operator */
@@ -441,7 +482,17 @@ export function leftovers(d: Deps, base: string, branch: string): Leftovers {
     worktrees: trees.length,
     dead: trees.filter((w) => !d.exists(w.path)).map((w) => w.path),
     done: trees.filter(done).map((w) => w.branch),
-    uncommitted: git(d, 'status', '--porcelain').split('\n').filter(Boolean),
+    // every worktree the repository has, its own checkout and the operator's main one: scratch left in any of them
+    uncommitted: trees
+      .filter((w) => d.exists(w.path))
+      .flatMap((w) =>
+        d
+          .run(['git', 'status', '--porcelain'], { cwd: w.path })
+          .stdout.trim()
+          .split('\n')
+          .filter(Boolean)
+          .map((l) => `${w.path.split('/').pop() ?? w.path}: ${l.trim()}`),
+      ),
     tmpHomes: d
       .list(d.tmpdir)
       .filter((e) => e.name.toLowerCase().includes('proof') && d.clock() - e.mtime > TMP_AGE && !serverRunning(d, e.name))
@@ -512,7 +563,8 @@ export function redTasks(run: WeeklyRun): RedTask[] {
   else if (!gate.passed && !gate.failed.length) add('gate', fitTitle('Weekly: the gate did not pass'), `the full gate ending without a pass (${gate.line || 'no verdict line'}, exit ${gate.exitCode})`)
   for (const name of gate.failed) {
     const advisories = name === 'audit' && run.audit.fresh.length ? ` New advisories: ${run.audit.fresh.join(' · ')}.` : ''
-    add(name, fitTitle(`Weekly: ${name} red`), `the ${name} step of the full gate red.${advisories}`)
+    const named = gate.detail.length && (name === 'tests' || name === 'types' || name === 'coverage' || name === 'build') ? ` The gate named: ${gate.detail.join(' · ')}.` : ''
+    add(name, fitTitle(`Weekly: ${name} red`), `the ${name} step of the full gate red.${named}${advisories}`)
   }
   // a part the runner skipped was not checked this week at all: the week where nothing may be missed is where that is news
   for (const name of gate.skipped) {
@@ -640,8 +692,8 @@ function pickProbe(d: Deps, common: string, sample: number): Probe {
   } catch {
     /* no timings yet: the files go in by name */
   }
-  const previous = readState(join(weeklyDir(common), 'state.json'), d.read)?.sample ?? []
-  return { files: runProbe(d, pickSample(orderBySlowest(files, timings), previous, sample)), skipped: '' }
+  const state = readState(join(weeklyDir(common), 'state.json'), d.read)
+  return { files: runProbe(d, pickSample(orderBySlowest(files, timings), state?.probed ?? [], sample)), skipped: '' }
 }
 
 export function main(argv: string[], overrides: Partial<Deps> = {}): number {
@@ -660,8 +712,19 @@ export function main(argv: string[], overrides: Partial<Deps> = {}): number {
   const tip = git(d, 'rev-parse', '--verify', '--quiet', `origin/${base}`)
   const behind = tip ? Number(git(d, 'rev-list', '--count', `HEAD..origin/${base}`)) : null
   const logs = logsOf(d)
+  // a killed run must not leave last week's report looking like this one's: the file says a run is on, from its start
+  const report = join(weeklyDir(common), 'report.md')
+  try {
+    d.write(
+      report,
+      `# Weekly full check · running\n\nStarted ${new Date(started).toISOString()} on \`${branch}\` at \`${commit}\` (base \`${base}\`). This file is replaced when the run ends: the gate takes minutes, up to an hour behind another worktree's check.\n`,
+    )
+  } catch (e) {
+    d.log(`weekly: the report could not be written (${e instanceof Error ? e.message : String(e)}): nothing was started`)
+    return 2
+  }
   const gate = runGate(d)
-  const browsers = gateBrowsers(d, logs)
+  const browsers = gateBrowsers(d, logs, started)
   const audit = auditInfo(d, common)
   const outdated = outdatedInfo(d)
   let probe: Probe
@@ -676,7 +739,7 @@ export function main(argv: string[], overrides: Partial<Deps> = {}): number {
     base,
     tip,
     behind: behind === null || Number.isNaN(behind) ? null : behind,
-    report: join(weeklyDir(common), 'report.md'),
+    report,
     browsers,
     gate,
     audit,
@@ -695,7 +758,13 @@ export function main(argv: string[], overrides: Partial<Deps> = {}): number {
   try {
     d.write(run.report, buildReport(run, reds))
     // a week without a probe keeps the last sample: the rotation is the weekly run's, not a trial run's
-    if (probe.files.length) d.write(join(weeklyDir(common), 'state.json'), JSON.stringify({ at: run.at, commit, sample: probe.files.map((f) => f.file) } satisfies State))
+    if (probe.files.length) {
+      const before = readState(join(weeklyDir(common), 'state.json'), d.read)?.probed ?? []
+      const picked = probe.files.map((f) => f.file)
+      // a pick that repeats one already probed began a new turn of the list
+      const probed = picked.some((f) => before.includes(f)) ? picked : [...before, ...picked]
+      d.write(join(weeklyDir(common), 'state.json'), JSON.stringify({ at: run.at, commit, sample: picked, probed } satisfies State))
+    }
   } catch (e) {
     d.log(`weekly: the report could not be written (${e instanceof Error ? e.message : String(e)}): nothing was recorded`)
     return 2
@@ -713,8 +782,11 @@ export function main(argv: string[], overrides: Partial<Deps> = {}): number {
 
 /** both browsers as the gate opened them, from the probe log it keeps in the run's folder: it runs the probe right
  *  after installing the dependencies, which is the first moment playwright-core can be imported */
-export function gateBrowsers(d: Deps, logs: string): { engine: string; line: string }[] {
-  return (d.read(join(logs, 'browsers.log')) ?? '')
+export function gateBrowsers(d: Deps, logs: string, since: number): { engine: string; line: string }[] {
+  const file = join(logs, 'browsers.log')
+  // the runner probes the browsers only when its run gets that far: an older log is another run's
+  if (mtimeOf(file) < since) return []
+  return (d.read(file) ?? '')
     .split('\n')
     .map((l) => l.match(/^(chromium|webkit): (.*)$/))
     .filter((m): m is RegExpMatchArray => !!m)

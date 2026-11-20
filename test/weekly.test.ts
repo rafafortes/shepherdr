@@ -18,6 +18,7 @@ import {
   type GateResult,
   gateBrowsers,
   leftovers,
+  limiter,
   lowPriorityArgs,
   main,
   mtimeOf,
@@ -131,7 +132,7 @@ function fakeRun(f: ReturnType<typeof repoFixture>, a: Answers): Run {
     const file = args[args.length - 1] ?? ''
     if (args.includes('test') && file.endsWith('.test.ts')) {
       const code = a.probe?.[file] ?? 0
-      return { stdout: code ? '(fail) opens the board [3.00ms]\n' : 'ok\n', stderr: '', exitCode: code }
+      return { stdout: code ? '(fail) opens the board [3.00ms]\n' : '(pass) opens the board [3.00ms]\n', stderr: '', exitCode: code }
     }
     return realRun(args, o)
   }
@@ -156,6 +157,8 @@ function world(f: ReturnType<typeof repoFixture>, run: Run, extra: Partial<Deps>
     },
     log: () => {},
     lowPriority: [],
+    lock: join(f.home, '.cache', 'shepherdr', 'check-local.lock'),
+    flock: true,
     ...extra,
   }
 }
@@ -179,6 +182,7 @@ describe('the gate verdict', () => {
     expect(v.failed).toEqual([])
     expect(v.skipped).toEqual([])
     expect(v.notes).toEqual([])
+    expect(v.detail).toEqual([])
   })
 
   test('a failed run names its failed part, a stopped one is a failure too', () => {
@@ -194,6 +198,11 @@ describe('the gate verdict', () => {
     expect(skipped.parts[1]?.note).toBe('gitleaks is missing')
     // the runner's own notes: what did not happen outside a step
     expect(skipped.notes).toEqual(['docs: gitleaks is missing', 'the tests: 3 skipped'])
+    // the failing tests the runner named under its verdict, for the brief
+    const failed = parseVerdict(
+      'check:local · work/90 at abc1234 · 2 test workers\n1/2 tests FAILED (1m)\n\nFAILED in 1m03s: tests\n\nFailing tests:\n  test/x.test.ts > opens the board\n  test/y.test.ts > sends\n',
+    )
+    expect(failed.detail).toEqual(['test/x.test.ts > opens the board', 'test/y.test.ts > sends'])
   })
 
   test('a run that gave up has no parts and is not a run of the gate', () => {
@@ -260,10 +269,11 @@ describe('dependencies', () => {
 describe('the flaky probe', () => {
   test('the sample walks the list, so the same five files do not repeat for ever', () => {
     const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    // the turn's slowest first; a file this turn already had never comes back in it
     expect(pickSample(files, [], 5)).toEqual(['a', 'b', 'c', 'd', 'e'])
-    // the next week goes on past this week's last pick, and wraps at the end of the list
-    expect(pickSample(files, ['a', 'b', 'c', 'd', 'e'], 5)).toEqual(['f', 'g', 'a', 'b', 'c'])
-    expect(pickSample(files, ['f', 'g'], 5)).toEqual(['a', 'b', 'c', 'd', 'e'])
+    expect(pickSample(files, ['a', 'b'], 5)).toEqual(['c', 'd', 'e', 'f', 'g'])
+    // the turn is done: a new one starts at the slowest, the rest of the old one after
+    expect(pickSample(files, ['a', 'b', 'c', 'd', 'e', 'f'], 5)).toEqual(['g', 'a', 'b', 'c', 'd'])
     expect(pickSample(files, ['gone'], 2)).toEqual(['a', 'b'])
     expect(pickSample(files, [], 99)).toEqual(files)
     expect(pickSample([], [], 5)).toEqual([])
@@ -284,6 +294,7 @@ describe('the flaky probe', () => {
       gateBrowsers(
         world(f, () => plain('')),
         f.logs,
+        0,
       ),
     ).toEqual([
       { engine: 'chromium', line: 'ok (1s)' },
@@ -293,6 +304,15 @@ describe('the flaky probe', () => {
       gateBrowsers(
         world(f, () => plain('')),
         join(f.dir, 'nowhere'),
+        0,
+      ),
+    ).toEqual([])
+    // a log an earlier run left is not this run's browsers
+    expect(
+      gateBrowsers(
+        world(f, () => plain('')),
+        f.logs,
+        Date.now() + 60_000,
       ),
     ).toEqual([])
   })
@@ -379,7 +399,7 @@ describe('the coverage trend and the leftovers', () => {
     mkdirSync(join(cache, 'merged-task'), { recursive: true })
     mkdirSync(join(cache, 'verdicts'), { recursive: true })
     const porcelain = `worktree ${f.repo}\nHEAD abc\nbranch refs/heads/work/90\n\nworktree ${gone}\nHEAD def\nbranch refs/heads/work/1\n\nworktree ${join(f.tmpdir, 'follow-up')}\nHEAD 1\nbranch refs/heads/work/77\n\nworktree ${f.tmpdir}\nHEAD 0\nbranch refs/heads/herdr-tui\n`
-    const run: Run = (args) => {
+    const run: Run = (args, o) => {
       const line = args.join(' ')
       if (line.includes('worktree list')) return plain(porcelain)
       if (line.includes('branch --merged')) return plain('* herdr-tui\n+ work/90\n')
@@ -388,7 +408,7 @@ describe('the coverage trend and the leftovers', () => {
       if (line.includes('log -1 --format=%s%x00%ct work/90') && line.includes('work/90')) return plain(`SHE-90: Run the complete gate weekly\u0000${Math.round(now / 1000)}\n`)
       // the same task id the base already carries, but a branch still at work: not a leftover
       if (line.includes('log -1 --format=%s%x00%ct work/77')) return plain(`SHE-77: A follow-up still at work\u0000${Math.round(now / 1000)}\n`)
-      if (line.includes('status --porcelain')) return plain(' M scripts/weekly.ts\n')
+      if (line.includes('status --porcelain')) return o?.cwd === f.repo ? plain(' M scripts/weekly.ts\n') : plain('')
       return plain('')
     }
     const d = world(f, run, {
@@ -415,7 +435,7 @@ describe('the coverage trend and the leftovers', () => {
     expect(left.dead).toEqual([gone])
     // work/1 descended from the base, work/77 landed as a squash under a task id its own branch names
     expect(left.done).toEqual(['work/1'])
-    expect(left.uncommitted).toEqual(['M scripts/weekly.ts'])
+    expect(left.uncommitted).toEqual(['repo: M scripts/weekly.ts'])
     // the running proof server's home is not a leftover; the young one is not finished; the old one is
     expect(left.tmpHomes).toEqual(['bad-proof', 'old-proof'])
     expect(processAlive(process.pid)).toBe(true)
@@ -438,6 +458,7 @@ function baseRun(o: Partial<WeeklyRun> = {}): WeeklyRun {
     failed: [],
     skipped: [],
     notes: [],
+    detail: [],
     line: 'PASSED in 1m08s',
     branch: 'herdr-tui',
     commit: '3cb7a424',
@@ -469,7 +490,7 @@ describe('the report and its tasks', () => {
   test('the report carries every part, the audit, the probe, the coverage trend and the leftovers', () => {
     const run = baseRun({
       outdated: { rows: [{ pkg: 'ws', current: '8.22.0', update: '8.23.0', latest: '8.23.0', dev: false }], offline: false },
-      probe: { files: [{ file: 'test/layout-a.test.ts', ok: true, repeats: REPEATS, detail: [] }], skipped: '' },
+      probe: { files: [{ file: 'test/layout-a.test.ts', ok: true, repeats: REPEATS, detail: [], skipped: false }], skipped: '' },
       coverage: { commit: 'abc1234', at: 0, ageDays: 3, summary: 'Coverage: 91.2%', top: ['index.ts 90.0% missed 2: 4, 9'], exempt: 4 },
       leftovers: { worktrees: 3, dead: ['/tmp/gone'], done: ['work/1'], tmpHomes: ['shep-proof'], logFolders: ['merged-task'], uncommitted: [' M x.ts'] },
     })
@@ -525,7 +546,7 @@ describe('the report and its tasks', () => {
     const run = baseRun({
       gate: { ...baseRun().gate, ran: false, passed: false, parts: [], line: '', exitCode: 2 },
       audit: { fresh: ['ws · advisory 9'], known: 0, offline: false },
-      probe: { files: [{ file: 'test/layout-settings-lazy.test.ts', ok: false, repeats: REPEATS, detail: ['opens the board'] }], skipped: '' },
+      probe: { files: [{ file: 'test/layout-settings-lazy.test.ts', ok: false, repeats: REPEATS, detail: ['opens the board'], skipped: false }], skipped: '' },
     })
     const reds = redTasks(run)
     expect(reds.map((r) => r.area)).toEqual(['gate', 'audit', 'flaky test/layout-settings-lazy.test.ts'])
@@ -555,6 +576,8 @@ describe('a red week that is not a failed step', () => {
     // a failed step keeps its own task, not a second one for the gate around it
     const named = redTasks(baseRun({ gate: { ...baseRun().gate, passed: false, failed: ['tests'], line: 'FAILED in 1m03s', exitCode: 1 } }))
     expect(named.map((r) => r.area)).toEqual(['tests'])
+    const withDetail = redTasks(baseRun({ gate: { ...baseRun().gate, passed: false, failed: ['tests'], detail: ['test/x.test.ts > opens the board'] } }))
+    expect(withDetail[0]?.brief).toContain('The gate named: test/x.test.ts > opens the board.')
   })
 
   test('no browser line, and a note no step covers, are red too', () => {
@@ -708,11 +731,22 @@ describe('the run itself', () => {
     writeFileSync(state, JSON.stringify({ at: 1, commit: 'abc', sample: ['test/layout-a.test.ts'] }))
     const out = capture()
     const fakes = depsOf(f, out)
+    fakes.run = fakeRun(f, { verdict: GREEN })
+    // nothing can be written at all: no run starts
     fakes.write = (file: string) => {
       throw new Error(`no write to ${basename(file)}`)
     }
-    fakes.run = fakeRun(f, { verdict: GREEN })
     expect(main(['--no-probe'], fakes)).toBe(2)
+    expect(out.lines.at(-1)).toContain('the report could not be written (no write to report.md): nothing was started')
+    // the first write is the running marker the run leaves while it works; the second is the report
+    const written: { file: string; text: string }[] = []
+    fakes.write = (file: string, text: string) => {
+      written.push({ file, text })
+      if (written.length > 1) throw new Error(`no write to ${basename(file)}`)
+    }
+    expect(main(['--no-probe'], fakes)).toBe(2)
+    expect(written[0]?.text).toContain('# Weekly full check · running')
+    expect(written[0]?.text).toContain('replaced when the run ends')
     expect(out.lines.at(-1)).toContain('the report could not be written (no write to report.md): nothing was recorded')
     // the failed write left the sample alone
     expect(JSON.parse(readFileSync(state, 'utf8')).sample).toEqual(['test/layout-a.test.ts'])
@@ -725,12 +759,33 @@ describe('the run itself', () => {
     expect(out.lines[0]).toContain('is not a git checkout')
     const repo = repoFixture()
     expect(baseBranch(world(repo, realRun))).toBe('herdr-tui')
+    // no origin/HEAD: origin/herdr-tui still names the base the space merges into, and never this branch
+    repo.git('symbolic-ref', '--delete', 'refs/remotes/origin/HEAD')
+    expect(baseBranch(world(repo, realRun))).toBe('herdr-tui')
+    const bare = tmp('weekly-nobase')
+    Bun.spawnSync(['git', 'init', '-q', '-b', 'work/90', bare])
+    expect(baseBranch(world({ ...repo, repo: bare }, realRun))).toBe('main')
     // a command this host does not have is one failed process, never a crash
     expect(realRun(['/nonexistent-shepherdr-weekly-command']).exitCode).not.toBe(0)
     expect(lowPriorityArgs(() => false)).toEqual([])
     // an entry that went while /tmp was listed is no age, never an error that loses the whole listing
     expect(mtimeOf('/nonexistent-shepherdr-weekly-entry')).toBe(0)
     expect(lowPriorityArgs(() => true)).toEqual(['nice', '-n', '19', 'ionice', '-c', '3'])
+    const scope = ['systemd-run', '--user', '--scope', '--quiet', '--collect', '-p', 'CPUWeight=1', '-p', 'IOWeight=1']
+    if (process.platform === 'linux') {
+      expect(
+        limiter(
+          () => true,
+          () => true,
+        ),
+      ).toEqual([...scope, 'nice', '-n', '19', 'ionice', '-c', '3'])
+      expect(
+        limiter(
+          () => false,
+          () => true,
+        ),
+      ).toEqual([])
+    } else expect(limiter(() => true)).toEqual(['nice', '-n', '19', 'ionice', '-c', '3'])
   })
 
   test('a browser that cannot start is named before the gate, not skipped inside it', () => {
