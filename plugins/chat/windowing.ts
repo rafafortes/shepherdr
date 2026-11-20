@@ -40,7 +40,10 @@ function of(chat: string): Window {
   return w
 }
 
-const emit = (chat: string) => windows.get(chat)?.subs.forEach((l) => l())
+const emit = (chat: string) =>
+  windows.get(chat)?.subs.forEach((l) => {
+    l()
+  })
 
 /** the first rendered row: the last window, or higher where the reader has revealed it */
 export function topOf(chat: string, count: number): number {
@@ -80,7 +83,7 @@ export function revealChat(chat: string, id: string) {
  *  asks for a batch; what lands in view is the reader's decision from there. The list itself does not scroll (its
  *  box does), so the top is read from the nearest scrollable ancestor, one frame after the event (the scroll event
  *  lands before the layout the reader's step caused) */
-export function watchReveal(list: HTMLElement, chat: string, by: () => void) {
+export function watchReveal(list: HTMLElement, by: () => void) {
   const scroller = (list.closest?.('.overflow-y-auto') ?? list) as HTMLElement
   const near = () => requestAnimationFrame(() => scroller.scrollTop < EDGE && by())
   const onScroll = near

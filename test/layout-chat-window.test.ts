@@ -2,10 +2,10 @@
 // the top (the sentinel, or their own wheel and keys) or a jump asks for a message outside the window. The store
 // keeps every message; only the DOM is capped, and a reveal never moves the message the reader is on (the browser
 // keeps their place while the batch goes in). The window's floor logic is test/chat-window.test.ts.
+// biome-ignore-all lint/style/noNonNullAssertion: a Playwright bounding box is non-null once its element has appeared
 import { describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
 import { layout } from './layout.ts'
-import { revealChat } from '../plugins/chat/windowing.ts'
 import type { Message } from '../shared/types.ts'
 
 const { browser, world, url, server } = await layout()
@@ -16,12 +16,15 @@ const emit = () => (world as unknown as { emit(e: string, k: string): void }).em
 
 /** a long chat, one line a message, newest last */
 const long = (n: number): Message[] =>
-  Array.from({ length: n }, (_, i): Message => ({
-    id: `win-${i}`,
-    who: i % 2 ? 'agent' : 'you',
-    text: i % 2 ? `A reply number ${i}` : `Question number ${i}`,
-    at: 1_700_000_000_000 + i * 1000,
-  }))
+  Array.from(
+    { length: n },
+    (_, i): Message => ({
+      id: `win-${i}`,
+      who: i % 2 ? 'agent' : 'you',
+      text: i % 2 ? `A reply number ${i}` : `Question number ${i}`,
+      at: 1_700_000_000_000 + i * 1000,
+    }),
+  )
 
 /** the scroll box of the chat (the overflow of StickToBottom) */
 const box = (page: Page) => page.locator('[data-msg]').first().locator('xpath=ancestor::div[contains(@class,"overflow-y-auto")][1]')
@@ -142,7 +145,7 @@ describe.skipIf(!browser)('the chat windows its message list', () => {
     }
   }, 60_000)
 
-  test('the sentinel answers a tap, an Enter and the reader\'s keys alike, and a jump asks for a row outside the window', async () => {
+  test("the sentinel answers a tap, an Enter and the reader's keys alike, and a jump asks for a row outside the window", async () => {
     const chat = world.chats[KEY]
     const old = chat.messages
     chat.messages = long(400)
