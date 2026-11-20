@@ -72,6 +72,45 @@ describe("executable settings need the screen's own proof", () => {
     expect(await src.act({ type: 'setting', key: 'alerts.doneCommand', value: null, capability: src.writeCapability })).toEqual({ ok: true })
   })
 
+  test('the /api/cli route refuses an executable key from a browser page but not from a local shell', async () => {
+    const cli = (headers: Record<string, string>) =>
+      fetch(`${base}/api/cli`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-shepherdr': '1', ...headers },
+        body: JSON.stringify({ args: ['set', 'alerts.command', 'echo cli-http'] }),
+      }).then((r) => r.json())
+    const host = `127.0.0.1:${app.port}`
+    const page = await cli({ origin: `http://${host}`, 'sec-fetch-site': 'same-origin' })
+    expect(page.code).toBe(1)
+    expect(page.out).toContain('Set it in Settings')
+    expect(stored().everywhere?.['alerts.command']).toBeUndefined()
+    // no Origin: a shell (or the alert installer) keeps working
+    expect(await cli({})).toMatchObject({ code: 0 })
+    expect(stored().everywhere?.['alerts.command']).toBe('echo cli-http')
+    expect(await src.cli(['unset', 'alerts.command'], { local: true })).toMatchObject({ code: 0 })
+  })
+
+  test("a write the main already gated is forwarded with its own marker, not this machine's proof", async () => {
+    // Machines.forward marks a peer write with x-shepherdr-main; the worker need not share the main's per-boot token
+    const r = await fetch(`${base}/api/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-shepherdr': '1', 'x-shepherdr-main': '1' },
+      body: JSON.stringify({ type: 'setting', key: 'alerts.command', value: 'echo forwarded', fromMain: true }),
+    }).then((x) => x.json())
+    expect(r).toEqual({ ok: true })
+    expect(stored().everywhere?.['alerts.command']).toBe('echo forwarded')
+    // a caller cannot mark its own write as forwarded through the JSON body
+    refused(
+      await fetch(`${base}/api/action`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-shepherdr': '1' },
+        body: JSON.stringify({ type: 'setting', key: 'alerts.command', value: 'echo false', fromMain: true }),
+      }).then((x) => x.json()),
+    )
+    expect(stored().everywhere?.['alerts.command']).toBe('echo forwarded')
+    expect(await src.act({ type: 'setting', key: 'alerts.command', value: null, capability: src.writeCapability })).toEqual({ ok: true })
+  })
+
   test('the screen gets that proof once over its own socket', async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${app.port}/api/ws`)
     try {
@@ -95,11 +134,22 @@ describe("executable settings need the screen's own proof", () => {
     }
   })
 
-  test("the shepherdr command still sets an executable key: it is the operator's tool (the lead's bound)", async () => {
-    const r = await src.cli(['set', 'alerts.command', 'echo cli'], {})
+  test("a local shepherdr command still sets an executable key: it is the operator's tool (the lead's bound)", async () => {
+    const r = await src.cli(['set', 'alerts.command', 'echo cli'], { local: true })
     expect(r.code).toBe(0)
     expect(src.settings.get('alerts.command')).toBe('echo cli')
     expect(stored().everywhere?.['alerts.command']).toBe('echo cli')
-    expect((await src.cli(['unset', 'alerts.command'], {})).code).toBe(0)
+    expect((await src.cli(['unset', 'alerts.command'], { local: true })).code).toBe(0)
+  })
+
+  test('a page that got past same-site cannot use /api/cli to set one either, but can still set ordinary keys', async () => {
+    const page = await src.cli(['set', 'alerts.command', 'echo page'], { local: false })
+    expect(page.code).toBe(1)
+    expect(page.out).toContain('Set it in Settings')
+    expect(src.settings.get('alerts.command')).toBe('off')
+    // a non-executable key keeps working from the command, with or without a local caller
+    expect((await src.cli(['set', 'brief.review', 'off'], { local: false })).code).toBe(0)
+    expect(src.settings.get('brief.review')).toBe('off')
+    expect((await src.cli(['unset', 'brief.review'], { local: false })).code).toBe(0)
   })
 })

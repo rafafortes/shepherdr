@@ -4091,11 +4091,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'call':
         return {}
       case 'setting': {
-        // A command of the operator's that a shell runs on every alert (or at every merge) is a second wall: the
-        // screen's write must carry the proof it got over its own socket at boot. A plain local POST can set the
-        // x-shepherdr header and send no Origin, but it cannot mint this (SEC-04). The shepherdr command writes
-        // settings directly through cli(), so the operator and their alert installer keep working.
-        if (EXECUTABLE_KEYS.has(a.key) && a.capability !== this.writeCapability) return { ok: false, error: 'Set it in Settings: a command here can only be changed from this page.' }
+        // A command of the operator's that a shell runs on every alert (or at every merge) gets a second wall: the
+        // screen's write must carry the proof it got over its own socket at boot. A page that got past same-site can
+        // send the x-shepherdr header, but cannot mint this without reading this machine's socket too; that is the
+        // wall's honest limit (SEC-04). The shepherdr command writes settings directly through cli(), so the operator
+        // and their alert installer keep working. A main machine's forwarded write carries its own server's marker.
+        if (EXECUTABLE_KEYS.has(a.key) && !a.fromMain && a.capability !== this.writeCapability) return { ok: false, error: 'Set it in Settings: a command here can only be changed from this page.' }
         if (a.key.startsWith('taskIds.')) {
           const p = a.place && this.places.space(a.place)
           if (!p) return { ok: false, error: 'Select a repository space in Settings.' }
@@ -5214,7 +5215,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return `Space order here: ${list}; spaces with no priority come after.`
   }
 
-  private async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string }): Promise<string> {
+  private async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean }): Promise<string> {
     const [a0, a1, ...rest] = p.words
     if (!a0 || a0 === 'help' || p.flags.has('help')) return HELP
     switch (a0) {
@@ -5440,6 +5441,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           return `${this.places.shownName(pr.name)}: base branch ${pr.base}. Existing tasks keep their target.`
         }
         if (!CATALOG.some((s) => s.rows.some((r) => r.key === a1))) throw new Error(`No setting ${a1}; shepherdr show lists them`)
+        // A browser page that got past same-site rules would send an Origin on its POST to /api/cli, so `local` is
+        // false there. A shell running shepherdr (the operator, their alert installer) sends none and keeps working;
+        // a local process gains nothing here anyway, as the lead's bound says (SEC-04).
+        if (EXECUTABLE_KEYS.has(a1) && !ctx.local) throw new Error('Set it in Settings: a command here can only be changed from the Settings page.')
         const waiting = p.flags.has('apply-waiting')
         if (waiting && a0 === 'set' && a1.startsWith('advisor.')) throw new Error(`${ADVISOR_AT_ONCE} Set it without --apply-waiting.`)
         if (waiting && (a0 !== 'set' || !waitingKind(a1))) throw new Error('--apply-waiting goes with shepherdr set task.agent, task.model, task.effort or a reviewer.* key')

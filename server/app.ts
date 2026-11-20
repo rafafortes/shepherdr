@@ -237,8 +237,11 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           // travels): only the server copies it into the action, so a caller cannot choose a proof in the JSON body.
           // The live source checks it when a write names an executable setting (SEC-04); other writes ignore it.
           const capability = req.headers.get('x-shepherdr-capability') ?? undefined
-          // always overwrite a body-supplied value: only the header the screen got over its socket can mint this
-          const act = a.type === 'setting' ? { ...a, capability } : a
+          // a worker's server marks a write the main already gated before forwarding it; the proof itself is per-boot
+          // and per-machine, so the worker cannot compare the main's token with its own
+          const fromMain = req.headers.get('x-shepherdr-main') === '1'
+          // always overwrite body-supplied values: only the server copies these from the request's own headers
+          const act = a.type === 'setting' ? { ...a, capability, fromMain } : a
           // one restart of every coordinator can outlast the idle cut-off (each turn that has to stop, each launch
           // that retries): its answer is the count the row shows, so it gets no cut-off, as the command does
           if (a.type === 'restart-all') srv.timeout(req, 0)

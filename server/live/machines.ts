@@ -608,7 +608,14 @@ export class Machines extends Emitter<Events> {
   }
 
   private async forward(l: Link, a: Action) {
-    const r = await fetch(`${l.rec.url}/api/action`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(a), signal: AbortSignal.timeout(20_000) })
+    // this machine's main gated the write before forwarding it; the worker's own per-boot proof is different, so it
+    // trusts this marker (set here, never from a request body) instead of comparing tokens (SEC-04)
+    const r = await fetch(`${l.rec.url}/api/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-shepherdr-main': '1' },
+      body: JSON.stringify(a),
+      signal: AbortSignal.timeout(20_000),
+    })
     return r.json()
   }
 
