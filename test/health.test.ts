@@ -1,6 +1,7 @@
 // Machine health: reading /proc and nvidia-smi, when a limit is told (once, and again once it is back under), what
 // holds new tasks, and the numbers each machine's Settings note gives (server/live/health.ts).
 import { describe, expect, test } from 'bun:test'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -47,6 +48,107 @@ describe('reading the machine', () => {
     expect(s.disks.length).toBeGreaterThanOrEqual(1)
     expect(new Set(s.disks.map((d) => d.dev)).size).toBe(s.disks.length)
     expect(H.summary(s)).toMatch(/^CPU \d+% \(load [\d.]+ on \d+ cores( · pressure \d+%)?\) · Memory \d+% \(\d+ GB of \d+ GB( · swap \d+ GB)?( · pressure \d+%)?\)( · I\/O pressure \d+%)? · Disk /)
+  })
+})
+
+describe('the GPU read is async', () => {
+  const script = (dir: string, name: string, body: string) => {
+    const path = join(dir, name)
+    writeFileSync(path, `#!/bin/sh\n${body}\n`, { mode: 0o755 })
+    return path
+  }
+  const lines = 'NVIDIA A10G, 37, 4096, 23028'
+
+  test('a fake nvidia-smi is read with Bun.spawn, and a missing one is looked up once then cached', async () => {
+    const dir = tmp('health-gpus')
+    expect(await H.gpusAsync(script(dir, 'smi', `printf '${lines}\\n'`))).toEqual([{ name: 'NVIDIA A10G', util: 37, memPct: 18 }])
+    // stub the lookup so this says the same on a machine with a GPU as on one without (the Radeon here)
+    const which = Bun.which
+    let lookups = 0
+    Bun.which = (() => {
+      lookups++
+      return null
+    }) as typeof Bun.which
+    try {
+      expect(await H.gpusAsync()).toEqual([])
+      expect(await H.gpusAsync()).toEqual([])
+      expect(lookups).toBe(1) // a miss is cached, not looked up again on every sample
+    } finally {
+      Bun.which = which
+    }
+    expect(await H.gpusAsync('')).toEqual([])
+  })
+
+  test('a failed, absent or hanging nvidia-smi misses; a hang settles well under the stall threshold', async () => {
+    const dir = tmp('health-gpus-slow')
+    expect(await H.gpusAsync(script(dir, 'bad', 'exit 1'))).toBeNull()
+    expect(await H.gpusAsync(join(dir, 'not-there'))).toBeNull()
+    const t0 = Date.now()
+    expect(await H.gpusAsync(script(dir, 'slow', 'exec sleep 5'))).toBeNull()
+    expect(Date.now() - t0).toBeLessThan(2500)
+  })
+
+  test('the sync sample spawns nothing; tick uses the real async reader and keeps the last reading on a miss', async () => {
+    const real = Bun.spawnSync
+    let sync = 0
+    Bun.spawnSync = ((...a: Parameters<typeof Bun.spawnSync>) => {
+      sync++
+      return real(...a)
+    }) as typeof Bun.spawnSync
+    try {
+      expect(H.sample().gpus).toEqual([])
+    } finally {
+      Bun.spawnSync = real
+    }
+    expect(sync).toBe(0)
+
+    const dir = tmp('health-gpus-tick')
+    const gpu = [{ name: 'NVIDIA A10G', util: 37, memPct: 18 }]
+    let shown = 0
+    const mon = new H.Monitor(
+      limits,
+      () => true,
+      () => undefined,
+      undefined,
+      undefined,
+      () => shown++,
+    )
+    mon.readGpus = () => H.gpusAsync(script(dir, 'smi', `printf '${lines}\\n'`)) // the default reader, pointed at a fake smi
+    const t0 = Date.now()
+    mon.tick(0)
+    expect(Date.now() - t0).toBeLessThan(200)
+    for (let i = 0; i < 50 && !mon.last?.gpus.length; i++) await Bun.sleep(10) // let the async read land, however long the spawn takes
+    expect(mon.last?.gpus).toEqual(gpu)
+    expect(shown).toBe(1) // the screen is told when the number lands, not one sample late
+    // a miss leaves the previous reading and tells nothing; a hung read cannot hold the tick either
+    mon.readGpus = async () => null
+    mon.tick(31_000)
+    expect(mon.last?.gpus).toEqual(gpu)
+    expect(shown).toBe(1)
+    mon.readGpus = () => new Promise<never>(() => undefined)
+    const t1 = Date.now()
+    mon.tick(62_000)
+    expect(Date.now() - t1).toBeLessThan(200)
+    expect(mon.last?.gpus).toEqual(gpu)
+  })
+
+  test("a sample that brings its own GPUs (a box worker's remote machine) is not overwritten by a local read", async () => {
+    const remote = [{ name: 'REMOTE RTX', util: 55, memPct: 7 }]
+    let reads = 0
+    const mon = new H.Monitor(
+      limits,
+      () => true,
+      () => undefined,
+      () => ({ ...at(1), gpus: remote }),
+    )
+    mon.readGpus = async () => {
+      reads++
+      return []
+    }
+    mon.tick(0)
+    await Bun.sleep(20)
+    expect(mon.last?.gpus).toEqual(remote)
+    expect(reads).toBe(0)
   })
 })
 

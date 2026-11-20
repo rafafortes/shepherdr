@@ -12,6 +12,8 @@ import { BOX, helperDir, runSync, type BoxInfo } from './box.ts'
 import { join } from 'node:path'
 
 export const SAMPLE_MS = 30_000
+/** how long an nvidia-smi read may take before it is killed: a hung GPU read must not become a long event-loop stall */
+const SMI_TIMEOUT_MS = 1500
 /** the load must stay over its limit this long before the coordinator hears of it: one test run's spike is no news */
 export const LOAD_FOR = 120_000
 /** herdr must stay silent this long: a restart of it takes a few seconds */
@@ -105,14 +107,38 @@ export function diskOf(path: string): Disk | null {
 }
 
 let smi: string | null | undefined
-function gpus(): Gpu[] {
-  smi ??= Bun.which('nvidia-smi')
-  if (!smi) return []
+/** look nvidia-smi up once and remember a miss too: `smi ??=` would look it up again on every sample where it is absent */
+function smiPath(): string | null {
+  if (smi === undefined) smi = Bun.which('nvidia-smi') ?? null
+  return smi
+}
+
+/**
+ * Read the GPU off the event loop: spawnSync here stalls herdr and the screens for as long as the driver takes (seconds
+ * under a compute job). `null` is a read that missed (it timed out or failed) — the caller keeps its last reading;
+ * an empty array is a machine with no nvidia-smi at all. `bin` lets a test point at a fake smi.
+ */
+export async function gpusAsync(bin = smiPath()): Promise<Gpu[] | null> {
+  if (!bin) return []
+  let proc: ReturnType<typeof Bun.spawn> | undefined
+  let expired: (miss: null) => void = () => undefined
+  const deadline = new Promise<null>((resolve) => {
+    expired = resolve
+  })
+  const timer = setTimeout(() => {
+    if (proc && proc.exitCode === null) proc.kill('SIGKILL')
+    expired(null) // a driver stuck in an uninterruptible wait may not exit: settle the read at the cap all the same
+  }, SMI_TIMEOUT_MS)
   try {
-    const r = Bun.spawnSync([smi, '--query-gpu=name,utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits'], { stdout: 'pipe', stderr: 'ignore', timeout: 5000 })
-    return r.exitCode === 0 ? parseGpus(r.stdout.toString()) : []
+    const p = Bun.spawn([bin, '--query-gpu=name,utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits'], { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' })
+    proc = p
+    // wait for the process first: waiting for stdout's EOF instead would hang while a child of a killed smi holds it open
+    const code = await Promise.race([p.exited, deadline])
+    return code === 0 ? parseGpus(await new Response(p.stdout).text()) : null
   } catch {
-    return []
+    return null
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -124,8 +150,8 @@ function boxSample(b: BoxInfo): Sample {
   return { ...j, at: Date.now(), disks: j.disks.map((d) => ({ ...d, path: d.path === b.home ? homedir() : d.path, dev: Number(d.dev) || 0 })) }
 }
 
-/** this machine now: home and /tmp once each (one disk when they are the same) */
-export function sample(): Sample {
+/** this machine now: home and /tmp once each (one disk when they are the same); the GPU is read separately, off the loop */
+export function sample(gpus: Gpu[] = []): Sample {
   if (BOX) return boxSample(BOX)
   const read = (f: string) => {
     try {
@@ -157,7 +183,7 @@ export function sample(): Sample {
     memUsed: mem.used,
     ...(mem.swapTotal ? { swapTotal: mem.swapTotal, swapUsed: mem.swapUsed } : {}),
     disks,
-    gpus: gpus(),
+    gpus,
   }
 }
 
@@ -392,26 +418,51 @@ export interface HealthEvent {
  */
 export class Monitor {
   last?: Sample
+  /** the last GPU reading, kept when a read misses so the meters still show something */
+  private gpus: Gpu[] = []
+  /** one GPU read at a time: a tick never waits for it */
+  private sampling?: Promise<void>
+  /** the async GPU read; a test swaps in a fake or a slow smi */
+  readGpus: () => Promise<Gpu[] | null> = gpusAsync
+  /** only the plain local sample needs a GPU read of ours: a box sample carries its own machine's GPUs, and a test's take owns its sample */
+  private readonly ownSample: boolean
+  private take: () => Sample
   private watch: Partial<Record<Kind, Watch>>
 
   constructor(
     private limits: () => MachineLimits,
     private herdr: () => boolean,
     private on: (e: HealthEvent) => void,
-    private take: () => Sample = sample,
+    take?: () => Sample,
     private store: { read: () => Partial<Record<Kind, Watch>>; write: (w: Partial<Record<Kind, Watch>>) => void } = { read: () => ({}), write: () => undefined },
+    private onSample: () => void = () => undefined,
   ) {
+    this.ownSample = !take
+    this.take = take ?? (() => sample(this.gpus))
     this.watch = store.read()
   }
 
-  /** a look: a fresh sample when the last is old, then each limit judged */
+  /** a look: a fresh sample when the last is old (the GPU read starts off the loop, never waited for), then each limit judged */
   tick(now = Date.now()) {
-    if (!this.last || now - this.last.at >= SAMPLE_MS - 1000) this.last = { ...this.take(), at: now }
+    if (!this.last || now - this.last.at >= SAMPLE_MS - 1000) {
+      const fresh = { ...this.take(), at: now }
+      this.last = fresh
+      if (this.ownSample && !BOX && !this.sampling) this.sampling = this.refresh(fresh).finally(() => (this.sampling = undefined))
+    }
     const was = this.watch
     const { next, events } = judge(was, levels(this.last, this.herdr(), this.limits()), now)
     this.watch = next
     if (JSON.stringify(next) !== JSON.stringify(was)) this.store.write(next)
     for (const e of events) this.on({ ...e, sample: this.last, since: was[e.kind]?.since })
+  }
+
+  /** read the GPU off the loop and put it in the sample we just took; a miss leaves the last reading in place */
+  private async refresh(expected: Sample) {
+    const gpus = await this.readGpus()
+    if (gpus === null) return
+    this.gpus = gpus
+    if (this.last === expected) this.last.gpus = gpus
+    this.onSample() // the meter has a new number: tell the screen instead of showing it one sample late
   }
 
   /** what is past its alert limit now, and was told */
