@@ -137,6 +137,8 @@ export type GateResult = {
   failed: string[]
   /** the parts that did not run: a week that did not check them is not a full week */
   skipped: string[]
+  /** the runner's own `! note` lines: what it says did not happen, outside a step */
+  notes: string[]
   /** `PASSED in 2m03s` or `FAILED in ...: types tests` */
   line: string
   branch: string
@@ -157,6 +159,7 @@ export function parseDur(text: string): number {
 /** the runner's verdict.txt: one part per line, a skipped reason into it, the closing verdict line */
 export function parseVerdict(text: string): Omit<GateResult, 'logs' | 'exitCode'> {
   const parts: Part[] = []
+  const notes: string[] = []
   let line = ''
   let passed = false
   let branch = ''
@@ -166,6 +169,11 @@ export function parseVerdict(text: string): Omit<GateResult, 'logs' | 'exitCode'
     if (head) {
       branch = group(head, 1)
       commit = group(head, 2)
+      continue
+    }
+    const note = raw.match(/^\s*! (.+)$/)
+    if (note) {
+      notes.push(note[1] ?? '')
       continue
     }
     const step = raw.match(/^(\d+)\/(\d+) ([\w-]+) (ok|skipped|FAILED|STOPPED|TIMED OUT, killed|TIMED OUT|KILLED)(?: \(([^)]*)\))?(.*)$/)
@@ -190,7 +198,7 @@ export function parseVerdict(text: string): Omit<GateResult, 'logs' | 'exitCode'
   }
   const failed = parts.filter((p) => p.status === 'failed').map((p) => p.name)
   const skipped = parts.filter((p) => p.status === 'skipped').map((p) => p.name)
-  return { ran: parts.length > 0, passed, parts, failed, skipped, line, branch, commit }
+  return { ran: parts.length > 0, passed, parts, failed, skipped, notes, line, branch, commit }
 }
 
 /** where the runner keeps this worktree's verdict and step logs */
@@ -271,11 +279,11 @@ export function orderBySlowest(files: string[], timings: Record<string, number> 
   return [...files].sort((a, b) => ms(b) - ms(a) || a.localeCompare(b))
 }
 
-/** the next sample: five files from this season's slowest-first list, the window sliding by one file a week, so the
- *  slowest keep being re-probed while the rest is reached over time */
+/** the next sample: five files from the slowest-first list, the window moving on past last week's last pick and
+ *  wrapping, so the whole set is reached over the weeks and the slowest are probed again on the next turn of the list */
 export function pickSample(ordered: string[], previous: string[], size: number): string[] {
   if (!ordered.length || size < 1) return []
-  const at = previous.length ? ordered.indexOf(previous[0] ?? '') : -1
+  const at = previous.length ? ordered.indexOf(previous[previous.length - 1] ?? '') : -1
   const from = at < 0 ? 0 : (at + 1) % ordered.length
   const out: string[] = []
   for (let i = 0; i < Math.min(size, ordered.length); i++) out.push(ordered[(from + i) % ordered.length] ?? '')
@@ -303,6 +311,8 @@ export function runProbe(d: Deps, files: string[]): ProbeFile[] {
     const r = d.run([...d.lowPriority, 'bun', 'test', '--parallel=1', `--rerun-each=${REPEATS}`, '--timeout=20000', `./${file}`], {
       cwd: d.root,
       timeout: 30 * 60_000,
+      // as the runner gives them to the suite: a test that makes a commit needs somebody to make it
+      env: { GIT_AUTHOR_NAME: 'CI', GIT_AUTHOR_EMAIL: 'ci@localhost', GIT_COMMITTER_NAME: 'CI', GIT_COMMITTER_EMAIL: 'ci@localhost' },
     })
     const detail = r.exitCode === 0 ? [] : failingTests(`${r.stdout}\n${r.stderr}`)
     return { file, ok: r.exitCode === 0, repeats: REPEATS, detail: detail.length ? detail : [`exit ${r.exitCode}`] }
@@ -326,12 +336,13 @@ function readState(file: string, read: (f: string) => string | null): State | nu
 
 export type CoverageTrend = { commit: string; at: number | null; ageDays: number | null; summary: string; top: string[]; exempt: number }
 
-export function coverageTrend(d: Deps, common: string, logs: string): CoverageTrend {
+/** `measured`: this run reached its coverage step; a report left by an earlier run is not this week's trend */
+export function coverageTrend(d: Deps, common: string, logs: string, measured = true): CoverageTrend {
   const base = readCoverageBaseline(join(common, 'shepherdr-test', 'coverage.json'))
-  const lines = (d.read(join(logs, 'coverage', 'report.txt')) ?? '').split('\n').filter(Boolean)
+  const lines = measured ? (d.read(join(logs, 'coverage', 'report.txt')) ?? '').split('\n').filter(Boolean) : []
   const files = git(d, 'ls-files').split('\n').filter(counted)
   let exempt = 0
-  for (const f of files) for (const line of (d.read(join(d.root, f)) ?? '').split('\n')) if (/^\s*(\/\/|#)\s*coverage-exempt:/.test(line)) exempt++
+  for (const f of files) for (const line of (d.read(join(d.root, f)) ?? '').split('\n')) if (/(^|\s)(\/\/|#|\*)\s*coverage-exempt:/.test(line)) exempt++
   return {
     commit: base?.commit ?? '',
     at: base?.at ?? null,
@@ -362,6 +373,8 @@ export type Leftovers = {
 export const TMP_AGE = 2 * 60 * 60_000
 /** a gate log folder nothing is likely to read again */
 export const LOG_AGE = 7 * 86_400_000
+/** a worktree of a landed task counts once it has sat this long: an hour-old one may still be the task at work */
+export const DONE_AGE = 24 * 60 * 60_000
 
 export function parseWorktrees(text: string): { path: string; branch: string }[] {
   const out: { path: string; branch: string }[] = []
@@ -419,11 +432,14 @@ export function leftovers(d: Deps, base: string, branch: string): Leftovers {
   const landed = new Set(git(d, 'log', '--format=%s', base).split('\n').map(taskOf).filter(Boolean))
   const done = (w: { path: string; branch: string }) => {
     if (!w.branch || w.branch === branch || w.branch === base) return false
-    return merged.has(w.branch) || landed.has(taskOf(git(d, 'log', '-1', '--format=%s', w.branch)))
+    // the subject and the time in one call: a live follow-up on an id that already landed is not a leftover
+    const [subject = '', at = '0'] = git(d, 'log', '-1', '--format=%s%x00%ct', w.branch).split('\u0000')
+    if (d.clock() - Number(at) * 1000 < DONE_AGE) return false
+    return merged.has(w.branch) || landed.has(taskOf(subject))
   }
   return {
     worktrees: trees.length,
-    dead: trees.filter((w) => !existsSync(w.path)).map((w) => w.path),
+    dead: trees.filter((w) => !d.exists(w.path)).map((w) => w.path),
     done: trees.filter(done).map((w) => w.branch),
     uncommitted: git(d, 'status', '--porcelain').split('\n').filter(Boolean),
     tmpHomes: d
@@ -504,10 +520,16 @@ export function redTasks(run: WeeklyRun): RedTask[] {
     add(`${name} not run`, fitTitle(`Weekly: ${name} did not run`), `the ${name} step of the full gate did not run this week (${reason})`)
   }
   if (run.audit.fresh.length && !seen.has('audit')) add('audit', fitTitle('Weekly: audit red'), `new advisories: ${run.audit.fresh.join(' · ')}`)
-  // the browsers are opened before the gate on purpose: one that cannot start means its tests skip silently inside it
+  // the gate opens both browsers before its tests: one that cannot start means its tests skip silently inside it, and no
+  // browser line at all means the probe did not get to run
+  if (!run.browsers.length) add('browsers', fitTitle('Weekly: browsers not checked'), 'the gate left no browser probe line, so nobody knows whether its browser tests ran')
   for (const b of run.browsers.filter((b) => !/^ok\b/.test(b.line))) {
     add(`browser ${b.engine}`, fitTitle(`Weekly: ${b.engine} did not start`), `the ${b.engine} browser could not start (${b.line || 'no line from the probe'}), so every test of its engine would skip`)
   }
+  // the runner's own notes: what did not happen outside a step (the skipped steps and the browsers are named above)
+  const covered = new Set([...gate.skipped, ...run.browsers.map((b) => b.engine)])
+  const loose = gate.notes.filter((n) => !covered.has(n.split(':')[0]?.trim() ?? ''))
+  if (loose.length) add('notes', fitTitle('Weekly: the run skipped parts'), `the runner named what did not happen: ${loose.join(' · ')}`)
   for (const f of run.probe.files.filter((p) => !p.ok)) {
     const name = f.file.replace(/^test\//, '').replace(/\.test\.tsx?$/, '')
     add(`flaky ${f.file}`, fitFlakyTitle(name), `${f.file} failing at least once in ${f.repeats} repeats (${f.detail.join(' · ')})`)
@@ -638,8 +660,8 @@ export function main(argv: string[], overrides: Partial<Deps> = {}): number {
   const tip = git(d, 'rev-parse', '--verify', '--quiet', `origin/${base}`)
   const behind = tip ? Number(git(d, 'rev-list', '--count', `HEAD..origin/${base}`)) : null
   const logs = logsOf(d)
-  const browsers = probeBrowsers(d)
   const gate = runGate(d)
+  const browsers = gateBrowsers(d, logs)
   const audit = auditInfo(d, common)
   const outdated = outdatedInfo(d)
   let probe: Probe
@@ -660,7 +682,12 @@ export function main(argv: string[], overrides: Partial<Deps> = {}): number {
     audit,
     outdated,
     probe,
-    coverage: coverageTrend(d, common, logs),
+    coverage: coverageTrend(
+      d,
+      common,
+      logs,
+      gate.parts.some((p) => p.name === 'coverage' && p.status === 'ok'),
+    ),
     leftovers: leftovers(d, base, branch),
     took: Math.round((d.clock() - started) / 1000),
   }
@@ -684,10 +711,10 @@ export function main(argv: string[], overrides: Partial<Deps> = {}): number {
   return 1
 }
 
-/** both browsers opened before anything else, as the check does: a browser that cannot start is named, not skipped */
-export function probeBrowsers(d: Deps): { engine: string; line: string }[] {
-  const r = d.run([...d.lowPriority, 'bun', join(d.root, 'scripts', 'check-browsers.ts')], { cwd: d.root, timeout: 180_000 })
-  return `${r.stdout}\n${r.stderr}`
+/** both browsers as the gate opened them, from the probe log it keeps in the run's folder: it runs the probe right
+ *  after installing the dependencies, which is the first moment playwright-core can be imported */
+export function gateBrowsers(d: Deps, logs: string): { engine: string; line: string }[] {
+  return (d.read(join(logs, 'browsers.log')) ?? '')
     .split('\n')
     .map((l) => l.match(/^(chromium|webkit): (.*)$/))
     .filter((m): m is RegExpMatchArray => !!m)
