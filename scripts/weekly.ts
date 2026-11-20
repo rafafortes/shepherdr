@@ -16,7 +16,8 @@
 // (`shepherdr-weekly/report.md`, with `state.json` for the next week's rotating sample), never into the tree: a report
 // of this machine's numbers has nothing to do in the repository's history.
 //
-// Exit codes: 0 every part green, 1 a red part (the report names which), 2 it could not run (no git, no script).
+// Exit codes: 0 every part green, 1 a red part (the report names which), 2 it could not run (not a git checkout, or the
+// report could not be written).
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { compare, parseAudit, readBaseline as readAuditBaseline } from './checks/audit.ts'
@@ -39,8 +40,11 @@ export type Deps = {
   clock: () => number
   run: Run
   read: (file: string) => string | null
+  exists: (path: string) => boolean
   list: (dir: string) => Entry[]
   write: (file: string, text: string) => void
+  /** whether a process is still there: a proof server of a finished task is not */
+  alive: (pid: number) => boolean
   log: (line: string) => void
   /** the prefix that puts a child last in line for the CPU and the disk, as the check and the tests do */
   lowPriority: string[]
@@ -68,6 +72,16 @@ export function lowPriorityArgs(which: (cmd: string) => boolean = (c) => !!Bun.w
   if (which('nice')) out.push('nice', '-n', '19')
   if (which('ionice')) out.push('ionice', '-c', '3')
   return out
+}
+
+/** whether a process is still there (signal 0 asks, it does not send) */
+export const processAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** a file's age, or 0 for one that went while its folder was being listed */
@@ -101,6 +115,8 @@ const defaults = (): Deps => ({
       return null
     }
   },
+  exists: (path) => existsSync(path),
+  alive: processAlive,
   list: listDir,
   write: (file, text) => {
     mkdirSync(dirname(file), { recursive: true })
@@ -119,7 +135,8 @@ export type GateResult = {
   passed: boolean
   parts: Part[]
   failed: string[]
-  secs: number
+  /** the parts that did not run: a week that did not check them is not a full week */
+  skipped: string[]
   /** `PASSED in 2m03s` or `FAILED in ...: types tests` */
   line: string
   branch: string
@@ -141,7 +158,6 @@ export function parseDur(text: string): number {
 export function parseVerdict(text: string): Omit<GateResult, 'logs' | 'exitCode'> {
   const parts: Part[] = []
   let line = ''
-  let secs = 0
   let passed = false
   let branch = ''
   let commit = ''
@@ -152,7 +168,7 @@ export function parseVerdict(text: string): Omit<GateResult, 'logs' | 'exitCode'
       commit = group(head, 2)
       continue
     }
-    const step = raw.match(/^(\d+)\/(\d+) ([\w-]+) (ok|skipped|FAILED|TIMED OUT, killed|TIMED OUT|KILLED)(?: \(([^)]*)\))?(.*)$/)
+    const step = raw.match(/^(\d+)\/(\d+) ([\w-]+) (ok|skipped|FAILED|STOPPED|TIMED OUT, killed|TIMED OUT|KILLED)(?: \(([^)]*)\))?(.*)$/)
     if (step) {
       const said = group(step, 4)
       const status = said === 'ok' ? 'ok' : said === 'skipped' ? 'skipped' : 'failed'
@@ -166,15 +182,15 @@ export function parseVerdict(text: string): Omit<GateResult, 'logs' | 'exitCode'
       })
       continue
     }
-    const end = raw.match(/^(PASSED|FAILED|NOT A FULL VERDICT) in (\S+)(.*)$/)
+    const end = raw.match(/^(PASSED|FAILED|NOT A FULL VERDICT) in (\d+(?:m\d+)?s)(.*)$/)
     if (end) {
       passed = end[1] === 'PASSED'
-      secs = parseDur(group(end, 2))
       line = raw.replace(/ · logs: .*$/, '')
     }
   }
   const failed = parts.filter((p) => p.status === 'failed').map((p) => p.name)
-  return { ran: parts.length > 0, passed, parts, failed, secs, line, branch, commit }
+  const skipped = parts.filter((p) => p.status === 'skipped').map((p) => p.name)
+  return { ran: parts.length > 0, passed, parts, failed, skipped, line, branch, commit }
 }
 
 /** where the runner keeps this worktree's verdict and step logs */
@@ -226,8 +242,12 @@ export function parseOutdated(text: string): Outdated[] {
   return out
 }
 
-export function outdatedInfo(d: Deps): Outdated[] {
-  return parseOutdated(d.run(['bun', 'outdated'], { cwd: d.root, timeout: 180_000 }).stdout)
+export type OutdatedInfo = { rows: Outdated[]; offline: boolean }
+
+/** what could move; a registry that cannot be reached is a note, never "nothing to move" */
+export function outdatedInfo(d: Deps): OutdatedInfo {
+  const r = d.run(['bun', 'outdated'], { cwd: d.root, timeout: 180_000 })
+  return r.exitCode === 0 ? { rows: parseOutdated(r.stdout), offline: false } : { rows: [], offline: true }
 }
 
 /* ---------- the flaky probe ---------- */
@@ -251,8 +271,8 @@ export function orderBySlowest(files: string[], timings: Record<string, number> 
   return [...files].sort((a, b) => ms(b) - ms(a) || a.localeCompare(b))
 }
 
-/** the next sample: this week's slowest, taken from after last week's first pick, so the weekly probe walks the list
- *  over the weeks instead of repeating five files for ever */
+/** the next sample: five files from this season's slowest-first list, the window sliding by one file a week, so the
+ *  slowest keep being re-probed while the rest is reached over time */
 export function pickSample(ordered: string[], previous: string[], size: number): string[] {
   if (!ordered.length || size < 1) return []
   const at = previous.length ? ordered.indexOf(previous[0] ?? '') : -1
@@ -278,11 +298,14 @@ export function failingTests(text: string): string[] {
 /** repeat each file's tests five times: a failure in any repeat is the file that is flaky */
 export function runProbe(d: Deps, files: string[]): ProbeFile[] {
   return files.map((file) => {
-    const r = d.run([...d.lowPriority, 'bun', 'test', `--rerun-each=${REPEATS}`, '--timeout=20000', `./${file}`], {
+    // --parallel: a plain `bun test` is sent through scripts/test.ts by test/preload.ts, which rewrites the timings that
+    // order this very list; its own worker leaves them alone
+    const r = d.run([...d.lowPriority, 'bun', 'test', '--parallel=1', `--rerun-each=${REPEATS}`, '--timeout=20000', `./${file}`], {
       cwd: d.root,
       timeout: 30 * 60_000,
     })
-    return { file, ok: r.exitCode === 0, repeats: REPEATS, detail: r.exitCode === 0 ? [] : failingTests(`${r.stdout}\n${r.stderr}`) }
+    const detail = r.exitCode === 0 ? [] : failingTests(`${r.stdout}\n${r.stderr}`)
+    return { file, ok: r.exitCode === 0, repeats: REPEATS, detail: detail.length ? detail : [`exit ${r.exitCode}`] }
   })
 }
 
@@ -308,7 +331,7 @@ export function coverageTrend(d: Deps, common: string, logs: string): CoverageTr
   const lines = (d.read(join(logs, 'coverage', 'report.txt')) ?? '').split('\n').filter(Boolean)
   const files = git(d, 'ls-files').split('\n').filter(counted)
   let exempt = 0
-  for (const f of files) for (const line of (d.read(join(d.root, f)) ?? '').split('\n')) if (line.includes('coverage-exempt:')) exempt++
+  for (const f of files) for (const line of (d.read(join(d.root, f)) ?? '').split('\n')) if (/^\s*(\/\/|#)\s*coverage-exempt:/.test(line)) exempt++
   return {
     commit: base?.commit ?? '',
     at: base?.at ?? null,
@@ -324,9 +347,18 @@ export function coverageTrend(d: Deps, common: string, logs: string): CoverageTr
 
 /* ---------- the leftovers ---------- */
 
-export type Leftovers = { worktrees: number; dead: string[]; merged: string[]; tmpHomes: string[]; logFolders: string[]; uncommitted: string[] }
+export type Leftovers = {
+  worktrees: number
+  dead: string[]
+  /** worktrees whose task already landed: by ancestry, or by the task id its branch and the base both name */
+  done: string[]
+  /** /tmp proof scratch of finished tasks: files and folders, a running server's home left out */
+  tmpHomes: string[]
+  logFolders: string[]
+  uncommitted: string[]
+}
 
-/** a /tmp entry this counts: a proof server's home or a test's own folder, older than two hours (a running one is young) */
+/** a /tmp entry counts as leftover proof scratch once it is this old: a running task's is younger */
 export const TMP_AGE = 2 * 60 * 60_000
 /** a gate log folder nothing is likely to read again */
 export const LOG_AGE = 7 * 86_400_000
@@ -350,6 +382,23 @@ export function parseWorktrees(text: string): { path: string; branch: string }[]
   return out
 }
 
+/** the task a commit belongs to, from this repo's subject convention (`SHE-90: ...`), or '' */
+export function taskOf(subject: string): string {
+  return subject.match(/^([A-Z][A-Z0-9]*-\d+):/)?.[1] ?? ''
+}
+
+/** whether a /tmp folder is a Shepherdr home whose server still runs (its server.json names the pid) */
+function serverRunning(d: Deps, name: string): boolean {
+  const home = join(d.tmpdir, name)
+  if (!d.exists(join(home, 'server.json'))) return false
+  try {
+    const pid = (JSON.parse(d.read(join(home, 'server.json')) ?? '') as { pid?: number }).pid
+    return typeof pid === 'number' && d.alive(pid)
+  } catch {
+    return false
+  }
+}
+
 /** the default branch: origin/HEAD when the checkout has it, else the branch it is on */
 export function baseBranch(d: Deps): string {
   const head = git(d, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD')
@@ -365,14 +414,21 @@ export function leftovers(d: Deps, base: string, branch: string): Leftovers {
       .map((l) => l.replace(/^[*+]\s+/, '').trim())
       .filter(Boolean),
   )
+  // a task lands as one squashed commit under the same task id, so ancestry alone sees none of them: the base's
+  // subjects are the other half, and a branch whose own subject already sits there is a task that landed
+  const landed = new Set(git(d, 'log', '--format=%s', base).split('\n').map(taskOf).filter(Boolean))
+  const done = (w: { path: string; branch: string }) => {
+    if (!w.branch || w.branch === branch || w.branch === base) return false
+    return merged.has(w.branch) || landed.has(taskOf(git(d, 'log', '-1', '--format=%s', w.branch)))
+  }
   return {
     worktrees: trees.length,
     dead: trees.filter((w) => !existsSync(w.path)).map((w) => w.path),
-    merged: trees.filter((w) => w.branch && w.branch !== branch && w.branch !== base && merged.has(w.branch)).map((w) => w.branch),
+    done: trees.filter(done).map((w) => w.branch),
     uncommitted: git(d, 'status', '--porcelain').split('\n').filter(Boolean),
     tmpHomes: d
       .list(d.tmpdir)
-      .filter((e) => e.dir && (e.name.startsWith('shep-') || e.name.includes('proof')) && d.clock() - e.mtime > TMP_AGE)
+      .filter((e) => e.name.toLowerCase().includes('proof') && d.clock() - e.mtime > TMP_AGE && !serverRunning(d, e.name))
       .map((e) => e.name)
       .sort(),
     logFolders: d
@@ -391,12 +447,14 @@ export type WeeklyRun = {
   branch: string
   commit: string
   base: string
+  /** the base's tip, and how many of its commits this run does not have (null when git cannot say) */
+  tip: string
+  behind: number | null
   report: string
-  logs: string
   browsers: { engine: string; line: string }[]
   gate: GateResult
   audit: AuditInfo
-  outdated: Outdated[]
+  outdated: OutdatedInfo
   probe: Probe
   coverage: CoverageTrend
   leftovers: Leftovers
@@ -406,6 +464,13 @@ export type WeeklyRun = {
 /** a task's title fits one line on a phone: at most 32 characters */
 export const TITLE_MAX = 32
 export const fitTitle = (text: string) => (text.length <= TITLE_MAX ? text : text.slice(0, TITLE_MAX))
+/** a long file name keeps its tail, where two of them usually differ */
+export const fitFlakyTitle = (name: string) => {
+  const title = `Weekly: flaky ${name}`
+  if (title.length <= TITLE_MAX) return title
+  const keep = TITLE_MAX - 'Weekly: flaky …'.length
+  return `Weekly: flaky …${name.slice(-keep)}`
+}
 
 export type RedTask = { area: string; title: string; brief: string }
 
@@ -424,15 +489,28 @@ export function redTasks(run: WeeklyRun): RedTask[] {
       brief: `${head} found ${what}. Run bun run check:local in a worktree of ${run.base} and fix it: the full check is where nothing may be missed, and nothing merges over a red one. Look upstream first, as AGENTS.md asks.`,
     })
   }
-  if (!run.gate.ran) add('gate', fitTitle('Weekly: the gate did not run'), 'the full gate unable to run (it gave up or ended before its first step)')
-  for (const name of run.gate.failed) {
+  const gate = run.gate
+  // a gate that never ran, or ended without a pass it could name a step for (gave up, stopped, killed, or passed on paper
+  // with a failing runner), is red as a whole: a task per step is only possible when a step says it failed
+  if (!gate.ran) add('gate', fitTitle('Weekly: the gate did not run'), 'the full gate unable to run (it gave up or ended before its first step)')
+  else if (!gate.passed && !gate.failed.length) add('gate', fitTitle('Weekly: the gate did not pass'), `the full gate ending without a pass (${gate.line || 'no verdict line'}, exit ${gate.exitCode})`)
+  for (const name of gate.failed) {
     const advisories = name === 'audit' && run.audit.fresh.length ? ` New advisories: ${run.audit.fresh.join(' · ')}.` : ''
     add(name, fitTitle(`Weekly: ${name} red`), `the ${name} step of the full gate red.${advisories}`)
   }
+  // a part the runner skipped was not checked this week at all: the week where nothing may be missed is where that is news
+  for (const name of gate.skipped) {
+    const reason = gate.parts.find((p) => p.name === name)?.note ?? 'no reason given'
+    add(`${name} not run`, fitTitle(`Weekly: ${name} did not run`), `the ${name} step of the full gate did not run this week (${reason})`)
+  }
   if (run.audit.fresh.length && !seen.has('audit')) add('audit', fitTitle('Weekly: audit red'), `new advisories: ${run.audit.fresh.join(' · ')}`)
+  // the browsers are opened before the gate on purpose: one that cannot start means its tests skip silently inside it
+  for (const b of run.browsers.filter((b) => !/^ok\b/.test(b.line))) {
+    add(`browser ${b.engine}`, fitTitle(`Weekly: ${b.engine} did not start`), `the ${b.engine} browser could not start (${b.line || 'no line from the probe'}), so every test of its engine would skip`)
+  }
   for (const f of run.probe.files.filter((p) => !p.ok)) {
     const name = f.file.replace(/^test\//, '').replace(/\.test\.tsx?$/, '')
-    add(`flaky ${f.file}`, fitTitle(`Weekly: flaky ${name}`), `${f.file} failing at least once in ${f.repeats} repeats${f.detail.length ? ` (${f.detail.join(' · ')})` : ''}`)
+    add(`flaky ${f.file}`, fitFlakyTitle(name), `${f.file} failing at least once in ${f.repeats} repeats (${f.detail.join(' · ')})`)
   }
   return out
 }
@@ -451,11 +529,19 @@ export function buildReport(run: WeeklyRun, reds: RedTask[] = redTasks(run)): st
     const status = p.status === 'ok' ? 'ok' : p.status === 'skipped' ? 'skipped' : 'FAILED'
     return `- ${p.name} ${status}${took}${p.note ? `: ${p.note}` : ''}`
   })
-  const outdated = run.outdated.map((o) => `${o.pkg} ${o.current} → ${o.latest}${o.dev ? ' (dev)' : ''}`)
+  const outdated = run.outdated.rows.map((o) => `${o.pkg} ${o.current} → ${o.latest}${o.dev ? ' (dev)' : ''}`)
+  const shown = (names: string[], cap = 10) => [...names.slice(0, cap).map((n) => `  - ${n}`), ...(names.length > cap ? [`  - …and ${names.length - cap} more`] : [])]
+  const baseTip =
+    run.behind === null
+      ? `- base \`${run.base}\`: its tip could not be read`
+      : run.behind === 0
+        ? `- base \`${run.base}\` at \`${run.tip.slice(0, 7)}\`: this run is its tip`
+        : `- base \`${run.base}\` at \`${run.tip.slice(0, 7)}\`: ${run.behind} commit${run.behind === 1 ? '' : 's'} this run does not have`
   return [
     `# Weekly full check · ${new Date(run.at).toISOString()}`,
     '',
     `Branch \`${run.branch}\` at \`${run.commit}\` (base \`${run.base}\`), run in \`${run.root}\`.`,
+    baseTip,
     `Took ${dur(run.took)}. Written by \`scripts/weekly.ts\` into the repository's own .git, never into the tree.`,
     '',
     '## Gate',
@@ -470,8 +556,10 @@ export function buildReport(run: WeeklyRun, reds: RedTask[] = redTasks(run)): st
     '## Dependencies',
     audit.offline ? '- audit: the registry could not be read, advisories not checked' : `- audit: ${audit.fresh.length} new, ${audit.known} accepted advisories`,
     ...(audit.fresh.length ? audit.fresh.map((f) => `  - new: ${f}`) : []),
-    `- outdated: ${outdated.length} package${outdated.length === 1 ? '' : 's'} could move (weighed and pinned by hand, never bumped blind)`,
-    ...(outdated.length ? outdated.map((o) => `  - ${o}`) : []),
+    run.outdated.offline
+      ? '- outdated: the registry could not be read, nothing weighed'
+      : `- outdated: ${outdated.length} package${outdated.length === 1 ? '' : 's'} could move (weighed and pinned by hand, never bumped blind)`,
+    ...(run.outdated.offline ? [] : outdated.map((o) => `  - ${o}`)),
     '',
     '## Flaky probe',
     probe.skipped ? `Not run: ${probe.skipped}.` : `Repeated ${REPEATS} times each, once more next week:`,
@@ -484,14 +572,14 @@ export function buildReport(run: WeeklyRun, reds: RedTask[] = redTasks(run)): st
     `- \`coverage-exempt:\` markers in the tree: ${cov.exempt}`,
     '',
     '## Leftovers (report only: nothing is deleted here)',
-    `- worktrees: ${left.worktrees}, ${left.dead.length} dead, ${left.merged.length} of merged branches`,
+    `- worktrees: ${left.worktrees}, ${left.dead.length} dead, ${left.done.length} of done tasks`,
     ...(left.dead.length ? left.dead.map((p) => `  - dead: ${p}`) : []),
-    ...(left.merged.length ? left.merged.map((b) => `  - merged: ${b}`) : []),
-    `- /tmp homes of finished tasks (older than 2 h): ${left.tmpHomes.length}`,
-    ...left.tmpHomes.map((n) => `  - ${n}`),
+    ...(left.done.length ? left.done.map((b) => `  - done: ${b}`) : []),
+    `- /tmp proof scratch of finished tasks (older than 2 h): ${left.tmpHomes.length}`,
+    ...shown(left.tmpHomes),
     `- gate log folders older than 7 days: ${left.logFolders.length}`,
     `- uncommitted files in this checkout: ${left.uncommitted.length}`,
-    ...left.uncommitted.slice(0, 10).map((f) => `  - ${f}`),
+    ...shown(left.uncommitted),
     '',
     reds.length ? `## Red: ${reds.length} area${reds.length === 1 ? '' : 's'}, one task each` : '## Red',
     ...(reds.length ? reds.flatMap((r) => ['', `### ${r.title}`, r.brief]) : ['None: the gate passed and nothing else is red.']),
@@ -506,7 +594,7 @@ const git = (d: Deps, ...args: string[]): string => {
   return r.exitCode === 0 ? r.stdout.trim() : ''
 }
 
-/** `--no-probe` and `--sample N`, the two flags a trial run uses; the weekly one runs the probe over five files */
+/** `--no-probe` and `--sample N` (at most five, the weekly probe's size) for a trial run */
 export function parseArgs(argv: string[]): { probe: boolean; sample: number } {
   let probe = true
   let sample = 5
@@ -514,7 +602,7 @@ export function parseArgs(argv: string[]): { probe: boolean; sample: number } {
     if (argv[i] === '--no-probe') probe = false
     else if (argv[i] === '--sample') {
       const n = Number(argv[++i])
-      if (Number.isInteger(n) && n > 0) sample = n
+      if (Number.isInteger(n) && n > 0) sample = Math.min(n, 5)
     }
   }
   return { probe, sample }
@@ -547,25 +635,26 @@ export function main(argv: string[], overrides: Partial<Deps> = {}): number {
     return 2
   }
   const base = baseBranch(d)
+  const tip = git(d, 'rev-parse', '--verify', '--quiet', `origin/${base}`)
+  const behind = tip ? Number(git(d, 'rev-list', '--count', `HEAD..origin/${base}`)) : null
   const logs = logsOf(d)
-  d.log(`weekly: the full check of ${branch} at ${commit}, at the check's own priority: about two minutes warm, longer under load`)
   const browsers = probeBrowsers(d)
   const gate = runGate(d)
   const audit = auditInfo(d, common)
   const outdated = outdatedInfo(d)
   let probe: Probe
   if (!opts.probe) probe = { files: [], skipped: 'asked not to run (--no-probe)' }
-  else if (!gate.ran) probe = { files: [], skipped: 'the gate did not run' }
-  else if (gate.failed.includes('tests')) probe = { files: [], skipped: 'the gate failed its tests part: the suite is the thing to fix first' }
+  else if (!gate.passed) probe = { files: [], skipped: 'the gate did not pass: the suite it already ran is the thing to fix first' }
   else probe = pickProbe(d, common, opts.sample)
   const run: WeeklyRun = {
     at: started,
+    root,
     branch,
     commit,
     base,
-    root,
+    tip,
+    behind: behind === null || Number.isNaN(behind) ? null : behind,
     report: join(weeklyDir(common), 'report.md'),
-    logs,
     browsers,
     gate,
     audit,
@@ -573,15 +662,20 @@ export function main(argv: string[], overrides: Partial<Deps> = {}): number {
     probe,
     coverage: coverageTrend(d, common, logs),
     leftovers: leftovers(d, base, branch),
-    took: 0,
+    took: Math.round((d.clock() - started) / 1000),
   }
-  run.took = Math.round((d.clock() - started) / 1000)
   const reds = redTasks(run)
-  d.write(run.report, buildReport(run, reds))
-  d.write(join(weeklyDir(common), 'state.json'), JSON.stringify({ at: run.at, commit, sample: probe.files.map((f) => f.file) } satisfies State))
+  try {
+    d.write(run.report, buildReport(run, reds))
+    // a week without a probe keeps the last sample: the rotation is the weekly run's, not a trial run's
+    if (probe.files.length) d.write(join(weeklyDir(common), 'state.json'), JSON.stringify({ at: run.at, commit, sample: probe.files.map((f) => f.file) } satisfies State))
+  } catch (e) {
+    d.log(`weekly: the report could not be written (${e instanceof Error ? e.message : String(e)}): nothing was recorded`)
+    return 2
+  }
   if (!reds.length) {
     d.log(
-      `weekly: green · ${gate.line || 'gate passed'} · audit ${audit.offline ? 'not checked (registry unreachable)' : `${audit.fresh.length} new, ${audit.known} accepted`} · outdated ${outdated.length} · probe ${probe.skipped ? `not run (${probe.skipped})` : `${probe.files.length} file${probe.files.length === 1 ? '' : 's'} ok`} · coverage ${run.coverage.summary || 'not measured'} · leftovers ${run.leftovers.worktrees} worktrees, ${run.leftovers.tmpHomes.length} /tmp homes, ${run.leftovers.logFolders.length} old logs · report: ${run.report}`,
+      `weekly: green · ${gate.line || 'gate passed'} · audit ${audit.offline ? 'not checked (registry unreachable)' : `${audit.fresh.length} new, ${audit.known} accepted`} · outdated ${outdated.offline ? 'not checked (registry unreachable)' : outdated.rows.length} · probe ${probe.skipped ? `not run (${probe.skipped})` : `${probe.files.length} file${probe.files.length === 1 ? '' : 's'} ok`} · coverage ${run.coverage.summary || 'not measured'} · leftovers ${run.leftovers.worktrees} worktrees, ${run.leftovers.tmpHomes.length} proof scratch, ${run.leftovers.logFolders.length} old logs · report: ${run.report}`,
     )
     return 0
   }

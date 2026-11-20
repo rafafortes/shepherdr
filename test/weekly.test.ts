@@ -21,12 +21,14 @@ import {
   main,
   mtimeOf,
   orderBySlowest,
+  outdatedInfo,
   parseArgs,
   parseDur,
   parseOutdated,
   parseVerdict,
   parseWorktrees,
   pickSample,
+  processAlive,
   REPEATS,
   type Run,
   type RunResult,
@@ -35,6 +37,7 @@ import {
   runGate,
   runProbe,
   TITLE_MAX,
+  taskOf,
   type WeeklyRun,
 } from '../scripts/weekly.ts'
 import { tmp } from './tmp.ts'
@@ -87,19 +90,23 @@ const GREEN = `check:local · herdr-tui at 3cb7a424 · 8 test workers · nice 19
 2/5 audit ok (1s) 0 new, 2 accepted advisories; licences: 80 checked, 3 not installed here
 3/5 tests ok (1m02s) Ran 400 tests across 80 files
 4/5 coverage ok (2s) 91.2% of the server's lines
-5/5 docs skipped: gitleaks is missing
+5/5 build ok (1s) built in 621ms
 
 PASSED in 1m08s · logs: /nowhere
 `
 
+// the runner stops at the first failed step, so a real red verdict names that one and nothing after it
 const RED = `check:local · work/90 at deadbee · 8 test workers
 1/5 dependencies ok (3s)
-2/5 audit ok (1s) 1 new, 0 accepted advisories
-3/5 tests FAILED (1m)
-4/5 types FAILED (2s)
-5/5 build skipped: the run stopped at types
+2/5 tests FAILED (1m)
 
-FAILED in 1m03s: tests types · logs: /nowhere
+FAILED in 1m03s: tests · logs: /nowhere
+`
+
+// a stopped step, as the runner prints one when its tool's timeout fires
+const STOPPED = `check:local · work/90 at deadbee · 8 test workers
+1/5 dependencies ok (3s)
+2/5 tests STOPPED (5m10s): this check was stopped before it finished
 `
 
 const GAVE_UP = `check:local is running: no verdict yet
@@ -138,6 +145,8 @@ function world(f: ReturnType<typeof repoFixture>, run: Run, extra: Partial<Deps>
     clock: () => (t += 500),
     run,
     read,
+    exists: existsSync,
+    alive: (pid) => pid === process.pid,
     list,
     write: (file, text) => {
       mkdirSync(join(file, '..'), { recursive: true })
@@ -162,19 +171,22 @@ describe('the gate verdict', () => {
     expect(v.passed).toBe(true)
     expect(v.branch).toBe('herdr-tui')
     expect(v.commit).toBe('3cb7a424')
-    expect(v.secs).toBe(68)
     expect(v.line).toBe('PASSED in 1m08s')
-    expect(v.parts.map((p) => `${p.name} ${p.status} ${p.secs}`)).toEqual(['dependencies ok 3', 'audit ok 1', 'tests ok 62', 'coverage ok 2', 'docs skipped 0'])
+    expect(v.parts.map((p) => `${p.name} ${p.status} ${p.secs}`)).toEqual(['dependencies ok 3', 'audit ok 1', 'tests ok 62', 'coverage ok 2', 'build ok 1'])
     expect(v.parts[1]?.note).toBe('0 new, 2 accepted advisories; licences: 80 checked, 3 not installed here')
-    expect(v.parts[4]?.note).toBe('gitleaks is missing')
     expect(v.failed).toEqual([])
+    expect(v.skipped).toEqual([])
   })
 
-  test('a failed run names its failed parts, a skipped one is not one of them', () => {
+  test('a failed run names its failed part, a stopped one is a failure too', () => {
     const v = parseVerdict(RED)
     expect(v.passed).toBe(false)
-    expect(v.failed).toEqual(['tests', 'types'])
-    expect(v.parts.find((p) => p.name === 'build')?.status).toBe('skipped')
+    expect(v.failed).toEqual(['tests'])
+    expect(parseVerdict(STOPPED).failed).toEqual(['tests'])
+    // a part the runner skipped, and why, so the week can name what it did not check
+    const skipped = parseVerdict('check:local · herdr-tui at abc1234 · 2 test workers\n1/2 tests ok (1m)\n2/2 docs skipped: gitleaks is missing\n\nPASSED in 1m01s\n')
+    expect(skipped.skipped).toEqual(['docs'])
+    expect(skipped.parts[1]?.note).toBe('gitleaks is missing')
   })
 
   test('a run that gave up has no parts and is not a run of the gate', () => {
@@ -274,11 +286,25 @@ describe('the flaky probe', () => {
 
   test('a file that fails once in the repeats is the one the report names', () => {
     const f = repoFixture()
-    const d = world(f, fakeRun(f, { verdict: GREEN, probe: { './test/layout-a.test.ts': 1 } }))
-    const probe = runProbe(d, ['test/layout-a.test.ts', 'test/layout-b.test.ts'])
+    const asked: string[][] = []
+    const probeRun: Run = (args, o) => {
+      asked.push(args)
+      return fakeRun(f, { verdict: GREEN, probe: { './test/layout-a.test.ts': 1 } })(args, o)
+    }
+    const probe = runProbe(world(f, probeRun), ['test/layout-a.test.ts', 'test/layout-b.test.ts'])
     expect(probe[0]).toMatchObject({ file: 'test/layout-a.test.ts', ok: false, repeats: REPEATS })
     expect(probe[0]?.detail).toEqual(['opens the board'])
     expect(probe[1]?.ok).toBe(true)
+    // --parallel keeps test/preload.ts from sending this through scripts/test.ts, which rewrites the timings that
+    // order the next week's sample
+    expect(asked[0]).toContain('--parallel=1')
+    expect(asked[0]).toContain(`--rerun-each=${REPEATS}`)
+    // a failure with no (fail) line still says what it was
+    const timedOut = runProbe(
+      world(f, () => ({ stdout: '', stderr: '', exitCode: 124 })),
+      ['test/layout-a.test.ts'],
+    )
+    expect(timedOut[0]?.detail).toEqual(['exit 124'])
     expect(failingTests('ok\n(fail) one [1.00ms]\n(fail) two [2.00ms]')).toEqual(['one', 'two'])
   })
 })
@@ -312,7 +338,11 @@ describe('the coverage trend and the leftovers', () => {
   test('dead worktrees of done tasks, /tmp homes, old gate logs and uncommitted files are counted, never removed', () => {
     const f = repoFixture()
     const gone = join(f.tmpdir, 'gone')
-    mkdirSync(join(f.tmpdir, 'shep-proof-home'))
+    mkdirSync(join(f.tmpdir, 'old-proof'))
+    mkdirSync(join(f.tmpdir, 'running-proof-home'), { recursive: true })
+    writeFileSync(join(f.tmpdir, 'running-proof-home', 'server.json'), JSON.stringify({ pid: process.pid }))
+    mkdirSync(join(f.tmpdir, 'bad-proof'), { recursive: true })
+    writeFileSync(join(f.tmpdir, 'bad-proof', 'server.json'), 'not json')
     const now = Date.now()
     const cache = join(f.home, '.cache', 'shepherdr', 'check-local')
     mkdirSync(join(cache, 'merged-task'), { recursive: true })
@@ -321,7 +351,10 @@ describe('the coverage trend and the leftovers', () => {
     const run: Run = (args) => {
       const line = args.join(' ')
       if (line.includes('worktree list')) return plain(porcelain)
-      if (line.includes('branch --merged')) return plain('* herdr-tui\n+ work/1\n+ work/90\n')
+      if (line.includes('branch --merged')) return plain('* herdr-tui\n+ work/90\n')
+      if (line.includes('log --format=%s herdr-tui')) return plain('SHE-90: Run the complete gate weekly\nSHE-77: Something else\n')
+      if (line.includes('log -1 --format=%s work/1')) return plain('SHE-77: Squashed under another id\n')
+      if (line.includes('log -1 --format=%s work/90')) return plain('SHE-90: Run the complete gate weekly\n')
       if (line.includes('status --porcelain')) return plain(' M scripts/weekly.ts\n')
       return plain('')
     }
@@ -330,8 +363,10 @@ describe('the coverage trend and the leftovers', () => {
       list: (dir) => {
         if (dir === f.tmpdir)
           return [
-            { name: 'shep-proof-home', dir: true, mtime: now - 3 * 3600_000 },
-            { name: 'young', dir: true, mtime: now },
+            { name: 'old-proof', dir: true, mtime: now - 3 * 3600_000 },
+            { name: 'bad-proof', dir: true, mtime: now - 3 * 3600_000 },
+            { name: 'running-proof-home', dir: true, mtime: now - 3 * 3600_000 },
+            { name: 'young-proof', dir: true, mtime: now },
           ]
         if (dir === cache)
           return [
@@ -345,9 +380,13 @@ describe('the coverage trend and the leftovers', () => {
     const left = leftovers(d, 'herdr-tui', 'work/90')
     expect(left.worktrees).toBe(3)
     expect(left.dead).toEqual([gone])
-    expect(left.merged).toEqual(['work/1'])
+    // work/1 descended from the base, work/77 landed as a squash under a task id its own branch names
+    expect(left.done).toEqual(['work/1'])
     expect(left.uncommitted).toEqual(['M scripts/weekly.ts'])
-    expect(left.tmpHomes).toEqual(['shep-proof-home'])
+    // the running proof server's home is not a leftover; the young one is not finished; the old one is
+    expect(left.tmpHomes).toEqual(['bad-proof', 'old-proof'])
+    expect(processAlive(process.pid)).toBe(true)
+    expect(processAlive(4194305)).toBe(false)
     expect(left.logFolders).toEqual(['merged-task'])
     expect(parseWorktrees(porcelain)).toHaveLength(3)
   })
@@ -361,10 +400,10 @@ function baseRun(o: Partial<WeeklyRun> = {}): WeeklyRun {
     parts: [
       { name: 'dependencies', status: 'ok', secs: 3, note: '' },
       { name: 'tests', status: 'ok', secs: 62, note: 'Ran 400 tests across 80 files' },
-      { name: 'docs', status: 'skipped', secs: 0, note: 'gitleaks is missing' },
+      { name: 'build', status: 'ok', secs: 1, note: 'built in 621ms' },
     ],
     failed: [],
-    secs: 68,
+    skipped: [],
     line: 'PASSED in 1m08s',
     branch: 'herdr-tui',
     commit: '3cb7a424',
@@ -377,15 +416,16 @@ function baseRun(o: Partial<WeeklyRun> = {}): WeeklyRun {
     branch: 'herdr-tui',
     commit: '3cb7a424',
     base: 'herdr-tui',
+    tip: 'abc1234deadbeef',
+    behind: 0,
     report: '/repo/.git/shepherdr-weekly/report.md',
-    logs: '/logs',
     browsers: [{ engine: 'chromium', line: 'ok (1s)' }],
     gate,
     audit: { fresh: [], known: 2, offline: false },
-    outdated: [],
+    outdated: { rows: [], offline: false },
     probe: { files: [], skipped: '' },
     coverage: { commit: 'abc1234', at: 0, ageDays: 3, summary: 'Coverage: 91.2%', top: [], exempt: 4 },
-    leftovers: { worktrees: 1, dead: [], merged: [], tmpHomes: [], logFolders: [], uncommitted: [] },
+    leftovers: { worktrees: 1, dead: [], done: [], tmpHomes: [], logFolders: [], uncommitted: [] },
     took: 500,
     ...o,
   }
@@ -394,17 +434,18 @@ function baseRun(o: Partial<WeeklyRun> = {}): WeeklyRun {
 describe('the report and its tasks', () => {
   test('the report carries every part, the audit, the probe, the coverage trend and the leftovers', () => {
     const run = baseRun({
-      outdated: [{ pkg: 'ws', current: '8.22.0', update: '8.23.0', latest: '8.23.0', dev: false }],
+      outdated: { rows: [{ pkg: 'ws', current: '8.22.0', update: '8.23.0', latest: '8.23.0', dev: false }], offline: false },
       probe: { files: [{ file: 'test/layout-a.test.ts', ok: true, repeats: REPEATS, detail: [] }], skipped: '' },
       coverage: { commit: 'abc1234', at: 0, ageDays: 3, summary: 'Coverage: 91.2%', top: ['index.ts 90.0% missed 2: 4, 9'], exempt: 4 },
-      leftovers: { worktrees: 3, dead: ['/tmp/gone'], merged: ['work/1'], tmpHomes: ['shep-proof'], logFolders: ['merged-task'], uncommitted: [' M x.ts'] },
+      leftovers: { worktrees: 3, dead: ['/tmp/gone'], done: ['work/1'], tmpHomes: ['shep-proof'], logFolders: ['merged-task'], uncommitted: [' M x.ts'] },
     })
     const report = buildReport(run)
     expect(report).toContain('# Weekly full check · 2026-11-22T08:30:00.000Z')
     expect(report).toContain('Took 8m20s.')
     expect(report).toContain('## Gate\nPASSED in 1m08s')
     expect(report).toContain('- tests ok (1m02s): Ran 400 tests across 80 files')
-    expect(report).toContain('- docs skipped: gitleaks is missing')
+    expect(report).toContain('- build ok (1s): built in 621ms')
+    expect(report).toContain('base `herdr-tui` at `abc1234`: this run is its tip')
     expect(report).toContain('- chromium: ok (1s)')
     expect(report).toContain('- audit: 0 new, 2 accepted advisories')
     expect(report).toContain('ws 8.22.0 → 8.23.0')
@@ -413,10 +454,10 @@ describe('the report and its tasks', () => {
     expect(report).toContain('baseline from `abc1234`, 3 days old')
     expect(report).toContain('index.ts 90.0% missed 2: 4, 9')
     expect(report).toContain('`coverage-exempt:` markers in the tree: 4')
-    expect(report).toContain('worktrees: 3, 1 dead, 1 of merged branches')
+    expect(report).toContain('worktrees: 3, 1 dead, 1 of done tasks')
     expect(report).toContain('dead: /tmp/gone')
-    expect(report).toContain('merged: work/1')
-    expect(report).toContain('/tmp homes of finished tasks (older than 2 h): 1')
+    expect(report).toContain('done: work/1')
+    expect(report).toContain('/tmp proof scratch of finished tasks (older than 2 h): 1')
     expect(report).toContain('gate log folders older than 7 days: 1')
     expect(report).toContain('uncommitted files in this checkout: 1')
     expect(report).toContain('## Red\nNone: the gate passed and nothing else is red.')
@@ -426,16 +467,21 @@ describe('the report and its tasks', () => {
     const run = baseRun({
       browsers: [],
       audit: { fresh: [], known: 0, offline: true },
+      outdated: { rows: [], offline: true },
       probe: { files: [], skipped: 'asked not to run (--no-probe)' },
       coverage: { commit: '', at: null, ageDays: null, summary: '', top: [], exempt: 0 },
       gate: { ...baseRun().gate, ran: false, passed: false, parts: [], line: '', exitCode: 2 },
-      leftovers: { worktrees: 0, dead: [], merged: [], tmpHomes: [], logFolders: [], uncommitted: [] },
+      tip: '',
+      behind: null,
+      leftovers: { worktrees: 0, dead: [], done: [], tmpHomes: [], logFolders: [], uncommitted: [] },
     })
     const report = buildReport(run)
     expect(report).toContain('- nothing ran')
     expect(report).toContain('Exit code 2. Logs: `/logs`.')
     expect(report).toContain('- the probe said nothing')
     expect(report).toContain('- audit: the registry could not be read, advisories not checked')
+    expect(report).toContain('- outdated: the registry could not be read, nothing weighed')
+    expect(report).toContain('- base `herdr-tui`: its tip could not be read')
     expect(report).toContain('Not run: asked not to run (--no-probe).')
     expect(report).toContain('- no baseline recorded on the default branch yet')
     expect(report).toContain('no coverage measured (the gate did not reach its coverage step)')
@@ -452,6 +498,8 @@ describe('the report and its tasks', () => {
     expect(reds[0]?.title).toBe('Weekly: the gate did not run')
     expect(reds.every((r) => r.title.length <= TITLE_MAX)).toBe(true)
     expect(reds[1]?.brief).toContain('new advisories: ws · advisory 9')
+    expect(reds[2]?.title).toBe('Weekly: flaky …out-settings-lazy')
+    expect(reds[2]?.title).toHaveLength(TITLE_MAX)
     expect(reds[2]?.brief).toContain('failing at least once in 5 repeats (opens the board)')
     expect(reds[2]?.brief).toContain('Run bun run check:local in a worktree of herdr-tui')
 
@@ -461,6 +509,48 @@ describe('the report and its tasks', () => {
     expect(both[0]?.title).toBe('Weekly: audit red')
     expect(both[0]?.brief).toContain('New advisories: ws · advisory 9.')
     expect(fitTitle('x'.repeat(40))).toHaveLength(TITLE_MAX)
+  })
+})
+
+describe('a red week that is not a failed step', () => {
+  test('a gate that ran without a pass it can name a step for is red as a whole', () => {
+    const stopped = redTasks(baseRun({ gate: { ...baseRun().gate, passed: false, failed: [], line: 'FAILED in 1m03s', exitCode: 1 } }))
+    expect(stopped.map((r) => r.area)).toEqual(['gate'])
+    expect(stopped[0]?.title).toBe('Weekly: the gate did not pass')
+    expect(stopped[0]?.brief).toContain('FAILED in 1m03s, exit 1')
+    // a failed step keeps its own task, not a second one for the gate around it
+    const named = redTasks(baseRun({ gate: { ...baseRun().gate, passed: false, failed: ['tests'], line: 'FAILED in 1m03s', exitCode: 1 } }))
+    expect(named.map((r) => r.area)).toEqual(['tests'])
+  })
+
+  test('a step the runner skipped was not checked this week: it is red with its reason', () => {
+    const run = baseRun({
+      gate: {
+        ...baseRun().gate,
+        parts: [
+          { name: 'tests', status: 'ok', secs: 60, note: '' },
+          { name: 'docs', status: 'skipped', secs: 0, note: 'gitleaks is missing: install it' },
+        ],
+        skipped: ['docs'],
+      },
+    })
+    const reds = redTasks(run)
+    expect(reds.map((r) => r.area)).toEqual(['docs not run'])
+    expect(reds[0]?.title).toBe('Weekly: docs did not run')
+    expect(reds[0]?.brief).toContain('did not run this week (gitleaks is missing: install it)')
+  })
+
+  test('an unreachable registry is said, never taken for "nothing to move"', () => {
+    const f = repoFixture()
+    expect(outdatedInfo(world(f, () => ({ stdout: '', stderr: 'registry down', exitCode: 1 })))).toEqual({ rows: [], offline: true })
+    expect(outdatedInfo(world(f, () => plain('| Package | Current | Update | Latest |\n')))).toEqual({ rows: [], offline: false })
+    expect(taskOf('SHE-90: Run the complete gate weekly')).toBe('SHE-90')
+    expect(taskOf('Format codebase with Biome')).toBe('')
+  })
+
+  test('the base says how far the run is from it', () => {
+    expect(buildReport(baseRun({ behind: 3, tip: 'abcdef1234567' }))).toContain('base `herdr-tui` at `abcdef1`: 3 commits this run does not have')
+    expect(buildReport(baseRun({ behind: 1, tip: 'abcdef1234567' }))).toContain('1 commit this run does not have')
   })
 })
 
@@ -475,9 +565,10 @@ describe('the run itself', () => {
       outdated: '| Package | Current | Update | Latest |\n| ws | 8.22.0 | 8.23.0 | 8.23.0 |\n',
     })
     expect(main([], fakes)).toBe(0)
-    expect(out.lines).toHaveLength(2)
-    expect(out.lines[1]?.startsWith('weekly: green · PASSED in 1m08s')).toBe(true)
-    expect(out.lines[1]).toContain('1 file ok')
+    // one line, and nothing else: a green week says what it found, once
+    expect(out.lines).toHaveLength(1)
+    expect(out.lines[0]?.startsWith('weekly: green · PASSED in 1m08s')).toBe(true)
+    expect(out.lines[0]).toContain('1 file ok')
     const report = join(f.common, 'shepherdr-weekly', 'report.md')
     expect(existsSync(report)).toBe(true)
     const text = readFileSync(report, 'utf8')
@@ -511,13 +602,12 @@ describe('the run itself', () => {
     fakes.run = fakeRun(f, { verdict: RED, gateCode: 1, browsers: 'chromium: ok (1s)\n' })
     expect(main([], fakes)).toBe(1)
     expect(out.lines).toContain('weekly: red · tests · file one task: Weekly: tests red')
-    expect(out.lines).toContain('weekly: red · types · file one task: Weekly: types red')
-    expect(out.lines.at(-1)).toContain('weekly: 2 red areas · report:')
+    expect(out.lines.at(-1)).toContain('weekly: 1 red area · report:')
     const report = readFileSync(join(f.common, 'shepherdr-weekly', 'report.md'), 'utf8')
-    expect(report).toContain('## Red: 2 areas, one task each')
+    expect(report).toContain('## Red: 1 area, one task each')
     expect(report).toContain('### Weekly: tests red')
-    // the probe does not add load to a machine whose suite is already red
-    expect(report).toContain('Not run: the gate failed its tests part')
+    // the probe does not add load to a machine whose gate did not pass
+    expect(report).toContain('Not run: the gate did not pass')
     expect(report).toContain('uncommitted files in this checkout: 0')
   })
 
@@ -529,11 +619,29 @@ describe('the run itself', () => {
     fakes.tmpdir = join(f.dir, 'nope')
     fakes.run = fakeRun(f, { verdict: GAVE_UP, gateCode: 2 })
     expect(main(['--no-probe', '--sample', '0'], fakes)).toBe(1)
-    expect(out.lines[1]?.startsWith('weekly: red · gate · file one task: Weekly: the gate did not run')).toBe(true)
+    expect(out.lines[0]?.startsWith('weekly: red · gate · file one task: Weekly: the gate did not run')).toBe(true)
     expect(readFileSync(join(f.common, 'shepherdr-weekly', 'report.md'), 'utf8')).toContain('Not run: asked not to run (--no-probe)')
     expect(parseArgs(['--sample', '2', '--no-probe'])).toEqual({ probe: false, sample: 2 })
     expect(parseArgs(['--sample', 'nope'])).toEqual({ probe: true, sample: 5 })
+    expect(parseArgs(['--sample', '99'])).toEqual({ probe: true, sample: 5 })
     expect(parseArgs([])).toEqual({ probe: true, sample: 5 })
+  })
+
+  test('a week without a probe keeps the last sample, and a report that cannot be written is not a green week', () => {
+    const f = repoFixture()
+    mkdirSync(join(f.common, 'shepherdr-weekly'), { recursive: true })
+    const state = join(f.common, 'shepherdr-weekly', 'state.json')
+    writeFileSync(state, JSON.stringify({ at: 1, commit: 'abc', sample: ['test/layout-a.test.ts'] }))
+    const out = capture()
+    const fakes = depsOf(f, out)
+    fakes.write = (file: string) => {
+      throw new Error(`no write to ${basename(file)}`)
+    }
+    fakes.run = fakeRun(f, { verdict: GREEN })
+    expect(main(['--no-probe'], fakes)).toBe(2)
+    expect(out.lines.at(-1)).toContain('the report could not be written (no write to report.md): nothing was recorded')
+    // the failed write left the sample alone
+    expect(JSON.parse(readFileSync(state, 'utf8')).sample).toEqual(['test/layout-a.test.ts'])
   })
 
   test('outside a checkout it says so and runs nothing', () => {
@@ -556,10 +664,13 @@ describe('the run itself', () => {
     const out = capture()
     const fakes = depsOf(f, out)
     fakes.run = fakeRun(f, { verdict: GREEN, browsers: 'chromium: not installed: bun x playwright-core install --only-shell chromium\nwebkit: ok (2s)\n' })
-    expect(main(['--no-probe'], fakes)).toBe(0)
+    // a browser that cannot start means its tests skip inside the gate: the week is red and names it
+    expect(main(['--no-probe'], fakes)).toBe(1)
+    expect(out.lines[0]).toContain('weekly: red · browser chromium · file one task: Weekly: chromium did not start')
     const report = readFileSync(join(f.common, 'shepherdr-weekly', 'report.md'), 'utf8')
     expect(report).toContain('- chromium: not installed: bun x playwright-core install --only-shell chromium')
     expect(report).toContain('- webkit: ok (2s)')
+    expect(report).toContain('### Weekly: chromium did not start')
   })
 })
 
