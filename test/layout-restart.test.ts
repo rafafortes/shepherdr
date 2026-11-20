@@ -155,6 +155,7 @@ describe.skipIf(!browser)('restarting an agent', () => {
       if (a.type === 'restart-all') sent.push('restart-all')
       return origAct(a)
     }
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     // what the screen itself asks the server for: the tap must not ask for a restart-all, only Restart may
     const asks: string[] = []
@@ -162,6 +163,7 @@ describe.skipIf(!browser)('restarting an agent', () => {
       if (r.url().endsWith('/api/action') && r.method() === 'POST') asks.push(r.postDataJSON().type as string)
     })
     try {
+      // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
       await page.waitForSelector('#places li')
       const mine = page.locator('#places li[data-heading="m:vm-str"]')
@@ -194,8 +196,10 @@ describe.skipIf(!browser)('restarting an agent', () => {
       if (a.type === 'restart-all') sent.push('restart-all')
       return origAct(a)
     }
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
+      // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
       await page.waitForSelector('#places li')
       const mine = page.locator('#places li[data-heading="m:vm-str"]')
@@ -213,7 +217,11 @@ describe.skipIf(!browser)('restarting an agent', () => {
       // (a real one only happens when the Settings move back between the tap and the Restart, on the server)
       newSettings()
       let ran = 0
-      world.act = async (a) => (a.type === 'restart-all' ? (ran++, { ok: true, restarted: 0, failed: 0 }) : origAct(a))
+      world.act = async (a) => {
+        if (a.type !== 'restart-all') return origAct(a)
+        ran++
+        return { ok: true, restarted: 0, failed: 0 }
+      }
       await mine.hover()
       await mine.getByRole('button', { name: 'More for vm-str' }).click()
       await page.getByRole('menuitem', { name: 'Restart 2 coordinators', exact: true }).click()
@@ -241,15 +249,25 @@ describe.skipIf(!browser)('restarting an agent', () => {
   test('a place that cannot restart: the answer names it, and it is still offered after', async () => {
     newSettings()
     const origAct = world.act
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
+      // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
       await page.waitForSelector('#places li')
       // the server would answer one that could not, by name, and keep the failed one's hint for another go: a refusal,
       // then the run it would give, with nothing else done (a mocked run, for this screen's own answer)
-      const runs = [{ ok: false, error: 'herdr is not answering.' }, { ok: true, restarted: 1, failed: 1, failures: ['gtm'] }] as const
+      const runs = [
+        { ok: false, error: 'herdr is not answering.' },
+        { ok: true, restarted: 1, failed: 1, failures: ['gtm'] },
+      ] as const
       let ran = 0
-      world.act = async (a) => (a.type === 'restart-all' ? (ran++, runs.at(ran - 1)!) : origAct(a))
+      world.act = async (a) => {
+        if (a.type !== 'restart-all') return origAct(a)
+        const reply = runs[ran]
+        ran++
+        return reply
+      }
       const mine = page.locator('#places li[data-heading="m:vm-str"]')
       await mine.hover()
       await mine.getByRole('button', { name: 'More for vm-str' }).click()

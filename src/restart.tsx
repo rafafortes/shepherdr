@@ -326,7 +326,7 @@ let askingAll = false
 const allListeners = new Set<() => void>()
 function setAskingAll(open: boolean) {
   askingAll = open
-  allListeners.forEach((f) => f())
+  for (const notify of allListeners) notify()
 }
 
 /**
@@ -371,7 +371,7 @@ export function ConfirmRestartAll() {
 }
 
 function RestartAllBox() {
-  const snap = useSnap()!
+  const snap = useSnap()
   const ui = useUI()
   const chats = useStore((s) => s.chats)
   const [busy, setBusy] = useState(false)
@@ -381,11 +381,11 @@ function RestartAllBox() {
   // the places the question shows: live until Restart is pressed, then fixed — the run's snapshots shrink the live
   // list one restart at a time, and the dialog asks what it asked and says what the run said
   const [frozen, setFrozen] = useState<Place[] | null>(null)
-  const affected = frozen ?? snap.places.filter((p) => p.machine === snap.host && p.restart)
+  const affected = frozen ?? (snap ? snap.places.filter((p) => p.machine === snap.host && p.restart) : [])
   const count = affected.length
   // a chat the screen watches is live, with its working state as the server pushes it; one it watched before and
   // left is stale, and one it never saw is missing: neither can be marked, so the server's own rule is said for them
-  const watched = new Set(visibleChats(ui, snap))
+  const watched = new Set(snap ? visibleChats(ui, snap) : [])
   const cancel = () => setAskingAll(false)
   const go = async () => {
     setFrozen(affected)
@@ -434,9 +434,7 @@ function RestartAllBox() {
           )
         })}
       </ul>
-      {affected.some((p) => !watched.has(p.chat)) ? (
-        <p className="mt-1.5 text-fg3">A turn at work is stopped first: their work in progress stops.</p>
-      ) : null}
+      {affected.some((p) => !watched.has(p.chat)) ? <p className="mt-1.5 text-fg3">A turn at work is stopped first: their work in progress stops.</p> : null}
       <p className="mt-1.5">Their chats and worktrees stay, and each comes back on what its Settings say now.</p>
       {error ? <p className="mt-1.5 text-need-fg">{error}</p> : null}
     </Dialog>
