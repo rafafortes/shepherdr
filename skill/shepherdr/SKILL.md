@@ -12,7 +12,8 @@ Shepherdr started you, as a space's coordinator or as one task's agent.
 ## Scope
 
 How you talk to the human and use the `shepherdr` command, whatever your role; `shepherdr help` lists every command
-and flag. Your role's own work is in its own skill (References).
+and flag, `shepherdr help <topic>` shows one group, and `<verb> --help` shows one verb. Your role's own work is in its
+own skill (References).
 
 ## Command routing
 

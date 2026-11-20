@@ -55,7 +55,7 @@ import { followCommand, isCommand } from './commands.ts'
 import { launchesAgents } from './launch-policy.ts'
 import { effortsOf, findModel, knowsModels, modelsOf, nearest } from './models.ts'
 import { picksOf, pinModel, rememberModel } from './model-picks.ts'
-import { HELP, one, parseArgs, summaryOpts, type Parsed } from './args.ts'
+import { HELP, helpTopic, helpVerb, one, parseArgs, summaryOpts, type Parsed } from './args.ts'
 import { Automations, type Automation, type Template } from './automations.ts'
 import { Heartbeats, heartbeatFile, SKIPPED_LINE, WAKE_ANYWAY, Wakes, wakeProblem, wakesAnyway } from './heartbeat.ts'
 import { eventRules, eventsText, eventWords, matches, nextWords, runWords, timeRule, timeWords, triggerWords, type Happened, type TriggerEvent } from './trigger.ts'
@@ -5220,7 +5220,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   private async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean }): Promise<string> {
     const [a0, a1, ...rest] = p.words
-    if (!a0 || a0 === 'help' || p.flags.has('help')) return HELP
+    if (!a0) return HELP
+    if (a0 === 'help') return helpTopic(a1)
+    if (p.flags.has('help')) {
+      const section = helpVerb(a0)
+      if (section) return section
+    }
     switch (a0) {
       case 'status': {
         if (a1) return this.reportCommand(a1, rest, p, ctx)

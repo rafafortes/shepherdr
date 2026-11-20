@@ -61,9 +61,26 @@ export function summaryOpts(p: Parsed, rest: string[] = []): { said?: string; fa
   return { said: said || undefined, facts }
 }
 
-export const HELP = `shepherdr: talk to Shepherdr from a terminal (agents use it; so can you)
+/** the trigger block, kept whole: it sits inside Settings in the full page, and is a help topic on its own */
+const TRIGGERS = `  Triggers: automations and Autopilot's heartbeat (shepherdr set heartbeat.when / heartbeat.on) take the same ones,
+  their times in time.zone (Everywhere). Write them from the human's words; show them back in the words Shepherdr
+  prints, never as written.
+      time rule (--when, heartbeat.when): an iCalendar RRULE (RFC 5545), with DTSTART and EXDATE lines where needed
+          FREQ=MINUTELY;INTERVAL=30                       every 30 minutes
+          FREQ=MINUTELY;INTERVAL=30;BYHOUR=8,9,…,21;BYDAY=MO,TU,WE,TH,FR    every 30 min, 8:00-22:00, weekdays
+          FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;BYHOUR=16;BYMINUTE=0           every other Friday at 16:00
+          FREQ=MONTHLY;BYDAY=-1FR;BYHOUR=9;BYMINUTE=0                    the last Friday of the month at 9:00
+          DTSTART:20261201T090000 RRULE:FREQ=DAILY;COUNT=10 EXDATE:20261206T090000   from, how many, skip dates
+        or once 2026-11-02 9:00, or off. Without DTSTART it counts from 2026-01-01 0:00 (every other week, every 7 min)
+      events (--on, heartbeat.on): all news, none, or some split by commas, each with optional filters
+          added · ready · failed · needs-you · merged · stalled · main-red · health (heartbeat only)
+          space=<name> · branch=<glob, * any> · title=<words in the title>       ready, merged branch=release/*
+        an automation hears its own space's news unless a rule names another space=
+`
 
-Spaces (a folder on a machine with a name and its own coordinator; each machine has its home space, ~)
+/** the named help topics. `triggers` is the time-rule block inside Settings, also shown on its own. */
+export const TOPIC = {
+  spaces: `Spaces (a folder on a machine with a name and its own coordinator; each machine has its home space, ~)
   shepherdr space add <path> [--name NAME]       add a git repo folder as a space (its own herdr space); the name
                                                  follows the space rules: lowercase letters, numbers, - and _,
                                                  at most 80 characters, its own on its machine
@@ -88,8 +105,8 @@ Spaces (a folder on a machine with a name and its own coordinator; each machine 
   shepherdr heartbeat run [<space>]              wake it once now, with its heartbeat (what Run now does in Settings →
                                                  Autopilot and at the chat's Autopilot pill): one wake per call,
                                                  refused while one is already waking, and only on its own machine
-
-Tasks (coordinators add them; only when the human asks, or on Autopilot)
+`,
+  tasks: `Tasks (coordinators add them; only when the human asks, or on Autopilot)
   shepherdr task add "<title>" --brief "<the brief>" [--space NAME] [--base BRANCH] [--after SHE-12,SHE-13] [--later]
                                                  [--at "tomorrow 9:00" | --in 6h] [--set KEY=VALUE ...] [--agent CLI]
                                                  [--model ID] [--effort LEVEL] [--reviewer CLI] [--reviewer-model ID]
@@ -206,8 +223,8 @@ Tasks (coordinators add them; only when the human asks, or on Autopilot)
                                                  It touches no task's agent (its brief was written when it
                                                  started: shepherdr restart <id> is its own choice) and no
                                                  other machine's space, and says so
-
-Task agents
+`,
+  agents: `Task agents
   shepherdr todo <id>                            the brief says to wait for a go: show as To do until one comes
   shepherdr review <id>                          count the review round you are starting (its brief's Review rounds
                                                  at most) and get the reviewer to use this round, the caps choosing
@@ -239,8 +256,8 @@ Task agents
                                                  while you work). Run it at the start, at each natural step and at least
                                                  every 5 minutes; revise --left honestly each time and say in the line
                                                  when it is a revision. A line older than 5 minutes reads as older
-
-Chat
+`,
+  chat: `Chat
   shepherdr ask "<question>" --choice "<label>" ... [--desc "<label>=<one line>"] [--other] [--multi] [--ordinary]
       --ordinary: ordinary questions only; never permissions, startup approvals or plans
   shepherdr attach <file> [<file> …] [--caption "<one line>"]
@@ -255,8 +272,8 @@ Chat
                                                  run it from
   shepherdr alert "<title>" --body "<why now>" [--task <id>]
                                                  with --task: it says what that task needs and opens on its card
-
-Secrets (API keys, tokens, passwords: used by name, never seen or printed)
+`,
+  secrets: `Secrets (API keys, tokens, passwords: used by name, never seen or printed)
   shepherdr secret list                          the names you can use here, and where each is kept
   shepherdr secret ask NAME --why "<what for>" [--force]
                                                  a masked box in your chat for the human; end your turn, and a
@@ -271,8 +288,8 @@ Secrets (API keys, tokens, passwords: used by name, never seen or printed)
   shepherdr secret rm NAME [--machine | --space NAME]
                                                  for the human: keep one (its value on stdin) or remove it, Everywhere
                                                  (none), for this machine or one space; the most specific one wins
-
-Artifacts (one self-contained HTML file, optional JSON data; checked at phone width, then shown in your chat)
+`,
+  artifacts: `Artifacts (one self-contained HTML file, optional JSON data; checked at phone width, then shown in your chat)
   shepherdr artifact new <file.html> --title "<title>" [--data <file.json>] [--space NAME]
   shepherdr artifact update <id> [<file.html>] [--data <file.json>] [--title "<title>"] [--note "<what changed>"]
                                                  a new version of the same one; --data alone changes only its data
@@ -280,8 +297,8 @@ Artifacts (one self-contained HTML file, optional JSON data; checked at phone wi
   shepherdr artifact list [--space NAME]
   shepherdr artifact show <id>                   its versions and the files of its latest, to edit
   shepherdr artifact rm <id>
-
-Settings and automations
+`,
+  settings: `Settings and automations
   shepherdr show [--space NAME]                the app's few settings (how tasks work, each agent's CLI, model and
                                                  effort, auto-archive, Autopilot's heartbeat in words with its next
                                                  runs, the time zone, this machine's
@@ -338,27 +355,104 @@ Settings and automations
   shepherdr automation edit "<name>" [--name "<new name>"] [--task …] [--brief …] [--when … | off] [--on … | none]
                          [--agent …]
 
-  Triggers: automations and Autopilot's heartbeat (shepherdr set heartbeat.when / heartbeat.on) take the same ones,
-  their times in time.zone (Everywhere). Write them from the human's words; show them back in the words Shepherdr
-  prints, never as written.
-      time rule (--when, heartbeat.when): an iCalendar RRULE (RFC 5545), with DTSTART and EXDATE lines where needed
-          FREQ=MINUTELY;INTERVAL=30                       every 30 minutes
-          FREQ=MINUTELY;INTERVAL=30;BYHOUR=8,9,…,21;BYDAY=MO,TU,WE,TH,FR    every 30 min, 8:00-22:00, weekdays
-          FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;BYHOUR=16;BYMINUTE=0           every other Friday at 16:00
-          FREQ=MONTHLY;BYDAY=-1FR;BYHOUR=9;BYMINUTE=0                    the last Friday of the month at 9:00
-          DTSTART:20261201T090000 RRULE:FREQ=DAILY;COUNT=10 EXDATE:20261206T090000   from, how many, skip dates
-        or once 2026-11-02 9:00, or off. Without DTSTART it counts from 2026-01-01 0:00 (every other week, every 7 min)
-      events (--on, heartbeat.on): all news, none, or some split by commas, each with optional filters
-          added · ready · failed · needs-you · merged · stalled · main-red · health (heartbeat only)
-          space=<name> · branch=<glob, * any> · title=<words in the title>       ready, merged branch=release/*
-        an automation hears its own space's news unless a rule names another space=
-  shepherdr automation pause|resume|run|remove "<name>" [--space NAME]
+${TRIGGERS}  shepherdr automation pause|resume|run|remove "<name>" [--space NAME]
                                                  run: add its task now
   shepherdr automation list [--space NAME]     with each one's last run
-
-Setup
+`,
+  setup: `Setup
   shepherdr secret elevenlabs                    store the ElevenLabs key for voice calls (reads it from stdin)
   shepherdr doctor                               check every machine saved in herdr; put its helper there again (main machine)
   shepherdr status                               spaces, open tasks, herdr, and done tasks that kept work
                                                  (with a task's id: that task's progress, above)
-`
+`,
+  triggers: TRIGGERS,
+} as const
+
+export type Topic = keyof typeof TOPIC
+
+/** the CLI verbs, including the two aliases and the two gone verbs that point at their replacement */
+export const VERBS = [
+  'status',
+  'project',
+  'space',
+  'mode',
+  'task',
+  'restart',
+  'review',
+  'ready',
+  'done',
+  'todo',
+  'merge',
+  'pr',
+  'checks',
+  'plan',
+  'ask',
+  'attach',
+  'artifact',
+  'render',
+  'preview',
+  'alert',
+  'show',
+  'profile',
+  'models',
+  'set',
+  'unset',
+  'automation',
+  'heartbeat',
+  'doctor',
+  'secret',
+] as const
+
+export type Verb = (typeof VERBS)[number]
+
+/** the help section a verb's `--help` opens */
+export const VERB_TOPIC: Record<Verb, Topic> = {
+  status: 'setup',
+  doctor: 'setup',
+  project: 'spaces',
+  space: 'spaces',
+  mode: 'spaces',
+  heartbeat: 'spaces',
+  task: 'tasks',
+  restart: 'tasks',
+  review: 'tasks',
+  ready: 'tasks',
+  done: 'tasks',
+  todo: 'tasks',
+  merge: 'tasks',
+  pr: 'tasks',
+  checks: 'tasks',
+  plan: 'tasks',
+  ask: 'chat',
+  attach: 'chat',
+  alert: 'chat',
+  artifact: 'artifacts',
+  render: 'artifacts',
+  preview: 'artifacts',
+  show: 'settings',
+  profile: 'settings',
+  models: 'settings',
+  set: 'settings',
+  unset: 'settings',
+  automation: 'settings',
+  secret: 'secrets',
+}
+
+/** `shepherdr help [topic]`: one section (a verb name finds its section too), the whole page, or the topic list plus the page. */
+export function helpTopic(name?: string): string {
+  if (!name) return HELP
+  if (Object.hasOwn(TOPIC, name)) return TOPIC[name as Topic]
+  if (Object.hasOwn(VERB_TOPIC, name)) return TOPIC[VERB_TOPIC[name as Verb]]
+  return `No help topic ${name}; try one of: ${Object.keys(TOPIC).join(', ')}.\n\n${HELP}`
+}
+
+/** `shepherdr <verb> --help`: that verb's section, or nothing when the switch will refuse the verb. */
+export function helpVerb(verb?: string): string | undefined {
+  const topic = verb ? VERB_TOPIC[verb as Verb] : undefined
+  return topic ? TOPIC[topic] : undefined
+}
+
+/** a bare `shepherdr help` is the join of every section: byte for byte the page this replaced. */
+export const HELP = `shepherdr: talk to Shepherdr from a terminal (agents use it; so can you)
+
+${[TOPIC.spaces, TOPIC.tasks, TOPIC.agents, TOPIC.chat, TOPIC.secrets, TOPIC.artifacts, TOPIC.settings, TOPIC.setup].join('\n')}`
