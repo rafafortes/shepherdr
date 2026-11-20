@@ -436,7 +436,8 @@ of this machine's agents (`usage.json` in Shepherdr's home, read from the agents
   counts whole, so "5 h" is 5 to 6 hours.
 - **Run-outs**: how many a provider had in the last 7 days, the last one (its reason, when, and its reset when the provider
   gave one), and whether it is **out right now**: until its known reset, or until its return watch sees the primary back, or
-  until a call of it goes through after the run-out. A reset that has passed says nothing of now.
+  until a call of it goes through after the run-out. A reset that has passed says nothing of now, to that mark or to a new
+  start of it.
 - **Quota**: each provider's quota windows, read as [Quotas](#quotas) says: each window that has not refilled, with its share
   used and a thin bar, when it refills in this machine's time, where the figure came from and how old it is (read 7 min
   ago), an estimate's tag, a failed read's reason (the figure stays the last good one), and the hint that asks for a key
@@ -467,8 +468,12 @@ Shepherdr's agents from its start (the backfill, once: until it is done the summ
 **Run-outs and alerts.** A turn a provider cut off because its allowance or its credit is used up (a "usage limit", a "resets
 …" time, or a 402 "Insufficient account funds") is a **run-out**: it is kept with its time and model, and the agent's
 backup takes over as before. The first one of a provider that was fine before alerts you once: the title says "OpenCode Go
-ran out", the body names the chat it cut off and the reason; the others while it is still out do not. A reset the provider gives as an
-ISO time is shown in this machine's time, with its zone name. OpenCode's own run-outs are the same: its "Go usage limit
+ran out", the body names the chat it cut off and the reason; the others while it is still out do not. A reset the provider gives is read
+into the moment the allowance comes back, whatever form it takes — an ISO time (shown in this machine's time, with its
+zone name), a clock ("resets 2:10am": today, or tomorrow once today's has passed; a zone the CLI names beside it, such as
+"(Europe/Oslo)", is the one read), a date with its clock ("resets Nov 6, 11:59am") or a wait from now ("resets in
+1h3m51s") — and that moment is what ends the mark: from it on the provider is not out any more, so a new task may start on
+it before the return watch has asked it. OpenCode's own run-outs are the same: its "Go usage limit
 exceeded" or "Free usage limit reached" (a `provider.quota` error) and a provider's "Insufficient balance".
 
 ### Profiles
@@ -799,7 +804,9 @@ nothing to come back to, and is never asked.
   there, a provider's refusal — never an error that passes by itself), the primary is first asked three minutes later
   (a burst, such as a free-usage 429, often clears in minutes), and while it still doesn't answer each wait doubles — six
   minutes, twelve, twenty-four — up to four hours, the longest — with a fifth of the wait either way at random, so two
-  roles rarely fall due together and a provider that is out for good is never hammered. A probe is one tiny request
+  roles rarely fall due together and a provider that is out for good is never hammered. A reset the provider named for its
+  allowance (its run-out's reset, above) is one moment it is asked at whatever the wait says: it comes, the primary is
+  asked then, once, and a failure after it sets the next wait again. A probe is one tiny request
   through that
   CLI: one line in, one word out, no tools, a hard timeout. Claude Code and pi are asked with their coding assistant's
   prompt and the person's MCP servers and settings left out, and keep no session; pi does load its own extensions, which

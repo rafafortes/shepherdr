@@ -15,7 +15,7 @@ delete process.env.SHEPHERDR_MAIN
 const { FIRST_LOOK, LiveSource } = await import('../server/live/source.ts')
 const { placeId } = await import('../server/live/places.ts')
 const { canProbe, FIRST_WAIT, FRESH, LONGEST_WAIT, MAX_RETURNS, QUIET, oneShot, probeHarness, wait } = await import('../server/live/return.ts')
-const { Retries } = await import('../server/live/retry.ts')
+const { resetOf, Retries } = await import('../server/live/retry.ts')
 type Retry = import('../server/live/retry.ts').Retry
 
 const src = new LiveSource()
@@ -1292,6 +1292,53 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
     }
   })
 
+  test('the reset an outage kept ends its mark, however late the takeover was noted', async () => {
+    const { setModels, opencodeList } = await import('../server/live/models.ts')
+    setModels('opencode', opencodeList([{ id: MODEL, label: MODEL, efforts: [] }], MODEL))
+    const s = await space('reset-came')
+    try {
+      primary(s.p.name)
+      const now = Date.now()
+      // POL-461/464: a 5-hour limit cut the chat off six hours ago, its reset came, and the watch's next question is
+      // hours away (its wait grows to four): the ledger's mark is over, so a new task starts on the primary again.
+      // The takeover was noted four minutes after the cut, as a launch and the machine's own room take their time:
+      // the reset is the outage's own, never worked out from how close those two moments are
+      const resetAt = now - 3_600_000
+      src.usage.runOut(
+        {
+          at: now - 6 * 3_600_000,
+          key: KEY,
+          chat: `${s.p.name}/Agent`,
+          role: 'task',
+          reason: 'Out of allowance until 2:10am',
+          words: "You've hit your 5-hour limit · resets 2:10am",
+          reset: '2:10am',
+          resetAt,
+        },
+        now,
+      )
+      src.returns.note(
+        { role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 2:10am', at: now - 6 * 3_600_000 + 4 * 60_000 },
+        { resetAt },
+      )
+      src.returns.failed('task', s.p.name, now - 5 * 3_600_000)
+      expect(out(KEY)).toBeUndefined()
+      expect(startsOn(s.p.name)).toBe('opencode')
+      // a refusal on the primary after that reset is another outage, and its own reset is what the mark ends at now
+      const later = now + 30 * 60_000
+      src.returns.cut('task', s.p.name, now, { key: 'another/Agent', onPrimary: true, resetAt: later })
+      expect(src.returns.get('task', s.p.name)?.resetAt).toBe(later)
+      // a takeover of another kind keeps none: the allowance that reset named is not what this one waits for
+      src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'signed out', at: now }, { resetAt: undefined })
+      expect(src.returns.get('task', s.p.name)?.why).toBe('signed out')
+      expect(src.returns.get('task', s.p.name)?.resetAt).toBeUndefined()
+    } finally {
+      forget(s.p.name)
+      setModels('opencode', undefined)
+      s.done()
+    }
+  })
+
   test('a probe answer frees starts even when the run-out promised a reset', async () => {
     const { setModels, opencodeList } = await import('../server/live/models.ts')
     setModels('opencode', opencodeList([{ id: MODEL, label: MODEL, efforts: [] }], MODEL))
@@ -1301,7 +1348,10 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
       const now = Date.now()
       // an allowance that ran out with "resets 5pm": until the primary speaks, that reset keeps new starts off it
       src.usage.runOut({ at: now - 3_600_000, key: KEY, chat: `${s.p.name}/Agent`, role: 'task', reason: 'Out of allowance', words: 'resets 5pm', resetAt: now + 4 * 3_600_000 }, now)
-      src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: now - 3_600_000 })
+      src.returns.note(
+        { role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: now - 3_600_000 },
+        { resetAt: now + 4 * 3_600_000 },
+      )
       expect(out(KEY)).toBeDefined()
       expect(startsOn(s.p.name)).toBe('codex')
       // it answered: the promised reset no longer holds, even though the chats are still on the backup
@@ -1325,7 +1375,10 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
       // an allowance that ran out hours ago with "resets 5pm": until the primary speaks, that reset keeps starts off it
       src.usage.runOut({ at: now - 3 * 3_600_000, key: KEY, chat: `${s.p.name}/Agent`, role: 'task', reason: 'Out of allowance', words: 'resets 5pm', resetAt: now + 4 * 3_600_000 }, now)
       const onBackup = task(s.p.name, 'codex', { from: 'opencode' })
-      src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: now - FIRST_WAIT * 2 })
+      src.returns.note(
+        { role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: now - FIRST_WAIT * 2 },
+        { resetAt: now + 4 * 3_600_000 },
+      )
       expect(out(KEY)).toEqual({ until: expect.any(String) })
       expect(startsOn(s.p.name)).toBe('codex')
       await src.watchReturns(now)
@@ -1397,6 +1450,66 @@ describe('how soon the primary is asked', () => {
       expect(asked).toEqual(['claude'])
       expect(cards(a.key)).toHaveLength(1)
     } finally {
+      s.done()
+    }
+  })
+
+  test('the reset a provider named is asked at, never after a wait that grew to hours, in each of the five', async () => {
+    const s = await space('ask-at-reset')
+    /** each CLI's own words for an allowance that ran out, which retry.ts reads its reset from */
+    const words: Record<string, string> = {
+      claude: "You've hit your 5-hour limit · resets 2:10am",
+      codex: "You've hit your usage limit. Upgrade to Pro or try again at 5:00 PM.",
+      pi: '429 usage limit reached for this plan, resets 3pm',
+      opencode: 'Go usage limit exceeded',
+      agy: 'RESOURCE_EXHAUSTED: Individual quota reached. Resets in 158h59m47s.',
+    }
+    const status = s.src.agents.status
+    try {
+      // going back, but its chat is busy, so the outage stays open with the answer it got: the reset is asked once, not
+      // on every pass after it
+      s.src.settings.set('backup.watchReturn', 'go back')
+      s.src.agents.status = (() => 'working') as never
+      const now = Date.now()
+      for (const kind of ['claude', 'codex', 'pi', 'opencode', 'agy']) {
+        // each round starts with nothing kept from the one before, and its provider is out with a reset that has come
+        for (const o of s.src.returns.list()) s.src.returns.forget(o.role, o.space)
+        s.src.engine.tasks.length = 0
+        for (const k of Object.keys(s.src.agents.records)) delete s.src.agents.records[k]
+        asked.length = 0
+        const backup = kind === 'codex' ? 'claude' : 'codex'
+        expect(s.src.settings.set('task.agent', kind, { space: s.p.name }).ok).toBe(true)
+        const a = task(s.p.name, backup, { from: kind })
+        // when it came back, from that CLI's own words where they name one: OpenCode's say only "usage limit exceeded"
+        // (its CLI reports how long to wait instead), so its round takes its moment from the ledger's own reset. The cut is
+        // a second ago, so this round's run-out is the newest of that provider however many the tests before it left
+        const cut = now - 1_000
+        const reset = resetOf(words[kind] ?? '', cut, 'UTC')?.at ?? now - 60_000
+        s.src.usage.runOut({ at: cut, key: `${kind}/test-model`, chat: `${s.p.name}/${kind}/Agent`, role: 'task', reason: 'Out of allowance', words: words[kind] ?? '', resetAt: reset }, now)
+        s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind }, to: { kind: backup }, why: 'out of allowance', at: cut }, { resetAt: reset })
+        // the watch has failed a few times since: its next question is hours away
+        const failAt = Math.min(reset, now) - 60_000
+        for (let i = 0; i < 6; i++) s.src.returns.failed('task', s.p.name, failAt)
+        // before its reset came, nothing is asked: its own wait is still hours away
+        await s.src.watchReturns(failAt)
+        expect([kind, asked]).toEqual([kind, []])
+        expect([kind, cards(a.key)]).toEqual([kind, []])
+        // its reset came: the primary is asked at once, and its chat hears
+        const after = Math.max(reset + 1_000, now)
+        await s.src.watchReturns(after)
+        expect([kind, asked]).toEqual([kind, [kind]])
+        expect([kind, s.src.returns.get('task', s.p.name)?.ok]).toEqual([kind, expect.any(Number)])
+        // it answered, and its chat is busy so it stays where it is: the wait after an answer is its own (fifteen minutes,
+        // then twice as long each time), so the reset
+        // is not asked again once that answer stands, though the reset is long past
+        await s.src.watchReturns(after + 16 * 60_000)
+        expect([kind, asked.length]).toEqual([kind, 2])
+        await s.src.watchReturns(after + 32 * 60_000)
+        expect([kind, asked.length]).toEqual([kind, 2])
+      }
+    } finally {
+      s.src.agents.status = status
+      s.src.settings.set('task.agent', null, { space: s.p.name })
       s.done()
     }
   })

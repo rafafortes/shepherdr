@@ -280,6 +280,40 @@ describe('run-outs: recorded once, and out until a reset, a return or a later ca
     expect(l.outOf('pi.opencode-go', NOW, undefined, 'pi.opencode-go/deepseek-v4.1-flash').out).toBe(true)
   })
 
+  test('a reset that came is the answer whatever the hours say, to the minute', () => {
+    // a reset read from the provider's own words (retry.ts resetOf) is a moment, not an hour: the provider is back at
+    // it, and a call counted in the hour the run-out happened in neither shortens it nor keeps it longer
+    const l = new UsageLedger(tmp('ledger-reset-edge'), true)
+    const resetAt = ago(1) + 30 * 60_000
+    l.runOut(runOut('A/Agent', 2, { reset: '2:10am', resetAt }), NOW)
+    expect(l.outOf('pi.opencode-go', resetAt - 60_000).out).toBe(true)
+    expect(l.outOf('pi.opencode-go', resetAt).out).toBe(false)
+    l.count('B/Agent', 'pi.opencode-go/deepseek-v4.1-flash', { id: 'in-the-same-hour', at: ago(2), tokens: 10 }, NOW)
+    expect(l.outOf('pi.opencode-go', resetAt - 60_000).out).toBe(true)
+  })
+
+  test('with no reset at all the hours are the grain: a call in the run-out’s own hour is not yet its answer', () => {
+    // bounded, and only without a reset: the run-out's hour counts whole, so a call of it in that same hour says nothing
+    // yet, and the one in the next hour frees the provider
+    const l = new UsageLedger(tmp('ledger-hour'), true)
+    l.runOut(runOut('A/Agent', 0), NOW)
+    // the same hour the run-out happened in, to the second it happened at: never a call of the hour after by luck
+    l.count('B/Agent', 'pi.opencode-go/deepseek-v4.1-flash', { id: 'in-the-hour', at: NOW, tokens: 10 }, NOW)
+    expect(l.outOf('pi.opencode-go', NOW).out).toBe(true)
+    l.count('B/Agent', 'pi.opencode-go/deepseek-v4.1-flash', { id: 'next-hour', at: NOW + HOUR, tokens: 10 }, NOW + HOUR)
+    expect(l.outOf('pi.opencode-go', NOW + HOUR).out).toBe(false)
+  })
+
+  test('a call that went through after the run-out is the answer even against a reset far ahead', () => {
+    // the provider working again speaks for itself, as a probe's answer does: a later hour's call frees it, and the
+    // models-summary alerts the next run-out as a new outage because of it
+    const l = new UsageLedger(tmp('ledger-call-beat-reset'), true)
+    l.runOut(runOut('A/Agent', 2, { resetAt: NOW + 48 * HOUR }), NOW)
+    expect(l.outOf('pi.opencode-go', NOW).out).toBe(true)
+    l.count('B/Agent', 'pi.opencode-go/other', { id: 'after-the-outage', at: NOW - HOUR, tokens: 5 }, NOW)
+    expect(l.outOf('pi.opencode-go', NOW).out).toBe(false)
+  })
+
   test('outState: the last run-out decides, and a reset that has passed does not keep it out', () => {
     const r1 = runOut('A/Agent', 9)
     const r2 = runOut('A/Agent', 2, { resetAt: NOW - HOUR })

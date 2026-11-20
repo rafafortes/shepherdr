@@ -54,6 +54,10 @@ export interface Outage {
   /** the primary answered this probe, when: going back, its chats still busy then follow without asking it again while
    *  this is fresh */
   ok?: number
+  /** the reset the provider named when this outage opened (retry.ts resetOf, kept with the run-out in usage.json): the
+   *  allowance comes back then, so the mark does not outlive it, whatever the wait to ask the primary has grown to. Only
+   *  an outage that is itself a run-out has one — being signed out, or a model that is not there, is no allowance */
+  resetAt?: number
   /** how many probes it answered: one that keeps answering while a chat can't go back yet (a pause of days) is asked
    *  again less and less often */
   oks?: number
@@ -226,8 +230,9 @@ export class Returns {
   }
 
   /** a backup took that role's agent over for a reason waiting can't fix: from now on, until it answers, its primary is
-   *  asked now and then whether it is back. A new takeover starts a new count */
-  note(o: Pick<Outage, 'role' | 'space' | 'primary' | 'to' | 'why' | 'at'>, also: { key?: string; allOut?: boolean } = {}) {
+   *  asked now and then whether it is back. A new takeover starts a new count. `also.resetAt`: the reset the provider
+   *  named for the run-out that cut it off, kept with the outage */
+  note(o: Pick<Outage, 'role' | 'space' | 'primary' | 'to' | 'why' | 'at'>, also: { key?: string; allOut?: boolean; resetAt?: number } = {}) {
     const was = this.get(o.role, o.space)
     // the returns of the day before it stay: a primary that runs out again right after going back counts
     const returned = (was?.returned ?? []).filter((at) => o.at - at < DAY)
@@ -240,11 +245,20 @@ export class Returns {
       due: o.at + wait(0),
       ...(returned.length ? { returned } : {}),
       ...(also.allOut ? { allOut: true } : {}),
+      ...('resetAt' in also ? { resetAt: also.resetAt } : {}),
     }
     // one more cut-off of an outage still open keeps its schedule: a night of cut-offs never puts its question off
-    // again and again (one that answered or is over starts a new count)
+    // again and again (one that answered or is over starts a new count). Its reset is the new takeover's own, given or
+    // not: the allowance it named is the one that came back, and a takeover of another kind has none
     if (was && !was.back && !was.ok) {
-      this.data[keyOf(o.role, o.space)] = { ...was, to: fresh.to, why: o.why, lastCut: o.at, allOut: also.allOut ?? was.allOut }
+      this.data[keyOf(o.role, o.space)] = {
+        ...was,
+        to: fresh.to,
+        why: o.why,
+        lastCut: o.at,
+        ...('resetAt' in also ? { resetAt: also.resetAt } : {}),
+        allOut: also.allOut ?? was.allOut,
+      }
       this.again(was, also.key)
     } else this.data[keyOf(o.role, o.space)] = fresh
     this.save()
@@ -253,12 +267,14 @@ export class Returns {
   /** one more agent of that role cut off for good while its outage is open. On the primary (onPrimary), it says the primary
    *  refuses again: its answer is not fresh any more, and an agent at work on it counts only after a quiet while (QUIET);
    *  on the backup it says nothing of the primary. allOut: its backup was cut off too, or it has none */
-  cut(role: ReturnRole, space: string, at = Date.now(), also: { key?: string; allOut?: boolean; onPrimary?: boolean } = {}) {
+  cut(role: ReturnRole, space: string, at = Date.now(), also: { key?: string; allOut?: boolean; onPrimary?: boolean; resetAt?: number } = {}) {
     const o = this.get(role, space)
     if (!o || o.back) return
     if (also.onPrimary) {
       o.lastCut = at
       o.ok = undefined
+      // the refusal's own reset, given or not: it is what this outage ends at now
+      if ('resetAt' in also) o.resetAt = also.resetAt
     }
     if (also.allOut) o.allOut = true
     this.again(o, also.key)

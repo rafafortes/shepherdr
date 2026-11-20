@@ -133,6 +133,131 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(providerError('Blocked by content filter', 'provider.content-filter')).toEqual({ passing: false, reason: "Response blocked by the provider's filter", blocked: true })
   })
 
+  test("a phrased session, weekly or 5-hour limit is out of allowance in every CLI's words, never a rate limit", () => {
+    // POL-452: Claude Code's StopFailure sends code rate_limit, and its words say "You've hit your 5-hour limit": the
+    // hyphen was not in the old rule, so the cut was waited out five times over fifteen minutes, no run-out was kept,
+    // and the task went to a backup at the end of it
+    expect(ending('claude-5-hour-limit-made')).toEqual({ passing: false, reason: 'Out of allowance until 2:10am' })
+    const phrased = [
+      // Claude Code's own words, with the code and status it sends with them
+      ["You've hit your 5-hour limit · resets 2:10am", 'rate_limit', 429],
+      ["You've hit your weekly limit · resets Nov 21, 11:59am", 'rate_limit', 429],
+      ["You've hit your session limit · resets 5pm", 'rate_limit', 429],
+      ['5-hour limit reached · resets 2:10am', 'rate_limit', 429],
+      ["You've reached your daily limit", 'rate_limit', 429],
+      // and the other four CLIs' words for the same thing
+      ["You've hit your usage limit. Upgrade to Pro or try again at 5:00 PM.", 'usage_limit_exceeded', 429],
+      ['429 usage limit reached for this plan, resets 3pm', '', 429],
+      ['Go usage limit exceeded', 'provider.quota', 429],
+      ['RESOURCE_EXHAUSTED: Individual quota reached. Resets in 158h59m47s.', '', 429],
+    ] as const
+    for (const [words, code, status] of phrased) {
+      const e = providerError(words, code, status)
+      expect([words, e.passing]).toEqual([words, false])
+      expect([words, runOutOf(e.reason)]).toEqual([words, true])
+    }
+    // a real rate limit keeps being waited out, however it is worded, and in whoever's words
+    expect(providerError("You've hit your rate limit", 'rate_limit', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('Rate limit reached, please retry', '', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('too many requests', 'provider.rate-limit', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    // a rate limit with a word before it, and a limit of a resource, are no allowance either
+    expect(providerError('You have reached the per-minute rate limit', 'rate_limit', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('hit the API rate limit', '', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('You have reached the context window limit', 'context_window_exceeded', 400).reason).toBe('Context window full')
+    // Claude Code's own words while the provider throttles it: not the allowance, though it says "usage limit"
+    expect(providerError('Claude Code is temporarily limiting requests (not your usage limit)', 'rate_limit', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    // its extra usage running out is the allowance, with the reset it names
+    expect(providerError("You're out of extra usage · resets 5pm", 'rate_limit', 429).reason).toBe('Out of allowance until 5pm')
+    // a plan's spend or an organization's limit is the allowance, apostrophe and all, and the rate words after a full
+    // stop say nothing of it; a limit of requests, of tokens or of the context, however it is spelled, is not
+    expect(providerError("You've hit your org's spend limit", 'rate_limit', 429)).toEqual({ passing: false, reason: 'Out of allowance' })
+    expect(providerError("You've hit your org's spend limit. Requests are blocked until you raise it", 'rate_limit', 429)).toEqual({ passing: false, reason: 'Out of allowance' })
+    expect(providerError("You've hit your corporate spend limit", 'rate_limit', 429)).toEqual({ passing: false, reason: 'Out of allowance' })
+    expect(providerError('max_requests limit exceeded', 'rate_limit', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('Request limit reached', '', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('Output token limit reached', '', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('Context limit reached · /compact or /clear to continue', 'invalid_request', 400).reason).toBe('Context window full')
+    // a bare limit reached is the allowance, and Google's transient 429 that points at its quota page is a wait
+    expect(providerError('Limit reached. resets 3pm', '', 429).reason).toBe('Out of allowance until 3pm')
+    expect(providerError('Resource has been exhausted (e.g. check quota).', '', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    // agy's own out-of-allowance words, which name a quota reached and its reset
+    expect(providerError('RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 158h59m47s.', '', 429).reason).toBe('Out of allowance until in 158h59m47s')
+  })
+
+  test('a reset given as a clock, a date or a wait is read into the moment it comes back', () => {
+    // 19 Nov 2026, 10:00 in the zone read: a reset is worked out from `now`, never from when the message is read
+    const now = Date.UTC(2026, 10, 19, 10, 0)
+    const at = (words: string, zone = 'UTC') => {
+      const r = resetOf(words, now, zone)
+      return r?.at === undefined ? undefined : new Date(r.at).toISOString()
+    }
+    // a clock today, or tomorrow once today's has passed
+    expect(at('resets 5pm')).toBe('2026-11-19T17:00:00.000Z')
+    expect(at('try again at 5:00 PM')).toBe('2026-11-19T17:00:00.000Z')
+    // a day word instead of a date, and its words stopping at the minute
+    expect(at('resets tomorrow 9am')).toBe('2026-11-20T09:00:00.000Z')
+    expect(at('try again Fri 5pm')).toBe('2026-11-20T17:00:00.000Z')
+    expect(at('resets today 3pm')).toBe('2026-11-19T15:00:00.000Z')
+    // 19 Nov is a Thursday: a weekday whose clock has gone today is next week's, and "today" with one gone is past
+    expect(at('resets Thu 3am')).toBe('2026-11-26T03:00:00.000Z')
+    expect(at('resets today 3am')).toBe('2026-11-19T03:00:00.000Z')
+    // a clock written with stops: "5 p.m.", and the same without its last stop
+    expect(at('resets 5 p.m.')).toBe('2026-11-19T17:00:00.000Z')
+    expect(at('resets 5 p.m')).toBe('2026-11-19T17:00:00.000Z')
+    expect(at('resets 2:10am')).toBe('2026-11-20T02:10:00.000Z')
+    expect(at('Claude usage limit reached. Your limit will reset at 3pm')).toBe('2026-11-19T15:00:00.000Z')
+    expect(at('resets noon')).toBe('2026-11-19T12:00:00.000Z')
+    // its words stop at the minute: a clock that has this very minute in it is today's, not tomorrow's
+    const minute = (words: string, moment: number) => {
+      const r = resetOf(words, moment, 'UTC')
+      return r?.at === undefined ? undefined : new Date(r.at).toISOString()
+    }
+    expect(minute('resets 2:10am', Date.UTC(2026, 10, 19, 2, 10, 30))).toBe('2026-11-19T02:10:00.000Z')
+    // the zone a CLI names beside its time wins over the configured one; without one, the configured zone is read
+    expect(at('resets 5pm (Europe/Oslo)', 'America/Sao_Paulo')).toBe('2026-11-19T16:00:00.000Z')
+    expect(at('resets 5pm', 'Europe/Oslo')).toBe('2026-11-19T16:00:00.000Z')
+    // brackets that name no zone leave the configured one; a zone without a slash (UTC) is read when Intl knows it
+    expect(at('resets 5pm (Foo/Bar)')).toBe('2026-11-19T17:00:00.000Z')
+    expect(at('resets 5pm (America/Sao_Paulo)')).toBe('2026-11-19T20:00:00.000Z')
+    expect(at('resets 5pm (UTC)', 'Europe/Oslo')).toBe('2026-11-19T17:00:00.000Z')
+    // a date with its clock written after it; one that has passed is past (an allowance that came back is back), and one
+    // a week ahead is this year's
+    expect(at('resets Nov 21, 11:59am')).toBe('2026-11-21T11:59:00.000Z')
+    expect(at('resets 21 Nov, 11:59am')).toBe('2026-11-21T11:59:00.000Z')
+    // a date a machine writes names its own, never today's clock
+    expect(at('resets 2026-11-25 03:00')).toBe('2026-11-25T03:00:00.000Z')
+    expect(at("You've hit your weekly limit · resets Nov 6, 11:59am")).toBe('2026-11-06T11:59:00.000Z')
+    expect(at('resets Dec 30, 1:00pm')).toBe('2026-12-30T13:00:00.000Z')
+    // a date this year's is half a year behind is next year's (a week that ends after New Year)
+    expect(at('resets Jan 2, 1:00pm')).toBe('2027-01-02T13:00:00.000Z')
+    // a wait from now, in a provider's words: agy's seconds too, which no time rule of Settings has
+    expect(at('Resets in 158h59m47s.')).toBe('2026-11-26T00:59:47.000Z')
+    expect(at('resets in 1h3m51s')).toBe('2026-11-19T11:03:51.000Z')
+    expect(at('resets in 2d 5h')).toBe('2026-11-21T15:00:00.000Z')
+    expect(at('try again in 20 minutes')).toBe('2026-11-19T10:20:00.000Z')
+    expect(at('resets in 2 hours and 5 minutes')).toBe('2026-11-19T12:05:00.000Z')
+    // what names no time it can read keeps only the provider's words
+    expect(resetOf('resets in 3 elephants', now, 'UTC')).toEqual({ when: 'in 3 elephants' })
+    expect(resetOf('resets 31:99pm', now, 'UTC')).toEqual({ when: '31:99pm' })
+    expect(resetOf('resets Nov 42, 5pm', now, 'UTC')).toEqual({ when: 'Nov 42' })
+    // a reset whose words are blank, or that name no time at all ("try again later", "reset your payment method"),
+    // says no reset: the reason keeps nothing of those words
+    expect(resetOf('resets  · 5pm', now, 'UTC')).toBeUndefined()
+    expect(resetOf('try again later', now, 'UTC')).toBeUndefined()
+    expect(resetOf('billing problem: reset your payment method', now, 'UTC')).toBeUndefined()
+    // each CLI's own run-out words name when it comes back, so its run-out carries a moment, not only words
+    for (const [words, iso] of [
+      ["You've hit your 5-hour limit · resets 2:10am", '2026-11-20T02:10:00.000Z'],
+      ["You've hit your usage limit. Upgrade to Pro or try again at 5:00 PM.", '2026-11-19T17:00:00.000Z'],
+      ['429 usage limit reached for this plan, resets 3pm', '2026-11-19T15:00:00.000Z'],
+      ['RESOURCE_EXHAUSTED: Individual quota reached. Resets in 158h59m47s.', '2026-11-26T00:59:47.000Z'],
+    ] as const) {
+      expect([words, at(words)]).toEqual([words, iso])
+    }
+    // OpenCode's own words name no moment: its CLI says how long to wait instead (retryAfterMs, source.ts ranOut)
+    expect(resetOf('Go usage limit exceeded', now, 'UTC')).toBeUndefined()
+  })
+
   test("one response a content or safety filter refused is not a provider outage, in every CLI's own words", () => {
     const blocked = { passing: false, reason: "Response blocked by the provider's filter", blocked: true }
     // OpenCode: a `content-filter` finish with `provider.content-filter`
@@ -176,9 +301,9 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(resetOf(`Limit reached. resets at ${iso}.`)).toEqual({ when: shown, at: Date.parse(iso) })
     // with milliseconds and an offset
     expect(resetOf('resets 2026-11-11T17:44:33.250-03:00')?.at).toBe(Date.parse('2026-11-11T17:44:33.250-03:00'))
-    // what is not an ISO time stays as the provider wrote it
-    expect(resetOf('resets 5pm (Europe/Oslo)')).toEqual({ when: '5pm' })
-    expect(resetOf('try again at 5:00 PM')).toEqual({ when: '5:00 PM' })
+    // what is not an ISO time stays as the provider wrote it, with the moment it names read too (below)
+    expect(resetOf('resets 5pm (Europe/Oslo)')).toEqual({ when: '5pm', at: expect.any(Number) })
+    expect(resetOf('try again at 5:00 PM')).toEqual({ when: '5:00 PM', at: expect.any(Number) })
     expect(resetOf('nothing about a time')).toBeUndefined()
     expect(runOutOf('Out of credit until 5pm')).toBe(true)
     expect(runOutOf('Out of allowance')).toBe(true)
@@ -252,6 +377,30 @@ describe('waits and tries', () => {
     r.seen('D', cut('e1', 'Insufficient account funds', 402))
     r.seen('E', cut('e2', 'bad request', 400))
     expect(runs).toEqual([{ key: 'D', id: 'e1', reason: 'Out of credit' }])
+    r.stop()
+  })
+
+  test('a phrased 5-hour limit is a run-out at the first cut: no try is waited out (POL-452)', () => {
+    const nudged: string[] = []
+    const over: { key: string; reason: string }[] = []
+    const runs: { key: string; id: string; reason: string }[] = []
+    const r = new Retries(
+      {
+        nudge: (k, t) => nudged.push(`${k} ${t}`),
+        over: (k, x) => over.push({ key: k, reason: x.reason }),
+        changed: () => undefined,
+        runOut: (key, c, reason) => runs.push({ key, id: c.id, reason }),
+      },
+      [30, 60, 90, 120],
+    )
+    // Claude Code's StopFailure: code rate_limit, 429, and the 5-hour limit in its words, hyphen and all
+    r.seen('H', { id: 'e1', at: Date.now(), text: "You've hit your 5-hour limit · resets 2:10am", code: 'rate_limit', status: 429 })
+    expect(over).toEqual([{ key: 'H', reason: 'Out of allowance until 2:10am' }])
+    expect(r.get('H')).toMatchObject({ over: true, lasting: true, tries: 1 })
+    // nothing is waited out, and the run-out reaches the usage ledger with the cut it came from
+    expect(nudged).toEqual([])
+    expect(r.get('H')?.due).toBeUndefined()
+    expect(runs).toEqual([{ key: 'H', id: 'e1', reason: 'Out of allowance until 2:10am' }])
     r.stop()
   })
 

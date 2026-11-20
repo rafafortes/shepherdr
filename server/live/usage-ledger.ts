@@ -49,7 +49,8 @@ export interface RunOut {
   reason: string
   /** the provider's words, a few hundred characters */
   words: string
-  /** when it resets, as the words show it (ISO times in local time), and when, for an ISO time */
+  /** when it resets, as the words show it (ISO times in local time), and when that is (ms), where retry.ts could work
+   *  it out: an ISO time, a clock ("2:10am"), a date with its clock, or a wait from now */
   reset?: string
   resetAt?: number
 }
@@ -137,15 +138,18 @@ export const providerOf = (key: string) => (key.includes('/') ? key.slice(0, key
 export const modelOf = (key: string) => (key.includes('/') ? key.slice(key.indexOf('/') + 1) : '')
 
 /** whether a provider or model is out right now. An answer after the run-out (the return watch's back or a probe's
- *  ok, passed as backAt) decides first: the provider speaks for itself now, whatever reset it had promised. Else a
- *  known reset decides (out until it), and without one it is out until a call of it went through after the run-out
- *  (successAfter). The last run-out is the one that counts. */
+ *  ok, passed as backAt) decides first: the provider speaks for itself now, whatever reset it had promised. A call of it
+ *  that went through after the run-out (successAfter) is the same kind of answer, and it decides before a reset the
+ *  run-out named too: a call in a later hour than the run-out is the provider working again, whatever was promised. Else
+ *  a known reset decides (out until it), and without one it is out, as the run-out said. The last run-out is the one
+ *  that counts. */
 export function outState(runOuts: RunOut[], successAfter: (at: number) => boolean, now: number, backAt?: number): { out: boolean; last?: RunOut } {
   const last = runOuts.reduce<RunOut | undefined>((a, r) => (!a || r.at > a.at ? r : a), undefined)
   if (!last) return { out: false }
   if (backAt !== undefined && backAt >= last.at) return { out: false, last }
+  if (successAfter(last.at)) return { out: false, last }
   if (last.resetAt !== undefined) return { out: last.resetAt > now, last }
-  return { out: !successAfter(last.at), last }
+  return { out: true, last }
 }
 
 export class UsageLedger {
