@@ -634,6 +634,9 @@ export function archiveAfterMs(v: string) {
 /** leftovers of finished tasks are swept up this long after starting, and then every hour */
 const SWEEP_FIRST = 20_000
 const SWEEP_EVERY = 3_600_000
+/** an ended task's agent still 'working' this long after it finished never settles on its own: interrupt and end it
+ *  (upstream herdr-task's DONE_WORKING_MS) */
+const DONE_WORKING_MS = 15 * 60_000
 
 /** how long shepherdr checks waits for GitHub's checks at most, and how often it looks */
 const CHECKS_WAIT = 9 * 60_000
@@ -892,6 +895,8 @@ export class Engine extends Emitter<Events> {
   private took = new Map<string, { ms?: number; at: number }>()
   /** tasks whose place is being put away */
   private cleaning = new Set<string>()
+  /** ended tasks whose stuck agent is being ended, so the sweep and a status event cannot both force-close it */
+  private endingDone = new Set<string>()
   private sweeps: ReturnType<typeof setTimeout>[] = []
   /** the timer that starts the next scheduled task at its time */
   private dueTimer?: ReturnType<typeof setTimeout>
@@ -4832,6 +4837,28 @@ export class Engine extends Emitter<Events> {
   }
 
   /**
+   * An ended task whose agent still reads 'working' past the grace never ended its turn (a hung CLI, a turn that
+   * never settles): the status handler and the sweep both used to skip it, so it pinned its pane, process tree and
+   * worktree for ever. Interrupt once and, if it is still at work, end it, then put the task away as any other ended
+   * one. A live task, one inside the grace, or one whose turn settles meanwhile keeps today's path.
+   */
+  private async endDoneWorking(t: TaskRec, quiet = false) {
+    const key = this.key(t)
+    if (!ended(t) || this.agents.status(key) !== 'working') return
+    if (Date.now() - (t.doneAt ?? t.updated) < DONE_WORKING_MS) return
+    if (this.endingDone.has(key)) return // one force-close even if the sweep and a status event arrive together
+    this.endingDone.add(key)
+    try {
+      // stopTurn interrupts and waits up to 15 s; a turn that will not settle throws, which is the stuck case
+      await this.agents.stopTurn(key).catch(() => undefined)
+      if (this.agents.status(key) === 'working') await this.agents.finish(key)
+      await this.cleanup(t, quiet)
+    } finally {
+      this.endingDone.delete(key)
+    }
+  }
+
+  /**
    * Leftovers of finished tasks, put away: at startup and every hour, so none pile up. Only tasks Shepherdr made and
    * merged or closed, never one whose agent is at work (or that you talk to again after its clean-up), and never what holds
    * unsaved or unmerged work. Nothing is touched while herdr does not answer.
@@ -4841,8 +4868,13 @@ export class Engine extends Emitter<Events> {
     if (!spaces) return
     for (const t of this.tasks.filter(ended)) {
       const p = this.places.space(t.project)
+      if (!p) continue
       const st = this.agents.status(this.key(t))
-      if (!p || st === 'working' || (t.cleaned && st !== 'gone')) continue
+      if (st === 'working') {
+        await this.endDoneWorking(t, true).catch(() => undefined)
+        continue
+      }
+      if (t.cleaned && st !== 'gone') continue
       const left = !t.cleaned || (!!t.worktree && existsSync(t.worktree)) || (!!t.branch && (await G.branchExists(p.path, t.branch))) || !!(await this.wt.spaceOf(t.worktree, labelOf(t), spaces))
       if (left) await this.cleanup(t, true).catch(() => undefined)
     }
@@ -5244,7 +5276,8 @@ export class Engine extends Emitter<Events> {
       return
     }
     if (ended(t)) {
-      if (st !== 'working' && !t.cleaned) this.cleanup(t).catch(() => undefined)
+      if (st === 'working') this.endDoneWorking(t).catch(() => undefined)
+      else if (!t.cleaned) this.cleanup(t).catch(() => undefined)
       return
     }
     this.begun(t)
