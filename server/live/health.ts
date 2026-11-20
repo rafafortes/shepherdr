@@ -142,8 +142,9 @@ export async function gpusAsync(bin = smiPath()): Promise<Gpu[] | null> {
   }
 }
 
-/** another machine now, as the helper's health.pl reads it there (box.ts) */
-function boxSample(b: BoxInfo): Sample {
+/** another machine now, as the helper's health.pl reads it there (box.ts). Exported so a test can check that a sample
+ *  from a helper that predates the pressure and swap fields still passes through with those fields undefined. */
+export function boxSample(b: BoxInfo): Sample {
   const r = runSync(['perl', join(helperDir(b.home), 'health.pl')], { timeoutMs: 15_000 })
   const j = r.code === 0 ? (JSON.parse(r.out.toString()) as Omit<Sample, 'at'>) : null
   if (!j) return { at: Date.now(), cores: 1, load: 0, memTotal: 0, memUsed: 0, disks: [], gpus: [] }
