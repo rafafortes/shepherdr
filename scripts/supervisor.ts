@@ -1,7 +1,7 @@
 // What the supervisor decides: when to make a release, when to restart on it (only once no voice call is on, with new
 // calls stopped), and when to take a release back. scripts/supervise.ts wires it to the server process and watchers.
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { HOME, readJson } from '../server/store.ts'
 import type { UpdateStatus } from '../shared/types.ts'
@@ -19,6 +19,119 @@ export const MAX_BACKOFF = 60_000
 /** the alert's key, and the env var that tells the operator's notifier this is Shepherdr itself, not a wait */
 export const LOOP_KEY = 'shepherdr-crash-loop'
 export const ALERT_ENV = 'SHEPHERDR_ALERT_KIND'
+
+/* ---------- superseded plugin installs (RES-09) ----------
+ * herdr keeps every release of the plugin under github-installations/<plugin>/<id>-0/. Once a newer one runs, the old
+ * checkouts, their .releases and deps-* stay for ever (3.6 GB / 69 installs here). The supervisor owns pruning them:
+ * it knows which install it runs from. Report-only until the operator answers whether it may delete; the one process
+ * read, retention and keep-newest rules below are the same for the report and for a removal once Settings allows one. */
+
+/** how many installs to hold: the running one and the one before it */
+export const INSTALL_KEEP = 2
+/** an install must be this old before it may go */
+export const INSTALL_AGE_MS = 14 * 24 * 60 * 60 * 1000
+/** Removal is behind this setting, off by default: doctor only reports until the operator answers. */
+export const INSTALL_PRUNE_KEY = 'installs.prune'
+
+/** one line of the single process-table read the install check makes. ps names the absolute script path of the
+ *  supervisor and every server (supervise.ts starts both by absolute path), so a command line names the install even
+ *  where ps cannot show a cwd; cwd is included where a reader has it. */
+export interface InstallProc {
+  pid: number
+  cmd: string
+  cwd?: string
+}
+
+/** the filesystem and process reads the install check needs, injected so a test uses a fake layout and process table */
+export interface InstallIO {
+  now(): number
+  /** the install folders under a plugin's family, with the time each was installed */
+  dirs(family: string): { name: string; mtime: number }[]
+  /** one read of the process table */
+  processes(): InstallProc[]
+  /** remove one install folder (only called when the setting allows it) */
+  remove(path: string): void
+}
+
+/** the folder holding every install of this plugin, and the install this checkout runs from */
+export const installFamily = (root: string) => dirname(dirname(root))
+export const runningInstall = (root: string) => dirname(root)
+
+/** whether a process runs from an install: a whole path token in its cwd or command line, never a bare substring */
+export function runsFrom(p: InstallProc, path: string): boolean {
+  const touch = (s: string) => s.split(/\s+/).some((t) => t === path || t.startsWith(`${path}/`))
+  return touch(p.cmd) || touch(p.cwd ?? '')
+}
+
+/** an install that may go, with its age in days for the doctor line */
+export interface StaleInstall {
+  path: string
+  name: string
+  days: number
+}
+
+/** superseded installs, newest first: past the retention, not one of the newest `keep` (the running install is always
+ *  held), and no process runs from them. Nothing is removed here — the caller decides whether removal is allowed. */
+export function staleInstalls(root: string, io: InstallIO, keep = INSTALL_KEEP, age = INSTALL_AGE_MS): StaleInstall[] {
+  const family = installFamily(root)
+  const now = io.now()
+  const dirs = io
+    .dirs(family)
+    .slice()
+    .sort((a, b) => b.mtime - a.mtime)
+  const held = new Set([runningInstall(root), ...dirs.slice(0, keep).map((d) => join(family, d.name))])
+  const procs = io.processes()
+  const out: StaleInstall[] = []
+  for (const d of dirs) {
+    const path = join(family, d.name)
+    const ms = now - d.mtime
+    if (held.has(path) || ms < age || procs.some((p) => runsFrom(p, path))) continue
+    out.push({ path, name: d.name, days: Math.floor(ms / 86_400_000) })
+  }
+  return out
+}
+
+/** whether the operator allowed removal: off (report-only) until installs.prune is set on, on this machine or everywhere */
+export function installPruneAllowed(home?: string): boolean {
+  const raw = readJson<{ everywhere?: Record<string, unknown>; machine?: Record<string, unknown> }>('settings.json', {}, home)
+  const v = raw.machine?.[INSTALL_PRUNE_KEY] ?? raw.everywhere?.[INSTALL_PRUNE_KEY]
+  return v === true || (typeof v === 'string' && ['on', 'true', 'yes', '1'].includes(v.trim().toLowerCase()))
+}
+
+/** the doctor's report of what a prune would remove; nothing is deleted while the setting is off */
+export function installLines(found: StaleInstall[], allowed: boolean, days: number): string[] {
+  if (!found.length) return []
+  const shown = found.slice(0, 8).map((x) => `  ${x.path} (${x.days} days old, no process running from it)`)
+  if (found.length > 8) shown.push(`  ... and ${found.length - 8} more`)
+  return [
+    `Stale plugin installs (RES-09): ${found.length} older than ${days} days, kept ${INSTALL_KEEP} newest. ${allowed ? 'Removal is on.' : 'Report only: removal is off until the operator answers (set installs.prune on to allow it).'}`,
+    ...shown,
+  ]
+}
+
+/** the real reads: one ps command, a directory listing and a recursive remove. Used by the supervisor and doctor. */
+export const systemInstallIO: InstallIO = {
+  now: () => Date.now(),
+  dirs: (family) => {
+    try {
+      return readdirSync(family, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && /^\d+-\d+$/.test(d.name))
+        .map((d) => ({ name: d.name, mtime: statSync(join(family, d.name)).mtimeMs }))
+    } catch {
+      return []
+    }
+  },
+  processes: () => {
+    const r = Bun.spawnSync(['ps', '-axo', 'pid=,command='], { stdout: 'pipe', stderr: 'ignore' })
+    const out: InstallProc[] = []
+    for (const l of r.stdout.toString().split('\n')) {
+      const m = /^\s*(\d+)\s+(.*)$/.exec(l)
+      if (m) out.push({ pid: Number(m[1]), cmd: m[2] })
+    }
+    return out
+  },
+  remove: (path) => rmSync(path, { recursive: true, force: true }),
+}
 
 /** the operator's alert command from Settings (this machine, then Everywhere); off or unset: none. Read from the
  *  settings file, never a path written in the repo — the same value wait-alerts.ts runs. */
@@ -44,6 +157,8 @@ export interface SupervisorDeps {
   /** run the operator's own alert command (Settings → alerts.command) with these argv and environment, as
    *  wait-alerts.ts does; SHEPHERDR_ALERT_KIND says this is Shepherdr itself, not a wait on an agent */
   alert?: (command: string, args: string[], env: Record<string, string | undefined>) => void
+  /** how to find and prune superseded plugin installs (RES-09); none: the supervisor leaves them alone */
+  installs?: InstallIO
 }
 
 export class Supervisor {
@@ -145,6 +260,18 @@ export class Supervisor {
     this.d.restart()
     prune(this.d.root, [this.current, previous])
     this.save(r)
+    this.pruneInstalls()
+  }
+
+  /** after a good update and restart: remove superseded plugin installs once the operator allowed it (report-only
+   *  otherwise, in doctor). The running install and the one before it are always kept; a folder a live process runs
+   *  from is skipped. */
+  private pruneInstalls() {
+    const io = this.d.installs
+    if (!io || !installPruneAllowed(this.d.home)) return
+    const stale = staleInstalls(this.d.root, io)
+    for (const x of stale) io.remove(x.path)
+    if (stale.length) this.d.log(`pruned ${stale.length} stale plugin install${stale.length === 1 ? '' : 's'}: ${stale.map((x) => x.name).join(', ')}`)
   }
 
   /** the server was started: its uptime begins now, so a long run can end a crash loop */

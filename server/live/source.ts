@@ -152,6 +152,7 @@ import { Unread } from './unread.ts'
 import { levels, Monitor, memoryOver, meters, procLines, shortage, summary, swapPct, topProcs, type HealthEvent, type Kind } from './health.ts'
 import { has, PLUGIN_KEY, pluginSection, setPluginOn } from '../plugins.ts'
 import { TOOK_OVER, type TookOver } from '../../scripts/take-over.ts'
+import { installLines, installPruneAllowed, INSTALL_AGE_MS, staleInstalls, systemInstallIO, type InstallIO } from '../../scripts/supervisor.ts'
 import { placeOrder } from '../../shared/space-order.ts'
 
 /** a coordinator that waits for room under the caps (source.ts capWaits): its start, or its takeover after the cut-off `r`
@@ -343,6 +344,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   orphanEnd: (pids: number[]) => Promise<number[]> = (pids) => endOrphans(pids, endDeps)
   /** off until the operator answers whether the sweep may end proof-marked orphans: report-only until then */
   autoKillProof = false
+  /** the reads behind RES-09's doctor line; a test injects a fake home so nothing here reads this machine's installs */
+  installIO: InstallIO = systemInstallIO
 
   constructor() {
     super()
@@ -647,6 +650,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (sig && sig !== this.orphanSignature) this.news(placeId.home(), orphanNews(found, kills), 'stalled')
     this.orphanSignature = sig
     return found
+  }
+
+  /** RES-09: superseded herdr installs older than the retention that no process runs from. The supervisor owns the
+   *  removal; until the operator answers this only reports what it would remove (installs.prune stays off). */
+  private staleInstallLines(): string[] {
+    return installLines(staleInstalls(ROOT, this.installIO), installPruneAllowed(), Math.round(INSTALL_AGE_MS / 86_400_000))
   }
 
   /** a look at this machine: limits judged, held tasks started where there is room, the screen told of new numbers */
@@ -5540,6 +5549,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           ...this.pushWarnings().map((warning) => `Alerts: ${warning}`),
           ...this.agents.unreadableLogs(),
           ...orphanLines(this.orphansFound),
+          ...this.staleInstallLines(),
           ...((await this.peers?.doctor()) ?? []),
           ...(await this.places.doctor()),
         ]
