@@ -141,6 +141,33 @@ describe.skipIf(!browser)("an agent's pictures and videos in its chat", () => {
     await page.close()
   }, 30_000)
 
+  test('a video whose file was removed says so instead of a dead player', async () => {
+    // no bytes at this path: the player's source fails, and the tile says the file went rather than showing a black box
+    world.chats['p:vm-str:~'].messages.push({ id: 'gone-clip', who: 'agent', file: { name: 'gone-clip.mp4', path: '~/inbox/home/gone-clip.mp4' }, at: Date.now() })
+    const page = await open()
+    const tile = page.locator('[data-msg="gone-clip"], [data-msg="gone-clip:0"]').first()
+    await tile.waitFor()
+    const gone = tile.locator('[data-file-gone]')
+    await gone.waitFor()
+    expect(await gone.textContent()).toContain('This file is no longer there')
+    expect(await tile.locator('video, a[download]').count()).toBe(0)
+    await page.close()
+  }, 30_000)
+
+  test('a check that cannot reach the file route keeps the download tile, not the removed words', async () => {
+    // the HEAD that tells removal from an undrawable format fails: the conservative answer is the old file tile
+    const page = await open()
+    await page.route('**/api/file*', (route) => (route.request().method() === 'HEAD' ? route.abort() : route.continue()))
+    world.chats['p:vm-str:~'].messages.push({ id: 'unreachable', who: 'agent', file: { name: 'unreachable.png', path: '~/inbox/home/unreachable.png' }, at: Date.now() })
+    await page.reload()
+    await page.getByRole('textbox', { name: /Message/ }).waitFor()
+    const tile = page.locator('[data-msg="unreachable"], [data-msg="unreachable:0"]').first()
+    await tile.waitFor()
+    await tile.getByRole('link', { name: 'Download unreachable.png' }).waitFor()
+    expect(await tile.locator('[data-file-gone]').count()).toBe(0)
+    await page.close()
+  }, 30_000)
+
   test('two pictures an agent sent together lie side by side, and a tap opens the one tapped', async () => {
     sent('pair')
     const page = await open()

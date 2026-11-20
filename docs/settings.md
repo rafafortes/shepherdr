@@ -281,8 +281,8 @@ On Autopilot a coordinator works on its own within what you asked for and asks y
   long after it was kept, saying so in news. Off keeps today's remind-only behaviour; work a task was written to after
   it was kept is never removed.
 - **Remove chat files after** (`tasks.inboxKeep`, off, from 1 to 3650 days or off): when a task archives, attachments in
-  its chat older than this are removed, and a removed picture says so in place of the tile. Off (the default) keeps the
-  files until the task is deleted, which still removes its whole inbox.
+  its chat older than this are removed, and a removed picture or video says so in place of the tile. Off (the default)
+  keeps the files until the task is deleted, which still removes its chat's files.
 
 ## Browser
 

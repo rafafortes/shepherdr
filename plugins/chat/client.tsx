@@ -789,10 +789,17 @@ export const isPicture = (m: Message) => !!m.file && !m.text && !m.answered && i
 /** a video (an agent's screen recording of what it fixed): it plays in place, a still first, so a phone shows it
  *  without downloading it whole; the file itself is served a part at a time, so a seek costs nothing */
 function VideoTile({ name, chat, path, tucked }: { name: string; chat: string; path: string; tucked?: boolean }) {
+  // retention can remove the clip after the chat was written; the player would be a dead black box, so say so instead
+  const [gone, setGone] = useState(false)
+  if (gone) return <GoneFile name={name} />
   return (
     <div className={clsx('w-[280px] max-w-full overflow-hidden rounded-box bg-bubble p-1.5', tucked && tucks)}>
       <video controls playsInline preload="metadata" poster={posterUrl(chat, path)} aria-label={name} className="block w-full rounded-[calc(var(--bubble-radius)-var(--spacing))] bg-black">
-        <source src={fileUrl(chat, path)} type={extOf(name) === 'webm' ? 'video/webm' : extOf(name) === 'mov' ? 'video/quicktime' : extOf(name) === 'ogv' ? 'video/ogg' : 'video/mp4'} />
+        <source
+          src={fileUrl(chat, path)}
+          type={extOf(name) === 'webm' ? 'video/webm' : extOf(name) === 'mov' ? 'video/quicktime' : extOf(name) === 'ogv' ? 'video/ogg' : 'video/mp4'}
+          onError={() => void fileGone(chat, path).then(setGone)}
+        />
       </video>
       <div className="mt-0.5 flex items-center gap-2 px-1 pt-0.5 text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
         <span className="min-w-0 flex-1 truncate">{name}</span>

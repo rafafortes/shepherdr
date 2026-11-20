@@ -592,7 +592,7 @@ export const CATALOG: Section[] = [
         key: 'tasks.inboxKeep',
         value: 'off',
         num: { min: 1, max: 3650, unit: 'days', one: 'day', off: true },
-        hint: 'When a task archives, attachments older than this are removed from its chat, and a removed picture says so in place of the tile. Off (the default): files stay until the task is deleted, which still removes its whole inbox.',
+        hint: 'When a task archives, attachments older than this are removed from its chat, and a removed picture or video says so in place of the tile. Off (the default): files stay until the task is deleted, which still removes its chat’s files.',
       },
     ],
   },
