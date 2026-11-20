@@ -441,6 +441,12 @@ Ours reads its conversation store read only (`<agy home>/conversations/<id>.db`)
 | --- | --- | --- | --- | --- | --- |
 | **Checks share cores and one build-cache server** (`f2ac2eec` #322, `main`) | A pinned sccache binary, one server and one cache under `~/.cache` shared by every worktree, plus a dynamic share of the cores counted from the checks running now | **port (the idea only)** | The shared build cache is the part we needed; sccache caches Rust compiles and our gate is TypeScript plus registry writes. Our lock already serializes checks, so there is no race over cores and no server to keep alive: `scripts/build-plugins.ts` hashes its inputs into a per-worktree file under `node_modules/.cache`, which typecheck, tests and the build all share, and tsc's own `--incremental` cache makes a warm types step seconds | No daemon, no download, no new network trust; the lock, worker cap, coverage ratchet, timeout and exit-code contract stay as they are | M |
 
+## Send only new chat messages (SHE-110)
+
+| Improvement | What it does | Verdict | Why | Risk to our flow | Size |
+| --- | --- | --- | --- | --- | --- |
+| **Read agent logs incrementally by byte offset** (`mods/chat/core/chat-log.js:43`, `main`: `log tail <file> <from>` answers what was added since a byte, and ids come from byte offsets so earlier pages can be added) | Upstream 3.x reads a transcript from a cursor instead of rereading it, and pages history behind that | **port (the idea only)** | Our readers already read logs in 2 MB pieces (row 44); the missing half was the *wire*: every per-second 'chat' push rebuilt and sent the whole history. We diff the built message array against the last push (`added`, `changed`, `through`), keep the full form for a first watch, a reconnect and older link peers, and apply the delta to the base chat on screen. 3.x's core and byte-offset ids do not exist on our line, so only the idea ports | Only the 'chat' event's wire form changes; `Message`, `Action` and the plugin contract stay as they are. A delta cannot express a removed row or field, so those still go whole | L |
+
 ## Ranked: adopt and port, by value to us
 
 Order is the sequence the operator would get the most from; each is one task and one pull request. **SHE-2 merged the

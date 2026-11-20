@@ -152,9 +152,16 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
   source.on('snapshot', () => scheduleSnapshot(false))
   source.on('heartbeat', () => scheduleSnapshot(true))
   source.on('chat', (key) => {
+    const watchers = [...live]
+      .filter((ws) => ws.data.kind === 'live' && ws.data.chats.includes(key))
+      .map((ws) => ({ ws, link: ws.data.kind === 'live' && !!ws.data.link }))
+    if (!watchers.length) return
     const chat = timed('chat', () => source.chat(key))
     if (!chat) return
-    for (const ws of live) if (ws.data.kind === 'live' && ws.data.chats.includes(key)) send(ws, { type: 'chat', chat })
+    // a screen that already holds a base gets only what moved (PERFC-03); a machine's link, which may run an older
+    // version, and any chat we cannot diff always get the whole form
+    const delta = watchers.some((w) => !w.link) ? (source.chatUpdate?.(key, chat).delta ?? null) : null
+    for (const { ws, link } of watchers) send(ws, delta && !link ? delta : { type: 'chat', chat })
   })
   source.on('terminal', (key, screen) => {
     for (const ws of live) if (ws.data.kind === 'live' && ws.data.term === key) send(ws, { type: 'terminal', chat: key, ...screen })
@@ -411,7 +418,10 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           for (const k of m.chats) {
             if (before.has(k)) continue
             const chat = source.chat(k)
-            if (chat) send(ws, { type: 'chat', chat })
+            if (!chat) continue
+            // a first watch (or a reconnect, whose watch starts empty) re-establishes the full base and the diff
+            // point: the deltas that follow apply to exactly the chat the screen now holds (PERFC-03)
+            send(ws, source.chatUpdate?.(k, chat)?.full ?? { type: 'chat', chat })
           }
           rewatch()
         } else if (d.kind === 'voice') {

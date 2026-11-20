@@ -15,6 +15,8 @@ import {
   machineName,
   type Action,
   type Chat,
+  type ChatEventDelta,
+  type ChatEventFull,
   type Message,
   type Need,
   type Place,
@@ -737,13 +739,43 @@ let tried = 0
  *  here: the alerts plugin reads the wait count from them to keep the badge and the window title right while the tab
  *  is away, and the service worker owns its own path. Keeping only the latest of each bounds the memory a tab that
  *  stays hidden for days can hold. */
-const deferredChats = new Map<string, Chat>()
+const deferredChats = new Map<string, ChatEventFull>()
 let deferredTerm: Extract<ServerEvent, { type: 'terminal' }> | null = null
+/** the sequence of the last chat push applied per key (PERFC-03): a delta older than this was already applied, so it
+ *  must not change the chat twice. */
+const chatSeq = new Map<string, number>()
 
-/** hold back the latest chat per key and terminal while the document is hidden */
-function defer(msg: ServerEvent) {
-  if (msg.type === 'chat') deferredChats.set(msg.chat.key, msg.chat)
-  else if (msg.type === 'terminal') deferredTerm = msg
+/** Fold a delta into a chat the client already holds (PERFC-03). New rows keep their built order until the re-sort by
+ *  `at`, as on the server; the current non-message fields ride along in `msg.chat`. */
+function applyDelta(base: Chat, msg: ChatEventDelta): Chat {
+  const messages = base.messages.slice()
+  for (const m of msg.added) messages.push(m)
+  for (const { id, patch } of msg.changed) {
+    const i = messages.findIndex((x) => x.id === id)
+    if (i >= 0) messages[i] = { ...messages[i]!, ...patch }
+  }
+  messages.sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
+  return { ...base, ...msg.chat, messages }
+}
+
+/** hold back the latest chat per key and one terminal while the document is hidden (PERFC-07). A delta is folded into
+ *  the chat we are already holding for that key, so waking applies one complete chat, in order, not a stale base that
+ *  would roll the delta back. */
+function defer(msg: ServerEvent): boolean {
+  if (msg.type === 'terminal') {
+    deferredTerm = msg
+    return true
+  }
+  if (msg.type !== 'chat') return false
+  if ('added' in msg) {
+    const key = msg.chat.key
+    // with no full buffered, fold into the chat the tab already holds, so the delta is not lost while it is away
+    const held = deferredChats.get(key)?.chat ?? ((chatSeq.get(key) ?? -1) < msg.through ? state.chats[key] : undefined)
+    if (held) deferredChats.set(key, { type: 'chat', chat: applyDelta(held, msg), through: msg.through })
+    return true
+  }
+  deferredChats.set(msg.chat.key, msg)
+  return true
 }
 
 /** Apply one server message to the store. The live socket and the wake flush both go through here, so a chat held
@@ -771,8 +803,21 @@ function apply(msg: ServerEvent): boolean {
     // redraw is still owed for them even when the snapshot's revision did not move (PERFC-01)
     if (state !== before) changed = true
   } else if (msg.type === 'chat') {
-    state = { ...state, chats: { ...state.chats, [msg.chat.key]: msg.chat } }
-    putOutbox(settle(state.outbox, msg.chat))
+    const key = msg.chat.key
+    let chat: Chat
+    if ('added' in msg) {
+      // a delta needs the full chat we got when we started watching. Without one, or when the sequence says we
+      // already applied it, wait for the next full chat rather than patch blind.
+      const base = state.chats[key]
+      if (!base || (chatSeq.get(key) ?? -1) >= msg.through) return false
+      chat = applyDelta(base, msg)
+      chatSeq.set(key, msg.through)
+    } else {
+      chat = msg.chat
+      chatSeq.set(key, msg.through ?? 0)
+    }
+    state = { ...state, chats: { ...state.chats, [key]: chat } }
+    putOutbox(settle(state.outbox, chat))
   } else if (msg.type === 'terminal') state = { ...state, terms: { ...state.terms, [msg.chat]: { ansi: msg.ansi, cols: msg.cols, rows: msg.rows } } }
   else if (msg.type === 'update') state = { ...state, update: msg.update }
   else if (msg.type === 'build' && BUILD && msg.id && msg.id !== BUILD) reloadSoon()
@@ -789,7 +834,7 @@ function flushDeferred() {
   deferredChats.clear()
   deferredTerm = null
   let changed = false
-  for (const chat of chats) changed = apply({ type: 'chat', chat }) || changed
+  for (const chat of chats) changed = apply(chat) || changed
   if (term) changed = apply(term) || changed
   if (changed) emit()
 }
@@ -825,10 +870,7 @@ export function connect() {
     }
     // A hidden tab keeps applying snapshots (the badge and the service worker need them) but holds back the frequent
     // chat and terminal pushes: keep only the latest of each and apply them together on wake (PERFC-07).
-    if (document.visibilityState !== 'visible' && (msg.type === 'chat' || msg.type === 'terminal')) {
-      defer(msg)
-      return
-    }
+    if (document.visibilityState !== 'visible' && defer(msg)) return
     if (apply(msg)) emit()
   }
   sock.onclose = () => drop(sock)
