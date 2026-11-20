@@ -97,6 +97,28 @@ describe.skipIf(!browser)('Settings → Models → Summary on a desktop', () => 
     }
   })
 
+  test('one usage line per space: what this machine’s task and reviewer chats used', async () => {
+    const b = browser
+    if (!b) return
+    const page = await b.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      const s = await openModels(page)
+      const bySpace = s.getByRole('region', { name: 'Usage by space' })
+      await bySpace.waitFor()
+      const lines = bySpace.locator('li')
+      expect(await lines.count()).toBe(3)
+      const words = await lines.allTextContents()
+      expect(words.map((w) => w.match(/^[a-z-]+/)?.[0] ?? '')).toEqual(['home', 'gtm', 'herdr-projects'])
+      // the demo read GTM-15 and HP-204's chats; the mac space has no line on this machine
+      expect(words.some((w) => / · \d+ calls?/.test(w))).toBe(true)
+      expect(words.join(' ')).not.toContain('lilla-varlden')
+      // the cost estimate is spelled out where the model reported one
+      expect(words.join(' ')).toContain('estimate')
+    } finally {
+      await page.close()
+    }
+  })
+
   test('the providers nothing uses yet are under Other providers, closed: their models under them with the full id as a title, and dashes for the numbers', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {

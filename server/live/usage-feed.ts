@@ -31,7 +31,8 @@ export class UsageFeed {
     let left = budget
     let behind = false
     const files = new Set<string>()
-    for (const [chat, r] of Object.entries(this.records())) {
+    const records = this.records()
+    for (const [chat, r] of Object.entries(records)) {
       for (const f of r.logs) {
         files.add(f)
         if (left <= 0) {
@@ -60,8 +61,10 @@ export class UsageFeed {
         if (t.behind) behind = true
       }
     }
-    // a log no record names any more is no longer read (its chat was removed); what it counted stays
+    // a log no record names any more is no longer read (its chat was removed); what it counted stays in the hourly
+    // buckets, but the chat's small rolling total goes with its record, so a deleted task leaves no row behind
     this.ledger.keepFiles(files)
+    this.ledger.keepChats(new Set(Object.keys(records)))
     for (const f of this.tails.keys()) if (!files.has(f)) this.tails.delete(f)
     return behind
   }

@@ -14,6 +14,7 @@ import type {
   SummaryAtOnce,
   SummaryConfigured,
   SummarySpaceCap,
+  SummarySpaceUsage,
   SummaryModel,
   SummaryNow,
   SummaryProvider,
@@ -114,9 +115,12 @@ export interface LiveAgent {
   model?: string
   status: string
 }
-/** a task, as its waiting and its agents show: its status, and the CLI and model its agent and its reviewer start on */
+/** a task, as its waiting and its agents show: its status, where it lives, and the CLI and model its agent and its
+ *  reviewer start on. `id` and `space` join a chat's rolling usage to the space whose line it belongs on. */
 export interface TaskFact {
   status: string
+  id?: string
+  space?: string
   agent?: Harness
   reviewer?: Harness
 }
@@ -343,6 +347,31 @@ const lastOf = (r: RunOut): NonNullable<SummaryRunOuts['last']> => ({
 /** the usage of the keys matching `matches`, as the totals a window has */
 const keysOf = (byKey: Map<string, UsageTotals>, matches: (k: string) => boolean): UsageTotals[] => [...byKey].filter(([k]) => matches(k)).map(([, t]) => t)
 
+/** the per-space lines: each chat's rolling total joined to the space that owns it. A task's agent or reviewer chat is
+ *  `<ID>/Agent` or `<ID>/Reviewer`, and its record names the space; a coordinator's is `p:<host>:<space>` (home's `~`).
+ *  Chats of tasks no longer in the list, and another machine's coordinators, have no line here. The totals come from
+ *  the ledger's small per-chat map, read in memory: this adds no store and no write to the hourly rollups. */
+export function spaceUsageOf(f: SummaryInput): SummarySpaceUsage[] {
+  const taskSpace = new Map<string, string>()
+  for (const t of f.tasks) if (t.id !== undefined) taskSpace.set(t.id, t.space ?? '~')
+  const totals = new Map<string, UsageTotals>()
+  const add = (space: string, u: UsageTotals) => {
+    const t = totals.get(space) ?? { tokens: 0, calls: 0 }
+    t.tokens += u.tokens
+    t.calls += u.calls
+    if (u.cost !== undefined) t.cost = (t.cost ?? 0) + u.cost
+    totals.set(space, t)
+  }
+  const prefix = `p:${f.host}:`
+  for (const [chat, u] of f.usage.allChats()) {
+    const slash = chat.indexOf('/')
+    const id = slash < 0 ? undefined : chat.slice(0, slash)
+    const space = id ? taskSpace.get(id) : chat.startsWith(prefix) ? chat.slice(prefix.length) : undefined
+    if (space !== undefined) add(space, u)
+  }
+  return f.spaces.map((sp) => ({ key: sp.key, name: sp.name, ...(totals.get(sp.key) ?? { tokens: 0, calls: 0 }) }))
+}
+
 /** the summary of this machine: its providers (each with its models), and the warnings about them */
 export function modelsSummary(f: SummaryInput): ModelsSummary {
   const conf = configuredOf(f.settings, f.spaces)
@@ -405,7 +434,7 @@ export function modelsSummary(f: SummaryInput): ModelsSummary {
   // the providers in use first, by the week's tokens; then those nothing uses, by name
   rows.sort((a, b) => Number(a.idle) - Number(b.idle) || b.usage.d7.tokens - a.usage.d7.tokens || a.name.localeCompare(b.name))
   const warnings = [...warningsOf(f, conf, rows), ...quotaWarningsOf(f, conf, rows)]
-  return { at: f.now, ...(f.usage.backfilled !== undefined ? { backfilled: f.usage.backfilled } : {}), providers: rows, warnings, caps: capsTextOf(f) }
+  return { at: f.now, ...(f.usage.backfilled !== undefined ? { backfilled: f.usage.backfilled } : {}), providers: rows, spaces: spaceUsageOf(f), warnings, caps: capsTextOf(f) }
 }
 
 /** models.maxAtOnce as each level holds its own text ('' where it sets none), this machine's place a write goes to, and

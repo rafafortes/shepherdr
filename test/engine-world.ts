@@ -5,6 +5,7 @@ import { execSync } from 'node:child_process'
 import { beforeEach } from 'bun:test'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
+import type { UsageLedger } from '../server/live/usage-ledger.ts'
 
 process.env.SHEPHERDR_HOME = tmp('engine')
 export const { Engine } = await import('../server/live/engine/engine.ts')
@@ -51,7 +52,7 @@ export function repo() {
 }
 
 /** boot: what herdr says once the agent is ready; any but working leaves its brief waiting to go in */
-export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
+export function world(herdr = fakeHerdr(), o: { boot?: string; usage?: UsageLedger } = {}) {
   process.env.SHEPHERDR_HOME = base
   const started: { key: string; first?: string; cwd: string; system?: string; pane?: string; kind: string; model?: string; effort?: string }[] = []
   const status: Record<string, string> = {}
@@ -163,7 +164,7 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
   // no spacing between starts unless a test asks for one: every start Shepherdr makes by itself follows machine.startEvery
   // (engine.startGate), and its 2 minutes would hold the second task any test starts
   if (settings.pick('machine.startEvery', 'machine').from === 'default') settings.set('machine.startEvery', '0')
-  const engine = new Engine(agents as never, chats as never, places, settings, herdr.h as never)
+  const engine = new Engine(agents as never, chats as never, places, settings, herdr.h as never, o.usage)
   const news: string[] = []
   /** the place each news is for: a project's place id, as its coordinator's chat has it */
   const newsTo: string[] = []

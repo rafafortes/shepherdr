@@ -11,6 +11,7 @@ process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock'
 delete process.env.SHEPHERDR_MAIN
 const { LiveSource } = await import('../server/live/source.ts')
 const { HOUR } = await import('../server/live/usage-ledger.ts')
+const { placeId } = await import('../server/live/places.ts')
 
 const src = new LiveSource()
 afterAll(() => src.stop())
@@ -121,6 +122,34 @@ describe('the summary action', () => {
     expect(go(sum).runOuts.count7d).toBeGreaterThanOrEqual(1)
     expect(typeof sum.at).toBe('number')
     expect(Array.isArray(sum.warnings)).toBe(true)
+  })
+})
+
+describe('the per-space usage lines', () => {
+  test('an archived task’s chat still counts on its space’s line', async () => {
+    const now = Date.now()
+    src.usage.count('T-906/Agent', KEY, { id: 'archived-chat', at: now, tokens: 777 }, now)
+    src.engine.tasks.push({
+      id: 'T-906',
+      n: 906,
+      project: placeId.home(),
+      title: 'Archived',
+      desc: '',
+      by: 'test',
+      created: now,
+      updated: now,
+      archived: now,
+      doneAt: now,
+      merged: true,
+      cleaned: true,
+    } as never)
+    try {
+      const sum = (await src.act({ type: 'models-summary' })) as { spaces: { key: string; tokens: number; calls: number }[] }
+      expect(sum.spaces.find((s) => s.key === '~')).toMatchObject({ tokens: 777, calls: 1 })
+    } finally {
+      const i = src.engine.tasks.findIndex((t) => t.id === 'T-906')
+      if (i >= 0) src.engine.tasks.splice(i, 1)
+    }
   })
 })
 

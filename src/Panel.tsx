@@ -25,6 +25,7 @@ import {
   type PanelItem,
 } from './kernel.ts'
 import type { Task } from '@shared/types.ts'
+import { tokens } from '../shared/quota-words.ts'
 import { Pushed } from './Stack.tsx'
 import { BackIcon, Head, ic, IconButton, Menu, MenuItem, MenuSeparator, MoreIcon, NarrowIcon, PanelIcon, PhoneTop, RoundButton, SidebarIcon, Small, SplitIcon, Who, WidenIcon, XIcon } from './ui.tsx'
 
@@ -109,6 +110,12 @@ export function TaskPanel({ task }: { task: Task }) {
         </IconButton>
       </Head>
       <div role="tabpanel" id="task-panel-body" aria-label={item.label} className="flex min-h-0 flex-1 flex-col">
+        {task.usage?.calls ? (
+          <Small aria-label="Model usage" className="px-3 pt-2 tabular-nums">
+            Usage: {tokens(task.usage.tokens)} tokens · {task.usage.calls} {task.usage.calls === 1 ? 'call' : 'calls'}
+            {task.usage.cost !== undefined ? ` · ≈ $${task.usage.cost.toFixed(2)} estimate` : ''}
+          </Small>
+        ) : null}
         <ItemBody key={item.id} item={item} task={task} chatKey={g.chat} />
       </div>
     </>

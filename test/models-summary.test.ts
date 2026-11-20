@@ -223,6 +223,46 @@ describe('the summary: providers, models, usage, run-outs, what runs now', () =>
   })
 })
 
+describe('the usage by space: which place the chats belong to', () => {
+  test('a task’s agent and reviewer chats and its coordinator chat join the space that owns them', () => {
+    const u = ledger('sum-spaces')
+    call(u, GO, 2, 300, 0.25, 'T-1/Agent')
+    call(u, `claude/${CLAUDE}`, 3, 200, undefined, 'T-1/Reviewer')
+    call(u, `claude/${CLAUDE}`, 4, 100, 0.1, 'p:box:gtm')
+    call(u, GO, 1, 500, undefined, 'T-2/Agent')
+    // a chat we cannot place (a task gone from the list, another machine's coordinator) has no line
+    call(u, GO, 1, 900, undefined, 'Gone/Agent')
+    call(u, GO, 1, 900, undefined, 'p:other:gtm')
+    const tasks: TaskFact[] = [
+      { id: 'T-1', space: 'gtm', status: 'work' },
+      { id: 'T-2', space: 'docs', status: 'work' },
+    ]
+    const sum = modelsSummary(input(settings(), u, { tasks }))
+    expect(sum.spaces).toEqual([
+      { key: '~', name: 'home', tokens: 0, calls: 0 },
+      { key: 'gtm', name: 'gtm', tokens: 600, calls: 3, cost: 0.35 },
+      { key: 'docs', name: 'Docs site', tokens: 500, calls: 1 },
+    ])
+  })
+
+  test('an archived task still counts on its space’s line, without waiting or reviewing in the rows', () => {
+    const u = ledger('sum-spaces-archived')
+    call(u, GO, 2, 400, undefined, 'T-9/Agent')
+    const sum = modelsSummary(input(settings(), u, { tasks: [{ id: 'T-9', space: 'gtm', status: 'archived' }] }))
+    expect(sum.spaces.find((s) => s.key === 'gtm')).toMatchObject({ tokens: 400, calls: 1 })
+    expect(provider(sum, 'pi.opencode-go').now.starts).toBe(0)
+  })
+
+  test('one line per space even where nothing ran there', () => {
+    const sum = modelsSummary(input(settings(), ledger('sum-spaces-empty')))
+    expect(sum.spaces.map((s) => [s.key, s.calls])).toEqual([
+      ['~', 0],
+      ['gtm', 0],
+      ['docs', 0],
+    ])
+  })
+})
+
 describe('the warnings: what the rules raise, with its fix', () => {
   test('a role whose primary and every backup sit on providers out right now is a risk, with a button to its backup', () => {
     const s = settings({

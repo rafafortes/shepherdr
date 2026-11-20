@@ -16,6 +16,7 @@ import type {
   SummaryProvider,
   SummaryRow,
   SummaryRunOuts,
+  SummarySpaceUsage,
   SummaryUsage,
   SummaryWarning,
 } from '@shared/types.ts'
@@ -179,6 +180,7 @@ export default function ModelsSummary({
       <h2 className="font-medium">Summary</h2>
       <Warnings list={s.warnings} go={go} />
       {extra}
+      {s.spaces?.length ? <SpaceUsage spaces={s.spaces} /> : null}
       {s.backfilled === undefined ? <Small className="text-pretty">Reading the logs once from their start: the numbers grow until it is done.</Small> : null}
       {s.providers.length ? (
         phone ? (
@@ -201,6 +203,29 @@ interface CapState {
   caps: CapsText
   open: string | null
   onOpen: (id: string | null) => void
+}
+
+/** one line per space: what the chats of its tasks, reviewers and coordinator used since they were counted */
+function SpaceUsage({ spaces }: { spaces: SummarySpaceUsage[] }) {
+  return (
+    <section aria-label="Usage by space" className="flex flex-col gap-1">
+      <h3 className="font-medium">By space</h3>
+      <ul className="flex flex-col gap-1 text-[0.8125rem]">
+        {spaces.map((sp) => {
+          const words = usageWords(sp)
+          return (
+            <li key={sp.key} className="flex items-baseline gap-2 text-fg2">
+              <span className="min-w-0 truncate">{sp.name}</span>
+              <span className="ml-auto shrink-0 tabular-nums">
+                {words.main}
+                {words.sub ? ` · ${words.sub}` : ''}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
 }
 
 /** the providers nothing uses yet (no slot, agent, run, run-out in the week, or cap): a group under the table, its models

@@ -123,9 +123,13 @@ describe('the feed reads the logs of the records it is given, once each', () => 
     const feed = new UsageFeed(ledger, () => records)
     feed.pass(NOW)
     expect(ledger.position(log)).toBeDefined()
+    expect(ledger.chatUsage('T-6/Agent').calls).toBe(1)
     records = {}
     feed.pass(NOW)
     expect(ledger.position(log)).toBeUndefined()
+    // a deleted task's chat total goes with its record and log position, while the hourly buckets keep the calls
+    expect(ledger.chatUsage('T-6/Agent').calls).toBe(0)
+    expect(ledger.byKey(0).get('pi.opencode-go/deepseek-v4.1-flash')?.calls).toBe(1)
     // a record whose log is not there yet: nothing is read, nothing breaks
     records = rec('T-7/Agent', [join(dir, 'not-yet.jsonl')])
     expect(feed.pass(NOW)).toBe(false)
