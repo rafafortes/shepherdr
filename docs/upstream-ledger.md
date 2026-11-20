@@ -800,3 +800,19 @@ so a restart keeps it): a human talking to a Done task's agent gets a fresh grac
 grace, a turn that settles, and every live task keep the old path; an `endingDone` set keeps the sweep and a status
 event from force-closing the same agent twice. The force-close is on herdr's side (one Esc, then a pane close), so it
 is the same for all five CLIs; each kind's stuck status is driven through it in `test/engine-cleanup.test.ts`.
+
+## Per-verb help (SHE-121)
+
+Checked 2026-11-20 (SHE-121) on `upstream/main` and `upstream/v2.0`, their code and the public issues (read only):
+3.x's `bin/shepherdr` builds one argparse sub-parser per verb (`upstream/main:bin/shepherdr:2018-2021`, `ap =
+argparse.ArgumentParser(...)` then `c = sub.add_parser(name)`), so `shepherdr <verb> --help` prints that verb's usage;
+`bin/herdr-secret:907-934` does the same for secrets. `upstream/v2.0:server/live/args.ts:45` still has one HELP
+string, as our line did before this task; no public issue or pull request names the split. The improvement is the
+idea, not the code: 3.x is a Python rewrite on herdr-core with no plain-string help to split.
+
+Ours: `server/live/args.ts` keeps `HELP` byte for byte (a pinned SHA-256 in the test proves it) but builds it by
+joining the named `TOPIC` sections (spaces, tasks, agents, chat, secrets, artifacts, settings, setup — the `triggers`
+block is shared with Settings and is a topic on its own). `server/live/source.ts` answers `help [topic]` and
+`<verb> --help` from a total verb-to-topic map; an unknown topic lists the topics and the page, and an unknown verb
+keeps its old refusal. `skill/shepherdr/SKILL.md` names the new forms. The five CLIs call the same command, so this
+is one change for all of them, with the CLI's own tests.
