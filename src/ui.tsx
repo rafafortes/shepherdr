@@ -983,7 +983,7 @@ export function Row({
           aria-controls={p['aria-controls']}
           onClick={onActivate}
           onKeyDown={activate}
-          className={clsx('w-full', rowClass(sel, kb), two && 'items-start py-1.5 [&>.dot]:mt-[3px] phone:[&>.dot]:mt-1', className)}
+          className={clsx('w-full text-left', rowClass(sel, kb), two && 'items-start py-1.5 [&>.dot]:mt-[3px] phone:[&>.dot]:mt-1', className)}
         >
           {children}
         </button>

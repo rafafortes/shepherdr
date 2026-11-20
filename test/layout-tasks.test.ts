@@ -565,6 +565,8 @@ describe.skipIf(!browser)('To do always shows; Automations only once there is on
     await row.waitFor()
     // its trigger in words, in the time zone of Settings
     expect(await row.innerText()).toBe('Flaky tests\nEvery day at 7:00 (Stockholm)')
+    // the row's button keeps the li's left alignment: a native button centres its text on its own
+    expect(await row.locator('button').evaluate((b) => getComputedStyle(b).textAlign)).toBe('left')
     expect(await page.locator('li[aria-expanded]', { hasText: 'Dependency bump' }).innerText()).toBe('Dependency bump\nPaused · The last Friday of the month at 8:00 (Stockholm)')
     const event = page.locator('li[aria-expanded]', { hasText: 'Changelog' })
     expect(await event.innerText()).toBe('Changelog\nWhen a task is merged')
