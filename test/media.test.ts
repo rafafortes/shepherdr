@@ -11,10 +11,8 @@ const root = join(import.meta.dir, '..')
 describe('the extracted photo viewer', () => {
   test('keeps one public export, Photo, so the split grows no public surface', () => {
     const src = readFileSync(join(root, 'plugins', 'chat', 'photo.tsx'), 'utf8')
-    const exported = [...src.matchAll(/^export\s+(?:async\s+)?(?:function|const|let|class|type|interface|enum)\s+(\w+)/gm)].map((m) => m[1])
-    expect(exported).toEqual(['Photo'])
-    expect(src).not.toMatch(/^export\s*\{/m)
-    expect(src).not.toMatch(/^export\s+default\b/m)
+    // every export form, not just declarations: a later re-export or type export must fail this too
+    expect([...src.matchAll(/^export\b.*$/gm)].map((m) => m[0])).toEqual(['export function Photo() {'])
   })
 })
 

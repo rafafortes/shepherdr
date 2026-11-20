@@ -284,16 +284,21 @@ describe.skipIf(!browser)('the full-screen picture viewer', () => {
   }, 30_000)
 
   test('a short sideways drag snaps back; a long downward one closes, sliding away when motion is on', async () => {
-    // held back at the ends: a small sideways pull is not a page turn
+    // too short to be a page turn: the strip springs back to zero and the same picture is still open
     {
       const { page, viewer } = await open()
       const b = await middle(viewer)
       const [x, y] = [b.x + b.width / 2, b.y + b.height / 2]
+      const strip = viewer.locator('div.will-change-transform').first()
       await page.mouse.move(x, y)
       await page.mouse.down()
       await page.mouse.move(x + 12, y)
       await page.mouse.move(x + 24, y)
+      expect(await strip.evaluate((el: HTMLDivElement) => el.style.transform)).toBe('translateX(24px)')
       await page.mouse.up()
+      expect(await strip.evaluate((el: HTMLDivElement) => el.style.transform)).toBe('translateX(0px)')
+      // past the 220 ms a page turn would have taken: still the same picture
+      await page.waitForTimeout(350)
       expect(await viewer.count()).toBe(1)
       await viewer.getByRole('button', { name: 'Close' }).click()
       await viewer.waitFor({ state: 'detached' })
@@ -301,7 +306,7 @@ describe.skipIf(!browser)('the full-screen picture viewer', () => {
     }
     // pulled down far enough: reduced motion closes it at once
     {
-      const { page, viewer } = await open()
+      const { page, viewer } = await open({ motion: 'reduce' })
       const b = await middle(viewer)
       const [x, y] = [b.x + b.width / 2, b.y + b.height / 2]
       await page.mouse.move(x, y)
@@ -320,6 +325,8 @@ describe.skipIf(!browser)('the full-screen picture viewer', () => {
       await page.mouse.down()
       await page.mouse.move(x, y + 160)
       await page.mouse.up()
+      // still on screen, sliding away before the 180 ms close
+      expect(await viewer.count()).toBe(1)
       await viewer.waitFor({ state: 'detached' })
       await page.close()
     }
