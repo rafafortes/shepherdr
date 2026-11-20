@@ -5243,7 +5243,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
               machine: NAME,
               spaces: this.places.shown().length,
               openTasks: this.engine.tasks.filter((t) => !ended(t) && !t.archived).length,
-              herdr: this.agents.reachable ? 'answers' : 'does not answer',
+              herdr: this.agents.reachable,
               parked,
               spaceOrder: this.spaceOrderLine() || undefined,
               kept,
@@ -5528,9 +5528,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const pr = one(p, 'space') || op !== 'list' ? this.projectFor(p, ctx) : null
         const place = pr ? placeId.space(pr.name) : ''
         const name = rest[0]
-        const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => !['json', 'when', 'on', 'task', 'brief', 'desc', 'space', 'agent', 'model', 'effort', 'name'].includes(f))
+        const allowed = ['when', 'on', 'task', 'brief', 'desc', 'space', 'agent', 'model', 'effort', 'name', ...(op === 'list' ? ['json'] : [])]
+        const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => !allowed.includes(f))
         if (odd.length)
-          throw new Error(`Automation ${op} takes no --${odd[0]}: only --when (a time rule), --on (events), --task, --brief, --agent, --model, --effort, --name, --space and --json (list)`)
+          throw new Error(
+            `Automation ${op} takes no --${odd[0]}: only --when (a time rule), --on (events), --task, --brief, --agent, --model, --effort, --name and --space${op === 'list' ? ', plus --json on list' : ''}`,
+          )
         const agent = one(p, 'agent') || one(p, 'model') || one(p, 'effort') ? harnessOf(p, this.settings) : undefined
         const brief = one(p, 'brief') ?? one(p, 'desc')
         const zone = this.settings.zone()

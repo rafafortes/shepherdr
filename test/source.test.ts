@@ -937,13 +937,15 @@ describe('--json on the list and show commands', () => {
   }
 
   test('space list --json returns the rows with their id, name, key and folder', async () => {
+    const dir = tmp('src-repo')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'jsonprobe')
     const rows = (await json(['space', 'list'])) as { id: string; name: string; key?: string; folder: string; home?: boolean }[]
     expect(Array.isArray(rows)).toBe(true)
-    expect(rows[0]).toMatchObject({ id: placeId.home(), name: 'home', home: true })
-    expect(typeof rows[0].folder).toBe('string')
-    // a repo space carries the key the prose showed beside its name
-    const repo = rows.find((r) => r.key)
-    if (repo) expect(repo.name).toBeTruthy()
+    expect(rows.find((r) => r.id === placeId.home())).toMatchObject({ name: 'home', home: true })
+    const repo = rows.find((r) => r.id === placeId.space(p.name))
+    expect(repo).toMatchObject({ name: 'jsonprobe', key: p.key, home: false })
+    expect(repo?.folder).toContain(dir)
   })
 
   test('automation list --json returns the automation records', async () => {
@@ -978,16 +980,25 @@ describe('--json on the list and show commands', () => {
   })
 
   test('status --json returns the overview as records', async () => {
-    const s = (await json(['status'])) as { machine: string; spaces: number; openTasks: number; herdr: string; kept: string[] }
+    const s = (await json(['status'])) as { machine: string; spaces: number; openTasks: number; herdr: boolean; kept: string[] }
     expect(typeof s.machine).toBe('string')
     expect(typeof s.spaces).toBe('number')
     expect(typeof s.openTasks).toBe('number')
-    expect(['answers', 'does not answer']).toContain(s.herdr)
+    expect(typeof s.herdr).toBe('boolean')
     expect(Array.isArray(s.kept)).toBe(true)
   })
 
   test('doctor --json is refused instead of answering prose', async () => {
     const r = await src.cli(['doctor', '--json'], {})
+    expect(r.code).toBe(1)
+    expect(r.out).toContain('takes no --json')
+  })
+
+  test('--json is only accepted on automation list, not the verbs that still answer prose', async () => {
+    const dir = tmp('src-repo')
+    run(REPO, dir)
+    const p = await src.places.add(dir, 'nojson')
+    const r = await src.cli(['automation', 'add', 'NoJson', '--task', 'Probe task', '--when', 'FREQ=DAILY', '--space', p.name, '--json'], {})
     expect(r.code).toBe(1)
     expect(r.out).toContain('takes no --json')
   })
