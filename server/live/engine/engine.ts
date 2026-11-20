@@ -1050,6 +1050,17 @@ export class Engine extends Emitter<Events> {
     const stalls = setInterval(() => this.checkStalls(), STALL_EVERY)
     stalls.unref?.()
     this.sweeps.push(stalls)
+    // a restart is where a cleanup that never finished leaves its mark: drop records no screen can reach (PERFS-12)
+    this.pruneAgentRecords()
+  }
+
+  /** drop records whose task is gone from the engine: their chat is gone with the task, so nothing reads their CLI
+   *  logs. Every other record stays. A task still held keeps both chat roles, archived ones included — their chats
+   *  still read their logs. A coordinator's chat is kept even when its space is gone: removing a space keeps its chat
+   *  and brings it back if the space is added again (source.ts removeSpace), so it can still be opened. */
+  private pruneAgentRecords() {
+    const tasks = new Set(this.tasks.map((t) => t.id))
+    this.agents.prune((key) => !key.includes('/') || tasks.has(key.split('/')[0]))
   }
 
   get tasks() {
@@ -5284,6 +5295,8 @@ export class Engine extends Emitter<Events> {
     if (!stopped) this.emit('gone', t, ended(t))
     // a finished task's agent may still be about: put away as merging would
     if (ended(t) && !t.cleaned && this.agents.status(this.key(t)) !== 'working') this.cleanup(t, true).catch(() => undefined)
+    // a natural point to sweep up records orphaned by a delete whose cleanup did not finish (PERFS-12)
+    this.pruneAgentRecords()
     return { kept, stopped }
   }
 
