@@ -110,6 +110,27 @@ describe('chat pushes over the wire', () => {
     }
   })
 
+  test('a link peer gets a full chat on its first watch even when the chat is quiet', async () => {
+    // no poll can produce a chat push: whatever arrives has to come from the watch itself
+    const quiet = [
+      spyOn(src.chats, 'pull').mockReturnValue(false),
+      spyOn(src.chats, 'readMenu').mockResolvedValue(false),
+      spyOn(src.chats, 'readReply').mockResolvedValue(false),
+      spyOn(src.chats, 'jobsChanged').mockReturnValue(false),
+    ]
+    current = { key: KEY, messages: [msg('m1'), msg('m2')], cli: 'claude' }
+    const { ws, seen } = await screen(true)
+    try {
+      const first = await nextChat(seen, 0)
+      expect(first.type).toBe('chat')
+      expect('added' in first).toBe(false)
+      expect(first.chat.messages.map((m) => m.id)).toEqual(['m1', 'm2'])
+    } finally {
+      ws.close()
+      for (const s of quiet) s.mockRestore()
+    }
+  })
+
   test('a machine on the link path keeps receiving the whole chat', async () => {
     const { ws, seen } = await screen(true)
     try {
