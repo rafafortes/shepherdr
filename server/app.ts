@@ -384,8 +384,9 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
                 if (closed) return
                 try {
                   controller.enqueue(enc.encode(`${JSON.stringify(rec)}\n`))
-                  // coverage-exempt: only if the stream closes without cancel() first; Bun always calls cancel(), so no test reaches this
+                  // coverage-exempt: only if the stream closes without cancel() first; Bun always calls cancel(), so no test reaches these
                 } catch {
+                  // coverage-exempt: the same defensive fallback, only reachable without cancel()
                   closed = true
                 }
               }
