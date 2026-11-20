@@ -3903,8 +3903,10 @@ export class Engine extends Emitter<Events> {
   /** its pull request as GitHub has it now: the one recorded, else the branch's own (one opened by hand) */
   private async prOf(t: TaskRec, g: G.GitHub, cwd: string) {
     const known = t.pr ? await G.viewPr(g, cwd, t.pr.number) : null
-    // one closed on GitHub is no longer its pull request: the branch may have another
-    const pr = known && known.state !== 'CLOSED' ? known : await G.findPr(g, cwd, t.branch!)
+    // one closed on GitHub is no longer its pull request: the branch may have another, or a fix-forward branch may
+    // carry its exact tip. The worktree's head is findPr's fallback when no pull request answers to the branch name.
+    const live = known && known.state !== 'CLOSED' ? known : null
+    const pr = live ?? (await G.findPr(g, cwd, t.branch!, (await G.git(cwd, 'rev-parse', 'HEAD')).out))
     if ((pr?.number ?? null) !== (t.pr?.number ?? null) && (pr || known?.state === 'CLOSED')) {
       t.pr = pr ? { number: pr.number, url: pr.url } : undefined
       this.saveNow()

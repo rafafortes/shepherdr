@@ -17,7 +17,7 @@ setDefaultTimeout(60_000)
 const ghBin = tmp('ghbin')
 writeFileSync(join(ghBin, 'gh'), `#!/bin/sh\nexec "${process.execPath}" "${join(import.meta.dir, 'fake-gh.ts')}" "$@"\n`, { mode: 0o755 })
 
-function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['checks']; remote?: string } = {}) {
+function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['checks']; remote?: string; listUnreadable?: boolean; tipListUnreadable?: boolean } = {}) {
   process.env.PATH = `${ghBin}:${process.env.PATH}`
   const bare = tmp('gh-origin')
   sh('git init -q --bare -b main', bare)
@@ -26,7 +26,10 @@ function onGitHub(o: { authed?: boolean; down?: boolean; checks?: FakeGitHub['ch
   const remote = o.remote ?? 'https://github.com/acme/app.git'
   sh(`git clone -q ${bare} . && git config user.email t@t && git config user.name T && git remote set-url origin ${remote} && git config url.${bare}.insteadOf ${remote}`, dir)
   const file = join(tmp('gh-state'), 'github.json')
-  writeFileSync(file, JSON.stringify({ origin: bare, repo: 'acme/app', prs: [], calls: [], authed: o.authed, down: o.down, checks: o.checks }))
+  writeFileSync(
+    file,
+    JSON.stringify({ origin: bare, repo: 'acme/app', prs: [], calls: [], authed: o.authed, down: o.down, checks: o.checks, listUnreadable: o.listUnreadable, tipListUnreadable: o.tipListUnreadable }),
+  )
   process.env.FAKE_GH_STATE = file
   const gh = () => JSON.parse(readFileSync(file, 'utf8')) as FakeGitHub
   const set = (patch: Partial<FakeGitHub>) => writeFileSync(file, JSON.stringify({ ...gh(), ...patch }))
@@ -53,6 +56,22 @@ function mergedByHand(g: ReturnType<typeof onGitHub>, branch: string, subject = 
 
 /** how many pull requests the engine asked GitHub to open (a second one for the same branch is the bug) */
 const opened = (g: ReturnType<typeof onGitHub>) => g.gh().calls.filter((c) => c.args[0] === 'pr' && c.args[1] === 'create').length
+
+/** the pull-request lookups, in order: the branch's, then — only when that was empty — the one by exact tip */
+const lists = (g: ReturnType<typeof onGitHub>) => g.gh().calls.filter((c) => c.args[0] === 'pr' && c.args[1] === 'list')
+
+/** push the task's exact tip onto a fix-forward branch, the way a reviewer or the coordinator would */
+const fixForward = (wt: string) => sh('git push -q origin HEAD:refs/heads/fix-forward', wt)
+
+/** narrow a task's worktree and branch once; the ratchet on non-null assertions in this file stays at its baseline */
+const worktreeOf = (t: { worktree?: string }) => {
+  if (!t.worktree) throw new Error('task has no worktree')
+  return t.worktree
+}
+const branchOf = (t: { branch?: string }) => {
+  if (!t.branch) throw new Error('task has no branch')
+  return t.branch
+}
 
 describe('on GitHub: a pull request per task', () => {
   test('its origin is read as written and as git rewrites it: github.com mapped to github.localhost talks to github.localhost', async () => {
@@ -366,5 +385,124 @@ describe('on GitHub: a pull request per task', () => {
     expect(r.text).toContain('PR #1 is merged on GitHub already')
     expect(g.gh().prs.length).toBe(1)
     expect(opened(g)).toBe(1)
+  })
+
+  test('shepherdr pr keeps an open pull request on another branch at the exact tip, never opening a second one', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'ghtip')
+    const wt = worktreeOf(t)
+    const branch = branchOf(t)
+    writeFileSync(join(wt, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', wt)
+    const tip = sh('git rev-parse HEAD', wt)
+    // a reviewer pushed the exact tip onto a fix-forward branch and opened that branch's pull request
+    fixForward(wt)
+    g.set({ prs: [{ number: 7, head: 'fix-forward', base: 'main', title: 'Fix forward', body: '', isDraft: false, state: 'OPEN' }] })
+    const r = await w.engine.openPr(t.id)
+    expect(r.ok).toBe(true)
+    expect(r.text).toContain('PR #7')
+    expect(t.pr).toEqual({ number: 7, url: 'https://github.com/acme/app/pull/7' })
+    expect(g.gh().prs.length).toBe(1)
+    expect(opened(g)).toBe(0)
+    // its own branch was still pushed, and the pull request it continues stays the one on the fix-forward branch
+    expect(sh(`git rev-parse refs/heads/${branch}`, g.bare)).toBe(tip)
+    expect(sh('git rev-parse refs/heads/fix-forward', g.bare)).toBe(tip)
+    // two lookups: the branch's came back empty, then the tip's — bounded, with no branch in it
+    expect(lists(g).length).toBe(2)
+    expect(lists(g)[1].args).toContain('open')
+    expect(lists(g)[1].args).toContain('30')
+    expect(lists(g)[1].args).not.toContain('--head')
+  })
+
+  test('an open pull request on the task’s own branch wins over one at the same tip on another branch', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'ghown')
+    const wt = worktreeOf(t)
+    const branch = branchOf(t)
+    writeFileSync(join(wt, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', wt)
+    fixForward(wt)
+    g.set({
+      prs: [
+        { number: 1, head: branch, base: 'main', title: 'Its own', body: '', isDraft: false, state: 'OPEN' },
+        { number: 7, head: 'fix-forward', base: 'main', title: 'Fix forward', body: '', isDraft: false, state: 'OPEN' },
+      ],
+    })
+    const r = await w.engine.openPr(t.id)
+    expect(r.ok).toBe(true)
+    expect(r.text).toContain('PR #1')
+    expect(t.pr?.number).toBe(1)
+    expect(opened(g)).toBe(0)
+    expect(lists(g).length).toBe(1) // the branch's own open pull request answered: no tip lookup
+  })
+
+  test('a merged pull request on another branch at the exact tip is never adopted', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'ghmergedtip')
+    const wt = worktreeOf(t)
+    const branch = branchOf(t)
+    writeFileSync(join(wt, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', wt)
+    const tip = sh('git rev-parse HEAD', wt)
+    fixForward(wt)
+    g.set({ prs: [{ number: 7, head: 'fix-forward', base: 'main', title: 'Fix forward', body: '', isDraft: false, state: 'MERGED', at: tip }] })
+    const r = await w.engine.openPr(t.id)
+    expect(r.ok).toBe(true)
+    expect(lists(g).length).toBe(2)
+    expect(opened(g)).toBe(1)
+    expect(g.gh().prs.length).toBe(2)
+    const made = g.gh().prs.filter((p) => p.number !== 7)[0]
+    expect(made?.head).toBe(branch)
+    expect(t.pr?.number).toBe(made?.number)
+  })
+
+  test('the tip lookup is made only when the branch lookup came back empty', async () => {
+    const w = world()
+    const g = onGitHub()
+    const { t } = await started(w, g.dir, 'ghlookups')
+    const wt = worktreeOf(t)
+    writeFileSync(join(wt, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', wt)
+    await w.engine.openPr(t.id)
+    expect(lists(g).length).toBe(2) // no pull request at all: the branch's lookup, then the tip's
+    // the branch has an open pull request now; forget the recorded number so findPr runs again
+    t.pr = undefined
+    const before = lists(g).length
+    await w.engine.openPr(t.id)
+    expect(lists(g).length).toBe(before + 1) // only the branch's lookup this time
+    expect((t.pr as { number: number } | undefined)?.number).toBe(1)
+  })
+
+  test('an unreadable GitHub answer leaves no pull request, so the caller opens one', async () => {
+    const w = world()
+    const g = onGitHub({ listUnreadable: true })
+    const { t } = await started(w, g.dir, 'ghjunk')
+    const wt = worktreeOf(t)
+    writeFileSync(join(wt, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', wt)
+    const r = await w.engine.openPr(t.id)
+    expect(r.ok).toBe(true)
+    expect(t.pr?.number).toBe(1)
+    expect(opened(g)).toBe(1)
+    expect(lists(g).length).toBe(1) // nothing readable came back, so there is no tip lookup
+  })
+
+  test('an unreadable tip answer still leaves the branch’s merged pull request in place', async () => {
+    const w = world()
+    const g = onGitHub({ tipListUnreadable: true })
+    const { t } = await started(w, g.dir, 'ghtipjunk')
+    const wt = worktreeOf(t)
+    const branch = branchOf(t)
+    writeFileSync(join(wt, 'hello.txt'), 'hello\n')
+    sh('git add -A && git commit -qm hello', wt)
+    g.set({ prs: [{ number: 1, head: branch, base: 'main', title: 'Merged', body: '', isDraft: false, state: 'MERGED', at: sh('git rev-parse HEAD', wt) }] })
+    const r = await w.engine.openPr(t.id)
+    expect(r.ok).toBe(false)
+    expect(r.text).toContain('PR #1 is merged on GitHub already')
+    expect(opened(g)).toBe(0)
+    expect(lists(g).length).toBe(2) // the branch's list was readable; only the tip's was junk
   })
 })

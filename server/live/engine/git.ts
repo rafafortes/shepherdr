@@ -517,16 +517,37 @@ export interface Pr {
 
 const PR_FIELDS = 'number,url,state,isDraft,headRefOid,baseRefName'
 
-/** the branch's pull request: its open one, else one merged already */
-export async function findPr(g: GitHub, cwd: string, branch: string): Promise<Pr | null> {
+/**
+ * The branch's pull request: its open one, else one merged already. A task whose work was carried onto another branch
+ * keeps the pull request there: the tip match is the fallback, not the rule — the branch's own open pull request wins,
+ * and only when there is none do we look for an open one at the task's exact tip. A merged pull request is never taken
+ * by tip (that path stays branch-only).
+ */
+export async function findPr(g: GitHub, cwd: string, branch: string, tip: string): Promise<Pr | null> {
   const r = await gh(g, cwd, 'pr', 'list', ...R(g), '--head', branch, '--state', 'all', '--json', PR_FIELDS, '--limit', '10')
   if (!r.ok) return null
+  let list: Pr[]
   try {
-    const list = JSON.parse(r.out || '[]') as Pr[]
-    return list.find((p) => p.state === 'OPEN') ?? list.find((p) => p.state === 'MERGED') ?? null
+    list = JSON.parse(r.out || '[]') as Pr[]
   } catch {
     return null
   }
+  const own = list.find((p) => p.state === 'OPEN')
+  if (own) return own
+  // one more call, only when the branch has no open pull request: a fix-forward branch carrying the exact tip
+  if (tip) {
+    try {
+      const more = await gh(g, cwd, 'pr', 'list', ...R(g), '--state', 'open', '--json', PR_FIELDS, '--limit', '30')
+      if (more.ok) {
+        const open = JSON.parse(more.out || '[]') as Pr[]
+        const atTip = open.find((p) => p.state === 'OPEN' && p.headRefOid === tip)
+        if (atTip) return atTip
+      }
+    } catch {
+      // an unreadable tip answer must not lose the branch's merged pull request below
+    }
+  }
+  return list.find((p) => p.state === 'MERGED') ?? null
 }
 
 export async function viewPr(g: GitHub, cwd: string, n: number): Promise<Pr | null> {
