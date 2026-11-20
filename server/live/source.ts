@@ -5463,7 +5463,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'models': {
         const kinds = a1 ? [kindOf(a1)] : ['claude', 'codex', 'pi', 'opencode', 'agy']
         if (!kinds[0]) throw new Error(`No CLI called ${a1}; herdr starts ${CLIS.join(', ')}`)
-        if (p.flags.has('json')) return JSON.stringify(kinds.filter((k): k is string => !!k).map((k) => ({ agent: k, cli: CLI_NAME[k], ...modelsOf(k) })), null, 2)
+        if (p.flags.has('json'))
+          return JSON.stringify(
+            kinds.filter((k): k is string => !!k).map((k) => ({ agent: k, cli: CLI_NAME[k], ...modelsOf(k) })),
+            null,
+            2,
+          )
         return kinds
           .map((k) => {
             const c = modelsOf(k!)
@@ -5524,7 +5529,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const place = pr ? placeId.space(pr.name) : ''
         const name = rest[0]
         const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => !['json', 'when', 'on', 'task', 'brief', 'desc', 'space', 'agent', 'model', 'effort', 'name'].includes(f))
-        if (odd.length) throw new Error(`Automation ${op} takes no --${odd[0]}: only --when (a time rule), --on (events), --task, --brief, --agent, --model, --effort, --name, --space and --json (list)`)
+        if (odd.length)
+          throw new Error(`Automation ${op} takes no --${odd[0]}: only --when (a time rule), --on (events), --task, --brief, --agent, --model, --effort, --name, --space and --json (list)`)
         const agent = one(p, 'agent') || one(p, 'model') || one(p, 'effort') ? harnessOf(p, this.settings) : undefined
         const brief = one(p, 'brief') ?? one(p, 'desc')
         const zone = this.settings.zone()
@@ -5916,11 +5922,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           .filter((a) => !pr || a.place === pr)
           .sort((a, b) => b.at - a.at)
         if (p.flags.has('json')) return JSON.stringify(all, null, 2)
-        return (
-          all
-            .map((a) => `${a.id}  v${this.artifacts.latest(a).n}  ${a.title}  · ${this.chatName(a.place)} · ${age(a.at)}`)
-            .join('\n') || 'No artifacts here yet.'
-        )
+        return all.map((a) => `${a.id}  v${this.artifacts.latest(a).n}  ${a.title}  · ${this.chatName(a.place)} · ${age(a.at)}`).join('\n') || 'No artifacts here yet.'
       }
       case 'rm':
       case 'remove':
