@@ -1,6 +1,6 @@
 // Autopilot, its news and its artifacts: the mode, the heartbeat, automations, the news a coordinator gets, artifacts
 // from the command and another machine's, a task row's menu, and Autopilot from the command.
-import { afterAll, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -521,6 +521,15 @@ describe("Autopilot's heartbeat", () => {
 // RES-05: a scheduled heartbeat over a space with nothing to act on spends no coordinator turn, one quiet line instead
 describe('a heartbeat with nothing to act on', () => {
   const min = 60_000
+  // no herdr answers here: a refresh every 2 s fails and clears agents.reachable, which sends heartbeat() home before
+  // it looks at any place — a test that waits on a task can lose the link mid-test. Hold it still for this block
+  const refresh = src.agents.refresh
+  beforeEach(() => {
+    src.agents.refresh = async () => {}
+  })
+  afterEach(() => {
+    src.agents.refresh = refresh
+  })
 
   /**
    * A place of its own on Autopilot, its coordinator idle and due: what its heartbeats sent, the quiet lines they left,
@@ -571,11 +580,17 @@ describe('a heartbeat with nothing to act on', () => {
   test('a quiet space is not woken: one quiet line, the rule counted as given, and the command says it would skip', async () => {
     const w = await world('quiet')
     try {
-      src.heartbeat(Date.now())
+      const first = Date.now()
+      src.heartbeat(first)
       expect(w.beats()).toEqual([])
       expect(w.quiet().map((m) => m.pilot)).toEqual(['Autopilot skipped · on schedule · nothing to do'])
-      // counted as given: the next is the rule's next, so the tick a minute later spends nothing again
-      src.heartbeat(Date.now() + min)
+      // counted as given: the next is the rule's next, so the tick a minute later spends nothing again. The rule fires
+      // on :00 and :30, so a minute after a real clock near :29 or :59 crosses its next boundary and is due for a new
+      // heartbeat: stop one ms before that boundary instead, which still says the same thing — no second skip here
+      const h = src.settings.heartbeat({ space: w.p.name })
+      const next = src.heartbeats.next(w.place, h.time, h.zone)
+      const again = next !== undefined ? Math.min(first + min, next - 1) : first + min
+      src.heartbeat(again)
       expect(w.beats()).toEqual([])
       expect(w.quiet()).toHaveLength(1)
       // and it buzzes nothing: a quiet line is no new message, so no alert and no unread mark
