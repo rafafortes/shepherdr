@@ -2,7 +2,7 @@
 // away with the task (stopping what still runs from it). A kept worktree keeps its folder; the server sweeps folders
 // of tasks that are gone or archived at start and never touches anything outside the root.
 import { afterAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { agentEnv } from '../server/live/box.ts'
@@ -57,6 +57,23 @@ describe('a task temporary folder', () => {
     setTaskTmpBase(() => join(owned, 'no-root-here'))
     try {
       expect(sweepTaskTmp(new Set())).toBe(0)
+    } finally {
+      setTaskTmpBase(() => saved)
+    }
+  })
+
+  test('a link in the root is not followed', () => {
+    const real = join(owned, 'linked-root')
+    const link = join(owned, 'linked-root-symlink')
+    mkdirSync(real, { recursive: true })
+    symlinkSync(real, link, 'dir')
+    const left = join(real, 'NOPE-1')
+    mkdirSync(left, { recursive: true })
+    const saved = taskTmpBase()
+    setTaskTmpBase(() => link)
+    try {
+      expect(sweepTaskTmp(new Set())).toBe(0)
+      expect(existsSync(left)).toBe(true)
     } finally {
       setTaskTmpBase(() => saved)
     }

@@ -148,11 +148,7 @@ export function agentEnv(chat: string, root: string): Record<string, string> {
   // default. Both variables go to every CLI, so tools that make their own temp files need no extra rule to land there.
   const task = taskOfChat(chat)
   const tmp = task ? taskTmpDir(task) : undefined
-  if (task && tmp) {
-    if (BOX)
-      runSync(['mkdir', '-p', tmp], { timeoutMs: 5000 }) // coverage-exempt: no box is reachable from these tests; the local branch is covered
-    else ensureTaskTmp(task)
-  }
+  if (task && tmp) ensureTaskTmp(task)
   const tmpEnv: Record<string, string> = tmp ? { SHEPHERDR_TMP: tmp, TMPDIR: tmp } : {}
   if (BOX) return { ...credential, ...tmpEnv, SHEPHERDR_CHAT: chat, SHEPHERDR_URL: '', SHEPHERDR_COMMAND: join(helperDir(BOX.home), 'bin', 'shepherdr'), SHEPHERDR_MACHINE: BOX.label, PATH: BOX.path }
   // The listening live server owns these agents, never an inherited CLI target (which may be a demo).

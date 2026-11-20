@@ -1259,6 +1259,9 @@ export class Agents extends Emitter<Events> {
       finished: false,
       parked: undefined,
     })
+    // on another machine the folder must exist there before its CLI starts. Make it here, once per launch (agentEnv
+    // is called often — a route bind or a repair pass must never ssh): a box worker's own folder is made locally.
+    if (BOX && r.env?.SHEPHERDR_TMP) await run(['mkdir', '-p', r.env.SHEPHERDR_TMP], { timeoutMs: 5000 }) // coverage-exempt: no box is reachable from these tests; the local path is covered
     this.codexState.delete(spec.key)
     r.started = Date.now()
     r.resumed = !!resume

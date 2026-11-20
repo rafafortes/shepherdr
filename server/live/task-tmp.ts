@@ -5,7 +5,7 @@
 // test) or ~/.shepherdr (the human's Shepherdr). When a task is put away what still runs from its folder is stopped and
 // the folder goes, except when it keeps work; at start, folders of tasks that are gone or archived are swept. The
 // process reader and the ending are the RES-03 helpers in orphans.ts (SHE-70), so a later reaper can reuse them.
-import { existsSync, lstatSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { lstatSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { end, endDeps, type Row, readRows, type Source, systemSource } from './orphans.ts'
@@ -59,7 +59,14 @@ export async function clearTaskTmp(id: string, s: Source = systemSource): Promis
  *  a link or anything outside it (RES-03's reaper gets its reliable marker from the same folder). */
 export function sweepTaskTmp(keep: Set<string>): number {
   const base = taskTmpBase()
-  if (!existsSync(base)) return 0
+  let owner: ReturnType<typeof lstatSync>
+  try {
+    owner = lstatSync(base)
+  } catch {
+    return 0
+  }
+  // never follow a link in the root's place, and never sweep a root another user owns
+  if (!owner.isDirectory() || (process.getuid?.() !== undefined && owner.uid !== process.getuid())) return 0
   let removed = 0
   for (const name of readdirSync(base)) {
     if (keep.has(name)) continue
