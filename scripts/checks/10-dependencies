@@ -4,4 +4,16 @@
 set -uo pipefail
 root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
 cd "$root" || exit 1
+# SEC-05 (audit 2026-11-18): every version spec is pinned exactly. A caret or a tilde lets a re-resolve (a fresh
+# lockfile, a dependency change, `bun update ws`) drift to a version nobody reviewed here; --frozen-lockfile installs
+# from the lock and would not notice a range, so read package.json itself before installing.
+ranges=$(awk '
+  /^[[:space:]]*"(dependencies|devDependencies)"[[:space:]]*:[[:space:]]*\{/ { in_deps = 1; next }
+  in_deps && /^[[:space:]]*\}/ { in_deps = 0 }
+  in_deps && /:[[:space:]]*"[\^~]/ { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print }
+' package.json)
+if [ -n "$ranges" ]; then
+  printf 'package.json: dependency versions must be pinned exactly (no ^ or ~); found:\n%s\n' "$ranges" >&2
+  exit 1
+fi
 exec bun install --frozen-lockfile
