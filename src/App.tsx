@@ -247,7 +247,7 @@ function Drawer() {
   const can = useUI((u) => !u.settings && !u.menu && !u.taskMenu && !u.plus && !u.pick && !u.search && !u.viewer && !u.photo && !u.adding && !(phone && (u.task || u.sheet)))
   const P = registry.views.places
   return (
-    <SlideDrawer open={open} onOpen={(drawer) => setUI({ drawer })} can={can} label="Places" panel={phone ? 'w-[84%] pt-[env(safe-area-inset-top)]' : 'w-[320px]'}>
+    <SlideDrawer open={open} onOpen={(drawer) => setUI({ drawer })} can={can} label="Spaces" panel={phone ? 'w-[84%] pt-[env(safe-area-inset-top)]' : 'w-[320px]'}>
       <Brand />
       <SearchBox />
       {P ? <P /> : null}
@@ -261,11 +261,11 @@ function MenuButton() {
   const docked = useStore((s) => placesDocked(s.ui, s.snap))
   if (docked) return null
   return device === 'phone' ? (
-    <RoundButton label="Places" onClick={() => setUI({ drawer: true })}>
+    <RoundButton label="Spaces" onClick={() => setUI({ drawer: true })}>
       <MenuIcon className={ic} />
     </RoundButton>
   ) : (
-    <IconButton label="Places" onClick={() => setUI({ drawer: true })}>
+    <IconButton label="Spaces" onClick={() => setUI({ drawer: true })}>
       <MenuIcon className={ic} />
     </IconButton>
   )

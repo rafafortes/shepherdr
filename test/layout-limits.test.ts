@@ -26,7 +26,7 @@ async function fresh(page: Page) {
 async function openLimits(page: Page, phone = false) {
   await fresh(page)
   await page.goto(url())
-  if (phone) await page.getByRole('button', { name: 'Places', exact: true }).click()
+  if (phone) await page.getByRole('button', { name: 'Spaces', exact: true }).click()
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByRole('region', { name: 'Settings' }).getByRole('button', { name: 'Limits', exact: true }).click()
   await settled(page)

@@ -103,8 +103,8 @@ describe.skipIf(!browser)('removing a space', () => {
     const page = await ctx.newPage()
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places' }).first().click()
-      const row = page.locator('nav[aria-label="Places"] li', { hasText: 'lilla-varlden' })
+      await page.getByRole('button', { name: 'Spaces', exact: true }).first().click()
+      const row = page.locator('nav[aria-label="Spaces"] li', { hasText: 'lilla-varlden' })
       await row.waitFor()
       expect(await row.getByRole('button', { name: 'More for lilla-varlden' }).isVisible()).toBe(false)
       // the drawer has slid in
@@ -273,8 +273,8 @@ describe.skipIf(!browser)('the order of places', () => {
     const page = await ctx.newPage()
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places' }).first().click()
-      const nav = 'nav[aria-label="Places"]'
+      await page.getByRole('button', { name: 'Spaces', exact: true }).first().click()
+      const nav = 'nav[aria-label="Spaces"]'
       const row = page.locator(`${nav} li`, { hasText: 'herdr-projects' })
       await row.waitFor()
       await settled(page)

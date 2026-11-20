@@ -302,8 +302,8 @@ describe.skipIf(!browser)('restarting an agent', () => {
     const page = await ctx.newPage()
     try {
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
-      await page.getByRole('button', { name: 'Places' }).first().click()
-      const nav = 'nav[aria-label="Places"]'
+      await page.getByRole('button', { name: 'Spaces', exact: true }).first().click()
+      const nav = 'nav[aria-label="Spaces"]'
       const heading = page.locator(`${nav} li[data-heading="m:vm-str"]`)
       await heading.waitFor()
       await settled(page)

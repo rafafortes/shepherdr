@@ -97,7 +97,7 @@ describe.skipIf(!browser)('notification settings', () => {
     const page = await browser!.newPage({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Spaces', exact: true }).click()
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
       await page.getByRole('button', { name: 'Editing: home · vm-str', exact: true }).click()
       await page.getByRole('searchbox', { name: 'Find scope or value' }).fill('home · machine-20')
@@ -123,7 +123,7 @@ describe.skipIf(!browser)('chat agent choices', () => {
     const page = await browser!.newPage({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Spaces', exact: true }).click()
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
       const settings = page.getByRole('region', { name: 'Settings' })
       await settings.getByRole('button', { name: 'Agents', exact: true }).click()
@@ -173,7 +173,7 @@ describe.skipIf(!browser)('two backups, each with its own model and effort', () 
     const page = await browser!.newPage({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Spaces', exact: true }).click()
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
       const settings = page.getByRole('region', { name: 'Settings' })
       await settings.getByRole('button', { name: 'Agents', exact: true }).click()
@@ -232,7 +232,7 @@ describe.skipIf(!browser)('a chain of backups', () => {
     const page = await browser!.newPage({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Spaces', exact: true }).click()
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
       const settings = page.getByRole('region', { name: 'Settings' })
       await settings.getByRole('button', { name: 'Agents', exact: true }).click()
@@ -318,7 +318,7 @@ describe.skipIf(!browser)('private instruction settings', () => {
     const page = await browser!.newPage({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Spaces', exact: true }).click()
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
       await page.getByRole('button', { name: 'Private instructions', exact: true }).click()
       const panel = page.getByRole('region', { name: 'Private instructions', exact: true })
@@ -460,7 +460,7 @@ describe.skipIf(!browser)('a task agent saved, and the tasks already waiting', (
     const page = await browser!.newPage({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Spaces', exact: true }).click()
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
       const settings = page.getByRole('region', { name: 'Settings' })
       // Everywhere (the page opens on this machine's home space, which has nothing waiting)

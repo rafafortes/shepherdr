@@ -994,7 +994,7 @@ A new launch snapshots the role's current effective instructions. Claude Code an
 prompt file; other CLIs receive the existing hidden initial prompt. Saving does not interrupt, restart or update an
 already-running agent. Start a new agent or explicitly restart it to deliver changes: the chat's own ⋯ → Restart
 agent… (`shepherdr restart <space|id>`) is the one that hands a running coordinator or task agent its new private rules.
-`shepherdr restart --all`, and this machine's ⋯ in the places list, restarts only the coordinators whose agent, model or
+`shepherdr restart --all`, and this machine's ⋯ in the spaces list, restarts only the coordinators whose agent, model or
 effort moved in Settings — not one whose instructions alone changed — so it is no way to deliver these words; [the chat
 page](chat.md) says what it does and does not touch. On resume, a changed prompt
 is sent again for CLIs without an append flag; it says the new private snapshot replaces the previous one, including

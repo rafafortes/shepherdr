@@ -168,8 +168,8 @@ describe.skipIf(!browser)('pinned spaces', () => {
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places' }).first().click()
-      const nav = 'nav[aria-label="Places"]'
+      await page.getByRole('button', { name: 'Spaces', exact: true }).first().click()
+      const nav = 'nav[aria-label="Spaces"]'
       await page.locator(`${nav} li[data-pin]`).first().waitFor()
       await settled(page)
       // moved out of the tree; the machines stay, vm-str with the spaces not pinned

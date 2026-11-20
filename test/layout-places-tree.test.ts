@@ -175,9 +175,9 @@ describe.skipIf(!browser)('places, calm like Slack', () => {
     await desk.close()
     const phone = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
     await phone.goto(url())
-    await phone.getByRole('button', { name: 'Places' }).first().click()
-    await phone.waitForSelector('nav[aria-label="Places"] li')
-    check(await rows(phone, 'nav[aria-label="Places"]'))
+    await phone.getByRole('button', { name: 'Spaces', exact: true }).first().click()
+    await phone.waitForSelector('nav[aria-label="Spaces"] li')
+    check(await rows(phone, 'nav[aria-label="Spaces"]'))
     await phone.close()
   }, 30_000)
 
@@ -190,8 +190,8 @@ describe.skipIf(!browser)('places, calm like Slack', () => {
       const page = await ctx.newPage()
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('m:vm-str')}`)
       const phone = opts.viewport.width < 600
-      const side = phone ? 'nav[aria-label="Places"]' : '#places'
-      if (phone) await page.getByRole('button', { name: 'Places' }).first().click()
+      const side = phone ? 'nav[aria-label="Spaces"]' : '#places'
+      if (phone) await page.getByRole('button', { name: 'Spaces', exact: true }).first().click()
       await page.waitForSelector(`${side} li`)
       const rs = await page.$$eval(`${side} li`, (ls) =>
         ls.map((l) => {
@@ -264,8 +264,8 @@ describe.skipIf(!browser)('places, calm like Slack', () => {
       }
       // Settings' place picker: its value and each choice with its place's icon
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
-      if (phone) await page.getByRole('button', { name: 'Places' }).first().click()
-      await page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Settings', exact: true }).click()
+      if (phone) await page.getByRole('button', { name: 'Spaces', exact: true }).first().click()
+      await page.getByRole('navigation', { name: 'Spaces' }).getByRole('button', { name: 'Settings', exact: true }).click()
       const pick = page.getByRole('button', { name: /^Editing: / }).first()
       await pick.waitFor()
       expect(await pick.locator('[data-icon]').getAttribute('data-icon')).toBe('hash')
@@ -463,9 +463,9 @@ describe.skipIf(!browser)('a single machine', () => {
       // the phone drawer
       const phone = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
       await phone.goto(url())
-      await phone.getByRole('button', { name: 'Places' }).first().click()
-      await phone.waitForSelector('nav[aria-label="Places"] li')
-      const drawer = await sidebar(phone, 'nav[aria-label="Places"]')
+      await phone.getByRole('button', { name: 'Spaces', exact: true }).first().click()
+      await phone.waitForSelector('nav[aria-label="Spaces"] li')
+      const drawer = await sidebar(phone, 'nav[aria-label="Spaces"]')
       expect(drawer).not.toContain('All machines')
       expect(drawer.slice(drawer.indexOf('vm-str'), drawer.indexOf('Settings'))).toEqual(['vm-str', 'home', 'gtm', 'herdr-projects'])
       await phone.close()

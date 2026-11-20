@@ -76,7 +76,7 @@ export function PlacesColumn({ children }: { children: ReactNode }) {
   const drawn = useStore((s) => placesDrawn(s.ui, s.snap))
   return (
     <div className="min-w-0 overflow-hidden" inert={!drawn}>
-      <nav id="places" aria-label="Places" className="flex h-full w-(--left-open) flex-col overflow-y-auto border-r border-line bg-well">
+      <nav id="places" aria-label="Spaces" className="flex h-full w-(--left-open) flex-col overflow-y-auto border-r border-line bg-well">
         {children}
       </nav>
     </div>

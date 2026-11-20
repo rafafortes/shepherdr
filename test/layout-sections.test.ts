@@ -245,8 +245,8 @@ describe.skipIf(!browser)('sections', () => {
     const page = await ctx.newPage()
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places' }).first().click()
-      const nav = 'nav[aria-label="Places"]'
+      await page.getByRole('button', { name: 'Spaces', exact: true }).first().click()
+      const nav = 'nav[aria-label="Spaces"]'
       await page.locator(`${nav} li`).first().waitFor()
       await settled(page)
       await page.getByRole('button', { name: 'New section' }).tap()

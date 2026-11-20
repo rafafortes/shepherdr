@@ -82,8 +82,8 @@ describe.skipIf(!browser)('attention count circles', () => {
                   .first()
                   .evaluate((el) => getComputedStyle(el).color),
               ).toBe(colour)
-            const row = page.locator(`nav[aria-label="Places"] li[data-project="${place}"]`)
-            if (!(await row.isVisible())) await page.getByRole('button', { name: 'Places', exact: true }).click()
+            const row = page.locator(`nav[aria-label="Spaces"] li[data-project="${place}"]`)
+            if (!(await row.isVisible())) await page.getByRole('button', { name: 'Spaces', exact: true }).click()
             if (need || ready) {
               await row.locator(badge).first().waitFor({ state: 'attached' })
               // the space's own row counts both: what it holds waiting and ready
@@ -105,7 +105,7 @@ describe.skipIf(!browser)('attention count circles', () => {
         world.emit('snapshot')
         await one('needs scope', 2, 0)
         await one('panel scope', 0, 1)
-        if (!(await page.locator(`li[data-project="${place}"]`).isVisible())) await page.getByRole('button', { name: 'Places', exact: true }).click()
+        if (!(await page.locator(`li[data-project="${place}"]`).isVisible())) await page.getByRole('button', { name: 'Spaces', exact: true }).click()
         expect(
           await until(
             () => page.locator(`li[data-project="${place}"] ${badge}`).getAttribute('aria-label'),
