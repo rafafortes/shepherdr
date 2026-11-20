@@ -49,16 +49,17 @@ describe('superseded installs', () => {
     expect(names(40 * DAY)).toEqual([])
   })
 
-  test('a folder a live process runs from is skipped, supervisor and server paths included', () => {
+  test('a folder a command line names is skipped, supervisor and server paths included', () => {
     const procs: InstallProc[] = [
       { pid: 1, cmd: `bun ${join(family, '80-0', 'checkout', 'scripts', 'supervise.ts')}` },
-      { pid: 2, cmd: 'bun', cwd: join(family, '60-0', 'checkout', '.releases', 'abc') },
+      { pid: 2, cmd: `bun --root=${join(family, '60-0')}/checkout server/main.ts` },
       { pid: 3, cmd: 'ps -axo pid=,command=' },
     ]
-    // 80-0's script is named and 60-0's cwd is inside it; 70-0 is still reported
+    // 80-0's script and 60-0's flag-attached path are named; 70-0 is still reported
     expect(staleInstalls(running, fakeIO(table, procs)).map((x) => x.name)).toEqual(['70-0'])
-    // a partial numeric prefix is not the same install
+    // a partial numeric prefix is not the same install, but a quoted path is
     expect(runsFrom({ pid: 4, cmd: `bun ${family}/800-0/checkout/scripts/supervise.ts` }, join(family, '80-0'))).toBe(false)
+    expect(runsFrom({ pid: 5, cmd: `bun '${join(family, '80-0')}/x'` }, join(family, '80-0'))).toBe(true)
   })
 
   test('a lookalike folder outside github-installations is left alone', () => {
@@ -70,10 +71,10 @@ describe('superseded installs', () => {
     const found = staleInstalls(running, fakeIO(table))
     expect(installLines([], 14)).toEqual([])
     const lines = installLines(found, 14)
-    expect(lines[0]).toContain('Stale plugin installs (RES-09): 2 older than 14 days, kept 2 newest.')
-    expect(lines[0]).toContain("Report only: removal awaits the operator's decision; nothing is deleted.")
+    expect(lines[0]).toContain('Stale plugin installs (RES-09): 2 older than 14 days; running and 2 newest kept.')
+    expect(lines[0]).toContain("Report only: nothing is deleted; command lines were checked, not agents' environments.")
     expect(lines[1]).toContain(join(family, '80-0'))
-    expect(lines[2]).toContain('30 days old')
+    expect(lines[2]).toContain('30 days old; no supervisor or server command line names it')
     const many = staleInstalls(running, fakeIO(Array.from({ length: 12 }, (_, i) => dir(`${200 - i}-0`, 30))))
     const capped = installLines(many, 14)
     expect(capped).toHaveLength(10)

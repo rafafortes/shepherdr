@@ -16,7 +16,6 @@ process.env.SHEPHERDR_AGENT_BROWSER = join(standIns, 'agent-browser')
 
 const O = await import('../server/live/orphans.ts')
 const { LiveSource } = await import('../server/live/source.ts')
-const { systemInstallIO } = await import('../scripts/supervisor.ts')
 type Row = import('../server/live/orphans.ts').Row
 type Source = import('../server/live/orphans.ts').Source
 type ScanOpts = import('../server/live/orphans.ts').ScanOpts
@@ -182,20 +181,23 @@ describe('the doctor lines', () => {
       ],
       processes: () => [],
     }
+    const wasIO = src.installIO
     const wasRoot = src.installRoot
-    src.installIO = io
-    src.installRoot = join(family, '100-0', 'checkout')
     try {
+      src.installIO = io
+      src.installRoot = join(family, '100-0', 'checkout')
       const out = (await src.cli(['doctor'], {})).out
-      expect(out).toContain('Stale plugin installs (RES-09): 1 older than 14 days, kept 2 newest.')
-      expect(out).toContain(`${join(family, '10-0')} (40 days old`)
+      expect(out).toContain('Stale plugin installs (RES-09): 1 older than 14 days; running and 2 newest kept.')
+      expect(out).toContain(`${join(family, '10-0')} (40 days old; no supervisor or server command line names it`)
       expect(out).toContain('Report only:')
       expect(existsSync(join(family, '10-0'))).toBe(false)
+      // an empty reader, not this host's, proves the line goes away when there is nothing stale
+      src.installIO = { now: () => 0, dirs: () => [], processes: () => [] }
+      expect((await src.cli(['doctor'], {})).out).not.toContain('Stale plugin installs (RES-09)')
     } finally {
-      src.installIO = systemInstallIO
+      src.installIO = wasIO
       src.installRoot = wasRoot
     }
-    expect((await src.cli(['doctor'], {})).out).not.toContain('Stale plugin installs (RES-09)')
   })
 })
 

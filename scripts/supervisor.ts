@@ -22,22 +22,21 @@ export const ALERT_ENV = 'SHEPHERDR_ALERT_KIND'
 
 /* ---------- superseded plugin installs (RES-09) ----------
  * herdr keeps every release of the plugin under github-installations/<plugin>/<id>-0/. Once a newer one runs, the old
- * checkouts, their .releases and deps-* stay for ever (3.6 GB / 69 installs here). The supervisor owns this finding:
- * only it knows which install it runs from. This ships the report only. Deleting another install's folder is
- * irreversible and the operator has not answered whether Shepherdr may do it, so nothing here removes a folder. */
+ * checkouts, their .releases and deps-* stay for ever. The supervisor owns this finding: only it knows which install it
+ * runs from. This ships the report only. Deleting another install's folder is irreversible and the operator has not
+ * answered whether Shepherdr may do it, so nothing here removes a folder. */
 
 /** how many installs to hold: the running one and the one before it */
 export const INSTALL_KEEP = 2
 /** an install must be this old before it is reported */
 export const INSTALL_AGE_MS = 14 * 24 * 60 * 60 * 1000
 
-/** one line of the single process-table read the install check makes. ps names the absolute script path of the
- *  supervisor and every server (supervise.ts starts both by absolute path), so a command line names the install even
- *  where ps cannot show a cwd; cwd is included where a reader has it. */
+/** one line of the single process-table read the install check makes. supervise.ts starts the supervisor and every
+ *  server by absolute script path, so the command line names the install. One ps read cannot show an agent's cwd or
+ *  environment, so the report says only what command lines show — never that nothing at all runs from a folder. */
 export interface InstallProc {
   pid: number
   cmd: string
-  cwd?: string
 }
 
 /** the filesystem and process reads the report needs, injected so a test uses a fake layout and process table */
@@ -53,10 +52,10 @@ export interface InstallIO {
 export const installFamily = (root: string) => dirname(dirname(root))
 export const runningInstall = (root: string) => dirname(root)
 
-/** whether a process runs from an install: a whole path token in its cwd or command line, never a bare substring */
+/** whether a process's command line names an install: the path followed by a separator (so a quoted path or
+ *  --root=<path> matches, while a sibling named 800-0 does not look like 80-0) */
 export function runsFrom(p: InstallProc, path: string): boolean {
-  const touch = (s: string) => s.split(/\s+/).some((t) => t === path || t.startsWith(`${path}/`))
-  return touch(p.cmd) || touch(p.cwd ?? '')
+  return p.cmd === path || p.cmd.includes(`${path}/`)
 }
 
 /** an install that would be pruned, with its age in days for the doctor line */
@@ -92,9 +91,12 @@ export function staleInstalls(root: string, io: InstallIO, keep = INSTALL_KEEP, 
 /** what doctor reports; nothing is deleted until the operator answers the open question */
 export function installLines(found: StaleInstall[], days: number): string[] {
   if (!found.length) return []
-  const shown = found.slice(0, 8).map((x) => `  ${x.path} (${x.days} days old, no process running from it)`)
+  const shown = found.slice(0, 8).map((x) => `  ${x.path} (${x.days} days old; no supervisor or server command line names it)`)
   if (found.length > 8) shown.push(`  ... and ${found.length - 8} more`)
-  return [`Stale plugin installs (RES-09): ${found.length} older than ${days} days, kept ${INSTALL_KEEP} newest. Report only: removal awaits the operator's decision; nothing is deleted.`, ...shown]
+  return [
+    `Stale plugin installs (RES-09): ${found.length} older than ${days} days; running and ${INSTALL_KEEP} newest kept. Report only: nothing is deleted; command lines were checked, not agents' environments.`,
+    ...shown,
+  ]
 }
 
 /** the real reads: one ps command and a directory listing. Used by doctor; a test injects its own. */
