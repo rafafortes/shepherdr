@@ -697,21 +697,27 @@ export class Machines extends Emitter<Events> {
 
   /* ---------- shepherdr doctor ---------- */
 
-  /** check every machine and repair what is missing: the helper put there again, its worker started again. The command's
-   *  optional step channel gets each machine's line as soon as that one is done (UXD-08); the whole answer stays the same. */
+  /** check every machine and repair only what is broken: a worker that is gone, out of reach or on an old helper is
+   *  killed and started again with the helper put there; one alive, reachable and current is left alone, so asking why
+   *  something is slow never drops a working link (OPS-07). The command's optional step channel gets each machine's line
+   *  as soon as that one is done (UXD-08); the whole answer stays the same. */
   async doctor(onStep?: (words: string) => void): Promise<string[]> {
     await this.sync()
     const out: string[] = []
     for (const l of this.links.values()) {
-      if (l.worker) {
-        l.worker.kill()
-        await l.worker.exited
-        l.worker = undefined
+      let detail = 'healthy, left running'
+      if (!l.worker || !l.reachable || !l.probe || !fits(l.probe)) {
+        if (l.worker) {
+          l.worker.kill()
+          await l.worker.exited
+          l.worker = undefined
+        }
+        await this.start(l, true)
+        detail = l.lacks.length ? `needs ${l.lacks.join(', ')}` : l.state.startsWith("Can't") || l.state.startsWith('herdr') ? l.state : 'helper put there again, worker started again'
       }
-      await this.start(l, true)
       const p = l.probe
       const missing = p ? [!p.tools.gh && 'gh (pull requests of GitHub repos)', !p.tools.claude && 'Claude Code', !p.tools.codex && 'Codex'].filter(Boolean) : []
-      const line = `${l.rec.machine} (${l.saved.target}): ${l.lacks.length ? `needs ${l.lacks.join(', ')}` : l.state.startsWith("Can't") || l.state.startsWith('herdr') ? l.state : 'helper put there again, worker started again'}${missing.length ? `; not there: ${missing.join(', ')}` : ''}${l.chrome ? `; ${l.chrome}` : ''}`
+      const line = `${l.rec.machine} (${l.saved.target}): ${detail}${missing.length ? `; not there: ${missing.join(', ')}` : ''}${l.chrome ? `; ${l.chrome}` : ''}`
       out.push(line)
       onStep?.(line)
     }
