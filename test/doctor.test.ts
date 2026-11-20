@@ -2,7 +2,7 @@
 // removed, or a proof server's SHEPHERDR_HOME under /tmp — and the ready kill line beside each. Nothing here reads
 // the operator's processes: the process table, the worktree root and the ender are all stand-ins.
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
-import { writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -166,6 +166,38 @@ describe('the doctor lines', () => {
       src.orphansFound = []
     }
     expect((await src.cli(['doctor'], {})).out).not.toContain('Orphaned processes (RES-03)')
+  })
+
+  test('the RES-09 line names stale installs from the injected reader and deletes nothing', async () => {
+    const family = '/x/github-installations/herdr-projects-abc'
+    const old = 1_000_000_000_000
+    const day = 86_400_000
+    const io = {
+      now: () => old + 40 * day,
+      dirs: () => [
+        { name: '100-0', mtime: old + 39 * day }, // running
+        { name: '90-0', mtime: old + 38 * day }, // previous
+        { name: '10-0', mtime: old }, // 40 days old
+      ],
+      processes: () => [],
+    }
+    const wasIO = src.installIO
+    const wasRoot = src.installRoot
+    try {
+      src.installIO = io
+      src.installRoot = join(family, '100-0', 'checkout')
+      const out = (await src.cli(['doctor'], {})).out
+      expect(out).toContain('Stale plugin installs (RES-09): 1 older than 14 days; running and 2 newest kept.')
+      expect(out).toContain(`${join(family, '10-0')} (40 days old; no supervisor or server command line names it`)
+      expect(out).toContain('Report only:')
+      expect(existsSync(join(family, '10-0'))).toBe(false)
+      // an empty reader, not this host's, proves the line goes away when there is nothing stale
+      src.installIO = { now: () => 0, dirs: () => [], processes: () => [] }
+      expect((await src.cli(['doctor'], {})).out).not.toContain('Stale plugin installs (RES-09)')
+    } finally {
+      src.installIO = wasIO
+      src.installRoot = wasRoot
+    }
   })
 })
 

@@ -152,6 +152,7 @@ import { Unread } from './unread.ts'
 import { levels, Monitor, memoryOver, meters, procLines, shortage, summary, swapPct, topProcs, type HealthEvent, type Kind } from './health.ts'
 import { has, PLUGIN_KEY, pluginSection, setPluginOn } from '../plugins.ts'
 import { TOOK_OVER, type TookOver } from '../../scripts/take-over.ts'
+import { installLines, INSTALL_AGE_MS, staleInstalls, systemInstallIO, type InstallIO } from '../../scripts/supervisor.ts'
 import { placeOrder } from '../../shared/space-order.ts'
 
 /** a coordinator that waits for room under the caps (source.ts capWaits): its start, or its takeover after the cut-off `r`
@@ -343,6 +344,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   orphanEnd: (pids: number[]) => Promise<number[]> = (pids) => endOrphans(pids, endDeps)
   /** off until the operator answers whether the sweep may end proof-marked orphans: report-only until then */
   autoKillProof = false
+  /** the reads behind RES-09's doctor line; a test injects a fake home so nothing here reads this machine's installs */
+  installIO: InstallIO = systemInstallIO
+  /** the checkout this install runs from; a test names a fake github-installations layout */
+  installRoot = ROOT
 
   constructor() {
     super()
@@ -647,6 +652,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (sig && sig !== this.orphanSignature) this.news(placeId.home(), orphanNews(found, kills), 'stalled')
     this.orphanSignature = sig
     return found
+  }
+
+  /** RES-09: superseded herdr installs older than the retention that no process runs from. Report-only: the operator
+   *  has not said whether Shepherdr may delete another install's folder, so nothing here removes one. */
+  private staleInstallLines(): string[] {
+    return installLines(staleInstalls(this.installRoot, this.installIO), Math.round(INSTALL_AGE_MS / 86_400_000))
   }
 
   /** a look at this machine: limits judged, held tasks started where there is room, the screen told of new numbers */
@@ -5540,6 +5551,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           ...this.pushWarnings().map((warning) => `Alerts: ${warning}`),
           ...this.agents.unreadableLogs(),
           ...orphanLines(this.orphansFound),
+          ...this.staleInstallLines(),
           ...((await this.peers?.doctor()) ?? []),
           ...(await this.places.doctor()),
         ]

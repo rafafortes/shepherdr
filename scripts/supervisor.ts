@@ -1,8 +1,8 @@
 // What the supervisor decides: when to make a release, when to restart on it (only once no voice call is on, with new
 // calls stopped), and when to take a release back. scripts/supervise.ts wires it to the server process and watchers.
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { HOME, readJson } from '../server/store.ts'
 import type { UpdateStatus } from '../shared/types.ts'
 import { prune, releasesOf, update } from './update.ts'
@@ -19,6 +19,108 @@ export const MAX_BACKOFF = 60_000
 /** the alert's key, and the env var that tells the operator's notifier this is Shepherdr itself, not a wait */
 export const LOOP_KEY = 'shepherdr-crash-loop'
 export const ALERT_ENV = 'SHEPHERDR_ALERT_KIND'
+
+/* ---------- superseded plugin installs (RES-09) ----------
+ * herdr keeps every release of the plugin under github-installations/<plugin>/<id>-0/. Once a newer one runs, the old
+ * checkouts, their .releases and deps-* stay for ever. The supervisor owns this finding: only it knows which install it
+ * runs from. This ships the report only. Deleting another install's folder is irreversible and the operator has not
+ * answered whether Shepherdr may do it, so nothing here removes a folder. */
+
+/** how many installs to hold: the running one and the one before it */
+export const INSTALL_KEEP = 2
+/** an install must be this old before it is reported */
+export const INSTALL_AGE_MS = 14 * 24 * 60 * 60 * 1000
+
+/** one line of the single process-table read the install check makes. supervise.ts starts the supervisor and every
+ *  server by absolute script path, so the command line names the install. One ps read cannot show an agent's cwd or
+ *  environment, so the report says only what command lines show — never that nothing at all runs from a folder. */
+export interface InstallProc {
+  pid: number
+  cmd: string
+}
+
+/** the filesystem and process reads the report needs, injected so a test uses a fake layout and process table */
+export interface InstallIO {
+  now(): number
+  /** the install folders under a plugin's family, with the time each was installed */
+  dirs(family: string): { name: string; mtime: number }[]
+  /** one read of the process table */
+  processes(): InstallProc[]
+}
+
+/** the folder holding every install of this plugin, and the install this checkout runs from */
+export const installFamily = (root: string) => dirname(dirname(root))
+export const runningInstall = (root: string) => dirname(root)
+
+/** whether a process's command line names an install: the path followed by a separator (so a quoted path or
+ *  --root=<path> matches, while a sibling named 800-0 does not look like 80-0) */
+export function runsFrom(p: InstallProc, path: string): boolean {
+  return p.cmd === path || p.cmd.includes(`${path}/`)
+}
+
+/** an install that would be pruned, with its age in days for the doctor line */
+export interface StaleInstall {
+  path: string
+  name: string
+  days: number
+}
+
+/** superseded installs, newest first: past the retention, not one of the newest `keep` (the running install is always
+ *  held), and no process runs from them. Only herdr's github-installations layout is considered. Nothing is removed. */
+export function staleInstalls(root: string, io: InstallIO, keep = INSTALL_KEEP, age = INSTALL_AGE_MS): StaleInstall[] {
+  const family = installFamily(root)
+  // never look at a lookalike layout (a worktree folder with <digits>-<n> siblings) as if it were herdr's installs
+  if (basename(dirname(family)) !== 'github-installations') return []
+  const now = io.now()
+  const dirs = io
+    .dirs(family)
+    .slice()
+    .sort((a, b) => b.mtime - a.mtime)
+  const held = new Set([runningInstall(root), ...dirs.slice(0, keep).map((d) => join(family, d.name))])
+  const procs = io.processes()
+  const out: StaleInstall[] = []
+  for (const d of dirs) {
+    const path = join(family, d.name)
+    const ms = now - d.mtime
+    if (held.has(path) || ms < age || procs.some((p) => runsFrom(p, path))) continue
+    out.push({ path, name: d.name, days: Math.floor(ms / 86_400_000) })
+  }
+  return out
+}
+
+/** what doctor reports; nothing is deleted until the operator answers the open question */
+export function installLines(found: StaleInstall[], days: number): string[] {
+  if (!found.length) return []
+  const shown = found.slice(0, 8).map((x) => `  ${x.path} (${x.days} days old; no supervisor or server command line names it)`)
+  if (found.length > 8) shown.push(`  ... and ${found.length - 8} more`)
+  return [
+    `Stale plugin installs (RES-09): ${found.length} older than ${days} days; running and ${INSTALL_KEEP} newest kept. Report only: nothing is deleted; command lines were checked, not agents' environments.`,
+    ...shown,
+  ]
+}
+
+/** the real reads: one ps command and a directory listing. Used by doctor; a test injects its own. */
+export const systemInstallIO: InstallIO = {
+  now: () => Date.now(),
+  dirs: (family) => {
+    try {
+      return readdirSync(family, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && /^\d+-\d+$/.test(d.name))
+        .map((d) => ({ name: d.name, mtime: statSync(join(family, d.name)).mtimeMs }))
+    } catch {
+      return []
+    }
+  },
+  processes: () => {
+    const r = Bun.spawnSync(['ps', '-axo', 'pid=,command='], { stdout: 'pipe', stderr: 'ignore' })
+    const out: InstallProc[] = []
+    for (const l of r.stdout.toString().split('\n')) {
+      const m = /^\s*(\d+)\s+(.*)$/.exec(l)
+      if (m) out.push({ pid: Number(m[1]), cmd: m[2] })
+    }
+    return out
+  },
+}
 
 /** the operator's alert command from Settings (this machine, then Everywhere); off or unset: none. Read from the
  *  settings file, never a path written in the repo — the same value wait-alerts.ts runs. */
