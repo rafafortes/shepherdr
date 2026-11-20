@@ -83,7 +83,7 @@ const WORDS_AUTH = /\b(?:status|error|HTTP)\b[^\n]{0,12}\b40[13]\b|\b401 Unautho
  *  request limit", "the output limit" and "the context window limit" are a wait or a resource, never an allowance,
  *  however the sentence runs. */
 const WORDS_ALLOWANCE =
-  /(?<!not your )usage limit|out of (?:extra )?usage|(?<!rate.?)limit reached|\b(?:hit|reached) (?:your|its|the) (?:(?!\b(?:rate|requests?|context|output|tokens?|concurren\w*)\b)[\w .-]){0,24}?\blimit\b|\b(?:session|weekly|hourly|daily|monthly|5-hour|five-hour|plan|subscription) limit\b|\bquota\b|billing|credit balance|payment/i
+  /(?<!not your )usage limit|out of (?:extra )?usage|(?<!rate.?)limit reached|\b(?:hit|reached) (?:your|its|the) (?![\w .'-]*(?:rate|requests?|context|output|tokens?|concurren\w*))[\w .'-]{0,24}?\blimit\b|\b(?:session|weekly|hourly|daily|monthly|5-hour|five-hour|plan|subscription) limit\b|(?<!check )\bquota\b|billing|credit balance|payment/i
 /** a prepaid balance that ran out: the provider says so with 402 Payment Required, or in these words */
 const WORDS_CREDIT = /insufficient (?:account )?(?:funds|balance|credits?)|out of credits?|credit balance|payment required/i
 // agy's words for a model it does not have: "invalid model selection", "is not recognized as a known model"
@@ -102,7 +102,9 @@ const WORDS_PASSING: [RegExp, string][] = [
 /** when an allowance comes back, as the provider says it: "resets 5pm", "resets 2:10am", "reset at 3pm", "try again at
  *  5:00 PM", "resets Nov 6, 11:59am", "resets in 1h3m51s", or an ISO time ("resets at 2026-11-11T20:44:33Z",
  *  Command Code's) */
-const RESET = /\bresets? (?:at )?(\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)|\bresets? (?:at )?([^\n·.,;()]{1,24})|\btry again (?:at |on |after |in )?([^\n.,;()]{1,24})/i
+/** a reset's own words after "resets": up to a puntuation mark, but a dot inside a clock it writes ("5 p.m.") stays */
+const RESET_WORDS = '((?:[^\n·.,;()]|\\.(?=[^\\s·.,;()])){1,24})'
+const RESET = new RegExp(`\\bresets? (?:at )?(\\d{4}-\\d{2}-\\d{2}T[\\d:.]+(?:Z|[+-]\\d{2}:?\\d{2})?)|\\bresets? (?:at )?${RESET_WORDS}|\\btry again (?:at |on |after |in )?([^\\n.,;()]{1,24})`, 'i')
 
 /** the units a provider counts a wait in: seconds too, which no time rule of Settings has (agy says "158h59m47s") */
 const SPANS: Record<string, number> = {
@@ -132,7 +134,6 @@ const SPANS: Record<string, number> = {
 /** a span in a provider's words ("1h3m51s", "2d 5h", "20 minutes"), or none when the words are not all spans */
 function spanOf(text: string): number | undefined {
   const t = text.trim().toLowerCase().replace(/\s+/g, ' ').replace(/^in /, '').replace(/ and /g, ' ')
-  if (!t) return undefined
   let total = 0
   let pos = 0
   const re = /\s*(\d+(?:\.\d+)?)\s*([a-z]+)\s*/g
@@ -149,7 +150,7 @@ function spanOf(text: string): number | undefined {
  *  5 minutes" */
 const IN_SPAN = /\b(?:in|after)\s+([\d.]+\s*[a-z]+(?:(?:\s*and)?\s*[\d.]+\s*[a-z]+)*)/i
 /** a clock time as a provider writes it: "5pm", "2:10am", "5:00 PM", "17:00", "noon" */
-const CLOCK_WORDS = /\b(?:\d{1,2}(?::\d{2})?\s*[ap]\.?m|\d{1,2}:\d{2}|noon|midday|midnight)\b/i
+const CLOCK_WORDS = /\b(?:\d{1,2}(?::\d{2})?\s*(?:[ap]\.m\.?|[ap]m)|\d{1,2}:\d{2}|noon|midday|midnight)(?!\w)/i
 /** a date a reset words itself with, its clock written after it: "Nov 6", "November 6th" */
 const DATE_WORDS = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/i
 /** a day word a reset may name instead of a date: "tomorrow 9am", "Fri 9am" */
@@ -187,7 +188,8 @@ function resetMoment(words: string, now: number, configured: string): number | u
   if (!clockText) return undefined
   let clock: { h: number; m: number }
   try {
-    clock = parseClock(clockText)
+    // a clock written with stops ("5 p.m.") is the same time as "5 pm"
+    clock = parseClock(clockText.replace(/\./g, ''))
   } catch {
     return undefined
   }
@@ -195,11 +197,17 @@ function resetMoment(words: string, now: number, configured: string): number | u
   const y = today.getUTCFullYear()
   const at = (year: number, month: number, day: number) => instant(new Date(Date.UTC(year, month, day, clock.h, clock.m)), zone)
   const todayAt = at(y, today.getUTCMonth(), today.getUTCDate())
-  // a day word instead of a date: "tomorrow 9am", "Fri 9am" (the next Friday, today if still to come)
-  const ahead = dayOf(DAY_WORD.exec(words)?.[1] ?? '', (today.getUTCDay() + 6) % 7)
-  if (ahead !== undefined) return at(y, today.getUTCMonth(), today.getUTCDate() + ahead)
   const date = DATE_WORDS.exec(words)
   if (!date) {
+    // a day word instead of a date: "tomorrow 9am", "Fri 9am"
+    const word = (DAY_WORD.exec(words)?.[1] ?? '').toLowerCase()
+    const ahead = dayOf(word, (today.getUTCDay() + 6) % 7)
+    if (ahead !== undefined) {
+      const moment = at(y, today.getUTCMonth(), today.getUTCDate() + ahead)
+      // a weekday whose clock has gone today is next week's; "today" with one gone is already back
+      const todayItself = word === 'today' || word === 'tonight'
+      return todayItself || moment + 60_000 > now ? moment : at(y, today.getUTCMonth(), today.getUTCDate() + ahead + 7)
+    }
     // its words stop at the minute: this minute is still today
     return todayAt + 60_000 > now ? todayAt : at(y, today.getUTCMonth(), today.getUTCDate() + 1)
   }

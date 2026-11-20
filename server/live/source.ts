@@ -422,7 +422,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       // only a role whose agent ran the harness Settings name: one of its own (`task add --agent …`) that ran out is no
       // primary coming back — a restart would take it to Settings' pair, not to what it ran
       // a backup that went in is no model out: a new task may start, and one this outage took back may come back again
-      if (sameHarness(ran, primary)) this.returns.note({ role: 'task', space, primary, to, why, at: Date.now() }, { key: `${t.id}/Agent`, allOut: false })
+      if (sameHarness(ran, primary)) this.returns.note({ role: 'task', space, primary, to, why, at: Date.now() }, { key: `${t.id}/Agent`, allOut: false, resetAt: this.resetOfTakeover(why, primary) })
     }
     // a task cut off for good waits for the human: started again once its provider answers (return.ts)
     this.engine.noteStuck = (t, ran, why) => {
@@ -2246,27 +2246,23 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const backAt = mine.reduce((a, o) => Math.max(a, o.back ?? 0, o.ok ?? 0), 0) || undefined
     const st = this.usage.outOf(provider, now, backAt)
     // the reset its run-out named has come: that mark is over, whatever the return watch's backoff says (it grows to
-    // four hours), so a start is not held off until it asks the primary. An outage cut off again after that run-out is
-    // another refusal, and that one still holds
-    const expired = (o: Outage) => {
-      const reset = this.resetOfOutage(o, now)
-      return reset !== undefined && reset <= now
-    }
+    // four hours), so a start is not held off until it asks the primary
+    const expired = (o: Outage) => o.resetAt !== undefined && o.resetAt <= now
     // `cut(onPrimary)` clears `ok` (return.ts): a cut on the primary puts it out again; one on its backup says nothing
     if (!st.out && !mine.some((o) => o.back === undefined && o.ok === undefined && !expired(o))) return undefined
     return st.out && st.last?.resetAt !== undefined ? { until: clockWords(st.last.resetAt, now, this.settings.zone()) } : {}
   }
 
   /**
-   * The reset that ends this outage, where the run-out that cut it off named one (retry.ts resetOf: "resets 2:10am",
-   * "resets in 1h3m51s"). Only an outage that is itself a run-out can end at one — being signed out, or a model that is
-   * not there, is no allowance that comes back — and only its own run-out counts: its cut is the run-out's, to the same
-   * cut, so a reset of an older allowance says nothing of this one.
+   * The reset that ends this takeover, read once when it is noted: the one the provider's newest run-out named (retry.ts
+   * resetOf, kept with the run-out in usage.json), and only where the takeover is itself a run-out — being signed out, or
+   * a model that is not there, is no allowance that comes back. Kept on the outage (return.ts) rather than worked out
+   * again later: the ledger holds the run-outs of every chat that ran out with it, and none of them says which one this
+   * outage's own cut was.
    */
-  private resetOfOutage(o: Outage, now: number): number | undefined {
-    if (!runOutOf(o.why)) return undefined
-    const last = this.usage.outOf(providerOf(keyOf(o.primary.kind, o.primary.model)), now).last
-    return last?.resetAt !== undefined && (o.lastCut ?? o.at) <= last.at + SAME_CUT ? last.resetAt : undefined
+  private resetOfTakeover(why: string, primary: Harness, now = Date.now()): number | undefined {
+    if (!runOutOf(why)) return undefined
+    return this.usage.outOf(providerOf(keyOf(primary.kind, primary.model)), now).last?.resetAt
   }
 
   /** an agent between turns, with nothing of its own still running, no try of its own due and nothing it asks you: the
@@ -2872,7 +2868,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const primary = this.settings.harness('coordinator', space || undefined)
         if (r.lasting && sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, primary))
           try {
-            this.returns.note({ role: 'coordinator', space, primary, to: on, why, at: Date.now() })
+            this.returns.note({ role: 'coordinator', space, primary, to: on, why, at: Date.now() }, { resetAt: this.resetOfTakeover(why, primary) })
           } catch (e) {
             console.error(`shepherdr: couldn't keep that ${key} runs on a backup: ${(e as Error).message}`)
           }
@@ -2953,7 +2949,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       const o = this.returns.get(role, space)
       // a cut-off on the backup says nothing of the primary: only one on the primary puts its answer off
       if (o && !o.back) this.returns.cut(role, space, Date.now(), { key, allOut, onPrimary: sameHarness(ran, primary) })
-      else this.returns.note({ role, space, primary, to: ran, why, at: Date.now() }, { key, allOut })
+      else this.returns.note({ role, space, primary, to: ran, why, at: Date.now() }, { key, allOut, resetAt: this.resetOfTakeover(why, primary) })
       // it shows in line at once, not as needing the human until the watch's next pass
       this.refreshGoingBack()
     } catch (e) {
@@ -3032,10 +3028,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // asks once that work is over (or the quiet makes it the answer)
         else if (busy) continue
         else {
-          // the reset the provider's own words named has come (retry.ts resetOf, its run-out's resetAt): the primary is
+          // the reset the provider's own words named has come (retry.ts resetOf, kept on the outage): the primary is
           // asked now, never after a backoff that has grown to hours since it last failed, and once per reset — a probe,
           // or the answer of the machine's own work, is the reset's answer already
-          const reset = this.resetOfOutage(o, now)
+          const reset = o.resetAt
           const came = reset !== undefined && reset <= now && Math.max(o.probed ?? 0, o.ok ?? 0) < reset
           if (!came && (o.due ?? 0) > now) continue
           // a CLI this machine doesn't have, or one Shepherdr has no silent one-shot for, is never asked
@@ -3194,7 +3190,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const allOut = cut && noneLeft(ran, primary, backups)
     const why = r?.reason ? r.reason.charAt(0).toLowerCase() + r.reason.slice(1) : 'its backup took it over'
     // noted as old as it is: its first question due now (past its first wait and its random fifth), no quiet to wait for
-    this.returns.note({ role, space, primary, to: ran, why, at: now - 2 * FIRST_WAIT }, { key, allOut })
+    this.returns.note({ role, space, primary, to: ran, why, at: now - 2 * FIRST_WAIT }, { key, allOut, resetAt: this.resetOfTakeover(why, primary, now) })
   }
 
   /** the task chats the way back takes again, and what each waits for: a free slot (its primary answers) or its model */
@@ -6154,10 +6150,6 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 /** how long after this machine started the way back looks first: an outage kept from before a restart, its wait long over,
  *  is asked then — not at boot, beside the agents coming up, and not ten minutes on */
 export const FIRST_LOOK = 60_000
-
-/** how far apart a cut-off turn's own time (its log's) and the outage noted from it may be: the same cut, seconds apart.
- *  A cut newer than that is another refusal, not the one the provider's run-out and its reset speak of */
-const SAME_CUT = 60_000
 
 /** how long one line of another space's news may be for the main machine's home space */
 const OVERVIEW_MAX = 240

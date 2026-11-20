@@ -297,7 +297,8 @@ describe('run-outs: recorded once, and out until a reset, a return or a later ca
     // yet, and the one in the next hour frees the provider
     const l = new UsageLedger(tmp('ledger-hour'), true)
     l.runOut(runOut('A/Agent', 0), NOW)
-    l.count('B/Agent', 'pi.opencode-go/deepseek-v4.1-flash', call('in-the-hour', 0), NOW)
+    // the same hour the run-out happened in, to the second it happened at: never a call of the hour after by luck
+    l.count('B/Agent', 'pi.opencode-go/deepseek-v4.1-flash', { id: 'in-the-hour', at: NOW, tokens: 10 }, NOW)
     expect(l.outOf('pi.opencode-go', NOW).out).toBe(true)
     l.count('B/Agent', 'pi.opencode-go/deepseek-v4.1-flash', { id: 'next-hour', at: NOW + HOUR, tokens: 10 }, NOW + HOUR)
     expect(l.outOf('pi.opencode-go', NOW + HOUR).out).toBe(false)

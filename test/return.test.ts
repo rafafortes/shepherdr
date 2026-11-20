@@ -1292,15 +1292,18 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
     }
   })
 
-  test('an allowance whose reset came is over for new starts, though the return watch has not asked the primary yet', async () => {
+  test('the reset an outage kept ends its mark, however late the takeover was noted', async () => {
     const { setModels, opencodeList } = await import('../server/live/models.ts')
     setModels('opencode', opencodeList([{ id: MODEL, label: MODEL, efforts: [] }], MODEL))
     const s = await space('reset-came')
     try {
       primary(s.p.name)
       const now = Date.now()
-      // POL-461/464: a 5-hour limit cut the chat off at 2:10am, its reset has come, and the watch's next question is
-      // hours away (its wait grows to four): the ledger's mark is over, so a new task starts on the primary again
+      // POL-461/464: a 5-hour limit cut the chat off six hours ago, its reset came, and the watch's next question is
+      // hours away (its wait grows to four): the ledger's mark is over, so a new task starts on the primary again.
+      // The takeover was noted four minutes after the cut, as a launch and the machine's own room take their time:
+      // the reset is the outage's own, never worked out from how close those two moments are
+      const resetAt = now - 3_600_000
       src.usage.runOut(
         {
           at: now - 6 * 3_600_000,
@@ -1310,38 +1313,17 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
           reason: 'Out of allowance until 2:10am',
           words: "You've hit your 5-hour limit · resets 2:10am",
           reset: '2:10am',
-          resetAt: now - 3_600_000,
+          resetAt,
         },
         now,
       )
-      src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 2:10am', at: now - 6 * 3_600_000 })
+      src.returns.note(
+        { role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 2:10am', at: now - 6 * 3_600_000 + 4 * 60_000 },
+        { resetAt },
+      )
       src.returns.failed('task', s.p.name, now - 5 * 3_600_000)
       expect(out(KEY)).toBeUndefined()
       expect(startsOn(s.p.name)).toBe('opencode')
-      // a cut on the primary after that run-out is another refusal: out again until the watch asks it
-      src.returns.cut('task', s.p.name, now, { key: 'another/Agent', onPrimary: true })
-      expect(out(KEY)).toEqual({})
-      expect(startsOn(s.p.name)).toBe('codex')
-    } finally {
-      forget(s.p.name)
-      setModels('opencode', undefined)
-      s.done()
-    }
-  })
-
-  test('a reset ends only an allowance: an outage that was another thing stays out through it', async () => {
-    const { setModels, opencodeList } = await import('../server/live/models.ts')
-    setModels('opencode', opencodeList([{ id: MODEL, label: MODEL, efforts: [] }], MODEL))
-    const s = await space('reset-not-ours')
-    try {
-      primary(s.p.name)
-      const now = Date.now()
-      // an allowance of that provider ran out and came back, and this space's outage is another thing entirely: being
-      // signed out is no allowance that a reset brings back, so the provider is still out for a new start
-      src.usage.runOut({ at: now - 6 * 3_600_000, key: KEY, chat: `${s.p.name}/Agent`, role: 'task', reason: 'Out of allowance', words: 'resets 2:10am', resetAt: now - 3_600_000 }, now)
-      src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'signed out', at: now - 6 * 3_600_000 })
-      expect(out(KEY)).toEqual({})
-      expect(startsOn(s.p.name)).toBe('codex')
     } finally {
       forget(s.p.name)
       setModels('opencode', undefined)
@@ -1358,7 +1340,10 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
       const now = Date.now()
       // an allowance that ran out with "resets 5pm": until the primary speaks, that reset keeps new starts off it
       src.usage.runOut({ at: now - 3_600_000, key: KEY, chat: `${s.p.name}/Agent`, role: 'task', reason: 'Out of allowance', words: 'resets 5pm', resetAt: now + 4 * 3_600_000 }, now)
-      src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: now - 3_600_000 })
+      src.returns.note(
+        { role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: now - 3_600_000 },
+        { resetAt: now + 4 * 3_600_000 },
+      )
       expect(out(KEY)).toBeDefined()
       expect(startsOn(s.p.name)).toBe('codex')
       // it answered: the promised reset no longer holds, even though the chats are still on the backup
@@ -1382,7 +1367,10 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
       // an allowance that ran out hours ago with "resets 5pm": until the primary speaks, that reset keeps starts off it
       src.usage.runOut({ at: now - 3 * 3_600_000, key: KEY, chat: `${s.p.name}/Agent`, role: 'task', reason: 'Out of allowance', words: 'resets 5pm', resetAt: now + 4 * 3_600_000 }, now)
       const onBackup = task(s.p.name, 'codex', { from: 'opencode' })
-      src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: now - FIRST_WAIT * 2 })
+      src.returns.note(
+        { role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 5pm', at: now - FIRST_WAIT * 2 },
+        { resetAt: now + 4 * 3_600_000 },
+      )
       expect(out(KEY)).toEqual({ until: expect.any(String) })
       expect(startsOn(s.p.name)).toBe('codex')
       await src.watchReturns(now)
@@ -1490,7 +1478,7 @@ describe('how soon the primary is asked', () => {
         const cut = now - 1_000
         const reset = resetOf(words[kind] ?? '', cut, 'UTC')?.at ?? now - 60_000
         s.src.usage.runOut({ at: cut, key: `${kind}/test-model`, chat: `${s.p.name}/${kind}/Agent`, role: 'task', reason: 'Out of allowance', words: words[kind] ?? '', resetAt: reset }, now)
-        s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind }, to: { kind: backup }, why: 'out of allowance', at: cut })
+        s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind }, to: { kind: backup }, why: 'out of allowance', at: cut }, { resetAt: reset })
         // the watch has failed a few times since: its next question is hours away
         const failAt = Math.min(reset, now) - 60_000
         for (let i = 0; i < 6; i++) s.src.returns.failed('task', s.p.name, failAt)

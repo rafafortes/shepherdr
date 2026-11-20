@@ -168,6 +168,13 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(providerError('Claude Code is temporarily limiting requests (not your usage limit)', 'rate_limit', 429)).toEqual({ passing: true, reason: 'Rate limited' })
     // its extra usage running out is the allowance, with the reset it names
     expect(providerError("You're out of extra usage · resets 5pm", 'rate_limit', 429).reason).toBe('Out of allowance until 5pm')
+    // a plan's spend or an organization's limit is the allowance, apostrophe and all; a limit of requests, however it is
+    // spelled, and Google's transient 429 that points at its quota page, are not
+    expect(providerError("You've hit your org's spend limit", 'rate_limit', 429)).toEqual({ passing: false, reason: 'Out of allowance' })
+    expect(providerError('max_requests limit exceeded', 'rate_limit', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('Resource has been exhausted (e.g. check quota).', '', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    // agy's own out-of-allowance words, which name a quota reached and its reset
+    expect(providerError('RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 158h59m47s.', '', 429).reason).toBe('Out of allowance until in 158h59m47s')
   })
 
   test('a reset given as a clock, a date or a wait is read into the moment it comes back', () => {
@@ -184,6 +191,12 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(at('resets tomorrow 9am')).toBe('2026-11-20T09:00:00.000Z')
     expect(at('try again Fri 5pm')).toBe('2026-11-20T17:00:00.000Z')
     expect(at('resets today 3pm')).toBe('2026-11-19T15:00:00.000Z')
+    // 19 Nov is a Thursday: a weekday whose clock has gone today is next week's, and "today" with one gone is past
+    expect(at('resets Thu 3am')).toBe('2026-11-26T03:00:00.000Z')
+    expect(at('resets today 3am')).toBe('2026-11-19T03:00:00.000Z')
+    // a clock written with stops: "5 p.m.", and the same without its last stop
+    expect(at('resets 5 p.m.')).toBe('2026-11-19T17:00:00.000Z')
+    expect(at('resets 5 p.m')).toBe('2026-11-19T17:00:00.000Z')
     expect(at('resets 2:10am')).toBe('2026-11-20T02:10:00.000Z')
     expect(at('Claude usage limit reached. Your limit will reset at 3pm')).toBe('2026-11-19T15:00:00.000Z')
     expect(at('resets noon')).toBe('2026-11-19T12:00:00.000Z')
@@ -217,6 +230,8 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(resetOf('resets in 3 elephants', now, 'UTC')).toEqual({ when: 'in 3 elephants' })
     expect(resetOf('resets 31:99pm', now, 'UTC')).toEqual({ when: '31:99pm' })
     expect(resetOf('resets Nov 42, 5pm', now, 'UTC')).toEqual({ when: 'Nov 42' })
+    // a reset whose words are blank name nothing
+    expect(resetOf('resets  · 5pm', now, 'UTC')).toBeUndefined()
     // each CLI's own run-out words name when it comes back, so its run-out carries a moment, not only words
     for (const [words, iso] of [
       ["You've hit your 5-hour limit · resets 2:10am", '2026-11-20T02:10:00.000Z'],
