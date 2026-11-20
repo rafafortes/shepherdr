@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path'
 import { Emitter } from '../source.ts'
 import { home, readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
+import { stripControl } from '../../shared/keys.ts'
 import { dropped, herdr, isPassing, missing, retrying, startDelays, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
 import { agyScreenBackground, ClaudeSessions, Procs, screenBackground, servesCommand, sessionBackground, type Background } from './readers/background.ts'
 import { claudeHome, claudeLogPath, cwdCandidates, findAgyLog, findClaudeLog, findCodexLog, findLog, findOpencodeLog, findPiLog, logKind, type LogCwd } from './readers/find.ts'
@@ -1620,11 +1621,13 @@ export class Agents extends Emitter<Events> {
    *  it shows as you type, so while it still sits in the input, Enter goes again; one that never runs is wiped from
    *  the input and fails, so the chat says so instead of waiting on it. */
   private async put(key: string, item: OutItem) {
-    await herdr.prompt(this.records[key].name, item.text)
+    // only the pane is cleaned: item.text stays the original in the chat log and in what went in
+    const text = stripControl(item.text)
+    await herdr.prompt(this.records[key].name, text)
     const pane = item.command && this.info(key)?.pane_id
     if (!pane) return
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-    const read = async () => leftAtPrompt(await herdr.read(pane, 'text', 30).catch(() => ''), item.text)
+    const read = async () => leftAtPrompt(await herdr.read(pane, 'text', 30).catch(() => ''), text)
     // twice, a moment apart: a screen not yet redrawn must not get an Enter that picks from the menu it opened
     const left = async () => (await read()) && (await sleep(this.commandMs / 2), await read())
     for (let i = 0; i < 3; i++) {
@@ -1632,8 +1635,8 @@ export class Agents extends Emitter<Events> {
       if (!(await left())) return
       if (i < 2) await herdr.paneKeys(pane, ['enter'])
     }
-    await herdr.paneKeys(pane, Array(item.text.length + 2).fill('backspace')).catch(() => undefined)
-    throw new Error(`${item.text.trim().split(/\s/)[0]} didn't run in the terminal.`)
+    await herdr.paneKeys(pane, Array(text.length + 2).fill('backspace')).catch(() => undefined)
+    throw new Error(`${text.trim().split(/\s/)[0]} didn't run in the terminal.`)
   }
 
   /** how long a CLI has to run a slash command before its input is looked at */
@@ -1758,7 +1761,7 @@ export class Agents extends Emitter<Events> {
 
   async text(key: string, text: string) {
     const a = this.info(key)
-    if (a) await herdr.paneText(a.pane_id, text)
+    if (a) await herdr.paneText(a.pane_id, stripControl(text))
   }
 
   /** its terminal's recent lines and the pane's size, so a screen draws them at its real width; the size is read again
