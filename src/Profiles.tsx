@@ -6,15 +6,16 @@ import clsx from 'clsx'
 import { useEffect, useState } from 'react'
 import { waitingKind } from '@shared/apply-waiting.ts'
 import type { ProfileChange, ProfilePreview, ProfileRefusal, ProfileScheduleRow, ProfileSummary, ProfilesView } from '@shared/types.ts'
+import { useClock } from './clock.ts'
 import { act, useSnap } from './kernel.ts'
 import { askWaitingMany } from './apply-waiting.tsx'
 import { Anchored, OnTop } from './anchored.tsx'
 import { Dialog } from './rowmenu.tsx'
 import { Ghost, Menu, MenuItem, MenuLabel, MenuSeparator, Primary, Small, Tab, Tabs, field } from './ui.tsx'
 
-/** a time in words on the screen: just now, 5 min ago, 2 h ago, 3 d ago */
-function since(t: number) {
-  const s = Math.max(0, (Date.now() - t) / 1000)
+/** a time in words at the screen clock's `now`: just now, 5 min ago, 2 h ago, 3 d ago */
+function since(t: number, now: number) {
+  const s = Math.max(0, (now - t) / 1000)
   return s < 60 ? 'just now' : s < 3600 ? `${Math.floor(s / 60)} min ago` : s < 86400 ? `${Math.floor(s / 3600)} h ago` : `${Math.floor(s / 86400)} d ago`
 }
 const shown = (v: string | null) => v ?? 'not set'
@@ -44,6 +45,7 @@ function Refused({ text }: { text: string }) {
 type Open = { kind: 'preview'; name: string } | { kind: 'save' } | { kind: 'undo' } | { kind: 'manage' } | null
 
 export function ProfilesBar({ phone, limits = false }: { phone: boolean; limits?: boolean }) {
+  const now = useClock()
   const snap = useSnap()
   const [view, setView] = useState<ProfilesView | null>(null)
   const [menu, setMenu] = useState(false)
@@ -70,7 +72,7 @@ export function ProfilesBar({ phone, limits = false }: { phone: boolean; limits?
   const { last, undo } = view
   const matched = last && last.name === view.active
   const status = matched
-    ? `Applied ${since(last.at)}`
+    ? `Applied ${since(last.at, now)}`
     : view.active === 'Custom' && last
       ? `Changed since ${last.name} was applied`
       : view.profiles.length
@@ -102,7 +104,7 @@ export function ProfilesBar({ phone, limits = false }: { phone: boolean; limits?
                 <>
                   <MenuLabel>Apply</MenuLabel>
                   {view.profiles.map((p) => (
-                    <MenuItem key={p.name} hint={`${holds(p)} · ${p.applied ? `applied ${since(p.applied)}` : 'not applied yet'}`} onClick={() => pick({ kind: 'preview', name: p.name })}>
+                    <MenuItem key={p.name} hint={`${holds(p)} · ${p.applied ? `applied ${since(p.applied, now)}` : 'not applied yet'}`} onClick={() => pick({ kind: 'preview', name: p.name })}>
                       {`Apply ${p.name}…`}
                     </MenuItem>
                   ))}
@@ -448,6 +450,7 @@ function ScheduleForm({ name, row, onNote, onDone, onCancel }: { name: string; r
 /** Manage profiles: rename one, or delete it (its saved values go; the undo points that name it stay until they are used),
  *  and its schedules: each one in words, with its next and last run, changed, switched on or off, or removed */
 function ManageDialog({ onClose, onNote }: { onClose: () => void; onNote: (s: string) => void }) {
+  const now = useClock()
   const [list, setList] = useState<ProfileSummary[]>([])
   const [edit, setEdit] = useState<{ name: string; mode: 'rename' | 'delete'; to: string } | null>(null)
   // a schedule's editor: of a profile, and which one (none: a new one)
@@ -522,7 +525,7 @@ function ManageDialog({ onClose, onNote }: { onClose: () => void; onNote: (s: st
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate font-medium text-fg">{p.name}</span>
-                    <Small>{`${holds(p)} · saved ${since(p.saved)}${p.applied ? ` · applied ${since(p.applied)}` : ''}`}</Small>
+                    <Small>{`${holds(p)} · saved ${since(p.saved, now)}${p.applied ? ` · applied ${since(p.applied, now)}` : ''}`}</Small>
                   </div>
                   <Ghost onClick={() => setEdit({ name: p.name, mode: 'rename', to: p.name })}>Rename</Ghost>
                   <Ghost onClick={() => setEdit({ name: p.name, mode: 'delete', to: p.name })}>Delete</Ghost>

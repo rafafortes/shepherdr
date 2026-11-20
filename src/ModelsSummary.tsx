@@ -19,6 +19,7 @@ import type {
   SummaryUsage,
   SummaryWarning,
 } from '@shared/types.ts'
+import { useClock } from './clock.ts'
 import { openPage } from './settings-parts.tsx'
 import { ageWords, shareOf, tokens, windowWords } from '../shared/quota-words.ts'
 import { harnessGroups, inHarness } from '../shared/harness.ts'
@@ -171,6 +172,8 @@ export default function ModelsSummary({
 }) {
   const caps: CapsText = s.caps
   const cap = { caps, open: capOpen, onOpen: onCapOpen }
+  // quota ages and refill times tick on the screen's clock, not on a snapshot the heartbeat keeps unchanged
+  const now = useClock()
   return (
     <section aria-label="Summary" className="flex w-full flex-col gap-4 pt-2">
       <h2 className="font-medium">Summary</h2>
@@ -179,9 +182,9 @@ export default function ModelsSummary({
       {s.backfilled === undefined ? <Small className="text-pretty">Reading the logs once from their start: the numbers grow until it is done.</Small> : null}
       {s.providers.length ? (
         phone ? (
-          <Cards providers={s.providers} now={s.at} cap={cap} />
+          <Cards providers={s.providers} now={now} cap={cap} />
         ) : (
-          <Table providers={s.providers} now={s.at} cap={cap} />
+          <Table providers={s.providers} now={now} cap={cap} />
         )
       ) : (
         <Small className="text-pretty">Nothing configured, run or used yet.</Small>

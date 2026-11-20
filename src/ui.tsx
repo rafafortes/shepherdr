@@ -18,8 +18,9 @@ import {
   type TextareaHTMLAttributes,
 } from 'react'
 import { ChevronUpDownIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/16/solid'
-import type { Status, Task, Report } from '@shared/types.ts'
+import { STATUS_CADENCE_MIN, type Status, type Task, type Report } from '@shared/types.ts'
 import { span } from '@shared/when.ts'
+import { useClock } from './clock.ts'
 import { TALKING, type Sample } from './meter.ts'
 import { useMotion } from './motion.ts'
 
@@ -297,12 +298,8 @@ export function Waves({ className }: { className?: string }) {
 
 /** minutes and seconds since a moment, ticking: "0:42" */
 export function useElapsed(since: number) {
-  const [, tick] = useState(0)
-  useEffect(() => {
-    const t = setInterval(() => tick((x) => x + 1), 1000)
-    return () => clearInterval(t)
-  }, [])
-  const s = Math.max(0, Math.floor((Date.now() - since) / 1000))
+  const now = useClock(1000)
+  const s = Math.max(0, Math.floor((now - since) / 1000))
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
@@ -311,12 +308,8 @@ export function useElapsed(since: number) {
  * 9:00 · in 6h"); once its time has come, "Starts now", until its first turn takes that row's line over.
  */
 function ScheduledLine({ t }: { t: Task }) {
-  const [, tick] = useState(0)
-  useEffect(() => {
-    const x = setInterval(() => tick((n) => n + 1), 20_000)
-    return () => clearInterval(x)
-  }, [])
-  const left = (t.scheduled ?? 0) - Date.now()
+  const now = useClock()
+  const left = (t.scheduled ?? 0) - now
   // its time has come and its first turn has not taken the line over yet: "Starts now" alone says it
   if (left <= 0) return <>{t.sub}</>
   return (
@@ -439,6 +432,22 @@ export function etaShort(eta: number) {
 }
 
 /**
+ * A report's age and time left at the screen clock's `now`, counted here instead of waiting for a snapshot that keeps
+ * its revision. A line that waits on you is frozen by its own rule; an older snapshot without `at` keeps the numbers
+ * the server sent. A working line counts down from when the agent reported it, and turns older at the same cadence the
+ * server uses, so a heartbeat that redraws nothing still moves "Working · 5m" and "12m ago".
+ */
+function reportNumbers(w: Report, now: number): { eta?: number; stale?: number } {
+  if (w.paused || w.at === undefined) return { eta: w.eta, stale: w.stale }
+  const spent = (now - w.at) / 60_000
+  const older = w.stale !== undefined || spent >= Math.min(STATUS_CADENCE_MIN, w.left ?? STATUS_CADENCE_MIN)
+  return {
+    eta: w.left === undefined ? w.eta : Math.max(0, Math.round(w.left - spent)),
+    stale: older ? Math.max(0, Math.floor(spent)) : undefined,
+  }
+}
+
+/**
  * A task row's status mark: working, the dot's pie shows the % done and the minutes left sit small under it, in the
  * readable work text colour, level with the status line, centred on the dot without widening its column; the status line keeps
  * the row's whole width. Anything else is the dot alone; frozen while it waits on you, the % it stopped at stays in its
@@ -446,17 +455,25 @@ export function etaShort(eta: number) {
  */
 export function TaskDot({ s, w, under }: { s: Status; w?: Report; under?: boolean }) {
   const dot = <Dot s={s} p={w?.progress} frozen={w?.paused ? w : undefined} />
+  if (s !== 'work' || !w || w.paused || w.eta === undefined) return dot
+  return <EtaDot dot={dot} w={w} under={under} />
+}
+
+/** The minutes under a working dot, counted by the screen's clock: only this label redraws when that minute moves on. */
+function EtaDot({ dot, w, under }: { dot: ReactNode; w: Report; under?: boolean }) {
+  const now = useClock()
+  const { eta, stale } = reportNumbers(w, now)
   // a stale line's time left has counted down to a number that no longer means it is nearly done: the row shows the
   // line's age instead, so keep the dot's pie and drop the minutes under it
-  if (s !== 'work' || !w || w.paused || w.eta === undefined || w.stale !== undefined) return dot
+  if (eta === undefined || stale !== undefined) return dot
   return (
     <span className="mt-[3px] flex w-3.5 shrink-0 flex-col items-center self-stretch phone:mt-1 phone:w-4">
       {dot}
       {/* beside the status line: with a line under it (what the agent runs on, RowText's more), one line higher */}
       <span aria-hidden className={clsx('mt-auto text-[0.625rem]/4 font-semibold whitespace-nowrap text-work-fg tabular-nums phone:text-[0.6875rem]/5', under && 'mb-[17px] phone:mb-[21px]')}>
-        {etaShort(w.eta)}
+        {etaShort(eta)}
       </span>
-      <span className="sr-only">{`, about ${minutesLeft(w.eta).replace(/^~/, '')} left`}</span>
+      <span className="sr-only">{`, about ${minutesLeft(eta).replace(/^~/, '')} left`}</span>
     </span>
   )
 }
@@ -464,11 +481,12 @@ export function TaskDot({ s, w, under }: { s: Status; w?: Report; under?: boolea
 /** The quiet words at the end of an agent's status line. Past the cadence, its age ("12m ago") and no time left: an
  *  old line does not read as current. Otherwise in a header: the minutes left ("~12 min", "~12 min left" when wide),
  *  or frozen while it waits on you, the % it stopped at. In a row nothing: the minutes sit under the dot, which keeps the %. */
-function reportEnd(w: Report, head: boolean, left: boolean) {
-  if (w.stale !== undefined) return `${w.stale}m ago`
+function reportEnd(w: Report, head: boolean, left: boolean, now: number) {
+  const { eta, stale } = reportNumbers(w, now)
+  if (stale !== undefined) return `${stale}m ago`
   if (!head) return ''
   if (w.paused) return `${w.progress}%`
-  return w.eta !== undefined ? `${minutesLeft(w.eta)}${left ? ' left' : ''}` : ''
+  return eta !== undefined ? `${minutesLeft(eta)}${left ? ' left' : ''}` : ''
 }
 
 /**
@@ -480,7 +498,7 @@ function reportEnd(w: Report, head: boolean, left: boolean) {
  * status line's 40 characters, and never more than three.
  */
 export function ReportLine({ w, head = false, wrap = false }: { w: Report; head?: boolean; wrap?: boolean }) {
-  const end = reportEnd(w, head, head && !wrap)
+  const end = reportEnd(w, head, head && !wrap, useClock())
   const tail = end ? (
     <span className="whitespace-nowrap text-fg3 tabular-nums">
       {wrap ? ' ' : ''}· {end}
