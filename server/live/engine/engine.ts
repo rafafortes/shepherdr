@@ -1059,9 +1059,11 @@ export class Engine extends Emitter<Events> {
    *  still read their logs. A coordinator's chat is kept even when its space is gone: removing a space keeps its chat
    *  and brings it back if the space is added again (source.ts removeSpace), so it can still be opened. */
   private pruneAgentRecords() {
-    // a tasks.json that could not be read is frozen (store.ts) and this.data holds its empty fallback, not the truth:
-    // pruning against it would drop every task's chat records. Leave them until someone puts the file back.
-    if (readOnly(join(this.dir, 'tasks.json'))) return
+    // a tasks.json that could not be read is frozen (store.ts), and a missing or empty one is a store never written or
+    // torn off whole: in each case this.data holds an empty fallback, not the truth. Pruning against it would drop every
+    // task's chat records. Leave them until the file is really there.
+    const file = join(this.dir, 'tasks.json')
+    if (readOnly(file) || !existsSync(file) || statSync(file).size === 0) return
     const tasks = new Set(this.tasks.map((t) => t.id))
     this.agents.prune((key) => !key.includes('/') || tasks.has(key.split('/')[0]))
   }

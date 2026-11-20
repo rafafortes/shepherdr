@@ -44,6 +44,22 @@ describe('the engine prunes real records on a fixture home', () => {
     }
   })
 
+  test('a missing or empty tasks.json is not treated as an empty task list', () => {
+    for (const contents of [undefined, '']) {
+      const home = tmp(contents === undefined ? 'engine-prune-missing' : 'engine-prune-empty')
+      realWriteJson('agents.json', Object.fromEntries(['T-1/Agent', 'p:box:~'].map((key) => [key, record(key)])), home)
+      if (contents !== undefined) writeFileSync(join(home, 'tasks.json'), contents)
+      const { agents, engine } = boot(home)
+      try {
+        expect(engine.tasks).toEqual([])
+        expect(Object.keys(agents.records).sort()).toEqual(['T-1/Agent', 'p:box:~'])
+      } finally {
+        engine.stop()
+        agents.stop()
+      }
+    }
+  })
+
   test('a tasks.json that could not be read freezes the prune: no chat loses its record', () => {
     const home = tmp('engine-prune-frozen')
     realWriteJson('agents.json', Object.fromEntries(['T-1/Agent', 'p:box:~'].map((key) => [key, record(key)])), home)

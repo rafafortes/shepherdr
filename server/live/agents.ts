@@ -37,7 +37,8 @@ const logName = (f: string) => f.slice(f.lastIndexOf('/') + 1)
  *  agents.json for ever. The last sessions are the ones the agent resumes from and a chat reads first. A chat that has
  *  been through more than this many sessions loses the transcript of the oldest ones; the bound is high enough that an
  *  ordinary task keeps all its history, and it is what keeps a long-lived record from growing the store without limit.
- *  Applied on load (uniqueLogs) and as sessions are added (addLog). */
+ *  The usage feed reads these paths too, so a trimmed session stops feeding new usage; what was counted stays. Applied
+ *  on load (uniqueLogs) and as sessions are added (addLog). */
 export const MAX_LOGS = 32
 
 /** the logs with each one once, where it first came, by the path it was named by last (a session carried to another
