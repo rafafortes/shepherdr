@@ -68,6 +68,7 @@ export function sweepTaskTmp(keep: Set<string>): number {
       if (!lstatSync(path).isDirectory()) continue
       rmSync(path, { recursive: true, force: true })
       removed++
+      // coverage-exempt: a folder that vanishes or cannot be removed here needs no test; the next sweep sees it
     } catch {
       /* gone already, or not ours to remove */
     }

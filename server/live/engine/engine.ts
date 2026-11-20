@@ -1053,13 +1053,18 @@ export class Engine extends Emitter<Events> {
     this.sweeps.push(stalls)
     // a restart is where a cleanup that never finished leaves its mark: drop records no screen can reach (PERFS-12)
     this.pruneAgentRecords()
-    // and sweep the task temp folders of tasks that are gone or archived, without touching anything outside the root
-    this.sweepTaskTmp()
+    // and sweep the task temp folders of tasks that are gone or archived, without touching anything outside the root.
+    // Only the server that owns these tasks may sweep the shared root: a proof server (or another worktree's dev server)
+    // has no tasks of its own here and must not remove the folders of tasks running under another Shepherdr home.
+    if (launchesAgents()) this.sweepTaskTmp()
   }
 
   /** at start: the temp folders of tasks that no longer exist or were archived have no owner, so they go. A task that
-   *  is merely Done keeps its folder until cleanup (or keeps it with its kept work), and a live one always keeps it. */
+   *  is merely Done keeps its folder until cleanup (or keeps it with its kept work), and a live one always keeps it.
+   *  An unreadable, missing or empty tasks.json is not an empty task list: leave every folder alone until one can be read. */
   private sweepTaskTmp() {
+    const file = join(this.dir, 'tasks.json')
+    if (readOnly(file) || !existsSync(file) || statSync(file).size === 0) return
     sweepTaskTmp(new Set(this.tasks.filter((t) => !t.archived).map((t) => t.id)))
   }
 

@@ -352,7 +352,9 @@
   headless runs as both `TMPDIR` and `SHEPHERDR_TMP`: proofs, proof homes (`SHEPHERDR_HOME=$SHEPHERDR_TMP/home`),
   screenshots and scratch go there. Putting a task away stops whatever still runs from that folder and removes it; a task
   that keeps work keeps its folder, named in `shepherdr status` beside the kept worktree, until that work is removed. At
-  start the server sweeps folders of tasks that no longer exist or were archived, and touches nothing outside that root.
+  start only the server that owns those tasks sweeps their folders, and it touches nothing outside that root. A task on
+  another machine gets its folder on that machine as well; put-away and the start sweep run on the main server and cannot
+  reach the copy there, so cleaning the remote copy is left to that machine.
 
   Something still running in its space puts it all off until later. You can also just ask its coordinator to merge it.
   Task agents learn the way from brief to merged from [shepherdr-agent](../skill/shepherdr-agent/SKILL.md): the review the

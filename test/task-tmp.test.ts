@@ -144,6 +144,27 @@ describe('a task temporary folder', () => {
     expect(w.engine.keptLeftovers()[0]).toContain(`temp folder ${dir}`)
   })
 
+  test('a second server that may start no agent leaves the shared root alone', () => {
+    const dir = ensureTaskTmp('FOREIGN-1')
+    const saved = process.env.SHEPHERDR_LAUNCH_AGENTS
+    try {
+      delete process.env.SHEPHERDR_LAUNCH_AGENTS
+      // a proof server (or another worktree's dev server) has no tasks here: it must not sweep another home's folders
+      world()
+      expect(existsSync(dir)).toBe(true)
+    } finally {
+      if (saved === undefined) delete process.env.SHEPHERDR_LAUNCH_AGENTS
+      else process.env.SHEPHERDR_LAUNCH_AGENTS = saved
+    }
+  })
+
+  test('a home without a readable tasks.json leaves the folders alone', () => {
+    const dir = ensureTaskTmp('UNREAD-1')
+    // this test's home is fresh: no tasks.json yet is not an empty task list (PERFS-12's guard, the same here)
+    world()
+    expect(existsSync(dir)).toBe(true)
+  })
+
   test('at start folders of gone or archived tasks are swept; nothing outside the root is touched', async () => {
     const w = world()
     const p = await w.places.add(repo(), 'sweep')
