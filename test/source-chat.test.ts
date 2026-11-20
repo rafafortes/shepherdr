@@ -1048,3 +1048,21 @@ describe("a tile's small copy of a chat's picture or video", () => {
     }
   })
 })
+
+/* SHE-99: the live source's watched chats are the ones the memory sweep leaves alone */
+describe('chat memory', () => {
+  test('a chat the screen watches keeps its events through a sweep', () => {
+    const key = 'memory-watched/Agent'
+    const live = src as unknown as { watched: string[] }
+    const was = live.watched
+    live.watched = [key]
+    try {
+      const events = (src.chats as unknown as { events: Map<string, object[]> }).events
+      events.set(key, [{ kind: 'agent', id: 'a', at: 1, text: 'Hello.' }])
+      src.chats.sweep()
+      expect(src.chats.memory().holders.some((h) => h.key === key)).toBe(true)
+    } finally {
+      live.watched = was
+    }
+  })
+})

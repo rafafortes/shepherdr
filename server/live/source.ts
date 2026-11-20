@@ -191,6 +191,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     (k) => this.chatName(k),
     () => this.user,
     (p) => this.peerOf(p),
+    (k) => this.watched.includes(k),
   )
   engine = new Engine(this.agents, this.chats, this.places, this.settings)
   automations = new Automations()
@@ -512,6 +513,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.sayTookOver()
     // watched chats: read new log lines once a second; schedules once a minute
     this.timers.push(setInterval(() => this.stall.run('pollChats', () => this.pollChats()), 1000))
+    // parsed chat events are bounded: idle chats put theirs away every ten minutes (PERFS-07)
+    this.timers.push(setInterval(() => this.stall.run('chatMemory', () => this.chats.sweep()), 600_000))
     // a ledger from before the harness keys: its run-outs take the keys of their chats' CLIs (usage-ledger.ts), then the feed reads on
     this.usage.migrateRunOuts((chat) => this.agents.records[chat]?.kind)
     if (process.env.NODE_ENV !== 'test') this.usageFeed.start()
@@ -1176,6 +1179,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   chat(key: string): Chat | undefined {
     if (this.peers?.owner(key)) return this.peers.chat(key)
+    // a GET /api/chat or a 'chat' emit is the operator reading it: keep its events through the next memory sweep
+    this.chats.seen(key)
     const c = this.withAdvice({ ...this.chats.chat(key), restart: this.restartHintOf(key) })
     return key.includes('/') ? c : this.withAsks(c)
   }

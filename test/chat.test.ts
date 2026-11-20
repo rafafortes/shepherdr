@@ -1,6 +1,6 @@
 // The chat's plain rules: day lines and search in a chat; and the built chat's cache (SHE-68).
 import { describe, expect, test } from 'bun:test'
-import { renameSync, writeFileSync } from 'node:fs'
+import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { dayLabel, findIn } from '../plugins/chat/days.ts'
 import type { Message } from '../shared/types.ts'
@@ -63,11 +63,13 @@ const agentsForChat = () => {
     procs: { list: () => [] },
   }
 }
-const chatWith = (agents = agentsForChat()) =>
+const chatWith = (agents: object = agentsForChat(), watched?: (key: string) => boolean) =>
   new Chats(
     agents as never,
     (k) => k,
     () => 'You',
+    undefined,
+    watched,
   )
 
 /** what a CLI's reader left in the log, with the revision a real read would have bumped */
@@ -246,5 +248,188 @@ describe('a log read again from its start', () => {
       ['agent', 'Hi there.'],
       ['you', 'One more.'],
     ])
+  })
+})
+
+/* SHE-99: parsed chat events are bounded; an idle chat rebuilds its history when it is opened again */
+
+const idleAgents = (status: (key: string) => string = () => 'gone', record: (key: string) => object | undefined = () => undefined) => ({ ...agentsForChat(), status, record })
+
+const withClock = <T>(fn: (advance: (ms: number) => void) => T): T => {
+  const real = Date.now
+  let at = 1_700_000_000_000
+  Date.now = () => at
+  try {
+    return fn((ms) => {
+      at += ms
+    })
+  } finally {
+    Date.now = real
+  }
+}
+
+const evLines = (key: string, n: number) => Array.from({ length: n }, (_, i) => ({ kind: i % 2 ? 'agent' : 'user', id: `${key}-${i}`, at: 1000 + i, text: `A line ${i}.` }))
+
+/** a pi log of one message per text, written where a chat's reader finds it */
+const piFile = (dir: string, texts: string[], id: string) => {
+  const file = join(dir, 'session.jsonl')
+  const lines = [
+    { type: 'session', version: 3, id, timestamp: '2026-10-13T20:52:53.359Z', cwd: '/w' },
+    ...texts.map((text, i) => ({
+      type: 'message',
+      id: `e${i}`,
+      parentId: null,
+      timestamp: 1000 + i,
+      message: { role: i % 2 ? 'assistant' : 'user', content: [{ type: 'text', text }], timestamp: 1000 + i },
+    })),
+  ]
+  writeFileSync(file, `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`)
+  return file
+}
+
+describe('chat events kept in memory', () => {
+  test('a sweep caps the events kept across many chats, dropping the least recently read first', () => {
+    withClock((advance) => {
+      const chats = chatWith(idleAgents())
+      chats.maxEvents = 100
+      chats.idleMs = Infinity
+      for (let c = 0; c < 10; c++) {
+        const key = `cap-${c}/Agent`
+        reached(chats, key, ...evLines(key, 30))
+        chats.seen(key)
+        advance(1000)
+      }
+      expect(chats.memory().events).toBe(300)
+      expect(chats.memory().holders[0]?.events).toBe(30)
+      const out = chats.sweep()
+      expect(out.evicted).toBe(7)
+      expect(out.events).toBe(90)
+      expect(chats.memory().events).toBeLessThanOrEqual(chats.maxEvents)
+      const kept = chats.memory().holders.map((h) => h.key)
+      expect(kept).not.toContain('cap-0/Agent')
+      expect(kept).toContain('cap-9/Agent')
+    })
+  })
+
+  test('a chat no one has read for hours is evicted, and a fresh read keeps it', () => {
+    withClock((advance) => {
+      const chats = chatWith(idleAgents())
+      chats.maxEvents = Infinity
+      const key = 'idle/Agent'
+      reached(chats, key, ...evLines(key, 5))
+      chats.seen(key)
+      expect(chats.sweep().evicted).toBe(0)
+      advance(chats.idleMs - 1000)
+      expect(chats.sweep().evicted).toBe(0)
+      advance(2000)
+      expect(chats.sweep().evicted).toBe(1)
+      expect(chats.memory().events).toBe(0)
+      chats.seen(key)
+      reached(chats, key, ...evLines(key, 5))
+      expect(chats.sweep().evicted).toBe(0)
+      expect(chats.memory().events).toBe(5)
+    })
+  })
+
+  test('an evicted chat rebuilds its whole history on the next open, not on a background pull', () => {
+    withClock((advance) => {
+      const dir = tmp('chat-evict')
+      const file = piFile(
+        dir,
+        Array.from({ length: 8 }, (_, i) => `Line ${i}.`),
+        'ev-1',
+      )
+      const key = 'evict/Agent'
+      const record = { kind: 'pi', logs: [file], finished: true }
+      const chats = chatWith(idleAgents(undefined, () => record))
+      const before = chats.chat(key).messages.map((m) => [m.who, m.text])
+      expect(before.length).toBe(8)
+      // its first load starts the idle window: a chat pulled a moment ago is not one nobody read for hours
+      expect(chats.sweep().evicted).toBe(0)
+      advance(chats.idleMs + 1000)
+      expect(chats.sweep().evicted).toBe(1)
+      expect(chats.memory().events).toBe(0)
+      // the periodic passes leave it cold: nothing is reread until a chat() shows it again
+      expect(chats.pull(key)).toBe(false)
+      expect(chats.memory().events).toBe(0)
+      expect(chats.chat(key).messages.map((m) => [m.who, m.text])).toEqual(before)
+      expect(chats.memory().events).toBeGreaterThan(0)
+    })
+  })
+
+  test('a chat whose agent starts again reads its new log lines without waiting to be opened', () => {
+    withClock((advance) => {
+      const dir = tmp('chat-resume')
+      const file = piFile(dir, ['Hello.'], 're-1')
+      const key = 'resume/Agent'
+      const record = { kind: 'pi', logs: [file], finished: true }
+      const chats = chatWith(idleAgents(undefined, () => record))
+      expect(chats.chat(key).messages.map((m) => m.text)).toEqual(['Hello.'])
+      advance(chats.idleMs + 1000)
+      expect(chats.sweep().evicted).toBe(1)
+      // the task is worked on again: its agent resumes the same session and writes a new line
+      record.finished = false
+      const next = { type: 'message', id: 'e1', parentId: null, timestamp: 2000, message: { role: 'assistant', content: [{ type: 'text', text: 'Back at it.' }], timestamp: 2000 } }
+      writeFileSync(file, `${readFileSync(file, 'utf8')}${JSON.stringify(next)}\n`)
+      expect(chats.pull(key)).toBe(true)
+      expect(chats.chat(key).messages.map((m) => m.text)).toEqual(['Hello.', 'Back at it.'])
+    })
+  })
+
+  test('a chat the screen watches again is read without waiting to be opened', () => {
+    withClock((advance) => {
+      const dir = tmp('chat-watch-again')
+      const file = piFile(dir, ['Hello.'], 'wa-1')
+      const key = 'watch-again/Agent'
+      let watching = false
+      const chats = chatWith(
+        idleAgents(undefined, () => ({ kind: 'pi', logs: [file], finished: true })),
+        (k) => watching && k === key,
+      )
+      chats.chat(key)
+      advance(chats.idleMs + 1000)
+      expect(chats.sweep().evicted).toBe(1)
+      watching = true
+      expect(chats.pull(key)).toBe(true)
+      expect(chats.memory().events).toBeGreaterThan(0)
+    })
+  })
+
+  test('a watched chat, a live agent, an open question, a card and a reading log are never evicted', () => {
+    const watched = 'watched/Agent'
+    const working = 'working/Agent'
+    const blocked = 'blocked/Agent'
+    const live = 'live/Agent'
+    const question = 'question/Agent'
+    const card = 'card/Agent'
+    const reading = 'reading/Agent'
+    const menus = 'menus/Agent'
+    const idle = 'idle/Agent'
+    const statuses: Record<string, string> = { [working]: 'working', [blocked]: 'blocked' }
+    const records = new Map<string, object>([[live, { kind: 'pi', logs: [], started: 0 }]])
+    const chats = chatWith(
+      idleAgents(
+        (k) => statuses[k] ?? 'gone',
+        (k) => records.get(k),
+      ),
+      (k) => k === watched,
+    )
+    chats.maxEvents = 0
+    for (const key of [watched, working, blocked, live, question, card, reading, menus, idle]) reached(chats, key, ...evLines(key, 4))
+    reached(chats, question, {
+      kind: 'question',
+      id: 'q1',
+      at: 2000,
+      items: [{ question: 'Pick?', options: [{ label: 'A' }], multiSelect: false }],
+    })
+    chats.post(card, { id: 'ask:1', at: 2000, question: { id: 'ask:1', title: 'Pick?', kind: 'Plan', choices: [{ label: 'A' }], to: 'You' } })
+    chats.showStartMenu(menus, { title: 'Trust?', choices: ['Yes'], cursor: 0, screen: 'Trust?', all: 'Trust?' })
+    ;(chats as unknown as { reading: Set<string> }).reading.add(reading)
+    ;(chats as unknown as { commandMenus: Set<string> }).commandMenus.add(menus)
+    ;(chats as unknown as { events: Map<string, object[]> }).events.set('empty/Agent', [])
+    expect(chats.sweep().evicted).toBe(1)
+    const kept = chats.memory().holders.map((h) => h.key)
+    for (const key of [watched, working, blocked, live, question, card, reading, menus]) expect(kept).toContain(key)
+    expect(kept).not.toContain(idle)
   })
 })

@@ -269,6 +269,11 @@ export function sawReply(s: Pick<Shown, 'last' | 'on'>, text: string | undefined
  *  hundred MB (a long-lived coordinator's) never holds up the server, at a restart or as it grows */
 const PIECE = 2 << 20
 
+/** how many parsed events all chats may hold before a sweep evicts the coldest ones (PERFS-07) */
+const MAX_EVENTS = 100_000
+/** how long a chat no one has read may keep its parsed events, even when the total is under the cap */
+const EVICT_IDLE = 6 * 60 * 60_000
+
 export class Chats {
   private tails = new Map<string, LogTail>()
   private events = new Map<string, LogEvent[]>()
@@ -276,6 +281,11 @@ export class Chats {
   private where = new Map<string, Map<string, number>>()
   /** chats whose logs are still being read in the background */
   private reading = new Set<string>()
+  /** when the operator last opened each chat, and the logs it read: the memory sweep's LRU and its rewind list */
+  private lastRead = new Map<string, number>()
+  private logFiles = new Map<string, string[]>()
+  /** chats whose events were dropped: background pulls leave their logs alone until a chat() reads them again */
+  private cold = new Set<string>()
   /** a chat's logs were read in the background to their end: what it shows changed */
   onRead?: (key: string) => void
   private logs = new Map<string, ChatLog>()
@@ -295,12 +305,18 @@ export class Chats {
   /** how many times a chat's messages were built; a test reads it to prove an unchanged chat is built once */
   chatBuilds = 0
 
+  /** total events and idle time the sweep works to; a test lowers both */
+  maxEvents = MAX_EVENTS
+  idleMs = EVICT_IDLE
+
   constructor(
     private agents: Agents,
     private nameOf: (key: string) => string,
     private user: () => string,
     /** who a message from another agent says it is, as this machine can name it (live/source.ts: our own name for it) */
     private whoOf: (p: FromAgent) => Peer = (p) => ({ name: p.name }),
+    /** the chats the screen keeps open: never evict one that is watched (live/source.ts) */
+    private watched: (key: string) => boolean = () => false,
   ) {}
 
   /* ---------- Shepherdr's own log per chat ---------- */
@@ -325,8 +341,25 @@ export class Chats {
 
   /** a deleted task's chat: its log goes, and all that was read of it */
   forget(key: string) {
-    for (const m of [this.tails, this.events, this.where, this.reading, this.logs, this.menus, this.menuAt, this.shown, this.revs, this.acts, this.eventCloses, this.logRevs, this.chatCache])
+    for (const m of [
+      this.tails,
+      this.events,
+      this.where,
+      this.reading,
+      this.logs,
+      this.menus,
+      this.menuAt,
+      this.shown,
+      this.revs,
+      this.acts,
+      this.eventCloses,
+      this.logRevs,
+      this.chatCache,
+      this.lastRead,
+      this.logFiles,
+    ])
       m.delete(key)
+    this.cold.delete(key)
     rmSync(join(HOME, 'chatlog', `${safe(key)}.json`), { force: true })
   }
 
@@ -410,8 +443,16 @@ export class Chats {
   }
 
   /** read new lines of this chat's log files, up to PIECE in all (the rest follows in the background); true when
-   *  anything new came */
-  pull(key: string): boolean {
+   *  anything new came. A chat put away by the sweep waits for a chat() to bring its history back: the periodic
+   *  passes must not reread hundreds of logs just because their events were dropped */
+  pull(key: string, force = false): boolean {
+    if (this.cold.has(key)) {
+      // an agent that started again, or a chat the screen watches again, must read its log and rebuild: otherwise
+      // everything that pulls for it (pollChats, needs, questions) would keep seeing an empty history
+      const r = this.agents.record(key)
+      if (force || this.watched(key) || (r && !r.finished)) this.cold.delete(key)
+      else return false
+    }
     const { changed, behind } = this.read(key)
     if (behind) this.readOn(key)
     return changed
@@ -440,6 +481,7 @@ export class Chats {
   private readOnce(key: string): { changed: boolean; behind: boolean } | 'again' {
     const r = this.agents.record(key)
     if (!r) return { changed: false, behind: false }
+    this.logFiles.set(key, r.logs)
     let changed = false
     let behind = false
     let left = PIECE
@@ -483,6 +525,8 @@ export class Chats {
       this.events.set(key, all)
       this.where.set(key, where)
       this.revs.set(key, (this.revs.get(key) ?? 0) + 1)
+      // the first load starts the idle window: a chat pulled a moment ago is not one nobody read for hours
+      if (!this.lastRead.has(key)) this.lastRead.set(key, Date.now())
     }
     return { changed, behind }
   }
@@ -498,6 +542,62 @@ export class Chats {
       this.onRead?.(key)
     }
     setTimeout(step, 0)
+  }
+
+  /* ---------- keeping the parsed history bounded (PERFS-07) ---------- */
+
+  /** the operator opened this chat (a GET /api/chat or a 'chat' emit through source.chat): keep its events through
+   *  a sweep, and let a chat put away earlier rebuild its history now */
+  seen(key: string) {
+    this.lastRead.set(key, Date.now())
+    this.cold.delete(key)
+  }
+
+  /** the events held for each chat and their estimated bytes, biggest holder first: the audit's measure */
+  memory(): { events: number; bytes: number; holders: { key: string; events: number; bytes: number }[] } {
+    const holders = [...this.events].map(([key, ev]) => ({ key, events: ev.length, bytes: JSON.stringify(ev).length }))
+    holders.sort((a, b) => b.bytes - a.bytes)
+    return { events: holders.reduce((n, h) => n + h.events, 0), bytes: holders.reduce((n, h) => n + h.bytes, 0), holders }
+  }
+
+  /** put the parsed history of idle chats away, oldest read first, until none is idle or the total is under the cap.
+   *  Returns what it dropped and what is left; the next chat() reads a dropped chat's logs from their start again */
+  sweep(): { evicted: number; events: number } {
+    const keys = [...this.events.keys()].filter((key) => this.canEvict(key)).sort((a, b) => (this.lastRead.get(a) ?? 0) - (this.lastRead.get(b) ?? 0))
+    let events = 0
+    for (const ev of this.events.values()) events += ev.length
+    let evicted = 0
+    for (const key of keys) {
+      const n = this.events.get(key)?.length ?? 0
+      if (n === 0) continue
+      if (Date.now() - (this.lastRead.get(key) ?? 0) < this.idleMs && events <= this.maxEvents) break
+      this.evict(key)
+      events -= n
+      evicted++
+    }
+    return { evicted, events }
+  }
+
+  /** a chat whose events may be put away: not watched or being read, no live agent, nothing waiting on you */
+  private canEvict(key: string): boolean {
+    if (this.watched(key) || this.reading.has(key)) return false
+    const st = this.agents.status(key)
+    if (st === 'working' || st === 'blocked') return false
+    const r = this.agents.record(key)
+    if (r && !r.finished) return false
+    if (this.menus.has(key) || this.startScreens.has(key) || this.commandMenus.has(key)) return false
+    if (this.logs.has(key) && this.openPostedCached(key)) return false
+    return !this.openQuestionCached(key)
+  }
+
+  /** drop the events and their indexes, rewind the logs so a chat() rebuilds the whole history, and leave the chat
+   *  cold for background pulls: a sweep must not spend the next pass rereading the logs it just put away */
+  private evict(key: string) {
+    const logs = this.agents.record(key)?.logs ?? this.logFiles.get(key) ?? []
+    for (const m of [this.events, this.where, this.acts, this.eventCloses, this.chatCache]) m.delete(key)
+    this.revs.set(key, (this.revs.get(key) ?? 0) + 1)
+    for (const f of logs) this.tails.get(f)?.restart()
+    this.cold.add(key)
   }
 
   /** tokens this chat's agent has used, across all its sessions */
@@ -667,6 +767,11 @@ export class Chats {
   /** the question the CLI asks with its own tool, still open: nothing reached the agent after it */
   openQuestion(key: string): { id: string; at: number; items: { question: string; options: { label: string }[]; multiSelect: boolean }[] } | undefined {
     this.pull(key)
+    return this.openQuestionCached(key)
+  }
+
+  /** the same question from the events already read, without pulling the logs: the sweep asks this of many chats */
+  private openQuestionCached(key: string): { id: string; at: number; items: { question: string; options: { label: string }[]; multiSelect: boolean }[] } | undefined {
     const ev = this.events.get(key) ?? []
     const closeAt = this.lastEventClose(key)
     let answered: Set<string> | undefined
@@ -723,6 +828,11 @@ export class Chats {
   /** the posted card it waits on now, with when it was posted */
   private openPosted(key: string): Posted | undefined {
     this.pull(key)
+    return this.openPostedCached(key)
+  }
+
+  /** the same card from the log already loaded, without pulling the logs: the sweep asks this of many chats */
+  private openPostedCached(key: string): Posted | undefined {
     const l = this.log(key)
     // the one rule for a card and a CLI's own question alike (openQuestion): the human's words after it, hidden notes
     // included but never Shepherdr's own hidden news, or another agent's relay the agent takes as its prompt. Anything
@@ -990,7 +1100,9 @@ export class Chats {
   }
 
   chat(key: string): Chat {
-    this.pull(key)
+    // showing a chat again rebuilds the history the sweep put away, from its logs read from the start
+    this.cold.delete(key)
+    this.pull(key, true)
     const r = this.agents.record(key)
     const kind = r?.kind ?? 'claude'
     const user = this.user()
