@@ -123,8 +123,7 @@ export async function layout({ everything: wide = false, webkit = false } = {}) 
   const world = new DemoWorld()
   // the demo's HEIC pictures are files this browser cannot draw, not files retention removed: give them real bytes,
   // since a missing file now says so in place of the tile instead of falling back to a download tile
-  for (const name of ['x-photo.heic', 'x-a.heic', 'x-b.heic'])
-    world.files[`~/inbox/${name}`] = () => new Blob([new Uint8Array([1, 2, 3, 4, 5])], { type: 'image/heic' })
+  for (const name of ['x-photo.heic', 'x-a.heic', 'x-b.heic']) world.files[`~/inbox/${name}`] = () => new Blob([new Uint8Array([1, 2, 3, 4, 5])], { type: 'image/heic' })
   // one clock reading: pictures sent together share their time, and a millisecond ticking between two readings would
   // split them
   const now = Date.now()
