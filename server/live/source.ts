@@ -360,7 +360,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // a route provisioned while the loop stalls is answered late by its own timers: bindRoute waits for the loop to keep
     // up before it trusts a check, without polling herdr any more often than it does today
     this.agents.healthy = () => !this.stall.stalls.length || Date.now() - this.stall.stalls.at(-1)!.at > 1500
-    this.timers.push(setInterval(() => void this.drainRequestedNews(), 1000))
+    this.agents.timed = (label, f) => this.stall.run(label, f)
+    this.timers.push(setInterval(() => this.stall.run('drainRequestedNews', () => void this.drainRequestedNews()), 1000))
     this.agents.secretScope = (chat) => {
       const space = /^[^/]+\/(Agent|Reviewer)$/.test(chat) ? this.engine.task(chat.split('/')[0])?.project : this.places.find(chat)?.id === chat ? chat : undefined
       return space ? [space, placeId.machine(), 'all'] : undefined
@@ -373,8 +374,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       this.mirror.start()
       this.timers.push(setInterval(() => this.stall.run('followLogs', () => this.followLogs()), 5000))
       // the Everywhere defaults: the main machine's, read from its settings as they change
-      this.adoptEverywhere()
-      this.timers.push(setInterval(() => this.adoptEverywhere(), 3000))
+      this.stall.run('adoptEverywhere', () => this.adoptEverywhere())
+      this.timers.push(setInterval(() => this.stall.run('adoptEverywhere', () => this.adoptEverywhere()), 3000))
     }
     this.peers?.on('snapshot', () => {
       // another machine's task may be what a queued task here waits for
@@ -492,7 +493,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         setInterval(() => void this.sweepOrphans().catch(() => undefined), 3_600_000),
       )
       // browsers left idle (Settings, browser.idleClose): looked for once a minute
-      this.timers.push(setInterval(() => void this.browsers?.closeIdle().catch(() => undefined), 60_000))
+      this.timers.push(setInterval(() => this.stall.run('closeIdle', () => void this.browsers?.closeIdle().catch(() => undefined)), 60_000))
     }
     if (process.env.NODE_ENV !== 'test') {
       // coverage-exempt: the timer itself, like the browser sweeps' above (a test never parks this machine's agents);
@@ -518,8 +519,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     this.timers.push(setInterval(() => this.stall.run('runSchedules', () => this.runSchedules()), 60_000))
     // the quota reads: each minute looks for the reads that are due (each every ten minutes), the first one at once
     if (process.env.NODE_ENV !== 'test') {
-      void this.quotas.tick()
-      this.timers.push(setInterval(() => void this.quotas.tick(), 60_000))
+      void this.stall.run('quotas.tick', () => void this.quotas.tick())
+      this.timers.push(setInterval(() => this.stall.run('quotas.tick', () => void this.quotas.tick()), 60_000))
     }
     // a profile's schedule that came due while Shepherdr was off: the latest one applies now (profile-schedule.ts)
     this.profileSchedules.tick()
@@ -529,12 +530,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (process.env.NODE_ENV !== 'test')
       this.timers.push(
         setTimeout(() => {
-          void this.watchReturns().catch(() => undefined)
-          this.timers.push(setInterval(() => void this.watchReturns().catch(() => undefined), 60_000))
+          void this.stall.run('watchReturns', () => void this.watchReturns().catch(() => undefined))
+          this.timers.push(setInterval(() => this.stall.run('watchReturns', () => void this.watchReturns().catch(() => undefined)), 60_000))
         }, FIRST_LOOK) as unknown as ReturnType<typeof setInterval>,
       )
     // a question that waited long enough for the human goes to the advisor by itself (watchAdvice)
-    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => void this.watchAdvice().catch(() => undefined), 30_000))
+    if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.stall.run('watchAdvice', () => void this.watchAdvice().catch(() => undefined)), 30_000))
     // heartbeats: looked for twice a minute, so a busy coordinator gets its own soon after its turn ends
     this.timers.push(setInterval(() => this.stall.run('heartbeat', () => this.heartbeat()), 30_000))
     this.timers.push(setInterval(() => this.emit('snapshot'), 30_000))

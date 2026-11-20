@@ -303,6 +303,10 @@ export class Agents extends Emitter<Events> {
   /** whether its own event loop is keeping up: source.ts sets this from the stall watch. A loop that stalls answers its
    *  own timers and child processes late, so no route check is trusted until it is healthy again. Tests leave it true. */
   healthy: () => boolean = () => true
+  /** times this pass on source's stall watch (agents are built before source, so source injects it like `healthy`). When
+   *  one of these passes holds the loop, doctor must name it instead of saying no timed pass was slow. Tests leave it a
+   *  pass-through, or inject a watch on a held clock */
+  timed: <T>(label: string, f: () => T) => T = (_label, f) => f()
 
   private starting = new Map<string, Promise<AgentInfo | null>>()
   /** agents being stopped for a restart: what you send waits for the one it starts */
@@ -633,52 +637,56 @@ export class Agents extends Emitter<Events> {
     this.saidAt.clear()
     try {
       const list = await herdr.agents()
-      if (this.stopped) return
-      if (!this.reachable && BOX) console.info('shepherdr: herdr link recovered')
-      this.recovery.success()
-      this.retryAt = 0
-      this.reachable = true
-      this.lastReach = Date.now()
-      this.live = new Map(list.filter((a) => a.name).map((a) => [a.name!, a]))
-      for (const key of this.byName.values()) {
-        const now = this.status(key)
-        const was = this.told.get(key) ?? 'gone'
-        this.told.set(key, now)
-        if (was !== now) this.changed(key, now)
-      }
-      for (const r of Object.values(this.records)) {
-        if (!this.live.has(r.name) || r.finished) {
-          this.secretAccess.revoke(r.key)
-          this.routes.delete(r.key)
+      // everything after the herdr look is synchronous, and is the part of this pass that can hold the loop: a herdr
+      // list, settleLaunches and per-agent session follow. Timed together under one label, so a slow refresh is named.
+      this.timed('agents.refresh', () => {
+        if (this.stopped) return
+        if (!this.reachable && BOX) console.info('shepherdr: herdr link recovered')
+        this.recovery.success()
+        this.retryAt = 0
+        this.reachable = true
+        this.lastReach = Date.now()
+        this.live = new Map(list.filter((a) => a.name).map((a) => [a.name!, a]))
+        for (const key of this.byName.values()) {
+          const now = this.status(key)
+          const was = this.told.get(key) ?? 'gone'
+          this.told.set(key, now)
+          if (was !== now) this.changed(key, now)
         }
-      }
-      // Repair running sessions without interrupting them, including ones restored by herdr.
-      void this.readRuntime()
-      // Slow pane reads must not hold up transport health checks.
-      if (!this.readingBackground) {
-        this.readingBackground = true
-        void this.readBackground()
-          .catch(() => undefined)
-          .finally(() => {
-            this.readingBackground = false
-          })
-      }
-      // what each launch is really doing now, before the repair pass reads it: a pendingLaunch its launch is done with
-      // must not keep its route waiting for the next pass
-      this.settleLaunches()
-      const todo = this.repairTodo()
-      if (todo.length && Date.now() - this.routesAt > ROUTE_REPAIR_EVERY && !this.routing) {
-        this.routesAt = Date.now()
-        void this.repairRoutes(todo)
-      }
-      // learn log files herdr names (its agent integrations report them)
-      for (const [name, key] of this.byName) this.learnSession(key, this.live.get(name))
-      // and the session its hooks say it is in now, which herdr doesn't name: a /clear starts another
-      for (const key of this.byName.values()) this.followSession(key)
-      // what waits goes in as soon as its agent can take it
-      for (const key of new Set(this.outbox.map((o) => o.key))) if (!this.heldBy(key)) this.deliver(key)
-      this.checkStranded()
-      this.sub.set([{ type: 'pane.agent_status_changed' }, { type: 'pane.closed' }, { type: 'pane.created' }, ...[...this.watchedPanes].map((pane_id) => ({ type: 'pane.output_changed', pane_id }))])
+        for (const r of Object.values(this.records)) {
+          if (!this.live.has(r.name) || r.finished) {
+            this.secretAccess.revoke(r.key)
+            this.routes.delete(r.key)
+          }
+        }
+        // Repair running sessions without interrupting them, including ones restored by herdr.
+        void this.readRuntime()
+        // Slow pane reads must not hold up transport health checks.
+        if (!this.readingBackground) {
+          this.readingBackground = true
+          void this.readBackground()
+            .catch(() => undefined)
+            .finally(() => {
+              this.readingBackground = false
+            })
+        }
+        // what each launch is really doing now, before the repair pass reads it: a pendingLaunch its launch is done with
+        // must not keep its route waiting for the next pass
+        this.settleLaunches()
+        const todo = this.repairTodo()
+        if (todo.length && Date.now() - this.routesAt > ROUTE_REPAIR_EVERY && !this.routing) {
+          this.routesAt = Date.now()
+          void this.repairRoutes(todo)
+        }
+        // learn log files herdr names (its agent integrations report them)
+        for (const [name, key] of this.byName) this.learnSession(key, this.live.get(name))
+        // and the session its hooks say it is in now, which herdr doesn't name: a /clear starts another
+        for (const key of this.byName.values()) this.followSession(key)
+        // what waits goes in as soon as its agent can take it
+        for (const key of new Set(this.outbox.map((o) => o.key))) if (!this.heldBy(key)) this.deliver(key)
+        this.checkStranded()
+        this.sub.set([{ type: 'pane.agent_status_changed' }, { type: 'pane.closed' }, { type: 'pane.created' }, ...[...this.watchedPanes].map((pane_id) => ({ type: 'pane.output_changed', pane_id }))])
+      })
     } catch {
       if (BOX) this.retryAt = Date.now() + this.recovery.fail()
       if (this.reachable) {
