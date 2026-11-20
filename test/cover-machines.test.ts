@@ -3,12 +3,13 @@
 // worker in place of server/main.ts (process.execPath, which the main server starts its workers with, points at it),
 // serving a snapshot, actions and the live link. No real SSH, herdr, agent CLI or Shepherdr worker runs; the records
 // go in this file's own home under /tmp (test/preload.ts).
-import { afterAll, afterEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Action, Chat } from '../shared/types.ts'
 import { HOME, writeJson } from '../server/store.ts'
 import { Machines, codeVersion, machineHome } from '../server/live/machines.ts'
+import { WorkerHealth } from '../server/live/recovery.ts'
 import { helperVersion, type Probe, type Saved } from '../server/live/install.ts'
 import { tmp } from './tmp.ts'
 
@@ -422,7 +423,10 @@ describe('a restart of the main server', () => {
 })
 
 describe('shepherdr doctor', () => {
-  test('checks every machine again: the helper and worker again, and what each lacks or why it is out of reach', async () => {
+  test('reprobes every machine: repairs what is broken, leaves a current link running', async () => {
+    // a machine that already has this helper: its worker and live link are left alone
+    machine('doc-fit.test', { probe: looks({ home: remoteHome('doc-fit'), helper: HELPER }).text })
+    // live workers whose helper has gone missing since the last look: the fresh probe must still put it back
     machine('doc-chrome.test', {
       probe: looks({ home: remoteHome('doc-chrome'), tools: { herdr: true, git: true, perl: true, jsonpp: true, tar: true, pi: true } }).text,
       chromeCode: 1,
@@ -431,14 +435,20 @@ describe('shepherdr doctor', () => {
     machine('doc-out.test', { probe: looks({ home: remoteHome('doc-out') }).text, chromeCode: 1, chromeOut: 'fetching\ndone badly\n' })
     machine('doc-short.test', { probe: looks({ home: remoteHome('doc-short'), tools: { herdr: true, perl: true } }).text })
     machine('doc-gone.test', { probeCode: 255, probeErr: 'ssh: connect to host doc-gone.test port 22: Connection refused' })
-    const m = machines(['doc-chrome', 'doc-out', 'doc-short', 'doc-gone'].map((x) => saved(x)))
-    await until('all four to settle', () => m.list().length === 4 && m.list().every((l) => !l.busy && !l.connecting), 20_000)
+    const m = machines(['doc-fit', 'doc-chrome', 'doc-out', 'doc-short', 'doc-gone'].map((x) => saved(x)))
+    await until('all five to settle', () => m.list().length === 5 && m.list().every((l) => !l.busy && !l.connecting), 20_000)
+    const fit = linkOf(m, 'doc-fit')
     const chrome = linkOf(m, 'doc-chrome')
     const out = linkOf(m, 'doc-out')
-    await until('their workers and Chrome', () => !!chrome.worker && !!out.worker && !!chrome.chrome && !!out.chrome)
-    const before = [chrome.worker!.pid, out.worker!.pid]
+    await until('their workers, Chrome and links', () => !!fit.worker && !!chrome.worker && !!out.worker && !!chrome.chrome && !!out.chrome && fit.reachable && chrome.reachable && out.reachable)
+    const running = (l: Link) => {
+      if (!l.worker) throw new Error(`${l.rec.machine} has no worker`)
+      return l.worker
+    }
+    const before = [running(fit), running(chrome), running(out)].map((w) => w.pid)
 
     const expected = [
+      'doc-fit (doc-fit.test): healthy, left running',
       "doc-chrome (doc-chrome.test): helper put there again, worker started again; not there: gh (pull requests of GitHub repos), Claude Code, Codex; Chrome didn't install there: no space left on device",
       "doc-out (doc-out.test): helper put there again, worker started again; Chrome didn't install there: done badly",
       'doc-short (doc-short.test): needs git, perl (with JSON::PP), tar, an agent CLI (Claude Code, Codex or pi); not there: gh (pull requests of GitHub repos), Claude Code, Codex',
@@ -448,11 +458,106 @@ describe('shepherdr doctor', () => {
     expect(await m.doctor((w) => steps.push(w))).toEqual(expected)
     // each machine's line reaches the command's step channel as that machine is done, in the same words as the answer
     expect(steps).toEqual(expected)
-    // the workers were stopped and started again, and the helper sent again although it was this one's
-    expect(before.some(alive)).toBe(false)
-    expect(chrome.worker!.pid).not.toBe(before[0])
+    // the current machine kept its worker and needed no install; the two with a missing helper were killed and restarted
+    expect(running(fit).pid).toBe(before[0])
+    expect(kinds('doc-fit').filter((k) => k === 'install')).toHaveLength(0)
+    expect(before.slice(1).every(alive)).toBe(false)
+    expect(running(chrome).pid).not.toBe(before[1])
     expect(kinds('doc-chrome').filter((k) => k === 'install')).toHaveLength(2)
   }, 40_000)
+
+  /** a stand-in link with no server of its own: doctor decides from a fresh probe, the worker and the live link */
+  function link(label: string, over: { worker?: Link['worker']; reachable?: boolean; probe?: Probe } = {}): Link {
+    return {
+      rec: { machine: label, url: '', lastSeen: 0 },
+      saved: saved(label),
+      chats: new Map(),
+      watching: { chats: [], term: null },
+      reachable: true,
+      waiting: [],
+      state: 'Ready',
+      lacks: [],
+      connecting: false,
+      health: new WorkerHealth(),
+      probe: { ...looks({ home: remoteHome(label) }).probe, helper: HELPER },
+      ...over,
+    } as Link
+  }
+
+  /** a worker whose kill is watched and whose exit follows it, so doctor never waits on a phantom */
+  function fakeWorker() {
+    let ended!: () => void
+    const exited = new Promise<void>((done) => (ended = done))
+    return { pid: 4242, kill: () => ended(), exited }
+  }
+
+  test('a healthy link kills nothing and starts nothing', async () => {
+    const m = machines(null)
+    machine('fit-one.test', { probe: looks({ home: remoteHome('fit-one'), helper: HELPER }).text })
+    const worker = fakeWorker()
+    const kill = spyOn(worker, 'kill')
+    const start = spyOn(m, 'start')
+    const l = link('fit-one', { worker })
+    ;(m as unknown as { links: Map<string, Link> }).links.set(l.saved.label, l)
+    const steps: string[] = []
+    const line = 'fit-one (fit-one.test): healthy, left running'
+    expect(await m.doctor((w) => steps.push(w))).toEqual([line])
+    expect(steps).toEqual([line])
+    expect(kill).not.toHaveBeenCalled()
+    expect(start).not.toHaveBeenCalled()
+    expect(l.worker).toBe(worker)
+  })
+
+  test('a missing helper and a dead worker are killed and started again, with the same lines', async () => {
+    const m = machines(null)
+    machine('old-one.test', { probe: looks({ home: remoteHome('old-one'), helper: 'an-old-helper' }).text })
+    machine('dead-one.test', { probe: looks({ home: remoteHome('dead-one'), helper: HELPER }).text })
+    const worker = fakeWorker()
+    const kill = spyOn(worker, 'kill')
+    const start = spyOn(m, 'start').mockImplementation(async (l) => {
+      l.state = 'Starting…'
+      l.probe = { ...looks({ home: remoteHome(l.saved.label) }).probe, helper: HELPER }
+      l.lacks = []
+    })
+    const oldOne = link('old-one', { worker })
+    const deadOne = link('dead-one', { worker: undefined })
+    const links = (m as unknown as { links: Map<string, Link> }).links
+    links.set(oldOne.saved.label, oldOne)
+    links.set(deadOne.saved.label, deadOne)
+    expect(await m.doctor()).toEqual(['old-one (old-one.test): helper put there again, worker started again', 'dead-one (dead-one.test): helper put there again, worker started again'])
+    expect(kill).toHaveBeenCalledTimes(1) // the dead worker had nothing to kill
+    expect(start).toHaveBeenCalledTimes(2)
+    expect(start).toHaveBeenCalledWith(oldOne, true)
+    expect(start).toHaveBeenCalledWith(deadOne, true)
+    expect(oldOne.worker).toBeUndefined()
+  })
+
+  test('an unreachable link and a changed box are repaired too', async () => {
+    const m = machines(null)
+    machine('away-one.test', { probe: looks({ home: remoteHome('away-one'), helper: HELPER }).text })
+    machine('moved-one.test', { probe: looks({ home: remoteHome('moved-one-other'), helper: HELPER }).text })
+    const start = spyOn(m, 'start').mockImplementation(async (l) => {
+      l.state = 'Starting…'
+      l.probe = { ...looks({ home: remoteHome(l.saved.label) }).probe, helper: HELPER }
+      l.lacks = []
+    })
+    const away = link('away-one')
+    const moved = link('moved-one')
+    const awayWorker = fakeWorker()
+    const movedWorker = fakeWorker()
+    const awayKill = spyOn(awayWorker, 'kill')
+    const movedKill = spyOn(movedWorker, 'kill')
+    away.worker = awayWorker
+    moved.worker = movedWorker
+    away.reachable = false
+    const links = (m as unknown as { links: Map<string, Link> }).links
+    links.set(away.saved.label, away)
+    links.set(moved.saved.label, moved)
+    expect(await m.doctor()).toEqual(['away-one (away-one.test): helper put there again, worker started again', 'moved-one (moved-one.test): helper put there again, worker started again'])
+    expect(awayKill).toHaveBeenCalledTimes(1)
+    expect(movedKill).toHaveBeenCalledTimes(1)
+    expect(start).toHaveBeenCalledTimes(2)
+  })
 
   test('with no other machine saved in herdr, says how to add one', async () => {
     expect(await machines([]).doctor()).toEqual(['No other machines saved in herdr (herdr machine add <ssh target> adds one).'])

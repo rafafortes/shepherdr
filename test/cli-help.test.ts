@@ -16,7 +16,7 @@ const { helpVerbs } = await import('../scripts/checks/docs.ts')
 
 /** SHA-256 of the bare-help page: the split must not drift its bytes by accident. The docs check ties HELP to the
  *  dispatch verbs; this pins the text itself. Update it when help text is meant to change (as with --json on the lists). */
-const ORIGINAL_HELP_SHA = '5827320d1902dee6e885b8128f50ea8792a2660352b21f654ffa9fb1684b6bb4'
+const ORIGINAL_HELP_SHA = '041ea181df5a58e7dc36c5257bd286f9a5f243e78787cf1c63902a9383e83c41'
 
 const src = new LiveSource()
 afterAll(() => src.stop())

@@ -12,9 +12,9 @@ pull requests of GitHub repos); nothing to install by hand.
   agents (it reaches Shepherdr through an SSH tunnel from the main machine, so the API stays off the network), the
   hook recorder, the log copier, a health reader, the skills, and the pinned agent-browser with Chrome. A new machine
   gets it as soon as herdr has it saved; it is put there again whenever Shepherdr updates and its copy changed.
-- `shepherdr doctor` (on the main machine) checks every machine, puts the helper there again, starts its worker again
-  and says what is missing. Settings → Machines says how each one is: Ready, Putting the helper there…, Can't reach it
-  (and why), or what it needs.
+- `shepherdr doctor` (on the main machine) checks every machine again, puts the helper there and starts its worker
+  again where either is missing or out of date, leaves a healthy link running, and says what is missing. Settings →
+  Machines says how each one is: Ready, Putting the helper there…, Can't reach it (and why), or what it needs.
 - A task's shared browser runs on the task's own machine, next to its app. Where that machine can run `tailscale
   serve`, your screen takes the browser's frames and sends your input straight to it over the tailnet (the main
   machine only hands out the link, under a path no one can guess); elsewhere they come through the main machine.

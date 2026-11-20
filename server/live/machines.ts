@@ -697,21 +697,38 @@ export class Machines extends Emitter<Events> {
 
   /* ---------- shepherdr doctor ---------- */
 
-  /** check every machine and repair what is missing: the helper put there again, its worker started again. The command's
-   *  optional step channel gets each machine's line as soon as that one is done (UXD-08); the whole answer stays the same. */
+  /** check every machine: look again first, so a helper removed or a box changed since the last look is still put right.
+   *  Only a worker that is gone, out of reach or on an old helper is killed and started again; one alive, reachable and
+   *  current keeps its worker and its live link, so asking why something is slow never drops a working one (OPS-07).
+   *  The command's optional step channel gets each machine's line as soon as that one is done (UXD-08); the whole answer
+   *  stays the same. */
   async doctor(onStep?: (words: string) => void): Promise<string[]> {
     await this.sync()
     const out: string[] = []
     for (const l of this.links.values()) {
-      if (l.worker) {
-        l.worker.kill()
-        await l.worker.exited
-        l.worker = undefined
+      let fresh: Probe | undefined
+      try {
+        fresh = await probe(l.saved.target)
+      } catch {
+        /* an unreachable machine goes through the repair path below, as it always has */
       }
-      await this.start(l, true)
+      let detail = 'healthy, left running'
+      if (fresh && l.worker && l.reachable && fits(fresh) && (!l.probe || sameBox(l.saved, l.probe, fresh))) {
+        l.probe = fresh
+        l.lacks = []
+        this.keep(l)
+      } else {
+        if (l.worker) {
+          l.worker.kill()
+          await l.worker.exited
+          l.worker = undefined
+        }
+        await this.start(l, true)
+        detail = l.lacks.length ? `needs ${l.lacks.join(', ')}` : l.state.startsWith("Can't") || l.state.startsWith('herdr') ? l.state : 'helper put there again, worker started again'
+      }
       const p = l.probe
       const missing = p ? [!p.tools.gh && 'gh (pull requests of GitHub repos)', !p.tools.claude && 'Claude Code', !p.tools.codex && 'Codex'].filter(Boolean) : []
-      const line = `${l.rec.machine} (${l.saved.target}): ${l.lacks.length ? `needs ${l.lacks.join(', ')}` : l.state.startsWith("Can't") || l.state.startsWith('herdr') ? l.state : 'helper put there again, worker started again'}${missing.length ? `; not there: ${missing.join(', ')}` : ''}${l.chrome ? `; ${l.chrome}` : ''}`
+      const line = `${l.rec.machine} (${l.saved.target}): ${detail}${missing.length ? `; not there: ${missing.join(', ')}` : ''}${l.chrome ? `; ${l.chrome}` : ''}`
       out.push(line)
       onStep?.(line)
     }
