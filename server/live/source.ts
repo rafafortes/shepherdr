@@ -5093,7 +5093,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     switch (op) {
       case undefined:
       case 'list':
-        return this.profiles.list()
+        return p.flags.has('json') ? JSON.stringify(this.profiles.view(), null, 2) : this.profiles.list()
       case 'save': {
         if (!name) throw new Error(usage)
         const r = this.profiles.save(name, { limits: p.flags.has('limits'), force: p.flags.has('force') })
@@ -5237,6 +5237,20 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (a1) return this.reportCommand(a1, rest, p, ctx)
         const kept = this.engine.keptLeftovers()
         const parked = this.parkedCount()
+        if (p.flags.has('json'))
+          return JSON.stringify(
+            {
+              machine: NAME,
+              spaces: this.places.shown().length,
+              openTasks: this.engine.tasks.filter((t) => !ended(t) && !t.archived).length,
+              herdr: this.agents.reachable ? 'answers' : 'does not answer',
+              parked,
+              spaceOrder: this.spaceOrderLine() || undefined,
+              kept,
+            },
+            null,
+            2,
+          )
         const line = `Shepherdr on ${NAME}: ${this.places.shown().length} spaces, ${this.engine.tasks.filter((t) => !ended(t) && !t.archived).length} open tasks; herdr ${this.agents.reachable ? 'answers' : 'does not answer'}${parked ? `; ${parked} agent${parked === 1 ? '' : 's'} parked (a message to their chat starts each again)` : ''}.`
         const text = [line, this.spaceOrderLine()].filter(Boolean).join('\n')
         return kept.length ? `${text}\nDone tasks that kept work (remove it by hand once you're sure):\n${kept.map((k) => `  ${k}`).join('\n')}` : text
@@ -5259,10 +5273,25 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           if (existing) return `${named} is a space already (${pr.path}), with its tasks and chat.${keeps}`
           return `Added ${named} (${pr.path}) as a space; its tasks are ${pr.key}-1, ${pr.key}-2, …${pr.github ? ` GitHub: ${pr.github}.` : ' No GitHub remote: tasks merge here.'}`
         }
-        if (a1 === 'list' || !a1)
-          return this.orderedSpaces()
+        if (a1 === 'list' || !a1) {
+          const rows = this.orderedSpaces()
+          if (p.flags.has('json'))
+            return JSON.stringify(
+              rows.map((x) => ({
+                id: x.id,
+                name: x.name,
+                key: x.space?.key,
+                folder: x.space ? this.places.folderLine(x.space) : boxHome(),
+                github: x.space?.github,
+                home: !x.space,
+              })),
+              null,
+              2,
+            )
+          return rows
             .map((x) => (x.space ? `${x.name}  ${x.space.key}  ${this.places.folderLine(x.space)}${x.space.github ? `  github:${x.space.github}` : ''}` : `${x.name}  (home space)  ${boxHome()}`))
             .join('\n')
+        }
         if (a1 === 'rename') {
           const x = rest[0] ? this.places.find(rest[0]) : undefined
           if (!x || !rest[1]) throw new Error('shepherdr space rename <name> <new-name> (shepherdr space list shows them)')
@@ -5434,6 +5463,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'models': {
         const kinds = a1 ? [kindOf(a1)] : ['claude', 'codex', 'pi', 'opencode', 'agy']
         if (!kinds[0]) throw new Error(`No CLI called ${a1}; herdr starts ${CLIS.join(', ')}`)
+        if (p.flags.has('json')) return JSON.stringify(kinds.map((k) => ({ agent: k, cli: CLI_NAME[k!], ...modelsOf(k!) })), null, 2)
         return kinds
           .map((k) => {
             const c = modelsOf(k!)
@@ -5493,8 +5523,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const pr = one(p, 'space') || op !== 'list' ? this.projectFor(p, ctx) : null
         const place = pr ? placeId.space(pr.name) : ''
         const name = rest[0]
-        const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => !['when', 'on', 'task', 'brief', 'desc', 'space', 'agent', 'model', 'effort', 'name'].includes(f))
-        if (odd.length) throw new Error(`Automation ${op} takes no --${odd[0]}: only --when (a time rule), --on (events), --task, --brief, --agent, --model, --effort, --name and --space`)
+        const odd = [...Object.keys(p.opts), ...p.flags].filter((f) => !['json', 'when', 'on', 'task', 'brief', 'desc', 'space', 'agent', 'model', 'effort', 'name'].includes(f))
+        if (odd.length) throw new Error(`Automation ${op} takes no --${odd[0]}: only --when (a time rule), --on (events), --task, --brief, --agent, --model, --effort, --name, --space and --json (list)`)
         const agent = one(p, 'agent') || one(p, 'model') || one(p, 'effort') ? harnessOf(p, this.settings) : undefined
         const brief = one(p, 'brief') ?? one(p, 'desc')
         const zone = this.settings.zone()
@@ -5530,9 +5560,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           return op === 'remove' ? 'Removed.' : op === 'pause' ? `Paused “${name}”.` : `“${name}” is on again.`
         }
         if (op !== 'list') throw new Error('shepherdr automation add|edit|pause|resume|run|remove|list')
+        const shown = this.automations.list.filter((x) => !place || x.place === place)
+        if (p.flags.has('json')) return JSON.stringify(shown, null, 2)
         return (
-          this.automations.list
-            .filter((x) => !place || x.place === place)
+          shown
             .map(
               (x) =>
                 `${x.name} · ${told(x)} · adds “${x.task.title}”${x.task.agent?.kind ? ` (${[x.task.agent.kind, x.task.agent.model, x.task.agent.effort].filter(Boolean).join(', ')})` : ''} · ${this.places.space(x.place) ? this.places.nameOf(x.place) : x.place}${x.on ? '' : ' · paused'} · ${runs(x)}`,
@@ -5588,6 +5619,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           .join('\n\n')
       }
       case 'doctor': {
+        if (p.flags.has('json')) throw new Error('shepherdr doctor takes no --json; its answer is words, not records')
         if (BOX) throw new Error(`shepherdr doctor checks every machine from the main one: run it there (${HOST} is run from it over SSH).`)
         const own = `${NAME} (this machine, the main one): herdr ${this.agents.reachable ? 'answers' : 'does not answer'}${this.browsers ? `; shared browser ${this.browsers.status().ready ? 'ready' : this.browsers.status().hint}` : ''}`
         const named = this.settings.get('app.hosts').trim()
@@ -5880,10 +5912,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'list':
       case undefined: {
         const pr = one(p, 'space') ? placeId.space(this.projectFor(p, ctx).name) : null
-        const all = Object.values(this.artifacts.list).filter((a) => !pr || a.place === pr)
+        const all = Object.values(this.artifacts.list)
+          .filter((a) => !pr || a.place === pr)
+          .sort((a, b) => b.at - a.at)
+        if (p.flags.has('json')) return JSON.stringify(all, null, 2)
         return (
           all
-            .sort((a, b) => b.at - a.at)
             .map((a) => `${a.id}  v${this.artifacts.latest(a).n}  ${a.title}  · ${this.chatName(a.place)} · ${age(a.at)}`)
             .join('\n') || 'No artifacts here yet.'
         )

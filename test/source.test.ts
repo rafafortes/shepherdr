@@ -26,6 +26,7 @@ const { agentEnv } = await import('../server/live/box.ts')
 const { taskTmpDir } = await import('../server/live/task-tmp.ts')
 const { ROOT: APP_ROOT } = await import('../server/root.ts')
 const { ADVISOR_AT_ONCE } = await import('../shared/apply-waiting.ts')
+const { HELP } = await import('../server/live/args.ts')
 
 const src = new LiveSource()
 // this file is not about the spacing between starts: with machine.startEvery's 2 minutes, the shared machine of these
@@ -924,5 +925,77 @@ describe('pinned models, from the screen', () => {
     } finally {
       setPicks(NO_PICKS)
     }
+  })
+})
+
+describe('--json on the list and show commands', () => {
+  /** the answer is parseable JSON, not prose with a 0 exit the way it was before these verbs took --json */
+  const json = async (args: string[]): Promise<unknown> => {
+    const r = await src.cli([...args, '--json'], {})
+    expect(r.code).toBe(0)
+    return JSON.parse(r.out)
+  }
+
+  test('space list --json returns the rows with their id, name, key and folder', async () => {
+    const rows = (await json(['space', 'list'])) as { id: string; name: string; key?: string; folder: string; home?: boolean }[]
+    expect(Array.isArray(rows)).toBe(true)
+    expect(rows[0]).toMatchObject({ id: placeId.home(), name: 'home', home: true })
+    expect(typeof rows[0].folder).toBe('string')
+    // a repo space carries the key the prose showed beside its name
+    const repo = rows.find((r) => r.key)
+    if (repo) expect(repo.name).toBeTruthy()
+  })
+
+  test('automation list --json returns the automation records', async () => {
+    const a = src.automations.add({ place: placeId.home(), name: 'JsonProbe', trigger: { time: 'FREQ=DAILY' }, task: { title: 'Probe task' } })
+    const rows = (await json(['automation', 'list'])) as { id: string; name: string }[]
+    expect(Array.isArray(rows)).toBe(true)
+    expect(rows).toEqual(expect.arrayContaining([expect.objectContaining({ id: a.id, name: 'JsonProbe' })]))
+  })
+
+  test('artifact list --json returns the artifact records', async () => {
+    const a = src.artifacts.create({ title: 'JsonProbe board', place: placeId.home(), by: 'test', html: '<html></html>' })
+    const rows = (await json(['artifact', 'list'])) as { id: string; title: string }[]
+    expect(Array.isArray(rows)).toBe(true)
+    expect(rows).toEqual(expect.arrayContaining([expect.objectContaining({ id: a.id, title: 'JsonProbe board' })]))
+  })
+
+  test('profile list --json returns the saved profiles', async () => {
+    const saved = src.profiles.save('JsonProbe', { limits: false, force: false })
+    expect(saved.ok).toBe(true)
+    const v = (await json(['profile', 'list'])) as { profiles: { name: string }[]; active: string }
+    expect(Array.isArray(v.profiles)).toBe(true)
+    expect(v.profiles).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'JsonProbe' })]))
+    expect(typeof v.active).toBe('string')
+  })
+
+  test('models --json returns each CLI with its model ids', async () => {
+    const rows = (await json(['models'])) as { agent: string; models: { id: string }[] }[]
+    expect(Array.isArray(rows)).toBe(true)
+    expect(rows.map((r) => r.agent)).toContain('claude')
+    expect(rows.find((r) => r.agent === 'claude')!.models[0]!.id).toBe('claude-fable-5-1')
+  })
+
+  test('status --json returns the overview as records', async () => {
+    const s = (await json(['status'])) as { machine: string; spaces: number; openTasks: number; herdr: string; kept: string[] }
+    expect(typeof s.machine).toBe('string')
+    expect(typeof s.spaces).toBe('number')
+    expect(typeof s.openTasks).toBe('number')
+    expect(['answers', 'does not answer']).toContain(s.herdr)
+    expect(Array.isArray(s.kept)).toBe(true)
+  })
+
+  test('doctor --json is refused instead of answering prose', async () => {
+    const r = await src.cli(['doctor', '--json'], {})
+    expect(r.code).toBe(1)
+    expect(r.out).toContain('takes no --json')
+  })
+
+  test('help documents --json exactly on the verbs that take it', () => {
+    const lines = HELP.split('\n').filter((l) => l.includes('--json'))
+    expect(lines.length).toBe(8)
+    for (const verb of ['task list', 'task show', 'space list', 'automation list', 'artifact list', 'profile list', 'models', 'status'])
+      expect(lines.some((l) => l.includes(`shepherdr ${verb}`))).toBe(true)
+    expect(lines.some((l) => l.includes('doctor'))).toBe(false)
   })
 })

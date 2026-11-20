@@ -85,7 +85,7 @@ export const TOPIC = {
                                                  follows the space rules: lowercase letters, numbers, - and _,
                                                  at most 80 characters, its own on its machine
   shepherdr space set base <branch> --space NAME  new tasks start from and merge into this branch; existing tasks keep theirs
-  shepherdr space list                           this machine's spaces in queue order (the numbered ones first)
+  shepherdr space list [--json]                  this machine's spaces in queue order (the numbered ones first)
   shepherdr set space.priority <1-200> --space NAME
                                                  a space's place in this machine's queue: 1 first, a space with no
                                                  number after all numbered ones. Strict: while the first space has a
@@ -294,7 +294,7 @@ export const TOPIC = {
   shepherdr artifact update <id> [<file.html>] [--data <file.json>] [--title "<title>"] [--note "<what changed>"]
                                                  a new version of the same one; --data alone changes only its data
   shepherdr artifact check <file.html> [--data <file.json>]   pictures and errors, without showing it
-  shepherdr artifact list [--space NAME]
+  shepherdr artifact list [--space NAME] [--json]
   shepherdr artifact show <id>                   its versions and the files of its latest, to edit
   shepherdr artifact rm <id>
 `,
@@ -305,8 +305,8 @@ export const TOPIC = {
                                                  limits and numbers now, alerts,
                                                  voice) as they are where it runs (its space, else this machine),
                                                  each with where it comes from, and the lines every brief ends with
-  shepherdr models [CLI]                         each CLI's models and the effort levels each takes, as the CLI says
-  shepherdr profile list                         the saved profiles (named settings of this machine, see Models), which one is in
+  shepherdr models [CLI] [--json]                each CLI's models and the effort levels each takes, as the CLI says
+  shepherdr profile list [--json]                the saved profiles (named settings of this machine, see Models), which one is in
                                                  force, and the undo point
   shepherdr profile save <name> [--limits] [--force]
                                                  keeps the current models (every role's CLI, model and effort, backups
@@ -357,12 +357,12 @@ export const TOPIC = {
 
 ${TRIGGERS}  shepherdr automation pause|resume|run|remove "<name>" [--space NAME]
                                                  run: add its task now
-  shepherdr automation list [--space NAME]     with each one's last run
+  shepherdr automation list [--space NAME] [--json] with each one's last run
 `,
   setup: `Setup
   shepherdr secret elevenlabs                    store the ElevenLabs key for voice calls (reads it from stdin)
   shepherdr doctor                               check every machine saved in herdr; put its helper there again (main machine)
-  shepherdr status                               spaces, open tasks, herdr, and done tasks that kept work
+  shepherdr status [--json]                      spaces, open tasks, herdr, and done tasks that kept work
                                                  (with a task's id: that task's progress, above)
 `,
   triggers: TRIGGERS,
