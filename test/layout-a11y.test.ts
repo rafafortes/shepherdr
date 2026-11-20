@@ -27,16 +27,6 @@ const ALLOW: Allow[] = [
     why: 'The demo chart labels use --fg3 inside an artifact frame, which still carries the old #a1a1aa; SHE-114 darkened the app token but not the frame token (axe 2.56:1).',
     finding: 'A11Y-03',
   },
-  {
-    rule: 'aria-required-children',
-    pairs: [
-      { target: /^div\[data-flip="automations:p:vm-str:gtm"\] > ul$/, screens: ['desktop: places + chat + tasks', 'artifact viewer'] },
-      { target: /^div > ul$/, screens: ['Needs you view'] },
-      { target: /^#search-list$/, screens: ['search sheet'] },
-    ],
-    why: 'Three lists have non-li children: the automations ul, the Needs you ul and the search listbox; SHE-176 owns their markup.',
-    finding: 'SHE-176',
-  },
 ]
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']
@@ -246,16 +236,14 @@ test('the contrast allowance is confined to the artifact frame', () => {
   expect(accepts(violation(['[data-msg] span']))).toBe(false)
 })
 
-test('the follow-up allowances only cover their own targets and screens', () => {
+test('the follow-up allowances are gone', () => {
   const violation = (id: string, target: string[]) => ({ id, nodes: [{ target }] }) as Violation
-  expect(accepts(violation('aria-required-children', ['#search-list']), 'search sheet')).toBe(true)
-  expect(accepts(violation('aria-required-children', ['div[data-flip="automations:p:vm-str:gtm"] > ul']), 'artifact viewer')).toBe(true)
-  expect(accepts(violation('aria-required-children', ['div[data-flip="automations:p:vm-str:gtm"] > ul']), 'desktop: places + chat + tasks')).toBe(true)
-  expect(accepts(violation('aria-required-children', ['div > ul']), 'Needs you view')).toBe(true)
-  expect(accepts(violation('aria-required-children', ['#search-list']), 'desktop: places + chat + tasks')).toBe(false)
-  expect(accepts(violation('aria-required-children', ['ul']), 'search sheet')).toBe(false)
   // SHE-177 made the shortcuts scroller focusable, so its rule has no allowance left
   expect(ALLOW.some((a) => a.rule === 'scrollable-region-focusable')).toBe(false)
+  expect(ALLOW.some((a) => a.rule === 'aria-required-children')).toBe(false)
+  // a list whose children roles regress fails the scan: no rule is allowed through for SHE-176's lists any more
+  expect(accepts(violation('aria-required-children', ['#search-list']), 'search sheet')).toBe(false)
+  expect(accepts(violation('aria-required-children', ['div > ul']), 'Needs you view')).toBe(false)
 })
 
 describe.skipIf(!browser)('the shortcuts scroll region is keyboard reachable (SHE-177)', () => {

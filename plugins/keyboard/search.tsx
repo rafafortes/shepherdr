@@ -83,6 +83,12 @@ export function Search({ onClose }: { onClose: () => void }) {
   const groups = kinds.filter((k) => !kind || kind === k).map((k) => ({ kind: k, all: results.filter((h) => h.kind === k) }))
   const list = groups.flatMap((g) => g.all.slice(0, limit))
   const current = list.find((hit) => hit.key === selected) ?? list[0]
+  // One listbox per drawn group: the scroll area holds the group headings, empty notes and Show more buttons,
+  // while a listbox owns only its options (an axe `aria-required-children` listbox may own nothing else). The
+  // combobox controls each box, so its arrow keys keep moving through the same `list` of hits.
+  const shown = groups.filter((group) => group.all.length || (group.kind === 'Messages' && ((searching && !coverage.finished) || capped)))
+  const boxId = (i: number) => (i === 0 ? 'search-list' : `search-list-${i}`)
+  const boxes = shown.map((_, i) => boxId(i)).join(' ')
   useEffect(() => {
     document.getElementById(`search-hit-${current?.key}`)?.scrollIntoView({ block: 'nearest' })
   }, [current?.key])
@@ -113,7 +119,7 @@ export function Search({ onClose }: { onClose: () => void }) {
           name="search"
           role="combobox"
           aria-expanded="true"
-          aria-controls="search-list"
+          aria-controls={boxes || undefined}
           aria-activedescendant={current ? `search-hit-${current.key}` : undefined}
           aria-label="Search or jump to"
           placeholder="Search spaces, tasks, messages, artifacts, settings"
@@ -192,20 +198,13 @@ export function Search({ onClose }: { onClose: () => void }) {
           </p>
         ) : null}
       </div>
-      <div
-        id="search-list"
-        role="listbox"
-        aria-label="Search results"
-        aria-busy={searching && (!coverage.finished || q !== settled)}
-        className="max-h-[60vh] min-h-0 overflow-y-auto overscroll-contain p-2 phone:max-h-none phone:flex-1 phone:pb-[calc(env(safe-area-inset-bottom)+8px)]"
-      >
-        {groups
-          .filter((group) => group.all.length || (group.kind === 'Messages' && ((searching && !coverage.finished) || capped)))
-          .map((group) => (
-            <div role="group" aria-label={group.kind} key={group.kind}>
-              <h3 className="px-3 pt-3 pb-1 text-xs font-medium text-fg2 tabular-nums phone:text-sm">
-                {group.kind} · {group.all.length}
-              </h3>
+      <div className="max-h-[60vh] min-h-0 overflow-y-auto overscroll-contain p-2 phone:max-h-none phone:flex-1 phone:pb-[calc(env(safe-area-inset-bottom)+8px)]">
+        {shown.map((group, i) => (
+          <div role="group" aria-label={group.kind} key={group.kind}>
+            <h3 className="px-3 pt-3 pb-1 text-xs font-medium text-fg2 tabular-nums phone:text-sm">
+              {group.kind} · {group.all.length}
+            </h3>
+            <div id={boxId(i)} role="listbox" aria-label={i === 0 ? 'Search results' : `${group.kind} results`} aria-busy={searching && (!coverage.finished || q !== settled)}>
               {group.all.slice(0, limit).map((hit) => (
                 <div
                   role="option"
@@ -232,17 +231,18 @@ export function Search({ onClose }: { onClose: () => void }) {
                   </p>
                 </div>
               ))}
-              {!group.all.length ? <p className="px-3 py-2 text-sm text-fg3">{group.kind === 'Messages' && searching && !coverage.finished ? 'Still loading…' : 'No matches'}</p> : null}
-              {group.all.length > limit ? (
-                <button type="button" className="min-h-11 px-3 text-sm text-accent" onClick={() => setLimit((n) => n + 20)}>
-                  Show more {group.kind.toLowerCase()} ({group.all.length - limit})
-                </button>
-              ) : null}
-              {group.kind === 'Messages' && capped ? (
-                <p className="px-3 py-1 text-xs text-fg2 phone:text-sm">Older messages not searched in chats with more than {SEARCH_MESSAGE_WINDOW} messages.</p>
-              ) : null}
             </div>
-          ))}
+            {!group.all.length ? <p className="px-3 py-2 text-sm text-fg3">{group.kind === 'Messages' && searching && !coverage.finished ? 'Still loading…' : 'No matches'}</p> : null}
+            {group.all.length > limit ? (
+              <button type="button" className="min-h-11 px-3 text-sm text-accent" onClick={() => setLimit((n) => n + 20)}>
+                Show more {group.kind.toLowerCase()} ({group.all.length - limit})
+              </button>
+            ) : null}
+            {group.kind === 'Messages' && capped ? (
+              <p className="px-3 py-1 text-xs text-fg2 phone:text-sm">Older messages not searched in chats with more than {SEARCH_MESSAGE_WINDOW} messages.</p>
+            ) : null}
+          </div>
+        ))}
         {!list.length && (!searching || coverage.finished) ? <p className="px-3 py-4 text-sm text-fg2">Nothing found in this scope. Try Everywhere or fewer words.</p> : null}
       </div>
     </Sheet>

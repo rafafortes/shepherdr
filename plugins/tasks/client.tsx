@@ -744,7 +744,7 @@ function SpaceAutomations({ place, note }: { place: Place; note?: string }) {
             const id = `automation-${place.id}-${a.name}`.replace(/[^\w-]/g, '-')
             return (
               <Fragment key={a.name}>
-                <Row two aria-expanded={on} aria-controls={id} onActivate={() => setOpen(on ? null : a.name)}>
+                <Row two asListItem aria-expanded={on} aria-controls={id} onActivate={() => setOpen(on ? null : a.name)}>
                   {/* a clock, not a box: an automation runs on its own, there is nothing to tick; as wide as a status dot */}
                   <ClockIcon className={clsx(ic, '-mx-px h-lh text-fg3 phone:mx-0', !a.on && 'opacity-50')} />
                   <RowText sub={`${a.on ? '' : 'Paused · '}${a.when}`}>{a.name}</RowText>

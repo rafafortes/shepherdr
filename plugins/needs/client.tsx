@@ -27,7 +27,7 @@ export function needsIn(snap: Snapshot, chips: string[]) {
 function NeedRow({ n }: { n: Need }) {
   const snap = useSnap()!
   return (
-    <Row two className="p-0!" onActivate={() => openNeed(n)} data-need={n.question?.id ?? n.id}>
+    <Row two asListItem className="p-0!" onActivate={() => openNeed(n)} data-need={n.question?.id ?? n.id}>
       <TaskDot s="need" />
       <span className="flex min-h-[inherit] min-w-0 flex-1 flex-col justify-center gap-0.5 py-1.5 pr-1 text-left">
         <RowText sub={whoAsks(snap, n)}>{waitsWith(n)}</RowText>
