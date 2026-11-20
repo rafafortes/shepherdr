@@ -1,9 +1,7 @@
 // The demo's usage: a week of model calls for the providers the demo's settings and chats use, and a run-out or two, so
-// Settings → Models → Summary shows a believable week. Deterministic: the day/night pattern is a fixed phase counted
-// back from now, not the wall clock's hour, and the run-outs are at fixed times back from now. A fixture that read the
-// real hour let the "out now" row come back during 09-18 (SHE-167's outState, repaired by SHE-98; SHE-178 locks it in).
-// Kept in memory, as the demo's settings are. A key is its harness and provider: OpenCode Go is counted twice, under pi
-// and under OpenCode, as its own row in each.
+// Settings → Models → Summary shows a believable week. No random numbers: each hour's calls follow the hour of the day,
+// and the run-outs are at fixed times back from now. Kept in memory, as the demo's settings are. A key is its harness
+// and provider: OpenCode Go is counted twice, under pi and under OpenCode, as its own row in each.
 import { HOUR, UsageLedger } from '../live/usage-ledger.ts'
 import { opencodeEstimate, OPENCODE_ROWS } from '../live/quota-estimate.ts'
 import type { QuotaInput } from '../live/models-summary.ts'
@@ -30,12 +28,11 @@ const MODELS: { key: string; tokens: number; cost?: number; busy: number; chat: 
 ]
 
 /** the demo's ledger: the week before `now`, hour by hour, and the run-outs of the week. Every time is relative to
- *  `now`, and the day/night pattern is a fixed phase, so the fixture keeps its meaning at every wall clock hour. */
+ *  `now`, so the out-now row keeps its meaning at every wall clock hour. */
 export function demoUsage(now = Date.now()): UsageLedger {
   const l = new UsageLedger('', true)
   for (let back = 7 * 24 - 1; back >= 0; back--) {
-    // an hour of a fixed daily phase with noon at `now`: no getHours(), so the fixture never changes with the real hour
-    const hour = (12 - (back % 24) + 24) % 24
+    const hour = new Date(now - back * HOUR).getHours()
     const working = hour >= 9 && hour <= 18 ? 1 : 0
     MODELS.forEach((m, i) => {
       // a call after a run-out says the provider works again (outState, SHE-167): leave the out-now row without calls

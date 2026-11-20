@@ -1,6 +1,6 @@
-// The demo fixture behind Settings → Models → Summary must read the same whatever hour it is opened at. Before the
-// fixture stopped reading the wall clock's hour, the "Out until" row came back during 09-18 (SHE-167's outState, then
-// SHE-98's repair; SHE-178 makes the fixture clock-independent). This pins the fixture itself at every hour.
+// The demo fixture behind Settings → Models → Summary must read the same whatever hour it is opened at. At base 8aabbc3b
+// its working-hour calls let the "Out until" row come back during 09-18 (SHE-167's outState; SHE-98's repair already
+// landed on herdr-tui). This pins that repair across every hour and minute, in every time zone.
 import { describe, expect, test } from 'bun:test'
 import { demoUsage } from '../server/demo/usage.ts'
 
