@@ -404,9 +404,10 @@ function TaskList(_: { placeId: string }) {
   const place = placeOf(snap, view.level === 2 ? view.chips[0] : getState().ui.place)
   const by = groupFor(chosen, view.level)
   // a task moving to another group glides there; a new one fades in; what a filter, Show all, a fold or a chip leaves
-  // just shows
+  // just shows. The tasks array is the content token: a heartbeat that changed nothing keeps it, so no measuring
+  // (PERFC-04); a real change gives a new one, which still glides.
   const list = useRef<HTMLDivElement>(null)
-  useFlip(list, `${key}|${by}|${q}|${allDone.join()}|${shut.join()}`)
+  useFlip(list, `${key}|${by}|${q}|${allDone.join()}|${shut.join()}`, snap.tasks)
   if (archived) return <ArchivedList list={view} />
   // filtering, Done and archived tasks are in it too, each group whole and open, folded shut or not
   const groups = q

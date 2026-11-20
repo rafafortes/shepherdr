@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
 import { waiting } from '../shared/alerts.ts'
-import { layout, settled } from './layout.ts'
+import { layout, settled, until } from './layout.ts'
 
 const { browser, world, server, url } = await layout({ everything: true })
 
@@ -790,5 +790,47 @@ describe.skipIf(!browser)("an alert's link", () => {
     const n = waiting(world.snapshot()).count
     await page.waitForFunction((n) => (window as unknown as { badges: unknown[] }).badges.at(-1) === n, n)
     await page.close()
+  }, 30_000)
+})
+
+describe.skipIf(!browser)('useFlip measures only when the list changes (PERFC-04)', () => {
+  test('redraws with the same tokens skip measuring; a changed task measures again', async () => {
+    if (!browser) return
+    const pushSnap = () => (world as unknown as { emit(e: string): void }).emit('snapshot')
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+    const task = world.tasks[0]
+    const name = task.name
+    try {
+      // the hook in src/motion.ts counts one pass per querySelectorAll('[data-flip]'), from the first render on
+      await page.addInitScript(() => {
+        ;(window as unknown as { shepFlipMeasures: { count: number } }).shepFlipMeasures = { count: 0 }
+      })
+      await page.goto(`${url()}&tab=tasks`)
+      await page.locator('li[data-flip]').first().waitFor()
+      const measures = () => page.evaluate(() => (window as unknown as { shepFlipMeasures: { count: number } }).shepFlipMeasures.count)
+      await until(measures, (n) => n >= 1)
+      const first = await measures()
+
+      // opening and closing search redraws the app (and so the list) twice without changing its view or tasks:
+      // both useFlip passes are gated. The app counter proves the redraws happened, so the gate is really exercised.
+      await page.evaluate(() => {
+        ;(window as unknown as { shepRenderCount: Record<string, number> }).shepRenderCount = {}
+      })
+      await page.keyboard.press('Control+k')
+      await page.keyboard.press('Control+k')
+      const app = await page.evaluate(() => (window as unknown as { shepRenderCount: Record<string, number> }).shepRenderCount.app ?? 0)
+      expect(app).toBeGreaterThan(0)
+      expect(await measures()).toBe(first)
+
+      // a task that really changed gives a new content token: it measures again (and, as the glide test above shows,
+      // still animates)
+      task.name = `Renamed for the flip gate ${Date.now()}`
+      pushSnap()
+      await until(measures, (n) => n > first)
+      expect(await measures()).toBe(first + 1)
+    } finally {
+      task.name = name
+      await page.close()
+    }
   }, 30_000)
 })
