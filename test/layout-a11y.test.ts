@@ -232,3 +232,23 @@ test('the contrast allowance is confined to the artifact frame', () => {
   // a new low-contrast line in the app itself, or on any other screen, still fails with its rule id
   expect(accepts(violation(['[data-msg] span']))).toBe(false)
 })
+
+test.skipIf(!browser)(
+  'the contrast allowance is exercised by the real artifact frame',
+  async () => {
+    if (!browser) return
+    const { ctx, page } = await open(browser, { width: 1440, height: 900 })
+    try {
+      await page.goto(at('place=vm-str/home&artifact=a1'))
+      await page.getByRole('dialog', { name: 'This week across machines' }).waitFor()
+      await settled(page)
+      const found = (await new AxeBuilder({ page }).withTags(TAGS).analyze()).violations.filter((v) => v.id === 'color-contrast')
+      // when A11Y-03 fixes the frame's palette, this and the ALLOW entry go together
+      expect(found.length).toBeGreaterThan(0)
+      expect(found.every(accepts)).toBe(true)
+    } finally {
+      await ctx.close()
+    }
+  },
+  30_000,
+)
