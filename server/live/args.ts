@@ -361,7 +361,7 @@ ${TRIGGERS}  shepherdr automation pause|resume|run|remove "<name>" [--space NAME
 `,
   setup: `Setup
   shepherdr secret elevenlabs                    store the ElevenLabs key for voice calls (reads it from stdin)
-  shepherdr doctor                               check every machine saved in herdr; put its helper there again (main machine)
+  shepherdr doctor                               check every machine saved in herdr; repair one that is broken (main machine)
   shepherdr status [--json]                      spaces, open tasks, herdr, and done tasks that kept work
                                                  (with a task's id: that task's progress, above)
 `,

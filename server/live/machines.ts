@@ -716,6 +716,7 @@ export class Machines extends Emitter<Events> {
       if (fresh && l.worker && l.reachable && fits(fresh) && (!l.probe || sameBox(l.saved, l.probe, fresh))) {
         l.probe = fresh
         l.lacks = []
+        this.keep(l)
       } else {
         if (l.worker) {
           l.worker.kill()

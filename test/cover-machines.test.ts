@@ -532,6 +532,33 @@ describe('shepherdr doctor', () => {
     expect(oldOne.worker).toBeUndefined()
   })
 
+  test('an unreachable link and a changed box are repaired too', async () => {
+    const m = machines(null)
+    machine('away-one.test', { probe: looks({ home: remoteHome('away-one'), helper: HELPER }).text })
+    machine('moved-one.test', { probe: looks({ home: remoteHome('moved-one-other'), helper: HELPER }).text })
+    const start = spyOn(m, 'start').mockImplementation(async (l) => {
+      l.state = 'Starting…'
+      l.probe = { ...looks({ home: remoteHome(l.saved.label) }).probe, helper: HELPER }
+      l.lacks = []
+    })
+    const away = link('away-one')
+    const moved = link('moved-one')
+    const awayWorker = fakeWorker()
+    const movedWorker = fakeWorker()
+    const awayKill = spyOn(awayWorker, 'kill')
+    const movedKill = spyOn(movedWorker, 'kill')
+    away.worker = awayWorker
+    moved.worker = movedWorker
+    away.reachable = false
+    const links = (m as unknown as { links: Map<string, Link> }).links
+    links.set(away.saved.label, away)
+    links.set(moved.saved.label, moved)
+    expect(await m.doctor()).toEqual(['away-one (away-one.test): helper put there again, worker started again', 'moved-one (moved-one.test): helper put there again, worker started again'])
+    expect(awayKill).toHaveBeenCalledTimes(1)
+    expect(movedKill).toHaveBeenCalledTimes(1)
+    expect(start).toHaveBeenCalledTimes(2)
+  })
+
   test('with no other machine saved in herdr, says how to add one', async () => {
     expect(await machines([]).doctor()).toEqual(['No other machines saved in herdr (herdr machine add <ssh target> adds one).'])
   })
