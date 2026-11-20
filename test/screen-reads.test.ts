@@ -183,6 +183,30 @@ describe("an idle agent's screen reads", () => {
     a.stop()
   })
 
+  test('the snapshot herdr sends when a subscription opens is not a print, and a print reads only its own pane', async () => {
+    reads.clear()
+    start(Object.fromEntries(['A', 'B'].map((n) => [`SR-${n}/Agent`, record(`SR-${n}/Agent`, 'agy', `/w/${n}`)])))
+    listing = ['A', 'B'].map((n) => info(`SR-${n}/Agent`, 'agy', `p-${n}`, 'idle'))
+    for (const n of ['A', 'B']) screens.set(`p-${n}`, AGY_IDLE)
+    await tick(0)
+    expect(total()).toBe(2)
+
+    // opening a subscription sends one output event per pane with what is already there: no screen read for those
+    ;(a as unknown as { outputQuietUntil: number }).outputQuietUntil = clock + 1000
+    printed('p-A')
+    printed('p-B')
+    await Bun.sleep(20)
+    expect(total()).toBe(2)
+
+    // a real print on one pane reads that pane alone, even while both agents are still in their first minute
+    ;(a as unknown as { outputQuietUntil: number }).outputQuietUntil = 0
+    printed('p-A')
+    await until(() => (reads.get('p-A') ?? 0) >= 2)
+    expect(reads.get('p-A')).toBeGreaterThanOrEqual(2)
+    expect(reads.get('p-B')).toBe(1)
+    a.stop()
+  })
+
   test('only agy and a Claude Code with no session file read a screen: codex, pi, OpenCode and a session file do not', async () => {
     reads.clear()
     const keys: Kind[] = ['agy', 'claude', 'claude-session', 'codex', 'pi', 'opencode']

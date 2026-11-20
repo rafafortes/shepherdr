@@ -384,6 +384,9 @@ export class Agents extends Emitter<Events> {
   private screenNow = new Map<string, 'turn' | 'output'>()
   /** a screen pass was asked for while one was in flight: run one more after it, so no trigger is lost */
   private backgroundAgain = false
+  /** herdr sends an initial output event for every pane when a subscription opens: that is a snapshot of what is
+   *  already on screen, not something that printed. Ignore those events for a moment after each (re)open. */
+  private outputQuietUntil = 0
   /** what its hooks, session file or screen say still runs in the background, since when, and after which turn */
   private seen = new Map<string, { what: Background; since: number; turn?: number }>()
   /** the background work last told, so a change is told once */
@@ -418,7 +421,10 @@ export class Agents extends Emitter<Events> {
     }
     this.sub = new Subscription(
       (e) => this.onEvent(e),
-      () => this.refresh(),
+      () => {
+        this.outputQuietUntil = Date.now() + 1000
+        this.refresh()
+      },
     )
   }
 
@@ -990,7 +996,8 @@ export class Agents extends Emitter<Events> {
   /** what still runs in the background, read again: a screen only when its turn just ended, when herdr says its pane
    *  printed, while work still runs there, or on a pace that slows from the refresh's 2 s to 30 s after a minute. A
    *  change is told as a status change, since the agent may have woken, said a word and stopped again between looks. */
-  private async readBackground() {
+  /** `eventOnly` is an output event for one pane: read that pane, not every agent still in its fast window */
+  private async readBackground(eventOnly = false) {
     if (this.readingBackground) {
       this.backgroundAgain = true
       return
@@ -999,7 +1006,7 @@ export class Agents extends Emitter<Events> {
     try {
       do {
         this.backgroundAgain = false
-        await this.backgroundPass()
+        await this.backgroundPass(eventOnly)
       } while (this.backgroundAgain && !this.stopped)
     } finally {
       this.readingBackground = false
@@ -1009,7 +1016,7 @@ export class Agents extends Emitter<Events> {
   /** one pass: decide whose screen is due, then walk the agents in order — telling what changed without a read at once,
    *  and reading a due screen (at most a few at a time) before telling that one. A key whose state comes from its hooks
    *  or session file is never held up by a pane read that belongs to another agent. */
-  private async backgroundPass() {
+  private async backgroundPass(eventOnly = false) {
     const now = Date.now()
     const due = new Set<string>()
     for (const key of this.byName.values()) {
@@ -1021,8 +1028,9 @@ export class Agents extends Emitter<Events> {
         this.screenNow.delete(key)
         continue
       }
-      let s = this.screenState.get(key)
       const why = this.screenNow.get(key)
+      if (eventOnly && !why) continue
+      let s = this.screenState.get(key)
       if (!s || s.pane !== pane) {
         s = { pane, since: now, at: 0 }
         this.screenState.set(key, s)
@@ -1105,6 +1113,8 @@ export class Agents extends Emitter<Events> {
   private onEvent(e: HerdrEvent) {
     const type = String(e.data?.type ?? e.event)
     if (type.includes('output_changed') || type === 'pane.output_matched' || type === 'pane_output_matched') {
+      // an output_matched subscription sends the pane's current text as soon as it opens: that is not a print
+      if ((type === 'pane.output_matched' || type === 'pane_output_matched') && Date.now() < this.outputQuietUntil) return
       const pane = String(e.data.pane_id ?? '')
       for (const [name, key] of this.byName) if (this.live.get(name)?.pane_id === pane) this.emit('output', key)
       // a pane whose screen we read printed: read it now, however old its turn is
@@ -1114,7 +1124,7 @@ export class Agents extends Emitter<Events> {
           if (!this.screenNow.has(key)) this.screenNow.set(key, 'output')
           due = true
         }
-      if (due) void this.readBackground().catch(() => undefined)
+      if (due) void this.readBackground(true).catch(() => undefined)
       return
     }
     // status and pane changes: read the authoritative list again
