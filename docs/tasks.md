@@ -35,7 +35,9 @@
   hook allows only the own commands; the other four bypass or ask as a whole. **Open question for you:** should a
   coordinator keep its approvals (`ask`) on every CLI while task agents run `full`, or keep running like task agents?
   Today it differs per CLI only by accident. Nothing here changes until you answer; `ask` is implemented and tested for
-  every CLI, so either answer is a one-line launch change. See [the CLI settings](settings.md).
+  every CLI, so either answer is a launch change. OpenCode is the exception to a one-line switch: its permissions are
+  written when its session is created, so a resumed session keeps the rules it started with. See
+  [the CLI settings](settings.md).
 - Review rounds are a limit, so no agent reviews for ever, and raising it is its coordinator's alone: its agent counts each round
   (`shepherdr review <id>`) and stops at the brief's Review rounds. The same command picks the round's reviewer by the caps
   (the backup reviewer below): the round's reviewer holds a slot of the caps until `shepherdr review <id> --done`. A task that has used them all with its final

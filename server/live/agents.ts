@@ -1551,9 +1551,9 @@ export class Agents extends Emitter<Events> {
       // conflicts with that, so it is never passed.
       // The worktree is trusted for this session only (--settings): a new worktree is a folder agy has not seen, and it would
       // stop on its trust screen. Nothing is written to agy's own settings.
-      // Permissions: unlike Claude (a PreToolUse hook) and Codex (hooks.PermissionRequest), agy has no per-command allow
-      // list in --settings (checked in its installed help: the flag takes settings.json keys, and there is no allow-list
-      // flag), so an 'ask' launch keeps agy's own prompts and a full-access launch keeps --dangerously-skip-permissions.
+      // Permissions: unlike Claude (a PreToolUse hook) and Codex (hooks.PermissionRequest), agy's installed help names
+      // no per-command allow-list flag or settings key (--settings takes settings.json keys, and none is documented
+      // here), so an 'ask' launch keeps agy's own prompts and a full-access launch keeps --dangerously-skip-permissions.
       // Upstream has nothing for agy (3.x runs Claude and Codex only); the asymmetry is this CLI's, not a launch's.
       a.push('--settings', JSON.stringify({ trustedWorkspaces: [r.cwd] }))
       if (resume && r.sessionId) a.push('--conversation', r.sessionId)
