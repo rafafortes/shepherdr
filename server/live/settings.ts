@@ -200,9 +200,6 @@ const pairOfKey = (key: string): { pair: Pair; what: 'model' | 'effort' } | unde
   return undefined
 }
 
-/** the role each backup CLI setting backs up: the CLI whose agent can't go on, its backup takes over from
- * @knip-baseline dead export from audit 2026-11-18 QG-03, listed for MAINT (SHE-85) */
-export const FALLBACK_OF = { task: 'task.fallback', coordinator: 'coordinator.fallback' } as const
 /** the CLI keys of the tasks' and the coordinators' backups, every one of their chains: chat CLIs, as the agents they
  *  take over from */
 const FALLBACKS: string[] = (['task', 'coordinator'] as const).flatMap((c) => [`${c}.fallback`, ...EXTRA.map((n) => `${c}.fallback${n}`)])

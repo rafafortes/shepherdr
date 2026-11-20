@@ -1046,11 +1046,6 @@ export function Meta({ children, className }: { children: ReactNode; className?:
 }
 
 /** @knip-baseline dead export from audit 2026-11-18 QG-03, listed for MAINT (SHE-85) */
-export function Tag({ children }: { children: ReactNode }) {
-  return <span className="shrink-0 rounded-full px-2 text-xs/[18px] text-fg2 shadow-[inset_0_0_0_1px_var(--line2)] phone:text-[0.8125rem]/5">{children}</span>
-}
-
-/** @knip-baseline dead export from audit 2026-11-18 QG-03, listed for MAINT (SHE-85) */
 export function Section({ label, count, children, flip }: { label: ReactNode; count?: number; children?: ReactNode; flip?: string }) {
   return (
     <div data-flip={flip} className="flex min-h-9 items-center justify-between gap-2 px-4 pt-2.5 pb-0.5 text-[0.75rem] font-medium text-fg3 phone:px-5 phone:pt-3.5 phone:pb-1 phone:text-[0.875rem]">

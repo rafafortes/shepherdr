@@ -12,7 +12,7 @@ import { opencodeLogPath } from '../server/live/opencode.ts'
 import { ClaudeReader, readerFor } from '../server/live/readers/index.ts'
 import { logKind, piSessionDir } from '../server/live/readers/find.ts'
 import { notices } from '../server/live/readers/claude.ts'
-import { claudeStep, codexItem, commandSay, commandWords } from '../server/live/readers/steps.ts'
+import { claudeStep, codexItem, commandSay } from '../server/live/readers/steps.ts'
 import { home } from '../server/store.ts'
 import type { Step } from '../shared/types.ts'
 import type { LogEvent } from '../server/live/readers/types.ts'
@@ -110,8 +110,8 @@ describe('words', () => {
     expect(took(3_780_000)).toBe('1h 3m')
   })
   test('a command without its cd into the worktree; output without colours, its last lines', () => {
-    expect(commandWords('cd /w/x && bun test\nmore')).toBe('bun test')
-    expect(commandWords("cd '/w/a b'; ls")).toBe('ls')
+    expect(commandSay('cd /w/x && bun test\nmore')).toMatchObject({ title: 'Ran tests', test: true })
+    expect(commandSay("cd '/w/a b'; ls")).toMatchObject({ step: 'search', title: 'Listed files' })
     const many = Array.from({ length: 450 }, (_, i) => `\x1b[32mline ${i}\x1b[0m`).join('\n')
     const c = cutOutput(many)
     expect(c.cut).toBe(true)

@@ -11,7 +11,7 @@ process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'no-herdr.sock'
 delete process.env.SHEPHERDR_MAIN
 
 const { CLI_VERBS } = await import('../server/live/args.ts')
-const { CARDED_VERBS, OWN_VERBS, deciderScript, ownDecision } = await import('../server/live/readers/own-commands.ts')
+const { CARDED_VERBS, OWN_VERBS, deciderScript } = await import('../server/live/readers/own-commands.ts')
 const { Agents } = await import('../server/live/agents.ts')
 const { helpVerbs } = await import('../scripts/checks/docs.ts')
 
@@ -28,10 +28,6 @@ function dispatchVerbs(): string[] {
   }
   return out
 }
-
-const command = '/opt/shepherdr/bin/shepherdr'
-const chat = 'SHE-128/Agent'
-const bash = (text: string) => ({ tool_name: 'Bash', tool_input: { command: text } })
 
 describe('the shepherdr verb lists', () => {
   test('command() and CLI_VERBS handle exactly the same verbs', () => {
@@ -66,7 +62,7 @@ describe('the shepherdr verb lists', () => {
     for (const verb of CLI_VERBS.filter((v) => !['project', 'done', 'render', 'preview'].includes(v))) expect(groups).toContain(verb)
   })
 
-  test('claude: the generated hook still embeds the exact list and allows only those calls', () => {
+  test('claude: the generated hook still embeds the exact list', () => {
     // the literal the hook has written since SHE-6, in order: moving a verb changes the generated file
     expect(OWN_VERBS).toEqual([
       'help',
@@ -94,8 +90,6 @@ describe('the shepherdr verb lists', () => {
       'secret ask',
     ])
     expect(deciderScript()).toContain(`const OWN = ${JSON.stringify(OWN_VERBS)}`)
-    for (const verb of OWN_VERBS) expect(ownDecision(command, chat, bash(`${command} ${verb}`))).toContain('"permissionDecision":"allow"')
-    for (const verb of CARDED_VERBS) expect(ownDecision(command, chat, bash(`${command} ${verb}`))).toBeUndefined()
   })
 })
 

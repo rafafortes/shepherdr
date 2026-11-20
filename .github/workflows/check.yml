@@ -6,7 +6,7 @@
 # This file stays for a run asked for by hand (`gh workflow run check.yml --ref <branch>`, then `gh run watch`), which
 # is what workflow_dispatch is; it starts nothing by itself. Keep it free of anything that runs without being asked:
 # Shepherdr reads a workflow on a pull request as one whose checks will show up on the pull request, and holds a merge
-# until they do (server/live/engine/git.ts, hasPrWorkflows). No run hangs on this: a check is local, or it is asked for.
+# until they do (server/live/engine/git.ts, prWorkflowExpect). No run hangs on this: a check is local, or it is asked for.
 name: Check
 
 on:

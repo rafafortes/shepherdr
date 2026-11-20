@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ChecksExpect } from '../server/live/engine/git.ts'
-import { hasPrWorkflows, noneIsUnknown, prWorkflowExpect, workflowExpect } from '../server/live/engine/git.ts'
+import { noneIsUnknown, prWorkflowExpect, workflowExpect } from '../server/live/engine/git.ts'
 import { landingLine } from '../server/live/engine/engine.ts'
 import { sh } from './engine-world.ts'
 import { tmp } from './tmp.ts'
@@ -49,20 +49,17 @@ describe('what one workflow says about a pull request (workflowExpect)', () => {
 })
 
 describe('what a repo says about a pull request (prWorkflowExpect)', () => {
-  test('no workflows: no checks configured, and hasPrWorkflows agrees', async () => {
+  test('no workflows: no checks configured', async () => {
     const dir = repoWith(null)
     expect(await prWorkflowExpect(dir)).toBe('none')
-    expect(await hasPrWorkflows(dir)).toBe(false)
   })
   test('an unfiltered workflow says checks will come', async () => {
     const dir = repoWith({ 'ci.yml': 'on:\n  pull_request:\n' })
     expect(await prWorkflowExpect(dir)).toBe('yes')
-    expect(await hasPrWorkflows(dir)).toBe(true)
   })
   test('a paths-filtered workflow says maybe, not none: this is the filter we used to ignore', async () => {
     const dir = repoWith({ 'ci.yml': 'on:\n  pull_request:\n    paths:\n      - backend/**\n' })
     expect(await prWorkflowExpect(dir)).toBe('maybe')
-    expect(await hasPrWorkflows(dir)).toBe(true)
   })
   test('one unfiltered workflow wins over filtered and push-only ones', async () => {
     const dir = repoWith({ 'a.yml': 'on:\n  pull_request:\n    paths: [docs/**]\n', 'b.yml': 'on:\n  push:\n' })

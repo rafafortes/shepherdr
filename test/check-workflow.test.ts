@@ -1,13 +1,13 @@
 // GitHub Actions is off on this repo (2026-11-06): the Check workflow (`.github/workflows/check.yml`) starts nothing
 // by itself and stays only for a run asked for by hand, and the whole check runs on the machine the agents work on
 // (`bun run check:local`, AGENTS.md). Shepherdr reads a repo's workflow on a pull request as one whose checks will show
-// up on it, and holds a merge until they do (server/live/engine/git.ts, hasPrWorkflows, read by checksOf in
+// up on it, and holds a merge until they do (server/live/engine/git.ts, prWorkflowExpect, read by checksOf in
 // server/live/engine/engine.ts): no merge here may wait for checks that never start.
 import { describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { keyOf, main, prune } from '../scripts/prune-logs.ts'
-import { hasPrWorkflows } from '../server/live/engine/git.ts'
+import { prWorkflowExpect } from '../server/live/engine/git.ts'
 import { tmp } from './tmp.ts'
 
 type Workflow = {
@@ -22,7 +22,7 @@ const file = join(root, '.github/workflows/check.yml')
 const text = readFileSync(file, 'utf8')
 const workflow = Bun.YAML.parse(text) as Workflow
 
-/** a git repo holding this repo's Check workflow at HEAD: what hasPrWorkflows reads, whatever this worktree hasn't
+/** a git repo holding this repo's Check workflow at HEAD: what prWorkflowExpect reads, whatever this worktree hasn't
  *  committed yet */
 function repoWithWorkflow() {
   const dir = tmp('check')
@@ -46,7 +46,7 @@ describe('when Check runs', () => {
   test('and Shepherdr reads no pull request workflow in it, so no merge waits for checks that never start', async () => {
     const { dir } = repoWithWorkflow()
     try {
-      expect(await hasPrWorkflows(dir)).toBe(false)
+      expect(await prWorkflowExpect(dir)).toBe('none')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

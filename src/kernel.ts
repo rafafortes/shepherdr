@@ -1177,11 +1177,6 @@ export function pinTask(t: Task, on: boolean) {
   return act({ type: 'pin', chat: t.agent?.chat ?? `${t.id}/Agent`, on })
 }
 
-/** pause a working task: its agent is interrupted and the task is To do until written to */
-export function pauseTask(t: Task) {
-  return act({ type: 'pause', chat: t.agent?.chat ?? `${t.id}/Agent` })
-}
-
 /** stop a task: its agent and space close, it is To do and its work stays, until it is written to again */
 export function stopTask(t: Task) {
   return act({ type: 'stop', chat: t.agent?.chat ?? `${t.id}/Agent` })
@@ -1389,11 +1384,6 @@ export function listView(ui: UI, snap: Snapshot): ListView {
   const view = { ...listOf(snap, listChips(ui, snap)), search: listsPinned(ui, snap) ? '*pinned' : ui.place }
   lastList = { snap, lists: ui.lists, place: ui.place, view }
   return view
-}
-
-/** what waits on you in a list: its tasks that need you or are ready */
-export function listWaiting(snap: Snapshot, list: ListView) {
-  return tasksIn(snap, list).filter((t) => t.status === 'need' || t.status === 'ready').length
 }
 
 /** a chip's words: a space's "# gtm" (with its machine where there are more: "# gtm · vm-str"), a machine's name */
