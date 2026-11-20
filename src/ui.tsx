@@ -972,16 +972,18 @@ export function Row({
   }
   if (asListItem)
     return (
-      <li className={clsx(rowClass(sel, kb), 'p-0!', className)} {...p}>
+      // the li stays a plain listitem (callers' data-* and aria-expanded selectors keep working); the button
+      // carries the row's whole look and every interactive attribute, so its spacing and announced state match
+      // a plain Row exactly
+      <li {...p}>
         <button
           type="button"
           aria-current={sel || undefined}
+          aria-expanded={p['aria-expanded']}
+          aria-controls={p['aria-controls']}
           onClick={onActivate}
           onKeyDown={activate}
-          className={clsx(
-            'flex min-h-[inherit] min-w-0 flex-1 cursor-pointer gap-2 rounded-[inherit] px-2 text-left outline-none focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] phone:px-3',
-            two ? 'items-start py-1.5 [&>.dot]:mt-[3px] phone:[&>.dot]:mt-1' : 'items-center',
-          )}
+          className={clsx('w-full', rowClass(sel, kb), two && 'items-start py-1.5 [&>.dot]:mt-[3px] phone:[&>.dot]:mt-1', className)}
         >
           {children}
         </button>

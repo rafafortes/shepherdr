@@ -142,6 +142,18 @@ const SCREENS: Screen[] = [
     },
   },
   {
+    name: 'search sheet, no results',
+    query: 'place=vm-str/home',
+    viewport: { width: 390, height: 844 },
+    phone: true,
+    open: async (page) => {
+      await page.getByRole('button', { name: 'Search', exact: true }).click()
+      await page.getByRole('dialog', { name: 'Search or jump to' }).waitFor()
+      await page.getByRole('combobox', { name: 'Search or jump to' }).fill('zzzzqq')
+      await page.getByText('Nothing found in this scope').waitFor()
+    },
+  },
+  {
     name: 'phone drawer',
     query: 'place=vm-str/home',
     viewport: { width: 390, height: 844 },

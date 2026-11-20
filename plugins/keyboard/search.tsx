@@ -85,10 +85,11 @@ export function Search({ onClose }: { onClose: () => void }) {
   const current = list.find((hit) => hit.key === selected) ?? list[0]
   // One listbox per drawn group: the scroll area holds the group headings, empty notes and Show more buttons,
   // while a listbox owns only its options (an axe `aria-required-children` listbox may own nothing else). The
-  // combobox controls each box, so its arrow keys keep moving through the same `list` of hits.
+  // combobox controls each box, so its arrow keys keep moving through the same `list` of hits. No group drawn is
+  // still a listbox: the combobox always has one to control, even with no matches or while messages load.
   const shown = groups.filter((group) => group.all.length || (group.kind === 'Messages' && ((searching && !coverage.finished) || capped)))
   const boxId = (i: number) => (i === 0 ? 'search-list' : `search-list-${i}`)
-  const boxes = shown.map((_, i) => boxId(i)).join(' ')
+  const boxes = shown.length ? shown.map((_, i) => boxId(i)).join(' ') : 'search-list'
   useEffect(() => {
     document.getElementById(`search-hit-${current?.key}`)?.scrollIntoView({ block: 'nearest' })
   }, [current?.key])
@@ -119,7 +120,7 @@ export function Search({ onClose }: { onClose: () => void }) {
           name="search"
           role="combobox"
           aria-expanded="true"
-          aria-controls={boxes || undefined}
+          aria-controls={boxes}
           aria-activedescendant={current ? `search-hit-${current.key}` : undefined}
           aria-label="Search or jump to"
           placeholder="Search spaces, tasks, messages, artifacts, settings"
@@ -231,8 +232,13 @@ export function Search({ onClose }: { onClose: () => void }) {
                   </p>
                 </div>
               ))}
+              {/* a note is a dimmed option, never a bare child: the listbox always owns only options */}
+              {!group.all.length ? (
+                <div role="option" aria-selected={false} aria-disabled className="px-3 py-2 text-sm text-fg3">
+                  {group.kind === 'Messages' && searching && !coverage.finished ? 'Still loading…' : 'No matches'}
+                </div>
+              ) : null}
             </div>
-            {!group.all.length ? <p className="px-3 py-2 text-sm text-fg3">{group.kind === 'Messages' && searching && !coverage.finished ? 'Still loading…' : 'No matches'}</p> : null}
             {group.all.length > limit ? (
               <button type="button" className="min-h-11 px-3 text-sm text-accent" onClick={() => setLimit((n) => n + 20)}>
                 Show more {group.kind.toLowerCase()} ({group.all.length - limit})
@@ -243,7 +249,15 @@ export function Search({ onClose }: { onClose: () => void }) {
             ) : null}
           </div>
         ))}
-        {!list.length && (!searching || coverage.finished) ? <p className="px-3 py-4 text-sm text-fg2">Nothing found in this scope. Try Everywhere or fewer words.</p> : null}
+        {!shown.length ? (
+          <div id="search-list" role="listbox" aria-label="Search results" aria-busy={searching && !coverage.finished}>
+            {!searching || coverage.finished ? (
+              <div role="option" aria-selected={false} aria-disabled className="px-3 py-4 text-sm text-fg2">
+                Nothing found in this scope. Try Everywhere or fewer words.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </Sheet>
   )
