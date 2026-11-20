@@ -1,6 +1,6 @@
 // A source fills the view model and carries out actions. The live source reads herdr and the CLIs' logs; the demo
 // source holds the prototype's fictional world, for side-by-side review and tests.
-import type { Action, ActivityAnswer, ActivityAsk, AddSpace, Alert, Chat, Folders, Snapshot, TermScreen, WorktreeAsk } from '../shared/types.ts'
+import type { Action, ActivityAnswer, ActivityAsk, AddSpace, Alert, Chat, ChatEventDelta, ChatEventFull, Folders, Snapshot, TermScreen, WorktreeAsk } from '../shared/types.ts'
 
 export type SourceEvents = {
   /** something changed: the next snapshot gets a new revision */
@@ -84,6 +84,10 @@ export interface Source extends Emitter<SourceEvents> {
   /** Owning agent status, for chat readers such as voice. */
   chatStatus?(key: string): string
   chat(key: string): Chat | undefined
+  /** both wire forms of a chat built now (PERFC-03): a delta from the last push for screens that hold a base, and
+   *  the full form for a first watch, a reconnect or an older link peer. A source with no base (the demo world)
+   *  leaves this out, and its chats keep going whole. */
+  chatUpdate?(key: string, full: Chat): { full: ChatEventFull; delta: ChatEventDelta | null }
   act(a: Action): Promise<unknown>
   /** an artifact's page, data and what it sent, at a version (its latest when none) */
   artifact(id: string, v?: number): Promise<{ html: string; data?: unknown; sent?: string } | undefined>

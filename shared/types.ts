@@ -699,6 +699,24 @@ export interface Chat {
   restart?: RestartHint
 }
 
+/** One message whose fields moved since the last chat push (PERFC-03): the id to find it by and the fields to set.
+ *  A field that went away is never sent as a patch: the server sends the whole chat instead, so a null never has to
+ *  mean "delete" on the wire. */
+export interface ChatChange {
+  id: string
+  patch: Partial<Message>
+}
+
+/** What moved in a chat since the last push (PERFC-03). Sent between a screen's first full chat (a watch or a
+ *  reconnect) and the next one: `chat` carries the current non-message state with an empty messages array, and
+ *  `added`/`changed` carry only the message rows that moved. `through` is a per-chat sequence that advances on every
+ *  built chat, so a screen can tell a fresh update from one it already applied. */
+export interface ChatDelta {
+  added: Message[]
+  changed: ChatChange[]
+  through: number
+}
+
 /** "Runs on {on} · Settings now say {want}", by the first that differs: the CLI, the model or the effort */
 export interface RestartHint {
   on: string
@@ -1568,12 +1586,20 @@ export interface TermScreen {
   rows?: number
 }
 
+/** the two wire forms of a chat push (PERFC-03). The full one is what a screen gets when it starts watching, after a
+ *  reconnect, and what an older machine on the link path always gets. A delta has its own event type: a screen on the
+ *  previous build ignores an event it does not know, so it keeps the chat it has instead of replacing it with the
+ *  empty message array a delta carries. */
+export type ChatEventFull = { type: 'chat'; chat: Chat; through?: number }
+export type ChatEventDelta = { type: 'chat-delta'; chat: Chat; through: number } & ChatDelta
+
 export type ServerEvent =
   | { type: 'snapshot'; snapshot: Snapshot }
   /** the screen's per-boot proof of its own writes, handed to it once over this socket (SEC-04). It is never in a
    *  snapshot or a file: a page that can POST but cannot read this socket cannot change an executable setting. */
   | { type: 'capability'; capability: string }
-  | { type: 'chat'; chat: Chat }
+  | ChatEventFull
+  | ChatEventDelta
   | ({ type: 'terminal'; chat: string } & TermScreen)
   | { type: 'offline'; since: number }
   /** the build of the screen the server serves: a screen on another build reloads */

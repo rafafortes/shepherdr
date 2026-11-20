@@ -1197,6 +1197,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return key.includes('/') ? c : this.withAsks(c)
   }
 
+  /** both wire forms of a chat built now (PERFC-03): a full one for a first watch, a reconnect or an older link peer,
+   *  and the delta from what we last sent for screens that already hold a base. */
+  chatUpdate(key: string, full: Chat): ReturnType<Chats['chatUpdate']> {
+    return this.chats.chatUpdate(key, full)
+  }
+
   /* ---------- the advisor ---------- */
 
   /** a chat whose open questions the advisor can take: their cards carry Ask the advisor (none asked yet, one set) */

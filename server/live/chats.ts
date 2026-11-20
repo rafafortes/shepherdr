@@ -8,7 +8,11 @@ import {
   type ActivityAnswer,
   type ActivityAsk,
   type Chat,
+  type ChatChange,
   type ChatControls,
+  type ChatDelta,
+  type ChatEventDelta,
+  type ChatEventFull,
   type ArtifactPost,
   type Job,
   type Message,
@@ -274,6 +278,46 @@ const MAX_EVENTS = 100_000
 /** how long a chat no one has read may keep its parsed events, even when the total is under the cap */
 const EVICT_IDLE = 6 * 60 * 60_000
 
+/** The fields of one message that moved since the last push (PERFC-03). One rebuilt object with the same contents as
+ *  the last one is not a change: compare each field's JSON, not its identity. A field that went away cannot travel in
+ *  a JSON patch (undefined is dropped), so the caller then sends the whole chat instead. */
+function patchOf(base: Message, next: Message): Partial<Message> | null | undefined {
+  const patch: Record<string, unknown> = {}
+  let any = false
+  for (const key of new Set([...Object.keys(base), ...Object.keys(next)])) {
+    const before = (base as unknown as Record<string, unknown>)[key]
+    const after = (next as unknown as Record<string, unknown>)[key]
+    // chatBuild returns the same row objects for an unchanged chat, so identity skips almost all of this work
+    if (before === after || JSON.stringify(before) === JSON.stringify(after)) continue
+    // null says a field went away: the caller must send the whole chat, since JSON drops undefined
+    if (after === undefined || !(key in next)) return null
+    patch[key] = after
+    any = true
+  }
+  return any ? (patch as Partial<Message>) : undefined
+}
+
+/** The change between two built message arrays (PERFC-03). Messages are appended in practice; reactions, answers and
+ *  waiting flags mutate rows already there. A row that went away, or a field that was removed, is sent as the whole
+ *  chat instead: a delta cannot express either. New rows keep their built order; the screen re-sorts them by `at`,
+ *  as chatBuild does. */
+export function chatDelta(base: Message[] | undefined, next: Message[], through: number): ChatDelta | null {
+  if (!base) return null
+  const old = new Map(base.map((m) => [m.id, m]))
+  const ids = new Set(next.map((m) => m.id))
+  if (base.some((m) => !ids.has(m.id))) return null
+  const added = next.filter((m) => !old.has(m.id))
+  const changed: ChatChange[] = []
+  for (const m of next) {
+    const before = old.get(m.id)
+    if (!before) continue
+    const patch = patchOf(before, m)
+    if (patch === null) return null
+    if (patch) changed.push({ id: m.id, patch })
+  }
+  return { added, changed, through }
+}
+
 export class Chats {
   private tails = new Map<string, LogTail>()
   private events = new Map<string, LogEvent[]>()
@@ -302,6 +346,10 @@ export class Chats {
   /** the built messages and their close times, held until the events, the log or the menu move: the costly pass is
    *  repeated on every 'chat' emit, GET /api/chat, needs() and syncAsks otherwise */
   private chatCache = new Map<string, { sig: string; msgs: Message[]; closedAt: number[] }>()
+  /** the chat last sent to screens per key, and the sequence it went out with (PERFC-03): the base the next push is
+   *  diffed against. Kept here beside chatCache so a cold eviction or a rewind sends a full chat again. */
+  private sentMessages = new Map<string, Message[]>()
+  private chatThrough = new Map<string, number>()
   /** how many times a chat's messages were built; a test reads it to prove an unchanged chat is built once */
   chatBuilds = 0
 
@@ -594,7 +642,7 @@ export class Chats {
    *  cold for background pulls: a sweep must not spend the next pass rereading the logs it just put away */
   private evict(key: string) {
     const logs = this.agents.record(key)?.logs ?? this.logFiles.get(key) ?? []
-    for (const m of [this.events, this.where, this.acts, this.eventCloses, this.chatCache]) m.delete(key)
+    for (const m of [this.events, this.where, this.acts, this.eventCloses, this.chatCache, this.sentMessages]) m.delete(key)
     this.revs.set(key, (this.revs.get(key) ?? 0) + 1)
     for (const f of logs) this.tails.get(f)?.restart()
     this.cold.add(key)
@@ -1222,6 +1270,20 @@ export class Chats {
       live: st === 'working' && act.open ? lineOf(act.open, true) : undefined,
       jobs: jobs.length ? jobs : undefined,
       controls: this.controls(key, kind),
+    }
+  }
+
+  /** both wire forms of a chat built now (PERFC-03). The full one goes to a screen that starts watching, to one that
+   *  just reconnected, and to an older machine on the link path; screens that already hold a base get the delta from
+   *  what we last sent. Every call advances the chat's sequence, so a screen can tell a fresh push from an old one. */
+  chatUpdate(key: string, full: Chat): { full: ChatEventFull; delta: ChatEventDelta | null } {
+    const through = (this.chatThrough.get(key) ?? 0) + 1
+    this.chatThrough.set(key, through)
+    const changes = chatDelta(this.sentMessages.get(key), full.messages, through)
+    this.sentMessages.set(key, full.messages.slice())
+    return {
+      full: { type: 'chat', chat: full, through },
+      delta: changes ? { type: 'chat-delta', chat: { ...full, messages: [] }, ...changes } : null,
     }
   }
 

@@ -152,9 +152,16 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
   source.on('snapshot', () => scheduleSnapshot(false))
   source.on('heartbeat', () => scheduleSnapshot(true))
   source.on('chat', (key) => {
+    const watchers = [...live].filter((ws) => ws.data.kind === 'live' && ws.data.chats.includes(key)).map((ws) => ({ ws, link: ws.data.kind === 'live' && !!ws.data.link }))
+    if (!watchers.length) return
     const chat = timed('chat', () => source.chat(key))
     if (!chat) return
-    for (const ws of live) if (ws.data.kind === 'live' && ws.data.chats.includes(key)) send(ws, { type: 'chat', chat })
+    // a screen that already holds a base gets only what moved (PERFC-03); a machine's link, which may run an older
+    // version, and any chat we cannot diff always get the whole form. The full form carries the same sequence, so a
+    // fallback does not leave a screen with a sequence of zero and no guard against a repeated push.
+    const update = watchers.some((w) => !w.link) ? source.chatUpdate?.(key, chat) : undefined
+    const full = update?.full ?? { type: 'chat', chat }
+    for (const { ws, link } of watchers) send(ws, update?.delta && !link ? update.delta : full)
   })
   source.on('terminal', (key, screen) => {
     for (const ws of live) if (ws.data.kind === 'live' && ws.data.term === key) send(ws, { type: 'terminal', chat: key, ...screen })
@@ -411,7 +418,14 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           for (const k of m.chats) {
             if (before.has(k)) continue
             const chat = source.chat(k)
-            if (chat) send(ws, { type: 'chat', chat })
+            if (!chat) continue
+            // a first watch (or a reconnect, whose watch starts empty) re-establishes the full base and the diff
+            // point. Every screen watching this key gets the same full chat, so the next delta means the same thing
+            // to all of them (PERFC-03). The subscribing socket gets it whatever it is: a link peer holds no delta
+            // base and always gets whole chats, even when the chat has been quiet since it connected.
+            const full = source.chatUpdate?.(k, chat)?.full ?? { type: 'chat', chat }
+            send(ws, full)
+            for (const other of live) if (other !== ws && other.data.kind === 'live' && other.data.chats.includes(k) && !other.data.link) send(other, full)
           }
           rewatch()
         } else if (d.kind === 'voice') {
