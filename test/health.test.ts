@@ -1,9 +1,12 @@
 // Machine health: reading /proc and nvidia-smi, when a limit is told (once, and again once it is back under), what
 // holds new tasks, and the numbers each machine's Settings note gives (server/live/health.ts).
 import { describe, expect, test } from 'bun:test'
-import { writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
+
+const perl = spawnSync('perl', ['-MJSON::PP', '-e1']).status === 0
 
 process.env.SHEPHERDR_HOME = tmp('health')
 const H = await import('../server/live/health.ts')
@@ -48,6 +51,28 @@ describe('reading the machine', () => {
     expect(s.disks.length).toBeGreaterThanOrEqual(1)
     expect(new Set(s.disks.map((d) => d.dev)).size).toBe(s.disks.length)
     expect(H.summary(s)).toMatch(/^CPU \d+% \(load [\d.]+ on \d+ cores( · pressure \d+%)?\) · Memory \d+% \(\d+ GB of \d+ GB( · swap \d+ GB)?( · pressure \d+%)?\)( · I\/O pressure \d+%)? · Disk /)
+  })
+
+  test.if(perl)('a box sample from a helper that predates the fields keeps them undefined', () => {
+    const home = tmp('health-old-helper')
+    const helper = join(home, '.shepherdr', 'helper')
+    mkdirSync(helper, { recursive: true })
+    // what helper/health.pl printed before swap and the memory and I/O pressure were added
+    const old = { cores: 4, load: 1.2, load5: 1.1, cpuSome: 5, memTotal: 8 * 2 ** 30, memUsed: 3 * 2 ** 30, disks: [{ path: '/home/old', pct: 42, freeGb: 10, dev: 99 }], gpus: [] }
+    writeFileSync(join(helper, 'health.pl'), `print '${JSON.stringify(old)}', "\\n";\n`)
+    const s = H.boxSample({ label: 'old', target: 'old.invalid', session: 'default', herdr: 'herdr', home, path: '/usr/bin', os: 'Linux' })
+    // the fields ride the JSON as it is: an old helper simply leaves them out, and the main machine reads none of them
+    expect(s.ioSome).toBeUndefined()
+    expect(s.memSome).toBeUndefined()
+    expect(s.swapTotal).toBeUndefined()
+    expect(s.swapUsed).toBeUndefined()
+    expect(s.cpuSome).toBe(5)
+    expect(s.load).toBe(1.2)
+    expect(s.disks[0].path).toBe('/home/old')
+    // its line and meters do not break or invent an I/O reading; a limit there cannot hold a machine that gives none
+    expect(H.summary(s)).not.toContain('I/O pressure')
+    expect(H.meters(s, limits(), {}).map((m) => m.name)).toEqual(['CPU', 'Memory', 'Disk'])
+    expect(H.busy(s, { ...limits(), startIoPressure: 25 })).toBeUndefined()
   })
 })
 
