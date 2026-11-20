@@ -20,15 +20,6 @@ export function short(s: unknown, n = 80): string {
   return t.length > n ? `${t.slice(0, n - 1)}…` : t
 }
 
-/** a command as it reads: its first line, without a leading cd into the worktree */
-export function commandWords(cmd: unknown): string {
-  const first =
-    String(cmd ?? '')
-      .split('\n')
-      .find((l) => l.trim()) ?? ''
-  return short(first.replace(/^\s*cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*/, ''))
-}
-
 /** a command's whole text for its detail: at most 2000 characters */
 const fullCommand = (cmd: unknown) => {
   const t = String(cmd ?? '').trim()

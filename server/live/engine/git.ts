@@ -728,12 +728,6 @@ export async function checksTook(g: GitHub, cwd: string): Promise<number | undef
 export const mergePr = (g: GitHub, cwd: string, n: number, sha: string, subject: string, body: string) =>
   gh(g, cwd, 'pr', 'merge', String(n), ...R(g), '--squash', '--match-head-commit', sha, '--subject', subject, '--body', body)
 
-/** the repo has GitHub Actions workflows at this commit that may run on pull requests: a pull request of it may get
- *  checks, even before they show. `prWorkflowExpect` tells whether any run on every one or only filtered ones. */
-export async function hasPrWorkflows(wt: string) {
-  return (await prWorkflowExpect(wt)) !== 'none'
-}
-
 /** a commit's runs of GitHub Actions on a branch, as one verdict: all passed, one failed, or some still run */
 export type BranchRun = { sha: string; state: 'pass' | 'fail' | 'pending'; failed: { name: string; link: string }[] }
 

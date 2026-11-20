@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { OWN_VERBS, ownCall, ownDecision } from '../server/live/readers/own-commands.ts'
+import { OWN_VERBS, ownCall } from '../server/live/readers/own-commands.ts'
 import { hookSettings } from '../server/live/readers/hooks.ts'
 import { tmp } from './tmp.ts'
 
@@ -104,17 +104,6 @@ describe("an agent's own shepherdr command", () => {
     expect(own(`SHEPHERDR_CHAT="POL-1/Agent" ${command} ask x`, command, 'SHE-6/Agent')).toBe(false)
     expect(ownCall(undefined, command, chat, OWN_VERBS)).toBe(false)
   })
-
-  test('answers the hook: an allow for its own command, nothing at all otherwise', () => {
-    expect(JSON.parse(ownDecision(command, chat, bash(`${command} status`))!).hookSpecificOutput).toEqual({
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'allow',
-      permissionDecisionReason: 'This launch’s own Shepherdr command',
-    })
-    expect(ownDecision(command, chat, bash(`${command} secret run A -- ls`))).toBeUndefined()
-    for (const input of [{ tool_name: 'Edit', tool_input: { command: `${command} status` } }, { tool_name: 'Bash', tool_input: {} }, { tool_name: 'Bash', tool_input: null }, null, undefined])
-      expect(ownDecision(command, chat, input)).toBeUndefined()
-  })
 })
 
 describe('the settings file a launch gets', () => {
@@ -148,8 +137,17 @@ describe('the settings file a launch gets', () => {
       const allowed = run(bash(`SHEPHERDR_CHAT="${chat}" ${command} ready EX-1 --summary ok`))
       expect(allowed.status).toBe(0)
       expect(JSON.parse(allowed.stdout.toString()).hookSpecificOutput.permissionDecision).toBe('allow')
-      for (const text of [`${command} secret run A -- ls`, `${command} status; echo hi`, 'ls', `FOO=1 ${command} status`]) {
-        const r = run(bash(text))
+      for (const input of [
+        bash(`${command} secret run A -- ls`),
+        bash(`${command} status; echo hi`),
+        bash('ls'),
+        bash(`FOO=1 ${command} status`),
+        { tool_name: 'Edit', tool_input: { command: `${command} status` } },
+        { tool_name: 'Bash', tool_input: {} },
+        { tool_name: 'Bash', tool_input: null },
+        null,
+      ]) {
+        const r = run(input)
         expect(r.status).toBe(0)
         expect(r.stdout.toString().trim()).toBe('')
       }

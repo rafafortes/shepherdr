@@ -83,18 +83,6 @@ export function ownCall(text: unknown, command: string, chat: string | undefined
   })
 }
 
-/** what the hook answers on stdout: an allow for this launch's own command, or nothing at all (the prompt as before) */
-export function ownDecision(command: string, chat: string | undefined, input: any): string | undefined {
-  if (!input || input.tool_name !== 'Bash' || !ownCall(input.tool_input?.command, command, chat, OWN_VERBS)) return undefined
-  return JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'allow',
-      permissionDecisionReason: 'This launch’s own Shepherdr command',
-    },
-  })
-}
-
 /** the hook Claude Code runs before a Bash call: reads it on stdin, allows this launch's own command, says nothing else.
  *  Its arguments are the command path and this launch's chat identity */
 export const deciderScript = () => `// Written by Shepherdr: lets a launch run its own Shepherdr command without a prompt (readers/own-commands.ts).
