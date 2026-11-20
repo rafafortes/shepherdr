@@ -844,7 +844,7 @@ describe("a task's CLI, model and effort", () => {
     }
   })
   test('each CLI is started with its own flags for model and effort', () => {
-    const rec = (kind: string, model?: string, effort?: string) => ({ key: 'k', name: 'n', kind, cwd: '/', workspace: 'w', logs: [], started: 0, model, effort, access: 'full' as const })
+    const rec = (kind: string, model?: string, effort?: string, key = 'k') => ({ key, name: 'n', kind, cwd: '/', workspace: 'w', logs: [], started: 0, model, effort, access: 'full' as const })
     // Claude Code also gets its own hooks' settings file (readers/hooks.ts)
     const hooks = ['--settings', join(process.env.SHEPHERDR_HOME!, 'hooks', 'n.settings.json')]
     expect(src.agents.args(rec('claude', 'claude-opus-5-5', 'xhigh'), false)).toEqual([...hooks, '--model', 'claude-opus-5-5', '--effort', 'xhigh'])
@@ -864,6 +864,12 @@ describe("a task's CLI, model and effort", () => {
       }
     }
     expect(src.agents.args(rec('pi', 'openai/gpt-5.5', 'lowest'), false)).toEqual(['--model', 'openai/gpt-5.5', '--thinking', 'minimal'])
+    // pi pre-trusts a worktree Shepherdr made with its own one-shot flag, task agent and reviewer alike; a coordinator
+    // on a space the human picked keeps pi's own trust prompt (no flag). Nothing is written to pi's own settings.
+    expect(src.agents.args(rec('pi', 'openai/gpt-5.5', 'lowest', 'SHE-9/Agent'), false)).toEqual(['--approve', '--model', 'openai/gpt-5.5', '--thinking', 'minimal'])
+    expect(src.agents.args(rec('pi', '', '', 'SHE-9/Reviewer'), false)).toContain('--approve')
+    expect(src.agents.args({ ...rec('pi', '', '', 'SHE-9/Agent'), sessionId: 'sid' }, false)).toEqual(['--approve', '--session-id', 'sid'])
+    for (const key of ['p:desktop-shepherdr:shepherdr', 'k']) expect(src.agents.args(rec('pi', '', '', key), false)).not.toContain('--approve')
     expect(src.agents.args(rec('gemini', 'x', 'high'), false)).toEqual([])
   })
 

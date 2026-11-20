@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { menuId, menuKeys, parseMenu } from '../server/live/chats.ts'
+import { menuFooter } from '../server/live/screen.ts'
 import { codexTrust, trustWorktree } from '../server/live/trust.ts'
 import { tmp } from './tmp.ts'
 const screen = (name: string) => readFileSync(join(import.meta.dir, 'fixtures/startup', name + '.txt'), 'utf8')
@@ -39,12 +40,31 @@ describe('recorded startup prompts', () => {
     expect(m.choices).toEqual(['Trust and continue', 'Back to Agent Command Center'])
     expect(menuKeys(m, 0)).toEqual(['enter'])
   })
+  test('pi project trust: wording (from pi source) and the arrow cursor its selector draws', () => {
+    const raw = screen('pi-trust')
+    expect(menuFooter(raw)).toBe(true)
+    const m = parseMenu(raw)
+    expect(m).not.toBeNull()
+    if (!m) return
+    // the prompt and its five options are pi's own (core/project-trust.js formatProjectTrustPrompt and
+    // core/trust-manager.js getProjectTrustOptions with includeSessionOnly)
+    expect(m.title).toBe('Trust project folder?')
+    expect(m.screen).toContain('This allows pi to load .pi settings and resources, install missing project packages, and execute')
+    expect(m.screen).toContain('project extensions.')
+    expect(m.choices).toEqual(['Trust', 'Trust parent folder (/work)', 'Trust (this session only)', 'Do not trust', 'Do not trust (this session only)'])
+    // pi draws its cursor with U+2192; the card still reads and presses the menu, not a wall of text
+    expect(m.cursor).toBe(0)
+    expect(menuKeys(m, 0)).toEqual(['enter'])
+    expect(menuKeys(m, 1)).toEqual(['down', 'enter'])
+  })
   test('generic arrow and y/n menus; ordinary input is not a menu', () => {
     expect(parseMenu('Choose provider\n❯ Local\n  Hosted\nEnter to select · ↑/↓ to navigate')?.choices).toEqual(['Local', 'Hosted'])
     expect(parseMenu('Choose\n❯ Allow once\n  Allow always\n  Cancel\nEnter to confirm')?.choices).toEqual(['Allow once', 'Allow always', 'Cancel'])
     const yn = parseMenu('Allow this tool? [y/N]')!
     expect(menuKeys(yn, 1)).toEqual(['n', 'enter'])
     expect(parseMenu('❯ Try fixing a bug\n  permissions on')).toBeNull()
+    // pi's U+2192 is a cursor only in a menu with a footer: an arrow-drawn list without one is still not a menu
+    expect(parseMenu('→ first item\n  second item\nSome words here')).toBeNull()
     expect(menuKeys(yn, -1)).toBeUndefined()
     expect(menuKeys(yn, 12)).toBeUndefined()
   })

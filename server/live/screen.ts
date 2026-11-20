@@ -93,9 +93,9 @@ function startupMenu(lines: string[]): ScreenMenu | null {
       }
     }
   }
-  const cursor = lines.findLastIndex((l) => /^\s*[❯›>▶]\s+\S/.test(l))
+  const cursor = lines.findLastIndex((l) => /^\s*[❯›>▶→]\s+\S/.test(l))
   if (cursor >= 0 && /enter.*(?:confirm|select|continue)|[↑↓]|arrow keys/i.test(screen)) {
-    const col = lines[cursor].search(/[❯›>▶]/) + 2
+    const col = lines[cursor].search(/[❯›>▶→]/) + 2
     const isOption = (i: number) =>
       i === cursor || (!!lines[i]?.trim() && lines[i].search(/\S/) === col && !/^(?:enter|esc|press |[↑↓]|arrow keys).*?(?:confirm|select|continue|cancel|navigate|back)/i.test(lines[i].trim()))
     let first = cursor,
@@ -103,7 +103,7 @@ function startupMenu(lines: string[]): ScreenMenu | null {
     while (first > 0 && isOption(first - 1)) first--
     while (last + 1 < lines.length && isOption(last + 1)) last++
     if (last > first) {
-      const choices = lines.slice(first, last + 1).map((l) => l.replace(/^\s*[❯›>▶]?\s*/, '').trim())
+      const choices = lines.slice(first, last + 1).map((l) => l.replace(/^\s*[❯›>▶→]?\s*/, '').trim())
       const context = lines.slice(0, first).map(clean).filter(Boolean)
       const title = context.findLast((l) => /\?|MCP servers? found|trust|accessing workspace/i.test(l)) ?? context.at(-1) ?? 'Choose an option'
       return { title, choices, cursor: cursor - first, screen: promptScreen(lines, first) }
@@ -272,8 +272,8 @@ export function screenText(text: string, m?: Pick<ScreenMenu, 'choices' | 'curso
   // the choice the cursor is on: its mark is the cursor, not words, so moving it is no change
   const on = m?.choices[m.cursor]
   if (on !== undefined) {
-    const line = lines.findLastIndex((l) => /^\s*[❯›>▶*]/.test(l) && plainChoice(l) === plainChoice(on))
-    if (line >= 0) lines[line] = lines[line].replace(/^(\s*)[❯›>▶*](?=\s)/, '$1 ')
+    const line = lines.findLastIndex((l) => /^\s*[❯›>▶→*]/.test(l) && plainChoice(l) === plainChoice(on))
+    if (line >= 0) lines[line] = lines[line].replace(/^(\s*)[❯›>▶→*](?=\s)/, '$1 ')
   }
   // a multiple choice's ticks are drawn on the card itself: ticking one is no new screen
   return restingScreen((m?.multi ? lines.map((l) => l.replace(/\[[✔✓x]\]/, '[ ]')) : lines).join('\n'))
@@ -282,7 +282,7 @@ export function screenText(text: string, m?: Pick<ScreenMenu, 'choices' | 'curso
 /** a choice's words, as a line on the screen or as the card reads it: no cursor, no number, no checkbox, no "(esc)" hint */
 const plainChoice = (line: string) =>
   line
-    .replace(/^\s*[❯›>▶*]\s*/, '')
+    .replace(/^\s*[❯›>▶→*]\s*/, '')
     .replace(/^\d{1,2}[.)]\s+/, '')
     .replace(/^\[[✔✓x ]\]\s*/, '')
     .replace(/\s*\((?:esc|enter|tab|[a-z])\)$/i, '')

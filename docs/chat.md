@@ -23,7 +23,7 @@ Every agent, coordinator or task agent, gets the same chat.
   reads it mid-turn instead of at its next step.
 - Startup trust and MCP approval prompts appear as choice cards, even before the first message. The card keeps the
   CLI's screen text and offers Open terminal if it cannot read the choices. Answers are checked before messages go
-  in. Only task worktrees Shepherdr creates are pre-trusted in Claude Code and Codex; a space you picked still asks.
+  in. Only task worktrees Shepherdr creates are pre-trusted in Claude Code, Codex and pi; a space you picked still asks.
 - Every question, permission and plan card has Dismiss in its header, and Esc once you pressed the card (a press on
   one of its choices or its box keeps the keys there). It closes without an answer and the agent hears the person
   declined it, so it carries on with its own judgment and says what it assumed; a dismissed permission is never a yes,
