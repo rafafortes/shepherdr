@@ -155,6 +155,7 @@ function suite(engine: string, ctx: Ctx) {
         })
         await page.locator('button[aria-label*="latest"]').waitFor()
 
+        // WebKit under a loaded gate can take longer than the default 20 s to scroll up, settle and show the jump
         say('A reply you did not hear while reading back.')
         await page.locator('button[aria-label*="new reply"]').waitFor()
         await page.waitForTimeout(300)
@@ -163,7 +164,7 @@ function suite(engine: string, ctx: Ctx) {
         restore()
         await close()
       }
-    })
+    }, 60_000)
   })
 }
 
