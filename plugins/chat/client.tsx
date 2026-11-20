@@ -774,7 +774,8 @@ function GoneFile({ name, short, radius }: { name: string; short?: boolean; radi
   return (
     <div
       data-file-gone
-      title={name}
+      role="img"
+      aria-label={`${name}: ${short ? GONE_SHORT : GONE_WORDS}`}
       style={radius ? { borderRadius: radius } : undefined}
       className={clsx('grid place-items-center bg-bubble px-2 text-center text-[0.6875rem] text-fg2', short ? 'size-full' : 'min-h-16 max-w-44')}
     >
