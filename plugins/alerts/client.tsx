@@ -2,6 +2,25 @@ import { useEffect, useState } from 'react'
 import { definePlugin, openLink, setPushEndpoint, useSnap, useStore, visibleChats } from '@client/kernel.ts'
 import { keptTags, waiting } from '@shared/alerts.ts'
 
+/** This browser's subscription endpoint, remembered so a later load can tell the server when the browser drops it. */
+const PUSH_KEY = 'shepherdr.push.endpoint'
+
+/** a new subscription is remembered; one the browser no longer holds is forgotten on the server too */
+function syncPush(sub: PushSubscription | null | undefined) {
+  if (sub) {
+    localStorage.setItem(PUSH_KEY, sub.endpoint)
+    setPushEndpoint(sub.endpoint)
+    return
+  }
+  const old = localStorage.getItem(PUSH_KEY)
+  if (!old) return
+  setPushEndpoint(null)
+  // keep the key until the server answers: an offline device gets another chance on its next load
+  void fetch('api/push/subscribe', { method: 'DELETE', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ endpoint: old }) })
+    .then(() => localStorage.removeItem(PUSH_KEY))
+    .catch(() => undefined)
+}
+
 /** Ask this device for push alerts (the app must be installed to the home screen on an iPhone). */
 export async function subscribePush(): Promise<string> {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return 'This browser has no push alerts. On an iPhone, add Shepherdr to the home screen first.'
@@ -11,7 +30,7 @@ export async function subscribePush(): Promise<string> {
   const { key } = await fetch('api/push/key').then((r) => r.json())
   const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })
   await fetch('api/push/subscribe', { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ sub, device: navigator.userAgent }) })
-  setPushEndpoint(sub.endpoint)
+  syncPush(sub)
   return 'Alerts are on for this device.'
 }
 
@@ -64,7 +83,7 @@ export default definePlugin({
       .register('sw.js')
       // tell the server which push subscription is this screen, so it sends none while the app is on screen
       .then((r) => r.pushManager?.getSubscription())
-      .then((s) => s && setPushEndpoint(s.endpoint))
+      .then((s) => syncPush(s))
       .catch(() => undefined)
     // a tap on an alert while the app is open: straight to its card, without reloading
     navigator.serviceWorker.addEventListener('message', (e) => {
