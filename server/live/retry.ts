@@ -7,8 +7,10 @@
 // that one task goes to its backup but no outage is kept and no provider is marked out (return.ts). Each CLI's log
 // records the error (readers/), and this decides what it means. From herdr-projects' docs/provider-errors.md, without
 // the weight.
+import { instant, parseClock, wall } from '../../shared/when.ts'
 import { readJson, writeJson } from '../store.ts'
 import { hidden } from './agents.ts'
+import { OWN_ZONE } from './trigger.ts'
 
 /** what a CLI's log says cut its turn off: the provider's words, and its own code and HTTP status where it has them; how
  *  long the CLI says to wait, where one says it (OpenCode's free models: `retryAfterMs`) */
@@ -73,7 +75,12 @@ const WORDS_CONTENT =
 /** a rate limit in words, which OpenCode also types as its quota error (provider.quota) when the provider says so */
 const WORDS_RATE = /rate.?limit|too many requests/i
 const WORDS_AUTH = /\b(?:status|error|HTTP)\b[^\n]{0,12}\b40[13]\b|\b401 Unauthorized\b|please run \/login|login expired|not logged in|oauth token/i
-const WORDS_ALLOWANCE = /usage limit|(?<!rate.?)limit reached|hit your [\w ]*limit|\bquota\b|billing|credit balance|payment/i
+/** a plan's allowance in words, which no wait clears: "usage limit", "limit reached" (never "rate limit reached"),
+ *  "You've hit your 5-hour limit", "it has reached its weekly limit", a session or a plan limit, a quota, a billing
+ *  problem. The hyphen is why this has its own words: Claude Code says "you've hit your 5-hour limit", and without it
+ *  the code that comes with it (`rate_limit`) had that cut off waited out as a rate limit that passes. */
+const WORDS_ALLOWANCE =
+  /usage limit|(?<!rate.?)limit reached|\b(?:hit|reached) (?:your|its|the) (?!rate[ -]limit)[\w .-]{0,24}?\blimit\b|\b(?:session|weekly|hourly|daily|monthly|plan|subscription) limit\b|\bquota\b|billing|credit balance|payment/i
 /** a prepaid balance that ran out: the provider says so with 402 Payment Required, or in these words */
 const WORDS_CREDIT = /insufficient (?:account )?(?:funds|balance|credits?)|out of credits?|credit balance|payment required/i
 // agy's words for a model it does not have: "invalid model selection", "is not recognized as a known model"
@@ -89,9 +96,110 @@ const WORDS_PASSING: [RegExp, string][] = [
   ],
 ]
 
-/** when an allowance comes back, as the provider says it: "resets 5pm", "try again at 5:00 PM", or an ISO time
- *  ("resets at 2026-11-11T20:44:33Z", Command Code's) */
-const RESET = /\bresets (?:at )?(\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)|\bresets (?:at )?([^\n·.,;()]{1,24})|try again (?:at|after) ([^\n.,;()]{1,24})/i
+/** when an allowance comes back, as the provider says it: "resets 5pm", "resets 2:10am", "reset at 3pm", "try again at
+ *  5:00 PM", "resets Nov 6, 11:59am", "resets in 1h3m51s", or an ISO time ("resets at 2026-11-11T20:44:33Z",
+ *  Command Code's) */
+const RESET = /\bresets? (?:at )?(\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)|\bresets? (?:at )?([^\n·.,;()]{1,24})|\btry again (?:at|after|in) ([^\n.,;()]{1,24})/i
+
+/** the units a provider counts a wait in: seconds too, which no time rule of Settings has (agy says "158h59m47s") */
+const SPANS: Record<string, number> = {
+  s: 1_000,
+  sec: 1_000,
+  secs: 1_000,
+  second: 1_000,
+  seconds: 1_000,
+  m: 60_000,
+  min: 60_000,
+  mins: 60_000,
+  minute: 60_000,
+  minutes: 60_000,
+  h: 3_600_000,
+  hr: 3_600_000,
+  hrs: 3_600_000,
+  hour: 3_600_000,
+  hours: 3_600_000,
+  d: 86_400_000,
+  day: 86_400_000,
+  days: 86_400_000,
+  w: 604_800_000,
+  week: 604_800_000,
+  weeks: 604_800_000,
+}
+
+/** a span in a provider's words ("1h3m51s", "2d 5h", "20 minutes"), or none when the words are not all spans */
+function spanOf(text: string): number | undefined {
+  const t = text.trim().toLowerCase().replace(/\s+/g, ' ').replace(/^in /, '').replace(/ and /g, ' ')
+  if (!t) return undefined
+  let total = 0
+  let pos = 0
+  const re = /\s*(\d+(?:\.\d+)?)\s*([a-z]+)\s*/g
+  for (let m = re.exec(t); m; m = re.exec(t)) {
+    const unit = SPANS[m[2] ?? '']
+    if (m.index !== pos || unit === undefined) return undefined
+    total += Number(m[1] ?? 0) * unit
+    pos = m.index + (m[0]?.length ?? 0)
+  }
+  return pos === t.length && total > 0 ? Math.round(total) : undefined
+}
+
+/** the wait as a provider writes it, for the moment it comes back at: "resets in 1h3m51s", "try again after 20 minutes" */
+const IN_SPAN = /\b(?:in|after)\s+([\d.]+\s*[a-z]+(?:\s*[\d.]+\s*[a-z]+)*)/i
+/** a clock time as a provider writes it: "5pm", "2:10am", "5:00 PM", "17:00", "noon" */
+const CLOCK_WORDS = /\b(?:\d{1,2}(?::\d{2})?\s*[ap]\.?m|\d{1,2}:\d{2}|noon|midday|midnight)\b/i
+/** a date a reset words itself with, its clock written after it: "Nov 6", "November 6th" */
+const DATE_WORDS = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/i
+/** the zone a CLI names beside its reset: "resets 5pm (Europe/Oslo)" */
+const NAMED_ZONE = /\(([A-Za-z]+(?:\/[A-Za-z0-9_+-]+)+)\)/
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+/** half a year: a date this far behind is the next year's (a week that ends after New Year), anything nearer is past */
+const HALF_YEAR = 182 * 86_400_000
+
+/**
+ * The moment a reset's own words name, from `now` on and in a zone: a clock time today, or tomorrow once today's has
+ * passed; a date and a clock, with the clock written after the date; or a wait from now. A date with no year is this
+ * year's unless this year's is far behind, so a reset that has passed stays in the past — an allowance that came back
+ * is back, never a year away. The zone a CLI names in brackets wins over the configured one. Undefined when the words
+ * name no time this reads.
+ */
+function resetMoment(words: string, now: number, configured: string): number | undefined {
+  const named = NAMED_ZONE.exec(words)?.[1]
+  let zone = configured
+  if (named) {
+    try {
+      wall(now, named)
+      zone = named
+    } catch {
+      // not a zone: the one Settings sets
+    }
+  }
+  const span = IN_SPAN.exec(words)?.[1]
+  if (span) {
+    const ms = spanOf(span)
+    if (ms !== undefined) return now + ms
+  }
+  const clockText = CLOCK_WORDS.exec(words)?.[0]
+  if (!clockText) return undefined
+  let clock: { h: number; m: number }
+  try {
+    clock = parseClock(clockText)
+  } catch {
+    return undefined
+  }
+  const today = wall(now, zone)
+  const y = today.getUTCFullYear()
+  const at = (year: number, month: number, day: number) => instant(new Date(Date.UTC(year, month, day, clock.h, clock.m)), zone)
+  const date = DATE_WORDS.exec(words)
+  if (!date) {
+    const todayAt = at(y, today.getUTCMonth(), today.getUTCDate())
+    // its words stop at the minute: this minute is still today
+    return todayAt + 60_000 > now ? todayAt : at(y, today.getUTCMonth(), today.getUTCDate() + 1)
+  }
+  const month = MONTHS.indexOf((date[1] ?? '').toLowerCase())
+  const day = Number(date[2] ?? 0)
+  if (day < 1 || day > 31) return undefined
+  const thisYear = at(y, month, day)
+  return now - thisYear > HALF_YEAR ? at(y + 1, month, day) : thisYear
+}
 
 /** an ISO time, in this machine's time zone and with its name: "11 Nov, 17:44 GMT-3" (as it is given when it can't be read) */
 const local = (iso: string) => {
@@ -102,8 +210,12 @@ const local = (iso: string) => {
 /** a moment, in this machine's time zone and with its name: "11 Nov, 17:44 GMT-3" */
 export const momentOf = (at: number) => local(new Date(at).toISOString())
 
-/** the reset the provider's words give: what to show ("5pm", "11 Nov, 17:44 GMT-3") and, for an ISO time, when (ms) */
-export function resetOf(words: string): { when: string; at?: number } | undefined {
+/**
+ * The reset the provider's words give: what to show ("5pm", "in 2h", "11 Nov, 17:44 GMT-3") and, when the words say
+ * a moment this can work out — an ISO time, a clock (today, else tomorrow), a date with its clock, or a wait from now —
+ * when that is (ms), in the zone Settings set unless the words name one.
+ */
+export function resetOf(words: string, now = Date.now(), zone = OWN_ZONE): { when: string; at?: number } | undefined {
   const m = RESET.exec(words)
   if (!m) return undefined
   if (m[1]) {
@@ -111,7 +223,11 @@ export function resetOf(words: string): { when: string; at?: number } | undefine
     return { when: local(m[1]), ...(Number.isNaN(at) ? {} : { at }) }
   }
   const when = (m[2] ?? m[3])?.trim()
-  return when ? { when } : undefined
+  if (!when) return undefined
+  // the time is read from the reset's own words on: a date keeps the clock written after it, and no other number of
+  // the message is taken for it
+  const at = resetMoment(words.slice(m.index), now, zone)
+  return { when, ...(at !== undefined ? { at } : {}) }
 }
 
 const until = (words: string, resetAt?: number) => {

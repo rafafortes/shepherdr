@@ -280,6 +280,29 @@ describe('run-outs: recorded once, and out until a reset, a return or a later ca
     expect(l.outOf('pi.opencode-go', NOW, undefined, 'pi.opencode-go/deepseek-v4.1-flash').out).toBe(true)
   })
 
+  test('a reset that came is the answer whatever the hours say, to the minute', () => {
+    // a reset read from the provider's own words (retry.ts resetOf) is a moment, not an hour: the provider is back at
+    // it, and a call counted in the hour the run-out happened in neither shortens it nor keeps it longer
+    const l = new UsageLedger(tmp('ledger-reset-edge'), true)
+    const resetAt = ago(1) + 30 * 60_000
+    l.runOut(runOut('A/Agent', 2, { reset: '2:10am', resetAt }), NOW)
+    expect(l.outOf('pi.opencode-go', resetAt - 60_000).out).toBe(true)
+    expect(l.outOf('pi.opencode-go', resetAt).out).toBe(false)
+    l.count('B/Agent', 'pi.opencode-go/deepseek-v4.1-flash', call('in-the-same-hour', 2), NOW)
+    expect(l.outOf('pi.opencode-go', resetAt - 60_000).out).toBe(true)
+  })
+
+  test('with no reset at all the hours are the grain: a call in the run-out’s own hour is not yet its answer', () => {
+    // bounded, and only without a reset: the run-out's hour counts whole, so a call of it in that same hour says nothing
+    // yet, and the one in the next hour frees the provider
+    const l = new UsageLedger(tmp('ledger-hour'), true)
+    l.runOut(runOut('A/Agent', 0), NOW)
+    l.count('B/Agent', 'pi.opencode-go/deepseek-v4.1-flash', call('in-the-hour', 0), NOW)
+    expect(l.outOf('pi.opencode-go', NOW).out).toBe(true)
+    l.count('B/Agent', 'pi.opencode-go/deepseek-v4.1-flash', { id: 'next-hour', at: NOW + HOUR, tokens: 10 }, NOW + HOUR)
+    expect(l.outOf('pi.opencode-go', NOW + HOUR).out).toBe(false)
+  })
+
   test('outState: the last run-out decides, and a reset that has passed does not keep it out', () => {
     const r1 = runOut('A/Agent', 9)
     const r2 = runOut('A/Agent', 2, { resetAt: NOW - HOUR })

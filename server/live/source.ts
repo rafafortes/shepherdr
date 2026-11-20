@@ -710,7 +710,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (!rec) return
     const model = keyOf(rec.kind, rec.model)
     // when it comes back: the provider's own words, or the wait its CLI named instead (OpenCode's free models' retryAfterMs)
-    const reset = resetOf(cut.text) ?? (cut.retryAfterMs ? { when: momentOf(cut.at + cut.retryAfterMs), at: cut.at + cut.retryAfterMs } : undefined)
+    const reset = resetOf(cut.text, cut.at, this.settings.zone()) ?? (cut.retryAfterMs ? { when: momentOf(cut.at + cut.retryAfterMs), at: cut.at + cut.retryAfterMs } : undefined)
     const { wasOut, added } = this.usage.runOut({
       at: cut.at,
       key: model,
@@ -2245,9 +2245,26 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // provider answered now, so the reset it promised no longer holds new starts off it
     const backAt = mine.reduce((a, o) => Math.max(a, o.back ?? 0, o.ok ?? 0), 0) || undefined
     const st = this.usage.outOf(provider, now, backAt)
+    // the reset its run-out named has come: that mark is over, whatever the return watch's backoff says (it grows to
+    // four hours), so a start is not held off until it asks the primary. An outage cut off again after that run-out is
+    // another refusal, and that one still holds
+    const expired = (o: Outage) => {
+      const reset = this.resetOfOutage(o, now)
+      return reset !== undefined && reset <= now
+    }
     // `cut(onPrimary)` clears `ok` (return.ts): a cut on the primary puts it out again; one on its backup says nothing
-    if (!st.out && !mine.some((o) => o.back === undefined && o.ok === undefined)) return undefined
+    if (!st.out && !mine.some((o) => o.back === undefined && o.ok === undefined && !expired(o))) return undefined
     return st.out && st.last?.resetAt !== undefined ? { until: clockWords(st.last.resetAt, now, this.settings.zone()) } : {}
+  }
+
+  /**
+   * The reset that ends this outage, where the run-out that cut it off named one (retry.ts resetOf: "resets 2:10am",
+   * "resets in 1h3m51s"). Only that outage's own run-out counts — its cut is the run-out's, to the same cut — so a reset
+   * of an older allowance says nothing of this one, and one from before another refusal does not end the later one.
+   */
+  private resetOfOutage(o: Outage, now: number): number | undefined {
+    const last = this.usage.outOf(providerOf(keyOf(o.primary.kind, o.primary.model)), now).last
+    return last?.resetAt !== undefined && (o.lastCut ?? o.at) <= last.at + SAME_CUT ? last.resetAt : undefined
   }
 
   /** an agent between turns, with nothing of its own still running, no try of its own due and nothing it asks you: the
@@ -3013,7 +3030,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         // asks once that work is over (or the quiet makes it the answer)
         else if (busy) continue
         else {
-          if ((o.due ?? 0) > now) continue
+          // the reset the provider's own words named has come (retry.ts resetOf, its run-out's resetAt): the primary is
+          // asked now, never after a backoff that has grown to hours since it last failed, and once per reset (a probe
+          // after it sets the next wait as usual)
+          const reset = this.resetOfOutage(o, now)
+          const came = reset !== undefined && reset <= now && (o.probed ?? 0) < reset
+          if (!came && (o.due ?? 0) > now) continue
           // a CLI this machine doesn't have, or one Shepherdr has no silent one-shot for, is never asked
           if (!canProbe(to.primary.kind) || !this.engine.installed(to.primary.kind)) continue
           const model = keyOf(to.primary.kind, to.primary.model)
@@ -6130,6 +6152,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 /** how long after this machine started the way back looks first: an outage kept from before a restart, its wait long over,
  *  is asked then — not at boot, beside the agents coming up, and not ten minutes on */
 export const FIRST_LOOK = 60_000
+
+/** how far apart a cut-off turn's own time (its log's) and the outage noted from it may be: the same cut, seconds apart.
+ *  A cut newer than that is another refusal, not the one the provider's run-out and its reset speak of */
+const SAME_CUT = 60_000
 
 /** how long one line of another space's news may be for the main machine's home space */
 const OVERVIEW_MAX = 240

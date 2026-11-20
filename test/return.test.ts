@@ -1292,6 +1292,43 @@ describe('a filter refusal and a probe answer do not keep new starts off the pri
     }
   })
 
+  test('an allowance whose reset came is over for new starts, though the return watch has not asked the primary yet', async () => {
+    const { setModels, opencodeList } = await import('../server/live/models.ts')
+    setModels('opencode', opencodeList([{ id: MODEL, label: MODEL, efforts: [] }], MODEL))
+    const s = await space('reset-came')
+    try {
+      primary(s.p.name)
+      const now = Date.now()
+      // POL-461/464: a 5-hour limit cut the chat off at 2:10am, its reset has come, and the watch's next question is
+      // hours away (its wait grows to four): the ledger's mark is over, so a new task starts on the primary again
+      src.usage.runOut(
+        {
+          at: now - 6 * 3_600_000,
+          key: KEY,
+          chat: `${s.p.name}/Agent`,
+          role: 'task',
+          reason: 'Out of allowance until 2:10am',
+          words: "You've hit your 5-hour limit · resets 2:10am",
+          reset: '2:10am',
+          resetAt: now - 3_600_000,
+        },
+        now,
+      )
+      src.returns.note({ role: 'task', space: s.p.name, primary: { kind: 'opencode', model: MODEL }, to: { kind: 'codex' }, why: 'out of allowance until 2:10am', at: now - 6 * 3_600_000 })
+      src.returns.failed('task', s.p.name, now - 5 * 3_600_000)
+      expect(out(KEY)).toBeUndefined()
+      expect(startsOn(s.p.name)).toBe('opencode')
+      // a cut on the primary after that run-out is another refusal: out again until the watch asks it
+      src.returns.cut('task', s.p.name, now, { key: 'another/Agent', onPrimary: true })
+      expect(out(KEY)).toEqual({})
+      expect(startsOn(s.p.name)).toBe('codex')
+    } finally {
+      forget(s.p.name)
+      setModels('opencode', undefined)
+      s.done()
+    }
+  })
+
   test('a probe answer frees starts even when the run-out promised a reset', async () => {
     const { setModels, opencodeList } = await import('../server/live/models.ts')
     setModels('opencode', opencodeList([{ id: MODEL, label: MODEL, efforts: [] }], MODEL))
@@ -1397,6 +1434,57 @@ describe('how soon the primary is asked', () => {
       expect(asked).toEqual(['claude'])
       expect(cards(a.key)).toHaveLength(1)
     } finally {
+      s.done()
+    }
+  })
+
+  test('the reset a provider named is asked at, never after a wait that grew to hours, in each of the five', async () => {
+    const s = await space('ask-at-reset')
+    /** each CLI's own words for an allowance that ran out, which retry.ts reads its reset from */
+    const words: Record<string, string> = {
+      claude: "You've hit your 5-hour limit · resets 2:10am",
+      codex: "You've hit your usage limit. Upgrade to Pro or try again at 5:00 PM.",
+      pi: '429 usage limit reached for this plan, resets 3pm',
+      opencode: 'Go usage limit exceeded',
+      agy: 'RESOURCE_EXHAUSTED: Individual quota reached. Resets in 158h59m47s.',
+    }
+    try {
+      const now = Date.now()
+      for (const kind of ['claude', 'codex', 'pi', 'opencode', 'agy']) {
+        // each round starts with nothing kept from the one before, and its provider is out with a reset that has just come
+        for (const o of s.src.returns.list()) s.src.returns.forget(o.role, o.space)
+        s.src.engine.tasks.length = 0
+        for (const k of Object.keys(s.src.agents.records)) delete s.src.agents.records[k]
+        asked.length = 0
+        const backup = kind === 'codex' ? 'claude' : 'codex'
+        expect(s.src.settings.set('task.agent', kind, { space: s.p.name }).ok).toBe(true)
+        const a = task(s.p.name, backup, { from: kind })
+        s.src.usage.runOut(
+          {
+            at: now - 30 * 60_000,
+            key: `${kind}/test-model`,
+            chat: `${s.p.name}/${kind}/Agent`,
+            role: 'task',
+            reason: 'Out of allowance until 2:10am',
+            words: words[kind] ?? '',
+            resetAt: now - 1_000,
+          },
+          now,
+        )
+        s.src.returns.note({ role: 'task', space: s.p.name, primary: { kind }, to: { kind: backup }, why: 'out of allowance until 2:10am', at: now - 31 * 60_000 })
+        // the watch has failed a few times since: its next question is hours away
+        for (let i = 0; i < 6; i++) s.src.returns.failed('task', s.p.name, now - 45 * 60_000)
+        // before its reset came, nothing is asked: its own wait is still hours away
+        await s.src.watchReturns(now - 30_000)
+        expect([kind, asked]).toEqual([kind, []])
+        expect([kind, cards(a.key)]).toEqual([kind, []])
+        // its reset came: the primary is asked at once, and its chat hears
+        await s.src.watchReturns(now)
+        expect([kind, asked]).toEqual([kind, [kind]])
+        expect([kind, s.src.returns.get('task', s.p.name)?.back]).toEqual([kind, expect.any(Number)])
+      }
+    } finally {
+      s.src.settings.set('task.agent', null, { space: s.p.name })
       s.done()
     }
   })
