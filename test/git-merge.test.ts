@@ -3,8 +3,9 @@
 import { describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
+import { createServer, type AddressInfo, type Socket } from 'node:net'
 import { join } from 'node:path'
-import { catchUp, landStack, mergeHere, namedFiles } from '../server/live/engine/git.ts'
+import { catchUp, DEFAULT_GIT_TIMEOUT_MS, landStack, mergeHere, namedFiles, sh as gitSh, shTimeout } from '../server/live/engine/git.ts'
 import { tmp } from './tmp.ts'
 
 const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, shell: '/bin/sh', encoding: 'utf8' }).trim()
@@ -115,6 +116,60 @@ describe('catching main up with its remote', () => {
       "main here holds work of its own that would be overwritten: notes.txt. Nothing was changed there. That work is not the task's: an agent leaves it alone and says so, and whoever works in that folder commits, moves or removes it first, then merge again.",
     )
     expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe('mine\n')
+  })
+})
+
+describe('bounds on git calls', () => {
+  test('only remote-touching git gets a default bound, and an explicit one always wins', () => {
+    expect(DEFAULT_GIT_TIMEOUT_MS).toBe(120_000)
+    for (const verb of ['fetch', 'pull', 'push', 'ls-remote', 'clone']) expect(shTimeout(['git', verb, 'origin'])).toBe(DEFAULT_GIT_TIMEOUT_MS)
+    expect(shTimeout(['git', '-c', 'x=y', 'push', 'origin'])).toBe(DEFAULT_GIT_TIMEOUT_MS)
+    expect(shTimeout(['git', '--no-pager', 'fetch', 'origin'])).toBe(DEFAULT_GIT_TIMEOUT_MS)
+    // local commands carry no timer at all, so many of them cost the same as before
+    for (const cmd of [
+      ['git', 'rev-parse', 'HEAD'],
+      ['git', 'status', '--porcelain'],
+      ['git', 'merge-tree', '--write-tree', 'main', 'work/task'],
+      ['git', '--version'],
+    ])
+      expect(shTimeout(cmd)).toBeUndefined()
+    expect(shTimeout(['gh', 'pr', 'list'])).toBeUndefined()
+    expect(shTimeout(['git', 'fetch', 'origin'], { timeoutMs: 300 })).toBe(300)
+    expect(shTimeout(['git', 'rev-parse', 'HEAD'], { timeoutMs: 300 })).toBe(300)
+  })
+
+  test('many local git calls carry no bound and stay quick', async () => {
+    const dir = fresh()
+    // the shTimeout cases above prove no timer is set for these; this checks the cost of the common path
+    const began = Date.now()
+    for (let i = 0; i < 30; i++) expect((await gitSh(['git', 'rev-parse', 'HEAD'], dir)).ok).toBe(true)
+    expect(Date.now() - began).toBeLessThan(15_000)
+  })
+
+  test('a fetch that never answers stops at the bound, says so, and leaves the local base as it was', async () => {
+    const dir = fresh()
+    const sockets = new Set<Socket>()
+    const dead = createServer((s) => {
+      sockets.add(s)
+      s.on('close', () => sockets.delete(s))
+    })
+    await new Promise<void>((resolve) => dead.listen(0, '127.0.0.1', resolve))
+    const port = (dead.address() as AddressInfo).port
+    try {
+      sh(`git remote add origin git://127.0.0.1:${port}/repo.git`, dir)
+      const at = sh('git rev-parse main', dir)
+      const began = Date.now()
+      const r = await catchUp(dir, 'main', 'then merge again', 600)
+      expect(Date.now() - began).toBeLessThan(10_000)
+      // offline, not a refusal: main here stays where it was, and the words say the remote did not answer
+      expect(r.ok).toBe(true)
+      expect(r.code).toBe(124)
+      expect(r.err).toBe('origin did not answer in 1 s')
+      expect(sh('git rev-parse main', dir)).toBe(at)
+    } finally {
+      for (const s of sockets) s.destroy()
+      dead.close()
+    }
   })
 })
 

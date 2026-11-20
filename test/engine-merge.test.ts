@@ -2,6 +2,7 @@
 // the space's checkout, and closing a task that has nothing to merge. A gate, a train and GitHub have files of their own.
 import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { createServer, type AddressInfo, type Socket } from 'node:net'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { sh, repo, world, until, started } from './engine-world.ts'
@@ -221,6 +222,53 @@ describe('shepherdr merge', () => {
     expect(sh('git log --format=%s -n 3', dir).split('\n')).toEqual([`${t.id}: Say hello`, 'theirs', 'init'])
     // the task's commit holds only its own change
     expect(sh('git show --name-only --format= HEAD', dir)).toBe('mine.txt')
+  })
+
+  test('a fetch that never answers ends the merge with words and frees the repo for the next one', async () => {
+    const w = world()
+    const origin = repo()
+    const dir = tmp('clone')
+    sh(`git clone -q ${origin} . && git config user.email t@t && git config user.name T`, dir)
+    const { p, t, key } = await started(w, dir, 'hungfetch')
+    // the next merge into this repo, ready before the first is asked for
+    const b = w.engine.add({ project: p.name, title: 'Second', desc: 'Second change', by: 'test' })
+    await until(() => w.started.some((s) => s.key === `${b.id}/Agent`))
+    if (!t.worktree || !b.worktree) throw new Error('a task has no worktree')
+    writeFileSync(join(b.worktree, 'second.txt'), 'second\n')
+    w.agentIs(`${b.id}/Agent`, 'idle')
+    writeFileSync(join(t.worktree, 'mine.txt'), 'mine\n')
+    // a remote that takes the connection and never answers: git fetch waits until the bound kills it
+    const sockets = new Set<Socket>()
+    const dead = createServer((s) => {
+      sockets.add(s)
+      s.on('close', () => sockets.delete(s))
+    })
+    await new Promise<void>((resolve) => dead.listen(0, '127.0.0.1', resolve))
+    const port = (dead.address() as AddressInfo).port
+    try {
+      sh(`git remote set-url origin git://127.0.0.1:${port}/repo.git`, dir)
+      w.engine.mergeFetchMs = 600
+      w.engine.mergeDeadline = 5_000
+      w.agentIs(key, 'idle')
+      const began = Date.now()
+      const r = await w.engine.merge(t.id, { self: true })
+      expect(Date.now() - began).toBeLessThan(15_000)
+      // offline is not a refusal: it merged from main as it is here, and the note says the remote did not answer
+      expect(r.ok).toBe(true)
+      expect(r.note).toContain('origin did not answer')
+      expect(sh('git log --format=%s -n 1', dir)).toBe(`${t.id}: Say hello`)
+      const merging = (w.engine as unknown as { merging: Map<string, unknown> }).merging
+      await until(() => !merging.has(dir))
+      // the next merge into this repo goes in on its own: it is not stuck behind the one that hung
+      const second = Date.now()
+      expect((await w.engine.merge(b.id, { self: true })).ok).toBe(true)
+      expect(Date.now() - second).toBeLessThan(15_000)
+      expect(sh('git log --format=%s -n 2', dir).split('\n')[1]).toBe(`${t.id}: Say hello`)
+      await until(() => !merging.has(dir))
+    } finally {
+      for (const s of sockets) s.destroy()
+      dead.close()
+    }
   })
 
   test('a branch already merged by hand is only marked merged', async () => {
