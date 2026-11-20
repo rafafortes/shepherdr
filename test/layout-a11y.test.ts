@@ -288,6 +288,32 @@ describe.skipIf(!browser)('the shortcuts scroll region is keyboard reachable (SH
       await ctx.close()
     }
   }, 30_000)
+
+  test('chromium: a focused control inside keeps its own arrow keys', async () => {
+    if (!browser) return
+    const { ctx, page } = await open(browser, { width: 1440, height: 900 })
+    try {
+      await page.goto(at('place=vm-str/home'))
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.getByRole('button', { name: 'How tasks work', exact: true }).click()
+      await settled(page)
+      const scroller = page.getByRole('region', { name: 'Settings content' })
+      const box = settings.getByRole('textbox', { name: 'Review rounds (rounds)', exact: true })
+      await box.waitFor()
+      const { sh, ch } = await scroller.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }))
+      expect(sh).toBeGreaterThan(ch)
+      await box.focus()
+      const before = await box.inputValue()
+      const top = await scroller.evaluate((el) => el.scrollTop)
+      await box.press('ArrowDown')
+      // the number stepped, and the scroller did not move: the handler only acts on the scroller itself
+      expect(await box.inputValue()).not.toBe(before)
+      expect(await scroller.evaluate((el) => el.scrollTop)).toBe(top)
+    } finally {
+      await ctx.close()
+    }
+  }, 30_000)
 })
 
 test.skipIf(!browser)(

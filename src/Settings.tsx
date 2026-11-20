@@ -766,9 +766,10 @@ export default function Settings() {
           aria-label="Settings content"
           tabIndex={0}
           // a focused scroller keeps the arrow keys: the app's global keys would move the task cursor instead of
-          // scrolling, and the browser has no native arrow-scroll here, so the region scrolls itself
+          // scrolling them, and the test browser does not scroll a focused div on the arrow keys by itself, so the
+          // region scrolls itself. Only when the scroller itself has focus, so a control inside keeps its own keys.
           onKeyDown={(e) => {
-            if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+            if (e.target !== e.currentTarget || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return
             e.preventDefault()
             e.stopPropagation()
             const el = scroller.current
