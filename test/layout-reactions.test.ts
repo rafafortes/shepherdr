@@ -630,6 +630,51 @@ describe.skipIf(!browser)('a copy the browser refuses', () => {
   }, 30_000)
 })
 
+describe.skipIf(!browser)('a copy the browser refuses', () => {
+  test('a clipboard API that throws where it should refuse still copies the old way, quietly', async () => {
+    if (!browser) throw new Error('no browser: this file skips these tests before they run')
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    const page = await ctx.newPage()
+    // a clipboard that throws where it was meant to refuse: the tap must fall back to the old way, not break
+    const failed: string[] = []
+    page.on('pageerror', (e) => failed.push(e.message))
+    await page.goto(url())
+    await page.waitForSelector('[data-msg="long-agent"] [data-anchor]')
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          writeText: () => {
+            throw new Error('clipboard refused here')
+          },
+        },
+        configurable: true,
+      })
+      const w = window as unknown as { execs: string[] }
+      w.execs = []
+      const doc = document as Document & { execCommand: (cmd: string) => boolean }
+      doc.execCommand = (cmd: string) => {
+        w.execs.push(cmd)
+        return true
+      }
+    })
+    const cdp = await ctx.newCDPSession(page)
+    await page.$eval('[data-msg="long-agent"]', (m) => m.scrollIntoView({ block: 'center' }))
+    await page.waitForTimeout(350)
+    const box = (await page.$eval('[data-msg="long-agent"] [data-anchor]', (b) => b.getBoundingClientRect().toJSON())) as Box
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.left + 30, y: box.top + 16 }] })
+    await page.waitForTimeout(600)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await page.waitForSelector('[role=menuitem]:has-text("Copy")')
+    await page.tap('[role=menuitem]:has-text("Copy")')
+    await page.waitForSelector('[role=dialog][aria-label=React]', { state: 'detached' })
+    // the old way copied the words, and nothing was reported on the page
+    expect(await page.evaluate(() => (window as unknown as { execs: string[] }).execs)).toEqual(['copy'])
+    await page.waitForTimeout(300)
+    expect(failed).toEqual([])
+    await ctx.close()
+  }, 30_000)
+})
+
 describe.skipIf(!browser)("a code block's Copy says Copied only when the words were copied", () => {
   test('the old way that answers no leaves the button as it was; one that answers yes says Copied', async () => {
     if (!browser) throw new Error('no browser: this file skips these tests before they run')
