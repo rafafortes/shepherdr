@@ -15,8 +15,8 @@ import {
   type Deps,
   failingTests,
   fitTitle,
-  gateBrowsers,
   type GateResult,
+  gateBrowsers,
   leftovers,
   lowPriorityArgs,
   main,
@@ -187,7 +187,9 @@ describe('the gate verdict', () => {
     expect(v.failed).toEqual(['tests'])
     expect(parseVerdict(STOPPED).failed).toEqual(['tests'])
     // a part the runner skipped, and why, so the week can name what it did not check
-    const skipped = parseVerdict('check:local · herdr-tui at abc1234 · 2 test workers\n1/2 tests ok (1m)\n2/2 docs skipped: gitleaks is missing\n\nPASSED in 1m01s, with parts of it not run:\n  ! docs: gitleaks is missing\n  ! the tests: 3 skipped\n')
+    const skipped = parseVerdict(
+      'check:local · herdr-tui at abc1234 · 2 test workers\n1/2 tests ok (1m)\n2/2 docs skipped: gitleaks is missing\n\nPASSED in 1m01s, with parts of it not run:\n  ! docs: gitleaks is missing\n  ! the tests: 3 skipped\n',
+    )
     expect(skipped.skipped).toEqual(['docs'])
     expect(skipped.parts[1]?.note).toBe('gitleaks is missing')
     // the runner's own notes: what did not happen outside a step
@@ -275,14 +277,24 @@ describe('the flaky probe', () => {
     expect(orderBySlowest(files, null)).toEqual(files)
   })
 
-  test('the browsers are read from the gate\'s own probe log', () => {
+  test("the browsers are read from the gate's own probe log", () => {
     const f = repoFixture()
     writeFileSync(join(f.logs, 'browsers.log'), 'chromium: ok (1s)\nwebkit: not installed: bun x playwright-core install webkit\nnoise\n')
-    expect(gateBrowsers(world(f, () => plain('')), f.logs)).toEqual([
+    expect(
+      gateBrowsers(
+        world(f, () => plain('')),
+        f.logs,
+      ),
+    ).toEqual([
       { engine: 'chromium', line: 'ok (1s)' },
       { engine: 'webkit', line: 'not installed: bun x playwright-core install webkit' },
     ])
-    expect(gateBrowsers(world(f, () => plain('')), join(f.dir, 'nowhere'))).toEqual([])
+    expect(
+      gateBrowsers(
+        world(f, () => plain('')),
+        join(f.dir, 'nowhere'),
+      ),
+    ).toEqual([])
   })
 
   test('only the files that open a browser are probed', () => {
@@ -620,15 +632,13 @@ describe('the run itself', () => {
     expect(state.sample).toEqual(['test/layout-a.test.ts'])
   })
 
-  test('the next week starts after this week\'s last pick, through the state the first run left', () => {
+  test("the next week starts after this week's last pick, through the state the first run left", () => {
     const f = repoFixture()
     const out = capture()
     const fakes = depsOf(f, out)
     fakes.run = fakeRun(f, { verdict: GREEN })
     expect(main([], fakes)).toBe(0)
-    expect((JSON.parse(readFileSync(join(f.common, 'shepherdr-weekly', 'state.json'), 'utf8')) as { sample: string[] }).sample).toEqual([
-      'test/layout-a.test.ts',
-    ])
+    expect((JSON.parse(readFileSync(join(f.common, 'shepherdr-weekly', 'state.json'), 'utf8')) as { sample: string[] }).sample).toEqual(['test/layout-a.test.ts'])
     // a second browser test file joins the list: the next week probes it, not the one just probed
     writeFileSync(join(f.repo, 'test', 'layout-b.test.ts'), "import { open } from './layout.ts'\n")
     expect(main([], fakes)).toBe(0)
