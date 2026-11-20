@@ -438,6 +438,13 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           source.emit('snapshot')
           return json({ ok: true })
         }
+        // the browser lost its subscription: drop only that endpoint (the same same-origin wall guards this write)
+        if (path === '/api/push/subscribe' && req.method === 'DELETE') {
+          const b = await req.json()
+          push?.unsubscribe(b.endpoint)
+          source.emit('snapshot')
+          return json({ ok: true })
+        }
         if (path.startsWith('/api/')) return json({ error: 'Not found' }, 404)
       } catch (e) {
         return json({ error: (e as Error).message }, 500)
