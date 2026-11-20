@@ -973,7 +973,8 @@ describe('--json on the list and show commands', () => {
     const rows = (await json(['models'])) as { agent: string; models: { id: string }[] }[]
     expect(Array.isArray(rows)).toBe(true)
     expect(rows.map((r) => r.agent)).toContain('claude')
-    expect(rows.find((r) => r.agent === 'claude')!.models[0]!.id).toBe('claude-fable-5-1')
+    const claude = rows.find((r) => r.agent === 'claude')
+    expect(claude?.models[0]?.id).toBe('claude-fable-5-1')
   })
 
   test('status --json returns the overview as records', async () => {
