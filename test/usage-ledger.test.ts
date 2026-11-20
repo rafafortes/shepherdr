@@ -303,6 +303,16 @@ describe('run-outs: recorded once, and out until a reset, a return or a later ca
     expect(l.outOf('pi.opencode-go', NOW + HOUR).out).toBe(false)
   })
 
+  test('a call that went through after the run-out is the answer even against a reset far ahead', () => {
+    // the provider working again speaks for itself, as a probe's answer does: a later hour's call frees it, and the
+    // models-summary alerts the next run-out as a new outage because of it
+    const l = new UsageLedger(tmp('ledger-call-beat-reset'), true)
+    l.runOut(runOut('A/Agent', 2, { resetAt: NOW + 48 * HOUR }), NOW)
+    expect(l.outOf('pi.opencode-go', NOW).out).toBe(true)
+    l.count('B/Agent', 'pi.opencode-go/other', { id: 'after-the-outage', at: NOW - HOUR, tokens: 5 }, NOW)
+    expect(l.outOf('pi.opencode-go', NOW).out).toBe(false)
+  })
+
   test('outState: the last run-out decides, and a reset that has passed does not keep it out', () => {
     const r1 = runOut('A/Agent', 9)
     const r2 = runOut('A/Agent', 2, { resetAt: NOW - HOUR })

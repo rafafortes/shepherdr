@@ -160,6 +160,14 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(providerError("You've hit your rate limit", 'rate_limit', 429)).toEqual({ passing: true, reason: 'Rate limited' })
     expect(providerError('Rate limit reached, please retry', '', 429)).toEqual({ passing: true, reason: 'Rate limited' })
     expect(providerError('too many requests', 'provider.rate-limit', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    // a rate limit with a word before it, and a limit of a resource, are no allowance either
+    expect(providerError('You have reached the per-minute rate limit', 'rate_limit', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('hit the API rate limit', '', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    expect(providerError('You have reached the context window limit', 'context_window_exceeded', 400).reason).toBe('Context window full')
+    // Claude Code's own words while the provider throttles it: not the allowance, though it says "usage limit"
+    expect(providerError('Claude Code is temporarily limiting requests (not your usage limit)', 'rate_limit', 429)).toEqual({ passing: true, reason: 'Rate limited' })
+    // its extra usage running out is the allowance, with the reset it names
+    expect(providerError("You're out of extra usage · resets 5pm", 'rate_limit', 429).reason).toBe('Out of allowance until 5pm')
   })
 
   test('a reset given as a clock, a date or a wait is read into the moment it comes back', () => {
@@ -172,6 +180,10 @@ describe("each CLI's log says what cut its turn off", () => {
     // a clock today, or tomorrow once today's has passed
     expect(at('resets 5pm')).toBe('2026-11-19T17:00:00.000Z')
     expect(at('try again at 5:00 PM')).toBe('2026-11-19T17:00:00.000Z')
+    // a day word instead of a date, and its words stopping at the minute
+    expect(at('resets tomorrow 9am')).toBe('2026-11-20T09:00:00.000Z')
+    expect(at('try again Fri 5pm')).toBe('2026-11-20T17:00:00.000Z')
+    expect(at('resets today 3pm')).toBe('2026-11-19T15:00:00.000Z')
     expect(at('resets 2:10am')).toBe('2026-11-20T02:10:00.000Z')
     expect(at('Claude usage limit reached. Your limit will reset at 3pm')).toBe('2026-11-19T15:00:00.000Z')
     expect(at('resets noon')).toBe('2026-11-19T12:00:00.000Z')
@@ -184,8 +196,10 @@ describe("each CLI's log says what cut its turn off", () => {
     // the zone a CLI names beside its time wins over the configured one; without one, the configured zone is read
     expect(at('resets 5pm (Europe/Oslo)', 'America/Sao_Paulo')).toBe('2026-11-19T16:00:00.000Z')
     expect(at('resets 5pm', 'Europe/Oslo')).toBe('2026-11-19T16:00:00.000Z')
-    // brackets that name no zone leave the configured one
+    // brackets that name no zone leave the configured one; a zone without a slash (UTC) is read when Intl knows it
     expect(at('resets 5pm (Foo/Bar)')).toBe('2026-11-19T17:00:00.000Z')
+    expect(at('resets 5pm (America/Sao_Paulo)')).toBe('2026-11-19T20:00:00.000Z')
+    expect(at('resets 5pm (UTC)', 'Europe/Oslo')).toBe('2026-11-19T17:00:00.000Z')
     // a date with its clock written after it; one that has passed is past (an allowance that came back is back), and one
     // a week ahead is this year's
     expect(at('resets Nov 21, 11:59am')).toBe('2026-11-21T11:59:00.000Z')
@@ -198,10 +212,22 @@ describe("each CLI's log says what cut its turn off", () => {
     expect(at('resets in 1h3m51s')).toBe('2026-11-19T11:03:51.000Z')
     expect(at('resets in 2d 5h')).toBe('2026-11-21T15:00:00.000Z')
     expect(at('try again in 20 minutes')).toBe('2026-11-19T10:20:00.000Z')
+    expect(at('resets in 2 hours and 5 minutes')).toBe('2026-11-19T12:05:00.000Z')
     // what names no time it can read keeps only the provider's words
     expect(resetOf('resets in 3 elephants', now, 'UTC')).toEqual({ when: 'in 3 elephants' })
     expect(resetOf('resets 31:99pm', now, 'UTC')).toEqual({ when: '31:99pm' })
     expect(resetOf('resets Nov 42, 5pm', now, 'UTC')).toEqual({ when: 'Nov 42' })
+    // each CLI's own run-out words name when it comes back, so its run-out carries a moment, not only words
+    for (const [words, iso] of [
+      ["You've hit your 5-hour limit · resets 2:10am", '2026-11-20T02:10:00.000Z'],
+      ["You've hit your usage limit. Upgrade to Pro or try again at 5:00 PM.", '2026-11-19T17:00:00.000Z'],
+      ['429 usage limit reached for this plan, resets 3pm', '2026-11-19T15:00:00.000Z'],
+      ['RESOURCE_EXHAUSTED: Individual quota reached. Resets in 158h59m47s.', '2026-11-26T00:59:47.000Z'],
+    ] as const) {
+      expect([words, at(words)]).toEqual([words, iso])
+    }
+    // OpenCode's own words name no moment: its CLI says how long to wait instead (retryAfterMs, source.ts ranOut)
+    expect(resetOf('Go usage limit exceeded', now, 'UTC')).toBeUndefined()
   })
 
   test("one response a content or safety filter refused is not a provider outage, in every CLI's own words", () => {

@@ -131,7 +131,7 @@ import { Revivals, type Wrong } from './revive.ts'
 import { RESUME_SETTLE, Starts, type StartStep } from './start.ts'
 import { StallWatch } from './stall.ts'
 import { swallowedReport } from './debug.ts'
-import { carryOn, momentOf, Retries, resetOf, type Cut, type Retry } from './retry.ts'
+import { carryOn, momentOf, Retries, resetOf, runOutOf, type Cut, type Retry } from './retry.ts'
 import { modelsSummary, keyOf, patternName, providerWords, roleOfChat, type LiveAgent, type SummaryInput, type TaskFact } from './models-summary.ts'
 import { entryPatterns, knownOf, limitsView, type HeldFact } from './limits-view.ts'
 import { readClaude, type Reading } from './plan-limits.ts'
@@ -2259,10 +2259,12 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
 
   /**
    * The reset that ends this outage, where the run-out that cut it off named one (retry.ts resetOf: "resets 2:10am",
-   * "resets in 1h3m51s"). Only that outage's own run-out counts — its cut is the run-out's, to the same cut — so a reset
-   * of an older allowance says nothing of this one, and one from before another refusal does not end the later one.
+   * "resets in 1h3m51s"). Only an outage that is itself a run-out can end at one — being signed out, or a model that is
+   * not there, is no allowance that comes back — and only its own run-out counts: its cut is the run-out's, to the same
+   * cut, so a reset of an older allowance says nothing of this one.
    */
   private resetOfOutage(o: Outage, now: number): number | undefined {
+    if (!runOutOf(o.why)) return undefined
     const last = this.usage.outOf(providerOf(keyOf(o.primary.kind, o.primary.model)), now).last
     return last?.resetAt !== undefined && (o.lastCut ?? o.at) <= last.at + SAME_CUT ? last.resetAt : undefined
   }
@@ -3031,10 +3033,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         else if (busy) continue
         else {
           // the reset the provider's own words named has come (retry.ts resetOf, its run-out's resetAt): the primary is
-          // asked now, never after a backoff that has grown to hours since it last failed, and once per reset (a probe
-          // after it sets the next wait as usual)
+          // asked now, never after a backoff that has grown to hours since it last failed, and once per reset — a probe,
+          // or the answer of the machine's own work, is the reset's answer already
           const reset = this.resetOfOutage(o, now)
-          const came = reset !== undefined && reset <= now && (o.probed ?? 0) < reset
+          const came = reset !== undefined && reset <= now && Math.max(o.probed ?? 0, o.ok ?? 0) < reset
           if (!came && (o.due ?? 0) > now) continue
           // a CLI this machine doesn't have, or one Shepherdr has no silent one-shot for, is never asked
           if (!canProbe(to.primary.kind) || !this.engine.installed(to.primary.kind)) continue

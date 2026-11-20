@@ -7,7 +7,7 @@
 // that one task goes to its backup but no outage is kept and no provider is marked out (return.ts). Each CLI's log
 // records the error (readers/), and this decides what it means. From herdr-projects' docs/provider-errors.md, without
 // the weight.
-import { instant, parseClock, wall } from '../../shared/when.ts'
+import { dayOf, instant, parseClock, wall } from '../../shared/when.ts'
 import { readJson, writeJson } from '../store.ts'
 import { hidden } from './agents.ts'
 import { OWN_ZONE } from './trigger.ts'
@@ -75,12 +75,15 @@ const WORDS_CONTENT =
 /** a rate limit in words, which OpenCode also types as its quota error (provider.quota) when the provider says so */
 const WORDS_RATE = /rate.?limit|too many requests/i
 const WORDS_AUTH = /\b(?:status|error|HTTP)\b[^\n]{0,12}\b40[13]\b|\b401 Unauthorized\b|please run \/login|login expired|not logged in|oauth token/i
-/** a plan's allowance in words, which no wait clears: "usage limit", "limit reached" (never "rate limit reached"),
- *  "You've hit your 5-hour limit", "it has reached its weekly limit", a session or a plan limit, a quota, a billing
- *  problem. The hyphen is why this has its own words: Claude Code says "you've hit your 5-hour limit", and without it
- *  the code that comes with it (`rate_limit`) had that cut off waited out as a rate limit that passes. */
+/** a plan's allowance in words, which no wait clears: "usage limit" (but never Claude Code's "not your usage limit"
+ *  while it throttles), "out of extra usage", "limit reached" (never "rate limit reached"), "You've hit your 5-hour
+ *  limit", a session or a plan limit, a quota, a billing problem. The hyphen is why this has its own words: Claude Code
+ *  says "you've hit your 5-hour limit", and without it the code that comes with it (`rate_limit`) had that cut off
+ *  waited out as a rate limit that passes. What the limit is *of* decides the rest: "hit your rate limit", "reached the
+ *  request limit", "the output limit" and "the context window limit" are a wait or a resource, never an allowance,
+ *  however the sentence runs. */
 const WORDS_ALLOWANCE =
-  /usage limit|(?<!rate.?)limit reached|\b(?:hit|reached) (?:your|its|the) (?!rate[ -]limit)[\w .-]{0,24}?\blimit\b|\b(?:session|weekly|hourly|daily|monthly|plan|subscription) limit\b|\bquota\b|billing|credit balance|payment/i
+  /(?<!not your )usage limit|out of (?:extra )?usage|(?<!rate.?)limit reached|\b(?:hit|reached) (?:your|its|the) (?:(?!\b(?:rate|requests?|context|output|tokens?|concurren\w*)\b)[\w .-]){0,24}?\blimit\b|\b(?:session|weekly|hourly|daily|monthly|5-hour|five-hour|plan|subscription) limit\b|\bquota\b|billing|credit balance|payment/i
 /** a prepaid balance that ran out: the provider says so with 402 Payment Required, or in these words */
 const WORDS_CREDIT = /insufficient (?:account )?(?:funds|balance|credits?)|out of credits?|credit balance|payment required/i
 // agy's words for a model it does not have: "invalid model selection", "is not recognized as a known model"
@@ -99,7 +102,7 @@ const WORDS_PASSING: [RegExp, string][] = [
 /** when an allowance comes back, as the provider says it: "resets 5pm", "resets 2:10am", "reset at 3pm", "try again at
  *  5:00 PM", "resets Nov 6, 11:59am", "resets in 1h3m51s", or an ISO time ("resets at 2026-11-11T20:44:33Z",
  *  Command Code's) */
-const RESET = /\bresets? (?:at )?(\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)|\bresets? (?:at )?([^\n·.,;()]{1,24})|\btry again (?:at|after|in) ([^\n.,;()]{1,24})/i
+const RESET = /\bresets? (?:at )?(\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)|\bresets? (?:at )?([^\n·.,;()]{1,24})|\btry again (?:at |on |after |in )?([^\n.,;()]{1,24})/i
 
 /** the units a provider counts a wait in: seconds too, which no time rule of Settings has (agy says "158h59m47s") */
 const SPANS: Record<string, number> = {
@@ -142,14 +145,17 @@ function spanOf(text: string): number | undefined {
   return pos === t.length && total > 0 ? Math.round(total) : undefined
 }
 
-/** the wait as a provider writes it, for the moment it comes back at: "resets in 1h3m51s", "try again after 20 minutes" */
-const IN_SPAN = /\b(?:in|after)\s+([\d.]+\s*[a-z]+(?:\s*[\d.]+\s*[a-z]+)*)/i
+/** the wait as a provider writes it, for the moment it comes back at: "resets in 1h3m51s", "try again in 2 hours and
+ *  5 minutes" */
+const IN_SPAN = /\b(?:in|after)\s+([\d.]+\s*[a-z]+(?:(?:\s*and)?\s*[\d.]+\s*[a-z]+)*)/i
 /** a clock time as a provider writes it: "5pm", "2:10am", "5:00 PM", "17:00", "noon" */
 const CLOCK_WORDS = /\b(?:\d{1,2}(?::\d{2})?\s*[ap]\.?m|\d{1,2}:\d{2}|noon|midday|midnight)\b/i
 /** a date a reset words itself with, its clock written after it: "Nov 6", "November 6th" */
 const DATE_WORDS = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/i
-/** the zone a CLI names beside its reset: "resets 5pm (Europe/Oslo)" */
-const NAMED_ZONE = /\(([A-Za-z]+(?:\/[A-Za-z0-9_+-]+)+)\)/
+/** a day word a reset may name instead of a date: "tomorrow 9am", "Fri 9am" */
+const DAY_WORD = /\b(today|tonight|tomorrow|tmrw|tmr|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)\b/i
+/** the zone a CLI names beside its reset: "resets 5pm (Europe/Oslo)", "resets 3pm (UTC)" */
+const NAMED_ZONE = /\(([A-Za-z]+(?:\/[A-Za-z0-9_+-]+)*)\)/
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 /** half a year: a date this far behind is the next year's (a week that ends after New Year), anything nearer is past */
 const HALF_YEAR = 182 * 86_400_000
@@ -188,9 +194,12 @@ function resetMoment(words: string, now: number, configured: string): number | u
   const today = wall(now, zone)
   const y = today.getUTCFullYear()
   const at = (year: number, month: number, day: number) => instant(new Date(Date.UTC(year, month, day, clock.h, clock.m)), zone)
+  const todayAt = at(y, today.getUTCMonth(), today.getUTCDate())
+  // a day word instead of a date: "tomorrow 9am", "Fri 9am" (the next Friday, today if still to come)
+  const ahead = dayOf(DAY_WORD.exec(words)?.[1] ?? '', (today.getUTCDay() + 6) % 7)
+  if (ahead !== undefined) return at(y, today.getUTCMonth(), today.getUTCDate() + ahead)
   const date = DATE_WORDS.exec(words)
   if (!date) {
-    const todayAt = at(y, today.getUTCMonth(), today.getUTCDate())
     // its words stop at the minute: this minute is still today
     return todayAt + 60_000 > now ? todayAt : at(y, today.getUTCMonth(), today.getUTCDate() + 1)
   }
@@ -237,8 +246,9 @@ const until = (words: string, resetAt?: number) => {
   return r ? ` until ${r.when}` : resetAt ? ` until ${momentOf(resetAt)}` : ''
 }
 
-/** a reason that is a provider's run-out: its allowance or its credit is used up (retry.ts providerError) */
-export const runOutOf = (reason: string) => /^Out of (?:allowance|credit)/.test(reason)
+/** a reason that is a provider's run-out: its allowance or its credit is used up (retry.ts providerError), in the
+ *  capitalised words it says it with or the lower-case ones a takeover keeps (an outage's `why`) */
+export const runOutOf = (reason: string) => /^out of (?:allowance|credit)/i.test(reason)
 
 /** which errors pass by themselves. The CLI's own code decides where it has one (Codex codex_error_info, Claude Code's
  *  error and HTTP status); its words decide for the rest. Not recognised: it doesn't pass. `resetAt` is when the provider
