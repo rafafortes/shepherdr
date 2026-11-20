@@ -16,7 +16,8 @@ import { CLI_VERBS } from '../args.ts'
  *  to command() without placing it in one of them fails that test. */
 export const CARDED_VERBS = ['project', 'mode', 'restart', 'attach', 'render', 'preview', 'profile', 'doctor', 'secret'] as const
 
-/** the allowed one-word verbs, in the order the generated hook has always written them (test/own-verbs.test.ts) */
+/** the allowed one-word verbs, in the order the generated hook has always written them; kept here for that byte-exact
+ *  output and filtered to the verbs still in CLI_VERBS. test/own-verbs.test.ts pins both lists to CLI_VERBS. */
 const ALLOWED = [
   'show',
   'models',
@@ -41,7 +42,7 @@ const ALLOWED = [
 ] as const
 
 /** the verbs that never ask, as the CLI spells them (two words where the CLI takes two). `done` is `ready`'s older
- *  name, still taken. Derived from CLI_VERBS: the two-word pairs are the only verbs the CLI spells as two words. */
+ *  name, still taken. The two-word pairs are the only verbs the CLI spells as two words. */
 export const OWN_VERBS: string[] = ['help', ...ALLOWED.filter((v) => CLI_VERBS.includes(v)), 'secret list', 'secret ask']
 
 /**

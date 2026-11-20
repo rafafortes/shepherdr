@@ -36,6 +36,8 @@ const bash = (text: string) => ({ tool_name: 'Bash', tool_input: { command: text
 describe('the shepherdr verb lists', () => {
   test('command() and CLI_VERBS handle exactly the same verbs', () => {
     expect(dispatchVerbs()).toEqual([...CLI_VERBS])
+    // help is the one own verb handled before the switch rather than as a case in it
+    expect(readFileSync(join(import.meta.dir, '..', 'server', 'live', 'source.ts'), 'utf8')).toContain("if (a0 === 'help') return helpTopic(a1)")
   })
 
   test('every own verb is handled by command(), and every non-carded CLI verb is own', () => {
@@ -102,12 +104,19 @@ describe('how each CLI reaches the own-verb list', () => {
   afterAll(() => agents.stop())
   const rec = (kind: string, access: 'full' | 'ask' = 'full') => ({ key: 'own-verbs', name: 'own-verbs', kind, cwd: '/', workspace: 'w', logs: [], started: 0, access }) as never
 
+  /** the PreToolUse decider claude gets for its own shepherdr calls, whichever access mode it starts in */
+  const claudeHook = (access: 'full' | 'ask'): string => {
+    const args = agents.args(rec('claude', access), false)
+    expect(args[0]).toBe('--settings')
+    const groups = JSON.parse(readFileSync(args[1], 'utf8')).hooks.PreToolUse
+    expect(groups[1].matcher).toBe('Bash')
+    expect(groups[1].hooks[0].command).toContain('allow.cjs')
+    return groups[1].hooks[0].command
+  }
+
   test('claude uses a generated hook; codex, agy, opencode and pi do not consult it', () => {
     // claude is the only CLI with a permission card here, and the only one given a PreToolUse decider
-    const claude = agents.args(rec('claude'), false)
-    expect(claude[0]).toBe('--settings')
-    const groups = JSON.parse(readFileSync(claude[1], 'utf8')).hooks.PreToolUse
-    expect(groups[1].matcher).toBe('Bash')
+    claudeHook('full')
     // codex: approvals bypassed, no hook
     expect(agents.args(rec('codex'), false)).toContain('--dangerously-bypass-approvals-and-sandbox')
     // agy: its own bypass flag
@@ -124,7 +133,7 @@ describe('how each CLI reaches the own-verb list', () => {
     expect(agents.args(rec('agy', 'ask'), false)).not.toContain('--dangerously-skip-permissions')
     expect(agents.args(rec('opencode', 'ask'), false)).not.toContain('--auto')
     expect(agents.args(rec('pi', 'ask'), false)).toEqual([])
-    // claude keeps its own-command decider in both modes: that hook is the only carrier of OWN_VERBS
-    expect(agents.args(rec('claude', 'ask'), false)[0]).toBe('--settings')
+    // claude keeps the very own-command decider in both modes: that hook is the only carrier of OWN_VERBS
+    expect(claudeHook('ask')).toBe(claudeHook('full'))
   })
 })
