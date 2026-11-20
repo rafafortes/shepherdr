@@ -52,6 +52,8 @@ describe('shepherdr help, per topic', () => {
     expect(unknown.out).toContain('No help topic nope; try one of: ')
     for (const name of Object.keys(TOPIC)) expect(unknown.out).toContain(name)
     expect(unknown.out).toContain(HELP)
+    // names inherited from Object are not topics either: they used to print the page, and must not crash now
+    for (const inherited of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) expect((await cli(['help', inherited])).out).toContain(`No help topic ${inherited}; try one of: `)
     expect(helpTopic('tasks')).toBe(TOPIC.tasks)
     expect(helpTopic()).toBe(HELP)
   })
