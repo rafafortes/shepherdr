@@ -37,12 +37,6 @@ const ALLOW: Allow[] = [
     why: 'Three lists have non-li children: the automations ul, the Needs you ul and the search listbox; SHE-176 owns their markup.',
     finding: 'SHE-176',
   },
-  {
-    rule: 'scrollable-region-focusable',
-    pairs: [{ target: /^\.overscroll-contain\.touch-pan-y\.overflow-y-auto:nth-child\(2\)$/, screens: ['Keyboard shortcuts'] }],
-    why: "The shortcuts page's scroll column has no tab stop; SHE-177 owns making it focusable.",
-    finding: 'SHE-177',
-  },
 ]
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']
@@ -260,10 +254,66 @@ test('the follow-up allowances only cover their own targets and screens', () => 
   expect(accepts(violation('aria-required-children', ['div > ul']), 'Needs you view')).toBe(true)
   expect(accepts(violation('aria-required-children', ['#search-list']), 'desktop: places + chat + tasks')).toBe(false)
   expect(accepts(violation('aria-required-children', ['ul']), 'search sheet')).toBe(false)
-  const scroll = ['.overscroll-contain.touch-pan-y.overflow-y-auto:nth-child(2)']
-  expect(accepts(violation('scrollable-region-focusable', scroll), 'Keyboard shortcuts')).toBe(true)
-  expect(accepts(violation('scrollable-region-focusable', scroll), 'desktop: places + chat + tasks')).toBe(false)
-  expect(accepts(violation('button-name', scroll), 'Keyboard shortcuts')).toBe(false)
+  // SHE-177 made the shortcuts scroller focusable, so its rule has no allowance left
+  expect(ALLOW.some((a) => a.rule === 'scrollable-region-focusable')).toBe(false)
+})
+
+describe.skipIf(!browser)('the shortcuts scroll region is keyboard reachable (SHE-177)', () => {
+  test('chromium: the scroller takes focus and scrolls with the arrow keys', async () => {
+    if (!browser) return
+    const { ctx, page } = await open(browser, { width: 1440, height: 900 })
+    try {
+      await page.goto(at('place=vm-str/home'))
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.getByRole('button', { name: 'Keyboard shortcuts', exact: true }).click()
+      await page.getByRole('heading', { name: 'Keyboard shortcuts' }).waitFor()
+      await settled(page)
+      // the shared desktop Settings scroller is a named, focusable region (not just a scrollable div)
+      const scroller = page.getByRole('region', { name: 'Page content' })
+      await scroller.waitFor()
+      expect(await scroller.getAttribute('tabindex')).toBe('0')
+      // the shortcuts list really overflows, so there is something to scroll
+      const { sh, ch } = await scroller.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }))
+      expect(sh).toBeGreaterThan(ch)
+      await scroller.focus()
+      expect(await scroller.evaluate((el) => document.activeElement === el)).toBe(true)
+      const before = await scroller.evaluate((el) => el.scrollTop)
+      for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowDown')
+      const down = await scroller.evaluate((el) => el.scrollTop)
+      expect(down).toBeGreaterThan(before)
+      for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowUp')
+      expect(await scroller.evaluate((el) => el.scrollTop)).toBeLessThan(down)
+    } finally {
+      await ctx.close()
+    }
+  }, 30_000)
+
+  test('chromium: a focused control inside keeps its own arrow keys', async () => {
+    if (!browser) return
+    const { ctx, page } = await open(browser, { width: 1440, height: 900 })
+    try {
+      await page.goto(at('place=vm-str/home'))
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = page.getByRole('region', { name: 'Settings' })
+      await settings.getByRole('button', { name: 'How tasks work', exact: true }).click()
+      await settled(page)
+      const scroller = page.getByRole('region', { name: 'Page content' })
+      const box = settings.getByRole('textbox', { name: 'Review rounds (rounds)', exact: true })
+      await box.waitFor()
+      const { sh, ch } = await scroller.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }))
+      expect(sh).toBeGreaterThan(ch)
+      await box.focus()
+      const before = await box.inputValue()
+      const top = await scroller.evaluate((el) => el.scrollTop)
+      await box.press('ArrowDown')
+      // the number stepped, and the scroller did not move: the handler only acts on the scroller itself
+      expect(await box.inputValue()).not.toBe(before)
+      expect(await scroller.evaluate((el) => el.scrollTop)).toBe(top)
+    } finally {
+      await ctx.close()
+    }
+  }, 30_000)
 })
 
 test.skipIf(!browser)(
