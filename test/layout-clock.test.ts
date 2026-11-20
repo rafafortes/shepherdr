@@ -1,6 +1,6 @@
 // Relative-time labels keep moving on the screen's own clock, with no new snapshot and no real wait: the regression
-// SHE-105 left behind (f22d0997). A test hook moves one shared clock; this checks a countdown, an age, and that the
-// tree around them and the snapshot revision did not move.
+// SHE-105 left behind (f22d0997). Playwright's fake clock advances Date and fires the screen's real interval, so this
+// checks a countdown, an age, and that the tree around them and the snapshot revision did not move.
 import { describe, expect, test } from 'bun:test'
 import { layout } from './layout.ts'
 
@@ -28,11 +28,11 @@ describe.skipIf(!browser)('relative times tick on the shared clock', () => {
     await new Promise<void>((r) => (observer.onopen = () => r()))
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
     try {
+      // install before the page loads: this drives the interval the app itself uses, not a test-only setter
+      await page.clock.install({ time: base })
       await page.goto(`${url()}&tab=tasks`)
       const row = page.getByRole('button', { name: /HP-202 Voice/ })
       await row.waitFor()
-      // pin the clock to the same base the report is measured from, whatever minute the page opened in
-      await page.evaluate((at) => (window as unknown as { shepClock: (n: number) => void }).shepClock(at), base)
       await row.getByText('12m', { exact: true }).waitFor()
       // let anything queued while the page opened land before measuring what the clock alone changes
       await Bun.sleep(100)
@@ -42,14 +42,14 @@ describe.skipIf(!browser)('relative times tick on the shared clock', () => {
       })
 
       // four minutes later, still inside the five-minute cadence: the same snapshot reads "8m"
-      await page.evaluate((at) => (window as unknown as { shepClock: (n: number) => void }).shepClock(at), base + 4 * minute)
+      await page.clock.fastForward(4 * minute)
       await row.getByText('8m', { exact: true }).waitFor()
       const renders = await page.evaluate(() => ({ ...(window as unknown as { shepRenderCount: Record<string, number> }).shepRenderCount }))
       expect(renders.app ?? 0).toBe(0)
       expect(revs.length).toBe(settled)
 
       // past the cadence, the countdown gives way to the line's age: "11m ago", still on the same revision
-      await page.evaluate((at) => (window as unknown as { shepClock: (n: number) => void }).shepClock(at), base + 8 * minute)
+      await page.clock.fastForward(4 * minute)
       await row.getByText(/11m ago/).waitFor()
       expect(revs.length).toBe(settled)
     } finally {

@@ -370,8 +370,8 @@ export function reportOf(r: Reported | undefined, status: TaskStatus, now = Date
     msg: r.msg,
     progress: r.progress,
     eta: r.left === undefined ? undefined : Math.max(0, Math.round(r.left - spent)),
-    // the raw inputs the screen counts down on its own clock, so these words move through a heartbeat that changes
-    // nothing (PERFC-01): the numbers above stay for older snapshots that have no clock of their own.
+    // the raw inputs the screen counts down on its own clock (PERFC-01): a heartbeat that keeps the revision still
+    // moves these words on the screen, while older snapshots keep the numbers above.
     at: r.at,
     ...(r.left === undefined ? {} : { left: r.left }),
     paused: status === 'need' || undefined,
