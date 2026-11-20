@@ -31,7 +31,8 @@ export const spaceToken = (p: Picked & { kind: 'space' }) => `[#${p.name}](space
 /** what a picked task puts in a message */
 export const taskToken = (p: Picked & { kind: 'task' }) => `[@${p.ref}](task:${p.id})`
 
-/** the token of a pick, whatever it is */
+/** the token of a pick, whatever it is
+ * @knip-baseline dead export from audit 2026-11-18 QG-03, listed for MAINT (SHE-85) */
 export const token = (p: Picked) => (p.kind === 'space' ? spaceToken(p) : taskToken(p))
 
 /** the "#word" or "@word" the caret sits at the end of, else null. Never inside a word (an email's "a@b", a link's

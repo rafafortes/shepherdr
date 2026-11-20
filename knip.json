@@ -1,0 +1,49 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Entry points of this repo (tsconfig paths @shared/, @client/, @plugins/ are read from tsconfig.json). The server's
+  // two CLIs, the client bootstrap, each plugin's server and client part, the standalone scripts (generators with their
+  // own tests, e.g. scripts/emoji.ts), the check runners and every test. The two plugin API modules are entry points
+  // too: definePlugin, useSnap, useUI, useStore, getState, act, has, openTask, goPlace, placeOf, taskOf, Registry,
+  // ClientPlugin and ServerPlugin are the public contract in docs/plugins.md — outside plugins import them, so a
+  // change there must never be flagged as unused even when no in-repo plugin happens to use one.
+  "entry": [
+    "server/main.ts",
+    "server/cli.ts",
+    "src/main.tsx",
+    "src/kernel.ts",
+    "server/plugin-api.ts",
+    "plugins/*/server.ts",
+    "plugins/*/client.tsx",
+    "scripts/*.ts",
+    "scripts/checks/*.ts",
+    "test/**/*.test.ts",
+    "test/**/*.test.tsx"
+  ],
+  "project": [
+    "server/**/*.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "shared/**/*.ts",
+    "shared/**/*.tsx",
+    "plugins/**/*.ts",
+    "plugins/**/*.tsx",
+    "scripts/**/*.ts",
+    "test/**/*.ts",
+    "test/**/*.tsx"
+  ],
+  "ignoreExportsUsedInFile": true,
+  // A custom tag lets a baselined export carry its reason where it lives. Newly unused code has no tag and fails.
+  "tags": ["-@knip-baseline"],
+  // First pass of audit 2026-11-18 QG-03: each current finding is let off here or on the symbol with a reason. Anything
+  // newly unused after this baseline fails. The dead exports themselves are listed in the task summary for MAINT.
+  "ignoreDependencies": [
+    "agent-browser", // its node_modules/agent-browser/bin/ files are copied by server/live/install.ts, never imported
+    "inter-ui", // imported by src/styles.css with @import, which knip does not parse
+    "@biomejs/biome", // run as node_modules/.bin/biome by the lint and format checks, never imported
+    "tailwindcss" // imported by src/styles.css with @import, and used by @tailwindcss/vite in vite.config.ts
+  ],
+  "ignoreBinaries": [
+    "tailscale", // invoked with spawnSync by scripts/plugin.ts and scripts/take-over.ts
+    "perl" // the helper scripts are Perl, invoked with spawnSync by test/cli.test.ts and test/machines.test.ts
+  ]
+}

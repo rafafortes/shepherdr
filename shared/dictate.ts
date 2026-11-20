@@ -18,4 +18,5 @@ export interface DictateWays {
   ffmpeg?: string
 }
 
+/** @knip-baseline dead exported type from audit 2026-11-18 QG-03, listed for MAINT (SHE-85) */
 export type DictateAnswer = { text: string } | { error: string }

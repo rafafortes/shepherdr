@@ -41,7 +41,7 @@
 #
 # A check is one executable file in scripts/checks/, named <number>-<name> with the numbers spaced by ten
 # (10-dependencies, 12-audit, 15-secrets, 17-scripts, 18-docs, 19-version, 20-types, 21-language, 22-lint, 23-format,
-# 30-tests, 40-coverage, 50-build, 60-dist-budget). The runner discovers them by sorted file name; a .ts file beside them
+# 24-knip, 30-tests, 40-coverage, 50-build, 60-dist-budget). The runner discovers them by sorted file name; a .ts file beside them
 # is a check's own logic, not a check. Adding a check is adding one file, and the order is reviewed because it is the file
 # name; a number below 30 is worktree-local and a number of 30 or more runs in the shared, one-at-a-time phase (a check
 # that needs the machine is numbered there). Each check gets its shared context
