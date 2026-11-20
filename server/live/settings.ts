@@ -574,10 +574,19 @@ export const CATALOG: Section[] = [
     ],
   },
   {
-    // Done tasks put themselves in their place's Archived view this long after they finished (engine.autoArchive)
+    // Done tasks archive themselves after a set time, and work they kept may expire (engine.autoArchive, keptSweep)
     name: 'Tasks',
-    about: "Done tasks move to their place's Archived list after this long.",
-    rows: [{ label: 'Archive Done after', key: 'tasks.archiveAfter', value: '7 days', num: { min: 1, max: 3650, unit: 'days', one: 'day', off: true } }],
+    about: "When Done tasks archive themselves and when work they kept may be removed.",
+    rows: [
+      { label: 'Archive Done after', key: 'tasks.archiveAfter', value: '7 days', num: { min: 1, max: 3650, unit: 'days', one: 'day', off: true } },
+      {
+        label: 'Remove kept work after',
+        key: 'tasks.keptExpiry',
+        value: 'off',
+        num: { min: 1, max: 3650, unit: 'days', one: 'day', off: true },
+        hint: 'A Done task whose worktree or branch holds uncommitted or unmerged work keeps it, and is named in this space’s news once a week. Set this to remove that work this long after it was kept, saying so in news. Off (the default): only the weekly reminder, never a removal. Work a task was written to after it was kept is never removed.',
+      },
+    ],
   },
   {
     // Autopilot's heartbeat, a trigger (trigger.ts): when its coordinator goes through its HEARTBEAT.md (a time rule),

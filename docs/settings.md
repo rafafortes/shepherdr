@@ -276,6 +276,10 @@ On Autopilot a coordinator works on its own within what you asked for and asks y
 
 - **Archive Done after** (`tasks.archiveAfter`, 7 days, from 1 to 3650 days or off): a Done task moves to its place's
   Archived list this long after it finishes. Off keeps it where it is.
+- **Remove kept work after** (`tasks.keptExpiry`, off, from 1 to 3650 days or off): a Done task whose worktree or branch
+  still holds uncommitted or unmerged work is named in this space's news once a week. Set this to remove that work this
+  long after it was kept, saying so in news. Off keeps today's remind-only behaviour; work a task was written to after
+  it was kept is never removed.
 
 ## Browser
 
