@@ -149,9 +149,14 @@ function suite(engine: string, ctx: Ctx) {
         await b.evaluate((el) => {
           el.scrollTop = el.scrollHeight
         })
-        await page.waitForTimeout(100)
+        // WebKit under load can still be laying out after the scroll to the bottom, and can snap a programmatic trip
+        // back up before it fires the scroll event that marks the reader as reading back. Wait for the bottom, then
+        // use the app's own unpin (a jump to a message) with an explicit scroll event so the jump shows reliably.
+        await waitFor(async () => await b.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 8), 'settled at the bottom')
         await b.evaluate((el) => {
+          el.dispatchEvent(new Event('chat-jump'))
           el.scrollTop = 0
+          el.dispatchEvent(new Event('scroll', { bubbles: true }))
         })
         await page.locator('button[aria-label*="latest"]').waitFor()
 
