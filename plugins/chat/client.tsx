@@ -1559,6 +1559,76 @@ function PrOnCard({ pr, className }: { pr: { number: number; url: string }; clas
   )
 }
 
+const noMessages: Message[] = []
+/** One announcement holds the floor for this long: later messages in the window keep only the latest words, and are
+ *  flushed when it ends, so a screen reader hears one line per window, never one per message and never none. */
+const ANNOUNCE_MS = 2000
+const ANNOUNCE_CHARS = 120
+
+/** The chat's one live region. The rows are memoized and windowed (SHE-106, SHE-111), so this reads the store, not
+ *  what is on screen: a new agent reply, another agent's relay or a picture, said once as <who>: <first words>. What
+ *  you sent is skipped, as is everything already there when the chat opened; while the reader is up reading old
+ *  messages nothing is said (the unread jump still counts them). The list itself stays outside any aria-live so a
+ *  render never replays the whole history. */
+function Announcer({ chatKey, from }: { chatKey: string; from: string }) {
+  const atBottom = useContext(AtBottom)
+  const chat = useStore((s) => s.chats[chatKey])
+  const messages = chat?.messages ?? noMessages
+  const seen = useRef(new Set<string>())
+  // the store hydrates after mount, so take the first chat we get as the baseline: what is already there when the
+  // screen opens is not news, whether it arrived with the first render or a moment later from the server
+  const seeded = useRef(false)
+  const pending = useRef<string | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastAt = useRef(0)
+  const [said, setSaid] = useState('')
+  useEffect(() => {
+    if (!seeded.current) {
+      if (!chat) return
+      seeded.current = true
+      for (const m of messages) seen.current.add(m.id)
+      return
+    }
+    const fresh = messages.filter((m) => (m.who === 'agent' || m.who === 'peer') && !seen.current.has(m.id))
+    for (const m of fresh) seen.current.add(m.id)
+    // reading back: nothing is said, and a window still waiting to flush is dropped with the reader's place
+    if (!atBottom) {
+      if (timer.current !== null) clearTimeout(timer.current)
+      timer.current = null
+      pending.current = null
+      return
+    }
+    // a card or a wake's quiet line has no words; it does not swallow an earlier reply in the same batch
+    const m = fresh.filter((x) => x.text || x.file).at(-1)
+    if (!m) return
+    const words = (m.text ?? (isPicture(m) ? 'sent a picture' : `sent ${m.file?.name ?? 'a file'}`)).slice(0, ANNOUNCE_CHARS)
+    if (!words) return
+    pending.current = `${m.who === 'peer' ? (m.peer?.name ?? 'Peer') : from}: ${words}`
+    const flush = () => {
+      timer.current = null
+      if (pending.current === null) return
+      lastAt.current = Date.now()
+      setSaid(pending.current)
+      pending.current = null
+    }
+    const wait = Date.now() - lastAt.current
+    if (wait >= ANNOUNCE_MS) flush()
+    else if (timer.current === null) timer.current = setTimeout(flush, ANNOUNCE_MS - wait)
+  }, [chat, messages, atBottom, from])
+  // the chat going away takes a window still waiting to flush with it
+  useEffect(
+    () => () => {
+      if (timer.current !== null) clearTimeout(timer.current)
+    },
+    [],
+  )
+  return (
+    <div data-announce aria-live="polite" aria-atomic="true" className="sr-only">
+      {said}
+    </div>
+  )
+}
+
 /** drawn again only when its chat, what you sent or the New line changes: never as you type */
 const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: string }) {
   rememberChat(chat)
@@ -1695,6 +1765,7 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
       {registry.chatTail.map(({ View }, i) => (
         <View key={i} chat={chat} from={from} />
       ))}
+      <Announcer chatKey={chat.key} from={from} />
     </div>
   )
 })
@@ -2886,6 +2957,9 @@ function DictError() {
 
 /** the first of the agent's messages that came in while you read further up: the New line goes before it */
 const NewAt = createContext<string | null>(null)
+/** whether the reader follows at the bottom: the same condition the unread marker uses, shared with the announcer so
+ *  it stays quiet while they read old messages higher up */
+const AtBottom = createContext(true)
 
 /** how far up (px) counts as reading back: the chat stops following new replies, and the jump to the latest shows */
 const AWAY = 80
@@ -3094,7 +3168,9 @@ function StickToBottom({ chatKey, children }: { chatKey: string; children: React
         className="flex min-h-0 flex-1 touch-pan-y touch-pinch-zoom flex-col overflow-x-hidden overflow-y-auto overscroll-contain"
       >
         <div ref={inner} data-kb className="flex flex-1 flex-col">
-          <NewAt.Provider value={newAt}>{children}</NewAt.Provider>
+          <NewAt.Provider value={newAt}>
+            <AtBottom.Provider value={!away}>{children}</AtBottom.Provider>
+          </NewAt.Provider>
         </div>
       </div>
       {/* read further up, the chat fades out at the bottom, so the arrow sits on the fade, not on crisp words (like
