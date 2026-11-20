@@ -760,7 +760,22 @@ export default function Settings() {
             </div>
           ))}
         </nav>
-        <div ref={scroller} className="touch-pan-y overflow-y-auto overscroll-contain">
+        <div
+          ref={scroller}
+          role="region"
+          aria-label="Settings content"
+          tabIndex={0}
+          // a focused scroller keeps the arrow keys: the app's global keys would move the task cursor instead of
+          // scrolling, and the browser has no native arrow-scroll here, so the region scrolls itself
+          onKeyDown={(e) => {
+            if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+            e.preventDefault()
+            e.stopPropagation()
+            const el = scroller.current
+            if (el) el.scrollTop += (e.key === 'ArrowDown' ? 1 : -1) * 40
+          }}
+          className="touch-pan-y overflow-y-auto overscroll-contain focus-visible:outline-offset-[-2px]"
+        >
           {body}
         </div>
       </div>
