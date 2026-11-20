@@ -780,3 +780,23 @@ an alert's link, unified search and Go to question — reveals up to its row fir
 DOM. The store keeps every message: the outbox settles against the whole array and search finds across it; only the
 DOM is capped (a 1000-message chat renders at most the window plus what was revealed), and a revealed batch does not
 move the reader (the browser keeps their place while it goes in).
+
+## Ending a Done task's stuck agent (SHE-71)
+
+Checked 2026-11-20 (SHE-71) on `upstream/main` and `upstream/v2.0`, their histories and the public issues (read
+only): `main` already solves this case in `mods/tasks/bin/herdr_task/tick.py`'s `end_done()` (introduced in `8973089a`
+"SHEP-3 Build Shepherdr 3.0.0 (layout) (#584)"): a Done task's terminals end once idle, *or working past
+`DONE_WORKING_MS = 15 * 60000`*, so a hung CLI cannot keep a terminal for ever. `end_done_pass()` runs this over every
+Done task and is also called under memory pressure by `memory_guard()`. `upstream/v2.0` has no equivalent (that line
+predates the tick rewrite), and no public issue or pull request names the case. Ported as the sweep's grace in 2.0's
+engine, not as herdr-task code: 3.x is a Python rewrite against herdr-core.
+
+Ours: `server/live/engine/engine.ts` gains `DONE_WORKING_MS = 15 * 60_000`. For an ended task whose agent still reads
+`working` past a 15-minute grace, the hourly sweep (and, cheaper, `agentStatus`) calls `endDoneWorking()`: it
+interrupts the turn with `agents.stopTurn()` (its 15 s interrupt-and-wait), and if the agent still reads `working`
+force-ends it with `agents.finish()`, then puts the task away through the unchanged `cleanup()`. The grace runs from
+the latest of the task's done time, the agent's launch and the last message to its chat (`TaskRec.spokenAt`, persisted
+so a restart keeps it): a human talking to a Done task's agent gets a fresh grace for that turn. A task inside the
+grace, a turn that settles, and every live task keep the old path; an `endingDone` set keeps the sweep and a status
+event from force-closing the same agent twice. The force-close is on herdr's side (one Esc, then a pane close), so it
+is the same for all five CLIs; each kind's stuck status is driven through it in `test/engine-cleanup.test.ts`.
