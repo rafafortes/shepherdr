@@ -335,13 +335,15 @@ export function failingTests(text: string): string[] {
   return [...new Set(out)].slice(0, 5)
 }
 
-/** repeat each file's tests five times: a failure in any repeat is the file that is flaky */
-export function runProbe(d: Deps, files: string[]): ProbeFile[] {
-  return files.map((file) => {
+/** repeat each file's tests five times: a failure in any repeat is the file that is flaky. The probe waits up to a
+ *  quarter of an hour for the full checks' lock, then gives the probe up for the week rather than queue for hours. */
+export function runProbe(d: Deps, files: string[]): { files: ProbeFile[]; skipped: string } {
+  const out: ProbeFile[] = []
+  for (const file of files) {
     // --parallel: a plain `bun test` is sent through scripts/test.ts by test/preload.ts, which rewrites the timings that
     // order this very list; its own worker leaves them alone. The probe keeps the full checks' one-at-a-time rule: a
     // browser test lane beside another worktree's gate flakes on the contention and would be filed as flaky for it.
-    const lock = d.flock ? ['flock', '-w', '3600', d.lock] : []
+    const lock = d.flock ? ['flock', '-w', '900', d.lock] : []
     const r = d.run([...lock, ...d.lowPriority, 'bun', 'test', '--parallel=1', `--rerun-each=${REPEATS}`, '--timeout=20000', `./${file}`], {
       cwd: d.root,
       timeout: 30 * 60_000,
@@ -349,12 +351,16 @@ export function runProbe(d: Deps, files: string[]): ProbeFile[] {
       env: { GIT_AUTHOR_NAME: 'CI', GIT_AUTHOR_EMAIL: 'ci@localhost', GIT_COMMITTER_NAME: 'CI', GIT_COMMITTER_EMAIL: 'ci@localhost' },
     })
     const said = `${r.stdout}\n${r.stderr}`
+    // flock answers 1 with nothing printed when its wait ran out: another check held the machine, so this file is not a
+    // failure and the rest are not worth another quarter of an hour each
+    if (d.flock && r.exitCode === 1 && !said.trim()) return { files: out, skipped: 'another check kept the machine for the whole wait' }
     const passes = (said.match(/\(pass\) /g) ?? []).length
     const skips = (said.match(/\(skip\) /g) ?? []).length
     const skipped = r.exitCode === 0 && passes === 0
-    const detail = r.exitCode === 0 ? (skipped ? [`no test ran (${skips} skipped)`] : []) : (failingTests(said) ?? [])
-    return { file, ok: r.exitCode === 0 && !skipped, repeats: REPEATS, detail: detail.length ? detail : r.exitCode === 0 ? [] : [`exit ${r.exitCode}`], skipped }
-  })
+    const detail = r.exitCode === 0 ? (skipped ? [`no test ran (${skips} skipped)`] : []) : failingTests(said)
+    out.push({ file, ok: r.exitCode === 0 && !skipped, repeats: REPEATS, detail: detail.length ? detail : r.exitCode === 0 ? [] : [`exit ${r.exitCode}`], skipped })
+  }
+  return { files: out, skipped: '' }
 }
 
 type State = { at: number; commit: string; sample: string[]; probed: string[] }
@@ -693,7 +699,7 @@ function pickProbe(d: Deps, common: string, sample: number): Probe {
     /* no timings yet: the files go in by name */
   }
   const state = readState(join(weeklyDir(common), 'state.json'), d.read)
-  return { files: runProbe(d, pickSample(orderBySlowest(files, timings), state?.probed ?? [], sample)), skipped: '' }
+  return runProbe(d, pickSample(orderBySlowest(files, timings), state?.probed ?? [], sample))
 }
 
 export function main(argv: string[], overrides: Partial<Deps> = {}): number {

@@ -125,7 +125,8 @@ unreachable registry is said, not read as "nothing to move". The probe takes fiv
 slowest-first list (`node_modules/.cache/shepherdr-test/timings.json`), never one it already probed in this turn of the
 list, so every file is reached over the weeks and a re-sorted timing file cannot make it jump; it repeats each five
 times, at most five files a week, is skipped when the gate did not pass (no point piling load on a machine whose suite
-is already red), and holds the full checks' lock and runs in the same low-priority `systemd-run` scope, with `bun test
+is already red), and holds the full checks' lock — a quarter of an hour at most, then the probe is given up for the
+week rather than queue for hours — and runs in the same low-priority `systemd-run` scope, with `bun test
 --parallel=1` and the identity the runner gives its tests, so it never runs beside another worktree's gate and
 `test/preload.ts` does not send it through `scripts/test.ts` to rewrite the timings that order it.
 `--no-probe` and `--sample <n>` (at most five) are for a trial run, and neither replaces the gate: nothing merges over a

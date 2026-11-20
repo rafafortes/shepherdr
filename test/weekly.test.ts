@@ -339,7 +339,7 @@ describe('the flaky probe', () => {
       asked.push(args)
       return fakeRun(f, { verdict: GREEN, probe: { './test/layout-a.test.ts': 1 } })(args, o)
     }
-    const probe = runProbe(world(f, probeRun), ['test/layout-a.test.ts', 'test/layout-b.test.ts'])
+    const probe = runProbe(world(f, probeRun), ['test/layout-a.test.ts', 'test/layout-b.test.ts']).files
     expect(probe[0]).toMatchObject({ file: 'test/layout-a.test.ts', ok: false, repeats: REPEATS })
     expect(probe[0]?.detail).toEqual(['opens the board'])
     expect(probe[1]?.ok).toBe(true)
@@ -352,8 +352,21 @@ describe('the flaky probe', () => {
       world(f, () => ({ stdout: '', stderr: '', exitCode: 124 })),
       ['test/layout-a.test.ts'],
     )
-    expect(timedOut[0]?.detail).toEqual(['exit 124'])
+    expect(timedOut.files[0]?.detail).toEqual(['exit 124'])
+    expect(timedOut.skipped).toBe('')
     expect(failingTests('ok\n(fail) one [1.00ms]\n(fail) two [2.00ms]')).toEqual(['one', 'two'])
+    // the lock's wait ran out with nothing printed: not a failure, and no second quarter of an hour for the next file
+    const busy = runProbe(
+      world(f, () => ({ stdout: '', stderr: '', exitCode: 1 }), { flock: true }),
+      ['test/layout-a.test.ts', 'test/layout-b.test.ts'],
+    )
+    expect(busy).toEqual({ files: [], skipped: 'another check kept the machine for the whole wait' })
+    // without flock that same silent exit is just a failed run
+    const silent = runProbe(
+      world(f, () => ({ stdout: '', stderr: '', exitCode: 1 }), { flock: false }),
+      ['test/layout-a.test.ts'],
+    ).files
+    expect(silent[0]?.detail).toEqual(['exit 1'])
   })
 })
 
