@@ -2148,6 +2148,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     // full: one started by hand (or taken over) hears why; one started again by itself waits for room
     if (hold) return this.refuseFull(id, hold, named, !o.as)
     const spec: Spec = {
+      // Explicit, never undefined: a coordinator runs with the same access a task does on every CLI today, so no CLI
+      // silently reads a missing value as 'full' and no CLI starts asking for approvals by accident. Whether it should
+      // run on 'ask' instead is a question for the human (docs/tasks.md); today's answer is unchanged: 'full'.
+      access: 'full',
       key: id,
       name: c.name,
       kind: h?.kind ?? rec!.kind,

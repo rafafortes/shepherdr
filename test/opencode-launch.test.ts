@@ -7,6 +7,7 @@ import { Database } from 'bun:sqlite'
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Spec } from '../server/live/agents.ts'
+import { ownShellRules } from '../server/live/readers/own-commands.ts'
 import { agentEnv } from '../server/live/box.ts'
 import { taskTmpDir } from '../server/live/task-tmp.ts'
 import { ROOT } from '../server/root.ts'
@@ -172,7 +173,10 @@ describe('starting an OpenCode agent', () => {
       const [create] = calls()
       const body = JSON.parse(create.argv[4])
       expect(body.model).toBeUndefined()
-      expect(body.permissions).toEqual(['edit', 'shell', 'webfetch', 'external_directory', 'subagent'].map((action) => ({ action, resource: '*', effect: 'ask' })))
+      expect(body.permissions).toEqual([
+        ...['edit', 'shell', 'webfetch', 'external_directory', 'subagent'].map((action) => ({ action, resource: '*', effect: 'ask' })),
+        ...ownShellRules(join(ROOT, 'bin', 'shepherdr'), key),
+      ])
       expect((start.mock.calls[0] as unknown as unknown[])[3]).toEqual(['--standalone', '--session', 'ses_fake1'])
       expect(calls().some(isPut)).toBe(false)
     } finally {
@@ -180,6 +184,77 @@ describe('starting an OpenCode agent', () => {
       start.mockRestore()
       timer.mockRestore()
     }
+  })
+
+  test('a task launch (full) starts with --auto and no session permission rules', async () => {
+    reset()
+    const start = spyOn(herdr, 'start').mockResolvedValue(undefined as never)
+    const timer = spyOn(globalThis, 'setTimeout').mockImplementation((() => 0) as never)
+    const h = harness()
+    try {
+      await h.a.ensure(base({ key: 'EX-2/Agent', access: 'full', first: 'first' }))
+      const body = JSON.parse(calls()[0].argv[4])
+      expect(body.permissions).toBeUndefined()
+      expect((start.mock.calls[0] as unknown as unknown[])[3]).toEqual(['--standalone', '--session', 'ses_fake1', '--auto'])
+    } finally {
+      h.a.stop()
+      start.mockRestore()
+      timer.mockRestore()
+    }
+  })
+
+  test('a coordinator that asks: the session asks first, then allows this launch’s own verbs', async () => {
+    reset()
+    const start = spyOn(herdr, 'start').mockResolvedValue(undefined as never)
+    const timer = spyOn(globalThis, 'setTimeout').mockImplementation((() => 0) as never)
+    const h = harness()
+    try {
+      await h.a.ensure(base({ key: 'shepherdr', access: 'ask', first: 'first' }))
+      const body = JSON.parse(calls()[0].argv[4])
+      expect(body.permissions).toEqual([
+        ...['edit', 'shell', 'webfetch', 'external_directory', 'subagent'].map((action) => ({ action, resource: '*', effect: 'ask' })),
+        ...ownShellRules(join(ROOT, 'bin', 'shepherdr'), 'shepherdr'),
+      ])
+      expect((start.mock.calls[0] as unknown as unknown[])[3]).toEqual(['--standalone', '--session', 'ses_fake1'])
+    } finally {
+      h.a.stop()
+      start.mockRestore()
+      timer.mockRestore()
+    }
+  })
+
+  test('the allow rules pin the chat and the verb: a prefixed foreign command still asks', () => {
+    const path = join(ROOT, 'bin', 'shepherdr')
+    const rules = ownShellRules(path, key)
+    // OpenCode's wildcards are whole-value (`*` matches any characters), and a trailing ` *` also matches the bare
+    // command (https://opencode.ai/docs/permissions/). Emulate that, so this proves what the rules match, not just
+    // that createSession copied them into the body.
+    const re = (p: string) =>
+      new RegExp(
+        `^${p
+          .split('*')
+          .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .join('.*')}$`,
+      )
+    const matches = (p: string, text: string) => re(p).test(text) || (p.endsWith(' *') && re(p.slice(0, -2)).test(text))
+    const allowed = (text: string) => rules.some((r) => r.effect === 'allow' && matches(r.resource, text))
+    for (const text of [
+      `${path} status`,
+      `${path} status EX-1 --done 50`,
+      `SHEPHERDR_CHAT="${key}" ${path} ready SHE-137 --summary ok`,
+      `SHEPHERDR_CHAT=${key} ${path} ask x`,
+      `SHEPHERDR_CHAT='${key}' ${path} todo SHE-137`,
+    ])
+      expect(allowed(text), text).toBe(true)
+    for (const text of [
+      `SHEPHERDR_CHAT=x rm -rf / ${path} status`,
+      `SHEPHERDR_CHAT="OTHER-1/Agent" ${path} status`,
+      `${path} secret run A -- ls`,
+      `${path} secret env A --file x`,
+      `${path} nonsense`,
+      path,
+    ])
+      expect(allowed(text), text).toBe(false)
   })
 
   test('a session that cannot be created fails the launch, and its record keeps why', async () => {

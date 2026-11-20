@@ -16,7 +16,7 @@ import { swallow } from '../debug.ts'
 import * as task from '../mfs.ts'
 import type { Background } from './background.ts'
 import { servesCommand } from './background.ts'
-import { deciderScript } from './own-commands.ts'
+import { codexDeciderScript, deciderScript } from './own-commands.ts'
 
 /** one hook event, as the recorder writes it */
 export interface HookEvent {
@@ -180,6 +180,22 @@ export function hookSettings(dir: string, name: string, o: { command?: string; c
   const settings = join(dir, `${name}.settings.json`)
   task.writeFileSync(settings, JSON.stringify({ hooks }, null, 2))
   return { settings, events }
+}
+
+/**
+ * Codex's PermissionRequest hook for a launch that keeps its approvals (access 'ask'): allow exactly this launch's own
+ * shepherdr verbs, leave every other call to Codex's own prompt (own-commands.ts). Codex takes hooks as `-c` config,
+ * unlike Claude's settings file. On another machine the helper only records events, so it decides nothing there and
+ * the CLI keeps its approvals. Codex is not installed on the machine this was written on: the script is exercised
+ * directly in tests, not through a real CLI.
+ */
+export function codexPermissionHook(dir: string, name: string, command: string, chat: string, runtime = process.execPath): string[] | undefined {
+  // coverage-exempt: no second machine here; its helper records hooks but decides nothing, so it gets no decider
+  if (BOX) return undefined
+  task.mkdirSync(dir, { recursive: true })
+  const script = writeScript(dir, `codex-allow-${name}.cjs`, codexDeciderScript())
+  const run = `${q(runtime)} ${q(script)} ${q(command)} ${q(chat)}`
+  return ['-c', `hooks.PermissionRequest=[{hooks=[{type="command",command=${JSON.stringify(run)},timeout=10}]}]`]
 }
 
 /** what still runs, from Stop's list: a subagent (maybe with shells), shells and monitors that end, or only servers.

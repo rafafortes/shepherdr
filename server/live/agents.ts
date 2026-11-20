@@ -18,7 +18,7 @@ import { createSession, mirrorSession, opencodeLogPath, putInstructions, switchM
 import { agyLogPath, agyModelId, mirrorConversation } from './agy.ts'
 import { agyIds, effortFor, modelArg } from './models.ts'
 import { tag } from './chatlines.ts'
-import { hookSettings, HookLogs, type Said } from './readers/hooks.ts'
+import { codexPermissionHook, hookSettings, HookLogs, type Said } from './readers/hooks.ts'
 import * as task from './mfs.ts'
 import { boxDir, mirrored } from './mfs.ts'
 import { agentEnv, BOX, helperDir, run, runSync } from './box.ts'
@@ -145,7 +145,10 @@ export interface AgentRecord {
   /** set when the idle sweep parked it (SHE-72): the run ended the same way a finish ends it, and the task row, its
    *  chat and shepherdr status say so. Cleared when it starts again */
   parked?: number
-  /** 'ask' keeps the CLI's own approvals; otherwise (task agents) it runs without asking */
+  /** Set explicitly on every launch (source.ts coordinators and engine.ts tasks): 'full' runs without the CLI's
+   *  approvals; 'ask' keeps them, with this launch's own shepherdr verbs allowed by each CLI's own mechanism. No launch
+   *  leaves it undefined, so a missing value can never silently mean 'full'. Which access a coordinator should have is
+   *  an open question for the human (docs/tasks.md): until they answer, coordinators run with 'full' as they always have. */
   access?: 'full' | 'ask'
   /** environment for its terminal: who it is to the shepherdr command */
   env?: Record<string, string>
@@ -1482,7 +1485,7 @@ export class Agents extends Emitter<Events> {
       if (r.system && changedPrompt) await putInstructions(r.sessionId, r.system, r.cwd).catch((e) => console.error(`shepherdr: ${r.name} could not update its instructions: ${(e as Error).message}`))
       return
     }
-    r.sessionId = await createSession({ cwd: r.cwd, title: r.name, model, effort, ask: r.access === 'ask' })
+    r.sessionId = await createSession({ cwd: r.cwd, title: r.name, model, effort, ask: r.access === 'ask', command: agentEnv(r.key, ROOT).SHEPHERDR_COMMAND, chat: r.key })
     addLog(r, opencodeLogPath(home(), r.sessionId))
     if (r.system) await putInstructions(r.sessionId, r.system, r.cwd)
     this.save()
@@ -1508,6 +1511,8 @@ export class Agents extends Emitter<Events> {
       if (model) a.push('--model', model)
       if (effort) a.push('--effort', effort)
     } else if (r.kind === 'pi') {
+      // pi has no permission system, in either access mode: no flag, no allow list, nothing to port. --approve below is
+      // about trusting a worktree's files, not about approving tool calls.
       // A worktree Shepherdr made is trusted for this run with pi's own one-shot --approve, so its .pi extensions,
       // skills and MCP servers load without anyone answering pi's trust prompt in the chat. Nothing is written to
       // pi's own trust.json (as with agy's --settings below). A coordinator on a space the human picked keeps pi's
@@ -1530,15 +1535,26 @@ export class Agents extends Emitter<Events> {
       // its own last log: a task it took over keeps the logs of the agent before it too
       const id = resume ? r.logs.findLast((f) => (logKind(f) ?? 'codex') === 'codex')?.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/)?.[1] : undefined
       if (id) a.unshift('resume', id)
-      if (r.access !== 'ask') a.push('--dangerously-bypass-approvals-and-sandbox')
+      if (r.access === 'ask') {
+        // Keep Codex's approvals: its PermissionRequest hook allows exactly this launch's own shepherdr verbs
+        // (own-commands.ts) and says nothing about other calls, so they still show Codex's prompt. A full-access launch
+        // has no prompt to decide, so it needs no hook. This is the Codex half of upstream's SHEP-23, ported here
+        // because 2.0 has no core-side permission mailbox: the decision must travel with the launch.
+        const hook = codexPermissionHook(HOOKS_DIR, r.name, agentEnv(r.key, ROOT).SHEPHERDR_COMMAND, r.key)
+        if (hook) a.push(...hook)
+      } else a.push('--dangerously-bypass-approvals-and-sandbox')
       if (model) a.push('-m', model)
       if (effort) a.push('-c', `model_reasoning_effort="${effort}"`)
     } else if (r.kind === 'agy') {
       // agy names its conversation itself: a resume goes back to it by its id (--conversation; never --continue, which takes
       // the newest one of the whole machine). The model takes its effort in its id (gemini-3.8-flash-low), and --effort
-      // conflicts with that, so it is never passed. Permissions as for Codex.
+      // conflicts with that, so it is never passed.
       // The worktree is trusted for this session only (--settings): a new worktree is a folder agy has not seen, and it would
       // stop on its trust screen. Nothing is written to agy's own settings.
+      // Permissions: unlike Claude (a PreToolUse hook) and Codex (hooks.PermissionRequest), agy's installed help names
+      // no per-command allow-list flag or settings key (--settings takes settings.json keys, and none is documented
+      // here), so an 'ask' launch keeps agy's own prompts and a full-access launch keeps --dangerously-skip-permissions.
+      // Upstream has nothing for agy (3.x runs Claude and Codex only); the asymmetry is this CLI's, not a launch's.
       a.push('--settings', JSON.stringify({ trustedWorkspaces: [r.cwd] }))
       if (resume && r.sessionId) a.push('--conversation', r.sessionId)
       if (model) a.push('--model', agyModelId(model, effort, agyIds()))
