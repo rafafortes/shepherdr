@@ -756,7 +756,9 @@ function applyDelta(base: Chat, msg: ChatEventDelta): Chat {
     if (found) messages[at] = { ...found, ...patch }
   }
   messages.sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
-  return { ...base, ...msg.chat, messages }
+  // the delta's chat is the whole current chat with an empty message array: take every field from it, so a field
+  // that went away (working, live, jobs…) goes away here too, not lingers from the base
+  return { ...msg.chat, messages }
 }
 
 /** hold back the latest chat per key and one terminal while the document is hidden (PERFC-07). A delta is folded into
@@ -767,7 +769,7 @@ function defer(msg: ServerEvent): boolean {
     deferredTerm = msg
     return true
   }
-  if (msg.type !== 'chat') return false
+  if (msg.type !== 'chat' && msg.type !== 'chat-delta') return false
   if ('added' in msg) {
     const key = msg.chat.key
     // with no full buffered, fold into the chat the tab already holds, so the delta is not lost while it is away
@@ -803,7 +805,7 @@ function apply(msg: ServerEvent): boolean {
     // those steps can change state of their own (a place gone, an outbox pruned) without going through setUI: a
     // redraw is still owed for them even when the snapshot's revision did not move (PERFC-01)
     if (state !== before) changed = true
-  } else if (msg.type === 'chat') {
+  } else if (msg.type === 'chat' || msg.type === 'chat-delta') {
     const key = msg.chat.key
     let chat: Chat
     if ('added' in msg) {

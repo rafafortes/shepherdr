@@ -418,8 +418,10 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
             const chat = source.chat(k)
             if (!chat) continue
             // a first watch (or a reconnect, whose watch starts empty) re-establishes the full base and the diff
-            // point: the deltas that follow apply to exactly the chat the screen now holds (PERFC-03)
-            send(ws, source.chatUpdate?.(k, chat)?.full ?? { type: 'chat', chat })
+            // point. Every screen watching this key gets the same full chat, so the next delta means the same thing
+            // to all of them (PERFC-03). A link peer holds no delta base and keeps getting whole chats.
+            const full = source.chatUpdate?.(k, chat)?.full ?? { type: 'chat', chat }
+            for (const other of live) if (other.data.kind === 'live' && other.data.chats.includes(k) && !other.data.link) send(other, full)
           }
           rewatch()
         } else if (d.kind === 'voice') {

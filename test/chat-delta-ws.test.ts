@@ -28,13 +28,13 @@ const msg = (id: string, more: Partial<Message> = {}): Message => ({ id, who: 'a
 let current: Chat = { key: KEY, messages: [msg('m1'), msg('m2')], cli: 'claude' }
 spyOn(src.chats, 'chat').mockImplementation(() => current)
 
-type ChatEvent = Extract<ServerEvent, { type: 'chat' }>
+type ChatEvent = Extract<ServerEvent, { type: 'chat' }> | Extract<ServerEvent, { type: 'chat-delta' }>
 async function screen(link = false) {
   const ws = new WebSocket(`ws://127.0.0.1:${app.port}/api/ws`)
   const seen: ChatEvent[] = []
   ws.onmessage = (e) => {
     const m = JSON.parse(String(e.data)) as ServerEvent
-    if (m.type === 'chat' && m.chat.key === KEY) seen.push(m)
+    if ((m.type === 'chat' || m.type === 'chat-delta') && m.chat.key === KEY) seen.push(m)
   }
   await new Promise<void>((r) => (ws.onopen = () => r()))
   ws.send(JSON.stringify({ type: 'watch', chats: [KEY], term: null, visible: true, push: null, link }))
@@ -56,12 +56,15 @@ describe('chat pushes over the wire', () => {
     const { ws, seen } = await screen()
     try {
       const first = await nextChat(seen, 0)
+      expect(first.type).toBe('chat')
       expect('added' in first).toBe(false)
       expect(first.chat.messages.map((m) => m.id)).toEqual(['m1', 'm2'])
       expect(first.through).toBeGreaterThan(0)
 
       change([msg('m1'), msg('m2'), msg('m3')])
       const added = await nextChat(seen, 1)
+      // its own event type: a screen on the previous build ignores it and keeps the chat it has
+      expect(added.type).toBe('chat-delta')
       expect('added' in added).toBe(true)
       if (!('added' in added)) throw new Error('not a delta')
       expect(added.added).toEqual([msg('m3')])
@@ -76,6 +79,34 @@ describe('chat pushes over the wire', () => {
       expect(patch.changed).toEqual([{ id: 'm2', patch: { answered: 'Answered' } }])
     } finally {
       ws.close()
+    }
+  })
+
+  test('a second screen subscribing resets every screen to the same full base', async () => {
+    current = { key: KEY, messages: [msg('m1')], cli: 'claude' }
+    const a = await screen()
+    try {
+      expect('added' in (await nextChat(a.seen, 0))).toBe(false)
+      change([msg('m1'), msg('m2')])
+      expect('added' in (await nextChat(a.seen, 1))).toBe(true)
+      // a new screen's watch sends the whole chat to both, so their bases agree before the next delta
+      const b = await screen()
+      try {
+        const toB = await nextChat(b.seen, 0)
+        const toA = await nextChat(a.seen, 2)
+        expect(toA.type).toBe('chat')
+        expect(toB.type).toBe('chat')
+        expect(toA.through).toBe(toB.through)
+        expect(toA.chat.messages).toEqual(toB.chat.messages)
+        change([msg('m1'), msg('m2'), msg('m3')])
+        const next = await nextChat(a.seen, 3)
+        if (!('added' in next)) throw new Error('not a delta')
+        expect(next.added).toEqual([msg('m3')])
+      } finally {
+        b.ws.close()
+      }
+    } finally {
+      a.ws.close()
     }
   })
 

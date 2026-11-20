@@ -73,7 +73,7 @@ const full = (key: string, messages: Message[], through: number) => socket.onmes
 const delta = (messages: Message[], changes: { id: string; patch: Partial<Message> }[], through: number, key = KEY) =>
   socket.onmessage?.({
     data: JSON.stringify({
-      type: 'chat',
+      type: 'chat-delta',
       chat: chat(key, []),
       added: messages,
       changed: changes,
@@ -95,40 +95,54 @@ describe('applying a chat delta', () => {
     expect(shown(KEY)?.messages).toEqual(shown(OTHER)?.messages)
   })
 
+  test('a field that went away goes away on screen too', () => {
+    full(KEY, [msg('m1')], 4)
+    const withWork: Chat = { ...chat(KEY, [msg('m1')]), working: true, live: { id: 'turn-1', at: 1, rows: [], steps: 1 } }
+    socket.onmessage?.({ data: JSON.stringify({ type: 'chat', chat: withWork, through: 5 }) })
+    expect(shown()?.working).toBe(true)
+    expect(shown()?.live?.id).toBe('turn-1')
+    // the agent stopped: the next delta carries the chat with those fields absent
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'chat-delta', chat: chat(KEY, []), added: [], changed: [], through: 6 }),
+    })
+    expect(shown()?.working).toBeUndefined()
+    expect(shown()?.live).toBeUndefined()
+  })
+
   test('a new row that sorts before an old one lands in its place', () => {
-    full(KEY, [msg('m1'), msg('m3')], 4)
-    delta([msg('m2', { at: 1002 })], [], 5)
+    full(KEY, [msg('m1'), msg('m3')], 7)
+    delta([msg('m2', { at: 1002 })], [], 8)
     expect(shown()?.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'm3'])
   })
 
   test('a delta for a chat with no full base is left alone', () => {
     const unknown = 'p:m:never-watched'
-    socket.onmessage?.({ data: JSON.stringify({ type: 'chat', chat: chat(unknown, []), added: [msg('m9')], changed: [], through: 7 }) })
+    socket.onmessage?.({ data: JSON.stringify({ type: 'chat-delta', chat: chat(unknown, []), added: [msg('m9')], changed: [], through: 9 }) })
     expect(shown(unknown)).toBeUndefined()
   })
 
   test('a delta already applied, or one from before a reconnect, changes nothing', () => {
-    full(KEY, [msg('m1')], 8)
-    delta([msg('m2')], [], 8) // same sequence: already seen
+    full(KEY, [msg('m1')], 10)
+    delta([msg('m2')], [], 10) // same sequence: already seen
     expect(shown()?.messages.map((m) => m.id)).toEqual(['m1'])
-    delta([msg('m3')], [], 7) // older still
+    delta([msg('m3')], [], 9) // older still
     expect(shown()?.messages.map((m) => m.id)).toEqual(['m1'])
   })
 
   test('a reconnect brings a full chat first, and the deltas after it apply to that base', () => {
-    full(KEY, [msg('m1')], 9)
+    full(KEY, [msg('m1')], 11)
     // the socket came back: a fresh watch gets the whole chat, which becomes the new base
     socket = opened()
-    full(KEY, [msg('m1'), msg('m2')], 10)
+    full(KEY, [msg('m1'), msg('m2')], 12)
     expect(shown()?.messages.map((m) => m.id)).toEqual(['m1', 'm2'])
-    delta([], [{ id: 'm2', patch: { answered: 'Answered' } }], 11)
+    delta([], [{ id: 'm2', patch: { answered: 'Answered' } }], 13)
     expect(shown()?.messages).toEqual([msg('m1'), msg('m2', { answered: 'Answered' })])
   })
 
   test('a hidden tab keeps a delta that arrives with no full chat buffered', () => {
-    full(KEY, [msg('m1')], 15)
+    full(KEY, [msg('m1')], 14)
     doc.visibilityState = 'hidden'
-    delta([msg('m2')], [], 16)
+    delta([msg('m2')], [], 15)
     expect(shown()?.messages.map((m) => m.id)).toEqual(['m1'])
     doc.visibilityState = 'visible'
     for (const fn of listeners.get('visibilitychange') ?? []) fn({})
@@ -140,8 +154,8 @@ describe('applying a chat delta', () => {
     doc.visibilityState = 'hidden'
     // nothing reaches the store while the tab is away (PERFC-07): the delta is folded into the buffered full chat
     const before = shown()
-    full(KEY, [msg('m1'), msg('m2'), msg('m3')], 13)
-    delta([], [{ id: 'm1', patch: { answered: 'Answered' } }], 14)
+    full(KEY, [msg('m1'), msg('m2'), msg('m3')], 16)
+    delta([], [{ id: 'm1', patch: { answered: 'Answered' } }], 17)
     expect(shown()).toBe(before)
     doc.visibilityState = 'visible'
     for (const fn of listeners.get('visibilitychange') ?? []) fn({})

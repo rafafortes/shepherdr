@@ -1587,10 +1587,11 @@ export interface TermScreen {
 }
 
 /** the two wire forms of a chat push (PERFC-03). The full one is what a screen gets when it starts watching, after a
- *  reconnect, and what an older machine on the link path always gets; the delta one carries only what moved since
- *  the last push. Both go over the same 'chat' event, so older readers keep working. */
+ *  reconnect, and what an older machine on the link path always gets. A delta has its own event type: a screen on the
+ *  previous build ignores an event it does not know, so it keeps the chat it has instead of replacing it with the
+ *  empty message array a delta carries. */
 export type ChatEventFull = { type: 'chat'; chat: Chat; through?: number }
-export type ChatEventDelta = { type: 'chat'; chat: Chat; through: number } & ChatDelta
+export type ChatEventDelta = { type: 'chat-delta'; chat: Chat; through: number } & ChatDelta
 
 export type ServerEvent =
   | { type: 'snapshot'; snapshot: Snapshot }

@@ -98,8 +98,17 @@ describe('the bytes of one update', () => {
     const history = Array.from({ length: 1000 }, (_, i) =>
       msg(`m${i}`, { at: 1_700_000_000_000 + i * 1000, text: `Step ${i}: checked the chat's log and its cached message array for anything new since the last push.` }),
     )
-    const before = chats.chatUpdate(KEY, chat(history))
-    const after = chats.chatUpdate(KEY, chat([...history, msg('m1000', { at: 1_700_000_001_000, text: 'One more line from the agent.' })]))
+    // a real chat carries more than messages: the delta repeats those few fields, so they belong in the measurement
+    const realistic = (messages: Message[]): Chat => ({
+      ...chat(messages),
+      working: true,
+      closedAt: [1_700_000_000_000, 1_700_000_010_000],
+      jobs: [{ id: 'j1', kind: 'shell', title: 'bun run check:local', at: 1_700_000_000_000, now: 'tests' }],
+      agent: { kind: 'claude', model: 'claude-sonnet-5-5', effort: 'high' },
+      live: { id: 't1', at: 1_700_000_000_000, rows: [], steps: 3 },
+    })
+    const before = chats.chatUpdate(KEY, realistic(history))
+    const after = chats.chatUpdate(KEY, realistic([...history, msg('m1000', { at: 1_700_000_001_000, text: 'One more line from the agent.' })]))
     if (!after.delta) throw new Error('a single added line must fit in a delta')
     const fullBytes = JSON.stringify(before.full).length
     const deltaBytes = JSON.stringify(after.delta).length
