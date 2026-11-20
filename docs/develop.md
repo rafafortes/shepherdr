@@ -102,7 +102,9 @@ name. A check file:
 - gets its shared context in `SHEPHERDR_CHECK_*` environment variables, never positional arguments:
   `SHEPHERDR_CHECK_ROOT`, `SHEPHERDR_CHECK_LOGS`, `SHEPHERDR_CHECK_COVER`, `SHEPHERDR_CHECK_MAP` and
   `SHEPHERDR_CHECK_RECORD` (the last two are `1` only on the default branch, for the screen map and the coverage, dist
-  and lint baselines, and both empty in a `--quick` run), `SHEPHERDR_CHECK_QUICK` (`1` in a quick run), plus its own
+  and lint baselines, and both empty in a `--quick` run), `SHEPHERDR_CHECK_QUICK` (`1` in a quick run),
+  `SHEPHERDR_CHECK_SCREEN_ABSENT` (`1` when the browser probe found no Chromium, so no browser test recorded the screen
+  and `40-coverage` passes `--screen-absent`), plus its own
   `SHEPHERDR_CHECK_NAME`, `SHEPHERDR_CHECK_LOG`, `SHEPHERDR_CHECK_NOTE` and `SHEPHERDR_CHECK_SKIP`;
 - exits 0 on pass and non-zero on failure (the runner maps 124/137 to timed out or killed, and stops at the first
   failure, so a later check never reads a half-finished world);

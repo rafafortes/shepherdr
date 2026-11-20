@@ -472,8 +472,14 @@ run_phase() {
         [ "$engine" = webkit ] && what_skips='the iPhone tests'
         case $said in
           ok*) true ;;
-          '') notes+=("$engine: could not be checked (scripts/check-browsers.ts said nothing) · $what_skips skip") ;;
-          *) notes+=("$engine: $said · $what_skips skip") ;;
+          *)
+            # no Chromium: no browser test recorded the screen, so the coverage step must not read its files as code that
+            # nothing runs any more (40-coverage passes --screen-absent, scripts/coverage.ts, QG-13)
+            [ "$engine" = chromium ] && export SHEPHERDR_CHECK_SCREEN_ABSENT=1
+            if [ -n "$said" ]; then notes+=("$engine: $said · $what_skips skip")
+            else notes+=("$engine: could not be checked (scripts/check-browsers.ts said nothing) · $what_skips skip")
+            fi
+            ;;
         esac
       done
     fi

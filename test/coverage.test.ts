@@ -3,7 +3,7 @@
 // against a git repo of its own and a baseline file of its own: never this repo's .git.
 import { describe, expect, test } from 'bun:test'
 import { execSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -160,27 +160,41 @@ describe('the ratchet', () => {
 })
 
 describe('the command', () => {
-  /** a repo of its own with one counted file, committed, and what a covered run of it left */
+  /** a repo of its own with one counted server file and one screen file, two browser test files the screen map knows,
+   *  committed, and what a covered run of it left */
   function world() {
     const repo = tmp('cov-repo')
     mkdirSync(join(repo, 'server'), { recursive: true })
+    mkdirSync(join(repo, 'src'), { recursive: true })
+    mkdirSync(join(repo, 'test'), { recursive: true })
     writeFileSync(join(repo, 'server', 'a.ts'), 'export const a = 1\nexport function b() {\n  return 2\n}\n')
+    writeFileSync(join(repo, 'src', 'c.tsx'), 'export const c = 1\nexport function d() {\n  return 2\n}\n')
+    for (const t of ['test/layout-x.test.ts', 'test/layout-y.test.ts']) writeFileSync(join(repo, t), '// opens a browser: test/screen-map.ts records its lines\n')
     writeFileSync(join(repo, 'README.md'), 'hi\n')
     execSync('git init -q -b main && git -c user.email=t@t -c user.name=T add -A && git -c user.email=t@t -c user.name=T commit -qm init', { cwd: repo, shell: '/bin/sh' })
     const dir = tmp('cov-run')
-    const run = (da: [number, number][], screen?: object) => {
+    /** what a run left: the server's lcov, and one json per browser test that got a browser (`recorded` of the two) */
+    const run = (da: [number, number][], screen?: object, recorded = 2) => {
       mkdirSync(join(dir, 'server'), { recursive: true })
       writeFileSync(join(dir, 'server', 'lcov.info'), lcov('server/a.ts', da))
-      if (screen) {
-        mkdirSync(join(dir, 'screen'), { recursive: true })
-        writeFileSync(join(dir, 'screen', 'layout-x.test.ts.json'), JSON.stringify(screen))
-        writeFileSync(join(dir, 'screen', 'notes.txt'), 'not a test')
-      }
+      rmSync(join(dir, 'screen'), { recursive: true, force: true })
+      if (recorded === 0) return
+      mkdirSync(join(dir, 'screen'), { recursive: true })
+      writeFileSync(join(dir, 'screen', 'layout-x.test.ts.json'), JSON.stringify(screen ?? {}))
+      if (recorded > 1) writeFileSync(join(dir, 'screen', 'layout-y.test.ts.json'), '{}')
+      writeFileSync(join(dir, 'screen', 'notes.txt'), 'not a test')
     }
     const baseline = join(tmp('cov-base'), 'coverage.json')
+    // the screen map the browser test count is held against: two browser tests, as the repo holds
+    const map = join(tmp('cov-map'), 'screen-map.json')
+    writeFileSync(map, JSON.stringify({ commit: 'abc1234', sources: [], tests: { 'test/layout-x.test.ts': {}, 'test/layout-y.test.ts': {}, 'test/layout-gone.test.ts': {} } }))
     const said: string[] = []
-    const main = (...args: string[]) => C.main(args, { repo, baseline, log: (x) => said.push(x) })
-    return { repo, dir, run, baseline, said, main }
+    /** what the command said: its own lines, from the call it was given */
+    const main = (...args: string[]) => {
+      said.length = 0
+      return C.main(args, { repo, baseline, map, log: (x) => said.push(x) })
+    }
+    return { repo, dir, run, baseline, map, said, main }
   }
 
   test('no folder, or no run in it: it says how to make one', () => {
@@ -202,7 +216,7 @@ describe('the command', () => {
       { 'server/a.ts': { 3: 0 } },
     )
     expect(w.main(w.dir)).toBe(0)
-    expect(w.said[0]).toBe("Coverage: 66.7% of the server's lines (2 of 3), none of the screen measured; 0 of 1 files run whole")
+    expect(w.said[0]).toBe("Coverage: 66.7% of the server's lines (2 of 3), none of the screen measured; 0 of 2 files run whole, 1 no test loads")
     expect(w.said).toContain('No coverage baseline yet: the check on the default branch records one, and from then no file may lose coverage.')
     expect(readFileSync(join(w.dir, 'report.txt'), 'utf8')).toContain('server/a.ts')
     expect(existsSync(w.baseline)).toBe(false)
@@ -213,7 +227,7 @@ describe('the command', () => {
     execSync('rm loose.txt', { cwd: w.repo })
     expect(w.main(w.dir, '--record')).toBe(0)
     expect(w.said.at(-1)).toMatch(/^Coverage baseline of [0-9a-f]{7}: recorded in /)
-    expect(JSON.parse(readFileSync(w.baseline, 'utf8')).files).toEqual({ 'server/a.ts': 1 })
+    expect(JSON.parse(readFileSync(w.baseline, 'utf8')).files).toEqual({ 'server/a.ts': 1, 'src/c.tsx': null })
   })
 
   test('held against it: the same passes, one more line no test runs fails and names it', () => {
@@ -244,5 +258,148 @@ describe('the command', () => {
     expect(C.readBaseline(w.baseline)).toBeNull()
     writeFileSync(w.baseline, JSON.stringify({ at: 1 }))
     expect(C.readBaseline(w.baseline)).toBeNull()
+  })
+
+  // QG-13: a machine where Chromium cannot start. No browser test records the screen, so every screen file reads as one
+  // no test loads, and the ratchet used to blame the code for it.
+  test('--screen-absent: a run whose browser recorded nothing passes with the screen named as not compared', () => {
+    const w = world()
+    w.run(
+      [
+        [1, 1],
+        [2, 1],
+        [3, 0],
+      ],
+      { 'src/c.tsx': { 1: 1, 2: 1 } },
+    )
+    w.main(w.dir, '--record')
+    expect(JSON.parse(readFileSync(w.baseline, 'utf8')).files).toEqual({ 'server/a.ts': 1, 'src/c.tsx': 0 })
+    // the browser never started: the run left no screen dir at all
+    w.run(
+      [
+        [1, 1],
+        [2, 1],
+        [3, 0],
+      ],
+      undefined,
+      0,
+    )
+    expect(w.main(w.dir, '--screen-absent')).toBe(0)
+    expect(w.said[0]).toContain('the screen not compared this run (no browser could start)')
+    expect(w.said.join('\n')).toContain('The screen was not compared this run: no browser could start, so no browser test recorded it.')
+    expect(w.said.join('\n')).toMatch(/Coverage held: /)
+    expect(readFileSync(join(w.dir, 'report.txt'), 'utf8')).toContain('not compared this run (no browser could start)')
+    // a run of half the world records no baseline: the screen would be held against lines from another run
+    expect(w.main(w.dir, '--screen-absent', '--record')).toBe(0)
+    expect(w.said.at(-1)).toContain('No coverage baseline recorded: this run did not measure the screen (no browser could start)')
+    // the server's ratchet still holds: a line of its code that no test ran any more is the code's own fall
+    w.run(
+      [
+        [1, 1],
+        [2, 0],
+        [3, 0],
+      ],
+      undefined,
+      0,
+    )
+    expect(w.main(w.dir, '--screen-absent')).toBe(1)
+    expect(w.said.join('\n')).toContain('server/a.ts: 1 more line no test runs')
+    expect(w.said.join('\n')).not.toContain('src/c.tsx')
+  })
+
+  test('without the flag a screen nothing recorded is a browser that died, named as that and never as uncovered lines', () => {
+    const w = world()
+    w.run(
+      [
+        [1, 1],
+        [2, 1],
+        [3, 0],
+      ],
+      { 'src/c.tsx': { 1: 1, 2: 1 } },
+    )
+    w.main(w.dir, '--record')
+    w.run(
+      [
+        [1, 1],
+        [2, 1],
+        [3, 0],
+      ],
+      undefined,
+      0,
+    )
+    // the server held, so only the lost screen fails the run
+    expect(w.main(w.dir)).toBe(1)
+    expect(w.said.join('\n')).toContain("The screen's coverage was not compared: 2 browser test files recorded nothing, so a browser died during the run.")
+    expect(w.said.join('\n')).not.toContain('src/c.tsx: no test runs it any more')
+    // one of the two recorded and the run died partway: the count says how many did not
+    w.run(
+      [
+        [1, 1],
+        [2, 1],
+        [3, 0],
+      ],
+      { 'src/c.tsx': { 1: 1, 2: 1 } },
+      1,
+    )
+    expect(w.main(w.dir)).toBe(1)
+    expect(w.said.join('\n')).toContain('1 browser test file recorded nothing')
+    expect(w.said.join('\n')).not.toContain('src/c.tsx: no test runs it any more')
+  })
+
+  test("how many browser test files a run should record: the screen map's, for the ones this checkout still has", () => {
+    const w = world()
+    // the map names three browser tests, and the repo has two of them: the count is the two
+    expect(C.browserTests(w.map, w.repo)).toBe(2)
+    expect(C.browserTests(join(w.repo, 'no-map.json'), w.repo)).toBeNull()
+    writeFileSync(join(w.repo, 'empty-map.json'), JSON.stringify({ commit: 'abc1234', sources: [], tests: {} }))
+    expect(C.browserTests(join(w.repo, 'empty-map.json'), w.repo)).toBeNull()
+    // a screen dir of a run, and what it says of the screen: one file of two is a browser that died partway
+    expect(C.screenRecorded(w.dir)).toBe(0)
+    expect(C.screenState(w.dir, 2)).toBe('incomplete')
+    expect(C.screenState(w.dir, 2, true)).toBe('absent')
+    w.run(
+      [
+        [1, 1],
+        [2, 1],
+      ],
+      undefined,
+      0,
+    )
+    expect(C.screenRecorded(w.dir)).toBe(0)
+    w.run(
+      [
+        [1, 1],
+        [2, 1],
+      ],
+      { 'src/c.tsx': { 1: 1 } },
+      1,
+    )
+    expect(C.screenRecorded(w.dir)).toBe(1)
+    expect(C.screenState(w.dir, 2)).toBe('incomplete')
+    expect(C.screenState(w.dir, 1)).toBe('measured')
+    expect(C.screenState(w.dir, null)).toBe('measured')
+  })
+})
+
+describe('the coverage check (scripts/checks/40-coverage)', () => {
+  test('hands --screen-absent on exactly when the runner saw no Chromium', () => {
+    const root = join(import.meta.dir, '..')
+    const bin = join(tmp('coverage-flag'), 'bin')
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, 'bun'), '#!/bin/sh\nprintf "%s\\n" "$@"\n')
+    chmodSync(join(bin, 'bun'), 0o755)
+    const args = (absent: string) => {
+      const r = Bun.spawnSync(['bash', join(root, 'scripts', 'checks', '40-coverage')], {
+        cwd: root,
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SHEPHERDR_CHECK_ROOT: root, SHEPHERDR_CHECK_SCREEN_ABSENT: absent },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      expect(r.exitCode, r.stderr.toString()).toBe(0)
+      return r.stdout.toString()
+    }
+    expect(args('')).not.toContain('--screen-absent')
+    expect(args('0')).not.toContain('--screen-absent')
+    expect(args('1')).toContain('--screen-absent')
   })
 })
