@@ -90,7 +90,7 @@ Every agent, coordinator or task agent, gets the same chat.
   failure is shown. A switch to the CLI's own default is resolved to a concrete id and level first: where neither the
   target nor the starting value can be named from the chat, **Restart** is the only path. A switch the chat does not
   report is never taken as a success.
-- One setting changed for every space is still one action. This machine's ⋯ in the places list carries the count —
+- One setting changed for every space is still one action. This machine's ⋯ in the spaces list carries the count —
   Restart 3 coordinators, and it is there only while some coordinator's Settings moved — and asks first, in the same
   confirm dialog as a task's Stop or Archive: it names the places a restart would touch, marks a turn at work and waits
   for Restart (Cancel leaves every agent as it was). Its answer — the count, and the spaces that failed by name — shows

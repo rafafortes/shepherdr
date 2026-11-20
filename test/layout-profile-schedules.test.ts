@@ -246,7 +246,7 @@ describe.skipIf(!browser)('Settings → Models: schedules of a profile on a phon
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Spaces', exact: true }).click()
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
       const settings = page.getByRole('region', { name: 'Settings' })
       await settings.getByRole('button', { name: 'Models', exact: true }).tap()

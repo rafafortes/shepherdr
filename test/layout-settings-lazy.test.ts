@@ -19,7 +19,7 @@ async function opensThroughFallback(phone: boolean) {
       await route.continue()
     })
     await page.goto(url())
-    if (phone) await page.getByRole('button', { name: 'Places', exact: true }).click()
+    if (phone) await page.getByRole('button', { name: 'Spaces', exact: true }).click()
     await page.getByRole('button', { name: 'Settings', exact: true }).click()
     const settings = page.getByRole('region', { name: 'Settings' })
     // the shell: the section list comes with the first load, before any page body is asked for

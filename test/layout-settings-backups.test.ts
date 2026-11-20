@@ -84,7 +84,7 @@ describe.skipIf(!browser)('backups under their role on Settings → Agents', () 
     const page = await browser!.newPage({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Spaces', exact: true }).click()
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
       const settings = page.getByRole('region', { name: 'Settings' })
       await settings.getByRole('button', { name: 'Agents', exact: true }).tap()

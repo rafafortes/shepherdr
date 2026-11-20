@@ -144,7 +144,7 @@ describe.skipIf(!browser)('sidebars', () => {
       await settled(page)
       const docked = w >= 1180
       expect(await page.getByRole('button', { name: 'Hide Places', exact: true }).count()).toBe(docked ? 1 : 0)
-      expect(await page.getByRole('button', { name: 'Places', exact: true }).count()).toBe(docked ? 0 : 1)
+      expect(await page.getByRole('button', { name: 'Spaces', exact: true }).count()).toBe(docked ? 0 : 1)
       expect(
         await page
           .locator('[data-messages]')
@@ -152,7 +152,7 @@ describe.skipIf(!browser)('sidebars', () => {
           .evaluate((e) => e.getBoundingClientRect().width),
       ).toBeGreaterThanOrEqual(480)
       if (!docked) {
-        await page.getByRole('button', { name: 'Places', exact: true }).click()
+        await page.getByRole('button', { name: 'Spaces', exact: true }).click()
         // the drawer, over the docked one the screen behind still holds
         await page.getByRole('button', { name: 'Close', exact: true }).waitFor()
         await page.getByRole('button', { name: 'Close', exact: true }).click()
@@ -161,7 +161,7 @@ describe.skipIf(!browser)('sidebars', () => {
     await drag(page, 'Resize tasks', -300)
     await page.setViewportSize({ width: 1180, height: 850 })
     await settled(page)
-    expect(await page.getByRole('button', { name: 'Places', exact: true }).count()).toBe(1)
+    expect(await page.getByRole('button', { name: 'Spaces', exact: true }).count()).toBe(1)
     expect(
       await page
         .locator('[data-messages]')
@@ -169,7 +169,7 @@ describe.skipIf(!browser)('sidebars', () => {
         .evaluate((e) => e.getBoundingClientRect().width),
     ).toBeGreaterThanOrEqual(480)
     await page.reload()
-    await page.getByRole('button', { name: 'Places', exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Spaces', exact: true }).waitFor()
     await page.setViewportSize({ width: 1920, height: 850 })
     await page.getByRole('button', { name: 'Hide Places', exact: true }).waitFor()
     expect(await width(page, tasks)).toBe(700)
@@ -184,14 +184,14 @@ describe.skipIf(!browser)('sidebars', () => {
   test('a drawer open while widening does not reopen when the window narrows again', async () => {
     const page = await browser!.newPage({ viewport: { width: 1100, height: 850 } })
     await page.goto(url())
-    await page.getByRole('button', { name: 'Places', exact: true }).click()
+    await page.getByRole('button', { name: 'Spaces', exact: true }).click()
     await page.getByRole('button', { name: 'Close', exact: true }).waitFor()
     await page.setViewportSize({ width: 1180, height: 850 })
     await page.getByRole('button', { name: 'Hide Places', exact: true }).waitFor()
     await page.setViewportSize({ width: 1100, height: 850 })
     await settled(page)
     expect(await page.getByRole('button', { name: 'Close', exact: true }).count()).toBe(0)
-    await page.getByRole('button', { name: 'Places', exact: true }).click()
+    await page.getByRole('button', { name: 'Spaces', exact: true }).click()
     await page.getByRole('button', { name: 'Close', exact: true }).waitFor()
     await page.close()
   })
@@ -208,7 +208,7 @@ describe.skipIf(!browser)('sidebars', () => {
     await tablet.close()
     const phone = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
     await phone.goto(url())
-    await phone.getByRole('button', { name: 'Places' }).waitFor()
+    await phone.getByRole('button', { name: 'Spaces', exact: true }).waitFor()
     expect(await phone.getByRole('separator').count()).toBe(0)
     expect(await phone.getByRole('button', { name: /^(Hide|Show) Places$/ }).count()).toBe(0)
     await phone.close()

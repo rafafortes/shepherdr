@@ -159,7 +159,7 @@ const SCREENS: Screen[] = [
     viewport: { width: 390, height: 844 },
     phone: true,
     open: async (page) => {
-      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Spaces', exact: true }).click()
       await page.getByRole('button', { name: 'Close', exact: true }).waitFor()
     },
   },
@@ -326,7 +326,7 @@ describe.skipIf(!browser)('landmarks, the h1 and the skip link (A11Y-04)', () =>
       await settled(page)
       expect(await page.getByRole('main').count()).toBe(1)
       expect(await page.getByRole('heading', { level: 1, name: 'Shepherdr' }).count()).toBe(1)
-      expect(await page.getByRole('navigation', { name: 'Places' }).count()).toBe(1)
+      expect(await page.getByRole('navigation', { name: 'Spaces' }).count()).toBe(1)
       // the chat's title is a real heading, with the same type as before (16px, semibold, no heading margin)
       const title = page.getByRole('heading', { level: 2, name: 'home' }).first()
       expect(await title.count()).toBe(1)
@@ -412,7 +412,7 @@ describe.skipIf(!browser)('landmarks, the h1 and the skip link (A11Y-04)', () =>
       await page.goto(at('place=vm-str/home'))
       await page.getByRole('textbox', { name: /Message/ }).waitFor()
       // a phone reaches Settings through the Places drawer
-      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Spaces', exact: true }).click()
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
       await page.getByRole('region', { name: 'Settings' }).waitFor()
       await settled(page)

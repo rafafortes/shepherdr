@@ -2126,7 +2126,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    */
   private coordinator(id: string, o: { as?: Harness; restart?: () => Promise<string | undefined> } = {}) {
     const c = this.places.coordinator(id)
-    if (!c) throw new Error(`No place ${id}`)
+    if (!c) throw new Error(`No space ${id}`)
     const set = this.settings.harness('coordinator', this.spaceKey(id))
     const rec = this.agents.record(id)
     // a first start (nothing kept, nothing chosen by hand) takes the first harness of its chain with room under the caps
@@ -2375,7 +2375,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    *  backup's own start (`backup`: the reason its agent can't go on) says so in the card and in what it is told, and so
    *  does one going back to its primary model, which answers again (`back`, return.ts) */
   private async restartCoordinator(id: string, to: Harness, backup?: string, back?: BackWhy) {
-    if (!this.places.coordinator(id)) throw new Error(`No place ${id}`)
+    if (!this.places.coordinator(id)) throw new Error(`No space ${id}`)
     if (!this.engine.installed(to.kind)) throw new Error(`${CLI_NAME[to.kind] ?? to.kind} isn't installed on this machine.`)
     const h = fitHarness(to)
     const words = harnessWords(h)
@@ -5587,7 +5587,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const run = a1 === 'run'
         const name = set || run ? rest[0] : a1
         const named = name ? this.placeList().find((x) => x.name === name || x.id === name) : undefined
-        if (name && !named) throw new Error(`No place ${name}`)
+        if (name && !named) throw new Error(`No space ${name}`)
         const at =
           named ??
           this.placeList().find((x) => x.id === ctx.chat) ??

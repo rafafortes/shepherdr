@@ -178,7 +178,7 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     // the top bar says so, naming the first chip and how many more
     expect(await page.getByText('gtm · vm-str +3', { exact: true }).isVisible()).toBe(true)
     // another space from the drawer, then its Tasks tab: the pinned chips still
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: 'Spaces', exact: true }).click()
     await page
       .locator('li[data-project="p:vm-str:~"]')
       .getByRole('button', { name: /^home\b/ })
@@ -193,7 +193,7 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     // unpinned, the tab follows the place picked: at the main home space, everything; in a space, its own
     await page.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).click()
     expect(await chips(page)).toEqual([])
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: 'Spaces', exact: true }).click()
     await page
       .locator('li[data-project="p:vm-str:herdr-projects"]')
       .getByRole('button', { name: /^herdr-projects/ })

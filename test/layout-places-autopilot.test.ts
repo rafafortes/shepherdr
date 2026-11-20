@@ -74,8 +74,8 @@ describe.skipIf(!browser)("a place's Autopilot", () => {
       const page = await ctx.newPage()
       await page.goto(url())
       // a phone's places are in its drawer
-      const side = opts.viewport.width < 600 ? 'nav[aria-label="Places"]' : '#places'
-      if (side !== '#places') await page.getByRole('button', { name: 'Places' }).first().click()
+      const side = opts.viewport.width < 600 ? 'nav[aria-label="Spaces"]' : '#places'
+      if (side !== '#places') await page.getByRole('button', { name: 'Spaces', exact: true }).first().click()
       await page.waitForSelector(`${side} li`)
       await settled(page)
       const rows = () =>
@@ -202,7 +202,7 @@ describe.skipIf(!browser)('Autopilot Run now', () => {
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     const before = world.chat(p.chat).messages.length
     await page.goto(at(p.id))
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: 'Spaces', exact: true }).click()
     await page.getByRole('button', { name: 'Settings' }).click()
     await page.getByRole('button', { name: 'Autopilot', exact: true }).click()
     const run = page.getByRole('button', { name: /Run now: wake/ })
