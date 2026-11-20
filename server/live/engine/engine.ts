@@ -4911,13 +4911,13 @@ export class Engine extends Emitter<Events> {
    * checked it before it was kept, and a task written to since then never expires. Both are reported in news.
    */
   private async keptSweep(now: number) {
-    const expiry = keptExpiryMs(this.settings.get('tasks.keptExpiry'))
     const bySpace = new Map<string, TaskRec[]>()
     for (const t of this.tasks) {
       if (!ended(t) || !t.kept?.length) continue
       // a keep from before these clocks existed counts from when the task ended; its first reminder is due at once
       t.keptAt ??= t.doneAt ?? t.updated
       t.keptNotifiedAt ??= t.keptAt
+      const expiry = keptExpiryMs(this.settings.get('tasks.keptExpiry', this.nameOf(t)))
       const written = (t.spokenAt ?? 0) > t.keptAt
       if (!written && expiry !== null && now - t.keptAt >= expiry) {
         await this.expireKept(t, expiry)
@@ -4930,7 +4930,9 @@ export class Engine extends Emitter<Events> {
     for (const [project, list] of bySpace) {
       if (!list.some((t) => now - (t.keptNotifiedAt ?? now) >= KEPT_REMIND_MS)) continue
       const words = list.map((t) => `${t.id} (${(t.kept ?? []).join(', ')})`).join('; ')
-      this.emit('news', project, `${words} still keep work from when they were done; set tasks.keptExpiry to remove it after a while, or remove it by hand once you are sure`, 'need', {
+      const on = keptExpiryMs(this.settings.get('tasks.keptExpiry', this.nameOf(list[0]))) !== null
+      const advice = on ? 'review it, remove it by hand once you are sure, or change tasks.keptExpiry' : 'set tasks.keptExpiry to remove it after a while, or remove it by hand once you are sure'
+      this.emit('news', project, `${words} still keep work from when they were done; ${advice}`, 'need', {
         task: '',
         event: 'needs-you',
       })
@@ -4943,10 +4945,19 @@ export class Engine extends Emitter<Events> {
   private async expireKept(t: TaskRec, expiry: number) {
     const p = this.places.space(t.project)
     if (!p || this.cleaning.has(t.id)) return
+    if (this.agents.status(this.key(t)) === 'working') return // a turn running now could still change the work
+    if (await this.wt.spaceOf(t.worktree, labelOf(t))) return // someone opened the work again in herdr: never force it closed
     this.cleaning.add(t.id)
     try {
       const kept = t.kept ?? []
       const left = await this.wt.remove({ repo: p.path, wt: t.worktree, branch: t.branch, label: labelOf(t) })
+      if (left.length) {
+        // it still holds work: keep the record, back the clock off so the hourly sweep does not retry every hour
+        t.keptAt = Date.now()
+        this.saveNow()
+        this.emit('news', t.project, `${t.id} could not remove its kept work: ${left.join(', ')}`, 'need', { task: t.id, event: 'needs-you' })
+        return
+      }
       t.worktree = undefined
       t.branch = undefined
       t.kept = undefined
@@ -4954,13 +4965,7 @@ export class Engine extends Emitter<Events> {
       t.keptNotifiedAt = undefined
       this.saveNow()
       const days = expiry / 86_400_000
-      this.emit(
-        'news',
-        t.project,
-        `${t.id} kept ${kept.join(', ')} past ${days} day${days === 1 ? '' : 's'} (tasks.keptExpiry): removed it${left.length ? `; ${left.join(', ')} could not be removed` : ''}`,
-        'need',
-        { task: t.id, event: 'needs-you' },
-      )
+      this.emit('news', t.project, `${t.id} kept ${kept.join(', ')} past ${days} day${days === 1 ? '' : 's'} (tasks.keptExpiry): removed it`, 'need', { task: t.id, event: 'needs-you' })
     } finally {
       this.cleaning.delete(t.id)
     }

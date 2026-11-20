@@ -29,7 +29,7 @@ const put = (w: ReturnType<typeof world>, ...tasks: ReturnType<typeof kept>[]) =
 async function withKeptWork(name: string) {
   const w = world()
   const dir = repo()
-  const { t, key } = await started(w, dir, name)
+  const { p, t, key } = await started(w, dir, name)
   const wt = t.worktree
   const branch = t.branch
   if (!wt || !branch) throw new Error('the task has no worktree or branch')
@@ -38,7 +38,7 @@ async function withKeptWork(name: string) {
   w.agentIs(key, 'idle')
   await until(() => !!t.cleaned)
   expect(t.kept?.length).toBe(1)
-  return { w, dir, t, key, wt, branch }
+  return { w, dir, p, t, key, wt, branch }
 }
 
 const reminder = (w: ReturnType<typeof world>) => w.news.filter((n) => n.includes('still keep work from when they were done'))
@@ -122,6 +122,75 @@ describe('work a Done task kept', () => {
 
     expect(existsSync(wt)).toBe(true)
     expect(t.kept?.length).toBe(1)
+  })
+
+  test('the setting is read at the task’s space, so a space can opt out of a machine-wide expiry', async () => {
+    const { w, p, t, wt } = await withKeptWork('space-off')
+    expect(w.settings.set('tasks.keptExpiry', '1 day', 'all').ok).toBe(true)
+    expect(w.settings.set('tasks.keptExpiry', 'off', { space: p.name }).ok).toBe(true)
+    t.keptAt = Date.now() - 90 * DAY
+
+    await w.engine.sweep()
+
+    expect(existsSync(wt)).toBe(true) // the space's off wins over the machine's 1 day
+    expect(t.kept?.length).toBe(1)
+  })
+
+  test('a space can also opt in while the machine is off', async () => {
+    const { w, p, t, wt } = await withKeptWork('space-on')
+    expect(w.settings.set('tasks.keptExpiry', 'off', 'all').ok).toBe(true)
+    expect(w.settings.set('tasks.keptExpiry', '1 day', { space: p.name }).ok).toBe(true)
+    t.keptAt = Date.now() - 90 * DAY
+
+    await w.engine.sweep()
+
+    expect(existsSync(wt)).toBe(false)
+  })
+
+  test('a turn still running on the task, or herdr work reopened in its space, is never expired', async () => {
+    const running = await withKeptWork('agent-running')
+    expect(running.w.settings.set('tasks.keptExpiry', '1 day').ok).toBe(true)
+    running.t.doneAt = Date.now() // inside the stuck-agent grace: the sweep leaves this turn alone
+    running.t.keptAt = Date.now() - 90 * DAY
+    running.w.status[running.key] = 'working'
+
+    await running.w.engine.sweep()
+    expect(existsSync(running.wt)).toBe(true)
+
+    const opened = await withKeptWork('space-open')
+    expect(opened.w.settings.set('tasks.keptExpiry', '1 day').ok).toBe(true)
+    opened.t.keptAt = Date.now() - 90 * DAY
+    opened.w.herdr.spaces.push({
+      workspace_id: 'reopened',
+      label: `${opened.t.id} ${opened.t.title}`,
+      tab_count: 1,
+      worktree: { checkout_path: opened.wt, is_linked_worktree: true, repo_root: opened.dir },
+      panes: ['reopened:p1'],
+    })
+    opened.w.herdr.busy.add('reopened:p1') // putAway leaves a busy space alone
+
+    await opened.w.engine.sweep()
+    expect(existsSync(opened.wt)).toBe(true)
+  })
+
+  test('a removal that fails keeps the record, backs off, and is said in news', async () => {
+    const { w, t, wt } = await withKeptWork('failed')
+    expect(w.settings.set('tasks.keptExpiry', '1 day').ok).toBe(true)
+    t.keptAt = Date.now() - 90 * DAY
+    const before = t.keptAt
+    const api = w.engine as unknown as { wt: { remove: (o: unknown) => Promise<string[]> } }
+    const real = api.wt.remove
+    api.wt.remove = async () => ['some/path (git could not remove it)']
+    try {
+      await w.engine.sweep()
+    } finally {
+      api.wt.remove = real
+    }
+
+    expect(existsSync(wt)).toBe(true)
+    expect(t.kept?.length).toBe(1)
+    expect(t.keptAt ?? 0).toBeGreaterThan(before)
+    expect(w.news.some((n) => n.includes(`${t.id} could not remove its kept work`))).toBe(true)
   })
 
   test('a kept task whose place is gone is left alone', async () => {

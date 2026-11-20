@@ -394,7 +394,10 @@
   one whose agent is at work or that you talk to again, never your own worktrees or branches, and nothing while herdr
   does not answer. A branch counts as merged when main holds its exact tree (what the squash merge made), when
   squash-merging it again would make its task's own squash commit (so nothing came after the merge, however main
-  moved on since), or when merging it into main would change nothing.
+  moved on since), or when merging it into main would change nothing. Work a Done task kept (an uncommitted change, or a
+  branch main lacks) is named again in this space's news once a week. Settings → Tasks → Remove kept work after
+  (`tasks.keptExpiry`) makes the sweep remove it this long after it was kept, saying so in news; off, the default, only
+  reminds. A task written to after its work was kept, or whose work was opened again in herdr, is never removed.
 - While a task's agent works, it says itself what it is doing and how far along it is, at the start, at each natural
   step and at least every 5 minutes, revising its time left honestly when the work takes longer: `shepherdr status <id> "Fixing the two failing tests" --done 40 --left 5m` (its instructions tell it
   to). Shepherdr guesses nothing: it shows what the agent said, and counts the minutes left down while it works. Past

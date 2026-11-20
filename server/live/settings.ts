@@ -576,7 +576,7 @@ export const CATALOG: Section[] = [
   {
     // Done tasks archive themselves after a set time, and work they kept may expire (engine.autoArchive, keptSweep)
     name: 'Tasks',
-    about: "When Done tasks archive themselves and when work they kept may be removed.",
+    about: 'When Done tasks archive themselves and when work they kept may be removed.',
     rows: [
       { label: 'Archive Done after', key: 'tasks.archiveAfter', value: '7 days', num: { min: 1, max: 3650, unit: 'days', one: 'day', off: true } },
       {
