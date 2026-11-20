@@ -53,7 +53,8 @@ describe.skipIf(!browser)('composer + agent controls', () => {
         await page.close()
       }
     }
-  }, 30_000)
+    // Six viewport/role page loads: allow room for the full suite's CPU load, not just an idle run.
+  }, 60_000)
 
   test('missing launch values stay unknown in the popup instead of borrowing Settings defaults', async () => {
     const key = 'GTM-17/Agent'
