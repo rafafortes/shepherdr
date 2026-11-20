@@ -212,20 +212,35 @@ function groundOf(el: HTMLElement) {
   return 'Canvas'
 }
 
+/** Test hook: counts measuring passes in test/layout-tasks.test.ts; the app never sets this global (PERFC-04). */
+const countMeasure = () => {
+  const c = (globalThis as { shepFlipMeasures?: { count: number } }).shepFlipMeasures
+  if (c) c.count++
+}
+
 /**
  * Rows of a list (marked data-flip with their key) glide from where they showed to where they are now, as a task moves
  * from Working to Ready; new ones fade in and gone ones fade out where they were. Only rows are marked, never what
  * holds them, so no move adds to another. A change in the middle of a glide carries on from where each row shows,
  * so changes close together never stack. Changes above what shows keep what shows still (as scroll anchoring does,
  * which Safari lacks). When `reset` changes (another place), the new list just shows.
+ *
+ * `content` is the caller's own token for what the rows hold (the snapshot's tasks array): stable across a heartbeat
+ * that changed nothing (PERFC-01), so an unchanged list skips the measuring entirely (PERFC-04). `reset` still decides
+ * whether a real change animates; they are kept apart so a data change can glide instead of just showing.
  */
-export function useFlip(ref: RefObject<HTMLElement | null>, reset: unknown) {
-  const last = useRef<{ reset: unknown; box: HTMLElement; at: Map<string, Spot> } | null>(null)
+export function useFlip(ref: RefObject<HTMLElement | null>, reset: unknown, content: unknown) {
+  const last = useRef<{ reset: unknown; content: unknown; box: HTMLElement; at: Map<string, Spot>; count: number } | null>(null)
   const ghosts = useRef(new Set<HTMLElement>())
   useLayoutEffect(() => {
     const box = ref.current
     if (!box) return void (last.current = null)
-    const was = last.current && last.current.reset === reset && last.current.box === box ? last.current.at : null
+    const prev = last.current
+    // nothing the list shows moved: no measuring, no forced layout, no scroll adjust. The row count is a cheap
+    // guard for a row added or removed without either token changing (childElementCount needs no query).
+    if (prev && prev.box === box && prev.reset === reset && prev.content === content && prev.count === box.childElementCount) return
+    countMeasure()
+    const was = prev && prev.reset === reset && prev.box === box ? prev.at : null
     // another list now: what was fading out of the last one goes at once
     if (!was) for (const g of ghosts.current) g.remove()
     const calm = !was || still() || hushedNow()
@@ -262,7 +277,7 @@ export function useFlip(ref: RefObject<HTMLElement | null>, reset: unknown) {
     }
     const top = box.getBoundingClientRect().top
     if (top !== top0) measure(top)
-    last.current = { reset, box, at }
+    last.current = { reset, content, box, at, count: box.childElementCount }
     if (calm) return
     // how far what showed moved on screen by the scroll kept still
     const lift = top0 - top
