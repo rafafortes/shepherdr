@@ -83,7 +83,7 @@ function SkipToChat() {
   const jump = () => {
     const showing = (el: Element) => !el.closest('[inert]')
     const chat =
-      document.querySelector<HTMLElement>('[data-pane][data-focused] textarea[name="message"]') ??
+      [...document.querySelectorAll<HTMLElement>('[data-pane][data-focused] textarea[name="message"]')].find(showing) ??
       [...document.querySelectorAll<HTMLElement>('textarea[name="message"]')].find(showing) ??
       [...document.querySelectorAll<HTMLElement>('main')].find(showing)
     chat?.focus({ preventScroll: true })
