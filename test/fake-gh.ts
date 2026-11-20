@@ -31,6 +31,10 @@ export interface FakeGitHub {
   mergeError?: string
   /** gh pr merge takes this long (ms) before it merges: GitHub slow, or stuck */
   mergeSlow?: number
+  /** gh pr list answers with unreadable bytes (a GitHub answer we cannot parse) */
+  listUnreadable?: boolean
+  /** only the tip fallback's list (the one without --head) answers with unreadable bytes */
+  tipListUnreadable?: boolean
   prs: FakePr[]
   /** what gh pr checks answers; none: "no checks reported" */
   checks?: { name: string; bucket: string; link?: string }[]
@@ -173,9 +177,16 @@ if (import.meta.main) {
   if (a0 !== 'pr') fail(`fake gh: no ${a0}`)
   const pr = () => st.prs.find((p) => p.number === Number(a2)) ?? fail(`no pull requests found for ${a2}`)!
   switch (a1) {
-    case 'list':
-      out(JSON.stringify(st.prs.filter((p) => p.head === opt('head')).map(json)))
+    case 'list': {
+      // a branch lookup names --head; the tip fallback asks for every open pull request in the repo instead
+      const head = opt('head')
+      if (st.listUnreadable || (!head && st.tipListUnreadable)) out('not json')
+      else {
+        const state = opt('state')
+        out(JSON.stringify(st.prs.filter((p) => (!head || p.head === head) && (!state || state === 'all' || p.state.toLowerCase() === state.toLowerCase())).map(json)))
+      }
       break
+    }
     case 'view':
       out(JSON.stringify(json(pr())))
       break
