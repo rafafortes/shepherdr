@@ -4,7 +4,7 @@ import { providerOfKey } from '../../shared/model-caps.ts'
 // The live source: herdr is the truth for agents and their states; the CLIs' own logs are the chats; Shepherdr keeps
 // only what herdr can't tell it (spaces, tasks, modes, cards, settings). Assembled from the base plugins' parts.
 import { execSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, sep } from 'node:path'
@@ -142,7 +142,7 @@ import { readCommandCode as readCommandCodeQuota, SECRET as COMMANDCODE_KEY } fr
 import { alertShare, Quotas } from './quotas.ts'
 import { UsageFeed } from './usage-feed.ts'
 import { modelKey, providerOf, UsageLedger } from './usage-ledger.ts'
-import { CATALOG, CLI_NAME, CLIS, kindOf, MAX_BACKUPS, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
+import { CATALOG, CLI_NAME, CLIS, EXECUTABLE_KEYS, kindOf, MAX_BACKUPS, refuse, setForTask, repositorySection, Settings, type Level } from './settings.ts'
 import { modelsMatrix } from './models-matrix.ts'
 import { changeWords, Profiles, ProfileStore, previewWords, PROFILES_ON_MAIN, waitingPicks, type Change, type Site } from './profiles.ts'
 import { ProfileSchedules, scheduleRows, scheduleWords } from './profile-schedule.ts'
@@ -179,6 +179,12 @@ function userName(): string {
 
 export class LiveSource extends Emitter<SourceEvents> implements Source {
   readonly kind = 'live' as const
+  /**
+   * The screen's per-boot proof of its own writes (SEC-04). Minted here, never written to a file or an HTTP header a
+   * caller chooses: the server hands it to the live socket once at boot, and only a write carrying it back may change
+   * an executable setting. The shepherdr command writes settings directly and needs none.
+   */
+  readonly writeCapability = randomBytes(32).toString('hex')
   user = userName()
   settings = new Settings()
   /** the published names the app answers to (app.hosts), read fresh so a change to the setting needs no restart */
@@ -4085,6 +4091,11 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       case 'call':
         return {}
       case 'setting': {
+        // A command of the operator's that a shell runs on every alert (or at every merge) is a second wall: the
+        // screen's write must carry the proof it got over its own socket at boot. A plain local POST can set the
+        // x-shepherdr header and send no Origin, but it cannot mint this (SEC-04). The shepherdr command writes
+        // settings directly through cli(), so the operator and their alert installer keep working.
+        if (EXECUTABLE_KEYS.has(a.key) && a.capability !== this.writeCapability) return { ok: false, error: 'Set it in Settings: a command here can only be changed from this page.' }
         if (a.key.startsWith('taskIds.')) {
           const p = a.place && this.places.space(a.place)
           if (!p) return { ok: false, error: 'Select a repository space in Settings.' }

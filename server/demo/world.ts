@@ -95,6 +95,8 @@ const OTHER_CONTROLS = () => ({ models: [], model: 0, efforts: [], effort: 0 })
 
 export class DemoWorld extends Emitter<SourceEvents> implements Source {
   readonly kind = 'demo' as const
+  /** the screen's proof of its own writes (SEC-04), a fixed value here so a browser test can see it on a setting write */
+  readonly writeCapability = 'd'.repeat(64)
   /** a stand-in for the whole waiting line, set by a test that needs hundreds of waiting tasks on this page */
   queueOverride?: LimitsQueue
   /** a test that needs the page with nothing waiting sets this */

@@ -708,8 +708,14 @@ addEventListener('resize', () => {
 let ws: WebSocket | null = null
 let watched = ''
 
+/** the per-boot proof of this page's own writes, handed to it over its socket (SEC-04). Empty until the first socket
+ *  message; setting writes before then are refused with the Settings-page words rather than silently accepted. */
+let writeCapability = ''
+
 export async function act(a: Action, signal?: AbortSignal) {
-  const r = await fetch('api/action', { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify(a), signal })
+  const headers: Record<string, string> = { 'content-type': 'application/json', 'x-shepherdr': '1' }
+  if (writeCapability) headers['x-shepherdr-capability'] = writeCapability
+  const r = await fetch('api/action', { method: 'POST', headers, body: JSON.stringify(a), signal })
   if (!r.ok) throw new Error((await r.text()) || `${r.status}`)
   return r.json().catch(() => ({}))
 }
@@ -750,6 +756,10 @@ export function connect() {
     pinging = null
     const msg = JSON.parse(ev.data) as ServerEvent
     if (msg.type === 'pong') return
+    if (msg.type === 'capability') {
+      writeCapability = msg.capability
+      return
+    }
     if (msg.type === 'snapshot') {
       state = { ...state, snap: msg.snapshot }
       stayOnShown()

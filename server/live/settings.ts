@@ -347,6 +347,14 @@ export function fitCaps(text: string): { text: string; converted: boolean; lower
 /** values kept under their old words: read as today's */
 const OLD_VALUES: Record<string, Record<string, string>> = { 'brief.merge': { 'by itself': 'on its own', 'after your yes': 'ask me first' } }
 
+/**
+ * Settings whose value is handed to a shell: alerts.command and alerts.doneCommand (wait-alerts.ts) and merge.gate
+ * (engine.ts). A write of one that comes through the screen needs the page's own per-boot capability (source.act);
+ * the shepherdr command writes settings directly, for the operator, and keeps working (SEC-04). Kept here beside the
+ * rows so the gate and the rows' hints cannot drift apart.
+ */
+export const EXECUTABLE_KEYS: ReadonlySet<string> = new Set(['alerts.command', 'alerts.doneCommand', 'merge.gate'])
+
 export const CATALOG: Section[] = [
   {
     name: 'Private instructions',
@@ -383,7 +391,7 @@ export const CATALOG: Section[] = [
         key: 'merge.gate',
         value: 'off',
         text: true,
-        hint: "A command run in the task's worktree after its rebase, before its change goes into its base (here, or through its pull request): exit 0 lets it in, with its last line in the merge commit; anything else stops the merge, with its output, and the base stays as it was. Off: none.",
+        hint: "A command run in the task's worktree after its rebase, before its change goes into its base (here, or through its pull request): exit 0 lets it in, with its last line in the merge commit; anything else stops the merge, with its output, and the base stays as it was. Off: none. A command here is only changed from this Settings page's own writes; shepherdr set still works from a terminal.",
       },
       // with a merge gate, the first merges in line go in together on one gate run (engine.train)
       {
@@ -748,7 +756,7 @@ export const CATALOG: Section[] = [
         key: 'alerts.command',
         value: 'off',
         text: true,
-        hint: 'A command of yours told what waits for you: each question, plan, choice, permission or task that needs you, of an agent of any CLI, once it has waited the time below; one answered sooner runs nothing. It runs through sh as <command> <title> <message> <key>. Off: none.',
+        hint: "A command of yours told what waits for you: each question, plan, choice, permission or task that needs you, of an agent of any CLI, once it has waited the time below; one answered sooner runs nothing. It runs through sh as <command> <title> <message> <key>. Off: none. A command here is only changed from this Settings page's own writes; shepherdr set still works from a terminal.",
       },
       { label: 'Tell it after', key: 'alerts.after', value: '10 s', options: [...ALERT_AFTER] },
       {
@@ -756,7 +764,7 @@ export const CATALOG: Section[] = [
         key: 'alerts.doneCommand',
         value: 'off',
         text: true,
-        hint: 'A command of yours told when a wait you were alerted about ends, as <command> <key> <how it ended>, with the same key the alert got so a notifier can mark the message it sent (answer, relay, advisor, or the task moved on). Off: none.',
+        hint: "A command of yours told when a wait you were alerted about ends, as <command> <key> <how it ended>, with the same key the alert got so a notifier can mark the message it sent (answer, relay, advisor, or the task moved on). Off: none. A command here is only changed from this Settings page's own writes; shepherdr set still works from a terminal.",
       },
     ],
   },

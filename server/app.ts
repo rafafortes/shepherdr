@@ -233,10 +233,16 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
         }
         if (path === '/api/action' && req.method === 'POST') {
           const a = (await req.json()) as Action
+          // the screen sends the per-boot proof it got over its socket as a header (the way a secret's credential
+          // travels): only the server copies it into the action, so a caller cannot choose a proof in the JSON body.
+          // The live source checks it when a write names an executable setting (SEC-04); other writes ignore it.
+          const capability = req.headers.get('x-shepherdr-capability') ?? undefined
+          // always overwrite a body-supplied value: only the header the screen got over its socket can mint this
+          const act = a.type === 'setting' ? { ...a, capability } : a
           // one restart of every coordinator can outlast the idle cut-off (each turn that has to stop, each launch
           // that retries): its answer is the count the row shows, so it gets no cut-off, as the command does
           if (a.type === 'restart-all') srv.timeout(req, 0)
-          return json((await source.act(a)) ?? {})
+          return json((await source.act(act)) ?? {})
         }
         // an artifact: its page wrapped for a sealed frame, its data alone (pushed into open frames when only that
         // changed), the check's picture of it, and all of it raw for the main machine to pass on
@@ -361,6 +367,9 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
         if (ws.data.kind === 'live') {
           live.add(ws)
           send(ws, { type: 'snapshot', snapshot: source.snapshot() })
+          // the screen's own proof of executable-setting writes (SEC-04): over this socket, never in the snapshot or
+          // a file. A page that can POST but cannot read this socket cannot change a command the operator runs.
+          if (source.writeCapability) send(ws, { type: 'capability', capability: source.writeCapability })
           send(ws, { type: 'build', id: build })
           send(ws, { type: 'update', update })
         } else if (ws.data.kind === 'voice' && draining) {
