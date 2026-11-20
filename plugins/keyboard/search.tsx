@@ -234,7 +234,7 @@ export function Search({ onClose }: { onClose: () => void }) {
               ))}
               {/* a note is a dimmed option, never a bare child: the listbox always owns only options */}
               {!group.all.length ? (
-                <div role="option" aria-selected={false} aria-disabled className="px-3 py-2 text-sm text-fg3">
+                <div role="option" aria-selected={false} aria-disabled tabIndex={-1} className="px-3 py-2 text-sm text-fg3">
                   {group.kind === 'Messages' && searching && !coverage.finished ? 'Still loading…' : 'No matches'}
                 </div>
               ) : null}
@@ -252,7 +252,7 @@ export function Search({ onClose }: { onClose: () => void }) {
         {!shown.length ? (
           <div id="search-list" role="listbox" aria-label="Search results" aria-busy={searching && !coverage.finished}>
             {!searching || coverage.finished ? (
-              <div role="option" aria-selected={false} aria-disabled className="px-3 py-4 text-sm text-fg2">
+              <div role="option" aria-selected={false} aria-disabled tabIndex={-1} className="px-3 py-4 text-sm text-fg2">
                 Nothing found in this scope. Try Everywhere or fewer words.
               </div>
             ) : null}
