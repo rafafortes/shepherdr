@@ -95,6 +95,9 @@ export function readJson<T>(name: string, fallback: T, dir = home()): T {
   let text: string
   try {
     if (!fs.existsSync(f)) return fallback
+    // a private file copied, restored or made by an older version can be readable by group or other: tighten it as we
+    // read it and say so once (after the chmod the next read is quiet). The write path tightens the files it writes.
+    if (PRIVATE.has(name)) tightenIfLoose(f)
     text = fs.readFileSync(f, 'utf8')
   } catch (e) {
     return unreadable(f, fallback, `cannot be read (${words(e)})`)
@@ -149,6 +152,19 @@ function unreadable<T>(f: string, fallback: T, why: string, bytes?: number): T {
 
 /** secrets (keys, push subscriptions) are readable by you only */
 const PRIVATE = new Set(['secrets.json', 'vapid.json', 'push.json'])
+
+/** a private file made loose outside our write path (copied by hand, restored from a backup, made by an older version)
+ *  keeps its mode while we only read it: tighten it and say one line, which the chmod makes a one-off. A file we cannot
+ *  stat or change is still read as it is, with no line about a mode we did not change. */
+function tightenIfLoose(f: string) {
+  try {
+    if (!(fs.statSync(f).mode & 0o077)) return
+    fs.chmodSync(f, 0o600)
+    console.error(`shepherdr: tightened ${f} to 0600: it held secrets readable by group or other`)
+  } catch {
+    /* not a reason to fail the read */
+  }
+}
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
@@ -232,6 +248,9 @@ export function writeJson(name: string, value: unknown, dir = home(), compact = 
   } finally {
     fs.closeSync(fd)
   }
+  // the mode above applies only when openSync creates tmp: one left loose by a crashed or older write keeps it, and
+  // the rename would give that mode to the secrets file. Tighten it explicitly before it takes the target's place.
+  if (PRIVATE.has(name)) fs.chmodSync(tmp, 0o600)
   fs.renameSync(tmp, f)
   if (RECORD.has(basename(f))) syncDir(dirname(f))
 }

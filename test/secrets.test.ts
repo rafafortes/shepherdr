@@ -1,7 +1,8 @@
 // Agents' secrets: kept at a level (Everywhere, a machine, a space) in a file only you can read, picked most specific
 // first, asked for with a masked card, and never in a snapshot, a chat or the command's printed answer.
-import { afterAll, describe, expect, test } from 'bun:test'
-import { readFileSync, statSync, symlinkSync, mkdirSync, copyFileSync, unlinkSync } from 'node:fs'
+import { afterAll, describe, expect, spyOn, test } from 'bun:test'
+import { chmodSync, readFileSync, statSync, symlinkSync, mkdirSync, copyFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import * as fs from 'node:fs'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -33,6 +34,73 @@ describe('the vault', () => {
     expect(v.set('p:box:api', 'TOKEN', null).ok).toBe(true)
     expect(v.pick(['TOKEN'], chain).found.TOKEN.value).toBe('everywhere')
     expect(v.set('p:box:api', 'TOKEN', null).ok).toBe(false)
+  })
+
+  test('a loose vault.json is 0600 after the next write, and what it held is kept', () => {
+    const dir = tmp('vault-loose')
+    const f = join(dir, 'vault.json')
+    const before = { all: { OLD: { value: 'kept', at: 1 } } }
+    writeFileSync(f, JSON.stringify(before))
+    chmodSync(f, 0o644)
+    // a tmp an older or crashed write left loose keeps its mode when writeFileSync reopens it: the explicit chmod
+    // tightens it before the rename, so the vault does not inherit the loose mode
+    const loose = join(dir, `vault.json.${process.pid}.tmp`)
+    writeFileSync(loose, 'a loose tmp from another write')
+    chmodSync(loose, 0o644)
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const v = new Vault(dir)
+      expect(v.set('all', 'NEW', 'added').ok).toBe(true)
+      expect(statSync(f).mode & 0o777).toBe(0o600)
+      expect(v.pick(['OLD', 'NEW'], ['all']).found).toEqual({ OLD: { value: 'kept', level: 'all' }, NEW: { value: 'added', level: 'all' } })
+    } finally {
+      page.mockRestore()
+    }
+  })
+
+  test('a loose vault.json we only read is tightened, says one line, and keeps its secrets', () => {
+    const dir = tmp('vault-loose-read')
+    const f = join(dir, 'vault.json')
+    const bytes = JSON.stringify({ all: { OLD: { value: 'kept', at: 1 } } })
+    writeFileSync(f, bytes)
+    chmodSync(f, 0o644)
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const v = new Vault(dir)
+      expect(v.pick(['OLD'], ['all']).found).toEqual({ OLD: { value: 'kept', level: 'all' } })
+      expect(statSync(f).mode & 0o777).toBe(0o600)
+      expect(readFileSync(f, 'utf8')).toBe(bytes)
+      expect(page).toHaveBeenCalledTimes(1)
+      expect(String(page.mock.calls[0]?.[0])).toContain('tightened')
+      expect(String(page.mock.calls[0]?.[0])).toContain('0600')
+      // the first read's chmod makes later ones quiet
+      v.names()
+      expect(page).toHaveBeenCalledTimes(1)
+    } finally {
+      page.mockRestore()
+    }
+  })
+
+  test('a vault we cannot tighten still reads, with no line about a mode we did not change', () => {
+    const dir = tmp('vault-loose-stuck')
+    const f = join(dir, 'vault.json')
+    writeFileSync(f, '{"all": {"OLD": {"value": "kept", "at": 1}}}')
+    chmodSync(f, 0o644)
+    const real = fs.chmodSync
+    const chmod = spyOn(fs, 'chmodSync').mockImplementation((p, m) => {
+      if (p === f) throw new Error('EACCES')
+      return real(p, m)
+    })
+    const page = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const v = new Vault(dir)
+      expect(v.pick(['OLD'], ['all']).found).toEqual({ OLD: { value: 'kept', level: 'all' } })
+      expect(statSync(f).mode & 0o777).toBe(0o644)
+      expect(page).not.toHaveBeenCalled()
+    } finally {
+      chmod.mockRestore()
+      page.mockRestore()
+    }
   })
 
   test('a name is one an environment variable may have, and a value is not empty', () => {
