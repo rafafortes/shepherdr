@@ -75,8 +75,8 @@ describe.skipIf(!browser)('restarting an agent', () => {
     await ctx.close()
   }, 30_000)
 
-  // Every coordinator on new Settings from the places list's own menu: one action, one answer in the row itself, its
-  // label carrying how many it will touch, and no task's agent.
+  // Every coordinator on new Settings from the places list's own menu: the label carries how many, a tap asks first
+  // (the server stops a turn at work before it restarts, so a mis-tap must not interrupt), and no task's agent.
   const newSettings = () => {
     for (const c of Object.values(world.chats)) c.restart = undefined
     world.chats['p:vm-str:gtm'].restart = { on: 'Claude Code', want: 'Codex' }
@@ -84,9 +84,17 @@ describe.skipIf(!browser)('restarting an agent', () => {
     world.chats['HP-204/Agent'].restart = { on: 'Claude Code', want: 'Codex' }
     world.emit('snapshot')
   }
+  const noSettings = () => {
+    for (const c of Object.values(world.chats)) c.restart = undefined
+    world.emit('snapshot')
+  }
 
-  test("this machine's menu restarts every coordinator on new Settings, its label carrying how many, and no task's agent", async () => {
+  test("this machine's menu restarts every coordinator on new Settings, asks first, names the places, marks the working one, and restarts nothing until Restart is pressed", async () => {
     newSettings()
+    // gtm is the place the screen shows: it watches that chat, so it knows the coordinator's turn is at work (the other's
+    // row says nothing of work, which it cannot know from here)
+    world.chats['p:vm-str:gtm'].working = true
+    world.emit('snapshot')
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
@@ -105,7 +113,27 @@ describe.skipIf(!browser)('restarting an agent', () => {
       await item.waitFor()
       const taskCards = world.chats['HP-204/Agent'].messages.filter((m) => m.card?.restart).length
       await item.click()
-      await page.getByRole('menuitem', { name: 'Restarted 2', exact: true }).waitFor()
+      const dialog = page.getByRole('alertdialog', { name: 'Restart 2 coordinators?' })
+      await dialog.waitFor()
+      // the places it names, by name, the working one marked
+      expect(await dialog.getByText('gtm', { exact: true }).count()).toBe(1)
+      expect(await dialog.getByText('herdr-projects', { exact: true }).count()).toBe(1)
+      expect(await dialog.locator('[data-restart-all-row]', { hasText: 'gtm' }).textContent()).toContain('working, its turn stops first')
+      expect(await dialog.locator('[data-restart-all-row]', { hasText: 'herdr-projects' }).textContent()).not.toContain('working')
+      // the screen watches gtm (the place on screen) and not herdr-projects: its row can't be marked, so the
+      // server's own rule is said
+      expect(await dialog.getByText('A turn at work is stopped first: their work in progress stops.').count()).toBe(1)
+      // asking has restarted nothing: no card yet
+      expect(world.chats['p:vm-str:gtm'].messages.at(-1)?.card).toBeUndefined()
+      expect(world.chats['p:vm-str:herdr-projects'].messages.filter((m) => m.card?.restart).length).toBe(0)
+      await dialog.getByRole('button', { name: 'Restart', exact: true }).click()
+      // the real run's answer, in the dialog, before it closes
+      const answer = page.locator('[data-restart-all-answer]')
+      await answer.waitFor()
+      expect(await answer.textContent()).toBe('Restarted 2')
+      expect(await answer.getAttribute('class')).toBe(null)
+      await page.getByRole('button', { name: 'OK', exact: true }).click()
+      await dialog.waitFor({ state: 'detached' })
       expect(world.chats['p:vm-str:gtm'].messages.at(-1)?.card).toMatchObject({ restart: true, text: 'Restarted on Codex' })
       expect(world.chats['p:vm-str:herdr-projects'].messages.at(-1)?.card).toMatchObject({ restart: true, text: 'Restarted on pi' })
       // the card in each chat, the task's agent left as it was, and nothing left to count
@@ -113,6 +141,157 @@ describe.skipIf(!browser)('restarting an agent', () => {
       expect(world.chats['HP-204/Agent'].restart).toMatchObject({ want: 'Codex' })
       expect(world.snapshot().places.filter((p) => p.restart)).toEqual([])
     } finally {
+      world.chats['p:vm-str:gtm'].working = undefined
+      world.emit('snapshot')
+      await page.close()
+    }
+  }, 30_000)
+
+  test('the question is cancelled: the dialog closes and nothing is restarted', async () => {
+    newSettings()
+    const sent: string[] = []
+    const origAct = world.act
+    world.act = async (a) => {
+      if (a.type === 'restart-all') sent.push('restart-all')
+      return origAct(a)
+    }
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    // what the screen itself asks the server for: the tap must not ask for a restart-all, only Restart may
+    const asks: string[] = []
+    page.on('request', (r) => {
+      if (r.url().endsWith('/api/action') && r.method() === 'POST') asks.push(r.postDataJSON().type as string)
+    })
+    try {
+      // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
+      await page.waitForSelector('#places li')
+      const mine = page.locator('#places li[data-heading="m:vm-str"]')
+      await mine.hover()
+      await mine.getByRole('button', { name: 'More for vm-str' }).click()
+      await page.getByRole('menuitem', { name: 'Restart 2 coordinators', exact: true }).click()
+      const dialog = page.getByRole('alertdialog', { name: 'Restart 2 coordinators?' })
+      await dialog.waitFor()
+      await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await dialog.waitFor({ state: 'detached' })
+      // no act('restart-all') from the screen, in the world or over the wire, and the count stands
+      expect(sent).toEqual([])
+      expect(asks).not.toContain('restart-all')
+      expect(world.snapshot().places.filter((p) => p.restart).length).toBe(2)
+      // the menu's item still counts what it would do: the question can be asked again
+      await mine.hover()
+      await mine.getByRole('button', { name: 'More for vm-str' }).click()
+      expect(await page.getByRole('menuitem', { name: 'Restart 2 coordinators', exact: true }).count()).toBe(1)
+    } finally {
+      world.act = origAct
+      await page.close()
+    }
+  }, 30_000)
+
+  test('nothing to do: the question says so, a run that touches nothing says so too, and nothing is restarted', async () => {
+    newSettings()
+    const sent: string[] = []
+    const origAct = world.act
+    world.act = async (a) => {
+      if (a.type === 'restart-all') sent.push('restart-all')
+      return origAct(a)
+    }
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
+      await page.waitForSelector('#places li')
+      const mine = page.locator('#places li[data-heading="m:vm-str"]')
+      await mine.hover()
+      await mine.getByRole('button', { name: 'More for vm-str' }).click()
+      await page.getByRole('menuitem', { name: 'Restart 2 coordinators', exact: true }).click()
+      const dialog = page.getByRole('alertdialog', { name: 'Restart 2 coordinators?' })
+      await dialog.waitFor()
+      // their Settings moved back while the question is open: nothing to confirm, so it closes, and nothing is restarted
+      noSettings()
+      await dialog.waitFor({ state: 'detached' })
+      expect(sent).toEqual([])
+      expect(await page.getByRole('alertdialog').count()).toBe(0)
+      // a run that found nothing to touch answers with the same words, in the same place: the screen still saw two
+      // (a real one only happens when the Settings move back between the tap and the Restart, on the server)
+      newSettings()
+      let ran = 0
+      world.act = async (a) => {
+        if (a.type !== 'restart-all') return origAct(a)
+        ran++
+        return { ok: true, restarted: 0, failed: 0 }
+      }
+      await mine.hover()
+      await mine.getByRole('button', { name: 'More for vm-str' }).click()
+      await page.getByRole('menuitem', { name: 'Restart 2 coordinators', exact: true }).click()
+      await page.getByRole('alertdialog', { name: 'Restart 2 coordinators?' }).waitFor()
+      await page.getByRole('button', { name: 'Restart', exact: true }).click()
+      const answer = page.locator('[data-restart-all-answer]')
+      await answer.waitFor()
+      expect(await answer.textContent()).toBe('Nothing new in their Settings')
+      expect(await answer.getAttribute('class')).toBe(null)
+      expect(ran).toBe(1)
+      await page.getByRole('button', { name: 'OK', exact: true }).click()
+      await page.getByRole('alertdialog').waitFor({ state: 'detached' })
+      // and where there is nothing at all, the item is not there: the menu has no restart row for this machine
+      noSettings()
+      await settled(page)
+      await mine.hover()
+      await mine.getByRole('button', { name: 'More for vm-str' }).click()
+      expect(await page.getByRole('menuitem', { name: /Restart/ }).count()).toBe(0)
+    } finally {
+      world.act = origAct
+      await page.close()
+    }
+  }, 30_000)
+
+  test('a place that cannot restart: the answer names it, and it is still offered after', async () => {
+    newSettings()
+    const origAct = world.act
+    // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+    const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
+    try {
+      // biome-ignore lint/style/noNonNullAssertion: the describe skips every test of this file when no browser opened
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
+      await page.waitForSelector('#places li')
+      // the server would answer one that could not, by name, and keep the failed one's hint for another go: a refusal,
+      // then the run it would give, with nothing else done (a mocked run, for this screen's own answer)
+      const runs = [
+        { ok: false, error: 'herdr is not answering.' },
+        { ok: true, restarted: 1, failed: 1, failures: ['gtm'] },
+      ] as const
+      let ran = 0
+      world.act = async (a) => {
+        if (a.type !== 'restart-all') return origAct(a)
+        const reply = runs[ran]
+        ran++
+        return reply
+      }
+      const mine = page.locator('#places li[data-heading="m:vm-str"]')
+      await mine.hover()
+      await mine.getByRole('button', { name: 'More for vm-str' }).click()
+      await page.getByRole('menuitem', { name: 'Restart 2 coordinators', exact: true }).click()
+      const dialog = page.getByRole('alertdialog', { name: 'Restart 2 coordinators?' })
+      await dialog.waitFor()
+      // a run the server refused keeps the question open, and says why in it
+      await dialog.getByRole('button', { name: 'Restart', exact: true }).click()
+      await dialog.getByText('herdr is not answering.').waitFor()
+      await dialog.getByRole('button', { name: 'Restart', exact: true }).click()
+      // the run that kept going names the one that could not, in red, and the dialog stays for it
+      const answer = page.locator('[data-restart-all-answer]')
+      await answer.waitFor()
+      expect(await answer.textContent()).toContain('1 failed: gtm')
+      expect(await answer.getAttribute('class')).toContain('text-need-fg')
+      expect(ran).toBe(2)
+      await page.getByRole('button', { name: 'OK', exact: true }).click()
+      await page.getByRole('alertdialog').waitFor({ state: 'detached' })
+      // and where the world is as the run found it, the question can be asked again, by its own count
+      await mine.hover()
+      await mine.getByRole('button', { name: 'More for vm-str' }).click()
+      expect(await page.getByRole('menuitem', { name: 'Restart 2 coordinators', exact: true }).count()).toBe(1)
+    } finally {
+      world.act = origAct
       await page.close()
     }
   }, 30_000)
@@ -136,7 +315,13 @@ describe.skipIf(!browser)('restarting an agent', () => {
       await page.waitForTimeout(700)
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
       await page.getByRole('menuitem', { name: 'Restart 2 coordinators', exact: true }).tap()
-      await page.getByRole('menuitem', { name: 'Restarted 2', exact: true }).waitFor()
+      const dialog = page.getByRole('alertdialog', { name: 'Restart 2 coordinators?' })
+      await dialog.waitFor()
+      // the question on the phone names the places too, before anything is interrupted
+      expect(await dialog.getByText('gtm', { exact: true }).count()).toBe(1)
+      expect(await dialog.getByText('herdr-projects', { exact: true }).count()).toBe(1)
+      await dialog.getByRole('button', { name: 'Restart', exact: true }).tap()
+      await dialog.waitFor({ state: 'detached' })
       expect(world.chats['p:vm-str:gtm'].messages.at(-1)?.card).toMatchObject({ restart: true, text: 'Restarted on Codex' })
     } finally {
       await ctx.close()

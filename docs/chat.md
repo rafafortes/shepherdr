@@ -91,8 +91,10 @@ Every agent, coordinator or task agent, gets the same chat.
   target nor the starting value can be named from the chat, **Restart** is the only path. A switch the chat does not
   report is never taken as a success.
 - One setting changed for every space is still one action. This machine's ⋯ in the places list carries the count —
-  Restart 3 coordinators, and it is there only while some coordinator's Settings moved — and runs it, its answer in the
-  row itself (the count, and the spaces that failed by name); `shepherdr restart --all` does the same from a terminal:
+  Restart 3 coordinators, and it is there only while some coordinator's Settings moved — and asks first, in the same
+  confirm dialog as a task's Stop or Archive: it names the places a restart would touch, marks a turn at work and waits
+  for Restart (Cancel leaves every agent as it was). Its answer — the count, and the spaces that failed by name — shows
+  in that dialog instead of in the row. From a terminal `shepherdr restart --all` runs the same action at once:
   every coordinator of this machine's spaces whose Settings now say other than what its agent ran on when it started
   (why a chat whose own pick differs while Settings did not move is left alone), one restart each exactly as above, one
   line per space (what it runs on and that it was left alone, counted; the failures last and named), and one space that
