@@ -438,10 +438,11 @@ export const VERB_TOPIC: Record<Verb, Topic> = {
   secret: 'secrets',
 }
 
-/** `shepherdr help [topic]`: one section, the whole page, or the topic list plus the page. */
+/** `shepherdr help [topic]`: one section (a verb name finds its section too), the whole page, or the topic list plus the page. */
 export function helpTopic(name?: string): string {
   if (!name) return HELP
-  return TOPIC[name as Topic] ?? `No help topic ${name}; try one of: ${Object.keys(TOPIC).join(', ')}.\n\n${HELP}`
+  const section = TOPIC[name as Topic] ?? (Object.hasOwn(VERB_TOPIC, name) ? TOPIC[VERB_TOPIC[name as Verb]] : undefined)
+  return section ?? `No help topic ${name}; try one of: ${Object.keys(TOPIC).join(', ')}.\n\n${HELP}`
 }
 
 /** `shepherdr <verb> --help`: that verb's section, or nothing when the switch will refuse the verb. */
