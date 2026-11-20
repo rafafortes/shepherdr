@@ -118,6 +118,37 @@ describe('the discovered checks', () => {
     expect(r.out).toContain('  ! two: the tool is missing')
   })
 
+  // QG-13: a Chromium that cannot start leaves the screen unrecorded, and the coverage step must be told instead of
+  // reading every screen file as code no test runs any more
+  test('a Chromium that cannot start tells the coverage step the screen was not measured, and one that can says nothing', () => {
+    const seen = `printf 'absent=%s\\n' "\${SHEPHERDR_CHECK_SCREEN_ABSENT:-}" >> "$HOME/absent.txt"`
+    const cases = [
+      ["console.log('chromium: not installed: bun x playwright-core install --only-shell chromium')\nconsole.log('webkit: ok (fixture)')\n", 'absent=1'],
+      ["console.log('chromium: ok (fixture)')\nconsole.log('webkit: not installed: bun x playwright-core install webkit')\n", 'absent='],
+    ] as const
+    for (const [probe, want] of cases) {
+      const f = fixture({ '10-one': check(), '30-coverage': check(seen) })
+      // the probe's stand-in, written after the fixture's own: it answers as a host with or without Chromium
+      writeFileSync(join(f.dir, 'scripts', 'check-browsers.ts'), probe)
+      const r = f.run()
+      expect(r.code).toBe(0)
+      expect(readFileSync(join(f.home, 'absent.txt'), 'utf8'), probe).toBe(`${want}\n`)
+    }
+  })
+
+  test("the variable the probe sets never comes from the caller: this host's Chromium decides alone", () => {
+    const seen = `printf 'absent=%s\\n' "\${SHEPHERDR_CHECK_SCREEN_ABSENT:-}" >> "$HOME/absent.txt"`
+    const f = fixture({ '10-one': check(), '30-coverage': check(seen) })
+    // the caller's environment says no browser can start; this host's probe says Chromium is fine
+    process.env.SHEPHERDR_CHECK_SCREEN_ABSENT = '1'
+    try {
+      expect(f.run().code).toBe(0)
+    } finally {
+      delete process.env.SHEPHERDR_CHECK_SCREEN_ABSENT
+    }
+    expect(readFileSync(join(f.home, 'absent.txt'), 'utf8')).toBe('absent=\n')
+  })
+
   test('only the default branch gets the record and map flags a baseline needs', () => {
     const envBody = `printf 'record=%s map=%s\\n' "$SHEPHERDR_CHECK_RECORD" "$SHEPHERDR_CHECK_MAP" >> "$SHEPHERDR_CHECK_ROOT/flags.txt"`
     for (const [branch, want] of [

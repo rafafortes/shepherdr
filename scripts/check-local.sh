@@ -268,6 +268,9 @@ declare -a failed=()
 declare -a notes=()
 declare -a what=()
 
+# the probe's Chromium line is the only thing that sets this, below: never one inherited from the caller's environment
+unset SHEPHERDR_CHECK_SCREEN_ABSENT
+
 say() { printf '%s\n' "$1" | tee -a "$V"; }
 
 # the note a check wrote for its own line: tests say how many ran, coverage its percentage, build its time, the dist
@@ -374,7 +377,8 @@ show_failure() { # the reasons a step failed
       [ -n "$left" ] && { echo "Left behind:"; echo "$left" | sed 's/^/  /'; shown=$left; }
       ;;
     coverage)
-      shown=$(sed -n '/^Coverage fell since the baseline/,$p' "$log" | head -14)
+      # what fell, or the screen a browser left unrecorded (a browser that died during the run), whichever the step said
+      shown=$(awk '/^The screen|^Coverage fell since the baseline/ {on = 1} on' "$log" | head -14)
       [ -n "$shown" ] && echo "$shown"
       ;;
     dist-budget)
@@ -472,8 +476,14 @@ run_phase() {
         [ "$engine" = webkit ] && what_skips='the iPhone tests'
         case $said in
           ok*) true ;;
-          '') notes+=("$engine: could not be checked (scripts/check-browsers.ts said nothing) · $what_skips skip") ;;
-          *) notes+=("$engine: $said · $what_skips skip") ;;
+          *)
+            # no Chromium: no browser test recorded the screen, so the coverage step must not read its files as code that
+            # nothing runs any more (40-coverage passes --screen-absent, scripts/coverage.ts, QG-13)
+            [ "$engine" = chromium ] && export SHEPHERDR_CHECK_SCREEN_ABSENT=1
+            if [ -n "$said" ]; then notes+=("$engine: $said · $what_skips skip")
+            else notes+=("$engine: could not be checked (scripts/check-browsers.ts said nothing) · $what_skips skip")
+            fi
+            ;;
         esac
       done
     fi

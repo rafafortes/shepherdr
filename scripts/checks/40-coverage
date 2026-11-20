@@ -2,13 +2,17 @@
 # Check 4: the coverage ratchet (scripts/coverage.ts). It runs after tests that all passed: the runner stops at the
 # first failure, so what a failed test run left is never measured. On the default branch it records the baseline in the
 # repo's .git; the note is the summary line, read from this check's own log, exactly as the runner used to read it.
+# A browser that could not start leaves the screen unrecorded (no browser test ran), so the runner says so in
+# SHEPHERDR_CHECK_SCREEN_ABSENT and the screen is named as not compared instead of read as code no test runs any more.
 set -uo pipefail
 root=${SHEPHERDR_CHECK_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
 cover=${SHEPHERDR_CHECK_COVER:-"${SHEPHERDR_CHECK_LOGS:-/tmp}/coverage"}
 cd "$root" || exit 1
 record=()
 [ "${SHEPHERDR_CHECK_RECORD:-}" = 1 ] && record=(--record)
-bun "$root/scripts/coverage.ts" "$cover" ${record[@]+"${record[@]}"}
+absent=()
+[ "${SHEPHERDR_CHECK_SCREEN_ABSENT:-}" = 1 ] && absent=(--screen-absent)
+bun "$root/scripts/coverage.ts" "$cover" ${record[@]+"${record[@]}"} ${absent[@]+"${absent[@]}"}
 code=$?
 grep -E '^Coverage: ' "${SHEPHERDR_CHECK_LOG:-/dev/null}" | tail -1 | sed -E 's/ \([0-9]+ of [0-9]+\)//g; s/^Coverage: //; s/;.*//' >"${SHEPHERDR_CHECK_NOTE:-/dev/null}"
 exit "$code"

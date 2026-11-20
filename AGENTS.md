@@ -130,6 +130,10 @@ rule, it is repeated in every `CLAUDE.md` and `AGENTS.md` of the operator's proj
   nothing is compared. A quick run prints no coverage line, and a new file its tests never reach passes it: write the
   test, or run the full check, rather than reporting a coverage line you did not see. Say in `--facts` the percentages a
   full run you made printed, or that your check was the quick one and the ratchet is held where the full check runs.
+  A machine where Chromium cannot start is not a fall: the step is told the screen was not measured (`--screen-absent`,
+  which the runner passes when its chromium line is not ok), names the screen's files and the other files a browser test
+  runs as not compared, and holds the rest of the server's lines against the baseline. A Chromium that dies during the
+  run still fails it, naming the browser and how many browser test files recorded nothing.
 - GitHub Actions is off: `.github/workflows/check.yml` keeps only `workflow_dispatch`, so nothing waits for GitHub and
   `shepherdr checks` finds nothing to wait for. A branch can still be checked there by hand (`gh workflow run check.yml
   --ref <branch>`, then `gh run watch`), only for a rare case such as a review asking for it.
