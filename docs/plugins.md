@@ -105,5 +105,10 @@ slots below are public: plugins outside the repo rely on them, so they change on
   - items with an `order` are sorted by it; base plugins space theirs out (10, 20, …), so yours can fit between.
 - Hooks and actions from `@client/kernel.ts`: `useSnap()` (the server's data: places, tasks, artifacts, settings),
   `useUI()` and `setUI()` (what is on screen), `useStore()`, `getState()`, `act()` (send an action to the server),
-  `has(name)` (is a plugin on), and helpers such as `openTask`, `goPlace`, `placeOf`, `taskOf`.
+  `subscribeStore()` (the store's own notifications, for a test that counts redraws), `has(name)` (is a plugin on),
+  and helpers such as `openTask`, `goPlace`, `placeOf`, `taskOf`.
+- `Snapshot.rev` is added to the snapshot's public shape: the server's revision. A change advances it; the 30-second
+  heartbeat keeps it when the snapshot's bytes are the same, so a heartbeat keeps the last snapshot's object identity
+  and nothing that reads `useSnap()` redraws. Keep every other snapshot field as it is; a source that sends no revision
+  is treated as always new. It is not a task's or an artifact's version.
 - The server part: `definePlugin({ name, about })`; it runs when the server starts.

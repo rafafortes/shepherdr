@@ -1394,6 +1394,10 @@ export interface PullRequest {
 export type WorktreeAsk = { task: string } & ({ what: 'files' } | { what: 'file'; path: string } | { what: 'diff' } | { what: 'patch'; path: string } | { what: 'pr' })
 
 export interface Snapshot {
+  /** the server's revision: a change advances it, while the 30-second heartbeat keeps it when the bytes are the same,
+   *  so a screen can keep the object it already drew and skip the redraw (PERFC-01). A source without one is an older
+   *  server, whose snapshots are always taken as new. */
+  rev?: number
   name: string
   host: string
   /** every space, in the sidebar's order: each machine's home space first */

@@ -549,7 +549,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.stall.run('watchAdvice', () => void this.watchAdvice().catch(() => undefined)), 30_000))
     // heartbeats: looked for twice a minute, so a busy coordinator gets its own soon after its turn ends
     this.timers.push(setInterval(() => this.stall.run('heartbeat', () => this.heartbeat()), 30_000))
-    this.timers.push(setInterval(() => this.emit('snapshot'), 30_000))
+    // the heartbeat is a refresh, not a change: app.ts keeps the last revision when the bytes are the same
+    this.timers.push(setInterval(() => this.emit('heartbeat'), 30_000))
     if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.stall.run('healthTick', () => this.healthTick()), 5000))
     if (process.env.NODE_ENV !== 'test') this.timers.push(setInterval(() => this.stall.run('revive', () => void this.revive().catch(() => undefined)), 15_000))
     // a start that never becomes a turn: looked at twice a second past its first look, so a card or an error comes
