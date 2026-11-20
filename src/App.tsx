@@ -75,6 +75,30 @@ import {
   ic,
 } from './ui.tsx'
 
+/** The first Tab stop on a fresh page: jump over Places and the phone bar into the chat. Hidden until the keyboard
+ *  brings focus here, so a pointer never meets a stray button. A pushed screen makes the one under it inert, so only
+ *  the chat that is showing (the focused pane's, if panes are split) can take focus; where a screen has no composer,
+ *  its main landmark takes it instead. */
+function SkipToChat() {
+  const jump = () => {
+    const showing = (el: Element) => !el.closest('[inert]')
+    const chat =
+      [...document.querySelectorAll<HTMLElement>('[data-pane][data-focused] textarea[name="message"]')].find(showing) ??
+      [...document.querySelectorAll<HTMLElement>('textarea[name="message"]')].find(showing) ??
+      [...document.querySelectorAll<HTMLElement>('main')].find(showing)
+    chat?.focus({ preventScroll: true })
+  }
+  return (
+    <button
+      type="button"
+      onClick={jump}
+      className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:top-2 focus-visible:left-2 focus-visible:z-50 focus-visible:rounded-full focus-visible:bg-bg focus-visible:px-3 focus-visible:py-2 focus-visible:text-fg focus-visible:shadow-dialog focus-visible:outline-2 focus-visible:outline-focus"
+    >
+      Skip to chat
+    </button>
+  )
+}
+
 export default function App() {
   // Test hook for the snapshot-render browser test: it sets this global; the app never does.
   const renderCount = (globalThis as { shepRenderCount?: Record<string, number> }).shepRenderCount
@@ -96,6 +120,8 @@ export default function App() {
         device !== 'phone' && !keyboard && 'pb-[env(safe-area-inset-bottom)]',
       )}
     >
+      <h1 className="sr-only">Shepherdr</h1>
+      <SkipToChat />
       {registry.topBars.map((Bar, i) => (
         <Bar key={i} />
       ))}
@@ -808,7 +834,9 @@ function WideLayout({ snap }: { snap: Snapshot }) {
     return (
       <Frame places>
         <Sidebar />
-        <Settings />
+        <main tabIndex={-1} className="flex min-h-0 min-w-0 flex-col">
+          <Settings />
+        </main>
         {!docked ? <Drawer /> : null}
       </Frame>
     )
@@ -838,7 +866,13 @@ function WideLayout({ snap }: { snap: Snapshot }) {
           <Drawer />
         </Frame>
       }
-      top={settings && Settings ? <Settings /> : null}
+      top={
+        settings && Settings ? (
+          <main tabIndex={-1} className="flex min-h-0 flex-1 flex-col">
+            <Settings />
+          </main>
+        ) : null
+      }
       topKey={settings ? 'settings' : null}
       onBack={() => setUI({ settings: null })}
     />
@@ -854,8 +888,17 @@ function PhoneLayout({ snap }: { snap: Snapshot }) {
   )
   const settings = useUI((u) => !!u.settings)
   const Settings = registry.views.settings
-  // a task's chat, or settings, push over the place
-  const top = settings && Settings ? <Settings /> : task ? <TaskPage task={task} /> : null
+  // a task's chat, or settings, push over the place; the pushed screen carries the main landmark while it shows
+  const top =
+    settings && Settings ? (
+      <main tabIndex={-1} className="flex min-h-0 flex-1 flex-col">
+        <Settings />
+      </main>
+    ) : task ? (
+      <main tabIndex={-1} className="flex min-h-0 flex-1 flex-col">
+        <TaskPage task={task} />
+      </main>
+    ) : null
   return <Stack base={<PhoneHome snap={snap} />} top={top} topKey={settings ? 'settings' : (task?.id ?? null)} onBack={() => setUI(settings ? { settings: null } : { task: null })} />
 }
 
@@ -900,13 +943,19 @@ function PhoneHome({ snap }: { snap: Snapshot }) {
           )
         }
       />
-      {tab === 'chat' ? (
-        <div className="flex min-h-0 flex-1 flex-col">{Chat ? <Chat chatKey={place.chat} placeholder={`Message ${place.name}…`} unreachable={unreachable(place, snap)} /> : null}</div>
-      ) : (
-        <div className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain">
-          {tab === 'needs' && Needs ? <Needs placeId={place.id} /> : tab === 'artifacts' && Artifacts ? <Artifacts placeId={place.id} /> : Tasks ? <Tasks placeId={place.id} /> : null}
-        </div>
-      )}
+      <main tabIndex={-1} className={tab === 'chat' ? 'flex min-h-0 flex-1 flex-col' : 'min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain'}>
+        {tab === 'chat' ? (
+          Chat ? (
+            <Chat chatKey={place.chat} placeholder={`Message ${place.name}…`} unreachable={unreachable(place, snap)} />
+          ) : null
+        ) : tab === 'needs' && Needs ? (
+          <Needs placeId={place.id} />
+        ) : tab === 'artifacts' && Artifacts ? (
+          <Artifacts placeId={place.id} />
+        ) : Tasks ? (
+          <Tasks placeId={place.id} />
+        ) : null}
+      </main>
       {/* the keyboard is up: the message box sits right on it, so more of the chat shows */}
       {keyboard ? null : <PhoneBar />}
       <Drawer />
