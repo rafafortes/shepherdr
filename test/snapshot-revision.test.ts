@@ -71,6 +71,19 @@ describe('the revision on the wire', () => {
   })
 })
 
+describe('a peer machine', () => {
+  test('a refresh it sends reaches the source as a heartbeat, not a change', async () => {
+    const { LiveSource } = await import('../server/live/source.ts')
+    const live = new LiveSource()
+    const got: string[] = []
+    live.on('snapshot', () => got.push('snapshot'))
+    live.on('heartbeat', () => got.push('heartbeat'))
+    live.peers?.emit('heartbeat')
+    expect(got).toEqual(['heartbeat'])
+    live.stop()
+  })
+})
+
 describe('the stamp itself', () => {
   test('every change advances, even one with the same bytes; a refresh keeps them', () => {
     const revisions = new SnapshotRevisions()

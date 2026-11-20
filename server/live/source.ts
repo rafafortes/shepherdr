@@ -391,6 +391,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       this.engine.recheck()
       this.emit('snapshot')
     })
+    this.peers?.on('heartbeat', () => {
+      this.engine.recheck()
+      this.emit('heartbeat')
+    })
     this.engine.peerTask = this.peers ? (machine, id) => this.peerTask(machine, id) : undefined
     // held tasks start once this machine has room: by its load (once measured) and herdr answering
     this.engine.machine = () => (has('health') && this.health.last ? { busy: this.health.busy(), herdr: this.agents.reachable } : undefined)

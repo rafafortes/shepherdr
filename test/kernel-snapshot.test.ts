@@ -107,13 +107,16 @@ describe('the store on a snapshot push', () => {
     expect(notified).toBe(0)
   })
 
-  test('the next heartbeat, thirty seconds later by a stub clock, still redraws nothing', () => {
+  test('the next heartbeat, thirty seconds later by a stub clock, keeps every list even if chat data moved', () => {
     const first = onScreen()
     const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 30_000)
     try {
       notified = 0
-      push(snapshot(1))
+      // a chat's unread mark is the only field that moved; the server did not advance the revision
+      const next = push({ ...snapshot(1), last: { [place.chat]: Date.now() } })
+      expect(next.rev).toBe(1)
       expect(kernel.getState().snap).toBe(first)
+      expect(onScreen().artifacts).toBe(first.artifacts)
       expect(notified).toBe(0)
     } finally {
       clock.mockRestore()
