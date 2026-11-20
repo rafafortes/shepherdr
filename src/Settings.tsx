@@ -8,6 +8,7 @@
 import clsx from 'clsx'
 import { Component, Fragment, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { machineName, type Place, type SettingRow, type SettingSection } from '@shared/types.ts'
+import { useClock } from './clock.ts'
 import { act, registry, setUI, useSnap, useUI, type UI } from './kernel.ts'
 import { usePluginErrors } from './guard.tsx'
 import { PlacesToggle } from './Frame.tsx'
@@ -391,9 +392,9 @@ function PageBody({
   )
 }
 
-/** how long ago, in a word or two */
-function ago(at: number) {
-  const m = Math.max(0, Math.round((Date.now() - at) / 60_000))
+/** how long ago, in a word or two, at the screen clock's `now` */
+function ago(at: number, now: number) {
+  const m = Math.max(0, Math.round((now - at) / 60_000))
   if (m < 1) return 'just now'
   if (m < 60) return `${m} min ago`
   const h = Math.round(m / 60)
@@ -405,6 +406,7 @@ function ago(at: number) {
 /** a level's secrets, by name: each replaced or removed, and new ones added, in masked boxes. Values never come here:
  *  they only go, once, to be kept on the main machine */
 function SecretsList({ level, secrets, phone }: { level: string; secrets: { name: string; at: number }[]; phone: boolean }) {
+  const now = useClock()
   // the name being replaced, or '' for a new one; none: no box open
   const [open, setOpen] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -461,7 +463,7 @@ function SecretsList({ level, secrets, phone }: { level: string; secrets: { name
           <div key={x.name} className={clsx(rowLook(phone), open === x.name && 'flex-col items-stretch! gap-2.5 pb-3!')}>
             <dt className="flex min-w-0 flex-1 flex-col">
               <span className="truncate font-mono text-[0.8125rem] phone:text-[0.9375rem]">{x.name}</span>
-              <Small>Saved {ago(x.at)}</Small>
+              <Small>Saved {ago(x.at, now)}</Small>
             </dt>
             <dd className={clsx('flex shrink-0 items-center gap-1.5', open === x.name && 'w-full')}>
               {open === x.name ? (

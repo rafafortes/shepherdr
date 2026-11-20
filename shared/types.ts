@@ -185,6 +185,11 @@ export interface Report {
   progress: number
   /** minutes left, counted down while it works; 0 for under a minute; none when it gave none */
   eta?: number
+  /** when the agent reported this line (ms), and its own estimate in minutes at that time: the screen counts the
+   *  age and minutes left from these on its shared clock, so they keep moving through a snapshot that keeps its
+   *  revision. Older snapshots leave them out, and keep the numbers above. */
+  at?: number
+  left?: number
   /** the agent waits on you or is blocked: the report stays as it was */
   paused?: boolean
   /** whole minutes since the agent reported this line, once it is past the cadence or its own time left while working:

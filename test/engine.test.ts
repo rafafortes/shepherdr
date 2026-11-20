@@ -624,10 +624,10 @@ describe("a task's own status line, % done and time left", () => {
   })
   test('the minutes left count down while it works, stop while it waits on you, and nothing shows once its job is over', () => {
     const r = { msg: 'Fixing tests', progress: 40, left: 12, at: 0 }
-    expect(reportOf(r, 'work', 0)).toEqual({ msg: 'Fixing tests', progress: 40, eta: 12, paused: undefined })
+    expect(reportOf(r, 'work', 0)).toEqual({ msg: 'Fixing tests', progress: 40, eta: 12, at: 0, left: 12, paused: undefined })
     expect(reportOf(r, 'work', 5 * 60_000)!.eta).toBe(7)
     expect(reportOf(r, 'work', 30 * 60_000)!.eta).toBe(0)
-    expect(reportOf({ ...r, pausedAt: 5 * 60_000 }, 'need', 60 * 60_000)).toEqual({ msg: 'Fixing tests', progress: 40, eta: 7, paused: true })
+    expect(reportOf({ ...r, pausedAt: 5 * 60_000 }, 'need', 60 * 60_000)).toEqual({ msg: 'Fixing tests', progress: 40, eta: 7, at: 0, left: 12, paused: true })
     expect(reportOf({ ...r, left: undefined }, 'work', 0)!.eta).toBeUndefined()
     for (const s of ['ready', 'done', 'todo', 'queued'] as const) expect(reportOf(r, s, 0)).toBeUndefined()
     expect(reportOf(undefined, 'work')).toBeUndefined()
