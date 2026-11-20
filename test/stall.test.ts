@@ -1,7 +1,10 @@
 // Shepherdr's own event loop, watched (server/live/stall.ts): a tick that comes late says the loop stalled, and the slow
 // passes timed since the last tick say what held it.
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import { StallWatch } from '../server/live/stall.ts'
+import { Agents } from '../server/live/agents.ts'
+import { herdr } from '../server/live/herdr.ts'
+import { writeJson } from '../server/store.ts'
 
 /** a watch on a clock held by hand */
 function watch(o: ConstructorParameters<typeof StallWatch>[0] = {}) {
@@ -112,6 +115,45 @@ describe('what doctor says', () => {
     advance(2000)
     w.tick()
     expect(w.report()[0]).toContain('1 stall of')
+  })
+
+  test('the newly timed periodic passes are named when they are the slowest, in the same words', () => {
+    const { w, advance } = watch()
+    advance(250)
+    w.tick()
+    w.run('drainRequestedNews', () => advance(300))
+    w.run('adoptEverywhere', () => advance(200))
+    w.run('closeIdle', () => advance(150))
+    advance(1000)
+    const stalled = w.tick()
+    expect(stalled?.ran.map((r) => r.label)).toEqual(['drainRequestedNews', 'adoptEverywhere', 'closeIdle'])
+    expect(w.report((t) => `t${t - 1_000_000}`).join('\n')).toContain('slowest passes: drainRequestedNews 300 ms, adoptEverywhere 200 ms, closeIdle 150 ms')
+  })
+})
+
+describe('the passes source does not wrap itself', () => {
+  test('a slow agents.refresh, timed by the injected wrap, names itself in the report', async () => {
+    writeJson('agents.json', {})
+    writeJson('outbox.json', [])
+    const { w, advance } = watch()
+    const agents = new Agents()
+    const list = spyOn(herdr, 'agents').mockResolvedValue([])
+    try {
+      agents.timed = (label, f) => w.run(label, f)
+      // one synchronous step of a refresh holds the clock, standing for a slow pass in the timed stretch
+      const slow = spyOn(agents, 'checkStranded').mockImplementation(() => {
+        advance(500)
+      })
+      await agents.refresh()
+      slow.mockRestore()
+      advance(1100)
+      const stalled = w.tick()
+      expect(stalled?.ran).toEqual([{ label: 'agents.refresh', ms: 500 }])
+      expect(w.report((t) => `t${t - 1_000_000}`).join('\n')).toContain('slowest passes: agents.refresh 500 ms')
+    } finally {
+      list.mockRestore()
+      agents.stop()
+    }
   })
 })
 
