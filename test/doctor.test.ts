@@ -234,6 +234,25 @@ describe('the resource lines', () => {
     expect(R.bytes(2 * 1024 * 1024)).toBe('2.0 MB')
   })
 
+  test('a file or folder gone mid-walk costs only that entry, never the doctor output', () => {
+    expect(
+      R.folderSize('/box/inbox', {
+        ...io,
+        entries: () => {
+          throw new Error('gone')
+        },
+      }),
+    ).toBe(0)
+    const oneGone = {
+      ...io,
+      size: (p: string) => {
+        if (p === '/box/inbox/x.txt') throw new Error('gone')
+        return io.size(p)
+      },
+    }
+    expect(R.folderSize('/box/inbox', oneGone)).toBe(2048)
+  })
+
   test('the real folder reader measures a folder on disk', () => {
     const dir = join(home, 'sizes')
     mkdirSync(dir, { recursive: true })

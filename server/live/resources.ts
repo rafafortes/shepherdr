@@ -66,14 +66,25 @@ export function orphanChromes(chromes: ChromeRow[], live: ReadonlySet<string>): 
   return chromes.filter((c) => !live.has(c.task))
 }
 
-/** the bytes under a folder, following no links; undefined when it is not there */
+/** the bytes under a folder, following no links; undefined when it is not there. A file gone or a folder made
+ *  unreadable between the listing and the read costs that entry only: doctor still prints its other lines. */
 export function folderSize(dir: string, io: SizeIO = systemSizeIO): number | undefined {
   if (!io.exists(dir)) return undefined
   let total = 0
-  for (const e of io.entries(dir)) {
+  let entries: ReturnType<SizeIO['entries']>
+  try {
+    entries = io.entries(dir)
+  } catch {
+    return 0
+  }
+  for (const e of entries) {
     if (e.link) continue
     const p = join(dir, e.name)
-    total += e.dir ? (folderSize(p, io) ?? 0) : io.size(p)
+    try {
+      total += e.dir ? (folderSize(p, io) ?? 0) : io.size(p)
+    } catch {
+      // coverage-exempt: a deletion racing the walk cannot be forced on a test's disk
+    }
   }
   return total
 }
@@ -101,7 +112,7 @@ const pairs = (m: Record<string, number>) =>
 const VERBS: Record<string, string> = {
   inbox: 'Settings → Tasks → Remove chat files after (tasks.inboxKeep)',
   artifacts: 'shepherdr artifact rm <id>',
-  browser: 'Settings → Browser → Close idle browser after (browser.idleClose)',
+  browser: "the hourly sweep removes a done or gone task's browser profile; Settings → Browser → Close idle browser after (browser.idleClose) closes idle ones",
   'check logs': 'pruned after a successful check (SHEPHERDR_CHECK_KEEP)',
 }
 
@@ -109,9 +120,15 @@ const VERBS: Record<string, string> = {
 export function lines(f: Resources): string[] {
   const out: string[] = []
   const idle = pairs(f.idle)
-  if (idle) out.push(`Idle agents: ${idle}. To free the memory, set Settings → Idle agents → Park idle agents after (agents.idleClose); a message to a parked chat starts it again.`)
+  if (idle)
+    out.push(
+      `Idle agents: ${idle}. Park them with Settings → Idle agents → Park idle agents after (agents.idleClose); coordinators need Park idle coordinators after (agents.idleCloseCoordinators), off by default. A message to a parked chat starts it again.`,
+    )
   const done = pairs(f.done)
-  if (done) out.push(`Done agents still running: ${done}. Settings → Idle agents → Park idle agents after (agents.idleClose) closes their panes; a message to a chat starts its agent again.`)
+  if (done)
+    out.push(
+      `Done agents still running: ${done}. Settings → Idle agents → Park idle agents after (agents.idleClose) closes their panes (coordinators: agents.idleCloseCoordinators); a message to a chat starts its agent again.`,
+    )
   if (f.kept.length) {
     out.push(
       `Done tasks keeping work (${f.kept.length}): ${f.kept.slice(0, 8).join('; ')}${f.kept.length > 8 ? ` and ${f.kept.length - 8} more` : ''}. Remove it with Settings → Tasks → Remove kept work after (tasks.keptExpiry), or by hand once you are sure.`,
