@@ -129,14 +129,15 @@ export function compare(now: Record<string, FileCount>, base: Baseline, skip: (f
  *  --screen-absent), or only some of its browser tests recorded (one died during the run) */
 export type Screen = 'measured' | 'absent' | 'incomplete'
 
-/** the counts of the files this run compares: the screen's only when it measured it */
-const comparable = (now: Record<string, FileCount>, screen: Screen) => Object.entries(now).filter(([f]) => screen === 'measured' || !isScreen(f))
+/** whether this run compared a file at all: in a run whose browser tests did not record the screen, the screen's own
+ *  files and the files the built screen was made from are the browser's, and only the rest is the server's to judge */
+export const judged = (f: string, screen: Screen, browserOnly: Set<string> = new Set()) => screen === 'measured' || !(isScreen(f) || browserOnly.has(f))
 
 /** why the screen was not compared, in words */
 export const screenWhy = (screen: Screen) => (screen === 'absent' ? 'no browser could start' : 'a browser died during the run')
 
 /** the counts in a line: the server's and the screen's share of lines run, and the files run whole */
-export function summary(now: Record<string, FileCount>, screen: Screen = 'measured'): string {
+export function summary(now: Record<string, FileCount>, screen: Screen = 'measured', browserOnly: Set<string> = new Set()): string {
   const part = (screen: boolean) => {
     const fs = Object.entries(now).filter(([f, c]) => c.measured && isScreen(f) === screen)
     const lines = fs.reduce((a, [, c]) => a + c.lines, 0)
@@ -145,7 +146,9 @@ export function summary(now: Record<string, FileCount>, screen: Screen = 'measur
       ? `${(((lines - missed) / lines) * 100).toFixed(1)}% of the ${screen ? "screen's" : "server's"} lines (${lines - missed} of ${lines})`
       : `none of the ${screen ? 'screen' : 'server'} measured`
   }
-  const all = comparable(now, screen).map(([, c]) => c)
+  const all = Object.entries(now)
+    .filter(([f]) => judged(f, screen, browserOnly))
+    .map(([, c]) => c)
   const whole = all.filter((c) => c.measured && !c.missed.length).length
   const unmeasured = all.filter((c) => !c.measured).length
   return `Coverage: ${part(false)}, ${screen === 'measured' ? part(true) : `the screen not compared this run (${screenWhy(screen)})`}; ${whole} of ${all.length} files run whole${unmeasured ? `, ${unmeasured} no test loads` : ''}`
@@ -156,11 +159,11 @@ export const isScreen = (f: string) => f.startsWith('src/') || /^plugins\/[^/]+\
 
 /** every file's count for a reader, worst first: "file  92.1%  missed: 12-14, 40" (the screen's, in a run that did
  *  not measure it, is named as not compared rather than as loaded by nothing) */
-export function report(now: Record<string, FileCount>, screen: Screen = 'measured'): string {
+export function report(now: Record<string, FileCount>, screen: Screen = 'measured', browserOnly: Set<string> = new Set()): string {
   const rows = Object.entries(now).sort(([a, x], [b, y]) => y.missed.length - x.missed.length || (x.measured === y.measured ? a.localeCompare(b) : x.measured ? 1 : -1))
   return rows
     .map(([f, c]) =>
-      isScreen(f) && screen !== 'measured'
+      !judged(f, screen, browserOnly)
         ? `${f.padEnd(48)}     -   not compared this run (${screenWhy(screen)})`
         : c.measured
           ? `${f.padEnd(48)} ${(c.lines ? ((c.lines - c.missed.length) / c.lines) * 100 : 100).toFixed(1).padStart(5)}%  ${c.missed.length ? `missed ${c.missed.length}: ${spans(c.missed)}` : 'whole'}`
@@ -199,13 +202,12 @@ export function gatherRun(dir: string): Cover | null {
   return cover
 }
 
-/** how many browser test files should record the screen: the ones the screen map knows that this checkout still has
- *  (test/screen-map.ts writes one file per browser test that got a browser). Null: no map yet, so no count to hold */
-export function browserTests(map: string, repo = root): number | null {
+/** the screen map (test/screen-map.ts): how many browser test files should record the screen (the ones this checkout
+ *  still has), and every file the built screen was made from, which only a browser test runs. Null: no map yet */
+export function screenMapInfo(map: string, repo = root): { tests: number; sources: Set<string> } | null {
   const m = readMap(map)
   if (!m) return null
-  const tests = Object.keys(m.tests).filter((t) => existsSync(join(repo, t)))
-  return tests.length || null
+  return { tests: Object.keys(m.tests).filter((t) => existsSync(join(repo, t))).length, sources: new Set(m.sources) }
 }
 
 /** the browser test files this run's screen dir holds, one per test that got a browser */
@@ -240,17 +242,30 @@ export function main(args: string[], o: { repo?: string; baseline?: string; map?
   const absent = rest.includes('--screen-absent')
   const tracked = (git(repo, 'ls-files') ?? '').split('\n').filter(counted)
   const now = count(cover, tracked, (f) => readFileSync(join(repo, f), 'utf8'))
-  const expected = browserTests(o.map ?? mapFile(), repo)
-  const screen = screenState(dir, expected, absent)
-  // a run whose browser tests did not record the screen says nothing of the screen's code: those files are not compared,
-  // so their missing lines are not read as the code's fall (the server's ratchet still holds)
-  const skip = screen === 'measured' ? undefined : (f: string) => isScreen(f)
-  writeFileSync(join(dir, 'report.txt'), `${summary(now, screen)}\n\n${report(now, screen)}\n`)
-  log(summary(now, screen))
+  const map = screenMapInfo(o.map ?? mapFile(), repo)
+  const screen = screenState(dir, map?.tests || null, absent)
+  // a run whose browser tests did not record the screen says nothing of the files a browser test runs: those are not
+  // compared, so their missing lines are not read as the code's fall (the rest of the server's ratchet still holds)
+  const browserOnly = map?.sources ?? new Set<string>()
+  const skip = screen === 'measured' ? undefined : (f: string) => !judged(f, screen, browserOnly)
+  writeFileSync(join(dir, 'report.txt'), `${summary(now, screen, browserOnly)}\n\n${report(now, screen, browserOnly)}\n`)
+  log(summary(now, screen, browserOnly))
   log(`Each file's lines no test runs: ${join(dir, 'report.txt')}`)
   const file = o.baseline ?? baselineFile(repo)
   const base = readBaseline(file)
   let code = 0
+  if (screen === 'absent')
+    log(
+      `The screen was not compared this run: no browser could start, so no browser test recorded it, and the files a browser test runs are named as such below. The server's lines are held as always.`,
+    )
+  if (screen === 'incomplete') {
+    // the run lost its browser partway, not the code its tests: say so instead of blaming the screen's lines
+    const missing = (map?.tests ?? 0) - screenRecorded(dir)
+    log(
+      `The screen's coverage was not compared: ${missing} browser test file${missing === 1 ? '' : 's'} recorded nothing, so a browser died during the run. Fix the browser (the check's browsers.log names the command) and run the check again.`,
+    )
+    code = 1
+  }
   if (!base) log('No coverage baseline yet: the check on the default branch records one, and from then no file may lose coverage.')
   else {
     const fell = compare(now, base, skip)
@@ -261,15 +276,6 @@ export function main(args: string[], o: { repo?: string; baseline?: string; map?
       for (const f of fell) log(`  ${f}`)
       code = 1
     } else log(`Coverage held: no file has more lines no test runs than at ${base.commit.slice(0, 7)}.`)
-  }
-  if (screen === 'absent') log(`\nThe screen was not compared this run: no browser could start, so no browser test recorded it. The server's coverage still holds above.`)
-  if (screen === 'incomplete') {
-    // the run lost its browser partway, not the code its tests: say so instead of blaming the screen's lines
-    const missing = (expected ?? 0) - screenRecorded(dir)
-    log(
-      `\nThe screen's coverage was not compared: ${missing} browser test file${missing === 1 ? '' : 's'} recorded nothing, so a browser died during the run. Fix the browser (the check's browsers.log names the command) and run the check again.`,
-    )
-    code = 1
   }
   if (rest.includes('--record')) {
     const commit = git(repo, 'rev-parse', 'HEAD')?.trim() ?? ''

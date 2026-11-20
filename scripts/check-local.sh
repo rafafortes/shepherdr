@@ -374,7 +374,8 @@ show_failure() { # the reasons a step failed
       [ -n "$left" ] && { echo "Left behind:"; echo "$left" | sed 's/^/  /'; shown=$left; }
       ;;
     coverage)
-      shown=$(sed -n '/^Coverage fell since the baseline/,$p' "$log" | head -14)
+      # what fell, or the screen a browser left unrecorded (a browser that died during the run), whichever the step said
+      shown=$(awk '/^The screen|^Coverage fell since the baseline/ {on = 1} on' "$log" | head -14)
       [ -n "$shown" ] && echo "$shown"
       ;;
     dist-budget)
