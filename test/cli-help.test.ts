@@ -14,9 +14,9 @@ const { LiveSource } = await import('../server/live/source.ts')
 const { HELP, TOPIC, VERBS, VERB_TOPIC, helpTopic, helpVerb } = await import('../server/live/args.ts')
 const { helpVerbs } = await import('../scripts/checks/docs.ts')
 
-/** SHA-256 of the page at HEAD before this change: the bare-help bytes must not drift when the page is split. The docs
- *  check ties HELP to the dispatch verbs; this pins the text itself. Update it when help text is meant to change. */
-const ORIGINAL_HELP_SHA = '5f48cfda5c359612fea2a3a3528eb2b56af1cd134ef3fcb14bc359efb4f0c2a7'
+/** SHA-256 of the bare-help page: the split must not drift its bytes by accident. The docs check ties HELP to the
+ *  dispatch verbs; this pins the text itself. Update it when help text is meant to change (as with --json on the lists). */
+const ORIGINAL_HELP_SHA = '5827320d1902dee6e885b8128f50ea8792a2660352b21f654ffa9fb1684b6bb4'
 
 const src = new LiveSource()
 afterAll(() => src.stop())
