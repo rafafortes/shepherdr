@@ -33,7 +33,7 @@ import { Emitter } from '../../source.ts'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
-import { home, readJson, writeJson } from '../../store.ts'
+import { home, readJson, readOnly, writeJson } from '../../store.ts'
 import { ROOT } from '../../root.ts'
 import { has } from '../../plugins.ts'
 import { killGroup, processes } from '../../procs.ts'
@@ -1059,6 +1059,9 @@ export class Engine extends Emitter<Events> {
    *  still read their logs. A coordinator's chat is kept even when its space is gone: removing a space keeps its chat
    *  and brings it back if the space is added again (source.ts removeSpace), so it can still be opened. */
   private pruneAgentRecords() {
+    // a tasks.json that could not be read is frozen (store.ts) and this.data holds its empty fallback, not the truth:
+    // pruning against it would drop every task's chat records. Leave them until someone puts the file back.
+    if (readOnly(join(this.dir, 'tasks.json'))) return
     const tasks = new Set(this.tasks.map((t) => t.id))
     this.agents.prune((key) => !key.includes('/') || tasks.has(key.split('/')[0]))
   }
