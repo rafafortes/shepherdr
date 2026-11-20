@@ -2,7 +2,7 @@
 // removed, or a proof server's SHEPHERDR_HOME under /tmp — and the ready kill line beside each. Nothing here reads
 // the operator's processes: the process table, the worktree root and the ender are all stand-ins.
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
-import { writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -16,6 +16,7 @@ process.env.SHEPHERDR_AGENT_BROWSER = join(standIns, 'agent-browser')
 
 const O = await import('../server/live/orphans.ts')
 const { LiveSource } = await import('../server/live/source.ts')
+const { systemInstallIO } = await import('../scripts/supervisor.ts')
 type Row = import('../server/live/orphans.ts').Row
 type Source = import('../server/live/orphans.ts').Source
 type ScanOpts = import('../server/live/orphans.ts').ScanOpts
@@ -166,6 +167,35 @@ describe('the doctor lines', () => {
       src.orphansFound = []
     }
     expect((await src.cli(['doctor'], {})).out).not.toContain('Orphaned processes (RES-03)')
+  })
+
+  test('the RES-09 line names stale installs from the injected reader and deletes nothing', async () => {
+    const family = '/x/github-installations/herdr-projects-abc'
+    const old = 1_000_000_000_000
+    const day = 86_400_000
+    const io = {
+      now: () => old + 40 * day,
+      dirs: () => [
+        { name: '100-0', mtime: old + 39 * day }, // running
+        { name: '90-0', mtime: old + 38 * day }, // previous
+        { name: '10-0', mtime: old }, // 40 days old
+      ],
+      processes: () => [],
+    }
+    const wasRoot = src.installRoot
+    src.installIO = io
+    src.installRoot = join(family, '100-0', 'checkout')
+    try {
+      const out = (await src.cli(['doctor'], {})).out
+      expect(out).toContain('Stale plugin installs (RES-09): 1 older than 14 days, kept 2 newest.')
+      expect(out).toContain(`${join(family, '10-0')} (40 days old`)
+      expect(out).toContain('Report only:')
+      expect(existsSync(join(family, '10-0'))).toBe(false)
+    } finally {
+      src.installIO = systemInstallIO
+      src.installRoot = wasRoot
+    }
+    expect((await src.cli(['doctor'], {})).out).not.toContain('Stale plugin installs (RES-09)')
   })
 })
 

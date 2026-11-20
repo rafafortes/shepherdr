@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HOME, readJson, writeJson } from '../server/store.ts'
 import type { UpdateStatus } from '../shared/types.ts'
-import { codeOf, Supervisor, systemInstallIO } from './supervisor.ts'
+import { codeOf, Supervisor } from './supervisor.ts'
 import { refDirs, run as runCmd } from './update.ts'
 
 const ROOT = join(import.meta.dir, '..')
@@ -50,7 +50,6 @@ const sup = new Supervisor({
   sleep: (ms) => Bun.sleep(ms),
   log: (m) => console.log(m),
   alert,
-  installs: systemInstallIO,
 })
 
 function run() {
