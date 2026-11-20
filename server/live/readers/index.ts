@@ -83,7 +83,7 @@ export class LogTail {
     this.more = false
     try {
       const st = statSync(this.file)
-      if (st.ino !== this.ino || st.size < this.pos) this.restart(st.ino)
+      if (st.ino !== this.ino || st.size < this.pos) this.restartAt(st.ino)
       size = st.size
     } catch {
       return []
@@ -131,6 +131,16 @@ export class LogTail {
     return out
   }
 
+  /** rewind to the start of the file: the next read() reads every line again. An evicted chat's events rebuild from
+   *  its logs this way; the file's identity stays, so this is not a log replaced under the reader */
+  restart() {
+    this.offset = 0
+    this.pos = 0
+    this.carry = []
+    this.more = false
+    this.reader.reset?.(this.file)
+  }
+
   /** where the next read goes on from: the file's inode and the byte offset of its first line not read yet (what the
    *  usage ledger keeps, so a restart reads on from there and never counts a call twice) */
   get position(): { ino: number; offset: number } {
@@ -162,7 +172,7 @@ export class LogTail {
     }
   }
 
-  private restart(ino: number) {
+  private restartAt(ino: number) {
     // the first read is the log's start, not a reading again
     if (this.ino !== -1) this.reread++
     this.offset = 0
