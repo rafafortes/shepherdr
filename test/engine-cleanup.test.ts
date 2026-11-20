@@ -140,8 +140,8 @@ describe("a Done task's stuck agent", () => {
 
     // a fresh engine over the same home: the in-memory wrote map is gone, only the task's spokenAt survives
     const w2 = world()
-    const t2 = w2.engine.task(t.id)!
-    expect(t2.spokenAt).toBeTruthy()
+    const t2 = w2.engine.task(t.id)
+    expect(t2?.spokenAt).toBeTruthy()
     w2.status[key] = 'working'
     w2.records[key] = { kind: 'claude', started: Date.now() - STALE, sessionId: `${key}-session`, logs: [] }
     w2.engine.agentStatus(key)
