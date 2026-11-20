@@ -47,15 +47,50 @@ const wait = merge
         : envWait('SHEPHERDR_CLI_WAIT', 30_000)
 const verb = args[0] === 'task' ? `task ${args[1] ?? ''}`.trim() : (args[0] ?? '<verb>')
 
-let j: { out: string; code: number; secrets?: Record<string, string> }
+type Answer = { out: string; code: number; secrets?: Record<string, string> }
+
+/** the answer, read as it comes: the live server streams {step} lines as application/x-ndjson before its one final
+ *  {out, code}; an older helper or the demo answers with one application/json object, read whole as before. Interim
+ *  words go to stderr so stdout stays the answer (`| jq`, shell assignment). The body is read through the fetch
+ *  signal, so a stream that goes silent still ends by SHE-60's bound. */
+async function answer(r: Response): Promise<Answer> {
+  if (!(r.headers.get('content-type') ?? '').includes('application/x-ndjson')) return (await r.json()) as Answer
+  // biome-ignore lint/style/noNonNullAssertion: an ndjson answer always has a body; a response without one is a broken server
+  const reader = r.body!.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  let final: Answer | undefined
+  const line = (text: string) => {
+    if (!text.trim()) return
+    const rec = JSON.parse(text) as Answer & { step?: string }
+    if (typeof rec.step === 'string') process.stderr.write(`${rec.step}\n`)
+    else final = rec
+  }
+  for (;;) {
+    const next = await reader.read()
+    if (next.done) break
+    buf += dec.decode(next.value, { stream: true })
+    for (;;) {
+      const at = buf.indexOf('\n')
+      if (at < 0) break
+      line(buf.slice(0, at))
+      buf = buf.slice(at + 1)
+    }
+  }
+  line(buf + dec.decode())
+  if (!final) throw new Error('Shepherdr answered with no final record')
+  return final
+}
+
+let j: Answer
 try {
   const r = await fetch(`${url}/api/cli`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(capability ? { authorization: `Bearer ${capability}` } : {}) },
+    headers: { 'content-type': 'application/json', accept: 'application/x-ndjson', ...(capability ? { authorization: `Bearer ${capability}` } : {}) },
     body: JSON.stringify({ args, chat: process.env.SHEPHERDR_CHAT, pane: process.env.HERDR_PANE_ID, cwd: process.cwd(), stdin }),
     signal: AbortSignal.timeout(wait),
   })
-  j = (await r.json()) as typeof j
+  j = await answer(r)
 } catch (e) {
   if ((e as Error).name === 'TimeoutError') {
     process.stderr.write(merge ? noAnswer(wait, args[0] === 'merge' ? args[1] : args[2]) : noAnswerOther(wait, verb))

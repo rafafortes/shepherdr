@@ -200,6 +200,24 @@ describe('on GitHub: a pull request per task', () => {
     expect((await w.engine.merge(t.id, { self: true })).ok).toBe(true)
   })
 
+  test('checks sends one interim line per poll while it waits, before its answer (UXD-08)', async () => {
+    const w = world()
+    const g = onGitHub({ checks: [{ name: 'ci', bucket: 'pending' }] })
+    const { t } = await started(w, g.dir, 'ghsteps')
+    if (!t.worktree) throw new Error('ghsteps got no worktree')
+    writeFileSync(join(t.worktree, 'x.txt'), 'x\n')
+    sh('git add -A && git commit -qm x', t.worktree)
+    await w.engine.openPr(t.id)
+    const steps: string[] = []
+    // 11 s of waiting crosses CHECKS_EVERY (10 s); the exact count depends on a busy machine, but every poll says
+    // a line and there is at least one before the answer (the first is immediate, the second after 10 s)
+    const c = await w.engine.checks(t.id, 11_000, (s) => steps.push(s))
+    expect(c.ok).toBe(false)
+    expect(c.text).toContain('still run')
+    expect(steps.length).toBeGreaterThanOrEqual(1)
+    expect(steps.every((s) => s === 'checks: 0 passed, still running')).toBe(true)
+  }, 40_000)
+
   test("shepherdr checks says it is waiting, not merged, when a workflow's checks have not been reported yet", async () => {
     const w = world()
     const g = onGitHub()

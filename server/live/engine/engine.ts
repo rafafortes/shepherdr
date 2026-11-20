@@ -4274,13 +4274,17 @@ export class Engine extends Emitter<Events> {
    * (never a none-decided merge); a paths/branches-filtered one is not decided on the first read, but after the same
    * 90 s is taken as not applying to this change. GitHub not answering three times running is said, not waited on.
    */
-  private async checksOf(t: TaskRec, g: G.GitHub, n: number, waitMs: number): Promise<G.PrChecks> {
+  private async checksOf(t: TaskRec, g: G.GitHub, n: number, waitMs: number, onStep?: (words: string) => void): Promise<G.PrChecks> {
     const t0 = Date.now()
     const head = (await G.git(t.worktree!, 'rev-parse', 'HEAD')).out
     const expect = await G.prWorkflowExpect(t.worktree!)
     let errors = 0
     for (;;) {
       const c = await G.prChecks(g, t.worktree!, n)
+      // one interim line per poll: the command's step channel, never its answer (UXD-08)
+      onStep?.(
+        `checks: ${c.state === 'unknown' ? 'waiting for GitHub to report checks' : c.state === 'error' ? 'could not read GitHub, trying again' : c.state === 'none' ? 'no checks reported yet' : `${c.passed} passed${c.failed.length ? `, ${c.failed.length} failed` : ''}${c.state === 'pending' ? ', still running' : ''}`}`,
+      )
       errors = c.state === 'error' ? errors + 1 : 0
       const waited = t.pushed?.sha !== head || Date.now() - t.pushed.at >= CHECKS_SHOW
       const verdict = c.state === 'none' && expect !== 'none' ? G.noneIsUnknown(expect, waited) : c
@@ -4325,14 +4329,14 @@ export class Engine extends Emitter<Events> {
   private fixIt = (t: TaskRec) => `Fix it, commit, push with shepherdr pr ${t.id}, wait with shepherdr checks ${t.id}, then run shepherdr merge ${t.id} again.`
 
   /** shepherdr checks: wait for GitHub's checks on the task's pull request, at the commit this machine has */
-  checks(id: string, waitMs = CHECKS_WAIT): Promise<{ ok: boolean; text: string }> {
+  checks(id: string, waitMs = CHECKS_WAIT, onStep?: (words: string) => void): Promise<{ ok: boolean; text: string }> {
     return this.onGitHub(
-      () => this.checksNow(this.req(id), waitMs),
+      () => this.checksNow(this.req(id), waitMs, onStep),
       (text) => ({ ok: false, text }),
     )
   }
 
-  private async checksNow(t: TaskRec, waitMs: number): Promise<{ ok: boolean; text: string }> {
+  private async checksNow(t: TaskRec, waitMs: number, onStep?: (words: string) => void): Promise<{ ok: boolean; text: string }> {
     if (!t.worktree || !t.branch) return { ok: false, text: `${t.id} has no branch yet.` }
     const p = this.proj(t)
     const g = await this.hub(p)
@@ -4343,7 +4347,7 @@ export class Engine extends Emitter<Events> {
     if (pr.headRefOid !== head) return { ok: false, text: `PR #${pr.number} is not at your commit (${head.slice(0, 7)}): push it with shepherdr pr ${t.id} first.` }
     // on its way into main (a merge waits for them): the row says they run, then what comes next
     if (t.landing) this.land(t, 'checks', await this.checksDue(t, p, g, head))
-    const c = await this.checksOf(t, g, pr.number, waitMs)
+    const c = await this.checksOf(t, g, pr.number, waitMs, onStep)
     if (c.state === 'unknown') {
       if (t.landing) this.land(t, 'checks', await this.checksDue(t, p, g, head), { why: 'Checks not started yet' })
       return {

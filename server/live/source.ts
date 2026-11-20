@@ -4945,6 +4945,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   async cli(
     args: string[],
     ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string },
+    /** the command's interim channel: doctor and checks say what they are doing while they work (UXD-08) */
+    onStep?: (words: string) => void,
   ): Promise<{ out: string; code: number; secrets?: Record<string, string> }> {
     try {
       // the values themselves, for the shepherdr command to put in a command's environment or a file: never printed,
@@ -4956,7 +4958,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         if (JSON.stringify(this.agents.secretScope(owner.chat)) !== JSON.stringify(owner.chain)) throw new Error('Secret credential scope is no longer valid.')
         return { out: '', code: 0, secrets: this.secretValues(parseArgs(args).words.slice(2), owner.chain) }
       }
-      const out = await this.command(parseArgs(args), ctx)
+      const out = await this.command(parseArgs(args), ctx, onStep)
       return { out: out.endsWith('\n') ? out : `${out}\n`, code: 0 }
     } catch (e) {
       return { out: `${(e as Error).message}\n`, code: 1 }
@@ -5224,7 +5226,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     return `Space order here: ${list}; spaces with no priority come after.`
   }
 
-  private async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean }): Promise<string> {
+  private async command(p: Parsed, ctx: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean }, onStep?: (words: string) => void): Promise<string> {
     const [a0, a1, ...rest] = p.words
     if (!a0) return HELP
     if (a0 === 'help') return helpTopic(a1)
@@ -5364,7 +5366,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
         const t = this.engine.task(a1 ?? '')
         if (!t) throw new Error(`no task ${a1 ?? ''}; shepherdr ${a0} <id>`)
         if (ctx.chat?.includes('/') && ctx.chat.split('/')[0].toUpperCase() !== t.id.toUpperCase()) throw new Error(`A task's agent works on its own task's pull request only, not ${t.id}'s.`)
-        const r = a0 === 'pr' ? await this.engine.openPr(t.id) : await this.engine.checks(t.id)
+        const r = a0 === 'pr' ? await this.engine.openPr(t.id) : await this.engine.checks(t.id, undefined, onStep)
         if (!r.ok) throw new Error(r.text)
         return r.text
       }
@@ -5647,7 +5649,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           ...orphanLines(this.orphansFound),
           ...this.staleInstallLines(),
           ...resourceLines(await this.resourceReader()),
-          ...((await this.peers?.doctor()) ?? []),
+          ...((await this.peers?.doctor(onStep)) ?? []),
           ...(await this.places.doctor()),
         ]
           .filter(Boolean)

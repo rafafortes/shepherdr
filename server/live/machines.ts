@@ -694,8 +694,9 @@ export class Machines extends Emitter<Events> {
 
   /* ---------- shepherdr doctor ---------- */
 
-  /** check every machine and repair what is missing: the helper put there again, its worker started again */
-  async doctor(): Promise<string[]> {
+  /** check every machine and repair what is missing: the helper put there again, its worker started again. The command's
+   *  optional step channel gets each machine's line as soon as that one is done (UXD-08); the whole answer stays the same. */
+  async doctor(onStep?: (words: string) => void): Promise<string[]> {
     await this.sync()
     const out: string[] = []
     for (const l of this.links.values()) {
@@ -707,9 +708,9 @@ export class Machines extends Emitter<Events> {
       await this.start(l, true)
       const p = l.probe
       const missing = p ? [!p.tools.gh && 'gh (pull requests of GitHub repos)', !p.tools.claude && 'Claude Code', !p.tools.codex && 'Codex'].filter(Boolean) : []
-      out.push(
-        `${l.rec.machine} (${l.saved.target}): ${l.lacks.length ? `needs ${l.lacks.join(', ')}` : l.state.startsWith("Can't") || l.state.startsWith('herdr') ? l.state : 'helper put there again, worker started again'}${missing.length ? `; not there: ${missing.join(', ')}` : ''}${l.chrome ? `; ${l.chrome}` : ''}`,
-      )
+      const line = `${l.rec.machine} (${l.saved.target}): ${l.lacks.length ? `needs ${l.lacks.join(', ')}` : l.state.startsWith("Can't") || l.state.startsWith('herdr') ? l.state : 'helper put there again, worker started again'}${missing.length ? `; not there: ${missing.join(', ')}` : ''}${l.chrome ? `; ${l.chrome}` : ''}`
+      out.push(line)
+      onStep?.(line)
     }
     return out.length ? out : ['No other machines saved in herdr (herdr machine add <ssh target> adds one).']
   }

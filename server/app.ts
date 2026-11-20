@@ -340,7 +340,13 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
         }
         if (path === '/api/cli' && req.method === 'POST') {
           const cli = (
-            source as Source & { cli?(a: string[], c: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string }): Promise<{ out: string; code: number }> }
+            source as Source & {
+              cli?(
+                a: string[],
+                c: { chat?: string; pane?: string; cwd?: string; stdin?: string; local?: boolean; proof?: string },
+                onStep?: (words: string) => void,
+              ): Promise<{ out: string; code: number }>
+            }
           ).cli
           if (!cli)
             return json({
@@ -355,16 +361,52 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           const b = (await req.json()) as { args: string[]; chat?: string; pane?: string; cwd?: string; stdin?: string }
           // some commands wait long (shepherdr checks waits for GitHub's): no idle cut-off for these
           srv.timeout(req, 0)
-          return json(
-            await cli.call(source, b.args ?? [], {
-              chat: b.chat,
-              pane: b.pane,
-              cwd: b.cwd,
-              stdin: b.stdin,
-              local: direct(req),
-              proof: req.headers.get('authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1],
-            }),
-          )
+          const ctx = {
+            chat: b.chat,
+            pane: b.pane,
+            cwd: b.cwd,
+            stdin: b.stdin,
+            local: direct(req),
+            proof: req.headers.get('authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1],
+          }
+          // only a caller that says it can read them gets the interim steps: the new command sends Accept:
+          // application/x-ndjson. An older helper (or command) on another machine gets the one application/json
+          // object it knows, so the change works across versions in both directions (UXD-08).
+          if (!(req.headers.get('accept') ?? '').includes('application/x-ndjson')) return json(await cli.call(source, b.args ?? [], ctx))
+          // one {step} line as each step finishes, then the one final {out, code}, as application/x-ndjson. A caller
+          // that goes away mid-call (a timeout, Ctrl-C) must never stop the work: guard the enqueue with a flag
+          // written by cancel(), so doctor goes on repairing the machines after the client has left.
+          const enc = new TextEncoder()
+          let closed = false
+          const body = new ReadableStream<Uint8Array>({
+            async start(controller) {
+              const send = (rec: unknown) => {
+                if (closed) return
+                try {
+                  controller.enqueue(enc.encode(`${JSON.stringify(rec)}\n`))
+                  // coverage-exempt: only if the stream closes without cancel() first; Bun always calls cancel(), so no test reaches these
+                } catch {
+                  // coverage-exempt: the same defensive fallback, only reachable without cancel()
+                  closed = true
+                }
+              }
+              try {
+                const answer = await cli.call(source, b.args ?? [], ctx, (words) => send({ step: words }))
+                send(answer)
+              } catch (e) {
+                send({ out: `${(e as Error).message}\n`, code: 1 })
+              } finally {
+                if (!closed) {
+                  controller.close()
+                  closed = true
+                }
+              }
+            },
+            cancel() {
+              closed = true
+            },
+          })
+          return new Response(body, { headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' } })
         }
         if (path === '/api/push/key') return json({ key: push?.publicKey ?? null })
         // what waits on you: the service worker sets the app icon's count with it after a notification button answers

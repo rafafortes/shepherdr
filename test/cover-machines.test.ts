@@ -438,12 +438,16 @@ describe('shepherdr doctor', () => {
     await until('their workers and Chrome', () => !!chrome.worker && !!out.worker && !!chrome.chrome && !!out.chrome)
     const before = [chrome.worker!.pid, out.worker!.pid]
 
-    expect(await m.doctor()).toEqual([
+    const expected = [
       "doc-chrome (doc-chrome.test): helper put there again, worker started again; not there: gh (pull requests of GitHub repos), Claude Code, Codex; Chrome didn't install there: no space left on device",
       "doc-out (doc-out.test): helper put there again, worker started again; Chrome didn't install there: done badly",
       'doc-short (doc-short.test): needs git, perl (with JSON::PP), tar, an agent CLI (Claude Code, Codex or pi); not there: gh (pull requests of GitHub repos), Claude Code, Codex',
       "doc-gone (doc-gone.test): Can't reach it: ssh: connect to host doc-gone.test port 22: Connection refused",
-    ])
+    ]
+    const steps: string[] = []
+    expect(await m.doctor((w) => steps.push(w))).toEqual(expected)
+    // each machine's line reaches the command's step channel as that machine is done, in the same words as the answer
+    expect(steps).toEqual(expected)
     // the workers were stopped and started again, and the helper sent again although it was this one's
     expect(before.some(alive)).toBe(false)
     expect(chrome.worker!.pid).not.toBe(before[0])
