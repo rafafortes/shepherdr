@@ -316,6 +316,151 @@ describe.skipIf(!browser)('the shortcuts scroll region is keyboard reachable (SH
   }, 30_000)
 })
 
+describe.skipIf(!browser)('landmarks, the h1 and the skip link (A11Y-04)', () => {
+  test('chromium: one main and one h1 on the desktop home, beside places and the chat title as an h2', async () => {
+    if (!browser) return
+    const { ctx, page } = await open(browser, { width: 1440, height: 900 })
+    try {
+      await page.goto(at('place=vm-str/home'))
+      await page.getByRole('textbox', { name: /Message/ }).waitFor()
+      await settled(page)
+      expect(await page.getByRole('main').count()).toBe(1)
+      expect(await page.getByRole('heading', { level: 1, name: 'Shepherdr' }).count()).toBe(1)
+      expect(await page.getByRole('navigation', { name: 'Places' }).count()).toBe(1)
+      // the chat's title is a real heading, with the same type as before (16px, semibold, no heading margin)
+      const title = page.getByRole('heading', { level: 2, name: 'home' }).first()
+      expect(await title.count()).toBe(1)
+      const style = await title.evaluate((el) => {
+        const s = getComputedStyle(el)
+        return { size: s.fontSize, weight: s.fontWeight, margin: s.marginTop }
+      })
+      expect(style).toEqual({ size: '16px', weight: '600', margin: '0px' })
+    } finally {
+      await ctx.close()
+    }
+  }, 30_000)
+
+  test('chromium: the task panel is a complementary landmark beside the one main', async () => {
+    if (!browser) return
+    const { ctx, page } = await open(browser, { width: 1440, height: 900 })
+    try {
+      await page.goto(at('place=p%3Avm-str%3Aherdr-projects&task=HP-201'))
+      await page.locator('#task-panel').waitFor()
+      await settled(page)
+      expect(await page.getByRole('main').count()).toBe(1)
+      expect(await page.getByRole('complementary', { name: 'Task panel' }).count()).toBe(1)
+    } finally {
+      await ctx.close()
+    }
+  }, 30_000)
+
+  test('chromium: one main and one h1 on a phone, still one after switching to Tasks', async () => {
+    if (!browser) return
+    const { ctx, page } = await open(browser, { width: 390, height: 844 }, true)
+    try {
+      await page.goto(at('place=vm-str/home'))
+      await page.getByRole('textbox', { name: /Message/ }).waitFor()
+      await settled(page)
+      expect(await page.getByRole('main').count()).toBe(1)
+      expect(await page.getByRole('heading', { level: 1, name: 'Shepherdr' }).count()).toBe(1)
+      await page
+        .getByRole('button', { name: /^Tasks/ })
+        .first()
+        .click()
+      expect(await page.getByRole('main').count()).toBe(1)
+    } finally {
+      await ctx.close()
+    }
+  }, 30_000)
+
+  test('chromium: the skip link is the first Tab stop, shows on keyboard focus and lands in the chat', async () => {
+    if (!browser) return
+    const { ctx, page } = await open(browser, { width: 1440, height: 900 })
+    try {
+      await page.goto(at('place=vm-str/home'))
+      await page.getByRole('textbox', { name: /Message/ }).waitFor()
+      await settled(page)
+      await page.keyboard.press('Tab')
+      const skip = page.getByRole('button', { name: 'Skip to chat' })
+      expect(await skip.evaluate((el) => document.activeElement === el)).toBe(true)
+      // hidden until the keyboard brings focus here: `fixed` comes from the focus-visible variant
+      expect(await skip.evaluate((el) => getComputedStyle(el).position)).toBe('fixed')
+      await page.keyboard.press('Enter')
+      const box = page.locator('main textarea[name="message"]')
+      expect(await box.evaluate((el) => document.activeElement === el)).toBe(true)
+      // one more Tab stays inside the chat column
+      await page.keyboard.press('Tab')
+      expect(await page.evaluate(() => !!document.activeElement?.closest('main'))).toBe(true)
+    } finally {
+      await ctx.close()
+    }
+  }, 30_000)
+
+  test('chromium: a phone keeps one main with a task or Settings pushed over the place', async () => {
+    if (!browser) return
+    const { ctx, page } = await open(browser, { width: 390, height: 844 }, true)
+    try {
+      await page.goto(at('place=p%3Avm-str%3Aherdr-projects&task=HP-201'))
+      await page.locator('[data-pushed] textarea[name="message"]').waitFor()
+      await settled(page)
+      expect(await page.getByRole('main').count()).toBe(1)
+      const skip = page.getByRole('button', { name: 'Skip to chat' })
+      await skip.focus()
+      await page.keyboard.press('Enter')
+      expect(await page.locator('[data-pushed] textarea[name="message"]').evaluate((el) => document.activeElement === el)).toBe(true)
+      // Settings, pushed over the place instead, carries the one main too
+      await page.goto(at('place=vm-str/home'))
+      await page.getByRole('textbox', { name: /Message/ }).waitFor()
+      // a phone reaches Settings through the Places drawer
+      await page.getByRole('button', { name: 'Places', exact: true }).click()
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      await page.getByRole('region', { name: 'Settings' }).waitFor()
+      await settled(page)
+      expect(await page.getByRole('main').count()).toBe(1)
+    } finally {
+      await ctx.close()
+    }
+  }, 30_000)
+
+  test('chromium: the skip link still lands somewhere on screens with no message box', async () => {
+    if (!browser) return
+    // desktop Settings has no composer: its main landmark takes the focus
+    const desk = await open(browser, { width: 1440, height: 900 })
+    try {
+      const { page } = desk
+      await page.goto(at('place=vm-str/home'))
+      await page.getByRole('textbox', { name: /Message/ }).waitFor()
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      await page.getByRole('region', { name: 'Settings' }).waitFor()
+      await settled(page)
+      const skip = page.getByRole('button', { name: 'Skip to chat' })
+      await skip.focus()
+      await page.keyboard.press('Enter')
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('MAIN')
+    } finally {
+      await desk.ctx.close()
+    }
+    // a phone's Tasks tab has no composer either: its main landmark takes the focus
+    const phone = await open(browser, { width: 390, height: 844 }, true)
+    try {
+      const { page } = phone
+      await page.goto(at('place=vm-str/home'))
+      await page.getByRole('textbox', { name: /Message/ }).waitFor()
+      await page
+        .getByRole('button', { name: /^Tasks/ })
+        .first()
+        .click()
+      await settled(page)
+      const skip = page.getByRole('button', { name: 'Skip to chat' })
+      await skip.focus()
+      await page.keyboard.press('Enter')
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('MAIN')
+    } finally {
+      await phone.ctx.close()
+    }
+  }, 30_000)
+})
+
 test.skipIf(!browser)(
   'the contrast allowance is exercised by the real artifact frame',
   async () => {

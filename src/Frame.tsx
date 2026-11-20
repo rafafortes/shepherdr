@@ -83,14 +83,15 @@ export function PlacesColumn({ children }: { children: ReactNode }) {
   )
 }
 
-/** The coordinator chat beside the tasks; in focus it slides shut, keeping its width so nothing in it rewraps, and is
- *  out of reach of Tab and screen readers too */
+/** The main landmark: the chat and panes, between places and the tasks/panel. A real grid item (not `contents`), so
+ *  the landmark stays in the screen reader's tree and the frame's columns keep working. In focus it slides shut,
+ *  keeping its width so nothing in it rewraps, and is out of reach of Tab and screen readers too. */
 export function ChatColumn({ children }: { children: ReactNode }) {
   const focus = useStore((s) => focusHere(s.ui, s.snap))
   return (
-    <div className="flex min-w-0 overflow-hidden *:min-w-(--chat-open)" inert={focus}>
+    <main tabIndex={-1} className="flex min-w-0 overflow-hidden *:min-w-(--chat-open)" inert={focus}>
       {children}
-    </div>
+    </main>
   )
 }
 

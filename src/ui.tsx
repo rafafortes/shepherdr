@@ -1215,7 +1215,7 @@ export function Who({ name, kind }: { name: ReactNode; kind?: ReactNode }) {
   return (
     // the title a step over the chat's 15px words, as Slack's channel name is
     <div className="min-w-0 flex-1">
-      <div className="truncate text-base/5 font-semibold">{name}</div>
+      <h2 className="truncate text-base/5 font-semibold">{name}</h2>
       {kind ? <div className="truncate text-[0.8125rem]/[18px] text-fg2 phone:text-sm/5">{kind}</div> : null}
     </div>
   )
