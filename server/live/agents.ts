@@ -1845,10 +1845,10 @@ export class Agents extends Emitter<Events> {
     this.flushRecords()
   }
 
-  /** drop the records no screen, search or command can reach (PERFS-12): a chat whose task is gone from the engine,
-   *  or a coordinator of a space that went away. The caller says which keys are still live — it is the one that knows
-   *  the tasks and the spaces. Kept records (archived tasks' chats above all) keep their logs, so a chat the operator
-   *  can still open reads its history. One batched write for the whole pass, whatever the number of orphans. */
+  /** drop records no screen, search or command can reach (PERFS-12), whatever the caller says is not live: today the
+   *  engine only names task chats of deleted tasks, and keeps every coordinator. Kept records (archived tasks' chats
+   *  above all) keep their logs, so a chat the operator can still open reads its history. One batched write for the
+   *  whole pass, whatever the number of orphans. */
   prune(keep: (key: string, record: AgentRecord) => boolean): number {
     let dropped = 0
     for (const [key, r] of Object.entries(this.records)) {

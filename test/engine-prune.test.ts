@@ -4,7 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import { placeId, repo, started, world } from './engine-world.ts'
 
 describe('orphan agent records are pruned by the engine', () => {
-  test('startup prunes with the keys of the tasks and spaces held', () => {
+  test('startup runs the prune with the tasks the engine holds', () => {
     const w = world()
     // no records at boot: the pass still runs (it is where an earlier cleanup's leftovers would go)
     expect(w.pruned).toEqual([0])
