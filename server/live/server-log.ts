@@ -45,14 +45,21 @@ export function rotate(path: string, cap = LOG_CAP): boolean {
   }
 }
 
+/** the folders already made, so a log line costs a size check and one append, not a mkdir each time */
+const madeDirs = new Set<string>()
+
 /** rotate when needed, then append one prefixed line. Opening on each write means a rotation made here or at start is
  *  picked up at once by the supervisor and the server, neither of which holds an fd to a file renamed away. */
 export function write(path: string, args: unknown[], at = new Date(), cap = LOG_CAP): void {
   try {
     const line = redact((format as (...a: unknown[]) => string)(...args))
     rotate(path, cap)
+    const dir = dirname(path)
     // a proof server's home need not have a run folder yet; the plugin makes it for the live one
-    mkdirSync(dirname(path), { recursive: true })
+    if (!madeDirs.has(dir)) {
+      mkdirSync(dir, { recursive: true })
+      madeDirs.add(dir)
+    }
     appendFileSync(path, stamp(line, at))
   } catch {
     // logging never brings the server down

@@ -60,8 +60,9 @@ The server the plugin supervises, its supervisor and each machine worker write o
 `2026-11-18T21:44:03.000Z`, including each line of a multi-line message, so a stall or a failed start can be placed on a
 day after the fact. The file rotates at 10 MB: the previous generation is kept as `server.log.1` (or `worker.log.1`,
 overwriting the older one), at start and whenever a line is written, so a server that stays up for weeks stays bounded.
-Anything the runtime writes straight to stdout or stderr (an uncaught crash trace) is not stamped, though it still
-lands in the same file through the fd the plugin passes. A server started by hand keeps its own stdout.
+Anything the runtime writes straight to stdout or stderr (an uncaught crash trace) is not stamped: it goes to the fd
+the plugin passed before a rotation, so after one it lands in `server.log.1` rather than the live file. A server started
+by hand keeps its own stdout.
 
 Nothing that belongs to the human goes into it: no secret, credential or token from `secrets.json`, and no agent chat
 text. Provider failures are logged as a short marked excerpt, known key/value secrets are redacted on the way out, and
