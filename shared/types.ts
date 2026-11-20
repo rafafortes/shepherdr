@@ -1467,10 +1467,9 @@ export type Action =
   | { type: 'call'; chat: string; on: boolean }
   /** place: the level it is set at, as a place id (all when none); a machine's or project's goes to that machine */
   /** capability: the screen's per-boot proof (the x-shepherdr-capability header, copied here by the server). A write of
-   *  an executable setting (alerts.command and its kind) needs it; the shepherdr command writes settings directly and
-   *  has none (SEC-04). fromMain: set by a worker's server on a write this machine's main forwarded after passing its
-   *  own gate, so the worker need not share the main's per-boot proof. */
-  | { type: 'setting'; key: string; value: string | null; place?: string; capability?: string; fromMain?: boolean }
+   *  an executable setting (alerts.command and its kind) needs this or the main machine's proof, which a worker reads
+   *  over its live link; the shepherdr command writes settings directly and has neither (SEC-04). */
+  | { type: 'setting'; key: string; value: string | null; place?: string; capability?: string }
   /** a space's move up or down the queue in Settings → Limits → Spaces: every value the move writes, at the space each
    *  names (null clears it). One action, so a move happens whole or not at all and two moves cannot interleave */
   | { type: 'space-order'; moves: { place: string; value: string | null }[] }

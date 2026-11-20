@@ -237,11 +237,9 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           // travels): only the server copies it into the action, so a caller cannot choose a proof in the JSON body.
           // The live source checks it when a write names an executable setting (SEC-04); other writes ignore it.
           const capability = req.headers.get('x-shepherdr-capability') ?? undefined
-          // a worker's server marks a write the main already gated before forwarding it; the proof itself is per-boot
-          // and per-machine, so the worker cannot compare the main's token with its own
-          const fromMain = req.headers.get('x-shepherdr-main') === '1'
-          // always overwrite body-supplied values: only the server copies these from the request's own headers
-          const act = a.type === 'setting' ? { ...a, capability, fromMain } : a
+          // a peer forward carries the main's proof in the body, so keep it when there is no header to override it;
+          // either way the source checks the value against a proof this machine actually holds (SEC-04)
+          const act = a.type === 'setting' && capability ? { ...a, capability } : a
           // one restart of every coordinator can outlast the idle cut-off (each turn that has to stop, each launch
           // that retries): its answer is the count the row shows, so it gets no cut-off, as the command does
           if (a.type === 'restart-all') srv.timeout(req, 0)
@@ -388,7 +386,7 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
       message(ws, msg) {
         const d = ws.data
         if (d.kind === 'live') {
-          const m = JSON.parse(String(msg)) as { type: 'ping' } | { type: 'watch'; chats: string[]; term: string | null; visible?: boolean; push?: string | null; link?: boolean }
+          const m = JSON.parse(String(msg)) as { type: 'ping' } | { type: 'watch'; chats: string[]; term: string | null; visible?: boolean; push?: string | null; link?: boolean; capability?: string }
           if (m.type === 'ping') return void send(ws, { type: 'pong' })
           if (m.type !== 'watch') return
           const before = new Set(d.chats)
@@ -397,6 +395,9 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           d.visible = !!m.visible
           d.push = m.push ?? null
           d.link = !!m.link
+          // this socket came from the main machine's Machines: its proof lets a write the main gated and forwarded
+          // through here be told from one a caller forged (SEC-04)
+          if (d.link && m.capability) (source as Source & { setMainProof?(capability: string): void }).setMainProof?.(m.capability)
           if (d.link) for (const news of unsent.splice(0)) send(ws, { type: 'news', news } as unknown as ServerEvent)
           for (const k of m.chats) {
             if (before.has(k)) continue

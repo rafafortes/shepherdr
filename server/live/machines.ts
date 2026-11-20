@@ -136,6 +136,9 @@ export class Machines extends Emitter<Events> {
   constructor(
     private saved: (() => Promise<Saved[]>) | null = savedMachines,
     private status: typeof machineStatus = machineStatus,
+    /** this machine's own write proof (SEC-04), sent to each worker over its live link so the worker can tell a write
+     *  the main already gated from one a caller forged. A worker has no Machines of its own and never uses this. */
+    private proof?: () => string,
   ) {
     super()
     // from the time Shepherdr was installed on every machine: the machines that announced themselves
@@ -553,7 +556,7 @@ export class Machines extends Emitter<Events> {
     const ws = new WebSocket(url)
     l.ws = ws
     ws.onopen = () => {
-      if (this.active(l) && l.ws === ws) ws.send(JSON.stringify({ type: 'watch', ...l.watching, link: true }))
+      if (this.active(l) && l.ws === ws) ws.send(JSON.stringify({ type: 'watch', ...l.watching, link: true, ...(this.proof ? { capability: this.proof() } : {}) }))
     }
     ws.onmessage = (e) => {
       if (!this.active(l) || l.ws !== ws) return
@@ -608,11 +611,9 @@ export class Machines extends Emitter<Events> {
   }
 
   private async forward(l: Link, a: Action) {
-    // this machine's main gated the write before forwarding it; the worker's own per-boot proof is different, so it
-    // trusts this marker (set here, never from a request body) instead of comparing tokens (SEC-04)
     const r = await fetch(`${l.rec.url}/api/action`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-shepherdr-main': '1' },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify(a),
       signal: AbortSignal.timeout(20_000),
     })

@@ -49,23 +49,17 @@ describe("executable settings need the screen's own proof", () => {
     expect(await src.act({ type: 'setting', key: 'review.rounds', value: null })).toEqual({ ok: true })
   })
 
-  test('a POST to /api/action carries the proof only in the header the server copies', async () => {
-    const post = (headers: Record<string, string>) =>
+  test('a POST to /api/action must carry a real proof, in the header the screen uses', async () => {
+    const post = (headers: Record<string, string>, body: Record<string, unknown> = {}) =>
       fetch(`${base}/api/action`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-shepherdr': '1', ...headers },
-        body: JSON.stringify({ type: 'setting', key: 'alerts.doneCommand', value: 'echo done' }),
+        body: JSON.stringify({ type: 'setting', key: 'alerts.doneCommand', value: 'echo done', ...body }),
       }).then((r) => r.json())
 
     refused(await post({}))
     expect(stored().everywhere?.['alerts.doneCommand']).toBeUndefined()
-    // a proof in the JSON body is not accepted: the server only reads the header
-    const inBody = await fetch(`${base}/api/action`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-shepherdr': '1' },
-      body: JSON.stringify({ type: 'setting', key: 'alerts.doneCommand', value: 'echo done', capability: src.writeCapability }),
-    }).then((r) => r.json())
-    refused(inBody)
+    refused(await post({ 'x-shepherdr-capability': '0'.repeat(64) }))
     expect(stored().everywhere?.['alerts.doneCommand']).toBeUndefined()
     expect(await post({ 'x-shepherdr-capability': src.writeCapability })).toEqual({ ok: true })
     expect(stored().everywhere?.['alerts.doneCommand']).toBe('echo done')
@@ -90,25 +84,47 @@ describe("executable settings need the screen's own proof", () => {
     expect(await src.cli(['unset', 'alerts.command'], { local: true })).toMatchObject({ code: 0 })
   })
 
-  test("a write the main already gated is forwarded with its own marker, not this machine's proof", async () => {
-    // Machines.forward marks a peer write with x-shepherdr-main; the worker need not share the main's per-boot token
-    const r = await fetch(`${base}/api/action`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-shepherdr': '1', 'x-shepherdr-main': '1' },
-      body: JSON.stringify({ type: 'setting', key: 'alerts.command', value: 'echo forwarded', fromMain: true }),
-    }).then((x) => x.json())
-    expect(r).toEqual({ ok: true })
-    expect(stored().everywhere?.['alerts.command']).toBe('echo forwarded')
-    // a caller cannot mark its own write as forwarded through the JSON body
-    refused(
-      await fetch(`${base}/api/action`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-shepherdr': '1' },
-        body: JSON.stringify({ type: 'setting', key: 'alerts.command', value: 'echo false', fromMain: true }),
-      }).then((x) => x.json()),
-    )
-    expect(stored().everywhere?.['alerts.command']).toBe('echo forwarded')
-    expect(await src.act({ type: 'setting', key: 'alerts.command', value: null, capability: src.writeCapability })).toEqual({ ok: true })
+  test('a write to another machine is gated here before it is forwarded there', async () => {
+    const realPeers = src.peers
+    const forwarded: unknown[] = []
+    try {
+      src.peers = {
+        ownerOfAction: () => ({ placeholder: true }),
+        act: async (_l: unknown, a: unknown) => {
+          forwarded.push(a)
+          return { ok: true }
+        },
+      } as never
+      refused(await src.act({ type: 'setting', key: 'alerts.command', value: 'echo remote', place: 'm:other' }))
+      expect(forwarded).toEqual([])
+      expect(stored().everywhere?.['alerts.command']).toBeUndefined()
+      expect(await src.act({ type: 'setting', key: 'alerts.command', value: 'echo remote', place: 'm:other', capability: src.writeCapability })).toEqual({ ok: true })
+      expect(forwarded).toHaveLength(1)
+    } finally {
+      src.peers = realPeers
+    }
+  })
+
+  test('a page cannot plant a per-task merge gate with task add --set either', async () => {
+    const page = await src.cli(['task', 'add', 'A task', '--set', 'merge.gate=echo pwned'], { local: false })
+    expect(page.code).toBe(1)
+    expect(page.out).toContain('Set it in Settings')
+    // a local shell gets past this gate (the rest of task add may still need a space set up)
+    const local = await src.cli(['task', 'add', 'A task', '--set', 'merge.gate=echo safe'], { local: true })
+    expect(local.out).not.toContain('Set it in Settings')
+  })
+
+  test('a worker accepts a forwarded write only with the main proof it learned over its link', async () => {
+    const mainProof = 'f'.repeat(64)
+    src.setMainProof(mainProof)
+    try {
+      refused(await src.act({ type: 'setting', key: 'alerts.command', value: 'echo forged' }))
+      expect(await src.act({ type: 'setting', key: 'alerts.command', value: 'echo from-main', capability: mainProof })).toEqual({ ok: true })
+      expect(stored().everywhere?.['alerts.command']).toBe('echo from-main')
+      expect(await src.act({ type: 'setting', key: 'alerts.command', value: null, capability: src.writeCapability })).toEqual({ ok: true })
+    } finally {
+      src.setMainProof('')
+    }
   })
 
   test('the screen gets that proof once over its own socket', async () => {
