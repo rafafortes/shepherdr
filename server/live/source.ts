@@ -265,6 +265,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     (e) => void this.onHealth(e).catch(() => undefined),
     undefined,
     { read: () => readJson('health.json', {}), write: (w) => writeJson('health.json', w) },
+    () => this.emit('snapshot'),
   )
   /** when each chat last had something new, and how far you have read each (on the main machine) */
   unread = new Unread()

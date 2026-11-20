@@ -6,13 +6,16 @@ import { HOUR, UsageLedger } from '../live/usage-ledger.ts'
 import { opencodeEstimate, OPENCODE_ROWS } from '../live/quota-estimate.ts'
 import type { QuotaInput } from '../live/models-summary.ts'
 
+/** OpenCode Go under pi: the row the demo shows out now, with a run-out whose reset has not come yet */
+const OUT_NOW_KEY = 'pi.opencode-go/deepseek-v4.1-flash'
+
 /** per model key: tokens per call, its cost estimate per call (pi's), and how many calls in a working hour */
 const MODELS: { key: string; tokens: number; cost?: number; busy: number; chat: string }[] = [
   { key: 'claude/claude-opus-5-5', tokens: 42_000, busy: 3, chat: 'GTM-15/Agent' },
   { key: 'claude/claude-haiku-5-5', tokens: 18_000, busy: 1, chat: 'HP-201/Reviewer' },
   { key: 'codex/gpt-6-sol', tokens: 26_000, busy: 1, chat: 'HP-202/Agent' },
   // OpenCode Go's plan, used from pi and from OpenCode: two rows, each with its own calls
-  { key: 'pi.opencode-go/deepseek-v4.1-flash', tokens: 15_000, cost: 0.0009, busy: 2, chat: 'LV-3/Agent' },
+  { key: OUT_NOW_KEY, tokens: 15_000, cost: 0.0009, busy: 2, chat: 'LV-3/Agent' },
   { key: 'opencode.opencode-go/deepseek-v4.1-flash', tokens: 11_000, cost: 0.0007, busy: 1, chat: 'HP-204/Agent' },
   { key: 'pi.spark/qwen3.8-flash-next-mlx4-mtp-tensorfold', tokens: 22_000, busy: 2, chat: 'GTM-16/Agent' },
   // OpenCode's free Zen models: a provider of its own with no quota, its row says so
@@ -28,6 +31,9 @@ export function demoUsage(now = Date.now()): UsageLedger {
     const hour = new Date(now - back * HOUR).getHours()
     const working = hour >= 9 && hour <= 18 ? 1 : 0
     MODELS.forEach((m, i) => {
+      // a call after a run-out says the provider works again (outState, SHE-167): leave the out-now row without calls
+      // since its run-out two hours back, so the demo still shows a run-out that is out now until its reset
+      if (m.key === OUT_NOW_KEY && back <= 2) return
       // the calls of this hour: a working hour's share, a little more on the weekdays' busy hours
       const calls = working * m.busy + ((back * 3 + i * 5) % 3)
       for (let c = 0; c < calls; c++) {
@@ -37,12 +43,12 @@ export function demoUsage(now = Date.now()): UsageLedger {
     })
   }
   // OpenCode Go's calls under pi before its run-outs, whatever the hour the demo is looked at: the learned limit reads from them
-  for (const h of [2.5, 4, 6]) l.count('LV-3/Agent', 'pi.opencode-go/deepseek-v4.1-flash', { id: `demo-opencode-before-${h}`, at: now - h * HOUR, tokens: 15_000, cost: 0.0009 }, now)
+  for (const h of [2.5, 4, 6]) l.count('LV-3/Agent', OUT_NOW_KEY, { id: `demo-opencode-before-${h}`, at: now - h * HOUR, tokens: 15_000, cost: 0.0009 }, now)
   // OpenCode Go ran out twice this week under pi: the second time, now, until a reset three hours on (out now)
   l.runOut(
     {
       at: now - 50 * HOUR,
-      key: 'pi.opencode-go/deepseek-v4.1-flash',
+      key: OUT_NOW_KEY,
       chat: 'LV-3/Agent',
       role: 'task',
       reason: 'Out of allowance until 6pm',
@@ -55,7 +61,7 @@ export function demoUsage(now = Date.now()): UsageLedger {
   l.runOut(
     {
       at: now - 2 * HOUR,
-      key: 'pi.opencode-go/deepseek-v4.1-flash',
+      key: OUT_NOW_KEY,
       chat: 'LV-3/Agent',
       role: 'task',
       reason: 'Out of allowance until 5pm',
