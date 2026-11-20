@@ -433,6 +433,38 @@ describe('the check files themselves', () => {
     for (const name of names) expect(statSync(join(dir, name)).mode & 0o111, name).toBeTruthy()
   })
 
+  // SEC-05 (audit 2026-11-18): a caret or tilde in package.json must fail the dependency step even though a frozen
+  // lockfile would install the pinned version happily. Both dependency maps are covered, so pinning @types/ws holds too.
+  test('the dependency step refuses a version range and accepts exact pins', () => {
+    const dir = tmp('checks-dependencies')
+    mkdirSync(join(dir, 'scripts', 'checks'), { recursive: true })
+    copyFileSync(join(root, 'scripts', 'checks', '10-dependencies'), join(dir, 'scripts', 'checks', '10-dependencies'))
+    // a bun stand-in: install is a no-op here; only the step's own range refusal is under test
+    const bin = join(dir, 'bin')
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, 'bun'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(bin, 'bun'), 0o755)
+    const run = (ws: string, types: string) => {
+      writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ name: 'fixture', dependencies: { web: '1.0.0', ws }, devDependencies: { '@types/ws': types } }, null, 2)}\n`)
+      const r = Bun.spawnSync(['bash', join(dir, 'scripts', 'checks', '10-dependencies')], {
+        cwd: dir,
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SHEPHERDR_CHECK_ROOT: dir },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      return { code: r.exitCode, out: `${r.stdout}${r.stderr}` }
+    }
+    const caret = run('^8.22.0', '8.18.2')
+    expect(caret.code, caret.out).toBe(1)
+    expect(caret.out).toContain('must be pinned exactly')
+    expect(caret.out).toContain('^8.22.0')
+    const pinned = run('8.22.0', '8.18.2')
+    expect(pinned.code, pinned.out).toBe(0)
+    const tilde = run('8.22.0', '~8.18.2')
+    expect(tilde.code, tilde.out).toBe(1)
+    expect(tilde.out).toContain('~8.18.2')
+  })
+
   test('a check run on its own finds the repo root, two folders up from scripts/checks/', () => {
     const dir = tmp('checks-standalone')
     const bin = join(dir, 'bin')
