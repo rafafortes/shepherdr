@@ -111,7 +111,7 @@ import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, LiveLine, TurnLine } from './activity.tsx'
 import { AgentControls, PlaceRestartItem, RestartSheet } from '@client/restart.tsx'
 import { countRender, currentChat, memoRow, rememberChat } from './rows.ts'
-import { CHAT_BATCH, floorOf, revealMore, setRows, subscribeFloor, topOf, watchReveal } from './windowing.ts'
+import { CHAT_BATCH, floorOf, revealMore, setRows, subscribeFloor, takeCompensation, topOf, watchReveal } from './windowing.ts'
 
 /* ---------- messages ---------- */
 
@@ -1610,6 +1610,16 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   const shown = rows.slice(top)
   const topRef = useRef(top)
   topRef.current = top
+  // a reveal puts rows in above what the reader sees. Where the browser anchors (the common case) it keeps their
+  // place; at the very top it doesn't, so move the box by what the list grew — no visible jump either way
+  const lastHeight = useRef(0)
+  useLayoutEffect(() => {
+    const scroller = list.current?.closest<HTMLElement>('.overflow-y-auto')
+    if (!scroller) return
+    const height = scroller.scrollHeight
+    if (takeCompensation(chat.key) && lastHeight.current) scroller.scrollTop += height - lastHeight.current
+    lastHeight.current = height
+  })
   // the reader's own scroll into the sentinel: one more batch, from the first row now shown (the store's raw floor
   // is Infinity until something is revealed, so revealing from it would do nothing)
   useEffect(() => {

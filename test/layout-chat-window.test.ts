@@ -1,11 +1,13 @@
 // The chat's message list is windowed: the last rows render, and the list grows upwards as the reader scrolls to
 // the top (the sentinel, or their own wheel and keys) or a jump asks for a message outside the window. The store
-// keeps every message; only the DOM is capped, and a reveal never moves the message the reader is on (the browser
-// keeps their place while the batch goes in). The window's floor logic is test/chat-window.test.ts.
+// keeps every message; only the DOM is capped, and a reveal never moves the message the reader is on (the list
+// corrects its scroll by the height the batch adds, even at the top where the browser does not anchor). The window's
+// floor logic is test/chat-window.test.ts.
 // biome-ignore-all lint/style/noNonNullAssertion: a Playwright bounding box is non-null once its element has appeared
 import { describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
 import { layout } from './layout.ts'
+import { CHAT_BATCH } from '../plugins/chat/windowing.ts'
 import type { Message } from '../shared/types.ts'
 
 const { browser, world, url, server } = await layout()
@@ -113,7 +115,7 @@ describe.skipIf(!browser)('the chat windows its message list', () => {
     }
   }, 60_000)
 
-  test("a fresh chat reveals a batch to the reader's own wheel, with no sentinel tap", async () => {
+  test("a fresh chat reveals one batch to the reader's own wheel, without moving the message they are on", async () => {
     const chat = world.chats[KEY]
     const old = chat.messages
     chat.messages = long(350)
@@ -126,16 +128,20 @@ describe.skipIf(!browser)('the chat windows its message list', () => {
       const b = box(page)
       const c = (await b.boundingBox())!
       await page.mouse.move(c.x + c.width / 2, c.y + c.height / 2)
-      // wheel up to the top and one step more: the reader's own gesture, never the sentinel
+      // wheel up until the first reveal: the reader's own gesture, never the sentinel. One wheel step must bring
+      // one batch, and the message they are on stays put (a wheel's own scroll is at most its 600 px delta; a
+      // reveal that lost their place moved it thousands of px, as it did before the scroll correction)
+      const marker = page.locator('[data-msg="win-340"]')
+      let before: { y: number } | null = null
       for (let i = 0; i < 200; i++) {
-        const top = await b.evaluate((el) => el.scrollTop)
-        if (top === 0) break
+        if ((await page.locator('[data-msg]').count()) > 200) break
+        before = (await marker.boundingBox())!
         await page.mouse.wheel(0, -600)
-        await page.waitForTimeout(30)
+        await page.waitForTimeout(40)
       }
-      await page.mouse.wheel(0, -600)
-      await page.locator('[data-msg="win-149"]').waitFor()
-      expect(await page.locator('[data-msg]').count()).toBeGreaterThanOrEqual(300)
+      const after = (await marker.boundingBox())!
+      expect(Math.abs(after.y - before!.y)).toBeLessThan(700)
+      expect(await page.locator('[data-msg]').count()).toBe(200 + CHAT_BATCH)
     } finally {
       chat.messages = old
       await page.close()

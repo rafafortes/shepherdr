@@ -16,9 +16,9 @@
 export const CHAT_WINDOW = 200
 export const CHAT_BATCH = 100
 
-/** how close to the top (px) counts as "the reader is at the top": within this, their own scroll reveals the
- *  previous batch (the sentinel's own pass rests further down after the compensation, so it can't reveal on its
- *  own) */
+/** how close to the top (px) counts as "the reader is at the top": within this, their own scroll, wheel or key
+ *  reveals the previous batch. The browser keeps their place as the rows go in above (natural scroll anchoring —
+ *  the list pins to its end and its rows have variable heights, so there is no virtual list to position) */
 const EDGE = 48
 
 interface Window {
@@ -56,6 +56,15 @@ export function topOf(chat: string, count: number): number {
 /** what useSyncExternalStore reads: the revealed floor (a jump or a scroll changing it redraws the window) */
 export const floorOf = (chat: string) => windows.get(chat)?.top ?? Infinity
 
+/** a reveal is going in above what the reader is looking at. The browser keeps their place where it anchors (the
+ *  common case, scrolled into the chat); at the very top it does not, so Messages applies the height delta itself.
+ *  Jumps don't set this: they scroll to their row and would fight a correction */
+const compensated = new Set<string>()
+export const takeCompensation = (chat: string) => {
+  const was = compensated.delete(chat)
+  return was
+}
+
 /** Messages calls it as it builds the rows, so a jump can find a message's row before it is drawn */
 export function setRows(chat: string, rowOf: Map<string, number>, count: number) {
   const w = of(chat)
@@ -69,6 +78,7 @@ export function revealMore(chat: string, top: number) {
   const next = Math.max(0, top - CHAT_BATCH)
   if (top > 0 && next < w.top) {
     w.top = next
+    compensated.add(chat)
     emit(chat)
   }
 }
