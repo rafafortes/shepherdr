@@ -152,9 +152,7 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
   source.on('snapshot', () => scheduleSnapshot(false))
   source.on('heartbeat', () => scheduleSnapshot(true))
   source.on('chat', (key) => {
-    const watchers = [...live]
-      .filter((ws) => ws.data.kind === 'live' && ws.data.chats.includes(key))
-      .map((ws) => ({ ws, link: ws.data.kind === 'live' && !!ws.data.link }))
+    const watchers = [...live].filter((ws) => ws.data.kind === 'live' && ws.data.chats.includes(key)).map((ws) => ({ ws, link: ws.data.kind === 'live' && !!ws.data.link }))
     if (!watchers.length) return
     const chat = timed('chat', () => source.chat(key))
     if (!chat) return

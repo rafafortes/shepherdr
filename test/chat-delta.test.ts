@@ -7,7 +7,12 @@ import type { Chat, Message } from '../shared/types.ts'
 
 const KEY = 'p:m:delta'
 /** a fresh Chats so each test owns its diff base and sequence */
-const fresh = () => new Chats({} as never, () => 'Agent', () => 'you')
+const fresh = () =>
+  new Chats(
+    {} as never,
+    () => 'Agent',
+    () => 'you',
+  )
 const msg = (id: string, more: Partial<Message> = {}): Message => ({ id, who: 'agent', at: 1000 + Number(id.slice(1) || 0), text: `line ${id}`, ...more })
 const chat = (messages: Message[]): Chat => ({ key: KEY, messages, cli: 'claude' })
 
