@@ -755,7 +755,10 @@ function applyDelta(base: Chat, msg: ChatEventDelta): Chat {
     const found = messages[at]
     if (found) messages[at] = { ...found, ...patch }
   }
-  messages.sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
+  // chatBuild sorts the log's rows by `at`, then chat() puts a terminal menu ahead of the queued sends behind it.
+  // Mirror that order here: by `at` among log rows, with the menu and the waiting rows kept after them (PERFC-03).
+  const rank = (m: Message) => (m.question?.terminal ? 1 : m.waiting ? 2 : 0)
+  messages.sort((a, b) => rank(a) - rank(b) || (a.at ?? 0) - (b.at ?? 0))
   // the delta's chat is the whole current chat with an empty message array: take every field from it, so a field
   // that went away (working, live, jobs…) goes away here too, not lingers from the base
   return { ...msg.chat, messages }

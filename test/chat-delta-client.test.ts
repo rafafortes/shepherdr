@@ -115,6 +115,15 @@ describe('applying a chat delta', () => {
     expect(shown()?.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'm3'])
   })
 
+  test('a terminal menu stays ahead of the queued rows it belongs to', () => {
+    const menu: Message = { id: 'menu-1', who: 'agent', at: 2000, question: { id: 'menu-1', title: 'Pick one', kind: 'Form', choices: [], to: 'Agent', terminal: true } }
+    const waiting: Message = { id: 'w1', who: 'you', at: 1500, text: 'typed while the menu was up', waiting: true }
+    full(KEY, [msg('m1'), menu, waiting], 9)
+    // the server appends a new log row after the built rows and before the menu/queue tail
+    delta([msg('m4', { at: 3000 })], [], 10)
+    expect(shown()?.messages.map((m) => m.id)).toEqual(['m1', 'm4', 'menu-1', 'w1'])
+  })
+
   test('a delta for a chat with no full base is left alone', () => {
     const unknown = 'p:m:never-watched'
     socket.onmessage?.({ data: JSON.stringify({ type: 'chat-delta', chat: chat(unknown, []), added: [msg('m9')], changed: [], through: 9 }) })

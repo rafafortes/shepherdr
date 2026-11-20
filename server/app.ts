@@ -157,9 +157,11 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
     const chat = timed('chat', () => source.chat(key))
     if (!chat) return
     // a screen that already holds a base gets only what moved (PERFC-03); a machine's link, which may run an older
-    // version, and any chat we cannot diff always get the whole form
-    const delta = watchers.some((w) => !w.link) ? (source.chatUpdate?.(key, chat).delta ?? null) : null
-    for (const { ws, link } of watchers) send(ws, delta && !link ? delta : { type: 'chat', chat })
+    // version, and any chat we cannot diff always get the whole form. The full form carries the same sequence, so a
+    // fallback does not leave a screen with a sequence of zero and no guard against a repeated push.
+    const update = watchers.some((w) => !w.link) ? source.chatUpdate?.(key, chat) : undefined
+    const full = update?.full ?? { type: 'chat', chat }
+    for (const { ws, link } of watchers) send(ws, update?.delta && !link ? update.delta : full)
   })
   source.on('terminal', (key, screen) => {
     for (const ws of live) if (ws.data.kind === 'live' && ws.data.term === key) send(ws, { type: 'terminal', chat: key, ...screen })

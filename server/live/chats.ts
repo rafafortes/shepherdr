@@ -287,7 +287,8 @@ function patchOf(base: Message, next: Message): Partial<Message> | null | undefi
   for (const key of new Set([...Object.keys(base), ...Object.keys(next)])) {
     const before = (base as unknown as Record<string, unknown>)[key]
     const after = (next as unknown as Record<string, unknown>)[key]
-    if (JSON.stringify(before) === JSON.stringify(after)) continue
+    // chatBuild returns the same row objects for an unchanged chat, so identity skips almost all of this work
+    if (before === after || JSON.stringify(before) === JSON.stringify(after)) continue
     // null says a field went away: the caller must send the whole chat, since JSON drops undefined
     if (after === undefined || !(key in next)) return null
     patch[key] = after
@@ -1251,9 +1252,6 @@ export class Chats {
     if (runtime?.model) runtime.modelLabel = findModel(kind, runtime.model)?.label
     const act = this.activityFor(key)
     const jobs = this.jobs(key, act).map(({ log: _l, output: _o, ...j }): Job => j)
-    // the queue and the menu card are added after chatBuild's sort; sort the final array too, so the full chat and
-    // a delta applied by the screen (which re-sorts by `at`) always come out in the same order (PERFC-03)
-    msgs.sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
     return {
       key,
       cli: CLI_NAME[kind] ?? kind,
