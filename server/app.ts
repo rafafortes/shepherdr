@@ -440,6 +440,7 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
         }
         // the browser lost its subscription: drop only that endpoint (the same same-origin wall guards this write)
         if (path === '/api/push/subscribe' && req.method === 'DELETE') {
+          if (req.headers.get('x-shepherdr') !== '1') return json({ error: 'Not allowed' }, 403)
           const b = await req.json()
           push?.unsubscribe(b.endpoint)
           source.emit('snapshot')

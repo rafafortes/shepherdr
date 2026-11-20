@@ -109,7 +109,8 @@ export class Push {
         this.failures.delete(s)
         return false
       }
-      if (now - (s.lastOk ?? s.at) > STALE_MS) {
+      // a device left on screen is skipped on purpose: it sees the alerts in the app, so no delivery means nothing
+      if (to.includes(s) && now - (s.lastOk ?? s.at) > STALE_MS) {
         console.warn('Dropping push device: no alert succeeded in 30 days.')
         this.failures.delete(s)
         return false

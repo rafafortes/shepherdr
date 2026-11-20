@@ -14,9 +14,11 @@ function syncPush(sub: PushSubscription | null | undefined) {
   }
   const old = localStorage.getItem(PUSH_KEY)
   if (!old) return
-  localStorage.removeItem(PUSH_KEY)
-  void fetch('api/push/subscribe', { method: 'DELETE', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ endpoint: old }) })
   setPushEndpoint(null)
+  // keep the key until the server answers: an offline device gets another chance on its next load
+  void fetch('api/push/subscribe', { method: 'DELETE', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ endpoint: old }) })
+    .then(() => localStorage.removeItem(PUSH_KEY))
+    .catch(() => undefined)
 }
 
 /** Ask this device for push alerts (the app must be installed to the home screen on an iPhone). */

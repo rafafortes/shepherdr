@@ -73,6 +73,13 @@ test('a subscription that never succeeded is dropped after 30 days on the next s
   }
 })
 
+test('a stale device left on screen is kept: it was skipped, not attempted', async () => {
+  writeJson('push.json', [{ sub: sub('on'), device: 'desktop', at: Date.now() - 40 * DAY }])
+  const push = new Push(undefined, async () => response)
+  await push.send(alert, new Set([sub('on').endpoint]))
+  expect(push.devices).toEqual(['desktop'])
+})
+
 test('a recent success keeps a device past its subscribe date', async () => {
   writeJson('push.json', [{ sub: sub('old'), device: 'phone', at: Date.now() - 40 * DAY, lastOk: Date.now() }])
   const push = new Push(undefined, async () => response)
@@ -124,6 +131,13 @@ describe('DELETE /api/push/subscribe', () => {
       body: JSON.stringify({ endpoint: 'https://push.example/b' }),
     })
     expect(refused.status).toBe(403)
+    // no Origin and no header: the sameSite wall lets it through, this route's own check refuses it
+    const bare = await fetch(`${at}/api/push/subscribe`, {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ endpoint: 'https://push.example/b' }),
+    })
+    expect(bare.status).toBe(403)
     expect(push.devices).toEqual(['phone B'])
   })
 })

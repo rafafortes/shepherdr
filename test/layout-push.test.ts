@@ -20,7 +20,11 @@ test('a browser that lost its subscription removes its device on the next load',
     (n) => n > 0,
   )
   expect(JSON.parse(removed[0] ?? 'null')).toEqual({ endpoint: 'https://push.example/old' })
-  expect(await page.evaluate(() => localStorage.getItem('shepherdr.push.endpoint'))).toBeNull()
+  const forgotten = await until(
+    () => page.evaluate(() => localStorage.getItem('shepherdr.push.endpoint')),
+    (v) => v === null,
+  )
+  expect(forgotten).toBeNull()
   await page.close()
 })
 
