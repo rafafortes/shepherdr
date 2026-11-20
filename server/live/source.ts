@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { homedir } from 'node:os'
 import { basename, dirname, join, sep } from 'node:path'
 import { askText, BODY_MAX, clip, lastReply, NOTIFY_KEY, openCards, taskAlert, TITLE_MAX } from '../../shared/alerts.ts'
+import { stripControl } from '../../shared/keys.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, sortPlaces } from '../../shared/order.ts'
 import {
   asEmoji,
@@ -4617,7 +4618,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       } else keys.push(String(a.choice + 1))
       await this.agents.keys(key, keys)
       if (a.other) {
-        await this.agents.text(key, a.other)
+        await this.agents.text(key, stripControl(a.other))
         await this.agents.keys(key, ['enter'])
       }
       // the last question of a form: the CLI asks to submit
