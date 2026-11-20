@@ -21,6 +21,7 @@
         "ws": "^8.22.0",
       },
       "devDependencies": {
+        "@axe-core/playwright": "4.14.0",
         "@biomejs/biome": "2.6.8",
         "@jridgewell/trace-mapping": "0.3.31",
         "@tailwindcss/vite": "4.3.3",
@@ -40,6 +41,8 @@
     },
   },
   "packages": {
+    "@axe-core/playwright": ["@axe-core/playwright@4.14.0", "", { "dependencies": { "axe-core": "~4.14.0" }, "peerDependencies": { "playwright-core": ">= 1.0.0" } }, "sha512-SGUhG5PIHd2eMdpgBF2PyQLOhX+qyDR2PT4cmoS4Qk2ak+jX/rrSvst9l0PGv5WTHolKpUMvVmoHpr4cZgf1RQ=="],
+
     "@biomejs/biome": ["@biomejs/biome@2.6.8", "", { "optionalDependencies": { "@biomejs/cli-android-arm64": "2.6.8", "@biomejs/cli-android-x64": "2.6.8", "@biomejs/cli-darwin-arm64": "2.6.8", "@biomejs/cli-darwin-x64": "2.6.8", "@biomejs/cli-linux-arm64": "2.6.8", "@biomejs/cli-linux-arm64-musl": "2.6.8", "@biomejs/cli-linux-x64": "2.6.8", "@biomejs/cli-linux-x64-musl": "2.6.8", "@biomejs/cli-win32-arm64": "2.6.8", "@biomejs/cli-win32-x64": "2.6.8" }, "bin": { "biome": "bin/biome" } }, "sha512-kqZUFvX6/aYQOmzfRN5ANcfNS9wLH4aHLWWP/dQKyhRZVoA6rdWszA7DGugFcxPbMiznUyVYyukVl+ExZN4PQA=="],
 
     "@biomejs/cli-android-arm64": ["@biomejs/cli-android-arm64@2.6.8", "", { "os": "android", "cpu": "arm64" }, "sha512-X4JKPLK85kfUTwuuaORFplnBfGjKkp62PsFhhcL7F/Tpltc7pyUofjlkkMnlZZLWsifFl7LNB8ngVrwJg1uo1Q=="],
@@ -249,6 +252,8 @@
     "agent-browser": ["agent-browser@0.39.4", "", { "bin": { "agent-browser": "./bin/agent-browser.js" } }, "sha512-R0ue5CWlpkGtbcXeq3ZKM96zLrCXkNKEGyttgWhi0eSNKoNSvxglvv1/D9NhKxe+MI+djiCFepPd4PYOM0H2Rg=="],
 
     "asn1.js": ["asn1.js@5.4.1", "", { "dependencies": { "bn.js": "^4.0.0", "inherits": "^2.0.1", "minimalistic-assert": "^1.0.0", "safer-buffer": "^2.1.0" } }, "sha512-+I//4cYPccV8LdmBLiX8CYvf9Sp3vQsrqu2QNXRcrbiWvcx/UdlFiqUJJzxRQxgsZmvhXhn4cSKeSmoFjVdupA=="],
+
+    "axe-core": ["axe-core@4.14.1", "", {}, "sha512-FHfa+lmNjQZfJz1q8wKqIDwC6DExcHt/pkjNQb09a3NPjCKg2rhu5qb2S4r76ASyFNNtuFooJpZe37OgudVGtQ=="],
 
     "bn.js": ["bn.js@4.12.5", "", {}, "sha512-3aRg6/JxfffFD+OlOjOFR3Vo79l39ooBTFucxx+MT3dhCtzn3EmiUPQo+6/OZuI2jbXi3YKgmiTFBgChQMwIRQ=="],
 
