@@ -123,6 +123,10 @@ export interface TaskRec {
   cleaned?: boolean
   /** what putting it away kept, and why ("~/x (uncommitted changes)") */
   kept?: string[]
+  /** when its kept work was first recorded: the clock for the weekly reminder and tasks.keptExpiry */
+  keptAt?: number
+  /** when the weekly reminder naming this task's kept work was last sent */
+  keptNotifiedAt?: number
   /** starting it went wrong */
   trouble?: string
   plan?: string[]
@@ -632,6 +636,14 @@ export function archiveAfterMs(v: string) {
   const m = v.trim().match(/^(\d+)(\s*days?)?$/i)
   return m && Number(m[1]) > 0 ? Number(m[1]) * 86_400_000 : null
 }
+
+/** "7 days", "off": the same span as tasks.archiveAfter, for how long kept work may stay (tasks.keptExpiry) */
+function keptExpiryMs(v: string) {
+  return archiveAfterMs(v)
+}
+
+/** a Done task's kept work is named in news this often, one line per space (cleanup's one-time news is only the first) */
+const KEPT_REMIND_MS = 7 * 86_400_000
 
 /** leftovers of finished tasks are swept up this long after starting, and then every hour */
 const SWEEP_FIRST = 20_000
@@ -4808,6 +4820,12 @@ export class Engine extends Emitter<Events> {
       const news = r.kept.length && JSON.stringify(r.kept) !== JSON.stringify(t.kept)
       t.kept = r.kept.length ? r.kept : undefined
       t.cleaned = true
+      // a new keep, or a change in what is kept, starts a fresh clock: this one-time news is the first word about it,
+      // so the weekly reminder (keptSweep) is a week away. An unchanged keep keeps the clock it already had.
+      if (news) {
+        t.keptAt = Date.now()
+        t.keptNotifiedAt = t.keptAt
+      }
       this.saveNow()
       if (news && !quiet)
         this.emit('news', t.project, `${t.id} ${t.closed ? 'is done, nothing to merge' : 'was merged'}; kept ${r.kept.join(', ')}`, 'done', { task: t.id, event: t.closed ? 'closed' : 'merged' })
@@ -4868,7 +4886,7 @@ export class Engine extends Emitter<Events> {
    * merged or closed, never one whose agent is at work (or that you talk to again after its clean-up), and never what holds
    * unsaved or unmerged work. Nothing is touched while herdr does not answer.
    */
-  async sweep() {
+  async sweep(now = Date.now()) {
     const spaces = await this.wt.workspaces().catch(() => null)
     if (!spaces) return
     for (const t of this.tasks.filter(ended)) {
@@ -4883,7 +4901,76 @@ export class Engine extends Emitter<Events> {
       const left = !t.cleaned || (!!t.worktree && existsSync(t.worktree)) || (!!t.branch && (await G.branchExists(p.path, t.branch))) || !!(await this.wt.spaceOf(t.worktree, labelOf(t), spaces))
       if (left) await this.cleanup(t, true).catch(() => undefined)
     }
+    await this.keptSweep(now)
     await this.wt.closeRepoSpaces()
+  }
+
+  /**
+   * Work a Done task kept is named once a week, one line per space rather than one per task (cleanup's one-time news
+   * was only the first word). With tasks.keptExpiry set, work kept that long is removed by the forced path: holds()
+   * checked it before it was kept, and a task written to since then never expires. Both are reported in news.
+   */
+  private async keptSweep(now: number) {
+    const bySpace = new Map<string, TaskRec[]>()
+    for (const t of this.tasks) {
+      if (!ended(t) || !t.kept?.length) continue
+      // a keep from before these clocks existed counts from when the task ended; its first reminder is due at once
+      t.keptAt ??= t.doneAt ?? t.updated
+      t.keptNotifiedAt ??= t.keptAt
+      const expiry = keptExpiryMs(this.settings.get('tasks.keptExpiry', this.nameOf(t)))
+      const written = (t.spokenAt ?? 0) > t.keptAt
+      if (!written && expiry !== null && now - t.keptAt >= expiry) {
+        await this.expireKept(t, expiry)
+        // one that could not go (agent working, herdr open, removal failed) still keeps work: name it below
+        if (!t.kept?.length) continue
+      }
+      const list = bySpace.get(t.project) ?? []
+      list.push(t)
+      bySpace.set(t.project, list)
+    }
+    for (const [project, list] of bySpace) {
+      if (!list.some((t) => now - (t.keptNotifiedAt ?? now) >= KEPT_REMIND_MS)) continue
+      const words = list.map((t) => `${t.id} (${(t.kept ?? []).join(', ')})`).join('; ')
+      const on = keptExpiryMs(this.settings.get('tasks.keptExpiry', this.nameOf(list[0]))) !== null
+      const advice = on ? 'review it, remove it by hand once you are sure, or change tasks.keptExpiry' : 'set tasks.keptExpiry to remove it after a while, or remove it by hand once you are sure'
+      this.emit('news', project, `${words} still keep work from when they were done; ${advice}`, 'need', {
+        task: '',
+        event: 'needs-you',
+      })
+      for (const t of list) t.keptNotifiedAt = now
+      this.saveSoon()
+    }
+  }
+
+  /** remove a Done task's kept work for good: its agent and space closed long ago in cleanup, so only the place goes */
+  private async expireKept(t: TaskRec, expiry: number) {
+    const p = this.places.space(t.project)
+    if (!p || this.cleaning.has(t.id)) return
+    if (this.agents.status(this.key(t)) === 'working') return // a turn running now could still change the work
+    // a space opened again – or a herdr that stopped answering – is a reason to leave the work alone, not to guess
+    if (await this.wt.spaceOf(t.worktree, labelOf(t)).catch(() => true)) return
+    this.cleaning.add(t.id)
+    try {
+      const kept = t.kept ?? []
+      const left = await this.wt.remove({ repo: p.path, wt: t.worktree, branch: t.branch, label: labelOf(t) })
+      if (left.length) {
+        // it still holds work: keep the record, back the clock off so the hourly sweep does not retry every hour
+        t.keptAt = Date.now()
+        this.saveNow()
+        this.emit('news', t.project, `${t.id} could not remove its kept work: ${left.join(', ')}`, 'need', { task: t.id, event: 'needs-you' })
+        return
+      }
+      t.worktree = undefined
+      t.branch = undefined
+      t.kept = undefined
+      t.keptAt = undefined
+      t.keptNotifiedAt = undefined
+      this.saveNow()
+      const days = expiry / 86_400_000
+      this.emit('news', t.project, `${t.id} kept ${kept.join(', ')} past ${days} day${days === 1 ? '' : 's'} (tasks.keptExpiry): removed it`, 'need', { task: t.id, event: 'needs-you' })
+    } finally {
+      this.cleaning.delete(t.id)
+    }
   }
 
   /**
