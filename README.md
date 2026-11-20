@@ -93,7 +93,7 @@ The plugin action "Open Shepherdr" starts it when it is not running and shows it
 shepherdr doctor
 ```
 
-It checks every machine saved in herdr, puts Shepherdr's helper there again, starts its worker again and says what is missing. Settings → Machines says how each one is, and each machine's home space shows its load, memory and disk. [Other machines](docs/machines.md) has the details.
+It checks every machine saved in herdr, puts the helper there again and starts its worker again where either is missing or out of date, leaves a healthy one running, and says what is missing. Settings → Machines says how each one is, and each machine's home space shows its load, memory and disk. [Other machines](docs/machines.md) has the details.
 
 ### What permissions do the agents get?
 

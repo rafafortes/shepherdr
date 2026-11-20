@@ -697,16 +697,26 @@ export class Machines extends Emitter<Events> {
 
   /* ---------- shepherdr doctor ---------- */
 
-  /** check every machine and repair only what is broken: a worker that is gone, out of reach or on an old helper is
-   *  killed and started again with the helper put there; one alive, reachable and current is left alone, so asking why
-   *  something is slow never drops a working link (OPS-07). The command's optional step channel gets each machine's line
-   *  as soon as that one is done (UXD-08); the whole answer stays the same. */
+  /** check every machine: look again first, so a helper removed or a box changed since the last look is still put right.
+   *  Only a worker that is gone, out of reach or on an old helper is killed and started again; one alive, reachable and
+   *  current keeps its worker and its live link, so asking why something is slow never drops a working one (OPS-07).
+   *  The command's optional step channel gets each machine's line as soon as that one is done (UXD-08); the whole answer
+   *  stays the same. */
   async doctor(onStep?: (words: string) => void): Promise<string[]> {
     await this.sync()
     const out: string[] = []
     for (const l of this.links.values()) {
+      let fresh: Probe | undefined
+      try {
+        fresh = await probe(l.saved.target)
+      } catch {
+        /* an unreachable machine goes through the repair path below, as it always has */
+      }
       let detail = 'healthy, left running'
-      if (!l.worker || !l.reachable || !l.probe || !fits(l.probe)) {
+      if (fresh && l.worker && l.reachable && fits(fresh) && (!l.probe || sameBox(l.saved, l.probe, fresh))) {
+        l.probe = fresh
+        l.lacks = []
+      } else {
         if (l.worker) {
           l.worker.kill()
           await l.worker.exited
