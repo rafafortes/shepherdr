@@ -441,7 +441,11 @@ describe('shepherdr doctor', () => {
     const chrome = linkOf(m, 'doc-chrome')
     const out = linkOf(m, 'doc-out')
     await until('their workers, Chrome and links', () => !!fit.worker && !!chrome.worker && !!out.worker && !!chrome.chrome && !!out.chrome && fit.reachable && chrome.reachable && out.reachable)
-    const before = [fit.worker!.pid, chrome.worker!.pid, out.worker!.pid]
+    const running = (l: Link) => {
+      if (!l.worker) throw new Error(`${l.rec.machine} has no worker`)
+      return l.worker
+    }
+    const before = [running(fit), running(chrome), running(out)].map((w) => w.pid)
 
     const expected = [
       'doc-fit (doc-fit.test): healthy, left running',
@@ -455,10 +459,10 @@ describe('shepherdr doctor', () => {
     // each machine's line reaches the command's step channel as that machine is done, in the same words as the answer
     expect(steps).toEqual(expected)
     // the current machine kept its worker and needed no install; the two with a missing helper were killed and restarted
-    expect(fit.worker!.pid).toBe(before[0])
+    expect(running(fit).pid).toBe(before[0])
     expect(kinds('doc-fit').filter((k) => k === 'install')).toHaveLength(0)
     expect(before.slice(1).every(alive)).toBe(false)
-    expect(chrome.worker!.pid).not.toBe(before[1])
+    expect(running(chrome).pid).not.toBe(before[1])
     expect(kinds('doc-chrome').filter((k) => k === 'install')).toHaveLength(2)
   }, 40_000)
 
