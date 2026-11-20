@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
-const perl = spawnSync('perl', ['-MJSON::PP', '-e1']).status === 0
+const perl = spawnSync('perl', ['-e1']).status === 0
 
 process.env.SHEPHERDR_HOME = tmp('health')
 const H = await import('../server/live/health.ts')
@@ -73,6 +73,34 @@ describe('reading the machine', () => {
     expect(H.summary(s)).not.toContain('I/O pressure')
     expect(H.meters(s, limits(), {}).map((m) => m.name)).toEqual(['CPU', 'Memory', 'Disk'])
     expect(H.busy(s, { ...limits(), startIoPressure: 25 })).toBeUndefined()
+  })
+
+  test.if(perl)("a box sample carries a current helper's pressure and swap fields through", () => {
+    const home = tmp('health-current-helper')
+    const helper = join(home, '.shepherdr', 'helper')
+    mkdirSync(helper, { recursive: true })
+    const current = {
+      cores: 8,
+      load: 2.4,
+      load5: 2.1,
+      cpuSome: 31,
+      memSome: 24,
+      ioSome: 28,
+      memTotal: 16 * 2 ** 30,
+      memUsed: 10 * 2 ** 30,
+      swapTotal: 2 * 2 ** 30,
+      swapUsed: 1 * 2 ** 30,
+      disks: [{ path: '/home/current', pct: 60, freeGb: 20, dev: 42 }],
+      gpus: [],
+    }
+    writeFileSync(join(helper, 'health.pl'), `print '${JSON.stringify(current)}', "\\n";\n`)
+    const s = H.boxSample({ label: 'current', target: 'current.invalid', session: 'default', herdr: 'herdr', home, path: '/usr/bin', os: 'Linux' })
+    expect(s.ioSome).toBe(28)
+    expect(s.memSome).toBe(24)
+    expect(s.swapTotal).toBe(2 * 2 ** 30)
+    expect(s.swapUsed).toBe(1 * 2 ** 30)
+    expect(H.summary(s)).toContain('I/O pressure 28%')
+    expect(H.meters(s, limits(), {}).map((m) => m.name)).toContain('I/O')
   })
 })
 
