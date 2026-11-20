@@ -250,6 +250,9 @@ export interface Task {
   plan?: string[]
   /** none until the task's agent starts */
   agent?: TaskAgent
+  /** what this task's agent chat used inside the ledger's 35-day window: tokens, calls and pi's cost estimate; none
+   *  while it has made no counted call */
+  usage?: UsageTotals
   desc?: string
   said?: string
   /** its facts line when done: PR, commit, checks, review, what is not proven */
@@ -970,6 +973,14 @@ export interface QuotaRead {
   tried?: number
 }
 
+/** what a chat, a task or a space used inside the ledger's 35-day window: tokens, calls and pi's cost estimate when
+ *  its logs gave one (an estimate, never a bill) */
+export interface UsageTotals {
+  tokens: number
+  calls: number
+  cost?: number
+}
+
 /** Settings → Models → Summary (models-summary.ts): where the work runs, per provider and per model. Usage is read from
  *  the logs of Shepherdr's agents on this machine (usage-ledger.ts); the rest is the table's configured values and what
  *  runs and waits now */
@@ -978,6 +989,12 @@ export interface SummaryUsage {
   calls: number
   /** pi's own cost estimate, in dollars, when its logs gave one: an estimate, never a bill */
   cost?: number
+}
+
+/** one space's rolling usage in the Summary: the chats of its tasks, reviewers and coordinator added up */
+export interface SummarySpaceUsage extends UsageTotals {
+  key: string
+  name: string
 }
 export interface SummaryWindows<T> {
   h5: T
@@ -1077,6 +1094,8 @@ export interface ModelsSummary {
   /** when the logs were read once from their start (the backfill); none while it runs */
   backfilled?: number
   providers: SummaryProvider[]
+  /** one line per space of this machine's table, in the table's order: what its tasks, reviewers and coordinator used */
+  spaces: SummarySpaceUsage[]
   warnings: SummaryWarning[]
   /** models.maxAtOnce as each level holds it (its text, '' for none), and the machine's place id a write goes to: the
    *  cap editors write the entries at the level they pick */

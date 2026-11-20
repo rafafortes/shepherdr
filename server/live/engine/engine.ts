@@ -78,6 +78,7 @@ import { andWords, keyOf, providerName } from '../models-summary.ts'
 import { comparePlace, placeOrder } from '../../../shared/space-order.ts'
 import { allBlocked, blockedOnly, capWords, choose, waitShort, waitWords, type Blocked, type Choice, type Option, type Run } from './choose.ts'
 import { chainWords, fitHarness, harnessWords, recentChat, sameHarness } from '../restart.ts'
+import type { UsageLedger } from '../usage-ledger.ts'
 import * as G from './git.ts'
 import { Worktrees, type HerdrSpaces, type Made } from './worktrees.ts'
 
@@ -984,6 +985,8 @@ export class Engine extends Emitter<Events> {
     private places: Places,
     private settings: Settings,
     h?: HerdrSpaces,
+    /** the usage ledger: a task's row joins its agent chat's rolling totals here (none in a test without one) */
+    private usage?: UsageLedger,
   ) {
     super()
     this.taskIds = new TaskIds(this.places.spaces, this.data, (name) => placeId.space(name), this.dir)
@@ -1463,8 +1466,10 @@ export class Engine extends Emitter<Events> {
     // a row's line may be cut short: its title names what the line says in full (a held task's whole chain)
     const longSub = this.subOf(t, status, true, line)
     const doneAt = status === 'done' ? (t.doneAt ?? t.updated) : undefined
+    const usage = this.usage?.chatUsage(key)
     return {
       id: t.id,
+      ...(usage?.calls ? { usage } : {}),
       name: t.title,
       status,
       place: t.project,

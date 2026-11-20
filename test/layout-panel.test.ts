@@ -8,8 +8,23 @@ import { layout, settled, until } from './layout.ts'
 const { browser, world, server } = await layout()
 
 describe.skipIf(!browser)("a task's side panel", () => {
-  const task = (id: string) => `http://127.0.0.1:${server!.port}/?place=p:vm-str:gtm&task=${id}`
+  const task = (id: string, place = 'p:vm-str:gtm') => `http://127.0.0.1:${server!.port}/?place=${place}&task=${id}`
   const width = (page: Page, sel: string) => page.$eval(sel, (el) => Math.round(el.getBoundingClientRect().width))
+
+  test('the panel shows what the task’s agent chat used, with pi’s cost as an estimate where it has one', async () => {
+    const b = browser
+    if (!b) return
+    const page = await b.newPage({ viewport: { width: 1600, height: 900 } })
+    try {
+      await page.goto(task('HP-204', 'p:vm-str:herdr-projects'))
+      await page.getByRole('button', { name: 'Show task panel' }).click()
+      const usage = page.getByLabel('Model usage')
+      await usage.waitFor()
+      expect(await usage.textContent()).toMatch(/^Usage: [\d.]+[kKmM]? tokens · \d+ calls · ≈ \$\d+\.\d\d estimate$/)
+    } finally {
+      await page.close()
+    }
+  })
 
   test('widening a compact task/tool view subscribes to its split chats again', async () => {
     const page = await browser!.newPage({ viewport: { width: 1024, height: 850 } })

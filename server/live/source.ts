@@ -200,7 +200,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     (p) => this.peerOf(p),
     (k) => this.watched.includes(k),
   )
-  engine = new Engine(this.agents, this.chats, this.places, this.settings)
+  /** what each model call of Shepherdr's agents used, by the hour, and each provider's run-outs (usage-ledger.ts), read
+   *  from the agents' logs (usage-feed.ts); also the per-chat totals a task's row joins */
+  usage = new UsageLedger()
+  engine = new Engine(this.agents, this.chats, this.places, this.settings, undefined, this.usage)
   automations = new Automations()
   heartbeats = new Heartbeats()
   /** Autopilot's Run now: the wake a tap waits for, and the one its turn runs */
@@ -233,9 +236,6 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   lateCutFor = 60_000
   /** the chats whose turn ended and whose log is looked at again for a cut, and until when */
   private lateCuts = new Map<string, number>()
-  /** what each model call of Shepherdr's agents used, by the hour, and each provider's run-outs (usage-ledger.ts), read
-   *  from the agents' logs (usage-feed.ts) */
-  usage = new UsageLedger()
   usageFeed = new UsageFeed(this.usage, () => this.agents.records)
   /** Settings → Models → Quotas (quotas.ts): Claude Code's /usage, Command Code's account (its key from Secrets), and the
    *  alerts of every window at the warning share. A test puts its own Claude read and Command Code's fetch here, so no
@@ -808,7 +808,9 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     const spaces = this.matrixSpaces()
     const rows = modelsMatrix(this.settings, { host: HOST, name: NAME }, spaces).rows.map((r) => r.id)
     const agents: LiveAgent[] = Object.values(this.agents.records).map((r) => ({ key: r.key, kind: r.kind, model: r.model, status: this.agents.status(r.key) }))
-    const tasks: TaskFact[] = this.engine.tasks.filter((t) => !t.archived).map((t) => ({ status: this.engine.statusOf(t), agent: t.agent, reviewer: t.reviewer }))
+    const tasks: TaskFact[] = this.engine.tasks
+      .filter((t) => !t.archived)
+      .map((t) => ({ id: t.id, space: t.project.split(':')[2] ?? '~', status: this.engine.statusOf(t), agent: t.agent, reviewer: t.reviewer }))
     const watch = this.returns.list().map((o) => ({ key: keyOf(o.primary.kind, o.primary.model), back: o.back, ok: o.ok, resetAt: o.resetAt, at: o.at }))
     const now = Date.now()
     // what counts toward models.maxAtOnce now, and the entry each task held for a model's cap waits for

@@ -4,14 +4,19 @@
 // (quota: a read of its own, 4b) is set by whoever reads it. Settings → Models → Summary reads it (models-summary.ts).
 //
 // Shape: usage is provider/model → hour (ms ÷ 3,600,000) → { tokens, calls, cost? }; the hours go back KEEP_USAGE (35
-// days). Windows are whole hours: the hour a window starts in counts whole, so "the last 5 h" is 5 to 6 hours.
+// days). Alongside it, chats is chat → the same totals with the time of the chat's last call, one small record per chat
+// (task, reviewer or coordinator) so a task's panel and the summary's per-space lines can say what that task or space
+// used. It is pruned by the same 35-day pass and by the chats whose agent records are gone (usage-feed.ts); it adds a
+// lookup to count() but no write of its own — save() is the one debounced writer.
+// Windows are whole hours: the hour a window starts in counts whole, so "the last 5 h" is 5 to 6 hours.
 // Dedupe: a call is counted once per chat, by the call's own id (readers/: Claude Code's message id, pi's message id,
 // Codex's file and offset). A resumed session copies the calls before it into its new log file, so the ids repeat
 // across a chat's files, and a per-file position alone would count them twice; a per-chat set of the ids inside the
 // window does not, and a restart re-reads nothing it has counted. The ids go back as far as the usage does.
 import { home, readJson, writeJson } from '../store.ts'
 import { agyBaseId } from './models.ts'
-import type { QuotaFigure } from '../../shared/types.ts'
+import type { QuotaFigure, UsageTotals } from '../../shared/types.ts'
+export type { UsageTotals }
 
 export const HOUR = 3_600_000
 /** how far back usage and the ids that dedupe it are kept: a call older than this is not counted at all */
@@ -55,10 +60,9 @@ export interface RunOut {
   resetAt?: number
 }
 
-export interface UsageTotals {
-  tokens: number
-  calls: number
-  cost?: number
+/** one chat's rolling totals: what its calls used inside KEEP_USAGE, and when its last call was, for the prune */
+export interface ChatTotals extends UsageTotals {
+  at: number
 }
 
 /** usage.json's format: 2 is the harness keys (pi.spark/…, claude/…); a file with no version is 1 */
@@ -70,6 +74,8 @@ interface Stored {
   /** the format (VERSION); none for a file written before it existed */
   version?: number
   usage: Record<string, Record<string, Bucket>>
+  /** per chat: its totals in the window, with the time of its last call */
+  chats: Record<string, ChatTotals>
   /** per chat: each counted call id, with its hour */
   seen: Record<string, Record<string, number>>
   runOuts: RunOut[]
@@ -82,7 +88,7 @@ interface Stored {
   backfilled?: number
 }
 
-const fresh = (): Stored => ({ version: VERSION, usage: {}, seen: {}, runOuts: [], quotas: {}, alerts: {}, files: {} })
+const fresh = (): Stored => ({ version: VERSION, usage: {}, chats: {}, seen: {}, runOuts: [], quotas: {}, alerts: {}, files: {} })
 
 /** an alert key (`provider|window`) with its provider renamed, when the provider has a new name */
 const renamedAlert = (key: string) => {
@@ -167,7 +173,7 @@ export class UsageLedger {
     private memory = false,
   ) {
     this.data = memory ? fresh() : readJson<Stored>('usage.json', fresh(), dir)
-    for (const k of ['usage', 'seen', 'quotas', 'alerts', 'files'] as const) this.data[k] ??= {}
+    for (const k of ['usage', 'chats', 'seen', 'quotas', 'alerts', 'files'] as const) this.data[k] ??= {}
     this.data.runOuts ??= []
     this.migrate()
     this.prune(Date.now())
@@ -178,6 +184,7 @@ export class UsageLedger {
   private migrate() {
     if ((this.data.version ?? 1) >= VERSION) return
     this.data.usage = {}
+    this.data.chats = {}
     this.data.seen = {}
     this.data.files = {}
     delete this.data.backfilled
@@ -206,8 +213,28 @@ export class UsageLedger {
     b.tokens += c.tokens
     b.calls += 1
     if (c.cost !== undefined) b.cost = (b.cost ?? 0) + c.cost
+    let chatRec = this.data.chats[chat]
+    if (!chatRec) {
+      chatRec = { tokens: 0, calls: 0, at: c.at }
+      this.data.chats[chat] = chatRec
+    }
+    chatRec.tokens += c.tokens
+    chatRec.calls += 1
+    if (c.cost !== undefined) chatRec.cost = (chatRec.cost ?? 0) + c.cost
+    if (c.at > chatRec.at) chatRec.at = c.at
     this.save()
     return true
+  }
+
+  /** one chat's totals inside the 35-day window (0s when it has none): the task row and the per-space rollup read this */
+  chatUsage(chat: string): UsageTotals {
+    const t = this.data.chats[chat]
+    return t ? { tokens: t.tokens, calls: t.calls, ...(t.cost !== undefined ? { cost: t.cost } : {}) } : { tokens: 0, calls: 0 }
+  }
+
+  /** every chat's totals with its last call's time, for the summary's per-space rollup */
+  allChats(): [string, ChatTotals][] {
+    return Object.entries(this.data.chats)
   }
 
   /** a run-out, once per chat and time. `wasOut`: its provider was out already before it (the caller alerts only the
@@ -330,6 +357,15 @@ export class UsageLedger {
     this.save()
   }
 
+  /** keeps the totals of the chats given, and forgets the rest: their tasks (or spaces) are gone from the agents'
+   *  records, so a deleted task's chat does not keep its row in this bounded map forever (usage-feed.ts) */
+  keepChats(chats: Set<string>) {
+    const gone = Object.keys(this.data.chats).filter((c) => !chats.has(c))
+    if (!gone.length) return
+    for (const c of gone) delete this.data.chats[c]
+    this.save()
+  }
+
   /** the first read of every log is done: the backfill is not run again */
   get backfilled(): number | undefined {
     return this.data.backfilled
@@ -352,6 +388,9 @@ export class UsageLedger {
       for (const [id, h] of Object.entries(ids)) if (h < cutHour) delete ids[id]
       if (!Object.keys(ids).length) delete this.data.seen[chat]
     }
+    // a chat whose last call was before the window's start is gone, whatever its ids: the totals and `seen` are pruned
+    // by the same clock, so a resumed chat cannot keep its old totals after its ids have expired
+    for (const [chat, t] of Object.entries(this.data.chats)) if (t.at < now - KEEP_USAGE) delete this.data.chats[chat]
     this.data.runOuts = this.data.runOuts.filter((r) => r.at >= now - KEEP_RUNOUTS)
   }
 

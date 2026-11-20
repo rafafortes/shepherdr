@@ -114,6 +114,21 @@ describe('counting: once per call, in its hour', () => {
     expect(t).toEqual({ tokens: 500, calls: 2, cost: 0.5 })
   })
 
+  test('each chat keeps its own rolling totals, with the time of its last call; a deduped call adds nothing', () => {
+    const l = new UsageLedger(tmp('ledger-chats'), true)
+    l.count('A/Agent', 'spark/q', call('c1', 3, 300, 0.5), NOW)
+    l.count('A/Agent', 'claude/claude-opus-5-5', call('c2', 2, 200), NOW)
+    l.count('B/Agent', 'spark/q', call('c3', 1, 100, 0.1), NOW)
+    expect(l.count('A/Agent', 'spark/q', call('c1', 3, 300, 0.5), NOW)).toBe(false)
+    expect(l.chatUsage('A/Agent')).toEqual({ tokens: 500, calls: 2, cost: 0.5 })
+    expect(l.chatUsage('B/Agent')).toEqual({ tokens: 100, calls: 1, cost: 0.1 })
+    expect(l.chatUsage('C/Agent')).toEqual({ tokens: 0, calls: 0 })
+    expect(l.allChats().map(([chat, t]) => [chat, t.at])).toEqual([
+      ['A/Agent', ago(2) + 1000],
+      ['B/Agent', ago(1) + 1000],
+    ])
+  })
+
   test('the same call id in the same chat is counted once, however often it is read', () => {
     const l = new UsageLedger(tmp('ledger-dedupe'), true)
     for (let i = 0; i < 3; i++) l.count('A/Agent', 'claude/claude-opus-5-5', call('msg_1', 1, 122), NOW)
@@ -194,6 +209,8 @@ describe('the file: kept across a restart, pruned, the backfill once', () => {
     const DAY = 24 * HOUR
     l.count('A/Agent', 'spark/q', { id: 'ok', at: NOW - 30 * DAY, tokens: 5 }, NOW)
     l.count('A/Agent', 'spark/old', { id: 'old', at: NOW - 34 * DAY, tokens: 5 }, NOW)
+    l.count('Old/Agent', 'spark/q', { id: 'old-chat', at: NOW - 34 * DAY, tokens: 5 }, NOW)
+    l.count('Fresh/Agent', 'spark/q', { id: 'fresh-chat', at: NOW - 2 * DAY, tokens: 5 }, NOW)
     l.runOut(runOut('A/Agent', 20 * 24, { key: 'spark/q', reason: 'Out of credit' }), NOW)
     l.runOut(runOut('A/Agent', 50 * 24, { key: 'spark/q', reason: 'Out of allowance' }), NOW)
     l.prune(NOW)
@@ -201,6 +218,9 @@ describe('the file: kept across a restart, pruned, the backfill once', () => {
     // two days later the 34-day-old call is past the 35 days; the 30-day-old one is not
     l.prune(NOW + 2 * DAY)
     expect([...l.byKey(0).keys()]).toEqual(['spark/q'])
+    // a chat goes when its last call passes the 35 days, on the same pass as the hours and ids it counted in
+    expect(l.chatUsage('Old/Agent')).toEqual({ tokens: 0, calls: 0 })
+    expect(l.chatUsage('Fresh/Agent')).toEqual({ tokens: 5, calls: 1 })
     // and its id goes with it: the same call read again would count (it is no longer in the window's ids)
     expect(l.count('A/Agent', 'spark/old', { id: 'old', at: NOW - 34 * DAY, tokens: 5 }, NOW + 2 * DAY)).toBe(false)
     // eleven days later the run-out of 50 days is past its 60 days' keep; the one of 20 days is not
@@ -217,6 +237,23 @@ describe('the file: kept across a restart, pruned, the backfill once', () => {
     expect(l.position('/logs/a.jsonl')).toEqual({ ino: 1, offset: 10 })
     expect(l.position('/logs/b.jsonl')).toBeUndefined()
     l.keepFiles(new Set(['/logs/a.jsonl']))
+  })
+
+  test('the chats whose agent records are gone are dropped; the rest keep their totals', () => {
+    const l = new UsageLedger(tmp('ledger-keep-chats'), true)
+    l.count('A/Agent', 'k/m', call('a', 1), NOW)
+    l.count('p:box:gtm', 'k/m', call('b', 1), NOW)
+    l.count('Gone/Agent', 'k/m', call('c', 1), NOW)
+    l.keepChats(new Set(['A/Agent', 'p:box:gtm']))
+    expect(
+      l
+        .allChats()
+        .map(([c]) => c)
+        .sort(),
+    ).toEqual(['A/Agent', 'p:box:gtm'])
+    l.keepChats(new Set(['A/Agent', 'p:box:gtm']))
+    expect(l.chatUsage('A/Agent').calls).toBe(1)
+    expect(l.chatUsage('Gone/Agent').calls).toBe(0)
   })
 
   test('a memory ledger writes nothing; a flush with nothing changed writes nothing either', () => {
@@ -519,6 +556,19 @@ describe('writing usage.json: one write per delay under a trickle, compact and c
     expect(parsed.usage['k/old']).toBeUndefined()
     expect(parsed.usage['k/new'][String(recent)].tokens).toBe(5)
     l.stop()
+  })
+
+  test('500 chats add one small record each to the file: a bounded few tens of KB', () => {
+    const dir = tmp('ledger-500-chats')
+    const l = new UsageLedger(dir)
+    for (let i = 0; i < 500; i++) l.count(`T-${i}/Agent`, 'k/m', { id: `c${i}`, at: NOW - i * 1000, tokens: 100 + i }, NOW)
+    l.flush(NOW)
+    const data = JSON.parse(readFileSync(join(dir, 'usage.json'), 'utf8'))
+    const bytes = (v: unknown) => Buffer.byteLength(JSON.stringify(v))
+    const after = bytes(data)
+    const before = bytes({ ...data, chats: undefined })
+    expect(Object.keys(data.chats)).toHaveLength(500)
+    expect(after - before).toBeLessThan(100_000)
   })
 
   test('a reader sees the change in memory before it reaches disk, so a cap never reads a stale file', () => {
