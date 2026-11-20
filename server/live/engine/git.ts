@@ -11,15 +11,44 @@ export interface Run {
   err: string
 }
 
+/**
+ * A remote-touching git command gets a bound even when its caller passes none: a dead SSH connection, a black-holed
+ * socket or a stale lock prompt must not leave a merge (and its repo's place in the queue) unsettled for ever. Purely
+ * local git stays unbounded, and 120 s matches gh's own bound.
+ */
+export const DEFAULT_GIT_TIMEOUT_MS = 120_000
+const NETWORK_GIT = new Set(['fetch', 'pull', 'push', 'ls-remote', 'clone'])
+
+/** the git subcommand, past global options and their values, for the timeout decision */
+function gitCommand(cmd: string[]): string | undefined {
+  if (cmd[0] !== 'git') return undefined
+  for (let i = 1; i < cmd.length; i++) {
+    const a = cmd[i]
+    if (a === '-C' || a === '-c' || a === '--config-env' || a === '--git-dir' || a === '--work-tree' || a === '--namespace' || a === '--exec-path') {
+      i++
+      continue
+    }
+    if (a.startsWith('-')) continue
+    return a
+  }
+  return undefined
+}
+
+/** the bound sh() applies: the caller's, else the default for a network git command */
+export function shTimeout(cmd: string[], opts: { timeoutMs?: number } = {}): number | undefined {
+  return opts.timeoutMs || (NETWORK_GIT.has(gitCommand(cmd) ?? '') ? DEFAULT_GIT_TIMEOUT_MS : undefined)
+}
+
 /** a command on the task's machine: here, or over SSH on another one (box.ts) */
 export async function sh(cmd: string[], cwd: string, opts: { timeoutMs?: number; env?: Record<string, string>; here?: boolean } = {}): Promise<Run> {
+  const timeoutMs = shTimeout(cmd, opts)
   if (BOX && !opts.here) {
-    const r = await run(cmd, { cwd, env: { GIT_TERMINAL_PROMPT: '0', ...opts.env }, timeoutMs: opts.timeoutMs })
+    const r = await run(cmd, { cwd, env: { GIT_TERMINAL_PROMPT: '0', ...opts.env }, timeoutMs })
     return { ok: r.code === 0, code: r.code, out: r.out.trimEnd(), err: r.err.trimEnd() }
   }
   const p = Bun.spawn(cmd, { cwd, stdout: 'pipe', stderr: 'pipe', env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...opts.env } })
   let timedOut = false
-  const t = opts.timeoutMs ? setTimeout(() => ((timedOut = true), p.kill()), opts.timeoutMs) : null
+  const t = timeoutMs ? setTimeout(() => ((timedOut = true), p.kill()), timeoutMs) : null
   const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited])
   if (t) clearTimeout(t)
   return { ok: code === 0 && !timedOut, code: timedOut ? 124 : code, out: out.trimEnd(), err: timedOut ? `${err}\ntimed out` : err.trimEnd() }
@@ -339,11 +368,12 @@ export async function catchUp(repo: string, base: string, then = 'then merge aga
   const ok: Run = { ok: true, code: 0, out: '', err: '' }
   if (!(await git(repo, 'remote', 'get-url', 'origin')).ok) return ok
   // offline: go on with what is here
-  const fetched = fetchMs ? await sh(['git', 'fetch', '--quiet', 'origin', base], repo, { timeoutMs: fetchMs }) : await git(repo, 'fetch', '--quiet', 'origin', base)
+  const bound = fetchMs ?? DEFAULT_GIT_TIMEOUT_MS
+  const fetched = await sh(['git', 'fetch', '--quiet', 'origin', base], repo, { timeoutMs: bound })
   // offline: go on with what is here, saying that the base was not brought up (a bounded fetch that did not answer
   // in time is that too, and its code says so)
   if (!fetched.ok)
-    return { ...ok, code: fetched.code, err: fetched.code === 124 ? `origin did not answer in ${Math.round(fetchMs! / 1000)} s` : fetched.err.split('\n')[0] || 'origin could not be reached' }
+    return { ...ok, code: fetched.code, err: fetched.code === 124 ? `origin did not answer in ${Math.round(bound / 1000)} s` : fetched.err.split('\n')[0] || 'origin could not be reached' }
   const remote = `origin/${base}`
   if (!(await git(repo, 'rev-parse', '--verify', '--quiet', remote)).ok) return ok
   if (!(await branchExists(repo, base))) return git(repo, 'branch', '--', base, remote)

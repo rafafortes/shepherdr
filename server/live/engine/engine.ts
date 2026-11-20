@@ -883,6 +883,9 @@ export class Engine extends Emitter<Events> {
   private landings = new Map<string, Promise<{ ok: boolean; error?: string; note?: string }>>()
   /** how long shepherdr merge may take before it answers that it isn't through yet (tests shorten it) */
   mergeDeadline = MERGE_DEADLINE
+  /** the merge's catch-up fetch, shorter than the caller's deadline so a remote that does not answer frees the queue
+   *  with words about it, rather than holding the repo until sh()'s default git bound (tests shorten it) */
+  mergeFetchMs = 20_000
   /** stopping: no merge starts */
   private closing = false
   /** how long GitHub's checks took lately, per repo, and when that was asked */
@@ -4556,9 +4559,14 @@ export class Engine extends Emitter<Events> {
     t.mergeStop = undefined
     const p = this.proj(t)
     const wt = t.worktree
-    // main here first catches up with the remote's, so the branch is rebased on what main really is
-    const up = await G.catchUp(p.path, t.base)
+    // main here first catches up with the remote's, so the branch is rebased on what main really is. Bound the fetch
+    // well under the caller's deadline: an answerless remote must free this repo's place in the queue with words
+    // about it, not leave every later merge here waiting behind this one
+    const up = await G.catchUp(p.path, t.base, 'then merge again', this.mergeFetchMs)
     if (!up.ok) return { ok: false, error: `Can't merge ${t.id}: ${up.err}` }
+    // a timed-out fetch is offline, not a refusal: the merge goes on from the base as it is here, but the agent and
+    // the row are told, just as the GitHub path's note says main there was not brought up
+    const stale = up.err ? `${t.base} here was not brought up to the remote: ${up.err}` : undefined
     // a train's gate left it at the top of its stack (Shepherdr stopped while it ran): back on its branch first
     if (!(await G.git(wt, 'branch', '--show-current')).out) await G.git(wt, 'checkout', '--quiet', t.branch)
     await G.commitAll(wt, `${t.id}: ${t.title}`)
@@ -4599,7 +4607,7 @@ export class Engine extends Emitter<Events> {
       }
       t.squash = (await G.git(p.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${t.base}`)).out || undefined
     }
-    return this.markMerged(t, await this.pushBase(p, t.base, note))
+    return this.markMerged(t, await this.pushBase(p, t.base, [note, stale].filter(Boolean).join('; ') || undefined))
   }
 
   /**
@@ -4751,7 +4759,7 @@ export class Engine extends Emitter<Events> {
    * main here comes up to GitHub's, so the merge is here too (and Shepherdr's own update sees it), then it is marked.
    * `fetchMs` bounds the catch-up's fetch: `ready` and the watch call this with no deadline of their own around it, so
    * a remote that does not answer leaves main here as it is, said in the note, rather than holding them. The merge
-   * path passes none: its own caller races a deadline of its own.
+   * path passes its own shorter bound for the same reason, and says so in its note too.
    */
   private async mergedOnGitHub(t: TaskRec, p: Space, note: string, fetchMs?: number) {
     const up = await G.catchUp(p.path, t.base!, `then run git pull in ${t.base} here`, fetchMs)
