@@ -165,6 +165,29 @@ describe('tasks.json writes are coalesced, and durability is kept where it matte
     }
   })
 
+  test('a task added while held, and words written to one while held, are durable before the call returns', async () => {
+    const project = await bigHome()
+    const w = world()
+    await Bun.sleep(0)
+    w.settings.set('machine.maxTasks', '0') // no room: add() and tell() both go through hold()
+    const spy = spyOn(store, 'writeJson').mockImplementation((...args: Parameters<typeof store.writeJson>) => realWriteJson(...args))
+    w.engine.saveAfter = 60_000
+    try {
+      const t = w.engine.add({ project, title: 'Held', desc: 'the brief', by: 'test' })
+      expect(writes(spy)).toBe(1)
+      const held = onDisk().tasks.find((x: { id: string }) => x.id === t.id)
+      expect(held.desc).toContain('the brief')
+      expect(held.held.why).toBe('zero')
+      task(w, 'T-LIVE').todo = true // a task waiting for a go: tell() holds its words instead of starting it
+      await w.engine.tell('T-LIVE', 'words from the coordinator', { gate: true })
+      expect(writes(spy)).toBe(2)
+      expect(onDisk().tasks.find((x: { id: string }) => x.id === 'T-LIVE').desc).toContain('words from the coordinator')
+    } finally {
+      w.engine.stop()
+      spy.mockRestore()
+    }
+  })
+
   test('a failed write is said once per path and leaves the state dirty for a later flush', async () => {
     await bigHome()
     const w = world()
@@ -217,12 +240,19 @@ test('a compact write of a 6.7 MB tasks.json is measured against the indented on
   t = performance.now()
   writeFileSync(`${dir}/compact.json`, compact)
   const compactWrite = performance.now() - t
+  // the whole writeJson path, including the fsync and rename a store of record gets, before and after the toggle
+  t = performance.now()
+  realWriteJson('tasks.json', value, dir, false)
+  const prettyFull = performance.now() - t
+  t = performance.now()
+  realWriteJson('tasks.json', value, dir, true)
+  const compactFull = performance.now() - t
   expect(compact.length).toBeLessThan(pretty.length)
-  expect(JSON.parse(compact).tasks.length).toBe(1000)
+  expect(JSON.parse(readFileSync(`${dir}/tasks.json`, 'utf8')).tasks.length).toBe(1000)
   console.log(
     `BENCH tasks.json ${(pretty.length / 1e6).toFixed(2)} MB pretty ` +
-      `(stringify ${prettyStringify.toFixed(1)} ms + write ${prettyWrite.toFixed(1)} ms) -> ` +
+      `(stringify ${prettyStringify.toFixed(1)} ms + write ${prettyWrite.toFixed(1)} ms, writeJson ${prettyFull.toFixed(1)} ms) -> ` +
       `${(compact.length / 1e6).toFixed(2)} MB compact ` +
-      `(stringify ${compactStringify.toFixed(1)} ms + write ${compactWrite.toFixed(1)} ms)`,
+      `(stringify ${compactStringify.toFixed(1)} ms + write ${compactWrite.toFixed(1)} ms, writeJson ${compactFull.toFixed(1)} ms)`,
   )
 })

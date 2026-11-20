@@ -1064,7 +1064,8 @@ export class Engine extends Emitter<Events> {
    *    task's own settings written by a command that reports done (queue ×2, schedule ×2, setWorker, setPriority,
    *    plan, pin).
    *  - soon (saveSoon): status lines (settleOne ×2, quiet, hold), stall checks (checkStalls), the wait reasons release
-   *    restates across the line (release ×3), progress reports (report).
+   *    restates across the line (release ×3), progress reports (report); a plain hold() is here too, but one carrying
+   *    go text, a new task's reserved id or words just added to its brief writes now (see hold).
    *  - turn (save): the rest, written at the end of the turn as before (sweepGates, dropTaskGate, the constructor's
    *    migration, beginScheduled's wait, autoArchive, routeRecovered).
    */
@@ -2246,8 +2247,10 @@ export class Engine extends Emitter<Events> {
     return { queued, scheduled, todo, merges }
   }
 
-  /** hold it until there's room: its line says why, and its chat gets a small card */
-  private hold(t: TaskRec, why: HeldWhy, go?: { text: string; why: string; plain?: boolean }) {
+  /** hold it until there's room: its line says why, and its chat gets a small card. A hold that carries someone's go
+   *  text, or one that follows a new task's id being reserved or its brief being edited, is on disk when it returns:
+   *  a hard kill in the next second must not lose words that were already reported delivered. */
+  private hold(t: TaskRec, why: HeldWhy, go?: { text: string; why: string; plain?: boolean }, durable = false) {
     const l = this.settings.machine()
     t.held = { why, since: t.held?.since ?? Date.now(), ...(go ? { go: go.text, goWhy: go.why, plain: go.plain } : {}) }
     t.after = undefined
@@ -2270,7 +2273,8 @@ export class Engine extends Emitter<Events> {
       spaceZero: `waiting: ${cap?.shown ?? 'its space'} is set to 0 tasks`,
     }[why]
     this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: words } })
-    this.saveSoon()
+    if (go || durable) this.saveNow()
+    else this.saveSoon()
     this.settleOne(t)
     // its turn comes at a pass: one held only by the line asks for it now, so a machine with room does not sit on a task
     // until the next health sample (release() starts the ones ahead of it, and then it, at their turn)
@@ -2499,7 +2503,7 @@ export class Engine extends Emitter<Events> {
     this.data.tasks.push(t)
     if (room.why) {
       t.told = 'queued'
-      this.hold(t, room.why)
+      this.hold(t, room.why, undefined, true) // the id and brief are reserved before the caller is told they were added
     } else this.saveNow()
     this.emit('news', t.project, `${t.id} was added: ${t.title}`, 'added', { task: t.id, event: 'added' })
     if (!room.why && !after.length) this.startTask(t).catch((e) => this.troubled(t, e))
@@ -4969,7 +4973,7 @@ export class Engine extends Emitter<Events> {
         // starts on it once there's room
         const [work, how] = splitBrief(t.desc)
         t.desc = [work, text, how].filter(Boolean).join('\n\n')
-        this.hold(t, r.why)
+        this.hold(t, r.why, undefined, true) // the words just added to its brief must survive a hard kill
       } else this.hold(t, r.why, { text: t.held?.go ? `${t.held.go}\n\n${said}` : said, why: 'its coordinator said go', plain: true })
       return { held: r.why }
     }
