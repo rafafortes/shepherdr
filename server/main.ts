@@ -6,7 +6,10 @@ import { DemoWorld } from './demo/world.ts'
 import { Push } from './push.ts'
 import type { Source } from './source.ts'
 import { HOME, writeJson } from './store.ts'
+import { install } from './live/server-log.ts'
 
+// a server the plugin supervises (or a machine worker) logs to the shared file; one started by hand keeps its stdout
+if (process.env.SHEPHERDR_SUPERVISOR || process.env.SHEPHERDR_BOX) install()
 const root = join(import.meta.dir, '..')
 const port = Number(process.env.SHEPHERDR_PORT ?? 7787)
 const kind = process.env.SHEPHERDR_SOURCE === 'demo' ? 'demo' : 'live'

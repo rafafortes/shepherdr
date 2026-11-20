@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, watch, writeF
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HOME, readJson, writeJson } from '../server/store.ts'
+import { install } from '../server/live/server-log.ts'
 import type { UpdateStatus } from '../shared/types.ts'
 import { codeOf, Supervisor } from './supervisor.ts'
 import { refDirs, run as runCmd } from './update.ts'
@@ -18,6 +19,9 @@ let child: ChildProcess | null = null
 let stopping = false
 /** the code this supervisor runs, as it started */
 const CODE = codeOf(import.meta.path)
+
+// every console line this supervisor and the server it starts write carries the date and time, and rotates the log
+install()
 
 /** stop new voice calls (or let them start again) and say how many are on; a server that doesn't answer has none */
 async function drain(on: boolean) {

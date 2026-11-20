@@ -3106,7 +3106,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
             probed.set(model, probe)
             // its failure is silent for the human — no card, no alert, nothing to answer — and leaves only the log and a
             // longer wait; a sibling space waiting on that model hears the same failure from this pass, unasked
-            if (!probe.ok) console.error(`shepherdr: ${to.primary.kind} doesn't answer yet: ${probe.said.slice(0, 160)}`)
+            if (!probe.ok) console.error(`shepherdr: ${to.primary.kind} doesn't answer yet: ${probe.said.slice(0, 80)}${probe.said.length > 80 ? '… (excerpt)' : ''}`)
           }
           if (!probe.ok) {
             this.returns.failed(o.role, o.space, now)

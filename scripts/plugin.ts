@@ -11,6 +11,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { takeOver } from './take-over.ts'
 import { prepare } from './prepare.ts'
+import { rotate } from '../server/live/server-log.ts'
 
 const ROOT = resolve(process.env.HERDR_PLUGIN_ROOT ?? join(import.meta.dir, '..'))
 const STATE = process.env.HERDR_PLUGIN_STATE_DIR ?? join(process.env.SHEPHERDR_HOME ?? join(homedir(), '.shepherdr'), 'run')
@@ -142,6 +143,7 @@ async function start(): Promise<boolean> {
     }
   }
   mkdirSync(STATE, { recursive: true })
+  rotate(LOG)
   const out = openSync(LOG, 'a')
   const child = spawn(process.execPath, [join(ROOT, 'scripts', 'supervise.ts')], {
     cwd: ROOT,
