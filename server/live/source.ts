@@ -109,6 +109,7 @@ import { Mirror } from './mirror.ts'
 import { claudeHome, claudeProjectDirs, piSessionDirs } from './readers/find.ts'
 import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
+import { agentCounts, folderSize, FOLDERS, lines as resourceLines, orphanChromes, type Resources } from './resources.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places, shortId, type Space } from './places.ts'
 import {
   privatePrompt,
@@ -348,6 +349,10 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
   installIO: InstallIO = systemInstallIO
   /** the checkout this install runs from; a test names a fake github-installations layout */
   installRoot = ROOT
+  /** doctor's resource lines (RES-11); a test injects counts and sizes so doctor never measures this machine */
+  resourceReader: () => Promise<Resources> = () => this.resourceFacts()
+  /** the folder doctor measures for check logs; a test points it at a temporary tree */
+  checkLogRoot = process.env.SHEPHERDR_CHECK_LOG_ROOT ?? join(homedir(), '.cache', 'shepherdr', 'check-local')
 
   constructor() {
     super()
@@ -658,6 +663,16 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
    *  has not said whether Shepherdr may delete another install's folder, so nothing here removes one. */
   private staleInstallLines(): string[] {
     return installLines(staleInstalls(this.installRoot, this.installIO), Math.round(INSTALL_AGE_MS / 86_400_000))
+  }
+
+  /** what doctor measures on this machine (RES-11): idle/done agents by CLI, kept work, Chrome processes of done or
+   *  gone tasks, and the sizes of the folders Shepherdr fills. Read only: nothing here starts, kills or removes. */
+  private async resourceFacts(): Promise<Resources> {
+    const { idle, done } = agentCounts(this.agents.records, (key) => this.agents.status(key))
+    const live = new Set(this.engine.tasks.filter((t) => !ended(t) && !t.stopped && !t.archived).map((t) => t.id))
+    const chromes = orphanChromes(this.browsers ? await this.browsers.chromes() : [], live)
+    const folders = [...FOLDERS.map((name) => ({ name: name as string, bytes: folderSize(join(boxDir(), name)) })), { name: 'check logs', bytes: folderSize(this.checkLogRoot) }]
+    return { idle, done, kept: this.engine.keptLeftovers(), chromes, folders }
   }
 
   /** a look at this machine: limits judged, held tasks started where there is room, the screen told of new numbers */
@@ -5552,6 +5567,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
           ...this.agents.unreadableLogs(),
           ...orphanLines(this.orphansFound),
           ...this.staleInstallLines(),
+          ...resourceLines(await this.resourceReader()),
           ...((await this.peers?.doctor()) ?? []),
           ...(await this.places.doctor()),
         ]

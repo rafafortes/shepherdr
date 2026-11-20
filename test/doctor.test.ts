@@ -2,7 +2,7 @@
 // removed, or a proof server's SHEPHERDR_HOME under /tmp — and the ready kill line beside each. Nothing here reads
 // the operator's processes: the process table, the worktree root and the ender are all stand-ins.
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmp } from './tmp.ts'
 
@@ -15,11 +15,13 @@ process.env.PATH = `${standIns}:${process.env.PATH}`
 process.env.SHEPHERDR_AGENT_BROWSER = join(standIns, 'agent-browser')
 
 const O = await import('../server/live/orphans.ts')
+const R = await import('../server/live/resources.ts')
 const { LiveSource } = await import('../server/live/source.ts')
 type Row = import('../server/live/orphans.ts').Row
 type Source = import('../server/live/orphans.ts').Source
 type ScanOpts = import('../server/live/orphans.ts').ScanOpts
 const src = new LiveSource()
+src.checkLogRoot = join(home, 'check-local') // the default reader never measures this machine's check logs
 afterAll(() => src.stop())
 /** the news is sent when the set changes; each test starts with a fresh set */
 const resetSignature = () => {
@@ -197,6 +199,156 @@ describe('the doctor lines', () => {
     } finally {
       src.installIO = wasIO
       src.installRoot = wasRoot
+    }
+  })
+})
+
+describe('the resource lines', () => {
+  /** a stand-in folder tree: /box/inbox has a subfolder, a file and a link; only the two files have bytes */
+  const io: import('../server/live/resources.ts').SizeIO = {
+    exists: (p) => ['/box/inbox', '/box/inbox/a', '/box/artifacts'].includes(p),
+    entries: (p) =>
+      p === '/box/inbox'
+        ? [
+            { name: 'a', dir: true, link: false },
+            { name: 'x.txt', dir: false, link: false },
+            { name: 'loop', dir: false, link: true },
+          ]
+        : p === '/box/inbox/a'
+          ? [{ name: 'y.txt', dir: false, link: false }]
+          : p === '/box/artifacts'
+            ? []
+            : [],
+    size: (p) => ({ '/box/inbox/x.txt': 1024, '/box/inbox/a/y.txt': 2048 })[p] ?? 0,
+  }
+
+  test('a folder size sums files recursively, skips links and is undefined when absent', () => {
+    expect(R.folderSize('/box/inbox', io)).toBe(3072)
+    expect(R.folderSize('/box/artifacts', io)).toBe(0)
+    expect(R.folderSize('/box/browser', io)).toBeUndefined()
+  })
+
+  test('a size uses the biggest unit that fits', () => {
+    expect(R.bytes(512)).toBe('512 B')
+    expect(R.bytes(1536)).toBe('1.5 KB')
+    expect(R.bytes(2 * 1024 * 1024)).toBe('2.0 MB')
+  })
+
+  test('a file or folder gone mid-walk costs only that entry, never the doctor output', () => {
+    expect(
+      R.folderSize('/box/inbox', {
+        ...io,
+        entries: () => {
+          throw new Error('gone')
+        },
+      }),
+    ).toBe(0)
+    const oneGone = {
+      ...io,
+      size: (p: string) => {
+        if (p === '/box/inbox/x.txt') throw new Error('gone')
+        return io.size(p)
+      },
+    }
+    expect(R.folderSize('/box/inbox', oneGone)).toBe(2048)
+  })
+
+  test('the real folder reader measures a folder on disk', () => {
+    const dir = join(home, 'sizes')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'a.txt'), '1234567890')
+    expect(R.folderSize(dir)).toBe(10)
+  })
+
+  test('agent counts group idle and done by kind; only non-live Chrome tasks are orphans', () => {
+    const records = {
+      a: { key: 'a', kind: 'claude' },
+      b: { key: 'b', kind: 'pi' },
+      c: { key: 'c', kind: 'pi' },
+      d: { key: 'd', kind: 'codex' },
+    }
+    const status = (key: string) => ({ a: 'idle', b: 'idle', c: 'done', d: 'working' })[key] ?? 'gone'
+    expect(R.agentCounts(records, status)).toEqual({ idle: { claude: 1, pi: 1 }, done: { pi: 1 } })
+    const chromes = [
+      { pid: 1, task: 'SHE-1', age: 0 },
+      { pid: 2, task: 'SHE-2', age: 0 },
+    ]
+    expect(R.orphanChromes(chromes, new Set(['SHE-1']))).toEqual([chromes[1]])
+  })
+
+  const facts = (over: Partial<import('../server/live/resources.ts').Resources> = {}): import('../server/live/resources.ts').Resources => ({
+    idle: { claude: 1, pi: 2, codex: 0 },
+    done: { claude: 1 },
+    kept: ['SHE-1 worktree, branch'],
+    chromes: [
+      { pid: 1, task: 'SHE-9', age: 100 },
+      { pid: 2, task: 'SHE-9', age: 200 },
+    ],
+    folders: [
+      { name: 'inbox', bytes: 1536 },
+      { name: 'check logs', bytes: 5 * 1024 * 1024 * 1024 },
+    ],
+    ...over,
+  })
+
+  test('each growing thing gets one line, naming the verb or setting that deals with it', () => {
+    const out = R.lines(facts())
+    expect(out).toHaveLength(6)
+    expect(out[0]).toContain('Idle agents: 1 claude, 2 pi')
+    expect(out[0]).toContain('agents.idleClose')
+    expect(out[1]).toContain('Done agents still running: 1 claude')
+    expect(out[1]).toContain('agents.idleClose')
+    expect(out[2]).toContain('Done tasks keeping work (1): SHE-1 worktree, branch')
+    expect(out[2]).toContain('tasks.keptExpiry')
+    expect(out[3]).toContain('Shared-browser processes of done or gone tasks (2): SHE-9 (2)')
+    expect(out[3]).toContain('browser.idleClose')
+    expect(out[4]).toContain('Shepherdr inbox: 1.5 KB')
+    expect(out[4]).toContain('tasks.inboxKeep')
+    expect(out.at(-1)).toContain('SHEPHERDR_CHECK_KEEP')
+  })
+
+  test('an empty machine produces none, and a large set stays short', () => {
+    expect(
+      R.lines(
+        facts({
+          idle: {},
+          done: {},
+          kept: [],
+          chromes: [],
+          folders: [
+            { name: 'inbox', bytes: undefined },
+            { name: 'browser', bytes: 0 },
+          ],
+        }),
+      ),
+    ).toEqual([])
+    const many = facts({
+      kept: Array.from({ length: 12 }, (_, i) => `SHE-${i} worktree`),
+      chromes: Array.from({ length: 12 }, (_, i) => ({ pid: i, task: `SHE-${i}`, age: 0 })),
+      idle: {},
+      done: {},
+      folders: [],
+    })
+    const out = R.lines(many)
+    expect(out).toHaveLength(2)
+    expect(out[0]).toContain('and 4 more')
+    expect(out[1]).toContain('and 4 more tasks')
+  })
+
+  test('the CLI prints the lines from the reader, and none when it is empty', async () => {
+    const was = src.resourceReader
+    try {
+      src.resourceReader = async () => facts()
+      const out = (await src.cli(['doctor'], {})).out
+      expect(out).toContain('Idle agents: 1 claude, 2 pi')
+      expect(out).toContain('Done tasks keeping work (1)')
+      expect(out).toContain('Shared-browser processes of done or gone tasks (2)')
+      expect(out).toContain('Shepherdr inbox: 1.5 KB')
+      src.resourceReader = async () => ({ idle: {}, done: {}, kept: [], chromes: [], folders: [] })
+      const clean = (await src.cli(['doctor'], {})).out
+      for (const word of ['Idle agents:', 'Done agents still running:', 'Done tasks keeping work', 'Shared-browser processes', 'Shepherdr inbox:']) expect(clean).not.toContain(word)
+    } finally {
+      src.resourceReader = was
     }
   })
 })

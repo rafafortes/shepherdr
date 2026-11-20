@@ -16,6 +16,9 @@ import { cleanup, sweep, tmp } from './tmp.ts'
 if (!process.env.SHEPHERDR_TEST_RUN) sweep()
 const home = tmp('test-home')
 process.env.SHEPHERDR_HOME = home
+// doctor's check-log size line (server/live/resources.ts) measures this folder; a test that runs doctor without
+// injecting its own reader must see the test's copy, never the operator's
+process.env.SHEPHERDR_CHECK_LOG_ROOT = join(home, '.cache', 'shepherdr', 'check-local')
 // agy's store (~/.gemini/antigravity-cli) is never read by a test: a folder under the test's home that does not exist
 process.env.SHEPHERDR_AGY_HOME = join(home, 'no-agy-home')
 // bun starts every test file in a worker of its own and ends it without running what is registered on the process: the

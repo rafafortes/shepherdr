@@ -669,8 +669,8 @@ export class Browsers {
   }
 
   /** every Chrome process running in a task's profile on this machine (agent-browser starts it with --user-data-dir),
-   *  with how long ago it started */
-  private async chromes(): Promise<Chrome[]> {
+   *  with how long ago it started. Public for doctor's resource line (RES-11). */
+  async chromes(): Promise<Chrome[]> {
     const flag = `--user-data-dir=${dirname(this.env('X-1').AGENT_BROWSER_PROFILE)}/`
     const r = await onBox(['ps', '-axo', 'pid=,etime=,command='], { timeoutMs: 20_000 })
     return r.code ? [] : chromesIn(r.out, flag)
@@ -739,7 +739,7 @@ export class Browsers {
 }
 
 /** a Chrome process in a task's profile, and how long it has run (ms) */
-type Chrome = { pid: number; task: string; age: number }
+export type Chrome = { pid: number; task: string; age: number }
 
 /** from ps's pid, elapsed time and command lines, the processes started with a profile under flag's folder, with that
  *  profile's task */
