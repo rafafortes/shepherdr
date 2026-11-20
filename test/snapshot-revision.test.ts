@@ -78,6 +78,8 @@ describe('the stamp itself', () => {
     const b = revisions.changed({ name: 'x' } as Snapshot) // a profile changed, not this snapshot's bytes
     const c = revisions.refresh({ name: 'x' } as Snapshot)
     const d = revisions.refresh({ name: 'y' } as Snapshot)
-    expect([a.rev, b.rev, c.rev, d.rev]).toEqual([1, 2, 2, 3])
+    const first = a.rev
+    if (first === undefined) throw new Error('the stamp gave no revision')
+    expect([b.rev, c.rev, d.rev]).toEqual([first + 1, first + 1, first + 2])
   })
 })

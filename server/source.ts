@@ -41,23 +41,30 @@ const withoutRev = (snap: Snapshot) => {
   return JSON.stringify(body)
 }
 
-/** A snapshot's revision (PERFC-01). Every change emit advances it, even one whose effect is read through an action
+/** A snapshot's revision (PERFC-01). A change emit advances it, even one whose effect is read through an action
  *  rather than the snapshot (a profile changed, say). The 30-second heartbeat instead keeps the number when the bytes
- *  are the same, so a screen that has not changed anything keeps the object it drew and redraws nothing. */
+ *  are the same, so a screen that has not changed anything keeps the object it drew and redraws nothing. The first
+ *  number comes from the clock, so a screen that kept a snapshot across a server restart cannot mistake the next
+ *  process's early numbers for the ones it already drew. */
 export class SnapshotRevisions {
-  private rev = 0
+  private rev = Date.now()
   private last: Snapshot | null = null
+  private lastBytes: string | null = null
   /** a change: the next snapshot gets a new number. Nothing is serialized here: the server already has the object. */
   changed(snap: Snapshot): Snapshot {
     this.rev++
     this.last = snap
+    this.lastBytes = null // worked out at the next refresh, not on every change
     return { ...snap, rev: this.rev }
   }
   /** a refresh: same bytes, same number; different bytes, a change the emit sites did not have to name. This is the
    *  half-minute heartbeat, so it is the only place that pays for a comparison. */
   refresh(snap: Snapshot): Snapshot {
-    if (!this.last || withoutRev(snap) !== withoutRev(this.last)) {
+    const bytes = withoutRev(snap)
+    if (this.lastBytes === null) this.lastBytes = this.last ? withoutRev(this.last) : ''
+    if (bytes !== this.lastBytes) {
       this.last = snap
+      this.lastBytes = bytes
       this.rev++
     }
     return { ...snap, rev: this.rev }

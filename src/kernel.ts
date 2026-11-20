@@ -767,6 +767,7 @@ export function connect() {
     let changed = true
     if (msg.type === 'snapshot') {
       const snap = msg.snapshot
+      const before = state
       changed = !state.snap || snap.rev === undefined || snap.rev !== state.snap.rev
       if (changed) state = { ...state, snap }
       stayOnShown()
@@ -778,6 +779,9 @@ export function connect() {
         putOutbox(prune(state.outbox, Date.now(), chatIn(snap)))
         pruned = true
       }
+      // those steps can change state of their own (a place gone, an outbox pruned) without going through setUI: a
+      // redraw is still owed for them even when the snapshot's revision did not move (PERFC-01)
+      if (state !== before) changed = true
     } else if (msg.type === 'chat') {
       state = { ...state, chats: { ...state.chats, [msg.chat.key]: msg.chat } }
       putOutbox(settle(state.outbox, msg.chat))

@@ -126,8 +126,15 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
    *  that get it; a screen that opens gets its own at once (websocket.open), and /api/snapshot and the alert handler
    *  build theirs when they need one. A link counts as one: it mirrors this machine (machines.ts keeps its snapshot).
    *  A change advances the revision; the half-minute heartbeat keeps it when the bytes say the same thing. */
+  let pendingRefresh = false
   const scheduleSnapshot = (refresh: boolean) => {
-    if (snapTimer || !live.size) return
+    if (snapTimer) {
+      // a change that lands while a heartbeat's build waits turns it into a change: its emit said something moved
+      if (!refresh) pendingRefresh = false
+      return
+    }
+    if (!live.size) return
+    pendingRefresh = refresh
     const wait = Math.min(SNAP_MAX, Math.max(30, snapEnd + snapCost * 4 - Date.now()))
     snapTimer = setTimeout(() => {
       snapTimer = null
@@ -135,7 +142,7 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
       if (!live.size) return
       const began = Date.now()
       const snapshot = timed('snapshot', () => source.snapshot())
-      const stamped = refresh ? revisions.refresh(snapshot) : revisions.changed(snapshot)
+      const stamped = pendingRefresh ? revisions.refresh(snapshot) : revisions.changed(snapshot)
       rememberSnapshot(stamped)
       snapEnd = Date.now()
       snapCost = snapEnd - began

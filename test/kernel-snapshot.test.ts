@@ -129,6 +129,15 @@ describe('the store on a snapshot push', () => {
     expect(notified).toBe(1)
   })
 
+  test('an unchanged snapshot still draws when handling it changed the place', () => {
+    notified = 0
+    // same revision, but the place on screen is no longer listed: stayOnShown moves it and owes a redraw
+    push({ ...snapshot(1), places: [{ ...place, id: 'p:m:new', name: 'new' }] })
+    expect(kernel.getState().ui.place).toBe('p:m:new')
+    expect(notified).toBe(1)
+    kernel.setUI({ place: 'all' })
+  })
+
   test('a source with no revision is taken as new, as an older server', () => {
     notified = 0
     const next = snapshot(0)
