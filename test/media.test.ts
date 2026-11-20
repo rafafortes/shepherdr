@@ -1,10 +1,22 @@
 // A chat's pictures and videos as a tile draws them: a small copy of a big picture, a video's still, and the part of a
 // file a player asks for (server/live/media.ts). Kept beside the file in the chat's own inbox, made once.
 import { describe, expect, test } from 'bun:test'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { smaller, span, THUMB_FROM } from '../server/live/media.ts'
 import { tmp } from './tmp.ts'
+
+const root = join(import.meta.dir, '..')
+
+describe('the extracted photo viewer', () => {
+  test('keeps one public export, Photo, so the split grows no public surface', () => {
+    const src = readFileSync(join(root, 'plugins', 'chat', 'photo.tsx'), 'utf8')
+    const exported = [...src.matchAll(/^export\s+(?:async\s+)?(?:function|const|let|class|type|interface|enum)\s+(\w+)/gm)].map((m) => m[1])
+    expect(exported).toEqual(['Photo'])
+    expect(src).not.toMatch(/^export\s*\{/m)
+    expect(src).not.toMatch(/^export\s+default\b/m)
+  })
+})
 
 describe('a player asks for part of a file', () => {
   test('a span of it, the end of it, or the whole file', () => {
