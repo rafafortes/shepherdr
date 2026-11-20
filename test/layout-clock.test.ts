@@ -13,7 +13,8 @@ describe.skipIf(!browser)('relative times tick on the shared clock', () => {
     // pin the agent's report to a whole minute so every displayed number is exact: said "15 min left" three minutes
     // ago, so the screen reads "12m" now. The raw timestamp is what the live source sends with every report.
     const base = Math.floor(Date.now() / minute) * minute
-    const working = world.tasks.find((t) => t.id === 'HP-202')!
+    const working = world.tasks.find((t) => t.id === 'HP-202')
+    if (!working) throw new Error('HP-202 is missing from the demo world')
     working.report = { msg: 'Tracing why mute ends the call', progress: 40, eta: 12, at: base - 3 * minute, left: 15 }
     ;(world as unknown as { emit(e: string): void }).emit('snapshot')
 
