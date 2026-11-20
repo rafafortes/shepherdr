@@ -13,6 +13,7 @@ describe("a Done task's stuck agent", () => {
     // Done a while ago, but its CLI never ended its turn (status stays 'working')
     t.merged = true
     t.doneAt = Date.now() - STALE
+    w.records[key].started = Date.now() - STALE // a stuck agent started before the task ended and never settled
     const wt = t.worktree ?? ''
 
     await w.engine.sweep()
@@ -28,6 +29,7 @@ describe("a Done task's stuck agent", () => {
     const { t, key } = await started(w, repo(), 'stuck-status')
     t.closed = true
     t.doneAt = Date.now() - STALE
+    w.records[key].started = Date.now() - STALE // a stuck agent started before the task ended and never settled
 
     w.engine.agentStatus(key)
     await until(() => !!t.cleaned)
@@ -83,6 +85,73 @@ describe("a Done task's stuck agent", () => {
     expect(existsSync(t.worktree ?? '')).toBe(true)
   })
 
+  test('a turn that will not stop after the interrupt is still ended', async () => {
+    const w = world()
+    const { t, key } = await started(w, repo(), 'throws')
+    const real = w.agents.stopTurn
+    // the real stopTurn throws after 15 s when the turn will not settle; the catch must still reach finish
+    w.agents.stopTurn = async (k: string) => {
+      await real(k)
+      throw new Error('It is still working after an interrupt: try again in a moment.')
+    }
+    t.closed = true
+    t.doneAt = Date.now() - STALE
+    w.records[key].started = Date.now() - STALE // a stuck agent started before the task ended and never settled
+
+    await w.engine.sweep()
+
+    expect(w.stopped).toContain(key)
+    expect(w.records[key].finished).toBe(true)
+    expect(t.cleaned).toBe(true)
+  })
+
+  test('an agent resumed after clean-up gets a fresh grace, not cut off by the old done time', async () => {
+    const w = world()
+    const { t, key } = await started(w, repo(), 'resume')
+    t.merged = true
+    t.doneAt = Date.now() - STALE
+    w.records[key].started = Date.now() - STALE // a stuck agent started before the task ended and never settled
+    await w.engine.sweep()
+    expect(t.cleaned).toBe(true)
+    w.stopped.length = 0
+
+    // the human writes to it again: its agent is launched anew on the same session, with a new started time
+    await w.agents.ensure({ key, cwd: t.worktree ?? '', kind: 'claude' })
+    w.status[key] = 'working'
+    w.engine.agentStatus(key)
+    await Bun.sleep(20)
+
+    expect(w.stopped).toEqual([])
+    expect(w.records[key].finished).toBeFalsy()
+  })
+
+  test('a status event racing the sweep cannot force-close the same agent twice', async () => {
+    const w = world()
+    const { t, key } = await started(w, repo(), 'race')
+    t.merged = true
+    t.doneAt = Date.now() - STALE
+    w.records[key].started = Date.now() - STALE // a stuck agent started before the task ended and never settled
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const real = w.agents.stopTurn
+    let calls = 0
+    w.agents.stopTurn = async (k: string) => {
+      calls++
+      await gate
+      await real(k)
+    }
+
+    const sweeping = w.engine.sweep()
+    await until(() => calls === 1) // the sweep is inside stopTurn, holding endingDone
+    w.engine.agentStatus(key) // a status event arrives now
+    release()
+    await sweeping
+    await until(() => !!t.cleaned)
+
+    expect(calls).toBe(1)
+    expect(w.records[key].finished).toBe(true)
+  })
+
   test("every CLI's stuck agent is ended the same way", async () => {
     const w = world()
     const dir = repo()
@@ -96,6 +165,7 @@ describe("a Done task's stuck agent", () => {
       expect(w.records[key].kind).toBe(kind)
       t.merged = true
       t.doneAt = Date.now() - STALE
+      w.records[key].started = Date.now() - STALE // a stuck agent started before the task ended and never settled
       made.push({ key, t })
     }
 

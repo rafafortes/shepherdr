@@ -4845,7 +4845,10 @@ export class Engine extends Emitter<Events> {
   private async endDoneWorking(t: TaskRec, quiet = false) {
     const key = this.key(t)
     if (!ended(t) || this.agents.status(key) !== 'working') return
-    if (Date.now() - (t.doneAt ?? t.updated) < DONE_WORKING_MS) return
+    // a Done task whose agent was (re)started since it finished — a human resuming its chat — gets a fresh grace:
+    // its record's `started` is set on each launch, so the old done time never cuts off a new turn
+    const since = Math.max(t.doneAt ?? t.updated, this.agents.record(key)?.started ?? 0)
+    if (Date.now() - since < DONE_WORKING_MS) return
     if (this.endingDone.has(key)) return // one force-close even if the sweep and a status event arrive together
     this.endingDone.add(key)
     try {
