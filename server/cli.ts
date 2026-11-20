@@ -86,7 +86,7 @@ let j: Answer
 try {
   const r = await fetch(`${url}/api/cli`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(capability ? { authorization: `Bearer ${capability}` } : {}) },
+    headers: { 'content-type': 'application/json', accept: 'application/x-ndjson', ...(capability ? { authorization: `Bearer ${capability}` } : {}) },
     body: JSON.stringify({ args, chat: process.env.SHEPHERDR_CHAT, pane: process.env.HERDR_PANE_ID, cwd: process.cwd(), stdin }),
     signal: AbortSignal.timeout(wait),
   })

@@ -115,7 +115,7 @@ describe('shepherdr interim words', () => {
     try {
       const r = await fetch(`http://127.0.0.1:${app.port}/api/cli`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' },
         body: JSON.stringify({ args: ['doctor'] }),
       })
       expect(r.headers.get('content-type')).toContain('application/x-ndjson')
@@ -138,8 +138,67 @@ describe('shepherdr interim words', () => {
     })
     const app = startApp({ source: source as never, dist: '/nonexistent', port: 0 })
     try {
-      const r = await fetch(`http://127.0.0.1:${app.port}/api/cli`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ args: ['doctor'] }) })
+      const r = await fetch(`http://127.0.0.1:${app.port}/api/cli`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' },
+        body: JSON.stringify({ args: ['doctor'] }),
+      })
       expect(await r.text()).toBe('{"out":"command broke\\n","code":1}\n')
+    } finally {
+      app.stop(true)
+    }
+  })
+
+  test('a caller that does not ask for steps (an older helper) gets one application/json object', async () => {
+    const { startApp } = await import('../server/app.ts')
+    const { Emitter } = await import('../server/source.ts')
+    const source = Object.assign(new Emitter(), {
+      kind: 'live',
+      cli: async (_args: string[], _c: unknown, onStep?: (words: string) => void) => {
+        onStep?.('this step is never sent to a caller that cannot read it')
+        return { out: 'ok\n', code: 0 }
+      },
+      snapshot: () => ({ name: 'S', host: 'h', places: [], machines: [], tasks: [], automations: {}, asks: {}, settings: [], overrides: {}, user: 'u' }),
+      chat: () => undefined,
+    })
+    const app = startApp({ source: source as never, dist: '/nonexistent', port: 0 })
+    try {
+      const r = await fetch(`http://127.0.0.1:${app.port}/api/cli`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ args: ['checks', 'SHE-1'] }) })
+      expect(r.headers.get('content-type')).toContain('application/json')
+      expect(await r.json()).toEqual({ out: 'ok\n', code: 0 })
+    } finally {
+      app.stop(true)
+    }
+  })
+
+  test('a caller that goes away mid-call never stops the command from finishing its work', async () => {
+    const { startApp } = await import('../server/app.ts')
+    const { Emitter } = await import('../server/source.ts')
+    let finished = false
+    const source = Object.assign(new Emitter(), {
+      kind: 'live',
+      cli: async (_args: string[], _c: unknown, onStep?: (words: string) => void) => {
+        onStep?.('one: helper put there again, worker started again')
+        await Bun.sleep(50)
+        // a gone client must not make this throw: doctor goes on to the next machine
+        onStep?.('two: helper put there again, worker started again')
+        finished = true
+        return { out: 'done\n', code: 0 }
+      },
+      snapshot: () => ({ name: 'S', host: 'h', places: [], machines: [], tasks: [], automations: {}, asks: {}, settings: [], overrides: {}, user: 'u' }),
+      chat: () => undefined,
+    })
+    const app = startApp({ source: source as never, dist: '/nonexistent', port: 0 })
+    try {
+      const r = await fetch(`http://127.0.0.1:${app.port}/api/cli`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' },
+        body: JSON.stringify({ args: ['doctor'] }),
+        signal: AbortSignal.timeout(10),
+      }).catch(() => undefined)
+      if (r) await r.text().catch(() => undefined)
+      await Bun.sleep(120)
+      expect(finished).toBe(true)
     } finally {
       app.stop(true)
     }

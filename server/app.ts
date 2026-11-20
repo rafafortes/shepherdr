@@ -361,32 +361,47 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', hosts =
           const b = (await req.json()) as { args: string[]; chat?: string; pane?: string; cwd?: string; stdin?: string }
           // some commands wait long (shepherdr checks waits for GitHub's): no idle cut-off for these
           srv.timeout(req, 0)
-          // the long verbs send their words as they go: one {step} line each, as application/x-ndjson, before the one
-          // final {out, code}. The command decides by content-type: an older helper or the demo still answers with a
-          // single application/json object and is read whole (UXD-08).
+          const ctx = {
+            chat: b.chat,
+            pane: b.pane,
+            cwd: b.cwd,
+            stdin: b.stdin,
+            local: direct(req),
+            proof: req.headers.get('authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1],
+          }
+          // only a caller that says it can read them gets the interim steps: the new command sends Accept:
+          // application/x-ndjson. An older helper (or command) on another machine gets the one application/json
+          // object it knows, so the change works across versions in both directions (UXD-08).
+          if (!(req.headers.get('accept') ?? '').includes('application/x-ndjson')) return json(await cli.call(source, b.args ?? [], ctx))
+          // one {step} line as each step finishes, then the one final {out, code}, as application/x-ndjson. A caller
+          // that goes away mid-call (a timeout, Ctrl-C) must never stop the work: guard the enqueue with a flag
+          // written by cancel(), so doctor goes on repairing the machines after the client has left.
           const enc = new TextEncoder()
+          let closed = false
           const body = new ReadableStream<Uint8Array>({
             async start(controller) {
-              try {
-                const answer = await cli.call(
-                  source,
-                  b.args ?? [],
-                  {
-                    chat: b.chat,
-                    pane: b.pane,
-                    cwd: b.cwd,
-                    stdin: b.stdin,
-                    local: direct(req),
-                    proof: req.headers.get('authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1],
-                  },
-                  (words) => controller.enqueue(enc.encode(`${JSON.stringify({ step: words })}\n`)),
-                )
-                controller.enqueue(enc.encode(`${JSON.stringify(answer)}\n`))
-              } catch (e) {
-                controller.enqueue(enc.encode(`${JSON.stringify({ out: `${(e as Error).message}\n`, code: 1 })}\n`))
-              } finally {
-                controller.close()
+              const send = (rec: unknown) => {
+                if (closed) return
+                try {
+                  controller.enqueue(enc.encode(`${JSON.stringify(rec)}\n`))
+                } catch {
+                  closed = true
+                }
               }
+              try {
+                const answer = await cli.call(source, b.args ?? [], ctx, (words) => send({ step: words }))
+                send(answer)
+              } catch (e) {
+                send({ out: `${(e as Error).message}\n`, code: 1 })
+              } finally {
+                if (!closed) {
+                  controller.close()
+                  closed = true
+                }
+              }
+            },
+            cancel() {
+              closed = true
             },
           })
           return new Response(body, { headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' } })
