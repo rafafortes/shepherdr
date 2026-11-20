@@ -32,6 +32,15 @@ describe("an agent's own shepherdr command", () => {
       expect(own(text)).toBe(true)
   })
 
+  test('takes the two-word verbs as pairs, never a bare or other secret subcommand', () => {
+    for (const pair of ['secret list', 'secret ask']) {
+      expect(OWN_VERBS).toContain(pair)
+      expect(own(`${command} ${pair}`)).toBe(true)
+    }
+    for (const text of [`${command} secret`, `${command} secret run A -- ls`, `${command} secret env A --file x`, `${command} secret elevenlabs`, `${command} secret listx`])
+      expect(own(text)).toBe(false)
+  })
+
   test('is allowed with its path quoted, as a shell needs it', () => {
     const spaced = '/home/me/My Projects/bin/shepherdr'
     expect(own(`'${spaced}' status`, spaced)).toBe(true)
