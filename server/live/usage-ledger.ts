@@ -60,7 +60,7 @@ export interface RunOut {
   resetAt?: number
 }
 
-/** one chat's rolling totals: what its calls used inside KEEP_USAGE, and when its last call was, for the prune */
+/** one chat's totals since counting began for it: what its calls used, and when its last call was, for the prune */
 export interface ChatTotals extends UsageTotals {
   at: number
 }
@@ -389,8 +389,8 @@ export class UsageLedger {
       for (const [id, h] of Object.entries(ids)) if (h < cutHour) delete ids[id]
       if (!Object.keys(ids).length) delete this.data.seen[chat]
     }
-    // a chat whose last call was before the window's start is gone, whatever its ids: the totals and `seen` are pruned
-    // by the same clock, so a resumed chat cannot keep its old totals after its ids have expired
+    // a chat whose last call was before the window's start is gone, whatever its older calls or ids: its totals are
+    // dropped with its ids on the same 35-day clock; a chat still called inside it keeps the totals of all its calls
     for (const [chat, t] of Object.entries(this.data.chats)) if (t.at < now - KEEP_USAGE) delete this.data.chats[chat]
     this.data.runOuts = this.data.runOuts.filter((r) => r.at >= now - KEEP_RUNOUTS)
   }
