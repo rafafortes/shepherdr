@@ -31,8 +31,8 @@ lock, so a full and a quick run can overlap without one removing the other's fol
 
 A run is two phases, split by the check's number. Everything below `30` is worktree-local — its own `node_modules`, its
 own files, no browser — and runs before the lock: `10-dependencies`, `12-audit`, `15-secrets`, `17-scripts`, `18-docs`,
-`19-version`, `20-types`, `21-language`, `22-lint` and `23-format`, so a broken type, script, doc, version, language
-scan, lint finding or unformatted file fails in seconds instead of after a queue for the tests. `30-tests`, `40-coverage`, `50-build` and `60-dist-budget` share the machine's
+`19-version`, `20-types`, `21-language`, `22-lint`, `23-format` and `24-knip`, so a broken type, script, doc, version,
+language scan, lint finding, unformatted file or unused export fails in seconds instead of after a queue for the tests. `30-tests`, `40-coverage`, `50-build` and `60-dist-budget` share the machine's
 browsers and cores with every other worktree and go under the lock, one run at a time; dependencies stay first because a
 fresh worktree has none and the types need them. A new check that needs the machine to itself is numbered 30 or more.
 On a machine where herdr runs as a systemd user service, give it (and the server and agents it holds) the CPU first:
@@ -96,7 +96,7 @@ overlap to use is a `--quick` run beside a full one.
 The runner (`scripts/check-local.sh`) keeps the lock, the log folder, `verdict.txt` and the browser probe, and runs the
 checks in the two phases above; each step is one executable file in `scripts/checks/`, named `<number>-<name>` with the
 numbers spaced by ten (`10-dependencies`, `12-audit`, `15-secrets`, `17-scripts`, `18-docs`, `19-version`, `20-types`,
-`21-language`, `22-lint`, `23-format`, `30-tests`, `40-coverage`, `50-build`, `60-dist-budget`). A number below 30 is
+`21-language`, `22-lint`, `23-format`, `24-knip`, `30-tests`, `40-coverage`, `50-build`, `60-dist-budget`). A number below 30 is
 worktree-local and runs before the lock, one of 30 or more runs in the shared phase under it. The runner discovers the
 executable files by sorted file name, so adding a check is adding one file and no later task edits a shared list: a `.ts` file
 beside them is a check's own logic, not a check (e.g. `secrets.ts`), and the order is reviewed because it is the file
@@ -187,6 +187,20 @@ is next edited and no whole-tree reformat lands in one pull request; a file the 
 in formatted. A file the branch did not touch may stay unformatted, and the weekly run on the default branch has no
 diff, so it checks nothing. Nothing is ever written by the check. The style is the tree's own, in `biome.json`: two
 spaces, single quotes, no semicolons, trailing commas, and a 200-column line close to how the files already wrap.
+
+The knip step (`24-knip`, whose logic is `scripts/checks/knip.ts`) runs the pinned `knip` (an exact version in
+`package.json`) with `--reporter compact` right after formatting: it finds code nothing uses — unused exports and
+exported types, whole dead files, dependencies `package.json` no longer imports and undeclared binaries. It is
+TS-native and needs no separate type collection, so it takes seconds over this tree. `knip.json` declares the entry
+points (the two servers, the client bootstrap, every plugin's server and client part, the standalone scripts, the
+check runners and the tests), lets knip read the `@shared/`, `@client/` and `@plugins/` paths from `tsconfig.json`, and
+keeps the public plugin contract in `src/kernel.ts` and `server/plugin-api.ts` as entry points so a change to
+`definePlugin` and the other exports in `docs/plugins.md` is never flagged even if no in-repo plugin uses one.
+The first pass's findings are the baseline: each unused dependency and binary sits in a documented ignore list in
+`knip.json`, and each dead export carries a `/** @knip-baseline <why> */` tag where it lives — the dead-code list is
+handed to MAINT, not deleted here. Anything newly unused has no ignore or tag and makes the step fail with its compact
+report; fix it, or baseline it with a reason. A host without the binary, or one that cannot run, skips the step with
+`bun install` as the lint and audit steps do.
 
 The dist-budget step (`60-dist-budget`, whose logic is `scripts/checks/dist-budget.ts`) runs after the build and only
 reads the files in `dist/`: total JS may grow by 1% or 5 KB (whichever is larger) since the baseline, and an asset over

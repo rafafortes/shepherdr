@@ -316,7 +316,8 @@ function Line({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-/** Kept for plugin imports. The + menu replaces the old Settings mismatch banner. */
+/** Kept for plugin imports. The + menu replaces the old Settings mismatch banner.
+ * @knip-baseline kept for external plugin imports (public surface) — do not delete; SHE-85 */
 export function RestartHint(_props: { chatKey: string; cli: string }) {
   return null
 }

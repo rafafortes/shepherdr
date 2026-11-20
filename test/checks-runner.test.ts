@@ -389,6 +389,7 @@ describe('the check files themselves', () => {
     expect(statSync(join(dir, 'audit.ts')).mode & 0o111, 'audit.ts is a module, not a check').toBe(0)
     expect(statSync(join(dir, 'lint.ts')).mode & 0o111, 'lint.ts is a module, not a check').toBe(0)
     expect(statSync(join(dir, 'format.ts')).mode & 0o111, 'format.ts is a module, not a check').toBe(0)
+    expect(statSync(join(dir, 'knip.ts')).mode & 0o111, 'knip.ts is a module, not a check').toBe(0)
     const names = readdirSync(dir)
       .filter((n) => !n.endsWith('.ts'))
       .sort()
@@ -403,6 +404,7 @@ describe('the check files themselves', () => {
       '21-language',
       '22-lint',
       '23-format',
+      '24-knip',
       '30-tests',
       '40-coverage',
       '50-build',
@@ -419,6 +421,7 @@ describe('the check files themselves', () => {
     expect(text['21-language']).toContain('scripts/checks/language.ts')
     expect(text['22-lint']).toContain('scripts/checks/lint.ts')
     expect(text['23-format']).toContain('scripts/checks/format.ts')
+    expect(text['24-knip']).toContain('scripts/checks/knip.ts')
     expect(text['30-tests']).toContain('scripts/test.ts')
     expect(text['30-tests']).toContain('--force')
     expect(text['30-tests']).toContain('SHEPHERDR_CHECK_MAP')

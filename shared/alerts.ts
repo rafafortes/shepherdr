@@ -104,7 +104,8 @@ export function openCards(chat: Chat | undefined): Card[] {
   return out
 }
 
-/** the card an alert is about: the first one open (a form's first question unanswered, which the CLI asks first) */
+/** the card an alert is about: the first one open (a form's first question unanswered, which the CLI asks first)
+ * @knip-baseline dead export from audit 2026-11-18 QG-03, listed for MAINT (SHE-85) */
 export const openCard = (chat: Chat | undefined): Card | undefined => openCards(chat)[0]
 
 /** the agent's last reply in a chat */
