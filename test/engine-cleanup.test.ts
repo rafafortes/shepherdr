@@ -105,7 +105,7 @@ describe("a Done task's stuck agent", () => {
     expect(t.cleaned).toBe(true)
   })
 
-  test('an agent resumed after clean-up gets a fresh grace, not cut off by the old done time', async () => {
+  test("a message to a Done task's agent starts a new grace, even long after it was launched", async () => {
     const w = world()
     const { t, key } = await started(w, repo(), 'resume')
     t.merged = true
@@ -115,9 +115,12 @@ describe("a Done task's stuck agent", () => {
     expect(t.cleaned).toBe(true)
     w.stopped.length = 0
 
-    // the human writes to it again: its agent is launched anew on the same session, with a new started time
+    // the human resumed the agent a while ago, then writes again: both the done time and the launch are stale,
+    // but this turn is new — its status event must not interrupt it
     await w.agents.ensure({ key, cwd: t.worktree ?? '', kind: 'claude' })
+    w.records[key].started = Date.now() - STALE
     w.status[key] = 'working'
+    w.engine.youWrote(key)
     w.engine.agentStatus(key)
     await Bun.sleep(20)
 
@@ -153,6 +156,9 @@ describe("a Done task's stuck agent", () => {
   })
 
   test("every CLI's stuck agent is ended the same way", async () => {
+    // The force-close is on herdr's side: one Esc through agents.stopTurn, then agents.finish closes the pane. No
+    // CLI's reader or status wiring differs here, so each kind is started in this fixture and its stuck 'working'
+    // status driven through the same engine path; what is checked is that every kind is interrupted and ended.
     const w = world()
     const dir = repo()
     const p = await w.places.add(dir, 'kinds')

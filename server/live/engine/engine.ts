@@ -4845,9 +4845,9 @@ export class Engine extends Emitter<Events> {
   private async endDoneWorking(t: TaskRec, quiet = false) {
     const key = this.key(t)
     if (!ended(t) || this.agents.status(key) !== 'working') return
-    // a Done task whose agent was (re)started since it finished — a human resuming its chat — gets a fresh grace:
-    // its record's `started` is set on each launch, so the old done time never cuts off a new turn
-    const since = Math.max(t.doneAt ?? t.updated, this.agents.record(key)?.started ?? 0)
+    // a Done task whose agent took up a new turn since it finished — a human writing to it again — gets a fresh grace:
+    // a launch or a message to its chat both move this on, so an old done time never cuts off the new turn
+    const since = Math.max(t.doneAt ?? t.updated, this.agents.record(key)?.started ?? 0, this.wrote.get(t.id) ?? 0)
     if (Date.now() - since < DONE_WORKING_MS) return
     if (this.endingDone.has(key)) return // one force-close even if the sweep and a status event arrive together
     this.endingDone.add(key)
@@ -5234,6 +5234,9 @@ export class Engine extends Emitter<Events> {
     const [id] = key.split('/')
     const t = this.task(id)
     if (!t) return
+    // a message to a Done task's agent (which keeps its chat) starts a new turn: remember it even though the task stays
+    // ended, so the stuck-agent grace starts from this turn, not from when the task was finished
+    this.wrote.set(t.id, Date.now())
     // writing to an archived task brings it back: you talk to it again
     if (t.archived) this.unarchive(t.id)
     if (ended(t)) return
@@ -5249,7 +5252,6 @@ export class Engine extends Emitter<Events> {
     t.going = undefined
     // what it was held with is said already, or overtaken by what you wrote
     if (go) t.held = undefined
-    this.wrote.set(t.id, Date.now())
     this.settle(t)
     this.settleSoon(t, ANSWER_GRACE + 500)
   }
