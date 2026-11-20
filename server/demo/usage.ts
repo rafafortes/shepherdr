@@ -1,13 +1,16 @@
 // The demo's usage: a week of model calls for the providers the demo's settings and chats use, and a run-out or two, so
-// Settings → Models → Summary shows a believable week. Deterministic (no random numbers): each hour's calls follow the
-// hour of the day, and the run-outs are at fixed times back from now. Kept in memory, as the demo's settings are. A key
-// is its harness and provider: OpenCode Go is counted twice, under pi and under OpenCode, as its own row in each.
+// Settings → Models → Summary shows a believable week. No random numbers: each hour's calls follow the hour of the day,
+// and the run-outs are at fixed times back from now. Kept in memory, as the demo's settings are. A key is its harness
+// and provider: OpenCode Go is counted twice, under pi and under OpenCode, as its own row in each.
 import { HOUR, UsageLedger } from '../live/usage-ledger.ts'
 import { opencodeEstimate, OPENCODE_ROWS } from '../live/quota-estimate.ts'
 import type { QuotaInput } from '../live/models-summary.ts'
 
 /** OpenCode Go under pi: the row the demo shows out now, with a run-out whose reset has not come yet */
 const OUT_NOW_KEY = 'pi.opencode-go/deepseek-v4.1-flash'
+/** how many hours back it ran out: no call of it after that, or outState (SHE-167) says the provider is back. The
+ *  run-out's time and the call-free hours are this one number, so they cannot drift apart. */
+const OUT_NOW_BACK = 2
 
 /** per model key: tokens per call, its cost estimate per call (pi's), and how many calls in a working hour */
 const MODELS: { key: string; tokens: number; cost?: number; busy: number; chat: string }[] = [
@@ -24,7 +27,8 @@ const MODELS: { key: string; tokens: number; cost?: number; busy: number; chat: 
   { key: 'pi.commandcode/deepseek/deepseek-v4.1-flash', tokens: 9_000, busy: 1, chat: 'HP-203/Agent' },
 ]
 
-/** the demo's ledger: the week before `now`, hour by hour, and the run-outs of the week */
+/** the demo's ledger: the week before `now`, hour by hour, and the run-outs of the week. Every time is relative to
+ *  `now`, so the out-now row keeps its meaning at every wall clock hour. */
 export function demoUsage(now = Date.now()): UsageLedger {
   const l = new UsageLedger('', true)
   for (let back = 7 * 24 - 1; back >= 0; back--) {
@@ -32,8 +36,8 @@ export function demoUsage(now = Date.now()): UsageLedger {
     const working = hour >= 9 && hour <= 18 ? 1 : 0
     MODELS.forEach((m, i) => {
       // a call after a run-out says the provider works again (outState, SHE-167): leave the out-now row without calls
-      // since its run-out two hours back, so the demo still shows a run-out that is out now until its reset
-      if (m.key === OUT_NOW_KEY && back <= 2) return
+      // since its run-out OUT_NOW_BACK hours back, so the demo still shows a run-out that is out now until its reset
+      if (m.key === OUT_NOW_KEY && back <= OUT_NOW_BACK) return
       // the calls of this hour: a working hour's share, a little more on the weekdays' busy hours
       const calls = working * m.busy + ((back * 3 + i * 5) % 3)
       for (let c = 0; c < calls; c++) {
@@ -60,7 +64,7 @@ export function demoUsage(now = Date.now()): UsageLedger {
   )
   l.runOut(
     {
-      at: now - 2 * HOUR,
+      at: now - OUT_NOW_BACK * HOUR,
       key: OUT_NOW_KEY,
       chat: 'LV-3/Agent',
       role: 'task',
