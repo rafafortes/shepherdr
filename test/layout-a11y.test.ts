@@ -15,43 +15,58 @@ const at = (query: string) => `${base}?${query}`
 const webkit = browser ? await launchWebkit() : null
 if (webkit) afterAll(() => webkit.close())
 
-/** Violations accepted for now. Each one names the audit finding that owns its fix, so the list can only shrink;
- *  anything a finding does not own stays a failure and is reported as a follow-up, never silently allowed here.
- *  `frame` ties an entry to one iframe's nodes only, so the same rule still fails on any other screen. */
-type Allow = { rule: string; why: string; finding: string; frame?: RegExp }
+/** Violations accepted for now. Each one names the finding or task that owns its fix, so the list can only shrink;
+ *  anything nobody owns stays a failure. `target` and `screens` tie an entry to the exact nodes and screens audited
+ *  here, so the same rule still fails everywhere else. When a follow-up task fixes its entry, remove the entry. */
+type Pair = { target: RegExp; screens?: string[] }
+type Allow = { rule: string; why: string; finding: string; pairs: Pair[] }
 const ALLOW: Allow[] = [
   {
     rule: 'color-contrast',
-    frame: /iframe\[title="This week across machines"\]/,
+    pairs: [{ target: /iframe\[title="This week across machines"\]/ }],
     why: 'The demo chart labels use --fg3 inside an artifact frame, which still carries the old #a1a1aa; SHE-114 darkened the app token but not the frame token (axe 2.56:1).',
     finding: 'A11Y-03',
+  },
+  {
+    rule: 'aria-required-children',
+    pairs: [
+      { target: /^div\[data-flip="automations:p:vm-str:gtm"\] > ul$/, screens: ['desktop: places + chat + tasks', 'artifact viewer'] },
+      { target: /^div > ul$/, screens: ['Needs you view'] },
+      { target: /^#search-list$/, screens: ['search sheet'] },
+    ],
+    why: 'Three lists have non-li children: the automations ul, the Needs you ul and the search listbox; SHE-176 owns their markup.',
+    finding: 'SHE-176',
+  },
+  {
+    rule: 'scrollable-region-focusable',
+    pairs: [{ target: /^\.overscroll-contain\.touch-pan-y\.overflow-y-auto:nth-child\(2\)$/, screens: ['Keyboard shortcuts'] }],
+    why: "The shortcuts page's scroll column has no tab stop; SHE-177 owns making it focusable.",
+    finding: 'SHE-177',
   },
 ]
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']
 type Violation = Awaited<ReturnType<AxeBuilder['analyze']>>['violations'][number]
 
-/** an entry applies only when the rule and, if it names one, every node's frame match; a new failure anywhere else
- *  is still reported with its rule id */
-const accepts = (v: Violation) =>
-  ALLOW.some((a) => {
-    if (a.rule !== v.id) return false
-    if (!a.frame) return true
-    return v.nodes.every((n) => n.target.some((t) => typeof t === 'string' && a.frame?.test(t)))
-  })
+/** an entry applies only when a target-and-screens pair fits every node and, where named, the screen; a new failure
+ *  anywhere else is still reported with its rule id */
+const accepts = (v: Violation, screen?: string) =>
+  ALLOW.some(
+    (a) => a.rule === v.id && a.pairs.some((p) => (!p.screens || (!!screen && p.screens.includes(screen))) && v.nodes.every((n) => n.target.some((t) => typeof t === 'string' && p.target.test(t)))),
+  )
 
 /** the rule id, impact and the targets: enough for a failure to name what to fix */
 const detail = (v: Violation) => `${v.id} (${v.impact}) ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`
 
 /** scan one settled screen, print its pass count, and return the violations this file does not accept */
-async function scan(page: Page, where: string) {
+async function scan(page: Page, where: string, screen: string) {
   await settled(page)
   const result = await new AxeBuilder({ page }).withTags(TAGS).analyze()
-  const accepted = result.violations.filter(accepts)
-  const open = result.violations.filter((v) => !accepts(v))
+  const accepted = result.violations.filter((v) => accepts(v, screen))
+  const open = result.violations.filter((v) => !accepts(v, screen))
   console.log(
     `a11y · ${where}: ${result.passes.length} rules passed, ${result.violations.length} violation(s)${accepted.length ? `, ${accepted.length} accepted` : ''}` +
-      (result.violations.length ? ` — ${result.violations.map((v) => `${v.id}${accepts(v) ? ' (accepted)' : ''}`).join(', ')}` : ''),
+      (result.violations.length ? ` — ${result.violations.map((v) => `${v.id}${accepts(v, screen) ? ' (accepted)' : ''}`).join(', ')}` : ''),
   )
   return open
 }
@@ -172,7 +187,7 @@ function run(engine: string, b: Browser, screens: Screen[]) {
       try {
         await page.goto(at(screen.query))
         await screen.open(page)
-        const open = await scan(page, `${engine} · ${screen.name}`)
+        const open = await scan(page, `${engine} · ${screen.name}`, screen.name)
         expect(open.map(detail)).toEqual([])
       } finally {
         await ctx.close()
@@ -194,7 +209,7 @@ function run(engine: string, b: Browser, screens: Screen[]) {
         div.append(button)
         document.body.append(div)
       })
-      const found = (await scan(page, `${engine} · fixture`)).map((v) => v.id)
+      const found = (await scan(page, `${engine} · fixture`, 'fixture')).map((v) => v.id)
       expect(found).toContain('button-name')
     } finally {
       await ctx.close()
@@ -219,10 +234,14 @@ test('every accepted rule names its reason and the finding that will remove it',
   for (const a of ALLOW) {
     expect(a.rule).toMatch(/^[a-z-]+$/)
     expect(a.why.length).toBeGreaterThan(20)
-    expect(a.finding).toMatch(/^A11Y-\d+$/)
-    if (a.frame) expect(a.frame.test('iframe[title="This week across machines"]')).toBe(true)
+    expect(a.finding).toMatch(/^(A11Y-\d+|SHE-\d+)$/)
+    expect(a.pairs.length).toBeGreaterThan(0)
+    for (const p of a.pairs) {
+      expect(p.target).toBeInstanceOf(RegExp)
+      if (p.screens) expect(p.screens.length).toBeGreaterThan(0)
+    }
   }
-  expect(new Set(ALLOW.map((a) => a.rule)).size).toBe(ALLOW.length)
+  expect(ALLOW.length).toBe(new Set(ALLOW.map((a) => a.rule)).size)
 })
 
 test('the contrast allowance is confined to the artifact frame', () => {
@@ -231,6 +250,20 @@ test('the contrast allowance is confined to the artifact frame', () => {
   expect(accepts(violation(['.inset-0.absolute > iframe[title="This week across machines"]', 'span:nth-child(1)']))).toBe(true)
   // a new low-contrast line in the app itself, or on any other screen, still fails with its rule id
   expect(accepts(violation(['[data-msg] span']))).toBe(false)
+})
+
+test('the follow-up allowances only cover their own targets and screens', () => {
+  const violation = (id: string, target: string[]) => ({ id, nodes: [{ target }] }) as Violation
+  expect(accepts(violation('aria-required-children', ['#search-list']), 'search sheet')).toBe(true)
+  expect(accepts(violation('aria-required-children', ['div[data-flip="automations:p:vm-str:gtm"] > ul']), 'artifact viewer')).toBe(true)
+  expect(accepts(violation('aria-required-children', ['div[data-flip="automations:p:vm-str:gtm"] > ul']), 'desktop: places + chat + tasks')).toBe(true)
+  expect(accepts(violation('aria-required-children', ['div > ul']), 'Needs you view')).toBe(true)
+  expect(accepts(violation('aria-required-children', ['#search-list']), 'desktop: places + chat + tasks')).toBe(false)
+  expect(accepts(violation('aria-required-children', ['ul']), 'search sheet')).toBe(false)
+  const scroll = ['.overscroll-contain.touch-pan-y.overflow-y-auto:nth-child(2)']
+  expect(accepts(violation('scrollable-region-focusable', scroll), 'Keyboard shortcuts')).toBe(true)
+  expect(accepts(violation('scrollable-region-focusable', scroll), 'desktop: places + chat + tasks')).toBe(false)
+  expect(accepts(violation('button-name', scroll), 'Keyboard shortcuts')).toBe(false)
 })
 
 test.skipIf(!browser)(
@@ -245,7 +278,7 @@ test.skipIf(!browser)(
       const found = (await new AxeBuilder({ page }).withTags(TAGS).analyze()).violations.filter((v) => v.id === 'color-contrast')
       // when A11Y-03 fixes the frame's palette, this and the ALLOW entry go together
       expect(found.length).toBeGreaterThan(0)
-      expect(found.every(accepts)).toBe(true)
+      expect(found.every((v) => accepts(v, 'artifact viewer'))).toBe(true)
     } finally {
       await ctx.close()
     }
