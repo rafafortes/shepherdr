@@ -171,6 +171,57 @@ describe('shepherdr interim words', () => {
     }
   })
 
+  test('a step reaches the client before the command finishes (done condition 1)', async () => {
+    const { startApp } = await import('../server/app.ts')
+    const { Emitter } = await import('../server/source.ts')
+    let open = () => {}
+    const gate = new Promise<void>((resolve) => (open = resolve))
+    const source = Object.assign(new Emitter(), {
+      kind: 'live',
+      cli: async (_args: string[], _c: unknown, onStep?: (words: string) => void) => {
+        onStep?.('one: helper put there again, worker started again')
+        // the command does not finish until the client has read the step: a buffer that waits for the end fails here
+        await gate
+        return { out: 'done\n', code: 0 }
+      },
+      snapshot: () => ({ name: 'S', host: 'h', places: [], machines: [], tasks: [], automations: {}, asks: {}, settings: [], overrides: {}, user: 'u' }),
+      chat: () => undefined,
+    })
+    const app = startApp({ source: source as never, dist: '/nonexistent', port: 0 })
+    let read = false
+    try {
+      const r = await fetch(`http://127.0.0.1:${app.port}/api/cli`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' },
+        body: JSON.stringify({ args: ['checks', 'SHE-1'] }),
+      })
+      const reader = r.body?.getReader()
+      if (!reader) throw new Error('no stream body')
+      const first = await Promise.race([
+        reader.read(),
+        Bun.sleep(3000).then(() => {
+          throw new Error('the step was not flushed before the command finished')
+        }),
+      ])
+      expect(new TextDecoder().decode(first.value)).toBe('{"step":"one: helper put there again, worker started again"}\n')
+      read = true
+      open()
+      // let the command finish and drain the final record through the same reader
+      await Promise.race([
+        (async () => {
+          for (;;) {
+            const n = await reader.read()
+            if (n.done) break
+          }
+        })(),
+        Bun.sleep(3000),
+      ])
+    } finally {
+      if (!read) open()
+      app.stop(true)
+    }
+  })
+
   test('a caller that goes away mid-call never stops the command from finishing its work', async () => {
     const { startApp } = await import('../server/app.ts')
     const { Emitter } = await import('../server/source.ts')
@@ -189,17 +240,23 @@ describe('shepherdr interim words', () => {
       chat: () => undefined,
     })
     const app = startApp({ source: source as never, dist: '/nonexistent', port: 0 })
+    const controller = new AbortController()
     try {
       const r = await fetch(`http://127.0.0.1:${app.port}/api/cli`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' },
         body: JSON.stringify({ args: ['doctor'] }),
-        signal: AbortSignal.timeout(10),
-      }).catch(() => undefined)
-      if (r) await r.text().catch(() => undefined)
+        signal: controller.signal,
+      })
+      const reader = r.body?.getReader()
+      if (!reader) throw new Error('no stream body')
+      await reader.read()
+      // abort only once the server has really taken the call and sent its first step (no 10 ms race under load)
+      controller.abort()
       await Bun.sleep(120)
       expect(finished).toBe(true)
     } finally {
+      controller.abort()
       app.stop(true)
     }
   })

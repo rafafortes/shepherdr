@@ -4283,7 +4283,7 @@ export class Engine extends Emitter<Events> {
       const c = await G.prChecks(g, t.worktree!, n)
       // one interim line per poll: the command's step channel, never its answer (UXD-08)
       onStep?.(
-        `checks: ${c.state === 'unknown' ? 'waiting for GitHub to report checks' : c.state === 'error' ? 'could not read GitHub, trying again' : c.state === 'none' ? 'no checks on this pull request' : `${c.passed} passed${c.failed.length ? `, ${c.failed.length} failed` : ''}${c.state === 'pending' ? ', still running' : ''}`}`,
+        `checks: ${c.state === 'unknown' ? 'waiting for GitHub to report checks' : c.state === 'error' ? 'could not read GitHub, trying again' : c.state === 'none' ? 'no checks reported yet' : `${c.passed} passed${c.failed.length ? `, ${c.failed.length} failed` : ''}${c.state === 'pending' ? ', still running' : ''}`}`,
       )
       errors = c.state === 'error' ? errors + 1 : 0
       const waited = t.pushed?.sha !== head || Date.now() - t.pushed.at >= CHECKS_SHOW
