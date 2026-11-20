@@ -8,7 +8,7 @@ import { layout } from './layout.ts'
 import { revealChat } from '../plugins/chat/windowing.ts'
 import type { Message } from '../shared/types.ts'
 
-const { browser, world, url } = await layout()
+const { browser, world, url, server } = await layout()
 
 /** the chat the demo opens at: the home space's coordinator */
 const KEY = 'p:vm-str:~'
@@ -174,6 +174,55 @@ describe.skipIf(!browser)('the chat windows its message list', () => {
       await page.keyboard.press('Home')
       await page.locator('[data-msg="win-0"]').waitFor()
       expect(await page.locator('[data-earlier]').count()).toBe(0)
+    } finally {
+      chat.messages = old
+      await page.close()
+    }
+  }, 60_000)
+
+  test("an alert's link to a card outside the window reveals it, lights it once, and keeps it on a push", async () => {
+    const chat = world.chats[KEY]
+    const old = chat.messages
+    chat.messages = long(400)
+    const base = 1_700_000_000_000
+    // a question card high up in the chat: its row is outside the window when the chat opens
+    chat.messages[150] = {
+      id: 'alert-q',
+      who: 'agent',
+      text: 'Which one?',
+      question: { id: 'alert:q', title: 'Which one?', kind: 'Form', choices: [{ label: 'A' }, { label: 'B' }], to: KEY },
+      at: base + 150_000,
+    }
+    emit()
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
+    // the light lasts a moment; remember it so a slow glide to the row still finds what was lit
+    await page.addInitScript(() =>
+      new MutationObserver((ms) => {
+        for (const m of ms) {
+          const el = m.target as Element
+          if (!el.hasAttribute('data-flash')) continue
+          for (const was of document.querySelectorAll('[data-lit]')) was.removeAttribute('data-lit')
+          el.setAttribute('data-lit', '')
+        }
+      }).observe(document, { subtree: true, attributes: true, attributeFilter: ['data-flash'] }),
+    )
+    try {
+      // the app's own cold-open path for a link: its ?focus address, the card's id
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=vm-str/home&focus=${encodeURIComponent('alert:q')}`)
+      const flashed = await page.waitForFunction(() => {
+        const f = document.querySelector('[data-lit]')
+        const b = f?.getBoundingClientRect()
+        if (!f || !b || b.top < 0 || b.top > innerHeight - 100) return null
+        return { card: f.hasAttribute('data-card'), msg: f.closest('[data-whole]')?.getAttribute('data-whole'), inView: true }
+      })
+      // the window widened to the card's row, and it is lit in view
+      expect(await flashed.jsonValue()).toEqual({ card: true, msg: 'alert-q', inView: true })
+      expect(await page.locator('[data-msg="alert-q"]').count()).toBe(1)
+      // a push in the meantime must not take the card out again: the floor only moves up
+      chat.messages = [...chat.messages, { id: 'win-after', who: 'agent', text: 'And on.', at: base + 401_000 }]
+      emit()
+      await page.locator('[data-msg="win-after"]').waitFor()
+      expect(await page.locator('[data-msg="alert-q"]').count()).toBe(1)
     } finally {
       chat.messages = old
       await page.close()
