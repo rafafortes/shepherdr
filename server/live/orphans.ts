@@ -25,6 +25,8 @@ export interface Row {
   cwd: string
   /** SHEPHERDR_HOME from its environment, where the environment can be read */
   home?: string
+  /** TMPDIR from its environment, where the environment can be read: what a task's folder gives its agent */
+  tmp?: string
   /** the process's uid, where the platform tells it */
   uid?: number
 }
@@ -75,17 +77,16 @@ export function rowFromProc(pid: number, s: Source): Row | null {
   const uid = Number(/^Uid:\s*(\d+)/m.exec(s.read(`/proc/${pid}/status`))?.[1])
   const me = s.selfUid()
   if (me !== null && Number.isFinite(uid) && uid !== me) return null
-  const home = s
-    .read(`/proc/${pid}/environ`)
-    .split('\0')
-    .find((v) => v.startsWith('SHEPHERDR_HOME='))
-    ?.slice('SHEPHERDR_HOME='.length)
+  const environ = s.read(`/proc/${pid}/environ`).split('\0')
+  const home = environ.find((v) => v.startsWith('SHEPHERDR_HOME='))?.slice('SHEPHERDR_HOME='.length)
+  const tmp = environ.find((v) => v.startsWith('TMPDIR='))?.slice('TMPDIR='.length)
   return {
     pid,
     ppid,
     cmd: s.read(`/proc/${pid}/cmdline`).split('\0').filter(Boolean).join(' '),
     cwd: s.link(`/proc/${pid}/cwd`).replace(/ \(deleted\)$/, ''),
     ...(home ? { home } : {}),
+    ...(tmp ? { tmp } : {}),
     ...(Number.isFinite(uid) ? { uid } : {}),
   }
 }

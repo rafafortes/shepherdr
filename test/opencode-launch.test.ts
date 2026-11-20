@@ -7,6 +7,9 @@ import { Database } from 'bun:sqlite'
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Spec } from '../server/live/agents.ts'
+import { agentEnv } from '../server/live/box.ts'
+import { taskTmpDir } from '../server/live/task-tmp.ts'
+import { ROOT } from '../server/root.ts'
 import { tmp } from './tmp.ts'
 
 const { Agents } = await import('../server/live/agents.ts')
@@ -134,6 +137,24 @@ describe('starting an OpenCode agent', () => {
       expect(r.sessionId).toBe('ses_fake1')
       expect(r.logs).toEqual([opencodeLogPath(home(), 'ses_fake1')])
       expect(h.queued).toEqual([['first']])
+    } finally {
+      h.a.stop()
+      start.mockRestore()
+      timer.mockRestore()
+    }
+  })
+
+  test("the launch environment carries the task temp folder, and the session calls get it too, not the daemon's", async () => {
+    reset()
+    const start = spyOn(herdr, 'start').mockResolvedValue(undefined as never)
+    const timer = spyOn(globalThis, 'setTimeout').mockImplementation((() => 0) as never)
+    const h = harness()
+    try {
+      await h.a.ensure(base({ first: 'first', env: agentEnv(key, ROOT) }))
+      expect(h.a.record(key)?.env).toMatchObject({ TMPDIR: taskTmpDir('OC-1'), SHEPHERDR_TMP: taskTmpDir('OC-1') })
+      // the session is prepared with the same folder it runs in: a later session of another task never inherits this
+      expect(calls()[0].cwd).toBe(cwd)
+      expect(start).toHaveBeenCalled()
     } finally {
       h.a.stop()
       start.mockRestore()

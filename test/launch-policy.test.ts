@@ -18,6 +18,7 @@ const { HOME, home } = await import('../server/store.ts')
 const { Agents } = await import('../server/live/agents.ts')
 const { herdr } = await import('../server/live/herdr.ts')
 const { ROOT } = await import('../server/root.ts')
+const { taskTmpDir } = await import('../server/live/task-tmp.ts')
 
 // the variables are put back after the body has finished, an awaited one included: a finally alone would restore them
 // at its first await, and the rest of the body would run under the preload's answer
@@ -91,6 +92,17 @@ describe('a server with a home of its own', () => {
       logged.mockRestore()
       timer.mockRestore()
     }
+  })
+
+  test('a proof home under a task temp folder still starts no agent', async () => {
+    // the agent skill now puts a proof server's home in $SHEPHERDR_TMP/home: that is not the human's home either
+    const tmp = taskTmpDir('LP-9')
+    const homeInTmp = join(tmp, 'home')
+    expect(await withEnv({ SHEPHERDR_HOME: homeInTmp, SHEPHERDR_LAUNCH_AGENTS: undefined, SHEPHERDR_BOX: undefined }, launchesAgents)).toBe(false)
+    const env = await withEnv({ SHEPHERDR_HOME: homeInTmp, SHEPHERDR_LAUNCH_AGENTS: undefined }, () => agentEnv('LP-9/Agent', ROOT))
+    expect(env.SHEPHERDR_TMP).toBe(tmp)
+    expect(env.TMPDIR).toBe(tmp)
+    expect(homeInTmp.startsWith(`${env.SHEPHERDR_TMP}/`)).toBe(true)
   })
 
   test('keeps its agents credentials in its own home, where the helper writes them', async () => {
