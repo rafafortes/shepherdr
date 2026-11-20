@@ -1,8 +1,16 @@
 // Only task worktrees Shepherdr made are trusted here. A human-picked space always keeps its CLI's first-run prompt.
 // mfs routes config reads and atomic replacement to the worker's machine over SSH, just like its other own files.
+// pi has no trust file for us to write: its task worktrees are trusted at launch with its own one-shot --approve flag
+// (see taskWorktreeKey and agents.ts args()). agy is trusted the same way at launch (--settings), and opencode has no
+// trust dialog. None of them has any of its own settings written here.
 import { dirname, join } from 'node:path'
 import { BOX, boxHome } from './box.ts'
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from './mfs.ts'
+
+/** The agents Shepherdr starts in a worktree it made: a task's `<id>/Agent` and its reviewer's `<id>/Reviewer`. A
+ *  coordinator on a space the human picked has a place id with no '/', and keeps its CLI's own first-run prompt.
+ *  This is the condition the header promises; the launch args use it for pi, where no trust file is written. */
+export const taskWorktreeKey = (key: string) => key.includes('/')
 
 /** Preserve every other setting and project. Refuse TOML shapes we cannot edit without changing their meaning. */
 export function codexTrust(text: string, path: string): string {
@@ -41,6 +49,8 @@ export function codexTrust(text: string, path: string): string {
 }
 
 export function trustWorktree(path: string, kind: string, env: Record<string, string> = {}) {
+  // claude and codex keep a trust file we write; pi (--approve), agy (--settings) and opencode (no dialog) are trusted
+  // at launch instead, so there is nothing to write here. Only task worktrees Shepherdr made reach this call.
   if (kind !== 'claude' && kind !== 'codex') return
   const ownEnv = BOX ? env : { ...process.env, ...env }
   if (process.env.NODE_ENV === 'test' && !(kind === 'claude' ? ownEnv.CLAUDE_CONFIG_DIR : ownEnv.CODEX_HOME)) return

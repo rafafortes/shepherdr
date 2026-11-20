@@ -30,6 +30,7 @@ import { SecretAccess } from './secret-access.ts'
 import { isAgentProcess } from './agent-process.ts'
 import { launchesAgents, skippedLaunch } from './launch-policy.ts'
 import { capture, end as endProcesses, endDeps, readTree, systemSource, type Source } from './orphans.ts'
+import { taskWorktreeKey } from './trust.ts'
 
 /** a log's name (its session id), wherever it lies: one named both by its mirrored path and by its own is one log */
 const logName = (f: string) => f.slice(f.lastIndexOf('/') + 1)
@@ -1507,6 +1508,11 @@ export class Agents extends Emitter<Events> {
       if (model) a.push('--model', model)
       if (effort) a.push('--effort', effort)
     } else if (r.kind === 'pi') {
+      // A worktree Shepherdr made is trusted for this run with pi's own one-shot --approve, so its .pi extensions,
+      // skills and MCP servers load without anyone answering pi's trust prompt in the chat. Nothing is written to
+      // pi's own trust.json (as with agy's --settings below). A coordinator on a space the human picked keeps pi's
+      // first-run prompt. opencode has no trust dialog: its session carries permissions instead.
+      if (taskWorktreeKey(r.key)) a.push('--approve')
       if (r.sessionId) a.push('--session-id', r.sessionId)
       if (r.system) a.push('--append-system-prompt', this.promptFile(r))
       if (model) a.push('--model', model)
