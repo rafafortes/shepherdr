@@ -171,6 +171,10 @@ describe('a Codex permission request for its own shepherdr command', () => {
     expect(ask(`${command} ask x`, '/other/bin/shepherdr')).toBe(false)
     expect(ask(`SHEPHERDR_CHAT="SHE-6/Agent" ${command} ask x`, command, chat)).toBe(false)
     expect(ask(`${command} ask x`, command, chat, 'Write')).toBe(false)
+    // the shell argv form some tools pass instead of one string: upstream's cmd_allow unwraps ["bash","-lc",cmd]
+    expect(ownCommand(command, 'Bash', { command: ['bash', '-lc', `${command} status`] }, chat, OWN_VERBS)).toBe(true)
+    expect(ownCommand(command, 'Bash', { command: ['bash', '-lc', `${command} secret run A -- ls`] }, chat, OWN_VERBS)).toBe(false)
+    expect(ownCommand(command, 'Bash', { command: ['bash', '-x', `${command} status`] }, chat, OWN_VERBS)).toBe(false)
     expect(ownCommand(command, 'Bash', null, chat, OWN_VERBS)).toBe(false)
     expect(ownCommand(command, 'Bash', {}, chat, OWN_VERBS)).toBe(false)
     expect(ownCommand('', 'Bash', { command: `${command} status` }, chat, OWN_VERBS)).toBe(false)

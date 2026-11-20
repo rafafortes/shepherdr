@@ -111,7 +111,7 @@ describe('how each CLI reaches the own-verb list', () => {
   test('claude uses a generated hook; codex, agy, opencode and pi do not consult it', () => {
     // claude is the only CLI with a permission card here, and the only one given a PreToolUse decider
     claudeHook('full')
-    // codex: approvals bypassed, no hook
+    // codex: full access bypasses approvals and needs no hook; an ask launch gets the PermissionRequest hook instead
     expect(agents.args(rec('codex'), false)).toContain('--dangerously-bypass-approvals-and-sandbox')
     // agy: its own bypass flag
     expect(agents.args(rec('agy'), false)).toContain('--dangerously-skip-permissions')
@@ -121,8 +121,9 @@ describe('how each CLI reaches the own-verb list', () => {
     expect(agents.args(rec('pi'), false)).toEqual([])
   })
 
-  test('in ask mode those CLIs raise their own card; none of them reads OWN_VERBS', () => {
+  test('in ask mode those CLIs raise their own card, with the own verbs allowed their own way', () => {
     // codex and agy keep their CLI's approvals when asked; opencode's ask rules are on its session, not in ownCall
+    // (codex allows OWN_VERBS through its hook, opencode through the session rules; neither uses the Claude decider)
     expect(agents.args(rec('codex', 'ask'), false)).not.toContain('--dangerously-bypass-approvals-and-sandbox')
     expect(agents.args(rec('agy', 'ask'), false)).not.toContain('--dangerously-skip-permissions')
     expect(agents.args(rec('opencode', 'ask'), false)).not.toContain('--auto')

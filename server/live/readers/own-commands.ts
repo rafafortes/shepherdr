@@ -112,7 +112,9 @@ process.stdin.on('end', () => {
  */
 export function ownCommand(command: string, tool: unknown, input: unknown, chat?: string, own: string[] = OWN_VERBS): boolean {
   if (tool !== 'Bash' || typeof command !== 'string' || !command) return false
-  const text = (input as { command?: unknown } | null | undefined)?.command
+  let text = (input as { command?: unknown } | null | undefined)?.command
+  // Some tools hand Codex a shell argv instead of one string; upstream ca9629cf's cmd_allow unwraps `["bash","-lc",cmd]`.
+  if (Array.isArray(text) && text.length === 3 && (text[1] === '-c' || text[1] === '-lc')) text = text[2]
   if (typeof text !== 'string') return false
   // One plain word: no expansion, redirect, separator or line break can sit outside a quote, or $ and ` inside one.
   const WORD = /(?:[\w@%+=:,./-]+|'[^']*'|"(?:[^"\\$`]|\\["\\])*")+/y
@@ -168,10 +170,13 @@ process.stdin.on('end', () => {
 
 /** OpenCode's shell permission rules for one launch, appended after its broad ask rule (the last match wins). Its
  *  wildcards are whole-value, so each own verb gets its own rule ending in ` *` (which also matches the verb alone):
- *  a bare path, a verb not listed (`secret run`, `secret env`) and a compound line still ask. The `SHEPHERDR_CHAT=*`
- *  form covers the launch prompt's assignment, whichever way the agent quotes its value. */
-export const ownShellRules = (command: string): { action: string; resource: string; effect: string }[] =>
+ *  a bare path, a verb not listed (`secret run`, `secret env`) and a compound line still ask. The launch prompt's
+ *  `SHEPHERDR_CHAT` assignment is allowed in its three shell spellings, with this launch's identity pinned: a wildcard
+ *  there would swallow other commands before the path (`SHEPHERDR_CHAT=x rm -rf / <path> status`). */
+export const ownShellRules = (command: string, chat: string): { action: string; resource: string; effect: string }[] =>
   OWN_VERBS.flatMap((verb) => [
     { action: 'shell', resource: `${command} ${verb} *`, effect: 'allow' },
-    { action: 'shell', resource: `SHEPHERDR_CHAT=* ${command} ${verb} *`, effect: 'allow' },
+    { action: 'shell', resource: `SHEPHERDR_CHAT=${chat} ${command} ${verb} *`, effect: 'allow' },
+    { action: 'shell', resource: `SHEPHERDR_CHAT="${chat}" ${command} ${verb} *`, effect: 'allow' },
+    { action: 'shell', resource: `SHEPHERDR_CHAT='${chat}' ${command} ${verb} *`, effect: 'allow' },
   ])

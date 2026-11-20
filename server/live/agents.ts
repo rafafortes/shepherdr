@@ -1485,7 +1485,7 @@ export class Agents extends Emitter<Events> {
       if (r.system && changedPrompt) await putInstructions(r.sessionId, r.system, r.cwd).catch((e) => console.error(`shepherdr: ${r.name} could not update its instructions: ${(e as Error).message}`))
       return
     }
-    r.sessionId = await createSession({ cwd: r.cwd, title: r.name, model, effort, ask: r.access === 'ask', command: agentEnv(r.key, ROOT).SHEPHERDR_COMMAND })
+    r.sessionId = await createSession({ cwd: r.cwd, title: r.name, model, effort, ask: r.access === 'ask', command: agentEnv(r.key, ROOT).SHEPHERDR_COMMAND, chat: r.key })
     addLog(r, opencodeLogPath(home(), r.sessionId))
     if (r.system) await putInstructions(r.sessionId, r.system, r.cwd)
     this.save()
