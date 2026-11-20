@@ -383,8 +383,9 @@ function Lifted({ msg, chat }: { msg: Message; chat: string }) {
               <MenuItem
                 icon={<CopyIcon className={ic} />}
                 onClick={() => {
-                  // in the tap itself: Safari copies only then
-                  copyText(text)
+                  // in the tap itself: Safari copies only then. It answers whether the browser copied; there is nothing
+                  // to say here when both ways refused, and it never leaves a rejection behind
+                  void copyText(text)
                   leave()
                 }}
               >

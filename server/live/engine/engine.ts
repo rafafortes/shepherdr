@@ -2117,7 +2117,7 @@ export class Engine extends Emitter<Events> {
     const queued = this.tasks
       .filter((t) => this.queued(t) && !t.scheduled && !t.archived)
       .map((t) => {
-        const q: QueueTask & { blockersWorking?: boolean } = of(t)
+        const q: QueueTask & { blockersWorking?: boolean; first?: boolean } = of(t)
         q.words = this.waitLine(t)
         const need = (t.after ?? []).flatMap((ref) => {
           const n = rootNeed(ref)
@@ -2132,11 +2132,14 @@ export class Engine extends Emitter<Events> {
             const d = splitRef(ref)[0] ? undefined : this.task(ref)
             return !!d && this.statusOf(d) === 'work'
           })
+        // first in line, as recheck() orders the ones freed at once: among equals, it goes before the others
+        if (t.priority) q.first = true
         return q
       })
-      // a stable sort: within either group the engine's own order (age) stays
-      .sort((a, b) => Number(!!b.blockersWorking) - Number(!!a.blockersWorking))
-      .map(({ blockersWorking: _blockersWorking, ...q }) => q)
+      // a stable sort: those whose blockers are all at work first, then a first-in-line task, then the engine's own order
+      // (age) inside each group
+      .sort((a, b) => Number(!!b.blockersWorking) - Number(!!a.blockersWorking) || Number(!!b.first) - Number(!!a.first))
+      .map(({ blockersWorking: _blockersWorking, first: _first, ...q }) => q)
     const scheduled = this.tasks
       .filter((t) => !!t.scheduled && !t.archived && !ended(t))
       .map((t) => {

@@ -100,6 +100,11 @@ describe.skipIf(!browser)('Settings → Limits on a desktop', () => {
       await openLimits(page)
       expect(await page.getByRole('region', { name: 'Queued after other tasks' }).getByRole('button', { name: 'Queued after other tasks' }).getAttribute('aria-expanded')).toBe('true')
       expect(await page.getByRole('region', { name: 'Scheduled' }).getByRole('button', { name: 'Scheduled' }).getAttribute('aria-expanded')).toBe('true')
+      // a stored value that is no object (another version, a hand) opens the page on its defaults, never breaks it
+      await page.evaluate(() => localStorage.setItem('limits:waiting', 'null'))
+      await openLimits(page)
+      expect(await page.getByRole('region', { name: 'Held for room' }).getByRole('button', { name: 'Held for room' }).getAttribute('aria-expanded')).toBe('true')
+      expect(await page.getByRole('region', { name: 'Queued after other tasks' }).getByRole('button', { name: 'Queued after other tasks' }).getAttribute('aria-expanded')).toBe('false')
     } finally {
       await page.close()
     }

@@ -1156,7 +1156,8 @@ export interface QueueTask {
 }
 /** the whole line of tasks waiting to start on this machine, as the engine has it (limits-view.ts groups and numbers it) */
 export interface LimitsQueue {
-  /** queued after other tasks, in the order they will go: those whose blockers are all at work first */
+  /** queued after other tasks, in the order they will go: those whose blockers are all at work first, and a first-in-line
+   *  task before the others of its group */
   queued: QueueTask[]
   /** waiting for their time, soonest first */
   scheduled: QueueTask[]

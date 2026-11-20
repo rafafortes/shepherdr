@@ -559,3 +559,147 @@ describe.skipIf(!browser)('the message menu Copy where the clipboard is refused'
     await ctx.close()
   }, 30_000)
 })
+
+describe.skipIf(!browser)('a copy the browser refuses', () => {
+  test('the message menu closes and leaves no rejection behind when both ways to copy are refused', async () => {
+    if (!browser) throw new Error('no browser: this file skips these tests before they run')
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    const page = await ctx.newPage()
+    // the clipboard API is there but refuses the words, and the hidden textarea's old way throws too
+    const failed: string[] = []
+    page.on('pageerror', (e) => failed.push(e.message))
+    await page.goto(url())
+    await page.waitForSelector('[data-msg="long-agent"] [data-anchor]')
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('clipboard refused')) }, configurable: true })
+      const w = window as unknown as { execs: number }
+      w.execs = 0
+      const doc = document as Document & { execCommand: (cmd: string) => boolean }
+      doc.execCommand = () => {
+        w.execs++
+        throw new Error('copy refused')
+      }
+    })
+    const cdp = await ctx.newCDPSession(page)
+    await page.$eval('[data-msg="long-agent"]', (m) => m.scrollIntoView({ block: 'center' }))
+    await page.waitForTimeout(350)
+    const box = (await page.$eval('[data-msg="long-agent"] [data-anchor]', (b) => b.getBoundingClientRect().toJSON())) as Box
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.left + 30, y: box.top + 16 }] })
+    await page.waitForTimeout(600)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await page.waitForSelector('[role=menuitem]:has-text("Copy")')
+    await page.tap('[role=menuitem]:has-text("Copy")')
+    // the old way was tried (the clipboard refused first), the menu closed, and the refusal is a quiet nothing: no
+    // unhandled rejection and no uncaught error reaches the page
+    await page.waitForSelector('[role=dialog][aria-label=React]', { state: 'detached' })
+    await page.waitForTimeout(300)
+    expect(await page.evaluate(() => (window as unknown as { execs: number }).execs)).toBe(1)
+    expect(failed).toEqual([])
+    await ctx.close()
+  }, 30_000)
+
+  test('no clipboard API at all and an old way that throws: the tap still copies nothing quietly', async () => {
+    if (!browser) throw new Error('no browser: this file skips these tests before they run')
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    const page = await ctx.newPage()
+    // a plain-http page has no clipboard API, and here even the hidden textarea's way throws (as a webview may)
+    const failed: string[] = []
+    page.on('pageerror', (e) => failed.push(e.message))
+    await page.goto(url())
+    await page.waitForSelector('[data-msg="long-agent"] [data-anchor]')
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+      const doc = document as Document & { execCommand: (cmd: string) => boolean }
+      doc.execCommand = () => {
+        throw new Error('copy refused')
+      }
+    })
+    const cdp = await ctx.newCDPSession(page)
+    await page.$eval('[data-msg="long-agent"]', (m) => m.scrollIntoView({ block: 'center' }))
+    await page.waitForTimeout(350)
+    const box = (await page.$eval('[data-msg="long-agent"] [data-anchor]', (b) => b.getBoundingClientRect().toJSON())) as Box
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.left + 30, y: box.top + 16 }] })
+    await page.waitForTimeout(600)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await page.waitForSelector('[role=menuitem]:has-text("Copy")')
+    await page.tap('[role=menuitem]:has-text("Copy")')
+    await page.waitForSelector('[role=dialog][aria-label=React]', { state: 'detached' })
+    await page.waitForTimeout(300)
+    expect(failed).toEqual([])
+    await ctx.close()
+  }, 30_000)
+})
+
+describe.skipIf(!browser)('a copy the browser refuses', () => {
+  test('a clipboard API that throws where it should refuse still copies the old way, quietly', async () => {
+    if (!browser) throw new Error('no browser: this file skips these tests before they run')
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    const page = await ctx.newPage()
+    // a clipboard that throws where it was meant to refuse: the tap must fall back to the old way, not break
+    const failed: string[] = []
+    page.on('pageerror', (e) => failed.push(e.message))
+    await page.goto(url())
+    await page.waitForSelector('[data-msg="long-agent"] [data-anchor]')
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          writeText: () => {
+            throw new Error('clipboard refused here')
+          },
+        },
+        configurable: true,
+      })
+      const w = window as unknown as { execs: string[] }
+      w.execs = []
+      const doc = document as Document & { execCommand: (cmd: string) => boolean }
+      doc.execCommand = (cmd: string) => {
+        w.execs.push(cmd)
+        return true
+      }
+    })
+    const cdp = await ctx.newCDPSession(page)
+    await page.$eval('[data-msg="long-agent"]', (m) => m.scrollIntoView({ block: 'center' }))
+    await page.waitForTimeout(350)
+    const box = (await page.$eval('[data-msg="long-agent"] [data-anchor]', (b) => b.getBoundingClientRect().toJSON())) as Box
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.left + 30, y: box.top + 16 }] })
+    await page.waitForTimeout(600)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await page.waitForSelector('[role=menuitem]:has-text("Copy")')
+    await page.tap('[role=menuitem]:has-text("Copy")')
+    await page.waitForSelector('[role=dialog][aria-label=React]', { state: 'detached' })
+    // the old way copied the words, and nothing was reported on the page
+    expect(await page.evaluate(() => (window as unknown as { execs: string[] }).execs)).toEqual(['copy'])
+    await page.waitForTimeout(300)
+    expect(failed).toEqual([])
+    await ctx.close()
+  }, 30_000)
+})
+
+describe.skipIf(!browser)("a code block's Copy says Copied only when the words were copied", () => {
+  test('the old way that answers no leaves the button as it was; one that answers yes says Copied', async () => {
+    if (!browser) throw new Error('no browser: this file skips these tests before they run')
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+    await page.goto(url())
+    const msg = page.locator('[data-msg="code-agent"]')
+    await msg.waitFor()
+    // no clipboard API, and the old way answers that it did not copy
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+      const doc = document as Document & { execCommand: (cmd: string) => boolean }
+      doc.execCommand = () => false
+    })
+    const copy = msg.getByRole('button', { name: 'Copy code' })
+    await copy.click()
+    // nothing was copied, so nothing says it was, to a screen reader either
+    expect(await msg.locator('[data-copied]').count()).toBe(0)
+    expect(await msg.getByRole('button', { name: 'Copied' }).count()).toBe(0)
+    // the same button, this time the old way copies
+    await page.evaluate(() => {
+      const doc = document as Document & { execCommand: (cmd: string) => boolean }
+      doc.execCommand = () => true
+    })
+    await copy.click()
+    expect(await msg.getByRole('button', { name: 'Copied' }).getAttribute('data-copied')).toBe('')
+    await page.close()
+  }, 30_000)
+})
