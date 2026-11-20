@@ -823,7 +823,7 @@ export class Engine extends Emitter<Events> {
       if (g) dropGate(g)
       t.gateRun = undefined
       t.mergeStop = `Merge${gate ? ' gate' : ''} interrupted by a restart: run shepherdr merge again`
-      this.save()
+      this.saveNow()
       this.settle(t)
       void this.agents
         .send(this.key(t), hidden(`Shepherdr restarted while your merge ran${gate ? ' (its gate was stopped)' : ''}: nothing was merged. Run shepherdr merge ${t.id} again.`, 'merge'))
@@ -1045,9 +1045,81 @@ export class Engine extends Emitter<Events> {
   /** where each task is in the list, by its id in capitals (task) */
   private byId?: { list: TaskRec[]; at: Map<string, number> }
 
+  /** tasks.json is a whole 6.7 MB store rewritten on the event loop. A change is coalesced to one compact write at the
+   *  end of its turn (dirty flag + one queued microtask); the bursty, harmless ones wait a short unref'd timer; a
+   *  transition whose loss after a crash would repeat a side effect is written before the engine goes on. stop() and
+   *  drain() flush what is still held, as UsageLedger and agents.ts do for their big stores. */
+  saveAfter = 1000
+  private saveDirty = false
+  private saveTimer: ReturnType<typeof setTimeout> | null = null
+  private saveFlushQueued = false
+
+  /**
+   * The call sites, by group (this change's line numbers):
+   *  - now (durable, saveNow): a task added and its id reserved (add ×2), an agent launched (go, release ×2,
+   *    beginScheduled, startTask ×2, launch, startNow, restart, resumeTakeovers, cantGoOn ×3, park), a merge recorded
+   *    (resumeMerges, retuneReviewers, done, prOf, runGate ×2, train ×2, push, openPrNow, land, watchPr, nudgeToMerge,
+   *    watchMain ×2, toldFailed, merge ×2, inLineBehind, mergeNow, mergeOnGitHub, cleanup), a review round counted
+   *    (reviewRound, attemptRound, retryReviews, sweepReviews, reviewMore), a task deleted (deleteTask ×2), and a
+   *    task's own settings written by a command that reports done (queue ×2, schedule ×2, setWorker, setPriority,
+   *    plan, pin).
+   *  - soon (saveSoon): status lines (settleOne ×2, quiet, hold), stall checks (checkStalls), the wait reasons release
+   *    restates across the line (release ×3), progress reports (report).
+   *  - turn (save): the rest, written at the end of the turn as before (sweepGates, dropTaskGate, the constructor's
+   *    migration, beginScheduled's wait, autoArchive, routeRecovered).
+   */
   private save() {
-    writeJson('tasks.json', this.data, this.dir)
     this.emit('changed')
+    this.saveDirty = true
+    if (this.saveFlushQueued) return
+    this.saveFlushQueued = true
+    queueMicrotask(() => {
+      this.saveFlushQueued = false
+      try {
+        this.flush()
+      } catch (e) {
+        this.writeFailed(e)
+      }
+    })
+  }
+
+  /** a burst of status lines, stall checks and progress reports repeats no side effect if a hard kill loses one: one
+   *  unref'd timer serves the whole burst. A durable transition never takes this path. */
+  private saveSoon() {
+    this.emit('changed')
+    this.saveDirty = true
+    if (this.saveTimer) return
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null
+      try {
+        this.flush()
+      } catch (e) {
+        this.writeFailed(e)
+      }
+    }, this.saveAfter)
+    this.saveTimer.unref?.()
+  }
+
+  /** a transition whose loss after a crash would repeat a side effect is on disk before the engine goes on */
+  private saveNow() {
+    this.saveDirty = true
+    this.flush()
+    this.emit('changed')
+  }
+
+  private writeFailed(e: unknown) {
+    console.error(`shepherdr: could not write tasks.json: ${(e as Error).message}`)
+  }
+
+  /** write what changed, now; clears both the turn's microtask and the short timer (the microtask becomes a no-op) */
+  flush() {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = null
+    }
+    if (!this.saveDirty) return
+    writeJson('tasks.json', this.data, this.dir, true)
+    this.saveDirty = false
   }
 
   private proj(t: TaskRec): Space {
@@ -1067,6 +1139,12 @@ export class Engine extends Emitter<Events> {
   }
 
   stop() {
+    // a failed write at shutdown must not skip the rest of the stop (agents, usage, retries)
+    try {
+      this.flush()
+    } catch (e) {
+      this.writeFailed(e)
+    }
     this.taskIds.close()
     clearTimeout(this.dueTimer)
     for (const x of this.later.values()) clearTimeout(x)
@@ -1230,7 +1308,7 @@ export class Engine extends Emitter<Events> {
     // a task from before this was told: what it shows now is where it starts, not news
     if (before === undefined) {
       t.posted = `${status}|${sub}`
-      return this.save()
+      return this.saveSoon()
     }
     t.updated = Date.now()
     // back at work: the next time it waits is news again, even with the same words
@@ -1254,7 +1332,7 @@ export class Engine extends Emitter<Events> {
       this.emit('card', t, status, sub)
       this.emit('news', t.project, `${t.id} ${t.closed ? `is done, nothing to merge${t.said ? `: ${t.said}` : ''}` : 'was merged'}`, 'done', { task: t.id, event: t.closed ? 'closed' : 'merged' })
     }
-    this.save()
+    this.saveSoon()
   }
 
   /** its report follows its status: its clock stops while it waits on you, and the report goes once its job is over */
@@ -1273,7 +1351,7 @@ export class Engine extends Emitter<Events> {
   private quiet(t: TaskRec, status = this.statusOf(t)) {
     t.told = status
     t.posted = `${status}|${this.subOf(t, status)}`
-    this.save()
+    this.saveSoon()
   }
 
   /** a turn that ends may be followed at once by the next: wait a moment before telling anyone it waits */
@@ -1375,7 +1453,7 @@ export class Engine extends Emitter<Events> {
       const mins = Math.max(0, Math.round((now - (quiet ? life : r!.at + r!.left! * 60_000)) / 60_000))
       this.emit('card', t, 'work', quiet ? `may be stuck: quiet for ${mins}m` : `may be stuck: ${mins}m past its time left`)
       this.emit('news', t.project, this.stallLine(t, now, quiet ? life : undefined), 'stalled', { task: t.id, event: 'stalled' })
-      this.save()
+      this.saveSoon()
     }
   }
 
@@ -1543,7 +1621,7 @@ export class Engine extends Emitter<Events> {
     const key = this.key(t)
     const id = `go:${t.id}:${Date.now()}`
     this.chats.post(key, { id, card: { id, task: t.id, status: 'work', text: `started: ${why}` } })
-    this.save()
+    this.saveNow()
     // its agent hears it: one that never started (a scheduled task whose time came while it waited for another) is
     // started first by `ensure`, and gets the go as its first message after the brief (starter). One waiting in a
     // worktree it already has is brought up to its base first, and the go says how (launch does it for one whose agent
@@ -1627,7 +1705,7 @@ export class Engine extends Emitter<Events> {
     if (t.scheduled) {
       const open = after.filter((ref) => this.depState(ref) !== 'done')
       t.after = open.length ? open : undefined
-      this.save()
+      this.saveNow()
       this.settleOne(t)
       return { queued: open }
     }
@@ -1645,7 +1723,7 @@ export class Engine extends Emitter<Events> {
     const key = this.key(t)
     const cid = `queued:${t.id}:${Date.now()}`
     this.chats.post(key, { id: cid, card: { id: cid, task: t.id, status: 'queued', text: `queued after ${open.join(', ')}` } })
-    this.save()
+    this.saveNow()
     if (!opts.self && this.agents.status(key) !== 'gone')
       this.agents.send(key, hidden(queuedLine(open, was.length ? 'changed' : 'later', t.id), 'queue'), { ensure: this.starter(t) }).catch(() => undefined)
     this.settleOne(t)
@@ -2192,7 +2270,7 @@ export class Engine extends Emitter<Events> {
       spaceZero: `waiting: ${cap?.shown ?? 'its space'} is set to 0 tasks`,
     }[why]
     this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'queued', text: words } })
-    this.save()
+    this.saveSoon()
     this.settleOne(t)
     // its turn comes at a pass: one held only by the line asks for it now, so a machine with room does not sit on a task
     // until the next health sample (release() starts the ones ahead of it, and then it, at their turn)
@@ -2248,7 +2326,7 @@ export class Engine extends Emitter<Events> {
         if (r.why && !MACHINE_WIDE.has(r.why)) {
           if (t.held!.why !== r.why) {
             t.held!.why = r.why
-            this.save()
+            this.saveSoon()
             this.settleOne(t)
           }
           continue
@@ -2257,7 +2335,7 @@ export class Engine extends Emitter<Events> {
           // each one waits for the same reason: its line says the one that holds them now
           const stale = order.filter((x) => this.holding(x) && x.held!.why !== r.why)
           for (const x of stale) x.held!.why = r.why
-          if (stale.length) this.save()
+          if (stale.length) this.saveSoon()
           return
         }
         // one first in line doesn't wait for the spacing either
@@ -2273,7 +2351,7 @@ export class Engine extends Emitter<Events> {
             x.held.why = why
             restated = true
           }
-          if (restated) this.save()
+          if (restated) this.saveSoon()
           return
         }
         this.lastStart = now
@@ -2293,7 +2371,7 @@ export class Engine extends Emitter<Events> {
         if (t.held!.takeover) {
           const { why: cut, lasting } = t.held!.takeover
           t.held = undefined
-          this.save()
+          this.saveNow()
           this.cantGoOn(t.id, cut, lasting).catch(() => undefined)
           continue
         }
@@ -2302,7 +2380,7 @@ export class Engine extends Emitter<Events> {
           t.held = undefined
           const id = `go:${t.id}:${now}`
           this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'work', text: `started: ${why}` } })
-          this.save()
+          this.saveNow()
           this.startTask(t).catch((e) => this.troubled(t, e))
         }
       }
@@ -2371,7 +2449,7 @@ export class Engine extends Emitter<Events> {
         ...(Object.keys(o.agent ?? {}).length ? { chosen: true as const } : {}),
       }
       this.data.tasks.push(t)
-      this.save()
+      this.saveNow()
       this.armDue()
       this.emit('news', t.project, `${t.id} was added: ${t.title}`, 'added', { task: t.id, event: 'added' })
       return t
@@ -2422,7 +2500,7 @@ export class Engine extends Emitter<Events> {
     if (room.why) {
       t.told = 'queued'
       this.hold(t, room.why)
-    } else this.save()
+    } else this.saveNow()
     this.emit('news', t.project, `${t.id} was added: ${t.title}`, 'added', { task: t.id, event: 'added' })
     if (!room.why && !after.length) this.startTask(t).catch((e) => this.troubled(t, e))
     return t
@@ -2553,7 +2631,7 @@ export class Engine extends Emitter<Events> {
       const id = `due:${t.id}:${now}`
       this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'work', text: 'its time came: starting' } })
     }
-    this.save()
+    this.saveNow()
     this.startTask(t).catch((e) => this.troubled(t, e))
   }
 
@@ -2576,7 +2654,7 @@ export class Engine extends Emitter<Events> {
       // a task added for a time keeps the brief it was added with, unread by Settings; one scheduled after it was added
       // already has its own, whole
       t.scheduled = { ...(t.scheduled ?? {}), at }
-      this.save()
+      this.saveNow()
       this.armDue()
       this.settle(t)
       return { at }
@@ -2584,7 +2662,7 @@ export class Engine extends Emitter<Events> {
     // cancelled: from now on it waits for nothing but room, and for what it waits for (those done already are no wait)
     this.materialize(t)
     t.scheduled = undefined
-    this.save()
+    this.saveNow()
     this.armDue()
     const open = this.queued(t) ? this.open(t) : []
     t.after = open.length ? open : undefined
@@ -2643,7 +2721,7 @@ export class Engine extends Emitter<Events> {
       const branch = branchFor(t)
       // Old records without a snapshot keep the existing fallback; new tasks snapshot at add.
       t.base ??= p.base
-      this.save()
+      this.saveNow()
       await G.validateBase(p.path, t.base)
       // herdr dropping a call is tried again, as its agent's start does (agents.ts launch): creating the worktree finds the one a
       // dropped try made, instead of making another
@@ -2651,7 +2729,7 @@ export class Engine extends Emitter<Events> {
         throw new Error(`Could not make a worktree: ${(e as Error).message}`)
       })
       Object.assign(t, { branch, worktree: made.path })
-      this.save()
+      this.saveNow()
       // on a backup because its primary was full or out: a card in its chat says so, and the agent is told it too
       if (step > 0) {
         t.onBackup = { step, kind: h.kind, at: Date.now() }
@@ -2700,7 +2778,7 @@ export class Engine extends Emitter<Events> {
     if (!made && !ended(t) && !existsSync(t.worktree!) && this.agents.status(key) === 'gone') {
       made = await this.wt.create(home, t.branch!, t.base!, labelOf(t), t.worktree)
       t.worktree = made.path
-      this.save()
+      this.saveNow()
     }
     // back to work in the worktree it had (not one made just now): what came into its base meanwhile reaches it first
     const moved = made ? undefined : await this.freshen(t).catch(() => undefined)
@@ -2783,7 +2861,7 @@ export class Engine extends Emitter<Events> {
     else {
       const card = `go:${t.id}:${Date.now()}`
       this.chats.post(this.key(t), { id: card, card: { id: card, task: t.id, status: 'work', text: `started: ${why}` } })
-      this.save()
+      this.saveNow()
       // as a task added with room starts: one that can't start says so on the task
       this.startTask(t).catch((e) => this.troubled(t, e))
     }
@@ -2804,7 +2882,7 @@ export class Engine extends Emitter<Events> {
     t.switchTo = t.worktree && rec && !sameHarness({ kind: rec.kind, model: rec.model, effort: rec.effort }, on) ? on : undefined
     const id2 = `worker:${t.id}:${Date.now()}`
     this.chats.post(this.key(t), { id: id2, card: { id: id2, task: t.id, text: `Starts on ${harnessWords(fitHarness(on))} when its turn comes` } })
-    this.save()
+    this.saveNow()
     this.settleOne(t)
     return t
   }
@@ -2939,7 +3017,7 @@ export class Engine extends Emitter<Events> {
     }
     if (!dry && plan.length) {
       for (const f of plan) f()
-      this.save()
+      this.saveNow()
     }
     // as retuneWaiting: the answer names each space as it shows
     out.kept = out.kept.map((name) => this.places.shownName(name))
@@ -2953,7 +3031,7 @@ export class Engine extends Emitter<Events> {
     const t = this.req(id)
     if (ended(t)) throw new Error(`${t.id} is Done already (${t.closed ? 'nothing to merge' : 'merged'})`)
     t.priority = on ? true : undefined
-    this.save()
+    this.saveNow()
     this.settleOne(t)
     this.release()
     return t
@@ -3115,7 +3193,7 @@ export class Engine extends Emitter<Events> {
     } finally {
       this.handing.delete(t.id)
       this.unclaim(key)
-      this.save()
+      this.saveNow()
       this.settle(t)
     }
     return words
@@ -3148,7 +3226,7 @@ export class Engine extends Emitter<Events> {
       const h = t.handover!
       t.handover = undefined
       t.tookOver = h.prior
-      this.save()
+      this.saveNow()
       if (ended(t) || t.archived || t.stopped) continue
       void this.cantGoOn(t.id, h.why, h.lasting).catch(() => undefined)
     }
@@ -3199,7 +3277,7 @@ export class Engine extends Emitter<Events> {
       // every backup blocked (0 allowed): it never starts until a limit changes; otherwise it waits for a slot
       this.hold(t, blockedOnly(c) ? 'blocked' : 'model')
       t.held!.takeover = { why: why.charAt(0).toLowerCase() + why.slice(1), step: at, lasting }
-      this.save()
+      this.saveNow()
       stuck()
       return this.settle(t)
     }
@@ -3220,7 +3298,7 @@ export class Engine extends Emitter<Events> {
     t.handover = { why, lasting, ...(prior ? { prior } : {}), at: Date.now() }
     // kept on the mark: the way back adopts an open takeover as an outage, but a one-response filter refusal is none
     t.tookOver = { from, to, why: why.charAt(0).toLowerCase() + why.slice(1), at: Date.now(), step: plan.n, ...(blocked ? { blocked: true } : {}) }
-    this.save()
+    this.saveNow()
     // Settings' Backup model and effort (this task's own first), or else the task's own: its CLI may not take them, in
     // which case it starts on its own default. Its run counts there from now on: another cut-off a moment later sees it
     const h: Harness = backupHarness(plan.to!, own)
@@ -3245,7 +3323,7 @@ export class Engine extends Emitter<Events> {
       }
       // the backup is up: no restart takes this takeover again
       t.handover = undefined
-      this.save()
+      this.saveNow()
       const card = `takeover:${t.id}:${t.tookOver.at}`
       const text = backupCardWords({ from: name(from), to: name(to), words, same, why: t.tookOver.why })
       this.chats.post(key, { id: card, card: { id: card, text } })
@@ -3350,7 +3428,7 @@ export class Engine extends Emitter<Events> {
       to: `${t.id} agent`,
     }
     this.chats.post(this.key(t), { id: q.id, question: q })
-    this.save()
+    this.saveNow()
   }
 
   /** the agent's own progress (shepherdr status): its line, how far through the task, the minutes left if it said */
@@ -3362,7 +3440,7 @@ export class Engine extends Emitter<Events> {
     const at = Date.now()
     this.heard.set(t.id, at)
     t.report = { msg: fitStatus(msg), progress, left, at, pausedAt: this.statusOf(t) === 'need' ? at : undefined }
-    this.save()
+    this.saveSoon()
     return t.report
   }
 
@@ -3403,7 +3481,7 @@ export class Engine extends Emitter<Events> {
         const left = deadline - Date.now()
         if (left <= 0) {
           t.reviewWait = { since: Date.now() }
-          this.save()
+          this.saveNow()
           return a
         }
         await Bun.sleep(Math.min(this.reviewPoll, left))
@@ -3424,7 +3502,7 @@ export class Engine extends Emitter<Events> {
     const key = keyOf(h.kind, h.model)
     t.reviews = (t.reviews ?? 0) + 1
     t.reviewWait = undefined
-    this.save()
+    this.saveNow()
     this.lease(`review:${t.id}`, 'reviewer', key, this.nameOf(t) ?? '')
     this.reviewing.set(t.id, { since: Date.now() })
     const why = n > 0 ? c.skipped.find((b) => b.harness.n === 0) : undefined
@@ -3478,7 +3556,7 @@ export class Engine extends Emitter<Events> {
     for (const t of waiting) {
       if (!this.atReviewStep(t) || this.reviewsLeft(t) <= 0) {
         t.reviewWait = undefined
-        this.save()
+        this.saveNow()
         continue
       }
       const a = this.attemptRound(t)
@@ -3524,7 +3602,7 @@ export class Engine extends Emitter<Events> {
     for (const t of this.tasks) {
       if (!t.reviewWait || this.atReviewStep(t)) continue
       t.reviewWait = undefined
-      this.save()
+      this.saveNow()
     }
   }
 
@@ -3561,7 +3639,7 @@ export class Engine extends Emitter<Events> {
       )
     t.reviewsAdded = (t.reviewsAdded ?? 0) + 1
     const rounds = this.roundsOf(t)
-    this.save()
+    this.saveNow()
     const text = `Your coordinator added one review round: ${rounds} in all. Run shepherdr review ${t.id}, then review your final commit as your brief says.`
     const cid = `review:${t.id}:${Date.now()}`
     this.chats.post(this.key(t), { id: cid, card: { id: cid, task: t.id, status: 'work', text: `woken: your coordinator added one review round (${rounds} in all)` } })
@@ -3606,7 +3684,7 @@ export class Engine extends Emitter<Events> {
         return { state: 'merged', note: r.note ?? why }
       }
     }
-    this.save()
+    this.saveNow()
     // told once its turn ends: an agent that merges right after never shows as waiting
     this.settleSoon(t)
     // its pull request gets the summary and is ready for review; GitHub away changes nothing here
@@ -3752,7 +3830,7 @@ export class Engine extends Emitter<Events> {
     const pr = known && known.state !== 'CLOSED' ? known : await G.findPr(g, cwd, t.branch!)
     if ((pr?.number ?? null) !== (t.pr?.number ?? null) && (pr || known?.state === 'CLOSED')) {
       t.pr = pr ? { number: pr.number, url: pr.url } : undefined
-      this.save()
+      this.saveNow()
     }
     return pr
   }
@@ -3862,10 +3940,10 @@ export class Engine extends Emitter<Events> {
     // an earlier run this one does not pick up is unwanted: it is stopped, and its files (including a late exit) go
     if (g && g !== run) dropGate(g)
     t.gateRun = run
-    this.save()
+    this.saveNow()
     const ran = await waitGate(run, this.gateTimeout)
     t.gateRun = undefined
-    this.save()
+    this.saveNow()
     forgetGate(run)
     return ran
   }
@@ -3963,7 +4041,7 @@ export class Engine extends Emitter<Events> {
     const riding = cars.slice(1).map((c) => c.t)
     trainLog(`${t.id}'s merge train: ${names.join(', ')} (one gate run on ${top.slice(0, 7)}, main at ${at.slice(0, 7)})${leftOut().length ? `. Left out: ${leftOut().join('; ')}` : ''}`)
     for (const x of riding) x.landing = { ...x.landing!, train: t.id }
-    this.save()
+    this.saveNow()
     riding.forEach((x) => this.settle(x))
     // the gate, once, in t's worktree at the top of the stack; its branch is back as it was after
     let ran: { code: number; out: string } | undefined
@@ -4001,7 +4079,7 @@ export class Engine extends Emitter<Events> {
       // that never ran, marks none: the change did not fail
       if (ran && ran.code !== 0 && ran.code !== GATE_GONE) for (const c of cars) c.t.alone = true
       for (const x of riding) if (x.landing?.train === t.id) x.landing = { ...x.landing, train: undefined }
-      this.save()
+      this.saveNow()
       riding.forEach((x) => this.settle(x))
       return undefined
     }
@@ -4058,7 +4136,7 @@ export class Engine extends Emitter<Events> {
         t.mergeStop = undefined
         this.settle(t)
       }
-      this.save()
+      this.saveNow()
     }
     return r
   }
@@ -4102,7 +4180,7 @@ export class Engine extends Emitter<Events> {
       const o = await G.openPr(g, t.worktree, { branch: t.branch, base: t.base, title: this.prTitle(t), body: this.prBody(t), draft: !t.reported })
       if ('error' in o) return { ok: false, text: `Pushed ${t.branch}, but GitHub did not open a pull request: ${o.error}` }
       t.pr = { number: o.number, url: o.url }
-      this.save()
+      this.saveNow()
       opened = true
     } else if (t.reported) await this.readyForReview(t, g)
     const head = (await G.git(t.worktree, 'rev-parse', '--short', 'HEAD')).out
@@ -4141,7 +4219,7 @@ export class Engine extends Emitter<Events> {
   private land(t: TaskRec, step?: Landing['step'], due?: number, more?: Partial<Landing>) {
     if (!t.reported || ended(t)) return
     t.landing = step ? { step, at: Date.now(), due, ...more } : undefined
-    this.save()
+    this.saveNow()
     this.settle(t)
   }
 
@@ -4263,7 +4341,7 @@ export class Engine extends Emitter<Events> {
     if (news.length && ['working', 'blocked'].includes(this.agents.status(this.key(t)))) return
     w.failed = failed
     if (all) w.seen = all.map((x) => x.id)
-    this.save()
+    this.saveNow()
     if (!news.length) return this.nudgeToMerge(t, pr.number, c)
     const id = `pr:${t.id}:${Date.now()}`
     this.chats.post(this.key(t), { id, card: { id, task: t.id, status: 'work', text: `woken: ${what.join(' and ')} on PR #${pr.number}`, pr: t.pr } })
@@ -4278,7 +4356,7 @@ export class Engine extends Emitter<Events> {
     const key = this.key(t)
     if (!t.landing || t.landing.nudged || (c.state !== 'pass' && c.state !== 'none') || this.agents.background(key)) return
     t.landing.nudged = true
-    this.save()
+    this.saveNow()
     const text = `GitHub's checks passed on PR #${n}: merge ${t.id} now (shepherdr merge ${t.id}), as your brief says.`
     await this.agents.send(key, hidden(text, 'github', { task: t.id, pr: String(n) }), { ensure: this.starter(t) }).catch(() => undefined)
   }
@@ -4311,13 +4389,13 @@ export class Engine extends Emitter<Events> {
     const now = runs[i]
     if (now.state === 'pass') {
       if (red) delete this.data.red![p.path]
-      if (red) this.save()
+      if (red) this.saveNow()
       return
     }
     // told once while it stays red, whatever else merges meanwhile
     if (red) return
     ;(this.data.red ??= {})[p.path] = now.sha
-    this.save()
+    this.saveNow()
     const green = runs.slice(i + 1).find((r) => r.state === 'pass')?.sha
     await G.git(p.path, 'fetch', '--quiet', 'origin', p.base)
     const log = await G.git(p.path, 'log', '--format=%s', '-n', '20', green ? `${green}..${now.sha}` : `${now.sha}^!`)
@@ -4345,7 +4423,7 @@ export class Engine extends Emitter<Events> {
   /** checks that failed at a commit were told to the agent (shepherdr checks, merge): watching won't tell it again */
   private toldFailed(t: TaskRec, head: string, c: G.PrChecks) {
     t.watch = { ...t.watch, since: t.watch?.since ?? ghNow(), failed: failKey(head, c) }
-    this.save()
+    this.saveNow()
   }
 
   /* ---------- merging ---------- */
@@ -4366,7 +4444,7 @@ export class Engine extends Emitter<Events> {
     // say so; never Needs you while its agent waits, as told, for how it went
     if (!run && opts.self && !t.reported && !ended(t)) {
       t.reported = true
-      this.save()
+      this.saveNow()
     }
     if (!run) {
       const repo = this.places.space(t.project)?.path ?? ''
@@ -4374,7 +4452,7 @@ export class Engine extends Emitter<Events> {
       const ahead = this.mergingNow.get(repo)
       if (ahead && ahead !== t.id && t.reported && !ended(t)) {
         t.landing = { step: 'queue', at: Date.now(), behind: ahead, gate: this.gateOf(t) !== undefined }
-        this.save()
+        this.saveNow()
         this.settle(t)
       }
       const now = (this.merging.get(repo) ?? Promise.resolve())
@@ -4433,7 +4511,7 @@ export class Engine extends Emitter<Events> {
       this.settle(x)
       moved = true
     }
-    if (moved) this.save()
+    if (moved) this.saveNow()
   }
 
   /**
@@ -4443,6 +4521,12 @@ export class Engine extends Emitter<Events> {
    */
   async drain(): Promise<boolean> {
     this.closing = true
+    // SIGTERM/SIGINT reach here before stop(): everything held by a saveSoon timer is on disk first
+    try {
+      this.flush()
+    } catch (e) {
+      this.writeFailed(e)
+    }
     const on = [...this.landings.values()]
     if (!on.length) return false
     await Promise.race([Promise.allSettled(on), Bun.sleep(this.mergeDeadline)])
@@ -4498,7 +4582,7 @@ export class Engine extends Emitter<Events> {
       // its turn alone is over once its gate ran to its end, however that ended: it may ride a train again
       if (t.alone && !(!gate.ok && gate.stopped)) {
         t.alone = undefined
-        this.save()
+        this.saveNow()
       }
       if (!gate.ok) return { ok: false, error: gate.error }
       const m = await G.mergeHere(p.path, t.branch, t.base, this.mergeMessage(t, gate.line), true)
@@ -4588,7 +4672,7 @@ export class Engine extends Emitter<Events> {
       const o = await G.openPr(g, wt, { branch: t.branch!, base: t.base!, title: this.prTitle(t), body: this.prBody(t), draft: false })
       if ('error' in o) return { ok: false, error: `GitHub did not open a pull request for ${t.branch}: ${o.error}` }
       t.pr = { number: o.number, url: o.url }
-      this.save()
+      this.saveNow()
     } else {
       // its words carry the summary, whether or not the agent reported done before
       if (t.said) await G.editPr(g, wt, pr.number, this.prBody(t))
@@ -4705,7 +4789,7 @@ export class Engine extends Emitter<Events> {
       const news = r.kept.length && JSON.stringify(r.kept) !== JSON.stringify(t.kept)
       t.kept = r.kept.length ? r.kept : undefined
       t.cleaned = true
-      this.save()
+      this.saveNow()
       if (news && !quiet)
         this.emit('news', t.project, `${t.id} ${t.closed ? 'is done, nothing to merge' : 'was merged'}; kept ${r.kept.join(', ')}`, 'done', { task: t.id, event: t.closed ? 'closed' : 'merged' })
       return r
@@ -4819,7 +4903,7 @@ export class Engine extends Emitter<Events> {
         this.briefing.delete(t.id)
         // a fresh start at its turn: its brief again, on what Settings say then, never the closed agent's session
         this.agents.forget(key)
-        this.save()
+        this.saveNow()
         this.settleOne(t)
         parked.push(t.id)
       } finally {
@@ -5007,7 +5091,7 @@ export class Engine extends Emitter<Events> {
       // its agent may have written something before it closed: it stays stopped, and writing to it resumes it
       await holds(' Its agent was stopped (writing to it starts it again).').catch((e) => {
         t.stopped = true
-        this.save()
+        this.saveNow()
         throw e
       })
       const left = p ? await this.wt.remove({ repo: p.path, wt: t.worktree, branch: t.branch, label: labelOf(t) }) : []
@@ -5018,7 +5102,7 @@ export class Engine extends Emitter<Events> {
       this.emit('gone', t, true)
       this.chats.forget(key)
       this.agents.forget(key)
-      this.save()
+      this.saveNow()
       // a task queued after it waits on you now
       this.recheck()
       return left
@@ -5071,7 +5155,7 @@ export class Engine extends Emitter<Events> {
     if (on && t.archived) throw new Error(`${t.id} is archived: unarchive it first (shepherdr task unarchive ${t.id})`)
     if (!!t.pinned === on) return t
     t.pinned = on ? Date.now() : undefined
-    this.save()
+    this.saveNow()
     return t
   }
 
