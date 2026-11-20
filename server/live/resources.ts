@@ -83,7 +83,7 @@ export function folderSize(dir: string, io: SizeIO = systemSizeIO): number | und
     try {
       total += e.dir ? (folderSize(p, io) ?? 0) : io.size(p)
     } catch {
-      // coverage-exempt: a deletion racing the walk cannot be forced on a test's disk
+      // a file gone between the listing and the read: the rest of the folder still counts
     }
   }
   return total
@@ -112,7 +112,7 @@ const pairs = (m: Record<string, number>) =>
 const VERBS: Record<string, string> = {
   inbox: 'Settings → Tasks → Remove chat files after (tasks.inboxKeep)',
   artifacts: 'shepherdr artifact rm <id>',
-  browser: "the hourly sweep removes a done or gone task's browser profile; Settings → Browser → Close idle browser after (browser.idleClose) closes idle ones",
+  browser: "the browser sweep removes a done, stopped or gone task's profile; Settings → Browser → Close idle browser after (browser.idleClose) closes idle ones",
   'check logs': 'pruned after a successful check (SHEPHERDR_CHECK_KEEP)',
 }
 
@@ -143,7 +143,7 @@ export function lines(f: Resources): string[] {
       .map(([t, n]) => `${t} (${n})`)
       .join(', ')
     out.push(
-      `Shared-browser processes of done or gone tasks (${f.chromes.length}): ${shown}${byTask.size > 8 ? ` and ${byTask.size - 8} more tasks` : ''}. Settings → Browser → Close idle browser after (browser.idleClose) closes idle ones; the hourly sweep closes a done task's browser.`,
+      `Shared-browser processes of done or gone tasks (${f.chromes.length}): ${shown}${byTask.size > 8 ? ` and ${byTask.size - 8} more tasks` : ''}. Settings → Browser → Close idle browser after (browser.idleClose) closes idle ones; the browser sweep closes a stopped, done or gone task's browser.`,
     )
   }
   for (const folder of f.folders) {
