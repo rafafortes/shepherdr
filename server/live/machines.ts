@@ -21,6 +21,7 @@ import { mirrorHomes } from './mirror.ts'
 import { q, sshArgs } from './box.ts'
 import { MERGE_DEADLINE } from './engine/engine.ts'
 import { EXECUTABLE_KEYS } from './settings.ts'
+import { rotate } from './server-log.ts'
 
 export interface MachineRec {
   machine: string
@@ -426,7 +427,9 @@ export class Machines extends Emitter<Events> {
     if (!this.active(l)) return
     rmSync(join(home, 'server.json'), { force: true })
     l.rec.url = ''
-    const log = openSync(join(home, 'worker.log'), 'a')
+    const workerLog = join(home, 'worker.log')
+    rotate(workerLog)
+    const log = openSync(workerLog, 'a')
     const w = Bun.spawn([process.execPath, join(import.meta.dir, '..', 'main.ts')], {
       env: {
         ...process.env,

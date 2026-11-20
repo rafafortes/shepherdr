@@ -51,3 +51,16 @@ are discarded on restart. A daemon response for an earlier launch is ignored.
 
 References: [Codex app-server protocol and metadata-only thread reads](https://learn.chatgpt.com/docs/app-server).
 The per-version schemas can be inspected with `codex app-server generate-ts --out <temporary directory>`.
+
+## Server log
+
+The live server, its supervisor and each machine worker write one persistent log: `~/.shepherdr/run/server.log`
+(`HERDR_PLUGIN_STATE_DIR/server.log` when set), and `~/.shepherdr/machines/<name>/worker.log` for a worker. Every line
+starts with an ISO date-time such as `2026-11-18T21:44:03`, including each line of a multi-line message, so a stall or a
+failed start can be placed on a day after the fact. The file rotates at 10 MB: the previous generation is kept as
+`server.log.1` (or `worker.log.1`, overwriting the older one), at start and whenever a line is written, so a server that
+stays up for weeks stays bounded.
+
+Nothing that belongs to the human goes into it: no secret, credential or token from `secrets.json`, and no agent chat
+text. Provider failures are logged as a short marked excerpt, keys and tokens are redacted, and console lines stay
+about Shepherdr itself.

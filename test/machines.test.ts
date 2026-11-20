@@ -9,6 +9,7 @@ import { helperFiles, helperVersion } from '../server/live/install.ts'
 import { Mirror, mirrorHomes } from '../server/live/mirror.ts'
 import { carryClaudeSession } from '../server/live/agents.ts'
 import type { BoxInfo } from '../server/live/box.ts'
+import { logFile, rotate } from '../server/live/server-log.ts'
 import { tmp } from './tmp.ts'
 
 const root = join(import.meta.dir, '..')
@@ -546,5 +547,17 @@ describe('a restart of the main server (an update)', () => {
       m.stop()
       if (w.alive()) process.kill(w.pid)
     }
+  })
+})
+
+describe('a machine worker log', () => {
+  test('rotates under a machine home of its own, keeping one previous generation', () => {
+    const home = tmp('worker-log-home')
+    const worker = logFile(home, undefined, 'machine-1')
+    expect(worker).toBe(join(home, 'worker.log'))
+    writeFileSync(worker, 'worker output\n'.repeat(20))
+    expect(rotate(worker, 100)).toBe(true)
+    expect(readFileSync(`${worker}.1`, 'utf8')).toBe('worker output\n'.repeat(20))
+    expect(existsSync(worker)).toBe(false)
   })
 })
