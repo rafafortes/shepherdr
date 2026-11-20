@@ -223,6 +223,169 @@ describe.skipIf(!browser)('pictures sent in the chat', () => {
     }, 30_000)
 })
 
+describe.skipIf(!browser)('the full-screen picture viewer', () => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJ', 'base64')
+  const br = browser as NonNullable<typeof browser>
+
+  /** send three pictures from the box and open the middle one full screen, on a page of its own */
+  async function open(opts: { phone?: boolean; motion?: 'reduce' | 'no-preference' } = {}) {
+    const page = await br.newPage(opts.phone ? { viewport: { width: 390, height: 844 }, hasTouch: true } : { viewport: { width: 1280, height: 800 } })
+    if (opts.motion) await page.emulateMedia({ reducedMotion: opts.motion })
+    await page.goto(url())
+    await page.getByRole('button', { name: 'Attach files and more' }).click()
+    const names = ['gest-0.png', 'gest-1.png', 'gest-2.png']
+    await page.setInputFiles(
+      'input[name="file"]',
+      names.map((n) => ({ name: n, mimeType: 'image/png', buffer: png })),
+    )
+    await page.getByRole('list', { name: 'Attached files' }).getByRole('listitem').nth(2).waitFor()
+    await page.waitForFunction(() => [...document.querySelectorAll('[aria-label="Attached files"] img')].every((i) => (i as HTMLImageElement).naturalWidth > 0))
+    await page.getByRole('button', { name: 'Send' }).click()
+    const album = page.getByRole('group', { name: '3 pictures' }).last()
+    await album.waitFor()
+    await settled(page)
+    await album.getByRole('button', { name: 'Open gest-1.png' }).click()
+    const viewer = page.getByRole('dialog', { name: 'gest-1.png' })
+    await viewer.waitFor()
+    return { page, viewer }
+  }
+
+  const middle = async (viewer: Awaited<ReturnType<typeof open>>['viewer']) => {
+    const b = await viewer.boundingBox()
+    if (!b) throw new Error('the viewer has no box')
+    return b
+  }
+
+  /** the zoom of the picture itself, not of its dimmed neighbours */
+  const scale = (viewer: Awaited<ReturnType<typeof open>>['viewer']) =>
+    viewer.locator('img[alt="gest-1.png"]').evaluate((el: HTMLImageElement) => {
+      const t = getComputedStyle(el).transform
+      return t === 'none' ? 1 : new DOMMatrix(t).a
+    })
+
+  test('a wheel zooms where it points, two taps zoom out again, one tap closes', async () => {
+    const { page, viewer } = await open()
+    const b = await middle(viewer)
+    const [x, y] = [b.x + b.width / 2, b.y + b.height / 2]
+    expect(await scale(viewer)).toBe(1)
+    await page.mouse.move(x, y)
+    await page.mouse.wheel(0, -240)
+    await page.waitForTimeout(250)
+    expect(await scale(viewer)).toBeGreaterThan(1)
+    // already zoomed: the second of two quick taps takes it back to one
+    await page.mouse.click(x, y)
+    await page.mouse.click(x, y)
+    await page.waitForTimeout(250)
+    expect(await scale(viewer)).toBe(1)
+    // a single tap on an unzoomed picture closes the viewer
+    await page.mouse.click(x, y)
+    await viewer.waitFor({ state: 'detached' })
+    await page.close()
+  }, 30_000)
+
+  test('a short sideways drag snaps back; a long downward one closes, sliding away when motion is on', async () => {
+    // too short to be a page turn: the strip springs back to zero and the same picture is still open
+    {
+      const { page, viewer } = await open()
+      const b = await middle(viewer)
+      const [x, y] = [b.x + b.width / 2, b.y + b.height / 2]
+      const strip = viewer.locator('div.will-change-transform').first()
+      await page.mouse.move(x, y)
+      await page.mouse.down()
+      await page.mouse.move(x + 12, y)
+      await page.mouse.move(x + 24, y)
+      expect(await strip.evaluate((el: HTMLDivElement) => el.style.transform)).toBe('translateX(24px)')
+      await page.mouse.up()
+      expect(await strip.evaluate((el: HTMLDivElement) => el.style.transform)).toBe('translateX(0px)')
+      // past the 220 ms a page turn would have taken: still the same picture
+      await page.waitForTimeout(350)
+      expect(await viewer.count()).toBe(1)
+      await viewer.getByRole('button', { name: 'Close' }).click()
+      await viewer.waitFor({ state: 'detached' })
+      await page.close()
+    }
+    // pulled down far enough: reduced motion closes it at once
+    {
+      const { page, viewer } = await open({ motion: 'reduce' })
+      const b = await middle(viewer)
+      const [x, y] = [b.x + b.width / 2, b.y + b.height / 2]
+      await page.mouse.move(x, y)
+      await page.mouse.down()
+      await page.mouse.move(x, y + 160)
+      await page.mouse.up()
+      await viewer.waitFor({ state: 'detached' })
+      await page.close()
+    }
+    // with motion, the same drag carries the picture off the screen before it closes
+    {
+      const { page, viewer } = await open({ motion: 'no-preference' })
+      const b = await middle(viewer)
+      const [x, y] = [b.x + b.width / 2, b.y + b.height / 2]
+      await page.mouse.move(x, y)
+      await page.mouse.down()
+      await page.mouse.move(x, y + 160)
+      await page.mouse.up()
+      // still on screen, sliding away before the 180 ms close
+      expect(await viewer.count()).toBe(1)
+      await viewer.waitFor({ state: 'detached' })
+      await page.close()
+    }
+  }, 30_000)
+
+  test('a two-finger pinch zooms; a full picture that cannot load says so', async () => {
+    const ctx = await br.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    const page = await ctx.newPage()
+    await page.goto(url())
+    await page.getByRole('button', { name: 'Attach files and more' }).click()
+    await page.setInputFiles(
+      'input[name="file"]',
+      ['pinch-0.png', 'pinch-1.png'].map((n) => ({ name: n, mimeType: 'image/png', buffer: png })),
+    )
+    await page.getByRole('list', { name: 'Attached files' }).getByRole('listitem').nth(1).waitFor()
+    await page.getByRole('button', { name: 'Send' }).click()
+    const album = page.getByRole('group', { name: '2 pictures' }).last()
+    await album.waitFor()
+    await album.getByRole('button', { name: 'Open pinch-1.png' }).click()
+    const viewer = page.getByRole('dialog', { name: 'pinch-1.png' })
+    await viewer.waitFor()
+    const cdp = await ctx.newCDPSession(page)
+    const [x, y] = [195, 400]
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [
+        { x: x - 30, y },
+        { x: x + 30, y },
+      ],
+    })
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [
+        { x: x - 70, y },
+        { x: x + 70, y },
+      ],
+    })
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await page.waitForTimeout(250)
+    const zoom = await viewer.locator('img[alt="pinch-1.png"]').evaluate((el: HTMLImageElement) => {
+      const t = getComputedStyle(el).transform
+      return t === 'none' ? 1 : new DOMMatrix(t).a
+    })
+    expect(zoom).toBeGreaterThan(1)
+    await ctx.close()
+
+    // the tile's small copy loads, but the full picture the viewer asks for does not
+    const broken = await br.newPage({ viewport: { width: 1280, height: 800 } })
+    await broken.route(/api\/file\?/, (route) => (new URL(route.request().url()).searchParams.has('thumb') ? route.continue() : route.abort()))
+    await broken.goto(url())
+    await broken.getByRole('button', { name: 'Attach files and more' }).click()
+    await broken.setInputFiles('input[name="file"]', { name: 'gone.png', mimeType: 'image/png', buffer: png })
+    await broken.getByRole('button', { name: 'Send' }).click()
+    await broken.getByRole('button', { name: 'Open gone.png' }).click()
+    await broken.getByText("This picture can't be shown here. Download it to open it.").waitFor()
+    await broken.close()
+  }, 30_000)
+})
+
 describe.skipIf(!browser)('a picture that cannot be shown', () => {
   test('is a file tile that keeps its reactions and ways to react (desktop)', async () => {
     const page = await browser!.newPage({ viewport: { width: 1280, height: 800 } })

@@ -138,7 +138,8 @@ describe('one design across the screen', () => {
     const chat = source['plugins/chat/client.tsx']
     // a finger holds the bubble; a mouse gets the smiley; the keyboard presses Enter on it
     expect(chat).toMatch(/data-anchor\s+\{\.\.\.keys\}\s+\{\.\.\.hold\}/)
-    expect(chat).toContain('pointer-fine:grid')
+    // the round arrows beside a full-screen picture live in the extracted viewer now
+    expect(readFileSync(join(root, 'plugins', 'chat', 'photo.tsx'), 'utf8')).toContain('pointer-fine:grid')
     expect(chat).toContain("'aria-label': 'Message: press Enter to react'")
     // on a touch screen a hold reacts instead of selecting, until Select text
     expect(chat).toContain('pointer-coarse:select-none')
